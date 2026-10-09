@@ -44,6 +44,14 @@ impl Timing {
         bytes
     }
 
+    pub fn clear_flag(&mut self, bit: u32) {
+        self.pending[2] &= !(1 << bit);
+    }
+
+    pub fn flag(&self, bit: u32) -> bool {
+        self.pending[2] & (1 << bit) != 0
+    }
+
     pub fn activation_allowed(&self) -> bool {
         self.pending[2] & (1 << 17) == 0
     }

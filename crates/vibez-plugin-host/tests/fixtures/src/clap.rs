@@ -10,7 +10,7 @@ use std::ffi::{c_char, c_void, CStr};
 struct State {
     active: bool,
     processing: bool,
-    processing_thread: usize,
+    in_call: std::sync::atomic::AtomicBool,
     max_frames: u32,
     sample_rate: f64,
     host: *const clap_host,
@@ -93,7 +93,7 @@ unsafe extern "C" fn create(
     let state = Box::into_raw(Box::new(State {
         active: false,
         processing: false,
-        processing_thread: 0,
+        in_call: std::sync::atomic::AtomicBool::new(false),
         max_frames: 0,
         sample_rate: 0.0,
         host,
@@ -150,6 +150,25 @@ unsafe extern "C" fn activate(plugin: *const clap_plugin, rate: f64, min: u32, m
     if state(plugin).processing || state(plugin).main_thread != crate::thread_id() {
         return false;
     }
+    crate::ACTIVATIONS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    if state(plugin).timing.flag(19) {
+        ((*state(plugin).host).request_restart.unwrap())(state(plugin).host);
+        let latency = ((*state(plugin).host).get_extension.unwrap())(
+            state(plugin).host,
+            CLAP_EXT_LATENCY.as_ptr(),
+        ) as *const clap_host_latency;
+        ((*latency).changed.unwrap())(state(plugin).host);
+    }
+    if state(plugin).timing.flag(23) {
+        let host = state(plugin).host as usize;
+        std::thread::spawn(move || {
+            let host = host as *const clap_host;
+            unsafe { ((*host).request_restart.unwrap())(host) };
+        })
+        .join()
+        .unwrap();
+        state(plugin).timing.clear_flag(23);
+    }
     state(plugin).timing.activate();
     state(plugin).active = true;
     state(plugin).max_frames = max;
@@ -157,25 +176,58 @@ unsafe extern "C" fn activate(plugin: *const clap_plugin, rate: f64, min: u32, m
     true
 }
 unsafe extern "C" fn deactivate(plugin: *const clap_plugin) {
+    if state(plugin).processing
+        || state(plugin)
+            .in_call
+            .load(std::sync::atomic::Ordering::Acquire)
+        || state(plugin).main_thread != crate::thread_id()
+    {
+        crate::lifecycle_error();
+    }
     state(plugin).active = false;
 }
 unsafe extern "C" fn start(plugin: *const clap_plugin) -> bool {
-    state(plugin).processing_thread = crate::thread_id();
+    check_audio_role(plugin);
+    if state(plugin).timing.flag(18) {
+        return false;
+    }
     state(plugin).processing = state(plugin).active;
     state(plugin).processing
 }
 unsafe extern "C" fn stop(plugin: *const clap_plugin) {
-    if state(plugin).processing && state(plugin).processing_thread != crate::thread_id() {
+    check_audio_role(plugin);
+    if state(plugin)
+        .in_call
+        .load(std::sync::atomic::Ordering::Acquire)
+    {
         crate::lifecycle_error();
-        return;
     }
     state(plugin).processing = false;
 }
 unsafe extern "C" fn reset(plugin: *const clap_plugin) {
+    check_audio_role(plugin);
     state(plugin).timing.reset();
     state(plugin).playing = false;
 }
-unsafe extern "C" fn main(_: *const clap_plugin) {}
+unsafe fn audio_role(plugin: *const clap_plugin) -> bool {
+    let host = state(plugin).host;
+    let ext = ((*host).get_extension.unwrap())(
+        host,
+        clap_sys::ext::thread_check::CLAP_EXT_THREAD_CHECK.as_ptr(),
+    ) as *const clap_sys::ext::thread_check::clap_host_thread_check;
+    !ext.is_null() && ((*ext).is_audio_thread.unwrap())(host)
+}
+unsafe fn check_audio_role(plugin: *const clap_plugin) {
+    if !audio_role(plugin) {
+        crate::lifecycle_error();
+    }
+}
+unsafe extern "C" fn main(plugin: *const clap_plugin) {
+    if state(plugin).main_thread != crate::thread_id() || audio_role(plugin) {
+        crate::lifecycle_error();
+    }
+    crate::MAIN_CALLBACKS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+}
 unsafe extern "C" fn extension(_: *const clap_plugin, id: *const c_char) -> *const c_void {
     match CStr::from_ptr(id) {
         id if id == CLAP_EXT_AUDIO_PORTS => &PORTS as *const _ as *const c_void,
@@ -293,6 +345,16 @@ unsafe extern "C" fn process(
     plugin: *const clap_plugin,
     data: *const clap_process,
 ) -> clap_process_status {
+    check_audio_role(plugin);
+    if state(plugin).timing.flag(24) {
+        state(plugin).timing.clear_flag(24);
+        return CLAP_PROCESS_ERROR;
+    }
+    let in_call = &*std::ptr::addr_of!((*((*plugin).plugin_data as *mut State)).in_call);
+    let _call = crate::ProcessingCall::enter(in_call);
+    if state(plugin).timing.flag(20) {
+        ((*state(plugin).host).request_callback.unwrap())(state(plugin).host);
+    }
     let data = &*data;
     if !data.transport.is_null() {
         let seconds = (*data.transport).song_pos_seconds as f64

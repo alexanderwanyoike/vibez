@@ -8,7 +8,7 @@
 
 use vibez_core::effect::PluginDeviceInfo;
 use vibez_core::id::{EffectId, TrackId};
-use vibez_plugin_host::{PluginFormat, PluginInfo, PluginInstance};
+use vibez_plugin_host::{PluginFormat, PluginInfo};
 
 use crate::app::plugin_load_requests::PluginLoadToken;
 use crate::plugin_window::PluginRawPtr;
@@ -138,7 +138,7 @@ pub(crate) fn load_plugin_effect_bg(
                 sample_rate,
                 device_ref: plugin_device_ref(info),
                 state_ptr: None,
-                // CLAP state must be applied after init_on_main_thread.
+                // State restoration requires initialized native interfaces on the main thread.
                 pending_state: saved_state,
                 position: None,
             })
@@ -324,27 +324,16 @@ fn finish_effect_init_inner(
     )>,
     String,
 > {
-    let plugin_name = result.plugin_name.clone();
     if let Some(partial) = result.clap_partial.take() {
-        let mut clap_inst =
-            vibez_plugin_host::clap_host::instance::ClapPluginInstance::init_on_main_thread(
+        let clap_inst =
+            vibez_plugin_host::clap_host::instance::ClapPluginInstance::init_on_main_thread_with_state(
                 partial,
                 result.sample_rate,
                 4096,
+                result.pending_state.as_deref(),
+                strict_state_restore,
             )
             .map_err(|e| format!("CLAP init failed on UI thread: {e}"))?;
-        if let Some(ref data) = result.pending_state {
-            use vibez_plugin_host::PluginInstance;
-            if !clap_inst.load_state(data) {
-                if strict_state_restore {
-                    return Err(format!("{plugin_name} rejected its saved state"));
-                }
-                eprintln!("vibez: {plugin_name} rejected saved state");
-            }
-        }
-        if result.pending_state.is_some() {
-            clap_inst.reconfigure_on_main_thread()?;
-        }
         let raw_ptr = Some(PluginRawPtr::Clap(
             clap_inst.plugin_ptr() as *const std::ffi::c_void
         ));
@@ -355,25 +344,15 @@ fn finish_effect_init_inner(
         return Ok(Some((Box::new(wrapper), raw_ptr)));
     }
     if let Some(partial) = result.vst3_partial.take() {
-        let mut vst3_inst =
-            vibez_plugin_host::vst3_host::instance::Vst3PluginInstance::init_on_main_thread(
+        let vst3_inst =
+            vibez_plugin_host::vst3_host::instance::Vst3PluginInstance::init_on_main_thread_with_state(
                 partial,
                 result.sample_rate,
                 4096,
+                result.pending_state.as_deref(),
+                strict_state_restore,
             )
             .map_err(|e| format!("VST3 init failed on UI thread: {e}"))?;
-        if let Some(ref data) = result.pending_state {
-            use vibez_plugin_host::PluginInstance;
-            if !vst3_inst.load_state(data) {
-                if strict_state_restore {
-                    return Err(format!("{plugin_name} rejected its saved state"));
-                }
-                eprintln!("vibez: {plugin_name} rejected saved state");
-            }
-        }
-        if result.pending_state.is_some() {
-            vst3_inst.reconfigure_on_main_thread()?;
-        }
         let ctrl = vst3_inst.controller_ptr();
         let raw_ptr = if ctrl.is_null() {
             None
@@ -412,27 +391,16 @@ fn finish_instrument_init_inner(
     result: &mut PluginInstrumentLoadResult,
     strict_state_restore: bool,
 ) -> Result<Option<(Box<dyn vibez_instruments::Instrument>, Option<PluginRawPtr>)>, String> {
-    let plugin_name = result.plugin_name.clone();
     if let Some(partial) = result.clap_partial.take() {
-        let mut clap_inst =
-            vibez_plugin_host::clap_host::instance::ClapPluginInstance::init_on_main_thread(
+        let clap_inst =
+            vibez_plugin_host::clap_host::instance::ClapPluginInstance::init_on_main_thread_with_state(
                 partial,
                 result.sample_rate,
                 4096,
+                result.pending_state.as_deref(),
+                strict_state_restore,
             )
             .map_err(|e| format!("CLAP instrument init failed on UI thread: {e}"))?;
-        if let Some(ref data) = result.pending_state {
-            use vibez_plugin_host::PluginInstance;
-            if !clap_inst.load_state(data) {
-                if strict_state_restore {
-                    return Err(format!("{plugin_name} rejected its saved state"));
-                }
-                eprintln!("vibez: {plugin_name} rejected saved state");
-            }
-        }
-        if result.pending_state.is_some() {
-            clap_inst.reconfigure_on_main_thread()?;
-        }
         let raw_ptr = Some(PluginRawPtr::Clap(
             clap_inst.plugin_ptr() as *const std::ffi::c_void
         ));
@@ -443,25 +411,15 @@ fn finish_instrument_init_inner(
         return Ok(Some((Box::new(wrapper), raw_ptr)));
     }
     if let Some(partial) = result.vst3_partial.take() {
-        let mut vst3_inst =
-            vibez_plugin_host::vst3_host::instance::Vst3PluginInstance::init_on_main_thread(
+        let vst3_inst =
+            vibez_plugin_host::vst3_host::instance::Vst3PluginInstance::init_on_main_thread_with_state(
                 partial,
                 result.sample_rate,
                 4096,
+                result.pending_state.as_deref(),
+                strict_state_restore,
             )
             .map_err(|e| format!("VST3 instrument init failed on UI thread: {e}"))?;
-        if let Some(ref data) = result.pending_state {
-            use vibez_plugin_host::PluginInstance;
-            if !vst3_inst.load_state(data) {
-                if strict_state_restore {
-                    return Err(format!("{plugin_name} rejected its saved state"));
-                }
-                eprintln!("vibez: {plugin_name} rejected saved state");
-            }
-        }
-        if result.pending_state.is_some() {
-            vst3_inst.reconfigure_on_main_thread()?;
-        }
         let ctrl = vst3_inst.controller_ptr();
         let raw_ptr = if ctrl.is_null() {
             None

@@ -87,7 +87,7 @@ fn make_test_host_with_plugin(plugin_ptr: *const clap_plugin) -> clap_host {
         plugin_ptr,
         restart_requested: AtomicBool::new(false),
         callback_requested: AtomicBool::new(false),
-        activating: AtomicBool::new(false),
+        main_thread: std::thread::current().id(),
     }));
     host.host_data = data as *mut ClapHostUserData as *mut std::ffi::c_void;
     host

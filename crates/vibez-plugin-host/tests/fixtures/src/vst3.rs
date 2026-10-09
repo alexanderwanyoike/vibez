@@ -11,7 +11,7 @@ use vst3::{uid, Class, ComPtr, ComRef, ComWrapper, Steinberg::Vst::*, Steinberg:
 struct Probe {
     active: Cell<bool>,
     processing: Cell<bool>,
-    processing_thread: Cell<usize>,
+    in_call: std::sync::atomic::AtomicBool,
     aux_active: Cell<u32>,
     max_frames: Cell<i32>,
     timing: RefCell<crate::timing::Timing>,
@@ -24,7 +24,7 @@ struct Probe {
 }
 const INSTRUMENT_CID: TUID = uid(0xFEDCBA98, 0x76543210, 0xFEDCBA98, 0x76543210);
 const CID: TUID = uid(0x01234567, 0x89ABCDEF, 0x01234567, 0x89ABCDEF);
-const CIDS: [TUID; 7] = [
+const CIDS: [TUID; 8] = [
     CID,
     INSTRUMENT_CID,
     uid(0x01234567, 0x89ABCDEF, 0x01234567, 0x00000001),
@@ -32,8 +32,9 @@ const CIDS: [TUID; 7] = [
     uid(0x01234567, 0x89ABCDEF, 0x01234567, 0x00000003),
     uid(0x01234567, 0x89ABCDEF, 0x01234567, 0x00000004),
     uid(0x01234567, 0x89ABCDEF, 0x01234567, 0x00000005),
+    uid(0x01234567, 0x89ABCDEF, 0x01234567, 0x00000006),
 ];
-const NAMES: [&str; 7] = [
+const NAMES: [&str; 8] = [
     "Routing Probe",
     "Pulse Instrument",
     "Refused aux",
@@ -41,6 +42,7 @@ const NAMES: [&str; 7] = [
     "Refused main",
     "Processing error",
     "Surround main",
+    "Refused handler",
 ];
 impl Class for Probe {
     type Interfaces = (IComponent, IAudioProcessor, IEditController);
@@ -149,6 +151,9 @@ impl IComponentTrait for Probe {
                 self.aux_active.get() & !mask
             });
         }
+        if media == 1 && enabled != 0 {
+            crate::EVENT_ACTIVATIONS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
         kResultOk
     }
     unsafe fn setActive(&self, enabled: TBool) -> tresult {
@@ -162,7 +167,22 @@ impl IComponentTrait for Probe {
             {
                 return kResultFalse;
             }
+            crate::ACTIVATIONS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            if self.timing.borrow().flag(19) {
+                if let Some(handler) = self.handler.borrow().as_ref() {
+                    handler.restartComponent(
+                        RestartFlags_::kLatencyChanged | RestartFlags_::kIoChanged,
+                    );
+                }
+            }
             self.timing.borrow_mut().activate();
+        }
+        if enabled == 0
+            && (self.processing.get()
+                || self.in_call.load(std::sync::atomic::Ordering::Acquire)
+                || self.main_thread != crate::thread_id())
+        {
+            crate::lifecycle_error();
         }
         self.active.set(enabled != 0);
         kResultOk
@@ -181,7 +201,11 @@ impl IComponentTrait for Probe {
         }
         if self.active.get() {
             if let Some(handler) = self.handler.borrow().as_ref() {
-                handler.restartComponent(RestartFlags_::kLatencyChanged);
+                handler.restartComponent(if self.timing.borrow().flag(21) {
+                    RestartFlags_::kIoChanged
+                } else {
+                    RestartFlags_::kLatencyChanged
+                });
             }
         }
         kResultOk
@@ -235,18 +259,20 @@ impl IAudioProcessorTrait for Probe {
     }
     unsafe fn setupProcessing(&self, setup: *mut ProcessSetup) -> tresult {
         self.max_frames.set((*setup).maxSamplesPerBlock);
+        if self.timing.borrow().flag(19) {
+            if let Some(handler) = self.handler.borrow().as_ref() {
+                handler.restartComponent(RestartFlags_::kLatencyChanged);
+            }
+        }
         kResultOk
     }
     unsafe fn setProcessing(&self, enabled: TBool) -> tresult {
-        if enabled == 0
-            && self.processing.get()
-            && self.processing_thread.get() != crate::thread_id()
-        {
+        if self.in_call.load(std::sync::atomic::Ordering::Acquire) {
             crate::lifecycle_error();
             return kResultFalse;
         }
-        if enabled != 0 {
-            self.processing_thread.set(crate::thread_id());
+        if enabled != 0 && self.timing.borrow().flag(18) {
+            return kResultFalse;
         }
         if enabled == 0 {
             self.timing.borrow_mut().reset();
@@ -256,6 +282,11 @@ impl IAudioProcessorTrait for Probe {
         kResultOk
     }
     unsafe fn process(&self, data: *mut ProcessData) -> tresult {
+        if self.timing.borrow().flag(24) {
+            self.timing.borrow_mut().clear_flag(24);
+            return kResultFalse;
+        }
+        let _call = crate::ProcessingCall::enter(&self.in_call);
         let data = &*data;
         if !data.processContext.is_null() {
             self.timing
@@ -387,6 +418,9 @@ impl IEditControllerTrait for Probe {
         kInvalidArgument
     }
     unsafe fn setComponentHandler(&self, handler: *mut IComponentHandler) -> tresult {
+        if self.scenario == 7 {
+            return kNotImplemented;
+        }
         *self.handler.borrow_mut() =
             ComRef::from_raw(handler).map(|reference| reference.to_com_ptr());
         kResultOk
@@ -412,10 +446,10 @@ impl IPluginFactoryTrait for Factory {
         kResultOk
     }
     unsafe fn countClasses(&self) -> i32 {
-        7
+        CIDS.len() as i32
     }
     unsafe fn getClassInfo(&self, index: i32, info: *mut PClassInfo) -> tresult {
-        if !(0..7).contains(&index) {
+        if !(0..CIDS.len() as i32).contains(&index) {
             return kInvalidArgument;
         }
         *info = std::mem::zeroed();
@@ -442,7 +476,7 @@ impl IPluginFactoryTrait for Factory {
         let instance = ComWrapper::new(Probe {
             active: Cell::new(false),
             processing: Cell::new(false),
-            processing_thread: Cell::new(0),
+            in_call: std::sync::atomic::AtomicBool::new(false),
             aux_active: Cell::new(if scenario == 3 { 15 } else { 0 }),
             max_frames: Cell::new(0),
             timing: RefCell::new(Default::default()),
