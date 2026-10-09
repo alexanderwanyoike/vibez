@@ -693,6 +693,9 @@ mod clip_launcher;
 #[path = "engine_clip_launcher_tests.rs"]
 mod clip_launcher_tests;
 
+#[path = "engine_graph_layout.rs"]
+mod graph_layout;
+
 #[path = "engine_graph.rs"]
 mod graph_render;
 

@@ -1,3 +1,5 @@
+//! Execute prepared stage buffers without callback graph searches or allocation.
+
 use super::*;
 use vibez_core::routing::{
     adapt_channels, EdgeKind, ExternalInputBlock, ExternalInputId, NodeStage,
@@ -57,6 +59,10 @@ impl AudioEngine {
             }
             return;
         }
+        if block.channels > 2 {
+            self.render_hardware_routing(output, block, capture, idle, capture_audible_only);
+            return;
+        }
         let Some(mut prepared) = self.routing.take() else {
             return;
         };
@@ -71,16 +77,18 @@ impl AudioEngine {
         let track_solo = any_solo(&self.tracks);
         let bus_solo = any_solo(&self.buses);
         let tempo = TempoMap::new(self.transport.bpm(), self.sample_rate);
+        for channel in &mut prepared.channels {
+            channel.bind(&self.tracks, &self.buses);
+        }
         for order_index in 0..prepared.graph.order.len() {
             let index = prepared.graph.order[order_index];
             let node = prepared.graph.nodes[index];
+            let binding = prepared.channels[prepared.nodes[index].channel].binding;
             prepared.nodes[index].samples[..len].fill(0.0);
             match node.stage {
                 NodeStage::Source => {
-                    let Some(track) = self
-                        .tracks
-                        .iter_mut()
-                        .find(|track| track.id == node.channel)
+                    let Some(track) =
+                        binding.get_mut(&mut self.tracks, &mut self.buses, &mut self.master)
                     else {
                         continue;
                     };
@@ -163,6 +171,17 @@ impl AudioEngine {
                         }
                     }
                     std::mem::swap(&mut track.mix_buffer, &mut prepared.nodes[index].samples);
+                    if let Some(reason) = track
+                        .instrument
+                        .as_mut()
+                        .and_then(|instrument| instrument.take_processing_error())
+                    {
+                        let _ = self.event_tx.push(EngineEvent::DeviceProcessingFailed {
+                            track_id: id,
+                            effect_id: None,
+                            reason,
+                        });
+                    }
                     let activity = track.take_note_activity();
                     if activity != 0 {
                         let _ = self.event_tx.push(EngineEvent::TrackNoteActivity {
@@ -172,48 +191,42 @@ impl AudioEngine {
                     }
                 }
                 NodeStage::Sum => {
-                    let track = if node.channel.is_master() {
-                        Some(&mut self.master)
-                    } else {
-                        self.buses.iter_mut().find(|bus| bus.id == node.channel)
-                    };
+                    let track =
+                        binding.get_mut(&mut self.tracks, &mut self.buses, &mut self.master);
                     let Some(track) = track else {
                         continue;
                     };
-                    track.apply_graph_automation(block.pos as f64 / tempo.samples_per_beat());
-                    for edge in prepared.graph.edges.iter().filter(|edge| edge.to == index) {
+                    track.apply_graph_automation(
+                        if self.clip_performance {
+                            block.repeat_pos
+                        } else {
+                            block.pos
+                        } as f64
+                            / tempo.samples_per_beat(),
+                    );
+                    for incoming_index in 0..prepared.nodes[index].incoming.len() {
+                        let edge_index = prepared.nodes[index].incoming[incoming_index];
+                        let edge = prepared.graph.edges[edge_index];
+                        let source_binding =
+                            prepared.channels[prepared.nodes[edge.from].channel].binding;
+                        let source = source_binding.get(&self.tracks, &self.buses, &self.master);
                         let audible = match edge.kind {
-                            EdgeKind::Mix => {
-                                if let Some(track) = self.tracks.iter().find(|track| {
-                                    track.id == prepared.graph.nodes[edge.from].channel
-                                }) {
-                                    (!track_solo && !bus_solo) || track.solo
-                                } else {
-                                    self.buses
-                                        .iter()
-                                        .find(|bus| {
-                                            bus.id == prepared.graph.nodes[edge.from].channel
-                                        })
-                                        .is_some_and(|bus| {
-                                            (!bus_solo || bus.solo)
-                                                && (!track_solo
-                                                    || bus.solo
-                                                    || !prepared.detector_buses.contains(&bus.id))
-                                        })
+                            EdgeKind::Mix => source.is_some_and(|channel| match source_binding {
+                                crate::routing::ChannelIndex::Track(_) => {
+                                    (!track_solo && !bus_solo) || channel.solo
                                 }
-                            }
+                                _ => {
+                                    (!bus_solo || channel.solo)
+                                        && (!track_solo
+                                            || channel.solo
+                                            || !prepared.detector_buses.contains(&channel.id))
+                                }
+                            }),
                             EdgeKind::Send(_) => {
                                 !track_solo
                                     || bus_solo
                                     || prepared.detector_buses.contains(&node.channel)
-                                    || self
-                                        .tracks
-                                        .iter()
-                                        .chain(self.buses.iter())
-                                        .find(|channel| {
-                                            channel.id == prepared.graph.nodes[edge.from].channel
-                                        })
-                                        .is_some_and(|channel| channel.solo)
+                                    || source.is_some_and(|channel| channel.solo)
                             }
                             _ => true,
                         };
@@ -221,24 +234,24 @@ impl AudioEngine {
                             continue;
                         }
                         let gain = match edge.kind {
-                            EdgeKind::Send(_) => self
-                                .tracks
-                                .iter()
-                                .chain(self.buses.iter())
-                                .find(|track| track.id == prepared.graph.nodes[edge.from].channel)
-                                .map_or(0.0, |track| {
-                                    let pos = if self.clip_performance {
-                                        track.active_clip.map_or(0, |clip| {
-                                            clip.position.saturating_add(block.pos)
-                                        })
-                                    } else {
-                                        block.pos
-                                    };
-                                    track.effective_send_amount(
-                                        node.channel,
-                                        pos as f64 / tempo.samples_per_beat(),
-                                    )
-                                }),
+                            EdgeKind::Send(_) => source.map_or(0.0, |track| {
+                                let pos = if self.clip_performance {
+                                    match source_binding {
+                                        crate::routing::ChannelIndex::Track(_) => {
+                                            track.active_clip.map_or(0, |clip| {
+                                                clip.position.saturating_add(block.pos)
+                                            })
+                                        }
+                                        _ => block.repeat_pos,
+                                    }
+                                } else {
+                                    block.pos
+                                };
+                                track.effective_send_amount(
+                                    node.channel,
+                                    pos as f64 / tempo.samples_per_beat(),
+                                )
+                            }),
                             _ => 1.0,
                         };
                         for sample in 0..len {
@@ -248,12 +261,12 @@ impl AudioEngine {
                     }
                 }
                 NodeStage::Effect(effect_id) => {
-                    for edge in prepared
-                        .graph
-                        .edges
-                        .iter()
-                        .filter(|edge| edge.to == index && edge.kind == EdgeKind::Main)
-                    {
+                    for incoming_index in 0..prepared.nodes[index].incoming.len() {
+                        let edge =
+                            prepared.graph.edges[prepared.nodes[index].incoming[incoming_index]];
+                        if edge.kind != EdgeKind::Main {
+                            continue;
+                        }
                         for sample in 0..len {
                             prepared.nodes[index].samples[sample] +=
                                 prepared.nodes[edge.from].samples[sample];
@@ -293,14 +306,8 @@ impl AudioEngine {
                             connected: input.connected,
                         };
                     }
-                    let track = if node.channel.is_master() {
-                        Some(&mut self.master)
-                    } else {
-                        self.tracks
-                            .iter_mut()
-                            .chain(self.buses.iter_mut())
-                            .find(|track| track.id == node.channel)
-                    };
+                    let track =
+                        binding.get_mut(&mut self.tracks, &mut self.buses, &mut self.master);
                     if let Some(track) = track {
                         if let Some(slot) = track
                             .effects
@@ -313,34 +320,36 @@ impl AudioEngine {
                                 channels,
                                 &blocks[..destination.inputs.len()],
                             );
+                            if let Some(reason) = slot.effect.take_processing_error() {
+                                let _ = self.event_tx.push(EngineEvent::DeviceProcessingFailed {
+                                    track_id: node.channel,
+                                    effect_id: Some(effect_id),
+                                    reason,
+                                });
+                            }
                         }
                     }
                 }
                 NodeStage::AfterEffects | NodeStage::AfterFader => {
-                    if let Some(edge) = prepared
-                        .graph
-                        .edges
+                    if let Some(edge) = prepared.nodes[index]
+                        .incoming
                         .iter()
-                        .find(|edge| edge.to == index && edge.kind == EdgeKind::Main)
+                        .map(|edge| &prepared.graph.edges[*edge])
+                        .find(|edge| edge.kind == EdgeKind::Main)
                     {
                         for sample in 0..len {
                             prepared.nodes[index].samples[sample] =
                                 prepared.nodes[edge.from].samples[sample];
                         }
                     }
-                    let bus_channel = node.channel.is_master()
-                        || self.buses.iter().any(|bus| bus.id == node.channel);
-                    let track = if node.channel.is_master() {
-                        Some(&mut self.master)
-                    } else {
-                        self.tracks
-                            .iter_mut()
-                            .chain(self.buses.iter_mut())
-                            .find(|track| track.id == node.channel)
-                    };
+                    let bus_channel = !matches!(binding, crate::routing::ChannelIndex::Track(_));
+                    let track =
+                        binding.get_mut(&mut self.tracks, &mut self.buses, &mut self.master);
                     if let Some(track) = track {
                         if node.stage == NodeStage::AfterFader {
-                            let pos = if self.clip_performance {
+                            let pos = if self.clip_performance && bus_channel {
+                                block.repeat_pos
+                            } else if self.clip_performance {
                                 track
                                     .active_clip
                                     .map_or(0, |clip| clip.position.saturating_add(block.pos))

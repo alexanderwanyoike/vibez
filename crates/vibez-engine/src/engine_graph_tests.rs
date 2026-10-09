@@ -12,6 +12,189 @@ fn channel(id: TrackId) -> RoutingChannel {
     }
 }
 
+#[test]
+fn hardware_first_pair_live_capture_and_populated_graph_are_allocation_free() {
+    let (mut engine, mut commands, mut events) = AudioEngine::new();
+    let source = TrackId::new();
+    let receiver = TrackId::new();
+    let bus = TrackId::new();
+    let effect = EffectId::new();
+    for id in [source, receiver] {
+        commands
+            .push(EngineCommand::AddTrack(id, "Track".into()))
+            .unwrap();
+        commands.push(clip(id, 0.1)).unwrap();
+    }
+    commands
+        .push(EngineCommand::AddBus(bus, "Bus".into()))
+        .unwrap();
+    commands
+        .push(EngineCommand::AddEffect {
+            track_id: receiver,
+            effect_id: effect,
+            effect_type: EffectType::Gate,
+            position: None,
+        })
+        .unwrap();
+    commands
+        .push(EngineCommand::SetSend {
+            track_id: source,
+            bus_id: bus,
+            amount: 1.0,
+        })
+        .unwrap();
+    let mut source_model = channel(source);
+    source_model.sends.push((bus, 1.0));
+    let mut bus_model = channel(bus);
+    bus_model.is_bus = true;
+    let mut receiver_model = channel(receiver);
+    receiver_model.effects.push(RoutingEffect {
+        id: effect,
+        inactive_inputs: vec![],
+        inputs: vec![ExternalInputDescriptor {
+            id: ExternalInputId(0),
+            name: "Sidechain".into(),
+            channels: 2,
+        }],
+        assignments: vec![SidechainAssignment {
+            input_id: ExternalInputId(0),
+            input_name: "Sidechain".into(),
+            source: bus,
+            source_name: "Bus".into(),
+            tap: SourceTap::AfterEffects,
+        }],
+    });
+    let channels = vec![
+        source_model,
+        receiver_model,
+        bus_model,
+        channel(TrackId::MASTER),
+    ];
+    commands
+        .push(EngineCommand::SetRouting(
+            crate::routing::PreparedRouting::prepare(&channels, 16).unwrap(),
+        ))
+        .unwrap();
+    commands.push(EngineCommand::Play).unwrap();
+    let mut output = [0.0; 6 * 32];
+    let mut capture = [0.0; 6 * 32];
+    engine.process(&mut output, 6);
+    while events.pop().is_ok() {}
+    let input = [0.2; 6 * 32];
+    let count = crate::retirement::tests::allocations(|| {
+        engine.process_block(
+            AudioProcessBlock::new(&mut output, 6)
+                .with_live_input(source.raw(), &input)
+                .with_track_output_capture(source.raw(), &mut capture),
+        )
+    });
+    assert_eq!(count, (0, 0));
+    for (output, capture) in output.chunks_exact(6).zip(capture.chunks_exact(6)) {
+        assert!(output[0] > 0.0 && output[1] > 0.0);
+        assert!(capture[0] > 0.1 && capture[1] > 0.1);
+        assert_eq!(&output[2..], &[0.0; 4]);
+        assert_eq!(&capture[2..], &[0.0; 4]);
+    }
+    while events.pop().is_ok() {}
+    commands
+        .push(EngineCommand::SetRouting(
+            crate::routing::PreparedRouting::prepare(&channels, 16).unwrap(),
+        ))
+        .unwrap();
+    assert_eq!(
+        crate::retirement::tests::allocations(|| engine.process(&mut output, 6)),
+        (0, 0)
+    );
+    while events.pop().is_ok() {}
+    commands
+        .push(EngineCommand::ReorderTracks(vec![receiver, source]))
+        .unwrap();
+    engine.process(&mut output, 6);
+    assert_eq!(
+        crate::retirement::tests::allocations(|| engine.process(&mut output, 6)),
+        (0, 0)
+    );
+    assert!(output[0] > 0.0);
+}
+
+#[test]
+fn clip_bus_and_master_automation_advance_on_perform_clock() {
+    use crate::playback_source::ActiveClipPlayback;
+    use vibez_core::automation::{AutomationLane, AutomationPoint, AutomationTarget};
+    for target in [TrackId::MASTER, TrackId::new()] {
+        let (mut engine, mut commands, _events) = AudioEngine::new();
+        let track = TrackId::new();
+        commands.push(EngineCommand::SetSampleRate(8)).unwrap();
+        commands.push(EngineCommand::SetBpm(120.0)).unwrap();
+        commands
+            .push(EngineCommand::AddTrack(track, "Clip".into()))
+            .unwrap();
+        commands.push(clip(track, 1.0)).unwrap();
+        let mut track_model = channel(track);
+        let mut channels = vec![];
+        if !target.is_master() {
+            commands
+                .push(EngineCommand::AddBus(target, "Return".into()))
+                .unwrap();
+            commands
+                .push(EngineCommand::SetSend {
+                    track_id: track,
+                    bus_id: target,
+                    amount: 1.0,
+                })
+                .unwrap();
+            track_model.sends.push((target, 1.0));
+            let mut bus = channel(target);
+            bus.is_bus = true;
+            channels.push(bus);
+        }
+        channels.push(track_model);
+        channels.push(channel(TrackId::MASTER));
+        commands
+            .push(EngineCommand::SetRouting(
+                crate::routing::PreparedRouting::prepare(&channels, 64).unwrap(),
+            ))
+            .unwrap();
+        engine.process(&mut [], 2);
+        let mut lane = AutomationLane::new(AutomationTarget::TrackGain);
+        lane.points = vec![
+            AutomationPoint {
+                beat: 0.0,
+                value: 0.5,
+                curve: 0.0,
+            },
+            AutomationPoint {
+                beat: 2.0,
+                value: 0.0,
+                curve: 0.0,
+            },
+        ];
+        engine
+            .channel_mut(target)
+            .unwrap()
+            .playback_source
+            .automation = vec![lane];
+        engine.clip_performance = true;
+        engine.transport.play();
+        engine.tracks[0].launcher_source = std::mem::take(&mut engine.tracks[0].playback_source);
+        engine.tracks[0].active_clip = Some(ActiveClipPlayback {
+            clip_id: ClipId::new(),
+            request_id: 1,
+            position: 0,
+            length: 4096,
+            looping: true,
+        });
+        let mut first = [0.0; 16];
+        engine.process(&mut first, 2);
+        let mut next = [0.0; 16];
+        engine.process(&mut next, 2);
+        assert!(
+            first[0] > next[0],
+            "{target:?} automation stayed at beat zero"
+        );
+    }
+}
+
 fn clip(id: TrackId, value: f32) -> EngineCommand {
     EngineCommand::AddClip {
         track_id: id,

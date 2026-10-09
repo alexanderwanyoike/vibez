@@ -435,7 +435,7 @@ impl AudioEngine {
             // each bus at its send amount.
             for send_idx in 0..track.sends.len() {
                 let (bus_id, amount) = track.sends[send_idx];
-                if amount <= 0.0005 {
+                if amount <= vibez_core::routing::SEND_SILENCE_THRESHOLD {
                     continue;
                 }
                 if let Some(bus) = self.buses.iter_mut().find(|b| b.id == bus_id) {
@@ -639,7 +639,7 @@ impl AudioEngine {
             // notes reach the returns like in any DAW.
             for send_idx in 0..track.sends.len() {
                 let (bus_id, amount) = track.sends[send_idx];
-                if amount <= 0.0005 {
+                if amount <= vibez_core::routing::SEND_SILENCE_THRESHOLD {
                     continue;
                 }
                 if let Some(bus) = self.buses.iter_mut().find(|b| b.id == bus_id) {

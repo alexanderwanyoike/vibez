@@ -11,6 +11,7 @@ use crate::instance::PluginInstance;
 /// allowing external plugins to slot into the existing instrument slot.
 pub struct PluginInstrumentWrapper {
     inner: Box<dyn PluginInstance>,
+    processing_error: Option<&'static str>,
     /// Leaked to satisfy the `&'static [ParamDescriptor]` requirement.
     descriptors: &'static [ParamDescriptor],
 }
@@ -19,7 +20,11 @@ impl PluginInstrumentWrapper {
     pub fn new(inner: Box<dyn PluginInstance>) -> Self {
         let desc_vec = inner.param_descriptors_vec();
         let descriptors: &'static [ParamDescriptor] = Box::leak(desc_vec.into_boxed_slice());
-        Self { inner, descriptors }
+        Self {
+            inner,
+            descriptors,
+            processing_error: None,
+        }
     }
 
     pub fn plugin_name(&self) -> &str {
@@ -74,7 +79,7 @@ impl Instrument for PluginInstrumentWrapper {
         }));
         if result.is_err() {
             buffer.fill(0.0);
-            log::error!("Plugin panicked during render");
+            self.processing_error = Some("Plugin panicked during rendering");
         }
     }
 
@@ -82,11 +87,13 @@ impl Instrument for PluginInstrumentWrapper {
         self.inner.reset();
     }
 
-    fn stop_processing(&mut self) {
-        self.inner.stop_processing();
+    fn take_processing_error(&mut self) -> Option<&'static str> {
+        self.processing_error
+            .take()
+            .or_else(|| self.inner.take_processing_error())
     }
 
-    fn finish_offline_processing(&mut self) {
+    fn stop_processing(&mut self) {
         self.inner.stop_processing();
     }
 

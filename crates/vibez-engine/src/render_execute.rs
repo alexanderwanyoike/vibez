@@ -335,7 +335,7 @@ pub(super) fn render_offline_inner(
                 }
             }
             for (bus_id, amount) in &track.sends {
-                if *amount <= 0.0005 {
+                if *amount <= vibez_core::routing::SEND_SILENCE_THRESHOLD {
                     continue;
                 }
                 if let Some(bus) = buses.iter_mut().find(|b| b.id == *bus_id) {

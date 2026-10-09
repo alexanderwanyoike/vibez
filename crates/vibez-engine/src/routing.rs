@@ -1,3 +1,5 @@
+//! Prepared graph buffers and indexed channel bindings for callback delivery.
+
 use vibez_core::routing::{ExternalInputDescriptor, RoutingChannel, RoutingError, RoutingGraph};
 
 pub const MAX_EXTERNAL_INPUTS: usize = 64;
@@ -14,12 +16,18 @@ pub struct PreparedInput {
 
 #[derive(Debug)]
 pub struct PreparedNode {
+    pub channel: usize,
+    pub incoming: Vec<usize>,
     pub samples: Vec<f32>,
     pub inputs: Vec<PreparedInput>,
 }
 
 #[derive(Debug)]
 pub struct PreparedRouting {
+    pub channels: Vec<PreparedChannel>,
+    pub layout_output: Vec<f32>,
+    pub layout_input: Vec<f32>,
+    pub layout_capture: Vec<f32>,
     pub graph: RoutingGraph,
     pub nodes: Vec<PreparedNode>,
     pub max_frames: usize,
@@ -49,7 +57,7 @@ impl PreparedRouting {
             .nodes
             .len()
             .checked_mul(2)
-            .and_then(|count| count.checked_add(input_channels))
+            .and_then(|count| count.checked_add(input_channels + 6))
             .and_then(|count| count.checked_mul(max_frames))
             .and_then(|count| count.checked_mul(std::mem::size_of::<f32>()))
             .ok_or("Routing storage arithmetic overflow")?;
@@ -96,11 +104,10 @@ impl PreparedRouting {
                     for descriptor in effect.inputs.iter().filter(|input| input.supported()) {
                         inputs.push(PreparedInput {
                             descriptor: descriptor.clone(),
-                            connected: effect.assignments.iter().any(|route| {
-                                route.input_id == descriptor.id
-                                    && (route.input_name.is_empty()
-                                        || route.input_name == descriptor.name)
-                            }),
+                            connected: effect
+                                .assignments
+                                .iter()
+                                .any(|route| route.matches(descriptor)),
                             source: graph
                                 .edges
                                 .iter()
@@ -123,15 +130,123 @@ impl PreparedRouting {
                 ));
             }
             nodes.push(PreparedNode {
+                channel: channels
+                    .iter()
+                    .position(|channel| channel.id == node.channel)
+                    .unwrap(),
+                incoming: graph
+                    .edges
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(edge_index, edge)| (edge.to == index).then_some(edge_index))
+                    .collect(),
                 samples: vec![0.0; max_frames * 2],
                 inputs,
             });
         }
         Ok(Box::new(Self {
+            channels: {
+                let mut track = 0;
+                let mut bus = 0;
+                channels
+                    .iter()
+                    .map(|channel| {
+                        let binding = if channel.id.is_master() {
+                            ChannelIndex::Master
+                        } else if channel.is_bus {
+                            let index = bus;
+                            bus += 1;
+                            ChannelIndex::Bus(index)
+                        } else {
+                            let index = track;
+                            track += 1;
+                            ChannelIndex::Track(index)
+                        };
+                        PreparedChannel {
+                            id: channel.id,
+                            binding,
+                        }
+                    })
+                    .collect()
+            },
+            layout_output: vec![0.0; max_frames * 2],
+            layout_input: vec![0.0; max_frames * 2],
+            layout_capture: vec![0.0; max_frames * 2],
             graph,
             nodes,
             max_frames,
             detector_buses,
         }))
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum ChannelIndex {
+    Track(usize),
+    Bus(usize),
+    Master,
+    Missing,
+}
+#[derive(Debug)]
+pub struct PreparedChannel {
+    pub id: vibez_core::id::TrackId,
+    pub binding: ChannelIndex,
+}
+
+impl PreparedChannel {
+    pub(crate) fn bind(
+        &mut self,
+        tracks: &[crate::mixer::EngineTrack],
+        buses: &[crate::mixer::EngineTrack],
+    ) {
+        let valid = match self.binding {
+            ChannelIndex::Track(index) => {
+                tracks.get(index).is_some_and(|track| track.id == self.id)
+            }
+            ChannelIndex::Bus(index) => buses.get(index).is_some_and(|bus| bus.id == self.id),
+            ChannelIndex::Master => true,
+            ChannelIndex::Missing => false,
+        };
+        if !valid {
+            self.binding = tracks
+                .iter()
+                .position(|track| track.id == self.id)
+                .map(ChannelIndex::Track)
+                .or_else(|| {
+                    buses
+                        .iter()
+                        .position(|bus| bus.id == self.id)
+                        .map(ChannelIndex::Bus)
+                })
+                .unwrap_or(ChannelIndex::Missing);
+        }
+    }
+}
+impl ChannelIndex {
+    pub(crate) fn get<'a>(
+        self,
+        tracks: &'a [crate::mixer::EngineTrack],
+        buses: &'a [crate::mixer::EngineTrack],
+        master: &'a crate::mixer::EngineTrack,
+    ) -> Option<&'a crate::mixer::EngineTrack> {
+        match self {
+            Self::Track(index) => tracks.get(index),
+            Self::Bus(index) => buses.get(index),
+            Self::Master => Some(master),
+            Self::Missing => None,
+        }
+    }
+    pub(crate) fn get_mut<'a>(
+        self,
+        tracks: &'a mut [crate::mixer::EngineTrack],
+        buses: &'a mut [crate::mixer::EngineTrack],
+        master: &'a mut crate::mixer::EngineTrack,
+    ) -> Option<&'a mut crate::mixer::EngineTrack> {
+        match self {
+            Self::Track(index) => tracks.get_mut(index),
+            Self::Bus(index) => buses.get_mut(index),
+            Self::Master => Some(master),
+            Self::Missing => None,
+        }
     }
 }

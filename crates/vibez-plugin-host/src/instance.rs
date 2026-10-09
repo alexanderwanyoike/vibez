@@ -37,6 +37,10 @@ pub trait PluginInstance: Send {
     fn activate(&mut self) -> bool;
     /// Stop the realtime processing phase on the processing thread while
     /// keeping the main-thread-owned instance alive for later teardown.
+    /// A cached diagnostic consumed without formatting or I/O in processing.
+    fn take_processing_error(&mut self) -> Option<&'static str> {
+        None
+    }
     fn stop_processing(&mut self) {}
     fn deactivate(&mut self);
 }

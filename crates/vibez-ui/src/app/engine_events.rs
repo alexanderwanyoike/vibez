@@ -112,6 +112,15 @@ impl App {
                     event @ (EngineEvent::ClipRecordArmed { .. }
                     | EngineEvent::ClipRecordStarted { .. }
                     | EngineEvent::ClipRecordStopped { .. }) => self.clip_record_event(event),
+                    EngineEvent::DeviceProcessingFailed {
+                        track_id,
+                        effect_id,
+                        reason,
+                    } => {
+                        self.state.status_text = format!(
+                            "Device processing failed on {track_id:?} ({effect_id:?}): {reason}"
+                        );
+                    }
                     EngineEvent::DisposeEffect(cell) => {
                         // Plugin teardown remains on the UI thread.
                         drop(cell.take());

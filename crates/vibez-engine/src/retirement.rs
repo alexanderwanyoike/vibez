@@ -144,4 +144,4 @@ impl crate::engine::AudioEngine {
 
 #[cfg(test)]
 #[path = "retirement_tests.rs"]
-mod tests;
+pub(crate) mod tests;

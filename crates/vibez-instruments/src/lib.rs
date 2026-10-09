@@ -45,6 +45,10 @@ pub trait Instrument: Send {
     fn reset(&mut self);
     /// End an isolated offline processing run on its render thread.
     /// Native instruments need no lifecycle transition.
+    /// A cached diagnostic consumed without formatting or I/O in processing.
+    fn take_processing_error(&mut self) -> Option<&'static str> {
+        None
+    }
     fn stop_processing(&mut self) {}
     fn finish_offline_processing(&mut self) {
         self.stop_processing();

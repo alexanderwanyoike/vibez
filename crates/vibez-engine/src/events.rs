@@ -23,8 +23,8 @@ impl<T: ?Sized> DisposalCell<T> {
     pub fn new(device: Box<T>) -> Self {
         Self(device)
     }
-    pub fn take(self) -> Option<Box<T>> {
-        Some(self.0)
+    pub fn take(self) -> Box<T> {
+        self.0
     }
 }
 impl<T: ?Sized> PartialEq for DisposalCell<T> {
@@ -65,6 +65,11 @@ pub struct ClipTrackState {
 
 #[derive(Debug)]
 pub enum EngineEvent {
+    DeviceProcessingFailed {
+        track_id: TrackId,
+        effect_id: Option<vibez_core::id::EffectId>,
+        reason: &'static str,
+    },
     RetiredChannel(crate::retirement::RetiredChannel),
     RetiredAutomationLane(vibez_core::automation::AutomationLane),
     RoutingRetired(Box<crate::routing::PreparedRouting>),
