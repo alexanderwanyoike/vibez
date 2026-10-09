@@ -102,7 +102,7 @@ fn production_engine_routes_two_independent_plugin_inputs_without_audible_source
         let source_stereo = TrackId::new();
         let receiver = TrackId::new();
         let effect = EffectId::new();
-        let (mut engine, mut commands, _events) = AudioEngine::new();
+        let (mut engine, mut commands, mut events) = AudioEngine::new();
         for track in [receiver, source_stereo, source_mono] {
             commands
                 .push(EngineCommand::AddTrack(track, "Fixture".into()))
@@ -176,6 +176,19 @@ fn production_engine_routes_two_independent_plugin_inputs_without_audible_source
                 assert!((frame[1] - 1.8 * std::f32::consts::FRAC_1_SQRT_2).abs() < 1e-6);
             }
         }
+        let delivered: Vec<_> = std::iter::from_fn(|| events.pop().ok())
+            .filter_map(|event| match event {
+                vibez_engine::events::EngineEvent::SidechainInputMeter {
+                    input_id,
+                    peak_l,
+                    peak_r,
+                    ..
+                } => Some((input_id, peak_l, peak_r)),
+                _ => None,
+            })
+            .collect();
+        assert!(delivered.contains(&(inputs[0].id, 0.25, 0.25)));
+        assert!(delivered.contains(&(inputs[1].id, 0.2, 0.4)));
         drop(engine);
     }
 }
@@ -464,7 +477,7 @@ fn source_taps_apply_effects_fader_and_pan_only_at_the_requested_stage() {
             let bass = TrackId::new();
             let effect = EffectId::new();
             let gain_effect = EffectId::new();
-            let (mut engine, mut commands, _events) = AudioEngine::new();
+            let (mut engine, mut commands, mut events) = AudioEngine::new();
             for track in [bass, ghost] {
                 commands
                     .push(EngineCommand::AddTrack(track, "Track".into()))
@@ -541,6 +554,154 @@ fn source_taps_apply_effects_fader_and_pan_only_at_the_requested_stage() {
             assert!(output
                 .iter()
                 .all(|sample| (*sample - expected).abs() < 1e-6));
+            let levels: Vec<_> = std::iter::from_fn(|| events.pop().ok())
+                .filter_map(|event| match event {
+                    vibez_engine::events::EngineEvent::SidechainInputMeter { peak_l, .. } => {
+                        Some(peak_l)
+                    }
+                    _ => None,
+                })
+                .collect();
+            assert!(levels.iter().any(|level| (*level - trigger).abs() < 1e-6));
+        }
+    }
+}
+
+#[test]
+fn loaded_plugins_preserve_trigger_history_in_selected_track_bounce() {
+    use std::{collections::HashMap, sync::Arc};
+    use vibez_core::{
+        effect::{EffectInfo, EffectType, PluginDeviceInfo},
+        midi::{MidiNote, NoteClipInfo, TrackKind},
+        track::{ClipInfo, TrackInfo},
+    };
+    use vibez_engine::render::{
+        render_offline_with_plugins, BounceMode, BounceRequest, OfflinePlugins,
+    };
+    use vibez_plugin_host::wrappers::instrument::PluginInstrumentWrapper;
+    let fixture = support::Fixture::new();
+    for source_format in ["clap", "vst3"] {
+        for receiving_format in ["clap", "vst3"] {
+            let receiving = fixture.load(receiving_format, 512);
+            let input = receiving.external_inputs()[0].clone();
+            let source = fixture.load_instrument(source_format, 512);
+            let mut bass = TrackInfo::new("Bass");
+            let mut ghost = TrackInfo::new("Ghost");
+            ghost.mute = true;
+            ghost.kind = TrackKind::Midi;
+            let identity = |format: &str, name: &str| PluginDeviceInfo {
+                format: format.into(),
+                uid: name.into(),
+                path: fixture.root.join(name),
+                name: name.into(),
+                state_b64: None,
+            };
+            ghost.plugin_instrument = Some(identity(source_format, "Pulse"));
+            let effect = EffectId::new();
+            bass.effects.push(EffectInfo {
+                id: effect,
+                effect_type: EffectType::Gain,
+                bypass: false,
+                params: vec![],
+                plugin: Some(identity(receiving_format, "Probe")),
+                sidechains: vec![SidechainAssignment {
+                    input_id: input.id,
+                    input_name: input.name,
+                    source: ghost.id,
+                    source_name: ghost.name.clone(),
+                    tap: SourceTap::AfterEffects,
+                }],
+            });
+            let clip = ClipInfo {
+                id: ClipId::new(),
+                track_id: bass.id,
+                name: "Main".into(),
+                position: 0,
+                source_offset: 0,
+                start_marker: None,
+                duration: 32,
+                source: None,
+                file_path: None,
+                loop_enabled: false,
+                loop_start: 0,
+                loop_end: 0,
+                gain_db: Default::default(),
+                fades: Default::default(),
+                playback_direction: Default::default(),
+                transient_markers: Default::default(),
+                warp_markers: Default::default(),
+                transpose: Default::default(),
+                original_bpm: None,
+                warped: false,
+                warped_to_bpm: None,
+            };
+            let notes = NoteClipInfo {
+                id: ClipId::new(),
+                track_id: ghost.id,
+                name: "Pulse".into(),
+                position_beats: 0.0,
+                duration_beats: 1.0,
+                notes: vec![MidiNote {
+                    pitch: 60,
+                    velocity: 100,
+                    start_beat: 3.0 / 24000.0,
+                    duration_beats: 4.0 / 24000.0,
+                }],
+                start_marker_beats: None,
+                loop_enabled: false,
+                loop_start_beats: 0.0,
+                loop_end_beats: 0.0,
+                groove_grid: Default::default(),
+            };
+            let audio = Arc::new(DecodedAudio {
+                channels: vec![vec![0.1; 32], vec![0.1; 32]],
+                sample_rate: 48000,
+            });
+            let mut plugins = OfflinePlugins::default();
+            plugins
+                .effects
+                .insert(effect, Box::new(PluginEffectWrapper::new(receiving)));
+            plugins
+                .instruments
+                .insert(ghost.id, Box::new(PluginInstrumentWrapper::new(source)));
+            let ghost_id = ghost.id;
+            let req = BounceRequest {
+                mode: BounceMode::Track(bass.id),
+                tracks: vec![bass, ghost],
+                master: None,
+                buses: vec![],
+                audio_clips: vec![clip.clone()],
+                note_clips: vec![notes],
+                clip_audio: [(clip.id, audio)].into_iter().collect(),
+                sampler_audio: HashMap::new(),
+                drum_pad_audio: HashMap::new(),
+                range_samples: (5, 17),
+                bpm: 120.0,
+                sample_rate: 48000,
+                swing: vibez_core::perform::SwingAmount::STRAIGHT,
+            };
+            let (plugins, output) = std::thread::spawn(move || {
+                let output = render_offline_with_plugins(&req, &mut plugins, |_| {}).unwrap();
+                (plugins, output)
+            })
+            .join()
+            .unwrap();
+            assert_eq!(output.audio.num_frames(), 12);
+            assert!(output.warnings.is_empty());
+            for frame in 0..12 {
+                let expected = if frame < 2 { 1.6 } else { 0.1 };
+                for channel in 0..2 {
+                    assert!(
+                        (output.audio.channels[channel][frame]
+                            - expected * std::f32::consts::FRAC_1_SQRT_2)
+                            .abs()
+                            < 1e-6,
+                        "{source_format} -> {receiving_format} bounce frame {frame}"
+                    );
+                }
+            }
+            assert!(plugins.effects.contains_key(&effect));
+            assert!(plugins.instruments.contains_key(&ghost_id));
         }
     }
 }

@@ -70,7 +70,7 @@ fn routed_gate_preserves_muted_source_and_solo_without_trigger_leakage() {
         SourceTap::AfterEffects,
         SourceTap::AfterFader,
     ] {
-        let (mut engine, mut commands, _events) = AudioEngine::new();
+        let (mut engine, mut commands, mut events) = AudioEngine::new();
         let source = TrackId::new();
         let receiver = TrackId::new();
         let effect = EffectId::new();
@@ -117,6 +117,20 @@ fn routed_gate_preserves_muted_source_and_solo_without_trigger_leakage() {
         } else {
             assert!(tail.iter().all(|sample| *sample > 0.006 && *sample < 0.008));
         }
+        let meters: Vec<_> = std::iter::from_fn(|| events.pop().ok())
+            .filter_map(|event| match event {
+                EngineEvent::SidechainInputMeter { peak_l, .. } => Some(peak_l),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            meters.last().copied(),
+            Some(if tap == SourceTap::AfterFader {
+                0.0
+            } else {
+                1.0
+            })
+        );
     }
 }
 
@@ -179,7 +193,7 @@ fn live_route_swap_retains_effect_state_and_missing_sources_supply_silence() {
 
 #[test]
 fn soloed_receiver_keeps_bus_detector_source_inaudible() {
-    let (mut engine, mut commands, _events) = AudioEngine::new();
+    let (mut engine, mut commands, mut events) = AudioEngine::new();
     let ghost = TrackId::new();
     let bass = TrackId::new();
     let bus = TrackId::new();
@@ -260,6 +274,15 @@ fn soloed_receiver_keeps_bus_detector_source_inaudible() {
     assert!(output[output.len() - 128..]
         .iter()
         .all(|sample| *sample > 0.006 && *sample < 0.008));
+    let levels: Vec<_> = std::iter::from_fn(|| events.pop().ok())
+        .filter_map(|event| match event {
+            EngineEvent::SidechainInputMeter { peak_l, .. } => Some(peak_l),
+            _ => None,
+        })
+        .collect();
+    assert!(levels
+        .iter()
+        .any(|level| (*level - std::f32::consts::FRAC_1_SQRT_2).abs() < 1e-6));
     assert!(
         engine
             .tracks()
