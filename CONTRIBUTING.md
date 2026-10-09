@@ -13,7 +13,7 @@ main <- dev <- feature/your-thing
 
 Stacked feature PRs may target another feature branch while their shared
 foundation is under review. Merge that foundation first, then retarget the
-dependent PR to `dev`. CI tests stacked feature PRs on all three platforms.
+dependent PR to `dev`. CI tests stacked feature and sidechain PRs on all three platforms.
 
 ## Requirements for a PR
 
