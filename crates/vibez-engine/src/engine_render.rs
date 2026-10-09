@@ -231,6 +231,10 @@ impl AudioEngine {
             loop_region,
             live_input,
         } = block;
+        if self.routing.is_some() {
+            self.render_routing_graph(output, block, track_output_capture, false);
+            return;
+        }
         let has_track_solo = any_solo(&self.tracks);
         let has_bus_solo = any_solo(&self.buses);
         let bpm = self.transport.bpm();
@@ -506,6 +510,22 @@ impl AudioEngine {
         live_input: Option<LiveInputBlock<'_>>,
         mut track_output_capture: Option<&mut TrackOutputCapture<'_>>,
     ) {
+        if self.routing.is_some() {
+            self.render_routing_graph(
+                output,
+                MultitrackRenderBlock {
+                    pos: self.transport.position(),
+                    repeat_pos,
+                    frames,
+                    channels,
+                    loop_region: None,
+                    live_input,
+                },
+                track_output_capture,
+                true,
+            );
+            return;
+        }
         let has_track_solo = any_solo(&self.tracks);
         let has_bus_solo = any_solo(&self.buses);
         for track in &mut self.tracks {

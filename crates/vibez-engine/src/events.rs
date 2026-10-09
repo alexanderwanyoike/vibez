@@ -78,6 +78,13 @@ pub struct ClipTrackState {
 
 #[derive(Debug)]
 pub enum EngineEvent {
+    RoutingRetired(Box<crate::routing::PreparedRouting>),
+    SidechainInputMeter {
+        effect_id: vibez_core::id::EffectId,
+        input_id: vibez_core::routing::ExternalInputId,
+        peak_l: f32,
+        peak_r: f32,
+    },
     /// A device removed from the audio graph, handed back so the UI
     /// thread performs the teardown. Plugin destructors run dlclose
     /// and COM/JUCE teardown, which must never happen in the audio

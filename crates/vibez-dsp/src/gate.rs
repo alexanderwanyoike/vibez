@@ -41,6 +41,7 @@ pub struct GateEffect {
     hold_ms: f32,
     sample_rate: f32,
     env_db: f32,
+    inputs: [vibez_core::routing::ExternalInputDescriptor; 1],
     gain: f32,
     hold_counter: u32,
 }
@@ -54,6 +55,11 @@ impl GateEffect {
             hold_ms: 10.0,
             sample_rate,
             env_db: -120.0,
+            inputs: [vibez_core::routing::ExternalInputDescriptor {
+                id: vibez_core::routing::ExternalInputId(0),
+                name: "Sidechain".into(),
+                channels: 2,
+            }],
             gain: 0.0,
             hold_counter: 0,
         }
@@ -106,7 +112,22 @@ impl AudioEffect for GateEffect {
         }
     }
 
+    fn external_inputs(&self) -> &[vibez_core::routing::ExternalInputDescriptor] {
+        &self.inputs
+    }
     fn process(&mut self, buffer: &mut [f32], channels: usize) {
+        self.process_with_inputs(buffer, channels, &[]);
+    }
+
+    fn process_with_inputs(
+        &mut self,
+        buffer: &mut [f32],
+        channels: usize,
+        inputs: &[vibez_core::routing::ExternalInputBlock<'_>],
+    ) {
+        let detector = inputs
+            .iter()
+            .find(|input| input.id == vibez_core::routing::ExternalInputId(0) && input.connected);
         let ch = channels.clamp(1, 2);
         let frames = buffer.len() / ch;
         let att = Self::coef(self.attack_ms, self.sample_rate);
@@ -116,7 +137,15 @@ impl AudioEffect for GateEffect {
         for frame in 0..frames {
             let mut peak = 0.0_f32;
             for c in 0..ch {
-                peak = peak.max(buffer[frame * ch + c].abs());
+                let sample = match detector {
+                    Some(input) => input
+                        .samples
+                        .get(frame * input.channels + c.min(input.channels - 1))
+                        .copied()
+                        .unwrap_or(0.0),
+                    None => buffer[frame * ch + c],
+                };
+                peak = peak.max(sample.abs());
             }
             let peak_db = 20.0 * (peak.max(1e-10)).log10();
             let env_coef = if peak_db > self.env_db { att } else { rel };

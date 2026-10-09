@@ -37,6 +37,8 @@ pub enum SourceTap {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SidechainAssignment {
     pub input_id: ExternalInputId,
+    #[serde(default)]
+    pub input_name: String,
     pub source: TrackId,
     pub source_name: String,
     #[serde(default)]
@@ -167,11 +169,11 @@ impl RoutingGraph {
                     .index(channel.id, NodeStage::Effect(effect.id))
                     .unwrap();
                 for route in &effect.assignments {
-                    if !effect
-                        .inputs
-                        .iter()
-                        .any(|input| input.id == route.input_id && input.supported())
-                    {
+                    if !effect.inputs.iter().any(|input| {
+                        input.id == route.input_id
+                            && input.supported()
+                            && (route.input_name.is_empty() || route.input_name == input.name)
+                    }) {
                         continue;
                     }
                     if route.source.is_master() {
@@ -282,6 +284,7 @@ mod tests {
         let mut channel = channel(id, EffectId::new());
         channel.effects[0].assignments.push(SidechainAssignment {
             input_id: ExternalInputId(0),
+            input_name: "Detector".into(),
             source: id,
             source_name: "Self".into(),
             tap: SourceTap::BeforeEffects,

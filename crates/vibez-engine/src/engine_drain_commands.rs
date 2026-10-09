@@ -8,6 +8,15 @@ impl AudioEngine {
     pub(super) fn drain_commands(&mut self) {
         while let Ok(cmd) = self.cmd_rx.pop() {
             match cmd {
+                EngineCommand::SetRouting(prepared) => {
+                    if let Some(retired) = self.routing.replace(prepared) {
+                        if let Err(rtrb::PushError::Full(event)) =
+                            self.event_tx.push(EngineEvent::RoutingRetired(retired))
+                        {
+                            std::mem::forget(event);
+                        }
+                    }
+                }
                 EngineCommand::ArmClipRecord {
                     free_length,
                     prepared,
