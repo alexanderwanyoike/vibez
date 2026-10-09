@@ -460,3 +460,109 @@ fn all_instrument_source_formats_feed_builtins_and_hosted_receivers() {
         }
     }
 }
+
+#[test]
+fn source_taps_apply_effects_fader_and_pan_only_at_the_requested_stage() {
+    use vibez_core::effect::EffectType;
+    let fixture = support::Fixture::new();
+    for format in ["clap", "vst3"] {
+        for tap in [
+            SourceTap::BeforeEffects,
+            SourceTap::AfterEffects,
+            SourceTap::AfterFader,
+        ] {
+            let plugin = fixture.load(format, 64);
+            let input = plugin.external_inputs()[0].clone();
+            let ghost = TrackId::new();
+            let bass = TrackId::new();
+            let effect = EffectId::new();
+            let gain_effect = EffectId::new();
+            let (mut engine, mut commands, mut events) = AudioEngine::new();
+            for track in [bass, ghost] {
+                commands
+                    .push(EngineCommand::AddTrack(track, "Track".into()))
+                    .unwrap();
+            }
+            commands.push(clip(bass, 0.1, 0.1)).unwrap();
+            commands.push(clip(ghost, 1.0, 1.0)).unwrap();
+            commands
+                .push(EngineCommand::SetTrackGain(ghost, 0.25))
+                .unwrap();
+            commands
+                .push(EngineCommand::SetTrackPan(ghost, 0.0))
+                .unwrap();
+            commands
+                .push(EngineCommand::SetTrackSolo(bass, true))
+                .unwrap();
+            commands
+                .push(EngineCommand::AddEffect {
+                    track_id: ghost,
+                    effect_id: gain_effect,
+                    effect_type: EffectType::Gain,
+                    position: None,
+                })
+                .unwrap();
+            commands
+                .push(EngineCommand::SetEffectParam {
+                    track_id: ghost,
+                    effect_id: gain_effect,
+                    param_index: 0,
+                    value: 0.5,
+                })
+                .unwrap();
+            commands
+                .push(EngineCommand::AddPluginEffect {
+                    track_id: bass,
+                    effect_id: effect,
+                    effect: Box::new(PluginEffectWrapper::new(plugin)),
+                    position: None,
+                })
+                .unwrap();
+            let mut source = channel(ghost);
+            source.effects.push(RoutingEffect {
+                id: gain_effect,
+                inputs: vec![],
+                assignments: vec![],
+            });
+            let mut receiver = channel(bass);
+            receiver.effects.push(RoutingEffect {
+                id: effect,
+                inputs: vec![input.clone()],
+                assignments: vec![SidechainAssignment {
+                    input_id: input.id,
+                    input_name: input.name,
+                    source: ghost,
+                    source_name: "Ghost".into(),
+                    tap,
+                }],
+            });
+            commands
+                .push(EngineCommand::SetRouting(
+                    PreparedRouting::prepare(&[receiver, source, channel(TrackId::MASTER)], 64)
+                        .unwrap(),
+                ))
+                .unwrap();
+            commands.push(EngineCommand::Play).unwrap();
+            let mut output = [0.0; 34];
+            engine.process_block(vibez_engine::engine::AudioProcessBlock::new(&mut output, 2));
+            let trigger = match tap {
+                SourceTap::BeforeEffects => 1.0,
+                SourceTap::AfterEffects => 0.5,
+                SourceTap::AfterFader => 0.0625,
+            };
+            let expected = (0.1 + 2.0 * trigger) * std::f32::consts::FRAC_1_SQRT_2;
+            assert!(output
+                .iter()
+                .all(|sample| (*sample - expected).abs() < 1e-6));
+            let levels: Vec<_> = std::iter::from_fn(|| events.pop().ok())
+                .filter_map(|event| match event {
+                    vibez_engine::events::EngineEvent::SidechainInputMeter { peak_l, .. } => {
+                        Some(peak_l)
+                    }
+                    _ => None,
+                })
+                .collect();
+            assert!(levels.iter().any(|level| (*level - trigger).abs() < 1e-6));
+        }
+    }
+}
