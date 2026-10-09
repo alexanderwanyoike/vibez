@@ -49,7 +49,7 @@ pub struct Vst3PluginInstance {
     main_thread: std::thread::ThreadId,
     active: bool,
     processing: bool,
-    processing_thread: usize,
+    processing_thread: u64,
 }
 
 unsafe impl Send for Vst3PluginInstance {}
@@ -763,6 +763,12 @@ impl PluginInstance for Vst3PluginInstance {
     }
 
     fn prepare(&mut self, sample_rate: f64, max_buffer_size: u32) {
+        if self.active || self.processing {
+            if sample_rate != self.sample_rate || max_buffer_size != self.max_frames as u32 {
+                self.process_error_logged = true;
+            }
+            return;
+        }
         self.sample_rate = sample_rate;
         if !self.processor.is_null() {
             let mut setup = ProcessSetupRaw {

@@ -259,3 +259,18 @@ fn reuse_at_another_rate_or_processing_thread_fails_until_sanctioned_stop_and_re
         assert!(instance.processing_configuration_valid());
     }
 }
+
+#[test]
+fn preparation_cannot_relabel_an_active_device_as_activated_at_another_rate() {
+    let fixture = support::Fixture::new();
+    for format in ["clap", "vst3"] {
+        let mut instance = fixture.load(format, 64);
+        instance.prepare(96000.0, 64);
+        assert_eq!(instance.activation_sample_rate(), Some(48000));
+        assert!(!instance.processing_configuration_valid());
+        instance.stop_for_reconfiguration();
+        instance.reconfigure_on_main_thread().unwrap();
+        assert!(instance.processing_configuration_valid());
+        assert_eq!(instance.activation_sample_rate(), Some(48000));
+    }
+}

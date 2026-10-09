@@ -44,7 +44,7 @@ pub struct ClapPluginInstance {
     main_thread: std::thread::ThreadId,
     active: bool,
     processing: bool,
-    processing_thread: usize,
+    processing_thread: u64,
     processing_failed: bool,
 }
 
@@ -669,6 +669,12 @@ impl PluginInstance for ClapPluginInstance {
     }
 
     fn prepare(&mut self, sample_rate: f64, max_buffer_size: u32) {
+        if self.active || self.processing {
+            if sample_rate != self.sample_rate || max_buffer_size != self.max_frames {
+                self.processing_failed = true;
+            }
+            return;
+        }
         self.sample_rate = sample_rate;
         self.max_frames = max_buffer_size;
     }
