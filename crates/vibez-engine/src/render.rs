@@ -113,8 +113,8 @@ mod execute;
 mod prepare;
 use execute::render_offline_inner;
 use prepare::{
-    clip_included_for_mode, return_offline_plugins, return_plugin_effects,
-    track_is_active_for_mode, validate_offline_plugins,
+    clip_included_for_mode, return_offline_plugins, track_is_active_for_mode,
+    validate_offline_plugins,
 };
 #[cfg(test)]
 #[path = "render_tests.rs"]
