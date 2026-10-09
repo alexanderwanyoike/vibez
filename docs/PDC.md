@@ -143,15 +143,24 @@ current live-route exception to the resulting Arrange track as well, so it can
 make that direct branch earlier again; compensated returns remain independent.
 
 Native rate-sensitive devices retain their constructor rate, and hosted devices
-retain their activation rate and processing-thread identity. Reuse at another
-rate or on a different processing thread fails the applied configuration check,
-suppresses project playback/monitoring, identifies the cause and preserves project
-state and owners. Matching an old latency report does not make that configuration
-valid. Recreate wrong-rate devices or reopen the saved project at the chosen rate.
-A hosted instance must stop on its original processing thread before main-thread
-reactivation; if stream replacement has already removed that worker, restart the
-host after saving the project. Automatic live migration between output workers
-or sample rates is outside this guarded recovery path.
+retain their activation configuration. Sequential worker replacement at a
+compatible rate, block size and layout preserves device state, delay history and
+cached latency while the engine remains exclusively owned. CLAP's audio-thread
+role belongs to the current call, rather than one permanent OS thread.
+
+Wrong-rate reuse and fatal processing failures suppress invalid project
+playback/monitoring, identify the cause and preserve project state and owners.
+Matching an old latency report does not make that configuration valid. Recreate
+wrong-rate devices or reopen the saved project at the chosen rate; automatic live
+sample-rate migration remains outside this guarded recovery path. Bounce checks
+the same applied configuration before DSP and rejects incompatible reuse while
+returning its device owners.
+
+Stream teardown takes the engine on the UI owner thread after excluding any
+in-flight callback. Retained callback clones then observe an empty slot. Hosted
+processors stop before main-thread deactivation and destruction, with a truthful
+exclusive CLAP audio role for the stop call. VST3 permits stopping on the UI or
+processing thread.
 
 The fixtures and installed adapter probes above do not establish complete Bounce
 sessions for the installed third-party processors. Cross-platform CI belongs to
