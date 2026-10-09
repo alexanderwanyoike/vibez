@@ -1,3 +1,5 @@
+//! Main-thread cached CLAP latency reporting after activation.
+
 use clap_sys::ext::latency::{clap_plugin_latency, CLAP_EXT_LATENCY};
 use clap_sys::plugin::clap_plugin;
 

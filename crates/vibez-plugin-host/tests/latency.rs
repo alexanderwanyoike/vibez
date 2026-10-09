@@ -171,3 +171,33 @@ fn loadable_latency_restart_stops_on_the_processing_thread_and_destroys_on_main(
         );
     }
 }
+
+#[test]
+fn failed_restart_zeros_cached_latency_and_inactive_output_until_successful_activation() {
+    let fixture = support::Fixture::new();
+    for format in ["clap", "vst3"] {
+        let mut plugin = fixture.load(format, 64);
+        let state = |flags: u32| {
+            [137u32, 137, flags]
+                .into_iter()
+                .flat_map(u32::to_le_bytes)
+                .collect::<Vec<_>>()
+        };
+        assert!(plugin.load_state(&state(0)));
+        plugin.reconfigure_on_main_thread().unwrap();
+        assert_eq!(plugin.latency_samples(), 137);
+        assert!(plugin.load_state(&state(1 << 17)));
+        assert!(plugin.reconfigure_on_main_thread().is_err());
+        assert_eq!(plugin.latency_samples(), 0);
+        let mut output = [1.0; 128];
+        assert_eq!(
+            support::allocation::count_allocations(|| plugin.process_audio(&mut output, 2)),
+            0
+        );
+        assert_eq!(output, [0.0; 128]);
+        assert!(plugin.load_state(&state(0)));
+        plugin.reconfigure_on_main_thread().unwrap();
+        assert_eq!(plugin.latency_samples(), 137);
+        impulse(plugin.as_mut(), 137);
+    }
+}
