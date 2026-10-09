@@ -106,6 +106,18 @@ impl App {
             while let Some(event) = self.event_rx.as_mut().and_then(|rx| rx.pop().ok()) {
                 apply_drum_pad_flash(&mut self.state.view, &event, std::time::Instant::now());
                 match event {
+                    EngineEvent::RoutingRetired(plan) => drop(plan),
+                    EngineEvent::SidechainInputMeter {
+                        effect_id,
+                        input_id,
+                        peak_l,
+                        peak_r,
+                    } => {
+                        self.state
+                            .devices
+                            .sidechain_meters
+                            .insert((effect_id, input_id), (peak_l, peak_r));
+                    }
                     event @ (EngineEvent::ClipRecordArmed { .. }
                     | EngineEvent::ClipRecordStarted { .. }
                     | EngineEvent::ClipRecordStopped { .. }) => self.clip_record_event(event),

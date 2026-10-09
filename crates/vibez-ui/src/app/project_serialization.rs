@@ -1,0 +1,85 @@
+use super::project_io::drum_rack_pads_for_save;
+use super::*;
+use crate::state::ProjectTrack;
+use vibez_core::{
+    midi::InstrumentKind,
+    track::{InstrumentStateInfo, TrackInfo},
+};
+
+impl App {
+    pub(super) fn track_info_from_ui(&self, track: &ProjectTrack) -> TrackInfo {
+        let effects = track
+            .effects
+            .iter()
+            .map(|effect| {
+                let plugin = effect.plugin_ref.as_ref().map(|dev| {
+                    let mut dev = dev.clone();
+                    dev.state_b64 = self
+                        .capture_device_state(PluginGuiKey::Effect {
+                            track_id: track.id,
+                            effect_id: effect.id,
+                        })
+                        .or(dev.state_b64);
+                    dev
+                });
+                vibez_core::effect::EffectInfo {
+                    sidechains: effect.sidechains.clone(),
+
+                    id: effect.id,
+                    effect_type: effect.effect_type,
+                    bypass: effect.bypass,
+                    params: effect.params.clone(),
+                    plugin,
+                }
+            })
+            .collect();
+
+        let plugin_instrument = track
+            .instrument_kind
+            .is_none()
+            .then(|| {
+                track.plugin_instrument_ref.as_ref().map(|dev| {
+                    let mut dev = dev.clone();
+                    dev.state_b64 = self
+                        .capture_device_state(PluginGuiKey::Instrument { track_id: track.id })
+                        .or(dev.state_b64);
+                    dev
+                })
+            })
+            .flatten();
+
+        let native_instrument = match track.instrument_kind {
+            Some(InstrumentKind::SubtractiveSynth) => Some(InstrumentStateInfo::SubtractiveSynth {
+                params: track.instrument_params.clone(),
+            }),
+            Some(InstrumentKind::Sampler) => Some(InstrumentStateInfo::Sampler {
+                params: track.instrument_params.clone(),
+                source: track.sample_source.clone(),
+            }),
+            Some(InstrumentKind::DrumRack) => Some(InstrumentStateInfo::DrumRack {
+                pads: drum_rack_pads_for_save(&track.drum_rack_pads),
+            }),
+            None => None,
+        };
+
+        TrackInfo {
+            id: track.id,
+            name: track.name.clone(),
+            gain: track.gain,
+            pan: track.pan,
+            mute: track.mute,
+            solo: track.solo,
+            audio_input_route: track.audio_input_route,
+            input_monitoring: track.input_monitoring,
+            swing_offset: track.swing_offset,
+            effects,
+            kind: track.kind,
+            color_index: track.color_index,
+            instrument: track.instrument_kind,
+            native_instrument,
+            plugin_instrument,
+            automation: Vec::new(),
+            sends: track.sends.clone(),
+        }
+    }
+}

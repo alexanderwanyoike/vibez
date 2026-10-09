@@ -113,10 +113,10 @@ impl App {
             swing: project.swing,
         };
 
-        self.state.status_text = format!("Bouncing {clip_name}...");
-        Task::perform(
-            bounce_async(request, wav_path, clip_name, insert_position_samples),
-            Message::BounceComplete,
+        self.start_offline_render(
+            request,
+            wav_path,
+            Some((clip_name, insert_position_samples)),
         )
     }
 

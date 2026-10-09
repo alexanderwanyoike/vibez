@@ -71,6 +71,8 @@ pub struct EffectInfo {
     /// plugin slots.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plugin: Option<PluginDeviceInfo>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sidechains: Vec<crate::routing::SidechainAssignment>,
 }
 
 /// Identity and state of a third-party plugin device, as persisted in
@@ -113,11 +115,32 @@ mod tests {
             bypass: false,
             params: vec![500.0, 0.5, 0.3],
             plugin: None,
+            sidechains: Vec::new(),
         };
         let json = serde_json::to_string(&info).unwrap();
         let loaded: EffectInfo = serde_json::from_str(&json).unwrap();
         assert_eq!(loaded.effect_type, EffectType::Delay);
         assert_eq!(loaded.params.len(), 3);
         assert!(!loaded.bypass);
+    }
+    #[test]
+    fn sidechain_route_roundtrips_and_legacy_effects_default_disconnected() {
+        use crate::{
+            id::TrackId,
+            routing::{ExternalInputId, SidechainAssignment, SourceTap},
+        };
+        let legacy = serde_json::json!({"id":EffectId::new(), "effect_type":"Compressor", "bypass":false, "params":[]});
+        let mut effect: EffectInfo = serde_json::from_value(legacy).unwrap();
+        assert!(effect.sidechains.is_empty());
+        effect.sidechains.push(SidechainAssignment {
+            input_id: ExternalInputId(7),
+            input_name: "Detector".into(),
+            source: TrackId::new(),
+            source_name: "Ghost kick".into(),
+            tap: SourceTap::AfterEffects,
+        });
+        let loaded: EffectInfo =
+            serde_json::from_str(&serde_json::to_string(&effect).unwrap()).unwrap();
+        assert_eq!(loaded.sidechains, effect.sidechains);
     }
 }

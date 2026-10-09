@@ -35,6 +35,18 @@ pub enum DevicesMsg {
     /// display drags frequency and gain together).
     SetEffectParams(TrackId, EffectId, Vec<(usize, f32)>),
     ToggleEffectBypass(TrackId, EffectId),
+    SetSidechainSource {
+        track_id: TrackId,
+        effect_id: EffectId,
+        input_id: vibez_core::routing::ExternalInputId,
+        source: Option<TrackId>,
+    },
+    SetSidechainTap {
+        track_id: TrackId,
+        effect_id: EffectId,
+        input_id: vibez_core::routing::ExternalInputId,
+        tap: vibez_core::routing::SourceTap,
+    },
     MoveEffectUp(TrackId, EffectId),
     MoveEffectDown(TrackId, EffectId),
     SetTrackInstrument(TrackId, InstrumentKind),
@@ -108,6 +120,9 @@ pub struct DevicesAction {
 #[derive(Debug, Default)]
 pub struct DevicesState {
     pub context_menu: Option<DeviceContextMenu>,
+    pub last_routing: Option<Vec<vibez_core::routing::RoutingChannel>>,
+    pub sidechain_meters:
+        std::collections::HashMap<(EffectId, vibez_core::routing::ExternalInputId), (f32, f32)>,
 }
 
 /// Default parameter values for a freshly added native instrument.
@@ -168,7 +183,38 @@ impl DevicesState {
         sample_rate: u32,
     ) -> DevicesAction {
         let mut action = DevicesAction::default();
+        let fallback_routing = super::sidechain::routing_channels(tracks, master, buses);
         match msg {
+            DevicesMsg::SetSidechainSource {
+                track_id,
+                effect_id,
+                input_id,
+                source,
+            } => {
+                super::sidechain::edit_source_with_model(
+                    tracks,
+                    master,
+                    buses,
+                    (track_id, effect_id, input_id),
+                    source,
+                    self.last_routing.as_deref().unwrap_or(&fallback_routing),
+                );
+            }
+            DevicesMsg::SetSidechainTap {
+                track_id,
+                effect_id,
+                input_id,
+                tap,
+            } => {
+                super::sidechain::edit_tap_with_model(
+                    tracks,
+                    master,
+                    buses,
+                    (track_id, effect_id, input_id),
+                    tap,
+                    self.last_routing.as_deref().unwrap_or(&fallback_routing),
+                );
+            }
             DevicesMsg::AddEffect(track_id, effect_type) => {
                 let effect_id = EffectId::new();
                 let fx = vibez_dsp::factory::create_effect(effect_type, sample_rate as f32);
@@ -177,6 +223,9 @@ impl DevicesState {
 
                 if let Some(track) = find_track_mut(tracks, master, buses, track_id) {
                     track.effects.push(UiEffect {
+                        sidechains: Default::default(),
+                        external_inputs: fx.external_inputs().to_vec(),
+
                         id: effect_id,
                         effect_type,
                         bypass: false,
@@ -546,6 +595,9 @@ mod tests {
         );
         let effect_id = EffectId::new();
         track.effects.push(UiEffect {
+            sidechains: Default::default(),
+            external_inputs: Default::default(),
+
             id: effect_id,
             effect_type: EffectType::Gain,
             bypass: false,

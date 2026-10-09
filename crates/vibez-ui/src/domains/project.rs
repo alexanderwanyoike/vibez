@@ -107,11 +107,8 @@ pub struct PluginReloadRequests {
 /// `capture_state` is called for devices that still have a live
 /// instance so undo restores their exact current state instead of the
 /// (possibly stale, possibly absent) blob recorded at project load.
-/// Plugin effect entries are removed from the snapshot's chains; the
-/// load pipeline re-inserts them at `chain position` when the reload
-/// completes, exactly like project open. Plugin instrument fields
-/// stay on the track (the card renders immediately; the arriving
-/// instance overwrites them idempotently).
+/// Retaining unavailable slots preserves sidechain assignments and chain identity
+/// while plugin reloads complete asynchronously.
 pub fn collect_plugin_reload_requests(
     snapshot: &mut ProjectSnapshot,
     mut capture_state: impl FnMut(PluginGuiKey) -> Option<String>,
@@ -129,7 +126,7 @@ pub fn collect_plugin_reload_requests(
         .chain(buses.iter_mut())
     {
         let track_id = track.id;
-        for (chain_pos, effect) in track.effects.iter().enumerate() {
+        for (chain_pos, effect) in track.effects.iter_mut().enumerate() {
             if let Some(dev) = &effect.plugin_ref {
                 let mut dev = dev.clone();
                 if let Some(state) = capture_state(PluginGuiKey::Effect {
@@ -138,10 +135,13 @@ pub fn collect_plugin_reload_requests(
                 }) {
                     dev.state_b64 = Some(state);
                 }
+                effect.plugin_ref = Some(dev.clone());
+                effect.external_inputs.clear();
+                effect.descriptors = &[];
+                effect.has_plugin_gui = false;
                 requests.effects.push((track_id, effect.id, chain_pos, dev));
             }
         }
-        track.effects.retain(|e| e.plugin_ref.is_none());
         if let Some(dev) = &track.plugin_instrument_ref {
             let mut dev = dev.clone();
             if let Some(state) = capture_state(PluginGuiKey::Instrument { track_id }) {
@@ -171,6 +171,9 @@ mod tests {
 
     fn effect(plugin: Option<PluginDeviceInfo>) -> UiEffect {
         UiEffect {
+            sidechains: Default::default(),
+            external_inputs: Default::default(),
+
             id: EffectId::new(),
             effect_type: EffectType::Gain,
             bypass: false,
@@ -215,12 +218,18 @@ mod tests {
         let (_, _, chain_pos, dev) = &requests.effects[0];
         assert_eq!(*chain_pos, 1);
         assert_eq!(dev.name, "comp");
-        // Plugin slot stripped; builtins remain for direct replay.
-        assert_eq!(snap.project_tracks.tracks[0].effects.len(), 2);
-        assert!(snap.project_tracks.tracks[0]
-            .effects
-            .iter()
-            .all(|e| e.plugin_ref.is_none()));
+        assert_eq!(snap.project_tracks.tracks[0].effects.len(), 3);
+        assert_eq!(
+            snap.project_tracks.tracks[0].effects[1]
+                .plugin_ref
+                .as_ref()
+                .unwrap()
+                .name,
+            "comp"
+        );
+        assert!(snap.project_tracks.tracks[0].effects[1]
+            .external_inputs
+            .is_empty());
     }
 
     #[test]

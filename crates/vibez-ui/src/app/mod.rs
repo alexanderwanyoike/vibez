@@ -60,7 +60,7 @@ struct App {
     /// the GUI pointers. Entries live exactly as long as the device.
     plugin_state_ptrs: std::collections::HashMap<PluginGuiKey, vibez_plugin_host::PluginStatePtr>,
     /// Plugin preflight and render progress for the one active project export.
-    export_job: Option<project_io::ExportJob>,
+    export_job: Option<project_export::ExportJob>,
     export_render_progress: Option<Arc<std::sync::atomic::AtomicU8>>,
     export_plugin_return_rx:
         Option<std::sync::mpsc::Receiver<vibez_engine::render::OfflinePlugins>>,
@@ -170,18 +170,23 @@ mod dropbox_io;
 mod media;
 mod media_import;
 mod plugins;
+mod project_export;
 mod project_io;
 mod project_replay;
 mod project_sections;
+mod project_serialization;
 mod save_runtime;
 mod section_record;
+mod sidechain;
 mod timeline_results;
 mod transient_markers;
 mod update;
+mod update_audio_edits;
 mod update_media;
 mod update_policy;
 mod update_project;
 mod update_remote;
+mod update_services;
 mod update_timeline;
 mod update_view;
 mod views_about;

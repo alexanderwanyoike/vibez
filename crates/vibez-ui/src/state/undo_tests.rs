@@ -59,6 +59,9 @@ fn one_eq_drag_is_one_undo_step() {
     let effect_id = EffectId::new();
     let mut track = ProjectTrack::new(track_id, "Audio".into(), 0);
     track.effects.push(UiEffect {
+        sidechains: Default::default(),
+        external_inputs: Default::default(),
+
         id: effect_id,
         effect_type: EffectType::Eq,
         bypass: false,
@@ -1076,4 +1079,53 @@ fn cut_and_each_paste_are_separate_undo_steps_while_clipboard_survives_undo() {
         source_id
     );
     assert_eq!(state.clip_clipboard.clips.len(), 1);
+}
+
+#[test]
+fn deleting_sidechain_source_keeps_assignment_and_undo_restores_identity() {
+    use vibez_core::routing::{ExternalInputId, SidechainAssignment, SourceTap};
+    let mut state = AppState::default();
+    let receiver = TrackId::new();
+    let source = TrackId::new();
+    let effect = EffectId::new();
+    let route = SidechainAssignment {
+        input_id: ExternalInputId(0),
+        input_name: "Detector".into(),
+        source,
+        source_name: "Ghost kick".into(),
+        tap: SourceTap::AfterEffects,
+    };
+    let mut bass = ProjectTrack::new(receiver, "Bass".into(), 0);
+    bass.effects.push(UiEffect {
+        id: effect,
+        effect_type: EffectType::Compressor,
+        bypass: false,
+        params: vec![],
+        descriptors: &[],
+        plugin_name: None,
+        has_plugin_gui: false,
+        plugin_ref: None,
+        external_inputs: vec![],
+        sidechains: vec![route.clone()],
+    });
+    Arc::make_mut(&mut state.project_tracks).tracks =
+        vec![bass, ProjectTrack::new(source, "Ghost kick".into(), 1)];
+    state.project.history.push_edit(snapshot(&state), None);
+    Arc::make_mut(&mut state.project_tracks)
+        .tracks
+        .retain(|track| track.id != source);
+    assert_eq!(
+        state.project_tracks.tracks[0].effects[0].sidechains,
+        vec![route.clone()]
+    );
+    undo_once(&mut state);
+    assert!(state
+        .project_tracks
+        .tracks
+        .iter()
+        .any(|track| track.id == source));
+    assert_eq!(
+        state.project_tracks.tracks[0].effects[0].sidechains,
+        vec![route]
+    );
 }

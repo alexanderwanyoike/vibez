@@ -237,3 +237,28 @@ fn unsupported_layouts_cannot_receive_new_routes() {
     ));
     assert!(tracks[0].effects[0].sidechains.is_empty());
 }
+
+#[test]
+fn potential_automated_send_prevents_feedback_before_its_first_nonzero_point() {
+    let (mut tracks, mut master, mut buses, effect_id) = setup();
+    let receiver = tracks[0].id;
+    let bus_id = TrackId::new();
+    buses.push(ProjectTrack::new(bus_id, "Return".into(), 2));
+    let mut model = routing_channels(&tracks, &master, &buses);
+    model
+        .iter_mut()
+        .find(|channel| channel.id == receiver)
+        .unwrap()
+        .sends
+        .push((bus_id, 1.0));
+    assert!(valid_taps(&model, receiver, effect_id, ExternalInputId(0), bus_id).is_empty());
+    assert!(!edit_source_with_model(
+        &mut tracks,
+        &mut master,
+        &mut buses,
+        (receiver, effect_id, ExternalInputId(0)),
+        Some(bus_id),
+        &model
+    ));
+    assert!(tracks[0].effects[0].sidechains.is_empty());
+}
