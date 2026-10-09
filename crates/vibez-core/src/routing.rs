@@ -316,6 +316,30 @@ pub use choices::{input_source_choices, valid_input_taps, InputSourceChoice};
 mod restore;
 pub use restore::resolve_restored;
 
+/// Automation reserves only paths that can become audible, keeping dormant
+/// sends from rejecting valid detector routes through an artificial cycle.
+pub fn reserve_automated_sends(
+    sends: &mut Vec<(TrackId, f32)>,
+    lanes: &[crate::automation::AutomationLane],
+) {
+    for lane in lanes {
+        if let crate::automation::AutomationTarget::Send { bus_id } = lane.target {
+            let maximum = lane
+                .points
+                .iter()
+                .map(|point| point.value)
+                .fold(0.0f32, f32::max);
+            if maximum > SEND_SILENCE_THRESHOLD {
+                if let Some((_, amount)) = sends.iter_mut().find(|(id, _)| *id == bus_id) {
+                    *amount = amount.max(maximum);
+                } else {
+                    sends.push((bus_id, maximum));
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -389,29 +413,5 @@ mod tests {
             );
         }
         assert_eq!(adapt_channel_sample(6, 2, 0, |_| 99.0), 0.0);
-    }
-}
-
-/// Automation reserves only paths that can become audible, keeping dormant
-/// sends from rejecting valid detector routes through an artificial cycle.
-pub fn reserve_automated_sends(
-    sends: &mut Vec<(TrackId, f32)>,
-    lanes: &[crate::automation::AutomationLane],
-) {
-    for lane in lanes {
-        if let crate::automation::AutomationTarget::Send { bus_id } = lane.target {
-            let maximum = lane
-                .points
-                .iter()
-                .map(|point| point.value)
-                .fold(0.0f32, f32::max);
-            if maximum > SEND_SILENCE_THRESHOLD {
-                if let Some((_, amount)) = sends.iter_mut().find(|(id, _)| *id == bus_id) {
-                    *amount = amount.max(maximum);
-                } else {
-                    sends.push((bus_id, maximum));
-                }
-            }
-        }
     }
 }

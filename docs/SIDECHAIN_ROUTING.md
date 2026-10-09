@@ -31,6 +31,10 @@ missing source continues delivering external silence.
 Routes are saved with effect, input and source identities. Source deletion keeps
 its original name and identity, marked missing. Missing plugins or incompatible
 inputs retain inactive assignments instead of moving them to another input.
+A compatible restored input that would introduce feedback retains its assignment
+as inactive external silence. Established active routes win; the inactive decision
+is saved so reopening or plugin load order cannot change the winner. Choosing a
+valid source or tap deliberately reactivates that input.
 Undo restores routing alongside the source or effect. Source and tap edits take
 effect at a block boundary without recreating the receiving device.
 

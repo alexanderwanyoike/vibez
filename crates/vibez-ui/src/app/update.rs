@@ -172,6 +172,15 @@ impl App {
                 AudioRecordingTransportGuard::Pass => {}
             }
         }
+        if let Message::Arrangement(ArrangementMsg::EngineTrackMeter {
+            track_id,
+            peak_l,
+            peak_r,
+        }) = &message
+        {
+            self.observe_track_meter(*track_id, *peak_l, *peak_r);
+            return Task::none();
+        }
         if self.prepare_capture_message(undo_gesture, &message) {
             return Task::none();
         }
@@ -322,8 +331,8 @@ impl App {
                         &mut project_tracks.tracks,
                         &mut project_tracks.master,
                         &mut project_tracks.buses,
-                        sample_rate,
                         crate::domains::devices::DevicesCtx {
+                            sample_rate,
                             routing: routing.as_deref(),
                         },
                     )

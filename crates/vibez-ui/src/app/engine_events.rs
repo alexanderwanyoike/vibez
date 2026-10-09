@@ -89,6 +89,17 @@ fn apply_clip_resync(
 }
 
 impl App {
+    pub(super) fn observe_track_meter(
+        &mut self,
+        track_id: vibez_core::id::TrackId,
+        peak_l: f32,
+        peak_r: f32,
+    ) {
+        let peaks = self.track_meter_peaks.entry(track_id).or_default();
+        peaks.0 = peak_l.max(peaks.0 * 0.85);
+        peaks.1 = peak_r.max(peaks.1 * 0.85);
+    }
+
     pub(super) fn poll_engine_events(&mut self) {
         if let Some(command) = self
             .state
@@ -300,9 +311,7 @@ impl App {
                         peak_l,
                         peak_r,
                     } => {
-                        let peaks = self.track_meter_peaks.entry(track_id).or_default();
-                        peaks.0 = peak_l.max(peaks.0 * 0.85);
-                        peaks.1 = peak_r.max(peaks.1 * 0.85);
+                        self.observe_track_meter(track_id, peak_l, peak_r);
                     }
                     EngineEvent::TrackNoteActivity { .. } => {}
                     EngineEvent::TrackMuteChanged {

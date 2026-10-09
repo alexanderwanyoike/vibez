@@ -168,7 +168,7 @@ pub fn view<'a>(
                     name: source.name.clone(),
                 })
         }));
-        let selected = route.map_or_else(
+        let mut selected = route.map_or_else(
             || choices[0].clone(),
             |route| SourceChoice {
                 id: Some(route.source),
@@ -182,6 +182,9 @@ pub fn view<'a>(
                     ),
             },
         );
+        if route.is_some() && effect.inactive_sidechains.contains(&id) {
+            selected.name.push_str(" (inactive)");
+        }
         let source = selector(choices, selected, move |choice| {
             source_message(receiver, effect_id, id, choice.id)
         });

@@ -10,6 +10,29 @@ impl App {
     pub(super) fn project_for_offline_render(&self) -> vibez_project::Project {
         let mut project = self.project_from_state();
         attach_render_automation(&mut project);
+        for channel in project
+            .tracks
+            .iter_mut()
+            .chain(project.buses.iter_mut())
+            .chain(project.master.iter_mut())
+        {
+            if let Some(live) = self.state.find_track(channel.id) {
+                for saved in &mut channel.effects {
+                    if let Some(effect) = live.effects.iter().find(|effect| effect.id == saved.id) {
+                        for route in &saved.sidechains {
+                            if !effect
+                                .external_inputs
+                                .iter()
+                                .any(|input| route.matches(input))
+                                && !saved.inactive_sidechains.contains(&route.input_id)
+                            {
+                                saved.inactive_sidechains.push(route.input_id);
+                            }
+                        }
+                    }
+                }
+            }
+        }
         project
     }
 
@@ -31,7 +54,6 @@ impl App {
                 vibez_core::effect::EffectInfo {
                     inactive_sidechains: effect.inactive_sidechains.clone(),
                     sidechains: effect.sidechains.clone(),
-
                     id: effect.id,
                     effect_type: effect.effect_type,
                     bypass: effect.bypass,
