@@ -11,6 +11,40 @@ impl AudioEngine {
         mut capture: Option<&mut TrackOutputCapture<'_>>,
         idle: bool,
     ) {
+        if let Some(max_frames) = self
+            .routing
+            .as_ref()
+            .map(|plan| plan.max_frames)
+            .filter(|max_frames| block.frames > *max_frames)
+        {
+            let mut offset = 0;
+            while offset < block.frames {
+                let frames = (block.frames - offset).min(max_frames);
+                let start = offset * block.channels;
+                let end = (offset + frames) * block.channels;
+                let mut part_capture = capture.as_deref_mut().map(|capture| TrackOutputCapture {
+                    source_track_raw: capture.source_track_raw,
+                    samples: &mut capture.samples[start..end],
+                });
+                self.render_routing_graph(
+                    &mut output[start..end],
+                    render_paths::MultitrackRenderBlock {
+                        pos: block.pos + offset as u64,
+                        repeat_pos: block.repeat_pos + offset as u64,
+                        frames,
+                        channels: block.channels,
+                        loop_region: block.loop_region,
+                        live_input: block
+                            .live_input
+                            .map(|input| input.slice(offset, frames, block.channels)),
+                    },
+                    part_capture.as_mut(),
+                    idle,
+                );
+                offset += frames;
+            }
+            return;
+        }
         let Some(mut prepared) = self.routing.take() else {
             return;
         };
@@ -126,6 +160,14 @@ impl AudioEngine {
                     }
                 }
                 NodeStage::Sum => {
+                    let track = if node.channel.is_master() {
+                        Some(&mut self.master)
+                    } else {
+                        self.buses.iter_mut().find(|bus| bus.id == node.channel)
+                    };
+                    if let Some(track) = track {
+                        track.apply_automation(block.pos as f64 / tempo.samples_per_beat());
+                    }
                     for edge in prepared.graph.edges.iter().filter(|edge| edge.to == index) {
                         let audible = match edge.kind {
                             EdgeKind::Mix => {
@@ -139,8 +181,26 @@ impl AudioEngine {
                                         .find(|bus| {
                                             bus.id == prepared.graph.nodes[edge.from].channel
                                         })
-                                        .is_some_and(|bus| !bus_solo || bus.solo)
+                                        .is_some_and(|bus| {
+                                            (!bus_solo || bus.solo)
+                                                && (!track_solo
+                                                    || bus.solo
+                                                    || !prepared.detector_buses.contains(&bus.id))
+                                        })
                                 }
+                            }
+                            EdgeKind::Send(_) => {
+                                !track_solo
+                                    || bus_solo
+                                    || prepared.detector_buses.contains(&node.channel)
+                                    || self
+                                        .tracks
+                                        .iter()
+                                        .chain(self.buses.iter())
+                                        .find(|channel| {
+                                            channel.id == prepared.graph.nodes[edge.from].channel
+                                        })
+                                        .is_some_and(|channel| channel.solo)
                             }
                             _ => true,
                         };
@@ -227,7 +287,6 @@ impl AudioEngine {
                             .find(|track| track.id == node.channel)
                     };
                     if let Some(track) = track {
-                        track.apply_automation(block.pos as f64 / tempo.samples_per_beat());
                         if let Some(slot) = track
                             .effects
                             .iter_mut()
@@ -266,8 +325,15 @@ impl AudioEngine {
                     };
                     if let Some(track) = track {
                         if node.stage == NodeStage::AfterFader {
+                            let pos = if self.clip_performance {
+                                track
+                                    .active_clip
+                                    .map_or(0, |clip| clip.position.saturating_add(block.pos))
+                            } else {
+                                block.pos
+                            };
                             let (gain, pan) =
-                                track.apply_automation(block.pos as f64 / tempo.samples_per_beat());
+                                track.automation_mix_values(pos as f64 / tempo.samples_per_beat());
                             let gain = gain.unwrap_or(track.gain);
                             let pan = pan.unwrap_or(track.pan);
                             let (left, right) = if bus_channel {

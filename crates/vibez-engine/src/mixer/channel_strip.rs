@@ -115,6 +115,24 @@ impl EngineTrack {
         (gain, pan)
     }
 
+    pub(crate) fn automation_mix_values(&self, beat: f64) -> (Option<f32>, Option<f32>) {
+        use vibez_core::automation::AutomationTarget;
+        let value = |target| {
+            if self.automation_overrides.contains(target) {
+                return None;
+            }
+            self.playback_source
+                .automation
+                .iter()
+                .find(|lane| lane.target == target)
+                .and_then(|lane| lane.value_at(beat))
+        };
+        (
+            value(AutomationTarget::TrackGain).map(|gain| gain * 2.0),
+            value(AutomationTarget::TrackPan),
+        )
+    }
+
     pub(crate) fn has_automation_target(
         &self,
         target: vibez_core::automation::AutomationTarget,

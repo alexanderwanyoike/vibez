@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 pub struct Fixture {
@@ -46,6 +46,36 @@ impl Fixture {
         std::fs::write(vst3.join("Contents/Info.plist"),r#"<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>CFBundleExecutable</key><string>Probe</string><key>CFBundleIdentifier</key><string>vibez.fixture.routing</string><key>CFBundlePackageType</key><string>BNDL</string></dict></plist>"#).unwrap();
         Self { root, clap, vst3 }
     }
+    pub fn load_instrument(
+        &self,
+        format: &str,
+        frames: u32,
+    ) -> Box<dyn vibez_plugin_host::instance::PluginInstance> {
+        if format == "clap" {
+            Box::new(
+                vibez_plugin_host::clap_host::instance::ClapPluginInstance::load(
+                    &self.clap,
+                    "vibez.fixture.instrument",
+                    true,
+                    48000.0,
+                    frames,
+                )
+                .unwrap(),
+            )
+        } else {
+            let plugins = vibez_plugin_host::vst3_host::scanner::scan_vst3(&self.vst3).unwrap();
+            Box::new(
+                vibez_plugin_host::vst3_host::instance::Vst3PluginInstance::load(
+                    &self.vst3,
+                    &plugins[1].id.uid,
+                    true,
+                    48000.0,
+                    frames,
+                )
+                .unwrap(),
+            )
+        }
+    }
     pub fn load(
         &self,
         format: &str,
@@ -83,7 +113,4 @@ impl Drop for Fixture {
     }
 }
 
-#[allow(dead_code)]
-pub fn path_is_fixture(path: &Path) -> bool {
-    path.exists()
-}
+pub mod allocation;

@@ -1,4 +1,6 @@
 mod support;
+#[global_allocator]
+static ALLOCATOR: support::allocation::AllocationCounter = support::allocation::AllocationCounter;
 use vibez_core::{
     audio_buffer::DecodedAudio,
     id::{ClipId, EffectId, TrackId},
@@ -54,24 +56,27 @@ fn loadable_formats_deliver_declared_inputs_at_short_and_variable_blocks() {
             let mut main = vec![0.1; frames * 2];
             let mono = vec![0.25; frames];
             let stereo: Vec<_> = (0..frames).flat_map(|_| [0.2, 0.4]).collect();
-            plugin.process_with_inputs(
-                &mut main,
-                2,
-                &[
-                    ExternalInputBlock {
-                        id: inputs[0].id,
-                        channels: 1,
-                        samples: &mono,
-                        connected: true,
-                    },
-                    ExternalInputBlock {
-                        id: inputs[1].id,
-                        channels: 2,
-                        samples: &stereo,
-                        connected: true,
-                    },
-                ],
-            );
+            let allocations = support::allocation::count_allocations(|| {
+                plugin.process_with_inputs(
+                    &mut main,
+                    2,
+                    &[
+                        ExternalInputBlock {
+                            id: inputs[0].id,
+                            channels: 1,
+                            samples: &mono,
+                            connected: true,
+                        },
+                        ExternalInputBlock {
+                            id: inputs[1].id,
+                            channels: 2,
+                            samples: &stereo,
+                            connected: true,
+                        },
+                    ],
+                )
+            });
+            assert_eq!(allocations, 0, "{format} input delivery allocated");
             for frame in main.chunks_exact(2) {
                 assert!((frame[0] - 1.2).abs() < 1e-6);
                 assert!((frame[1] - 1.8).abs() < 1e-6);
@@ -185,5 +190,106 @@ fn production_engine_routes_two_independent_plugin_inputs_without_audible_source
         assert!(delivered.contains(&(inputs[0].id, 0.25, 0.25)));
         assert!(delivered.contains(&(inputs[1].id, 0.2, 0.4)));
         drop(engine);
+    }
+}
+
+#[test]
+fn loaded_instrument_formats_trigger_other_formats_on_the_exact_note_frames() {
+    use vibez_plugin_host::wrappers::instrument::PluginInstrumentWrapper;
+    let fixture = support::Fixture::new();
+    for source_format in ["clap", "vst3"] {
+        for receiving_format in ["clap", "vst3"] {
+            let source = fixture.load_instrument(source_format, 64);
+            let receiving = fixture.load(receiving_format, 64);
+            let input = receiving.external_inputs()[0].clone();
+            let ghost = TrackId::new();
+            let bass = TrackId::new();
+            let effect = EffectId::new();
+            let note_clip = ClipId::new();
+            let (mut engine, mut commands, _events) = AudioEngine::new();
+            commands.push(EngineCommand::SetSampleRate(48000)).unwrap();
+            commands
+                .push(EngineCommand::AddTrack(bass, "Bass".into()))
+                .unwrap();
+            commands
+                .push(EngineCommand::AddMidiTrack(ghost, "Pulse".into()))
+                .unwrap();
+            commands.push(clip(bass, 0.1, 0.1)).unwrap();
+            commands
+                .push(EngineCommand::SetPluginInstrument {
+                    track_id: ghost,
+                    instrument: Box::new(PluginInstrumentWrapper::new(source)),
+                })
+                .unwrap();
+            commands
+                .push(EngineCommand::AddNoteClip {
+                    track_id: ghost,
+                    clip_id: note_clip,
+                    position_beats: 0.0,
+                    duration_beats: 1.0,
+                    start_marker_beats: 0.0,
+                    loop_enabled: false,
+                    loop_start_beats: 0.0,
+                    loop_end_beats: 0.0,
+                    groove_grid: Default::default(),
+                })
+                .unwrap();
+            commands
+                .push(EngineCommand::AddNote {
+                    track_id: ghost,
+                    clip_id: note_clip,
+                    note: vibez_core::midi::MidiNote {
+                        pitch: 60,
+                        velocity: 100,
+                        start_beat: 3.0 / 24000.0,
+                        duration_beats: 4.0 / 24000.0,
+                    },
+                })
+                .unwrap();
+            commands
+                .push(EngineCommand::SetTrackMute(ghost, true))
+                .unwrap();
+            commands
+                .push(EngineCommand::AddPluginEffect {
+                    track_id: bass,
+                    effect_id: effect,
+                    effect: Box::new(PluginEffectWrapper::new(receiving)),
+                    position: None,
+                })
+                .unwrap();
+            let mut bass_model = channel(bass);
+            bass_model.effects.push(RoutingEffect {
+                id: effect,
+                inputs: vec![input.clone()],
+                assignments: vec![SidechainAssignment {
+                    input_id: input.id,
+                    input_name: input.name,
+                    source: ghost,
+                    source_name: "Pulse".into(),
+                    tap: SourceTap::BeforeEffects,
+                }],
+            });
+            commands
+                .push(EngineCommand::SetRouting(
+                    PreparedRouting::prepare(
+                        &[bass_model, channel(ghost), channel(TrackId::MASTER)],
+                        64,
+                    )
+                    .unwrap(),
+                ))
+                .unwrap();
+            commands.push(EngineCommand::Play).unwrap();
+            let mut output = [0.0; 34];
+            engine.process_block(vibez_engine::engine::AudioProcessBlock::new(&mut output, 2));
+            for (frame, samples) in output.chunks_exact(2).enumerate() {
+                let expected = if (3..7).contains(&frame) { 1.6 } else { 0.1 };
+                for sample in samples {
+                    assert!(
+                        (*sample - expected * std::f32::consts::FRAC_1_SQRT_2).abs() < 1e-6,
+                        "{source_format} -> {receiving_format}, frame {frame}: {sample}"
+                    );
+                }
+            }
+        }
     }
 }

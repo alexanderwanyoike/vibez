@@ -190,3 +190,171 @@ fn live_route_swap_retains_effect_state_and_missing_sources_supply_silence() {
     assert!(input.connected);
     assert!(input.samples[..64].iter().all(|sample| *sample == 0.0));
 }
+
+#[test]
+fn soloed_receiver_keeps_bus_detector_source_inaudible() {
+    let (mut engine, mut commands, mut events) = AudioEngine::new();
+    let ghost = TrackId::new();
+    let bass = TrackId::new();
+    let bus = TrackId::new();
+    let effect = EffectId::new();
+    for track in [bass, ghost] {
+        commands
+            .push(EngineCommand::AddTrack(track, "Track".into()))
+            .unwrap();
+    }
+    commands
+        .push(EngineCommand::AddBus(bus, "Detector bus".into()))
+        .unwrap();
+    commands.push(clip(bass, 0.01)).unwrap();
+    commands.push(clip(ghost, 1.0)).unwrap();
+    commands
+        .push(EngineCommand::SetSend {
+            track_id: ghost,
+            bus_id: bus,
+            amount: 1.0,
+        })
+        .unwrap();
+    commands
+        .push(EngineCommand::SetTrackSolo(bass, true))
+        .unwrap();
+    commands
+        .push(EngineCommand::AddEffect {
+            track_id: bass,
+            effect_id: effect,
+            effect_type: EffectType::Gate,
+            position: None,
+        })
+        .unwrap();
+    commands
+        .push(EngineCommand::SetEffectParam {
+            track_id: bass,
+            effect_id: effect,
+            param_index: 0,
+            value: -20.0,
+        })
+        .unwrap();
+    let mut ghost_channel = channel(ghost);
+    ghost_channel.sends.push((bus, 1.0));
+    let mut bus_channel = channel(bus);
+    bus_channel.is_bus = true;
+    let mut bass_channel = channel(bass);
+    bass_channel.effects.push(RoutingEffect {
+        id: effect,
+        inputs: vec![ExternalInputDescriptor {
+            id: ExternalInputId(0),
+            name: "Sidechain".into(),
+            channels: 2,
+        }],
+        assignments: vec![SidechainAssignment {
+            input_id: ExternalInputId(0),
+            input_name: "Sidechain".into(),
+            source: bus,
+            source_name: "Detector bus".into(),
+            tap: SourceTap::AfterEffects,
+        }],
+    });
+    commands
+        .push(EngineCommand::SetRouting(
+            crate::routing::PreparedRouting::prepare(
+                &[
+                    bass_channel,
+                    ghost_channel,
+                    bus_channel,
+                    channel(TrackId::MASTER),
+                ],
+                64,
+            )
+            .unwrap(),
+        ))
+        .unwrap();
+    commands.push(EngineCommand::Play).unwrap();
+    let mut output = [0.0; 4096];
+    engine.process(&mut output, 2);
+    assert!(output[output.len() - 128..]
+        .iter()
+        .all(|sample| *sample > 0.006 && *sample < 0.008));
+    let levels: Vec<_> = std::iter::from_fn(|| events.pop().ok())
+        .filter_map(|event| match event {
+            EngineEvent::SidechainInputMeter { peak_l, .. } => Some(peak_l),
+            _ => None,
+        })
+        .collect();
+    assert!(levels
+        .iter()
+        .any(|level| (*level - std::f32::consts::FRAC_1_SQRT_2).abs() < 1e-6));
+    assert!(
+        engine
+            .tracks()
+            .iter()
+            .find(|track| track.id == bass)
+            .unwrap()
+            .solo
+    );
+    assert!(!engine.buses[0].solo);
+}
+
+#[test]
+fn master_receives_a_muted_prefader_source() {
+    let (mut engine, mut commands, _events) = AudioEngine::new();
+    let ghost = TrackId::new();
+    let bass = TrackId::new();
+    let effect = EffectId::new();
+    for track in [bass, ghost] {
+        commands
+            .push(EngineCommand::AddTrack(track, "Track".into()))
+            .unwrap();
+    }
+    commands.push(clip(bass, 0.01)).unwrap();
+    commands.push(clip(ghost, 1.0)).unwrap();
+    commands
+        .push(EngineCommand::SetTrackMute(ghost, true))
+        .unwrap();
+    commands
+        .push(EngineCommand::AddEffect {
+            track_id: TrackId::MASTER,
+            effect_id: effect,
+            effect_type: EffectType::Gate,
+            position: None,
+        })
+        .unwrap();
+    commands
+        .push(EngineCommand::SetEffectParam {
+            track_id: TrackId::MASTER,
+            effect_id: effect,
+            param_index: 0,
+            value: -20.0,
+        })
+        .unwrap();
+
+    let mut bass_model = channel(bass);
+    bass_model.effects.clear();
+    let mut master = channel(TrackId::MASTER);
+    master.effects.push(RoutingEffect {
+        id: effect,
+        inputs: vec![ExternalInputDescriptor {
+            id: ExternalInputId(0),
+            name: "Sidechain".into(),
+            channels: 2,
+        }],
+        assignments: vec![SidechainAssignment {
+            input_id: ExternalInputId(0),
+            input_name: "Sidechain".into(),
+            source: ghost,
+            source_name: "Ghost".into(),
+            tap: SourceTap::AfterEffects,
+        }],
+    });
+    commands
+        .push(EngineCommand::SetRouting(
+            crate::routing::PreparedRouting::prepare(&[bass_model, channel(ghost), master], 4096)
+                .unwrap(),
+        ))
+        .unwrap();
+    commands.push(EngineCommand::Play).unwrap();
+    let mut output = [0.0; 4096];
+    engine.process(&mut output, 2);
+    assert!(output[output.len() - 128..]
+        .iter()
+        .all(|sample| *sample > 0.006 && *sample < 0.008));
+}

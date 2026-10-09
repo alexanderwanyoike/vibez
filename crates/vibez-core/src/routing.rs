@@ -75,14 +75,14 @@ pub struct RoutingEdge {
     pub kind: EdgeKind,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct RoutingEffect {
     pub id: EffectId,
     pub inputs: Vec<ExternalInputDescriptor>,
     pub assignments: Vec<SidechainAssignment>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct RoutingChannel {
     pub id: TrackId,
     pub is_bus: bool,
@@ -156,6 +156,9 @@ impl RoutingGraph {
                 }
             }
             for &(bus, gain) in &channel.sends {
+                if gain <= 0.0005 {
+                    continue;
+                }
                 if let Some(to) = graph.index(bus, NodeStage::Sum) {
                     graph.edges.push(RoutingEdge {
                         from: after_fader,

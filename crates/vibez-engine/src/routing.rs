@@ -21,6 +21,7 @@ pub struct PreparedRouting {
     pub graph: RoutingGraph,
     pub nodes: Vec<PreparedNode>,
     pub max_frames: usize,
+    pub detector_buses: Vec<vibez_core::id::TrackId>,
 }
 
 impl PreparedRouting {
@@ -33,6 +34,31 @@ impl PreparedRouting {
             RoutingError::DuplicateIdentity => "Routing contains duplicate identities",
             RoutingError::MasterSource => "Master cannot provide an external input",
         })?;
+        let mut required = vec![false; graph.nodes.len()];
+        for edge in &graph.edges {
+            if matches!(edge.kind, vibez_core::routing::EdgeKind::External(_)) {
+                required[edge.from] = true;
+            }
+        }
+        for &node in graph.order.iter().rev() {
+            if required[node] {
+                for edge in graph.edges.iter().filter(|edge| edge.to == node) {
+                    required[edge.from] = true;
+                }
+            }
+        }
+        let detector_buses = channels
+            .iter()
+            .filter(|channel| {
+                channel.is_bus
+                    && graph
+                        .nodes
+                        .iter()
+                        .enumerate()
+                        .any(|(index, node)| node.channel == channel.id && required[index])
+            })
+            .map(|channel| channel.id)
+            .collect();
         let mut nodes = Vec::with_capacity(graph.nodes.len());
         for (index, node) in graph.nodes.iter().enumerate() {
             let mut inputs = Vec::new();
@@ -80,6 +106,7 @@ impl PreparedRouting {
             graph,
             nodes,
             max_frames,
+            detector_buses,
         }))
     }
 }

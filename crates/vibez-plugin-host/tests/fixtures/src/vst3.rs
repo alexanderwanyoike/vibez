@@ -4,14 +4,17 @@ use std::{
     ffi::{c_char, c_void},
     ptr, slice,
 };
-use vst3::{uid, Class, ComWrapper, Steinberg::Vst::*, Steinberg::*};
+use vst3::{uid, Class, ComRef, ComWrapper, Steinberg::Vst::*, Steinberg::*};
 
 struct Probe {
     active: Cell<bool>,
     processing: Cell<bool>,
     aux_active: Cell<u32>,
     max_frames: Cell<i32>,
+    instrument: bool,
+    playing: Cell<bool>,
 }
+const INSTRUMENT_CID: TUID = uid(0xFEDCBA98, 0x76543210, 0xFEDCBA98, 0x76543210);
 const CID: TUID = uid(0x01234567, 0x89ABCDEF, 0x01234567, 0x89ABCDEF);
 impl Class for Probe {
     type Interfaces = (IComponent, IAudioProcessor);
@@ -33,9 +36,17 @@ impl IComponentTrait for Probe {
     }
     unsafe fn getBusCount(&self, media: MediaType, direction: BusDirection) -> i32 {
         if media != 0 {
-            0
+            if self.instrument && direction == 0 {
+                1
+            } else {
+                0
+            }
         } else if direction == 0 {
-            4
+            if self.instrument {
+                0
+            } else {
+                4
+            }
         } else {
             1
         }
@@ -149,6 +160,40 @@ impl IAudioProcessorTrait for Probe {
     }
     unsafe fn process(&self, data: *mut ProcessData) -> tresult {
         let data = &*data;
+        if self.instrument {
+            if !self.processing.get()
+                || data.numInputs != 0
+                || data.numOutputs != 1
+                || data.numSamples > self.max_frames.get()
+            {
+                return kResultFalse;
+            }
+            let events = ComRef::from_raw(data.inputEvents);
+            let mut event_index = 0;
+            let output = &*data.outputs;
+            for frame in 0..data.numSamples {
+                if let Some(events) = &events {
+                    while event_index < events.getEventCount() {
+                        let mut event: Event = std::mem::zeroed();
+                        events.getEvent(event_index, &mut event);
+                        if event.sampleOffset > frame {
+                            break;
+                        }
+                        if event.r#type == 0 {
+                            self.playing.set(true);
+                        } else if event.r#type == 1 {
+                            self.playing.set(false);
+                        }
+                        event_index += 1;
+                    }
+                }
+                for channel in 0..2 {
+                    *(*output.__field0.channelBuffers32.add(channel)).add(frame as usize) =
+                        if self.playing.get() { 0.75 } else { 0.0 };
+                }
+            }
+            return kResultOk;
+        }
         if !self.processing.get()
             || self.aux_active.get() & 7 != 7
             || data.numInputs != 4
@@ -193,17 +238,24 @@ impl IPluginFactoryTrait for Factory {
         kResultOk
     }
     unsafe fn countClasses(&self) -> i32 {
-        1
+        2
     }
     unsafe fn getClassInfo(&self, index: i32, info: *mut PClassInfo) -> tresult {
-        if index != 0 {
+        if !(0..=1).contains(&index) {
             return kInvalidArgument;
         }
         *info = std::mem::zeroed();
-        (*info).cid = CID;
+        (*info).cid = if index == 0 { CID } else { INSTRUMENT_CID };
         (*info).cardinality = i32::MAX;
         copy("Audio Module Class", &mut (*info).category);
-        copy("Routing Probe", &mut (*info).name);
+        copy(
+            if index == 0 {
+                "Routing Probe"
+            } else {
+                "Pulse Instrument"
+            },
+            &mut (*info).name,
+        );
         kResultOk
     }
     unsafe fn createInstance(
@@ -212,7 +264,8 @@ impl IPluginFactoryTrait for Factory {
         iid: FIDString,
         object: *mut *mut c_void,
     ) -> tresult {
-        if *(cid as *const TUID) != CID {
+        let instrument = *(cid as *const TUID) == INSTRUMENT_CID;
+        if !instrument && *(cid as *const TUID) != CID {
             *object = ptr::null_mut();
             return kInvalidArgument;
         }
@@ -221,6 +274,8 @@ impl IPluginFactoryTrait for Factory {
             processing: Cell::new(false),
             aux_active: Cell::new(0),
             max_frames: Cell::new(0),
+            instrument,
+            playing: Cell::new(false),
         })
         .to_com_ptr::<FUnknown>()
         .unwrap();
