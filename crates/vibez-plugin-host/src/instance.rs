@@ -15,6 +15,20 @@ pub trait PluginInstance: Send {
     ) {
         self.process_audio(buffer, channels);
     }
+    fn reconfiguration_requested(&self) -> bool {
+        false
+    }
+    /// Called on the processing thread before transferring exclusive ownership.
+    fn stop_for_reconfiguration(&mut self) {}
+    /// Called on the format's main thread, after processing has stopped.
+    fn reconfigure_on_main_thread(&mut self) -> Result<(), String> {
+        Ok(())
+    }
+    /// Cached processing delay, excluding musical echoes and hardware delay.
+    /// Format adapters refresh this only during their permitted lifecycle.
+    fn latency_samples(&self) -> u32 {
+        0
+    }
     fn name(&self) -> &str;
     fn param_count(&self) -> usize;
     fn param_descriptors_vec(&self) -> Vec<ParamDescriptor>;

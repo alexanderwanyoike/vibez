@@ -26,6 +26,7 @@ pub struct Vst3PluginInstance {
     /// True when `controller` is a separate object that we created and
     /// initialized, and therefore must terminate on drop.
     controller_is_separate: bool,
+    component_handler: Option<super::component_handler::ComponentHandler>,
     param_descriptors: Vec<ParamDescriptor>,
     param_values: Vec<f32>,
     /// VST3 ParamIDs, index-aligned with the descriptors.
@@ -43,6 +44,8 @@ pub struct Vst3PluginInstance {
     processing_failed: bool,
     note_events: Vec<NoteEvent>,
     sample_rate: f64,
+    latency_samples: u32,
+    main_thread: std::thread::ThreadId,
     active: bool,
     processing: bool,
 }
@@ -374,6 +377,7 @@ impl Vst3PluginInstance {
             processor,
             controller,
             controller_is_separate,
+            component_handler: None,
             param_descriptors: Vec::new(),
             param_values: Vec::new(),
             param_ids: Vec::new(),
@@ -389,6 +393,8 @@ impl Vst3PluginInstance {
             processing_failed: false,
             note_events: Vec::with_capacity(2048),
             sample_rate,
+            latency_samples: 0,
+            main_thread: std::thread::current().id(),
             active: false,
             processing: false,
         };
@@ -402,9 +408,11 @@ impl Vst3PluginInstance {
             instance.param_ids = ids;
         }
 
+        instance.component_handler =
+            Some(unsafe { super::component_handler::ComponentHandler::install(controller)? });
         instance.prepare(sample_rate, max_buffer_size);
         if !instance.activate() {
-            return Err("VST3 activation failed".into());
+            return Err(format!("{} failed activation", instance.name));
         }
 
         Ok(instance)
@@ -450,6 +458,68 @@ fn parse_uid(uid_str: &str) -> Result<[u8; 16], String> {
 }
 
 impl PluginInstance for Vst3PluginInstance {
+    fn reconfiguration_requested(&self) -> bool {
+        self.component_handler
+            .as_ref()
+            .is_some_and(|handler| handler.requested())
+    }
+
+    fn stop_for_reconfiguration(&mut self) {
+        self.stop_processing();
+    }
+
+    fn reconfigure_on_main_thread(&mut self) -> Result<(), String> {
+        if self.main_thread != std::thread::current().id() {
+            return Err(format!("{} requires its owning main thread", self.name));
+        }
+        if self.processing {
+            return Err(format!("{} is still processing", self.name));
+        }
+        if let Some(handler) = &self.component_handler {
+            handler.clear();
+        }
+        self.deactivate();
+        type GetBusCount = unsafe extern "system" fn(*mut std::ffi::c_void, i32, i32) -> i32;
+        let count: GetBusCount = unsafe { std::mem::transmute(*vtbl(self.component).add(7)) };
+        self.input_ports = unsafe {
+            super::audio_ports::query(
+                self.component,
+                0,
+                count(self.component, 0, 0),
+                self.max_frames,
+            )
+        }?;
+        self.output_ports = unsafe {
+            super::audio_ports::query(
+                self.component,
+                1,
+                count(self.component, 0, 1),
+                self.max_frames,
+            )
+        }?;
+        self.external_inputs = crate::audio_ports::descriptors(&self.input_ports);
+        let buses = |ports: &mut Vec<(String, crate::audio_ports::AudioPort)>| {
+            ports
+                .iter_mut()
+                .map(|(_, port)| AudioBusBuffersRaw {
+                    num_channels: port.channels as i32,
+                    silence_flags: 0,
+                    channel_buffers32: port.pointers.as_mut_ptr(),
+                })
+                .collect()
+        };
+        self.input_buses = buses(&mut self.input_ports);
+        self.output_buses = buses(&mut self.output_ports);
+        if !self.activate() {
+            return Err(format!("{} failed to reactivate", self.name));
+        }
+        Ok(())
+    }
+
+    fn latency_samples(&self) -> u32 {
+        self.latency_samples
+    }
+
     fn name(&self) -> &str {
         &self.name
     }
@@ -503,12 +573,18 @@ impl PluginInstance for Vst3PluginInstance {
         if !self.active || self.processor.is_null() {
             return;
         }
+        if self.processing_failed {
+            self.processing_failed = true;
+            buffer.fill(0.0);
+            return;
+        }
         if !self.processing {
             type SetProcessingFn = unsafe extern "system" fn(*mut std::ffi::c_void, i32) -> i32;
             let proc_vtbl = unsafe { vtbl(self.processor) };
             let set_processing: SetProcessingFn = unsafe { std::mem::transmute(*proc_vtbl.add(8)) };
             let result = unsafe { set_processing(self.processor, 1) };
             if result != 0 {
+                self.processing_failed = true;
                 buffer.fill(0.0);
                 return;
             }
@@ -645,6 +721,9 @@ impl PluginInstance for Vst3PluginInstance {
 
     fn reset(&mut self) {
         self.note_events.clear();
+        // VST3 exposes the processing boundary instead of a separate reset
+        // entry point. The next render starts processing on this same thread.
+        self.stop_processing();
     }
 
     fn is_instrument(&self) -> bool {
@@ -652,6 +731,9 @@ impl PluginInstance for Vst3PluginInstance {
     }
 
     fn prepare(&mut self, sample_rate: f64, max_buffer_size: u32) {
+        if self.active || self.processing {
+            return;
+        }
         self.sample_rate = sample_rate;
         if !self.processor.is_null() {
             let mut setup = ProcessSetupRaw {
@@ -695,6 +777,8 @@ impl PluginInstance for Vst3PluginInstance {
         }
         if hr == 0 {
             self.active = true;
+            self.processing_failed = false;
+            self.latency_samples = unsafe { super::latency::query(self.processor) };
             true
         } else {
             false

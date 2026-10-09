@@ -1,8 +1,8 @@
-//! CLAP host callback routing and main-thread service registries.
-
+use clap_sys::ext::latency::{clap_host_latency, CLAP_EXT_LATENCY};
 use std::cell::Cell;
 use std::ffi::CStr;
 use std::os::raw::c_char;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::thread::ThreadId;
 use std::time::Instant;
@@ -74,9 +74,13 @@ fn is_on_clap_audio_thread() -> bool {
 /// This is needed so timer/FD callbacks can call back into the correct plugin.
 pub struct ClapHostUserData {
     pub plugin_ptr: *const clap_plugin,
+    pub restart_requested: AtomicBool,
+    pub callback_requested: AtomicBool,
+    pub activating: AtomicBool,
 }
 
-// Safety: Only accessed from the main thread (timer/fd/gui callbacks).
+// Safety: The plugin identity is immutable after init. Native callbacks only
+// change atomic request flags; main-thread dispatch owns pointer dereferences.
 unsafe impl Send for ClapHostUserData {}
 unsafe impl Sync for ClapHostUserData {}
 
@@ -86,8 +90,17 @@ unsafe impl Sync for ClapHostUserData {}
 /// # Safety
 /// `host` must be a valid, leaked `clap_host` pointer. `plugin_ptr` must be valid.
 pub unsafe fn set_host_user_data(host: &mut clap_host, plugin_ptr: *const clap_plugin) {
-    let data = Box::leak(Box::new(ClapHostUserData { plugin_ptr }));
+    let data = Box::leak(Box::new(ClapHostUserData {
+        plugin_ptr,
+        restart_requested: AtomicBool::new(false),
+        callback_requested: AtomicBool::new(false),
+        activating: AtomicBool::new(false),
+    }));
     host.host_data = data as *mut ClapHostUserData as *mut std::ffi::c_void;
+    MAIN_CALLBACK_HOSTS
+        .lock()
+        .unwrap()
+        .push(host as *const clap_host as usize);
 }
 
 /// Create a `clap_host` descriptor for the vibez host.
@@ -105,6 +118,39 @@ pub fn make_clap_host() -> clap_host {
         request_restart: Some(host_request_restart),
         request_process: Some(host_request_process),
         request_callback: Some(host_request_callback),
+    }
+}
+
+static MAIN_CALLBACK_HOSTS: Mutex<Vec<usize>> = Mutex::new(Vec::new());
+
+fn poll_main_callbacks() {
+    let hosts = MAIN_CALLBACK_HOSTS
+        .lock()
+        .map(|hosts| hosts.clone())
+        .unwrap_or_default();
+    for address in hosts {
+        unsafe {
+            let host = &*(address as *const clap_host);
+            let data = &*(host.host_data as *const ClapHostUserData);
+            if data.callback_requested.swap(false, Ordering::AcqRel) {
+                if let Some(callback) = (*data.plugin_ptr).on_main_thread {
+                    callback(data.plugin_ptr);
+                }
+            }
+        }
+    }
+}
+
+pub(super) fn unregister_host_callbacks(host: *const clap_host) {
+    if let Ok(mut hosts) = MAIN_CALLBACK_HOSTS.lock() {
+        hosts.retain(|&address| address != host as usize);
+    }
+    let plugin = unsafe { (&*((*host).host_data as *const ClapHostUserData)).plugin_ptr };
+    if let Ok(mut timers) = CLAP_TIMERS.lock() {
+        timers.retain(|timer| timer.plugin_ptr != plugin);
+    }
+    if let Ok(mut fds) = CLAP_FDS.lock() {
+        fds.retain(|entry| entry.plugin_ptr != plugin);
     }
 }
 
@@ -252,6 +298,7 @@ unsafe extern "C" fn host_unregister_fd(_host: *const clap_host, fd: i32) -> boo
 /// Must be called on the main thread (e.g., from iced's 60fps tick).
 /// Fires `on_timer` for elapsed timers and `on_fd` for ready file descriptors.
 pub fn poll_clap_events() {
+    poll_main_callbacks();
     poll_timers();
     poll_fds();
 }
@@ -442,42 +489,57 @@ unsafe extern "C" fn host_get_extension(
         return std::ptr::null();
     }
     let ext_id = CStr::from_ptr(extension_id);
-    let ext_name = ext_id.to_str().unwrap_or("?");
 
+    if ext_id == CLAP_EXT_LATENCY {
+        return (&CLAP_HOST_LATENCY as *const clap_host_latency).cast();
+    }
     if ext_id == CLAP_EXT_THREAD_CHECK {
-        eprintln!("vibez: host_get_extension({ext_name}) → thread-check");
         return &CLAP_HOST_THREAD_CHECK_IMPL as *const clap_host_thread_check
             as *const std::ffi::c_void;
     }
     if ext_id == CLAP_EXT_GUI {
-        eprintln!("vibez: host_get_extension({ext_name}) → gui");
         return &CLAP_HOST_GUI_IMPL as *const clap_host_gui as *const std::ffi::c_void;
     }
     if ext_id == CLAP_EXT_TIMER_SUPPORT {
-        eprintln!("vibez: host_get_extension({ext_name}) → timer-support");
         return &CLAP_HOST_TIMER_SUPPORT_IMPL as *const clap_host_timer_support
             as *const std::ffi::c_void;
     }
     if ext_id == CLAP_EXT_POSIX_FD_SUPPORT {
-        eprintln!("vibez: host_get_extension({ext_name}) → posix-fd-support");
         return &CLAP_HOST_POSIX_FD_SUPPORT_IMPL as *const clap_host_posix_fd_support
             as *const std::ffi::c_void;
     }
-
-    eprintln!("vibez: host_get_extension({ext_name}) → null (not implemented)");
     std::ptr::null()
 }
 
-unsafe extern "C" fn host_request_restart(_host: *const clap_host) {
-    // TODO: handle restart request from plugin
+static CLAP_HOST_LATENCY: clap_host_latency = clap_host_latency {
+    changed: Some(host_latency_changed),
+};
+
+unsafe extern "C" fn host_latency_changed(host: *const clap_host) {
+    if !host.is_null() && !(*host).host_data.is_null() {
+        let data = &*((*host).host_data as *const ClapHostUserData);
+        if !data.activating.load(Ordering::Acquire) {
+            data.restart_requested.store(true, Ordering::Release);
+        }
+    }
+}
+
+unsafe extern "C" fn host_request_restart(host: *const clap_host) {
+    if !host.is_null() && !(*host).host_data.is_null() {
+        let data = &*((*host).host_data as *const ClapHostUserData);
+        data.restart_requested.store(true, Ordering::Release);
+    }
 }
 
 unsafe extern "C" fn host_request_process(_host: *const clap_host) {
     // TODO: handle process request from plugin
 }
 
-unsafe extern "C" fn host_request_callback(_host: *const clap_host) {
-    // TODO: handle callback request from plugin
+unsafe extern "C" fn host_request_callback(host: *const clap_host) {
+    if !host.is_null() && !(*host).host_data.is_null() {
+        let data = &*((*host).host_data as *const ClapHostUserData);
+        data.callback_requested.store(true, Ordering::Release);
+    }
 }
 
 #[cfg(test)]
