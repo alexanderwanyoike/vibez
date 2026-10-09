@@ -115,6 +115,35 @@ fn loadable_instrument_reports_and_applies_its_processing_delay() {
 }
 
 #[test]
+fn loadable_formats_receive_target_audio_context_at_varied_rates() {
+    let fixture = support::Fixture::new();
+    for format in ["clap", "vst3"] {
+        for rate in [44100, 48000, 96000] {
+            let mut instance = fixture.load_at_rate(format, 64, rate as f64);
+            let bytes: Vec<u8> = [0u32, 0, 2]
+                .into_iter()
+                .flat_map(u32::to_le_bytes)
+                .collect();
+            assert!(instance.load_state(&bytes));
+            instance.reconfigure_on_main_thread().unwrap();
+            instance.set_audio_context(vibez_core::audio_context::DeviceAudioContext {
+                musical_sample: 800,
+                continuous_sample: 4000,
+                sample_rate: rate,
+                bpm: 123.0,
+                playing: true,
+            });
+            let mut output = [0.0; 62];
+            instance.process_audio(&mut output, 2);
+            for (frame, sample) in output.chunks_exact(2).enumerate() {
+                assert_eq!(sample, &[(800 + frame) as f32; 2]);
+            }
+            instance.stop_processing();
+        }
+    }
+}
+
+#[test]
 fn format_restart_refreshes_input_metadata_while_deactivated() {
     let fixture = support::Fixture::new();
     for format in ["clap", "vst3"] {
@@ -173,31 +202,31 @@ fn loadable_latency_restart_stops_on_the_processing_thread_and_destroys_on_main(
 }
 
 #[test]
-fn failed_restart_zeros_cached_latency_and_inactive_output_until_successful_activation() {
+fn failed_reactivation_invalidates_cached_processing_even_when_latency_still_matches() {
     let fixture = support::Fixture::new();
     for format in ["clap", "vst3"] {
-        let mut plugin = fixture.load(format, 64);
-        let state = |flags: u32| {
-            [137u32, 137, flags]
-                .into_iter()
-                .flat_map(u32::to_le_bytes)
-                .collect::<Vec<_>>()
-        };
-        assert!(plugin.load_state(&state(0)));
-        plugin.reconfigure_on_main_thread().unwrap();
-        assert_eq!(plugin.latency_samples(), 137);
-        assert!(plugin.load_state(&state(1 << 17)));
-        assert!(plugin.reconfigure_on_main_thread().is_err());
-        assert_eq!(plugin.latency_samples(), 0);
+        let mut instance = fixture.load(format, 64);
+        instance.load_state(&state(137, 137, false));
+        instance.reconfigure_on_main_thread().unwrap();
+        assert!(instance.processing_configuration_valid());
+        let fail: Vec<_> = [137u32, 137, 1 << 17]
+            .into_iter()
+            .flat_map(u32::to_le_bytes)
+            .collect();
+        instance.load_state(&fail);
+        instance.stop_for_reconfiguration();
+        assert!(instance.reconfigure_on_main_thread().is_err());
+        assert_eq!(instance.latency_samples(), 0);
         let mut output = [1.0; 128];
         assert_eq!(
-            support::allocation::count_allocations(|| plugin.process_audio(&mut output, 2)),
+            support::allocation::count_allocations(|| instance.process_audio(&mut output, 2)),
             0
         );
-        assert_eq!(output, [0.0; 128]);
-        assert!(plugin.load_state(&state(0)));
-        plugin.reconfigure_on_main_thread().unwrap();
-        assert_eq!(plugin.latency_samples(), 137);
-        impulse(plugin.as_mut(), 137);
+        assert!(output.iter().all(|&sample| sample == 0.0));
+        assert!(!instance.processing_configuration_valid());
+        instance.load_state(&state(137, 137, false));
+        instance.reconfigure_on_main_thread().unwrap();
+        assert!(instance.processing_configuration_valid());
     }
 }
+

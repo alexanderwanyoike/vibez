@@ -45,6 +45,7 @@ pub struct Vst3PluginInstance {
     note_events: Vec<NoteEvent>,
     sample_rate: f64,
     latency_samples: u32,
+    audio_context: Option<vibez_core::audio_context::DeviceAudioContext>,
     main_thread: std::thread::ThreadId,
     active: bool,
     processing: bool,
@@ -384,6 +385,7 @@ impl Vst3PluginInstance {
             note_events: Vec::with_capacity(2048),
             sample_rate,
             latency_samples: 0,
+            audio_context: None,
             main_thread: std::thread::current().id(),
             active: false,
             processing: false,
@@ -462,6 +464,10 @@ fn parse_uid(uid_str: &str) -> Result<[u8; 16], String> {
 }
 
 impl PluginInstance for Vst3PluginInstance {
+    fn set_audio_context(&mut self, context: vibez_core::audio_context::DeviceAudioContext) {
+        self.audio_context = Some(context);
+    }
+
     fn reconfiguration_requested(&self) -> bool {
         self.component_handler
             .as_ref()
@@ -495,6 +501,12 @@ impl PluginInstance for Vst3PluginInstance {
         Ok(())
     }
 
+    fn activation_sample_rate(&self) -> Option<u32> {
+        Some(self.sample_rate as u32)
+    }
+    fn processing_configuration_valid(&self) -> bool {
+        self.active && !self.processing_failed
+    }
     fn latency_samples(&self) -> u32 {
         self.latency_samples
     }
@@ -600,6 +612,7 @@ impl PluginInstance for Vst3PluginInstance {
             .sort_unstable_by_key(|event| (event.frame_offset, event.is_on));
         let mut live_events = LiveEventList::new(&self.note_events);
 
+        let mut transport = self.audio_context.map(crate::process_context::vst3);
         let mut process_data = ProcessDataRaw {
             process_mode: 0,
             symbolic_sample_size: 0,
@@ -616,7 +629,11 @@ impl PluginInstance for Vst3PluginInstance {
             output_parameter_changes: param_changes_stub(),
             input_events: live_events.as_raw_mut(),
             output_events: std::ptr::null_mut(),
-            process_context: std::ptr::null_mut(),
+            process_context: transport
+                .as_mut()
+                .map_or(std::ptr::null_mut(), |transport| {
+                    (transport as *mut vst3::Steinberg::Vst::ProcessContext).cast()
+                }),
         };
 
         // IAudioProcessor::process - vtable layout:

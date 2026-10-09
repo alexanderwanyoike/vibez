@@ -1,4 +1,4 @@
-//! VST3 component and controller destruction ordering.
+//! Main-thread VST3 component and controller destruction ordering.
 
 use super::*;
 
