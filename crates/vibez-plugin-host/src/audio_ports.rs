@@ -48,17 +48,12 @@ impl AudioPort {
         for channel in 0..self.channels {
             for frame in 0..frames {
                 self.samples[channel][frame] = if self.available {
-                    vibez_core::routing::adapt_channel_sample(
-                        channels,
-                        self.channels,
-                        channel,
-                        |source_channel| {
-                            samples
-                                .get(frame * channels + source_channel)
-                                .copied()
-                                .unwrap_or(0.0)
-                        },
-                    )
+                    self.adapt_sample(channels, self.channels, channel, |source_channel| {
+                        samples
+                            .get(frame * channels + source_channel)
+                            .copied()
+                            .unwrap_or(0.0)
+                    })
                 } else {
                     0.0
                 };
@@ -66,16 +61,37 @@ impl AudioPort {
         }
     }
 
+    fn adapt_sample(
+        &self,
+        source_channels: usize,
+        destination_channels: usize,
+        channel: usize,
+        source: impl Fn(usize) -> f32,
+    ) -> f32 {
+        if self.main {
+            vibez_core::routing::adapt_main_channel_sample(
+                source_channels,
+                destination_channels,
+                channel,
+                source,
+            )
+        } else {
+            vibez_core::routing::adapt_channel_sample(
+                source_channels,
+                destination_channels,
+                channel,
+                source,
+            )
+        }
+    }
+
     pub fn copy_output(&self, output: &mut [f32], output_channels: usize, frames: usize) {
         for frame in 0..frames {
             for channel in 0..output_channels {
                 output[frame * output_channels + channel] =
-                    vibez_core::routing::adapt_channel_sample(
-                        self.channels,
-                        output_channels,
-                        channel,
-                        |source_channel| self.samples[source_channel][frame],
-                    );
+                    self.adapt_sample(self.channels, output_channels, channel, |source_channel| {
+                        self.samples[source_channel][frame]
+                    });
             }
         }
     }
@@ -143,8 +159,18 @@ mod tests {
                     &mut expected,
                     destination_channels,
                 );
-                let mut port = AudioPort::new(ExternalInputId(0), destination_channels, true, 3);
-                port.fill_input(&source, source_channels, &[], 3);
+                let mut port = AudioPort::new(ExternalInputId(0), destination_channels, false, 3);
+                port.fill_input(
+                    &[],
+                    2,
+                    &[ExternalInputBlock {
+                        id: port.id,
+                        channels: source_channels,
+                        samples: &source,
+                        connected: true,
+                    }],
+                    3,
+                );
                 for frame in 0..3 {
                     for channel in 0..destination_channels {
                         assert_eq!(

@@ -12,6 +12,7 @@ struct State {
     processing: bool,
     max_frames: u32,
     instrument: bool,
+    wide_main: bool,
     playing: bool,
     parameter: f64,
 }
@@ -52,8 +53,13 @@ static INSTRUMENT_DESCRIPTOR: clap_plugin_descriptor = clap_plugin_descriptor {
     name: c"Pulse Instrument".as_ptr(),
     ..DESCRIPTOR
 };
+static WIDE_DESCRIPTOR: clap_plugin_descriptor = clap_plugin_descriptor {
+    id: c"vibez.fixture.surround".as_ptr(),
+    name: c"Surround main".as_ptr(),
+    ..DESCRIPTOR
+};
 unsafe extern "C" fn count(_: *const clap_plugin_factory) -> u32 {
-    2
+    3
 }
 unsafe extern "C" fn descriptor(
     _: *const clap_plugin_factory,
@@ -63,6 +69,8 @@ unsafe extern "C" fn descriptor(
         &DESCRIPTOR
     } else if index == 1 {
         &INSTRUMENT_DESCRIPTOR
+    } else if index == 2 {
+        &WIDE_DESCRIPTOR
     } else {
         std::ptr::null()
     }
@@ -73,7 +81,8 @@ unsafe extern "C" fn create(
     id: *const c_char,
 ) -> *const clap_plugin {
     let instrument = CStr::from_ptr(id) == c"vibez.fixture.instrument";
-    if !instrument && CStr::from_ptr(id) != c"vibez.fixture.routing" {
+    let wide_main = CStr::from_ptr(id) == c"vibez.fixture.surround";
+    if !instrument && !wide_main && CStr::from_ptr(id) != c"vibez.fixture.routing" {
         return std::ptr::null();
     }
     let state = Box::into_raw(Box::new(State {
@@ -81,12 +90,15 @@ unsafe extern "C" fn create(
         processing: false,
         max_frames: 0,
         instrument,
+        wide_main,
         playing: false,
         parameter: 0.0,
     }));
     Box::into_raw(Box::new(clap_plugin {
         desc: if instrument {
             &INSTRUMENT_DESCRIPTOR
+        } else if wide_main {
+            &WIDE_DESCRIPTOR
         } else {
             &DESCRIPTOR
         },
@@ -198,7 +210,7 @@ unsafe extern "C" fn port_count(plugin: *const clap_plugin, input: bool) -> u32 
     }
 }
 unsafe extern "C" fn port_info(
-    _: *const clap_plugin,
+    plugin: *const clap_plugin,
     index: u32,
     input: bool,
     info: *mut clap_audio_port_info,
@@ -208,10 +220,14 @@ unsafe extern "C" fn port_info(
     }
     *info = std::mem::zeroed();
     (*info).id = index + 10;
-    (*info).channel_count = match index {
-        1 => 1,
-        3 => 6,
-        _ => 2,
+    (*info).channel_count = if index == 0 && state(plugin).wide_main {
+        6
+    } else {
+        match index {
+            1 => 1,
+            3 => 6,
+            _ => 2,
+        }
     };
     (*info).flags = if index == 0 {
         CLAP_AUDIO_PORT_IS_MAIN
@@ -227,10 +243,10 @@ unsafe extern "C" fn port_info(
     for (target, byte) in (*info).name.iter_mut().zip(name.as_bytes()) {
         *target = *byte as c_char;
     }
-    (*info).port_type = if (*info).channel_count == 1 {
-        CLAP_PORT_MONO.as_ptr()
-    } else {
-        CLAP_PORT_STEREO.as_ptr()
+    (*info).port_type = match (*info).channel_count {
+        1 => CLAP_PORT_MONO.as_ptr(),
+        2 => CLAP_PORT_STEREO.as_ptr(),
+        _ => std::ptr::null(),
     };
     (*info).in_place_pair = u32::MAX;
     true
@@ -301,7 +317,23 @@ unsafe extern "C" fn process(
     if inputs[1].channel_count != 1 || inputs[2].channel_count != 2 {
         return CLAP_PROCESS_ERROR;
     }
+    if state(plugin).wide_main && (inputs[0].channel_count != 6 || output.channel_count != 6) {
+        return CLAP_PROCESS_ERROR;
+    }
     for frame in 0..data.frames_count as usize {
+        if state(plugin).wide_main {
+            for channel in 0..6 {
+                if sample(&inputs[3], channel, frame) != 0.0 {
+                    return CLAP_PROCESS_ERROR;
+                }
+            }
+            for channel in 2..6 {
+                if sample(&inputs[0], channel, frame) != 0.0 {
+                    return CLAP_PROCESS_ERROR;
+                }
+                *(*output.data32.add(channel)).add(frame) = 99.0;
+            }
+        }
         for channel in 0..2 {
             let value = sample(&inputs[0], channel, frame)
                 + 2.0 * sample(&inputs[1], 0, frame)
