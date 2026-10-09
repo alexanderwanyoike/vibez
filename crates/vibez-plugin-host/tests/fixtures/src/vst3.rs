@@ -20,21 +20,23 @@ struct Probe {
 }
 const INSTRUMENT_CID: TUID = uid(0xFEDCBA98, 0x76543210, 0xFEDCBA98, 0x76543210);
 const CID: TUID = uid(0x01234567, 0x89ABCDEF, 0x01234567, 0x89ABCDEF);
-const CIDS: [TUID; 6] = [
+const CIDS: [TUID; 7] = [
     CID,
     INSTRUMENT_CID,
     uid(0x01234567, 0x89ABCDEF, 0x01234567, 0x00000001),
     uid(0x01234567, 0x89ABCDEF, 0x01234567, 0x00000002),
     uid(0x01234567, 0x89ABCDEF, 0x01234567, 0x00000003),
     uid(0x01234567, 0x89ABCDEF, 0x01234567, 0x00000004),
+    uid(0x01234567, 0x89ABCDEF, 0x01234567, 0x00000005),
 ];
-const NAMES: [&str; 6] = [
+const NAMES: [&str; 7] = [
     "Routing Probe",
     "Pulse Instrument",
     "Refused aux",
     "Refused surround deactivation",
     "Refused main",
     "Processing error",
+    "Surround main",
 ];
 impl Class for Probe {
     type Interfaces = (IComponent, IAudioProcessor);
@@ -84,10 +86,14 @@ impl IComponentTrait for Probe {
         *bus = std::mem::zeroed();
         (*bus).mediaType = media;
         (*bus).direction = direction;
-        (*bus).channelCount = match index {
-            1 => 1,
-            3 => 6,
-            _ => 2,
+        (*bus).channelCount = if self.scenario == 6 && index == 0 {
+            6
+        } else {
+            match index {
+                1 => 1,
+                3 => 6,
+                _ => 2,
+            }
         };
         (*bus).busType = i32::from(index != 0);
         (*bus).flags = 1;
@@ -166,6 +172,8 @@ impl IAudioProcessorTrait for Probe {
     ) -> tresult {
         *arrangement = if index == 1 {
             SpeakerArr::kMono
+        } else if index == 3 || (index == 0 && self.scenario == 6) {
+            SpeakerArr::k51
         } else {
             SpeakerArr::kStereo
         };
@@ -240,9 +248,20 @@ impl IAudioProcessorTrait for Probe {
         if inputs[1].numChannels != 1 || inputs[2].numChannels != 2 || inputs[3].numChannels != 6 {
             return kResultFalse;
         }
+        if self.scenario == 6 && (inputs[0].numChannels != 6 || output.numChannels != 6) {
+            return kResultFalse;
+        }
         for frame in 0..data.numSamples as usize {
+            if self.scenario == 6 {
+                for channel in 2..6 {
+                    if *(*inputs[0].__field0.channelBuffers32.add(channel)).add(frame) != 0.0 {
+                        return kResultFalse;
+                    }
+                    *(*output.__field0.channelBuffers32.add(channel)).add(frame) = 99.0;
+                }
+            }
             for channel in 0..2 {
-                if self.scenario == 3 {
+                if matches!(self.scenario, 3 | 6) {
                     for auxiliary in 0..6 {
                         if *(*inputs[3].__field0.channelBuffers32.add(auxiliary)).add(frame) != 0.0
                         {
@@ -279,10 +298,10 @@ impl IPluginFactoryTrait for Factory {
         kResultOk
     }
     unsafe fn countClasses(&self) -> i32 {
-        6
+        7
     }
     unsafe fn getClassInfo(&self, index: i32, info: *mut PClassInfo) -> tresult {
-        if !(0..6).contains(&index) {
+        if !(0..7).contains(&index) {
             return kInvalidArgument;
         }
         *info = std::mem::zeroed();

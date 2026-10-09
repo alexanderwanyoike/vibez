@@ -11,6 +11,75 @@ use vibez_plugin_host::{
 };
 
 #[test]
+fn declared_surround_main_uses_first_pair_without_enabling_surround_aux() {
+    let fixture = support::Fixture::new();
+    for format in ["clap", "vst3"] {
+        let mut plugin: Box<dyn PluginInstance> = if format == "clap" {
+            Box::new(
+                ClapPluginInstance::load(
+                    &fixture.clap,
+                    "vibez.fixture.surround",
+                    false,
+                    48000.0,
+                    64,
+                )
+                .unwrap(),
+            )
+        } else {
+            let classes = scan_vst3(&fixture.vst3).unwrap();
+            Box::new(
+                Vst3PluginInstance::load(&fixture.vst3, &classes[6].id.uid, false, 48000.0, 64)
+                    .unwrap(),
+            )
+        };
+        assert_eq!(
+            plugin
+                .external_inputs()
+                .iter()
+                .map(|input| input.channels)
+                .collect::<Vec<_>>(),
+            [1, 2]
+        );
+        for channels in [1, 2, 6] {
+            let mut samples = vec![0.0; channels * 7];
+            for frame in samples.chunks_exact_mut(channels) {
+                frame[0] = 0.25;
+                if channels > 1 {
+                    frame[1] = 0.75;
+                }
+                for extra in frame.iter_mut().skip(2) {
+                    *extra = 8.0;
+                }
+            }
+            let unsupported = [9.0; 6 * 7];
+            let input = vibez_core::routing::ExternalInputBlock {
+                id: vibez_core::routing::ExternalInputId(if format == "clap" { 13 } else { 3 }),
+                channels: 6,
+                samples: &unsupported,
+                connected: true,
+            };
+            assert_eq!(
+                support::allocation::count_allocations(|| plugin.process_with_inputs(
+                    &mut samples,
+                    channels,
+                    &[input]
+                )),
+                0
+            );
+            assert!(plugin.take_processing_error().is_none());
+            for frame in samples.chunks_exact(channels) {
+                assert_eq!(frame[0], 0.25);
+                if channels > 1 {
+                    assert_eq!(frame[1], 0.75);
+                }
+                assert!(frame.iter().skip(2).all(|sample| *sample == 0.0));
+            }
+        }
+        plugin.stop_processing();
+    }
+}
+
+#[test]
 fn refused_optional_buses_keep_main_processing_and_declared_indices() {
     let fixture = support::Fixture::new();
     let plugins = scan_vst3(&fixture.vst3).unwrap();
