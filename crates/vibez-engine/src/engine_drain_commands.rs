@@ -6,6 +6,7 @@ use super::*;
 impl AudioEngine {
     /// Drain all pending commands from the ring buffer without blocking.
     pub(super) fn drain_commands(&mut self) {
+        self.flush_presentation();
         self.return_retired_routing();
         self.flush_retirements();
         self.clean_removed_bus_automation();
@@ -19,18 +20,45 @@ impl AudioEngine {
             // A stalled UI must retain plan ownership, without callback
             // destruction or unbounded leaked retirement buffers.
             if self.retired_routing.is_some()
-                && matches!(self.cmd_rx.peek(), Ok(EngineCommand::SetRouting(_)))
+                && matches!(
+                    self.cmd_rx.peek(),
+                    Ok(EngineCommand::SetRouting(_)
+                        | EngineCommand::ResumeDeviceReconfiguration { .. })
+                )
             {
                 break;
             }
-            let Ok(cmd) = self.cmd_rx.pop() else {
+            let Ok(mut cmd) = self.cmd_rx.pop() else {
                 break;
             };
+            self.prepare_device_edit(&mut cmd);
+            if self.routing.is_some()
+                && matches!(
+                    &cmd,
+                    EngineCommand::AddEffect { .. }
+                        | EngineCommand::RemoveEffect(..)
+                        | EngineCommand::MoveEffect { .. }
+                        | EngineCommand::AddPluginEffect { .. }
+                        | EngineCommand::SetPluginInstrument { .. }
+                        | EngineCommand::SetTrackInstrument(..)
+                        | EngineCommand::RemoveTrackInstrument(..)
+                )
+            {
+                self.graph_edit_pending = true;
+            }
+            let cmd = match self.handle_compensation_command(cmd) {
+                Ok(()) => continue,
+                Err(cmd) => cmd,
+            };
+            let cmd = match self.handle_device_command(cmd) {
+                Ok(()) => continue,
+                Err(cmd) => cmd,
+            };
+            let cmd = match self.handle_capture_command(cmd) {
+                Ok(()) => continue,
+                Err(cmd) => cmd,
+            };
             match cmd {
-                EngineCommand::SetRouting(prepared) => {
-                    self.retired_routing = self.routing.replace(prepared);
-                    self.return_retired_routing();
-                }
                 EngineCommand::ArmClipRecord {
                     free_length,
                     prepared,
@@ -221,33 +249,7 @@ impl AudioEngine {
                     replace_existing,
                 ),
                 EngineCommand::StopSectionRecord => self.stop_section_record(),
-                EngineCommand::StartPerformanceCapture => {
-                    if self.clip_performance {
-                        self.apply_clip_boundaries(self.performance_position);
-                    }
-                    let section_id = self.active_section.map(|section| section.section_id);
-                    let section_position_samples =
-                        self.active_section.map(|section| section.position_samples);
-                    let _ = self.event_tx.push(EngineEvent::PerformanceCaptureStarted {
-                        effective_at_samples: self.effective_position(),
-                        section_id,
-                        section_position_samples,
-                    });
-                    for index in 0..self.tracks.len() {
-                        if let Some(active) = self.tracks[index].active_clip {
-                            self.clip_event(EngineEvent::ClipCaptureSource {
-                                track_id: self.tracks[index].id,
-                                position: active.position,
-                                effective_at_samples: self.performance_position,
-                            });
-                        }
-                    }
-                }
-                EngineCommand::StopPerformanceCapture => {
-                    let _ = self.event_tx.push(EngineEvent::PerformanceCaptureStopped {
-                        effective_at_samples: self.effective_position(),
-                    });
-                }
+
                 EngineCommand::LoadAudio(audio) => {
                     let len = audio.num_frames() as u64;
                     self.audio = Some(audio);
@@ -763,44 +765,6 @@ impl AudioEngine {
                 }
 
                 // -- External MIDI input --
-                EngineCommand::ExternalNoteOn {
-                    track_id,
-                    pitch,
-                    velocity,
-                } => {
-                    if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
-                        if let Some(instrument) = track.instrument.as_mut() {
-                            instrument.note_on(pitch, velocity);
-                        }
-                    }
-                    let section = self.active_section;
-                    let _ = self.event_tx.push(EngineEvent::InstrumentNoteInput {
-                        track_id,
-                        pitch,
-                        velocity,
-                        on: true,
-                        effective_at_samples: self.performance_position,
-                        section_id: section.map(|active| active.section_id),
-                        section_position_samples: section.map(|active| active.position_samples),
-                    });
-                }
-                EngineCommand::ExternalNoteOff { track_id, pitch } => {
-                    if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
-                        if let Some(instrument) = track.instrument.as_mut() {
-                            instrument.note_off(pitch);
-                        }
-                    }
-                    let section = self.active_section;
-                    let _ = self.event_tx.push(EngineEvent::InstrumentNoteInput {
-                        track_id,
-                        pitch,
-                        velocity: 0,
-                        on: false,
-                        effective_at_samples: self.performance_position,
-                        section_id: section.map(|active| active.section_id),
-                        section_position_samples: section.map(|active| active.position_samples),
-                    });
-                }
                 EngineCommand::StartNoteRepeat {
                     id,
                     track_id,
@@ -888,51 +852,18 @@ impl AudioEngine {
                 }
 
                 // -- External plugins --
-                EngineCommand::AddPluginEffect {
-                    track_id,
-                    effect_id,
-                    effect,
-                    position,
-                } => {
-                    if let Some(track) = self.channel_mut(track_id) {
-                        let slot = EffectSlot {
-                            id: effect_id,
-                            effect,
-                            bypass: false,
-                        };
-                        if let Some(pos) = position {
-                            let idx = pos.min(track.effects.len());
-                            track.effects.insert(idx, slot);
-                        } else {
-                            track.effects.push(slot);
-                        }
-                    }
-                }
-                EngineCommand::AuditionNote {
-                    track_id,
-                    pitch,
-                    velocity,
-                    on,
-                } => {
-                    if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
-                        if let Some(instrument) = track.instrument.as_mut() {
-                            if on {
-                                instrument.note_on(pitch, velocity);
-                            } else {
-                                instrument.note_off(pitch);
-                            }
-                        }
-                    }
-                }
-                EngineCommand::SetPluginInstrument {
-                    track_id,
-                    instrument,
-                } => {
-                    if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
-                        if let Some(old) = track.instrument.replace(instrument) {
-                            self.dispose_instrument(old);
-                        }
-                    }
+                EngineCommand::StartPerformanceCapture
+                | EngineCommand::StopPerformanceCapture
+                | EngineCommand::ExternalNoteOn { .. }
+                | EngineCommand::ExternalNoteOff { .. }
+                | EngineCommand::AddPluginEffect { .. }
+                | EngineCommand::SetPluginInstrument { .. }
+                | EngineCommand::AuditionNote { .. }
+                | EngineCommand::SetRouting(_)
+                | EngineCommand::RejectRoutingUpdate { .. }
+                | EngineCommand::ResumeDeviceReconfiguration { .. }
+                | EngineCommand::RejectDeviceReconfiguration { .. } => {
+                    unreachable!("recovery command was consumed by its dispatcher")
                 }
             }
         }

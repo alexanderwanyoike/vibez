@@ -465,6 +465,9 @@ fn parse_uid(uid_str: &str) -> Result<[u8; 16], String> {
 
 impl PluginInstance for Vst3PluginInstance {
     fn set_audio_context(&mut self, context: vibez_core::audio_context::DeviceAudioContext) {
+        if context.sample_rate as f64 != self.sample_rate {
+            self.processing_failed = true;
+        }
         self.audio_context = Some(context);
     }
 
@@ -565,6 +568,11 @@ impl PluginInstance for Vst3PluginInstance {
             buffer.fill(0.0);
             return;
         }
+        if !self.processing_configuration_valid() {
+            self.processing_failed = true;
+            buffer.fill(0.0);
+            return;
+        }
         if !self.processing {
             type SetProcessingFn = unsafe extern "system" fn(*mut std::ffi::c_void, i32) -> i32;
             let proc_vtbl = unsafe { vtbl(self.processor) };
@@ -572,6 +580,7 @@ impl PluginInstance for Vst3PluginInstance {
             let result = unsafe { set_processing(self.processor, 1) };
             if result != 0 {
                 self.processing_error = Some("VST3 setProcessing(true) failed");
+                self.processing_failed = true;
                 buffer.fill(0.0);
                 return;
             }
@@ -724,6 +733,9 @@ impl PluginInstance for Vst3PluginInstance {
 
     fn prepare(&mut self, sample_rate: f64, max_buffer_size: u32) {
         if self.active || self.processing {
+            if sample_rate != self.sample_rate || max_buffer_size != self.max_frames as u32 {
+                self.processing_failed = true;
+            }
             return;
         }
         self.sample_rate = sample_rate;

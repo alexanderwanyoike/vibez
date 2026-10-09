@@ -88,6 +88,35 @@ impl App {
         false
     }
 
+    pub(super) fn retain_routing_activation(
+        &mut self,
+        channels: &[vibez_core::routing::RoutingChannel],
+        model: &[vibez_core::routing::RoutingChannel],
+    ) {
+        let changed = channels.iter().zip(model).any(|(active, original)| {
+            active
+                .effects
+                .iter()
+                .zip(&original.effects)
+                .any(|(a, b)| a.inactive_inputs != b.inactive_inputs)
+        });
+        if changed {
+            let tracks = Arc::make_mut(&mut self.state.project_tracks);
+            for channel in channels {
+                if let Some(track) = tracks.find_mut(channel.id) {
+                    for effect in &channel.effects {
+                        if let Some(slot) =
+                            track.effects.iter_mut().find(|slot| slot.id == effect.id)
+                        {
+                            slot.inactive_sidechains.clone_from(&effect.inactive_inputs);
+                        }
+                    }
+                }
+            }
+            self.mark_project_dirty();
+        }
+    }
+
     pub(super) fn sync_sidechain_routing(&mut self) {
         if self
             .sidechain_sync_inputs
@@ -104,33 +133,15 @@ impl App {
             Ok(channels) => channels,
             Err(error) => {
                 self.state.status_text = format!("Routing unavailable: {error:?}");
+                self.send_command(EngineCommand::RejectRoutingUpdate {
+                    reason: self.state.status_text.clone(),
+                });
                 self.sidechain_sync_inputs =
                     Some(super::sidechain_sync::RoutingInputs::capture(&self.state));
                 return;
             }
         };
-        let changed_activation = channels.iter().zip(&model).any(|(active, original)| {
-            active
-                .effects
-                .iter()
-                .zip(&original.effects)
-                .any(|(a, b)| a.inactive_inputs != b.inactive_inputs)
-        });
-        if changed_activation {
-            let tracks = Arc::make_mut(&mut self.state.project_tracks);
-            for channel in &channels {
-                if let Some(track) = tracks.find_mut(channel.id) {
-                    for effect in &channel.effects {
-                        if let Some(slot) =
-                            track.effects.iter_mut().find(|slot| slot.id == effect.id)
-                        {
-                            slot.inactive_sidechains.clone_from(&effect.inactive_inputs);
-                        }
-                    }
-                }
-            }
-            self.mark_project_dirty();
-        }
+        self.retain_routing_activation(&channels, &model);
         let names: std::collections::HashMap<_, _> = self
             .state
             .project_tracks
@@ -188,7 +199,12 @@ impl App {
                 self.send_command(EngineCommand::SetRouting(prepared));
                 self.state.devices.last_routing = Some(channels);
             }
-            Err(error) => self.state.status_text = error,
+            Err(error) => {
+                self.send_command(EngineCommand::RejectRoutingUpdate {
+                    reason: error.clone(),
+                });
+                self.state.status_text = error;
+            }
         }
         self.sidechain_sync_inputs =
             Some(super::sidechain_sync::RoutingInputs::capture(&self.state));

@@ -127,6 +127,7 @@ fn start_failure_has_retained_static_cause_and_silent_allocation_free_output() {
             0
         );
         assert_eq!(output, [0.0; 128]);
+        assert!(!plugin.processing_configuration_valid());
         assert_eq!(
             plugin.take_processing_error(),
             Some(if format == "clap" {
@@ -139,6 +140,7 @@ fn start_failure_has_retained_static_cause_and_silent_allocation_free_output() {
         plugin.load_state(&state(0, 0, 0));
         plugin.reconfigure_on_main_thread().unwrap();
         plugin.process_audio(&mut [1.0; 128], 2);
+        assert!(plugin.processing_configuration_valid());
     }
 }
 
@@ -197,7 +199,7 @@ fn vst_io_changed_refreshes_ports_and_reactivates_declared_event_buses() {
 }
 
 #[test]
-fn sequential_worker_migration_preserves_delay_history() {
+fn sequential_worker_migration_preserves_delay_history_and_fatal_failure_latching() {
     let fixture = support::Fixture::new();
     for format in ["clap", "vst3"] {
         let audit = audit(&fixture, format);
@@ -228,6 +230,24 @@ fn sequential_worker_migration_preserves_delay_history() {
             .join()
             .unwrap();
         }
+        assert!(plugin.processing_configuration_valid());
+        plugin.set_audio_context(vibez_core::audio_context::DeviceAudioContext {
+            sample_rate: 96000,
+            musical_sample: 0,
+            continuous_sample: 0,
+            bpm: 120.0,
+            playing: true,
+        });
+        plugin = std::thread::spawn(move || {
+            assert!(!plugin.processing_configuration_valid());
+            let mut output = [1.0; 128];
+            plugin.process_audio(&mut output, 2);
+            assert_eq!(output, [0.0; 128]);
+            plugin
+        })
+        .join()
+        .unwrap();
+        assert!(!plugin.processing_configuration_valid());
         drop(plugin);
         assert_eq!(count(&audit, b"fixture_lifecycle_errors\0"), 0);
     }
@@ -265,9 +285,10 @@ fn concurrent_clap_restart_request_survives_activation_without_an_announcement_l
 }
 
 #[test]
-fn reporting_without_an_applied_engine_guard_preserves_transient_dsp_retry() {
+fn actual_dsp_failure_remains_fatal_across_exclusive_worker_change_until_reactivation() {
     let fixture = support::Fixture::new();
     for format in ["clap", "vst3"] {
+        let audit = audit(&fixture, format);
         let mut plugin = load(&fixture, format, &state(0, 0, 1 << 24), true).unwrap();
         let mut output = [1.0; 128];
         assert_eq!(
@@ -275,44 +296,27 @@ fn reporting_without_an_applied_engine_guard_preserves_transient_dsp_retry() {
             0
         );
         assert_eq!(output, [0.0; 128]);
-        assert_eq!(
-            plugin.take_processing_error(),
-            Some(if format == "clap" {
-                "CLAP process returned failure"
-            } else {
-                "VST3 process returned failure"
-            })
-        );
-        output.fill(1.0);
-        assert_eq!(
-            support::allocation::count_allocations(|| plugin.process_audio(&mut output, 2)),
-            0
-        );
-        assert_eq!(
-            output, [1.0; 128],
-            "{format} reporting must not introduce permanent mute"
-        );
-    }
-}
-
-#[test]
-fn reporting_start_failure_retries_without_a_runtime_latch() {
-    let fixture = support::Fixture::new();
-    for format in ["clap", "vst3"] {
-        let mut plugin = load(&fixture, format, &state(0, 0, 1 << 18), true).unwrap();
-        let mut output = [1.0; 128];
-        plugin.process_audio(&mut output, 2);
-        assert_eq!(output, [0.0; 128]);
+        assert!(!plugin.processing_configuration_valid());
         assert!(plugin.take_processing_error().is_some());
-        assert!(plugin.load_state(&state(0, 0, 0)));
+        plugin = std::thread::spawn(move || {
+            let mut output = [1.0; 128];
+            assert_eq!(
+                support::allocation::count_allocations(|| plugin.process_audio(&mut output, 2)),
+                0
+            );
+            assert_eq!(output, [0.0; 128]);
+            assert!(!plugin.processing_configuration_valid());
+            plugin
+        })
+        .join()
+        .unwrap();
+        plugin.stop_for_reconfiguration();
+        plugin.reconfigure_on_main_thread().unwrap();
+        assert!(plugin.processing_configuration_valid());
         output.fill(1.0);
-        assert_eq!(
-            support::allocation::count_allocations(|| plugin.process_audio(&mut output, 2)),
-            0
-        );
-        assert_eq!(
-            output, [1.0; 128],
-            "{format} retry requires no discarded owner or reload"
-        );
+        plugin.process_audio(&mut output, 2);
+        assert_eq!(output, [1.0; 128]);
+        drop(plugin);
+        assert_eq!(count(&audit, b"fixture_lifecycle_errors\0"), 0);
     }
 }

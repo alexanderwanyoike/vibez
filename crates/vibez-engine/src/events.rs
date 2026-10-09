@@ -65,6 +65,21 @@ pub struct ClipTrackState {
 
 #[derive(Debug)]
 pub enum EngineEvent {
+    DeviceReconfiguration(crate::engine::reconfiguration::DeviceReconfiguration),
+    DeviceReconfigurationRetired {
+        device: crate::engine::reconfiguration::DeviceReconfiguration,
+        reason: Option<String>,
+    },
+    RetiredEffectStorage(crate::engine::reconfiguration::RetiredEffectStorage),
+    CompensationFailed {
+        reason: String,
+    },
+    CompensationInvalid {
+        track_id: TrackId,
+        effect_id: Option<vibez_core::id::EffectId>,
+        reason: &'static str,
+    },
+
     DeviceProcessingFailed {
         track_id: TrackId,
         effect_id: Option<vibez_core::id::EffectId>,
