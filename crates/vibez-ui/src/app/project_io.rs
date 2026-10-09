@@ -5,41 +5,19 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use vibez_core::effect::EffectType;
 
-use iced::Task;
-
 use vibez_core::id::{EffectId, TrackId};
-use vibez_core::midi::{InstrumentKind, TrackKind};
+use vibez_core::midi::TrackKind;
 use vibez_core::track::{InstrumentStateInfo, MediaSourceRef, TrackInfo};
 use vibez_engine::commands::EngineCommand;
 use vibez_plugin_host::gui::PluginGuiKey;
 
 use vibez_project::{Project, TimelineLocation};
 
-use crate::message::{Message, ProjectLoadResult};
+use crate::message::ProjectLoadResult;
 use crate::state::{ProjectTrack, UiDrumPad, UiEffect, UiNoteClip};
 use crate::ui_settings::UiSettings;
 
 use super::*;
-
-pub(super) enum ExportPluginLoadEvent {
-    Effect(crate::services::plugin_loader::PluginLoadResult),
-    Instrument(crate::services::plugin_loader::PluginInstrumentLoadResult),
-    Failed(String),
-    Finished,
-}
-
-type ExportEffectRequest = (TrackId, EffectId, vibez_core::effect::PluginDeviceInfo);
-type ExportInstrumentRequest = (TrackId, vibez_core::effect::PluginDeviceInfo);
-
-pub(super) struct ExportJob {
-    request: Option<vibez_engine::render::BounceRequest>,
-    path: PathBuf,
-    receiver: std::sync::mpsc::Receiver<ExportPluginLoadEvent>,
-    plugins: vibez_engine::render::OfflinePlugins,
-    expected_plugins: usize,
-    prepared_plugins: usize,
-    loader_finished: bool,
-}
 
 fn plugin_instrument_for_replay(track: &TrackInfo) -> Option<vibez_core::effect::PluginDeviceInfo> {
     // Native and plugin instruments are mutually exclusive. Older projects
@@ -54,6 +32,9 @@ fn plugin_instrument_for_replay(track: &TrackInfo) -> Option<vibez_core::effect:
 
 impl App {
     pub(super) fn clear_project_runtime(&mut self) {
+        self.state.devices.last_routing = None;
+        self.state.devices.sidechain_meters.clear();
+        self.state.devices.sidechain_choices.clear();
         // Invalidate any Browser import still preparing (e.g. in its
         // WARP stage) so it cannot add a clip to the reset project.
         self.browser_import_request.cancel();
@@ -203,6 +184,7 @@ impl App {
         for (chain_pos, effect_info) in effects.iter().enumerate() {
             if let Some(dev) = &effect_info.plugin {
                 plugin_requests.push((chan_id, effect_info.id, chain_pos, dev.clone()));
+                out.push(UiEffect::unavailable_plugin(effect_info));
                 continue;
             }
             let fx = vibez_dsp::factory::create_effect_with_params(
@@ -211,6 +193,9 @@ impl App {
                 &effect_info.params,
             );
             out.push(UiEffect {
+                sidechains: effect_info.sidechains.clone(),
+                external_inputs: fx.external_inputs().to_vec(),
+
                 id: effect_info.id,
                 effect_type: effect_info.effect_type,
                 bypass: effect_info.bypass,
@@ -324,77 +309,6 @@ impl App {
             path,
         ) {
             self.persist_ui_settings();
-        }
-    }
-
-    pub(super) fn track_info_from_ui(&self, track: &ProjectTrack) -> TrackInfo {
-        let effects = track
-            .effects
-            .iter()
-            .map(|effect| {
-                let plugin = effect.plugin_ref.as_ref().map(|dev| {
-                    let mut dev = dev.clone();
-                    dev.state_b64 = self.capture_device_state(PluginGuiKey::Effect {
-                        track_id: track.id,
-                        effect_id: effect.id,
-                    });
-                    dev
-                });
-                vibez_core::effect::EffectInfo {
-                    id: effect.id,
-                    effect_type: effect.effect_type,
-                    bypass: effect.bypass,
-                    params: effect.params.clone(),
-                    plugin,
-                }
-            })
-            .collect();
-
-        let plugin_instrument = track
-            .instrument_kind
-            .is_none()
-            .then(|| {
-                track.plugin_instrument_ref.as_ref().map(|dev| {
-                    let mut dev = dev.clone();
-                    dev.state_b64 =
-                        self.capture_device_state(PluginGuiKey::Instrument { track_id: track.id });
-                    dev
-                })
-            })
-            .flatten();
-
-        let native_instrument = match track.instrument_kind {
-            Some(InstrumentKind::SubtractiveSynth) => Some(InstrumentStateInfo::SubtractiveSynth {
-                params: track.instrument_params.clone(),
-            }),
-            Some(InstrumentKind::Sampler) => Some(InstrumentStateInfo::Sampler {
-                params: track.instrument_params.clone(),
-                source: track.sample_source.clone(),
-            }),
-            Some(InstrumentKind::DrumRack) => Some(InstrumentStateInfo::DrumRack {
-                pads: drum_rack_pads_for_save(&track.drum_rack_pads),
-            }),
-            None => None,
-        };
-
-        TrackInfo {
-            id: track.id,
-            name: track.name.clone(),
-            gain: track.gain,
-            pan: track.pan,
-            mute: track.mute,
-            solo: track.solo,
-            audio_input_route: track.audio_input_route,
-            input_monitoring: track.input_monitoring,
-            swing_offset: track.swing_offset,
-            effects,
-            kind: track.kind,
-            color_index: track.color_index,
-            instrument: track.instrument_kind,
-            native_instrument,
-            plugin_instrument,
-            automation: Vec::new(),
-            sends: track.sends.clone(),
         }
     }
 
@@ -665,6 +579,9 @@ impl App {
                         chain_pos,
                         dev.clone(),
                     ));
+                    track
+                        .effects
+                        .push(UiEffect::unavailable_plugin(effect_info));
                     continue;
                 }
                 let fx = vibez_dsp::factory::create_effect_with_params(
@@ -674,6 +591,9 @@ impl App {
                 );
                 let descriptors = fx.param_descriptors();
                 track.effects.push(UiEffect {
+                    sidechains: effect_info.sidechains.clone(),
+                    external_inputs: fx.external_inputs().to_vec(),
+
                     id: effect_info.id,
                     effect_type: effect_info.effect_type,
                     bypass: effect_info.bypass,
@@ -718,6 +638,9 @@ impl App {
                 );
                 let descriptors = fx.param_descriptors();
                 track.effects.push(UiEffect {
+                    sidechains: Default::default(),
+                    external_inputs: Default::default(),
+
                     id: effect_id,
                     effect_type: EffectType::Eq,
                     bypass: false,
@@ -1004,281 +927,6 @@ impl App {
             self.state.transport.sample_rate as f64,
         );
     }
-
-    pub(super) fn handle_export_path_selected(&mut self, path: Option<PathBuf>) -> Task<Message> {
-        if self.export_job.is_some() || self.export_render_progress.is_some() {
-            self.state.status_text = "An export is already in progress".to_string();
-            return Task::none();
-        }
-        let Some(mut path) = path else {
-            return Task::none();
-        };
-        if path.extension().is_none() {
-            path.set_extension("wav");
-        }
-        let total = self.state.total_duration_samples();
-        if total == 0 {
-            self.state.status_text = "Nothing to export: project is empty".to_string();
-            return Task::none();
-        }
-        let assets = self.collect_bounce_assets();
-        let project = self.project_from_state();
-        let sample_rate = self.state.transport.sample_rate;
-        let bpm = self.state.transport.bpm;
-        let request = vibez_engine::render::BounceRequest {
-            tracks: project.tracks,
-            master: project.master,
-            buses: project.buses,
-            audio_clips: project.arrange.clips,
-            note_clips: project.arrange.note_clips,
-            clip_audio: assets.clips,
-            sampler_audio: assets.samplers,
-            drum_pad_audio: assets.pads,
-            mode: vibez_engine::render::BounceMode::Master,
-            range_samples: (0, total),
-            bpm,
-            sample_rate,
-            swing: project.swing,
-        };
-        let (effect_requests, instrument_requests) = export_plugin_requests(&request);
-        let expected_plugins = effect_requests.len() + instrument_requests.len();
-        self.state.export_progress = Some(0);
-        self.state.status_text = if expected_plugins == 0 {
-            format!("Exporting… 0% · {}", path.display())
-        } else {
-            format!("Preparing {expected_plugins} plugin(s)… 0%")
-        };
-
-        let (sender, receiver) = std::sync::mpsc::channel();
-        spawn_export_plugin_preflight(
-            effect_requests,
-            instrument_requests,
-            sender,
-            sample_rate as f64,
-        );
-        self.export_job = Some(ExportJob {
-            request: Some(request),
-            path,
-            receiver,
-            plugins: vibez_engine::render::OfflinePlugins::default(),
-            expected_plugins,
-            prepared_plugins: 0,
-            loader_finished: false,
-        });
-        Task::none()
-    }
-
-    pub(super) fn poll_export(&mut self) -> Task<Message> {
-        use std::sync::atomic::Ordering;
-
-        if let Some(progress) = &self.export_render_progress {
-            let percent = progress.load(Ordering::Relaxed).min(100);
-            self.state.export_progress = Some(percent);
-            self.state.status_text = format!("Exporting… {percent}%");
-            return Task::none();
-        }
-
-        let Some(mut job) = self.export_job.take() else {
-            return Task::none();
-        };
-        let mut failure = None;
-        match job.receiver.try_recv() {
-            Ok(ExportPluginLoadEvent::Effect(mut loaded)) => {
-                let label = loaded.plugin_name.clone();
-                match crate::services::plugin_loader::finish_effect_init_for_export(&mut loaded) {
-                    Ok(Some(effect)) => {
-                        job.plugins.effects.insert(loaded.effect_id, effect);
-                        job.prepared_plugins += 1;
-                    }
-                    Ok(None) => failure = Some(format!("{label} produced no effect instance")),
-                    Err(error) => failure = Some(format!("{label}: {error}")),
-                }
-            }
-            Ok(ExportPluginLoadEvent::Instrument(mut loaded)) => {
-                let label = loaded.plugin_name.clone();
-                match crate::services::plugin_loader::finish_instrument_init_for_export(&mut loaded)
-                {
-                    Ok(Some(instrument)) => {
-                        job.plugins.instruments.insert(loaded.track_id, instrument);
-                        job.prepared_plugins += 1;
-                    }
-                    Ok(None) => failure = Some(format!("{label} produced no instrument instance")),
-                    Err(error) => failure = Some(format!("{label}: {error}")),
-                }
-            }
-            Ok(ExportPluginLoadEvent::Failed(error)) => {
-                failure = Some(error);
-            }
-            Ok(ExportPluginLoadEvent::Finished) => {
-                job.loader_finished = true;
-            }
-            Err(std::sync::mpsc::TryRecvError::Empty) => {}
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                if !job.loader_finished {
-                    failure = Some("plugin preparation stopped unexpectedly".to_string());
-                }
-            }
-        }
-
-        if let Some(error) = failure {
-            self.state.export_progress = None;
-            self.state.status_text =
-                format!("Export failed — {error}. No destination WAV was written.");
-            return Task::none();
-        }
-
-        if !job.loader_finished || job.prepared_plugins != job.expected_plugins {
-            let percent = job
-                .prepared_plugins
-                .saturating_mul(10)
-                .checked_div(job.expected_plugins)
-                .unwrap_or(0)
-                .min(10) as u8;
-            self.state.export_progress = Some(percent);
-            self.state.status_text = format!(
-                "Preparing plugins… {}/{} · {percent}%",
-                job.prepared_plugins, job.expected_plugins
-            );
-            self.export_job = Some(job);
-            return Task::none();
-        }
-
-        let progress = Arc::new(std::sync::atomic::AtomicU8::new(10));
-        self.export_render_progress = Some(Arc::clone(&progress));
-        self.state.export_progress = Some(10);
-        self.state.status_text = "Exporting… 10%".to_string();
-        let request = job.request.take().expect("export request is consumed once");
-        let path = job.path;
-        let (plugin_return, plugin_return_rx) = std::sync::mpsc::channel();
-        self.export_plugin_return_rx = Some(plugin_return_rx);
-        Task::perform(
-            export_async(request, job.plugins, path, progress, plugin_return),
-            Message::ExportComplete,
-        )
-    }
-
-    pub(super) fn finish_export_runtime(&mut self) {
-        self.export_render_progress = None;
-        self.state.export_progress = None;
-        if let Some(receiver) = self.export_plugin_return_rx.take() {
-            // ExportTask has completed, so this is either immediately ready
-            // or disconnected. Dropping the returned devices here satisfies
-            // CLAP/VST3 main-thread teardown requirements.
-            drop(receiver.recv().ok());
-        }
-    }
-}
-
-fn export_plugin_requests(
-    request: &vibez_engine::render::BounceRequest,
-) -> (Vec<ExportEffectRequest>, Vec<ExportInstrumentRequest>) {
-    let mut effects = Vec::new();
-    let mut instruments = Vec::new();
-    for track in &request.tracks {
-        if let Some(device) = &track.plugin_instrument {
-            instruments.push((track.id, device.clone()));
-        }
-        effects.extend(track.effects.iter().filter_map(|effect| {
-            effect
-                .plugin
-                .clone()
-                .map(|device| (track.id, effect.id, device))
-        }));
-    }
-    for bus in &request.buses {
-        effects.extend(bus.effects.iter().filter_map(|effect| {
-            effect
-                .plugin
-                .clone()
-                .map(|device| (bus.id, effect.id, device))
-        }));
-    }
-    if let Some(master) = &request.master {
-        effects.extend(master.effects.iter().filter_map(|effect| {
-            effect
-                .plugin
-                .clone()
-                .map(|device| (TrackId::MASTER, effect.id, device))
-        }));
-    }
-    (effects, instruments)
-}
-
-fn spawn_export_plugin_preflight(
-    effects: Vec<ExportEffectRequest>,
-    instruments: Vec<ExportInstrumentRequest>,
-    sender: std::sync::mpsc::Sender<ExportPluginLoadEvent>,
-    sample_rate: f64,
-) {
-    std::thread::spawn(move || {
-        for (track_id, effect_id, device) in effects {
-            let prepared = (|| {
-                let info = crate::services::plugin_loader::plugin_info_from_device(
-                    &device,
-                    vibez_plugin_host::PluginCategory::Effect,
-                )?;
-                let state = crate::services::plugin_loader::decode_plugin_state(&device)?;
-                let mut loaded = crate::services::plugin_loader::load_plugin_effect_bg(
-                    &info,
-                    sample_rate,
-                    state,
-                )?;
-                loaded.track_id = track_id;
-                loaded.effect_id = effect_id;
-                Ok::<_, String>(loaded)
-            })();
-            match prepared {
-                Ok(loaded) => {
-                    if sender.send(ExportPluginLoadEvent::Effect(loaded)).is_err() {
-                        return;
-                    }
-                }
-                Err(error) => {
-                    let _ = sender.send(ExportPluginLoadEvent::Failed(format!(
-                        "{} effect '{}': {error}",
-                        device.format.to_uppercase(),
-                        device.name
-                    )));
-                    return;
-                }
-            }
-        }
-        for (track_id, device) in instruments {
-            let prepared = (|| {
-                let info = crate::services::plugin_loader::plugin_info_from_device(
-                    &device,
-                    vibez_plugin_host::PluginCategory::Instrument,
-                )?;
-                let state = crate::services::plugin_loader::decode_plugin_state(&device)?;
-                let mut loaded = crate::services::plugin_loader::load_plugin_instrument_bg(
-                    &info,
-                    sample_rate,
-                    state,
-                )?;
-                loaded.track_id = track_id;
-                Ok::<_, String>(loaded)
-            })();
-            match prepared {
-                Ok(loaded) => {
-                    if sender
-                        .send(ExportPluginLoadEvent::Instrument(loaded))
-                        .is_err()
-                    {
-                        return;
-                    }
-                }
-                Err(error) => {
-                    let _ = sender.send(ExportPluginLoadEvent::Failed(format!(
-                        "{} instrument '{}': {error}",
-                        device.format.to_uppercase(),
-                        device.name
-                    )));
-                    return;
-                }
-            }
-        }
-        let _ = sender.send(ExportPluginLoadEvent::Finished);
-    });
 }
 
 fn first_remote_provenance_label(project: &Project) -> Option<String> {
@@ -1312,7 +960,7 @@ fn expand_drum_rack_pads(pads: &[vibez_core::track::DrumPadState]) -> Vec<UiDrum
     expanded
 }
 
-fn drum_rack_pads_for_save(pads: &[UiDrumPad]) -> Vec<vibez_core::track::DrumPadState> {
+pub(super) fn drum_rack_pads_for_save(pads: &[UiDrumPad]) -> Vec<vibez_core::track::DrumPadState> {
     let empty = UiDrumPad::default().to_state();
     let used = pads
         .iter()
@@ -1325,69 +973,5 @@ fn drum_rack_pads_for_save(pads: &[UiDrumPad]) -> Vec<vibez_core::track::DrumPad
 }
 
 #[cfg(test)]
-mod instrument_invariant_tests {
-    use super::*;
-
-    fn surge_device() -> vibez_core::effect::PluginDeviceInfo {
-        vibez_core::effect::PluginDeviceInfo {
-            format: "clap".to_string(),
-            uid: "org.surge-synth-team.surge-xt".to_string(),
-            path: "/usr/lib/clap/Surge XT.clap".into(),
-            name: "Surge XT".to_string(),
-            state_b64: Some("plugin-state".to_string()),
-        }
-    }
-
-    #[test]
-    fn legacy_dual_instrument_record_replays_the_native_sampler() {
-        let mut track = TrackInfo::new("MIDI 1");
-        track.instrument = Some(InstrumentKind::Sampler);
-        track.native_instrument = Some(InstrumentStateInfo::Sampler {
-            params: Vec::new(),
-            source: None,
-        });
-        track.plugin_instrument = Some(surge_device());
-
-        assert!(plugin_instrument_for_replay(&track).is_none());
-    }
-
-    #[test]
-    fn plugin_only_record_still_replays_its_plugin() {
-        let mut track = TrackInfo::new("Bass");
-        track.plugin_instrument = Some(surge_device());
-
-        assert_eq!(
-            plugin_instrument_for_replay(&track)
-                .as_ref()
-                .map(|plugin| plugin.name.as_str()),
-            Some("Surge XT")
-        );
-    }
-
-    #[test]
-    fn legacy_one_bank_drum_racks_expand_without_moving_saved_pads() {
-        let first = crate::state::UiDrumPad {
-            name: Some("Kick".into()),
-            ..Default::default()
-        };
-        let mut saved = vec![first.to_state()];
-        saved.extend((1..16).map(|_| crate::state::UiDrumPad::default().to_state()));
-
-        let expanded = expand_drum_rack_pads(&saved);
-
-        assert_eq!(expanded.len(), vibez_core::track::DRUM_RACK_PAD_COUNT);
-        assert_eq!(expanded[0].name.as_deref(), Some("Kick"));
-        assert!(expanded[16..].iter().all(|pad| pad.source.is_none()));
-    }
-
-    #[test]
-    fn saving_a_multi_bank_rack_keeps_used_banks_without_serializing_empty_tail_banks() {
-        let mut pads = crate::state::default_drum_rack_pads();
-        pads[19].name = Some("Slice 20".into());
-
-        let saved = drum_rack_pads_for_save(&pads);
-
-        assert_eq!(saved.len(), 20);
-        assert_eq!(saved[19].name.as_deref(), Some("Slice 20"));
-    }
-}
+#[path = "project_io_tests.rs"]
+mod instrument_invariant_tests;

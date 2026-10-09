@@ -1,6 +1,7 @@
 use super::*;
 use crate::commands::EngineCommand as Command;
 use crate::engine::{AudioEngine, AudioProcessBlock};
+use crate::mixer::EngineClip;
 use crate::playback_source::PreparedPlaybackSource;
 use vibez_core::constants::{DEFAULT_TRACK_GAIN, DEFAULT_TRACK_PAN};
 use vibez_core::effect::{EffectInfo, EffectType, ParamDescriptor, PluginDeviceInfo};
@@ -842,3 +843,6 @@ fn strict_render_uses_prepared_plugin_instrument_and_reports_progress() {
 
 #[path = "render_plugin_tests.rs"]
 mod plugin_tests;
+
+#[path = "render_sidechain_tests.rs"]
+mod sidechain_tests;

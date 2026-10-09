@@ -398,6 +398,9 @@ impl App {
     /// async pipeline instead.
     fn replay_effects_to_engine(&mut self, track: &ProjectTrack) {
         for effect in &track.effects {
+            if effect.plugin_ref.is_some() {
+                continue;
+            }
             self.send_command(EngineCommand::AddEffect {
                 track_id: track.id,
                 effect_id: effect.id,
