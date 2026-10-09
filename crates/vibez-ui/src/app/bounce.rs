@@ -92,7 +92,7 @@ impl App {
         }
 
         let assets = self.collect_bounce_assets();
-        let project = self.project_from_state();
+        let project = self.project_for_offline_render();
         let wav_path = self.next_bounce_path();
         let sample_rate = self.state.transport.sample_rate;
         let bpm = self.state.transport.bpm;

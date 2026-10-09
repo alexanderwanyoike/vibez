@@ -7,6 +7,12 @@ use vibez_core::{
 };
 
 impl App {
+    pub(super) fn project_for_offline_render(&self) -> vibez_project::Project {
+        let mut project = self.project_from_state();
+        attach_render_automation(&mut project);
+        project
+    }
+
     pub(super) fn track_info_from_ui(&self, track: &ProjectTrack) -> TrackInfo {
         let effects = track
             .effects
@@ -80,6 +86,57 @@ impl App {
             plugin_instrument,
             automation: Vec::new(),
             sends: track.sends.clone(),
+        }
+    }
+}
+
+fn attach_render_automation(project: &mut vibez_project::Project) {
+    for saved in &project.arrange.automation {
+        if let Some(channel) = project
+            .tracks
+            .iter_mut()
+            .chain(project.buses.iter_mut())
+            .chain(project.master.iter_mut())
+            .find(|channel| channel.id == saved.track_id)
+        {
+            channel.automation = saved.lanes.clone();
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use vibez_core::automation::{AutomationLane, AutomationTarget};
+
+    #[test]
+    fn offline_channels_receive_arrange_automation_including_bus_and_master() {
+        let mut project = vibez_project::Project::default();
+        let track = TrackInfo::new("Bass");
+        let bus = TrackInfo::new("Return");
+        let mut master = TrackInfo::new("Master");
+        master.id = vibez_core::id::TrackId::MASTER;
+        for channel in [&track, &bus, &master] {
+            project
+                .arrange
+                .automation
+                .push(vibez_project::TimelineAutomationInfo {
+                    track_id: channel.id,
+                    lanes: vec![AutomationLane::new(AutomationTarget::TrackGain)],
+                });
+        }
+        project.tracks.push(track);
+        project.buses.push(bus);
+        project.master = Some(master);
+        attach_render_automation(&mut project);
+        for channel in project
+            .tracks
+            .iter()
+            .chain(project.buses.iter())
+            .chain(project.master.iter())
+        {
+            assert_eq!(channel.automation.len(), 1);
+            assert_eq!(channel.automation[0].target, AutomationTarget::TrackGain);
         }
     }
 }

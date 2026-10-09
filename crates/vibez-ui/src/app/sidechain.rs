@@ -7,6 +7,14 @@ impl App {
             &self.state.project_tracks.master,
             &self.state.project_tracks.buses,
         );
+        // Send level comes from the channel at render time; only topology
+        // changes should replace prepared buffers.
+        for channel in &mut channels {
+            channel.sends.retain(|(_, amount)| *amount > 0.0005);
+            for (_, amount) in &mut channel.sends {
+                *amount = 1.0;
+            }
+        }
         let timelines = std::iter::once(self.state.arrangement.timeline.as_ref())
             .chain(
                 self.state

@@ -41,7 +41,7 @@ impl App {
             return Task::none();
         }
         let assets = self.collect_bounce_assets();
-        let project = self.project_from_state();
+        let project = self.project_for_offline_render();
         let sample_rate = self.state.transport.sample_rate;
         let bpm = self.state.transport.bpm;
         let request = vibez_engine::render::BounceRequest {

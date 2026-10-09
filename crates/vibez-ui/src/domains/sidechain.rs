@@ -100,7 +100,12 @@ pub fn edit_source(
 ) -> bool {
     let channels = routing_channels(tracks, master, buses);
     edit_source_with_model(
-        tracks, master, buses, (receiver, effect_id, input_id), source, &channels,
+        tracks,
+        master,
+        buses,
+        (receiver, effect_id, input_id),
+        source,
+        &channels,
     )
 }
 
@@ -191,7 +196,12 @@ pub fn edit_tap(
 ) -> bool {
     let channels = routing_channels(tracks, master, buses);
     edit_tap_with_model(
-        tracks, master, buses, (receiver, effect_id, input_id), tap, &channels,
+        tracks,
+        master,
+        buses,
+        (receiver, effect_id, input_id),
+        tap,
+        &channels,
     )
 }
 
