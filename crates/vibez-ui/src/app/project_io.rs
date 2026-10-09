@@ -196,6 +196,7 @@ impl App {
                 &effect_info.params,
             );
             out.push(UiEffect {
+                latency_samples: Some(0),
                 inactive_sidechains: effect_info.inactive_sidechains.clone(),
                 sidechains: effect_info.sidechains.clone(),
                 external_inputs: fx.external_inputs().to_vec(),
@@ -595,6 +596,7 @@ impl App {
                 );
                 let descriptors = fx.param_descriptors();
                 track.effects.push(UiEffect {
+                    latency_samples: Some(0),
                     inactive_sidechains: effect_info.inactive_sidechains.clone(),
                     sidechains: effect_info.sidechains.clone(),
                     external_inputs: fx.external_inputs().to_vec(),
@@ -643,6 +645,7 @@ impl App {
                 );
                 let descriptors = fx.param_descriptors();
                 track.effects.push(UiEffect {
+                    latency_samples: Some(0),
                     inactive_sidechains: Default::default(),
                     sidechains: Default::default(),
                     external_inputs: Default::default(),

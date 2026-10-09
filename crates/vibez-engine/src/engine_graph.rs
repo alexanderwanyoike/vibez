@@ -24,6 +24,17 @@ impl AudioEngine {
         idle: bool,
         capture_audible_only: bool,
     ) {
+        if self.compensation_suspended
+            || self.graph_edit_pending
+            || !self.compensation_valid
+            || self.reconfiguration_pending()
+        {
+            output.fill(0.0);
+            if let Some(capture) = capture.as_deref_mut() {
+                capture.samples.fill(0.0);
+            }
+            return;
+        }
         if let Some(max_frames) = self
             .routing
             .as_ref()

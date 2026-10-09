@@ -115,6 +115,38 @@ impl App {
             while let Some(event) = self.event_rx.as_mut().and_then(|rx| rx.pop().ok()) {
                 apply_drum_pad_flash(&mut self.state.view, &event, std::time::Instant::now());
                 match event {
+                    EngineEvent::RetiredEffectStorage(storage) => drop(storage),
+                    EngineEvent::DeviceReconfigurationRetired { device, reason } => {
+                        drop((device, reason))
+                    }
+                    EngineEvent::DeviceReconfiguration(device) => {
+                        self.reconfigure_device_timing(device)
+                    }
+                    EngineEvent::CompensationFailed { reason } => self.state.status_text = reason,
+                    EngineEvent::CompensationInvalid {
+                        track_id,
+                        effect_id,
+                        reason,
+                    } => {
+                        let name = self
+                            .state
+                            .find_track(track_id)
+                            .map(|track| {
+                                effect_id
+                                    .and_then(|id| {
+                                        track.effects.iter().find(|effect| effect.id == id)
+                                    })
+                                    .map(|effect| {
+                                        effect
+                                            .plugin_name
+                                            .as_deref()
+                                            .unwrap_or_else(|| effect.effect_type.name())
+                                    })
+                                    .unwrap_or(&track.name)
+                            })
+                            .unwrap_or("Unavailable channel");
+                        self.state.status_text = format!("{name}: {reason}");
+                    }
                     EngineEvent::RetiredAutomationLane(lane) => drop(lane),
                     EngineEvent::RetiredChannel(channel) => {
                         drop(channel);

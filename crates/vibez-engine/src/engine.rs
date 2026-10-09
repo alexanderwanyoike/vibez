@@ -46,6 +46,15 @@ const SPECTRUM_RING_CAPACITY: usize = 16_384;
 /// // Keep `cmd_tx` and `event_rx` on the UI thread.
 /// ```
 pub struct AudioEngine {
+    pending_capture_stop: Option<u64>,
+    pending_compensation_failure: Option<(TrackId, Option<vibez_core::id::EffectId>, &'static str)>,
+    compensation_callback_heard_start: u64,
+    compensation_suspended: bool,
+    next_device_handoff: u64,
+    pending_device_reconfiguration: Option<reconfiguration::PendingDeviceReconfiguration>,
+    graph_edit_pending: bool,
+    compensation_valid: bool,
+    compensation_failure_reported: bool,
     routing: Option<Box<crate::routing::PreparedRouting>>,
     retired_routing: Option<Box<crate::routing::PreparedRouting>>,
     pub(super) pending_retirements: Vec<EngineEvent>,
@@ -210,6 +219,15 @@ impl AudioEngine {
 
         let engine = Self {
             routing: None,
+            pending_capture_stop: None,
+            pending_compensation_failure: None,
+            compensation_callback_heard_start: 0,
+            compensation_suspended: false,
+            next_device_handoff: 0,
+            pending_device_reconfiguration: None,
+            graph_edit_pending: false,
+            compensation_valid: true,
+            compensation_failure_reported: false,
             retired_routing: None,
             pending_bus_cleanup: None,
             pending_retirements: Vec::with_capacity(crate::retirement::RETIREMENT_CAPACITY),
@@ -291,7 +309,9 @@ impl AudioEngine {
             live_input,
             mut track_output_capture,
         } = block;
+        self.compensation_callback_heard_start = self.effective_position();
         self.flush_processing_errors();
+        self.flush_presentation();
         self.resync_clip_events();
         // A musical boundary due at this block start owns the same timestamp
         // as commands drained below. Publish the recording start first so a
@@ -302,6 +322,8 @@ impl AudioEngine {
 
         // ---- 1. Drain commands ------------------------------------------
         self.drain_commands();
+        self.begin_device_reconfiguration();
+        self.validate_compensation();
 
         let frames = output.len().checked_div(channels).unwrap_or(0);
 
@@ -428,7 +450,19 @@ impl AudioEngine {
                 push_spectrum(&mut self.spectrum_tx, output, channels);
             }
         }
+        self.validate_compensation();
+        if self.compensation_suspended
+            || self.graph_edit_pending
+            || !self.compensation_valid
+            || self.reconfiguration_pending()
+        {
+            output.fill(0.0);
+            if let Some(capture) = track_output_capture.as_mut() {
+                capture.samples.fill(0.0);
+            }
+        }
         self.flush_processing_errors();
+        self.flush_presentation();
 
         // ---- 4.5 Audition Bus (post-master, outside project graph) ------
         self.audition.process(
@@ -728,3 +762,22 @@ mod device_commands;
 
 #[path = "engine_transport_commands.rs"]
 mod transport_commands;
+
+#[path = "engine_compensation_commands.rs"]
+mod compensation_commands;
+#[path = "engine_presentation.rs"]
+mod presentation;
+#[path = "engine_reconfiguration.rs"]
+pub mod reconfiguration;
+#[path = "engine_reconfiguration_edits.rs"]
+mod reconfiguration_edits;
+#[cfg(test)]
+#[path = "engine_reconfiguration_owner_tests.rs"]
+mod reconfiguration_owner_tests;
+
+#[path = "engine_capture_commands.rs"]
+mod capture_commands;
+
+#[cfg(test)]
+#[path = "engine_recovery_configuration_tests.rs"]
+mod recovery_configuration_tests;

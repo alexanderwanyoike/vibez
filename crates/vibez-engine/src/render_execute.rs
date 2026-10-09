@@ -109,6 +109,10 @@ pub(super) fn render_offline_inner(
             ));
             break;
         }
+        if let Some(reason) = engine.offline_compensation_failure() {
+            failure = Some(reason);
+            break;
+        }
         if position + block as u64 > start {
             let first_frame = start.saturating_sub(position) as usize;
             let written = if selected_track.is_some() {
