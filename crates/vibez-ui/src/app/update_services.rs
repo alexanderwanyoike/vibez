@@ -138,10 +138,14 @@ impl App {
                         return Task::none();
                     }
                     if is_instrument {
+                        let token = self
+                            .plugin_load_requests
+                            .begin(PluginGuiKey::Instrument { track_id });
                         let tx = self.plugin_instrument_tx.clone();
                         std::thread::spawn(move || {
                             match load_plugin_instrument_bg(&info, sample_rate, None) {
                                 Ok(mut result) => {
+                                    result.load_token = token;
                                     result.track_id = track_id;
                                     let _ = tx.send(result);
                                 }
@@ -151,11 +155,18 @@ impl App {
                             }
                         });
                     } else {
+                        let effect_id = vibez_core::id::EffectId::new();
+                        let token = self.plugin_load_requests.begin(PluginGuiKey::Effect {
+                            track_id,
+                            effect_id,
+                        });
                         let tx = self.plugin_effect_tx.clone();
                         std::thread::spawn(move || {
                             match load_plugin_effect_bg(&info, sample_rate, None) {
                                 Ok(mut result) => {
+                                    result.load_token = token;
                                     result.track_id = track_id;
+                                    result.effect_id = effect_id;
                                     let _ = tx.send(result);
                                 }
                                 Err(e) => {

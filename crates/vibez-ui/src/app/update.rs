@@ -292,6 +292,13 @@ impl App {
             // shared model handed in explicitly; the returned action
             // carries GUI teardown / selection / status effects.
             Message::Devices(msg) => {
+                if let crate::domains::devices::DevicesMsg::SetTrackInstrument(track_id, _)
+                | crate::domains::devices::DevicesMsg::RemoveTrackInstrument(track_id) = &msg
+                {
+                    self.plugin_load_requests.cancel(PluginGuiKey::Instrument {
+                        track_id: *track_id,
+                    });
+                }
                 let sample_rate = self.state.transport.sample_rate;
                 let action = {
                     let mut engine = crate::domains::EngineTx(&mut self.cmd_tx);

@@ -32,6 +32,7 @@ fn plugin_instrument_for_replay(track: &TrackInfo) -> Option<vibez_core::effect:
 
 impl App {
     pub(super) fn clear_project_runtime(&mut self) {
+        self.plugin_load_requests.reset();
         self.state.devices.last_routing = None;
         self.state.devices.sidechain_meters.clear();
         self.state.devices.sidechain_choices.clear();
@@ -919,6 +920,25 @@ impl App {
         }
         let n = effect_requests.len() + instrument_requests.len();
         self.state.status_text = format!("Loading {n} plugin(s)...");
+        let effect_requests = effect_requests
+            .into_iter()
+            .map(|(track, effect, position, device)| {
+                let token = self.plugin_load_requests.begin(PluginGuiKey::Effect {
+                    track_id: track,
+                    effect_id: effect,
+                });
+                (token, track, effect, position, device)
+            })
+            .collect();
+        let instrument_requests = instrument_requests
+            .into_iter()
+            .map(|(track, device)| {
+                let token = self
+                    .plugin_load_requests
+                    .begin(PluginGuiKey::Instrument { track_id: track });
+                (token, track, device)
+            })
+            .collect();
         crate::services::plugin_loader::spawn_device_reloads(
             effect_requests,
             instrument_requests,

@@ -53,6 +53,7 @@ struct App {
     plugin_effect_tx: std::sync::mpsc::Sender<PluginLoadResult>,
     plugin_instrument_rx: std::sync::mpsc::Receiver<PluginInstrumentLoadResult>,
     plugin_instrument_tx: std::sync::mpsc::Sender<PluginInstrumentLoadResult>,
+    plugin_load_requests: plugin_load_requests::PluginLoadRequests,
     // Plugin GUI support
     plugin_window_manager: Option<PluginWindowManager>,
     plugin_gui_raw_ptrs: std::collections::HashMap<PluginGuiKey, PluginRawPtr>,
@@ -424,6 +425,7 @@ impl App {
             _input_stream: None,
             plugin_effect_rx,
             plugin_effect_tx,
+            plugin_load_requests: Default::default(),
             plugin_instrument_rx,
             plugin_instrument_tx,
             plugin_window_manager,
@@ -690,3 +692,11 @@ mod views_clip_launcher;
 
 #[cfg(test)]
 mod clip_project_tests;
+
+#[cfg(test)]
+mod plugin_load_tests;
+#[cfg(test)]
+mod test_support;
+
+pub(crate) mod plugin_load_requests;
+mod plugin_loading;
