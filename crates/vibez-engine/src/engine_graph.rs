@@ -365,7 +365,7 @@ impl AudioEngine {
                                 &mut prepared.nodes[index].samples,
                             );
                             track.apply_mute_envelope(
-                                block.pos,
+                                pos,
                                 frames,
                                 channels,
                                 tempo.samples_per_beat(),

@@ -441,3 +441,77 @@ fn prepared_send_edges_follow_automation_without_mutating_manual_sends() {
         .all(|sample| (*sample - 1.5 * std::f32::consts::FRAC_1_SQRT_2).abs() < 1e-6));
     assert!(engine.tracks()[0].sends.is_empty());
 }
+
+#[test]
+fn clip_mute_points_follow_nonzero_clip_position_inside_a_render_block() {
+    use crate::playback_source::{PreparedClipPlayback, PreparedPlaybackSource};
+    use vibez_core::{
+        automation::{AutomationLane, AutomationPoint, AutomationTarget},
+        perform::MusicalBoundary,
+    };
+    let (mut engine, mut commands, _events) = AudioEngine::new();
+    let track = TrackId::new();
+    let clip_id = ClipId::new();
+    let mut lane = AutomationLane::new(AutomationTarget::TrackMute);
+    lane.points.push(AutomationPoint {
+        beat: 15.0 / 4.0,
+        value: 1.0,
+        curve: 0.0,
+    });
+    let source = PreparedPlaybackSource::new(
+        vec![EngineClip {
+            id: clip_id,
+            audio: Arc::new(DecodedAudio {
+                channels: vec![vec![1.0; 256]],
+                sample_rate: 8,
+            }),
+            position: 0,
+            source_offset: 0,
+            start_marker: 0,
+            duration: 256,
+            loop_enabled: false,
+            loop_start: 0,
+            loop_end: 0,
+            linear_gain: 1.0,
+            fades: Default::default(),
+            playback_direction: Default::default(),
+            warp_markers: Default::default(),
+        }],
+        vec![],
+        vec![lane],
+    );
+    for command in [
+        EngineCommand::SetSampleRate(8),
+        EngineCommand::SetBpm(120.0),
+        EngineCommand::AddTrack(track, "Clip".into()),
+        EngineCommand::SetRouting(
+            crate::routing::PreparedRouting::prepare(
+                &[channel(track), channel(TrackId::MASTER)],
+                128,
+            )
+            .unwrap(),
+        ),
+    ] {
+        commands.push(command).unwrap();
+    }
+    commands
+        .push(EngineCommand::QueueClips {
+            clips: vec![Box::new(PreparedClipPlayback {
+                track_id: track,
+                clip_id: Some(clip_id),
+                request_id: 1,
+                length_samples: 256,
+                looping: false,
+                source: Box::new(source),
+            })],
+            quantization: MusicalBoundary::Immediate,
+        })
+        .unwrap();
+    engine.process(&mut [0.0; 10], 1);
+    assert_eq!(engine.tracks()[0].active_clip.unwrap().position, 10);
+    let mut output = [0.0; 20];
+    engine.process(&mut output, 1);
+    assert_eq!(output[4], 1.0);
+    assert_eq!(output[5], 63.0 / 64.0);
+    assert_eq!(output[15], 53.0 / 64.0);
+}
