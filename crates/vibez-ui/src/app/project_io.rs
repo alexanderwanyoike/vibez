@@ -33,6 +33,8 @@ fn plugin_instrument_for_replay(track: &TrackInfo) -> Option<vibez_core::effect:
 impl App {
     pub(super) fn clear_project_runtime(&mut self) {
         self.plugin_load_requests.reset();
+        self.sidechain_sync_inputs = None;
+        self.track_meter_peaks.clear();
         self.state.devices.last_routing = None;
         self.state.devices.sidechain_meters.clear();
         self.state.devices.sidechain_choices.clear();
@@ -194,6 +196,7 @@ impl App {
                 &effect_info.params,
             );
             out.push(UiEffect {
+                inactive_sidechains: effect_info.inactive_sidechains.clone(),
                 sidechains: effect_info.sidechains.clone(),
                 external_inputs: fx.external_inputs().to_vec(),
 
@@ -592,6 +595,7 @@ impl App {
                 );
                 let descriptors = fx.param_descriptors();
                 track.effects.push(UiEffect {
+                    inactive_sidechains: effect_info.inactive_sidechains.clone(),
                     sidechains: effect_info.sidechains.clone(),
                     external_inputs: fx.external_inputs().to_vec(),
 
@@ -639,9 +643,9 @@ impl App {
                 );
                 let descriptors = fx.param_descriptors();
                 track.effects.push(UiEffect {
+                    inactive_sidechains: Default::default(),
                     sidechains: Default::default(),
                     external_inputs: Default::default(),
-
                     id: effect_id,
                     effect_type: EffectType::Eq,
                     bypass: false,
@@ -900,52 +904,6 @@ impl App {
         }
 
         self.spawn_project_plugin_loads(plugin_effect_requests, plugin_instrument_requests);
-    }
-
-    /// Reload persisted plugin devices through the background loader
-    /// service. Results flow through the same channels as interactive
-    /// plugin loads.
-    pub(super) fn spawn_project_plugin_loads(
-        &mut self,
-        effect_requests: Vec<(
-            TrackId,
-            EffectId,
-            usize,
-            vibez_core::effect::PluginDeviceInfo,
-        )>,
-        instrument_requests: Vec<(TrackId, vibez_core::effect::PluginDeviceInfo)>,
-    ) {
-        if effect_requests.is_empty() && instrument_requests.is_empty() {
-            return;
-        }
-        let n = effect_requests.len() + instrument_requests.len();
-        self.state.status_text = format!("Loading {n} plugin(s)...");
-        let effect_requests = effect_requests
-            .into_iter()
-            .map(|(track, effect, position, device)| {
-                let token = self.plugin_load_requests.begin(PluginGuiKey::Effect {
-                    track_id: track,
-                    effect_id: effect,
-                });
-                (token, track, effect, position, device)
-            })
-            .collect();
-        let instrument_requests = instrument_requests
-            .into_iter()
-            .map(|(track, device)| {
-                let token = self
-                    .plugin_load_requests
-                    .begin(PluginGuiKey::Instrument { track_id: track });
-                (token, track, device)
-            })
-            .collect();
-        crate::services::plugin_loader::spawn_device_reloads(
-            effect_requests,
-            instrument_requests,
-            self.plugin_effect_tx.clone(),
-            self.plugin_instrument_tx.clone(),
-            self.state.transport.sample_rate as f64,
-        );
     }
 }
 

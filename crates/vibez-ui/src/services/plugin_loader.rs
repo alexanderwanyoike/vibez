@@ -261,6 +261,7 @@ pub(crate) fn spawn_device_reloads(
             let info = scan_info(&dev, vibez_plugin_host::PluginCategory::Effect);
             match load_plugin_effect_bg(&info, sample_rate, decode(&dev)) {
                 Ok(mut result) => {
+                    result.device_ref = dev;
                     result.load_token = token;
                     result.track_id = track_id;
                     result.effect_id = effect_id;
@@ -276,6 +277,7 @@ pub(crate) fn spawn_device_reloads(
             let info = scan_info(&dev, vibez_plugin_host::PluginCategory::Instrument);
             match load_plugin_instrument_bg(&info, sample_rate, decode(&dev)) {
                 Ok(mut result) => {
+                    result.device_ref = dev;
                     result.load_token = token;
                     result.track_id = track_id;
                     let _ = instrument_tx.send(result);

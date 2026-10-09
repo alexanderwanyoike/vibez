@@ -188,9 +188,9 @@ mod tests {
 
     fn effect(plugin: Option<PluginDeviceInfo>) -> UiEffect {
         UiEffect {
+            inactive_sidechains: Default::default(),
             sidechains: Default::default(),
             external_inputs: Default::default(),
-
             id: EffectId::new(),
             effect_type: EffectType::Gain,
             bypass: false,

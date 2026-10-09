@@ -1,5 +1,6 @@
 use super::*;
 use crate::state::UiEffect;
+use vibez_core::routing::RoutingGraph;
 use vibez_core::{
     effect::EffectType,
     routing::{ExternalInputDescriptor, ExternalInputId},
@@ -21,6 +22,7 @@ fn effect(id: EffectId) -> UiEffect {
         has_plugin_gui: false,
         plugin_ref: None,
         external_inputs: device.external_inputs().to_vec(),
+        inactive_sidechains: Default::default(),
         sidechains: Vec::new(),
     }
 }

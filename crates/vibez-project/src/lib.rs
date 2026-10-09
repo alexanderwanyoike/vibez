@@ -298,6 +298,7 @@ mod tests {
             bypass: false,
             params: vec![],
             plugin: None,
+            inactive_sidechains: Default::default(),
             sidechains: vec![SidechainAssignment {
                 input_id: ExternalInputId(0),
                 input_name: "Sidechain".into(),
@@ -380,8 +381,8 @@ mod tests {
         };
         let mut track = TrackInfo::new("FX");
         track.effects.push(EffectInfo {
+            inactive_sidechains: Default::default(),
             sidechains: Default::default(),
-
             id: vibez_core::id::EffectId::new(),
             effect_type: EffectType::Gain,
             bypass: false,
@@ -721,8 +722,8 @@ mod tests {
 
         let mut track = TrackInfo::new("FX Track");
         track.effects.push(EffectInfo {
+            inactive_sidechains: Default::default(),
             sidechains: Default::default(),
-
             id: EffectId::new(),
             effect_type: EffectType::Delay,
             bypass: false,

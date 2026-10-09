@@ -45,6 +45,11 @@ impl App {
                 StripRole::Track,
                 buses,
                 MixerStripView {
+                    peaks: self
+                        .track_meter_peaks
+                        .get(&track.id)
+                        .copied()
+                        .unwrap_or_default(),
                     selected,
                     editing_name: self.state.view.editing_track_name == Some(track.id),
                     edit_text: &self.state.view.edit_name_text,
@@ -69,6 +74,11 @@ impl App {
                 StripRole::Bus,
                 buses,
                 MixerStripView {
+                    peaks: self
+                        .track_meter_peaks
+                        .get(&bus.id)
+                        .copied()
+                        .unwrap_or_default(),
                     selected,
                     editing_name: self.state.view.editing_track_name == Some(bus.id),
                     edit_text: &self.state.view.edit_name_text,
@@ -123,6 +133,11 @@ impl App {
             StripRole::Master,
             buses,
             MixerStripView {
+                peaks: self
+                    .track_meter_peaks
+                    .get(&vibez_core::id::TrackId::MASTER)
+                    .copied()
+                    .unwrap_or_default(),
                 selected: master_selected,
                 editing_name: false,
                 edit_text: &self.state.view.edit_name_text,

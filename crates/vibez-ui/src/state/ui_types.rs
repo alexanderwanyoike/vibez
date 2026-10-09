@@ -385,6 +385,7 @@ pub struct UiEffect {
     /// Persistent identity of the plugin backing this slot, if any.
     pub plugin_ref: Option<vibez_core::effect::PluginDeviceInfo>,
     pub sidechains: Vec<vibez_core::routing::SidechainAssignment>,
+    pub inactive_sidechains: Vec<vibez_core::routing::ExternalInputId>,
     pub external_inputs: Vec<vibez_core::routing::ExternalInputDescriptor>,
 }
 
@@ -399,6 +400,7 @@ impl UiEffect {
             plugin_name: info.plugin.as_ref().map(|plugin| plugin.name.clone()),
             has_plugin_gui: false,
             plugin_ref: info.plugin.clone(),
+            inactive_sidechains: info.inactive_sidechains.clone(),
             sidechains: info.sidechains.clone(),
             external_inputs: Vec::new(),
         }

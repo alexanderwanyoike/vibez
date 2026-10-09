@@ -29,6 +29,7 @@ impl App {
                     dev
                 });
                 vibez_core::effect::EffectInfo {
+                    inactive_sidechains: effect.inactive_sidechains.clone(),
                     sidechains: effect.sidechains.clone(),
 
                     id: effect.id,

@@ -39,6 +39,7 @@ fn receiving_effect(source: TrackId, tap: SourceTap) -> EffectInfo {
         bypass: false,
         params: vec![-20.0, 0.1, 50.0, 10.0],
         plugin: None,
+        inactive_sidechains: Default::default(),
         sidechains: vec![SidechainAssignment {
             input_id: ExternalInputId(0),
             input_name: "Sidechain".into(),
@@ -190,6 +191,7 @@ fn before_effects_dependency_does_not_require_an_unreached_source_plugin() {
         bypass: false,
         params: vec![],
         plugin: Some(plugin_device("Unavailable source insert")),
+        inactive_sidechains: Default::default(),
         sidechains: vec![],
     });
     let mut req = request(source, bare_track("Bass"), SourceTap::BeforeEffects);

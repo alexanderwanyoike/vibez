@@ -59,9 +59,9 @@ fn one_eq_drag_is_one_undo_step() {
     let effect_id = EffectId::new();
     let mut track = ProjectTrack::new(track_id, "Audio".into(), 0);
     track.effects.push(UiEffect {
+        inactive_sidechains: Default::default(),
         sidechains: Default::default(),
         external_inputs: Default::default(),
-
         id: effect_id,
         effect_type: EffectType::Eq,
         bypass: false,
@@ -802,6 +802,7 @@ fn deleting_sidechain_source_keeps_assignment_and_undo_restores_identity() {
         has_plugin_gui: false,
         plugin_ref: None,
         external_inputs: vec![],
+        inactive_sidechains: Default::default(),
         sidechains: vec![route.clone()],
     });
     Arc::make_mut(&mut state.project_tracks).tracks =

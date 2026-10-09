@@ -128,3 +128,7 @@ oracle. These checks establish measured routing/DSP behavior for those installed
 builds, not listening-session, latency-compensation or universal compatibility
 evidence. Deterministic fixtures remain the cross-platform release checks;
 macOS and Windows independent builds require their own validation.
+
+Bounce and Export both reject missing required media or devices before committing
+their destination. A silent connected detector is intentional; missing detector
+media is a failed render, so a successful Bounce never carries warning-only audio.

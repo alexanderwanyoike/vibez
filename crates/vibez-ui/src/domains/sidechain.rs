@@ -1,6 +1,6 @@
 use vibez_core::id::{EffectId, TrackId};
 use vibez_core::routing::{
-    ExternalInputId, RoutingChannel, RoutingEffect, RoutingGraph, SidechainAssignment, SourceTap,
+    ExternalInputId, RoutingChannel, RoutingEffect, SidechainAssignment, SourceTap,
 };
 
 use crate::state::ProjectTrack;
@@ -30,6 +30,7 @@ fn channel(track: &ProjectTrack, is_bus: bool) -> RoutingChannel {
                 id: effect.id,
                 inputs: effect.external_inputs.clone(),
                 assignments: effect.sidechains.clone(),
+                inactive_inputs: effect.inactive_sidechains.clone(),
             })
             .collect(),
     }
@@ -42,50 +43,7 @@ pub fn valid_taps(
     input_id: ExternalInputId,
     source: TrackId,
 ) -> Vec<SourceTap> {
-    if source.is_master() || !channels.iter().any(|channel| channel.id == source) {
-        return Vec::new();
-    }
-    [
-        SourceTap::BeforeEffects,
-        SourceTap::AfterEffects,
-        SourceTap::AfterFader,
-    ]
-    .into_iter()
-    .filter(|tap| {
-        let mut candidate = channels.to_vec();
-        let Some(effect) = candidate
-            .iter_mut()
-            .find(|channel| channel.id == receiver)
-            .and_then(|channel| {
-                channel
-                    .effects
-                    .iter_mut()
-                    .find(|effect| effect.id == effect_id)
-            })
-        else {
-            return false;
-        };
-        let Some(input) = effect
-            .inputs
-            .iter()
-            .find(|input| input.id == input_id && input.supported())
-        else {
-            return false;
-        };
-        let input_name = input.name.clone();
-        effect
-            .assignments
-            .retain(|route| route.input_id != input_id);
-        effect.assignments.push(SidechainAssignment {
-            input_id,
-            input_name,
-            source,
-            source_name: String::new(),
-            tap: *tap,
-        });
-        RoutingGraph::prepare(&candidate).is_ok()
-    })
-    .collect()
+    vibez_core::routing::valid_input_taps(channels, receiver, effect_id, input_id, source)
 }
 
 #[cfg(test)]
@@ -142,6 +100,7 @@ pub fn edit_source_with_model(
     };
     let Some(source) = source else {
         let before = effect.sidechains.len();
+        effect.inactive_sidechains.retain(|id| *id != input_id);
         effect.sidechains.retain(|route| route.input_id != input_id);
         return before != effect.sidechains.len();
     };
@@ -162,13 +121,14 @@ pub fn edit_source_with_model(
     } else {
         taps[0]
     };
-    let input_name = effect
+    let Some(input) = effect
         .external_inputs
         .iter()
         .find(|input| input.id == input_id)
-        .unwrap()
-        .name
-        .clone();
+    else {
+        return false;
+    };
+    let input_name = input.name.clone();
     let assignment = SidechainAssignment {
         input_id,
         input_name,
@@ -176,9 +136,10 @@ pub fn edit_source_with_model(
         source_name,
         tap,
     };
-    if previous == Some(&assignment) {
+    if previous == Some(&assignment) && !effect.inactive_sidechains.contains(&input_id) {
         return false;
     }
+    effect.inactive_sidechains.retain(|id| *id != input_id);
     effect.sidechains.retain(|route| route.input_id != input_id);
     effect.sidechains.push(assignment);
     true
@@ -229,7 +190,7 @@ pub fn edit_tap_with_model(
     if !valid_taps(channels, receiver, effect_id, input_id, source).contains(&tap) {
         return false;
     }
-    let Some(route) = tracks
+    let Some(effect) = tracks
         .iter_mut()
         .chain(buses.iter_mut())
         .chain(std::iter::once(master))
@@ -240,19 +201,22 @@ pub fn edit_tap_with_model(
                 .iter_mut()
                 .find(|effect| effect.id == effect_id)
         })
-        .and_then(|effect| {
-            effect
-                .sidechains
-                .iter_mut()
-                .find(|route| route.input_id == input_id)
-        })
     else {
         return false;
     };
-    if route.tap == tap {
+    let inactive = effect.inactive_sidechains.contains(&input_id);
+    let Some(route) = effect
+        .sidechains
+        .iter_mut()
+        .find(|route| route.input_id == input_id)
+    else {
+        return false;
+    };
+    if route.tap == tap && !inactive {
         return false;
     }
     route.tap = tap;
+    effect.inactive_sidechains.retain(|id| *id != input_id);
     true
 }
 
@@ -262,4 +226,4 @@ mod tests;
 
 #[path = "sidechain_choices.rs"]
 mod choices;
-pub use choices::{input_source_choices, InputSourceChoice, SidechainChoiceCache};
+pub use choices::{input_source_choices, SidechainChoiceCache};

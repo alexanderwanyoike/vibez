@@ -609,6 +609,7 @@ fn loaded_plugins_preserve_trigger_history_in_selected_track_bounce() {
                 bypass: false,
                 params: vec![],
                 plugin: Some(identity(receiving_format, "Probe")),
+                inactive_sidechains: Default::default(),
                 sidechains: vec![SidechainAssignment {
                     input_id: input.id,
                     input_name: input.name,
