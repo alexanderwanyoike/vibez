@@ -4,6 +4,16 @@ use vibez_core::routing::{
 };
 
 impl AudioEngine {
+    pub(super) fn return_retired_routing(&mut self) {
+        if let Some(retired) = self.retired_routing.take() {
+            if let Err(rtrb::PushError::Full(EngineEvent::RoutingRetired(retired))) =
+                self.event_tx.push(EngineEvent::RoutingRetired(retired))
+            {
+                self.retired_routing = Some(retired);
+            }
+        }
+    }
+
     pub(super) fn render_routing_graph(
         &mut self,
         output: &mut [f32],

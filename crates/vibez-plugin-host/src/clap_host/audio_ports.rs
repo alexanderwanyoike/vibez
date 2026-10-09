@@ -11,10 +11,14 @@ pub(super) unsafe fn query(
     plugin: *const clap_plugin,
     input: bool,
     frames: usize,
+    instrument: bool,
 ) -> Vec<(String, AudioPort)> {
     let extension = ((*plugin).get_extension.unwrap())(plugin, CLAP_EXT_AUDIO_PORTS.as_ptr())
         as *const clap_plugin_audio_ports;
     if extension.is_null() {
+        if input && instrument {
+            return Vec::new();
+        }
         return vec![(
             "Main".into(),
             AudioPort::new(ExternalInputId(0), 2, true, frames),

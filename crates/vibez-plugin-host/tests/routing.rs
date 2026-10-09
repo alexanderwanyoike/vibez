@@ -293,3 +293,170 @@ fn loaded_instrument_formats_trigger_other_formats_on_the_exact_note_frames() {
         }
     }
 }
+
+#[test]
+fn all_instrument_source_formats_feed_builtins_and_hosted_receivers() {
+    use vibez_core::{effect::EffectType, midi::InstrumentKind};
+    use vibez_plugin_host::wrappers::instrument::PluginInstrumentWrapper;
+    let fixture = support::Fixture::new();
+    for source_format in ["builtin", "clap", "vst3"] {
+        for receiver_format in ["gate", "compressor", "clap", "vst3"] {
+            let ghost = TrackId::new();
+            let bass = TrackId::new();
+            let effect = EffectId::new();
+            let note_clip = ClipId::new();
+            let (mut engine, mut commands, _events) = AudioEngine::new();
+            commands.push(EngineCommand::SetSampleRate(48000)).unwrap();
+            commands
+                .push(EngineCommand::AddTrack(bass, "Bass".into()))
+                .unwrap();
+            let mut main = clip(bass, 0.01, 0.01);
+            if let EngineCommand::AddClip {
+                audio, duration, ..
+            } = &mut main
+            {
+                *duration = 4096;
+                *audio = std::sync::Arc::new(DecodedAudio {
+                    channels: vec![vec![0.01; 4096], vec![0.01; 4096]],
+                    sample_rate: 48000,
+                });
+            }
+            commands.push(main).unwrap();
+            if source_format == "builtin" {
+                commands
+                    .push(EngineCommand::AddInstrumentTrack(
+                        ghost,
+                        "Sampler".into(),
+                        InstrumentKind::Sampler,
+                    ))
+                    .unwrap();
+                commands
+                    .push(EngineCommand::LoadSamplerSample {
+                        track_id: ghost,
+                        sample: std::sync::Arc::new(DecodedAudio {
+                            channels: vec![vec![0.75; 8192]],
+                            sample_rate: 48000,
+                        }),
+                        sample_name: "Constant probe".into(),
+                    })
+                    .unwrap();
+            } else {
+                commands
+                    .push(EngineCommand::AddMidiTrack(ghost, "Instrument".into()))
+                    .unwrap();
+                commands
+                    .push(EngineCommand::SetPluginInstrument {
+                        track_id: ghost,
+                        instrument: Box::new(PluginInstrumentWrapper::new(
+                            fixture.load_instrument(source_format, 4096),
+                        )),
+                    })
+                    .unwrap();
+            }
+            commands
+                .push(EngineCommand::AddNoteClip {
+                    track_id: ghost,
+                    clip_id: note_clip,
+                    position_beats: 0.0,
+                    duration_beats: 1.0,
+                    start_marker_beats: 0.0,
+                    loop_enabled: false,
+                    loop_start_beats: 0.0,
+                    loop_end_beats: 0.0,
+                    groove_grid: Default::default(),
+                })
+                .unwrap();
+            commands
+                .push(EngineCommand::AddNote {
+                    track_id: ghost,
+                    clip_id: note_clip,
+                    note: vibez_core::midi::MidiNote {
+                        pitch: 60,
+                        velocity: 127,
+                        start_beat: 0.0,
+                        duration_beats: 1.0,
+                    },
+                })
+                .unwrap();
+            commands
+                .push(EngineCommand::SetTrackMute(ghost, true))
+                .unwrap();
+            commands
+                .push(EngineCommand::SetTrackSolo(bass, true))
+                .unwrap();
+            let inputs = if matches!(receiver_format, "gate" | "compressor") {
+                let kind = if receiver_format == "gate" {
+                    EffectType::Gate
+                } else {
+                    EffectType::Compressor
+                };
+                let device = vibez_dsp::factory::create_effect(kind, 48000.0);
+                let inputs = device.external_inputs().to_vec();
+                commands
+                    .push(EngineCommand::AddEffect {
+                        track_id: bass,
+                        effect_id: effect,
+                        effect_type: kind,
+                        position: None,
+                    })
+                    .unwrap();
+                commands
+                    .push(EngineCommand::SetEffectParam {
+                        track_id: bass,
+                        effect_id: effect,
+                        param_index: 0,
+                        value: -20.0,
+                    })
+                    .unwrap();
+                inputs
+            } else {
+                let device = fixture.load(receiver_format, 4096);
+                let inputs = device.external_inputs().to_vec();
+                commands
+                    .push(EngineCommand::AddPluginEffect {
+                        track_id: bass,
+                        effect_id: effect,
+                        effect: Box::new(PluginEffectWrapper::new(device)),
+                        position: None,
+                    })
+                    .unwrap();
+                inputs
+            };
+            let input = &inputs[0];
+            let mut bass_model = channel(bass);
+            bass_model.effects.push(RoutingEffect {
+                id: effect,
+                inputs: inputs.clone(),
+                assignments: vec![SidechainAssignment {
+                    input_id: input.id,
+                    input_name: input.name.clone(),
+                    source: ghost,
+                    source_name: "Instrument".into(),
+                    tap: SourceTap::BeforeEffects,
+                }],
+            });
+            commands
+                .push(EngineCommand::SetRouting(
+                    PreparedRouting::prepare(
+                        &[bass_model, channel(ghost), channel(TrackId::MASTER)],
+                        4096,
+                    )
+                    .unwrap(),
+                ))
+                .unwrap();
+            commands.push(EngineCommand::Play).unwrap();
+            let mut output = vec![0.0; 4096];
+            engine.process_block(vibez_engine::engine::AudioProcessBlock::new(&mut output, 2));
+            let tail = output[output.len() - 128..]
+                .iter()
+                .map(|sample| sample.abs())
+                .sum::<f32>()
+                / 128.0;
+            match receiver_format {
+                "gate" => assert!(tail > 0.006 && tail < 0.008),
+                "compressor" => assert!(tail > 0.0 && tail < 0.005),
+                _ => assert!(tail > 0.2),
+            }
+        }
+    }
+}

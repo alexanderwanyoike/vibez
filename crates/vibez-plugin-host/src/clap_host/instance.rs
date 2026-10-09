@@ -197,10 +197,22 @@ impl ClapPluginInstance {
         }
 
         let (param_descriptors, param_values, param_ids, param_cookies) = query_params(plugin_ptr);
-        let mut input_ports =
-            unsafe { super::audio_ports::query(plugin_ptr, true, max_buffer_size as usize) };
-        let mut output_ports =
-            unsafe { super::audio_ports::query(plugin_ptr, false, max_buffer_size as usize) };
+        let mut input_ports = unsafe {
+            super::audio_ports::query(
+                plugin_ptr,
+                true,
+                max_buffer_size as usize,
+                partial.is_instrument,
+            )
+        };
+        let mut output_ports = unsafe {
+            super::audio_ports::query(
+                plugin_ptr,
+                false,
+                max_buffer_size as usize,
+                partial.is_instrument,
+            )
+        };
         let external_inputs = crate::audio_ports::descriptors(&input_ports);
         let input_buffers = super::audio_ports::buffers(&mut input_ports);
         let output_buffers = super::audio_ports::buffers(&mut output_ports);
@@ -231,7 +243,9 @@ impl ClapPluginInstance {
         };
 
         instance.prepare(sample_rate, max_buffer_size);
-        instance.activate();
+        if !instance.activate() {
+            return Err("CLAP activation failed".into());
+        }
 
         Ok(instance)
     }

@@ -47,6 +47,7 @@ const SPECTRUM_RING_CAPACITY: usize = 16_384;
 /// ```
 pub struct AudioEngine {
     routing: Option<Box<crate::routing::PreparedRouting>>,
+    retired_routing: Option<Box<crate::routing::PreparedRouting>>,
     transport: Transport,
     /// Legacy single-audio field for backward compatibility.
     audio: Option<Arc<DecodedAudio>>,
@@ -206,6 +207,7 @@ impl AudioEngine {
 
         let engine = Self {
             routing: None,
+            retired_routing: None,
             transport: Transport::new(),
             audio: None,
             tracks: Vec::new(),
@@ -310,7 +312,7 @@ impl AudioEngine {
             }
         }
 
-        if !self.tracks.is_empty() {
+        if !self.tracks.is_empty() || self.routing.is_some() {
             // ---- 3. Multi-track rendering path --------------------------
             self.process_multitrack(
                 output,
@@ -714,3 +716,9 @@ mod graph_render;
 #[cfg(test)]
 #[path = "engine_graph_tests.rs"]
 mod graph_tests;
+
+#[path = "engine_instrument_commands.rs"]
+mod instrument_commands;
+
+#[path = "engine_effect_commands.rs"]
+mod effect_commands;

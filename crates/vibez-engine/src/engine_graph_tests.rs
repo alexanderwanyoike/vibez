@@ -358,3 +358,39 @@ fn master_receives_a_muted_prefader_source() {
         .iter()
         .all(|sample| *sample > 0.006 && *sample < 0.008));
 }
+
+#[test]
+fn saturated_meter_ring_retains_and_eventually_returns_old_plans() {
+    let (mut engine, mut commands, mut events) = AudioEngine::new();
+    engine.routing =
+        Some(crate::routing::PreparedRouting::prepare(&[channel(TrackId::MASTER)], 8).unwrap());
+    while engine
+        .event_tx
+        .push(EngineEvent::PlaybackPosition(0))
+        .is_ok()
+    {}
+    commands
+        .push(EngineCommand::SetRouting(
+            crate::routing::PreparedRouting::prepare(&[channel(TrackId::MASTER)], 16).unwrap(),
+        ))
+        .unwrap();
+    commands
+        .push(EngineCommand::SetRouting(
+            crate::routing::PreparedRouting::prepare(&[channel(TrackId::MASTER)], 32).unwrap(),
+        ))
+        .unwrap();
+    engine.process(&mut [], 2);
+    assert_eq!(engine.routing.as_ref().unwrap().max_frames, 16);
+    assert_eq!(engine.retired_routing.as_ref().unwrap().max_frames, 8);
+    while events.pop().is_ok() {}
+    engine.process(&mut [], 2);
+    assert_eq!(engine.routing.as_ref().unwrap().max_frames, 32);
+    assert!(engine.retired_routing.is_none());
+    let mut returned = Vec::new();
+    while let Ok(event) = events.pop() {
+        if let EngineEvent::RoutingRetired(retired) = event {
+            returned.push(retired.max_frames);
+        }
+    }
+    assert_eq!(returned, vec![8, 16]);
+}

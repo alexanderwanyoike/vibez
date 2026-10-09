@@ -390,7 +390,9 @@ impl Vst3PluginInstance {
         }
 
         instance.prepare(sample_rate, max_buffer_size);
-        instance.activate();
+        if !instance.activate() {
+            return Err("VST3 activation failed".into());
+        }
 
         Ok(instance)
     }

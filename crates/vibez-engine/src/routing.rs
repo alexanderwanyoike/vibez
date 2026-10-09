@@ -1,6 +1,8 @@
 use vibez_core::routing::{ExternalInputDescriptor, RoutingChannel, RoutingError, RoutingGraph};
 
 pub const MAX_EXTERNAL_INPUTS: usize = 64;
+pub const MAX_ROUTING_FRAMES: usize = 65_536;
+pub const MAX_ROUTING_STORAGE_BYTES: usize = 256 * 1024 * 1024;
 
 #[derive(Debug)]
 pub struct PreparedInput {
@@ -26,14 +28,37 @@ pub struct PreparedRouting {
 
 impl PreparedRouting {
     pub fn prepare(channels: &[RoutingChannel], max_frames: usize) -> Result<Box<Self>, String> {
-        if max_frames == 0 {
-            return Err("Routing block capacity must be positive".into());
+        if max_frames == 0 || max_frames > MAX_ROUTING_FRAMES {
+            return Err(format!(
+                "Routing block capacity must be in 1..={MAX_ROUTING_FRAMES}"
+            ));
         }
         let graph = RoutingGraph::prepare(channels).map_err(|error| match error {
             RoutingError::FeedbackLoop => "Routing creates a feedback loop",
             RoutingError::DuplicateIdentity => "Routing contains duplicate identities",
             RoutingError::MasterSource => "Master cannot provide an external input",
         })?;
+        let input_channels: usize = channels
+            .iter()
+            .flat_map(|channel| &channel.effects)
+            .flat_map(|effect| &effect.inputs)
+            .filter(|input| input.supported())
+            .map(|input| input.channels)
+            .sum();
+        let storage = graph
+            .nodes
+            .len()
+            .checked_mul(2)
+            .and_then(|count| count.checked_add(input_channels))
+            .and_then(|count| count.checked_mul(max_frames))
+            .and_then(|count| count.checked_mul(std::mem::size_of::<f32>()))
+            .ok_or("Routing storage arithmetic overflow")?;
+        if storage > MAX_ROUTING_STORAGE_BYTES {
+            return Err(format!(
+                "Routing exceeds the {} MiB storage budget",
+                MAX_ROUTING_STORAGE_BYTES / 1024 / 1024
+            ));
+        }
         let mut required = vec![false; graph.nodes.len()];
         for edge in &graph.edges {
             if matches!(edge.kind, vibez_core::routing::EdgeKind::External(_)) {

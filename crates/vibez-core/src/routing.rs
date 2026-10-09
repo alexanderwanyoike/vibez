@@ -132,7 +132,9 @@ impl RoutingGraph {
                     channel: channel.id,
                     stage,
                 };
-                if graph.nodes.contains(&node) {
+                if graph.nodes.contains(&node)
+                    || matches!(stage,NodeStage::Effect(id) if graph.nodes.iter().any(|existing| existing.stage==NodeStage::Effect(id)))
+                {
                     return Err(RoutingError::DuplicateIdentity);
                 }
                 graph.nodes.push(node);
@@ -209,8 +211,8 @@ impl RoutingGraph {
         let mut pending: Vec<usize> = (0..graph.nodes.len())
             .map(|node| graph.edges.iter().filter(|edge| edge.to == node).count())
             .collect();
-        for node in 0..graph.nodes.len() {
-            if pending[node] == 0 {
+        for (node, dependencies) in pending.iter().enumerate() {
+            if *dependencies == 0 {
                 graph.order.push(node);
             }
         }
