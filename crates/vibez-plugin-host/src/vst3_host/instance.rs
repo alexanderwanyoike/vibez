@@ -330,17 +330,31 @@ impl Vst3PluginInstance {
             }
         }
 
-        let mut input_ports = unsafe {
-            super::audio_ports::query(component, K_INPUT, audio_in_buses, max_buffer_size as usize)
-        }?;
-        let mut output_ports = unsafe {
-            super::audio_ports::query(
-                component,
-                K_OUTPUT,
-                audio_out_buses,
-                max_buffer_size as usize,
-            )
-        }?;
+        let ports = (|| unsafe {
+            Ok::<_, String>((
+                super::audio_ports::query(
+                    component,
+                    K_INPUT,
+                    audio_in_buses,
+                    max_buffer_size as usize,
+                )?,
+                super::audio_ports::query(
+                    component,
+                    K_OUTPUT,
+                    audio_out_buses,
+                    max_buffer_size as usize,
+                )?,
+            ))
+        })();
+        let (mut input_ports, mut output_ports) = match ports {
+            Ok(ports) => ports,
+            Err(error) => {
+                unsafe {
+                    release_interfaces(component, processor, controller, controller_is_separate)
+                };
+                return Err(error);
+            }
+        };
         let external_inputs = crate::audio_ports::descriptors(&input_ports);
         let make_buses = |ports: &mut Vec<(String, crate::audio_ports::AudioPort)>| {
             ports
@@ -725,39 +739,55 @@ impl Drop for Vst3PluginInstance {
         if self.active {
             self.deactivate();
         }
-        if !self.controller.is_null() {
-            let ctrl_vtbl = unsafe { vtbl(self.controller) };
-            if self.controller_is_separate {
-                // IPluginBase::terminate - vtable [4]
-                type TerminateFn = unsafe extern "system" fn(*mut std::ffi::c_void) -> i32;
-                let terminate: TerminateFn = unsafe { std::mem::transmute(*ctrl_vtbl.add(4)) };
-                unsafe { terminate(self.controller) };
-            }
-            type ReleaseFn = unsafe extern "system" fn(*mut std::ffi::c_void) -> u32;
-            let release: ReleaseFn = unsafe { std::mem::transmute(*ctrl_vtbl.add(2)) };
-            unsafe { release(self.controller) };
+        unsafe {
+            release_interfaces(
+                self.component,
+                self.processor,
+                self.controller,
+                self.controller_is_separate,
+            );
         }
-        // Release the processor interface before terminating the
-        // component: DPF warns (and may misbehave) if the audio
-        // processor ref is still held at component teardown.
-        if !self.processor.is_null() {
-            type ReleaseFn = unsafe extern "system" fn(*mut std::ffi::c_void) -> u32;
-            let proc_vtbl = unsafe { vtbl(self.processor) };
-            let release: ReleaseFn = unsafe { std::mem::transmute(*proc_vtbl.add(2)) };
-            unsafe { release(self.processor) };
-        }
-        if !self.component.is_null() {
+    }
+}
+
+unsafe fn release_interfaces(
+    component: *mut std::ffi::c_void,
+    processor: *mut std::ffi::c_void,
+    controller: *mut std::ffi::c_void,
+    controller_is_separate: bool,
+) {
+    if !controller.is_null() {
+        let ctrl_vtbl = unsafe { vtbl(controller) };
+        if controller_is_separate {
             // IPluginBase::terminate - vtable [4]
             type TerminateFn = unsafe extern "system" fn(*mut std::ffi::c_void) -> i32;
-            let comp_vtbl = unsafe { vtbl(self.component) };
-            let terminate: TerminateFn = unsafe { std::mem::transmute(*comp_vtbl.add(4)) };
-            unsafe { terminate(self.component) };
-
-            // Release component
-            type ReleaseFn = unsafe extern "system" fn(*mut std::ffi::c_void) -> u32;
-            let release: ReleaseFn = unsafe { std::mem::transmute(*comp_vtbl.add(2)) };
-            unsafe { release(self.component) };
+            let terminate: TerminateFn = unsafe { std::mem::transmute(*ctrl_vtbl.add(4)) };
+            unsafe { terminate(controller) };
         }
+        type ReleaseFn = unsafe extern "system" fn(*mut std::ffi::c_void) -> u32;
+        let release: ReleaseFn = unsafe { std::mem::transmute(*ctrl_vtbl.add(2)) };
+        unsafe { release(controller) };
+    }
+    // Release the processor interface before terminating the
+    // component: DPF warns (and may misbehave) if the audio
+    // processor ref is still held at component teardown.
+    if !processor.is_null() {
+        type ReleaseFn = unsafe extern "system" fn(*mut std::ffi::c_void) -> u32;
+        let proc_vtbl = unsafe { vtbl(processor) };
+        let release: ReleaseFn = unsafe { std::mem::transmute(*proc_vtbl.add(2)) };
+        unsafe { release(processor) };
+    }
+    if !component.is_null() {
+        // IPluginBase::terminate - vtable [4]
+        type TerminateFn = unsafe extern "system" fn(*mut std::ffi::c_void) -> i32;
+        let comp_vtbl = unsafe { vtbl(component) };
+        let terminate: TerminateFn = unsafe { std::mem::transmute(*comp_vtbl.add(4)) };
+        unsafe { terminate(component) };
+
+        // Release component
+        type ReleaseFn = unsafe extern "system" fn(*mut std::ffi::c_void) -> u32;
+        let release: ReleaseFn = unsafe { std::mem::transmute(*comp_vtbl.add(2)) };
+        unsafe { release(component) };
     }
 }
 

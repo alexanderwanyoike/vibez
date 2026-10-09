@@ -11,26 +11,28 @@ pub(super) unsafe fn query(
     plugin: *const clap_plugin,
     input: bool,
     frames: usize,
-    instrument: bool,
-) -> Vec<(String, AudioPort)> {
+) -> Result<Vec<(String, AudioPort)>, String> {
     let extension = ((*plugin).get_extension.unwrap())(plugin, CLAP_EXT_AUDIO_PORTS.as_ptr())
         as *const clap_plugin_audio_ports;
     if extension.is_null() {
-        if input && instrument {
-            return Vec::new();
-        }
-        return vec![(
-            "Main".into(),
-            AudioPort::new(ExternalInputId(0), 2, true, frames),
-        )];
+        return Ok(Vec::new());
     }
     let mut ports = Vec::new();
     for index in 0..((*extension).count.unwrap())(plugin, input) {
         let mut info: clap_audio_port_info = std::mem::zeroed();
-        if ((*extension).get.unwrap())(plugin, index, input, &mut info) {
+        if !((*extension).get.unwrap())(plugin, index, input, &mut info) {
+            return Err(format!("Cannot query CLAP audio port {index}"));
+        }
+        {
             let name = std::ffi::CStr::from_ptr(info.name.as_ptr())
                 .to_string_lossy()
                 .into_owned();
+            if ports
+                .iter()
+                .any(|(_, port): &(String, AudioPort)| port.id == ExternalInputId(info.id))
+            {
+                return Err("CLAP declared duplicate audio port identities".into());
+            }
             ports.push((
                 name,
                 AudioPort::new(
@@ -42,7 +44,7 @@ pub(super) unsafe fn query(
             ));
         }
     }
-    ports
+    Ok(ports)
 }
 
 pub(super) fn buffers(ports: &mut [(String, AudioPort)]) -> Vec<clap_audio_buffer> {

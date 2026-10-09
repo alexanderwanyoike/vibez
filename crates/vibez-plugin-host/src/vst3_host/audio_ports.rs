@@ -9,6 +9,9 @@ pub(super) unsafe fn query(
     count: i32,
     max_frames: usize,
 ) -> Result<Vec<(String, AudioPort)>, String> {
+    if count < 0 {
+        return Err("Cannot query VST3 audio bus count".into());
+    }
     type GetBusInfo =
         unsafe extern "system" fn(*mut std::ffi::c_void, i32, i32, i32, *mut BusInfo) -> i32;
     type ActivateBus = unsafe extern "system" fn(*mut std::ffi::c_void, i32, i32, i32, u8) -> i32;
