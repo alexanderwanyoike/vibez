@@ -304,8 +304,10 @@ impl AudioEngine {
 
         // Bus mixes accumulate from track sends during rendering;
         // start each block from silence.
-        for bus in &mut self.buses {
-            bus.clear_buffer(frames, channels);
+        if self.routing.is_none() {
+            for bus in &mut self.buses {
+                bus.clear_buffer(frames, channels);
+            }
         }
 
         if !self.tracks.is_empty() {

@@ -38,6 +38,7 @@ impl AudioEngine {
                     else {
                         continue;
                     };
+                    std::mem::swap(&mut track.mix_buffer, &mut prepared.nodes[index].samples);
                     let pos = if self.clip_performance {
                         track
                             .active_clip
@@ -115,7 +116,7 @@ impl AudioEngine {
                             *sample += live;
                         }
                     }
-                    prepared.nodes[index].samples[..len].copy_from_slice(&track.mix_buffer[..len]);
+                    std::mem::swap(&mut track.mix_buffer, &mut prepared.nodes[index].samples);
                     let activity = track.take_note_activity();
                     if activity != 0 {
                         let _ = self.event_tx.push(EngineEvent::TrackNoteActivity {
@@ -147,7 +148,15 @@ impl AudioEngine {
                             continue;
                         }
                         let gain = match edge.kind {
-                            EdgeKind::Send(gain) => gain,
+                            EdgeKind::Send(_) => self
+                                .tracks
+                                .iter()
+                                .chain(self.buses.iter())
+                                .find(|track| track.id == prepared.graph.nodes[edge.from].channel)
+                                .and_then(|track| {
+                                    track.sends.iter().find(|(bus, _)| *bus == node.channel)
+                                })
+                                .map_or(0.0, |(_, gain)| *gain),
                             _ => 1.0,
                         };
                         for sample in 0..len {
@@ -266,9 +275,10 @@ impl AudioEngine {
                             } else {
                                 equal_power_pan(pan)
                             };
-                            track.ensure_buffer(len);
-                            track.mix_buffer[..len]
-                                .copy_from_slice(&prepared.nodes[index].samples[..len]);
+                            std::mem::swap(
+                                &mut track.mix_buffer,
+                                &mut prepared.nodes[index].samples,
+                            );
                             track.apply_mute_envelope(
                                 block.pos,
                                 frames,
@@ -278,8 +288,7 @@ impl AudioEngine {
                             for frame in 0..frames {
                                 for channel in 0..channels {
                                     let offset = frame * channels + channel;
-                                    prepared.nodes[index].samples[offset] = track.mix_buffer
-                                        [offset]
+                                    track.mix_buffer[offset] = track.mix_buffer[offset]
                                         * gain
                                         * if channels == 1 {
                                             1.0
@@ -290,6 +299,10 @@ impl AudioEngine {
                                         };
                                 }
                             }
+                            std::mem::swap(
+                                &mut track.mix_buffer,
+                                &mut prepared.nodes[index].samples,
+                            );
                             let levels = metering::calculate_meters(
                                 &prepared.nodes[index].samples[..len],
                                 channels,

@@ -457,6 +457,9 @@ impl PluginInstance for Vst3PluginInstance {
 
     fn set_param(&mut self, index: usize, value: f32) -> bool {
         if index < self.param_values.len() {
+            if self.pending_params.len() == self.pending_params.capacity() {
+                return false;
+            }
             self.param_values[index] = value;
             self.pending_params
                 .push((self.param_ids[index], value.clamp(0.0, 1.0) as f64));
@@ -576,11 +579,10 @@ impl PluginInstance for Vst3PluginInstance {
             } else {
                 buffer.fill(0.0);
             }
-        } else if !self.process_error_logged {
+        } else {
             self.process_error_logged = true;
             buffer.fill(0.0);
         }
-        // On failure the interleaved buffer keeps the dry signal.
         self.note_events.clear();
     }
 

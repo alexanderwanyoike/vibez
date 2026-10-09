@@ -493,10 +493,12 @@ impl PluginInstance for ClapPluginInstance {
         };
 
         let plugin_ref = unsafe { &*self.plugin_ptr };
-        let _status: clap_process_status =
+        let status: clap_process_status =
             unsafe { (plugin_ref.process.unwrap())(self.plugin_ptr, &process) };
 
-        if let Some((_, port)) = self
+        if status == clap_sys::process::CLAP_PROCESS_ERROR {
+            buffer.fill(0.0);
+        } else if let Some((_, port)) = self
             .output_ports
             .iter()
             .find(|(_, port)| port.main)
