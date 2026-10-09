@@ -35,6 +35,8 @@ pub(super) const WARP_AUDITION_PREPARING: &str = "Preparing WARP Audition";
 
 struct App {
     state: AppState,
+    sidechain_sync_inputs: Option<sidechain_sync::RoutingInputs>,
+    track_meter_peaks: std::collections::HashMap<vibez_core::id::TrackId, (f32, f32)>,
     edge_shortcuts: EdgeShortcutState,
     cmd_tx: crate::domains::EngineCommandQueue,
     event_rx: Option<Consumer<EngineEvent>>,
@@ -426,6 +428,8 @@ impl App {
             plugin_effect_rx,
             plugin_effect_tx,
             plugin_load_requests: Default::default(),
+            sidechain_sync_inputs: None,
+            track_meter_peaks: Default::default(),
             plugin_instrument_rx,
             plugin_instrument_tx,
             plugin_window_manager,
@@ -700,3 +704,8 @@ mod test_support;
 
 pub(crate) mod plugin_load_requests;
 mod plugin_loading;
+
+mod sidechain_sync;
+
+#[cfg(test)]
+mod sidechain_sync_tests;

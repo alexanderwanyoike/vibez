@@ -73,6 +73,8 @@ pub struct EffectInfo {
     pub plugin: Option<PluginDeviceInfo>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub sidechains: Vec<crate::routing::SidechainAssignment>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub inactive_sidechains: Vec<crate::routing::ExternalInputId>,
 }
 
 /// Identity and state of a third-party plugin device, as persisted in
@@ -115,6 +117,7 @@ mod tests {
             bypass: false,
             params: vec![500.0, 0.5, 0.3],
             plugin: None,
+            inactive_sidechains: Default::default(),
             sidechains: Vec::new(),
         };
         let json = serde_json::to_string(&info).unwrap();

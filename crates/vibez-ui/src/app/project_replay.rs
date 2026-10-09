@@ -108,6 +108,8 @@ impl App {
             .editor_mut()
             .discard_audio_clip_inspector_edits();
         self.plugin_load_requests.reset();
+        self.sidechain_sync_inputs = None;
+        self.track_meter_peaks.clear();
         // Plugin devices cannot live inside snapshots; strip them
         // into reload requests first, capturing the live state of
         // instances that still exist so undo keeps their exact

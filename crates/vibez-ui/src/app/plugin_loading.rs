@@ -3,6 +3,7 @@
 use super::*;
 use crate::state::UiEffect;
 use vibez_core::effect::EffectType;
+use vibez_core::id::{EffectId, TrackId};
 
 impl App {
     pub(super) fn poll_plugin_loads(&mut self) {
@@ -72,6 +73,12 @@ impl App {
                     .map(|i| effect.get_param(i))
                     .collect();
                 let ui_effect = UiEffect {
+                    inactive_sidechains: track
+                        .effects
+                        .iter()
+                        .find(|slot| slot.id == effect_id)
+                        .map(|slot| slot.inactive_sidechains.clone())
+                        .unwrap_or_default(),
                     sidechains: track
                         .effects
                         .iter()
@@ -182,5 +189,53 @@ impl App {
             });
             self.state.status_text = format!("Loaded {plugin_name}");
         }
+    }
+}
+
+impl App {
+    /// Reload persisted plugin devices through the background loader
+    /// service. Results flow through the same channels as interactive
+    /// plugin loads.
+    pub(super) fn spawn_project_plugin_loads(
+        &mut self,
+        effect_requests: Vec<(
+            TrackId,
+            EffectId,
+            usize,
+            vibez_core::effect::PluginDeviceInfo,
+        )>,
+        instrument_requests: Vec<(TrackId, vibez_core::effect::PluginDeviceInfo)>,
+    ) {
+        if effect_requests.is_empty() && instrument_requests.is_empty() {
+            return;
+        }
+        let n = effect_requests.len() + instrument_requests.len();
+        self.state.status_text = format!("Loading {n} plugin(s)...");
+        let effect_requests = effect_requests
+            .into_iter()
+            .map(|(track, effect, position, device)| {
+                let token = self.plugin_load_requests.begin(PluginGuiKey::Effect {
+                    track_id: track,
+                    effect_id: effect,
+                });
+                (token, track, effect, position, device)
+            })
+            .collect();
+        let instrument_requests = instrument_requests
+            .into_iter()
+            .map(|(track, device)| {
+                let token = self
+                    .plugin_load_requests
+                    .begin(PluginGuiKey::Instrument { track_id: track });
+                (token, track, device)
+            })
+            .collect();
+        crate::services::plugin_loader::spawn_device_reloads(
+            effect_requests,
+            instrument_requests,
+            self.plugin_effect_tx.clone(),
+            self.plugin_instrument_tx.clone(),
+            self.state.transport.sample_rate as f64,
+        );
     }
 }

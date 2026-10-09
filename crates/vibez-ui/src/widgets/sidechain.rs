@@ -139,12 +139,7 @@ pub fn view<'a>(
     let unavailable: Vec<_> = effect
         .sidechains
         .iter()
-        .filter(|route| {
-            !inputs.iter().any(|input| {
-                input.id == route.input_id
-                    && (route.input_name.is_empty() || route.input_name == input.name)
-            })
-        })
+        .filter(|route| !inputs.iter().any(|input| route.matches(input)))
         .collect();
     if inputs.is_empty() && unavailable.is_empty() {
         return None;
@@ -153,9 +148,7 @@ pub fn view<'a>(
     for input in &inputs {
         let id = input.id;
         let effect_id = effect.id;
-        let route = effect.sidechains.iter().find(|route| {
-            route.input_id == id && (route.input_name.is_empty() || route.input_name == input.name)
-        });
+        let route = effect.sidechains.iter().find(|route| route.matches(input));
         let mut choices = vec![SourceChoice {
             id: None,
             name: "None".into(),

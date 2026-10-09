@@ -19,6 +19,8 @@ pub(super) fn app() -> super::App {
         plugin_effect_rx,
         plugin_effect_tx,
         plugin_load_requests: Default::default(),
+        sidechain_sync_inputs: None,
+        track_meter_peaks: Default::default(),
         plugin_instrument_rx,
         plugin_instrument_tx,
         plugin_window_manager: None,

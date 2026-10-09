@@ -175,13 +175,19 @@ impl App {
         if self.prepare_capture_message(undo_gesture, &message) {
             return Task::none();
         }
-        if self.reject_invalid_routing_edit(&message) {
+        if self.reject_invalid_send_edit(&message) {
             return Task::none();
         }
         let owns_project_transaction = self.begin_project_track_deletion_transaction(&message);
         let deferred_arrangement_project_edit = matches!(
             &message,
             Message::Arrangement(msg) if msg.defers_project_edit()
+        ) || matches!(
+            &message,
+            Message::Devices(
+                crate::domains::devices::DevicesMsg::SetSidechainSource { .. }
+                    | crate::domains::devices::DevicesMsg::SetSidechainTap { .. }
+            )
         );
         let should_mark_dirty = matches!(
             &message,
@@ -299,6 +305,13 @@ impl App {
                         track_id: *track_id,
                     });
                 }
+                let routing_edit = matches!(
+                    msg,
+                    crate::domains::devices::DevicesMsg::SetSidechainSource { .. }
+                        | crate::domains::devices::DevicesMsg::SetSidechainTap { .. }
+                );
+                let routing = routing_edit.then(|| self.sidechain_model());
+                let snapshot = routing_edit.then(|| self.take_snapshot());
                 let sample_rate = self.state.transport.sample_rate;
                 let action = {
                     let mut engine = crate::domains::EngineTx(&mut self.cmd_tx);
@@ -310,8 +323,15 @@ impl App {
                         &mut project_tracks.master,
                         &mut project_tracks.buses,
                         sample_rate,
+                        crate::domains::devices::DevicesCtx {
+                            routing: routing.as_deref(),
+                        },
                     )
                 };
+                if let (Some(true), Some(snapshot)) = (action.routing_changed, snapshot) {
+                    self.state.project.history.push_edit(snapshot, undo_gesture);
+                    self.mark_project_dirty();
+                }
                 self.apply_devices_action(action);
             }
             Message::SetDrumRackSliceMarkers(markers) => {

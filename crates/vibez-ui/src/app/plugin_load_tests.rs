@@ -81,6 +81,7 @@ fn setup() -> (
         plugin_name: Some(device.name.clone()),
         has_plugin_gui: false,
         plugin_ref: Some(device.clone()),
+        inactive_sidechains: Default::default(),
         sidechains: vec![],
         external_inputs: vec![],
     });

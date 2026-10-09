@@ -1,8 +1,5 @@
 use super::*;
-use vibez_core::{
-    automation::AutomationTarget,
-    routing::{ExternalInputDescriptor, RoutingChannel, RoutingEffect, SourceTap},
-};
+use vibez_core::routing::{ExternalInputDescriptor, RoutingChannel, RoutingEffect, SourceTap};
 
 pub(super) fn selected_track(mode: BounceMode) -> Option<TrackId> {
     match mode {
@@ -23,57 +20,12 @@ pub(super) fn all_channels(req: &BounceRequest) -> impl Iterator<Item = &TrackIn
 
 pub(super) fn potential_sends(track: &TrackInfo) -> Vec<(TrackId, f32)> {
     let mut sends = track.sends.clone();
-    for lane in &track.automation {
-        if let AutomationTarget::Send { bus_id } = lane.target {
-            let maximum = lane
-                .points
-                .iter()
-                .map(|point| point.value)
-                .fold(0.0f32, f32::max);
-            if maximum > 0.0005 {
-                if let Some((_, amount)) = sends.iter_mut().find(|(id, _)| *id == bus_id) {
-                    *amount = amount.max(maximum);
-                } else {
-                    sends.push((bus_id, maximum));
-                }
-            }
-        }
-    }
+    vibez_core::routing::reserve_automated_sends(&mut sends, &track.automation);
     sends
 }
 
 pub fn potential_dependency_ids(req: &BounceRequest) -> HashSet<TrackId> {
-    let mut needed: HashSet<_> = match selected_track(req.mode) {
-        Some(track) => [track].into_iter().collect(),
-        None => all_channels(req).map(|channel| channel.id).collect(),
-    };
-    loop {
-        let previous = needed.len();
-        for channel in all_channels(req) {
-            if needed.contains(&channel.id) {
-                for route in channel.effects.iter().flat_map(|effect| &effect.sidechains) {
-                    if !route.source.is_master()
-                        && all_channels(req).any(|source| source.id == route.source)
-                    {
-                        needed.insert(route.source);
-                    }
-                }
-                if req.buses.iter().any(|bus| bus.id == channel.id) {
-                    for source in all_channels(req).filter(|source| {
-                        potential_sends(source)
-                            .iter()
-                            .any(|(bus, amount)| *bus == channel.id && *amount > 0.0005)
-                    }) {
-                        needed.insert(source.id);
-                    }
-                }
-            }
-        }
-        if needed.len() == previous {
-            break;
-        }
-    }
-    needed
+    dependency_taps(req, None).into_keys().collect()
 }
 
 fn rank(tap: SourceTap) -> u8 {
@@ -116,49 +68,7 @@ pub(super) fn actual_dependencies(
         };
         metadata.insert(info.id, inputs);
     }
-    let mut taps = HashMap::new();
-    if let Some(track) = selected_track(req.mode) {
-        require(&mut taps, track, SourceTap::AfterFader);
-    } else {
-        for channel in all_channels(req) {
-            require(&mut taps, channel.id, SourceTap::AfterFader);
-        }
-    }
-    loop {
-        let before = taps.clone();
-        for channel in all_channels(req) {
-            let Some(tap) = taps.get(&channel.id).copied() else {
-                continue;
-            };
-            if tap != SourceTap::BeforeEffects {
-                for effect in &channel.effects {
-                    for route in &effect.sidechains {
-                        if metadata[&effect.id].iter().any(|input| {
-                            input.id == route.input_id
-                                && input.supported()
-                                && (route.input_name.is_empty() || input.name == route.input_name)
-                        }) && !route.source.is_master()
-                            && all_channels(req).any(|source| source.id == route.source)
-                        {
-                            require(&mut taps, route.source, route.tap);
-                        }
-                    }
-                }
-            }
-            if req.buses.iter().any(|bus| bus.id == channel.id) {
-                for source in all_channels(req).filter(|source| {
-                    potential_sends(source)
-                        .iter()
-                        .any(|(bus, amount)| *bus == channel.id && *amount > 0.0005)
-                }) {
-                    require(&mut taps, source.id, SourceTap::AfterFader);
-                }
-            }
-        }
-        if taps == before {
-            break;
-        }
-    }
+    let taps = dependency_taps(req, Some(&metadata));
     let mut graph_channels: Vec<_> = all_channels(req)
         .filter(|channel| taps.contains_key(&channel.id))
         .map(|channel| RoutingChannel {
@@ -175,6 +85,7 @@ pub(super) fn actual_dependencies(
                         id: effect.id,
                         inputs: metadata[&effect.id].clone(),
                         assignments: effect.sidechains.clone(),
+                        inactive_inputs: effect.inactive_sidechains.clone(),
                     })
                     .collect()
             },
@@ -235,4 +146,64 @@ pub(super) fn validate_plugins(
         }
     }
     Ok(())
+}
+
+fn dependency_taps(
+    req: &BounceRequest,
+    metadata: Option<&HashMap<EffectId, Vec<ExternalInputDescriptor>>>,
+) -> HashMap<TrackId, SourceTap> {
+    let mut taps = HashMap::new();
+    if let Some(track) = selected_track(req.mode) {
+        require(&mut taps, track, SourceTap::AfterFader);
+    } else {
+        for channel in all_channels(req) {
+            require(&mut taps, channel.id, SourceTap::AfterFader);
+        }
+    }
+    loop {
+        let before = taps.clone();
+        for channel in all_channels(req) {
+            let Some(tap) = taps.get(&channel.id).copied() else {
+                continue;
+            };
+            if tap != SourceTap::BeforeEffects {
+                for effect in &channel.effects {
+                    for route in &effect.sidechains {
+                        if !effect.inactive_sidechains.contains(&route.input_id)
+                            && metadata.is_none_or(|metadata| {
+                                metadata[&effect.id]
+                                    .iter()
+                                    .any(|input| route.matches(input))
+                            })
+                            && !route.source.is_master()
+                            && all_channels(req).any(|source| source.id == route.source)
+                        {
+                            require(
+                                &mut taps,
+                                route.source,
+                                if metadata.is_some() {
+                                    route.tap
+                                } else {
+                                    SourceTap::AfterFader
+                                },
+                            );
+                        }
+                    }
+                }
+            }
+            if req.buses.iter().any(|bus| bus.id == channel.id) {
+                for source in all_channels(req).filter(|source| {
+                    potential_sends(source).iter().any(|(bus, amount)| {
+                        *bus == channel.id && *amount > vibez_core::routing::SEND_SILENCE_THRESHOLD
+                    })
+                }) {
+                    require(&mut taps, source.id, SourceTap::AfterFader);
+                }
+            }
+        }
+        if taps == before {
+            break;
+        }
+    }
+    taps
 }

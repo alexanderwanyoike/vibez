@@ -94,7 +94,6 @@ pub(in crate::app) async fn bounce_async(
         path: wav_path,
         clip_name,
         insert_position_samples,
-        warnings: result.warnings,
     })
 }
 
@@ -173,5 +172,88 @@ mod export_tests {
             0,
             "failed export must clean up every temporary file"
         );
+    }
+    #[tokio::test]
+    async fn missing_detector_media_fails_bounce_without_committing_audio() {
+        use vibez_core::{
+            effect::{EffectInfo, EffectType},
+            id::{ClipId, EffectId},
+            routing::{ExternalInputId, SidechainAssignment, SourceTap},
+        };
+        let kick = TrackId::new();
+        let bass = TrackId::new();
+        let channel = |id, name: &str| TrackInfo {
+            id,
+            name: name.into(),
+            gain: DEFAULT_TRACK_GAIN,
+            pan: DEFAULT_TRACK_PAN,
+            mute: false,
+            solo: false,
+            audio_input_route: Default::default(),
+            input_monitoring: Default::default(),
+            swing_offset: None,
+            effects: vec![],
+            kind: TrackKind::Audio,
+            color_index: 0,
+            instrument: None,
+            native_instrument: None,
+            plugin_instrument: None,
+            automation: vec![],
+            sends: vec![],
+        };
+        let mut receiver = channel(bass, "Bass");
+        receiver.effects.push(EffectInfo {
+            id: EffectId::new(),
+            effect_type: EffectType::Compressor,
+            bypass: false,
+            params: vec![],
+            plugin: None,
+            inactive_sidechains: vec![],
+            sidechains: vec![SidechainAssignment {
+                input_id: ExternalInputId(0),
+                input_name: "Sidechain".into(),
+                source: kick,
+                source_name: "Kick".into(),
+                tap: SourceTap::BeforeEffects,
+            }],
+        });
+        let clip = serde_json::from_value(
+            serde_json::json!({"id": ClipId::new(), "track_id": kick, "name": "Missing ghost kick",
+            "position": 0, "source_offset": 0, "duration": 128, "file_path": "/missing/kick.wav"}),
+        )
+        .unwrap();
+        let request = vibez_engine::render::BounceRequest {
+            tracks: vec![channel(kick, "Kick"), receiver],
+            master: None,
+            buses: vec![],
+            audio_clips: vec![clip],
+            note_clips: vec![],
+            clip_audio: Default::default(),
+            sampler_audio: Default::default(),
+            drum_pad_audio: Default::default(),
+            mode: vibez_engine::render::BounceMode::Track(bass),
+            range_samples: (0, 128),
+            bpm: 120.0,
+            sample_rate: 44_100,
+            swing: vibez_core::perform::SwingAmount::STRAIGHT,
+        };
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("missing-detector.wav");
+        let (returned, rx) = std::sync::mpsc::channel();
+        let error = bounce_async(
+            request,
+            Default::default(),
+            path.clone(),
+            "Bass".into(),
+            0,
+            Arc::new(std::sync::atomic::AtomicU8::new(0)),
+            returned,
+        )
+        .await
+        .unwrap_err();
+        drop(rx.recv().unwrap());
+        assert!(error.contains("Missing ghost kick"), "{error}");
+        assert!(!path.exists());
+        assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 0);
     }
 }

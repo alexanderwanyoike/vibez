@@ -183,16 +183,10 @@ impl App {
             .insert(ArrangementSelection::AudioClip { track_id, clip_id });
         self.mark_project_dirty();
 
-        let warnings_note = if outcome.warnings.is_empty() {
-            String::new()
-        } else {
-            format!(" ({} warning(s))", outcome.warnings.len())
-        };
         self.state.status_text = format!(
-            "Bounced '{}' to {}{}",
+            "Bounced '{}' to {}",
             outcome.clip_name,
-            outcome.path.display(),
-            warnings_note
+            outcome.path.display()
         );
     }
 

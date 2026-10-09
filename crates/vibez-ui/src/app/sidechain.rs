@@ -1,20 +1,17 @@
 use super::*;
 
+#[cfg(test)]
+thread_local! { pub(super) static MODEL_BUILDS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }
+
 impl App {
     pub(super) fn sidechain_model(&self) -> Vec<vibez_core::routing::RoutingChannel> {
+        #[cfg(test)]
+        MODEL_BUILDS.with(|count| count.set(count.get() + 1));
         let mut channels = crate::domains::sidechain::routing_channels(
             &self.state.project_tracks.tracks,
             &self.state.project_tracks.master,
             &self.state.project_tracks.buses,
         );
-        // Send level comes from the channel at render time; only topology
-        // changes should replace prepared buffers.
-        for channel in &mut channels {
-            channel.sends.retain(|(_, amount)| *amount > 0.0005);
-            for (_, amount) in &mut channel.sends {
-                *amount = 1.0;
-            }
-        }
         let timelines = std::iter::once(self.state.arrangement.timeline.as_ref())
             .chain(
                 self.state
@@ -35,32 +32,30 @@ impl App {
         for timeline in timelines {
             for channel in &mut channels {
                 if let Some(content) = timeline.get(channel.id) {
-                    for lane in &content.automation {
-                        if let vibez_core::automation::AutomationTarget::Send { bus_id } =
-                            lane.target
-                        {
-                            reserve_send(channel, bus_id);
-                        }
-                    }
+                    vibez_core::routing::reserve_automated_sends(
+                        &mut channel.sends,
+                        &content.automation,
+                    );
                 }
+            }
+        }
+        for channel in &mut channels {
+            channel
+                .sends
+                .retain(|(_, amount)| *amount > vibez_core::routing::SEND_SILENCE_THRESHOLD);
+            for (_, amount) in &mut channel.sends {
+                *amount = 1.0;
             }
         }
         channels
     }
 
-    pub(super) fn reject_invalid_routing_edit(
-        &mut self,
-        message: &crate::message::Message,
-    ) -> bool {
-        use crate::domains::{
-            arrangement::ArrangementMsg, automation::AutomationMsg, devices::DevicesMsg,
-        };
+    pub(super) fn reject_invalid_send_edit(&mut self, message: &crate::message::Message) -> bool {
+        use crate::domains::{arrangement::ArrangementMsg, automation::AutomationMsg};
         use vibez_core::automation::AutomationTarget;
         if !matches!(
             message,
-            Message::Devices(
-                DevicesMsg::SetSidechainSource { .. } | DevicesMsg::SetSidechainTap { .. }
-            ) | Message::Arrangement(ArrangementMsg::SetSend { .. })
+            Message::Arrangement(ArrangementMsg::SetSend { .. })
                 | Message::Automation(AutomationMsg::AddLane {
                     target: AutomationTarget::Send { .. },
                     ..
@@ -90,52 +85,52 @@ impl App {
                 return true;
             }
         }
-        if !matches!(message, Message::Devices(_)) {
-            return false;
-        }
-        let mut tracks = self.state.project_tracks.tracks.clone();
-        let mut master = self.state.project_tracks.master.clone();
-        let mut buses = self.state.project_tracks.buses.clone();
-        let changed = match message {
-            Message::Devices(DevicesMsg::SetSidechainSource {
-                track_id,
-                effect_id,
-                input_id,
-                source,
-            }) => Some(crate::domains::sidechain::edit_source_with_model(
-                &mut tracks,
-                &mut master,
-                &mut buses,
-                (*track_id, *effect_id, *input_id),
-                *source,
-                &model,
-            )),
-            Message::Devices(DevicesMsg::SetSidechainTap {
-                track_id,
-                effect_id,
-                input_id,
-                tap,
-            }) => Some(crate::domains::sidechain::edit_tap_with_model(
-                &mut tracks,
-                &mut master,
-                &mut buses,
-                (*track_id, *effect_id, *input_id),
-                *tap,
-                &model,
-            )),
-            _ => None,
-        };
-        if changed == Some(false) {
-            return true;
-        }
-        if changed.is_some() {
-            self.state.devices.last_routing = Some(model);
-        }
         false
     }
 
     pub(super) fn sync_sidechain_routing(&mut self) {
-        let mut channels = self.sidechain_model();
+        if self
+            .sidechain_sync_inputs
+            .as_ref()
+            .is_some_and(|inputs| inputs.matches(&self.state))
+        {
+            return;
+        }
+        let model = self.sidechain_model();
+        let mut channels = match vibez_core::routing::resolve_restored(
+            &model,
+            self.state.devices.last_routing.as_deref(),
+        ) {
+            Ok(channels) => channels,
+            Err(error) => {
+                self.state.status_text = format!("Routing unavailable: {error:?}");
+                self.sidechain_sync_inputs =
+                    Some(super::sidechain_sync::RoutingInputs::capture(&self.state));
+                return;
+            }
+        };
+        let changed_activation = channels.iter().zip(&model).any(|(active, original)| {
+            active
+                .effects
+                .iter()
+                .zip(&original.effects)
+                .any(|(a, b)| a.inactive_inputs != b.inactive_inputs)
+        });
+        if changed_activation {
+            let tracks = Arc::make_mut(&mut self.state.project_tracks);
+            for channel in &channels {
+                if let Some(track) = tracks.find_mut(channel.id) {
+                    for effect in &channel.effects {
+                        if let Some(slot) =
+                            track.effects.iter_mut().find(|slot| slot.id == effect.id)
+                        {
+                            slot.inactive_sidechains.clone_from(&effect.inactive_inputs);
+                        }
+                    }
+                }
+            }
+            self.mark_project_dirty();
+        }
         let names: std::collections::HashMap<_, _> = self
             .state
             .project_tracks
@@ -182,6 +177,8 @@ impl App {
             }
         }
         if self.state.devices.last_routing.as_ref() == Some(&channels) {
+            self.sidechain_sync_inputs =
+                Some(super::sidechain_sync::RoutingInputs::capture(&self.state));
             return;
         }
         match vibez_engine::routing::PreparedRouting::prepare(&channels, 4096) {
@@ -193,6 +190,8 @@ impl App {
             }
             Err(error) => self.state.status_text = error,
         }
+        self.sidechain_sync_inputs =
+            Some(super::sidechain_sync::RoutingInputs::capture(&self.state));
     }
 }
 

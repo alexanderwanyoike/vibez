@@ -1,7 +1,5 @@
 //! UI-thread consumption of audio-engine events.
 
-use std::sync::Arc;
-
 use vibez_engine::events::EngineEvent;
 
 use crate::domains::perform::CapturedTimelineSource;
@@ -148,9 +146,10 @@ impl App {
                     EngineEvent::Metering { peak_l, peak_r, .. } => {
                         self.state.peak_l = peak_l.max(self.state.peak_l * 0.85);
                         self.state.peak_r = peak_r.max(self.state.peak_r * 0.85);
-                        let project_tracks = Arc::make_mut(&mut self.state.project_tracks);
-                        project_tracks.master.peak_l = self.state.peak_l;
-                        project_tracks.master.peak_r = self.state.peak_r;
+                        self.track_meter_peaks.insert(
+                            vibez_core::id::TrackId::MASTER,
+                            (self.state.peak_l, self.state.peak_r),
+                        );
                     }
                     EngineEvent::ClipQueued {
                         request_id,
@@ -301,10 +300,9 @@ impl App {
                         peak_l,
                         peak_r,
                     } => {
-                        if let Some(track) = self.state.find_track_mut(track_id) {
-                            track.peak_l = peak_l.max(track.peak_l * 0.85);
-                            track.peak_r = peak_r.max(track.peak_r * 0.85);
-                        }
+                        let peaks = self.track_meter_peaks.entry(track_id).or_default();
+                        peaks.0 = peak_l.max(peaks.0 * 0.85);
+                        peaks.1 = peak_r.max(peaks.1 * 0.85);
                     }
                     EngineEvent::TrackNoteActivity { .. } => {}
                     EngineEvent::TrackMuteChanged {

@@ -15,8 +15,8 @@ pub fn representative_document() -> ProjectDocumentV1 {
         params: vec![0.05, 0.2, 0.8, 0.4],
     });
     track.effects.push(EffectInfo {
+        inactive_sidechains: Default::default(),
         sidechains: Default::default(),
-
         id: EffectId::new(),
         effect_type: EffectType::Gain,
         bypass: false,
