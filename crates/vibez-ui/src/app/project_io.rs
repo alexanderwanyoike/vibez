@@ -34,6 +34,7 @@ impl App {
     pub(super) fn clear_project_runtime(&mut self) {
         self.state.devices.last_routing = None;
         self.state.devices.sidechain_meters.clear();
+        self.state.devices.sidechain_choices.clear();
         // Invalidate any Browser import still preparing (e.g. in its
         // WARP stage) so it cannot add a clip to the reset project.
         self.browser_import_request.cancel();

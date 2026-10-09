@@ -186,6 +186,8 @@ impl App {
         }
         match vibez_engine::routing::PreparedRouting::prepare(&channels, 4096) {
             Ok(prepared) => {
+                self.state.devices.sidechain_choices =
+                    crate::domains::sidechain::input_source_choices(&channels);
                 self.send_command(EngineCommand::SetRouting(prepared));
                 self.state.devices.last_routing = Some(channels);
             }
