@@ -81,6 +81,7 @@ pub(super) fn render_offline_inner(
         routing,
     });
     let mut position = 0u64;
+    let mut failure = None;
     while position < end {
         let block = (end - position).min(BLOCK_FRAMES as u64) as usize;
         let output = &mut scratch[..block * CHANNELS];
@@ -90,6 +91,24 @@ pub(super) fn render_offline_inner(
             output,
             selected_track.map(|id| (id, selected_output)),
         );
+        if let Some((track_id, effect_id, reason)) = engine.take_device_processing_error() {
+            let channel = dependencies::all_channels(req).find(|channel| channel.id == track_id);
+            let channel_name = channel.map_or("Master", |channel| channel.name.as_str());
+            let device_name = channel
+                .and_then(|channel| match effect_id {
+                    Some(id) => channel
+                        .effects
+                        .iter()
+                        .find(|effect| effect.id == id)
+                        .and_then(|effect| effect.plugin.as_ref()),
+                    None => channel.plugin_instrument.as_ref(),
+                })
+                .map_or("Device", |device| device.name.as_str());
+            failure = Some(format!(
+                "{device_name} on channel '{channel_name}' failed: {reason}"
+            ));
+            break;
+        }
         if position + block as u64 > start {
             let first_frame = start.saturating_sub(position) as usize;
             let written = if selected_track.is_some() {
@@ -112,6 +131,9 @@ pub(super) fn render_offline_inner(
     if let Some(plugins) = plugins {
         let (mut tracks, mut buses, mut master) = engine.take_offline_channels();
         prepare::return_plugins(req, plugins, &mut tracks, &mut buses, &mut master);
+    }
+    if let Some(error) = failure {
+        return Err(error);
     }
     progress(100);
     Ok(BounceResult {
