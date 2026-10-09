@@ -90,7 +90,7 @@ impl AudioEngine {
                     } else {
                         block.pos
                     };
-                    track.apply_automation(pos as f64 / tempo.samples_per_beat());
+                    track.apply_graph_automation(pos as f64 / tempo.samples_per_beat());
                     let id = track.id;
                     let section = self.active_section;
                     let events = &mut self.event_tx;
@@ -176,7 +176,7 @@ impl AudioEngine {
                         self.buses.iter_mut().find(|bus| bus.id == node.channel)
                     };
                     if let Some(track) = track {
-                        track.apply_automation(block.pos as f64 / tempo.samples_per_beat());
+                        track.apply_graph_automation(block.pos as f64 / tempo.samples_per_beat());
                     }
                     for edge in prepared.graph.edges.iter().filter(|edge| edge.to == index) {
                         let audible = match edge.kind {
@@ -223,10 +223,19 @@ impl AudioEngine {
                                 .iter()
                                 .chain(self.buses.iter())
                                 .find(|track| track.id == prepared.graph.nodes[edge.from].channel)
-                                .and_then(|track| {
-                                    track.sends.iter().find(|(bus, _)| *bus == node.channel)
-                                })
-                                .map_or(0.0, |(_, gain)| *gain),
+                                .map_or(0.0, |track| {
+                                    let pos = if self.clip_performance {
+                                        track.active_clip.map_or(0, |clip| {
+                                            clip.position.saturating_add(block.pos)
+                                        })
+                                    } else {
+                                        block.pos
+                                    };
+                                    track.effective_send_amount(
+                                        node.channel,
+                                        pos as f64 / tempo.samples_per_beat(),
+                                    )
+                                }),
                             _ => 1.0,
                         };
                         for sample in 0..len {

@@ -394,3 +394,50 @@ fn saturated_meter_ring_retains_and_eventually_returns_old_plans() {
     }
     assert_eq!(returned, vec![8, 16]);
 }
+
+#[test]
+fn prepared_send_edges_follow_automation_without_mutating_manual_sends() {
+    use vibez_core::automation::{AutomationLane, AutomationPoint, AutomationTarget};
+    let (mut engine, mut commands, _events) = AudioEngine::new();
+    let source = TrackId::new();
+    let bus = TrackId::new();
+    commands
+        .push(EngineCommand::AddTrack(source, "Source".into()))
+        .unwrap();
+    commands
+        .push(EngineCommand::AddBus(bus, "Return".into()))
+        .unwrap();
+    commands.push(clip(source, 1.0)).unwrap();
+    let mut lane = AutomationLane::new(AutomationTarget::Send { bus_id: bus });
+    lane.points.push(AutomationPoint {
+        beat: 0.0,
+        value: 0.5,
+        curve: 0.0,
+    });
+    commands
+        .push(EngineCommand::SetAutomationLane {
+            track_id: source,
+            lane,
+        })
+        .unwrap();
+    let mut source_model = channel(source);
+    source_model.sends.push((bus, 1.0));
+    let mut bus_model = channel(bus);
+    bus_model.is_bus = true;
+    commands
+        .push(EngineCommand::SetRouting(
+            crate::routing::PreparedRouting::prepare(
+                &[source_model, bus_model, channel(TrackId::MASTER)],
+                64,
+            )
+            .unwrap(),
+        ))
+        .unwrap();
+    commands.push(EngineCommand::Play).unwrap();
+    let mut output = [0.0; 32];
+    engine.process(&mut output, 2);
+    assert!(output
+        .iter()
+        .all(|sample| (*sample - 1.5 * std::f32::consts::FRAC_1_SQRT_2).abs() < 1e-6));
+    assert!(engine.tracks()[0].sends.is_empty());
+}
