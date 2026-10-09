@@ -292,7 +292,8 @@ pub fn view_effect_slot<'a>(
         ),
         None => (body, card_w),
     };
-    let latency = crate::domains::compensation::latency_label(effect.latency_samples, sample_rate);
+    let latency =
+        crate::domains::device_latency::latency_label(effect.latency_samples, sample_rate);
     let card = column![
         title_bar,
         container(text(latency).size(9).color(th::text_dim())).padding([2, 6]),

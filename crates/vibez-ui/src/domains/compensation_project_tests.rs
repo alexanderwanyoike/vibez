@@ -1,4 +1,5 @@
 use super::*;
+use crate::domains::device_latency::latency_label;
 use crate::state::{AppState, UiEffect};
 use std::sync::Arc;
 use vibez_core::{effect::EffectType, id::EffectId, midi::TrackKind, track::AudioInputRoute};

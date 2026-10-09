@@ -50,7 +50,7 @@ impl App {
                 match track.instrument_kind {
                     Some(vibez_core::midi::InstrumentKind::Sampler) => {
                         let card = self.view_sampler_device(track_id, track, track_color);
-                        let latency = crate::domains::compensation::latency_label(
+                        let latency = crate::domains::device_latency::latency_label(
                             track.instrument_latency_samples,
                             self.state.transport.sample_rate,
                         );
@@ -59,7 +59,7 @@ impl App {
                     }
                     Some(vibez_core::midi::InstrumentKind::DrumRack) => {
                         let card = self.view_drum_rack_device(track_id, track, track_color);
-                        let latency = crate::domains::compensation::latency_label(
+                        let latency = crate::domains::device_latency::latency_label(
                             track.instrument_latency_samples,
                             self.state.transport.sample_rate,
                         );
@@ -68,7 +68,7 @@ impl App {
                     }
                     _ => {
                         let synth_card = self.view_synth_device(track_id, track, track_color);
-                        let latency = crate::domains::compensation::latency_label(
+                        let latency = crate::domains::device_latency::latency_label(
                             track.instrument_latency_samples,
                             self.state.transport.sample_rate,
                         );
@@ -449,7 +449,7 @@ impl App {
 
         let title = Self::device_title_bar(title_row);
 
-        let latency = crate::domains::compensation::latency_label(
+        let latency = crate::domains::device_latency::latency_label(
             track.instrument_latency_samples,
             self.state.transport.sample_rate,
         );
