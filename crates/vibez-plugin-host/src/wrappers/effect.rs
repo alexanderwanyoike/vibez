@@ -43,6 +43,7 @@ impl AudioEffect for PluginEffectWrapper {
         }));
         if result.is_err() {
             buffer.fill(0.0);
+            self.processing_error = Some("Plugin panicked during external-input processing");
         }
     }
 

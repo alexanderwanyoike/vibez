@@ -50,7 +50,7 @@ fn loadable_formats_deliver_declared_inputs_at_short_and_variable_blocks() {
                 .iter()
                 .map(|input| input.channels)
                 .collect::<Vec<_>>(),
-            vec![1, 2, 6]
+            vec![1, 2]
         );
         for frames in [1, 7, 31, 64] {
             let mut main = vec![0.1; frames * 2];
@@ -130,6 +130,7 @@ fn production_engine_routes_two_independent_plugin_inputs_without_audible_source
             .unwrap();
         let mut receiving = channel(receiver);
         receiving.effects.push(RoutingEffect {
+            inactive_inputs: Vec::new(),
             id: effect,
             inputs: inputs.clone(),
             assignments: vec![
@@ -246,6 +247,7 @@ fn loaded_instrument_formats_trigger_other_formats_on_the_exact_note_frames() {
                 .unwrap();
             let mut bass_model = channel(bass);
             bass_model.effects.push(RoutingEffect {
+                inactive_inputs: Vec::new(),
                 id: effect,
                 inputs: vec![input.clone()],
                 assignments: vec![SidechainAssignment {
@@ -412,6 +414,7 @@ fn all_instrument_source_formats_feed_builtins_and_hosted_receivers() {
             let input = &inputs[0];
             let mut bass_model = channel(bass);
             bass_model.effects.push(RoutingEffect {
+                inactive_inputs: Vec::new(),
                 id: effect,
                 inputs: inputs.clone(),
                 assignments: vec![SidechainAssignment {
@@ -507,12 +510,14 @@ fn source_taps_apply_effects_fader_and_pan_only_at_the_requested_stage() {
                 .unwrap();
             let mut source = channel(ghost);
             source.effects.push(RoutingEffect {
+                inactive_inputs: Vec::new(),
                 id: gain_effect,
                 inputs: vec![],
                 assignments: vec![],
             });
             let mut receiver = channel(bass);
             receiver.effects.push(RoutingEffect {
+                inactive_inputs: Vec::new(),
                 id: effect,
                 inputs: vec![input.clone()],
                 assignments: vec![SidechainAssignment {

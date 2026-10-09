@@ -1,21 +1,28 @@
+//! VST3 process layouts, event adapters and parameter ABI objects.
+
+use vibez_core::effect::ParamDescriptor;
+use vst3::Steinberg::Vst::{
+    Event as VstEvent, Event__type0 as VstEventData, NoteOffEvent, NoteOnEvent,
+};
+
 // ── Stub IParameterChanges ──
 // DPF-based plugins assert on null input/outputParameterChanges and
 // JUCE tolerates but prefers them. This is a stateless, static COM
 // object: no parameters in, additions rejected.
 
 #[repr(C)]
-struct ParamChangesVtbl {
-    query_interface: unsafe extern "system" fn(
+pub(super) struct ParamChangesVtbl {
+    pub(super) query_interface: unsafe extern "system" fn(
         *mut std::ffi::c_void,
         *const u8,
         *mut *mut std::ffi::c_void,
     ) -> i32,
-    add_ref: unsafe extern "system" fn(*mut std::ffi::c_void) -> u32,
-    release: unsafe extern "system" fn(*mut std::ffi::c_void) -> u32,
-    get_parameter_count: unsafe extern "system" fn(*mut std::ffi::c_void) -> i32,
-    get_parameter_data:
+    pub(super) add_ref: unsafe extern "system" fn(*mut std::ffi::c_void) -> u32,
+    pub(super) release: unsafe extern "system" fn(*mut std::ffi::c_void) -> u32,
+    pub(super) get_parameter_count: unsafe extern "system" fn(*mut std::ffi::c_void) -> i32,
+    pub(super) get_parameter_data:
         unsafe extern "system" fn(*mut std::ffi::c_void, i32) -> *mut std::ffi::c_void,
-    add_parameter_data: unsafe extern "system" fn(
+    pub(super) add_parameter_data: unsafe extern "system" fn(
         *mut std::ffi::c_void,
         *const u32,
         *mut i32,
@@ -63,18 +70,20 @@ unsafe extern "system" fn pc_add_data(
 // IParamValueQueue stub: identifies as parameter 0, holds no points,
 // accepts (and discards) added points.
 #[repr(C)]
-struct ParamQueueVtbl {
-    query_interface: unsafe extern "system" fn(
+pub(super) struct ParamQueueVtbl {
+    pub(super) query_interface: unsafe extern "system" fn(
         *mut std::ffi::c_void,
         *const u8,
         *mut *mut std::ffi::c_void,
     ) -> i32,
-    add_ref: unsafe extern "system" fn(*mut std::ffi::c_void) -> u32,
-    release: unsafe extern "system" fn(*mut std::ffi::c_void) -> u32,
-    get_parameter_id: unsafe extern "system" fn(*mut std::ffi::c_void) -> u32,
-    get_point_count: unsafe extern "system" fn(*mut std::ffi::c_void) -> i32,
-    get_point: unsafe extern "system" fn(*mut std::ffi::c_void, i32, *mut i32, *mut f64) -> i32,
-    add_point: unsafe extern "system" fn(*mut std::ffi::c_void, i32, f64, *mut i32) -> i32,
+    pub(super) add_ref: unsafe extern "system" fn(*mut std::ffi::c_void) -> u32,
+    pub(super) release: unsafe extern "system" fn(*mut std::ffi::c_void) -> u32,
+    pub(super) get_parameter_id: unsafe extern "system" fn(*mut std::ffi::c_void) -> u32,
+    pub(super) get_point_count: unsafe extern "system" fn(*mut std::ffi::c_void) -> i32,
+    pub(super) get_point:
+        unsafe extern "system" fn(*mut std::ffi::c_void, i32, *mut i32, *mut f64) -> i32,
+    pub(super) add_point:
+        unsafe extern "system" fn(*mut std::ffi::c_void, i32, f64, *mut i32) -> i32,
 }
 
 unsafe extern "system" fn pq_parameter_id(_this: *mut std::ffi::c_void) -> u32 {
@@ -103,7 +112,7 @@ unsafe extern "system" fn pq_add_point(
     0
 }
 
-static PARAM_QUEUE_VTBL: ParamQueueVtbl = ParamQueueVtbl {
+pub(super) static PARAM_QUEUE_VTBL: ParamQueueVtbl = ParamQueueVtbl {
     query_interface: pc_query_interface,
     add_ref: pc_add_ref,
     release: pc_release,
@@ -114,15 +123,15 @@ static PARAM_QUEUE_VTBL: ParamQueueVtbl = ParamQueueVtbl {
 };
 
 #[repr(C)]
-struct ParamQueueStub {
-    vtbl: *const ParamQueueVtbl,
+pub(super) struct ParamQueueStub {
+    pub(super) vtbl: *const ParamQueueVtbl,
 }
 unsafe impl Sync for ParamQueueStub {}
-static PARAM_QUEUE_STUB: ParamQueueStub = ParamQueueStub {
+pub(super) static PARAM_QUEUE_STUB: ParamQueueStub = ParamQueueStub {
     vtbl: &PARAM_QUEUE_VTBL,
 };
 
-static PARAM_CHANGES_VTBL: ParamChangesVtbl = ParamChangesVtbl {
+pub(super) static PARAM_CHANGES_VTBL: ParamChangesVtbl = ParamChangesVtbl {
     query_interface: pc_query_interface,
     add_ref: pc_add_ref,
     release: pc_release,
@@ -132,15 +141,15 @@ static PARAM_CHANGES_VTBL: ParamChangesVtbl = ParamChangesVtbl {
 };
 
 #[repr(C)]
-struct ParamChangesStub {
-    vtbl: *const ParamChangesVtbl,
+pub(super) struct ParamChangesStub {
+    pub(super) vtbl: *const ParamChangesVtbl,
 }
 unsafe impl Sync for ParamChangesStub {}
-static PARAM_CHANGES_STUB: ParamChangesStub = ParamChangesStub {
+pub(super) static PARAM_CHANGES_STUB: ParamChangesStub = ParamChangesStub {
     vtbl: &PARAM_CHANGES_VTBL,
 };
 
-fn param_changes_stub() -> *mut std::ffi::c_void {
+pub(super) fn param_changes_stub() -> *mut std::ffi::c_void {
     &PARAM_CHANGES_STUB as *const ParamChangesStub as *mut std::ffi::c_void
 }
 
@@ -149,10 +158,10 @@ fn param_changes_stub() -> *mut std::ffi::c_void {
 // retain the pointer past the call.
 
 #[repr(C)]
-struct LiveParamQueue {
-    vtbl: *const ParamQueueVtbl,
-    id: u32,
-    value: f64,
+pub(super) struct LiveParamQueue {
+    pub(super) vtbl: *const ParamQueueVtbl,
+    pub(super) id: u32,
+    pub(super) value: f64,
 }
 
 unsafe extern "system" fn lpq_parameter_id(this: *mut std::ffi::c_void) -> u32 {
@@ -181,7 +190,7 @@ unsafe extern "system" fn lpq_get_point(
     0
 }
 
-static LIVE_PARAM_QUEUE_VTBL: ParamQueueVtbl = ParamQueueVtbl {
+pub(super) static LIVE_PARAM_QUEUE_VTBL: ParamQueueVtbl = ParamQueueVtbl {
     query_interface: pc_query_interface,
     add_ref: pc_add_ref,
     release: pc_release,
@@ -192,10 +201,10 @@ static LIVE_PARAM_QUEUE_VTBL: ParamQueueVtbl = ParamQueueVtbl {
 };
 
 #[repr(C)]
-struct LiveParamChanges {
-    vtbl: *const ParamChangesVtbl,
-    queues: *const LiveParamQueue,
-    len: usize,
+pub(super) struct LiveParamChanges {
+    pub(super) vtbl: *const ParamChangesVtbl,
+    pub(super) queues: *const LiveParamQueue,
+    pub(super) len: usize,
 }
 
 unsafe extern "system" fn lpc_count(this: *mut std::ffi::c_void) -> i32 {
@@ -212,7 +221,7 @@ unsafe extern "system" fn lpc_get_data(
     unsafe { changes.queues.add(index as usize) as *mut std::ffi::c_void }
 }
 
-static LIVE_PARAM_CHANGES_VTBL: ParamChangesVtbl = ParamChangesVtbl {
+pub(super) static LIVE_PARAM_CHANGES_VTBL: ParamChangesVtbl = ParamChangesVtbl {
     query_interface: pc_query_interface,
     add_ref: pc_add_ref,
     release: pc_release,
@@ -225,7 +234,7 @@ static LIVE_PARAM_CHANGES_VTBL: ParamChangesVtbl = ParamChangesVtbl {
 /// Vtable slots: FUnknown 0-2, IPluginBase 3-4, then
 /// setComponentState(5) setState(6) getState(7) getParameterCount(8)
 /// getParameterInfo(9) ... getParamNormalized(14).
-fn query_vst3_params(
+pub(super) fn query_vst3_params(
     controller: *mut std::ffi::c_void,
 ) -> (Vec<ParamDescriptor>, Vec<f32>, Vec<u32>) {
     type GetCountFn = unsafe extern "system" fn(*mut std::ffi::c_void) -> i32;
@@ -277,26 +286,17 @@ fn query_vst3_params(
     (descriptors, values, ids)
 }
 
-fn char16_to_string(chars: &[u16]) -> String {
+pub(super) fn char16_to_string(chars: &[u16]) -> String {
     let units: Vec<u16> = chars.iter().take_while(|&&c| c != 0).copied().collect();
     String::from_utf16_lossy(&units)
 }
 
-/// Output of [`Vst3PluginInstance::load_partial`]: a dlopen'd module
-/// with no plugin code executed yet.
-pub struct PartialVst3Plugin {
-    path: std::path::PathBuf,
-    lib: libloading::Library,
-    class_uid: String,
-    is_instrument: bool,
-}
-
 #[allow(dead_code)]
-struct NoteEvent {
-    is_on: bool,
-    pitch: u8,
-    velocity: u8,
-    frame_offset: u32,
+pub(super) struct NoteEvent {
+    pub(super) is_on: bool,
+    pub(super) pitch: u8,
+    pub(super) velocity: u8,
+    pub(super) frame_offset: u32,
 }
 
 // ── Live IEventList (input) ──
@@ -304,47 +304,48 @@ struct NoteEvent {
 // COM object synchronously and must not retain it after process() returns.
 
 #[repr(C)]
-struct EventListVtbl {
-    query_interface: unsafe extern "system" fn(
+pub(super) struct EventListVtbl {
+    pub(super) query_interface: unsafe extern "system" fn(
         *mut std::ffi::c_void,
         *const u8,
         *mut *mut std::ffi::c_void,
     ) -> i32,
-    add_ref: unsafe extern "system" fn(*mut std::ffi::c_void) -> u32,
-    release: unsafe extern "system" fn(*mut std::ffi::c_void) -> u32,
-    get_event_count: unsafe extern "system" fn(*mut std::ffi::c_void) -> i32,
-    get_event: unsafe extern "system" fn(*mut std::ffi::c_void, i32, *mut VstEvent) -> i32,
-    add_event: unsafe extern "system" fn(*mut std::ffi::c_void, *mut VstEvent) -> i32,
+    pub(super) add_ref: unsafe extern "system" fn(*mut std::ffi::c_void) -> u32,
+    pub(super) release: unsafe extern "system" fn(*mut std::ffi::c_void) -> u32,
+    pub(super) get_event_count: unsafe extern "system" fn(*mut std::ffi::c_void) -> i32,
+    pub(super) get_event:
+        unsafe extern "system" fn(*mut std::ffi::c_void, i32, *mut VstEvent) -> i32,
+    pub(super) add_event: unsafe extern "system" fn(*mut std::ffi::c_void, *mut VstEvent) -> i32,
 }
 
 #[repr(C)]
-struct LiveEventList<'a> {
-    vtbl: *const EventListVtbl,
-    events: &'a [NoteEvent],
+pub(super) struct LiveEventList<'a> {
+    pub(super) vtbl: *const EventListVtbl,
+    pub(super) events: &'a [NoteEvent],
 }
 
 impl<'a> LiveEventList<'a> {
-    fn new(events: &'a [NoteEvent]) -> Self {
+    pub(super) fn new(events: &'a [NoteEvent]) -> Self {
         Self {
             vtbl: &LIVE_EVENT_LIST_VTBL,
             events,
         }
     }
 
-    fn event_count(&self) -> usize {
+    pub(super) fn event_count(&self) -> usize {
         self.events.len()
     }
 
-    fn event(&self, index: usize) -> Option<VstEvent> {
+    pub(super) fn event(&self, index: usize) -> Option<VstEvent> {
         self.events.get(index).map(vst_event)
     }
 
-    fn as_raw_mut(&mut self) -> *mut std::ffi::c_void {
+    pub(super) fn as_raw_mut(&mut self) -> *mut std::ffi::c_void {
         self as *mut Self as *mut std::ffi::c_void
     }
 }
 
-fn vst_event(event: &NoteEvent) -> VstEvent {
+pub(super) fn vst_event(event: &NoteEvent) -> VstEvent {
     let sample_offset = event.frame_offset.min(i32::MAX as u32) as i32;
     if event.is_on {
         VstEvent {
@@ -411,7 +412,7 @@ unsafe extern "system" fn event_list_add(
     1
 }
 
-static LIVE_EVENT_LIST_VTBL: EventListVtbl = EventListVtbl {
+pub(super) static LIVE_EVENT_LIST_VTBL: EventListVtbl = EventListVtbl {
     query_interface: pc_query_interface,
     add_ref: pc_add_ref,
     release: pc_release,
@@ -421,52 +422,52 @@ static LIVE_EVENT_LIST_VTBL: EventListVtbl = EventListVtbl {
 };
 
 // VST3 IComponent IID: {E831FF31-F2D5-4301-928E-BBEE25697802}
-const ICOMPONENT_IID: [u8; 16] = crate::vst3_tuid([
+pub(super) const ICOMPONENT_IID: [u8; 16] = crate::vst3_tuid([
     0xE8, 0x31, 0xFF, 0x31, 0xF2, 0xD5, 0x43, 0x01, 0x92, 0x8E, 0xBB, 0xEE, 0x25, 0x69, 0x78, 0x02,
 ]);
 
 // VST3 IAudioProcessor IID: {42043F99-B7DA-453C-A569-E79D9AAEC33D}
-const IAUDIOPROCESSOR_IID: [u8; 16] = crate::vst3_tuid([
+pub(super) const IAUDIOPROCESSOR_IID: [u8; 16] = crate::vst3_tuid([
     0x42, 0x04, 0x3F, 0x99, 0xB7, 0xDA, 0x45, 0x3C, 0xA5, 0x69, 0xE7, 0x9D, 0x9A, 0xAE, 0xC3, 0x3D,
 ]);
 
 // VST3 IConnectionPoint IID: {70A4156F-6E6E-4026-9891-48BFAA60D8D1}
-const ICONNECTIONPOINT_IID: [u8; 16] = crate::vst3_tuid([
+pub(super) const ICONNECTIONPOINT_IID: [u8; 16] = crate::vst3_tuid([
     0x70, 0xA4, 0x15, 0x6F, 0x6E, 0x6E, 0x40, 0x26, 0x98, 0x91, 0x48, 0xBF, 0xAA, 0x60, 0xD8, 0xD1,
 ]);
 
 /// Raw ProcessSetup matching VST3 C layout.
 #[repr(C)]
-struct ProcessSetupRaw {
-    process_mode: i32,
-    symbolic_sample_size: i32,
-    max_samples_per_block: i32,
-    sample_rate: f64,
+pub(super) struct ProcessSetupRaw {
+    pub(super) process_mode: i32,
+    pub(super) symbolic_sample_size: i32,
+    pub(super) max_samples_per_block: i32,
+    pub(super) sample_rate: f64,
 }
 
 /// Raw AudioBusBuffers matching VST3 C layout.
 #[repr(C)]
-struct AudioBusBuffersRaw {
-    num_channels: i32,
-    silence_flags: u64,
-    channel_buffers32: *mut *mut f32,
+pub(super) struct AudioBusBuffersRaw {
+    pub(super) num_channels: i32,
+    pub(super) silence_flags: u64,
+    pub(super) channel_buffers32: *mut *mut f32,
 }
 
 /// Raw ProcessData matching VST3 C layout.
 #[repr(C)]
-struct ProcessDataRaw {
-    process_mode: i32,
-    symbolic_sample_size: i32,
-    num_samples: i32,
-    num_inputs: i32,
-    num_outputs: i32,
-    inputs: *mut AudioBusBuffersRaw,
-    outputs: *mut AudioBusBuffersRaw,
-    input_parameter_changes: *mut std::ffi::c_void,
-    output_parameter_changes: *mut std::ffi::c_void,
-    input_events: *mut std::ffi::c_void,
-    output_events: *mut std::ffi::c_void,
-    process_context: *mut std::ffi::c_void,
+pub(super) struct ProcessDataRaw {
+    pub(super) process_mode: i32,
+    pub(super) symbolic_sample_size: i32,
+    pub(super) num_samples: i32,
+    pub(super) num_inputs: i32,
+    pub(super) num_outputs: i32,
+    pub(super) inputs: *mut AudioBusBuffersRaw,
+    pub(super) outputs: *mut AudioBusBuffersRaw,
+    pub(super) input_parameter_changes: *mut std::ffi::c_void,
+    pub(super) output_parameter_changes: *mut std::ffi::c_void,
+    pub(super) input_events: *mut std::ffi::c_void,
+    pub(super) output_events: *mut std::ffi::c_void,
+    pub(super) process_context: *mut std::ffi::c_void,
 }
 
 /// Helper: get vtable pointer from COM object.
@@ -474,3 +475,79 @@ pub(super) unsafe fn vtbl(obj: *mut std::ffi::c_void) -> *const *const std::ffi:
     *(obj as *const *const *const std::ffi::c_void)
 }
 
+#[cfg(test)]
+mod tests {
+    use vst3::Steinberg::Vst::Event_::EventTypes_::{kNoteOffEvent, kNoteOnEvent};
+
+    /// Hand-written IIDs must match the SDK-generated constants in the
+    /// vst3 crate. A single wrong byte makes every plugin reject the
+    /// queryInterface call (a 0x3F-for-0x3D typo in IAudioProcessor
+    /// once broke loading of ALL VST3 plugins).
+    fn assert_iid(ours: [u8; 16], sdk: [::std::os::raw::c_char; 16]) {
+        let sdk_bytes: Vec<u8> = sdk.iter().map(|b| *b as u8).collect();
+        assert_eq!(ours.as_slice(), sdk_bytes.as_slice());
+    }
+
+    #[test]
+    fn icomponent_iid_matches_sdk() {
+        assert_iid(super::ICOMPONENT_IID, vst3::Steinberg::Vst::IComponent_iid);
+    }
+
+    #[test]
+    fn iconnectionpoint_iid_matches_sdk() {
+        assert_iid(
+            super::ICONNECTIONPOINT_IID,
+            vst3::Steinberg::Vst::IConnectionPoint_iid,
+        );
+    }
+
+    #[test]
+    fn iaudioprocessor_iid_matches_sdk() {
+        assert_iid(
+            super::IAUDIOPROCESSOR_IID,
+            vst3::Steinberg::Vst::IAudioProcessor_iid,
+        );
+    }
+
+    #[test]
+    fn live_event_list_exposes_timed_clip_notes_to_vst3() {
+        let mut events = vec![
+            super::NoteEvent {
+                is_on: false,
+                pitch: 64,
+                velocity: 0,
+                frame_offset: 91,
+            },
+            super::NoteEvent {
+                is_on: true,
+                pitch: 64,
+                velocity: 96,
+                frame_offset: 17,
+            },
+        ];
+        events.sort_unstable_by_key(|event| (event.frame_offset, event.is_on));
+        let mut list = super::LiveEventList::new(&events);
+
+        assert_eq!(list.event_count(), 2);
+
+        let raw = list.as_raw_mut();
+        let vtbl = unsafe { (*raw.cast::<super::LiveEventList<'_>>()).vtbl };
+        assert_eq!(unsafe { ((*vtbl).get_event_count)(raw) }, 2);
+        let mut via_vtable = unsafe { std::mem::zeroed() };
+        assert_eq!(unsafe { ((*vtbl).get_event)(raw, 0, &mut via_vtable) }, 0);
+        assert_eq!(via_vtable.sampleOffset, 17);
+
+        let note_on = list.event(0).expect("note-on event");
+        assert_eq!(note_on.r#type, kNoteOnEvent as u16);
+        assert_eq!(note_on.sampleOffset, 17);
+        let note_on = unsafe { note_on.__field0.noteOn };
+        assert_eq!(note_on.pitch, 64);
+        assert!((note_on.velocity - 96.0 / 127.0).abs() < f32::EPSILON);
+
+        let note_off = list.event(1).expect("note-off event");
+        assert_eq!(note_off.r#type, kNoteOffEvent as u16);
+        assert_eq!(note_off.sampleOffset, 91);
+        let note_off = unsafe { note_off.__field0.noteOff };
+        assert_eq!(note_off.pitch, 64);
+    }
+}

@@ -1,3 +1,5 @@
+//! Native CLAP lifecycle and allocation-free declared-port processing.
+
 use std::ffi::CString;
 use std::path::Path;
 
@@ -40,6 +42,8 @@ pub struct ClapPluginInstance {
     sample_rate: f64,
     active: bool,
     processing: bool,
+    processing_error: Option<&'static str>,
+    processing_failed: bool,
 }
 
 // Safety: CLAP plugins are expected to be thread-safe for audio processing.
@@ -237,6 +241,8 @@ impl ClapPluginInstance {
             sample_rate,
             active: false,
             processing: false,
+            processing_error: None,
+            processing_failed: false,
         };
 
         instance.prepare(sample_rate, max_buffer_size);
@@ -353,11 +359,10 @@ impl PluginInstance for ClapPluginInstance {
 
     fn set_param(&mut self, index: usize, value: f32) -> bool {
         if index < self.param_values.len() {
-            self.param_values[index] = value;
-            // Deliver as a CLAP param event on the next process block.
             if self.pending_params.len() == self.pending_params.capacity() {
                 return false;
             }
+            self.param_values[index] = value;
             self.pending_params.push((
                 self.param_ids[index],
                 self.param_cookies[index],
@@ -405,14 +410,14 @@ impl PluginInstance for ClapPluginInstance {
             return;
         }
 
-        for (_, port) in &mut self.input_ports {
-            port.fill_input(buffer, channels, inputs, frames);
-        }
-        for (_, port) in &mut self.output_ports {
-            for channel in &mut port.samples {
-                channel[..frames].fill(0.0);
-            }
-        }
+        crate::audio_ports::prepare_process_ports(
+            &mut self.input_ports,
+            &mut self.output_ports,
+            buffer,
+            channels,
+            inputs,
+            frames,
+        );
 
         // Build note events — sorted by time for CLAP spec compliance
         self.input_events_storage.clear();
@@ -509,14 +514,13 @@ impl PluginInstance for ClapPluginInstance {
             unsafe { (plugin_ref.process.unwrap())(self.plugin_ptr, &process) };
 
         if status == clap_sys::process::CLAP_PROCESS_ERROR {
+            if !self.processing_failed {
+                self.processing_error = Some("CLAP process returned failure");
+            }
+            self.processing_failed = true;
             buffer.fill(0.0);
-        } else if let Some((_, port)) = self
-            .output_ports
-            .iter()
-            .find(|(_, port)| port.main)
-            .or_else(|| self.output_ports.first())
-        {
-            port.copy_output(buffer, channels, frames);
+        } else {
+            crate::audio_ports::copy_process_output(&self.output_ports, buffer, channels, frames);
         }
     }
 
@@ -592,6 +596,10 @@ impl PluginInstance for ClapPluginInstance {
             self.active = true;
         }
         ok
+    }
+
+    fn take_processing_error(&mut self) -> Option<&'static str> {
+        self.processing_error.take()
     }
 
     fn stop_processing(&mut self) {

@@ -1,3 +1,5 @@
+//! Loadable CLAP input, note and parameter delivery acceptance probe.
+
 use clap_sys::{
     audio_buffer::clap_audio_buffer, entry::clap_plugin_entry, ext::audio_ports::*,
     ext::latency::*, factory::plugin_factory::*, host::clap_host, plugin::*, process::*,
@@ -11,6 +13,7 @@ struct State {
     max_frames: u32,
     instrument: bool,
     playing: bool,
+    parameter: f64,
 }
 
 unsafe extern "C" fn init(_: *const c_char) -> bool {
@@ -79,6 +82,7 @@ unsafe extern "C" fn create(
         max_frames: 0,
         instrument,
         playing: false,
+        parameter: 0.0,
     }));
     Box::into_raw(Box::new(clap_plugin {
         desc: if instrument {
@@ -140,9 +144,44 @@ unsafe extern "C" fn extension(_: *const clap_plugin, id: *const c_char) -> *con
     match CStr::from_ptr(id) {
         id if id == CLAP_EXT_AUDIO_PORTS => &PORTS as *const _ as *const c_void,
         id if id == CLAP_EXT_LATENCY => &LATENCY as *const _ as *const c_void,
+        id if id == clap_sys::ext::params::CLAP_EXT_PARAMS => &PARAMS as *const _ as *const c_void,
         _ => std::ptr::null(),
     }
 }
+unsafe extern "C" fn param_count(_: *const clap_plugin) -> u32 {
+    1
+}
+unsafe extern "C" fn param_info(
+    _: *const clap_plugin,
+    index: u32,
+    info: *mut clap_sys::ext::params::clap_param_info,
+) -> bool {
+    if index != 0 {
+        return false;
+    }
+    *info = std::mem::zeroed();
+    (*info).id = 0;
+    (*info).min_value = 0.0;
+    (*info).max_value = 1.0;
+    (*info).name[0] = b'P' as c_char;
+    true
+}
+unsafe extern "C" fn param_value(plugin: *const clap_plugin, id: u32, value: *mut f64) -> bool {
+    if id != 0 {
+        return false;
+    }
+    *value = state(plugin).parameter;
+    true
+}
+static PARAMS: clap_sys::ext::params::clap_plugin_params =
+    clap_sys::ext::params::clap_plugin_params {
+        count: Some(param_count),
+        get_info: Some(param_info),
+        get_value: Some(param_value),
+        value_to_text: None,
+        text_to_value: None,
+        flush: None,
+    };
 unsafe extern "C" fn latency(_: *const clap_plugin) -> u32 {
     0
 }
@@ -208,6 +247,14 @@ unsafe extern "C" fn process(
     data: *const clap_process,
 ) -> clap_process_status {
     let data = &*data;
+    let input_events = &*data.in_events;
+    for index in 0..(input_events.size.unwrap())(input_events) {
+        let header = (input_events.get.unwrap())(input_events, index);
+        if (*header).type_ == clap_sys::events::CLAP_EVENT_PARAM_VALUE {
+            state(plugin).parameter =
+                (*(header as *const clap_sys::events::clap_event_param_value)).value;
+        }
+    }
     if state(plugin).instrument {
         if !state(plugin).processing
             || data.audio_inputs_count != 0
@@ -263,4 +310,9 @@ unsafe extern "C" fn process(
         }
     }
     CLAP_PROCESS_CONTINUE
+}
+
+#[no_mangle]
+unsafe extern "C" fn vibez_fixture_parameter(plugin: *const clap_plugin) -> f64 {
+    state(plugin).parameter
 }
