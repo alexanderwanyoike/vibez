@@ -9,3 +9,5 @@ pub(crate) fn module_path(path: &std::path::Path) -> Result<std::path::PathBuf, 
     }
     Ok(path.to_path_buf())
 }
+
+mod audio_ports;
