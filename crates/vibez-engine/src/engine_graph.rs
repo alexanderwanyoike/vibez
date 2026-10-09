@@ -262,6 +262,27 @@ impl AudioEngine {
                         let effective_context = context_for(trigger.effective_at_samples);
                         let canonical_context = context_for(trigger.canonical_at_samples);
                         let event = EngineEvent::NoteRepeated {
+                            recording: crate::events::SourceRecordingPosition {
+                                effective_at_samples: trigger.effective_at_samples,
+                                canonical_at_samples: trigger.canonical_at_samples,
+                                section_id: section.map(|active| active.section_id),
+                                section_position_samples: section.map(|active| {
+                                    section_record::section_sample_for_performance(
+                                        pos,
+                                        block.repeat_pos,
+                                        trigger.effective_at_samples,
+                                        active.length_samples,
+                                    )
+                                }),
+                                canonical_section_position_samples: section.map(|active| {
+                                    section_record::section_sample_for_performance(
+                                        pos,
+                                        block.repeat_pos,
+                                        trigger.canonical_at_samples,
+                                        active.length_samples,
+                                    )
+                                }),
+                            },
                             track_id: id,
                             pitch: trigger.pitch,
                             velocity: trigger.velocity,
@@ -278,6 +299,15 @@ impl AudioEngine {
                             canonical_section_position_samples: canonical_context
                                 .and_then(|context| context.section),
                         };
+                        if let EngineEvent::NoteRepeated { recording, .. } = &event {
+                            let _ = events.push(EngineEvent::SourceNoteRepeated {
+                                track_id: id,
+                                pitch: trigger.pitch,
+                                velocity: trigger.velocity,
+                                rate: trigger.rate,
+                                position: *recording,
+                            });
+                        }
                         if path == 0 {
                             let _ = events.push(event);
                         } else if scheduled.len() < scheduled.capacity() {

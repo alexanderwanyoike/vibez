@@ -63,6 +63,18 @@ pub struct ClipTrackState {
     pub transport_playing: bool,
 }
 
+/// Source recorders write into the renderer's current source. Capture uses
+/// presentation coordinates so reduced monitoring cannot move the source take
+/// behind its own count-in or change its local musical intent.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SourceRecordingPosition {
+    pub effective_at_samples: u64,
+    pub canonical_at_samples: u64,
+    pub section_id: Option<SectionId>,
+    pub section_position_samples: Option<u64>,
+    pub canonical_section_position_samples: Option<u64>,
+}
+
 #[derive(Debug)]
 pub enum EngineEvent {
     PresentationCancelled,
@@ -194,9 +206,25 @@ pub enum EngineEvent {
         effective_at_samples: u64,
     },
 
-    /// A generated Note Repeat retrigger became effective at this exact
-    /// engine sample. Later recording cards consume the same audible truth.
+    /// Source takes can close before delayed audio reaches output, so their
+    /// recorder feed must retain delivery coordinates independently of Capture.
+    SourceNoteRepeated {
+        track_id: TrackId,
+        pitch: u8,
+        velocity: u8,
+        rate: NoteRepeatRate,
+        position: SourceRecordingPosition,
+    },
+    SourceNoteInput {
+        track_id: TrackId,
+        pitch: u8,
+        velocity: u8,
+        on: bool,
+        position: SourceRecordingPosition,
+    },
+    /// Capture follows the heard retrigger while source takes use SourceNoteRepeated.
     NoteRepeated {
+        recording: SourceRecordingPosition,
         track_id: TrackId,
         pitch: u8,
         velocity: u8,
@@ -208,9 +236,9 @@ pub enum EngineEvent {
         canonical_section_position_samples: Option<u64>,
     },
 
-    /// A monitored input note became effective on the engine clock. Section
-    /// Record consumes these events; monitoring itself remains immediate.
+    /// Capture follows the heard input while source takes use SourceNoteInput.
     InstrumentNoteInput {
+        recording: SourceRecordingPosition,
         track_id: TrackId,
         pitch: u8,
         velocity: u8,
@@ -453,6 +481,7 @@ impl PartialEq for EngineEvent {
             }
             (
                 Self::NoteRepeated {
+                    recording: left_recording,
                     track_id: left_track,
                     pitch: left_pitch,
                     velocity: left_velocity,
@@ -464,6 +493,7 @@ impl PartialEq for EngineEvent {
                     canonical_section_position_samples: left_canonical_position,
                 },
                 Self::NoteRepeated {
+                    recording: right_recording,
                     track_id: right_track,
                     pitch: right_pitch,
                     velocity: right_velocity,
@@ -475,7 +505,8 @@ impl PartialEq for EngineEvent {
                     canonical_section_position_samples: right_canonical_position,
                 },
             ) => {
-                left_track == right_track
+                left_recording == right_recording
+                    && left_track == right_track
                     && left_pitch == right_pitch
                     && left_velocity == right_velocity
                     && left_rate == right_rate
@@ -487,6 +518,7 @@ impl PartialEq for EngineEvent {
             }
             (
                 Self::InstrumentNoteInput {
+                    recording: lr,
                     track_id: lt,
                     pitch: lp,
                     velocity: lv,
@@ -496,6 +528,7 @@ impl PartialEq for EngineEvent {
                     section_position_samples: lsp,
                 },
                 Self::InstrumentNoteInput {
+                    recording: rr,
                     track_id: rt,
                     pitch: rp,
                     velocity: rv,
@@ -504,7 +537,16 @@ impl PartialEq for EngineEvent {
                     section_id: rs,
                     section_position_samples: rsp,
                 },
-            ) => lt == rt && lp == rp && lv == rv && lo == ro && le == re && ls == rs && lsp == rsp,
+            ) => {
+                lr == rr
+                    && lt == rt
+                    && lp == rp
+                    && lv == rv
+                    && lo == ro
+                    && le == re
+                    && ls == rs
+                    && lsp == rsp
+            }
             (
                 Self::SectionRecordArmed {
                     section_id: ls,

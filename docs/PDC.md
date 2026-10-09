@@ -130,7 +130,10 @@ They compare every sample, preserve first/last impulses and intentional silence,
 retain earlier detector state, and compare a partial 1,000..1,100 range with the
 same full render. An incorrect 522-frame report fails that oracle.
 
-Capture stores heard-time events and the applied plan's per-track source offsets.
+Clip and Section recorders retain immediate source-delivery coordinates, so a
+note cannot fall behind its source count-in or arrive after that take has closed.
+Capture consumes separate heard notifications and the applied plan's per-track
+source offsets.
 Section/Clip transitions publish when their relevant audio reaches output; early
 Section contributions are retained even when Capture starts or stops before the
 common mix boundary. A full-PDC Bounce of materialized Section audio and live

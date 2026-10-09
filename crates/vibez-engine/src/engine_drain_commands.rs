@@ -862,7 +862,8 @@ impl AudioEngine {
                         if let Some(instrument) = self.tracks[track_index].instrument.as_mut() {
                             instrument.note_on(pitch, velocity);
                         }
-                        let _ = self.event_tx.push(EngineEvent::NoteRepeated {
+                        let event = EngineEvent::NoteRepeated {
+                            recording: self.source_recording_position(),
                             track_id,
                             pitch,
                             velocity,
@@ -876,7 +877,25 @@ impl AudioEngine {
                             canonical_section_position_samples: self
                                 .active_section
                                 .map(|active| active.position_samples),
-                        });
+                        };
+                        if let EngineEvent::NoteRepeated {
+                            recording,
+                            track_id,
+                            pitch,
+                            velocity,
+                            rate,
+                            ..
+                        } = &event
+                        {
+                            let _ = self.event_tx.push(EngineEvent::SourceNoteRepeated {
+                                track_id: *track_id,
+                                pitch: *pitch,
+                                velocity: *velocity,
+                                rate: *rate,
+                                position: *recording,
+                            });
+                        }
+                        let _ = self.event_tx.push(event);
                     }
                     self.tracks[track_index].start_note_repeat(
                         NoteRepeatStart {

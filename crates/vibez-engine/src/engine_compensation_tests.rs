@@ -583,6 +583,7 @@ fn reduced_monitoring_capture_uses_the_same_heard_section_identity_and_local_clo
         .unwrap();
     engine.process(&mut [0.0; 2], 2);
     let immediate: Vec<_> = std::iter::from_fn(|| events.pop().ok()).collect();
+    assert!(immediate.iter().any(|event|matches!(event,EngineEvent::SourceNoteInput {position,..} if position.effective_at_samples==1024 && position.section_id==Some(new) && position.section_position_samples==Some(0))));
     assert!(!immediate.iter().any(
         |event| matches!(event,EngineEvent::SectionTransitioned{section_id,..} if *section_id==new)
     ));

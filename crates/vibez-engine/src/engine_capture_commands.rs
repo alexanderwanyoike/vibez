@@ -82,7 +82,18 @@ impl AudioEngine {
                 }
                 let context = self.live_capture_context(track_id);
                 self.present_event(
+                    EngineEvent::SourceNoteInput {
+                        track_id,
+                        pitch,
+                        velocity,
+                        on: true,
+                        position: self.source_recording_position(),
+                    },
+                    0,
+                );
+                self.present_event(
                     EngineEvent::InstrumentNoteInput {
+                        recording: self.source_recording_position(),
                         track_id,
                         pitch,
                         velocity,
@@ -102,7 +113,18 @@ impl AudioEngine {
                 }
                 let context = self.live_capture_context(track_id);
                 self.present_event(
+                    EngineEvent::SourceNoteInput {
+                        track_id,
+                        pitch,
+                        velocity: 0,
+                        on: false,
+                        position: self.source_recording_position(),
+                    },
+                    0,
+                );
+                self.present_event(
                     EngineEvent::InstrumentNoteInput {
+                        recording: self.source_recording_position(),
                         track_id,
                         pitch,
                         velocity: 0,

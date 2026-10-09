@@ -9,6 +9,93 @@ use crate::state::AuditionMode;
 
 use super::*;
 
+fn apply_performed_note(perform: &mut crate::domains::perform::PerformState, event: EngineEvent) {
+    match event {
+        EngineEvent::SourceNoteRepeated {
+            track_id,
+            pitch,
+            velocity,
+            rate,
+            position,
+        } => {
+            perform.clip_record.repeated_note(
+                track_id,
+                pitch,
+                velocity,
+                rate,
+                position.effective_at_samples,
+                position.canonical_at_samples,
+            );
+            perform.section_record.repeated_note(
+                position.section_id,
+                track_id,
+                pitch,
+                velocity,
+                rate,
+                position.effective_at_samples,
+                position.canonical_section_position_samples,
+            );
+        }
+        EngineEvent::SourceNoteInput {
+            track_id,
+            pitch,
+            velocity,
+            on,
+            position,
+        } => {
+            perform.clip_record.note_input(
+                track_id,
+                pitch,
+                velocity,
+                on,
+                position.effective_at_samples,
+            );
+            perform.section_record.input_note(
+                crate::domains::perform::section_record::SectionRecordInput {
+                    target_id: position.section_id,
+                    track_id,
+                    pitch,
+                    velocity,
+                    on,
+                    effective_at_samples: position.effective_at_samples,
+                    local_position_samples: position.section_position_samples,
+                },
+            );
+        }
+        EngineEvent::NoteRepeated {
+            track_id,
+            pitch,
+            velocity,
+            rate,
+            effective_at_samples,
+            canonical_at_samples,
+            ..
+        } => {
+            perform.capture.repeated_note(
+                track_id,
+                pitch,
+                velocity,
+                rate,
+                effective_at_samples,
+                canonical_at_samples,
+            );
+        }
+        EngineEvent::InstrumentNoteInput {
+            track_id,
+            pitch,
+            velocity,
+            on,
+            effective_at_samples,
+            ..
+        } => {
+            perform
+                .capture
+                .input_note(track_id, pitch, velocity, on, effective_at_samples);
+        }
+        _ => {}
+    }
+}
+
 fn apply_track_mute_event(
     state: &mut crate::state::AppState,
     track_id: vibez_core::id::TrackId,
@@ -383,77 +470,11 @@ impl App {
                             effective_at_samples,
                         );
                     }
-                    EngineEvent::NoteRepeated {
-                        track_id,
-                        pitch,
-                        velocity,
-                        rate,
-                        effective_at_samples,
-                        canonical_at_samples,
-                        section_id,
-                        canonical_section_position_samples,
-                        ..
-                    } => {
-                        self.state.perform.clip_record.repeated_note(
-                            track_id,
-                            pitch,
-                            velocity,
-                            rate,
-                            effective_at_samples,
-                            canonical_at_samples,
-                        );
-                        self.state.perform.capture.repeated_note(
-                            track_id,
-                            pitch,
-                            velocity,
-                            rate,
-                            effective_at_samples,
-                            canonical_at_samples,
-                        );
-                        self.state.perform.section_record.repeated_note(
-                            section_id,
-                            track_id,
-                            pitch,
-                            velocity,
-                            rate,
-                            effective_at_samples,
-                            canonical_section_position_samples,
-                        );
-                    }
-                    EngineEvent::InstrumentNoteInput {
-                        track_id,
-                        pitch,
-                        velocity,
-                        on,
-                        effective_at_samples,
-                        section_id,
-                        section_position_samples,
-                    } => {
-                        self.state.perform.clip_record.note_input(
-                            track_id,
-                            pitch,
-                            velocity,
-                            on,
-                            effective_at_samples,
-                        );
-                        self.state.perform.capture.input_note(
-                            track_id,
-                            pitch,
-                            velocity,
-                            on,
-                            effective_at_samples,
-                        );
-                        self.state.perform.section_record.input_note(
-                            crate::domains::perform::section_record::SectionRecordInput {
-                                target_id: section_id,
-                                track_id,
-                                pitch,
-                                velocity,
-                                on,
-                                effective_at_samples,
-                                local_position_samples: section_position_samples,
-                            },
-                        );
+                    event @ (EngineEvent::SourceNoteInput { .. }
+                    | EngineEvent::SourceNoteRepeated { .. }
+                    | EngineEvent::NoteRepeated { .. }
+                    | EngineEvent::InstrumentNoteInput { .. }) => {
+                        apply_performed_note(&mut self.state.perform, event)
                     }
                     EngineEvent::SectionRecordArmed {
                         section_id,
@@ -794,6 +815,7 @@ mod tests {
             triggered_notes: (1u128 << 41) | (1u128 << 44),
         };
         let repeated = EngineEvent::NoteRepeated {
+            recording: Default::default(),
             track_id,
             pitch: 42,
             velocity: 100,
@@ -805,6 +827,7 @@ mod tests {
             canonical_section_position_samples: None,
         };
         let input = EngineEvent::InstrumentNoteInput {
+            recording: Default::default(),
             track_id,
             pitch: 43,
             velocity: 100,
@@ -814,6 +837,7 @@ mod tests {
             section_position_samples: None,
         };
         let input_note_off = EngineEvent::InstrumentNoteInput {
+            recording: Default::default(),
             track_id,
             pitch: 45,
             velocity: 0,
@@ -835,3 +859,7 @@ mod tests {
         assert!(!view.drum_pad_is_flashing(track_id, 45, now));
     }
 }
+
+#[cfg(test)]
+#[path = "compensation_recording_tests.rs"]
+mod compensation_recording_tests;
