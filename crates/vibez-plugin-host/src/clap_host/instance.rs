@@ -42,6 +42,7 @@ pub struct ClapPluginInstance {
     note_events: Vec<NoteEvent>,
     sample_rate: f64,
     latency_samples: u32,
+    audio_context: Option<vibez_core::audio_context::DeviceAudioContext>,
     main_thread: std::thread::ThreadId,
     active: bool,
     processing: bool,
@@ -238,6 +239,7 @@ impl ClapPluginInstance {
             note_events: Vec::with_capacity(2048),
             sample_rate,
             latency_samples: 0,
+            audio_context: None,
             main_thread: std::thread::current().id(),
             active: false,
             processing: false,
@@ -366,6 +368,10 @@ fn query_params(
 }
 
 impl PluginInstance for ClapPluginInstance {
+    fn set_audio_context(&mut self, context: vibez_core::audio_context::DeviceAudioContext) {
+        self.audio_context = Some(context);
+    }
+
     fn reconfiguration_requested(&self) -> bool {
         let data =
             unsafe { &*((*self.host_ptr).host_data as *const super::host_impl::ClapHostUserData) };
@@ -399,6 +405,12 @@ impl PluginInstance for ClapPluginInstance {
         Ok(())
     }
 
+    fn activation_sample_rate(&self) -> Option<u32> {
+        Some(self.sample_rate as u32)
+    }
+    fn processing_configuration_valid(&self) -> bool {
+        self.active && !self.processing_failed
+    }
     fn latency_samples(&self) -> u32 {
         self.latency_samples
     }
@@ -565,10 +577,15 @@ impl PluginInstance for ClapPluginInstance {
             try_push: Some(output_events_try_push),
         };
 
+        let transport = self.audio_context.map(crate::process_context::clap);
         let process = clap_process {
-            steady_time: -1,
+            steady_time: self
+                .audio_context
+                .map_or(-1, |context| context.continuous_sample as i64),
             frames_count: frames as u32,
-            transport: std::ptr::null(),
+            transport: transport
+                .as_ref()
+                .map_or(std::ptr::null(), |transport| transport as *const _),
             audio_inputs: self.input_buffers.as_ptr(),
             audio_outputs: self.output_buffers.as_mut_ptr(),
             audio_inputs_count: self.input_buffers.len() as u32,
