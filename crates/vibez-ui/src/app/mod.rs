@@ -157,6 +157,7 @@ mod audio_take_finalization;
 mod audio_tasks;
 mod bounce;
 mod capture;
+mod compensation;
 mod drum_rack_preparation;
 mod engine_events;
 mod keyboard;
@@ -696,6 +697,9 @@ mod views_clip_launcher;
 
 #[cfg(test)]
 mod clip_project_tests;
+
+#[cfg(test)]
+mod compensation_persistence_tests;
 
 #[cfg(test)]
 mod plugin_load_tests;

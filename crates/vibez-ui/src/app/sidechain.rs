@@ -88,37 +88,21 @@ impl App {
         false
     }
 
-    pub(super) fn sync_sidechain_routing(&mut self) {
-        if self
-            .sidechain_sync_inputs
-            .as_ref()
-            .is_some_and(|inputs| inputs.matches(&self.state))
-        {
-            return;
-        }
-        let model = self.sidechain_model();
-        let mut channels = match vibez_core::routing::resolve_restored(
-            &model,
-            self.state.devices.last_routing.as_deref(),
-        ) {
-            Ok(channels) => channels,
-            Err(error) => {
-                self.state.status_text = format!("Routing unavailable: {error:?}");
-                self.sidechain_sync_inputs =
-                    Some(super::sidechain_sync::RoutingInputs::capture(&self.state));
-                return;
-            }
-        };
-        let changed_activation = channels.iter().zip(&model).any(|(active, original)| {
+    pub(super) fn retain_routing_activation(
+        &mut self,
+        channels: &[vibez_core::routing::RoutingChannel],
+        model: &[vibez_core::routing::RoutingChannel],
+    ) {
+        let changed = channels.iter().zip(model).any(|(active, original)| {
             active
                 .effects
                 .iter()
                 .zip(&original.effects)
                 .any(|(a, b)| a.inactive_inputs != b.inactive_inputs)
         });
-        if changed_activation {
+        if changed {
             let tracks = Arc::make_mut(&mut self.state.project_tracks);
-            for channel in &channels {
+            for channel in channels {
                 if let Some(track) = tracks.find_mut(channel.id) {
                     for effect in &channel.effects {
                         if let Some(slot) =
@@ -131,6 +115,47 @@ impl App {
             }
             self.mark_project_dirty();
         }
+    }
+
+    pub(super) fn sync_sidechain_routing(&mut self) {
+        if self
+            .sidechain_sync_inputs
+            .as_ref()
+            .is_some_and(|inputs| inputs.matches(&self.state, self.midi_input.is_some()))
+        {
+            return;
+        }
+        let model = if self
+            .sidechain_sync_inputs
+            .as_ref()
+            .is_some_and(|inputs| inputs.matches_canonical(&self.state))
+        {
+            self.state
+                .devices
+                .last_routing
+                .clone()
+                .unwrap_or_else(|| self.sidechain_model())
+        } else {
+            self.sidechain_model()
+        };
+        let mut channels = match vibez_core::routing::resolve_restored(
+            &model,
+            self.state.devices.last_routing.as_deref(),
+        ) {
+            Ok(channels) => channels,
+            Err(error) => {
+                self.state.status_text = format!("Routing unavailable: {error:?}");
+                self.send_command(EngineCommand::RejectRoutingUpdate {
+                    reason: self.state.status_text.clone(),
+                });
+                self.sidechain_sync_inputs = Some(super::sidechain_sync::RoutingInputs::capture(
+                    &self.state,
+                    self.midi_input.is_some(),
+                ));
+                return;
+            }
+        };
+        self.retain_routing_activation(&channels, &model);
         let names: std::collections::HashMap<_, _> = self
             .state
             .project_tracks
@@ -176,22 +201,69 @@ impl App {
                 }
             }
         }
-        if self.state.devices.last_routing.as_ref() == Some(&channels) {
-            self.sidechain_sync_inputs =
-                Some(super::sidechain_sync::RoutingInputs::capture(&self.state));
+        let timing = self.compensation_signature();
+        if self.state.devices.last_routing.as_ref() == Some(&channels)
+            && self.state.devices.last_timing.as_ref() == Some(&timing)
+        {
+            self.sidechain_sync_inputs = Some(super::sidechain_sync::RoutingInputs::capture(
+                &self.state,
+                self.midi_input.is_some(),
+            ));
             return;
         }
-        match vibez_engine::routing::PreparedRouting::prepare(&channels, 4096) {
+        let Some(generation) = self.state.devices.compensation_generation.checked_add(1) else {
+            self.state.status_text = "Compensation plan generation overflow".into();
+            return;
+        };
+        let same_topology = self.state.devices.last_routing.as_ref() == Some(&channels);
+        let same_alignment = same_topology
+            && self
+                .state
+                .devices
+                .last_timing
+                .as_ref()
+                .is_some_and(|previous| {
+                    previous.reports == timing.reports
+                        && previous.reduced_tracks == timing.reduced_tracks
+                        && previous.sample_rate == timing.sample_rate
+                });
+        let prepared = vibez_engine::routing::PreparedRouting::prepare_compensated(
+            &channels,
+            4096,
+            &timing.reports,
+            &timing.reduced_tracks,
+            generation,
+        )
+        .and_then(|mut routing| {
+            routing.configure_automation(&timing.controls)?;
+            Ok(routing)
+        });
+        match prepared {
             Ok(prepared) => {
-                self.state.devices.sidechain_choices =
-                    crate::domains::sidechain::input_source_choices(&channels);
-                self.send_command(EngineCommand::SetRouting(prepared));
+                if !same_topology {
+                    self.state.devices.sidechain_choices =
+                        crate::domains::sidechain::input_source_choices(&channels);
+                }
+                if same_alignment {
+                    self.send_command(EngineCommand::UpdateAutomationRouting(prepared));
+                } else {
+                    self.send_command(EngineCommand::SetRouting(prepared));
+                }
                 self.state.devices.last_routing = Some(channels);
+                self.state.devices.last_timing = Some(timing);
+                self.state.devices.compensation_generation = generation;
             }
-            Err(error) => self.state.status_text = error,
+            Err(error) => {
+                self.send_command(EngineCommand::RejectRoutingUpdate {
+                    reason: error.clone(),
+                });
+                self.state.status_text = error;
+            }
         }
-        self.sidechain_sync_inputs =
-            Some(super::sidechain_sync::RoutingInputs::capture(&self.state));
+        self.sidechain_sync_inputs = Some(super::sidechain_sync::RoutingInputs::capture(
+            &self.state,
+            self.midi_input.is_some(),
+        ));
     }
 }
 

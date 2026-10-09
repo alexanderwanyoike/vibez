@@ -120,6 +120,7 @@ async fn supported_format_matrix_catalogs_auditions_imports_and_reopens() {
             .with_fade_out_curve(FadeCurve::new(-45));
         let project_path = directory.path().join("format-roundtrip.vzp");
         let project = Project {
+            reduced_latency_monitoring: false,
             tracks: vec![track.clone()],
             arrange: vibez_project::TimelineInfo {
                 clips: vec![ClipInfo {
@@ -251,6 +252,7 @@ async fn warp_arrangement_import_reopens_from_project_media_without_local_source
 
     let track = TrackInfo::new("Audio");
     let project = Project {
+        reduced_latency_monitoring: false,
         tracks: vec![track.clone()],
         arrange: vibez_project::TimelineInfo {
             clips: vec![ClipInfo {
@@ -320,6 +322,7 @@ async fn warp_sampler_import_bakes_heard_audio_into_project_media() {
         source: Some(staged),
     });
     let project = Project {
+        reduced_latency_monitoring: false,
         tracks: vec![track],
         ..Project::default()
     };
@@ -356,6 +359,7 @@ async fn v1_reopen_decodes_embedded_audio_after_source_removal() {
     vibez_audio_io::file_io::write_wav_file(&source_path, &audio).unwrap();
     let track = TrackInfo::new("Audio");
     let project = Project {
+        reduced_latency_monitoring: false,
         tracks: vec![track.clone()],
         arrange: vibez_project::TimelineInfo {
             clips: vec![ClipInfo {
@@ -448,6 +452,7 @@ async fn shortened_section_audio_and_automation_survive_reopen() {
     });
     let beyond_boundary_position = 132_300;
     let project = Project {
+        reduced_latency_monitoring: false,
         tracks: vec![track],
         arrange: vibez_project::TimelineInfo {
             clips: vec![clip(ClipId::new(), 0)],
@@ -537,6 +542,7 @@ async fn unavailable_media_clip_is_kept_for_relink_on_reopen() {
     let track = TrackInfo::new("Audio");
     let clip_id = ClipId::new();
     let project = Project {
+        reduced_latency_monitoring: false,
         tracks: vec![track.clone()],
         arrange: vibez_project::TimelineInfo {
             clips: vec![ClipInfo {
@@ -741,6 +747,7 @@ async fn remote_warp_import_reopens_after_cache_clear_without_dropbox() {
     std::fs::remove_file(source_path).unwrap();
     let track = TrackInfo::new("Audio");
     let project = Project {
+        reduced_latency_monitoring: false,
         tracks: vec![track.clone()],
         arrange: vibez_project::TimelineInfo {
             clips: vec![ClipInfo {

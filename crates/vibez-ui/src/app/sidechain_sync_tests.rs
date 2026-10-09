@@ -67,6 +67,7 @@ fn metered_ticks_and_mouse_messages_do_not_rebuild_the_project_routing_model() {
 fn effect(source: TrackId) -> UiEffect {
     let device = vibez_dsp::factory::create_effect(EffectType::Compressor, 44_100.0);
     UiEffect {
+        latency_samples: Some(0),
         id: EffectId::new(),
         effect_type: EffectType::Compressor,
         bypass: false,
@@ -152,4 +153,92 @@ fn restored_cycle_keeps_established_route_and_persists_the_silent_assignment() {
         [ExternalInputId(0)]
     );
     RoutingGraph::prepare(app.state.devices.last_routing.as_ref().unwrap()).unwrap();
+}
+
+#[test]
+fn monitoring_target_changes_invalidate_timing_without_rebuilding_structural_routing() {
+    let mut app = app();
+    let mut first = ProjectTrack::new(TrackId::new(), "First".into(), 0);
+    let mut second = ProjectTrack::new(TrackId::new(), "Second".into(), 1);
+    for track in [&mut first, &mut second] {
+        track.kind = vibez_core::midi::TrackKind::Midi;
+        track.has_instrument = true;
+    }
+    let first_id = first.id;
+    let second_id = second.id;
+    let project = Arc::make_mut(&mut app.state.project_tracks);
+    project.reduced_latency_monitoring = true;
+    project.tracks = vec![first, second];
+    app.state.perform.sync_instrument_target(Some(first_id));
+    app.sync_sidechain_routing();
+    assert_eq!(
+        app.state
+            .devices
+            .last_timing
+            .as_ref()
+            .unwrap()
+            .reduced_tracks,
+        [first_id]
+    );
+    super::sidechain::MODEL_BUILDS.with(|count| count.set(0));
+    app.state.perform.sync_instrument_target(Some(second_id));
+    app.sync_sidechain_routing();
+    assert_eq!(
+        app.state
+            .devices
+            .last_timing
+            .as_ref()
+            .unwrap()
+            .reduced_tracks,
+        [second_id]
+    );
+    super::sidechain::MODEL_BUILDS.with(|count| assert_eq!(count.get(), 0));
+}
+
+#[test]
+fn timing_reactivation_refreshes_choices_and_persists_restored_feedback_silence() {
+    let mut app = app();
+    let mut a = ProjectTrack::new(TrackId::new(), "A".into(), 0);
+    let mut b = ProjectTrack::new(TrackId::new(), "B".into(), 1);
+    a.effects.push(effect(b.id));
+    b.effects.push(effect(a.id));
+    a.effects[0].external_inputs.clear();
+    let track_id = a.id;
+    let effect_id = a.effects[0].id;
+    Arc::make_mut(&mut app.state.project_tracks).tracks = vec![a, b];
+    app.sync_sidechain_routing();
+    assert!(!app
+        .state
+        .devices
+        .sidechain_choices
+        .contains_key(&(effect_id, ExternalInputId(0))));
+    app.reconfigure_device_timing(
+        vibez_engine::engine::reconfiguration::DeviceReconfiguration::Effect {
+            track_id,
+            position: 0,
+            slot: vibez_engine::mixer::EffectSlot {
+                id: effect_id,
+                effect: vibez_dsp::factory::create_effect(EffectType::Compressor, 44_100.0),
+                bypass: false,
+            },
+        },
+    );
+    assert_eq!(
+        app.state.project_tracks.tracks[0].effects[0].inactive_sidechains,
+        [ExternalInputId(0)]
+    );
+    let channels = app.state.devices.last_routing.as_ref().unwrap();
+    assert_eq!(
+        app.state.devices.sidechain_choices,
+        crate::domains::sidechain::input_source_choices(channels)
+    );
+    assert!(app
+        .state
+        .devices
+        .sidechain_choices
+        .contains_key(&(effect_id, ExternalInputId(0))));
+    assert_eq!(
+        app.project_from_state().tracks[0].effects[0].inactive_sidechains,
+        [ExternalInputId(0)]
+    );
 }

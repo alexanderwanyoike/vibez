@@ -2,17 +2,21 @@
 
 #![allow(non_snake_case)]
 use std::{
-    cell::Cell,
+    cell::{Cell, RefCell},
     ffi::{c_char, c_void},
     ptr, slice,
 };
-use vst3::{uid, Class, ComRef, ComWrapper, Steinberg::Vst::*, Steinberg::*};
+use vst3::{uid, Class, ComPtr, ComRef, ComWrapper, Steinberg::Vst::*, Steinberg::*};
 
 struct Probe {
     active: Cell<bool>,
     processing: Cell<bool>,
+    processing_thread: Cell<usize>,
     aux_active: Cell<u32>,
     max_frames: Cell<i32>,
+    timing: RefCell<crate::timing::Timing>,
+    handler: RefCell<Option<ComPtr<IComponentHandler>>>,
+    main_thread: usize,
     instrument: bool,
     playing: Cell<bool>,
     scenario: usize,
@@ -39,7 +43,7 @@ const NAMES: [&str; 7] = [
     "Surround main",
 ];
 impl Class for Probe {
-    type Interfaces = (IComponent, IAudioProcessor);
+    type Interfaces = (IComponent, IAudioProcessor, IEditController);
 }
 impl IPluginBaseTrait for Probe {
     unsafe fn initialize(&self, _context: *mut FUnknown) -> tresult {
@@ -80,7 +84,11 @@ impl IComponentTrait for Probe {
         index: i32,
         bus: *mut BusInfo,
     ) -> tresult {
-        if media != 0 || index < 0 || index >= self.getBusCount(media, direction) {
+        if self.active.get()
+            || media != 0
+            || index < 0
+            || index >= self.getBusCount(media, direction)
+        {
             return kInvalidArgument;
         }
         *bus = std::mem::zeroed();
@@ -90,7 +98,7 @@ impl IComponentTrait for Probe {
             6
         } else {
             match index {
-                1 => 1,
+                1 => self.timing.borrow().mono_channels() as i32,
                 3 => 6,
                 _ => 2,
             }
@@ -144,14 +152,47 @@ impl IComponentTrait for Probe {
         kResultOk
     }
     unsafe fn setActive(&self, enabled: TBool) -> tresult {
+        // Bus preparation ends at an activation attempt, even if activation
+        // fails. A later retry must start a fresh preparation epoch.
+        self.main_activations.set(0);
+        if enabled != 0 {
+            if self.processing.get()
+                || self.main_thread != crate::thread_id()
+                || !self.timing.borrow().activation_allowed()
+            {
+                return kResultFalse;
+            }
+            self.timing.borrow_mut().activate();
+        }
         self.active.set(enabled != 0);
         kResultOk
     }
-    unsafe fn setState(&self, _stream: *mut IBStream) -> tresult {
+    unsafe fn setState(&self, stream: *mut IBStream) -> tresult {
+        let Some(stream) = ComRef::from_raw(stream) else {
+            return kInvalidArgument;
+        };
+        let mut bytes = [0u8; 12];
+        let mut read = 0;
+        if stream.read(bytes.as_mut_ptr().cast(), 12, &mut read) != kResultOk
+            || read != 12
+            || !self.timing.borrow_mut().configure(&bytes)
+        {
+            return kResultFalse;
+        }
+        if self.active.get() {
+            if let Some(handler) = self.handler.borrow().as_ref() {
+                handler.restartComponent(RestartFlags_::kLatencyChanged);
+            }
+        }
         kResultOk
     }
-    unsafe fn getState(&self, _stream: *mut IBStream) -> tresult {
-        kResultOk
+    unsafe fn getState(&self, stream: *mut IBStream) -> tresult {
+        let Some(stream) = ComRef::from_raw(stream) else {
+            return kInvalidArgument;
+        };
+        let bytes = self.timing.borrow().state();
+        let mut written = 0;
+        stream.write(bytes.as_ptr().cast_mut().cast(), 12, &mut written)
     }
 }
 impl IAudioProcessorTrait for Probe {
@@ -170,7 +211,7 @@ impl IAudioProcessorTrait for Probe {
         index: i32,
         arrangement: *mut SpeakerArrangement,
     ) -> tresult {
-        *arrangement = if index == 1 {
+        *arrangement = if index == 1 && self.timing.borrow().mono_channels() == 1 {
             SpeakerArr::kMono
         } else if index == 3 || (index == 0 && self.scenario == 6) {
             SpeakerArr::k51
@@ -187,18 +228,40 @@ impl IAudioProcessorTrait for Probe {
         }
     }
     unsafe fn getLatencySamples(&self) -> u32 {
-        0
+        if self.main_thread != crate::thread_id() || self.processing.get() || !self.active.get() {
+            return u32::MAX;
+        }
+        self.timing.borrow().report()
     }
     unsafe fn setupProcessing(&self, setup: *mut ProcessSetup) -> tresult {
         self.max_frames.set((*setup).maxSamplesPerBlock);
         kResultOk
     }
     unsafe fn setProcessing(&self, enabled: TBool) -> tresult {
+        if enabled == 0
+            && self.processing.get()
+            && self.processing_thread.get() != crate::thread_id()
+        {
+            crate::lifecycle_error();
+            return kResultFalse;
+        }
+        if enabled != 0 {
+            self.processing_thread.set(crate::thread_id());
+        }
+        if enabled == 0 {
+            self.timing.borrow_mut().reset();
+            self.playing.set(false);
+        }
         self.processing.set(enabled != 0 && self.active.get());
         kResultOk
     }
     unsafe fn process(&self, data: *mut ProcessData) -> tresult {
         let data = &*data;
+        if !data.processContext.is_null() {
+            self.timing
+                .borrow_mut()
+                .set_context((*data.processContext).projectTimeSamples as u64);
+        }
         if self.instrument {
             if !self.processing.get()
                 || data.numInputs != 0
@@ -226,9 +289,10 @@ impl IAudioProcessorTrait for Probe {
                         event_index += 1;
                     }
                 }
-                for channel in 0..2 {
-                    *(*output.__field0.channelBuffers32.add(channel)).add(frame as usize) =
-                        if self.playing.get() { 0.75 } else { 0.0 };
+                let level = if self.playing.get() { 0.75 } else { 0.0 };
+                let values = self.timing.borrow_mut().frame([level; 2], 0.0, [0.0; 2]);
+                for (channel, value) in values.into_iter().enumerate() {
+                    *(*output.__field0.channelBuffers32.add(channel)).add(frame as usize) = value;
                 }
             }
             return kResultOk;
@@ -245,12 +309,16 @@ impl IAudioProcessorTrait for Probe {
         }
         let inputs = slice::from_raw_parts(data.inputs, 4);
         let output = &*data.outputs;
-        if inputs[1].numChannels != 1 || inputs[2].numChannels != 2 || inputs[3].numChannels != 6 {
+        if inputs[1].numChannels != self.timing.borrow().mono_channels() as i32
+            || inputs[2].numChannels != 2
+            || inputs[3].numChannels != 6
+        {
             return kResultFalse;
         }
         if self.scenario == 6 && (inputs[0].numChannels != 6 || output.numChannels != 6) {
             return kResultFalse;
         }
+        let mut timing = self.timing.borrow_mut();
         for frame in 0..data.numSamples as usize {
             if self.scenario == 6 {
                 for channel in 2..6 {
@@ -260,20 +328,22 @@ impl IAudioProcessorTrait for Probe {
                     *(*output.__field0.channelBuffers32.add(channel)).add(frame) = 99.0;
                 }
             }
-            for channel in 0..2 {
-                if matches!(self.scenario, 3 | 6) {
-                    for auxiliary in 0..6 {
-                        if *(*inputs[3].__field0.channelBuffers32.add(auxiliary)).add(frame) != 0.0
-                        {
-                            return kResultFalse;
-                        }
+            if matches!(self.scenario, 3 | 6) {
+                for auxiliary in 0..6 {
+                    if *(*inputs[3].__field0.channelBuffers32.add(auxiliary)).add(frame) != 0.0 {
+                        return kResultFalse;
                     }
                 }
-                let main = *(*inputs[0].__field0.channelBuffers32.add(channel)).add(frame);
-                let mono = *(*inputs[1].__field0.channelBuffers32).add(frame);
-                let stereo = *(*inputs[2].__field0.channelBuffers32.add(channel)).add(frame);
-                *(*output.__field0.channelBuffers32.add(channel)).add(frame) =
-                    main + 2.0 * mono + 3.0 * stereo;
+            }
+            let main = std::array::from_fn(|channel| {
+                *(*inputs[0].__field0.channelBuffers32.add(channel)).add(frame)
+            });
+            let mono = *(*inputs[1].__field0.channelBuffers32).add(frame);
+            let stereo = std::array::from_fn(|channel| {
+                *(*inputs[2].__field0.channelBuffers32.add(channel)).add(frame)
+            });
+            for (channel, value) in timing.frame(main, mono, stereo).into_iter().enumerate() {
+                *(*output.__field0.channelBuffers32.add(channel)).add(frame) = value;
             }
         }
         kResultOk
@@ -282,6 +352,50 @@ impl IAudioProcessorTrait for Probe {
         0
     }
 }
+impl IEditControllerTrait for Probe {
+    unsafe fn setComponentState(&self, _state: *mut IBStream) -> tresult {
+        kResultOk
+    }
+    unsafe fn setState(&self, _state: *mut IBStream) -> tresult {
+        kResultOk
+    }
+    unsafe fn getState(&self, _state: *mut IBStream) -> tresult {
+        kResultOk
+    }
+    unsafe fn getParameterCount(&self) -> i32 {
+        0
+    }
+    unsafe fn getParameterInfo(&self, _: i32, _: *mut ParameterInfo) -> tresult {
+        kInvalidArgument
+    }
+    unsafe fn getParamStringByValue(&self, _: u32, _: f64, _: *mut String128) -> tresult {
+        kInvalidArgument
+    }
+    unsafe fn getParamValueByString(&self, _: u32, _: *mut TChar, _: *mut f64) -> tresult {
+        kInvalidArgument
+    }
+    unsafe fn normalizedParamToPlain(&self, _: u32, value: f64) -> f64 {
+        value
+    }
+    unsafe fn plainParamToNormalized(&self, _: u32, value: f64) -> f64 {
+        value
+    }
+    unsafe fn getParamNormalized(&self, _: u32) -> f64 {
+        0.0
+    }
+    unsafe fn setParamNormalized(&self, _: u32, _: f64) -> tresult {
+        kInvalidArgument
+    }
+    unsafe fn setComponentHandler(&self, handler: *mut IComponentHandler) -> tresult {
+        *self.handler.borrow_mut() =
+            ComRef::from_raw(handler).map(|reference| reference.to_com_ptr());
+        kResultOk
+    }
+    unsafe fn createView(&self, _: *const c_char) -> *mut IPlugView {
+        ptr::null_mut()
+    }
+}
+
 struct Factory;
 impl Class for Factory {
     type Interfaces = (IPluginFactory,);
@@ -328,8 +442,12 @@ impl IPluginFactoryTrait for Factory {
         let instance = ComWrapper::new(Probe {
             active: Cell::new(false),
             processing: Cell::new(false),
+            processing_thread: Cell::new(0),
             aux_active: Cell::new(if scenario == 3 { 15 } else { 0 }),
             max_frames: Cell::new(0),
+            timing: RefCell::new(Default::default()),
+            handler: RefCell::new(None),
+            main_thread: crate::thread_id(),
             instrument,
             playing: Cell::new(false),
             scenario,
@@ -371,4 +489,12 @@ extern "system" fn bundleEntry(_bundle: *mut c_void) -> bool {
 #[no_mangle]
 extern "system" fn bundleExit() -> bool {
     true
+}
+
+impl Drop for Probe {
+    fn drop(&mut self) {
+        if self.processing.get() || self.main_thread != crate::thread_id() {
+            crate::lifecycle_error();
+        }
+    }
 }

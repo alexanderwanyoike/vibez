@@ -44,17 +44,21 @@ impl EngineTrack {
 
     /// Apply automation at `beat`; return gain and pan mix overrides.
     pub fn apply_automation(&mut self, beat: f64) -> (Option<f32>, Option<f32>) {
-        self.apply_automation_with_sends(beat, true)
+        self.apply_scoped_automation(beat, None)
     }
 
-    pub(crate) fn apply_graph_automation(&mut self, beat: f64) -> (Option<f32>, Option<f32>) {
-        self.apply_automation_with_sends(beat, false)
-    }
-
-    fn apply_automation_with_sends(
+    pub(crate) fn apply_node_automation(
         &mut self,
         beat: f64,
-        update_sends: bool,
+        stage: vibez_core::routing::NodeStage,
+    ) -> (Option<f32>, Option<f32>) {
+        self.apply_scoped_automation(beat, Some(stage))
+    }
+
+    fn apply_scoped_automation(
+        &mut self,
+        beat: f64,
+        stage: Option<vibez_core::routing::NodeStage>,
     ) -> (Option<f32>, Option<f32>) {
         use vibez_core::automation::AutomationTarget;
         let mut gain = None;
@@ -64,6 +68,31 @@ impl EngineTrack {
         let mut has_mute_lane = false;
         for lane_idx in 0..self.playback_source.automation.len() {
             let lane = &self.playback_source.automation[lane_idx];
+            if let Some(stage) = stage {
+                use vibez_core::routing::NodeStage;
+                let relevant = match (stage, lane.target) {
+                    (
+                        NodeStage::Source,
+                        AutomationTarget::InstrumentParam { .. }
+                        | AutomationTarget::TrackSwingOffset,
+                    ) => true,
+                    (NodeStage::Effect(id), AutomationTarget::EffectParam { effect_id, .. }) => {
+                        id == effect_id
+                    }
+                    (
+                        NodeStage::AfterFader,
+                        AutomationTarget::TrackGain
+                        | AutomationTarget::TrackPan
+                        | AutomationTarget::TrackMute
+                        | AutomationTarget::Send { .. },
+                    ) => true,
+                    _ => false,
+                };
+                if !relevant {
+                    continue;
+                }
+            }
+
             if lane.target == AutomationTarget::TrackMute {
                 has_mute_lane = true;
             }
@@ -105,7 +134,7 @@ impl EngineTrack {
                     }
                 }
                 AutomationTarget::PluginParam { .. } => {}
-                AutomationTarget::Send { bus_id } if update_sends => {
+                AutomationTarget::Send { bus_id } if stage.is_none() => {
                     // Send range is native 0..1, so write the value in place.
                     match self.sends.iter_mut().find(|(b, _)| *b == bus_id) {
                         Some(send) => send.1 = value,
@@ -119,11 +148,15 @@ impl EngineTrack {
                 | AutomationTarget::Send { .. } => {}
             }
         }
-        self.automation_swing_offset = swing_offset;
-        if has_mute_lane {
-            self.set_automation_mute(mute, true);
-        } else {
-            self.set_automation_mute(None, true);
+        if stage.is_none() || stage == Some(vibez_core::routing::NodeStage::Source) {
+            self.automation_swing_offset = swing_offset;
+        }
+        if stage.is_none() || stage == Some(vibez_core::routing::NodeStage::AfterFader) {
+            if has_mute_lane {
+                self.set_automation_mute(mute, true);
+            } else {
+                self.set_automation_mute(None, true);
+            }
         }
         (gain, pan)
     }
@@ -145,22 +178,71 @@ impl EngineTrack {
             .unwrap_or(0.0)
     }
 
-    pub(crate) fn automation_mix_values(&self, beat: f64) -> (Option<f32>, Option<f32>) {
+    pub(crate) fn apply_delayed_automation(
+        &mut self,
+        node: usize,
+        controls: &[crate::compensation_controls::PreparedAutomationControl],
+        offset: usize,
+    ) -> (Option<f32>, Option<f32>) {
         use vibez_core::automation::AutomationTarget;
-        let value = |target| {
-            if self.automation_overrides.contains(target) {
-                return None;
+        let mut gain = None;
+        let mut pan = None;
+        for control in controls.iter().filter(|control| control.node == node) {
+            let value = control.values[offset];
+            if value.is_nan() || self.automation_overrides.contains(control.target) {
+                continue;
             }
-            self.playback_source
-                .automation
-                .iter()
-                .find(|lane| lane.target == target)
-                .and_then(|lane| lane.value_at(beat))
-        };
-        (
-            value(AutomationTarget::TrackGain).map(|gain| gain * 2.0),
-            value(AutomationTarget::TrackPan),
-        )
+            match control.target {
+                AutomationTarget::TrackGain => gain = Some(value * 2.0),
+                AutomationTarget::TrackPan => pan = Some(value),
+                AutomationTarget::EffectParam {
+                    effect_id,
+                    param_index,
+                } => {
+                    if let Some(slot) = self.effects.iter_mut().find(|slot| slot.id == effect_id) {
+                        let native = slot
+                            .effect
+                            .param_descriptors()
+                            .get(param_index)
+                            .map_or(value, |descriptor| {
+                                descriptor.min + value * (descriptor.max - descriptor.min)
+                            });
+                        slot.effect.set_param(param_index, native);
+                    }
+                }
+                AutomationTarget::InstrumentParam { param_index } => {
+                    if let Some(instrument) = self.instrument.as_mut() {
+                        let native = instrument
+                            .param_descriptors()
+                            .get(param_index)
+                            .map_or(value, |descriptor| {
+                                descriptor.min + value * (descriptor.max - descriptor.min)
+                            });
+                        instrument.set_param(param_index, native);
+                    }
+                }
+                AutomationTarget::TrackSwingOffset => {
+                    self.automation_swing_offset = Some(SwingOffset::from_normalized(value))
+                }
+                _ => {}
+            }
+        }
+        (gain, pan)
+    }
+
+    pub(crate) fn apply_delayed_mute_envelope(
+        &mut self,
+        values: &[f32],
+        frames: usize,
+        channels: usize,
+    ) {
+        for (frame, &value) in values.iter().take(frames).enumerate() {
+            self.set_automation_mute((!value.is_nan()).then_some(value >= 0.5), false);
+            let gain = self.mute_ramp.next_gain();
+            for sample in &mut self.mix_buffer[frame * channels..(frame + 1) * channels] {
+                *sample *= gain;
+            }
+        }
     }
 
     pub(crate) fn has_automation_target(

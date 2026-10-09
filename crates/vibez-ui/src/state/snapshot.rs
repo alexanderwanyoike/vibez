@@ -84,14 +84,14 @@ impl UndoHistory {
 
     pub fn push_undo(&mut self, snapshot: ProjectSnapshot) {
         self.last_gesture = None;
-        self.push_snapshot(snapshot);
-    }
-
-    fn push_snapshot(&mut self, snapshot: ProjectSnapshot) {
         self.undo.push_back(snapshot);
         if self.undo.len() > Self::CAPACITY {
             self.undo.pop_front();
         }
+    }
+
+    fn push_snapshot(&mut self, snapshot: ProjectSnapshot) {
+        self.push_undo(snapshot);
         self.redo.clear();
     }
 
@@ -184,3 +184,7 @@ impl UndoHistory {
         self.transaction = None;
     }
 }
+
+#[cfg(test)]
+#[path = "compensation_undo_tests.rs"]
+mod compensation_undo_tests;

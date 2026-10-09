@@ -154,12 +154,14 @@ pub fn collect_plugin_reload_requests(
                 }
                 effect.plugin_ref = Some(dev.clone());
                 effect.external_inputs.clear();
+                effect.latency_samples = None;
                 effect.descriptors = &[];
                 effect.has_plugin_gui = false;
                 requests.effects.push((track_id, effect.id, chain_pos, dev));
             }
         }
         if let Some(dev) = &track.plugin_instrument_ref {
+            track.instrument_latency_samples = None;
             let mut dev = dev.clone();
             if let Some(state) = capture_state(PluginGuiKey::Instrument { track_id }) {
                 dev.state_b64 = Some(state);
@@ -188,6 +190,7 @@ mod tests {
 
     fn effect(plugin: Option<PluginDeviceInfo>) -> UiEffect {
         UiEffect {
+            latency_samples: Some(0),
             inactive_sidechains: Default::default(),
             sidechains: Default::default(),
             external_inputs: Default::default(),
@@ -207,6 +210,7 @@ mod tests {
         track.effects = effects;
         ProjectSnapshot {
             project_tracks: std::sync::Arc::new(ProjectTracksState {
+                reduced_latency_monitoring: false,
                 tracks: vec![track],
                 master: crate::state::new_master_track(),
                 buses: Vec::new(),
