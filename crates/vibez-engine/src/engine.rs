@@ -48,6 +48,8 @@ const SPECTRUM_RING_CAPACITY: usize = 16_384;
 pub struct AudioEngine {
     routing: Option<Box<crate::routing::PreparedRouting>>,
     retired_routing: Option<Box<crate::routing::PreparedRouting>>,
+    pub(super) pending_retirements: Vec<EngineEvent>,
+    pub(super) channel_retirement: Arc<crate::retirement::ChannelRetirementPool>,
     transport: Transport,
     /// Legacy single-audio field for backward compatibility.
     audio: Option<Arc<DecodedAudio>>,
@@ -71,7 +73,7 @@ pub struct AudioEngine {
     audition: AuditionBus,
     sample_rate: u32,
     cmd_rx: Consumer<EngineCommand>,
-    event_tx: Producer<EngineEvent>,
+    pub(super) event_tx: Producer<EngineEvent>,
     clip_event_drops: u64,
     reported_clip_event_drops: u64,
     clip_resync_track: Option<usize>,
@@ -208,6 +210,8 @@ impl AudioEngine {
         let engine = Self {
             routing: None,
             retired_routing: None,
+            pending_retirements: Vec::with_capacity(crate::retirement::RETIREMENT_CAPACITY),
+            channel_retirement: crate::retirement::ChannelRetirementPool::new(),
             transport: Transport::new(),
             audio: None,
             tracks: Vec::new(),
@@ -597,33 +601,6 @@ impl AudioEngine {
             return Some(track);
         }
         self.buses.iter_mut().find(|b| b.id == id)
-    }
-
-    /// Hand a removed device back to the UI thread for teardown. If
-    /// the event ring is full (should never happen for these rare
-    /// events) the device is leaked rather than destroyed here:
-    /// plugin destructors are wildly RT-unsafe (dlclose, COM, JUCE).
-    fn dispose_effect(&mut self, effect: Box<dyn vibez_dsp::effect::AudioEffect>) {
-        if let Err(rtrb::PushError::Full(item)) =
-            self.event_tx
-                .push(crate::events::EngineEvent::DisposeEffect(
-                    crate::events::DisposalCell::new(effect),
-                ))
-        {
-            std::mem::forget(item);
-        }
-    }
-
-    /// See [`Self::dispose_effect`].
-    fn dispose_instrument(&mut self, instrument: Box<dyn vibez_instruments::Instrument>) {
-        if let Err(rtrb::PushError::Full(item)) =
-            self.event_tx
-                .push(crate::events::EngineEvent::DisposeInstrument(
-                    crate::events::DisposalCell::new(instrument),
-                ))
-        {
-            std::mem::forget(item);
-        }
     }
 }
 

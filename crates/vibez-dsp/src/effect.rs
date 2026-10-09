@@ -22,5 +22,8 @@ pub trait AudioEffect: Send {
     fn reset(&mut self);
     /// End an isolated offline processing run on its render thread.
     /// Native effects need no lifecycle transition.
-    fn finish_offline_processing(&mut self) {}
+    fn stop_processing(&mut self) {}
+    fn finish_offline_processing(&mut self) {
+        self.stop_processing();
+    }
 }

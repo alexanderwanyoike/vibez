@@ -7,7 +7,13 @@ impl AudioEngine {
     /// Drain all pending commands from the ring buffer without blocking.
     pub(super) fn drain_commands(&mut self) {
         self.return_retired_routing();
+        self.flush_retirements();
         loop {
+            if self.pending_retirements.len() == self.pending_retirements.capacity()
+                || !self.channel_retirement.has_capacity()
+            {
+                break;
+            }
             // A stalled UI must retain plan ownership, without callback
             // destruction or unbounded leaked retirement buffers.
             if self.retired_routing.is_some()
@@ -278,13 +284,8 @@ impl AudioEngine {
                 }
                 EngineCommand::RemoveTrack(id) => {
                     if let Some(pos) = self.tracks.iter().position(|t| t.id == id) {
-                        let mut track = self.tracks.remove(pos);
-                        for slot in track.effects.drain(..) {
-                            self.dispose_effect(slot.effect);
-                        }
-                        if let Some(instrument) = track.instrument.take() {
-                            self.dispose_instrument(instrument);
-                        }
+                        let track = self.tracks.remove(pos);
+                        self.dispose_channel(track);
                     }
                     self.recalculate_audio_length();
                 }
@@ -553,17 +554,11 @@ impl AudioEngine {
                 }
                 EngineCommand::RemoveBus(id) => {
                     if let Some(pos) = self.buses.iter().position(|b| b.id == id) {
-                        let mut bus = self.buses.remove(pos);
-                        for slot in bus.effects.drain(..) {
-                            self.dispose_effect(slot.effect);
-                        }
+                        let bus = self.buses.remove(pos);
+                        self.dispose_channel(bus);
                     }
                     for track in &mut self.tracks {
                         track.sends.retain(|(bus_id, _)| *bus_id != id);
-                        track.playback_source.automation.retain(|lane| {
-                            lane.target
-                                != vibez_core::automation::AutomationTarget::Send { bus_id: id }
-                        });
                     }
                 }
                 EngineCommand::SetSend {
