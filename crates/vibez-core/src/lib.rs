@@ -8,6 +8,7 @@ pub mod id;
 pub mod midi;
 pub mod onset;
 pub mod perform;
+pub mod routing;
 pub mod time;
 pub mod track;
 pub mod transient;

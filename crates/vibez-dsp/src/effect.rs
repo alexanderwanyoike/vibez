@@ -1,6 +1,19 @@
 use vibez_core::effect::{EffectType, ParamDescriptor};
 
+use vibez_core::routing::{ExternalInputBlock, ExternalInputDescriptor};
+
 pub trait AudioEffect: Send {
+    fn external_inputs(&self) -> &[ExternalInputDescriptor] {
+        &[]
+    }
+    fn process_with_inputs(
+        &mut self,
+        buffer: &mut [f32],
+        channels: usize,
+        _inputs: &[ExternalInputBlock<'_>],
+    ) {
+        self.process(buffer, channels);
+    }
     fn effect_type(&self) -> EffectType;
     fn param_descriptors(&self) -> &'static [ParamDescriptor];
     fn set_param(&mut self, index: usize, value: f32) -> bool;

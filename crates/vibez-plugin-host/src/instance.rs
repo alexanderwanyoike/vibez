@@ -4,6 +4,17 @@ use vibez_core::effect::ParamDescriptor;
 ///
 /// Implemented by both CLAP and VST3 host wrappers.
 pub trait PluginInstance: Send {
+    fn external_inputs(&self) -> &[vibez_core::routing::ExternalInputDescriptor] {
+        &[]
+    }
+    fn process_with_inputs(
+        &mut self,
+        buffer: &mut [f32],
+        channels: usize,
+        _inputs: &[vibez_core::routing::ExternalInputBlock<'_>],
+    ) {
+        self.process_audio(buffer, channels);
+    }
     fn name(&self) -> &str;
     fn param_count(&self) -> usize;
     fn param_descriptors_vec(&self) -> Vec<ParamDescriptor>;
