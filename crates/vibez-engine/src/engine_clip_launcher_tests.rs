@@ -823,3 +823,26 @@ fn dropped_clip_performance_start_is_recoverable_without_a_launch_request() {
     assert!(recovered.running);
     assert!(recovered.transport_playing);
 }
+
+#[test]
+fn clip_mute_point_uses_its_local_position_after_the_first_callback() {
+    use vibez_core::automation::{AutomationLane, AutomationPoint, AutomationTarget};
+    let (mut engine, mut commands, _events, track, _other) = setup();
+    let mut prepared = clip(track, 1, &[1.0; 256], false);
+    let mut lane = AutomationLane::new(AutomationTarget::TrackMute);
+    lane.points.push(AutomationPoint {
+        beat: 15.0 / 4.0,
+        value: 1.0,
+        curve: 0.0,
+    });
+    prepared.source.automation.push(lane);
+    launch(&mut commands, vec![prepared], MusicalBoundary::Immediate);
+    let mut first = [0.0; 10];
+    engine.process(&mut first, 1);
+    assert!(first.iter().all(|sample| *sample == 1.0));
+    let mut output = [0.0; 20];
+    engine.process(&mut output, 1);
+    assert_eq!(output[4], 1.0);
+    assert_eq!(output[5], 63.0 / 64.0);
+    assert_eq!(output[15], 53.0 / 64.0);
+}
