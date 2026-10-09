@@ -239,3 +239,80 @@ fn sample_oracle_detects_uncompensated_and_wrong_reported_paths() {
     assert!(!aligned(137, 137, false));
     assert!(!aligned(137, 138, true));
 }
+
+#[test]
+fn chained_bus_sends_align_each_sum_and_accumulate_all_processor_reports() {
+    let source = TrackId::new();
+    let dry = TrackId::new();
+    let bus_a = TrackId::new();
+    let bus_b = TrackId::new();
+    let effects = [EffectId::new(), EffectId::new(), EffectId::new()];
+    let mut input = channel(source, &effects[..1], false);
+    input.sends.push((bus_a, 0.5));
+    let mut first_bus = channel(bus_a, &effects[1..2], true);
+    first_bus.sends.push((bus_b, 0.5));
+    let mut dry = channel(dry, &[], false);
+    dry.sends.push((bus_b, 0.5));
+    let graph = RoutingGraph::prepare(&[
+        input,
+        first_bus,
+        channel(bus_b, &effects[2..], true),
+        dry,
+        channel(TrackId::MASTER, &[], true),
+    ])
+    .unwrap();
+    let mut reports = vec![0; graph.nodes.len()];
+    for (effect, latency) in effects.into_iter().zip([137, 521, 17]) {
+        reports[graph
+            .nodes
+            .iter()
+            .position(|node| node.stage == NodeStage::Effect(effect))
+            .unwrap()] = latency;
+    }
+    let plan = CompensationPlan::prepare(&graph, &reports, &[], 1).unwrap();
+    assert_eq!(plan.output_latency, 675);
+    for bus in [bus_a, bus_b, TrackId::MASTER] {
+        let node = graph.index(bus, NodeStage::Sum).unwrap();
+        for (index, edge) in graph
+            .edges
+            .iter()
+            .enumerate()
+            .filter(|(_, edge)| edge.to == node)
+        {
+            assert_eq!(
+                plan.node_output_latency[edge.from] + plan.edge_delays[index],
+                plan.node_input_latency[node],
+                "sum {bus:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn aggregate_delay_budget_is_rejected_before_any_individual_line_is_prepared() {
+    let source = TrackId::new();
+    let dry = TrackId::new();
+    let effect = EffectId::new();
+    let graph = RoutingGraph::prepare(&[
+        channel(source, &[effect], false),
+        channel(dry, &[], false),
+        channel(TrackId::MASTER, &[], true),
+    ])
+    .unwrap();
+    let mut reports = vec![0; graph.nodes.len()];
+    reports[graph.index(source, NodeStage::Effect(effect)).unwrap()] = 137;
+    let timing = CompensationTiming::prepare(&graph, &reports, &[], 1).unwrap();
+    let needed = timing.storage_samples().unwrap();
+    assert!(matches!(
+        timing.allocate(needed - 1),
+        Err(CompensationError::DelayStorage(
+            DelayPreparationError::StorageBudget
+        ))
+    ));
+    assert_eq!(
+        CompensationPlan::prepare_with_budget(&graph, &reports, &[], 1, needed)
+            .unwrap()
+            .storage_samples(),
+        needed
+    );
+}

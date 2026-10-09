@@ -53,3 +53,57 @@ fn an_early_loop_wrap_does_not_rebase_unfilled_history_to_the_current_block() {
         }
     }
 }
+
+#[test]
+fn a_delay_beyond_retained_capacity_never_reads_an_overwritten_clock_slot() {
+    let mut clock = ChannelClock::prepare(TrackId::new(), 2, 2).unwrap();
+    for block in 0..5 {
+        clock.record(block * 2, 2, true);
+    }
+    assert_eq!(clock.before_block(1), Some(9));
+    assert_eq!(clock.before_block(5), Some(5));
+    assert_eq!(clock.before_block(6), None);
+    assert!(!clock.has_context(100, 0));
+}
+
+#[test]
+fn empty_command_drain_has_no_recorded_audio_context() {
+    let mut clock = ChannelClock::prepare(TrackId::new(), 0, 16).unwrap();
+    clock.record(100, 0, true);
+    assert!(!clock.has_context(0, 0));
+    assert_eq!(clock.position(0, 0), 0);
+    clock.record(100, 16, true);
+    clock.record(116, 0, true);
+    assert_eq!(clock.before_block(1), Some(115));
+    assert!(!clock.has_context(0, 0));
+    assert_eq!(clock.position(0, 0), 0);
+}
+
+#[test]
+fn automation_preparation_checks_values_and_delay_together_before_allocation() {
+    use super::PreparedAutomationControl;
+    use vibez_core::automation::AutomationTarget;
+    assert!(PreparedAutomationControl::prepare(
+        TrackId::new(),
+        AutomationTarget::TrackGain,
+        0,
+        3,
+        8,
+        10
+    )
+    .is_err());
+    assert_eq!(
+        PreparedAutomationControl::prepare(
+            TrackId::new(),
+            AutomationTarget::TrackGain,
+            0,
+            3,
+            8,
+            11
+        )
+        .unwrap()
+        .storage_samples(),
+        11
+    );
+    assert!(PreparedAutomationControl::required_samples(3, usize::MAX).is_err());
+}

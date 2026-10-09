@@ -23,12 +23,7 @@ impl CompensationDelay {
         channels: usize,
         available_samples: usize,
     ) -> Result<Self, DelayPreparationError> {
-        if !(1..=2).contains(&channels) {
-            return Err(DelayPreparationError::UnsupportedChannels);
-        }
-        let samples = (frames as usize)
-            .checked_mul(channels)
-            .ok_or(DelayPreparationError::SizeOverflow)?;
+        let samples = Self::required_samples(frames, channels)?;
         if samples > available_samples {
             return Err(DelayPreparationError::StorageBudget);
         }
@@ -42,6 +37,16 @@ impl CompensationDelay {
             channels,
             cursor: 0,
         })
+    }
+
+    pub fn required_samples(frames: u32, channels: usize) -> Result<usize, DelayPreparationError> {
+        if !(1..=2).contains(&channels) {
+            return Err(DelayPreparationError::UnsupportedChannels);
+        }
+        let samples = (frames as usize)
+            .checked_mul(channels)
+            .ok_or(DelayPreparationError::SizeOverflow)?;
+        Ok(samples)
     }
 
     pub fn storage_samples(&self) -> usize {
@@ -78,6 +83,10 @@ impl CompensationDelay {
     }
 
     pub fn process_layout(&mut self, interleaved: &mut [f32], channels: usize) {
+        debug_assert!(
+            channels == self.channels || (channels == 1 && self.channels == 2),
+            "Compensation delay received an unsupported processing layout"
+        );
         if channels == self.channels {
             self.process(interleaved);
         } else if channels == 1 && self.channels == 2 && !self.history.is_empty() {
@@ -158,5 +167,38 @@ mod tests {
             CompensationDelay::prepare(1, 3, usize::MAX),
             Err(DelayPreparationError::UnsupportedChannels)
         ));
+    }
+    #[test]
+    fn mono_frames_in_stereo_storage_preserve_both_history_channels_across_segments() {
+        for delay in [0, 3, 137] {
+            let mut line = CompensationDelay::prepare(delay, 2, 274).unwrap();
+            let mut input = [0.0; 180];
+            input[0] = 1.0;
+            for block in input.chunks_mut(7) {
+                line.process_layout(block, 1);
+            }
+            assert_eq!(
+                input.iter().position(|&sample| sample == 1.0),
+                Some(delay as usize)
+            );
+            assert!(input
+                .iter()
+                .enumerate()
+                .all(|(index, &sample)| index == delay as usize || sample == 0.0));
+        }
+        let mut line = CompensationDelay::prepare(3, 2, 6).unwrap();
+        line.process_layout(&mut [1.0, 2.0], 1);
+        let mut stereo = [0.0; 8];
+        line.process_layout(&mut stereo, 2);
+        assert_eq!(stereo, [0.0, 0.0, 1.0, 1.0, 2.0, 2.0, 0.0, 0.0]);
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    #[should_panic(expected = "unsupported processing layout")]
+    fn stereo_input_cannot_silently_bypass_a_mono_delay() {
+        CompensationDelay::prepare(3, 1, 3)
+            .unwrap()
+            .process_layout(&mut [1.0; 8], 2);
     }
 }

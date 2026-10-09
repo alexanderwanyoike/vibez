@@ -16,3 +16,5 @@ pub mod bounce_timing;
 pub mod routing;
 
 mod retirement;
+
+mod guarded_history;
