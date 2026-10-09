@@ -107,6 +107,23 @@ pub struct PluginReloadRequests {
 /// `capture_state` is called for devices that still have a live
 /// instance so undo restores their exact current state instead of the
 /// (possibly stale, possibly absent) blob recorded at project load.
+// A reload may outlive slot deletion, replacement or project reset. Its saved
+// identity must still belong to the current project before phase-two init.
+pub fn accepts_effect_load(
+    track: Option<&crate::state::ProjectTrack>,
+    effect_id: vibez_core::id::EffectId,
+    restoring_slot: bool,
+    device: &vibez_core::effect::PluginDeviceInfo,
+) -> bool {
+    track.is_some_and(|track| {
+        !restoring_slot
+            || track
+                .effects
+                .iter()
+                .any(|slot| slot.id == effect_id && slot.plugin_ref.as_ref() == Some(device))
+    })
+}
+
 /// Retaining unavailable slots preserves sidechain assignments and chain identity
 /// while plugin reloads complete asynchronously.
 pub fn collect_plugin_reload_requests(
@@ -230,6 +247,22 @@ mod tests {
         assert!(snap.project_tracks.tracks[0].effects[1]
             .external_inputs
             .is_empty());
+    }
+
+    #[test]
+    fn deleted_or_replaced_placeholder_rejects_its_completed_reload() {
+        let device = plugin_device("compressor");
+        let placeholder = effect(Some(device.clone()));
+        let id = placeholder.id;
+        let mut snap = snapshot_with(vec![placeholder]);
+        let track = &mut std::sync::Arc::make_mut(&mut snap.project_tracks).tracks[0];
+        assert!(accepts_effect_load(Some(track), id, true, &device));
+        track.effects[0].plugin_ref = Some(plugin_device("replacement"));
+        assert!(!accepts_effect_load(Some(track), id, true, &device));
+        track.effects.clear();
+        assert!(!accepts_effect_load(Some(track), id, true, &device));
+        assert!(accepts_effect_load(Some(track), id, false, &device));
+        assert!(!accepts_effect_load(None, id, false, &device));
     }
 
     #[test]

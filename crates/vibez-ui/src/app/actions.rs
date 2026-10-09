@@ -536,6 +536,19 @@ impl App {
             let track_id = result.track_id;
             let effect_id = result.effect_id;
             let plugin_name = result.plugin_name.clone();
+            let track = self.state.find_track(track_id);
+            if !crate::domains::project::accepts_effect_load(
+                track,
+                effect_id,
+                result.position.is_some(),
+                &result.device_ref,
+            ) {
+                continue;
+            }
+            if result.position.is_some() {
+                result.position = track
+                    .and_then(|track| track.effects.iter().position(|slot| slot.id == effect_id));
+            }
 
             // Phase 2 runs in the loader service: init on the UI thread
             // (JUCE binds its MessageManager here) + state restore.
