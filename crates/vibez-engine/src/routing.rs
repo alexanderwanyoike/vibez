@@ -46,6 +46,16 @@ pub struct PreparedRouting {
 
 impl PreparedRouting {
     pub fn prepare(channels: &[RoutingChannel], max_frames: usize) -> Result<Box<Self>, String> {
+        Self::prepare_compensated(channels, max_frames, &[], &[], 0)
+    }
+
+    pub fn prepare_compensated(
+        channels: &[RoutingChannel],
+        max_frames: usize,
+        reports: &[(vibez_core::routing::RoutingNode, u32)],
+        reduced_tracks: &[vibez_core::id::TrackId],
+        generation: u64,
+    ) -> Result<Box<Self>, String> {
         if max_frames == 0 || max_frames > MAX_ROUTING_FRAMES {
             return Err(format!(
                 "Routing block capacity must be in 1..={MAX_ROUTING_FRAMES}"
@@ -56,22 +66,19 @@ impl PreparedRouting {
             RoutingError::DuplicateIdentity => "Routing contains duplicate identities",
             RoutingError::MasterSource => "Master cannot provide an external input",
         })?;
-        let scratch_samples = preparation_samples(channels, &graph, max_frames)?;
-        if scratch_samples > crate::compensation::MAX_STORAGE_SAMPLES {
-            return Err("Routing exceeds the compensation storage budget".into());
-        }
         let input_channels: usize = channels
             .iter()
             .flat_map(|channel| &channel.effects)
             .flat_map(|effect| &effect.inputs)
             .filter(|input| input.supported())
-            .map(|input| input.channels)
-            .sum();
+            .try_fold(0usize, |sum, input| sum.checked_add(input.channels))
+            .ok_or("Routing input storage arithmetic overflow")?;
         let storage = graph
             .nodes
             .len()
             .checked_mul(2)
-            .and_then(|count| count.checked_add(input_channels + 6))
+            .and_then(|count| count.checked_add(input_channels))
+            .and_then(|count| count.checked_add(6))
             .and_then(|count| count.checked_mul(max_frames))
             .and_then(|count| count.checked_mul(std::mem::size_of::<f32>()))
             .ok_or("Routing storage arithmetic overflow")?;
@@ -81,6 +88,93 @@ impl PreparedRouting {
                 MAX_ROUTING_STORAGE_BYTES / 1024 / 1024
             ));
         }
+        if channels
+            .iter()
+            .flat_map(|channel| &channel.effects)
+            .any(|effect| {
+                effect
+                    .inputs
+                    .iter()
+                    .filter(|input| input.supported())
+                    .count()
+                    > MAX_EXTERNAL_INPUTS
+            })
+        {
+            return Err(format!(
+                "An effect exceeds the supported {MAX_EXTERNAL_INPUTS} external inputs"
+            ));
+        }
+        let device_latencies: Vec<_> = graph
+            .nodes
+            .iter()
+            .map(|node| {
+                reports
+                    .iter()
+                    .find(|(key, _)| key == node)
+                    .map_or(0, |(_, value)| *value)
+            })
+            .collect();
+        let timing = crate::compensation::CompensationTiming::prepare(
+            &graph,
+            &device_latencies,
+            reduced_tracks,
+            generation,
+        )
+        .map_err(|error| format!("Compensation preparation failed: {error:?}"))?;
+        let storage_samples = storage::planned_samples(
+            &graph,
+            input_channels,
+            channels.len(),
+            max_frames,
+            &timing,
+            &device_latencies,
+        )?;
+        storage::check_budget(storage_samples)?;
+        let compensation = timing
+            .allocate(crate::compensation::MAX_STORAGE_SAMPLES)
+            .map_err(|error| format!("Compensation preparation failed: {error:?}"))?;
+        let capture_offsets = channels
+            .iter()
+            .filter(|channel| !channel.is_bus && !channel.id.is_master())
+            .filter_map(|channel| {
+                let omitted = compensation
+                    .output_latency
+                    .saturating_sub(compensation.direct_path_latency(&graph, channel.id));
+                (omitted > 0).then_some((channel.id, omitted))
+            })
+            .collect::<Vec<_>>()
+            .into();
+        let channel_clocks = channels
+            .iter()
+            .map(|channel| {
+                crate::compensation_controls::ChannelClock::prepare(
+                    channel.id,
+                    compensation.output_latency,
+                    max_frames,
+                )
+            })
+            .collect::<Result<_, _>>()?;
+        let presentation =
+            crate::compensation_clock::PresentationHistory::prepare(compensation.output_latency)
+                .map_err(str::to_owned)?;
+        let bypass_delays = graph
+            .nodes
+            .iter()
+            .enumerate()
+            .map(|(index, node)| {
+                let frames = if matches!(node.stage, vibez_core::routing::NodeStage::Effect(_)) {
+                    device_latencies[index]
+                } else {
+                    0
+                };
+                vibez_dsp::compensation_delay::CompensationDelay::prepare(
+                    frames,
+                    2,
+                    crate::compensation::MAX_STORAGE_SAMPLES,
+                )
+                .map_err(|error| format!("Bypass delay preparation failed: {error:?}"))
+            })
+            .collect::<Result<_, _>>()?;
         let mut required = vec![false; graph.nodes.len()];
         for edge in &graph.edges {
             if matches!(edge.kind, vibez_core::routing::EdgeKind::External(_)) {
@@ -138,11 +232,6 @@ impl PreparedRouting {
                     }
                 }
             }
-            if inputs.len() > MAX_EXTERNAL_INPUTS {
-                return Err(format!(
-                    "An effect exceeds the supported {MAX_EXTERNAL_INPUTS} external inputs"
-                ));
-            }
             nodes.push(PreparedNode {
                 channel: channels
                     .iter()
@@ -158,10 +247,6 @@ impl PreparedRouting {
                 inputs,
             });
         }
-        let device_latencies = vec![0; graph.nodes.len()];
-        let compensation =
-            crate::compensation::CompensationPlan::prepare(&graph, &device_latencies, &[], 0)
-                .map_err(|error| format!("Compensation preparation failed: {error:?}"))?;
         let edge_samples = graph
             .edges
             .iter()
@@ -172,12 +257,7 @@ impl PreparedRouting {
             .iter()
             .map(|_| vec![0.0; max_frames * 2])
             .collect();
-        let bypass_delays = graph
-            .nodes
-            .iter()
-            .map(|_| vibez_dsp::compensation_delay::CompensationDelay::prepare(0, 2, 0).unwrap())
-            .collect();
-        Ok(Box::new(Self {
+        let routing = Box::new(Self {
             channels: {
                 let mut track = 0;
                 let mut bus = 0;
@@ -209,114 +289,23 @@ impl PreparedRouting {
             nodes,
             max_frames,
             compensation,
-            capture_offsets: std::sync::Arc::from([]),
+            capture_offsets,
             edge_samples,
             bypass_delays,
             bypass_samples,
             device_latencies,
-            channel_clocks: channels
-                .iter()
-                .map(|channel| {
-                    crate::compensation_controls::ChannelClock::prepare(channel.id, 0, max_frames)
-                })
-                .collect::<Result<_, _>>()?,
+            channel_clocks,
             automation_controls: Vec::new(),
-            presentation: crate::compensation_clock::PresentationHistory::prepare(0)
-                .map_err(str::to_owned)?,
+            presentation,
             presentation_start: None,
             detector_buses,
-        }))
+        });
+        debug_assert_eq!(routing.storage_samples()?, storage_samples);
+        Ok(routing)
     }
 
-    pub fn prepare_compensated(
-        channels: &[RoutingChannel],
-        max_frames: usize,
-        reports: &[(vibez_core::routing::RoutingNode, u32)],
-        reduced_tracks: &[vibez_core::id::TrackId],
-        generation: u64,
-    ) -> Result<Box<Self>, String> {
-        let mut routing = Self::prepare(channels, max_frames)?;
-        for (index, node) in routing.graph.nodes.iter().enumerate() {
-            routing.device_latencies[index] = reports
-                .iter()
-                .find(|(key, _)| key == node)
-                .map_or(0, |(_, value)| *value);
-        }
-        routing.compensation = crate::compensation::CompensationPlan::prepare_with_budget(
-            &routing.graph,
-            &routing.device_latencies,
-            reduced_tracks,
-            generation,
-            crate::compensation::MAX_STORAGE_SAMPLES
-                .checked_sub(preparation_samples(channels, &routing.graph, max_frames)?)
-                .ok_or("Routing scratch storage exceeds the compensation budget")?,
-        )
-        .map_err(|error| format!("Compensation preparation failed: {error:?}"))?;
-        routing.capture_offsets = channels
-            .iter()
-            .filter(|channel| !channel.is_bus && !channel.id.is_master())
-            .filter_map(|channel| {
-                let omitted = routing.compensation.output_latency.saturating_sub(
-                    routing
-                        .compensation
-                        .direct_path_latency(&routing.graph, channel.id),
-                );
-                (omitted > 0).then_some((channel.id, omitted))
-            })
-            .collect::<Vec<_>>()
-            .into();
-        let history_samples = (routing.compensation.output_latency as usize + 1)
-            .checked_mul(std::mem::size_of::<
-                crate::compensation_clock::PresentationPosition,
-            >())
-            .and_then(|bytes| bytes.checked_add(3))
-            .map(|bytes| bytes / 4)
-            .ok_or("Presentation storage size overflow")?;
-        let used = preparation_samples(channels, &routing.graph, max_frames)?
-            .checked_add(history_samples)
-            .and_then(|samples| samples.checked_add(routing.compensation.storage_samples()))
-            .ok_or("Compensation storage size overflow")?;
-        let mut budget = crate::compensation::MAX_STORAGE_SAMPLES
-            .checked_sub(used)
-            .ok_or("Compensation exceeds the combined storage budget")?;
-        let clock_samples = (routing.compensation.output_latency as usize)
-            .checked_add(max_frames)
-            .and_then(|samples| samples.checked_add(1))
-            .and_then(|samples| samples.checked_mul(channels.len()))
-            .and_then(|samples| samples.checked_mul(std::mem::size_of::<u64>() / 4))
-            .ok_or("Channel clock history size overflow")?;
-        budget = budget
-            .checked_sub(clock_samples)
-            .ok_or("Channel clock history exceeds the compensation storage budget")?;
-        // Capture can start after a source changed at the render head, while
-        // the previous source is still reaching the full mix.
-        routing.channel_clocks = channels
-            .iter()
-            .map(|channel| {
-                crate::compensation_controls::ChannelClock::prepare(
-                    channel.id,
-                    routing.compensation.output_latency,
-                    max_frames,
-                )
-            })
-            .collect::<Result<_, _>>()?;
-        routing.presentation = crate::compensation_clock::PresentationHistory::prepare(
-            routing.compensation.output_latency,
-        )
-        .map_err(str::to_owned)?;
-        for (index, node) in routing.graph.nodes.iter().enumerate() {
-            if matches!(node.stage, vibez_core::routing::NodeStage::Effect(_)) {
-                let delay = vibez_dsp::compensation_delay::CompensationDelay::prepare(
-                    routing.device_latencies[index],
-                    2,
-                    budget,
-                )
-                .map_err(|error| format!("Bypass delay preparation failed: {error:?}"))?;
-                budget -= delay.storage_samples();
-                routing.bypass_delays[index] = delay;
-            }
-        }
-        Ok(routing)
+    pub fn storage_samples(&self) -> Result<usize, String> {
+        storage::allocated_samples(self)
     }
 
     pub fn configure_automation(
@@ -328,32 +317,18 @@ impl PreparedRouting {
     ) -> Result<(), String> {
         use vibez_core::automation::AutomationTarget;
         use vibez_core::routing::NodeStage;
-        let mut used = self.compensation.storage_samples()
-            + self
-                .bypass_delays
-                .iter()
-                .map(|line| line.storage_samples())
-                .sum::<usize>()
-            + self
-                .channel_clocks
-                .iter()
-                .map(|clock| clock.storage_bytes() / 4)
-                .sum::<usize>()
-            + (self.compensation.output_latency as usize + 1)
-                * std::mem::size_of::<crate::compensation_clock::PresentationPosition>()
-                / 4
-            + (self.nodes.len() * 4 + self.graph.edges.len() * 2 + 6) * self.max_frames
-            + self
-                .nodes
-                .iter()
-                .flat_map(|node| &node.inputs)
-                .map(|input| input.samples.len())
-                .sum::<usize>();
+        let mut used = self.storage_samples()?;
+        let mut additions = Vec::new();
         for &(track, target) in targets {
             if self
                 .automation_controls
                 .iter()
                 .any(|control| control.track == track && control.target == target)
+                || additions
+                    .iter()
+                    .any(|&(existing_track, existing_target, _)| {
+                        existing_track == track && existing_target == target
+                    })
             {
                 continue;
             }
@@ -371,22 +346,31 @@ impl PreparedRouting {
                 _ => NodeStage::AfterFader,
             };
             if let Some(node) = self.graph.index(track, stage) {
-                let budget = crate::compensation::MAX_STORAGE_SAMPLES
-                    .checked_sub(used)
-                    .and_then(|samples| samples.checked_sub(self.max_frames))
-                    .ok_or("Automation exceeds the compensation storage budget")?;
-                let control = crate::compensation_controls::PreparedAutomationControl::prepare(
+                let needed = storage::automation_samples(
+                    self.compensation.node_input_latency[node],
+                    self.max_frames,
+                )?;
+                used = used
+                    .checked_add(needed)
+                    .ok_or("Automation storage size overflow")?;
+                storage::check_budget(used)?;
+                additions.push((track, target, node));
+            }
+        }
+        let mut controls = Vec::with_capacity(additions.len());
+        for (track, target, node) in additions {
+            controls.push(
+                crate::compensation_controls::PreparedAutomationControl::prepare(
                     track,
                     target,
                     node,
                     self.compensation.node_input_latency[node],
                     self.max_frames,
-                    budget,
-                )?;
-                used += control.storage_samples();
-                self.automation_controls.push(control);
-            }
+                    crate::compensation::MAX_STORAGE_SAMPLES,
+                )?,
+            );
         }
+        self.automation_controls.extend(controls);
         Ok(())
     }
 
@@ -406,34 +390,8 @@ impl PreparedRouting {
     }
 }
 
-fn preparation_samples(
-    channels: &[RoutingChannel],
-    graph: &RoutingGraph,
-    max_frames: usize,
-) -> Result<usize, String> {
-    let inputs: usize = channels
-        .iter()
-        .flat_map(|channel| &channel.effects)
-        .flat_map(|effect| &effect.inputs)
-        .filter(|input| input.supported())
-        .map(|input| input.channels)
-        .sum();
-    graph
-        .nodes
-        .len()
-        .checked_mul(4)
-        .and_then(|samples| {
-            graph
-                .edges
-                .len()
-                .checked_mul(2)
-                .and_then(|edges| samples.checked_add(edges))
-        })
-        .and_then(|samples| samples.checked_add(inputs))
-        .and_then(|samples| samples.checked_add(6))
-        .and_then(|samples| samples.checked_mul(max_frames))
-        .ok_or_else(|| "Routing storage size overflow".to_owned())
-}
+#[path = "routing_storage.rs"]
+mod storage;
 
 #[derive(Debug, Clone, Copy)]
 pub enum ChannelIndex {
