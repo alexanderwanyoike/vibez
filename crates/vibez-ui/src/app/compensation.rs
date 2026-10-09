@@ -40,16 +40,17 @@ impl App {
             })
             .unwrap_or_else(|| "Removed device".into());
         let reconfigured = device.reconfigure_on_main_thread();
-        if reconfigured.is_ok() {
-            if let Some(track) = self.state.find_track_mut(track_id) {
-                if let Some(id) = effect_id {
-                    if let Some(effect) = track.effects.iter_mut().find(|effect| effect.id == id) {
-                        effect.latency_samples = Some(device.latency_samples());
+        let reported = reconfigured.as_ref().ok().map(|_| device.latency_samples());
+        if let Some(track) = self.state.find_track_mut(track_id) {
+            if let Some(id) = effect_id {
+                if let Some(effect) = track.effects.iter_mut().find(|effect| effect.id == id) {
+                    effect.latency_samples = reported;
+                    if reconfigured.is_ok() {
                         effect.external_inputs = device.external_inputs().to_vec();
                     }
-                } else {
-                    track.instrument_latency_samples = Some(device.latency_samples());
                 }
+            } else {
+                track.instrument_latency_samples = reported;
             }
         }
         let mut channels = self.sidechain_model();
