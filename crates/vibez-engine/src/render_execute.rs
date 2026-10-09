@@ -13,6 +13,9 @@ pub(super) fn render_offline_inner(
     {
         return Err("Invalid offline sample rate, tempo or render range".into());
     }
+    let (start, end) = req.range_samples;
+    let frames =
+        usize::try_from(end - start).map_err(|_| "Offline range exceeds addressable storage")?;
     progress(0);
     let dependencies = dependencies::actual_dependencies(req, plugins.as_deref());
     if let Some(plugins) = plugins.as_deref() {
@@ -63,9 +66,6 @@ pub(super) fn render_offline_inner(
             )
         })
         .unwrap_or_else(|| EngineTrack::new(TrackId::MASTER));
-    let (start, end) = req.range_samples;
-    let frames =
-        usize::try_from(end - start).map_err(|_| "Offline range exceeds addressable storage")?;
     let mut left = Vec::with_capacity(frames);
     let mut right = Vec::with_capacity(frames);
     let mut scratch = vec![0.0; BLOCK_FRAMES * CHANNELS];
