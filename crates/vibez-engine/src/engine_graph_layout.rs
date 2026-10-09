@@ -24,11 +24,17 @@ impl AudioEngine {
         if let Some(live) = block.live_input {
             for frame in 0..block.frames {
                 for channel in 0..2 {
-                    input[frame * 2 + channel] = live
-                        .samples
-                        .get(frame * block.channels + channel)
-                        .copied()
-                        .unwrap_or(0.0);
+                    input[frame * 2 + channel] = vibez_core::routing::adapt_main_channel_sample(
+                        block.channels,
+                        2,
+                        channel,
+                        |source| {
+                            live.samples
+                                .get(frame * block.channels + source)
+                                .copied()
+                                .unwrap_or(0.0)
+                        },
+                    );
                 }
             }
         }

@@ -290,6 +290,25 @@ pub fn adapt_channel_sample(
     }
 }
 
+/// A stereo project occupies the first L/R pair of a declared main layout.
+/// Auxiliary layouts retain the strict mono/stereo law above.
+pub fn adapt_main_channel_sample(
+    source_channels: usize,
+    destination_channels: usize,
+    channel: usize,
+    source: impl Fn(usize) -> f32,
+) -> f32 {
+    if channel >= 2 || channel >= destination_channels {
+        return 0.0;
+    }
+    adapt_channel_sample(
+        source_channels.min(2),
+        destination_channels.min(2),
+        channel,
+        source,
+    )
+}
+
 #[path = "routing_choices.rs"]
 mod choices;
 pub use choices::{input_source_choices, valid_input_taps, InputSourceChoice};
@@ -346,5 +365,29 @@ mod tests {
         let mut stereo = [0.0; 4];
         adapt_channels(&mono, 1, &mut stereo, 2);
         assert_eq!(stereo, [0.0, 0.0, 0.5, 0.5]);
+    }
+
+    #[test]
+    fn main_layouts_use_only_the_first_pair_and_preserve_mono_conversion() {
+        let surround = [1.0, 3.0, 99.0, 99.0, 99.0, 99.0];
+        assert_eq!(
+            adapt_main_channel_sample(6, 2, 0, |index| surround[index]),
+            1.0
+        );
+        assert_eq!(
+            adapt_main_channel_sample(6, 2, 1, |index| surround[index]),
+            3.0
+        );
+        assert_eq!(
+            adapt_main_channel_sample(6, 1, 0, |index| surround[index]),
+            2.0
+        );
+        for channel in 0..6 {
+            assert_eq!(
+                adapt_main_channel_sample(1, 6, channel, |_| 0.5),
+                if channel < 2 { 0.5 } else { 0.0 }
+            );
+        }
+        assert_eq!(adapt_channel_sample(6, 2, 0, |_| 99.0), 0.0);
     }
 }
