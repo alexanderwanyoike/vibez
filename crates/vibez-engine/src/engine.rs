@@ -46,6 +46,11 @@ const SPECTRUM_RING_CAPACITY: usize = 16_384;
 /// // Keep `cmd_tx` and `event_rx` on the UI thread.
 /// ```
 pub struct AudioEngine {
+    routing: Option<Box<crate::routing::PreparedRouting>>,
+    retired_routing: Option<Box<crate::routing::PreparedRouting>>,
+    pub(super) pending_retirements: Vec<EngineEvent>,
+    pub(super) pending_bus_cleanup: Option<(TrackId, usize)>,
+    pub(super) channel_retirement: Arc<crate::retirement::ChannelRetirementPool>,
     transport: Transport,
     /// Legacy single-audio field for backward compatibility.
     audio: Option<Arc<DecodedAudio>>,
@@ -69,7 +74,7 @@ pub struct AudioEngine {
     audition: AuditionBus,
     sample_rate: u32,
     cmd_rx: Consumer<EngineCommand>,
-    event_tx: Producer<EngineEvent>,
+    pub(super) event_tx: Producer<EngineEvent>,
     clip_event_drops: u64,
     reported_clip_event_drops: u64,
     clip_resync_track: Option<usize>,
@@ -204,6 +209,11 @@ impl AudioEngine {
         let (spectrum_tx, spectrum_rx) = RingBuffer::<f32>::new(SPECTRUM_RING_CAPACITY);
 
         let engine = Self {
+            routing: None,
+            retired_routing: None,
+            pending_bus_cleanup: None,
+            pending_retirements: Vec::with_capacity(crate::retirement::RETIREMENT_CAPACITY),
+            channel_retirement: crate::retirement::ChannelRetirementPool::new(),
             transport: Transport::new(),
             audio: None,
             tracks: Vec::new(),
@@ -302,11 +312,13 @@ impl AudioEngine {
 
         // Bus mixes accumulate from track sends during rendering;
         // start each block from silence.
-        for bus in &mut self.buses {
-            bus.clear_buffer(frames, channels);
+        if self.routing.is_none() {
+            for bus in &mut self.buses {
+                bus.clear_buffer(frames, channels);
+            }
         }
 
-        if !self.tracks.is_empty() {
+        if !self.tracks.is_empty() || self.routing.is_some() {
             // ---- 3. Multi-track rendering path --------------------------
             self.process_multitrack(
                 output,
@@ -320,100 +332,101 @@ impl AudioEngine {
             self.process_legacy(output, frames, channels);
         }
 
-        // ---- 4.3 Buses: each return processes its send mix through
-        // its chain (always, so queued plugin params deliver and
-        // tails ring out) and sums into the mix ahead of the master.
-        let block_beat = if self.transport.is_playing() {
-            let bpm = self.transport.bpm();
-            if bpm > 0.0 {
-                Some(self.effective_position() as f64 * bpm / (self.sample_rate as f64 * 60.0))
+        if self.routing.is_none() {
+            // ---- 4.3 Buses: each return processes its send mix through
+            // its chain (always, so queued plugin params deliver and
+            // tails ring out) and sums into the mix ahead of the master.
+            let block_beat = if self.transport.is_playing() {
+                let bpm = self.transport.bpm();
+                if bpm > 0.0 {
+                    Some(self.effective_position() as f64 * bpm / (self.sample_rate as f64 * 60.0))
+                } else {
+                    None
+                }
             } else {
                 None
-            }
-        } else {
-            None
-        };
-        let has_bus_solo = any_solo(&self.buses);
-        for bus_idx in 0..self.buses.len() {
-            let bus = &mut self.buses[bus_idx];
-            let (bus_auto_gain, bus_auto_pan) = match block_beat {
-                Some(beat) => bus.apply_automation(beat),
-                None => (None, None),
             };
-            let buf_size = frames * channels;
-            if bus.mix_buffer.len() < buf_size {
-                bus.clear_buffer(frames, channels);
-            }
-            for slot in &mut bus.effects {
-                if !slot.bypass {
-                    slot.effect
-                        .process(&mut bus.mix_buffer[..buf_size], channels);
+            let has_bus_solo = any_solo(&self.buses);
+            for bus_idx in 0..self.buses.len() {
+                let bus = &mut self.buses[bus_idx];
+                let (bus_auto_gain, bus_auto_pan) = match block_beat {
+                    Some(beat) => bus.apply_automation(beat),
+                    None => (None, None),
+                };
+                let buf_size = frames * channels;
+                if bus.mix_buffer.len() < buf_size {
+                    bus.clear_buffer(frames, channels);
                 }
-            }
-            if self.spectrum_track == Some(bus.id) {
-                push_spectrum(&mut self.spectrum_tx, &bus.mix_buffer[..buf_size], channels);
-            }
+                for slot in &mut bus.effects {
+                    if !slot.bypass {
+                        slot.effect
+                            .process(&mut bus.mix_buffer[..buf_size], channels);
+                    }
+                }
+                if self.spectrum_track == Some(bus.id) {
+                    push_spectrum(&mut self.spectrum_tx, &bus.mix_buffer[..buf_size], channels);
+                }
 
-            let mut peak_l = 0.0f32;
-            let mut peak_r = 0.0f32;
-            if !bus.mute && (!has_bus_solo || bus.solo) {
-                let gain = bus_auto_gain.unwrap_or(bus.gain);
-                // Balance, not equal-power: the send mix is already
-                // panned stereo, center must pass at unity.
-                let (pan_l, pan_r) = crate::mixer::balance_pan(bus_auto_pan.unwrap_or(bus.pan));
-                for frame in 0..frames {
-                    for ch in 0..channels {
-                        let idx = frame * channels + ch;
-                        let sample = bus.mix_buffer[idx] * gain;
-                        let panned = if channels >= 2 {
-                            if ch == 0 {
-                                sample * pan_l
-                            } else if ch == 1 {
-                                sample * pan_r
+                let mut peak_l = 0.0f32;
+                let mut peak_r = 0.0f32;
+                if !bus.mute && (!has_bus_solo || bus.solo) {
+                    let gain = bus_auto_gain.unwrap_or(bus.gain);
+                    // Balance, not equal-power: the send mix is already
+                    // panned stereo, center must pass at unity.
+                    let (pan_l, pan_r) = crate::mixer::balance_pan(bus_auto_pan.unwrap_or(bus.pan));
+                    for frame in 0..frames {
+                        for ch in 0..channels {
+                            let idx = frame * channels + ch;
+                            let sample = bus.mix_buffer[idx] * gain;
+                            let panned = if channels >= 2 {
+                                if ch == 0 {
+                                    sample * pan_l
+                                } else if ch == 1 {
+                                    sample * pan_r
+                                } else {
+                                    sample
+                                }
                             } else {
                                 sample
+                            };
+                            output[idx] += panned;
+                            if ch == 0 {
+                                peak_l = peak_l.max(panned.abs());
+                            } else if ch == 1 {
+                                peak_r = peak_r.max(panned.abs());
                             }
-                        } else {
-                            sample
-                        };
-                        output[idx] += panned;
-                        if ch == 0 {
-                            peak_l = peak_l.max(panned.abs());
-                        } else if ch == 1 {
-                            peak_r = peak_r.max(panned.abs());
                         }
                     }
                 }
+                let bus_id = bus.id;
+                let _ = self.event_tx.push(EngineEvent::TrackMeter {
+                    track_id: bus_id,
+                    peak_l,
+                    peak_r,
+                });
             }
-            let bus_id = bus.id;
-            let _ = self.event_tx.push(EngineEvent::TrackMeter {
-                track_id: bus_id,
-                peak_l,
-                peak_r,
-            });
-        }
 
-        // ---- 4.4 Master bus: effect chain + gain over the summed mix.
-        // Runs whether or not the transport is playing so queued
-        // plugin params are delivered and tails ring out, matching
-        // the per-track idle behavior.
-        let (master_auto_gain, _) = match block_beat {
-            Some(beat) => self.master.apply_automation(beat),
-            None => (None, None),
-        };
-        for slot in &mut self.master.effects {
-            if !slot.bypass {
-                slot.effect.process(output, channels);
+            // ---- 4.4 Master bus: effect chain + gain over the summed mix.
+            // Runs whether or not the transport is playing so queued
+            // plugin params are delivered and tails ring out, matching
+            // the per-track idle behavior.
+            let (master_auto_gain, _) = match block_beat {
+                Some(beat) => self.master.apply_automation(beat),
+                None => (None, None),
+            };
+            for slot in &mut self.master.effects {
+                if !slot.bypass {
+                    slot.effect.process(output, channels);
+                }
+            }
+            let master_gain = master_auto_gain.unwrap_or(self.master.gain);
+            if (master_gain - 1.0).abs() > f32::EPSILON {
+                output.iter_mut().for_each(|s| *s *= master_gain);
+            }
+            if self.spectrum_track == Some(self.master.id) {
+                push_spectrum(&mut self.spectrum_tx, output, channels);
             }
         }
-        let master_gain = master_auto_gain.unwrap_or(self.master.gain);
-        if (master_gain - 1.0).abs() > f32::EPSILON {
-            output.iter_mut().for_each(|s| *s *= master_gain);
-        }
-        if self.spectrum_track == Some(self.master.id) {
-            push_spectrum(&mut self.spectrum_tx, output, channels);
-        }
-
         // ---- 4.5 Audition Bus (post-master, outside project graph) ------
         self.audition.process(
             output,
@@ -532,6 +545,10 @@ impl AudioEngine {
         self.sample_rate
     }
 
+    pub(super) fn tracks_mut_for_retirement(&mut self) -> &mut [EngineTrack] {
+        &mut self.tracks
+    }
+
     pub fn tracks(&self) -> &[EngineTrack] {
         &self.tracks
     }
@@ -590,33 +607,6 @@ impl AudioEngine {
             return Some(track);
         }
         self.buses.iter_mut().find(|b| b.id == id)
-    }
-
-    /// Hand a removed device back to the UI thread for teardown. If
-    /// the event ring is full (should never happen for these rare
-    /// events) the device is leaked rather than destroyed here:
-    /// plugin destructors are wildly RT-unsafe (dlclose, COM, JUCE).
-    fn dispose_effect(&mut self, effect: Box<dyn vibez_dsp::effect::AudioEffect>) {
-        if let Err(rtrb::PushError::Full(item)) =
-            self.event_tx
-                .push(crate::events::EngineEvent::DisposeEffect(
-                    crate::events::DisposalCell::new(effect),
-                ))
-        {
-            std::mem::forget(item);
-        }
-    }
-
-    /// See [`Self::dispose_effect`].
-    fn dispose_instrument(&mut self, instrument: Box<dyn vibez_instruments::Instrument>) {
-        if let Err(rtrb::PushError::Full(item)) =
-            self.event_tx
-                .push(crate::events::EngineEvent::DisposeInstrument(
-                    crate::events::DisposalCell::new(instrument),
-                ))
-        {
-            std::mem::forget(item);
-        }
     }
 }
 
@@ -702,3 +692,16 @@ mod clip_launcher;
 #[cfg(test)]
 #[path = "engine_clip_launcher_tests.rs"]
 mod clip_launcher_tests;
+
+#[path = "engine_graph.rs"]
+mod graph_render;
+
+#[cfg(test)]
+#[path = "engine_graph_tests.rs"]
+mod graph_tests;
+
+#[path = "engine_instrument_commands.rs"]
+mod instrument_commands;
+
+#[path = "engine_effect_commands.rs"]
+mod effect_commands;

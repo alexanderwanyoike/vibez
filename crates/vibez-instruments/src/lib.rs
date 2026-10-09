@@ -45,7 +45,10 @@ pub trait Instrument: Send {
     fn reset(&mut self);
     /// End an isolated offline processing run on its render thread.
     /// Native instruments need no lifecycle transition.
-    fn finish_offline_processing(&mut self) {}
+    fn stop_processing(&mut self) {}
+    fn finish_offline_processing(&mut self) {
+        self.stop_processing();
+    }
     /// Whether this instrument supports batch rendering with timed events.
     /// When true, the mixer will call note_on_at/note_off_at with frame
     /// offsets and then render() once for the entire buffer.

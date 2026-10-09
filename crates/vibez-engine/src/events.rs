@@ -16,35 +16,22 @@ pub enum AutomationGesturePhase {
 /// consumed on the UI thread to update the interface.  Because they are
 /// produced in the audio callback, every variant must be trivially cheap to
 /// construct (no allocations, no locks).
-/// Opaque, shareable holder carrying a boxed device across the event
-/// ring for disposal. Exists so `EngineEvent` can keep deriving
-/// Debug/Clone/PartialEq: clones share the same cell, equality is
-/// cell identity, and whichever holder takes the box first drops it.
-pub struct DisposalCell<T: ?Sized>(std::sync::Arc<std::sync::Mutex<Option<Box<T>>>>);
-
+/// Unique device ownership transferred to the UI without allocating a holder
+/// or locking on the processing thread.
+pub struct DisposalCell<T: ?Sized>(Box<T>);
 impl<T: ?Sized> DisposalCell<T> {
     pub fn new(device: Box<T>) -> Self {
-        Self(std::sync::Arc::new(std::sync::Mutex::new(Some(device))))
+        Self(device)
     }
-
-    /// Take the device out for dropping; None if already taken.
-    pub fn take(&self) -> Option<Box<T>> {
-        self.0.lock().ok().and_then(|mut guard| guard.take())
+    pub fn take(self) -> Option<Box<T>> {
+        Some(self.0)
     }
 }
-
-impl<T: ?Sized> Clone for DisposalCell<T> {
-    fn clone(&self) -> Self {
-        Self(std::sync::Arc::clone(&self.0))
-    }
-}
-
 impl<T: ?Sized> PartialEq for DisposalCell<T> {
     fn eq(&self, other: &Self) -> bool {
-        std::sync::Arc::ptr_eq(&self.0, &other.0)
+        std::ptr::eq(self.0.as_ref(), other.0.as_ref())
     }
 }
-
 impl<T: ?Sized> std::fmt::Debug for DisposalCell<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("DisposalCell")
@@ -78,6 +65,9 @@ pub struct ClipTrackState {
 
 #[derive(Debug)]
 pub enum EngineEvent {
+    RetiredChannel(crate::retirement::RetiredChannel),
+    RetiredAutomationLane(vibez_core::automation::AutomationLane),
+    RoutingRetired(Box<crate::routing::PreparedRouting>),
     /// A device removed from the audio graph, handed back so the UI
     /// thread performs the teardown. Plugin destructors run dlclose
     /// and COM/JUCE teardown, which must never happen in the audio

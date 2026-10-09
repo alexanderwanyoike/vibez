@@ -106,6 +106,9 @@ impl App {
             while let Some(event) = self.event_rx.as_mut().and_then(|rx| rx.pop().ok()) {
                 apply_drum_pad_flash(&mut self.state.view, &event, std::time::Instant::now());
                 match event {
+                    EngineEvent::RetiredAutomationLane(lane) => drop(lane),
+                    EngineEvent::RetiredChannel(channel) => drop(channel),
+                    EngineEvent::RoutingRetired(plan) => drop(plan),
                     event @ (EngineEvent::ClipRecordArmed { .. }
                     | EngineEvent::ClipRecordStarted { .. }
                     | EngineEvent::ClipRecordStopped { .. }) => self.clip_record_event(event),
