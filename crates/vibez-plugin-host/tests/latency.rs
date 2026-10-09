@@ -229,4 +229,3 @@ fn failed_reactivation_invalidates_cached_processing_even_when_latency_still_mat
         assert!(instance.processing_configuration_valid());
     }
 }
-
