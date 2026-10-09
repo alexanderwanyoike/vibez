@@ -260,6 +260,7 @@ fn independently_installed_instruments_feed_engine_sidechain_inputs() {
             is_bus: false,
             sends: vec![],
             effects: vec![RoutingEffect {
+                inactive_inputs: vec![],
                 id: effect,
                 inputs: vec![input],
                 assignments: vec![SidechainAssignment {

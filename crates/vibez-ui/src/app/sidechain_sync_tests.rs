@@ -37,7 +37,16 @@ fn metered_ticks_and_mouse_messages_do_not_rebuild_the_project_routing_model() {
             })
             .unwrap();
         app.poll_engine_events();
-        app.sync_sidechain_routing();
+        let _ = app.update_and_refresh_clips(Message::View(
+            crate::domains::view::ViewMsg::CursorMoved(10.0, 20.0),
+        ));
+        let _ = app.update_and_refresh_clips(Message::Arrangement(
+            crate::domains::arrangement::ArrangementMsg::EngineTrackMeter {
+                track_id: id,
+                peak_l: 0.8,
+                peak_r: 0.5,
+            },
+        ));
     }
     super::sidechain::MODEL_BUILDS.with(|count| assert_eq!(count.get(), 0));
     assert!(Arc::ptr_eq(&project, &app.state.project_tracks));
@@ -92,6 +101,14 @@ fn restored_cycle_keeps_established_route_and_persists_the_silent_assignment() {
     let declared = std::mem::take(&mut a.effects[0].external_inputs);
     Arc::make_mut(&mut app.state.project_tracks).tracks = vec![a, b];
     app.sync_sidechain_routing();
+    let snapshot = app.project_for_offline_render();
+    assert_eq!(
+        snapshot.tracks[0].effects[0].inactive_sidechains,
+        [ExternalInputId(0)]
+    );
+    assert!(snapshot.tracks[1].effects[0].inactive_sidechains.is_empty());
+    assert!(app.project_from_state().tracks[0].effects[0].inactive_sidechains.is_empty(),
+        "offline capability snapshot must not write temporary unavailability into the saved project");
     Arc::make_mut(&mut app.state.project_tracks).tracks[0].effects[0].external_inputs = declared;
     app.sync_sidechain_routing();
     let tracks = &app.state.project_tracks.tracks;
@@ -113,4 +130,26 @@ fn restored_cycle_keeps_established_route_and_persists_the_silent_assignment() {
         reopened.tracks[0].effects[0].sidechains,
         project.tracks[0].effects[0].sidechains
     );
+    let inactive_snapshot = app.take_snapshot();
+    let receiver = app.state.project_tracks.tracks[0].id;
+    let effect_id = app.state.project_tracks.tracks[0].effects[0].id;
+    let _ = app.update_and_refresh_clips(Message::Devices(
+        crate::domains::devices::DevicesMsg::SetSidechainTap {
+            track_id: receiver,
+            effect_id,
+            input_id: ExternalInputId(0),
+            tap: SourceTap::BeforeEffects,
+        },
+    ));
+    assert!(app.state.project_tracks.tracks[0].effects[0]
+        .inactive_sidechains
+        .is_empty());
+    assert_eq!(app.state.project.history.undo.len(), 1);
+    app.apply_snapshot(inactive_snapshot);
+    app.sync_sidechain_routing();
+    assert_eq!(
+        app.state.project_tracks.tracks[0].effects[0].inactive_sidechains,
+        [ExternalInputId(0)]
+    );
+    RoutingGraph::prepare(app.state.devices.last_routing.as_ref().unwrap()).unwrap();
 }

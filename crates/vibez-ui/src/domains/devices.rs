@@ -176,6 +176,7 @@ fn sync_pad(
 
 #[derive(Default)]
 pub struct DevicesCtx<'a> {
+    pub sample_rate: u32,
     pub routing: Option<&'a [vibez_core::routing::RoutingChannel]>,
 }
 
@@ -187,10 +188,10 @@ impl DevicesState {
         tracks: &mut [ProjectTrack],
         master: &mut ProjectTrack,
         buses: &mut [ProjectTrack],
-        sample_rate: u32,
         ctx: DevicesCtx<'_>,
     ) -> DevicesAction {
         let mut action = DevicesAction::default();
+        let sample_rate = ctx.sample_rate;
         match msg {
             DevicesMsg::SetSidechainSource {
                 track_id,
@@ -634,8 +635,10 @@ mod tests {
             &mut tracks,
             &mut crate::state::new_master_track(),
             &mut [],
-            44_100,
-            DevicesCtx::default(),
+            DevicesCtx {
+                sample_rate: 44_100,
+                ..Default::default()
+            },
         );
         assert!(tracks[0].effects.is_empty());
         assert_eq!(
@@ -666,8 +669,10 @@ mod tests {
             &mut tracks,
             &mut crate::state::new_master_track(),
             &mut [],
-            44_100,
-            DevicesCtx::default(),
+            DevicesCtx {
+                sample_rate: 44_100,
+                ..Default::default()
+            },
         );
 
         assert_eq!(tracks[0].instrument_kind, Some(InstrumentKind::Sampler));
@@ -699,8 +704,10 @@ mod tests {
             &mut tracks,
             &mut crate::state::new_master_track(),
             &mut [],
-            44_100,
-            DevicesCtx::default(),
+            DevicesCtx {
+                sample_rate: 44_100,
+                ..Default::default()
+            },
         );
 
         assert!(tracks[0].plugin_instrument_name.is_none());
@@ -720,8 +727,10 @@ mod tests {
             &mut tracks,
             &mut crate::state::new_master_track(),
             &mut [],
-            44_100,
-            DevicesCtx::default(),
+            DevicesCtx {
+                sample_rate: 44_100,
+                ..Default::default()
+            },
         );
         let max = tracks[0].effects[0].descriptors[0].max;
         assert_eq!(tracks[0].effects[0].params[0], max);
@@ -738,8 +747,10 @@ mod tests {
             &mut tracks,
             &mut crate::state::new_master_track(),
             &mut [],
-            44_100,
-            DevicesCtx::default(),
+            DevicesCtx {
+                sample_rate: 44_100,
+                ..Default::default()
+            },
         );
         assert!(engine.0.is_empty());
     }
@@ -756,8 +767,10 @@ mod tests {
             &mut tracks,
             &mut crate::state::new_master_track(),
             &mut [],
-            44_100,
-            DevicesCtx::default(),
+            DevicesCtx {
+                sample_rate: 44_100,
+                ..Default::default()
+            },
         );
         assert_eq!(tracks[0].selected_drum_pad, 3);
         assert_eq!(action.select_track, Some(track_id));
@@ -785,8 +798,10 @@ mod tests {
             &mut tracks,
             &mut crate::state::new_master_track(),
             &mut [],
-            44_100,
-            DevicesCtx::default(),
+            DevicesCtx {
+                sample_rate: 44_100,
+                ..Default::default()
+            },
         );
 
         assert_eq!(tracks[0].selected_drum_pad, 19);
@@ -811,8 +826,10 @@ mod tests {
             &mut tracks,
             &mut crate::state::new_master_track(),
             &mut [],
-            44_100,
-            DevicesCtx::default(),
+            DevicesCtx {
+                sample_rate: 44_100,
+                ..Default::default()
+            },
         );
         assert_eq!(tracks[0].drum_rack_pads[0].gain, 2.0); // clamped
         assert!(matches!(
@@ -831,8 +848,10 @@ mod tests {
             &mut tracks,
             &mut crate::state::new_master_track(),
             &mut [],
-            44_100,
-            DevicesCtx::default(),
+            DevicesCtx {
+                sample_rate: 44_100,
+                ..Default::default()
+            },
         );
         assert_eq!(
             tracks[0].drum_rack_pads[0].fade_out_ms,
@@ -862,8 +881,10 @@ mod tests {
             &mut tracks,
             &mut crate::state::new_master_track(),
             &mut [],
-            44_100,
-            DevicesCtx::default(),
+            DevicesCtx {
+                sample_rate: 44_100,
+                ..Default::default()
+            },
         );
         // MIDI track opens on the Instruments tab.
         assert_eq!(
@@ -876,8 +897,10 @@ mod tests {
             &mut tracks,
             &mut crate::state::new_master_track(),
             &mut [],
-            44_100,
-            DevicesCtx::default(),
+            DevicesCtx {
+                sample_rate: 44_100,
+                ..Default::default()
+            },
         );
         assert!(devices.context_menu.is_none());
     }

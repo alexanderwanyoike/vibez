@@ -99,7 +99,8 @@ pub(super) fn render_offline_inner(
             };
             for frame in written[first_frame * CHANNELS..].chunks_exact(CHANNELS) {
                 left.push(frame[0]);
-                right.push(frame[1]);            }
+                right.push(frame[1]);
+            }
         }
         position += block as u64;
         progress(if end == 0 {
