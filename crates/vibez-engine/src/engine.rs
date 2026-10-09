@@ -291,6 +291,7 @@ impl AudioEngine {
             live_input,
             mut track_output_capture,
         } = block;
+        self.flush_processing_errors();
         self.resync_clip_events();
         // A musical boundary due at this block start owns the same timestamp
         // as commands drained below. Publish the recording start first so a
@@ -427,6 +428,8 @@ impl AudioEngine {
                 push_spectrum(&mut self.spectrum_tx, output, channels);
             }
         }
+        self.flush_processing_errors();
+
         // ---- 4.5 Audition Bus (post-master, outside project graph) ------
         self.audition.process(
             output,
@@ -695,6 +698,9 @@ mod clip_launcher_tests;
 
 #[path = "engine_graph_layout.rs"]
 mod graph_layout;
+
+#[path = "engine_processing.rs"]
+mod processing;
 
 #[path = "engine_graph.rs"]
 mod graph_render;

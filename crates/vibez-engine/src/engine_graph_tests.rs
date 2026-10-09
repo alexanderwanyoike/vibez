@@ -13,6 +13,101 @@ fn channel(id: TrackId) -> RoutingChannel {
 }
 
 #[test]
+fn full_ring_retains_the_first_processing_failure_and_prioritizes_it_next_callback() {
+    use vibez_core::effect::ParamDescriptor;
+    struct Failure {
+        pending: Option<&'static str>,
+        failed: bool,
+    }
+    impl vibez_dsp::effect::AudioEffect for Failure {
+        fn effect_type(&self) -> EffectType {
+            EffectType::Gain
+        }
+        fn param_descriptors(&self) -> &'static [ParamDescriptor] {
+            &[]
+        }
+        fn set_param(&mut self, _: usize, _: f32) -> bool {
+            false
+        }
+        fn get_param(&self, _: usize) -> f32 {
+            0.0
+        }
+        fn process(&mut self, output: &mut [f32], _: usize) {
+            if !output.is_empty() && !self.failed {
+                self.pending = Some("Controlled failure");
+                self.failed = true;
+            }
+        }
+        fn reset(&mut self) {}
+        fn take_processing_error(&mut self) -> Option<&'static str> {
+            self.pending.take()
+        }
+    }
+    let (mut engine, mut commands, mut events) = AudioEngine::new();
+    let track = TrackId::new();
+    let effect = EffectId::new();
+    commands
+        .push(EngineCommand::AddTrack(track, "Failure".into()))
+        .unwrap();
+    commands
+        .push(EngineCommand::AddEffect {
+            track_id: track,
+            effect_id: effect,
+            effect_type: EffectType::Gain,
+            position: None,
+        })
+        .unwrap();
+    let mut model = channel(track);
+    model.effects.push(RoutingEffect {
+        id: effect,
+        inputs: vec![],
+        assignments: vec![],
+        inactive_inputs: vec![],
+    });
+    commands
+        .push(EngineCommand::SetRouting(
+            crate::routing::PreparedRouting::prepare(&[model, channel(TrackId::MASTER)], 32)
+                .unwrap(),
+        ))
+        .unwrap();
+    engine.process(&mut [], 2);
+    engine.tracks[0].effects[0].effect = Box::new(Failure {
+        pending: None,
+        failed: false,
+    });
+    while events.pop().is_ok() {}
+    while !engine.event_tx.is_full() {
+        engine.process(&mut [], 2);
+    }
+    assert_eq!(
+        crate::retirement::tests::allocations(|| engine.process(&mut [0.0; 16], 2)),
+        (0, 0)
+    );
+    events.pop().unwrap();
+    assert_eq!(
+        crate::retirement::tests::allocations(|| engine.process(&mut [0.0; 16], 2)),
+        (0, 0)
+    );
+    let mut failures = 0;
+    while let Ok(event) = events.pop() {
+        if let EngineEvent::DeviceProcessingFailed {
+            track_id,
+            effect_id,
+            reason,
+        } = event
+        {
+            assert_eq!(
+                (track_id, effect_id, reason),
+                (track, Some(effect), "Controlled failure")
+            );
+            failures += 1;
+        }
+    }
+    assert_eq!(failures, 1);
+    assert!(engine.take_device_processing_error().is_none());
+}
+
+#[test]
 fn hardware_first_pair_live_capture_and_populated_graph_are_allocation_free() {
     let (mut engine, mut commands, mut events) = AudioEngine::new();
     let source = TrackId::new();

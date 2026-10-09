@@ -177,17 +177,6 @@ impl AudioEngine {
                         }
                     }
                     std::mem::swap(&mut track.mix_buffer, &mut prepared.nodes[index].samples);
-                    if let Some(reason) = track
-                        .instrument
-                        .as_mut()
-                        .and_then(|instrument| instrument.take_processing_error())
-                    {
-                        let _ = self.event_tx.push(EngineEvent::DeviceProcessingFailed {
-                            track_id: id,
-                            effect_id: None,
-                            reason,
-                        });
-                    }
                     let activity = track.take_note_activity();
                     if activity != 0 {
                         let _ = self.event_tx.push(EngineEvent::TrackNoteActivity {
@@ -326,13 +315,6 @@ impl AudioEngine {
                                 channels,
                                 &blocks[..destination.inputs.len()],
                             );
-                            if let Some(reason) = slot.effect.take_processing_error() {
-                                let _ = self.event_tx.push(EngineEvent::DeviceProcessingFailed {
-                                    track_id: node.channel,
-                                    effect_id: Some(effect_id),
-                                    reason,
-                                });
-                            }
                         }
                     }
                 }
