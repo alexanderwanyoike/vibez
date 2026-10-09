@@ -81,11 +81,6 @@ impl App {
                 effect,
                 &self.state.project_tracks.tracks,
                 &self.state.project_tracks.buses,
-                self.state
-                    .devices
-                    .last_routing
-                    .as_deref()
-                    .unwrap_or_default(),
                 &self.state.devices,
             );
             let slot = view_effect_slot(track_id, effect, track_color, custom, sidechain);

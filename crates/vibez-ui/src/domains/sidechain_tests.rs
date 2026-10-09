@@ -262,3 +262,39 @@ fn potential_automated_send_prevents_feedback_before_its_first_nonzero_point() {
     ));
     assert!(tracks[0].effects[0].sidechains.is_empty());
 }
+
+#[test]
+fn cached_source_taps_match_command_validation_for_each_supported_input() {
+    let (mut tracks, master, mut buses, effect_id) = setup();
+    let source = tracks[1].id;
+    let mut bus = ProjectTrack::new(TrackId::new(), "Bus".into(), 2);
+    let bus_effect = EffectId::new();
+    bus.effects.push(effect(bus_effect));
+    tracks[1].sends.push((bus.id, 0.5));
+    buses.push(bus);
+    tracks[0].effects[0].sidechains.push(SidechainAssignment {
+        input_id: ExternalInputId(0),
+        input_name: "Sidechain".into(),
+        source,
+        source_name: "Kick".into(),
+        tap: SourceTap::AfterEffects,
+    });
+    let graph = routing_channels(&tracks, &master, &buses);
+    let cached = input_source_choices(&graph);
+    for channel in &graph {
+        for effect in &channel.effects {
+            for input in effect.inputs.iter().filter(|input| input.supported()) {
+                let choices = &cached[&(effect.id, input.id)];
+                for source in &graph {
+                    let expected = valid_taps(&graph, channel.id, effect.id, input.id, source.id);
+                    let actual = choices
+                        .iter()
+                        .find(|choice| choice.source == source.id)
+                        .map_or(&[][..], |choice| choice.taps.as_slice());
+                    assert_eq!(actual, expected);
+                }
+            }
+        }
+    }
+    assert!(cached.contains_key(&(effect_id, ExternalInputId(0))));
+}

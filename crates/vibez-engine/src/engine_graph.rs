@@ -20,6 +20,7 @@ impl AudioEngine {
         block: render_paths::MultitrackRenderBlock<'_>,
         mut capture: Option<&mut TrackOutputCapture<'_>>,
         idle: bool,
+        capture_audible_only: bool,
     ) {
         if let Some(max_frames) = self
             .routing
@@ -50,6 +51,7 @@ impl AudioEngine {
                     },
                     part_capture.as_mut(),
                     idle,
+                    capture_audible_only,
                 );
                 offset += frames;
             }
@@ -175,9 +177,10 @@ impl AudioEngine {
                     } else {
                         self.buses.iter_mut().find(|bus| bus.id == node.channel)
                     };
-                    if let Some(track) = track {
-                        track.apply_graph_automation(block.pos as f64 / tempo.samples_per_beat());
-                    }
+                    let Some(track) = track else {
+                        continue;
+                    };
+                    track.apply_graph_automation(block.pos as f64 / tempo.samples_per_beat());
                     for edge in prepared.graph.edges.iter().filter(|edge| edge.to == index) {
                         let audible = match edge.kind {
                             EdgeKind::Mix => {
@@ -401,8 +404,20 @@ impl AudioEngine {
                                 .as_deref_mut()
                                 .filter(|capture| capture.source_track_raw == node.channel.raw())
                             {
-                                capture.samples[..len]
-                                    .copy_from_slice(&prepared.nodes[index].samples[..len]);
+                                let audible = if bus_channel {
+                                    (!bus_solo || track.solo)
+                                        && (!track_solo
+                                            || track.solo
+                                            || !prepared.detector_buses.contains(&node.channel))
+                                } else {
+                                    (!track_solo && !bus_solo) || track.solo
+                                };
+                                if !capture_audible_only || audible {
+                                    capture.samples[..len]
+                                        .copy_from_slice(&prepared.nodes[index].samples[..len]);
+                                } else {
+                                    capture.samples[..len].fill(0.0);
+                                }
                             }
                             if node.channel.is_master() {
                                 output[..len]

@@ -232,7 +232,7 @@ impl AudioEngine {
             live_input,
         } = block;
         if self.routing.is_some() {
-            self.render_routing_graph(output, block, track_output_capture, false);
+            self.render_routing_graph(output, block, track_output_capture, false, true);
             return;
         }
         let has_track_solo = any_solo(&self.tracks);
@@ -522,6 +522,7 @@ impl AudioEngine {
                     live_input,
                 },
                 track_output_capture,
+                true,
                 true,
             );
             return;

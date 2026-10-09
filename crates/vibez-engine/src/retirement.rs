@@ -88,6 +88,28 @@ impl crate::engine::AudioEngine {
             }
         }
     }
+    pub(super) fn clean_removed_bus_automation(&mut self) {
+        let Some((bus, mut track_index)) = self.pending_bus_cleanup else {
+            return;
+        };
+        while track_index < self.tracks().len()
+            && self.pending_retirements.len() < self.pending_retirements.capacity()
+        {
+            let track = &mut self.tracks_mut_for_retirement()[track_index];
+            track.sends.retain(|(id, _)| *id != bus);
+            if let Some(index) = track.playback_source.automation.iter().position(|lane| {
+                lane.target == vibez_core::automation::AutomationTarget::Send { bus_id: bus }
+            }) {
+                let lane = track.playback_source.automation.remove(index);
+                self.retire_event(EngineEvent::RetiredAutomationLane(lane));
+            } else {
+                track_index += 1;
+            }
+        }
+        self.pending_bus_cleanup =
+            (track_index < self.tracks().len()).then_some((bus, track_index));
+    }
+
     fn retire_event(&mut self, event: EngineEvent) {
         if let Err(rtrb::PushError::Full(event)) = self.event_tx.push(event) {
             self.pending_retirements.push(event);

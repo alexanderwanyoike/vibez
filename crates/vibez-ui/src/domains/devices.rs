@@ -121,6 +121,7 @@ pub struct DevicesAction {
 pub struct DevicesState {
     pub context_menu: Option<DeviceContextMenu>,
     pub last_routing: Option<Vec<vibez_core::routing::RoutingChannel>>,
+    pub sidechain_choices: super::sidechain::SidechainChoiceCache,
     pub sidechain_meters:
         std::collections::HashMap<(EffectId, vibez_core::routing::ExternalInputId), (f32, f32)>,
 }

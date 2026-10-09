@@ -418,7 +418,8 @@ impl PluginInstance for ClapPluginInstance {
         self.input_events_storage.clear();
         let input_events_storage = &mut self.input_events_storage;
         // Sort events by frame offset so the plugin sees them in order
-        self.note_events.sort_unstable_by_key(|e| e.time);
+        self.note_events
+            .sort_unstable_by_key(|event| (event.time, event.is_on));
         for ne in self.note_events.drain(..) {
             let event = clap_event_note {
                 header: clap_event_header {

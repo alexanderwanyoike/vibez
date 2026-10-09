@@ -222,3 +222,34 @@ fn unavailable_receiver_input_does_not_make_its_stale_source_required() {
         .unwrap();
     assert!(error.contains("Missing library"));
 }
+
+#[test]
+fn partial_export_retains_the_full_render_automation_block_grid() {
+    use vibez_core::automation::{AutomationLane, AutomationPoint, AutomationTarget};
+    let mut ghost = bare_track("Ghost");
+    ghost.mute = true;
+    let mut req = request(ghost, bare_track("Bass"), SourceTap::AfterEffects);
+    let mut lane = AutomationLane::new(AutomationTarget::TrackGain);
+    lane.points = vec![
+        AutomationPoint {
+            beat: 0.0,
+            value: 0.0,
+            curve: 0.0,
+        },
+        AutomationPoint {
+            beat: 1100.0 / 22050.0,
+            value: 1.0,
+            curve: 0.0,
+        },
+    ];
+    req.tracks[0].automation.push(lane);
+    let full = render_offline(&req);
+    req.range_samples = (1000, 1600);
+    let partial = render_offline(&req);
+    for channel in 0..2 {
+        assert_eq!(
+            partial.audio.channels[channel],
+            full.audio.channels[channel][1000..1600]
+        );
+    }
+}

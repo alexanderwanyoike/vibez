@@ -49,6 +49,7 @@ pub struct AudioEngine {
     routing: Option<Box<crate::routing::PreparedRouting>>,
     retired_routing: Option<Box<crate::routing::PreparedRouting>>,
     pub(super) pending_retirements: Vec<EngineEvent>,
+    pub(super) pending_bus_cleanup: Option<(TrackId, usize)>,
     pub(super) channel_retirement: Arc<crate::retirement::ChannelRetirementPool>,
     transport: Transport,
     /// Legacy single-audio field for backward compatibility.
@@ -210,6 +211,7 @@ impl AudioEngine {
         let engine = Self {
             routing: None,
             retired_routing: None,
+            pending_bus_cleanup: None,
             pending_retirements: Vec::with_capacity(crate::retirement::RETIREMENT_CAPACITY),
             channel_retirement: crate::retirement::ChannelRetirementPool::new(),
             transport: Transport::new(),
@@ -541,6 +543,10 @@ impl AudioEngine {
     /// Read the tracks (for inspection / testing).
     pub fn sample_rate(&self) -> u32 {
         self.sample_rate
+    }
+
+    pub(super) fn tracks_mut_for_retirement(&mut self) -> &mut [EngineTrack] {
+        &mut self.tracks
     }
 
     pub fn tracks(&self) -> &[EngineTrack] {

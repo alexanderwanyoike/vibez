@@ -2,11 +2,11 @@ use iced::widget::{button, column, container, pick_list, row, scrollable, text, 
 use iced::{Element, Length, Theme};
 use vibez_core::{
     id::{EffectId, TrackId},
-    routing::{ExternalInputId, RoutingChannel, SourceTap},
+    routing::{ExternalInputId, SourceTap},
 };
 
 use crate::{
-    domains::{devices::DevicesMsg, devices::DevicesState, sidechain::valid_taps},
+    domains::{devices::DevicesMsg, devices::DevicesState},
     message::Message,
     state::{ProjectTrack, UiEffect},
     theme as th,
@@ -129,7 +129,6 @@ pub fn view<'a>(
     effect: &'a UiEffect,
     sources: &'a [ProjectTrack],
     buses: &'a [ProjectTrack],
-    channels: &[RoutingChannel],
     state: &DevicesState,
 ) -> Option<Element<'a, Message>> {
     let inputs: Vec<_> = effect
@@ -161,18 +160,21 @@ pub fn view<'a>(
             id: None,
             name: "None".into(),
         }];
-        choices.extend(
+        let allowed = state
+            .sidechain_choices
+            .get(&(effect_id, id))
+            .map(Vec::as_slice)
+            .unwrap_or_default();
+        choices.extend(allowed.iter().filter_map(|option| {
             sources
                 .iter()
                 .chain(buses)
-                .filter(|source| {
-                    !valid_taps(channels, receiver, effect_id, id, source.id).is_empty()
-                })
+                .find(|source| source.id == option.source)
                 .map(|source| SourceChoice {
                     id: Some(source.id),
                     name: source.name.clone(),
-                }),
-        );
+                })
+        }));
         let selected = route.map_or_else(
             || choices[0].clone(),
             |route| SourceChoice {
@@ -213,7 +215,11 @@ pub fn view<'a>(
             .align_y(iced::Alignment::Center),
         );
         if let Some(route) = route {
-            let taps = valid_taps(channels, receiver, effect_id, id, route.source);
+            let taps = allowed
+                .iter()
+                .find(|option| option.source == route.source)
+                .map(|option| option.taps.as_slice())
+                .unwrap_or_default();
             if !taps.is_empty() {
                 controls = controls.push(
                     row![
@@ -222,7 +228,7 @@ pub fn view<'a>(
                             .color(th::text_dim())
                             .width(Length::Fixed(36.0)),
                         selector(
-                            taps.into_iter().map(TapChoice).collect(),
+                            taps.iter().copied().map(TapChoice).collect(),
                             TapChoice(route.tap),
                             move |choice| Message::Devices(DevicesMsg::SetSidechainTap {
                                 track_id: receiver,

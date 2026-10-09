@@ -515,3 +515,54 @@ fn clip_mute_points_follow_nonzero_clip_position_inside_a_render_block() {
     assert_eq!(output[5], 63.0 / 64.0);
     assert_eq!(output[15], 53.0 / 64.0);
 }
+
+#[test]
+fn live_selected_output_capture_remains_silent_when_solo_excludes_its_source() {
+    let (mut engine, mut commands, _events) = AudioEngine::new();
+    let ghost = TrackId::new();
+    let bass = TrackId::new();
+    let effect = EffectId::new();
+    for id in [bass, ghost] {
+        commands
+            .push(EngineCommand::AddTrack(id, "Track".into()))
+            .unwrap();
+    }
+    commands.push(clip(bass, 0.01)).unwrap();
+    commands.push(clip(ghost, 1.0)).unwrap();
+    commands
+        .push(EngineCommand::AddEffect {
+            track_id: bass,
+            effect_id: effect,
+            effect_type: EffectType::Gate,
+            position: None,
+        })
+        .unwrap();
+    commands
+        .push(EngineCommand::SetTrackSolo(bass, true))
+        .unwrap();
+    commands
+        .push(EngineCommand::SetRouting(plan(
+            ghost,
+            bass,
+            effect,
+            SourceTap::AfterFader,
+        )))
+        .unwrap();
+    commands.push(EngineCommand::Play).unwrap();
+    let mut output = [0.0; 128];
+    let mut capture = [1.0; 128];
+    engine.process_block(
+        AudioProcessBlock::new(&mut output, 2).with_track_output_capture(ghost.raw(), &mut capture),
+    );
+    assert!(capture.iter().all(|sample| *sample == 0.0));
+    let input = engine
+        .routing
+        .as_ref()
+        .unwrap()
+        .nodes
+        .iter()
+        .flat_map(|node| &node.inputs)
+        .next()
+        .unwrap();
+    assert!(input.samples[..128].iter().any(|sample| *sample > 0.5));
+}

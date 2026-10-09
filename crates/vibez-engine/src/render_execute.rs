@@ -82,8 +82,7 @@ pub(super) fn render_offline_inner(
     });
     let mut position = 0u64;
     while position < end {
-        let boundary = if position < start { start } else { end };
-        let block = (boundary - position).min(BLOCK_FRAMES as u64) as usize;
+        let block = (end - position).min(BLOCK_FRAMES as u64) as usize;
         let output = &mut scratch[..block * CHANNELS];
         let selected_output = &mut selected[..block * CHANNELS];
         engine.render_offline_routing_segment(
@@ -91,13 +90,14 @@ pub(super) fn render_offline_inner(
             output,
             selected_track.map(|id| (id, selected_output)),
         );
-        if position >= start {
+        if position + block as u64 > start {
+            let first_frame = start.saturating_sub(position) as usize;
             let written = if selected_track.is_some() {
                 &selected[..block * CHANNELS]
             } else {
                 output
             };
-            for frame in written.chunks_exact(CHANNELS) {
+            for frame in written[first_frame * CHANNELS..].chunks_exact(CHANNELS) {
                 left.push(frame[0]);
                 right.push(frame[1]);
             }

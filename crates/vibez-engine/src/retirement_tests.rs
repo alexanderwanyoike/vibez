@@ -191,3 +191,53 @@ fn full_event_ring_keeps_channel_owner_until_retirement_can_be_delivered() {
         .iter()
         .all(|slot| !slot.occupied.load(Ordering::Acquire)));
 }
+
+#[test]
+fn bus_automation_cleanup_retires_point_storage_without_callback_destruction() {
+    use vibez_core::automation::{AutomationLane, AutomationPoint, AutomationTarget};
+    let (mut engine, mut commands, mut events) = AudioEngine::new();
+    let track = TrackId::new();
+    let bus = TrackId::new();
+    commands
+        .push(EngineCommand::AddTrack(track, "Track".into()))
+        .unwrap();
+    commands
+        .push(EngineCommand::AddBus(bus, "Bus".into()))
+        .unwrap();
+    let mut lane = AutomationLane::new(AutomationTarget::Send { bus_id: bus });
+    lane.points.push(AutomationPoint {
+        beat: 0.0,
+        value: 1.0,
+        curve: 0.0,
+    });
+    commands
+        .push(EngineCommand::SetAutomationLane {
+            track_id: track,
+            lane,
+        })
+        .unwrap();
+    engine.process_block(AudioProcessBlock::new(&mut [], 2));
+    while engine
+        .event_tx
+        .push(EngineEvent::PlaybackPosition(0))
+        .is_ok()
+    {}
+    commands.push(EngineCommand::RemoveBus(bus)).unwrap();
+    assert_eq!(
+        allocations(|| engine.process_block(AudioProcessBlock::new(&mut [], 2))),
+        (0, 0)
+    );
+    assert!(engine.tracks()[0].sends.is_empty());
+    assert!(engine.tracks()[0].playback_source.automation.is_empty());
+    assert_eq!(engine.pending_retirements.len(), 2);
+    while events.pop().is_ok() {}
+    engine.flush_retirements();
+    let mut lanes = 0;
+    while let Ok(event) = events.pop() {
+        if matches!(event, EngineEvent::RetiredAutomationLane(_)) {
+            lanes += 1;
+        }
+        drop(event);
+    }
+    assert_eq!(lanes, 1);
+}

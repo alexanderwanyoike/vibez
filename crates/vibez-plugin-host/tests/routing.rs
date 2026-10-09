@@ -705,3 +705,28 @@ fn loaded_plugins_preserve_trigger_history_in_selected_track_bounce() {
         }
     }
 }
+
+#[test]
+fn same_pitch_release_precedes_retrigger_in_mixed_timestamp_plugin_events() {
+    let fixture = support::Fixture::new();
+    for format in ["clap", "vst3"] {
+        let mut plugin = fixture.load_instrument(format, 64);
+        plugin.note_on_at(60, 100, 0);
+        plugin.note_on_at(60, 100, 5);
+        plugin.note_off_at(60, 9);
+        plugin.note_off_at(60, 5);
+        let mut output = [0.0; 32];
+        let allocations =
+            support::allocation::count_allocations(|| plugin.process_audio(&mut output, 2));
+        assert_eq!(allocations, 0);
+        for (frame, channels) in output.chunks_exact(2).enumerate() {
+            assert_eq!(
+                channels,
+                &[if frame < 9 { 0.75 } else { 0.0 }; 2],
+                "{format} frame{frame}"
+            );
+        }
+        plugin.stop_processing();
+        plugin.deactivate();
+    }
+}

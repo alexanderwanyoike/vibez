@@ -8,8 +8,10 @@ impl AudioEngine {
     pub(super) fn drain_commands(&mut self) {
         self.return_retired_routing();
         self.flush_retirements();
+        self.clean_removed_bus_automation();
         loop {
-            if self.pending_retirements.len() == self.pending_retirements.capacity()
+            if self.pending_bus_cleanup.is_some()
+                || self.pending_retirements.len() == self.pending_retirements.capacity()
                 || !self.channel_retirement.has_capacity()
             {
                 break;
@@ -557,9 +559,8 @@ impl AudioEngine {
                         let bus = self.buses.remove(pos);
                         self.dispose_channel(bus);
                     }
-                    for track in &mut self.tracks {
-                        track.sends.retain(|(bus_id, _)| *bus_id != id);
-                    }
+                    self.pending_bus_cleanup = Some((id, 0));
+                    self.clean_removed_bus_automation();
                 }
                 EngineCommand::SetSend {
                     track_id,

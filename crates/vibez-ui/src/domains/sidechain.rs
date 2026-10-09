@@ -259,3 +259,7 @@ pub fn edit_tap_with_model(
 #[cfg(test)]
 #[path = "sidechain_tests.rs"]
 mod tests;
+
+#[path = "sidechain_choices.rs"]
+mod choices;
+pub use choices::{input_source_choices, InputSourceChoice, SidechainChoiceCache};

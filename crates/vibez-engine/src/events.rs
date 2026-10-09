@@ -66,6 +66,7 @@ pub struct ClipTrackState {
 #[derive(Debug)]
 pub enum EngineEvent {
     RetiredChannel(crate::retirement::RetiredChannel),
+    RetiredAutomationLane(vibez_core::automation::AutomationLane),
     RoutingRetired(Box<crate::routing::PreparedRouting>),
     SidechainInputMeter {
         effect_id: vibez_core::id::EffectId,
