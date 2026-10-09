@@ -17,19 +17,20 @@ pub fn resolve_restored(
                     continue;
                 }
                 let established = previous_active.is_some_and(|previous| {
-                    previous
-                        .iter()
-                        .find(|old| old.id == channel.id)
-                        .and_then(|old| old.effects.iter().find(|old| old.id == effect.id))
-                        .is_some_and(|old| {
-                            !old.inactive_inputs.contains(&route.input_id)
-                                && old.inputs.iter().any(|input| route.matches(input))
-                                && old.assignments.iter().any(|old_route| {
-                                    old_route.input_id == route.input_id
-                                        && old_route.source == route.source
-                                        && old_route.tap == route.tap
-                                })
-                        })
+                    previous.iter().any(|source| source.id == route.source)
+                        && previous
+                            .iter()
+                            .find(|old| old.id == channel.id)
+                            .and_then(|old| old.effects.iter().find(|old| old.id == effect.id))
+                            .is_some_and(|old| {
+                                !old.inactive_inputs.contains(&route.input_id)
+                                    && old.inputs.iter().any(|input| route.matches(input))
+                                    && old.assignments.iter().any(|old_route| {
+                                        old_route.input_id == route.input_id
+                                            && old_route.source == route.source
+                                            && old_route.tap == route.tap
+                                    })
+                            })
                 });
                 active[channel_index].effects[effect_index]
                     .inactive_inputs
@@ -128,5 +129,28 @@ mod tests {
             ),
             [SourceTap::BeforeEffects]
         );
+    }
+
+    #[test]
+    fn restoring_a_missing_bus_cannot_displace_a_truly_active_input() {
+        let a = TrackId::new();
+        let c = TrackId::new();
+        let bus = TrackId::new();
+        let first = receiver(a, bus);
+        let mut active_receiver = receiver(c, a);
+        active_receiver.sends.push((bus, 1.0));
+        let bus_channel = RoutingChannel {
+            id: bus,
+            is_bus: true,
+            effects: vec![],
+            sends: vec![],
+        };
+        let previous = vec![first.clone(), active_receiver.clone()];
+        assert!(RoutingGraph::prepare(&previous).is_ok());
+        let restored =
+            resolve_restored(&[first, active_receiver, bus_channel], Some(&previous)).unwrap();
+        assert_eq!(restored[0].effects[0].inactive_inputs, [ExternalInputId(1)]);
+        assert!(restored[1].effects[0].inactive_inputs.is_empty());
+        assert!(RoutingGraph::prepare(&restored).is_ok());
     }
 }
