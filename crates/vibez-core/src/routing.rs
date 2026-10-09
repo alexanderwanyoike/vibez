@@ -1,4 +1,8 @@
+//! Declared external inputs and the channel-stage routing contract.
+
 use serde::{Deserialize, Serialize};
+
+pub const SEND_SILENCE_THRESHOLD: f32 = 0.0005;
 
 use crate::id::{EffectId, TrackId};
 
@@ -45,6 +49,25 @@ pub struct SidechainAssignment {
     pub tap: SourceTap,
 }
 
+impl SidechainAssignment {
+    pub fn matches(&self, input: &ExternalInputDescriptor) -> bool {
+        input.supported()
+            && self.input_id == input.id
+            && (self.input_name.is_empty() || self.input_name == input.name)
+    }
+}
+
+impl SourceTap {
+    pub fn stage(self, is_bus: bool) -> NodeStage {
+        match self {
+            Self::BeforeEffects if is_bus => NodeStage::Sum,
+            Self::BeforeEffects => NodeStage::Source,
+            Self::AfterEffects => NodeStage::AfterEffects,
+            Self::AfterFader => NodeStage::AfterFader,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum NodeStage {
     Source,
@@ -77,6 +100,7 @@ pub struct RoutingEdge {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct RoutingEffect {
+    pub inactive_inputs: Vec<ExternalInputId>,
     pub id: EffectId,
     pub inputs: Vec<ExternalInputDescriptor>,
     pub assignments: Vec<SidechainAssignment>,
@@ -158,7 +182,7 @@ impl RoutingGraph {
                 }
             }
             for &(bus, gain) in &channel.sends {
-                if gain <= 0.0005 {
+                if gain <= SEND_SILENCE_THRESHOLD {
                     continue;
                 }
                 if let Some(to) = graph.index(bus, NodeStage::Sum) {
@@ -174,30 +198,19 @@ impl RoutingGraph {
                     .index(channel.id, NodeStage::Effect(effect.id))
                     .unwrap();
                 for route in &effect.assignments {
-                    if !effect.inputs.iter().any(|input| {
-                        input.id == route.input_id
-                            && input.supported()
-                            && (route.input_name.is_empty() || route.input_name == input.name)
-                    }) {
+                    if effect.inactive_inputs.contains(&route.input_id)
+                        || !effect.inputs.iter().any(|input| route.matches(input))
+                    {
                         continue;
                     }
                     if route.source.is_master() {
                         return Err(RoutingError::MasterSource);
                     }
-                    let stage = match route.tap {
-                        SourceTap::BeforeEffects => {
-                            if channels
-                                .iter()
-                                .any(|source| source.id == route.source && source.is_bus)
-                            {
-                                NodeStage::Sum
-                            } else {
-                                NodeStage::Source
-                            }
-                        }
-                        SourceTap::AfterEffects => NodeStage::AfterEffects,
-                        SourceTap::AfterFader => NodeStage::AfterFader,
-                    };
+                    let stage = route.tap.stage(
+                        channels
+                            .iter()
+                            .any(|source| source.id == route.source && source.is_bus),
+                    );
                     if let Some(from) = graph.index(route.source, stage) {
                         graph.edges.push(RoutingEdge {
                             from,
@@ -254,13 +267,35 @@ pub fn adapt_channels(
         .chunks_exact(source_channels)
         .zip(destination.chunks_exact_mut(destination_channels))
     {
-        match (source_channels, destination_channels) {
-            (1, 2) => output.fill(input[0]),
-            (2, 1) => output[0] = (input[0] + input[1]) * 0.5,
-            _ => output.copy_from_slice(input),
+        for (channel, sample) in output.iter_mut().enumerate() {
+            *sample =
+                adapt_channel_sample(source_channels, destination_channels, channel, |index| {
+                    input[index]
+                });
         }
     }
 }
+
+pub fn adapt_channel_sample(
+    source_channels: usize,
+    destination_channels: usize,
+    channel: usize,
+    source: impl Fn(usize) -> f32,
+) -> f32 {
+    match (source_channels, destination_channels) {
+        (1, 1 | 2) => source(0),
+        (2, 1) => (source(0) + source(1)) * 0.5,
+        (2, 2) if channel < 2 => source(channel),
+        _ => 0.0,
+    }
+}
+
+#[path = "routing_choices.rs"]
+mod choices;
+pub use choices::{input_source_choices, valid_input_taps, InputSourceChoice};
+#[path = "routing_restore.rs"]
+mod restore;
+pub use restore::resolve_restored;
 
 #[cfg(test)]
 mod tests {
@@ -279,6 +314,7 @@ mod tests {
                     channels: 2,
                 }],
                 assignments: vec![],
+                inactive_inputs: vec![],
             }],
         }
     }

@@ -42,6 +42,7 @@ fn plan(
 ) -> Box<crate::routing::PreparedRouting> {
     let mut receiver = channel(receiver);
     receiver.effects.push(RoutingEffect {
+        inactive_inputs: Vec::new(),
         id: effect,
         inputs: vec![ExternalInputDescriptor {
             id: ExternalInputId(0),
@@ -226,6 +227,7 @@ fn soloed_receiver_keeps_bus_detector_source_inaudible() {
     bus_channel.is_bus = true;
     let mut bass_channel = channel(bass);
     bass_channel.effects.push(RoutingEffect {
+        inactive_inputs: Vec::new(),
         id: effect,
         inputs: vec![ExternalInputDescriptor {
             id: ExternalInputId(0),
@@ -308,6 +310,7 @@ fn master_receives_a_muted_prefader_source() {
     bass_model.effects.clear();
     let mut master = channel(TrackId::MASTER);
     master.effects.push(RoutingEffect {
+        inactive_inputs: Vec::new(),
         id: effect,
         inputs: vec![ExternalInputDescriptor {
             id: ExternalInputId(0),
