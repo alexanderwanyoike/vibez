@@ -95,6 +95,15 @@ fn hardware_first_pair_live_capture_and_populated_graph_are_allocation_free() {
         assert_eq!(&output[2..], &[0.0; 4]);
         assert_eq!(&capture[2..], &[0.0; 4]);
     }
+    let mut short_capture = [0.0; 4];
+    assert_eq!(
+        crate::retirement::tests::allocations(|| engine.process_block(
+            AudioProcessBlock::new(&mut output, 6)
+                .with_live_input(source.raw(), &[0.2; 4])
+                .with_track_output_capture(source.raw(), &mut short_capture)
+        )),
+        (0, 0)
+    );
     while events.pop().is_ok() {}
     commands
         .push(EngineCommand::SetRouting(

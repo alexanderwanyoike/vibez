@@ -35,9 +35,15 @@ impl AudioEngine {
                 let frames = (block.frames - offset).min(max_frames);
                 let start = offset * block.channels;
                 let end = (offset + frames) * block.channels;
-                let mut part_capture = capture.as_deref_mut().map(|capture| TrackOutputCapture {
-                    source_track_raw: capture.source_track_raw,
-                    samples: &mut capture.samples[start..end],
+                let mut part_capture = capture.as_deref_mut().and_then(|capture| {
+                    let source_track_raw = capture.source_track_raw;
+                    capture
+                        .samples
+                        .get_mut(start..end)
+                        .map(|samples| TrackOutputCapture {
+                            source_track_raw,
+                            samples,
+                        })
                 });
                 self.render_routing_graph(
                     &mut output[start..end],
@@ -402,10 +408,10 @@ impl AudioEngine {
                                 peak_l: levels.peak_l,
                                 peak_r: levels.peak_r,
                             });
-                            if let Some(capture) = capture
-                                .as_deref_mut()
-                                .filter(|capture| capture.source_track_raw == node.channel.raw())
-                            {
+                            if let Some(capture) = capture.as_deref_mut().filter(|capture| {
+                                capture.source_track_raw == node.channel.raw()
+                                    && capture.samples.len() >= len
+                            }) {
                                 let audible = if bus_channel {
                                     (!bus_solo || track.solo)
                                         && (!track_solo
