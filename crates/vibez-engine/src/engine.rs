@@ -893,3 +893,7 @@ pub(crate) use offline_routing::OfflineRoutingSetup;
 #[cfg(test)]
 #[path = "engine_compensation_stop_tests.rs"]
 mod compensation_stop_tests;
+
+#[cfg(test)]
+#[path = "engine_offline_configuration_tests.rs"]
+mod offline_configuration_tests;

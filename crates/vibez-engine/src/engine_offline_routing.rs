@@ -38,6 +38,7 @@ impl AudioEngine {
         selected_output: Option<(TrackId, &mut [f32])>,
     ) {
         output.fill(0.0);
+        self.validate_compensation();
         let mut capture = selected_output.map(|(track, samples)| {
             samples.fill(0.0);
             TrackOutputCapture {
@@ -68,6 +69,18 @@ impl AudioEngine {
             .chain(&self.buses)
             .chain(std::iter::once(&self.master))
         {
+            if let Some(rate) = track
+                .instrument
+                .as_ref()
+                .and_then(|instrument| instrument.activation_sample_rate())
+                .filter(|rate| *rate != self.sample_rate)
+            {
+                return Some(format!(
+                    "Instrument on channel {} was activated at {rate} Hz but Bounce requests {} Hz",
+                    track.id.raw(),
+                    self.sample_rate
+                ));
+            }
             if track.instrument.as_ref().is_some_and(|instrument| {
                 instrument.reconfiguration_requested()
                     || !instrument.processing_configuration_valid()
@@ -78,6 +91,16 @@ impl AudioEngine {
                 ));
             }
             for slot in &track.effects {
+                if let Some(rate) = slot
+                    .effect
+                    .activation_sample_rate()
+                    .filter(|rate| *rate != self.sample_rate)
+                {
+                    return Some(format!(
+                        "Effect {} on channel {} was activated at {rate} Hz but Bounce requests {} Hz",
+                        slot.id.raw(), track.id.raw(), self.sample_rate
+                    ));
+                }
                 if slot.effect.reconfiguration_requested()
                     || !slot.effect.processing_configuration_valid()
                 {
@@ -88,6 +111,9 @@ impl AudioEngine {
                     ));
                 }
             }
+        }
+        if !self.compensation_valid {
+            return Some("Applied audio configuration became invalid during Bounce".into());
         }
         None
     }
