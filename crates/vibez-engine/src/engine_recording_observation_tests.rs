@@ -149,3 +149,79 @@ fn repeats_observe_the_same_coordinates_in_graph_legacy_and_stopped_paths() {
         assert_eq!(source, notices);
     }
 }
+
+#[test]
+fn shared_repeat_constructor_wraps_source_coordinates_without_changing_notice_coordinates() {
+    use crate::events::{RepeatNoticePosition, SourceSectionClock};
+    let source_section = SectionId::new();
+    let notice_section = SectionId::new();
+    let track = TrackId::new();
+    let trigger = crate::note_repeat::NoteRepeatTrigger {
+        pitch: 42,
+        velocity: 100,
+        rate: NoteRepeatRate::Eighth,
+        effective_at_samples: 111,
+        canonical_at_samples: 99,
+    };
+    let section = SourceSectionClock {
+        id: source_section,
+        local_sample: 3,
+        performance_sample: 100,
+        length: 8,
+    };
+    let source = SourceRecordingPosition::from_trigger(trigger, Some(section));
+    assert_eq!(source.section_position_samples, Some(6));
+    assert_eq!(source.canonical_section_position_samples, Some(2));
+    let notice = RepeatNoticePosition {
+        effective_at_samples: 80,
+        canonical_at_samples: 72,
+        section_id: Some(notice_section),
+        section_position_samples: Some(4),
+        canonical_section_position_samples: Some(0),
+    };
+    let mut pair = None;
+    assert_eq!(
+        crate::retirement::tests::allocations(|| {
+            pair = Some(EngineEvent::repeated_pair(track, trigger, source, notice));
+        }),
+        (0, 0)
+    );
+    let (raw, presented) = pair.unwrap();
+    assert_eq!(
+        raw,
+        EngineEvent::SourceNoteRepeated {
+            track_id: track,
+            pitch: 42,
+            velocity: 100,
+            rate: NoteRepeatRate::Eighth,
+            position: source
+        }
+    );
+    assert_eq!(
+        presented,
+        EngineEvent::NoteRepeated {
+            track_id: track,
+            pitch: 42,
+            velocity: 100,
+            rate: NoteRepeatRate::Eighth,
+            effective_at_samples: 80,
+            canonical_at_samples: 72,
+            section_id: Some(notice_section),
+            section_position_samples: Some(4),
+            canonical_section_position_samples: Some(0)
+        }
+    );
+    let empty = SourceRecordingPosition::from_trigger(
+        trigger,
+        Some(SourceSectionClock {
+            length: 0,
+            ..section
+        }),
+    );
+    assert_eq!(empty.section_position_samples, Some(0));
+    assert_eq!(empty.canonical_section_position_samples, Some(0));
+    assert_eq!(
+        SourceRecordingPosition::from_trigger(trigger, None).section_id,
+        None
+    );
+}

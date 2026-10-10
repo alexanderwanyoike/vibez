@@ -1,6 +1,9 @@
 use vibez_core::id::{ClipId, SectionId, TrackId};
 use vibez_core::perform::NoteRepeatRate;
 
+#[path = "event_recording.rs"]
+mod recording;
+
 use crate::playback_source::{PreparedClipPlayback, PreparedSectionPlaybackSource};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -71,6 +74,23 @@ pub struct SourceRecordingPosition {
     pub section_id: Option<SectionId>,
     pub section_position_samples: Option<u64>,
     pub canonical_section_position_samples: Option<u64>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct SourceSectionClock {
+    pub(crate) id: SectionId,
+    pub(crate) local_sample: u64,
+    pub(crate) performance_sample: u64,
+    pub(crate) length: u64,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct RepeatNoticePosition {
+    pub(crate) effective_at_samples: u64,
+    pub(crate) canonical_at_samples: u64,
+    pub(crate) section_id: Option<SectionId>,
+    pub(crate) section_position_samples: Option<u64>,
+    pub(crate) canonical_section_position_samples: Option<u64>,
 }
 
 #[derive(Debug)]
@@ -372,51 +392,10 @@ pub enum EngineEvent {
 impl PartialEq for EngineEvent {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (
-                Self::SourceNoteInput {
-                    track_id: left_track,
-                    pitch: left_pitch,
-                    velocity: left_velocity,
-                    on: left_on,
-                    position: left_position,
-                },
-                Self::SourceNoteInput {
-                    track_id: right_track,
-                    pitch: right_pitch,
-                    velocity: right_velocity,
-                    on: right_on,
-                    position: right_position,
-                },
-            ) => {
-                left_track == right_track
-                    && left_pitch == right_pitch
-                    && left_velocity == right_velocity
-                    && left_on == right_on
-                    && left_position == right_position
+            (Self::SourceNoteInput { .. }, Self::SourceNoteInput { .. })
+            | (Self::SourceNoteRepeated { .. }, Self::SourceNoteRepeated { .. }) => {
+                recording::source_eq(self, other)
             }
-            (
-                Self::SourceNoteRepeated {
-                    track_id: left_track,
-                    pitch: left_pitch,
-                    velocity: left_velocity,
-                    rate: left_rate,
-                    position: left_position,
-                },
-                Self::SourceNoteRepeated {
-                    track_id: right_track,
-                    pitch: right_pitch,
-                    velocity: right_velocity,
-                    rate: right_rate,
-                    position: right_position,
-                },
-            ) => {
-                left_track == right_track
-                    && left_pitch == right_pitch
-                    && left_velocity == right_velocity
-                    && left_rate == right_rate
-                    && left_position == right_position
-            }
-
             (Self::DisposeEffect(left), Self::DisposeEffect(right)) => left == right,
             (Self::DisposeInstrument(left), Self::DisposeInstrument(right)) => left == right,
             (Self::PlaybackPosition(left), Self::PlaybackPosition(right)) => left == right,

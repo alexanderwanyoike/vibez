@@ -131,46 +131,21 @@ impl AudioEngine {
                     let physical = self.output_position;
                     let mut presentation_overflow = false;
                     let mut repeated = |trigger: crate::note_repeat::NoteRepeatTrigger| {
-                        let section_position = section.map(|active| {
-                            section_record::section_sample_for_performance(
-                                pos,
-                                block.repeat_pos,
-                                trigger.effective_at_samples,
-                                active.length_samples,
-                            )
-                        });
-                        let canonical_section_position = section.map(|active| {
-                            section_record::section_sample_for_performance(
-                                pos,
-                                block.repeat_pos,
-                                trigger.canonical_at_samples,
-                                active.length_samples,
-                            )
-                        });
-                        let source = EngineEvent::SourceNoteRepeated {
-                            track_id: id,
-                            pitch: trigger.pitch,
-                            velocity: trigger.velocity,
-                            rate: trigger.rate,
-                            position: crate::events::SourceRecordingPosition {
-                                effective_at_samples: trigger.effective_at_samples,
-                                canonical_at_samples: trigger.canonical_at_samples,
-                                section_id: section.map(|active| active.section_id),
-                                section_position_samples: section_position,
-                                canonical_section_position_samples: canonical_section_position,
-                            },
-                        };
-                        let event = EngineEvent::NoteRepeated {
-                            track_id: id,
-                            pitch: trigger.pitch,
-                            velocity: trigger.velocity,
-                            rate: trigger.rate,
-                            effective_at_samples: trigger.effective_at_samples,
-                            canonical_at_samples: trigger.canonical_at_samples,
-                            section_id: section.map(|active| active.section_id),
-                            section_position_samples: section_position,
-                            canonical_section_position_samples: canonical_section_position,
-                        };
+                        let source_position = crate::events::SourceRecordingPosition::from_trigger(
+                            trigger,
+                            section.map(|active| crate::events::SourceSectionClock {
+                                id: active.section_id,
+                                local_sample: pos,
+                                performance_sample: block.repeat_pos,
+                                length: active.length_samples,
+                            }),
+                        );
+                        let (source, event) = EngineEvent::repeated_pair(
+                            id,
+                            trigger,
+                            source_position,
+                            source_position.into(),
+                        );
                         presentation_overflow |= !presentation_queue::emit_repeated(
                             source, event, events, scheduled, physical,
                         );

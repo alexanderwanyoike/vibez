@@ -698,7 +698,7 @@ mod clock;
 mod section_queue;
 
 #[path = "engine_section_record.rs"]
-mod section_record;
+pub(crate) mod section_record;
 
 #[path = "engine_clip_record.rs"]
 mod clip_record;

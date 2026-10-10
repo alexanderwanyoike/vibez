@@ -837,28 +837,22 @@ impl AudioEngine {
                         if let Some(instrument) = self.tracks[track_index].instrument.as_mut() {
                             instrument.note_on(pitch, velocity);
                         }
-                        self.present_event(EngineEvent::SourceNoteRepeated {
-                            track_id,
-                            pitch,
-                            velocity,
-                            rate,
-                            position: self.source_recording_position(),
-                        });
-                        self.present_event(EngineEvent::NoteRepeated {
-                            track_id,
+                        let source_position = self.source_recording_position();
+                        let trigger = crate::note_repeat::NoteRepeatTrigger {
                             pitch,
                             velocity,
                             rate,
                             effective_at_samples: position,
                             canonical_at_samples: position,
-                            section_id: self.active_section.map(|active| active.section_id),
-                            section_position_samples: self
-                                .active_section
-                                .map(|active| active.position_samples),
-                            canonical_section_position_samples: self
-                                .active_section
-                                .map(|active| active.position_samples),
-                        });
+                        };
+                        let (source, notice) = EngineEvent::repeated_pair(
+                            track_id,
+                            trigger,
+                            source_position,
+                            source_position.into(),
+                        );
+                        self.present_event(source);
+                        self.present_event(notice);
                     }
                     self.tracks[track_index].start_note_repeat(
                         NoteRepeatStart {
