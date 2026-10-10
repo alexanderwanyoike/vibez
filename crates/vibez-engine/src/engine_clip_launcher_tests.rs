@@ -608,7 +608,7 @@ fn finishing_a_free_take_does_not_resize_a_replacement_clip() {
 }
 
 #[test]
-fn dropped_clip_transition_is_reported_and_engine_truth_is_retried_on_a_tiny_queue() {
+fn blocked_clip_transition_retains_owner_and_engine_truth_is_retried_on_a_tiny_queue() {
     let (mut engine, mut commands, _, a, b) = setup();
     let (events_tx, mut events) = rtrb::RingBuffer::new(1);
     engine.event_tx = events_tx;
@@ -620,6 +620,7 @@ fn dropped_clip_transition_is_reported_and_engine_truth_is_retried_on_a_tiny_que
     let mut drops = None;
     let mut recovered = None;
     let mut idle = None;
+    let mut transitioned = false;
     for _ in 0..8 {
         while let Ok(event) = events.pop() {
             match event {
@@ -628,7 +629,7 @@ fn dropped_clip_transition_is_reported_and_engine_truth_is_retried_on_a_tiny_que
                     recovered = Some(state)
                 }
                 EngineEvent::ClipStateResynced(state) if state.track_id == b => idle = Some(state),
-                EngineEvent::ClipTransitioned { .. } => panic!("transition must have been lost"),
+                EngineEvent::ClipTransitioned { .. } => transitioned = true,
                 _ => {}
             }
         }
@@ -637,6 +638,10 @@ fn dropped_clip_transition_is_reported_and_engine_truth_is_retried_on_a_tiny_que
     assert!(
         drops.is_some_and(|total| total > 0),
         "overflow must be observable"
+    );
+    assert!(
+        transitioned,
+        "the source owner must reach the UI after backpressure"
     );
     let recovered = recovered.expect("playing state must eventually escape the full queue");
     assert_eq!(recovered.playing.unwrap().clip_id, clip_id);
@@ -691,7 +696,7 @@ fn overflow_snapshots_include_edited_queued_requests_and_stop_state() {
     commands.push(EngineCommand::Stop).unwrap();
     engine.process(&mut [0.0; 1], 1);
     let mut stopped = None;
-    for _ in 0..6 {
+    for _ in 0..16 {
         while let Ok(event) = events.pop() {
             if let EngineEvent::ClipStateResynced(state) = event {
                 if state.track_id == a {

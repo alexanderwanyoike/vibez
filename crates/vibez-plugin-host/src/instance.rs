@@ -1,4 +1,8 @@
+//! Hosted processing metadata, diagnostics and exclusive lifecycle contracts.
+
 use vibez_core::effect::ParamDescriptor;
+
+pub(crate) const MAX_PROCESSING_RECOVERIES: u8 = 2;
 
 /// Trait for a loaded plugin instance ready for audio processing.
 ///
@@ -14,6 +18,38 @@ pub trait PluginInstance: Send {
         _inputs: &[vibez_core::routing::ExternalInputBlock<'_>],
     ) {
         self.process_audio(buffer, channels);
+    }
+    fn set_audio_context(&mut self, _context: vibez_core::audio_context::DeviceAudioContext) {}
+    /// A process/start failure can silence this device without invalidating the
+    /// prepared latency graph. Only main-thread reactivation clears its gate.
+    fn processing_failure_is_local(&self) -> bool {
+        false
+    }
+
+    /// Requests bounded main-thread recovery, never a callback-side DSP retry.
+    fn processing_recovery_requested(&self) -> bool {
+        false
+    }
+    fn reconfiguration_requested(&self) -> bool {
+        false
+    }
+    /// Called on the processing thread before transferring exclusive ownership.
+    fn stop_for_reconfiguration(&mut self) {}
+    /// Called on the format's main thread, after processing has stopped.
+    fn reconfigure_on_main_thread(&mut self) -> Result<(), String> {
+        Ok(())
+    }
+    /// None permits rate-independent processors without forcing recreation.
+    fn activation_sample_rate(&self) -> Option<u32> {
+        None
+    }
+    fn processing_configuration_valid(&self) -> bool {
+        true
+    }
+    /// Cached processing delay, excluding musical echoes and hardware delay.
+    /// Format adapters refresh this only during their permitted lifecycle.
+    fn latency_samples(&self) -> u32 {
+        0
     }
     fn name(&self) -> &str;
     fn param_count(&self) -> usize;

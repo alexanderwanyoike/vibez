@@ -210,6 +210,7 @@ mod tests {
         .await
         .unwrap();
         let project = vibez_project::Project {
+            reduced_latency_monitoring: false,
             tracks: vec![track.clone()],
             arrange: vibez_project::TimelineInfo {
                 clips: vec![vibez_core::track::ClipInfo {

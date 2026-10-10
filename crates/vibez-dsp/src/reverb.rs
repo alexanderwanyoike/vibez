@@ -100,6 +100,7 @@ impl AllPassFilter {
 
 /// Freeverb-inspired stereo reverb.
 pub struct ReverbEffect {
+    sample_rate: f32,
     room_size: f32,
     damping: f32,
     mix: f32,
@@ -130,6 +131,7 @@ impl ReverbEffect {
             .collect();
 
         let mut reverb = Self {
+            sample_rate,
             room_size: 0.5,
             damping: 0.5,
             mix: 0.3,
@@ -156,6 +158,9 @@ impl ReverbEffect {
 }
 
 impl AudioEffect for ReverbEffect {
+    fn activation_sample_rate(&self) -> Option<u32> {
+        Some(self.sample_rate as u32)
+    }
     fn effect_type(&self) -> EffectType {
         EffectType::Reverb
     }

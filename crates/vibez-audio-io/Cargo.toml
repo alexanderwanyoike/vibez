@@ -20,5 +20,6 @@ cpal = { workspace = true }
 cpal = { workspace = true, features = ["asio"] }
 
 [dev-dependencies]
+vibez-dsp = { workspace = true }
 tempfile = "3"
 serde_json = { workspace = true }
