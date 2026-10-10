@@ -69,11 +69,22 @@ impl AudioEngine {
             (false, false)
         };
         if changed {
-            let _ = self.event_tx.push(EngineEvent::TrackMuteChanged {
-                track_id: id,
-                muted,
-                effective_at_samples,
-            });
+            let target = AutomationTarget::TrackMute;
+            let now = self.effective_position();
+            let at_target = self.target_automation_position(id, target);
+            let mapped = if effective_at_samples >= now {
+                at_target.saturating_add(effective_at_samples - now)
+            } else {
+                at_target.saturating_sub(now - effective_at_samples)
+            };
+            self.present_event(
+                EngineEvent::TrackMuteChanged {
+                    track_id: id,
+                    muted,
+                    effective_at_samples: mapped,
+                },
+                self.automation_presentation_delay(id, target),
+            );
         }
         if override_changed {
             let _ = self.event_tx.push(EngineEvent::AutomationOverrideChanged {
@@ -221,17 +232,20 @@ impl AudioEngine {
         begin: bool,
     ) {
         self.set_automation_override(track_id, target, true);
-        let _ = self.event_tx.push(EngineEvent::AutomationGestureChanged {
-            track_id,
-            target,
-            normalized_value: normalized_value.clamp(0.0, 1.0),
-            phase: if begin {
-                AutomationGesturePhase::Begin
-            } else {
-                AutomationGesturePhase::Update
+        self.present_event(
+            EngineEvent::AutomationGestureChanged {
+                track_id,
+                target,
+                normalized_value: normalized_value.clamp(0.0, 1.0),
+                phase: if begin {
+                    AutomationGesturePhase::Begin
+                } else {
+                    AutomationGesturePhase::Update
+                },
+                effective_at_samples: self.target_automation_position(track_id, target),
             },
-            effective_at_samples: self.effective_position(),
-        });
+            self.automation_presentation_delay(track_id, target),
+        );
     }
 
     pub(super) fn end_automation_gesture(&mut self, track_id: TrackId, target: AutomationTarget) {
@@ -282,13 +296,16 @@ impl AudioEngine {
             });
         self.set_automation_override(track_id, target, false);
         if let Some(normalized_value) = normalized_value {
-            let _ = self.event_tx.push(EngineEvent::AutomationGestureChanged {
-                track_id,
-                target,
-                normalized_value,
-                phase: AutomationGesturePhase::End,
-                effective_at_samples: self.effective_position(),
-            });
+            self.present_event(
+                EngineEvent::AutomationGestureChanged {
+                    track_id,
+                    target,
+                    normalized_value,
+                    phase: AutomationGesturePhase::End,
+                    effective_at_samples: self.target_automation_position(track_id, target),
+                },
+                self.automation_presentation_delay(track_id, target),
+            );
         }
     }
 

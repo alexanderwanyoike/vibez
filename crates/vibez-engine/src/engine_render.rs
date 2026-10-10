@@ -134,6 +134,10 @@ impl AudioEngine {
                 for track in &mut self.tracks {
                     track.flush_notes();
                 }
+                // Held repeats cannot keep deadlines from the later source clock
+                // after Arrange returns to an earlier loop position.
+                let anchor = self.playing_note_repeat_anchor();
+                self.reanchor_note_repeats(anchor, loop_start);
                 if rest > 0 {
                     self.render_multitrack_segment(
                         &mut output[first * channels..],
@@ -283,6 +287,8 @@ impl AudioEngine {
                 let tempo_map = TempoMap::new(self.transport.bpm(), self.sample_rate);
                 let track_id = track.id;
                 let event_tx = &mut self.event_tx;
+                let scheduled = &mut self.scheduled_presentation;
+                let physical = self.output_position + self.rendered_callback_frames as u64;
                 let section = self.active_section;
                 let mut on_repeat = |trigger: crate::note_repeat::NoteRepeatTrigger| {
                     let section_position = section.map(|active| {
@@ -301,7 +307,14 @@ impl AudioEngine {
                             active.length_samples,
                         )
                     });
-                    let _ = event_tx.push(EngineEvent::NoteRepeated {
+                    let recording = crate::events::SourceRecordingPosition {
+                        effective_at_samples: trigger.effective_at_samples,
+                        canonical_at_samples: trigger.canonical_at_samples,
+                        section_id: section.map(|active| active.section_id),
+                        section_position_samples: section_position,
+                        canonical_section_position_samples: canonical_section_position,
+                    };
+                    let event = EngineEvent::NoteRepeated {
                         track_id,
                         pitch: trigger.pitch,
                         velocity: trigger.velocity,
@@ -311,7 +324,17 @@ impl AudioEngine {
                         section_id: section.map(|active| active.section_id),
                         section_position_samples: section_position,
                         canonical_section_position_samples: canonical_section_position,
-                    });
+                    };
+                    let source = EngineEvent::SourceNoteRepeated {
+                        track_id,
+                        pitch: trigger.pitch,
+                        velocity: trigger.velocity,
+                        rate: trigger.rate,
+                        position: recording,
+                    };
+                    let _ = presentation::emit_repeated(
+                        source, event, event_tx, scheduled, physical, physical,
+                    );
                 };
                 track.render_instrument(
                     InstrumentRenderContext {
@@ -552,8 +575,15 @@ impl AudioEngine {
                 let tempo_map = TempoMap::new(self.transport.bpm(), self.sample_rate);
                 let track_id = track.id;
                 let event_tx = &mut self.event_tx;
+                let scheduled = &mut self.scheduled_presentation;
+                let physical = self.output_position + self.rendered_callback_frames as u64;
                 let mut on_repeat = |trigger: crate::note_repeat::NoteRepeatTrigger| {
-                    let _ = event_tx.push(EngineEvent::NoteRepeated {
+                    let recording = crate::events::SourceRecordingPosition {
+                        effective_at_samples: trigger.effective_at_samples,
+                        canonical_at_samples: trigger.canonical_at_samples,
+                        ..Default::default()
+                    };
+                    let event = EngineEvent::NoteRepeated {
                         track_id,
                         pitch: trigger.pitch,
                         velocity: trigger.velocity,
@@ -563,7 +593,17 @@ impl AudioEngine {
                         section_id: None,
                         section_position_samples: None,
                         canonical_section_position_samples: None,
-                    });
+                    };
+                    let source = EngineEvent::SourceNoteRepeated {
+                        track_id,
+                        pitch: trigger.pitch,
+                        velocity: trigger.velocity,
+                        rate: trigger.rate,
+                        position: recording,
+                    };
+                    let _ = presentation::emit_repeated(
+                        source, event, event_tx, scheduled, physical, physical,
+                    );
                 };
                 track.render_instrument_idle(
                     repeat_pos,
