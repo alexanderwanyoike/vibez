@@ -42,7 +42,9 @@ Events come in two classes, and the class determines the push policy:
   `present_event`, or `present_event_at` when a resumed Clip packet must retain
   its original physical release time. Both use the same bounded queue. Due
   retained events precede new due events, including when UI capacity returns.
-  Future events do not block an immediate source event. Clip resync snapshots
+  Full PDC uses `present_event_after` for actual path delays; it delegates to
+  the same absolute physical-clock entry. Future events do not block an immediate
+  source event. Clip resync snapshots
   wait for earlier due acknowledgements; consumers still handle staleness.
 - **Cosmetic** (meters, pad flashes): pushed with `let _ =` and deliberately
   lossy. A cosmetic event must never retry, because a retry backlog competes
@@ -70,6 +72,8 @@ Packet admission subtracts pending inline notifications from available UI slots;
 the same slot cannot admit both a terminal event and a transferred owner.
 Subsequent packet publication returns owners without reasserting playing state. Capture-only cancellation preserves continuing-playback Section,
 Clip and transport acknowledgements, and immediate recording feeds.
+Cancelled Capture offset owners retain their original physical deadlines so
+retirement cannot advance another still-delayed public state.
 
 Once a prepared routing plan is installed, structural channel/effect changes
 must be followed by a new plan prepared outside the callback. Send topology

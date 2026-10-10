@@ -38,7 +38,7 @@ impl AudioEngine {
         self.clip_event_at(event, physical);
     }
 
-    pub(super) fn clip_event_at(&mut self, event: EngineEvent, physical: u64) {
+    pub(super) fn clip_event_at(&mut self, mut event: EngineEvent, physical: u64) {
         let request = match &event {
             EngineEvent::ClipQueued { request_id, .. }
             | EngineEvent::ClipTransitioned { request_id, .. }
@@ -47,11 +47,30 @@ impl AudioEngine {
             _ => 0,
         };
         self.clip_through_request = self.clip_through_request.max(request);
+        let track_timing = match &mut event {
+            EngineEvent::ClipTransitioned {
+                track_id,
+                effective_at_samples,
+                ..
+            }
+            | EngineEvent::ClipSourceRefreshed {
+                track_id,
+                effective_at_samples,
+                ..
+            } => {
+                let path = self.live_path_latency(*track_id);
+                *effective_at_samples = effective_at_samples
+                    .saturating_sub(self.mix_latency().saturating_sub(path) as u64);
+                Some(path)
+            }
+            _ => None,
+        };
         if self.event_tx.is_full() {
             self.clip_event_drops = self.clip_event_drops.saturating_add(1);
             self.clip_resync_track = Some(0);
         }
-        self.present_event_at(event, physical);
+        let due = physical.saturating_add(track_timing.unwrap_or(0) as u64);
+        self.present_event_at(event, due);
     }
 
     pub(super) fn resync_clip_events(&mut self) {
@@ -81,19 +100,38 @@ impl AudioEngine {
                 self.clip_resync_track = None;
                 break;
             };
+            // The resident source runs ahead of its heard acknowledgement.
+            // A snapshot cannot safely replace that still-pending transition.
+            if self.clip_batch_holds_transition(track.id)
+                || self.scheduled_presentation.iter().any(|pending| {
+                    matches!(pending.event,
+                    EngineEvent::ClipTransitioned { track_id, .. }
+                    | EngineEvent::ClipSourceRefreshed { track_id, .. } if track_id == track.id)
+                })
+            {
+                return;
+            }
+            let path = self.live_path_latency(track.id);
+            let heard_local = self.routing.as_ref().and_then(|routing| {
+                routing
+                    .channel_clocks
+                    .iter()
+                    .find(|clock| clock.track == track.id)
+                    .and_then(|clock| clock.before_block(path))
+            });
             let state = ClipTrackState {
                 track_id: track.id,
                 playing: track.active_clip.map(|active| ClipPlayingState {
                     clip_id: active.clip_id,
                     request_id: active.request_id,
-                    position: active.position,
+                    position: heard_local.unwrap_or(active.position.saturating_sub(path as u64)),
                 }),
                 queued: track.queued_clip.as_ref().map(|queued| ClipQueuedState {
                     clip_id: queued.prepared.clip_id,
                     request_id: queued.prepared.request_id,
                 }),
                 through_request: self.clip_through_request,
-                effective_at_samples: self.performance_position,
+                effective_at_samples: self.heard_capture_position(),
                 running: self.clip_performance && self.transport.is_playing(),
                 transport_playing: self.transport.is_playing(),
             };
@@ -223,11 +261,9 @@ impl AudioEngine {
         live_input: Option<LiveInputBlock<'_>>,
         mut capture: Option<&mut TrackOutputCapture<'_>>,
     ) {
-        let physical_offset = self.rendered_callback_frames;
         let mut rendered = 0;
         while rendered < frames {
             let now = self.performance_position + rendered as u64;
-            self.rendered_callback_frames = physical_offset + rendered;
             self.apply_clip_record_boundary(now);
             self.apply_clip_boundaries(now);
             let mut count = frames - rendered;
@@ -297,7 +333,6 @@ impl AudioEngine {
                 );
             }
             rendered += count;
-            self.rendered_callback_frames = physical_offset + rendered;
         }
     }
 }

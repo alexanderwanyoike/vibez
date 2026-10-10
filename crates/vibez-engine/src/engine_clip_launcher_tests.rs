@@ -696,7 +696,6 @@ fn overflow_snapshots_include_edited_queued_requests_and_stop_state() {
     commands.push(EngineCommand::Stop).unwrap();
     engine.process(&mut [0.0; 1], 1);
     let mut stopped = None;
-    // Retained sources and the packet container precede the resync in a one-slot ring.
     for _ in 0..16 {
         while let Ok(event) = events.pop() {
             if let EngineEvent::ClipStateResynced(state) = event {
@@ -733,7 +732,7 @@ fn full_clip_event_queue_never_reclaims_a_retired_source_in_the_callback() {
     assert_eq!(
         Arc::strong_count(&audio),
         2,
-        "a full ring must retain the source owner until main can retire it"
+        "a full ring must forget the source owner"
     );
 }
 

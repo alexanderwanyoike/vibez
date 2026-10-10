@@ -36,6 +36,8 @@ impl App {
         self.sidechain_sync_inputs = None;
         self.track_meter_peaks.clear();
         self.state.devices.last_routing = None;
+        self.state.devices.last_timing = None;
+        self.state.devices.compensation_generation = 0;
         self.state.devices.sidechain_meters.clear();
         self.state.devices.sidechain_choices.clear();
         // Invalidate any Browser import still preparing (e.g. in its

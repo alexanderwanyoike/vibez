@@ -454,6 +454,208 @@ fn in_segment_release_retains_the_actual_output_clock_prefix() {
 }
 
 #[test]
+fn publication_after_the_original_audible_due_time_does_not_add_device_latency_again() {
+    let (mut engine, mut events, id) = delayed_engine();
+    engine.sample_rate = 8;
+    engine.begin_clip_performance();
+    engine.performance_position = 1;
+    engine.queue_clips(vec![clip(id, 1)], MusicalBoundary::OneBar);
+    while events.pop().is_ok() {}
+    while engine.event_tx.push(EngineEvent::PlaybackStarted).is_ok() {}
+    for _ in 0..presentation_queue::PRESENTATION_EVENT_CAPACITY - 3 {
+        engine.present_event_after(EngineEvent::PlaybackStarted, 5000);
+    }
+    engine.queue_clips(vec![clip(id, 2)], MusicalBoundary::Immediate);
+    assert_eq!(engine.tracks[0].active_clip.unwrap().request_id, 2);
+    assert!(
+        engine.clip_batch_blocks_commands(),
+        "publication must retain the source owner"
+    );
+    while events.pop().is_ok() {}
+    engine.output_position = 1000;
+    engine.flush_presentation();
+    while events.pop().is_ok() {}
+    assert_eq!(
+        crate::retirement::tests::allocations(|| engine.continue_clip_batch(1000)),
+        (0, 0)
+    );
+    assert!(!engine
+        .scheduled_presentation
+        .iter()
+        .any(|pending| matches!(pending.event, EngineEvent::ClipTransitioned { .. })));
+    let event = events.pop().unwrap();
+    assert!(matches!(
+        event,
+        EngineEvent::ClipTransitioned {
+            request_id: 2,
+            effective_at_samples: 1,
+            retired: Some(_),
+            ..
+        }
+    ));
+    assert!(engine.pending_clip_batch.is_none());
+}
+
+#[test]
+fn publishing_does_not_count_ui_slots_before_a_real_heard_deadline() {
+    let (mut engine, mut events, id) = delayed_engine();
+    while engine
+        .event_tx
+        .push(EngineEvent::PlaybackPosition(0))
+        .is_ok()
+    {}
+    for _ in 0..presentation_queue::PRESENTATION_EVENT_CAPACITY {
+        engine.present_event_after(EngineEvent::PlaybackStarted, 137);
+    }
+    events.pop().unwrap();
+    let prepared = clip(id, 1);
+    let original = &*prepared as *const PreparedClipPlayback;
+    engine.pending_clip_batch = Some(PendingClipBatch {
+        clips: vec![prepared],
+        quantization: MusicalBoundary::Immediate,
+        boundary: 1,
+        starting: false,
+        phase: BatchPhase::Publishing {
+            source: 1,
+            physical: 20,
+        },
+    });
+    engine.rendered_callback_frames = 200;
+    assert_eq!(
+        crate::retirement::tests::allocations(|| engine.continue_clip_batch(200)),
+        (0, 0)
+    );
+    assert!(!engine.presentation_fault);
+    assert_eq!(engine.pending_clip_batch.as_ref().unwrap().clips.len(), 1);
+    engine.rendered_callback_frames = 0;
+    engine.output_position = 157;
+    let mut retired = None;
+    for _ in 0..4 {
+        while let Ok(event) = events.pop() {
+            if let EngineEvent::ClipTransitioned { retired: owner, .. } = event {
+                retired = owner;
+            }
+        }
+        engine.flush_presentation();
+        assert_eq!(
+            crate::retirement::tests::allocations(|| engine.continue_clip_batch(200)),
+            (0, 0)
+        );
+    }
+    assert_eq!(&*retired.unwrap() as *const PreparedClipPlayback, original);
+    assert!(!engine.presentation_fault);
+}
+
+#[test]
+fn resync_does_not_announce_a_clip_before_its_reported_delay_is_heard() {
+    let (mut engine, mut events, id) = delayed_engine();
+    engine.sample_rate = 8;
+    engine.queue_clips(vec![clip(id, 1)], MusicalBoundary::Immediate);
+    let mut output = [0.0; 16];
+    engine.process(&mut output, 2);
+    assert!(output.iter().all(|sample| *sample == 0.0));
+    while events.pop().is_ok() {}
+    let index = engine
+        .scheduled_presentation
+        .iter()
+        .position(|pending| matches!(pending.event, EngineEvent::ClipTransitioned { .. }))
+        .unwrap();
+    let owner = match engine.scheduled_presentation.remove(index).event {
+        EngineEvent::ClipTransitioned {
+            retired: Some(owner),
+            ..
+        } => owner,
+        _ => unreachable!(),
+    };
+    engine.pending_clip_batch = Some(PendingClipBatch {
+        clips: vec![owner],
+        quantization: MusicalBoundary::Immediate,
+        boundary: 0,
+        starting: true,
+        phase: BatchPhase::Publishing {
+            source: 0,
+            physical: 0,
+        },
+    });
+    engine.clip_resync_track = Some(0);
+    assert_eq!(
+        crate::retirement::tests::allocations(|| engine.resync_clip_events()),
+        (0, 0)
+    );
+    assert!(!std::iter::from_fn(|| events.pop().ok()).any(
+        |event| matches!(event, EngineEvent::ClipStateResynced(state) if state.playing.is_some())
+    ));
+    engine.continue_clip_batch(8);
+    engine.resync_clip_events();
+    assert!(!std::iter::from_fn(|| events.pop().ok()).any(
+        |event| matches!(event, EngineEvent::ClipStateResynced(state) if state.playing.is_some())
+    ));
+    engine.output_position = 137;
+    engine.flush_presentation();
+    engine.resync_clip_events();
+    let received: Vec<_> = std::iter::from_fn(|| events.pop().ok()).collect();
+    let transition = received
+        .iter()
+        .position(|event| matches!(event, EngineEvent::ClipTransitioned { .. }));
+    let snapshot = received.iter().position(
+        |event| matches!(event, EngineEvent::ClipStateResynced(state) if state.playing.is_some()),
+    );
+    assert!(transition.is_some() && snapshot.is_some() && transition < snapshot);
+    let state = match &received[snapshot.unwrap()] {
+        EngineEvent::ClipStateResynced(state) => state,
+        _ => unreachable!(),
+    };
+    assert_eq!(state.playing.unwrap().position, 0);
+    assert_eq!(state.effective_at_samples, 0);
+}
+
+fn delayed_engine() -> (AudioEngine, Consumer<EngineEvent>, TrackId) {
+    use vibez_core::routing::*;
+    let (mut engine, _, events) = AudioEngine::new();
+    let id = TrackId::new();
+    let effect = vibez_core::id::EffectId::new();
+    let mut track = EngineTrack::new(id);
+    track.effects.push(EffectSlot {
+        id: effect,
+        effect: Box::new(crate::test_support::DelayProbe::new(137)),
+        bypass: false,
+    });
+    engine.tracks.push(track);
+    let channels = [
+        RoutingChannel {
+            id,
+            is_bus: false,
+            sends: vec![],
+            effects: vec![RoutingEffect {
+                id: effect,
+                inputs: vec![],
+                assignments: vec![],
+                inactive_inputs: vec![],
+            }],
+        },
+        RoutingChannel {
+            id: TrackId::MASTER,
+            is_bus: true,
+            sends: vec![],
+            effects: vec![],
+        },
+    ];
+    let reports = [(
+        RoutingNode {
+            channel: id,
+            stage: NodeStage::Effect(effect),
+        },
+        137,
+    )];
+    engine.routing = Some(
+        crate::routing::PreparedRouting::prepare_compensated(&channels, 8, &reports, &[], 1)
+            .unwrap(),
+    );
+    engine.sample_rate = 8;
+    (engine, events, id)
+}
+
+#[test]
 fn inline_capture_stop_does_not_consume_packet_owner_admission_capacity() {
     let (mut engine, _, mut events) = AudioEngine::new();
     let id = TrackId::new();

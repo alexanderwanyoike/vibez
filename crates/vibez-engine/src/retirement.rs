@@ -110,7 +110,7 @@ impl crate::engine::AudioEngine {
             (track_index < self.tracks().len()).then_some((bus, track_index));
     }
 
-    pub(crate) fn retire_event(&mut self, event: EngineEvent) {
+    pub(super) fn retire_event(&mut self, event: EngineEvent) {
         if let Err(rtrb::PushError::Full(event)) = self.event_tx.push(event) {
             self.pending_retirements.push(event);
         }

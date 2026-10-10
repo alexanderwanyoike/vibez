@@ -40,14 +40,25 @@ impl AudioEngine {
             + usize::from(self.pending_compensation_failure.is_some())
             + usize::from(self.pending_playback_stop)
             + usize::from(self.presentation_overflow_owner.is_some());
-        // Common enqueue flushes inline notifications first. Their reserved
-        // ring slots cannot also admit a packet owner out of its retained Vec.
+        // Inline notifications flush before packet publication, so their
+        // reserved ring credits cannot also admit the next retained owner.
         scheduled
             + if future {
                 0
             } else {
                 self.event_tx.slots().saturating_sub(inline)
             }
+    }
+
+    pub(super) fn clip_batch_holds_transition(&self, track: TrackId) -> bool {
+        !self.presentation_fault
+            && self.pending_clip_batch.as_ref().is_some_and(|batch| {
+                matches!(batch.phase, BatchPhase::Publishing { .. })
+                    && batch
+                        .clips
+                        .iter()
+                        .any(|prepared| prepared.track_id == track)
+            })
     }
 
     #[allow(clippy::vec_box)]
@@ -75,7 +86,7 @@ impl AudioEngine {
         } else {
             quantization
                 .beats()
-                .map_or(now, |beats| self.next_grid_boundary(now, beats))
+                .map_or(now, |beats| self.next_achievable_boundary(now, beats))
         };
         self.pending_clip_batch = Some(PendingClipBatch {
             clips,
@@ -159,7 +170,7 @@ impl AudioEngine {
                     batch
                         .quantization
                         .beats()
-                        .map_or(now, |beats| self.next_grid_boundary(now, beats))
+                        .map_or(now, |beats| self.next_achievable_boundary(now, beats))
                 };
             }
             for track in &mut self.tracks {
@@ -209,9 +220,9 @@ impl AudioEngine {
             };
         }
         if let BatchPhase::Publishing { source, physical } = batch.phase {
-            while !batch.clips.is_empty() {
-                let due = physical;
-                let current = self.output_position + self.rendered_callback_frames as u64;
+            while let Some(prepared) = batch.clips.last() {
+                let due = physical.saturating_add(self.live_path_latency(prepared.track_id) as u64);
+                let current = self.output_position;
                 if self.clip_batch_event_room(due > current) == 0 {
                     self.pending_clip_batch = Some(batch);
                     return;

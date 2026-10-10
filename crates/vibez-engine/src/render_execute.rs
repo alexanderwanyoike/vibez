@@ -21,8 +21,64 @@ pub(super) fn render_offline_inner(
     if let Some(plugins) = plugins.as_deref() {
         dependencies::validate_plugins(req, plugins, &dependencies)?;
     }
-    let routing =
-        crate::routing::PreparedRouting::prepare(&dependencies.graph_channels, BLOCK_FRAMES)?;
+    let mut reports = Vec::new();
+    let mut controls = Vec::new();
+    for channel in &dependencies.graph_channels {
+        let info = dependencies::all_channels(req).find(|info| info.id == channel.id);
+        let instrument_latency = plugins
+            .as_deref()
+            .and_then(|plugins| plugins.instruments.get(&channel.id))
+            .map_or(0, |instrument| instrument.latency_samples());
+        reports.push((
+            vibez_core::routing::RoutingNode {
+                channel: channel.id,
+                stage: vibez_core::routing::NodeStage::Source,
+            },
+            instrument_latency,
+        ));
+        if let Some(info) = info {
+            controls.extend(info.automation.iter().map(|lane| (channel.id, lane.target)));
+            for effect in &channel.effects {
+                let latency = plugins
+                    .as_deref()
+                    .and_then(|plugins| plugins.effects.get(&effect.id))
+                    .map(|effect| effect.latency_samples())
+                    .unwrap_or_else(|| {
+                        info.effects
+                            .iter()
+                            .find(|info| info.id == effect.id)
+                            .map_or(0, |info| {
+                                vibez_dsp::factory::create_effect_with_params(
+                                    info.effect_type,
+                                    req.sample_rate as f32,
+                                    &info.params,
+                                )
+                                .latency_samples()
+                            })
+                    });
+                reports.push((
+                    vibez_core::routing::RoutingNode {
+                        channel: channel.id,
+                        stage: vibez_core::routing::NodeStage::Effect(effect.id),
+                    },
+                    latency,
+                ));
+            }
+        }
+    }
+    let mut routing = crate::routing::PreparedRouting::prepare_compensated(
+        &dependencies.graph_channels,
+        BLOCK_FRAMES,
+        &reports,
+        &[],
+        1,
+    )?;
+    routing.configure_automation(&controls)?;
+    let timing = crate::bounce_timing::BounceTiming::prepare(
+        (start, end),
+        routing.compensation.output_latency,
+    )
+    .map_err(str::to_owned)?;
     let mut warnings = Vec::new();
     let mut tracks = Vec::new();
     let mut buses = Vec::new();
@@ -80,10 +136,10 @@ pub(super) fn render_offline_inner(
         master,
         routing,
     });
-    let mut position = 0u64;
+    let mut position = timing.render_start;
     let mut failure = None;
-    while position < end {
-        let block = (end - position).min(BLOCK_FRAMES as u64) as usize;
+    while position < timing.render_end {
+        let block = (timing.render_end - position).min(BLOCK_FRAMES as u64) as usize;
         let output = &mut scratch[..block * CHANNELS];
         let selected_output = &mut selected[..block * CHANNELS];
         engine.render_offline_routing_segment(
@@ -113,31 +169,32 @@ pub(super) fn render_offline_inner(
             failure = Some(reason);
             break;
         }
-        if position + block as u64 > start {
-            let first_frame = start.saturating_sub(position) as usize;
+        if let Some(selection) = timing.block_selection(position, block) {
             let written = if selected_track.is_some() {
                 &selected[..block * CHANNELS]
             } else {
                 output
             };
-            for frame in written[first_frame * CHANNELS..].chunks_exact(CHANNELS) {
+            for frame in
+                written[selection.start * CHANNELS..selection.end * CHANNELS].chunks_exact(CHANNELS)
+            {
                 left.push(frame[0]);
                 right.push(frame[1]);
             }
         }
         position += block as u64;
-        progress(if end == 0 {
+        progress(if timing.render_end == 0 {
             100
         } else {
-            ((position as u128 * 100) / end as u128).min(100) as u8
+            ((position as u128 * 100) / timing.render_end as u128).min(100) as u8
         });
     }
     if let Some(plugins) = plugins {
         let (mut tracks, mut buses, mut master) = engine.take_offline_channels();
         prepare::return_plugins(req, plugins, &mut tracks, &mut buses, &mut master);
     }
-    if let Some(error) = failure {
-        return Err(error);
+    if let Some(reason) = failure {
+        return Err(reason);
     }
     progress(100);
     Ok(BounceResult {

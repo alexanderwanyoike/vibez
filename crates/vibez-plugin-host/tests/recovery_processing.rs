@@ -1,4 +1,4 @@
-//! Source-time recovery keeps healthy branches audible and owned devices guarded.
+//! Transient recovery keeps the other branch's audible delay history intact.
 
 #[allow(dead_code)]
 mod support;
@@ -59,7 +59,7 @@ fn clip(track: TrackId, value: f32) -> EngineCommand {
 }
 
 #[test]
-fn source_time_recovery_keeps_the_healthy_branch_audible_and_guards_the_absent_insert() {
+fn main_thread_recovery_keeps_other_delayed_branch_audible_and_silences_the_absent_insert() {
     let fixture = support::Fixture::new();
     for format in ["clap", "vst3"] {
         for bypass_while_held in [false, true] {
@@ -70,12 +70,26 @@ fn source_time_recovery_keeps_the_healthy_branch_audible_and_guards_the_absent_i
                 channel(tracks[1], Some(effects[1])),
                 channel(TrackId::MASTER, None),
             ];
-            let plan = || PreparedRouting::prepare(&channels, 64).unwrap();
+            let reports: Vec<_> = (0..2)
+                .map(|index| {
+                    (
+                        RoutingNode {
+                            channel: tracks[index],
+                            stage: NodeStage::Effect(effects[index]),
+                        },
+                        if index == 0 { 137 } else { 521 },
+                    )
+                })
+                .collect();
+            let plan = |generation| {
+                PreparedRouting::prepare_compensated(&channels, 64, &reports, &[], generation)
+                    .unwrap()
+            };
             let (mut engine, mut commands, mut events) = AudioEngine::new();
             commands.push(EngineCommand::SetSampleRate(48000)).unwrap();
             for index in 0..2 {
                 let mut plugin = fixture.load(format, 64);
-                let delay: u32 = 0;
+                let delay: u32 = if index == 0 { 137 } else { 521 };
                 let flags: u32 = if index == 0 { 1 << 24 } else { 0 };
                 let bytes: Vec<_> = [delay, delay, flags]
                     .into_iter()
@@ -98,7 +112,7 @@ fn source_time_recovery_keeps_the_healthy_branch_audible_and_guards_the_absent_i
                     })
                     .unwrap();
             }
-            commands.push(EngineCommand::SetRouting(plan())).unwrap();
+            commands.push(EngineCommand::SetRouting(plan(1))).unwrap();
             commands.push(EngineCommand::Play).unwrap();
             commands
                 .push(EngineCommand::StartPerformanceCapture)
@@ -173,7 +187,7 @@ fn source_time_recovery_keeps_the_healthy_branch_audible_and_guards_the_absent_i
                 }
                 for (frame, pair) in bypassed.chunks_exact(2).enumerate() {
                     for channel in 0..2 {
-                        let expected = healthy[channel] * 3.0;
+                        let expected = healthy[channel] * if frame < 521 - 137 { 1.0 } else { 3.0 };
                         assert!(
                             (pair[channel] - expected).abs() < 1e-6,
                             "{format} held bypass frame {frame}: {} != {expected}",
@@ -188,7 +202,7 @@ fn source_time_recovery_keeps_the_healthy_branch_audible_and_guards_the_absent_i
             commands
                 .push(EngineCommand::ResumeDeviceReconfiguration {
                     device: owner,
-                    routing: plan(),
+                    routing: plan(2),
                 })
                 .unwrap();
             let mut recovered = Vec::new();
@@ -204,7 +218,12 @@ fn source_time_recovery_keeps_the_healthy_branch_audible_and_guards_the_absent_i
             }
             for (frame, pair) in recovered.chunks_exact(2).enumerate() {
                 for channel in 0..2 {
-                    let expected = healthy[channel] * 3.0;
+                    let expected = healthy[channel]
+                        * if !bypass_while_held && frame < 521 {
+                            1.0
+                        } else {
+                            3.0
+                        };
                     assert!(
                         (pair[channel] - expected).abs() < 1e-6,
                         "{format} frame {frame}: {} != {expected}",

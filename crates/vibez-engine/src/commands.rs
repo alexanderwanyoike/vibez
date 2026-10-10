@@ -27,7 +27,7 @@ pub enum AuditionStart {
 /// audio callback.  Every variant must be safe to construct on the UI thread
 /// and safe to drop on the audio thread without blocking.
 pub enum EngineCommand {
-    SetRouting(Box<crate::routing::PreparedRouting>),
+    UpdateAutomationRouting(Box<crate::routing::PreparedRouting>),
     RejectRoutingUpdate {
         reason: String,
     },
@@ -39,6 +39,7 @@ pub enum EngineCommand {
         device: crate::engine::reconfiguration::DeviceReconfiguration,
         reason: String,
     },
+    SetRouting(Box<crate::routing::PreparedRouting>),
     /// Start playback from the current transport position.
     Play,
     /// Stop playback (transport position is preserved).
