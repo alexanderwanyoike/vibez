@@ -71,3 +71,63 @@ fn due_event_batch_is_bounded_by_free_ring_slots() {
     engine.flush_presentation();
     assert!(engine.scheduled_presentation.is_empty());
 }
+
+#[test]
+fn legacy_repeat_overflow_closes_capture_in_both_render_paths() {
+    use crate::note_repeat::NoteRepeatClock;
+    use vibez_core::midi::InstrumentKind;
+    use vibez_core::perform::NoteRepeatRate;
+    for idle in [false, true] {
+        let (mut engine, _, _) = AudioEngine::new();
+        engine.sample_rate = 100;
+        engine.transport.set_bpm(60.0);
+        let mut track = EngineTrack::new(TrackId::new());
+        track.instrument = Some(create_instrument(InstrumentKind::SubtractiveSynth, 100.0));
+        engine.tracks.push(track);
+        engine.render_idle_instruments(&mut [0.0; 16], 8, 2, 0, None, None);
+        engine.tracks[0].start_note_repeat(
+            NoteRepeatStart {
+                id: 0,
+                pitch: 42,
+                velocity: 100,
+                rate: NoteRepeatRate::Sixteenth,
+            },
+            NoteRepeatClock {
+                after_sample: 0,
+                anchor_sample: 0,
+                include_after_sample: true,
+                bpm: 60.0,
+                sample_rate: 100,
+                swing: SwingAmount::default(),
+            },
+        );
+        while engine.event_tx.push(EngineEvent::PlaybackStarted).is_ok() {}
+        for _ in 0..presentation_queue::PRESENTATION_EVENT_CAPACITY {
+            engine.present_event(EngineEvent::PlaybackStarted, 521);
+        }
+        engine.transport.play();
+        let counts = crate::retirement::tests::allocations(|| {
+            if idle {
+                engine.render_idle_instruments(&mut [0.0; 16], 8, 2, 0, None, None);
+            } else {
+                engine.render_multitrack_segment(
+                    &mut [0.0; 16],
+                    render_paths::MultitrackRenderBlock {
+                        pos: 0,
+                        repeat_pos: 0,
+                        frames: 8,
+                        channels: 2,
+                        loop_region: None,
+                        live_input: None,
+                    },
+                    None,
+                );
+            }
+        });
+        assert_eq!(counts, (0, 0));
+        assert!(engine.presentation_fault, "idle={idle}");
+        assert!(!engine.transport.is_playing());
+        assert_eq!(engine.pending_capture_stop, Some(0));
+        assert!(engine.pending_compensation_failure.is_some());
+    }
+}

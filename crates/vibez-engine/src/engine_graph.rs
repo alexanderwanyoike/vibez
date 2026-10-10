@@ -129,6 +129,7 @@ impl AudioEngine {
                     let events = &mut self.event_tx;
                     let scheduled = &mut self.scheduled_presentation;
                     let physical = self.output_position;
+                    let mut presentation_overflow = false;
                     let mut repeated = |trigger: crate::note_repeat::NoteRepeatTrigger| {
                         let section_position = section.map(|active| {
                             section_record::section_sample_for_performance(
@@ -157,8 +158,8 @@ impl AudioEngine {
                             section_position_samples: section_position,
                             canonical_section_position_samples: canonical_section_position,
                         };
-                        let _ =
-                            presentation_queue::emit_repeated(event, events, scheduled, physical);
+                        presentation_overflow |=
+                            !presentation_queue::emit_repeated(event, events, scheduled, physical);
                     };
                     if track.instrument.is_some() {
                         if idle {
@@ -199,6 +200,9 @@ impl AudioEngine {
                     }
                     std::mem::swap(&mut track.mix_buffer, &mut prepared.nodes[index].samples);
                     let activity = track.take_note_activity();
+                    if presentation_overflow {
+                        self.fail_presentation();
+                    }
                     if activity != 0 {
                         let _ = self.event_tx.push(EngineEvent::TrackNoteActivity {
                             track_id: id,

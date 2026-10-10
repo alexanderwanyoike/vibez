@@ -42,9 +42,12 @@ impl AudioEngine {
         self.cancel_presentation();
         let was_clip_performance = self.clip_performance;
         self.stop_section_record();
-        let _ = self.event_tx.push(EngineEvent::PerformanceCaptureStopped {
-            effective_at_samples: self.effective_position(),
-        });
+        self.present_event(
+            EngineEvent::PerformanceCaptureStopped {
+                effective_at_samples: self.effective_position(),
+            },
+            0,
+        );
         self.clear_clip_performance();
         self.transport.stop();
         self.arrangement_recording = false;

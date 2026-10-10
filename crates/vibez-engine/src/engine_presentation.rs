@@ -22,6 +22,7 @@ impl AudioEngine {
     }
 
     pub(super) fn close_capture_on_failure(&mut self) {
+        self.cancel_presentation();
         self.pending_capture_stop
             .get_or_insert(self.compensation_callback_heard_start);
         self.flush_presentation();

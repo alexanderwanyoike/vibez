@@ -209,12 +209,16 @@ impl AudioEngine {
                     }
                 }
                 EngineCommand::UnloadAudio => {
+                    self.cancel_presentation();
                     let was_clip_performance = self.clip_performance;
                     self.clear_clip_performance();
                     self.stop_section_record();
-                    let _ = self.event_tx.push(EngineEvent::PerformanceCaptureStopped {
-                        effective_at_samples: self.effective_position(),
-                    });
+                    self.present_event(
+                        EngineEvent::PerformanceCaptureStopped {
+                            effective_at_samples: self.effective_position(),
+                        },
+                        0,
+                    );
                     self.audio = None;
                     self.arrangement_audio_length = None;
                     self.arrangement_recording = false;
@@ -820,21 +824,24 @@ impl AudioEngine {
                         if let Some(instrument) = self.tracks[track_index].instrument.as_mut() {
                             instrument.note_on(pitch, velocity);
                         }
-                        let _ = self.event_tx.push(EngineEvent::NoteRepeated {
-                            track_id,
-                            pitch,
-                            velocity,
-                            rate,
-                            effective_at_samples: position,
-                            canonical_at_samples: position,
-                            section_id: self.active_section.map(|active| active.section_id),
-                            section_position_samples: self
-                                .active_section
-                                .map(|active| active.position_samples),
-                            canonical_section_position_samples: self
-                                .active_section
-                                .map(|active| active.position_samples),
-                        });
+                        self.present_event(
+                            EngineEvent::NoteRepeated {
+                                track_id,
+                                pitch,
+                                velocity,
+                                rate,
+                                effective_at_samples: position,
+                                canonical_at_samples: position,
+                                section_id: self.active_section.map(|active| active.section_id),
+                                section_position_samples: self
+                                    .active_section
+                                    .map(|active| active.position_samples),
+                                canonical_section_position_samples: self
+                                    .active_section
+                                    .map(|active| active.position_samples),
+                            },
+                            0,
+                        );
                     }
                     self.tracks[track_index].start_note_repeat(
                         NoteRepeatStart {

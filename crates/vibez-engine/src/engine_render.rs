@@ -244,6 +244,7 @@ impl AudioEngine {
             0.0
         };
 
+        let mut presentation_overflow = false;
         for track_idx in 0..self.tracks.len() {
             let track = &mut self.tracks[track_idx];
             let pos = if self.clip_performance {
@@ -314,7 +315,8 @@ impl AudioEngine {
                         section_position_samples: section_position,
                         canonical_section_position_samples: canonical_section_position,
                     };
-                    let _ = presentation_queue::emit_repeated(event, event_tx, scheduled, physical);
+                    presentation_overflow |=
+                        !presentation_queue::emit_repeated(event, event_tx, scheduled, physical);
                 };
                 track.render_instrument(
                     InstrumentRenderContext {
@@ -472,6 +474,9 @@ impl AudioEngine {
                 peak_r: track_peak_r,
             });
         }
+        if presentation_overflow {
+            self.fail_presentation();
+        }
     }
 
     /// Legacy single-audio rendering path (Phase 1 compatibility).
@@ -532,6 +537,7 @@ impl AudioEngine {
         }
         let has_track_solo = any_solo(&self.tracks);
         let has_bus_solo = any_solo(&self.buses);
+        let mut presentation_overflow = false;
         for track in &mut self.tracks {
             if has_track_solo && !track.solo && !has_bus_solo {
                 continue;
@@ -569,7 +575,8 @@ impl AudioEngine {
                         section_position_samples: None,
                         canonical_section_position_samples: None,
                     };
-                    let _ = presentation_queue::emit_repeated(event, event_tx, scheduled, physical);
+                    presentation_overflow |=
+                        !presentation_queue::emit_repeated(event, event_tx, scheduled, physical);
                 };
                 track.render_instrument_idle(
                     repeat_pos,
@@ -670,6 +677,9 @@ impl AudioEngine {
                     }
                 }
             }
+        }
+        if presentation_overflow {
+            self.fail_presentation();
         }
     }
 }
