@@ -91,6 +91,7 @@ impl ArrangementFixture {
         ctx: ArrangementCtx,
     ) -> ArrangementAction {
         let mut project_tracks = ProjectTracksState {
+            reduced_latency_monitoring: false,
             tracks: self
                 .tracks
                 .iter()

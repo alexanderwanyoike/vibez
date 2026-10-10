@@ -199,6 +199,10 @@ fn read_sample(audio: &DecodedAudio, position: f64, channel: usize) -> f32 {
 }
 
 impl Instrument for Sampler {
+    fn activation_sample_rate(&self) -> Option<u32> {
+        Some(self.sample_rate as u32)
+    }
+
     fn instrument_kind(&self) -> InstrumentKind {
         InstrumentKind::Sampler
     }

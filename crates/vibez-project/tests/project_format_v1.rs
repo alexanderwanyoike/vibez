@@ -160,6 +160,7 @@ fn process_interruption_preserves_last_committed_document_and_media() {
 fn project_with_source(source: MediaSourceRef) -> Project {
     let track = TrackInfo::new("Audio");
     Project {
+        reduced_latency_monitoring: false,
         tracks: vec![track.clone()],
         arrange: TimelineInfo {
             clips: vec![ClipInfo {
@@ -226,6 +227,7 @@ fn arrange_and_section_share_one_embedded_media_row() {
         warped_to_bpm: None,
     };
     let project = Project {
+        reduced_latency_monitoring: false,
         tracks: vec![track],
         arrange: TimelineInfo {
             clips: vec![clip(ClipId::new())],
@@ -333,6 +335,7 @@ fn sliced_drum_rack_pads_and_reconstruction_notes_survive_reopen_with_one_media_
         groove_grid: Default::default(),
     };
     let project = Project {
+        reduced_latency_monitoring: false,
         tracks: vec![track],
         arrange: TimelineInfo {
             note_clips: vec![note_clip],

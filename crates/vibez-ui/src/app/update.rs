@@ -959,6 +959,15 @@ impl App {
                     !self.state.confirm_project_track_deletion;
                 self.persist_ui_settings();
             }
+            Message::SetReducedLatencyMonitoring(enabled) => {
+                if self.state.project_tracks.reduced_latency_monitoring != enabled {
+                    let snapshot = self.state.project_snapshot();
+                    self.state.project.history.push_edit(snapshot, None);
+                    Arc::make_mut(&mut self.state.project_tracks).reduced_latency_monitoring =
+                        enabled;
+                    self.mark_project_dirty();
+                }
+            }
             Message::ToggleAutoSave => {
                 self.state.auto_save_enabled = !self.state.auto_save_enabled;
                 self.save_runtime.set_auto_save_enabled(

@@ -24,6 +24,7 @@ fn capture_started(events: &mut rtrb::Consumer<EngineEvent>) -> Option<(u64, Sec
             effective_at_samples,
             section_id: Some(section_id),
             section_position_samples: Some(section_position_samples),
+            ..
         } => Some((effective_at_samples, section_id, section_position_samples)),
         _ => None,
     })
