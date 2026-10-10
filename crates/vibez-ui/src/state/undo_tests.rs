@@ -59,6 +59,8 @@ fn one_eq_drag_is_one_undo_step() {
     let effect_id = EffectId::new();
     let mut track = ProjectTrack::new(track_id, "Audio".into(), 0);
     track.effects.push(UiEffect {
+        reconfiguration_failed: false,
+        latency_samples: Some(0),
         inactive_sidechains: Default::default(),
         sidechains: Default::default(),
         external_inputs: Default::default(),
@@ -793,6 +795,8 @@ fn deleting_sidechain_source_keeps_assignment_and_undo_restores_identity() {
     };
     let mut bass = ProjectTrack::new(receiver, "Bass".into(), 0);
     bass.effects.push(UiEffect {
+        reconfiguration_failed: false,
+        latency_samples: Some(0),
         id: effect,
         effect_type: EffectType::Compressor,
         bypass: false,
