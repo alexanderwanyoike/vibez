@@ -1,6 +1,10 @@
+//! CLAP host callback routing and main-thread service registries.
+
+use clap_sys::ext::latency::{clap_host_latency, CLAP_EXT_LATENCY};
 use std::cell::Cell;
 use std::ffi::CStr;
 use std::os::raw::c_char;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::thread::ThreadId;
 use std::time::Instant;
@@ -62,6 +66,32 @@ pub fn mark_clap_audio_thread() {
     IS_CLAP_AUDIO_THREAD.set(true);
 }
 
+thread_local! { static ACTIVATION_HOST: Cell<usize> = const { Cell::new(0) }; }
+
+pub(super) struct ActivationScope(usize);
+impl Drop for ActivationScope {
+    fn drop(&mut self) {
+        ACTIVATION_HOST.set(self.0);
+    }
+}
+// Only synchronous lifecycle announcements are already reflected in preparation.
+// Thread-safe requests from another producer must survive the lifecycle work.
+pub(super) fn activation_scope(host: *const clap_host) -> ActivationScope {
+    ActivationScope(ACTIVATION_HOST.replace(host as usize))
+}
+
+pub(super) struct AudioRole(bool);
+impl Drop for AudioRole {
+    fn drop(&mut self) {
+        IS_CLAP_AUDIO_THREAD.set(self.0);
+    }
+}
+// CLAP's audio role can move between exclusive OS threads, including main.
+// Restore the previous role so GUI callbacks never inherit a teardown role.
+pub(super) fn audio_role() -> AudioRole {
+    AudioRole(IS_CLAP_AUDIO_THREAD.replace(true))
+}
+
 fn is_on_clap_audio_thread() -> bool {
     IS_CLAP_AUDIO_THREAD.get()
 }
@@ -72,9 +102,13 @@ fn is_on_clap_audio_thread() -> bool {
 /// This is needed so timer/FD callbacks can call back into the correct plugin.
 pub struct ClapHostUserData {
     pub plugin_ptr: *const clap_plugin,
+    pub restart_requested: AtomicBool,
+    pub callback_requested: AtomicBool,
+    main_thread: ThreadId,
 }
 
-// Safety: Only accessed from the main thread (timer/fd/gui callbacks).
+// Safety: The plugin identity is immutable after init. Native callbacks only
+// change atomic request flags; main-thread dispatch owns pointer dereferences.
 unsafe impl Send for ClapHostUserData {}
 unsafe impl Sync for ClapHostUserData {}
 
@@ -84,8 +118,17 @@ unsafe impl Sync for ClapHostUserData {}
 /// # Safety
 /// `host` must be a valid, leaked `clap_host` pointer. `plugin_ptr` must be valid.
 pub unsafe fn set_host_user_data(host: &mut clap_host, plugin_ptr: *const clap_plugin) {
-    let data = Box::leak(Box::new(ClapHostUserData { plugin_ptr }));
+    let data = Box::leak(Box::new(ClapHostUserData {
+        plugin_ptr,
+        restart_requested: AtomicBool::new(false),
+        callback_requested: AtomicBool::new(false),
+        main_thread: std::thread::current().id(),
+    }));
     host.host_data = data as *mut ClapHostUserData as *mut std::ffi::c_void;
+    MAIN_CALLBACK_HOSTS
+        .lock()
+        .unwrap()
+        .push(host as *const clap_host as usize);
 }
 
 /// Create a `clap_host` descriptor for the vibez host.
@@ -103,6 +146,41 @@ pub fn make_clap_host() -> clap_host {
         request_restart: Some(host_request_restart),
         request_process: Some(host_request_process),
         request_callback: Some(host_request_callback),
+    }
+}
+
+static MAIN_CALLBACK_HOSTS: Mutex<Vec<usize>> = Mutex::new(Vec::new());
+
+fn poll_main_callbacks() {
+    let hosts = MAIN_CALLBACK_HOSTS
+        .lock()
+        .map(|hosts| hosts.clone())
+        .unwrap_or_default();
+    for address in hosts {
+        unsafe {
+            let host = &*(address as *const clap_host);
+            let data = &*(host.host_data as *const ClapHostUserData);
+            if data.main_thread == std::thread::current().id()
+                && data.callback_requested.swap(false, Ordering::AcqRel)
+            {
+                if let Some(callback) = (*data.plugin_ptr).on_main_thread {
+                    callback(data.plugin_ptr);
+                }
+            }
+        }
+    }
+}
+
+pub(super) fn unregister_host_callbacks(host: *const clap_host) {
+    if let Ok(mut hosts) = MAIN_CALLBACK_HOSTS.lock() {
+        hosts.retain(|&address| address != host as usize);
+    }
+    let plugin = unsafe { (&*((*host).host_data as *const ClapHostUserData)).plugin_ptr };
+    if let Ok(mut timers) = CLAP_TIMERS.lock() {
+        timers.retain(|timer| timer.plugin_ptr != plugin);
+    }
+    if let Ok(mut fds) = CLAP_FDS.lock() {
+        fds.retain(|entry| entry.plugin_ptr != plugin);
     }
 }
 
@@ -250,6 +328,7 @@ unsafe extern "C" fn host_unregister_fd(_host: *const clap_host, fd: i32) -> boo
 /// Must be called on the main thread (e.g., from iced's 60fps tick).
 /// Fires `on_timer` for elapsed timers and `on_fd` for ready file descriptors.
 pub fn poll_clap_events() {
+    poll_main_callbacks();
     poll_timers();
     poll_fds();
 }
@@ -440,572 +519,61 @@ unsafe extern "C" fn host_get_extension(
         return std::ptr::null();
     }
     let ext_id = CStr::from_ptr(extension_id);
-    let ext_name = ext_id.to_str().unwrap_or("?");
 
+    if ext_id == CLAP_EXT_LATENCY {
+        return (&CLAP_HOST_LATENCY as *const clap_host_latency).cast();
+    }
     if ext_id == CLAP_EXT_THREAD_CHECK {
-        eprintln!("vibez: host_get_extension({ext_name}) → thread-check");
         return &CLAP_HOST_THREAD_CHECK_IMPL as *const clap_host_thread_check
             as *const std::ffi::c_void;
     }
     if ext_id == CLAP_EXT_GUI {
-        eprintln!("vibez: host_get_extension({ext_name}) → gui");
         return &CLAP_HOST_GUI_IMPL as *const clap_host_gui as *const std::ffi::c_void;
     }
     if ext_id == CLAP_EXT_TIMER_SUPPORT {
-        eprintln!("vibez: host_get_extension({ext_name}) → timer-support");
         return &CLAP_HOST_TIMER_SUPPORT_IMPL as *const clap_host_timer_support
             as *const std::ffi::c_void;
     }
     if ext_id == CLAP_EXT_POSIX_FD_SUPPORT {
-        eprintln!("vibez: host_get_extension({ext_name}) → posix-fd-support");
         return &CLAP_HOST_POSIX_FD_SUPPORT_IMPL as *const clap_host_posix_fd_support
             as *const std::ffi::c_void;
     }
-
-    eprintln!("vibez: host_get_extension({ext_name}) → null (not implemented)");
     std::ptr::null()
 }
 
-unsafe extern "C" fn host_request_restart(_host: *const clap_host) {
-    // TODO: handle restart request from plugin
+static CLAP_HOST_LATENCY: clap_host_latency = clap_host_latency {
+    changed: Some(host_latency_changed),
+};
+
+unsafe extern "C" fn host_latency_changed(host: *const clap_host) {
+    if !host.is_null() && !(*host).host_data.is_null() {
+        let data = &*((*host).host_data as *const ClapHostUserData);
+        if ACTIVATION_HOST.get() != host as usize {
+            data.restart_requested.store(true, Ordering::Release);
+        }
+    }
+}
+
+unsafe extern "C" fn host_request_restart(host: *const clap_host) {
+    if !host.is_null() && !(*host).host_data.is_null() {
+        let data = &*((*host).host_data as *const ClapHostUserData);
+        if ACTIVATION_HOST.get() != host as usize {
+            data.restart_requested.store(true, Ordering::Release);
+        }
+    }
 }
 
 unsafe extern "C" fn host_request_process(_host: *const clap_host) {
     // TODO: handle process request from plugin
 }
 
-unsafe extern "C" fn host_request_callback(_host: *const clap_host) {
-    // TODO: handle callback request from plugin
+unsafe extern "C" fn host_request_callback(host: *const clap_host) {
+    if !host.is_null() && !(*host).host_data.is_null() {
+        let data = &*((*host).host_data as *const ClapHostUserData);
+        data.callback_requested.store(true, Ordering::Release);
+    }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::sync::atomic::{AtomicU32, Ordering};
-
-    // ── Fake plugin infrastructure ──
-
-    // Counters incremented by fake plugin callbacks
-    static TEST_TIMER_CALL_COUNT: AtomicU32 = AtomicU32::new(0);
-    static TEST_FD_CALL_COUNT: AtomicU32 = AtomicU32::new(0);
-
-    // The host timer/fd registries are process-global, so tests in
-    // this module MUST run serialized and start from a clean slate;
-    // in parallel they race each other (flaked three separate times
-    // in CI-style full runs before this lock).
-    static TEST_LOCK: Mutex<()> = Mutex::new(());
-
-    fn serialize_and_reset() -> std::sync::MutexGuard<'static, ()> {
-        let guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        CLAP_TIMERS.lock().unwrap().clear();
-        CLAP_FDS.lock().unwrap().clear();
-        TEST_TIMER_CALL_COUNT.store(0, Ordering::SeqCst);
-        TEST_FD_CALL_COUNT.store(0, Ordering::SeqCst);
-        guard
-    }
-
-    static TEST_PLUGIN_TIMER_EXT: clap_sys::ext::timer_support::clap_plugin_timer_support =
-        clap_sys::ext::timer_support::clap_plugin_timer_support {
-            on_timer: Some(test_on_timer),
-        };
-
-    static TEST_PLUGIN_FD_EXT: clap_sys::ext::posix_fd_support::clap_plugin_posix_fd_support =
-        clap_sys::ext::posix_fd_support::clap_plugin_posix_fd_support {
-            on_fd: Some(test_on_fd),
-        };
-
-    unsafe extern "C" fn test_on_timer(_plugin: *const clap_plugin, _timer_id: u32) {
-        TEST_TIMER_CALL_COUNT.fetch_add(1, Ordering::Relaxed);
-    }
-
-    unsafe extern "C" fn test_on_fd(
-        _plugin: *const clap_plugin,
-        _fd: i32,
-        _flags: clap_posix_fd_flags,
-    ) {
-        TEST_FD_CALL_COUNT.fetch_add(1, Ordering::Relaxed);
-    }
-
-    unsafe extern "C" fn test_get_extension(
-        _plugin: *const clap_plugin,
-        extension_id: *const c_char,
-    ) -> *const std::ffi::c_void {
-        let ext_id = CStr::from_ptr(extension_id);
-        if ext_id == CLAP_EXT_TIMER_SUPPORT {
-            return &TEST_PLUGIN_TIMER_EXT
-                as *const clap_sys::ext::timer_support::clap_plugin_timer_support
-                as *const std::ffi::c_void;
-        }
-        if ext_id == CLAP_EXT_POSIX_FD_SUPPORT {
-            return &TEST_PLUGIN_FD_EXT
-                as *const clap_sys::ext::posix_fd_support::clap_plugin_posix_fd_support
-                as *const std::ffi::c_void;
-        }
-        std::ptr::null()
-    }
-
-    /// Create a fake `clap_plugin` with only `get_extension` implemented.
-    fn make_test_plugin() -> clap_plugin {
-        clap_plugin {
-            desc: std::ptr::null(),
-            plugin_data: std::ptr::null_mut(),
-            init: None,
-            destroy: None,
-            activate: None,
-            deactivate: None,
-            start_processing: None,
-            stop_processing: None,
-            reset: None,
-            process: None,
-            get_extension: Some(test_get_extension),
-            on_main_thread: None,
-        }
-    }
-
-    /// Create a `clap_host` with `host_data` pointing to a fake plugin.
-    fn make_test_host_with_plugin(plugin_ptr: *const clap_plugin) -> clap_host {
-        let mut host = make_clap_host();
-        let data = Box::leak(Box::new(ClapHostUserData { plugin_ptr }));
-        host.host_data = data as *mut ClapHostUserData as *mut std::ffi::c_void;
-        host
-    }
-
-    /// Clear the timer and FD registries (for test isolation).
-    fn clear_registries() {
-        CLAP_TIMERS.lock().unwrap().clear();
-        CLAP_FDS.lock().unwrap().clear();
-    }
-
-    // ── make_clap_host tests ──
-
-    #[test]
-    fn test_make_clap_host_fields() {
-        let _serial = serialize_and_reset();
-        let host = make_clap_host();
-        assert_eq!(host.clap_version, CLAP_VERSION);
-        assert!(host.get_extension.is_some());
-        assert!(host.request_restart.is_some());
-        assert!(host.request_process.is_some());
-        assert!(host.request_callback.is_some());
-        assert!(host.host_data.is_null());
-
-        // Verify name string
-        let name = unsafe { CStr::from_ptr(host.name) };
-        assert_eq!(name, c"vibez");
-    }
-
-    // ── host_get_extension tests ──
-
-    #[test]
-    fn test_host_get_extension_returns_thread_check() {
-        let _serial = serialize_and_reset();
-        let host = make_clap_host();
-        let ptr = unsafe { host_get_extension(&host, CLAP_EXT_THREAD_CHECK.as_ptr()) };
-        assert!(!ptr.is_null());
-    }
-
-    #[test]
-    fn test_host_get_extension_returns_gui() {
-        let _serial = serialize_and_reset();
-        let host = make_clap_host();
-        let ptr = unsafe { host_get_extension(&host, CLAP_EXT_GUI.as_ptr()) };
-        assert!(!ptr.is_null());
-    }
-
-    #[test]
-    fn test_host_get_extension_returns_timer_support() {
-        let _serial = serialize_and_reset();
-        let host = make_clap_host();
-        let ptr = unsafe { host_get_extension(&host, CLAP_EXT_TIMER_SUPPORT.as_ptr()) };
-        assert!(!ptr.is_null());
-    }
-
-    #[test]
-    fn test_host_get_extension_returns_posix_fd_support() {
-        let _serial = serialize_and_reset();
-        let host = make_clap_host();
-        let ptr = unsafe { host_get_extension(&host, CLAP_EXT_POSIX_FD_SUPPORT.as_ptr()) };
-        assert!(!ptr.is_null());
-    }
-
-    #[test]
-    fn test_host_get_extension_returns_null_for_unknown() {
-        let _serial = serialize_and_reset();
-        let host = make_clap_host();
-        let unknown = c"clap.unknown-extension";
-        let ptr = unsafe { host_get_extension(&host, unknown.as_ptr()) };
-        assert!(ptr.is_null());
-    }
-
-    #[test]
-    fn test_host_get_extension_returns_null_for_null_id() {
-        let _serial = serialize_and_reset();
-        let host = make_clap_host();
-        let ptr = unsafe { host_get_extension(&host, std::ptr::null()) };
-        assert!(ptr.is_null());
-    }
-
-    // ── set_host_user_data tests ──
-
-    #[test]
-    fn test_set_host_user_data() {
-        let _serial = serialize_and_reset();
-        let plugin = make_test_plugin();
-        let mut host = make_clap_host();
-        assert!(host.host_data.is_null());
-
-        unsafe { set_host_user_data(&mut host, &plugin as *const _) };
-
-        assert!(!host.host_data.is_null());
-        let data = unsafe { &*(host.host_data as *const ClapHostUserData) };
-        assert_eq!(data.plugin_ptr, &plugin as *const _);
-    }
-
-    // ── Timer register/unregister tests ──
-
-    #[test]
-    fn test_timer_register_unregister() {
-        let _serial = serialize_and_reset();
-        clear_registries();
-
-        let plugin = make_test_plugin();
-        let host = make_test_host_with_plugin(&plugin);
-
-        let mut timer_id: u32 = 0;
-        let ok = unsafe { host_register_timer(&host, 100, &mut timer_id) };
-        assert!(ok);
-        assert_ne!(timer_id, 0);
-
-        // Verify timer is in registry
-        {
-            let timers = CLAP_TIMERS.lock().unwrap();
-            assert_eq!(timers.len(), 1);
-            assert_eq!(timers[0].timer_id, timer_id);
-            assert_eq!(timers[0].period_ms, 100);
-        }
-
-        // Unregister
-        let ok = unsafe { host_unregister_timer(&host, timer_id) };
-        assert!(ok);
-
-        {
-            let timers = CLAP_TIMERS.lock().unwrap();
-            assert_eq!(timers.len(), 0);
-        }
-
-        clear_registries();
-    }
-
-    #[test]
-    fn test_timer_register_assigns_unique_ids() {
-        let _serial = serialize_and_reset();
-        clear_registries();
-
-        let plugin = make_test_plugin();
-        let host = make_test_host_with_plugin(&plugin);
-
-        let mut id1: u32 = 0;
-        let mut id2: u32 = 0;
-        let mut id3: u32 = 0;
-
-        unsafe {
-            host_register_timer(&host, 50, &mut id1);
-            host_register_timer(&host, 100, &mut id2);
-            host_register_timer(&host, 200, &mut id3);
-        }
-
-        assert_ne!(id1, id2);
-        assert_ne!(id2, id3);
-        assert_ne!(id1, id3);
-
-        {
-            let timers = CLAP_TIMERS.lock().unwrap();
-            assert_eq!(timers.len(), 3);
-        }
-
-        clear_registries();
-    }
-
-    #[test]
-    fn test_unregister_nonexistent_timer() {
-        let _serial = serialize_and_reset();
-        clear_registries();
-
-        let host = make_clap_host();
-        let ok = unsafe { host_unregister_timer(&host, 99999) };
-        assert!(!ok);
-
-        clear_registries();
-    }
-
-    #[test]
-    fn test_timer_register_fails_without_host_data() {
-        let _serial = serialize_and_reset();
-        clear_registries();
-
-        let host = make_clap_host(); // host_data is null
-        let mut timer_id: u32 = 0;
-        let ok = unsafe { host_register_timer(&host, 100, &mut timer_id) };
-        assert!(!ok);
-
-        clear_registries();
-    }
-
-    // ── FD register/modify/unregister tests ──
-
-    #[test]
-    fn test_fd_register_unregister() {
-        let _serial = serialize_and_reset();
-        clear_registries();
-
-        let plugin = make_test_plugin();
-        let host = make_test_host_with_plugin(&plugin);
-
-        let ok = unsafe { host_register_fd(&host, 42, CLAP_POSIX_FD_READ) };
-        assert!(ok);
-
-        {
-            let fds = CLAP_FDS.lock().unwrap();
-            assert_eq!(fds.len(), 1);
-            assert_eq!(fds[0].fd, 42);
-            assert_eq!(fds[0].flags, CLAP_POSIX_FD_READ);
-        }
-
-        let ok = unsafe { host_unregister_fd(&host, 42) };
-        assert!(ok);
-
-        {
-            let fds = CLAP_FDS.lock().unwrap();
-            assert_eq!(fds.len(), 0);
-        }
-
-        clear_registries();
-    }
-
-    #[test]
-    fn test_fd_modify() {
-        let _serial = serialize_and_reset();
-        clear_registries();
-
-        let plugin = make_test_plugin();
-        let host = make_test_host_with_plugin(&plugin);
-
-        unsafe { host_register_fd(&host, 10, CLAP_POSIX_FD_READ) };
-
-        let ok = unsafe { host_modify_fd(&host, 10, CLAP_POSIX_FD_READ | CLAP_POSIX_FD_WRITE) };
-        assert!(ok);
-
-        {
-            let fds = CLAP_FDS.lock().unwrap();
-            assert_eq!(fds[0].flags, CLAP_POSIX_FD_READ | CLAP_POSIX_FD_WRITE);
-        }
-
-        clear_registries();
-    }
-
-    #[test]
-    fn test_fd_modify_nonexistent() {
-        let _serial = serialize_and_reset();
-        clear_registries();
-
-        let host = make_clap_host();
-        let ok = unsafe { host_modify_fd(&host, 999, CLAP_POSIX_FD_READ) };
-        assert!(!ok);
-
-        clear_registries();
-    }
-
-    #[test]
-    fn test_fd_register_fails_without_host_data() {
-        let _serial = serialize_and_reset();
-        clear_registries();
-
-        let host = make_clap_host(); // host_data is null
-        let ok = unsafe { host_register_fd(&host, 5, CLAP_POSIX_FD_READ) };
-        assert!(!ok);
-
-        clear_registries();
-    }
-
-    // ── Timer polling tests ──
-
-    #[test]
-    fn test_poll_timers_fires_elapsed() {
-        let _serial = serialize_and_reset();
-        clear_registries();
-        TEST_TIMER_CALL_COUNT.store(0, Ordering::Relaxed);
-
-        let plugin = make_test_plugin();
-        let plugin_ptr: *const clap_plugin = &plugin;
-
-        // Manually insert a timer with last_fired in the past
-        {
-            let mut timers = CLAP_TIMERS.lock().unwrap();
-            timers.push(TimerEntry {
-                plugin_ptr,
-                timer_id: 1,
-                period_ms: 0, // fire immediately
-                last_fired: Instant::now() - std::time::Duration::from_secs(1),
-            });
-        }
-
-        poll_timers();
-
-        assert!(TEST_TIMER_CALL_COUNT.load(Ordering::Relaxed) >= 1);
-
-        clear_registries();
-    }
-
-    #[test]
-    fn test_poll_timers_skips_not_elapsed() {
-        let _serial = serialize_and_reset();
-        clear_registries();
-        TEST_TIMER_CALL_COUNT.store(0, Ordering::Relaxed);
-
-        let plugin = make_test_plugin();
-        let plugin_ptr: *const clap_plugin = &plugin;
-
-        // Timer with very long period — should NOT fire
-        {
-            let mut timers = CLAP_TIMERS.lock().unwrap();
-            timers.push(TimerEntry {
-                plugin_ptr,
-                timer_id: 2,
-                period_ms: 999_999,
-                last_fired: Instant::now(),
-            });
-        }
-
-        poll_timers();
-
-        assert_eq!(TEST_TIMER_CALL_COUNT.load(Ordering::Relaxed), 0);
-
-        clear_registries();
-    }
-
-    // ── FD polling tests ──
-
-    #[cfg(unix)]
-    #[test]
-    fn test_poll_fds_fires_on_ready_pipe() {
-        let _serial = serialize_and_reset();
-        clear_registries();
-        TEST_FD_CALL_COUNT.store(0, Ordering::Relaxed);
-
-        let plugin = make_test_plugin();
-        let plugin_ptr: *const clap_plugin = &plugin;
-
-        // Create a pipe — write end makes read end ready
-        let mut fds = [0i32; 2];
-        let ret = unsafe { libc_pipe(fds.as_mut_ptr()) };
-        assert_eq!(ret, 0);
-
-        let read_fd = fds[0];
-        let write_fd = fds[1];
-
-        // Register read end with the CLAP FD registry
-        {
-            let mut fd_entries = CLAP_FDS.lock().unwrap();
-            fd_entries.push(FdEntry {
-                plugin_ptr,
-                fd: read_fd,
-                flags: CLAP_POSIX_FD_READ,
-            });
-        }
-
-        // Write a byte to make read end ready
-        let byte = [0x42u8];
-        unsafe { libc_write(write_fd, byte.as_ptr() as *const std::ffi::c_void, 1) };
-
-        // Poll — should fire on_fd
-        poll_fds();
-
-        assert!(TEST_FD_CALL_COUNT.load(Ordering::Relaxed) >= 1);
-
-        // Cleanup
-        unsafe {
-            libc_close(read_fd);
-            libc_close(write_fd);
-        }
-        clear_registries();
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn test_poll_fds_does_not_fire_empty_pipe() {
-        let _serial = serialize_and_reset();
-        clear_registries();
-        TEST_FD_CALL_COUNT.store(0, Ordering::Relaxed);
-
-        let plugin = make_test_plugin();
-        let plugin_ptr: *const clap_plugin = &plugin;
-
-        // Create a pipe — don't write anything
-        let mut fds = [0i32; 2];
-        let ret = unsafe { libc_pipe(fds.as_mut_ptr()) };
-        assert_eq!(ret, 0);
-
-        let read_fd = fds[0];
-        let write_fd = fds[1];
-
-        {
-            let mut fd_entries = CLAP_FDS.lock().unwrap();
-            fd_entries.push(FdEntry {
-                plugin_ptr,
-                fd: read_fd,
-                flags: CLAP_POSIX_FD_READ,
-            });
-        }
-
-        // Poll — should NOT fire (nothing to read)
-        poll_fds();
-
-        assert_eq!(TEST_FD_CALL_COUNT.load(Ordering::Relaxed), 0);
-
-        unsafe {
-            libc_close(read_fd);
-            libc_close(write_fd);
-        }
-        clear_registries();
-    }
-
-    // ── Thread identity tests ──
-
-    #[test]
-    fn test_is_on_clap_main_thread_default() {
-        let _serial = serialize_and_reset();
-        // Before set_clap_main_thread is called (or if OnceLock not set for
-        // this test), any thread should be considered the main thread.
-        // Note: If another test already called set_clap_main_thread in this
-        // process, this may return true or false depending on which thread
-        // we're on. We test the function doesn't panic.
-        let _ = is_on_clap_main_thread();
-    }
-
-    #[test]
-    fn clap_audio_thread_identity_is_local_to_the_processing_thread() {
-        assert!(!is_on_clap_audio_thread());
-
-        std::thread::spawn(|| {
-            assert!(!is_on_clap_audio_thread());
-            mark_clap_audio_thread();
-            assert!(is_on_clap_audio_thread());
-        })
-        .join()
-        .unwrap();
-
-        assert!(!is_on_clap_audio_thread());
-    }
-
-    // ── Minimal libc FFI for pipe tests (Unix-only, like poll_fds) ──
-
-    #[cfg(unix)]
-    extern "C" {
-        #[link_name = "pipe"]
-        fn libc_pipe(pipefd: *mut i32) -> i32;
-        #[link_name = "write"]
-        fn libc_write(fd: i32, buf: *const std::ffi::c_void, count: usize) -> isize;
-        #[link_name = "close"]
-        fn libc_close(fd: i32) -> i32;
-    }
-}
+#[path = "host_impl_tests.rs"]
+mod tests;

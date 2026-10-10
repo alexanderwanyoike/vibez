@@ -34,7 +34,7 @@ impl AudioEngine {
         self.refresh_clip(active);
     }
 
-    pub(super) fn clip_event(&mut self, event: EngineEvent) {
+    pub(super) fn clip_event(&mut self, mut event: EngineEvent) {
         let request = match &event {
             EngineEvent::ClipQueued { request_id, .. }
             | EngineEvent::ClipTransitioned { request_id, .. }
@@ -43,11 +43,32 @@ impl AudioEngine {
             _ => 0,
         };
         self.clip_through_request = self.clip_through_request.max(request);
+        let track_timing = match &mut event {
+            EngineEvent::ClipTransitioned {
+                track_id,
+                effective_at_samples,
+                ..
+            }
+            | EngineEvent::ClipSourceRefreshed {
+                track_id,
+                effective_at_samples,
+                ..
+            } => {
+                let path = self.live_path_latency(*track_id);
+                *effective_at_samples = effective_at_samples
+                    .saturating_sub(self.mix_latency().saturating_sub(path) as u64);
+                Some(path)
+            }
+            _ => None,
+        };
+        if let Some(delay) = track_timing.filter(|&delay| delay > 0) {
+            self.present_event(event, delay);
+            return;
+        }
         if let Err(rtrb::PushError::Full(event)) = self.event_tx.push(event) {
             self.clip_event_drops = self.clip_event_drops.saturating_add(1);
             self.clip_resync_track = Some(0);
-            // Source owners must be reclaimed on the UI thread, never in the callback.
-            std::mem::forget(event);
+            self.present_event(event, 0);
         }
     }
 
@@ -129,7 +150,7 @@ impl AudioEngine {
         } else {
             quantization
                 .beats()
-                .map_or(now, |beats| self.next_grid_boundary(now, beats))
+                .map_or(now, |beats| self.next_achievable_boundary(now, beats))
         };
         while let Some(prepared) = clips.pop() {
             let Some(index) = self
@@ -172,6 +193,9 @@ impl AudioEngine {
 
     pub(super) fn apply_clip_boundaries(&mut self, now: u64) {
         for index in 0..self.tracks.len() {
+            if !self.presentation_room(2) {
+                break;
+            }
             let track = &mut self.tracks[index];
             if track
                 .queued_clip
