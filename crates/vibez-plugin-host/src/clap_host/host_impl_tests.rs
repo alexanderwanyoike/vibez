@@ -1,5 +1,3 @@
-//! Existing CLAP timer, descriptor and thread identity regressions.
-
 use super::*;
 use std::sync::atomic::{AtomicU32, Ordering};
 
@@ -85,7 +83,12 @@ fn make_test_plugin() -> clap_plugin {
 /// Create a `clap_host` with `host_data` pointing to a fake plugin.
 fn make_test_host_with_plugin(plugin_ptr: *const clap_plugin) -> clap_host {
     let mut host = make_clap_host();
-    let data = Box::leak(Box::new(ClapHostUserData { plugin_ptr }));
+    let data = Box::leak(Box::new(ClapHostUserData {
+        plugin_ptr,
+        restart_requested: AtomicBool::new(false),
+        callback_requested: AtomicBool::new(false),
+        main_thread: std::thread::current().id(),
+    }));
     host.host_data = data as *mut ClapHostUserData as *mut std::ffi::c_void;
     host
 }
@@ -179,6 +182,7 @@ fn test_set_host_user_data() {
     assert!(!host.host_data.is_null());
     let data = unsafe { &*(host.host_data as *const ClapHostUserData) };
     assert_eq!(data.plugin_ptr, &plugin as *const _);
+    unregister_host_callbacks(&host);
 }
 
 // ── Timer register/unregister tests ──
@@ -385,7 +389,7 @@ fn test_poll_timers_skips_not_elapsed() {
     let plugin = make_test_plugin();
     let plugin_ptr: *const clap_plugin = &plugin;
 
-    // Timer with very long period — should NOT fire
+    // Timer with very long period , should NOT fire
     {
         let mut timers = CLAP_TIMERS.lock().unwrap();
         timers.push(TimerEntry {
@@ -415,7 +419,7 @@ fn test_poll_fds_fires_on_ready_pipe() {
     let plugin = make_test_plugin();
     let plugin_ptr: *const clap_plugin = &plugin;
 
-    // Create a pipe — write end makes read end ready
+    // Create a pipe , write end makes read end ready
     let mut fds = [0i32; 2];
     let ret = unsafe { libc_pipe(fds.as_mut_ptr()) };
     assert_eq!(ret, 0);
@@ -437,7 +441,7 @@ fn test_poll_fds_fires_on_ready_pipe() {
     let byte = [0x42u8];
     unsafe { libc_write(write_fd, byte.as_ptr() as *const std::ffi::c_void, 1) };
 
-    // Poll — should fire on_fd
+    // Poll , should fire on_fd
     poll_fds();
 
     assert!(TEST_FD_CALL_COUNT.load(Ordering::Relaxed) >= 1);
@@ -460,7 +464,7 @@ fn test_poll_fds_does_not_fire_empty_pipe() {
     let plugin = make_test_plugin();
     let plugin_ptr: *const clap_plugin = &plugin;
 
-    // Create a pipe — don't write anything
+    // Create a pipe , don't write anything
     let mut fds = [0i32; 2];
     let ret = unsafe { libc_pipe(fds.as_mut_ptr()) };
     assert_eq!(ret, 0);
@@ -477,7 +481,7 @@ fn test_poll_fds_does_not_fire_empty_pipe() {
         });
     }
 
-    // Poll — should NOT fire (nothing to read)
+    // Poll , should NOT fire (nothing to read)
     poll_fds();
 
     assert_eq!(TEST_FD_CALL_COUNT.load(Ordering::Relaxed), 0);
