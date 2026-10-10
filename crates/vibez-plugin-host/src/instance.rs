@@ -15,6 +15,7 @@ pub trait PluginInstance: Send {
     ) {
         self.process_audio(buffer, channels);
     }
+    fn set_audio_context(&mut self, _context: vibez_core::audio_context::DeviceAudioContext) {}
     fn reconfiguration_requested(&self) -> bool {
         false
     }
@@ -23,6 +24,13 @@ pub trait PluginInstance: Send {
     /// Called on the format's main thread, after processing has stopped.
     fn reconfigure_on_main_thread(&mut self) -> Result<(), String> {
         Ok(())
+    }
+    /// None permits rate-independent processors without forcing recreation.
+    fn activation_sample_rate(&self) -> Option<u32> {
+        None
+    }
+    fn processing_configuration_valid(&self) -> bool {
+        true
     }
     /// Cached processing delay, excluding musical echoes and hardware delay.
     /// Format adapters refresh this only during their permitted lifecycle.

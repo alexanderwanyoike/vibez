@@ -46,6 +46,10 @@ impl AudioEffect for PluginEffectWrapper {
             self.processing_error = Some("Plugin panicked during external-input processing");
         }
     }
+    fn set_audio_context(&mut self, context: vibez_core::audio_context::DeviceAudioContext) {
+        self.inner.set_audio_context(context);
+    }
+
     fn reconfiguration_requested(&self) -> bool {
         self.inner.reconfiguration_requested()
     }
@@ -58,6 +62,12 @@ impl AudioEffect for PluginEffectWrapper {
         self.inner.reconfigure_on_main_thread()
     }
 
+    fn activation_sample_rate(&self) -> Option<u32> {
+        self.inner.activation_sample_rate()
+    }
+    fn processing_configuration_valid(&self) -> bool {
+        self.inner.processing_configuration_valid()
+    }
     fn latency_samples(&self) -> u32 {
         self.inner.latency_samples()
     }
