@@ -718,3 +718,7 @@ mod effect_commands;
 #[cfg(test)]
 #[path = "engine_bus_solo_tests.rs"]
 mod bus_solo_tests;
+
+#[path = "engine_offline_routing.rs"]
+mod offline_routing;
+pub(crate) use offline_routing::OfflineRoutingSetup;

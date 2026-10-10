@@ -186,6 +186,8 @@ fn assert_export_preserves_insert_echo(
     let kind = track.kind;
     let effect_id = EffectId::new();
     track.effects.push(EffectInfo {
+        inactive_sidechains: Default::default(),
+        sidechains: Vec::new(),
         id: effect_id,
         effect_type: EffectType::Gain,
         bypass: false,
@@ -281,6 +283,8 @@ fn strict_render_fails_when_declared_plugin_was_not_prepared() {
 fn strict_render_uses_plugin_effects_on_tracks_buses_and_master() {
     fn plugin_effect() -> EffectInfo {
         EffectInfo {
+            inactive_sidechains: Default::default(),
+            sidechains: Vec::new(),
             id: EffectId::new(),
             effect_type: EffectType::Gain,
             bypass: false,
@@ -372,6 +376,8 @@ fn effect_chain_applied_during_bounce() {
     track.id = tid;
     // Gain of 0.5 halves the bounce output
     track.effects.push(EffectInfo {
+        inactive_sidechains: Default::default(),
+        sidechains: Vec::new(),
         id: EffectId::new(),
         effect_type: EffectType::Gain,
         bypass: false,

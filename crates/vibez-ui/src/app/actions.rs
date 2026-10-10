@@ -2,14 +2,12 @@
 
 use iced::Task;
 
-use vibez_core::effect::EffectType;
 use vibez_core::id::SectionId;
 use vibez_engine::commands::EngineCommand;
-use vibez_plugin_host::gui::PluginGuiKey;
 
 use crate::message::Message;
 use crate::plugin_window::PluginWindowEvent;
-use crate::state::{ArrangementSelection, DetailPanelTab, UiEffect};
+use crate::state::{ArrangementSelection, DetailPanelTab};
 
 use super::*;
 
@@ -493,6 +491,7 @@ impl App {
     /// Route cross-domain effects requested by the devices domain.
     pub(super) fn apply_devices_action(&mut self, action: crate::domains::devices::DevicesAction) {
         if let Some(key) = action.close_gui {
+            self.plugin_load_requests.cancel(key);
             if let Some(ref mut mgr) = self.plugin_window_manager {
                 mgr.close(key);
             }
@@ -527,126 +526,6 @@ impl App {
                 self.state.status_text = "Stop Perform playback to change BPM".into();
                 Task::none()
             }
-        }
-    }
-
-    pub(super) fn poll_plugin_loads(&mut self) {
-        // Poll for loaded plugin effects
-        while let Ok(mut result) = self.plugin_effect_rx.try_recv() {
-            let track_id = result.track_id;
-            let effect_id = result.effect_id;
-            let plugin_name = result.plugin_name.clone();
-
-            // Phase 2 runs in the loader service: init on the UI thread
-            // (JUCE binds its MessageManager here) + state restore.
-            let (effect, gui_raw_ptr) =
-                match crate::services::plugin_loader::finish_effect_init(&mut result) {
-                    Ok(Some(pair)) => pair,
-                    Ok(None) => continue,
-                    Err(e) => {
-                        eprintln!("vibez: {e}");
-                        self.state.status_text = format!("Plugin init failed: {e}");
-                        continue;
-                    }
-                };
-
-            let has_gui = gui_raw_ptr.is_some();
-
-            if let Some(raw_ptr) = gui_raw_ptr {
-                let key = PluginGuiKey::Effect {
-                    track_id,
-                    effect_id,
-                };
-                self.plugin_gui_raw_ptrs.insert(key, raw_ptr);
-            }
-            if let Some(state_ptr) = result.state_ptr {
-                let key = PluginGuiKey::Effect {
-                    track_id,
-                    effect_id,
-                };
-                self.plugin_state_ptrs.insert(key, state_ptr);
-            }
-
-            if let Some(track) = self.state.find_track_mut(track_id) {
-                // Real plugin parameters (already leaked 'static by the
-                // wrapper): drives the knob strip and automation picker.
-                let descriptors = effect.param_descriptors();
-                let params: Vec<f32> = (0..descriptors.len())
-                    .map(|i| effect.get_param(i))
-                    .collect();
-                let ui_effect = UiEffect {
-                    id: effect_id,
-                    effect_type: EffectType::Gain,
-                    bypass: false,
-                    params,
-                    descriptors,
-                    plugin_name: Some(plugin_name.clone()),
-                    has_plugin_gui: has_gui,
-                    plugin_ref: Some(result.device_ref.clone()),
-                };
-                match result.position {
-                    Some(pos) if pos < track.effects.len() => track.effects.insert(pos, ui_effect),
-                    _ => track.effects.push(ui_effect),
-                }
-            }
-            self.send_command(EngineCommand::AddPluginEffect {
-                track_id,
-                effect_id,
-                effect,
-                position: result.position,
-            });
-            self.state.status_text = format!("Loaded {plugin_name}");
-        }
-
-        // Poll for loaded plugin instruments
-        while let Ok(mut result) = self.plugin_instrument_rx.try_recv() {
-            let track_id = result.track_id;
-            let plugin_name = result.plugin_name.clone();
-
-            // Phase 2 runs in the loader service.
-            let (instrument, gui_raw_ptr) =
-                match crate::services::plugin_loader::finish_instrument_init(&mut result) {
-                    Ok(Some(pair)) => pair,
-                    Ok(None) => continue,
-                    Err(e) => {
-                        eprintln!("vibez: {e}");
-                        self.state.status_text = format!("Plugin init failed: {e}");
-                        continue;
-                    }
-                };
-
-            let has_gui = gui_raw_ptr.is_some();
-
-            if let Some(raw_ptr) = gui_raw_ptr {
-                let key = PluginGuiKey::Instrument { track_id };
-                self.plugin_gui_raw_ptrs.insert(key, raw_ptr);
-            }
-            if let Some(state_ptr) = result.state_ptr {
-                let key = PluginGuiKey::Instrument { track_id };
-                self.plugin_state_ptrs.insert(key, state_ptr);
-            }
-
-            if let Some(track) = self.state.find_track_mut(track_id) {
-                track.has_instrument = true;
-                track.instrument_kind = None;
-                track.sample_name = None;
-                track.sample_source = None;
-                track.sample_audio = None;
-                track.instrument_params.clear();
-                track.drum_rack_pads = (0..vibez_core::track::DRUM_RACK_PAD_COUNT)
-                    .map(|_| crate::state::UiDrumPad::default())
-                    .collect();
-                track.selected_drum_pad = 0;
-                track.plugin_instrument_name = Some(plugin_name.clone());
-                track.plugin_instrument_ref = Some(result.device_ref.clone());
-                track.plugin_instrument_descriptors = instrument.param_descriptors();
-                track.has_plugin_instrument_gui = has_gui;
-            }
-            self.send_command(EngineCommand::SetPluginInstrument {
-                track_id,
-                instrument,
-            });
-            self.state.status_text = format!("Loaded {plugin_name}");
         }
     }
 
@@ -844,160 +723,5 @@ impl App {
 }
 
 #[cfg(test)]
-mod perform_action_tests {
-    use super::*;
-    use crate::domains::test_support::RecordingEngine;
-    use crate::state::{AppState, ProjectSnapshot, ProjectTrack};
-    use vibez_core::id::TrackId;
-
-    fn snapshot(state: &AppState) -> ProjectSnapshot {
-        state.project_snapshot()
-    }
-
-    #[test]
-    fn perform_mute_request_updates_the_shared_track_and_engine_together() {
-        let track_id = TrackId::new();
-        let mut state = AppState::default();
-        Arc::make_mut(&mut state.project_tracks)
-            .tracks
-            .push(ProjectTrack::new(track_id, "Drums".into(), 0));
-        let mut engine = RecordingEngine::default();
-        let pre_edit_snapshot = snapshot(&state);
-
-        let name = apply_track_mute_request(
-            &mut state.project_tracks,
-            &mut state.project.history,
-            pre_edit_snapshot,
-            crate::domains::perform::TrackMuteRequest {
-                track_id,
-                muted: true,
-                quantization: vibez_core::perform::TrackMuteQuantization::Immediate,
-            },
-            false,
-            &mut engine,
-        );
-
-        assert_eq!(name.as_deref(), Some("Drums"));
-        assert!(state.project_tracks.tracks[0].mute);
-        assert!(matches!(
-            engine.0.as_slice(),
-            [EngineCommand::SetTrackMute(event_track, true)] if *event_track == track_id
-        ));
-        assert_eq!(state.project.history.undo.len(), 1);
-        let before_mute = state.project.history.pop_undo().expect("mute undo step");
-        assert!(!before_mute.project_tracks.tracks[0].mute);
-    }
-
-    #[test]
-    fn missing_track_mute_request_does_not_create_an_undo_step() {
-        let mut state = AppState::default();
-        let mut engine = RecordingEngine::default();
-        let pre_edit_snapshot = snapshot(&state);
-
-        let name = apply_track_mute_request(
-            &mut state.project_tracks,
-            &mut state.project.history,
-            pre_edit_snapshot,
-            crate::domains::perform::TrackMuteRequest {
-                track_id: TrackId::new(),
-                muted: true,
-                quantization: vibez_core::perform::TrackMuteQuantization::Immediate,
-            },
-            false,
-            &mut engine,
-        );
-
-        assert_eq!(name, None);
-        assert!(state.project.history.undo.is_empty());
-        assert!(engine.0.is_empty());
-    }
-
-    #[test]
-    fn running_quantized_mute_waits_for_engine_truth_before_editing_project_state() {
-        let track_id = TrackId::new();
-        let mut state = AppState::default();
-        Arc::make_mut(&mut state.project_tracks)
-            .tracks
-            .push(ProjectTrack::new(track_id, "Bass".into(), 0));
-        let mut engine = RecordingEngine::default();
-        let pre_edit_snapshot = snapshot(&state);
-
-        let name = apply_track_mute_request(
-            &mut state.project_tracks,
-            &mut state.project.history,
-            pre_edit_snapshot,
-            crate::domains::perform::TrackMuteRequest {
-                track_id,
-                muted: true,
-                quantization: vibez_core::perform::TrackMuteQuantization::OneBar,
-            },
-            true,
-            &mut engine,
-        );
-
-        assert_eq!(name.as_deref(), Some("Bass"));
-        assert!(!state.project_tracks.tracks[0].mute);
-        assert!(state.project.history.undo.is_empty());
-        assert!(matches!(
-            engine.0.as_slice(),
-            [EngineCommand::QueueTrackMute {
-                track_id: event_track,
-                muted: true,
-                quantization: vibez_core::perform::TrackMuteQuantization::OneBar,
-            }] if *event_track == track_id
-        ));
-    }
-
-    #[test]
-    fn section_refresh_is_prepared_only_for_the_currently_playing_section() {
-        let mut state = AppState::default();
-        let playing = crate::domains::perform::Section::new(0);
-        let playing_id = playing.id;
-        let other = crate::domains::perform::Section::new(1);
-        let other_id = other.id;
-        Arc::make_mut(&mut state.perform.sections).insert(playing);
-        Arc::make_mut(&mut state.perform.sections).insert(other);
-        state.perform.playing_section = Some(playing_id);
-
-        assert!(prepare_playing_section_refresh(
-            &state.perform,
-            &state.project_tracks.tracks,
-            playing_id,
-        )
-        .is_some());
-        assert!(prepare_playing_section_refresh(
-            &state.perform,
-            &state.project_tracks.tracks,
-            other_id,
-        )
-        .is_none());
-    }
-
-    #[test]
-    fn section_slice_refresh_is_requested_only_after_a_new_project_track_is_replayed() {
-        let section_id = crate::domains::perform::Section::new(0).id;
-        let track_id = TrackId::new();
-
-        assert_eq!(
-            section_to_refresh_after_project_track_replay(
-                Some(track_id),
-                vibez_project::TimelineLocation::Section(section_id),
-            ),
-            Some(section_id)
-        );
-        assert_eq!(
-            section_to_refresh_after_project_track_replay(
-                None,
-                vibez_project::TimelineLocation::Section(section_id),
-            ),
-            None
-        );
-        assert_eq!(
-            section_to_refresh_after_project_track_replay(
-                Some(track_id),
-                vibez_project::TimelineLocation::Arrange,
-            ),
-            None
-        );
-    }
-}
+#[path = "actions_tests.rs"]
+mod perform_action_tests;

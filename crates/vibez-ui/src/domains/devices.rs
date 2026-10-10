@@ -35,6 +35,18 @@ pub enum DevicesMsg {
     /// display drags frequency and gain together).
     SetEffectParams(TrackId, EffectId, Vec<(usize, f32)>),
     ToggleEffectBypass(TrackId, EffectId),
+    SetSidechainSource {
+        track_id: TrackId,
+        effect_id: EffectId,
+        input_id: vibez_core::routing::ExternalInputId,
+        source: Option<TrackId>,
+    },
+    SetSidechainTap {
+        track_id: TrackId,
+        effect_id: EffectId,
+        input_id: vibez_core::routing::ExternalInputId,
+        tap: vibez_core::routing::SourceTap,
+    },
     MoveEffectUp(TrackId, EffectId),
     MoveEffectDown(TrackId, EffectId),
     SetTrackInstrument(TrackId, InstrumentKind),
@@ -101,6 +113,7 @@ pub struct DevicesAction {
     pub select_track: Option<TrackId>,
     /// Status bar text.
     pub status: Option<String>,
+    pub routing_changed: Option<bool>,
 }
 
 /// Devices domain state slice: currently just the context menu; the
@@ -108,6 +121,10 @@ pub struct DevicesAction {
 #[derive(Debug, Default)]
 pub struct DevicesState {
     pub context_menu: Option<DeviceContextMenu>,
+    pub last_routing: Option<Vec<vibez_core::routing::RoutingChannel>>,
+    pub sidechain_choices: super::sidechain::SidechainChoiceCache,
+    pub sidechain_meters:
+        std::collections::HashMap<(EffectId, vibez_core::routing::ExternalInputId), (f32, f32)>,
 }
 
 /// Default parameter values for a freshly added native instrument.
@@ -157,6 +174,12 @@ fn sync_pad(
     }
 }
 
+#[derive(Default)]
+pub struct DevicesCtx<'a> {
+    pub sample_rate: u32,
+    pub routing: Option<&'a [vibez_core::routing::RoutingChannel]>,
+}
+
 impl DevicesState {
     pub fn update(
         &mut self,
@@ -165,10 +188,45 @@ impl DevicesState {
         tracks: &mut [ProjectTrack],
         master: &mut ProjectTrack,
         buses: &mut [ProjectTrack],
-        sample_rate: u32,
+        ctx: DevicesCtx<'_>,
     ) -> DevicesAction {
         let mut action = DevicesAction::default();
+        let sample_rate = ctx.sample_rate;
         match msg {
+            DevicesMsg::SetSidechainSource {
+                track_id,
+                effect_id,
+                input_id,
+                source,
+            } => {
+                action.routing_changed = Some(ctx.routing.is_some_and(|routing| {
+                    super::sidechain::edit_source_with_model(
+                        tracks,
+                        master,
+                        buses,
+                        (track_id, effect_id, input_id),
+                        source,
+                        routing,
+                    )
+                }));
+            }
+            DevicesMsg::SetSidechainTap {
+                track_id,
+                effect_id,
+                input_id,
+                tap,
+            } => {
+                action.routing_changed = Some(ctx.routing.is_some_and(|routing| {
+                    super::sidechain::edit_tap_with_model(
+                        tracks,
+                        master,
+                        buses,
+                        (track_id, effect_id, input_id),
+                        tap,
+                        routing,
+                    )
+                }));
+            }
             DevicesMsg::AddEffect(track_id, effect_type) => {
                 let effect_id = EffectId::new();
                 let fx = vibez_dsp::factory::create_effect(effect_type, sample_rate as f32);
@@ -177,6 +235,10 @@ impl DevicesState {
 
                 if let Some(track) = find_track_mut(tracks, master, buses, track_id) {
                     track.effects.push(UiEffect {
+                        inactive_sidechains: Default::default(),
+                        sidechains: Default::default(),
+                        external_inputs: fx.external_inputs().to_vec(),
+
                         id: effect_id,
                         effect_type,
                         bypass: false,
@@ -546,6 +608,9 @@ mod tests {
         );
         let effect_id = EffectId::new();
         track.effects.push(UiEffect {
+            inactive_sidechains: Default::default(),
+            sidechains: Default::default(),
+            external_inputs: Default::default(),
             id: effect_id,
             effect_type: EffectType::Gain,
             bypass: false,
@@ -570,7 +635,10 @@ mod tests {
             &mut tracks,
             &mut crate::state::new_master_track(),
             &mut [],
-            44_100,
+            DevicesCtx {
+                sample_rate: 44_100,
+                ..Default::default()
+            },
         );
         assert!(tracks[0].effects.is_empty());
         assert_eq!(
@@ -601,7 +669,10 @@ mod tests {
             &mut tracks,
             &mut crate::state::new_master_track(),
             &mut [],
-            44_100,
+            DevicesCtx {
+                sample_rate: 44_100,
+                ..Default::default()
+            },
         );
 
         assert_eq!(tracks[0].instrument_kind, Some(InstrumentKind::Sampler));
@@ -633,7 +704,10 @@ mod tests {
             &mut tracks,
             &mut crate::state::new_master_track(),
             &mut [],
-            44_100,
+            DevicesCtx {
+                sample_rate: 44_100,
+                ..Default::default()
+            },
         );
 
         assert!(tracks[0].plugin_instrument_name.is_none());
@@ -653,7 +727,10 @@ mod tests {
             &mut tracks,
             &mut crate::state::new_master_track(),
             &mut [],
-            44_100,
+            DevicesCtx {
+                sample_rate: 44_100,
+                ..Default::default()
+            },
         );
         let max = tracks[0].effects[0].descriptors[0].max;
         assert_eq!(tracks[0].effects[0].params[0], max);
@@ -670,7 +747,10 @@ mod tests {
             &mut tracks,
             &mut crate::state::new_master_track(),
             &mut [],
-            44_100,
+            DevicesCtx {
+                sample_rate: 44_100,
+                ..Default::default()
+            },
         );
         assert!(engine.0.is_empty());
     }
@@ -687,7 +767,10 @@ mod tests {
             &mut tracks,
             &mut crate::state::new_master_track(),
             &mut [],
-            44_100,
+            DevicesCtx {
+                sample_rate: 44_100,
+                ..Default::default()
+            },
         );
         assert_eq!(tracks[0].selected_drum_pad, 3);
         assert_eq!(action.select_track, Some(track_id));
@@ -715,7 +798,10 @@ mod tests {
             &mut tracks,
             &mut crate::state::new_master_track(),
             &mut [],
-            44_100,
+            DevicesCtx {
+                sample_rate: 44_100,
+                ..Default::default()
+            },
         );
 
         assert_eq!(tracks[0].selected_drum_pad, 19);
@@ -740,7 +826,10 @@ mod tests {
             &mut tracks,
             &mut crate::state::new_master_track(),
             &mut [],
-            44_100,
+            DevicesCtx {
+                sample_rate: 44_100,
+                ..Default::default()
+            },
         );
         assert_eq!(tracks[0].drum_rack_pads[0].gain, 2.0); // clamped
         assert!(matches!(
@@ -759,7 +848,10 @@ mod tests {
             &mut tracks,
             &mut crate::state::new_master_track(),
             &mut [],
-            44_100,
+            DevicesCtx {
+                sample_rate: 44_100,
+                ..Default::default()
+            },
         );
         assert_eq!(
             tracks[0].drum_rack_pads[0].fade_out_ms,
@@ -789,7 +881,10 @@ mod tests {
             &mut tracks,
             &mut crate::state::new_master_track(),
             &mut [],
-            44_100,
+            DevicesCtx {
+                sample_rate: 44_100,
+                ..Default::default()
+            },
         );
         // MIDI track opens on the Instruments tab.
         assert_eq!(
@@ -802,7 +897,10 @@ mod tests {
             &mut tracks,
             &mut crate::state::new_master_track(),
             &mut [],
-            44_100,
+            DevicesCtx {
+                sample_rate: 44_100,
+                ..Default::default()
+            },
         );
         assert!(devices.context_menu.is_none());
     }

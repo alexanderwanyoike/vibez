@@ -10,12 +10,14 @@ use vibez_core::effect::PluginDeviceInfo;
 use vibez_core::id::{EffectId, TrackId};
 use vibez_plugin_host::{PluginFormat, PluginInfo};
 
+use crate::app::plugin_load_requests::PluginLoadToken;
 use crate::plugin_window::PluginRawPtr;
 
 /// Result of loading a plugin on a background thread.
 /// For CLAP plugins, `clap_partial` carries an un-initialized plugin that
 /// must be finished on the UI thread (for JUCE MessageManager compatibility).
 pub(crate) struct PluginLoadResult {
+    pub(crate) load_token: PluginLoadToken,
     pub(crate) track_id: TrackId,
     pub(crate) effect_id: EffectId,
     pub(crate) plugin_name: String,
@@ -41,6 +43,7 @@ pub(crate) struct PluginLoadResult {
 
 /// Result of loading a plugin instrument on a background thread.
 pub(crate) struct PluginInstrumentLoadResult {
+    pub(crate) load_token: PluginLoadToken,
     pub(crate) track_id: TrackId,
     pub(crate) plugin_name: String,
     /// Fully-loaded instrument (VST3) or None (CLAP — see `clap_partial`).
@@ -124,6 +127,7 @@ pub(crate) fn load_plugin_effect_bg(
                 false,
             )?;
             Ok(PluginLoadResult {
+                load_token: Default::default(),
                 track_id: TrackId::default(), // filled in by caller
                 effect_id: EffectId::new(),
                 plugin_name: info.name.clone(),
@@ -146,6 +150,7 @@ pub(crate) fn load_plugin_effect_bg(
                 false,
             )?;
             Ok(PluginLoadResult {
+                load_token: Default::default(),
                 track_id: TrackId::default(),
                 effect_id: EffectId::new(),
                 plugin_name: info.name.clone(),
@@ -177,6 +182,7 @@ pub(crate) fn load_plugin_instrument_bg(
                 true,
             )?;
             Ok(PluginInstrumentLoadResult {
+                load_token: Default::default(),
                 track_id: TrackId::default(),
                 plugin_name: info.name.clone(),
                 instrument: None,
@@ -196,6 +202,7 @@ pub(crate) fn load_plugin_instrument_bg(
                 true,
             )?;
             Ok(PluginInstrumentLoadResult {
+                load_token: Default::default(),
                 track_id: TrackId::default(),
                 plugin_name: info.name.clone(),
                 instrument: None,
@@ -215,8 +222,8 @@ pub(crate) fn load_plugin_instrument_bg(
 /// file order, so results arrive in order and chain positions
 /// restore deterministically.
 pub(crate) fn spawn_device_reloads(
-    effect_requests: Vec<(TrackId, EffectId, usize, PluginDeviceInfo)>,
-    instrument_requests: Vec<(TrackId, PluginDeviceInfo)>,
+    effect_requests: Vec<(PluginLoadToken, TrackId, EffectId, usize, PluginDeviceInfo)>,
+    instrument_requests: Vec<(PluginLoadToken, TrackId, PluginDeviceInfo)>,
     effect_tx: std::sync::mpsc::Sender<PluginLoadResult>,
     instrument_tx: std::sync::mpsc::Sender<PluginInstrumentLoadResult>,
     sample_rate: f64,
@@ -250,10 +257,12 @@ pub(crate) fn spawn_device_reloads(
             }
         };
 
-        for (track_id, effect_id, chain_pos, dev) in effect_requests {
+        for (token, track_id, effect_id, chain_pos, dev) in effect_requests {
             let info = scan_info(&dev, vibez_plugin_host::PluginCategory::Effect);
             match load_plugin_effect_bg(&info, sample_rate, decode(&dev)) {
                 Ok(mut result) => {
+                    result.device_ref = dev;
+                    result.load_token = token;
                     result.track_id = track_id;
                     result.effect_id = effect_id;
                     result.position = Some(chain_pos);
@@ -264,10 +273,12 @@ pub(crate) fn spawn_device_reloads(
                 }
             }
         }
-        for (track_id, dev) in instrument_requests {
+        for (token, track_id, dev) in instrument_requests {
             let info = scan_info(&dev, vibez_plugin_host::PluginCategory::Instrument);
             match load_plugin_instrument_bg(&info, sample_rate, decode(&dev)) {
                 Ok(mut result) => {
+                    result.device_ref = dev;
+                    result.load_token = token;
                     result.track_id = track_id;
                     let _ = instrument_tx.send(result);
                 }
