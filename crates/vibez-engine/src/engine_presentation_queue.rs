@@ -215,6 +215,7 @@ impl AudioEngine {
             return;
         }
         self.presentation_fault = true;
+        self.capture_active = false;
         self.transport.stop();
         for track in &mut self.tracks {
             track.active_clip = None;

@@ -18,6 +18,7 @@ impl AudioEngine {
         }
         let section_id = self.active_section.map(|section| section.section_id);
         let section_position_samples = self.active_section.map(|section| section.position_samples);
+        self.capture_active = true;
         self.present_event(EngineEvent::PerformanceCaptureStarted {
             effective_at_samples: self.effective_position(),
             section_id,
@@ -38,6 +39,7 @@ impl AudioEngine {
     }
 
     pub(super) fn command_stop_performance_capture(&mut self) {
+        self.capture_active = false;
         self.present_event(EngineEvent::PerformanceCaptureStopped {
             effective_at_samples: self.effective_position(),
         });

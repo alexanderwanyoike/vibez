@@ -52,6 +52,7 @@ pub struct AudioEngine {
     pending_source_cleanup: bool,
     presentation_fault: bool,
     pending_capture_stop: Option<u64>,
+    capture_active: bool,
     pending_playback_stop: bool,
     pending_compensation_failure: Option<(TrackId, Option<vibez_core::id::EffectId>, &'static str)>,
     compensation_callback_heard_start: u64,
@@ -236,6 +237,7 @@ impl AudioEngine {
             pending_source_cleanup: false,
             presentation_fault: false,
             pending_capture_stop: None,
+            capture_active: false,
             pending_playback_stop: false,
             pending_compensation_failure: None,
             compensation_callback_heard_start: 0,
@@ -536,6 +538,7 @@ impl AudioEngine {
             self.stop_section_record();
             self.apply_end_of_section_track_mutes_at_queued_boundary();
             self.cancel_queued_track_mutes();
+            self.capture_active = false;
             self.present_event(EngineEvent::PerformanceCaptureStopped {
                 effective_at_samples: self.performance_position,
             });

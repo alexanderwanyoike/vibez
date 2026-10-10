@@ -4,6 +4,12 @@ use super::*;
 
 impl AudioEngine {
     pub(super) fn command_play(&mut self) {
+        let capture_needs_closure = self.capture_active || self.capture_stop_pending();
+        self.cancel_presentation();
+        if capture_needs_closure {
+            self.stop_heard_capture();
+        }
+        self.pending_playback_stop = false;
         self.presentation_fault = false;
         let was_clip_performance = self.clip_performance;
         self.clear_clip_performance();
@@ -41,9 +47,7 @@ impl AudioEngine {
     pub(super) fn command_stop(&mut self) {
         self.cancel_presentation();
         self.stop_section_record();
-        self.present_event(EngineEvent::PerformanceCaptureStopped {
-            effective_at_samples: self.effective_position(),
-        });
+        self.stop_heard_capture();
         self.clear_clip_performance();
         self.transport.stop();
         self.arrangement_recording = false;
