@@ -11,6 +11,51 @@ use crate::mixer::{PlaybackTimeline, QueuedTrackMute};
 use super::AudioEngine;
 
 impl AudioEngine {
+    pub(super) fn set_automation_lane(
+        &mut self,
+        track_id: TrackId,
+        lane: vibez_core::automation::AutomationLane,
+    ) {
+        let retired = if let Some(track) = self.channel_mut(track_id) {
+            if let Some(index) = track
+                .playback_source
+                .automation
+                .iter()
+                .position(|existing| existing.id == lane.id)
+            {
+                Some(std::mem::replace(
+                    &mut track.playback_source.automation[index],
+                    lane,
+                ))
+            } else {
+                track.playback_source.automation.push(lane);
+                None
+            }
+        } else {
+            Some(lane)
+        };
+        if let Some(lane) = retired {
+            self.retire_event(EngineEvent::RetiredAutomationLane(lane));
+        }
+    }
+    pub(super) fn remove_automation_lane(
+        &mut self,
+        track_id: TrackId,
+        lane_id: vibez_core::id::LaneId,
+    ) {
+        let retired = self.channel_mut(track_id).and_then(|track| {
+            track
+                .playback_source
+                .automation
+                .iter()
+                .position(|lane| lane.id == lane_id)
+                .map(|index| track.playback_source.automation.remove(index))
+        });
+        if let Some(lane) = retired {
+            self.retire_event(EngineEvent::RetiredAutomationLane(lane));
+        }
+    }
+
     pub(super) fn set_track_gain(&mut self, id: TrackId, gain: f32) {
         if let Some(track) = self.channel_mut(id) {
             track.gain = gain;

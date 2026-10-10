@@ -41,6 +41,10 @@ pub trait EngineHandle {
 pub struct EngineCommandQueue {
     producer: Option<rtrb::Producer<EngineCommand>>,
     pending: VecDeque<EngineCommand>,
+    device_owners: std::collections::HashMap<
+        (vibez_core::id::TrackId, Option<vibez_core::id::EffectId>),
+        usize,
+    >,
 }
 
 impl EngineCommandQueue {
@@ -48,6 +52,48 @@ impl EngineCommandQueue {
         Self {
             producer: Some(producer),
             pending: VecDeque::new(),
+            device_owners: Default::default(),
+        }
+    }
+
+    pub fn owns_reconfiguration(
+        &self,
+        device: &vibez_engine::engine::reconfiguration::DeviceReconfiguration,
+    ) -> bool {
+        self.device_owners
+            .get(&(device.track_id(), device.effect_id()))
+            == Some(&device.owner_identity())
+    }
+
+    fn record_device_owner(&mut self, command: &EngineCommand) {
+        use vibez_engine::engine::reconfiguration::{
+            effect_owner_identity, instrument_owner_identity,
+        };
+        let invalidation = command.device_owner_invalidation();
+        if invalidation != vibez_engine::command_ownership::DeviceOwnerInvalidation::None {
+            self.device_owners
+                .retain(|(track, effect), _| !invalidation.matches(*track, *effect));
+        }
+        match command {
+            EngineCommand::AddPluginEffect {
+                track_id,
+                effect_id,
+                effect,
+                ..
+            } => {
+                self.device_owners.insert(
+                    (*track_id, Some(*effect_id)),
+                    effect_owner_identity(&**effect),
+                );
+            }
+            EngineCommand::SetPluginInstrument {
+                track_id,
+                instrument,
+            } => {
+                self.device_owners
+                    .insert((*track_id, None), instrument_owner_identity(&**instrument));
+            }
+            _ => {}
         }
     }
 
@@ -75,6 +121,9 @@ impl EngineCommandQueue {
 
 impl EngineHandle for EngineCommandQueue {
     fn send(&mut self, cmd: EngineCommand) {
+        // Lifetime changes take effect in the UI even when the command ring is
+        // full; a delayed native handoff cannot reactivate a replaced owner.
+        self.record_device_owner(&cmd);
         let Some(producer) = self.producer.as_mut() else {
             return;
         };

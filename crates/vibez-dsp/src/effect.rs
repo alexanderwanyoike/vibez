@@ -1,3 +1,5 @@
+//! Effect processing and native ownership configuration.
+
 use vibez_core::effect::{EffectType, ParamDescriptor};
 
 use vibez_core::routing::{ExternalInputBlock, ExternalInputDescriptor};
@@ -15,6 +17,16 @@ pub trait AudioEffect: Send {
         self.process(buffer, channels);
     }
     fn set_audio_context(&mut self, _context: vibez_core::audio_context::DeviceAudioContext) {}
+    /// A process/start failure can silence this device without invalidating the
+    /// prepared latency graph. Only main-thread reactivation clears its gate.
+    fn processing_failure_is_local(&self) -> bool {
+        false
+    }
+
+    /// Requests bounded main-thread recovery, never a callback-side DSP retry.
+    fn processing_recovery_requested(&self) -> bool {
+        false
+    }
     fn reconfiguration_requested(&self) -> bool {
         false
     }

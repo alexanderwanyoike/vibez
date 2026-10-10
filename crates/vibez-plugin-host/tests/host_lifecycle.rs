@@ -1,3 +1,5 @@
+//! Loadable SDK lifecycle, callback-role and bounded recovery regressions.
+
 mod support;
 
 use vibez_plugin_host::PluginInstance;
@@ -127,6 +129,7 @@ fn start_failure_has_retained_static_cause_and_silent_allocation_free_output() {
             0
         );
         assert_eq!(output, [0.0; 128]);
+        assert!(!plugin.processing_configuration_valid());
         assert_eq!(
             plugin.take_processing_error(),
             Some(if format == "clap" {
@@ -139,6 +142,7 @@ fn start_failure_has_retained_static_cause_and_silent_allocation_free_output() {
         plugin.load_state(&state(0, 0, 0));
         plugin.reconfigure_on_main_thread().unwrap();
         plugin.process_audio(&mut [1.0; 128], 2);
+        assert!(plugin.processing_configuration_valid());
     }
 }
 
@@ -197,7 +201,7 @@ fn vst_io_changed_refreshes_ports_and_reactivates_declared_event_buses() {
 }
 
 #[test]
-fn sequential_worker_migration_preserves_delay_history() {
+fn sequential_worker_migration_preserves_delay_history_and_fatal_failure_latching() {
     let fixture = support::Fixture::new();
     for format in ["clap", "vst3"] {
         let audit = audit(&fixture, format);
@@ -228,6 +232,24 @@ fn sequential_worker_migration_preserves_delay_history() {
             .join()
             .unwrap();
         }
+        assert!(plugin.processing_configuration_valid());
+        plugin.set_audio_context(vibez_core::audio_context::DeviceAudioContext {
+            sample_rate: 96000,
+            musical_sample: 0,
+            continuous_sample: 0,
+            bpm: 120.0,
+            playing: true,
+        });
+        plugin = std::thread::spawn(move || {
+            assert!(!plugin.processing_configuration_valid());
+            let mut output = [1.0; 128];
+            plugin.process_audio(&mut output, 2);
+            assert_eq!(output, [0.0; 128]);
+            plugin
+        })
+        .join()
+        .unwrap();
+        assert!(!plugin.processing_configuration_valid());
         drop(plugin);
         assert_eq!(count(&audit, b"fixture_lifecycle_errors\0"), 0);
     }
@@ -265,9 +287,10 @@ fn concurrent_clap_restart_request_survives_activation_without_an_announcement_l
 }
 
 #[test]
-fn reporting_without_an_applied_engine_guard_preserves_transient_dsp_retry() {
+fn actual_dsp_failure_remains_fatal_across_exclusive_worker_change_until_reactivation() {
     let fixture = support::Fixture::new();
     for format in ["clap", "vst3"] {
+        let audit = audit(&fixture, format);
         let mut plugin = load(&fixture, format, &state(0, 0, 1 << 24), true).unwrap();
         let mut output = [1.0; 128];
         assert_eq!(
@@ -275,44 +298,86 @@ fn reporting_without_an_applied_engine_guard_preserves_transient_dsp_retry() {
             0
         );
         assert_eq!(output, [0.0; 128]);
-        assert_eq!(
-            plugin.take_processing_error(),
-            Some(if format == "clap" {
-                "CLAP process returned failure"
-            } else {
-                "VST3 process returned failure"
-            })
-        );
+        assert!(!plugin.processing_configuration_valid());
+        assert!(plugin.take_processing_error().is_some());
+        plugin = std::thread::spawn(move || {
+            let mut output = [1.0; 128];
+            assert_eq!(
+                support::allocation::count_allocations(|| plugin.process_audio(&mut output, 2)),
+                0
+            );
+            assert_eq!(output, [0.0; 128]);
+            assert!(!plugin.processing_configuration_valid());
+            plugin
+        })
+        .join()
+        .unwrap();
+        plugin.stop_for_reconfiguration();
+        plugin.reconfigure_on_main_thread().unwrap();
+        assert!(plugin.processing_configuration_valid());
         output.fill(1.0);
-        assert_eq!(
-            support::allocation::count_allocations(|| plugin.process_audio(&mut output, 2)),
-            0
-        );
-        assert_eq!(
-            output, [1.0; 128],
-            "{format} reporting must not introduce permanent mute"
-        );
+        plugin.process_audio(&mut output, 2);
+        assert_eq!(output, [1.0; 128]);
+        drop(plugin);
+        assert_eq!(count(&audit, b"fixture_lifecycle_errors\0"), 0);
     }
 }
 
 #[test]
-fn reporting_start_failure_retries_without_a_runtime_latch() {
+fn transient_start_and_process_failures_have_two_main_recoveries_then_require_reload() {
     let fixture = support::Fixture::new();
     for format in ["clap", "vst3"] {
-        let mut plugin = load(&fixture, format, &state(0, 0, 1 << 18), true).unwrap();
-        let mut output = [1.0; 128];
-        plugin.process_audio(&mut output, 2);
-        assert_eq!(output, [0.0; 128]);
-        assert!(plugin.take_processing_error().is_some());
-        assert!(plugin.load_state(&state(0, 0, 0)));
-        output.fill(1.0);
-        assert_eq!(
-            support::allocation::count_allocations(|| plugin.process_audio(&mut output, 2)),
-            0
-        );
-        assert_eq!(
-            output, [1.0; 128],
-            "{format} retry requires no discarded owner or reload"
-        );
+        for flag in [1 << 18, 1 << 24] {
+            let mut plugin = load(&fixture, format, &state(0, 0, flag), true).unwrap();
+            for attempt in 0..=2 {
+                let mut output = [1.0; 128];
+                assert_eq!(
+                    support::allocation::count_allocations(|| plugin.process_audio(&mut output, 2)),
+                    0
+                );
+                assert_eq!(output, [0.0; 128]);
+                assert!(!plugin.processing_configuration_valid());
+                assert!(plugin.processing_failure_is_local());
+                assert_eq!(
+                    plugin.processing_recovery_requested(),
+                    attempt < 2,
+                    "{format} attempt {attempt}"
+                );
+                assert_eq!(plugin.reconfiguration_requested(), attempt < 2);
+                assert!(plugin.take_processing_error().is_some());
+                output.fill(1.0);
+                plugin.process_audio(&mut output, 2);
+                assert_eq!(
+                    output, [0.0; 128],
+                    "callback must never retry invalid native DSP"
+                );
+                assert_eq!(plugin.take_processing_error(), None);
+                if attempt < 2 {
+                    plugin.stop_for_reconfiguration();
+                    if flag == 1 << 24 {
+                        plugin.load_state(&state(0, 0, flag));
+                    }
+                    plugin.reconfigure_on_main_thread().unwrap();
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn activation_rate_mismatch_never_requests_automatic_transient_recovery() {
+    let fixture = support::Fixture::new();
+    for format in ["clap", "vst3"] {
+        let mut plugin = load(&fixture, format, &state(0, 0, 0), true).unwrap();
+        plugin.set_audio_context(vibez_core::audio_context::DeviceAudioContext {
+            sample_rate: 44100,
+            musical_sample: 0,
+            continuous_sample: 0,
+            bpm: 120.0,
+            playing: true,
+        });
+        assert!(!plugin.processing_configuration_valid());
+        assert!(!plugin.processing_failure_is_local());
+        assert!(!plugin.processing_recovery_requested());
     }
 }

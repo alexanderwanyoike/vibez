@@ -48,6 +48,8 @@ pub struct ClapPluginInstance {
     processing: bool,
     processing_error: Option<&'static str>,
     processing_failed: bool,
+    configuration_failed: bool,
+    recovery_attempts: u8,
 }
 
 // Safety: CLAP plugins are expected to be thread-safe for audio processing.
@@ -245,6 +247,8 @@ impl ClapPluginInstance {
             processing: false,
             processing_error: None,
             processing_failed: false,
+            configuration_failed: false,
+            recovery_attempts: 0,
         };
 
         if let Some(state) = saved_state {
@@ -369,14 +373,31 @@ fn query_params(
 
 impl PluginInstance for ClapPluginInstance {
     fn set_audio_context(&mut self, context: vibez_core::audio_context::DeviceAudioContext) {
+        if context.sample_rate as f64 != self.sample_rate {
+            self.processing_failed = true;
+            self.configuration_failed = true;
+        }
         self.audio_context = Some(context);
+    }
+
+    fn processing_failure_is_local(&self) -> bool {
+        self.active && self.processing_failed && !self.configuration_failed
+    }
+
+    fn processing_recovery_requested(&self) -> bool {
+        self.active
+            && self.processing_failed
+            && !self.configuration_failed
+            && self.recovery_attempts < crate::instance::MAX_PROCESSING_RECOVERIES
     }
 
     fn reconfiguration_requested(&self) -> bool {
         let data =
             unsafe { &*((*self.host_ptr).host_data as *const super::host_impl::ClapHostUserData) };
-        data.restart_requested
-            .load(std::sync::atomic::Ordering::Acquire)
+        self.processing_recovery_requested()
+            || data
+                .restart_requested
+                .load(std::sync::atomic::Ordering::Acquire)
     }
 
     fn stop_for_reconfiguration(&mut self) {
@@ -395,6 +416,9 @@ impl PluginInstance for ClapPluginInstance {
         data.restart_requested
             .store(false, std::sync::atomic::Ordering::Release);
         let _activation = super::host_impl::activation_scope(self.host_ptr);
+        if self.processing_recovery_requested() {
+            self.recovery_attempts += 1;
+        }
         self.deactivate();
         self.latency_samples = 0;
         self.rebuild_ports()?;
@@ -474,11 +498,17 @@ impl PluginInstance for ClapPluginInstance {
         }
 
         let _audio_role = super::host_impl::audio_role();
+        if !self.processing_configuration_valid() {
+            self.processing_failed = true;
+            buffer.fill(0.0);
+            return;
+        }
         if !self.processing {
             let plugin_ref = unsafe { &*self.plugin_ptr };
             let started = unsafe { (plugin_ref.start_processing.unwrap())(self.plugin_ptr) };
             if !started {
                 self.processing_error = Some("CLAP start_processing failed");
+                self.processing_failed = true;
                 buffer.fill(0.0);
                 return;
             }
@@ -674,6 +704,10 @@ impl PluginInstance for ClapPluginInstance {
 
     fn prepare(&mut self, sample_rate: f64, max_buffer_size: u32) {
         if self.active || self.processing {
+            if sample_rate != self.sample_rate || max_buffer_size != self.max_frames {
+                self.processing_failed = true;
+                self.configuration_failed = true;
+            }
             return;
         }
         self.sample_rate = sample_rate;
@@ -692,6 +726,7 @@ impl PluginInstance for ClapPluginInstance {
         if ok {
             self.active = true;
             self.processing_failed = false;
+            self.configuration_failed = false;
             match super::latency::query(self.plugin_ptr) {
                 Ok(samples) => self.latency_samples = samples,
                 Err(_) => {
