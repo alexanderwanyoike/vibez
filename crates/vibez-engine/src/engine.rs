@@ -47,6 +47,7 @@ const SPECTRUM_RING_CAPACITY: usize = 16_384;
 /// ```
 pub struct AudioEngine {
     pending_capture_stop: Option<u64>,
+    pending_playback_stop: bool,
     pending_compensation_failure: Option<(TrackId, Option<vibez_core::id::EffectId>, &'static str)>,
     compensation_callback_heard_start: u64,
     compensation_suspended: bool,
@@ -221,6 +222,7 @@ impl AudioEngine {
         let engine = Self {
             routing: None,
             pending_capture_stop: None,
+            pending_playback_stop: false,
             pending_compensation_failure: None,
             compensation_callback_heard_start: 0,
             compensation_suspended: false,
@@ -783,3 +785,7 @@ mod recovery_configuration_tests;
 #[cfg(test)]
 #[path = "engine_recovery_review_tests.rs"]
 mod recovery_review_tests;
+
+#[cfg(test)]
+#[path = "engine_automation_retirement_tests.rs"]
+mod automation_retirement_tests;

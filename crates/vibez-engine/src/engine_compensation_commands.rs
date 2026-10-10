@@ -15,7 +15,8 @@ impl AudioEngine {
             self.close_capture_on_failure();
             self.compensation_valid = false;
             self.transport.stop();
-            let _ = self.event_tx.push(EngineEvent::PlaybackStopped);
+            self.pending_playback_stop = true;
+            self.flush_presentation();
         }
         self.retire_event(EngineEvent::CompensationFailed { reason });
     }
@@ -40,7 +41,8 @@ impl AudioEngine {
             self.transport.stop();
             self.retired_routing = Some(routing);
             self.return_retired_routing();
-            let _ = self.event_tx.push(EngineEvent::PlaybackStopped);
+            self.pending_playback_stop = true;
+            self.flush_presentation();
             return;
         }
         self.compensation_suspended = false;
@@ -68,6 +70,7 @@ impl AudioEngine {
         self.compensation_valid = false;
         self.transport.stop();
         self.retire_event(EngineEvent::CompensationFailed { reason });
-        let _ = self.event_tx.push(EngineEvent::PlaybackStopped);
+        self.pending_playback_stop = true;
+        self.flush_presentation();
     }
 }

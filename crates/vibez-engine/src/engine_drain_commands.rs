@@ -444,22 +444,10 @@ impl AudioEngine {
                     self.set_track_gain(id, gain);
                 }
                 EngineCommand::SetAutomationLane { track_id, lane } => {
-                    if let Some(track) = self.channel_mut(track_id) {
-                        match track
-                            .playback_source
-                            .automation
-                            .iter_mut()
-                            .find(|l| l.id == lane.id)
-                        {
-                            Some(existing) => *existing = lane,
-                            None => track.playback_source.automation.push(lane),
-                        }
-                    }
+                    self.set_automation_lane(track_id, lane);
                 }
                 EngineCommand::RemoveAutomationLane { track_id, lane_id } => {
-                    if let Some(track) = self.channel_mut(track_id) {
-                        track.playback_source.automation.retain(|l| l.id != lane_id);
-                    }
+                    self.remove_automation_lane(track_id, lane_id);
                 }
                 EngineCommand::SetTrackPan(id, pan) => {
                     self.set_track_pan(id, pan);

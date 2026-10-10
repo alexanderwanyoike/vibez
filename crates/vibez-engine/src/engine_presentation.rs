@@ -30,6 +30,9 @@ impl AudioEngine {
                 self.pending_compensation_failure = None;
             }
         }
+        if self.pending_playback_stop && self.event_tx.push(EngineEvent::PlaybackStopped).is_ok() {
+            self.pending_playback_stop = false;
+        }
     }
 
     pub(super) fn report_compensation_failure(

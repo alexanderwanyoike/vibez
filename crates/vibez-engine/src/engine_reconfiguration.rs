@@ -281,7 +281,8 @@ impl AudioEngine {
             self.compensation_valid = false;
             self.transport.stop();
             self.report_compensation_failure(track_id, effect_id, reason);
-            let _ = self.event_tx.push(EngineEvent::PlaybackStopped);
+            self.pending_playback_stop = true;
+            self.flush_presentation();
         }
     }
 
@@ -294,6 +295,10 @@ impl AudioEngine {
             return;
         }
         let Some(handoff_id) = self.next_device_handoff.checked_add(1) else {
+            self.close_capture_on_failure();
+            self.transport.stop();
+            self.pending_playback_stop = true;
+            self.flush_presentation();
             self.report_compensation_failure(
                 TrackId::MASTER,
                 None,
