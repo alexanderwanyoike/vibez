@@ -24,6 +24,13 @@ impl AudioEngine {
         idle: bool,
         capture_audible_only: bool,
     ) {
+        if self.project_processing_muted() {
+            output.fill(0.0);
+            if let Some(capture) = capture.as_deref_mut() {
+                capture.samples.fill(0.0);
+            }
+            return;
+        }
         if let Some(max_frames) = self
             .routing
             .as_ref()
@@ -48,7 +55,11 @@ impl AudioEngine {
                 self.render_routing_graph(
                     &mut output[start..end],
                     render_paths::MultitrackRenderBlock {
-                        pos: block.pos + offset as u64,
+                        pos: if idle {
+                            block.pos
+                        } else {
+                            block.pos + offset as u64
+                        },
                         repeat_pos: block.repeat_pos + offset as u64,
                         frames,
                         channels: block.channels,
@@ -80,11 +91,45 @@ impl AudioEngine {
             return;
         }
         let len = frames * channels;
+        let continuous_sample = self
+            .output_position
+            .saturating_add(self.rendered_callback_frames as u64);
         let track_solo = any_solo(&self.tracks);
         let bus_solo = any_solo(&self.buses);
         let tempo = TempoMap::new(self.transport.bpm(), self.sample_rate);
         for channel in &mut prepared.channels {
             channel.bind(&self.tracks, &self.buses);
+        }
+        for channel_index in 0..prepared.channels.len() {
+            let binding = prepared.channels[channel_index].binding;
+            let clock = &mut prepared.channel_clocks[channel_index];
+            if let Some(track) = binding.get(&self.tracks, &self.buses, &self.master) {
+                let position = if self.clip_performance {
+                    if matches!(binding, crate::routing::ChannelIndex::Track(_)) {
+                        track
+                            .active_clip
+                            .map_or(0, |clip| clip.position.saturating_add(block.pos))
+                    } else {
+                        block.repeat_pos
+                    }
+                } else {
+                    block.pos
+                };
+                clock.record(position, frames, !idle);
+                for control in prepared
+                    .automation_controls
+                    .iter_mut()
+                    .filter(|control| control.track == track.id)
+                {
+                    control.render(
+                        &track.playback_source.automation,
+                        position,
+                        frames,
+                        tempo.samples_per_beat(),
+                        !idle,
+                    );
+                }
+            }
         }
         prepared.select_audible_returns(
             &self.tracks,
@@ -96,10 +141,76 @@ impl AudioEngine {
         for order_index in 0..prepared.graph.order.len() {
             let index = prepared.graph.order[order_index];
             let node = prepared.graph.nodes[index];
-            let binding = prepared.channels[prepared.nodes[index].channel].binding;
+            let channel_index = prepared.nodes[index].channel;
+            let binding = prepared.channels[channel_index].binding;
             prepared.nodes[index].samples[..len].fill(0.0);
+            for incoming_index in 0..prepared.nodes[index].incoming.len() {
+                let edge_index = prepared.nodes[index].incoming[incoming_index];
+                let edge = prepared.graph.edges[edge_index];
+                prepared.edge_samples[edge_index][..len]
+                    .copy_from_slice(&prepared.nodes[edge.from].samples[..len]);
+                if matches!(edge.kind, EdgeKind::Send) {
+                    let source_channel = prepared.nodes[edge.from].channel;
+                    let track = prepared.channels[source_channel].binding.get(
+                        &self.tracks,
+                        &self.buses,
+                        &self.master,
+                    );
+                    let control = prepared.automation_controls
+                        [prepared.nodes[edge.from].controls.clone()]
+                    .iter()
+                    .find(|control| {
+                        control.target
+                            == vibez_core::automation::AutomationTarget::Send {
+                                bus_id: node.channel,
+                            }
+                    });
+                    let clock = Some(&prepared.channel_clocks[source_channel]);
+                    for frame in 0..frames {
+                        let gain = track.map_or(0.0, |track| {
+                            if let Some(control) = control {
+                                let value = control.values[frame];
+                                if value.is_nan() {
+                                    track
+                                        .sends
+                                        .iter()
+                                        .find(|(bus, _)| *bus == node.channel)
+                                        .map_or(0.0, |(_, value)| *value)
+                                } else {
+                                    value
+                                }
+                            } else {
+                                let position = clock.map_or(block.pos + frame as u64, |clock| {
+                                    clock.position(
+                                        prepared.compensation.node_input_latency[edge.from],
+                                        frame,
+                                    )
+                                });
+                                track.effective_send_amount(
+                                    node.channel,
+                                    position as f64 / tempo.samples_per_beat(),
+                                )
+                            }
+                        });
+                        for sample in &mut prepared.edge_samples[edge_index]
+                            [frame * channels..(frame + 1) * channels]
+                        {
+                            *sample *= gain;
+                        }
+                    }
+                }
+                prepared.compensation.delay_edge(
+                    edge_index,
+                    &mut prepared.edge_samples[edge_index][..len],
+                    channels,
+                );
+            }
+
             match node.stage {
                 NodeStage::Source => {
+                    if self.is_device_recovering(node.channel, None) {
+                        continue;
+                    }
                     let Some(track) =
                         binding.get_mut(&mut self.tracks, &mut self.buses, &mut self.master)
                     else {
@@ -113,38 +224,144 @@ impl AudioEngine {
                     } else {
                         block.pos
                     };
-                    track.apply_graph_automation(pos as f64 / tempo.samples_per_beat());
+                    if !prepared.nodes[index].controls.is_empty() {
+                        track.apply_delayed_automation(
+                            &prepared.automation_controls[prepared.nodes[index].controls.clone()],
+                            0,
+                        );
+                    } else {
+                        track.apply_node_automation(
+                            pos as f64 / tempo.samples_per_beat(),
+                            node.stage,
+                        );
+                    }
+                    if let Some(instrument) = track.instrument.as_mut() {
+                        instrument.set_audio_context(
+                            vibez_core::audio_context::DeviceAudioContext {
+                                musical_sample: pos,
+                                continuous_sample,
+                                sample_rate: self.sample_rate,
+                                bpm: self.transport.bpm(),
+                                playing: !idle,
+                            },
+                        );
+                    }
+
                     let id = track.id;
                     let section = self.active_section;
+                    let path = prepared.channels[channel_index].direct_latency;
+                    let omitted = prepared.compensation.output_latency.saturating_sub(path);
                     let events = &mut self.event_tx;
+                    let scheduled = &mut self.scheduled_presentation;
+                    let presentation = &prepared.presentation;
+                    let performing = self.clock_domain == ClockDomain::Perform;
+                    let mut presentation_overflow = false;
                     let mut repeated = |trigger: crate::note_repeat::NoteRepeatTrigger| {
-                        let section_position = section.map(|active| {
-                            section_record::section_sample_for_performance(
-                                pos,
-                                block.repeat_pos,
-                                trigger.effective_at_samples,
-                                active.length_samples,
-                            )
-                        });
-                        let canonical_section_position = section.map(|active| {
-                            section_record::section_sample_for_performance(
-                                pos,
-                                block.repeat_pos,
-                                trigger.canonical_at_samples,
-                                active.length_samples,
-                            )
-                        });
-                        let _ = events.push(EngineEvent::NoteRepeated {
+                        if presentation_overflow {
+                            return;
+                        }
+                        let context_for = |sample: u64| {
+                            let relative =
+                                sample as i128 - block.repeat_pos as i128 - omitted as i128;
+                            if relative < 0 {
+                                u32::try_from(-relative)
+                                    .ok()
+                                    .and_then(|delay| presentation.before_block(delay))
+                            } else {
+                                let delta = relative as u64;
+                                Some(crate::compensation_clock::PresentationPosition {
+                                    arrange: block.pos.saturating_add(delta),
+                                    perform: block.repeat_pos.saturating_add(delta),
+                                    section_id: section.map(|active| active.section_id),
+                                    section: section.map(|active| {
+                                        section_record::section_sample_for_performance(
+                                            pos,
+                                            block.repeat_pos,
+                                            sample.saturating_sub(omitted as u64),
+                                            active.length_samples,
+                                        )
+                                    }),
+                                    ..Default::default()
+                                })
+                            }
+                        };
+                        let effective_context = context_for(trigger.effective_at_samples);
+                        let canonical_context = context_for(trigger.canonical_at_samples);
+                        let recording = crate::events::SourceRecordingPosition {
+                            effective_at_samples: trigger.effective_at_samples,
+                            canonical_at_samples: trigger.canonical_at_samples,
+                            section_id: section.map(|active| active.section_id),
+                            section_position_samples: section.map(|active| {
+                                section_record::section_sample_for_performance(
+                                    pos,
+                                    block.repeat_pos,
+                                    trigger.effective_at_samples,
+                                    active.length_samples,
+                                )
+                            }),
+                            canonical_section_position_samples: section.map(|active| {
+                                section_record::section_sample_for_performance(
+                                    pos,
+                                    block.repeat_pos,
+                                    trigger.canonical_at_samples,
+                                    active.length_samples,
+                                )
+                            }),
+                        };
+                        let event = EngineEvent::NoteRepeated {
                             track_id: id,
                             pitch: trigger.pitch,
                             velocity: trigger.velocity,
                             rate: trigger.rate,
-                            effective_at_samples: trigger.effective_at_samples,
-                            canonical_at_samples: trigger.canonical_at_samples,
-                            section_id: section.map(|active| active.section_id),
-                            section_position_samples: section_position,
-                            canonical_section_position_samples: canonical_section_position,
-                        });
+                            effective_at_samples: effective_context.map_or_else(
+                                || trigger.effective_at_samples.saturating_sub(omitted as u64),
+                                |context| {
+                                    if performing {
+                                        context.perform
+                                    } else {
+                                        context.arrange
+                                    }
+                                },
+                            ),
+                            canonical_at_samples: canonical_context.map_or_else(
+                                || trigger.canonical_at_samples.saturating_sub(omitted as u64),
+                                |context| {
+                                    if performing {
+                                        context.perform
+                                    } else {
+                                        context.arrange
+                                    }
+                                },
+                            ),
+                            section_id: effective_context.and_then(|context| context.section_id),
+                            section_position_samples: effective_context
+                                .and_then(|context| context.section),
+                            canonical_section_position_samples: canonical_context
+                                .and_then(|context| context.section),
+                        };
+                        let source = EngineEvent::SourceNoteRepeated {
+                            track_id: id,
+                            pitch: trigger.pitch,
+                            velocity: trigger.velocity,
+                            rate: trigger.rate,
+                            position: recording,
+                        };
+                        let due = continuous_sample
+                            .saturating_add(
+                                trigger
+                                    .effective_at_samples
+                                    .saturating_sub(block.repeat_pos),
+                            )
+                            .saturating_add(path as u64);
+                        presentation_overflow = !presentation_queue::emit_repeated(
+                            source,
+                            event,
+                            events,
+                            scheduled,
+                            continuous_sample,
+                            due,
+                            self.output_position,
+                        );
                     };
                     if track.instrument.is_some() {
                         if idle {
@@ -185,6 +402,9 @@ impl AudioEngine {
                     }
                     std::mem::swap(&mut track.mix_buffer, &mut prepared.nodes[index].samples);
                     let activity = track.take_note_activity();
+                    if presentation_overflow {
+                        self.fail_presentation();
+                    }
                     if activity != 0 {
                         let _ = self.event_tx.push(EngineEvent::TrackNoteActivity {
                             track_id: id,
@@ -193,25 +413,15 @@ impl AudioEngine {
                     }
                 }
                 NodeStage::Sum => {
-                    let track =
-                        binding.get_mut(&mut self.tracks, &mut self.buses, &mut self.master);
-                    let Some(track) = track else {
+                    if binding
+                        .get(&self.tracks, &self.buses, &self.master)
+                        .is_none()
+                    {
                         continue;
-                    };
-                    track.apply_graph_automation(
-                        if self.clip_performance {
-                            block.repeat_pos
-                        } else {
-                            block.pos
-                        } as f64
-                            / tempo.samples_per_beat(),
-                    );
+                    }
                     for incoming_index in 0..prepared.nodes[index].incoming.len() {
                         let edge_index = prepared.nodes[index].incoming[incoming_index];
                         let edge = prepared.graph.edges[edge_index];
-                        let source_binding =
-                            prepared.channels[prepared.nodes[edge.from].channel].binding;
-                        let source = source_binding.get(&self.tracks, &self.buses, &self.master);
                         let source_channel = &prepared.channels[prepared.nodes[edge.from].channel];
                         let target_channel = &prepared.channels[prepared.nodes[index].channel];
                         let audible = match edge.kind {
@@ -228,56 +438,34 @@ impl AudioEngine {
                         if !audible {
                             continue;
                         }
-                        let gain = match edge.kind {
-                            EdgeKind::Send => source.map_or(0.0, |track| {
-                                let pos = if self.clip_performance {
-                                    match source_binding {
-                                        crate::routing::ChannelIndex::Track(_) => {
-                                            track.active_clip.map_or(0, |clip| {
-                                                clip.position.saturating_add(block.pos)
-                                            })
-                                        }
-                                        _ => block.repeat_pos,
-                                    }
-                                } else {
-                                    block.pos
-                                };
-                                track.effective_send_amount(
-                                    node.channel,
-                                    pos as f64 / tempo.samples_per_beat(),
-                                )
-                            }),
-                            _ => 1.0,
-                        };
                         for sample in 0..len {
                             prepared.nodes[index].samples[sample] +=
-                                prepared.nodes[edge.from].samples[sample] * gain;
+                                prepared.edge_samples[edge_index][sample];
                         }
                     }
                 }
                 NodeStage::Effect(effect_id) => {
+                    let recovery_bypass = self.recovering_effect_bypass(node.channel, effect_id);
                     for incoming_index in 0..prepared.nodes[index].incoming.len() {
-                        let edge =
-                            prepared.graph.edges[prepared.nodes[index].incoming[incoming_index]];
-                        if edge.kind != EdgeKind::Main {
+                        let edge_index = prepared.nodes[index].incoming[incoming_index];
+                        if prepared.graph.edges[edge_index].kind != EdgeKind::Main {
                             continue;
                         }
                         for sample in 0..len {
                             prepared.nodes[index].samples[sample] +=
-                                prepared.nodes[edge.from].samples[sample];
+                                prepared.edge_samples[edge_index][sample];
                         }
                     }
-                    let (before, remaining) = prepared.nodes.split_at_mut(index);
-                    let (destination, after) = remaining.split_first_mut().unwrap();
+                    let destination = &mut prepared.nodes[index];
                     for input in &mut destination.inputs {
-                        if let Some(source) = input.source {
-                            let samples = if source < index {
-                                &before[source].samples
-                            } else {
-                                &after[source - index - 1].samples
-                            };
+                        if let Some((edge_index, _)) = destination
+                            .incoming
+                            .iter()
+                            .map(|&edge_index| (edge_index, &prepared.graph.edges[edge_index]))
+                            .find(|(_, edge)| edge.kind == EdgeKind::External(input.descriptor.id))
+                        {
                             adapt_channels(
-                                &samples[..len],
+                                &prepared.edge_samples[edge_index][..len],
                                 channels,
                                 &mut input.samples[..frames * input.descriptor.channels],
                                 input.descriptor.channels,
@@ -311,30 +499,123 @@ impl AudioEngine {
                     let track =
                         binding.get_mut(&mut self.tracks, &mut self.buses, &mut self.master);
                     if let Some(track) = track {
-                        if let Some(slot) = track
-                            .effects
-                            .iter_mut()
-                            .find(|slot| slot.id == effect_id)
-                            .filter(|slot| !slot.bypass)
-                        {
-                            slot.effect.process_with_inputs(
-                                &mut destination.samples[..len],
-                                channels,
-                                &blocks[..destination.inputs.len()],
-                            );
+                        prepared.bypass_samples[index][..len]
+                            .copy_from_slice(&destination.samples[..len]);
+                        prepared.bypass_delays[index]
+                            .process_layout(&mut prepared.bypass_samples[index][..len], channels);
+                        if let Some(bypass) = recovery_bypass {
+                            if bypass {
+                                destination.samples[..len]
+                                    .copy_from_slice(&prepared.bypass_samples[index][..len]);
+                            } else {
+                                destination.samples[..len].fill(0.0);
+                            }
+                            continue;
+                        }
+                        let clock = Some(&prepared.channel_clocks[channel_index]);
+                        let delay = prepared.compensation.node_input_latency[index];
+                        let controls = &prepared.automation_controls[destination.controls.clone()];
+                        let controlled = !controls.is_empty();
+                        let mut offset = 0;
+                        while offset < frames {
+                            let target_pos = clock.map_or(block.pos + offset as u64, |clock| {
+                                clock.position(delay, offset)
+                            });
+                            let limit = if controlled {
+                                frames.min(offset + automation_interval(self.sample_rate))
+                            } else {
+                                frames
+                            };
+                            let end = clock
+                                .map_or(limit, |clock| clock.segment_end(delay, offset, limit));
+                            if controlled {
+                                track.apply_delayed_automation(controls, offset);
+                            } else {
+                                track.apply_node_automation(
+                                    target_pos as f64 / tempo.samples_per_beat(),
+                                    node.stage,
+                                );
+                            }
+                            if let Some(slot) =
+                                track.effects.iter_mut().find(|slot| slot.id == effect_id)
+                            {
+                                if destination
+                                    .bypass_state
+                                    .is_some_and(|previous| previous != slot.bypass)
+                                    && !slot.bypass
+                                {
+                                    // Stopped wet DSP must not replay input from before bypass.
+                                    slot.effect.reset();
+                                    destination.wet_warmup = prepared.device_latencies[index];
+                                    destination.wet_fade_in = 64;
+                                }
+                                destination.bypass_state = Some(slot.bypass);
+                                slot.effect.set_audio_context(
+                                    vibez_core::audio_context::DeviceAudioContext {
+                                        musical_sample: target_pos,
+                                        continuous_sample: continuous_sample + offset as u64,
+                                        sample_rate: self.sample_rate,
+                                        bpm: self.transport.bpm(),
+                                        playing: !idle,
+                                    },
+                                );
+                                for (entry, input) in blocks.iter_mut().zip(&destination.inputs) {
+                                    *entry = ExternalInputBlock {
+                                        id: input.descriptor.id,
+                                        channels: input.descriptor.channels,
+                                        samples: &input.samples[offset * input.descriptor.channels
+                                            ..end * input.descriptor.channels],
+                                        connected: input.connected,
+                                    };
+                                }
+                                if !slot.bypass {
+                                    slot.effect.process_with_inputs(
+                                        &mut destination.samples[offset * channels..end * channels],
+                                        channels,
+                                        &blocks[..destination.inputs.len()],
+                                    );
+                                    for frame in offset..end {
+                                        let blend = if destination.wet_warmup > 0 {
+                                            destination.wet_warmup -= 1;
+                                            0.0
+                                        } else if destination.wet_fade_in > 0 {
+                                            let blend = 1.0 - destination.wet_fade_in as f32 / 64.0;
+                                            destination.wet_fade_in -= 1;
+                                            blend
+                                        } else {
+                                            1.0
+                                        };
+                                        if blend < 1.0 {
+                                            for channel in 0..channels {
+                                                let sample = frame * channels + channel;
+                                                destination.samples[sample] = prepared
+                                                    .bypass_samples[index][sample]
+                                                    * (1.0 - blend)
+                                                    + destination.samples[sample] * blend;
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    destination.samples[offset * channels..end * channels]
+                                        .copy_from_slice(
+                                            &prepared.bypass_samples[index]
+                                                [offset * channels..end * channels],
+                                        );
+                                }
+                            }
+                            offset = end;
                         }
                     }
                 }
                 NodeStage::AfterEffects | NodeStage::AfterFader => {
-                    if let Some(edge) = prepared.nodes[index]
-                        .incoming
-                        .iter()
-                        .map(|edge| &prepared.graph.edges[*edge])
-                        .find(|edge| edge.kind == EdgeKind::Main)
+                    if let Some(&edge_index) =
+                        prepared.nodes[index].incoming.iter().find(|&&edge_index| {
+                            prepared.graph.edges[edge_index].kind == EdgeKind::Main
+                        })
                     {
                         for sample in 0..len {
                             prepared.nodes[index].samples[sample] =
-                                prepared.nodes[edge.from].samples[sample];
+                                prepared.edge_samples[edge_index][sample];
                         }
                     }
                     let bus_channel = !matches!(binding, crate::routing::ChannelIndex::Track(_));
@@ -342,17 +623,19 @@ impl AudioEngine {
                         binding.get_mut(&mut self.tracks, &mut self.buses, &mut self.master);
                     if let Some(track) = track {
                         if node.stage == NodeStage::AfterFader {
-                            let pos = if self.clip_performance && bus_channel {
-                                block.repeat_pos
-                            } else if self.clip_performance {
-                                track
-                                    .active_clip
-                                    .map_or(0, |clip| clip.position.saturating_add(block.pos))
+                            let target_pos = prepared.channel_clocks[channel_index]
+                                .position(prepared.compensation.node_input_latency[index], 0);
+                            let controls = &prepared.automation_controls
+                                [prepared.nodes[index].controls.clone()];
+                            let delayed = !controls.is_empty();
+                            let (gain, pan) = if delayed {
+                                track.apply_delayed_automation(controls, 0)
                             } else {
-                                block.pos
+                                track.apply_node_automation(
+                                    target_pos as f64 / tempo.samples_per_beat(),
+                                    node.stage,
+                                )
                             };
-                            let (gain, pan) =
-                                track.automation_mix_values(pos as f64 / tempo.samples_per_beat());
                             let gain = gain.unwrap_or(track.gain);
                             let pan = pan.unwrap_or(track.pan);
                             let (left, right) = if bus_channel {
@@ -364,13 +647,36 @@ impl AudioEngine {
                                 &mut track.mix_buffer,
                                 &mut prepared.nodes[index].samples,
                             );
-                            track.apply_mute_envelope(
-                                pos,
-                                frames,
-                                channels,
-                                tempo.samples_per_beat(),
-                            );
+                            if let Some(control) = controls.iter().find(|control| {
+                                control.target
+                                    == vibez_core::automation::AutomationTarget::TrackMute
+                            }) {
+                                track.apply_delayed_mute_envelope(
+                                    &control.values,
+                                    frames,
+                                    channels,
+                                );
+                            } else {
+                                track.apply_mute_envelope(
+                                    target_pos,
+                                    frames,
+                                    channels,
+                                    tempo.samples_per_beat(),
+                                );
+                            }
                             for frame in 0..frames {
+                                let (gain, left, right) = if delayed {
+                                    let (frame_gain, frame_pan) =
+                                        track.delayed_mix_values(controls, frame);
+                                    let (left, right) = if bus_channel {
+                                        crate::mixer::balance_pan(frame_pan.unwrap_or(track.pan))
+                                    } else {
+                                        equal_power_pan(frame_pan.unwrap_or(track.pan))
+                                    };
+                                    (frame_gain.unwrap_or(track.gain), left, right)
+                                } else {
+                                    (gain, left, right)
+                                };
                                 for channel in 0..channels {
                                     let offset = frame * channels + channel;
                                     track.mix_buffer[offset] = track.mix_buffer[offset]
@@ -428,6 +734,36 @@ impl AudioEngine {
                 }
             }
         }
+        {
+            let performing = self.clock_domain == ClockDomain::Perform;
+            let first = crate::compensation_clock::PresentationPosition {
+                arrange: if performing {
+                    self.transport.position()
+                } else {
+                    block.pos
+                },
+                perform: block.repeat_pos,
+                section: self.active_section.map(|_| block.pos),
+                section_id: self.active_section.map(|section| section.section_id),
+                section_length: self
+                    .active_section
+                    .map_or(0, |section| section.length_samples),
+                generation: prepared.compensation.generation,
+            };
+            prepared.presentation_start.get_or_insert(first);
+            prepared
+                .presentation
+                .record_clocks(first, frames, !performing && !idle, !idle);
+        }
+        self.rendered_callback_frames += frames;
         self.routing = Some(prepared);
     }
+}
+
+const MAX_AUTOMATION_INTERVAL: usize = 64;
+
+fn automation_interval(sample_rate: u32) -> usize {
+    (u64::from(sample_rate) * MAX_AUTOMATION_INTERVAL as u64)
+        .div_ceil(48_000)
+        .clamp(1, MAX_AUTOMATION_INTERVAL as u64) as usize
 }
