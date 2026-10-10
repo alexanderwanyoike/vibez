@@ -13,6 +13,7 @@ pub mod audio_recording;
 pub mod audio_settings;
 pub mod automation;
 pub mod browser;
+pub mod compensation;
 pub mod devices;
 pub mod perform;
 pub mod piano_roll;
