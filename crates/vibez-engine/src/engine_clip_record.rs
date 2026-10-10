@@ -158,6 +158,7 @@ impl AudioEngine {
         let prepared = record.prepared.take().expect("armed source");
         if let Some(track) = self.tracks.iter_mut().find(|track| track.id == track_id) {
             let retired = track.queued_clip.replace(QueuedClipPlayback {
+                pending_batch: false,
                 prepared,
                 effective_at: now,
             });

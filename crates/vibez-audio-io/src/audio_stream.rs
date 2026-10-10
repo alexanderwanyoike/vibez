@@ -568,6 +568,21 @@ impl AudioOutputStream {
     }
 }
 
+impl Drop for AudioOutputStream {
+    fn drop(&mut self) {
+        self.clear_active_stream();
+        // A backend can retain callback Arc clones after stream teardown. Taking
+        // the engine under its existing exclusion keeps destruction on this
+        // owner thread and makes every late callback observe an empty slot.
+        let engine = self
+            .engine_slot
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .take();
+        drop(engine);
+    }
+}
+
 fn requires_exclusive_reopen(
     active_backend: Option<AudioBackend>,
     requested_backend: AudioBackend,
@@ -588,6 +603,10 @@ fn resolve_output_device(
         .find(|device| device.name().is_ok_and(|name| name == requested_name))
         .ok_or_else(|| AudioStreamError::OutputDeviceNotFound(requested_name.to_string()))
 }
+
+#[cfg(test)]
+#[path = "audio_stream/teardown_tests.rs"]
+mod teardown_tests;
 
 #[cfg(test)]
 mod tests {

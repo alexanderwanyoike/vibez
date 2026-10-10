@@ -154,7 +154,7 @@ impl AudioEngine {
             retired,
         };
         if let Err(rtrb::PushError::Full(event)) = self.event_tx.push(event) {
-            std::mem::forget(event);
+            self.present_event(event, 0);
         }
     }
 
