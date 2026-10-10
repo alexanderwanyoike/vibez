@@ -283,6 +283,8 @@ impl AudioEngine {
                 let tempo_map = TempoMap::new(self.transport.bpm(), self.sample_rate);
                 let track_id = track.id;
                 let event_tx = &mut self.event_tx;
+                let scheduled = &mut self.scheduled_presentation;
+                let physical = self.output_position;
                 let section = self.active_section;
                 let mut on_repeat = |trigger: crate::note_repeat::NoteRepeatTrigger| {
                     let section_position = section.map(|active| {
@@ -301,7 +303,7 @@ impl AudioEngine {
                             active.length_samples,
                         )
                     });
-                    let _ = event_tx.push(EngineEvent::NoteRepeated {
+                    let event = EngineEvent::NoteRepeated {
                         track_id,
                         pitch: trigger.pitch,
                         velocity: trigger.velocity,
@@ -311,7 +313,8 @@ impl AudioEngine {
                         section_id: section.map(|active| active.section_id),
                         section_position_samples: section_position,
                         canonical_section_position_samples: canonical_section_position,
-                    });
+                    };
+                    let _ = presentation_queue::emit_repeated(event, event_tx, scheduled, physical);
                 };
                 track.render_instrument(
                     InstrumentRenderContext {
@@ -552,8 +555,10 @@ impl AudioEngine {
                 let tempo_map = TempoMap::new(self.transport.bpm(), self.sample_rate);
                 let track_id = track.id;
                 let event_tx = &mut self.event_tx;
+                let scheduled = &mut self.scheduled_presentation;
+                let physical = self.output_position;
                 let mut on_repeat = |trigger: crate::note_repeat::NoteRepeatTrigger| {
-                    let _ = event_tx.push(EngineEvent::NoteRepeated {
+                    let event = EngineEvent::NoteRepeated {
                         track_id,
                         pitch: trigger.pitch,
                         velocity: trigger.velocity,
@@ -563,7 +568,8 @@ impl AudioEngine {
                         section_id: None,
                         section_position_samples: None,
                         canonical_section_position_samples: None,
-                    });
+                    };
+                    let _ = presentation_queue::emit_repeated(event, event_tx, scheduled, physical);
                 };
                 track.render_instrument_idle(
                     repeat_pos,

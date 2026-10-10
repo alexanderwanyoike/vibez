@@ -46,8 +46,7 @@ impl AudioEngine {
         if let Err(rtrb::PushError::Full(event)) = self.event_tx.push(event) {
             self.clip_event_drops = self.clip_event_drops.saturating_add(1);
             self.clip_resync_track = Some(0);
-            // Source owners must be reclaimed on the UI thread, never in the callback.
-            std::mem::forget(event);
+            self.present_event(event, 0);
         }
     }
 
@@ -172,6 +171,9 @@ impl AudioEngine {
 
     pub(super) fn apply_clip_boundaries(&mut self, now: u64) {
         for index in 0..self.tracks.len() {
+            if !self.presentation_room(2) {
+                return;
+            }
             let track = &mut self.tracks[index];
             if track
                 .queued_clip

@@ -65,6 +65,7 @@ pub struct ClipTrackState {
 
 #[derive(Debug)]
 pub enum EngineEvent {
+    PresentationCancelled,
     DeviceReconfiguration(crate::engine::reconfiguration::DeviceReconfiguration),
     DeviceReconfigurationRetired {
         device: crate::engine::reconfiguration::DeviceReconfiguration,
@@ -660,7 +661,8 @@ impl PartialEq for EngineEvent {
                 left == right
             }
             (Self::ClipStateResynced(left), Self::ClipStateResynced(right)) => left == right,
-            (Self::PlaybackStarted, Self::PlaybackStarted)
+            (Self::PresentationCancelled, Self::PresentationCancelled)
+            | (Self::PlaybackStarted, Self::PlaybackStarted)
             | (Self::PlaybackStopped, Self::PlaybackStopped)
             | (Self::AuditionStopped, Self::AuditionStopped)
             | (Self::AuditionQueued, Self::AuditionQueued)

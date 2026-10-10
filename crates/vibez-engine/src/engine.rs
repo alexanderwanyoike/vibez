@@ -46,6 +46,10 @@ const SPECTRUM_RING_CAPACITY: usize = 16_384;
 /// // Keep `cmd_tx` and `event_rx` on the UI thread.
 /// ```
 pub struct AudioEngine {
+    scheduled_presentation: Vec<presentation_queue::ScheduledPresentation>,
+    presentation_overflow_owner: Option<EngineEvent>,
+    pending_playback_stop: bool,
+    presentation_fault: bool,
     pending_capture_stop: Option<u64>,
     pending_playback_stop: bool,
     pending_compensation_failure: Option<(TrackId, Option<vibez_core::id::EffectId>, &'static str)>,
@@ -221,6 +225,12 @@ impl AudioEngine {
 
         let engine = Self {
             routing: None,
+            scheduled_presentation: Vec::with_capacity(
+                presentation_queue::PRESENTATION_EVENT_CAPACITY,
+            ),
+            presentation_overflow_owner: None,
+            pending_playback_stop: false,
+            presentation_fault: false,
             pending_capture_stop: None,
             pending_playback_stop: false,
             pending_compensation_failure: None,
@@ -782,6 +792,8 @@ mod capture_commands;
 #[path = "engine_recovery_configuration_tests.rs"]
 mod recovery_configuration_tests;
 
+#[path = "engine_presentation_queue.rs"]
+mod presentation_queue;
 #[cfg(test)]
 #[path = "engine_recovery_review_tests.rs"]
 mod recovery_review_tests;
@@ -789,3 +801,7 @@ mod recovery_review_tests;
 #[cfg(test)]
 #[path = "engine_automation_retirement_tests.rs"]
 mod automation_retirement_tests;
+
+#[cfg(test)]
+#[path = "engine_presentation_runtime_tests.rs"]
+mod presentation_runtime_tests;

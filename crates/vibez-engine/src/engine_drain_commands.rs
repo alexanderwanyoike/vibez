@@ -11,6 +11,12 @@ impl AudioEngine {
         self.flush_retirements();
         self.clean_removed_bus_automation();
         loop {
+            let reserve = self.tracks.len().saturating_mul(2).saturating_add(4);
+            if self.scheduled_presentation.capacity() - self.scheduled_presentation.len() < reserve
+            {
+                self.fail_presentation();
+                break;
+            }
             if self.pending_bus_cleanup.is_some()
                 || self
                     .pending_retirements
@@ -109,7 +115,7 @@ impl AudioEngine {
                     {
                         let event = EngineEvent::SectionQueueCancelled { retired: prepared };
                         if let Err(rtrb::PushError::Full(event)) = self.event_tx.push(event) {
-                            std::mem::forget(event);
+                            self.present_event(event, 0);
                         }
                         continue;
                     }
@@ -173,7 +179,7 @@ impl AudioEngine {
                         retired: prepared,
                     };
                     if let Err(rtrb::PushError::Full(event)) = self.event_tx.push(event) {
-                        std::mem::forget(event);
+                        self.present_event(event, 0);
                     }
                 }
                 EngineCommand::ArmSectionRecord {

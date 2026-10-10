@@ -18,11 +18,14 @@ impl AudioEngine {
         }
         let section_id = self.active_section.map(|section| section.section_id);
         let section_position_samples = self.active_section.map(|section| section.position_samples);
-        let _ = self.event_tx.push(EngineEvent::PerformanceCaptureStarted {
-            effective_at_samples: self.effective_position(),
-            section_id,
-            section_position_samples,
-        });
+        self.present_event(
+            EngineEvent::PerformanceCaptureStarted {
+                effective_at_samples: self.effective_position(),
+                section_id,
+                section_position_samples,
+            },
+            0,
+        );
         for index in 0..self.tracks.len() {
             if let Some(active) = self.tracks[index].active_clip {
                 self.clip_event(EngineEvent::ClipCaptureSource {
@@ -35,9 +38,12 @@ impl AudioEngine {
     }
 
     pub(super) fn command_stop_performance_capture(&mut self) {
-        let _ = self.event_tx.push(EngineEvent::PerformanceCaptureStopped {
-            effective_at_samples: self.effective_position(),
-        });
+        self.present_event(
+            EngineEvent::PerformanceCaptureStopped {
+                effective_at_samples: self.effective_position(),
+            },
+            0,
+        );
     }
 
     pub(super) fn command_external_note_on(&mut self, track_id: TrackId, pitch: u8, velocity: u8) {
@@ -47,15 +53,18 @@ impl AudioEngine {
             }
         }
         let section = self.active_section;
-        let _ = self.event_tx.push(EngineEvent::InstrumentNoteInput {
-            track_id,
-            pitch,
-            velocity,
-            on: true,
-            effective_at_samples: self.performance_position,
-            section_id: section.map(|active| active.section_id),
-            section_position_samples: section.map(|active| active.position_samples),
-        });
+        self.present_event(
+            EngineEvent::InstrumentNoteInput {
+                track_id,
+                pitch,
+                velocity,
+                on: true,
+                effective_at_samples: self.performance_position,
+                section_id: section.map(|active| active.section_id),
+                section_position_samples: section.map(|active| active.position_samples),
+            },
+            0,
+        );
     }
 
     pub(super) fn command_external_note_off(&mut self, track_id: TrackId, pitch: u8) {
@@ -65,14 +74,17 @@ impl AudioEngine {
             }
         }
         let section = self.active_section;
-        let _ = self.event_tx.push(EngineEvent::InstrumentNoteInput {
-            track_id,
-            pitch,
-            velocity: 0,
-            on: false,
-            effective_at_samples: self.performance_position,
-            section_id: section.map(|active| active.section_id),
-            section_position_samples: section.map(|active| active.position_samples),
-        });
+        self.present_event(
+            EngineEvent::InstrumentNoteInput {
+                track_id,
+                pitch,
+                velocity: 0,
+                on: false,
+                effective_at_samples: self.performance_position,
+                section_id: section.map(|active| active.section_id),
+                section_position_samples: section.map(|active| active.position_samples),
+            },
+            0,
+        );
     }
 }

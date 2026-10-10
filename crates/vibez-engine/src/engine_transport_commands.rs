@@ -4,6 +4,7 @@ use super::*;
 
 impl AudioEngine {
     pub(super) fn command_play(&mut self) {
+        self.presentation_fault = false;
         let was_clip_performance = self.clip_performance;
         self.clear_clip_performance();
         self.clock_domain = ClockDomain::Arrange;
@@ -38,6 +39,7 @@ impl AudioEngine {
     }
 
     pub(super) fn command_stop(&mut self) {
+        self.cancel_presentation();
         let was_clip_performance = self.clip_performance;
         self.stop_section_record();
         let _ = self.event_tx.push(EngineEvent::PerformanceCaptureStopped {
@@ -70,6 +72,7 @@ impl AudioEngine {
     }
 
     pub(super) fn command_seek(&mut self, pos: u64) {
+        self.cancel_presentation();
         self.transport.seek(pos);
         for track in &mut self.tracks {
             track.flush_notes();
