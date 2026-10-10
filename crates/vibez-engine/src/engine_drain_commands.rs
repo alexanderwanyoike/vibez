@@ -44,80 +44,9 @@ impl AudioEngine {
                     clips,
                     quantization,
                 } => self.queue_clips(clips, quantization),
-                EngineCommand::Play => {
-                    let was_clip_performance = self.clip_performance;
-                    self.clear_clip_performance();
-                    self.clock_domain = ClockDomain::Arrange;
-                    if !self.arrangement_recording {
-                        self.transport
-                            .set_audio_length(self.arrangement_audio_length);
-                    }
-                    self.transport.play();
-                    let audition_queued = self.audition.resync_on_transport_start(
-                        self.transport.position(),
-                        self.transport.bpm(),
-                        self.sample_rate,
-                        audition_fade_frames(self.sample_rate),
-                    );
-                    if let Some(queued) = audition_queued {
-                        let event = if queued {
-                            EngineEvent::AuditionQueued
-                        } else {
-                            EngineEvent::AuditionStarted
-                        };
-                        let _ = self.event_tx.push(event);
-                    }
-                    self.performance_position = self.transport.position();
-                    self.stopped_note_repeat_anchor = None;
-                    let anchor = self.playing_note_repeat_anchor();
-                    self.reanchor_note_repeats(anchor, self.performance_position);
-                    if was_clip_performance {
-                        self.clip_event(EngineEvent::PlaybackStarted);
-                    } else {
-                        let _ = self.event_tx.push(EngineEvent::PlaybackStarted);
-                    }
-                }
-                EngineCommand::Stop => {
-                    let was_clip_performance = self.clip_performance;
-                    self.stop_section_record();
-                    let _ = self.event_tx.push(EngineEvent::PerformanceCaptureStopped {
-                        effective_at_samples: self.effective_position(),
-                    });
-                    self.clear_clip_performance();
-                    self.transport.stop();
-                    self.arrangement_recording = false;
-                    self.clock_domain = ClockDomain::Arrange;
-                    self.performance_position = self.transport.position();
-                    self.cancel_section_queue();
-                    self.cancel_queued_track_mutes();
-                    self.active_section = None;
-                    self.transport
-                        .set_audio_length(self.arrangement_audio_length);
-                    for track in &mut self.tracks {
-                        track.flush_notes();
-                    }
-                    self.stopped_note_repeat_anchor = self
-                        .has_active_note_repeats()
-                        .then_some(self.performance_position);
-                    if let Some(anchor) = self.stopped_note_repeat_anchor {
-                        self.reanchor_note_repeats(anchor, self.performance_position);
-                    }
-                    if was_clip_performance {
-                        self.clip_event(EngineEvent::PlaybackStopped);
-                    } else {
-                        let _ = self.event_tx.push(EngineEvent::PlaybackStopped);
-                    }
-                }
-                EngineCommand::Seek(pos) => {
-                    self.transport.seek(pos);
-                    for track in &mut self.tracks {
-                        track.flush_notes();
-                    }
-                    if self.clock_domain == ClockDomain::Arrange {
-                        self.performance_position = pos;
-                        self.reschedule_note_repeats();
-                    }
-                }
+                EngineCommand::Play => self.command_play(),
+                EngineCommand::Stop => self.command_stop(),
+                EngineCommand::Seek(pos) => self.command_seek(pos),
                 EngineCommand::SetBpm(bpm) => {
                     // V1 Perform holds one project tempo from the first
                     // Section transition until transport stop.
@@ -594,31 +523,123 @@ impl AudioEngine {
                     self.spectrum_track = target;
                 }
 
-                command @ (EngineCommand::AddEffect { .. }
-                | EngineCommand::RemoveEffect(..)
-                | EngineCommand::SetEffectParam { .. }
-                | EngineCommand::SetEffectBypass { .. }
-                | EngineCommand::MoveEffect { .. }) => self.apply_effect_command(command),
-
-                command @ (EngineCommand::AddInstrumentTrack(..)
-                | EngineCommand::AddMidiTrack(..)
-                | EngineCommand::SetTrackInstrument(..)
-                | EngineCommand::RemoveTrackInstrument(..)
-                | EngineCommand::SetNoteClipDuration { .. }
-                | EngineCommand::SetNoteClipGrooveGrid { .. }
-                | EngineCommand::AddNoteClip { .. }
-                | EngineCommand::RemoveNoteClip { .. }
-                | EngineCommand::MoveNoteClip { .. }
-                | EngineCommand::AddNote { .. }
-                | EngineCommand::RemoveNote { .. }
-                | EngineCommand::EditNote { .. }
-                | EngineCommand::SetInstrumentParam { .. }
-                | EngineCommand::LoadSamplerSample { .. }
-                | EngineCommand::LoadDrumRackPadSample { .. }
-                | EngineCommand::ClearDrumRackPad { .. }
-                | EngineCommand::SetDrumRackPadState { .. }) => {
-                    self.apply_instrument_command(command)
+                EngineCommand::AddEffect {
+                    track_id,
+                    effect_id,
+                    effect_type,
+                    position,
+                } => self.command_add_effect(track_id, effect_id, effect_type, position),
+                EngineCommand::RemoveEffect(track_id, effect_id) => {
+                    self.command_remove_effect(track_id, effect_id)
                 }
+                EngineCommand::SetEffectParam {
+                    track_id,
+                    effect_id,
+                    param_index,
+                    value,
+                } => self.command_set_effect_param(track_id, effect_id, param_index, value),
+                EngineCommand::SetEffectBypass {
+                    track_id,
+                    effect_id,
+                    bypass,
+                } => self.command_set_effect_bypass(track_id, effect_id, bypass),
+                EngineCommand::MoveEffect {
+                    track_id,
+                    effect_id,
+                    new_index,
+                } => self.command_move_effect(track_id, effect_id, new_index),
+                EngineCommand::AddInstrumentTrack(id, _name, kind) => {
+                    self.command_add_instrument_track(id, _name, kind)
+                }
+                EngineCommand::AddMidiTrack(id, _name) => self.command_add_midi_track(id, _name),
+                EngineCommand::SetTrackInstrument(track_id, kind) => {
+                    self.command_set_track_instrument(track_id, kind)
+                }
+                EngineCommand::RemoveTrackInstrument(track_id) => {
+                    self.command_remove_track_instrument(track_id)
+                }
+                EngineCommand::SetNoteClipDuration {
+                    track_id,
+                    clip_id,
+                    duration_beats,
+                } => self.command_set_note_clip_duration(track_id, clip_id, duration_beats),
+                EngineCommand::SetNoteClipGrooveGrid {
+                    track_id,
+                    clip_id,
+                    groove_grid,
+                } => self.command_set_note_clip_groove_grid(track_id, clip_id, groove_grid),
+                EngineCommand::AddNoteClip {
+                    track_id,
+                    clip_id,
+                    position_beats,
+                    duration_beats,
+                    start_marker_beats,
+                    loop_enabled,
+                    loop_start_beats,
+                    loop_end_beats,
+                    groove_grid,
+                } => self.command_add_note_clip(
+                    track_id,
+                    clip_id,
+                    position_beats,
+                    duration_beats,
+                    start_marker_beats,
+                    loop_enabled,
+                    loop_start_beats,
+                    loop_end_beats,
+                    groove_grid,
+                ),
+                EngineCommand::RemoveNoteClip(track_id, clip_id) => {
+                    self.command_remove_note_clip(track_id, clip_id)
+                }
+                EngineCommand::MoveNoteClip {
+                    track_id,
+                    clip_id,
+                    new_position_beats,
+                } => self.command_move_note_clip(track_id, clip_id, new_position_beats),
+                EngineCommand::AddNote {
+                    track_id,
+                    clip_id,
+                    note,
+                } => self.command_add_note(track_id, clip_id, note),
+                EngineCommand::RemoveNote {
+                    track_id,
+                    clip_id,
+                    note_index,
+                } => self.command_remove_note(track_id, clip_id, note_index),
+                EngineCommand::EditNote {
+                    track_id,
+                    clip_id,
+                    note_index,
+                    note,
+                } => self.command_edit_note(track_id, clip_id, note_index, note),
+                EngineCommand::SetInstrumentParam {
+                    track_id,
+                    param_index,
+                    value,
+                } => self.command_set_instrument_param(track_id, param_index, value),
+                EngineCommand::LoadSamplerSample {
+                    track_id,
+                    sample,
+                    sample_name,
+                } => self.command_load_sampler_sample(track_id, sample, sample_name),
+                EngineCommand::LoadDrumRackPadSample {
+                    track_id,
+                    pad_index,
+                    sample,
+                    sample_name,
+                } => {
+                    self.command_load_drum_rack_pad_sample(track_id, pad_index, sample, sample_name)
+                }
+                EngineCommand::ClearDrumRackPad {
+                    track_id,
+                    pad_index,
+                } => self.command_clear_drum_rack_pad(track_id, pad_index),
+                EngineCommand::SetDrumRackPadState {
+                    track_id,
+                    pad_index,
+                    state,
+                } => self.command_set_drum_rack_pad_state(track_id, pad_index, state),
 
                 // -- Arrangement recording / looping --
                 EngineCommand::SetArrangementRecording(active) => {
@@ -893,47 +914,17 @@ impl AudioEngine {
                     effect_id,
                     effect,
                     position,
-                } => {
-                    if let Some(track) = self.channel_mut(track_id) {
-                        let slot = EffectSlot {
-                            id: effect_id,
-                            effect,
-                            bypass: false,
-                        };
-                        if let Some(pos) = position {
-                            let idx = pos.min(track.effects.len());
-                            track.effects.insert(idx, slot);
-                        } else {
-                            track.effects.push(slot);
-                        }
-                    }
-                }
+                } => self.command_add_plugin_effect(track_id, effect_id, effect, position),
                 EngineCommand::AuditionNote {
                     track_id,
                     pitch,
                     velocity,
                     on,
-                } => {
-                    if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
-                        if let Some(instrument) = track.instrument.as_mut() {
-                            if on {
-                                instrument.note_on(pitch, velocity);
-                            } else {
-                                instrument.note_off(pitch);
-                            }
-                        }
-                    }
-                }
+                } => self.command_audition_note(track_id, pitch, velocity, on),
                 EngineCommand::SetPluginInstrument {
                     track_id,
                     instrument,
-                } => {
-                    if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
-                        if let Some(old) = track.instrument.replace(instrument) {
-                            self.dispose_instrument(old);
-                        }
-                    }
-                }
+                } => self.command_set_plugin_instrument(track_id, instrument),
             }
         }
     }
