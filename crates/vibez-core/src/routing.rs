@@ -87,7 +87,7 @@ pub struct RoutingNode {
 pub enum EdgeKind {
     Main,
     External(ExternalInputId),
-    Send(f32),
+    Send,
     Mix,
 }
 
@@ -111,7 +111,8 @@ pub struct RoutingChannel {
     pub id: TrackId,
     pub is_bus: bool,
     pub effects: Vec<RoutingEffect>,
-    pub sends: Vec<(TrackId, f32)>,
+    /// Declared connections are independent of their current DSP gain.
+    pub sends: Vec<TrackId>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -181,15 +182,12 @@ impl RoutingGraph {
                     });
                 }
             }
-            for &(bus, gain) in &channel.sends {
-                if gain <= SEND_SILENCE_THRESHOLD {
-                    continue;
-                }
+            for &bus in &channel.sends {
                 if let Some(to) = graph.index(bus, NodeStage::Sum) {
                     graph.edges.push(RoutingEdge {
                         from: after_fader,
                         to,
-                        kind: EdgeKind::Send(gain),
+                        kind: EdgeKind::Send,
                     });
                 }
             }
@@ -309,6 +307,17 @@ pub fn adapt_main_channel_sample(
     )
 }
 
+/// A configured lane declares its route even before its first audible point.
+pub fn reserve_send_targets(sends: &mut Vec<TrackId>, lanes: &[crate::automation::AutomationLane]) {
+    for lane in lanes {
+        if let crate::automation::AutomationTarget::Send { bus_id } = lane.target {
+            if !sends.contains(&bus_id) {
+                sends.push(bus_id);
+            }
+        }
+    }
+}
+
 #[path = "routing_choices.rs"]
 mod choices;
 pub use choices::{input_source_choices, valid_input_taps, InputSourceChoice};
@@ -389,5 +398,60 @@ mod tests {
             );
         }
         assert_eq!(adapt_channel_sample(6, 2, 0, |_| 99.0), 0.0);
+    }
+    #[test]
+    fn configured_bus_feedback_is_rejected_without_a_gain_escape() {
+        let a = TrackId::new();
+        let b = TrackId::new();
+        let bus = |id, send| RoutingChannel {
+            id,
+            is_bus: true,
+            effects: vec![],
+            sends: vec![send],
+        };
+        assert_eq!(
+            RoutingGraph::prepare(&[bus(a, b), bus(b, a)]).unwrap_err(),
+            RoutingError::FeedbackLoop
+        );
+    }
+
+    #[test]
+    fn configured_empty_and_silent_automation_lanes_reserve_connections() {
+        use crate::automation::{AutomationLane, AutomationTarget};
+        let bus = TrackId::new();
+        let mut sends = vec![];
+        let mut lane = AutomationLane::new(AutomationTarget::Send { bus_id: bus });
+        reserve_send_targets(&mut sends, std::slice::from_ref(&lane));
+        lane.insert_point(crate::automation::AutomationPoint {
+            beat: 0.0,
+            value: 0.0,
+            curve: 0.0,
+        });
+        reserve_send_targets(&mut sends, &[lane]);
+        assert_eq!(sends, [bus]);
+        let source = TrackId::new();
+        let graph = RoutingGraph::prepare(&[
+            RoutingChannel {
+                id: source,
+                is_bus: false,
+                effects: vec![],
+                sends,
+            },
+            RoutingChannel {
+                id: bus,
+                is_bus: true,
+                effects: vec![],
+                sends: vec![],
+            },
+        ])
+        .unwrap();
+        assert_eq!(
+            graph
+                .edges
+                .iter()
+                .filter(|edge| edge.kind == EdgeKind::Send)
+                .count(),
+            1
+        );
     }
 }

@@ -139,7 +139,7 @@ fn hardware_first_pair_live_capture_and_populated_graph_are_allocation_free() {
         })
         .unwrap();
     let mut source_model = channel(source);
-    source_model.sends.push((bus, 1.0));
+    source_model.sends.push(bus);
     let mut bus_model = channel(bus);
     bus_model.is_bus = true;
     let mut receiver_model = channel(receiver);
@@ -247,7 +247,7 @@ fn clip_bus_and_master_automation_advance_on_perform_clock() {
                     amount: 1.0,
                 })
                 .unwrap();
-            track_model.sends.push((target, 1.0));
+            track_model.sends.push(target);
             let mut bus = channel(target);
             bus.is_bus = true;
             channels.push(bus);
@@ -509,7 +509,7 @@ fn soloed_receiver_keeps_bus_detector_source_inaudible() {
         })
         .unwrap();
     let mut ghost_channel = channel(ghost);
-    ghost_channel.sends.push((bus, 1.0));
+    ghost_channel.sends.push(bus);
     let mut bus_channel = channel(bus);
     bus_channel.is_bus = true;
     let mut bass_channel = channel(bass);
@@ -688,7 +688,7 @@ fn prepared_send_edges_follow_automation_without_mutating_manual_sends() {
         })
         .unwrap();
     let mut source_model = channel(source);
-    source_model.sends.push((bus, 1.0));
+    source_model.sends.push(bus);
     let mut bus_model = channel(bus);
     bus_model.is_bus = true;
     commands

@@ -217,7 +217,7 @@ impl AudioEngine {
                                             || !prepared.detector_buses.contains(&channel.id))
                                 }
                             }),
-                            EdgeKind::Send(_) => {
+                            EdgeKind::Send => {
                                 !track_solo
                                     || bus_solo
                                     || prepared.detector_buses.contains(&node.channel)
@@ -229,7 +229,7 @@ impl AudioEngine {
                             continue;
                         }
                         let gain = match edge.kind {
-                            EdgeKind::Send(_) => source.map_or(0.0, |track| {
+                            EdgeKind::Send => source.map_or(0.0, |track| {
                                 let pos = if self.clip_performance {
                                     match source_binding {
                                         crate::routing::ChannelIndex::Track(_) => {

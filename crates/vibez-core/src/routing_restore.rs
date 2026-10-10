@@ -138,7 +138,7 @@ mod tests {
         let bus = TrackId::new();
         let first = receiver(a, bus);
         let mut active_receiver = receiver(c, a);
-        active_receiver.sends.push((bus, 1.0));
+        active_receiver.sends.push(bus);
         let bus_channel = RoutingChannel {
             id: bus,
             is_bus: true,
