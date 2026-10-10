@@ -46,6 +46,17 @@ Events come in two classes, and the class determines the push policy:
 
 ## 3. Ports and adapters: EngineHandle
 
+Removed devices stop processing on the audio thread before their unique owner
+is sent to the UI for destruction. Channel owners use preallocated pool slots
+with an Acquire/Release handoff. A full event ring retains owners in bounded
+pending retirement storage and pauses command consumption until capacity returns;
+it must never allocate a replacement holder or destroy a device in the callback.
+
+Once a prepared routing plan is installed, structural channel/effect changes
+must be followed by a new plan prepared outside the callback. Send topology
+includes audible sends and automation that can make a send audible. Parameter
+values are read at render time; dormant sends do not create feedback edges.
+
 Domain code sends engine commands through the `EngineHandle` trait, never
 through a concrete channel. The adapters are the vocabulary:
 

@@ -231,6 +231,10 @@ impl AudioEngine {
             loop_region,
             live_input,
         } = block;
+        if self.routing.is_some() {
+            self.render_routing_graph(output, block, track_output_capture, false, true);
+            return;
+        }
         let has_track_solo = any_solo(&self.tracks);
         let has_bus_solo = any_solo(&self.buses);
         let bpm = self.transport.bpm();
@@ -431,7 +435,7 @@ impl AudioEngine {
             // each bus at its send amount.
             for send_idx in 0..track.sends.len() {
                 let (bus_id, amount) = track.sends[send_idx];
-                if amount <= 0.0005 {
+                if amount <= vibez_core::routing::SEND_SILENCE_THRESHOLD {
                     continue;
                 }
                 if let Some(bus) = self.buses.iter_mut().find(|b| b.id == bus_id) {
@@ -506,6 +510,23 @@ impl AudioEngine {
         live_input: Option<LiveInputBlock<'_>>,
         mut track_output_capture: Option<&mut TrackOutputCapture<'_>>,
     ) {
+        if self.routing.is_some() {
+            self.render_routing_graph(
+                output,
+                MultitrackRenderBlock {
+                    pos: self.transport.position(),
+                    repeat_pos,
+                    frames,
+                    channels,
+                    loop_region: None,
+                    live_input,
+                },
+                track_output_capture,
+                true,
+                true,
+            );
+            return;
+        }
         let has_track_solo = any_solo(&self.tracks);
         let has_bus_solo = any_solo(&self.buses);
         for track in &mut self.tracks {
@@ -618,7 +639,7 @@ impl AudioEngine {
             // notes reach the returns like in any DAW.
             for send_idx in 0..track.sends.len() {
                 let (bus_id, amount) = track.sends[send_idx];
-                if amount <= 0.0005 {
+                if amount <= vibez_core::routing::SEND_SILENCE_THRESHOLD {
                     continue;
                 }
                 if let Some(bus) = self.buses.iter_mut().find(|b| b.id == bus_id) {
