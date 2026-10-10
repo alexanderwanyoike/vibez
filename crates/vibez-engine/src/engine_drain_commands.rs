@@ -837,6 +837,13 @@ impl AudioEngine {
                         if let Some(instrument) = self.tracks[track_index].instrument.as_mut() {
                             instrument.note_on(pitch, velocity);
                         }
+                        self.present_event(EngineEvent::SourceNoteRepeated {
+                            track_id,
+                            pitch,
+                            velocity,
+                            rate,
+                            position: self.source_recording_position(),
+                        });
                         self.present_event(EngineEvent::NoteRepeated {
                             track_id,
                             pitch,

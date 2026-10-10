@@ -91,15 +91,17 @@ fn queue_event(
 }
 
 pub(super) fn emit_repeated(
+    source: EngineEvent,
     event: EngineEvent,
     events: &mut rtrb::Producer<EngineEvent>,
     scheduled: &mut Vec<ScheduledPresentation>,
     now: u64,
 ) -> bool {
-    if scheduled.len() == scheduled.capacity() {
+    if scheduled.capacity() - scheduled.len() < 2 {
         return false;
     }
-    queue_event(event, events, scheduled, now, now).is_none()
+    queue_event(source, events, scheduled, now, now).is_none()
+        && queue_event(event, events, scheduled, now, now).is_none()
 }
 
 impl AudioEngine {

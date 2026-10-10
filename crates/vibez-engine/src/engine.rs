@@ -825,3 +825,7 @@ mod section_owner_retention_tests;
 #[cfg(test)]
 #[path = "engine_presentation_review_tests.rs"]
 mod presentation_review_tests;
+
+#[cfg(test)]
+#[path = "engine_recording_observation_tests.rs"]
+mod recording_observation_tests;

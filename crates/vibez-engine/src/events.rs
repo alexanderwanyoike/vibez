@@ -63,6 +63,16 @@ pub struct ClipTrackState {
     pub transport_playing: bool,
 }
 
+/// Source recorders retain renderer coordinates independently of Capture notices.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SourceRecordingPosition {
+    pub effective_at_samples: u64,
+    pub canonical_at_samples: u64,
+    pub section_id: Option<SectionId>,
+    pub section_position_samples: Option<u64>,
+    pub canonical_section_position_samples: Option<u64>,
+}
+
 #[derive(Debug)]
 pub enum EngineEvent {
     PresentationCancelled,
@@ -205,6 +215,21 @@ pub enum EngineEvent {
         effective_at_samples: u64,
     },
 
+    /// Source takes consume renderer coordinates before their recorder closes.
+    SourceNoteRepeated {
+        track_id: TrackId,
+        pitch: u8,
+        velocity: u8,
+        rate: NoteRepeatRate,
+        position: SourceRecordingPosition,
+    },
+    SourceNoteInput {
+        track_id: TrackId,
+        pitch: u8,
+        velocity: u8,
+        on: bool,
+        position: SourceRecordingPosition,
+    },
     /// A generated Note Repeat retrigger became effective at this exact
     /// engine sample. Later recording cards consume the same audible truth.
     NoteRepeated {
@@ -219,8 +244,8 @@ pub enum EngineEvent {
         canonical_section_position_samples: Option<u64>,
     },
 
-    /// A monitored input note became effective on the engine clock. Section
-    /// Record consumes these events; monitoring itself remains immediate.
+    /// Source takes have separate coordinates so Capture and pad feedback
+    /// can follow this notice without changing the recorded source.
     InstrumentNoteInput {
         track_id: TrackId,
         pitch: u8,
@@ -347,6 +372,51 @@ pub enum EngineEvent {
 impl PartialEq for EngineEvent {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
+            (
+                Self::SourceNoteInput {
+                    track_id: left_track,
+                    pitch: left_pitch,
+                    velocity: left_velocity,
+                    on: left_on,
+                    position: left_position,
+                },
+                Self::SourceNoteInput {
+                    track_id: right_track,
+                    pitch: right_pitch,
+                    velocity: right_velocity,
+                    on: right_on,
+                    position: right_position,
+                },
+            ) => {
+                left_track == right_track
+                    && left_pitch == right_pitch
+                    && left_velocity == right_velocity
+                    && left_on == right_on
+                    && left_position == right_position
+            }
+            (
+                Self::SourceNoteRepeated {
+                    track_id: left_track,
+                    pitch: left_pitch,
+                    velocity: left_velocity,
+                    rate: left_rate,
+                    position: left_position,
+                },
+                Self::SourceNoteRepeated {
+                    track_id: right_track,
+                    pitch: right_pitch,
+                    velocity: right_velocity,
+                    rate: right_rate,
+                    position: right_position,
+                },
+            ) => {
+                left_track == right_track
+                    && left_pitch == right_pitch
+                    && left_velocity == right_velocity
+                    && left_rate == right_rate
+                    && left_position == right_position
+            }
+
             (Self::DisposeEffect(left), Self::DisposeEffect(right)) => left == right,
             (Self::DisposeInstrument(left), Self::DisposeInstrument(right)) => left == right,
             (Self::PlaybackPosition(left), Self::PlaybackPosition(right)) => left == right,

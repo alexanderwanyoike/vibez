@@ -147,6 +147,19 @@ impl AudioEngine {
                                 active.length_samples,
                             )
                         });
+                        let source = EngineEvent::SourceNoteRepeated {
+                            track_id: id,
+                            pitch: trigger.pitch,
+                            velocity: trigger.velocity,
+                            rate: trigger.rate,
+                            position: crate::events::SourceRecordingPosition {
+                                effective_at_samples: trigger.effective_at_samples,
+                                canonical_at_samples: trigger.canonical_at_samples,
+                                section_id: section.map(|active| active.section_id),
+                                section_position_samples: section_position,
+                                canonical_section_position_samples: canonical_section_position,
+                            },
+                        };
                         let event = EngineEvent::NoteRepeated {
                             track_id: id,
                             pitch: trigger.pitch,
@@ -158,8 +171,9 @@ impl AudioEngine {
                             section_position_samples: section_position,
                             canonical_section_position_samples: canonical_section_position,
                         };
-                        presentation_overflow |=
-                            !presentation_queue::emit_repeated(event, events, scheduled, physical);
+                        presentation_overflow |= !presentation_queue::emit_repeated(
+                            source, event, events, scheduled, physical,
+                        );
                     };
                     if track.instrument.is_some() {
                         if idle {

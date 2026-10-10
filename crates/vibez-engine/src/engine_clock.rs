@@ -42,4 +42,15 @@ impl AudioEngine {
             ClockDomain::Perform => self.performance_position,
         }
     }
+    pub(super) fn source_recording_position(&self) -> crate::events::SourceRecordingPosition {
+        crate::events::SourceRecordingPosition {
+            effective_at_samples: self.performance_position,
+            canonical_at_samples: self.performance_position,
+            section_id: self.active_section.map(|section| section.section_id),
+            section_position_samples: self.active_section.map(|section| section.position_samples),
+            canonical_section_position_samples: self
+                .active_section
+                .map(|section| section.position_samples),
+        }
+    }
 }

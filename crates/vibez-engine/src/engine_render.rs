@@ -304,6 +304,19 @@ impl AudioEngine {
                             active.length_samples,
                         )
                     });
+                    let source = EngineEvent::SourceNoteRepeated {
+                        track_id,
+                        pitch: trigger.pitch,
+                        velocity: trigger.velocity,
+                        rate: trigger.rate,
+                        position: crate::events::SourceRecordingPosition {
+                            effective_at_samples: trigger.effective_at_samples,
+                            canonical_at_samples: trigger.canonical_at_samples,
+                            section_id: section.map(|active| active.section_id),
+                            section_position_samples: section_position,
+                            canonical_section_position_samples: canonical_section_position,
+                        },
+                    };
                     let event = EngineEvent::NoteRepeated {
                         track_id,
                         pitch: trigger.pitch,
@@ -315,8 +328,9 @@ impl AudioEngine {
                         section_position_samples: section_position,
                         canonical_section_position_samples: canonical_section_position,
                     };
-                    presentation_overflow |=
-                        !presentation_queue::emit_repeated(event, event_tx, scheduled, physical);
+                    presentation_overflow |= !presentation_queue::emit_repeated(
+                        source, event, event_tx, scheduled, physical,
+                    );
                 };
                 track.render_instrument(
                     InstrumentRenderContext {
@@ -564,6 +578,19 @@ impl AudioEngine {
                 let scheduled = &mut self.scheduled_presentation;
                 let physical = self.output_position;
                 let mut on_repeat = |trigger: crate::note_repeat::NoteRepeatTrigger| {
+                    let source = EngineEvent::SourceNoteRepeated {
+                        track_id,
+                        pitch: trigger.pitch,
+                        velocity: trigger.velocity,
+                        rate: trigger.rate,
+                        position: crate::events::SourceRecordingPosition {
+                            effective_at_samples: trigger.effective_at_samples,
+                            canonical_at_samples: trigger.canonical_at_samples,
+                            section_id: None,
+                            section_position_samples: None,
+                            canonical_section_position_samples: None,
+                        },
+                    };
                     let event = EngineEvent::NoteRepeated {
                         track_id,
                         pitch: trigger.pitch,
@@ -575,8 +602,9 @@ impl AudioEngine {
                         section_position_samples: None,
                         canonical_section_position_samples: None,
                     };
-                    presentation_overflow |=
-                        !presentation_queue::emit_repeated(event, event_tx, scheduled, physical);
+                    presentation_overflow |= !presentation_queue::emit_repeated(
+                        source, event, event_tx, scheduled, physical,
+                    );
                 };
                 track.render_instrument_idle(
                     repeat_pos,
