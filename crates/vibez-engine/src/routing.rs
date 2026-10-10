@@ -17,6 +17,10 @@ pub struct PreparedInput {
 #[derive(Debug)]
 pub struct PreparedNode {
     pub channel: usize,
+    pub controls: std::ops::Range<usize>,
+    pub bypass_state: Option<bool>,
+    pub wet_warmup: u32,
+    pub wet_fade_in: u32,
     pub incoming: Vec<usize>,
     pub samples: Vec<f32>,
     pub inputs: Vec<PreparedInput>,
@@ -31,11 +35,31 @@ pub struct PreparedRouting {
     pub graph: RoutingGraph,
     pub nodes: Vec<PreparedNode>,
     pub max_frames: usize,
+    pub compensation: crate::compensation::CompensationPlan,
+    pub capture_offsets: std::sync::Arc<[(vibez_core::id::TrackId, u32)]>,
+    pub edge_samples: Vec<Vec<f32>>,
+    pub bypass_delays: Vec<vibez_dsp::compensation_delay::CompensationDelay>,
+    pub bypass_samples: Vec<Vec<f32>>,
+    pub device_latencies: Vec<u32>,
+    pub channel_clocks: Vec<crate::compensation_controls::ChannelClock>,
+    pub automation_controls: Vec<crate::compensation_controls::PreparedAutomationControl>,
+    pub presentation: crate::compensation_clock::PresentationHistory,
+    pub presentation_start: Option<crate::compensation_clock::PresentationPosition>,
     pub detector_buses: Vec<vibez_core::id::TrackId>,
 }
 
 impl PreparedRouting {
     pub fn prepare(channels: &[RoutingChannel], max_frames: usize) -> Result<Box<Self>, String> {
+        Self::prepare_compensated(channels, max_frames, &[], &[], 0)
+    }
+
+    pub fn prepare_compensated(
+        channels: &[RoutingChannel],
+        max_frames: usize,
+        reports: &[(vibez_core::routing::RoutingNode, u32)],
+        reduced_tracks: &[vibez_core::id::TrackId],
+        generation: u64,
+    ) -> Result<Box<Self>, String> {
         if max_frames == 0 || max_frames > MAX_ROUTING_FRAMES {
             return Err(format!(
                 "Routing block capacity must be in 1..={MAX_ROUTING_FRAMES}"
@@ -51,13 +75,14 @@ impl PreparedRouting {
             .flat_map(|channel| &channel.effects)
             .flat_map(|effect| &effect.inputs)
             .filter(|input| input.supported())
-            .map(|input| input.channels)
-            .sum();
+            .try_fold(0usize, |sum, input| sum.checked_add(input.channels))
+            .ok_or("Routing input storage arithmetic overflow")?;
         let storage = graph
             .nodes
             .len()
             .checked_mul(2)
-            .and_then(|count| count.checked_add(input_channels + 6))
+            .and_then(|count| count.checked_add(input_channels))
+            .and_then(|count| count.checked_add(6))
             .and_then(|count| count.checked_mul(max_frames))
             .and_then(|count| count.checked_mul(std::mem::size_of::<f32>()))
             .ok_or("Routing storage arithmetic overflow")?;
@@ -67,6 +92,93 @@ impl PreparedRouting {
                 MAX_ROUTING_STORAGE_BYTES / 1024 / 1024
             ));
         }
+        if channels
+            .iter()
+            .flat_map(|channel| &channel.effects)
+            .any(|effect| {
+                effect
+                    .inputs
+                    .iter()
+                    .filter(|input| input.supported())
+                    .count()
+                    > MAX_EXTERNAL_INPUTS
+            })
+        {
+            return Err(format!(
+                "An effect exceeds the supported {MAX_EXTERNAL_INPUTS} external inputs"
+            ));
+        }
+        let device_latencies: Vec<_> = graph
+            .nodes
+            .iter()
+            .map(|node| {
+                reports
+                    .iter()
+                    .find(|(key, _)| key == node)
+                    .map_or(0, |(_, value)| *value)
+            })
+            .collect();
+        let timing = crate::compensation::CompensationTiming::prepare(
+            &graph,
+            &device_latencies,
+            reduced_tracks,
+            generation,
+        )
+        .map_err(|error| format!("Compensation preparation failed: {error:?}"))?;
+        let storage_samples = storage::planned_samples(
+            &graph,
+            input_channels,
+            channels.len(),
+            max_frames,
+            &timing,
+            &device_latencies,
+        )?;
+        storage::check_budget(storage_samples)?;
+        let compensation = timing
+            .allocate(crate::compensation::MAX_STORAGE_SAMPLES)
+            .map_err(|error| format!("Compensation preparation failed: {error:?}"))?;
+        let capture_offsets = channels
+            .iter()
+            .filter(|channel| !channel.is_bus && !channel.id.is_master())
+            .filter_map(|channel| {
+                let omitted = compensation
+                    .output_latency
+                    .saturating_sub(compensation.direct_path_latency(&graph, channel.id));
+                (omitted > 0).then_some((channel.id, omitted))
+            })
+            .collect::<Vec<_>>()
+            .into();
+        let channel_clocks = channels
+            .iter()
+            .map(|channel| {
+                crate::compensation_controls::ChannelClock::prepare(
+                    channel.id,
+                    compensation.output_latency,
+                    max_frames,
+                )
+            })
+            .collect::<Result<_, _>>()?;
+        let presentation =
+            crate::compensation_clock::PresentationHistory::prepare(compensation.output_latency)
+                .map_err(str::to_owned)?;
+        let bypass_delays = graph
+            .nodes
+            .iter()
+            .enumerate()
+            .map(|(index, node)| {
+                let frames = if matches!(node.stage, vibez_core::routing::NodeStage::Effect(_)) {
+                    device_latencies[index]
+                } else {
+                    0
+                };
+                vibez_dsp::compensation_delay::CompensationDelay::prepare(
+                    frames,
+                    2,
+                    crate::compensation::MAX_STORAGE_SAMPLES,
+                )
+                .map_err(|error| format!("Bypass delay preparation failed: {error:?}"))
+            })
+            .collect::<Result<_, _>>()?;
         let mut required = vec![false; graph.nodes.len()];
         for edge in &graph.edges {
             if matches!(edge.kind, vibez_core::routing::EdgeKind::External(_)) {
@@ -124,12 +236,11 @@ impl PreparedRouting {
                     }
                 }
             }
-            if inputs.len() > MAX_EXTERNAL_INPUTS {
-                return Err(format!(
-                    "An effect exceeds the supported {MAX_EXTERNAL_INPUTS} external inputs"
-                ));
-            }
             nodes.push(PreparedNode {
+                controls: 0..0,
+                bypass_state: None,
+                wet_warmup: 0,
+                wet_fade_in: 0,
                 channel: channels
                     .iter()
                     .position(|channel| channel.id == node.channel)
@@ -144,7 +255,17 @@ impl PreparedRouting {
                 inputs,
             });
         }
-        Ok(Box::new(Self {
+        let edge_samples = graph
+            .edges
+            .iter()
+            .map(|_| vec![0.0; max_frames * 2])
+            .collect();
+        let bypass_samples = graph
+            .nodes
+            .iter()
+            .map(|_| vec![0.0; max_frames * 2])
+            .collect();
+        let routing = Box::new(Self {
             channels: {
                 let mut track = 0;
                 let mut bus = 0;
@@ -164,6 +285,8 @@ impl PreparedRouting {
                         };
                         PreparedChannel {
                             id: channel.id,
+                            direct_latency: compensation.direct_path_latency(&graph, channel.id),
+                            source: !channel.is_bus && !channel.id.is_master(),
                             binding,
                             audible_return: false,
                         }
@@ -176,10 +299,110 @@ impl PreparedRouting {
             graph,
             nodes,
             max_frames,
+            compensation,
+            capture_offsets,
+            edge_samples,
+            bypass_delays,
+            bypass_samples,
+            device_latencies,
+            channel_clocks,
+            automation_controls: Vec::new(),
+            presentation,
+            presentation_start: None,
             detector_buses,
-        }))
+        });
+        debug_assert_eq!(routing.storage_samples()?, storage_samples);
+        Ok(routing)
+    }
+
+    pub fn storage_samples(&self) -> Result<usize, String> {
+        storage::allocated_samples(self)
+    }
+
+    pub fn configure_automation(
+        &mut self,
+        targets: &[(
+            vibez_core::id::TrackId,
+            vibez_core::automation::AutomationTarget,
+        )],
+    ) -> Result<(), String> {
+        let mut used = self.storage_samples()?;
+        let mut additions = Vec::new();
+        for &(track, target) in targets {
+            if self
+                .automation_controls
+                .iter()
+                .any(|control| control.track == track && control.target == target)
+                || additions
+                    .iter()
+                    .any(|&(existing_track, existing_target, _)| {
+                        existing_track == track && existing_target == target
+                    })
+            {
+                continue;
+            }
+            let stage = crate::compensation_controls::automation_stage(target);
+            if let Some(node) = self.graph.index(track, stage) {
+                let needed = storage::automation_samples(
+                    self.compensation.node_input_latency[node],
+                    self.max_frames,
+                )?;
+                used = used
+                    .checked_add(needed)
+                    .ok_or("Automation storage size overflow")?;
+                storage::check_budget(used)?;
+                additions.push((track, target, node));
+            }
+        }
+        let mut controls = Vec::with_capacity(additions.len());
+        for (track, target, node) in additions {
+            controls.push(
+                crate::compensation_controls::PreparedAutomationControl::prepare(
+                    track,
+                    target,
+                    node,
+                    self.compensation.node_input_latency[node],
+                    self.max_frames,
+                    crate::compensation::MAX_STORAGE_SAMPLES,
+                )?,
+            );
+        }
+        self.automation_controls.extend(controls);
+        self.automation_controls.sort_by_key(|control| control.node);
+        for (index, node) in self.nodes.iter_mut().enumerate() {
+            node.controls = self
+                .automation_controls
+                .partition_point(|control| control.node < index)
+                ..self
+                    .automation_controls
+                    .partition_point(|control| control.node <= index);
+        }
+        Ok(())
+    }
+
+    pub fn clear_history(&mut self) {
+        self.compensation.clear_history();
+        self.presentation.clear();
+        for clock in &mut self.channel_clocks {
+            clock.clear();
+        }
+        for control in &mut self.automation_controls {
+            control.clear();
+        }
+        self.presentation_start = None;
+        for node in &mut self.nodes {
+            node.bypass_state = None;
+            node.wet_warmup = 0;
+            node.wet_fade_in = 0;
+        }
+        for delay in &mut self.bypass_delays {
+            delay.clear();
+        }
     }
 }
+
+#[path = "routing_storage.rs"]
+mod storage;
 
 #[derive(Debug, Clone, Copy)]
 pub enum ChannelIndex {
@@ -192,6 +415,8 @@ pub enum ChannelIndex {
 pub struct PreparedChannel {
     pub id: vibez_core::id::TrackId,
     pub binding: ChannelIndex,
+    pub direct_latency: u32,
+    pub source: bool,
     pub(crate) audible_return: bool,
 }
 
