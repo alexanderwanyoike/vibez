@@ -69,6 +69,12 @@ impl CompensationPlan {
         self.delays[edge].process_layout(samples, channels);
     }
 
+    pub fn retain_history_from(&mut self, previous: &mut Self) {
+        for (next, old) in self.delays.iter_mut().zip(&mut previous.delays) {
+            next.retain_from(old);
+        }
+    }
+
     pub fn clear_history(&mut self) {
         for line in &mut self.delays {
             line.clear();
@@ -100,6 +106,7 @@ pub(crate) struct CompensationTiming {
     pub node_input_latency: Vec<u32>,
     pub node_output_latency: Vec<u32>,
     pub edge_delays: Vec<u32>,
+    retained_delays: Vec<u32>,
     pub output_latency: u32,
 }
 
@@ -122,6 +129,7 @@ impl CompensationTiming {
         let mut input_latency = vec![0u32; graph.nodes.len()];
         let mut output_latency = vec![0u32; graph.nodes.len()];
         let mut edge_delays = vec![0u32; graph.edges.len()];
+        let mut retained_delays = vec![0u32; graph.edges.len()];
         let mut visited = vec![false; graph.nodes.len()];
         for &node in &graph.order {
             if node >= visited.len() || visited[node] {
@@ -154,6 +162,7 @@ impl CompensationTiming {
                         matches!(dependency.kind, EdgeKind::External(_))
                             && graph.nodes[dependency.to].channel.is_master()
                     });
+                retained_delays[index] = arrival - output_latency[edge.from];
                 edge_delays[index] = if exempt {
                     0
                 } else {
@@ -168,20 +177,23 @@ impl CompensationTiming {
             node_input_latency: input_latency,
             node_output_latency: output_latency,
             edge_delays,
+            retained_delays,
             output_latency: total_latency,
         })
     }
 
     pub(crate) fn storage_samples(&self) -> Result<usize, CompensationError> {
-        self.edge_delays.iter().try_fold(0usize, |total, &frames| {
-            let samples = CompensationDelay::required_samples(frames, 2)
-                .map_err(CompensationError::DelayStorage)?;
-            total
-                .checked_add(samples)
-                .ok_or(CompensationError::DelayStorage(
-                    DelayPreparationError::SizeOverflow,
-                ))
-        })
+        self.retained_delays
+            .iter()
+            .try_fold(0usize, |total, &frames| {
+                let samples = CompensationDelay::required_samples(frames, 2)
+                    .map_err(CompensationError::DelayStorage)?;
+                total
+                    .checked_add(samples)
+                    .ok_or(CompensationError::DelayStorage(
+                        DelayPreparationError::SizeOverflow,
+                    ))
+            })
     }
 
     pub(crate) fn allocate(
@@ -197,8 +209,9 @@ impl CompensationTiming {
         let delays = self
             .edge_delays
             .iter()
-            .map(|&frames| {
-                CompensationDelay::prepare(frames, 2, needed)
+            .zip(&self.retained_delays)
+            .map(|(&frames, &retained)| {
+                CompensationDelay::prepare_retained(frames, retained, 2, needed)
                     .map_err(CompensationError::DelayStorage)
             })
             .collect::<Result<_, _>>()?;

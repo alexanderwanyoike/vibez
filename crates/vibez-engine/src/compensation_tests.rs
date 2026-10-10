@@ -29,9 +29,9 @@ fn series_parallel_bus_and_master_use_accumulated_arrivals() {
     let bus = TrackId::new();
     let effects = [EffectId::new(), EffectId::new(), EffectId::new()];
     let mut source = channel(a, &effects[..2], false);
-    source.sends.push((bus, 0.5));
+    source.sends.push(bus);
     let mut dry = channel(b, &[], false);
-    dry.sends.push((bus, 0.5));
+    dry.sends.push(bus);
     let graph = RoutingGraph::prepare(&[
         channel(TrackId::MASTER, &effects[2..], true),
         channel(bus, &[], true),
@@ -52,7 +52,7 @@ fn series_parallel_bus_and_master_use_accumulated_arrivals() {
     assert_eq!(plan.output_latency, 675);
     let dry_tap = graph.index(b, NodeStage::AfterFader).unwrap();
     for (edge, &delay) in graph.edges.iter().zip(&plan.edge_delays) {
-        if edge.from == dry_tap && matches!(edge.kind, EdgeKind::Mix | EdgeKind::Send(_)) {
+        if edge.from == dry_tap && matches!(edge.kind, EdgeKind::Mix | EdgeKind::Send) {
             assert_eq!(delay, 658);
         }
     }
@@ -126,7 +126,7 @@ fn reduced_monitoring_exempts_direct_output_but_preserves_returns() {
     let bus = TrackId::new();
     let fx = EffectId::new();
     let mut live = channel(monitored, &[], false);
-    live.sends.push((bus, 0.5));
+    live.sends.push(bus);
     let graph = RoutingGraph::prepare(&[
         live,
         channel(slow, &[fx], false),
@@ -248,11 +248,11 @@ fn chained_bus_sends_align_each_sum_and_accumulate_all_processor_reports() {
     let bus_b = TrackId::new();
     let effects = [EffectId::new(), EffectId::new(), EffectId::new()];
     let mut input = channel(source, &effects[..1], false);
-    input.sends.push((bus_a, 0.5));
+    input.sends.push(bus_a);
     let mut first_bus = channel(bus_a, &effects[1..2], true);
-    first_bus.sends.push((bus_b, 0.5));
+    first_bus.sends.push(bus_b);
     let mut dry = channel(dry, &[], false);
-    dry.sends.push((bus_b, 0.5));
+    dry.sends.push(bus_b);
     let graph = RoutingGraph::prepare(&[
         input,
         first_bus,

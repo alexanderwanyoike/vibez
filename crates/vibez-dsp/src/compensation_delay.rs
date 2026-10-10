@@ -3,6 +3,7 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DelayPreparationError {
     UnsupportedChannels,
+    InvalidRetention,
     SizeOverflow,
     StorageBudget,
     Allocation,
@@ -15,6 +16,9 @@ pub struct CompensationDelay {
     history: Vec<f32>,
     channels: usize,
     cursor: usize,
+    delay_frames: u32,
+    transition_from: u32,
+    transition_remaining: u32,
 }
 
 impl CompensationDelay {
@@ -23,7 +27,20 @@ impl CompensationDelay {
         channels: usize,
         available_samples: usize,
     ) -> Result<Self, DelayPreparationError> {
-        let samples = Self::required_samples(frames, channels)?;
+        Self::prepare_retained(frames, frames, channels, available_samples)
+    }
+
+    pub fn prepare_retained(
+        frames: u32,
+        retained_frames: u32,
+        channels: usize,
+        available_samples: usize,
+    ) -> Result<Self, DelayPreparationError> {
+        let samples = Self::required_samples(retained_frames, channels)?;
+        if frames > retained_frames {
+            return Err(DelayPreparationError::InvalidRetention);
+        }
+
         if samples > available_samples {
             return Err(DelayPreparationError::StorageBudget);
         }
@@ -36,6 +53,9 @@ impl CompensationDelay {
             history,
             channels,
             cursor: 0,
+            delay_frames: frames,
+            transition_from: frames,
+            transition_remaining: 0,
         })
     }
 
@@ -54,13 +74,31 @@ impl CompensationDelay {
     }
 
     pub fn frames(&self) -> usize {
-        self.history.len() / self.channels
+        self.delay_frames as usize
     }
 
     /// A seek invalidates history even if the destination reuses the same plan.
     pub fn clear(&mut self) {
         self.history.fill(0.0);
         self.cursor = 0;
+        self.transition_remaining = 0;
+    }
+
+    pub fn retain_from(&mut self, previous: &mut Self) {
+        debug_assert_eq!(self.history.len(), previous.history.len());
+        debug_assert_eq!(self.channels, previous.channels);
+        std::mem::swap(&mut self.history, &mut previous.history);
+        self.cursor = previous.cursor;
+        self.transition_from = if previous.transition_remaining == 64 {
+            previous.transition_from
+        } else {
+            previous.delay_frames
+        };
+        self.transition_remaining = if self.delay_frames == self.transition_from {
+            0
+        } else {
+            64
+        };
     }
 
     pub fn fill_history(&mut self, value: f32) {
@@ -69,17 +107,7 @@ impl CompensationDelay {
     }
 
     pub fn process(&mut self, interleaved: &mut [f32]) {
-        debug_assert!(interleaved.len().is_multiple_of(self.channels));
-        if self.history.is_empty() {
-            return;
-        }
-        for sample in interleaved {
-            std::mem::swap(sample, &mut self.history[self.cursor]);
-            self.cursor += 1;
-            if self.cursor == self.history.len() {
-                self.cursor = 0;
-            }
-        }
+        self.process_layout(interleaved, self.channels);
     }
 
     pub fn process_layout(&mut self, interleaved: &mut [f32], channels: usize) {
@@ -87,16 +115,44 @@ impl CompensationDelay {
             channels == self.channels || (channels == 1 && self.channels == 2),
             "Compensation delay received an unsupported processing layout"
         );
-        if channels == self.channels {
-            self.process(interleaved);
-        } else if channels == 1 && self.channels == 2 && !self.history.is_empty() {
-            for sample in interleaved {
-                let output = self.history[self.cursor];
-                self.history[self.cursor] = *sample;
-                self.history[self.cursor + 1] = *sample;
-                *sample = output;
-                self.cursor = (self.cursor + 2) % self.history.len();
+        if self.history.is_empty() {
+            return;
+        }
+        for frame in interleaved.chunks_exact_mut(channels) {
+            let mono = frame[0];
+            let blend = 1.0 - self.transition_remaining as f32 / 64.0;
+            for (channel, sample) in frame
+                .iter_mut()
+                .map(Some)
+                .chain(std::iter::repeat_with(|| None))
+                .take(self.channels)
+                .enumerate()
+            {
+                let source = sample.as_deref().copied().unwrap_or(mono);
+                let delayed = |delay: u32| {
+                    if delay == 0 {
+                        source
+                    } else {
+                        let index = (self.cursor + self.history.len()
+                            - delay as usize * self.channels
+                            + channel)
+                            % self.history.len();
+                        self.history[index]
+                    }
+                };
+                let next = delayed(self.delay_frames);
+                let output = if self.transition_remaining == 0 {
+                    next
+                } else {
+                    delayed(self.transition_from) * (1.0 - blend) + next * blend
+                };
+                self.history[self.cursor + channel] = source;
+                if let Some(sample) = sample {
+                    *sample = output;
+                }
             }
+            self.cursor = (self.cursor + self.channels) % self.history.len();
+            self.transition_remaining = self.transition_remaining.saturating_sub(1);
         }
     }
 }
@@ -200,5 +256,48 @@ mod tests {
         CompensationDelay::prepare(3, 1, 3)
             .unwrap()
             .process_layout(&mut [1.0; 8], 2);
+    }
+}
+
+#[cfg(test)]
+mod transition_tests {
+    use super::*;
+
+    #[test]
+    fn invalid_retention_is_rejected_before_storage_or_processing() {
+        assert!(matches!(
+            CompensationDelay::prepare_retained(521, 137, 2, 1042),
+            Err(DelayPreparationError::InvalidRetention)
+        ));
+    }
+
+    #[test]
+    fn zero_wait_retains_history_for_growing_and_shrinking_output_waits() {
+        let mut current = CompensationDelay::prepare_retained(0, 521, 2, 1042).unwrap();
+        let mut signal = [0.25; 2048];
+        current.process(&mut signal);
+        for wait in [521, 0, 521] {
+            let mut next = CompensationDelay::prepare_retained(wait, 521, 2, 1042).unwrap();
+            next.retain_from(&mut current);
+            let mut block = [0.25; 1024];
+            next.process(&mut block);
+            assert!(block.iter().all(|&sample| sample == 0.25));
+            current = next;
+        }
+    }
+
+    #[test]
+    fn wait_change_crossfades_old_and_new_taps_without_a_step() {
+        let mut previous = CompensationDelay::prepare_retained(0, 137, 1, 137).unwrap();
+        previous.process(&mut [0.0; 137]);
+        let mut next = CompensationDelay::prepare_retained(137, 137, 1, 137).unwrap();
+        next.retain_from(&mut previous);
+        let mut output = [1.0; 64];
+        next.process(&mut output);
+        assert_eq!(output[0], 1.0);
+        assert!(output
+            .windows(2)
+            .all(|pair| (pair[1] - pair[0]).abs() <= 1.0 / 64.0));
+        assert_eq!(output[63], 1.0 / 64.0);
     }
 }

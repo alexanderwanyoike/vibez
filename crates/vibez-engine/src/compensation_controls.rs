@@ -55,6 +55,26 @@ impl ChannelClock {
             .and_then(|index| self.positions.get(index))
             .is_some()
     }
+    pub fn segment_end(&self, delay: u32, offset: usize, limit: usize) -> usize {
+        let valid = self.has_context(delay, offset);
+        let start = self.position(delay, offset);
+        let mut end = offset + 1;
+        let step = if end < limit && self.position(delay, end) == start {
+            0
+        } else {
+            1
+        };
+        while end < limit
+            && self.has_context(delay, end) == valid
+            && (!valid
+                || self.position(delay, end)
+                    == start.saturating_add(((end - offset) * step) as u64))
+        {
+            end += 1;
+        }
+        end
+    }
+
     pub fn position(&self, delay: u32, offset: usize) -> u64 {
         // Empty command-drain callbacks have no current audio coordinate.
         if delay == 0 && offset == 0 && self.positions.written() == self.block_start {
@@ -144,3 +164,23 @@ impl PreparedAutomationControl {
 #[cfg(test)]
 #[path = "compensation_controls_tests.rs"]
 mod tests;
+
+pub fn automation_stage(target: AutomationTarget) -> vibez_core::routing::NodeStage {
+    use vibez_core::routing::NodeStage;
+    match target {
+        AutomationTarget::EffectParam { effect_id, .. }
+        | AutomationTarget::PluginParam {
+            effect_id: Some(effect_id),
+            ..
+        } => NodeStage::Effect(effect_id),
+        AutomationTarget::InstrumentParam { .. }
+        | AutomationTarget::PluginParam {
+            effect_id: None, ..
+        }
+        | AutomationTarget::TrackSwingOffset => NodeStage::Source,
+        AutomationTarget::TrackGain
+        | AutomationTarget::TrackPan
+        | AutomationTarget::TrackMute
+        | AutomationTarget::Send { .. } => NodeStage::AfterFader,
+    }
+}

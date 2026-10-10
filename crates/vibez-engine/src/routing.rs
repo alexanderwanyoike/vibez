@@ -17,6 +17,10 @@ pub struct PreparedInput {
 #[derive(Debug)]
 pub struct PreparedNode {
     pub channel: usize,
+    pub controls: std::ops::Range<usize>,
+    pub bypass_state: Option<bool>,
+    pub wet_warmup: u32,
+    pub wet_fade_in: u32,
     pub incoming: Vec<usize>,
     pub samples: Vec<f32>,
     pub inputs: Vec<PreparedInput>,
@@ -233,6 +237,10 @@ impl PreparedRouting {
                 }
             }
             nodes.push(PreparedNode {
+                controls: 0..0,
+                bypass_state: None,
+                wet_warmup: 0,
+                wet_fade_in: 0,
                 channel: channels
                     .iter()
                     .position(|channel| channel.id == node.channel)
@@ -277,6 +285,8 @@ impl PreparedRouting {
                         };
                         PreparedChannel {
                             id: channel.id,
+                            direct_latency: compensation.direct_path_latency(&graph, channel.id),
+                            source: !channel.is_bus && !channel.id.is_master(),
                             binding,
                             audible_return: false,
                         }
@@ -316,8 +326,6 @@ impl PreparedRouting {
             vibez_core::automation::AutomationTarget,
         )],
     ) -> Result<(), String> {
-        use vibez_core::automation::AutomationTarget;
-        use vibez_core::routing::NodeStage;
         let mut used = self.storage_samples()?;
         let mut additions = Vec::new();
         for &(track, target) in targets {
@@ -333,19 +341,7 @@ impl PreparedRouting {
             {
                 continue;
             }
-            let stage = match target {
-                AutomationTarget::EffectParam { effect_id, .. }
-                | AutomationTarget::PluginParam {
-                    effect_id: Some(effect_id),
-                    ..
-                } => NodeStage::Effect(effect_id),
-                AutomationTarget::InstrumentParam { .. }
-                | AutomationTarget::PluginParam {
-                    effect_id: None, ..
-                }
-                | AutomationTarget::TrackSwingOffset => NodeStage::Source,
-                _ => NodeStage::AfterFader,
-            };
+            let stage = crate::compensation_controls::automation_stage(target);
             if let Some(node) = self.graph.index(track, stage) {
                 let needed = storage::automation_samples(
                     self.compensation.node_input_latency[node],
@@ -372,6 +368,15 @@ impl PreparedRouting {
             );
         }
         self.automation_controls.extend(controls);
+        self.automation_controls.sort_by_key(|control| control.node);
+        for (index, node) in self.nodes.iter_mut().enumerate() {
+            node.controls = self
+                .automation_controls
+                .partition_point(|control| control.node < index)
+                ..self
+                    .automation_controls
+                    .partition_point(|control| control.node <= index);
+        }
         Ok(())
     }
 
@@ -385,6 +390,11 @@ impl PreparedRouting {
             control.clear();
         }
         self.presentation_start = None;
+        for node in &mut self.nodes {
+            node.bypass_state = None;
+            node.wet_warmup = 0;
+            node.wet_fade_in = 0;
+        }
         for delay in &mut self.bypass_delays {
             delay.clear();
         }
@@ -405,6 +415,8 @@ pub enum ChannelIndex {
 pub struct PreparedChannel {
     pub id: vibez_core::id::TrackId,
     pub binding: ChannelIndex,
+    pub direct_latency: u32,
+    pub source: bool,
     pub(crate) audible_return: bool,
 }
 

@@ -107,3 +107,15 @@ fn automation_preparation_checks_values_and_delay_together_before_allocation() {
     );
     assert!(PreparedAutomationControl::required_samples(3, usize::MAX).is_err());
 }
+
+#[test]
+fn context_segments_keep_held_clocks_whole_and_split_at_a_recorded_wrap() {
+    let mut clock = ChannelClock::prepare(TrackId::new(), 8, 16).unwrap();
+    clock.record(100, 8, false);
+    assert_eq!(clock.segment_end(0, 0, 8), 8);
+    clock.record(200, 8, true);
+    assert_eq!(clock.segment_end(0, 0, 8), 8);
+    clock.record(0, 8, true);
+    assert_eq!(clock.segment_end(4, 0, 8), 4);
+    assert_eq!(clock.segment_end(4, 4, 8), 8);
+}
