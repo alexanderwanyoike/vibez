@@ -68,8 +68,12 @@ pub(super) fn emit_repeated(
 
 impl AudioEngine {
     pub(super) fn present_event(&mut self, event: EngineEvent, delay: u32) {
-        let now = self.output_position;
-        let due = now.saturating_add(delay as u64);
+        let now = self.output_position + self.rendered_callback_frames as u64;
+        self.present_event_at(event, now.saturating_add(delay as u64));
+    }
+
+    pub(super) fn present_event_at(&mut self, event: EngineEvent, due: u64) {
+        let now = self.output_position + self.rendered_callback_frames as u64;
         if let Some(event) = queue_event(
             event,
             &mut self.event_tx,

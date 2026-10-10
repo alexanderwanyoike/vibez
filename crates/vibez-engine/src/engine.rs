@@ -100,6 +100,7 @@ pub struct AudioEngine {
     split_wrap_handled: bool,
     active_section: Option<ActiveSectionPlayback>,
     clip_performance: bool,
+    pending_clip_batch: Option<clip_batch::PendingClipBatch>,
     queued_section: Option<QueuedSectionPlayback>,
     pending_section_record: Option<section_record::PendingSectionRecord>,
     active_section_record: Option<section_record::ActiveSectionRecord>,
@@ -116,6 +117,7 @@ pub struct AudioEngine {
     /// this follows the active clock domain.
     performance_position: u64,
     output_position: u64,
+    rendered_callback_frames: usize,
     clip_record: Option<clip_record::ClipRecordRuntime>,
     /// The clock currently authorised to advance. Perform owns an independent
     /// zero-based engine timeline; its playback must never mutate the
@@ -265,6 +267,7 @@ impl AudioEngine {
             split_wrap_handled: false,
             active_section: None,
             clip_performance: false,
+            pending_clip_batch: None,
             queued_section: None,
             pending_section_record: None,
             active_section_record: None,
@@ -274,6 +277,7 @@ impl AudioEngine {
             project_swing: SwingAmount::default(),
             performance_position: 0,
             output_position: 0,
+            rendered_callback_frames: 0,
             clip_record: None,
             clock_domain: ClockDomain::Arrange,
             stopped_note_repeat_anchor: None,
@@ -323,6 +327,7 @@ impl AudioEngine {
             live_input,
             mut track_output_capture,
         } = block;
+        self.rendered_callback_frames = 0;
         self.compensation_callback_heard_start = self.effective_position();
         self.flush_processing_errors();
         self.flush_presentation();
@@ -805,3 +810,10 @@ mod automation_retirement_tests;
 #[cfg(test)]
 #[path = "engine_presentation_runtime_tests.rs"]
 mod presentation_runtime_tests;
+
+#[cfg(test)]
+#[path = "engine_clip_batch_tests.rs"]
+mod clip_batch_tests;
+
+#[path = "engine_clip_batch.rs"]
+mod clip_batch;
