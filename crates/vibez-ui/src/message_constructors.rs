@@ -1,5 +1,3 @@
-//! Existing message constructors, separated from message payloads.
-
 use super::*;
 
 /// Arity-preserving constructor helpers so call sites read cleanly

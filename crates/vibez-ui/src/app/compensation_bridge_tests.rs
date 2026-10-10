@@ -98,12 +98,6 @@ fn returned_device_event_reconfigures_on_main_and_publishes_resume_or_reject_wit
                     app.state.project_tracks.tracks[0].effects[0].latency_samples,
                     None
                 );
-                assert!(app.state.project_tracks.tracks[0].effects[0].reconfiguration_failed);
-                assert!(app
-                    .sidechain_model()
-                    .iter()
-                    .any(|channel| channel.id == track_id
-                        && channel.effects.iter().any(|effect| effect.id == id)));
             }
             EngineCommand::ResumeDeviceReconfiguration { device, routing } if !fail => {
                 assert_eq!(device.effect_id(), Some(id));

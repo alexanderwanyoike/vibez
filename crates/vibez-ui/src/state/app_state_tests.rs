@@ -1,5 +1,3 @@
-//! Existing shared application state regressions.
-
 use super::*;
 use vibez_core::id::TrackId;
 use vibez_core::midi::TrackKind;

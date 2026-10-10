@@ -699,6 +699,9 @@ mod views_clip_launcher;
 mod clip_project_tests;
 
 #[cfg(test)]
+mod compensation_persistence_tests;
+
+#[cfg(test)]
 mod plugin_load_tests;
 #[cfg(test)]
 mod test_support;
@@ -713,3 +716,11 @@ mod sidechain_sync_tests;
 
 #[cfg(test)]
 mod compensation_bridge_tests;
+
+#[cfg(test)]
+mod compensation_live_timing_tests;
+
+#[cfg(test)]
+mod compensation_selection_tests;
+
+mod midi_input;

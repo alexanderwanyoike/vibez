@@ -1,10 +1,9 @@
-//! Project-owned track lookup and its unchanged defaults.
-
 use super::{new_master_track, ProjectTrack, TrackId};
 
 /// Project-owned tracks and channels shared by every musical timeline.
 #[derive(Debug, Clone)]
 pub struct ProjectTracksState {
+    pub reduced_latency_monitoring: bool,
     pub tracks: Vec<ProjectTrack>,
     /// The master bus channel (see [`new_master_track`]).
     pub master: ProjectTrack,
@@ -16,6 +15,7 @@ pub struct ProjectTracksState {
 impl Default for ProjectTracksState {
     fn default() -> Self {
         Self {
+            reduced_latency_monitoring: false,
             tracks: Vec::new(),
             master: new_master_track(),
             buses: Vec::new(),

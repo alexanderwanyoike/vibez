@@ -186,5 +186,9 @@ impl UndoHistory {
 }
 
 #[cfg(test)]
+#[path = "compensation_undo_tests.rs"]
+mod compensation_undo_tests;
+
+#[cfg(test)]
 #[path = "history_redo_tests.rs"]
 mod history_redo_tests;
