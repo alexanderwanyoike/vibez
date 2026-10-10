@@ -1,5 +1,6 @@
 //! Prepared graph buffers and indexed channel bindings for callback delivery.
 
+use std::collections::HashMap;
 use vibez_core::routing::{ExternalInputDescriptor, RoutingChannel, RoutingError, RoutingGraph};
 
 pub const MAX_EXTERNAL_INPUTS: usize = 64;
@@ -28,6 +29,15 @@ pub struct PreparedNode {
 
 #[derive(Debug)]
 pub struct PreparedRouting {
+    pub(crate) node_indices: HashMap<vibez_core::routing::RoutingNode, usize>,
+    pub(crate) channel_indices: HashMap<vibez_core::id::TrackId, usize>,
+    pub(crate) control_indices: HashMap<
+        (
+            vibez_core::id::TrackId,
+            vibez_core::automation::AutomationTarget,
+        ),
+        usize,
+    >,
     pub channels: Vec<PreparedChannel>,
     pub layout_output: Vec<f32>,
     pub layout_input: Vec<f32>,
@@ -289,6 +299,7 @@ impl PreparedRouting {
                             source: !channel.is_bus && !channel.id.is_master(),
                             binding,
                             audible_return: false,
+                            controls: 0..0,
                         }
                     })
                     .collect()
@@ -296,6 +307,19 @@ impl PreparedRouting {
             layout_output: vec![0.0; max_frames * 2],
             layout_input: vec![0.0; max_frames * 2],
             layout_capture: vec![0.0; max_frames * 2],
+            node_indices: graph
+                .nodes
+                .iter()
+                .copied()
+                .enumerate()
+                .map(|(index, node)| (node, index))
+                .collect(),
+            channel_indices: channels
+                .iter()
+                .enumerate()
+                .map(|(index, channel)| (channel.id, index))
+                .collect(),
+            control_indices: HashMap::new(),
             graph,
             nodes,
             max_frames,
@@ -329,6 +353,9 @@ impl PreparedRouting {
         let mut used = self.storage_samples()?;
         let mut additions = Vec::new();
         for &(track, target) in targets {
+            if !self.channel_indices.contains_key(&track) {
+                continue;
+            }
             if self
                 .automation_controls
                 .iter()
@@ -342,7 +369,10 @@ impl PreparedRouting {
                 continue;
             }
             let stage = crate::compensation_controls::automation_stage(target);
-            if let Some(node) = self.graph.index(track, stage) {
+            if let Some(&node) = self.node_indices.get(&vibez_core::routing::RoutingNode {
+                channel: track,
+                stage,
+            }) {
                 let needed = storage::automation_samples(
                     self.compensation.node_input_latency[node],
                     self.max_frames,
@@ -376,6 +406,33 @@ impl PreparedRouting {
                 ..self
                     .automation_controls
                     .partition_point(|control| control.node <= index);
+        }
+        self.control_indices = self
+            .automation_controls
+            .iter()
+            .enumerate()
+            .map(|(index, control)| ((control.track, control.target), index))
+            .collect();
+        for channel in &mut self.channels {
+            debug_assert!(self.channel_indices.contains_key(&channel.id));
+            let first = self
+                .graph
+                .nodes
+                .iter()
+                .position(|node| node.channel == channel.id)
+                .unwrap_or(self.graph.nodes.len());
+            let end = self
+                .graph
+                .nodes
+                .iter()
+                .rposition(|node| node.channel == channel.id)
+                .map_or(first, |last| last + 1);
+            channel.controls = self
+                .automation_controls
+                .partition_point(|control| control.node < first)
+                ..self
+                    .automation_controls
+                    .partition_point(|control| control.node < end);
         }
         Ok(())
     }
@@ -418,6 +475,7 @@ pub struct PreparedChannel {
     pub direct_latency: u32,
     pub source: bool,
     pub(crate) audible_return: bool,
+    pub(crate) controls: std::ops::Range<usize>,
 }
 
 impl PreparedChannel {

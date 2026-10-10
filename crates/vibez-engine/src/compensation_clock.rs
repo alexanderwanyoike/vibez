@@ -18,6 +18,7 @@ pub struct PresentationPosition {
 pub struct PresentationHistory {
     positions: GuardedHistory<PresentationPosition>,
     delay: u32,
+    performance_rebase_written: u64,
 }
 
 impl PresentationHistory {
@@ -27,7 +28,11 @@ impl PresentationHistory {
         }
         let count = GuardedHistory::<PresentationPosition>::required_count(delay, 0)?;
         let positions = GuardedHistory::prepare(count)?;
-        Ok(Self { positions, delay })
+        Ok(Self {
+            positions,
+            delay,
+            performance_rebase_written: 0,
+        })
     }
 
     pub fn storage_bytes(&self) -> usize {
@@ -36,6 +41,27 @@ impl PresentationHistory {
 
     pub fn clear(&mut self) {
         self.positions.clear();
+        self.performance_rebase_written = 0;
+    }
+    pub fn retain_from(&mut self, previous: &mut Self) -> bool {
+        if self.delay != previous.delay || !self.positions.retain_from(&mut previous.positions) {
+            return false;
+        }
+        self.performance_rebase_written = previous.performance_rebase_written;
+        true
+    }
+    pub fn rebase_performance(&mut self) {
+        // Old Arrange coordinates still describe audio draining through the
+        // mix. Only their previous Perform lifetime becomes unavailable.
+        self.performance_rebase_written = self.positions.written();
+    }
+    fn position(&self, index: u64) -> Option<PresentationPosition> {
+        self.positions.get(index).map(|mut position| {
+            if index < self.performance_rebase_written {
+                position.perform = 0;
+            }
+            position
+        })
     }
 
     /// Each span is a contiguous musical render segment. A loop or Section
@@ -74,16 +100,19 @@ impl PresentationHistory {
     }
 
     pub fn before_block(&self, delay: u32) -> Option<PresentationPosition> {
-        if delay > self.delay {
+        if delay == 0 || delay > self.delay {
             return None;
         }
-        self.positions.before_block(delay)
+        self.positions
+            .written()
+            .checked_sub(delay as u64)
+            .and_then(|index| self.position(index))
     }
     pub fn audible(&self) -> Option<PresentationPosition> {
         self.positions
             .written()
             .checked_sub(self.delay as u64 + 1)
-            .and_then(|index| self.positions.get(index))
+            .and_then(|index| self.position(index))
     }
 }
 

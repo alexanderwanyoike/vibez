@@ -35,6 +35,12 @@ impl ChannelClock {
         self.positions.clear();
         self.block_start = 0;
     }
+    pub fn retain_from(&mut self, previous: &mut Self) {
+        if self.positions.retain_from(&mut previous.positions) {
+            self.block_start = previous.block_start;
+            self.history_start = previous.history_start;
+        }
+    }
     pub fn record(&mut self, position: u64, frames: usize, advancing: bool) {
         self.block_start = self.positions.written();
         if self.positions.written() == 0 {
@@ -141,6 +147,14 @@ impl PreparedAutomationControl {
     }
     pub fn clear(&mut self) {
         self.delay.fill_history(f32::NAN);
+    }
+    pub fn retain_from(&mut self, previous: &mut Self) {
+        if self.delay.storage_samples() == previous.delay.storage_samples() {
+            self.delay.retain_from(&mut previous.delay);
+        } else {
+            // Missing control history means no lane value, never numeric zero.
+            self.clear();
+        }
     }
     pub fn render(
         &mut self,

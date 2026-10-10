@@ -36,6 +36,14 @@ impl<T: Copy + Default> GuardedHistory<T> {
     pub(crate) fn clear(&mut self) {
         self.written = 0;
     }
+    pub(crate) fn retain_from(&mut self, previous: &mut Self) -> bool {
+        if self.values.len() != previous.values.len() {
+            return false;
+        }
+        std::mem::swap(&mut self.values, &mut previous.values);
+        self.written = previous.written;
+        true
+    }
     pub(crate) fn push(&mut self, position: T) {
         let index = (self.written % self.values.len() as u64) as usize;
         self.values[index] = position;
