@@ -574,3 +574,151 @@ fn same_pitch_release_precedes_retrigger_in_mixed_timestamp_plugin_events() {
         plugin.deactivate();
     }
 }
+
+#[test]
+fn loadable_bus_effect_has_one_shared_solo_sum_and_an_audible_return_capture() {
+    use vibez_core::effect::EffectType;
+    use vibez_engine::engine::AudioProcessBlock;
+    let fixture = support::Fixture::new();
+    for format in ["clap", "vst3"] {
+        for (kick_solo, bass_solo) in [(true, false), (false, true), (true, true)] {
+            let (mut engine, mut commands, mut events) = AudioEngine::new();
+            let kick = TrackId::new();
+            let bass = TrackId::new();
+            let ghost = TrackId::new();
+            let bus = TrackId::new();
+            let gate = EffectId::new();
+            let bus_fx = EffectId::new();
+            let plugin = fixture.load(format, 64);
+            let inputs = plugin.external_inputs().to_vec();
+            commands.push(EngineCommand::SetSampleRate(48000)).unwrap();
+            for id in [kick, bass, ghost] {
+                commands
+                    .push(EngineCommand::AddTrack(id, "Track".into()))
+                    .unwrap();
+            }
+            commands
+                .push(EngineCommand::AddBus(bus, "Drums".into()))
+                .unwrap();
+            for (id, value) in [(kick, 0.05), (bass, 0.2), (ghost, 1.0)] {
+                commands.push(clip(id, value, value)).unwrap();
+            }
+            for id in [kick, ghost] {
+                commands
+                    .push(EngineCommand::SetSend {
+                        track_id: id,
+                        bus_id: bus,
+                        amount: 1.0,
+                    })
+                    .unwrap();
+            }
+            commands
+                .push(EngineCommand::SetTrackSolo(kick, kick_solo))
+                .unwrap();
+            commands
+                .push(EngineCommand::SetTrackSolo(bass, bass_solo))
+                .unwrap();
+            commands
+                .push(EngineCommand::AddEffect {
+                    track_id: bass,
+                    effect_id: gate,
+                    effect_type: EffectType::Gate,
+                    position: None,
+                })
+                .unwrap();
+            for (param_index, value) in [(0, -20.0), (1, 0.1)] {
+                commands
+                    .push(EngineCommand::SetEffectParam {
+                        track_id: bass,
+                        effect_id: gate,
+                        param_index,
+                        value,
+                    })
+                    .unwrap();
+            }
+            commands
+                .push(EngineCommand::AddPluginEffect {
+                    track_id: bus,
+                    effect_id: bus_fx,
+                    effect: Box::new(PluginEffectWrapper::new(plugin)),
+                    position: None,
+                })
+                .unwrap();
+            let mut kick_model = channel(kick);
+            kick_model.sends.push(bus);
+            let mut ghost_model = channel(ghost);
+            ghost_model.sends.push(bus);
+            let mut bus_model = channel(bus);
+            bus_model.is_bus = true;
+            bus_model.effects.push(RoutingEffect {
+                id: bus_fx,
+                inputs,
+                assignments: vec![],
+                inactive_inputs: vec![],
+            });
+            let mut bass_model = channel(bass);
+            bass_model.effects.push(RoutingEffect {
+                id: gate,
+                inputs: vec![ExternalInputDescriptor {
+                    id: ExternalInputId(0),
+                    name: "Sidechain".into(),
+                    channels: 2,
+                }],
+                assignments: vec![SidechainAssignment {
+                    input_id: ExternalInputId(0),
+                    input_name: "Sidechain".into(),
+                    source: bus,
+                    source_name: "Drums".into(),
+                    tap: SourceTap::AfterEffects,
+                }],
+                inactive_inputs: vec![],
+            });
+            commands
+                .push(EngineCommand::SetRouting(
+                    PreparedRouting::prepare(
+                        &[
+                            kick_model,
+                            bass_model,
+                            ghost_model,
+                            bus_model,
+                            channel(TrackId::MASTER),
+                        ],
+                        64,
+                    )
+                    .unwrap(),
+                ))
+                .unwrap();
+            engine.process_block(AudioProcessBlock::new(&mut [], 2));
+            while events.pop().is_ok() {}
+            commands.push(EngineCommand::Play).unwrap();
+            let mut output = [0.0; 128];
+            let mut capture = [0.0; 128];
+            for _ in 0..2 {
+                assert_eq!(
+                    support::allocation::count_allocations(|| engine.process_block(
+                        AudioProcessBlock::new(&mut output, 2)
+                            .with_track_output_capture(bus.raw(), &mut capture)
+                    )),
+                    0
+                );
+                while events.pop().is_ok() {}
+            }
+            let pan = std::f32::consts::FRAC_1_SQRT_2;
+            let expected_bus = if kick_solo { 0.05 * pan } else { 0.0 };
+            let expected_mix = if kick_solo {
+                0.05 * pan + expected_bus
+            } else {
+                0.2 * pan
+            };
+            for sample in &output[output.len() - 16..] {
+                assert!(
+                    (*sample - expected_mix).abs() < 1e-5,
+                    "{format} {kick_solo}/{bass_solo}: {sample} != {expected_mix}"
+                );
+            }
+            assert!(capture
+                .iter()
+                .all(|sample| (*sample - expected_bus).abs() < 1e-6));
+        }
+    }
+}
