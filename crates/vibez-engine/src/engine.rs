@@ -813,3 +813,7 @@ mod presentation_runtime_tests;
 
 #[path = "engine_clip_batch.rs"]
 mod clip_batch;
+
+#[cfg(test)]
+#[path = "engine_section_owner_retention_tests.rs"]
+mod section_owner_retention_tests;
