@@ -141,6 +141,16 @@ impl AudioEngine {
     }
 
     pub(super) fn apply_clip_record_boundary(&mut self, now: u64) {
+        let due = self.clip_record.as_ref().is_some_and(|record| {
+            if record.started {
+                record.stop.is_some_and(|stop| stop <= now)
+            } else {
+                now >= record.start
+            }
+        });
+        if due && !self.presentation_room(4) {
+            return;
+        }
         let Some(record) = &mut self.clip_record else {
             return;
         };
@@ -158,6 +168,7 @@ impl AudioEngine {
         let prepared = record.prepared.take().expect("armed source");
         if let Some(track) = self.tracks.iter_mut().find(|track| track.id == track_id) {
             let retired = track.queued_clip.replace(QueuedClipPlayback {
+                pending_batch: false,
                 prepared,
                 effective_at: now,
             });

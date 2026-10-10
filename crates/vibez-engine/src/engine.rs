@@ -46,6 +46,31 @@ const SPECTRUM_RING_CAPACITY: usize = 16_384;
 /// // Keep `cmd_tx` and `event_rx` on the UI thread.
 /// ```
 pub struct AudioEngine {
+    scheduled_presentation: Vec<presentation_queue::ScheduledPresentation>,
+    empty_capture_offsets: Arc<[(TrackId, u32)]>,
+    section_capture_timing: Vec<presentation::SectionCaptureTiming>,
+    capture_replay: Option<presentation::CaptureReplay>,
+    pending_capture_stop: Option<u64>,
+    pending_playback_stop: bool,
+    pending_source_cleanup: bool,
+    presentation_fault: bool,
+    presentation_overflow_owner: Option<EngineEvent>,
+    pending_compensation_failure: Option<(TrackId, Option<vibez_core::id::EffectId>, &'static str)>,
+    compensation_callback_heard_start: u64,
+    capture_clip_positions: Vec<(TrackId, u64, u64)>,
+    compensation_suspended: bool,
+    device_failure_capture_closed: bool,
+    next_device_handoff: u64,
+    pending_device_reconfiguration: Option<reconfiguration::PendingDeviceReconfiguration>,
+    pending_device_parameters: Vec<(usize, f32)>,
+    graph_edit_pending: bool,
+    compensation_valid: bool,
+    compensation_failure_reported: bool,
+    compensation_transition_frames: u64,
+    compensation_fade_out: u32,
+    compensation_fade_in: u32,
+    last_mix_frame: [f32; 2],
+    was_project_muted: bool,
     routing: Option<Box<crate::routing::PreparedRouting>>,
     retired_routing: Option<Box<crate::routing::PreparedRouting>>,
     pub(super) pending_retirements: Vec<EngineEvent>,
@@ -85,6 +110,7 @@ pub struct AudioEngine {
     split_wrap_handled: bool,
     active_section: Option<ActiveSectionPlayback>,
     clip_performance: bool,
+    pending_clip_batch: Option<clip_batch::PendingClipBatch>,
     queued_section: Option<QueuedSectionPlayback>,
     pending_section_record: Option<section_record::PendingSectionRecord>,
     active_section_record: Option<section_record::ActiveSectionRecord>,
@@ -101,6 +127,7 @@ pub struct AudioEngine {
     /// this follows the active clock domain.
     performance_position: u64,
     output_position: u64,
+    rendered_callback_frames: usize,
     clip_record: Option<clip_record::ClipRecordRuntime>,
     /// The clock currently authorised to advance. Perform owns an independent
     /// zero-based engine timeline; its playback must never mutate the
@@ -210,6 +237,37 @@ impl AudioEngine {
 
         let engine = Self {
             routing: None,
+            scheduled_presentation: Vec::with_capacity(
+                presentation_queue::PRESENTATION_EVENT_CAPACITY,
+            ),
+            empty_capture_offsets: Arc::from([]),
+            section_capture_timing: Vec::with_capacity(
+                presentation_queue::PRESENTATION_EVENT_CAPACITY,
+            ),
+            capture_replay: None,
+            pending_capture_stop: None,
+            pending_playback_stop: false,
+            pending_source_cleanup: false,
+            presentation_fault: false,
+            presentation_overflow_owner: None,
+            pending_compensation_failure: None,
+            compensation_callback_heard_start: 0,
+            capture_clip_positions: Vec::with_capacity(
+                presentation_queue::PRESENTATION_EVENT_CAPACITY,
+            ),
+            compensation_suspended: false,
+            device_failure_capture_closed: false,
+            next_device_handoff: 0,
+            pending_device_reconfiguration: None,
+            pending_device_parameters: Vec::with_capacity(2048),
+            graph_edit_pending: false,
+            compensation_valid: true,
+            compensation_failure_reported: false,
+            compensation_transition_frames: 0,
+            compensation_fade_out: 0,
+            compensation_fade_in: 0,
+            last_mix_frame: [0.0; 2],
+            was_project_muted: false,
             retired_routing: None,
             pending_bus_cleanup: None,
             pending_retirements: Vec::with_capacity(crate::retirement::RETIREMENT_CAPACITY),
@@ -233,6 +291,7 @@ impl AudioEngine {
             split_wrap_handled: false,
             active_section: None,
             clip_performance: false,
+            pending_clip_batch: None,
             queued_section: None,
             pending_section_record: None,
             active_section_record: None,
@@ -242,6 +301,7 @@ impl AudioEngine {
             project_swing: SwingAmount::default(),
             performance_position: 0,
             output_position: 0,
+            rendered_callback_frames: 0,
             clip_record: None,
             clock_domain: ClockDomain::Arrange,
             stopped_note_repeat_anchor: None,
@@ -291,6 +351,7 @@ impl AudioEngine {
             live_input,
             mut track_output_capture,
         } = block;
+        self.compensation_callback_heard_start = self.heard_capture_position();
         self.flush_processing_errors();
         self.resync_clip_events();
         // A musical boundary due at this block start owns the same timestamp
@@ -302,6 +363,9 @@ impl AudioEngine {
 
         // ---- 1. Drain commands ------------------------------------------
         self.drain_commands();
+        self.rendered_callback_frames = 0;
+        self.begin_device_reconfiguration();
+        self.validate_compensation();
 
         let frames = output.len().checked_div(channels).unwrap_or(0);
 
@@ -428,6 +492,23 @@ impl AudioEngine {
                 push_spectrum(&mut self.spectrum_tx, output, channels);
             }
         }
+        self.validate_compensation();
+        if !self.compensation_valid && !self.compensation_failure_reported {
+            self.close_capture_on_failure();
+            self.report_compensation_failure(
+                TrackId::MASTER,
+                None,
+                "Audio presentation event history is full",
+            );
+        }
+        let project_muted = self.project_processing_muted();
+        if project_muted {
+            output.fill(0.0);
+            if let Some(capture) = track_output_capture.as_mut() {
+                capture.samples.fill(0.0);
+            }
+        }
+        self.apply_compensation_transition(output, channels, project_muted);
         self.flush_processing_errors();
 
         // ---- 4.5 Audition Bus (post-master, outside project graph) ------
@@ -460,6 +541,7 @@ impl AudioEngine {
         };
 
         let mut section_ended = false;
+        let mut section_end_boundary = self.performance_position;
         if was_playing {
             if let Some(section) = self.active_section.as_mut() {
                 let section_frames = self
@@ -473,23 +555,71 @@ impl AudioEngine {
                     section.position_samples = advanced.min(section.length_samples);
                     if advanced >= section.length_samples {
                         section_ended = true;
+                        section_end_boundary = self
+                            .performance_position
+                            .saturating_sub(advanced.saturating_sub(section.length_samples));
                     }
                 }
+                let presented = self
+                    .routing
+                    .as_ref()
+                    .filter(|routing| routing.compensation.output_latency > 0)
+                    .and_then(|routing| {
+                        routing
+                            .presentation
+                            .audible()
+                            .or(routing.presentation_start)
+                    });
+                let (section_id, position_samples) = presented
+                    .and_then(|position| {
+                        position
+                            .section_id
+                            .zip(position.section)
+                            .map(|(id, local)| {
+                                (
+                                    id,
+                                    if position.section_length > 0 {
+                                        local.saturating_add(1) % position.section_length
+                                    } else {
+                                        local
+                                    },
+                                )
+                            })
+                    })
+                    .unwrap_or((section.section_id, section.position_samples));
                 let _ = self.event_tx.push(EngineEvent::SectionPlaybackPosition {
-                    section_id: section.section_id,
-                    position_samples: section.position_samples,
+                    section_id,
+                    position_samples,
                 });
             }
         }
         if section_ended {
+            for track in &mut self.tracks {
+                track.flush_notes();
+            }
             self.stop_section_record();
             self.apply_end_of_section_track_mutes_at_queued_boundary();
             self.cancel_queued_track_mutes();
-            let _ = self.event_tx.push(EngineEvent::PerformanceCaptureStopped {
-                effective_at_samples: self.performance_position,
-            });
+            let rendered = self.rendered_callback_frames;
+            self.rendered_callback_frames = frames.saturating_sub(
+                self.performance_position
+                    .saturating_sub(section_end_boundary) as usize,
+            );
+            self.section_capture_stopped(section_end_boundary);
+            self.present_event_after(
+                EngineEvent::PerformanceCaptureStopped {
+                    effective_at_samples: section_end_boundary,
+                },
+                self.mix_latency(),
+            );
+            self.rendered_callback_frames = rendered;
             self.transport.stop();
-            let _ = self.event_tx.push(EngineEvent::PlaybackStopped);
+            self.rendered_callback_frames = frames.saturating_sub(
+                self.performance_position
+                    .saturating_sub(section_end_boundary) as usize,
+            );
+            self.present_event_after(EngineEvent::PlaybackStopped, self.mix_latency());
+            self.rendered_callback_frames = rendered;
             self.active_section = None;
             self.clock_domain = ClockDomain::Arrange;
             self.transport
@@ -514,14 +644,61 @@ impl AudioEngine {
         self.split_wrap_handled = false;
 
         // Position event.
-        let _ = self.event_tx.push(EngineEvent::PlaybackPosition(new_pos));
+        let audible = self
+            .routing
+            .as_ref()
+            .filter(|routing| routing.compensation.output_latency > 0)
+            .and_then(|routing| {
+                routing
+                    .presentation
+                    .audible()
+                    .map(|position| (position, true))
+                    .or_else(|| routing.presentation_start.map(|position| (position, false)))
+            });
+        let audible_arrange = audible.map_or(new_pos, |(position, advanced)| {
+            position
+                .arrange
+                .saturating_add(u64::from(advanced && !performing))
+        });
+        let audible_arrange = if was_playing {
+            audible_arrange
+        } else {
+            audible_arrange.min(new_pos)
+        };
+        let _ = self
+            .event_tx
+            .push(EngineEvent::PlaybackPosition(audible_arrange));
         if performing {
-            let _ = self
-                .event_tx
-                .push(EngineEvent::PerformancePosition(self.performance_position));
+            let _ = self.event_tx.push(EngineEvent::PerformancePosition(
+                audible.map_or(self.performance_position, |(position, advanced)| {
+                    position.perform.saturating_add(u64::from(advanced))
+                }),
+            ));
         }
 
+        if self.active_section.is_none() {
+            if let Some(position) = self
+                .routing
+                .as_ref()
+                .and_then(|routing| routing.presentation.audible())
+            {
+                if let Some((section_id, local)) = position.section_id.zip(position.section) {
+                    let _ = self.event_tx.push(EngineEvent::SectionPlaybackPosition {
+                        section_id,
+                        position_samples: local.saturating_add(1).min(position.section_length),
+                    });
+                    let _ = self.event_tx.push(EngineEvent::PerformancePosition(
+                        position.perform.saturating_add(1),
+                    ));
+                }
+            }
+        }
         self.output_position = self.output_position.saturating_add(frames as u64);
+        self.rendered_callback_frames = 0;
+        self.flush_presentation();
+        self.continue_capture_replay();
+        self.flush_presentation();
+        self.retire_section_capture_timing();
 
         // Master metering event.
         let meters = metering::calculate_meters(output, channels);
@@ -638,6 +815,9 @@ mod automation_commands;
 #[path = "engine_render.rs"]
 mod render_paths;
 
+#[path = "engine_presentation.rs"]
+mod presentation;
+
 #[path = "engine_clock.rs"]
 mod clock;
 
@@ -706,9 +886,30 @@ mod processing;
 mod graph_render;
 
 #[cfg(test)]
+#[path = "engine_compensation_tests.rs"]
+mod compensation_tests;
+
+#[cfg(test)]
+#[path = "engine_compensation_clip_tests.rs"]
+mod compensation_clip_tests;
+#[cfg(test)]
 #[path = "engine_graph_tests.rs"]
 mod graph_tests;
 
+#[path = "engine_reconfiguration_edits.rs"]
+mod reconfiguration_edits;
+
+#[path = "engine_reconfiguration.rs"]
+pub mod reconfiguration;
+
+#[path = "engine_capture_commands.rs"]
+mod capture_commands;
+
+#[path = "engine_compensation_commands.rs"]
+mod compensation_commands;
+
+#[path = "engine_device_commands.rs"]
+mod device_commands;
 #[path = "engine_instrument_commands.rs"]
 mod instrument_commands;
 
@@ -722,3 +923,67 @@ mod bus_solo_tests;
 #[path = "engine_offline_routing.rs"]
 mod offline_routing;
 pub(crate) use offline_routing::OfflineRoutingSetup;
+
+#[cfg(test)]
+#[path = "engine_compensation_stop_tests.rs"]
+mod compensation_stop_tests;
+
+#[cfg(test)]
+#[path = "engine_offline_configuration_tests.rs"]
+mod offline_configuration_tests;
+
+#[cfg(test)]
+#[path = "engine_reconfiguration_owner_tests.rs"]
+mod reconfiguration_owner_tests;
+
+#[cfg(test)]
+#[path = "engine_recovery_configuration_tests.rs"]
+mod recovery_configuration_tests;
+
+#[cfg(test)]
+#[path = "engine_graph_runtime_tests.rs"]
+mod graph_runtime_tests;
+
+#[cfg(test)]
+#[path = "engine_presentation_runtime_tests.rs"]
+mod presentation_runtime_tests;
+
+#[cfg(test)]
+#[path = "engine_compensation_presentation_tests.rs"]
+mod compensation_presentation_tests;
+
+#[path = "engine_compensation_transition.rs"]
+mod compensation_transition;
+
+#[cfg(test)]
+#[path = "engine_compensation_transition_tests.rs"]
+mod compensation_transition_tests;
+
+#[cfg(test)]
+#[path = "engine_compensation_edge_tests.rs"]
+mod compensation_edge_tests;
+
+#[cfg(test)]
+#[path = "engine_recovery_review_tests.rs"]
+mod recovery_review_tests;
+
+#[path = "engine_transport_commands.rs"]
+mod transport_commands;
+
+#[path = "engine_presentation_queue.rs"]
+mod presentation_queue;
+
+#[path = "engine_clip_batch.rs"]
+mod clip_batch;
+
+#[cfg(test)]
+#[path = "engine_section_owner_retention_tests.rs"]
+mod section_owner_retention_tests;
+
+#[cfg(test)]
+#[path = "engine_presentation_review_tests.rs"]
+mod presentation_review_tests;
+
+#[cfg(test)]
+#[path = "engine_recording_observation_tests.rs"]
+mod recording_observation_tests;
