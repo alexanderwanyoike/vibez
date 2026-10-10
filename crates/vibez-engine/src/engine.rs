@@ -811,9 +811,5 @@ mod automation_retirement_tests;
 #[path = "engine_presentation_runtime_tests.rs"]
 mod presentation_runtime_tests;
 
-#[cfg(test)]
-#[path = "engine_clip_batch_tests.rs"]
-mod clip_batch_tests;
-
 #[path = "engine_clip_batch.rs"]
 mod clip_batch;

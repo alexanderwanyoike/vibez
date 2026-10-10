@@ -196,3 +196,7 @@ impl AudioEngine {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "engine_clip_batch_tests.rs"]
+mod tests;

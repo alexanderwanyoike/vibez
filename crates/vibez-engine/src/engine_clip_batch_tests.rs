@@ -379,3 +379,57 @@ fn late_publication_keeps_the_original_source_timestamp_and_physical_release() {
     ));
     assert!(engine.pending_clip_batch.is_none());
 }
+
+#[test]
+fn in_segment_release_retains_the_actual_output_clock_prefix() {
+    let (mut engine, _, mut events) = AudioEngine::new();
+    let id = TrackId::new();
+    engine.sample_rate = 8;
+    engine.tracks.push(EngineTrack::new(id));
+    let channels = [
+        vibez_core::routing::RoutingChannel {
+            id,
+            is_bus: false,
+            sends: vec![],
+            effects: vec![],
+        },
+        vibez_core::routing::RoutingChannel {
+            id: TrackId::MASTER,
+            is_bus: true,
+            sends: vec![],
+            effects: vec![],
+        },
+    ];
+    engine.routing = Some(crate::routing::PreparedRouting::prepare(&channels, 8).unwrap());
+    engine.queue_clips(vec![clip(id, 1)], MusicalBoundary::Immediate);
+    while events.pop().is_ok() {}
+    engine.performance_position = 1;
+    engine.output_position = 100;
+    let mut next = clip(id, 2);
+    next.source.clips[0].linear_gain = 2.0;
+    engine.queue_clips(vec![next], MusicalBoundary::OneBeat);
+    while events.pop().is_ok() {}
+    while engine.event_tx.push(EngineEvent::PlaybackStarted).is_ok() {}
+    for _ in 0..presentation_queue::PRESENTATION_EVENT_CAPACITY {
+        engine.present_event(EngineEvent::PlaybackStarted, 5000);
+    }
+    let mut output = [0.0; 8];
+    assert_eq!(
+        crate::retirement::tests::allocations(|| engine.process(&mut output, 1)),
+        (0, 0)
+    );
+    assert!(output[..3]
+        .iter()
+        .all(|sample| (*sample - 0.1).abs() < 1e-6));
+    assert!(output[3..]
+        .iter()
+        .all(|sample| (*sample - 0.2).abs() < 1e-6));
+    assert!(matches!(
+        engine.pending_clip_batch.as_ref().unwrap().phase,
+        BatchPhase::Publishing {
+            source: 4,
+            physical: 103
+        }
+    ));
+    assert_eq!(engine.output_position, 108);
+}
