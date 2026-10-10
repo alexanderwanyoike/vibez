@@ -39,16 +39,13 @@ impl AudioEngine {
         }
         self.stopped_note_repeat_anchor = None;
         self.reanchor_note_repeats(effective_at_samples, effective_at_samples);
+        self.section_capture_source(section_id, effective_at_samples, 0, false);
         let event = EngineEvent::SectionTransitioned {
             section_id,
             effective_at_samples,
             retired: prepared,
         };
-        if let Err(rtrb::PushError::Full(event)) = self.event_tx.push(event) {
-            // Never destroy Vec/Arc owners in the callback. Losing this rare
-            // event leaks one retired source rather than glitching.
-            std::mem::forget(event);
-        }
+        self.present_event(event, self.mix_latency());
     }
 
     pub(super) fn queue_section(
@@ -59,7 +56,7 @@ impl AudioEngine {
         if self.pending_section_record.is_some() || self.active_section_record.is_some() {
             let event = EngineEvent::SectionQueueCancelled { retired: prepared };
             if let Err(rtrb::PushError::Full(event)) = self.event_tx.push(event) {
-                std::mem::forget(event);
+                self.present_event(event, 0);
             }
             return;
         }
@@ -77,7 +74,7 @@ impl AudioEngine {
         let effective_at_samples = if let Some(boundary) = quantization.musical_boundary() {
             boundary
                 .beats()
-                .map_or(now, |beats| self.next_grid_boundary(now, beats))
+                .map_or(now, |beats| self.next_achievable_boundary(now, beats))
         } else {
             self.active_section
                 .map(|active| {
@@ -107,7 +104,7 @@ impl AudioEngine {
             retired: retired.map(|queued| queued.prepared),
         };
         if let Err(rtrb::PushError::Full(event)) = self.event_tx.push(event) {
-            std::mem::forget(event);
+            self.present_event(event, 0);
         }
     }
 
@@ -119,7 +116,7 @@ impl AudioEngine {
             retired: queued.prepared,
         };
         if let Err(rtrb::PushError::Full(event)) = self.event_tx.push(event) {
-            std::mem::forget(event);
+            self.present_event(event, 0);
         }
     }
 
@@ -137,6 +134,10 @@ impl AudioEngine {
             .map(|queued| queued.effective_at_samples);
 
         if boundary.is_some_and(|boundary| boundary <= block_start) {
+            if !self.presentation_room(self.tracks.len().saturating_add(4)) {
+                output.fill(0.0);
+                return;
+            }
             let queued = self.queued_section.take().expect("queued Section");
             self.activate_section(queued.prepared, block_start);
         }
@@ -153,6 +154,10 @@ impl AudioEngine {
                 old_section,
                 block_start,
             );
+            if !self.presentation_room(self.tracks.len().saturating_add(4)) {
+                output.fill(0.0);
+                return;
+            }
             let queued = self.queued_section.take().expect("queued Section");
             self.activate_section(queued.prepared, boundary);
             let frames_after = frames - frames_before;
@@ -263,6 +268,27 @@ impl AudioEngine {
             }
         }
 
+        if rendered_frames < frames && self.routing.is_some() {
+            for track in &mut self.tracks {
+                track.flush_notes();
+            }
+            let active = self.active_section.take();
+            self.render_routing_graph(
+                &mut output[rendered_frames * channels..],
+                super::render_paths::MultitrackRenderBlock {
+                    pos: section.length_samples,
+                    repeat_pos: performance_position.saturating_add(rendered_frames as u64),
+                    frames: frames - rendered_frames,
+                    channels,
+                    loop_region: None,
+                    live_input: None,
+                },
+                None,
+                true,
+                true,
+            );
+            self.active_section = active;
+        }
         for track in &mut self.tracks {
             std::mem::swap(
                 &mut track.playback_source,
@@ -278,6 +304,16 @@ impl AudioEngine {
                 .max(1.0) as u64
         } else {
             1
+        }
+    }
+
+    pub(super) fn next_achievable_boundary(&self, render_now: u64, beats: f64) -> u64 {
+        let heard_now = self.presentation_context(self.mix_latency()).perform;
+        let wanted = self.next_grid_boundary(heard_now, beats);
+        if wanted >= render_now {
+            wanted
+        } else {
+            self.next_grid_boundary(render_now, beats)
         }
     }
 
