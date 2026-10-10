@@ -1,6 +1,6 @@
 //! Project persistence preferences.
 
-use iced::widget::{button, column, row, text};
+use iced::widget::{button, checkbox, column, row, text};
 use iced::{Element, Length, Theme};
 
 use crate::message::Message;
@@ -52,6 +52,11 @@ impl App {
                 .size(11)
                 .color(th::text_dim()),
             auto_save,
+            text("Monitoring").size(14).color(th::text()),
+            checkbox("Reduced Latency Monitoring", self.state.project_tracks.reduced_latency_monitoring)
+                .on_toggle(Message::SetReducedLatencyMonitoring),
+            text("Reduces compensation waiting on monitored tracks. Clips on those tracks share the earlier timing; sends and returns remain active.")
+                .size(11).color(th::text_dim()),
         ]
         .spacing(9)
         .into()

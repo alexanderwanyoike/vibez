@@ -15,6 +15,7 @@ use crate::state::{
 
 fn project_tracks(kinds: &[TrackKind]) -> ProjectTracksState {
     ProjectTracksState {
+        reduced_latency_monitoring: false,
         tracks: kinds
             .iter()
             .enumerate()

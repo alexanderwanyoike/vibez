@@ -83,7 +83,7 @@ pub struct RoutingNode {
     pub stage: NodeStage,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum EdgeKind {
     Main,
     External(ExternalInputId),
