@@ -51,6 +51,13 @@ impl AudioEngine {
                 instrument.note_on(pitch, velocity);
             }
         }
+        self.present_event(EngineEvent::SourceNoteInput {
+            track_id,
+            pitch,
+            velocity,
+            on: true,
+            position: self.source_recording_position(),
+        });
         let section = self.active_section;
         self.present_event(EngineEvent::InstrumentNoteInput {
             track_id,
@@ -69,6 +76,13 @@ impl AudioEngine {
                 instrument.note_off(pitch);
             }
         }
+        self.present_event(EngineEvent::SourceNoteInput {
+            track_id,
+            pitch,
+            velocity: 0,
+            on: false,
+            position: self.source_recording_position(),
+        });
         let section = self.active_section;
         self.present_event(EngineEvent::InstrumentNoteInput {
             track_id,

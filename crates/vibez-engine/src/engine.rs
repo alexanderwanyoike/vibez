@@ -698,7 +698,7 @@ mod clock;
 mod section_queue;
 
 #[path = "engine_section_record.rs"]
-mod section_record;
+pub(crate) mod section_record;
 
 #[path = "engine_clip_record.rs"]
 mod clip_record;
@@ -825,3 +825,7 @@ mod section_owner_retention_tests;
 #[cfg(test)]
 #[path = "engine_presentation_review_tests.rs"]
 mod presentation_review_tests;
+
+#[cfg(test)]
+#[path = "engine_recording_observation_tests.rs"]
+mod recording_observation_tests;
