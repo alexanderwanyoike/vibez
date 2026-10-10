@@ -165,6 +165,7 @@ impl PreparedRouting {
                         PreparedChannel {
                             id: channel.id,
                             binding,
+                            audible_return: false,
                         }
                     })
                     .collect()
@@ -191,6 +192,7 @@ pub enum ChannelIndex {
 pub struct PreparedChannel {
     pub id: vibez_core::id::TrackId,
     pub binding: ChannelIndex,
+    pub(crate) audible_return: bool,
 }
 
 impl PreparedChannel {
@@ -250,3 +252,6 @@ impl ChannelIndex {
         }
     }
 }
+
+#[path = "routing_solo.rs"]
+mod solo;

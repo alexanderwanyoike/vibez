@@ -714,3 +714,7 @@ mod instrument_commands;
 
 #[path = "engine_effect_commands.rs"]
 mod effect_commands;
+
+#[cfg(test)]
+#[path = "engine_bus_solo_tests.rs"]
+mod bus_solo_tests;

@@ -86,6 +86,13 @@ impl AudioEngine {
         for channel in &mut prepared.channels {
             channel.bind(&self.tracks, &self.buses);
         }
+        prepared.select_audible_returns(
+            &self.tracks,
+            &self.buses,
+            &self.master,
+            track_solo,
+            bus_solo,
+        );
         for order_index in 0..prepared.graph.order.len() {
             let index = prepared.graph.order[order_index];
             let node = prepared.graph.nodes[index];
@@ -205,23 +212,16 @@ impl AudioEngine {
                         let source_binding =
                             prepared.channels[prepared.nodes[edge.from].channel].binding;
                         let source = source_binding.get(&self.tracks, &self.buses, &self.master);
+                        let source_channel = &prepared.channels[prepared.nodes[edge.from].channel];
+                        let target_channel = &prepared.channels[prepared.nodes[index].channel];
                         let audible = match edge.kind {
-                            EdgeKind::Mix => source.is_some_and(|channel| match source_binding {
-                                crate::routing::ChannelIndex::Track(_) => {
-                                    (!track_solo && !bus_solo) || channel.solo
-                                }
-                                _ => {
-                                    (!bus_solo || channel.solo)
-                                        && (!track_solo
-                                            || channel.solo
-                                            || !prepared.detector_buses.contains(&channel.id))
-                                }
-                            }),
+                            EdgeKind::Mix => source_channel.audible_return,
                             EdgeKind::Send => {
                                 !track_solo
                                     || bus_solo
-                                    || prepared.detector_buses.contains(&node.channel)
-                                    || source.is_some_and(|channel| channel.solo)
+                                    || source_channel.audible_return
+                                    || (!target_channel.audible_return
+                                        && prepared.detector_buses.contains(&node.channel))
                             }
                             _ => true,
                         };
@@ -394,14 +394,8 @@ impl AudioEngine {
                                 capture.source_track_raw == node.channel.raw()
                                     && capture.samples.len() >= len
                             }) {
-                                let audible = if bus_channel {
-                                    (!bus_solo || track.solo)
-                                        && (!track_solo
-                                            || track.solo
-                                            || !prepared.detector_buses.contains(&node.channel))
-                                } else {
-                                    (!track_solo && !bus_solo) || track.solo
-                                };
+                                let audible =
+                                    prepared.channels[prepared.nodes[index].channel].audible_return;
                                 if !capture_audible_only || audible {
                                     capture.samples[..len]
                                         .copy_from_slice(&prepared.nodes[index].samples[..len]);
