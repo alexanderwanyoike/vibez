@@ -3,7 +3,18 @@ use vibez_engine::engine::reconfiguration::DeviceReconfiguration;
 
 impl App {
     pub(super) fn compensation_signature(&self) -> crate::domains::compensation::TimingSignature {
-        crate::domains::compensation::signature_for_state(&self.state)
+        self.compensation_signature_for_input(self.midi_input.is_some())
+    }
+
+    pub(super) fn compensation_signature_for_input(
+        &self,
+        midi_connected: bool,
+    ) -> crate::domains::compensation::TimingSignature {
+        if !midi_connected {
+            return crate::domains::compensation::signature_for_state(&self.state);
+        }
+        let midi_target = super::midi_input::configured_target(&self.state);
+        crate::domains::compensation::signature_for_live_routes(&self.state, midi_target)
     }
 
     pub(super) fn reconfigure_device_timing(&mut self, mut device: DeviceReconfiguration) {

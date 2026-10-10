@@ -157,6 +157,7 @@ fn main() {
     note_clips.push(clip(lead.id, "Hook", 32.0, 16.0, notes));
 
     let project = Project {
+        reduced_latency_monitoring: false,
         master: None,
         buses: Vec::new(),
         name: "Neon Skyline".to_string(),

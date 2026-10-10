@@ -1,5 +1,3 @@
-//! Existing audio stream health state regressions.
-
 use super::{AppState, AudioStreamHealth};
 use vibez_audio_io::audio_stream::AudioStreamEvent;
 
