@@ -5,7 +5,7 @@ use super::*;
 impl AudioEngine {
     pub(super) fn command_start_performance_capture(&mut self) {
         if !self.compensation_valid || self.local_device_failure_pending() {
-            self.close_capture_on_failure();
+            self.close_capture_for_device_failure();
             self.report_compensation_failure(
                 TrackId::MASTER,
                 None,
@@ -18,13 +18,17 @@ impl AudioEngine {
         }
         let section_id = self.active_section.map(|section| section.section_id);
         let section_position_samples = self.active_section.map(|section| section.position_samples);
-        let _ = self.event_tx.push(EngineEvent::PerformanceCaptureStarted {
+        self.capture_active = true;
+        self.present_event(EngineEvent::PerformanceCaptureStarted {
             effective_at_samples: self.effective_position(),
             section_id,
             section_position_samples,
         });
         for index in 0..self.tracks.len() {
             if let Some(active) = self.tracks[index].active_clip {
+                if !self.presentation_room(1) {
+                    return;
+                }
                 self.clip_event(EngineEvent::ClipCaptureSource {
                     track_id: self.tracks[index].id,
                     position: active.position,
@@ -35,7 +39,8 @@ impl AudioEngine {
     }
 
     pub(super) fn command_stop_performance_capture(&mut self) {
-        let _ = self.event_tx.push(EngineEvent::PerformanceCaptureStopped {
+        self.capture_active = false;
+        self.present_event(EngineEvent::PerformanceCaptureStopped {
             effective_at_samples: self.effective_position(),
         });
     }
@@ -47,7 +52,7 @@ impl AudioEngine {
             }
         }
         let section = self.active_section;
-        let _ = self.event_tx.push(EngineEvent::InstrumentNoteInput {
+        self.present_event(EngineEvent::InstrumentNoteInput {
             track_id,
             pitch,
             velocity,
@@ -65,7 +70,7 @@ impl AudioEngine {
             }
         }
         let section = self.active_section;
-        let _ = self.event_tx.push(EngineEvent::InstrumentNoteInput {
+        self.present_event(EngineEvent::InstrumentNoteInput {
             track_id,
             pitch,
             velocity: 0,

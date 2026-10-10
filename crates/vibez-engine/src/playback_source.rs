@@ -533,6 +533,7 @@ pub(crate) struct ActiveClipPlayback {
 }
 
 pub(crate) struct QueuedClipPlayback {
+    pub pending_batch: bool,
     pub prepared: Box<PreparedClipPlayback>,
     pub effective_at: u64,
 }

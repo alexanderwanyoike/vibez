@@ -128,6 +128,7 @@ impl AudioEngine {
         self.compensation_suspended
             || self.graph_edit_pending
             || !self.compensation_valid
+            || self.presentation_fault
             || self.reconfiguration_pending()
     }
 

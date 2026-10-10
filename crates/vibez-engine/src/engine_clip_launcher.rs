@@ -2,8 +2,7 @@
 
 use super::*;
 use crate::events::{ClipPlayingState, ClipQueuedState, ClipTrackState};
-use crate::playback_source::{ActiveClipPlayback, PreparedClipPlayback, QueuedClipPlayback};
-use vibez_core::perform::MusicalBoundary;
+use crate::playback_source::{ActiveClipPlayback, PreparedClipPlayback};
 
 impl AudioEngine {
     pub(super) fn edit_clip(
@@ -35,6 +34,11 @@ impl AudioEngine {
     }
 
     pub(super) fn clip_event(&mut self, event: EngineEvent) {
+        let physical = self.output_position + self.rendered_callback_frames as u64;
+        self.clip_event_at(event, physical);
+    }
+
+    pub(super) fn clip_event_at(&mut self, event: EngineEvent, physical: u64) {
         let request = match &event {
             EngineEvent::ClipQueued { request_id, .. }
             | EngineEvent::ClipTransitioned { request_id, .. }
@@ -43,15 +47,23 @@ impl AudioEngine {
             _ => 0,
         };
         self.clip_through_request = self.clip_through_request.max(request);
-        if let Err(rtrb::PushError::Full(event)) = self.event_tx.push(event) {
+        if self.event_tx.is_full() {
             self.clip_event_drops = self.clip_event_drops.saturating_add(1);
             self.clip_resync_track = Some(0);
-            // Source owners must be reclaimed on the UI thread, never in the callback.
-            std::mem::forget(event);
         }
+        self.present_event_at(event, physical);
     }
 
     pub(super) fn resync_clip_events(&mut self) {
+        self.flush_presentation();
+        let now = self.output_position + self.rendered_callback_frames as u64;
+        if self
+            .scheduled_presentation
+            .first()
+            .is_some_and(|pending| pending.due <= now)
+        {
+            return;
+        }
         if self.reported_clip_event_drops != self.clip_event_drops {
             if self
                 .event_tx
@@ -114,69 +126,52 @@ impl AudioEngine {
         }
     }
 
-    // Each owner moves into a track queue without allocating in the callback.
-    #[allow(clippy::vec_box)]
-    pub(super) fn queue_clips(
-        &mut self,
-        mut clips: Vec<Box<PreparedClipPlayback>>,
-        quantization: MusicalBoundary,
-    ) {
-        let starting = !self.clip_performance || !self.transport.is_playing();
-        self.begin_clip_performance();
-        let now = self.performance_position;
-        let boundary = if starting {
-            now
-        } else {
-            quantization
-                .beats()
-                .map_or(now, |beats| self.next_grid_boundary(now, beats))
-        };
-        while let Some(prepared) = clips.pop() {
-            let Some(index) = self
-                .tracks
-                .iter()
-                .position(|track| track.id == prepared.track_id)
-            else {
-                self.clip_event(EngineEvent::ClipRequestRetired(prepared));
-                continue;
-            };
-            let request_id = prepared.request_id;
-            let track_id = prepared.track_id;
-            let clip_id = prepared.clip_id;
-            if let Some(old) = self.tracks[index].queued_clip.replace(QueuedClipPlayback {
-                prepared,
-                effective_at: boundary,
-            }) {
-                self.clip_event(EngineEvent::ClipRequestRetired(old.prepared));
-            }
-            self.clip_event(EngineEvent::ClipQueued {
-                request_id,
-                track_id,
-                clip_id,
-            });
-        }
-        self.clip_event(EngineEvent::ClipBatchRetired(clips));
-        self.apply_clip_boundaries(now);
-    }
-
     pub(super) fn clear_clip_performance(&mut self) {
+        if self.clip_performance {
+            self.clip_resync_track = Some(0);
+        }
+        if let Some(batch) = self.pending_clip_batch.take() {
+            self.clip_event(EngineEvent::ClipBatchRetired(batch.clips));
+        }
         self.stop_clip_record(true);
         for index in 0..self.tracks.len() {
-            if let Some(queued) = self.tracks[index].queued_clip.take() {
+            self.tracks[index].active_clip = None;
+            if self.tracks[index].queued_clip.is_some() {
+                if self.scheduled_presentation.capacity() - self.scheduled_presentation.len()
+                    <= presentation_queue::COMMAND_PRESENTATION_RESERVE
+                {
+                    self.pending_source_cleanup = true;
+                    continue;
+                }
+                let queued = self.tracks[index]
+                    .queued_clip
+                    .take()
+                    .expect("queued Clip owner");
                 self.clip_event(EngineEvent::ClipRequestRetired(queued.prepared));
             }
-            self.tracks[index].active_clip = None;
         }
         self.clip_performance = false;
     }
 
     pub(super) fn apply_clip_boundaries(&mut self, now: u64) {
+        self.continue_clip_batch(now);
         for index in 0..self.tracks.len() {
+            let track = &self.tracks[index];
+            let queued_due = track
+                .queued_clip
+                .as_ref()
+                .is_some_and(|queued| !queued.pending_batch && queued.effective_at <= now);
+            let ended = track
+                .active_clip
+                .is_some_and(|clip| !clip.looping && clip.position >= clip.length);
+            if (queued_due || ended) && !self.presentation_room(2) {
+                break;
+            }
             let track = &mut self.tracks[index];
             if track
                 .queued_clip
                 .as_ref()
-                .is_some_and(|queued| queued.effective_at <= now)
+                .is_some_and(|queued| !queued.pending_batch && queued.effective_at <= now)
             {
                 let mut prepared = track.queued_clip.take().expect("due Clip").prepared;
                 track.flush_notes();
@@ -228,9 +223,11 @@ impl AudioEngine {
         live_input: Option<LiveInputBlock<'_>>,
         mut capture: Option<&mut TrackOutputCapture<'_>>,
     ) {
+        let physical_offset = self.rendered_callback_frames;
         let mut rendered = 0;
         while rendered < frames {
             let now = self.performance_position + rendered as u64;
+            self.rendered_callback_frames = physical_offset + rendered;
             self.apply_clip_record_boundary(now);
             self.apply_clip_boundaries(now);
             let mut count = frames - rendered;
@@ -238,7 +235,11 @@ impl AudioEngine {
                 count = count.min(boundary.saturating_sub(now) as usize);
             }
             for track in &self.tracks {
-                if let Some(queued) = &track.queued_clip {
+                if let Some(queued) = track
+                    .queued_clip
+                    .as_ref()
+                    .filter(|queued| !queued.pending_batch || self.clip_batch_waiting_boundary())
+                {
                     count = count.min(queued.effective_at.saturating_sub(now) as usize);
                 }
                 if let Some(active) = track.active_clip {
@@ -296,6 +297,7 @@ impl AudioEngine {
                 );
             }
             rendered += count;
+            self.rendered_callback_frames = physical_offset + rendered;
         }
     }
 }

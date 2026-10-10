@@ -127,6 +127,9 @@ impl AudioEngine {
                     let id = track.id;
                     let section = self.active_section;
                     let events = &mut self.event_tx;
+                    let scheduled = &mut self.scheduled_presentation;
+                    let physical = self.output_position;
+                    let mut presentation_overflow = false;
                     let mut repeated = |trigger: crate::note_repeat::NoteRepeatTrigger| {
                         let section_position = section.map(|active| {
                             section_record::section_sample_for_performance(
@@ -144,7 +147,7 @@ impl AudioEngine {
                                 active.length_samples,
                             )
                         });
-                        let _ = events.push(EngineEvent::NoteRepeated {
+                        let event = EngineEvent::NoteRepeated {
                             track_id: id,
                             pitch: trigger.pitch,
                             velocity: trigger.velocity,
@@ -154,7 +157,9 @@ impl AudioEngine {
                             section_id: section.map(|active| active.section_id),
                             section_position_samples: section_position,
                             canonical_section_position_samples: canonical_section_position,
-                        });
+                        };
+                        presentation_overflow |=
+                            !presentation_queue::emit_repeated(event, events, scheduled, physical);
                     };
                     if track.instrument.is_some() {
                         if idle {
@@ -195,6 +200,9 @@ impl AudioEngine {
                     }
                     std::mem::swap(&mut track.mix_buffer, &mut prepared.nodes[index].samples);
                     let activity = track.take_note_activity();
+                    if presentation_overflow {
+                        self.fail_presentation();
+                    }
                     if activity != 0 {
                         let _ = self.event_tx.push(EngineEvent::TrackNoteActivity {
                             track_id: id,

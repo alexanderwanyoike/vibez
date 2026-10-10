@@ -7,10 +7,36 @@ impl AudioEngine {
     /// Drain all pending commands from the ring buffer without blocking.
     pub(super) fn drain_commands(&mut self) {
         self.flush_presentation();
+        if self.pending_source_cleanup {
+            self.pending_source_cleanup = false;
+            self.clear_clip_performance();
+            self.cancel_queued_track_mutes();
+            if self.pending_source_cleanup {
+                return;
+            }
+        }
+        self.continue_clip_batch(self.performance_position);
+        if self.clip_batch_blocks_commands() {
+            return;
+        }
         self.return_retired_routing();
         self.flush_retirements();
         self.clean_removed_bus_automation();
         loop {
+            if self.clip_batch_blocks_commands() {
+                break;
+            }
+            let Ok(_) = self.cmd_rx.peek() else {
+                break;
+            };
+            // Track-sized cancellation loops retain their remaining intents and
+            // owners in place. Admission covers only the bounded command body.
+            let reserve = presentation_queue::COMMAND_PRESENTATION_RESERVE;
+            if self.scheduled_presentation.capacity() - self.scheduled_presentation.len() < reserve
+            {
+                self.fail_presentation();
+                break;
+            }
             if self.pending_bus_cleanup.is_some()
                 || self
                     .pending_retirements
@@ -108,9 +134,7 @@ impl AudioEngine {
                     if self.pending_section_record.is_some() || self.active_section_record.is_some()
                     {
                         let event = EngineEvent::SectionQueueCancelled { retired: prepared };
-                        if let Err(rtrb::PushError::Full(event)) = self.event_tx.push(event) {
-                            std::mem::forget(event);
-                        }
+                        self.present_event(event);
                         continue;
                     }
                     self.cancel_section_queue();
@@ -172,9 +196,7 @@ impl AudioEngine {
                         }),
                         retired: prepared,
                     };
-                    if let Err(rtrb::PushError::Full(event)) = self.event_tx.push(event) {
-                        std::mem::forget(event);
-                    }
+                    self.present_event(event);
                 }
                 EngineCommand::ArmSectionRecord {
                     section_id,
@@ -203,10 +225,11 @@ impl AudioEngine {
                     }
                 }
                 EngineCommand::UnloadAudio => {
+                    self.cancel_presentation();
                     let was_clip_performance = self.clip_performance;
                     self.clear_clip_performance();
                     self.stop_section_record();
-                    let _ = self.event_tx.push(EngineEvent::PerformanceCaptureStopped {
+                    self.present_event(EngineEvent::PerformanceCaptureStopped {
                         effective_at_samples: self.effective_position(),
                     });
                     self.audio = None;
@@ -219,7 +242,7 @@ impl AudioEngine {
                     if was_clip_performance {
                         self.clip_event(EngineEvent::PlaybackStopped);
                     } else {
-                        let _ = self.event_tx.push(EngineEvent::PlaybackStopped);
+                        self.present_event(EngineEvent::PlaybackStopped);
                     }
                 }
                 // -- Multi-track commands --
@@ -757,7 +780,7 @@ impl AudioEngine {
                         let frames_until_start = target.saturating_sub(clock_position);
                         self.audition
                             .queue(audio, frames_until_start, fade_frames, looped, true);
-                        let _ = self.event_tx.push(EngineEvent::AuditionQueued);
+                        self.present_event(EngineEvent::AuditionQueued);
                     } else {
                         self.audition.start(
                             audio,
@@ -765,7 +788,7 @@ impl AudioEngine {
                             looped,
                             start == AuditionStart::NextBar,
                         );
-                        let _ = self.event_tx.push(EngineEvent::AuditionStarted);
+                        self.present_event(EngineEvent::AuditionStarted);
                     }
                 }
                 EngineCommand::StopAudition => {
@@ -778,7 +801,7 @@ impl AudioEngine {
                         && !self.audition.has_outgoing();
                     self.audition.stop(audition_fade_frames(self.sample_rate));
                     if queued_only {
-                        let _ = self.event_tx.push(EngineEvent::AuditionStopped);
+                        self.present_event(EngineEvent::AuditionStopped);
                     }
                 }
                 EngineCommand::SetAuditionGain(gain) => {
@@ -814,7 +837,7 @@ impl AudioEngine {
                         if let Some(instrument) = self.tracks[track_index].instrument.as_mut() {
                             instrument.note_on(pitch, velocity);
                         }
-                        let _ = self.event_tx.push(EngineEvent::NoteRepeated {
+                        self.present_event(EngineEvent::NoteRepeated {
                             track_id,
                             pitch,
                             velocity,

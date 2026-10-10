@@ -8,7 +8,7 @@ use vibez_core::perform::TrackMuteQuantization;
 use crate::events::{AutomationGesturePhase, EngineEvent};
 use crate::mixer::{PlaybackTimeline, QueuedTrackMute};
 
-use super::AudioEngine;
+use super::{presentation_queue, AudioEngine};
 
 impl AudioEngine {
     pub(super) fn set_automation_lane(
@@ -94,9 +94,7 @@ impl AudioEngine {
             .channel_mut(id)
             .is_some_and(|track| track.queued_mute.take().is_some());
         if cancelled {
-            let _ = self
-                .event_tx
-                .push(EngineEvent::TrackMuteQueueCancelled { track_id: id });
+            self.present_event(EngineEvent::TrackMuteQueueCancelled { track_id: id });
         }
         self.apply_track_mute_at(id, muted, effective_at_samples);
     }
@@ -114,14 +112,14 @@ impl AudioEngine {
             (false, false)
         };
         if changed {
-            let _ = self.event_tx.push(EngineEvent::TrackMuteChanged {
+            self.present_event(EngineEvent::TrackMuteChanged {
                 track_id: id,
                 muted,
                 effective_at_samples,
             });
         }
         if override_changed {
-            let _ = self.event_tx.push(EngineEvent::AutomationOverrideChanged {
+            self.present_event(EngineEvent::AutomationOverrideChanged {
                 track_id: id,
                 target: AutomationTarget::TrackMute,
                 overridden: true,
@@ -145,9 +143,7 @@ impl AudioEngine {
             return;
         };
         if track.queued_mute.take().is_some() {
-            let _ = self
-                .event_tx
-                .push(EngineEvent::TrackMuteQueueCancelled { track_id });
+            self.present_event(EngineEvent::TrackMuteQueueCancelled { track_id });
             return;
         }
 
@@ -167,7 +163,7 @@ impl AudioEngine {
                 .unwrap_or(now)
         };
         if effective_at_samples <= now {
-            let _ = self.event_tx.push(EngineEvent::TrackMuteQueued {
+            self.present_event(EngineEvent::TrackMuteQueued {
                 track_id,
                 muted,
                 effective_at_samples: now,
@@ -183,7 +179,7 @@ impl AudioEngine {
             effective_at_samples,
             end_of_section: quantization == TrackMuteQuantization::EndOfSection,
         });
-        let _ = self.event_tx.push(EngineEvent::TrackMuteQueued {
+        self.present_event(EngineEvent::TrackMuteQueued {
             track_id,
             muted,
             effective_at_samples,
@@ -204,6 +200,9 @@ impl AudioEngine {
                 .filter(|queued| queued.effective_at_samples <= at_samples)
                 .map(|queued| (track.id, queued))
         }) {
+            if !self.presentation_room(2) {
+                break;
+            }
             self.apply_track_mute_at(track_id, queued.muted, queued.effective_at_samples);
         }
     }
@@ -215,6 +214,9 @@ impl AudioEngine {
                 .filter(|queued| queued.end_of_section)
                 .map(|queued| (track.id, queued.muted))
         }) {
+            if !self.presentation_room(2) {
+                break;
+            }
             self.apply_track_mute_at(track_id, muted, at_samples);
         }
     }
@@ -226,17 +228,28 @@ impl AudioEngine {
                 .filter(|queued| queued.end_of_section)
                 .map(|queued| (track.id, queued))
         }) {
+            if !self.presentation_room(2) {
+                break;
+            }
             self.apply_track_mute_at(track_id, queued.muted, queued.effective_at_samples);
         }
     }
 
     pub(super) fn cancel_queued_track_mutes(&mut self) {
-        for track in &mut self.tracks {
-            if track.queued_mute.take().is_some() {
-                let _ = self
-                    .event_tx
-                    .push(EngineEvent::TrackMuteQueueCancelled { track_id: track.id });
+        for index in 0..self.tracks.len() {
+            if self.tracks[index].queued_mute.is_none() {
+                continue;
             }
+            if self.scheduled_presentation.capacity() - self.scheduled_presentation.len()
+                <= presentation_queue::COMMAND_PRESENTATION_RESERVE
+            {
+                self.pending_source_cleanup = true;
+                return;
+            }
+            self.tracks[index].queued_mute = None;
+            self.present_event(EngineEvent::TrackMuteQueueCancelled {
+                track_id: self.tracks[index].id,
+            });
         }
     }
 
@@ -250,7 +263,7 @@ impl AudioEngine {
             .channel_mut(track_id)
             .is_some_and(|track| track.set_automation_override(target, overridden));
         if changed {
-            let _ = self.event_tx.push(EngineEvent::AutomationOverrideChanged {
+            self.present_event(EngineEvent::AutomationOverrideChanged {
                 track_id,
                 target,
                 overridden,
@@ -266,7 +279,7 @@ impl AudioEngine {
         begin: bool,
     ) {
         self.set_automation_override(track_id, target, true);
-        let _ = self.event_tx.push(EngineEvent::AutomationGestureChanged {
+        self.present_event(EngineEvent::AutomationGestureChanged {
             track_id,
             target,
             normalized_value: normalized_value.clamp(0.0, 1.0),
@@ -327,7 +340,7 @@ impl AudioEngine {
             });
         self.set_automation_override(track_id, target, false);
         if let Some(normalized_value) = normalized_value {
-            let _ = self.event_tx.push(EngineEvent::AutomationGestureChanged {
+            self.present_event(EngineEvent::AutomationGestureChanged {
                 track_id,
                 target,
                 normalized_value,

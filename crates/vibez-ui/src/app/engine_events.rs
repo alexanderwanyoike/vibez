@@ -115,6 +115,7 @@ impl App {
             while let Some(event) = self.event_rx.as_mut().and_then(|rx| rx.pop().ok()) {
                 apply_drum_pad_flash(&mut self.state.view, &event, std::time::Instant::now());
                 match event {
+                    EngineEvent::PresentationCancelled => {}
                     EngineEvent::RetiredEffectStorage(storage) => drop(storage),
                     EngineEvent::DeviceReconfigurationRetired { device, reason } => {
                         drop((device, reason))
@@ -648,7 +649,7 @@ mod tests {
     use vibez_core::id::TrackId;
 
     #[test]
-    fn dropped_engine_transition_recovers_the_actual_launcher_state() {
+    fn blocked_engine_transition_returns_owner_and_recovers_the_actual_launcher_state() {
         use crate::domains::perform::clip_record::empty_midi_clip;
         use vibez_core::id::ClipId;
         use vibez_core::perform::MusicalBoundary;
@@ -687,6 +688,7 @@ mod tests {
             1,
         ));
         let mut observed_drop = false;
+        let mut observed_transition = false;
         for _ in 0..4 {
             while let Ok(event) = events.pop() {
                 match event {
@@ -694,8 +696,9 @@ mod tests {
                     EngineEvent::ClipStateResynced(snapshot) => {
                         apply_clip_resync(&mut state, snapshot)
                     }
-                    EngineEvent::ClipTransitioned { .. } => {
-                        panic!("transition should have been lost")
+                    EngineEvent::ClipTransitioned { retired, .. } => {
+                        assert!(retired.is_some());
+                        observed_transition = true;
                     }
                     _ => {}
                 }
@@ -706,6 +709,7 @@ mod tests {
             ));
         }
         assert!(observed_drop);
+        assert!(observed_transition);
         assert_eq!(state.perform.clip_editor.playing[&track].id, clip.id);
         assert!(state.perform.clip_editor.queued.is_empty());
         assert!(state.perform.clip_editor.pending.is_empty());
