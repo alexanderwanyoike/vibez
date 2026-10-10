@@ -49,6 +49,7 @@ pub struct AudioEngine {
     scheduled_presentation: Vec<presentation_queue::ScheduledPresentation>,
     presentation_overflow_owner: Option<EngineEvent>,
     pending_playback_stop: bool,
+    pending_source_cleanup: bool,
     presentation_fault: bool,
     pending_capture_stop: Option<u64>,
     pending_playback_stop: bool,
@@ -232,6 +233,7 @@ impl AudioEngine {
             ),
             presentation_overflow_owner: None,
             pending_playback_stop: false,
+            pending_source_cleanup: false,
             presentation_fault: false,
             pending_capture_stop: None,
             pending_playback_stop: false,
@@ -534,11 +536,11 @@ impl AudioEngine {
             self.stop_section_record();
             self.apply_end_of_section_track_mutes_at_queued_boundary();
             self.cancel_queued_track_mutes();
-            let _ = self.event_tx.push(EngineEvent::PerformanceCaptureStopped {
+            self.present_event(EngineEvent::PerformanceCaptureStopped {
                 effective_at_samples: self.performance_position,
             });
             self.transport.stop();
-            let _ = self.event_tx.push(EngineEvent::PlaybackStopped);
+            self.present_event(EngineEvent::PlaybackStopped);
             self.active_section = None;
             self.clock_domain = ClockDomain::Arrange;
             self.transport
@@ -571,6 +573,7 @@ impl AudioEngine {
         }
 
         self.output_position = self.output_position.saturating_add(frames as u64);
+        self.rendered_callback_frames = 0;
 
         // Master metering event.
         let meters = metering::calculate_meters(output, channels);
@@ -817,3 +820,7 @@ mod clip_batch;
 #[cfg(test)]
 #[path = "engine_section_owner_retention_tests.rs"]
 mod section_owner_retention_tests;
+
+#[cfg(test)]
+#[path = "engine_presentation_review_tests.rs"]
+mod presentation_review_tests;

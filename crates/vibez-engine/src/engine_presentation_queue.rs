@@ -8,6 +8,9 @@ pub(super) struct ScheduledPresentation {
 }
 
 pub(super) const PRESENTATION_EVENT_CAPACITY: usize = 2048;
+// Track-sized cleanup pauses before consuming the slots needed by the remaining
+// fixed command body (recording, Section, Capture and transport acknowledgements).
+pub(super) const COMMAND_PRESENTATION_RESERVE: usize = 16;
 
 fn cancelled_event(event: EngineEvent) -> EngineEvent {
     match event {
@@ -38,7 +41,7 @@ fn queue_event(
     now: u64,
     due: u64,
 ) -> Option<EngineEvent> {
-    let event = if due <= now {
+    let event = if due <= now && scheduled.first().is_none_or(|pending| pending.due > now) {
         match events.push(event) {
             Ok(()) => return None,
             Err(rtrb::PushError::Full(event)) => event,
@@ -67,12 +70,31 @@ pub(super) fn emit_repeated(
 }
 
 impl AudioEngine {
-    pub(super) fn present_event(&mut self, event: EngineEvent, delay: u32) {
+    pub(super) fn present_event(&mut self, event: EngineEvent) {
         let now = self.output_position + self.rendered_callback_frames as u64;
-        self.present_event_at(event, now.saturating_add(delay as u64));
+        self.present_event_at(event, now);
     }
 
     pub(super) fn present_event_at(&mut self, event: EngineEvent, due: u64) {
+        if self.presentation_fault {
+            match event {
+                EngineEvent::PlaybackStopped => {
+                    self.pending_playback_stop = true;
+                    self.flush_presentation();
+                    return;
+                }
+                EngineEvent::PerformanceCaptureStopped {
+                    effective_at_samples,
+                } => {
+                    self.pending_capture_stop
+                        .get_or_insert(effective_at_samples);
+                    self.flush_presentation();
+                    return;
+                }
+                _ => {}
+            }
+        }
+        self.flush_presentation();
         let now = self.output_position + self.rendered_callback_frames as u64;
         if let Some(event) = queue_event(
             event,
@@ -134,9 +156,9 @@ impl AudioEngine {
                 return;
             }
         }
-        let due = self
-            .scheduled_presentation
-            .partition_point(|pending| pending.due <= self.output_position);
+        let due = self.scheduled_presentation.partition_point(|pending| {
+            pending.due <= self.output_position + self.rendered_callback_frames as u64
+        });
         let delivered = due.min(self.event_tx.slots());
         // The producer owns these free slots, so one drain moves the prefix once
         // and never drops an undelivered owner on the rendering thread.
@@ -152,6 +174,11 @@ impl AudioEngine {
         }
         self.presentation_fault = true;
         self.transport.stop();
+        for track in &mut self.tracks {
+            track.active_clip = None;
+            track.flush_notes();
+        }
+        self.clip_resync_track = Some(0);
         self.cancel_presentation();
         self.pending_capture_stop
             .get_or_insert(self.compensation_callback_heard_start);
@@ -182,5 +209,20 @@ impl AudioEngine {
             pending.event = cancelled_event(event);
             pending.due = self.output_position;
         }
+        // Tombstones hold no owner or state and need no UI slot. Reclaiming
+        // them leaves the reserved overflow holder for actual ownership.
+        self.scheduled_presentation
+            .retain(|pending| !matches!(pending.event, EngineEvent::PresentationCancelled));
+    }
+
+    pub(super) fn cancel_capture_presentation(&mut self) {
+        self.scheduled_presentation.retain(|pending| {
+            !matches!(
+                pending.event,
+                EngineEvent::PerformanceCaptureStarted { .. }
+                    | EngineEvent::PerformanceCaptureStopped { .. }
+                    | EngineEvent::ClipCaptureSource { .. }
+            )
+        });
     }
 }

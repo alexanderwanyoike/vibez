@@ -26,9 +26,9 @@ impl AudioEngine {
             } else {
                 EngineEvent::AuditionStarted
             };
-            let _ = self.event_tx.push(event);
+            self.present_event(event);
         }
-        let _ = self.event_tx.push(EngineEvent::PerformancePosition(0));
+        self.present_event(EngineEvent::PerformancePosition(0));
     }
 
     pub(super) fn effective_position(&self) -> u64 {

@@ -25,7 +25,7 @@ impl AudioEngine {
             } else {
                 EngineEvent::AuditionStarted
             };
-            let _ = self.event_tx.push(event);
+            self.present_event(event);
         }
         self.performance_position = self.transport.position();
         self.stopped_note_repeat_anchor = None;
@@ -34,20 +34,16 @@ impl AudioEngine {
         if was_clip_performance {
             self.clip_event(EngineEvent::PlaybackStarted);
         } else {
-            let _ = self.event_tx.push(EngineEvent::PlaybackStarted);
+            self.present_event(EngineEvent::PlaybackStarted);
         }
     }
 
     pub(super) fn command_stop(&mut self) {
         self.cancel_presentation();
-        let was_clip_performance = self.clip_performance;
         self.stop_section_record();
-        self.present_event(
-            EngineEvent::PerformanceCaptureStopped {
-                effective_at_samples: self.effective_position(),
-            },
-            0,
-        );
+        self.present_event(EngineEvent::PerformanceCaptureStopped {
+            effective_at_samples: self.effective_position(),
+        });
         self.clear_clip_performance();
         self.transport.stop();
         self.arrangement_recording = false;
@@ -67,15 +63,10 @@ impl AudioEngine {
         if let Some(anchor) = self.stopped_note_repeat_anchor {
             self.reanchor_note_repeats(anchor, self.performance_position);
         }
-        if was_clip_performance {
-            self.clip_event(EngineEvent::PlaybackStopped);
-        } else {
-            let _ = self.event_tx.push(EngineEvent::PlaybackStopped);
-        }
+        self.present_event(EngineEvent::PlaybackStopped);
     }
 
     pub(super) fn command_seek(&mut self, pos: u64) {
-        self.cancel_presentation();
         self.transport.seek(pos);
         for track in &mut self.tracks {
             track.flush_notes();

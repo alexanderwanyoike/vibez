@@ -159,7 +159,10 @@ fn partial_packet_releases_tracks_atomically_at_one_source_timestamp_and_keeps_o
     engine.queue_clips(vec![clip(ids[2], 7)], MusicalBoundary::Immediate);
     while events.pop().is_ok() {}
     for _ in 0..presentation_queue::PRESENTATION_EVENT_CAPACITY - 2 {
-        engine.present_event(EngineEvent::PlaybackStarted, 5000);
+        engine.present_event_at(
+            EngineEvent::PlaybackStarted,
+            engine.output_position.saturating_add(5000_u64),
+        );
     }
     queue(
         &mut engine,
@@ -198,16 +201,23 @@ fn partial_packet_releases_tracks_atomically_at_one_source_timestamp_and_keeps_o
     assert!(engine.tracks[..2]
         .iter()
         .all(|track| track.active_clip.is_some()));
-    let transitions: Vec<_> = std::iter::from_fn(|| events.pop().ok())
-        .filter_map(|event| match event {
-            EngineEvent::ClipTransitioned {
+    let mut transitions = Vec::new();
+    for _ in 0..4 {
+        while let Ok(event) = events.pop() {
+            if let EngineEvent::ClipTransitioned {
                 track_id,
                 effective_at_samples,
                 ..
-            } => Some((track_id, effective_at_samples)),
-            _ => None,
-        })
-        .collect();
+            } = event
+            {
+                transitions.push((track_id, effective_at_samples));
+            }
+        }
+        assert_eq!(
+            crate::retirement::tests::allocations(|| engine.flush_presentation()),
+            (0, 0)
+        );
+    }
     assert_eq!(transitions, vec![(ids[0], 17), (ids[1], 17)]);
     assert_eq!(engine.tracks[2].active_clip.unwrap().request_id, 7);
     assert!(!engine.presentation_fault);
@@ -319,7 +329,10 @@ fn stalled_quantized_packet_moves_only_the_missed_boundary_to_the_next_achievabl
     engine.performance_position = 1;
     while engine.event_tx.push(EngineEvent::PlaybackStarted).is_ok() {}
     for _ in 0..presentation_queue::PRESENTATION_EVENT_CAPACITY - 1 {
-        engine.present_event(EngineEvent::PlaybackStarted, 1000);
+        engine.present_event_at(
+            EngineEvent::PlaybackStarted,
+            engine.output_position.saturating_add(1000_u64),
+        );
     }
     engine.queue_clips(vec![clip(id, 8)], MusicalBoundary::OneBar);
     assert!(engine.tracks[0].queued_clip.is_none());
@@ -347,7 +360,10 @@ fn late_publication_keeps_the_original_source_timestamp_and_physical_release() {
     while events.pop().is_ok() {}
     while engine.event_tx.push(EngineEvent::PlaybackStarted).is_ok() {}
     for _ in 0..presentation_queue::PRESENTATION_EVENT_CAPACITY - 3 {
-        engine.present_event(EngineEvent::PlaybackStarted, 5000);
+        engine.present_event_at(
+            EngineEvent::PlaybackStarted,
+            engine.output_position.saturating_add(5000_u64),
+        );
     }
     engine.queue_clips(vec![clip(id, 2)], MusicalBoundary::Immediate);
     assert_eq!(engine.tracks[0].active_clip.unwrap().request_id, 2);
@@ -411,7 +427,10 @@ fn in_segment_release_retains_the_actual_output_clock_prefix() {
     while events.pop().is_ok() {}
     while engine.event_tx.push(EngineEvent::PlaybackStarted).is_ok() {}
     for _ in 0..presentation_queue::PRESENTATION_EVENT_CAPACITY {
-        engine.present_event(EngineEvent::PlaybackStarted, 5000);
+        engine.present_event_at(
+            EngineEvent::PlaybackStarted,
+            engine.output_position.saturating_add(5000_u64),
+        );
     }
     let mut output = [0.0; 8];
     assert_eq!(

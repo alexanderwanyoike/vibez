@@ -80,6 +80,35 @@ impl AudioEngine {
         let Some(mut batch) = self.pending_clip_batch.take() else {
             return;
         };
+        if self.presentation_fault {
+            for track in &mut self.tracks {
+                if track
+                    .queued_clip
+                    .as_ref()
+                    .is_some_and(|queued| queued.pending_batch)
+                {
+                    debug_assert!(batch.clips.len() < batch.clips.capacity());
+                    batch
+                        .clips
+                        .push(track.queued_clip.take().expect("batch queue").prepared);
+                }
+            }
+            while !batch.clips.is_empty() {
+                if self.clip_batch_event_room(false) == 0 {
+                    self.pending_clip_batch = Some(batch);
+                    return;
+                }
+                self.clip_event(EngineEvent::ClipRequestRetired(
+                    batch.clips.pop().expect("packet owner"),
+                ));
+            }
+            if self.clip_batch_event_room(false) == 0 {
+                self.pending_clip_batch = Some(batch);
+                return;
+            }
+            self.clip_event(EngineEvent::ClipBatchRetired(batch.clips));
+            return;
+        }
         if batch.phase == BatchPhase::Staging {
             while !batch.clips.is_empty() {
                 // One displaced owner and one queue acknowledgement are the

@@ -6,15 +6,18 @@ use super::*;
 fn cancellation_delivers_applied_mute_and_stop_state_immediately() {
     let (mut engine, _, mut events) = AudioEngine::new();
     let track_id = TrackId::new();
-    engine.present_event(
+    engine.present_event_at(
         EngineEvent::TrackMuteChanged {
             track_id,
             muted: true,
             effective_at_samples: 1000,
         },
-        521,
+        engine.output_position.saturating_add(521_u64),
     );
-    engine.present_event(EngineEvent::PlaybackStopped, 521);
+    engine.present_event_at(
+        EngineEvent::PlaybackStopped,
+        engine.output_position.saturating_add(521_u64),
+    );
     engine.cancel_presentation();
     engine.flush_presentation();
     let events: Vec<_> = std::iter::from_fn(|| events.pop().ok()).collect();
@@ -30,9 +33,15 @@ fn full_presentation_queue_stops_and_can_restart_without_replacing_valid_plan() 
     engine.transport.play();
     while engine.event_tx.push(EngineEvent::PlaybackStarted).is_ok() {}
     for _ in 0..presentation_queue::PRESENTATION_EVENT_CAPACITY {
-        engine.present_event(EngineEvent::PlaybackStarted, 521);
+        engine.present_event_at(
+            EngineEvent::PlaybackStarted,
+            engine.output_position.saturating_add(521_u64),
+        );
     }
-    engine.present_event(EngineEvent::PlaybackStarted, 521);
+    engine.present_event_at(
+        EngineEvent::PlaybackStarted,
+        engine.output_position.saturating_add(521_u64),
+    );
     assert!(engine.presentation_fault);
     assert!(!engine.transport.is_playing());
     assert!(engine.compensation_valid);
@@ -59,7 +68,10 @@ fn due_event_batch_is_bounded_by_free_ring_slots() {
     let (mut engine, _, mut events) = AudioEngine::new();
     while engine.event_tx.push(EngineEvent::PlaybackStarted).is_ok() {}
     for _ in 0..64 {
-        engine.present_event(EngineEvent::PlaybackStopped, 1);
+        engine.present_event_at(
+            EngineEvent::PlaybackStopped,
+            engine.output_position.saturating_add(1_u64),
+        );
     }
     engine.output_position = 1;
     for _ in 0..7 {
@@ -103,7 +115,10 @@ fn legacy_repeat_overflow_closes_capture_in_both_render_paths() {
         );
         while engine.event_tx.push(EngineEvent::PlaybackStarted).is_ok() {}
         for _ in 0..presentation_queue::PRESENTATION_EVENT_CAPACITY {
-            engine.present_event(EngineEvent::PlaybackStarted, 521);
+            engine.present_event_at(
+                EngineEvent::PlaybackStarted,
+                engine.output_position.saturating_add(521_u64),
+            );
         }
         engine.transport.play();
         let counts = crate::retirement::tests::allocations(|| {

@@ -47,14 +47,23 @@ impl AudioEngine {
             _ => 0,
         };
         self.clip_through_request = self.clip_through_request.max(request);
-        if let Err(rtrb::PushError::Full(event)) = self.event_tx.push(event) {
+        if self.event_tx.is_full() {
             self.clip_event_drops = self.clip_event_drops.saturating_add(1);
             self.clip_resync_track = Some(0);
-            self.present_event_at(event, physical);
         }
+        self.present_event_at(event, physical);
     }
 
     pub(super) fn resync_clip_events(&mut self) {
+        self.flush_presentation();
+        let now = self.output_position + self.rendered_callback_frames as u64;
+        if self
+            .scheduled_presentation
+            .first()
+            .is_some_and(|pending| pending.due <= now)
+        {
+            return;
+        }
         if self.reported_clip_event_drops != self.clip_event_drops {
             if self
                 .event_tx
@@ -118,15 +127,28 @@ impl AudioEngine {
     }
 
     pub(super) fn clear_clip_performance(&mut self) {
+        if self.clip_performance {
+            self.clip_resync_track = Some(0);
+        }
         if let Some(batch) = self.pending_clip_batch.take() {
             self.clip_event(EngineEvent::ClipBatchRetired(batch.clips));
         }
         self.stop_clip_record(true);
         for index in 0..self.tracks.len() {
-            if let Some(queued) = self.tracks[index].queued_clip.take() {
+            self.tracks[index].active_clip = None;
+            if self.tracks[index].queued_clip.is_some() {
+                if self.scheduled_presentation.capacity() - self.scheduled_presentation.len()
+                    <= presentation_queue::COMMAND_PRESENTATION_RESERVE
+                {
+                    self.pending_source_cleanup = true;
+                    continue;
+                }
+                let queued = self.tracks[index]
+                    .queued_clip
+                    .take()
+                    .expect("queued Clip owner");
                 self.clip_event(EngineEvent::ClipRequestRetired(queued.prepared));
             }
-            self.tracks[index].active_clip = None;
         }
         self.clip_performance = false;
     }
