@@ -313,3 +313,73 @@ fn normal_stop_does_not_overtake_a_retained_applied_mute() {
         .collect();
     assert_eq!(state, ["mute", "stop"]);
 }
+
+#[test]
+fn accepted_capture_start_and_notes_survive_a_stalled_ui_until_capture_closes() {
+    for global_stop in [false, true] {
+        let (mut engine, mut commands, mut events) = AudioEngine::new();
+        let id = TrackId::new();
+        engine.tracks.push(EngineTrack::new(id));
+        engine.begin_clip_performance();
+        engine.process(&mut [0.0; 16], 1);
+        while events.pop().is_ok() {}
+        full_ring(&mut engine);
+        commands
+            .push(EngineCommand::StartPerformanceCapture)
+            .unwrap();
+        commands
+            .push(EngineCommand::ExternalNoteOn {
+                track_id: id,
+                pitch: 42,
+                velocity: 100,
+            })
+            .unwrap();
+        assert_eq!(
+            crate::retirement::tests::allocations(|| engine.process(&mut [0.0; 8], 1)),
+            (0, 0)
+        );
+        if global_stop {
+            commands.push(EngineCommand::Stop).unwrap();
+        } else {
+            local_recovery(&mut engine);
+            commands
+                .push(EngineCommand::StartPerformanceCapture)
+                .unwrap();
+        }
+        assert_eq!(
+            crate::retirement::tests::allocations(|| engine.process(&mut [0.0; 8], 1)),
+            (0, 0)
+        );
+        while events.pop().is_ok() {}
+        engine.flush_presentation();
+        let mut phase = "Starting";
+        let mut captured = 0;
+        let mut order = Vec::new();
+        while let Ok(event) = events.pop() {
+            match event {
+                EngineEvent::PerformanceCaptureStarted { .. } => {
+                    phase = "Recording";
+                    order.push("start");
+                }
+                EngineEvent::InstrumentNoteInput { .. } => {
+                    if phase == "Recording" {
+                        captured += 1;
+                    }
+                    order.push("note");
+                }
+                EngineEvent::PerformanceCaptureStopped { .. } => {
+                    phase = "Idle";
+                    order.push("stop");
+                }
+                _ => {}
+            }
+        }
+        assert_eq!(
+            order,
+            ["start", "note", "stop"],
+            "global stop={global_stop}"
+        );
+        assert_eq!(captured, 1);
+        assert_eq!(phase, "Idle");
+    }
+}

@@ -452,3 +452,67 @@ fn in_segment_release_retains_the_actual_output_clock_prefix() {
     ));
     assert_eq!(engine.output_position, 108);
 }
+
+#[test]
+fn inline_capture_stop_does_not_consume_packet_owner_admission_capacity() {
+    let (mut engine, _, mut events) = AudioEngine::new();
+    let id = TrackId::new();
+    engine.tracks.push(EngineTrack::new(id));
+    engine.begin_clip_performance();
+    engine.performance_position = 1;
+    engine.queue_clips(vec![clip(id, 92)], MusicalBoundary::OneBar);
+    let boundary = engine.pending_clip_batch.as_ref().unwrap().boundary;
+    let identity = &*engine.tracks[0].queued_clip.as_ref().unwrap().prepared as *const _;
+    while events.pop().is_ok() {}
+    engine.performance_position = boundary;
+    engine.output_position = boundary;
+    while engine
+        .event_tx
+        .push(EngineEvent::PlaybackPosition(0))
+        .is_ok()
+    {}
+    for request in 0..presentation_queue::PRESENTATION_EVENT_CAPACITY {
+        let owner = PreparedClipPlayback::stop(TrackId::new(), request as u64);
+        engine.present_event(EngineEvent::ClipRequestRetired(owner));
+    }
+    assert_eq!(
+        crate::retirement::tests::allocations(|| engine.continue_clip_batch(boundary)),
+        (0, 0)
+    );
+    assert!(matches!(
+        engine.pending_clip_batch.as_ref().unwrap().phase,
+        BatchPhase::Publishing { .. }
+    ));
+    engine.compensation_callback_heard_start = boundary;
+    engine.close_capture_for_device_failure();
+    events.pop().unwrap();
+    assert_eq!(
+        crate::retirement::tests::allocations(|| engine.continue_clip_batch(boundary)),
+        (0, 0)
+    );
+    assert!(!engine.presentation_fault);
+    assert_eq!(engine.pending_clip_batch.as_ref().unwrap().clips.len(), 1);
+    let mut returned = false;
+    for _ in 0..8 {
+        while let Ok(event) = events.pop() {
+            if let EngineEvent::ClipTransitioned {
+                retired: Some(owner),
+                ..
+            } = event
+            {
+                assert_eq!(&*owner as *const _, identity);
+                returned = true;
+            }
+        }
+        assert_eq!(
+            crate::retirement::tests::allocations(|| {
+                engine.flush_presentation();
+                engine.continue_clip_batch(boundary);
+            }),
+            (0, 0)
+        );
+    }
+    assert!(returned);
+    assert!(engine.pending_clip_batch.is_none());
+    assert!(!engine.presentation_fault);
+}

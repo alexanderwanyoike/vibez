@@ -36,7 +36,18 @@ impl AudioEngine {
 
     fn clip_batch_event_room(&self, future: bool) -> usize {
         let scheduled = self.scheduled_presentation.capacity() - self.scheduled_presentation.len();
-        scheduled + if future { 0 } else { self.event_tx.slots() }
+        let inline = usize::from(self.pending_capture_stop.is_some())
+            + usize::from(self.pending_compensation_failure.is_some())
+            + usize::from(self.pending_playback_stop)
+            + usize::from(self.presentation_overflow_owner.is_some());
+        // Common enqueue flushes inline notifications first. Their reserved
+        // ring slots cannot also admit a packet owner out of its retained Vec.
+        scheduled
+            + if future {
+                0
+            } else {
+                self.event_tx.slots().saturating_sub(inline)
+            }
     }
 
     #[allow(clippy::vec_box)]

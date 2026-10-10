@@ -65,8 +65,10 @@ Presentation exhaustion stops playback and Capture, retains their terminal state
 and named cause in inline pending slots, and converts canceled Section/Clip
 notifications into owner retirement. One inline overflow holder protects the
 producer that discovered exhaustion. Terminal stop/cause delivery precedes normal
-queued delivery. Subsequent packet publication returns owners without reasserting
-playing state. Capture-only cancellation preserves continuing-playback Section,
+queued delivery, after already-due accepted Capture start/data have drained.
+Packet admission subtracts pending inline notifications from available UI slots;
+the same slot cannot admit both a terminal event and a transferred owner.
+Subsequent packet publication returns owners without reasserting playing state. Capture-only cancellation preserves continuing-playback Section,
 Clip and transport acknowledgements, and immediate recording feeds.
 
 Once a prepared routing plan is installed, structural channel/effect changes
