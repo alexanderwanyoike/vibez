@@ -169,7 +169,7 @@ impl AudioEngine {
             };
         }
         if let BatchPhase::Publishing { source, physical } = batch.phase {
-            while let Some(prepared) = batch.clips.last() {
+            while !batch.clips.is_empty() {
                 let due = physical;
                 let current = self.output_position + self.rendered_callback_frames as u64;
                 if self.clip_batch_event_room(due > current) == 0 {
