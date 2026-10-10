@@ -252,7 +252,7 @@ fn potential_automated_send_prevents_feedback_before_its_first_nonzero_point() {
         .find(|channel| channel.id == receiver)
         .unwrap()
         .sends
-        .push((bus_id, 1.0));
+        .push(bus_id);
     assert!(valid_taps(&model, receiver, effect_id, ExternalInputId(0), bus_id).is_empty());
     assert!(!edit_source_with_model(
         &mut tracks,

@@ -1,3 +1,4 @@
+//! Tap-aware Bounce dependency closure and routing topology projection.
 use super::*;
 use vibez_core::routing::{ExternalInputDescriptor, RoutingChannel, RoutingEffect, SourceTap};
 
@@ -74,7 +75,11 @@ pub(super) fn actual_dependencies(
         .map(|channel| RoutingChannel {
             id: channel.id,
             is_bus: req.buses.iter().any(|bus| bus.id == channel.id) || channel.id.is_master(),
-            sends: potential_sends(channel),
+            sends: {
+                let mut sends = channel.sends.iter().map(|(bus, _)| *bus).collect();
+                vibez_core::routing::reserve_send_targets(&mut sends, &channel.automation);
+                sends
+            },
             effects: if taps[&channel.id] == SourceTap::BeforeEffects {
                 vec![]
             } else {

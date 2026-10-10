@@ -22,7 +22,7 @@ fn channel(track: &ProjectTrack, is_bus: bool) -> RoutingChannel {
     RoutingChannel {
         id: track.id,
         is_bus,
-        sends: track.sends.clone(),
+        sends: track.sends.iter().map(|(bus, _)| *bus).collect(),
         effects: track
             .effects
             .iter()

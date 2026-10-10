@@ -17,10 +17,13 @@ Master can receive it. Master and Browser Audition are not source choices.
 
 A muted ghost source therefore continues triggering pre-fader routes. Solo keeps
 required sources processing without adding their direct output to the audible
-mix. During track solo, a non-soloed bus required as a detector source is also
-inaudible; this suppresses that bus's wet return when it serves both purposes.
-Soloing the bus explicitly auditions its full mix. This does not change saved
-mute, solo or send settings.
+mix. Return buses keep their audible return under track solo, including buses
+that also feed a detector. Detector dependencies do not decide whether a Bus
+return is audible. This does not change saved mute, solo or send settings.
+An audible Bus return and its detector taps share the same processed Bus signal.
+Under solo, that signal includes the audible contributors. A Bus needed only
+for detection retains its required contributor mix while its return stays
+inaudible. Bus effects keep one shared processing state for these taps.
 
 Mono is copied into stereo; stereo is averaged into mono. Input meters measure
 the adapted audio delivered to each input, independently of gain reduction or
@@ -44,6 +47,11 @@ effect at a block boundary without recreating the receiving device.
 after-fader nodes. Main, auxiliary, send and mix edges share one dependency
 graph. The selectors and prepared engine graph use the same validation. Actual
 cycles are excluded; a same-track Before Effects route remains valid.
+Send connections are structural, independent of their current level. A zero
+level silences the send while retaining its connection; moving a send through
+zero does not rebuild the graph. Configured send automation also retains its
+connection before audible points exist. Feedback validation applies to dormant
+connections, so setting a send to zero cannot hide a cycle.
 
 `AudioEffect` and `PluginInstance` declare cached input descriptors and accept
 external input blocks. Unsupported built-ins opt out by default. Compressor,

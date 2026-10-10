@@ -8,6 +8,112 @@ use vibez_core::{
 };
 
 #[test]
+fn dormant_send_keeps_its_graph_connection_without_republishing_for_level_edits() {
+    let mut app = app();
+    let mut track = ProjectTrack::new(TrackId::new(), "Kick".into(), 0);
+    let bus = ProjectTrack::new(TrackId::new(), "Drums".into(), 1);
+    let track_id = track.id;
+    let bus_id = bus.id;
+    track.sends.push((bus_id, 0.0));
+    let project = Arc::make_mut(&mut app.state.project_tracks);
+    project.tracks.push(track);
+    project.buses.push(bus);
+    let (commands, mut received) = rtrb::RingBuffer::new(16);
+    app.cmd_tx = crate::domains::EngineCommandQueue::new(commands);
+    app.sync_sidechain_routing();
+    assert!(matches!(
+        received.pop().unwrap(),
+        EngineCommand::SetRouting(_)
+    ));
+    let routing = app.state.devices.last_routing.clone().unwrap();
+    let graph = RoutingGraph::prepare(&routing).unwrap();
+    let from = graph
+        .index(track_id, vibez_core::routing::NodeStage::AfterFader)
+        .unwrap();
+    let to = graph
+        .index(bus_id, vibez_core::routing::NodeStage::Sum)
+        .unwrap();
+    assert!(graph
+        .edges
+        .iter()
+        .any(|edge| edge.from == from && edge.to == to));
+    for amount in [0.5, 0.0, 1.0, 0.0] {
+        let _ = app.update_and_refresh_clips(Message::set_send(track_id, bus_id, amount));
+        assert_eq!(app.state.devices.last_routing.as_ref(), Some(&routing));
+        assert_eq!(app.state.project_tracks.tracks[0].sends, [(bus_id, amount)]);
+        let mut level_changes = 0;
+        while let Ok(command) = received.pop() {
+            assert!(!matches!(command, EngineCommand::SetRouting(_)));
+            if matches!(command, EngineCommand::SetSend { .. }) {
+                level_changes += 1;
+            }
+        }
+        assert_eq!(level_changes, 1);
+    }
+}
+
+#[test]
+fn creating_a_zero_level_send_cannot_hide_feedback_from_validation() {
+    let mut app = app();
+    let bus = ProjectTrack::new(TrackId::new(), "Detector".into(), 1);
+    let mut track = ProjectTrack::new(TrackId::new(), "Bass".into(), 0);
+    track.effects.push(effect(bus.id));
+    let track_id = track.id;
+    let bus_id = bus.id;
+    let project = Arc::make_mut(&mut app.state.project_tracks);
+    project.tracks.push(track);
+    project.buses.push(bus);
+    app.sync_sidechain_routing();
+    let routing = app.state.devices.last_routing.clone();
+    let _ = app.update_and_refresh_clips(Message::set_send(track_id, bus_id, 0.0));
+    assert!(app.state.project_tracks.tracks[0].sends.is_empty());
+    assert_eq!(app.state.devices.last_routing, routing);
+    assert!(app.state.status_text.contains("Routing change rejected"));
+}
+
+#[test]
+fn configured_send_automation_reserves_topology_even_without_audible_points() {
+    use vibez_core::automation::{AutomationLane, AutomationPoint, AutomationTarget};
+    let mut app = app();
+    let track = ProjectTrack::new(TrackId::new(), "Kick".into(), 0);
+    let bus = ProjectTrack::new(TrackId::new(), "Drums".into(), 1);
+    let track_id = track.id;
+    let bus_id = bus.id;
+    let project = Arc::make_mut(&mut app.state.project_tracks);
+    project.tracks.push(track);
+    project.buses.push(bus);
+    Arc::make_mut(&mut app.state.arrangement.timeline)
+        .ensure(track_id)
+        .automation
+        .push(AutomationLane::new(AutomationTarget::Send { bus_id }));
+    app.sync_sidechain_routing();
+    let routing = app.state.devices.last_routing.clone().unwrap();
+    let graph = RoutingGraph::prepare(&routing).unwrap();
+    let from = graph
+        .index(track_id, vibez_core::routing::NodeStage::AfterFader)
+        .unwrap();
+    let to = graph
+        .index(bus_id, vibez_core::routing::NodeStage::Sum)
+        .unwrap();
+    assert!(graph
+        .edges
+        .iter()
+        .any(|edge| edge.from == from && edge.to == to));
+    for value in [0.0, 0.5, 0.0] {
+        Arc::make_mut(&mut app.state.arrangement.timeline)
+            .ensure(track_id)
+            .automation[0]
+            .insert_point(AutomationPoint {
+                beat: 0.0,
+                value,
+                curve: 0.0,
+            });
+        app.sync_sidechain_routing();
+        assert_eq!(app.state.devices.last_routing.as_ref(), Some(&routing));
+    }
+}
+
+#[test]
 fn metered_ticks_and_mouse_messages_do_not_rebuild_the_project_routing_model() {
     let mut app = app();
     let track = ProjectTrack::new(TrackId::new(), "Bass".into(), 0);

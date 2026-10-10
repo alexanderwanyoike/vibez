@@ -1,3 +1,4 @@
+//! Project-wide routing validation and prepared topology publication.
 use super::*;
 
 #[cfg(test)]
@@ -32,19 +33,11 @@ impl App {
         for timeline in timelines {
             for channel in &mut channels {
                 if let Some(content) = timeline.get(channel.id) {
-                    vibez_core::routing::reserve_automated_sends(
+                    vibez_core::routing::reserve_send_targets(
                         &mut channel.sends,
                         &content.automation,
                     );
                 }
-            }
-        }
-        for channel in &mut channels {
-            channel
-                .sends
-                .retain(|(_, amount)| *amount > vibez_core::routing::SEND_SILENCE_THRESHOLD);
-            for (_, amount) in &mut channel.sends {
-                *amount = 1.0;
             }
         }
         channels
@@ -66,10 +59,8 @@ impl App {
         let mut model = self.sidechain_model();
         let send = match message {
             Message::Arrangement(ArrangementMsg::SetSend {
-                track_id,
-                bus_id,
-                amount,
-            }) if *amount > 0.0 => Some((*track_id, *bus_id)),
+                track_id, bus_id, ..
+            }) => Some((*track_id, *bus_id)),
             Message::Automation(AutomationMsg::AddLane {
                 track_id,
                 target: AutomationTarget::Send { bus_id },
@@ -199,9 +190,7 @@ fn reserve_send(
     channel: &mut vibez_core::routing::RoutingChannel,
     bus_id: vibez_core::id::TrackId,
 ) {
-    if let Some((_, amount)) = channel.sends.iter_mut().find(|(id, _)| *id == bus_id) {
-        *amount = amount.max(1.0);
-    } else {
-        channel.sends.push((bus_id, 1.0));
+    if !channel.sends.contains(&bus_id) {
+        channel.sends.push(bus_id);
     }
 }
