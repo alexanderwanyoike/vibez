@@ -85,8 +85,14 @@ impl CompensationDelay {
     }
 
     pub fn retain_from(&mut self, previous: &mut Self) {
-        debug_assert_eq!(self.history.len(), previous.history.len());
-        debug_assert_eq!(self.channels, previous.channels);
+        if self.history.len() != previous.history.len()
+            || self.channels != previous.channels
+            || (!previous.history.is_empty() && previous.cursor >= previous.history.len())
+            || !previous.cursor.is_multiple_of(self.channels)
+        {
+            self.clear();
+            return;
+        }
         std::mem::swap(&mut self.history, &mut previous.history);
         self.cursor = previous.cursor;
         self.transition_from = if previous.transition_remaining == 64 {
@@ -262,6 +268,37 @@ mod tests {
 #[cfg(test)]
 mod transition_tests {
     use super::*;
+
+    #[test]
+    fn incompatible_retention_layout_resets_without_swapping_storage() {
+        let mut previous = CompensationDelay::prepare(4, 1, 4).unwrap();
+        previous.process(&mut [0.5; 3]);
+        let mut next = CompensationDelay::prepare(2, 2, 4).unwrap();
+        next.fill_history(0.25);
+        next.retain_from(&mut previous);
+        let mut output = [0.0; 4];
+        next.process(&mut output);
+        assert_eq!(output, [0.0; 4]);
+        let mut old_output = [0.0; 4];
+        previous.process(&mut old_output);
+        assert_eq!(old_output, [0.0, 0.5, 0.5, 0.5]);
+    }
+
+    #[test]
+    fn incompatible_retention_capacity_keeps_both_prepared_storage_bounds() {
+        for (old, new) in [(2, 4), (4, 2)] {
+            let mut previous = CompensationDelay::prepare(old, 2, 8).unwrap();
+            previous.fill_history(0.5);
+            let mut next = CompensationDelay::prepare(new, 2, 8).unwrap();
+            next.fill_history(0.25);
+            next.retain_from(&mut previous);
+            assert_eq!(previous.storage_samples(), old as usize * 2);
+            assert_eq!(next.storage_samples(), new as usize * 2);
+            let mut output = [0.0; 8];
+            next.process(&mut output);
+            assert_eq!(output, [0.0; 8]);
+        }
+    }
 
     #[test]
     fn invalid_retention_is_rejected_before_storage_or_processing() {

@@ -1,7 +1,8 @@
 //! One timing plan for the shared stage graph used by playback and Bounce.
 
+use std::collections::HashMap;
 use vibez_core::id::TrackId;
-use vibez_core::routing::{EdgeKind, RoutingGraph};
+use vibez_core::routing::{EdgeKind, RoutingGraph, RoutingNode};
 use vibez_dsp::compensation_delay::{CompensationDelay, DelayPreparationError};
 
 /// These are resource bounds, not a monitoring threshold. Reports outside the
@@ -18,6 +19,13 @@ pub enum CompensationError {
     DelayStorage(DelayPreparationError),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct EdgeIdentity {
+    from: RoutingNode,
+    to: RoutingNode,
+    kind: EdgeKind,
+}
+
 #[derive(Debug)]
 pub struct CompensationPlan {
     pub generation: u64,
@@ -26,6 +34,8 @@ pub struct CompensationPlan {
     pub edge_delays: Vec<u32>,
     pub output_latency: u32,
     delays: Vec<CompensationDelay>,
+    edge_identities: Vec<EdgeIdentity>,
+    edge_indices: HashMap<EdgeIdentity, usize>,
 }
 
 impl CompensationPlan {
@@ -69,9 +79,16 @@ impl CompensationPlan {
         self.delays[edge].process_layout(samples, channels);
     }
 
+    /// Prepared identities keep publication linear and allocation-free even
+    /// when graph indices change. Unmatched paths start with fresh history.
     pub fn retain_history_from(&mut self, previous: &mut Self) {
-        for (next, old) in self.delays.iter_mut().zip(&mut previous.delays) {
-            next.retain_from(old);
+        for (index, identity) in self.edge_identities.iter().enumerate() {
+            let next = &mut self.delays[index];
+            if let Some(&old) = previous.edge_indices.get(identity) {
+                next.retain_from(&mut previous.delays[old]);
+            } else {
+                next.clear();
+            }
         }
     }
 
@@ -108,6 +125,8 @@ pub(crate) struct CompensationTiming {
     pub edge_delays: Vec<u32>,
     retained_delays: Vec<u32>,
     pub output_latency: u32,
+    edge_identities: Vec<EdgeIdentity>,
+    edge_indices: HashMap<EdgeIdentity, usize>,
 }
 
 impl CompensationTiming {
@@ -125,6 +144,19 @@ impl CompensationTiming {
                 .any(|edge| edge.from >= graph.nodes.len() || edge.to >= graph.nodes.len())
         {
             return Err(CompensationError::InvalidGraph);
+        }
+        let mut edge_indices = HashMap::with_capacity(graph.edges.len());
+        let mut edge_identities = Vec::with_capacity(graph.edges.len());
+        for (index, edge) in graph.edges.iter().enumerate() {
+            let identity = EdgeIdentity {
+                from: graph.nodes[edge.from],
+                to: graph.nodes[edge.to],
+                kind: edge.kind,
+            };
+            if edge_indices.insert(identity, index).is_some() {
+                return Err(CompensationError::InvalidGraph);
+            }
+            edge_identities.push(identity);
         }
         let mut input_latency = vec![0u32; graph.nodes.len()];
         let mut output_latency = vec![0u32; graph.nodes.len()];
@@ -179,6 +211,8 @@ impl CompensationTiming {
             edge_delays,
             retained_delays,
             output_latency: total_latency,
+            edge_identities,
+            edge_indices,
         })
     }
 
@@ -222,6 +256,8 @@ impl CompensationTiming {
             edge_delays: self.edge_delays,
             output_latency: self.output_latency,
             delays,
+            edge_identities: self.edge_identities,
+            edge_indices: self.edge_indices,
         })
     }
 }
@@ -229,3 +265,7 @@ impl CompensationTiming {
 #[cfg(test)]
 #[path = "compensation_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "compensation_retention_tests.rs"]
+mod retention_tests;
