@@ -22,6 +22,8 @@ impl AudioEngine {
             } else {
                 track.effects.push(slot);
             }
+        } else {
+            self.dispose_effect(effect);
         }
     }
 
@@ -52,6 +54,8 @@ impl AudioEngine {
             if let Some(old) = track.instrument.replace(instrument) {
                 self.dispose_instrument(old);
             }
+        } else {
+            self.dispose_instrument(instrument);
         }
     }
 }

@@ -31,12 +31,14 @@ impl App {
         if let Some(track) = self.state.find_track(track_id) {
             device.prepare_effect_storage(track.effects.len());
         }
+        let recovering = device.processing_recovery_requested();
         let reconfigured = device.reconfigure_on_main_thread();
         let reported = reconfigured.as_ref().ok().map(|_| device.latency_samples());
         if let Some(track) = self.state.find_track_mut(track_id) {
             if let Some(id) = effect_id {
                 if let Some(effect) = track.effects.iter_mut().find(|effect| effect.id == id) {
                     effect.latency_samples = reported;
+                    effect.reconfiguration_failed = reconfigured.is_err();
                     if reconfigured.is_ok() {
                         effect.external_inputs = device.external_inputs().to_vec();
                     }
@@ -72,7 +74,11 @@ impl App {
                 }
                 self.state.devices.last_routing = Some(channels);
                 self.send_command(EngineCommand::ResumeDeviceReconfiguration { device, routing });
-                self.state.status_text = format!("Updated {name} processing latency");
+                self.state.status_text = if recovering {
+                    format!("Recovered {name} processing")
+                } else {
+                    format!("Updated {name} processing latency")
+                };
             }
             Err(reason) => {
                 let reason = format!("{name}: {reason}");

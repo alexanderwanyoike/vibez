@@ -42,6 +42,8 @@ pub struct Vst3PluginInstance {
     live_queues: Vec<LiveParamQueue>,
     processing_error: Option<&'static str>,
     processing_failed: bool,
+    configuration_failed: bool,
+    recovery_attempts: u8,
     note_events: Vec<NoteEvent>,
     sample_rate: f64,
     latency_samples: u32,
@@ -382,6 +384,8 @@ impl Vst3PluginInstance {
             live_queues: Vec::with_capacity(2048),
             processing_error: None,
             processing_failed: false,
+            configuration_failed: false,
+            recovery_attempts: 0,
             note_events: Vec::with_capacity(2048),
             sample_rate,
             latency_samples: 0,
@@ -467,14 +471,28 @@ impl PluginInstance for Vst3PluginInstance {
     fn set_audio_context(&mut self, context: vibez_core::audio_context::DeviceAudioContext) {
         if context.sample_rate as f64 != self.sample_rate {
             self.processing_failed = true;
+            self.configuration_failed = true;
         }
         self.audio_context = Some(context);
     }
 
+    fn processing_failure_is_local(&self) -> bool {
+        self.active && self.processing_failed && !self.configuration_failed
+    }
+
+    fn processing_recovery_requested(&self) -> bool {
+        self.active
+            && self.processing_failed
+            && !self.configuration_failed
+            && self.recovery_attempts < crate::instance::MAX_PROCESSING_RECOVERIES
+    }
+
     fn reconfiguration_requested(&self) -> bool {
-        self.component_handler
-            .as_ref()
-            .is_some_and(|handler| handler.requested())
+        self.processing_recovery_requested()
+            || self
+                .component_handler
+                .as_ref()
+                .is_some_and(|handler| handler.requested())
     }
 
     fn stop_for_reconfiguration(&mut self) {
@@ -495,6 +513,9 @@ impl PluginInstance for Vst3PluginInstance {
             .component_handler
             .as_ref()
             .map(|handler| handler.preparing());
+        if self.processing_recovery_requested() {
+            self.recovery_attempts += 1;
+        }
         self.deactivate();
         self.latency_samples = 0;
         self.rebuild_ports()?;
@@ -735,6 +756,7 @@ impl PluginInstance for Vst3PluginInstance {
         if self.active || self.processing {
             if sample_rate != self.sample_rate || max_buffer_size != self.max_frames as u32 {
                 self.processing_failed = true;
+                self.configuration_failed = true;
             }
             return;
         }
@@ -777,6 +799,7 @@ impl PluginInstance for Vst3PluginInstance {
         if hr == 0 {
             self.active = true;
             self.processing_failed = false;
+            self.configuration_failed = false;
             self.latency_samples = unsafe { super::latency::query(self.processor) };
             true
         } else {

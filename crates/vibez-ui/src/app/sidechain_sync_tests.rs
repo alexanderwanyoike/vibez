@@ -173,6 +173,7 @@ fn metered_ticks_and_mouse_messages_do_not_rebuild_the_project_routing_model() {
 fn effect(source: TrackId) -> UiEffect {
     let device = vibez_dsp::factory::create_effect(EffectType::Compressor, 44_100.0);
     UiEffect {
+        reconfiguration_failed: false,
         latency_samples: Some(0),
         id: EffectId::new(),
         effect_type: EffectType::Compressor,

@@ -12,7 +12,11 @@ impl AudioEngine {
         self.clean_removed_bus_automation();
         loop {
             if self.pending_bus_cleanup.is_some()
-                || self.pending_retirements.len() == self.pending_retirements.capacity()
+                || self
+                    .pending_retirements
+                    .capacity()
+                    .saturating_sub(self.pending_retirements.len())
+                    < self.cmd_rx.peek().map_or(2, |cmd| cmd.retirement_reserve())
                 || !self.channel_retirement.has_capacity()
             {
                 break;
@@ -32,6 +36,9 @@ impl AudioEngine {
                 break;
             };
             self.prepare_device_edit(&mut cmd);
+            if self.retain_device_parameter(&cmd) {
+                continue;
+            }
             if self.routing.is_some()
                 && matches!(
                     &cmd,
@@ -39,22 +46,31 @@ impl AudioEngine {
                         | EngineCommand::RemoveEffect(..)
                         | EngineCommand::MoveEffect { .. }
                         | EngineCommand::AddPluginEffect { .. }
-                        | EngineCommand::SetPluginInstrument { .. }
-                        | EngineCommand::SetTrackInstrument(..)
-                        | EngineCommand::RemoveTrackInstrument(..)
                 )
             {
                 self.graph_edit_pending = true;
             }
             match cmd {
                 EngineCommand::SetRouting(prepared) => self.command_set_routing(prepared),
-                EngineCommand::RejectRoutingUpdate { reason } => self.command_reject_routing_update(reason),
-                EngineCommand::ResumeDeviceReconfiguration { device, routing } => self.command_resume_device_reconfiguration(device, routing),
-                EngineCommand::RejectDeviceReconfiguration { device, reason } => self.command_reject_device_reconfiguration(device, reason),
+                EngineCommand::RejectRoutingUpdate { reason } => {
+                    self.command_reject_routing_update(reason)
+                }
+                EngineCommand::ResumeDeviceReconfiguration { device, routing } => {
+                    self.command_resume_device_reconfiguration(device, routing)
+                }
+                EngineCommand::RejectDeviceReconfiguration { device, reason } => {
+                    self.command_reject_device_reconfiguration(device, reason)
+                }
                 EngineCommand::StartPerformanceCapture => self.command_start_performance_capture(),
                 EngineCommand::StopPerformanceCapture => self.command_stop_performance_capture(),
-                EngineCommand::ExternalNoteOn { track_id, pitch, velocity } => self.command_external_note_on(track_id, pitch, velocity),
-                EngineCommand::ExternalNoteOff { track_id, pitch } => self.command_external_note_off(track_id, pitch),
+                EngineCommand::ExternalNoteOn {
+                    track_id,
+                    pitch,
+                    velocity,
+                } => self.command_external_note_on(track_id, pitch, velocity),
+                EngineCommand::ExternalNoteOff { track_id, pitch } => {
+                    self.command_external_note_off(track_id, pitch)
+                }
                 EngineCommand::ArmClipRecord {
                     free_length,
                     prepared,

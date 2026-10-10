@@ -196,6 +196,7 @@ impl App {
                 &effect_info.params,
             );
             out.push(UiEffect {
+                reconfiguration_failed: false,
                 latency_samples: Some(0),
                 inactive_sidechains: effect_info.inactive_sidechains.clone(),
                 sidechains: effect_info.sidechains.clone(),
@@ -596,6 +597,7 @@ impl App {
                 );
                 let descriptors = fx.param_descriptors();
                 track.effects.push(UiEffect {
+                    reconfiguration_failed: false,
                     latency_samples: Some(0),
                     inactive_sidechains: effect_info.inactive_sidechains.clone(),
                     sidechains: effect_info.sidechains.clone(),
@@ -645,6 +647,7 @@ impl App {
                 );
                 let descriptors = fx.param_descriptors();
                 track.effects.push(UiEffect {
+                    reconfiguration_failed: false,
                     latency_samples: Some(0),
                     inactive_sidechains: Default::default(),
                     sidechains: Default::default(),

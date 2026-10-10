@@ -9,6 +9,7 @@ use vibez_core::{
 fn effect(id: EffectId) -> UiEffect {
     let device = vibez_dsp::factory::create_effect(EffectType::Compressor, 48000.0);
     UiEffect {
+        reconfiguration_failed: false,
         latency_samples: Some(0),
         id,
         effect_type: EffectType::Compressor,

@@ -73,6 +73,7 @@ impl App {
                     .map(|i| effect.get_param(i))
                     .collect();
                 let ui_effect = UiEffect {
+                    reconfiguration_failed: false,
                     latency_samples: Some(effect.latency_samples()),
                     inactive_sidechains: track
                         .effects

@@ -45,6 +45,7 @@ pub(super) struct PendingDeviceReconfiguration {
     pub effect_id: Option<EffectId>,
     pub position: usize,
     pub bypass: bool,
+    pub local_recovery: bool,
 }
 
 impl DeviceReconfiguration {
@@ -69,6 +70,13 @@ impl DeviceReconfiguration {
         match self {
             Self::Effect { slot, .. } => effect_owner_identity(&*slot.effect),
             Self::Instrument { instrument, .. } => instrument_owner_identity(&**instrument),
+        }
+    }
+
+    pub fn processing_recovery_requested(&self) -> bool {
+        match self {
+            Self::Effect { slot, .. } => slot.effect.processing_recovery_requested(),
+            Self::Instrument { instrument, .. } => instrument.processing_recovery_requested(),
         }
     }
 
@@ -116,20 +124,66 @@ pub fn instrument_owner_identity(instrument: &dyn vibez_instruments::Instrument)
 }
 
 impl AudioEngine {
+    pub(super) fn project_processing_muted(&self) -> bool {
+        self.compensation_suspended
+            || self.graph_edit_pending
+            || !self.compensation_valid
+            || self.reconfiguration_pending()
+    }
+
+    pub(super) fn is_device_recovering(&self, track: TrackId, effect: Option<EffectId>) -> bool {
+        self.pending_device_reconfiguration.is_some_and(|pending| {
+            pending.local_recovery && pending.track_id == track && pending.effect_id == effect
+        })
+    }
+
+    pub(super) fn recovering_effect_bypass(
+        &self,
+        track: TrackId,
+        effect: EffectId,
+    ) -> Option<bool> {
+        self.pending_device_reconfiguration
+            .filter(|pending| {
+                pending.local_recovery
+                    && pending.track_id == track
+                    && pending.effect_id == Some(effect)
+            })
+            .map(|pending| pending.bypass)
+    }
+
+    pub(super) fn local_device_failure_pending(&self) -> bool {
+        self.pending_device_reconfiguration
+            .is_some_and(|pending| pending.local_recovery)
+            || self
+                .tracks
+                .iter()
+                .chain(&self.buses)
+                .chain(std::iter::once(&self.master))
+                .any(|track| {
+                    track
+                        .instrument
+                        .as_ref()
+                        .is_some_and(|instrument| instrument.processing_failure_is_local())
+                        || track
+                            .effects
+                            .iter()
+                            .any(|slot| slot.effect.processing_failure_is_local())
+                })
+    }
+
     pub(super) fn reconfiguration_pending(&self) -> bool {
         self.tracks
             .iter()
             .chain(&self.buses)
             .chain(std::iter::once(&self.master))
             .any(|track| {
-                track
-                    .effects
-                    .iter()
-                    .any(|slot| slot.effect.reconfiguration_requested())
-                    || track
-                        .instrument
-                        .as_ref()
-                        .is_some_and(|instrument| instrument.reconfiguration_requested())
+                track.effects.iter().any(|slot| {
+                    slot.effect.reconfiguration_requested()
+                        && !slot.effect.processing_recovery_requested()
+                }) || track.instrument.as_ref().is_some_and(|instrument| {
+                    instrument.reconfiguration_requested()
+                        && !instrument.processing_recovery_requested()
+                })
             })
     }
 
@@ -141,6 +195,7 @@ impl AudioEngine {
             return;
         };
         let mut invalid = None;
+        let mut local_failure = false;
         for node in &routing.graph.nodes {
             let track = if node.channel.is_master() {
                 Some(&self.master)
@@ -183,6 +238,28 @@ impl AudioEngine {
                     .is_some_and(|slot| slot.effect.processing_configuration_valid()),
                 _ => true,
             };
+            let recovering = match node.stage {
+                vibez_core::routing::NodeStage::Source => {
+                    self.is_device_recovering(node.channel, None)
+                        || track
+                            .instrument
+                            .as_ref()
+                            .is_some_and(|instrument| instrument.processing_failure_is_local())
+                }
+                vibez_core::routing::NodeStage::Effect(id) => {
+                    self.is_device_recovering(node.channel, Some(id))
+                        || track
+                            .effects
+                            .iter()
+                            .find(|slot| slot.id == id)
+                            .is_some_and(|slot| slot.effect.processing_failure_is_local())
+                }
+                _ => false,
+            };
+            if recovering {
+                local_failure = true;
+                continue;
+            }
             if !valid {
                 invalid = Some((
                     node.channel,
@@ -195,6 +272,10 @@ impl AudioEngine {
                 break;
             }
         }
+        if local_failure && !self.device_failure_capture_closed {
+            self.close_capture_for_device_failure();
+        }
+        self.device_failure_capture_closed = local_failure;
         if let Some((track_id, effect_id, reason)) = invalid {
             self.close_capture_on_failure();
             self.compensation_valid = false;
@@ -205,7 +286,11 @@ impl AudioEngine {
     }
 
     pub(super) fn begin_device_reconfiguration(&mut self) {
-        if self.compensation_suspended || self.graph_edit_pending {
+        if !self.compensation_valid
+            || self.pending_device_reconfiguration.is_some()
+            || self.compensation_suspended
+            || self.graph_edit_pending
+        {
             return;
         }
         let Some(handoff_id) = self.next_device_handoff.checked_add(1) else {
@@ -261,22 +346,24 @@ impl AudioEngine {
                 DeviceReconfiguration::Effect { position, slot, .. } => (*position, slot.bypass),
                 _ => (0, false),
             };
+            let local_recovery = device.processing_recovery_requested();
             self.pending_device_reconfiguration = Some(PendingDeviceReconfiguration {
                 handoff_id,
                 track_id: device.track_id(),
                 effect_id: device.effect_id(),
                 position,
                 bypass,
+                local_recovery,
             });
             match self
                 .event_tx
                 .push(EngineEvent::DeviceReconfiguration(device))
             {
-                Ok(()) => self.compensation_suspended = true,
+                Ok(()) => self.compensation_suspended = !local_recovery,
                 Err(rtrb::PushError::Full(EngineEvent::DeviceReconfiguration(device))) => {
                     let _ = self.restore_reconfigured_device(device);
                 }
-                Err(_) => unreachable!(),
+                Err(rtrb::PushError::Full(event)) => self.retire_event(event),
             }
         }
     }
@@ -301,6 +388,9 @@ impl AudioEngine {
                 mut reserved_effects,
                 ..
             } => {
+                self.apply_pending_device_parameters(track_id, Some(slot.id), |index, value| {
+                    slot.effect.set_param(index, value)
+                });
                 if let Some(track) = self.channel_mut(track_id) {
                     if track.effects.len() == track.effects.capacity()
                         && reserved_effects.capacity() > track.effects.len()
@@ -338,9 +428,12 @@ impl AudioEngine {
             }
             DeviceReconfiguration::Instrument {
                 track_id,
-                instrument,
+                mut instrument,
                 ..
             } => {
+                self.apply_pending_device_parameters(track_id, None, |index, value| {
+                    instrument.set_param(index, value)
+                });
                 if let Some(track) = self.channel_mut(track_id) {
                     if track.instrument.is_none() {
                         track.instrument = Some(instrument);

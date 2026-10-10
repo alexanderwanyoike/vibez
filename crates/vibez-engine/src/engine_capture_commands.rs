@@ -4,7 +4,7 @@ use super::*;
 
 impl AudioEngine {
     pub(super) fn command_start_performance_capture(&mut self) {
-        if !self.compensation_valid {
+        if !self.compensation_valid || self.local_device_failure_pending() {
             self.close_capture_on_failure();
             self.report_compensation_failure(
                 TrackId::MASTER,
@@ -17,8 +17,7 @@ impl AudioEngine {
             self.apply_clip_boundaries(self.performance_position);
         }
         let section_id = self.active_section.map(|section| section.section_id);
-        let section_position_samples =
-            self.active_section.map(|section| section.position_samples);
+        let section_position_samples = self.active_section.map(|section| section.position_samples);
         let _ = self.event_tx.push(EngineEvent::PerformanceCaptureStarted {
             effective_at_samples: self.effective_position(),
             section_id,
@@ -76,5 +75,4 @@ impl AudioEngine {
             section_position_samples: section.map(|active| active.position_samples),
         });
     }
-
 }

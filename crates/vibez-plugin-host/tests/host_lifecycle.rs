@@ -1,3 +1,5 @@
+//! Loadable SDK lifecycle, callback-role and bounded recovery regressions.
+
 mod support;
 
 use vibez_plugin_host::PluginInstance;
@@ -318,5 +320,64 @@ fn actual_dsp_failure_remains_fatal_across_exclusive_worker_change_until_reactiv
         assert_eq!(output, [1.0; 128]);
         drop(plugin);
         assert_eq!(count(&audit, b"fixture_lifecycle_errors\0"), 0);
+    }
+}
+
+#[test]
+fn transient_start_and_process_failures_have_two_main_recoveries_then_require_reload() {
+    let fixture = support::Fixture::new();
+    for format in ["clap", "vst3"] {
+        for flag in [1 << 18, 1 << 24] {
+            let mut plugin = load(&fixture, format, &state(0, 0, flag), true).unwrap();
+            for attempt in 0..=2 {
+                let mut output = [1.0; 128];
+                assert_eq!(
+                    support::allocation::count_allocations(|| plugin.process_audio(&mut output, 2)),
+                    0
+                );
+                assert_eq!(output, [0.0; 128]);
+                assert!(!plugin.processing_configuration_valid());
+                assert!(plugin.processing_failure_is_local());
+                assert_eq!(
+                    plugin.processing_recovery_requested(),
+                    attempt < 2,
+                    "{format} attempt {attempt}"
+                );
+                assert_eq!(plugin.reconfiguration_requested(), attempt < 2);
+                assert!(plugin.take_processing_error().is_some());
+                output.fill(1.0);
+                plugin.process_audio(&mut output, 2);
+                assert_eq!(
+                    output, [0.0; 128],
+                    "callback must never retry invalid native DSP"
+                );
+                assert_eq!(plugin.take_processing_error(), None);
+                if attempt < 2 {
+                    plugin.stop_for_reconfiguration();
+                    if flag == 1 << 24 {
+                        plugin.load_state(&state(0, 0, flag));
+                    }
+                    plugin.reconfigure_on_main_thread().unwrap();
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn activation_rate_mismatch_never_requests_automatic_transient_recovery() {
+    let fixture = support::Fixture::new();
+    for format in ["clap", "vst3"] {
+        let mut plugin = load(&fixture, format, &state(0, 0, 0), true).unwrap();
+        plugin.set_audio_context(vibez_core::audio_context::DeviceAudioContext {
+            sample_rate: 44100,
+            musical_sample: 0,
+            continuous_sample: 0,
+            bpm: 120.0,
+            playing: true,
+        });
+        assert!(!plugin.processing_configuration_valid());
+        assert!(!plugin.processing_failure_is_local());
+        assert!(!plugin.processing_recovery_requested());
     }
 }

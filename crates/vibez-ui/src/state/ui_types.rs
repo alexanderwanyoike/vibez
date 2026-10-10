@@ -373,6 +373,8 @@ pub struct SampleBrowserFolder {
 /// An effect instance as represented in the UI.
 #[derive(Debug, Clone)]
 pub struct UiEffect {
+    /// A live owner whose main-thread restart failed remains a guarded node.
+    pub reconfiguration_failed: bool,
     pub latency_samples: Option<u32>,
     pub id: EffectId,
     pub effect_type: EffectType,
@@ -393,6 +395,7 @@ pub struct UiEffect {
 impl UiEffect {
     pub fn unavailable_plugin(info: &vibez_core::effect::EffectInfo) -> Self {
         Self {
+            reconfiguration_failed: false,
             latency_samples: None,
             id: info.id,
             effect_type: info.effect_type,

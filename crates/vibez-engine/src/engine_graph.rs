@@ -24,11 +24,7 @@ impl AudioEngine {
         idle: bool,
         capture_audible_only: bool,
     ) {
-        if self.compensation_suspended
-            || self.graph_edit_pending
-            || !self.compensation_valid
-            || self.reconfiguration_pending()
-        {
+        if self.project_processing_muted() {
             output.fill(0.0);
             if let Some(capture) = capture.as_deref_mut() {
                 capture.samples.fill(0.0);
@@ -111,6 +107,9 @@ impl AudioEngine {
             prepared.nodes[index].samples[..len].fill(0.0);
             match node.stage {
                 NodeStage::Source => {
+                    if self.is_device_recovering(node.channel, None) {
+                        continue;
+                    }
                     let Some(track) =
                         binding.get_mut(&mut self.tracks, &mut self.buses, &mut self.master)
                     else {
@@ -267,6 +266,8 @@ impl AudioEngine {
                     }
                 }
                 NodeStage::Effect(effect_id) => {
+                    let recovering = self.is_device_recovering(node.channel, Some(effect_id));
+                    let recovery_bypass = self.recovering_effect_bypass(node.channel, effect_id);
                     for incoming_index in 0..prepared.nodes[index].incoming.len() {
                         let edge =
                             prepared.graph.edges[prepared.nodes[index].incoming[incoming_index]];
@@ -318,6 +319,12 @@ impl AudioEngine {
                             peak_l: levels.peak_l,
                             peak_r: levels.peak_r,
                         });
+                    }
+                    if recovering {
+                        if recovery_bypass != Some(true) {
+                            destination.samples[..len].fill(0.0);
+                        }
+                        continue;
                     }
                     let track =
                         binding.get_mut(&mut self.tracks, &mut self.buses, &mut self.master);

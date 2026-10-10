@@ -50,11 +50,12 @@ pub struct AudioEngine {
     pending_compensation_failure: Option<(TrackId, Option<vibez_core::id::EffectId>, &'static str)>,
     compensation_callback_heard_start: u64,
     compensation_suspended: bool,
+    device_failure_capture_closed: bool,
+    pending_device_parameters: Vec<(usize, f32)>,
     next_device_handoff: u64,
     pending_device_reconfiguration: Option<reconfiguration::PendingDeviceReconfiguration>,
     graph_edit_pending: bool,
     compensation_valid: bool,
-    compensation_failure_reported: bool,
     routing: Option<Box<crate::routing::PreparedRouting>>,
     retired_routing: Option<Box<crate::routing::PreparedRouting>>,
     pub(super) pending_retirements: Vec<EngineEvent>,
@@ -223,11 +224,12 @@ impl AudioEngine {
             pending_compensation_failure: None,
             compensation_callback_heard_start: 0,
             compensation_suspended: false,
+            device_failure_capture_closed: false,
+            pending_device_parameters: Vec::with_capacity(2048),
             next_device_handoff: 0,
             pending_device_reconfiguration: None,
             graph_edit_pending: false,
             compensation_valid: true,
-            compensation_failure_reported: false,
             retired_routing: None,
             pending_bus_cleanup: None,
             pending_retirements: Vec::with_capacity(crate::retirement::RETIREMENT_CAPACITY),
@@ -451,11 +453,7 @@ impl AudioEngine {
             }
         }
         self.validate_compensation();
-        if self.compensation_suspended
-            || self.graph_edit_pending
-            || !self.compensation_valid
-            || self.reconfiguration_pending()
-        {
+        if self.project_processing_muted() {
             output.fill(0.0);
             if let Some(capture) = track_output_capture.as_mut() {
                 capture.samples.fill(0.0);
@@ -781,3 +779,7 @@ mod capture_commands;
 #[cfg(test)]
 #[path = "engine_recovery_configuration_tests.rs"]
 mod recovery_configuration_tests;
+
+#[cfg(test)]
+#[path = "engine_recovery_review_tests.rs"]
+mod recovery_review_tests;

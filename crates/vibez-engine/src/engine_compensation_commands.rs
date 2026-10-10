@@ -6,7 +6,6 @@ impl AudioEngine {
     pub(super) fn command_set_routing(&mut self, prepared: Box<crate::routing::PreparedRouting>) {
         self.graph_edit_pending = false;
         self.compensation_valid = true;
-        self.compensation_failure_reported = false;
         self.retired_routing = self.routing.replace(prepared);
         self.return_retired_routing();
     }
@@ -21,7 +20,11 @@ impl AudioEngine {
         self.retire_event(EngineEvent::CompensationFailed { reason });
     }
 
-    pub(super) fn command_resume_device_reconfiguration(&mut self, device: reconfiguration::DeviceReconfiguration, routing: Box<crate::routing::PreparedRouting>) {
+    pub(super) fn command_resume_device_reconfiguration(
+        &mut self,
+        device: reconfiguration::DeviceReconfiguration,
+        routing: Box<crate::routing::PreparedRouting>,
+    ) {
         if !self.handoff_is_current(&device) {
             self.retired_routing = Some(routing);
             self.return_retired_routing();
@@ -43,12 +46,15 @@ impl AudioEngine {
         self.compensation_suspended = false;
         self.graph_edit_pending = false;
         self.compensation_valid = true;
-        self.compensation_failure_reported = false;
         self.retired_routing = self.routing.replace(routing);
         self.return_retired_routing();
     }
 
-    pub(super) fn command_reject_device_reconfiguration(&mut self, device: reconfiguration::DeviceReconfiguration, reason: String) {
+    pub(super) fn command_reject_device_reconfiguration(
+        &mut self,
+        device: reconfiguration::DeviceReconfiguration,
+        reason: String,
+    ) {
         if !self.handoff_is_current(&device) {
             self.retire_event(EngineEvent::DeviceReconfigurationRetired {
                 device,
@@ -64,5 +70,4 @@ impl AudioEngine {
         self.retire_event(EngineEvent::CompensationFailed { reason });
         let _ = self.event_tx.push(EngineEvent::PlaybackStopped);
     }
-
 }

@@ -43,8 +43,13 @@ impl AudioEngine {
         self.flush_presentation();
     }
 
+    pub(super) fn close_capture_for_device_failure(&mut self) {
+        self.pending_capture_stop
+            .get_or_insert(self.compensation_callback_heard_start);
+        self.flush_presentation();
+    }
+
     pub(super) fn close_capture_on_failure(&mut self) {
-        self.compensation_failure_reported = true;
         self.pending_capture_stop
             .get_or_insert(self.compensation_callback_heard_start);
         self.flush_presentation();

@@ -190,6 +190,7 @@ mod tests {
 
     fn effect(plugin: Option<PluginDeviceInfo>) -> UiEffect {
         UiEffect {
+            reconfiguration_failed: false,
             latency_samples: Some(0),
             inactive_sidechains: Default::default(),
             sidechains: Default::default(),

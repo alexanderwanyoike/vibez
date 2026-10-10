@@ -69,6 +69,11 @@ impl EngineCommandQueue {
         use vibez_engine::engine::reconfiguration::{
             effect_owner_identity, instrument_owner_identity,
         };
+        let invalidation = command.device_owner_invalidation();
+        if invalidation != vibez_engine::command_ownership::DeviceOwnerInvalidation::None {
+            self.device_owners
+                .retain(|(track, effect), _| !invalidation.matches(*track, *effect));
+        }
         match command {
             EngineCommand::AddPluginEffect {
                 track_id,
@@ -88,27 +93,6 @@ impl EngineCommandQueue {
                 self.device_owners
                     .insert((*track_id, None), instrument_owner_identity(&**instrument));
             }
-            EngineCommand::AddEffect {
-                track_id,
-                effect_id,
-                ..
-            }
-            | EngineCommand::RemoveEffect(track_id, effect_id) => {
-                self.device_owners.remove(&(*track_id, Some(*effect_id)));
-            }
-            EngineCommand::SetTrackInstrument(track_id, ..)
-            | EngineCommand::RemoveTrackInstrument(track_id) => {
-                self.device_owners.remove(&(*track_id, None));
-            }
-            EngineCommand::RemoveTrack(track_id)
-            | EngineCommand::RemoveBus(track_id)
-            | EngineCommand::AddTrack(track_id, _)
-            | EngineCommand::AddBus(track_id, _)
-            | EngineCommand::AddMidiTrack(track_id, _)
-            | EngineCommand::AddInstrumentTrack(track_id, _, _) => {
-                self.device_owners.retain(|(track, _), _| track != track_id);
-            }
-            EngineCommand::UnloadAudio => self.device_owners.clear(),
             _ => {}
         }
     }
