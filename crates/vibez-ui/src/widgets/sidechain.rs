@@ -275,7 +275,7 @@ pub fn view<'a>(
         )
         .padding([8, 8])
         .width(Length::Fixed(WIDTH))
-        .height(Length::Fixed(th::DEVICE_BODY_H))
+        .max_height(th::DEVICE_BODY_H - crate::widgets::device_chrome::COMPACT_TOP)
         .into(),
     )
 }

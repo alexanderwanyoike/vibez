@@ -27,6 +27,20 @@ pub fn divider() -> Element<'static, Message> {
         .into()
 }
 
+/// Gap above compact sections (knob rows, sidechain, plugin face).
+/// One shared offset keeps their labels level across the whole chain
+/// while placing typical compact content near the rack's middle.
+pub const COMPACT_TOP: f32 = 40.0;
+
+/// Rack-height body for a compact section, so short devices sit balanced
+/// next to full-height ones like the EQ instead of leaving a void below.
+pub fn compact_body<'a>(content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
+    container(content)
+        .padding(iced::padding::top(COMPACT_TOP))
+        .height(Length::Fixed(th::DEVICE_BODY_H))
+        .into()
+}
+
 /// Tiny uppercase header above a group of controls inside a device body.
 pub fn section_label<'a>(label: impl ToString) -> Element<'a, Message> {
     text(label.to_string().to_uppercase())
@@ -129,7 +143,6 @@ pub fn plugin_face<'a>(
     )
     .padding([8, 10])
     .width(Length::Fill)
-    .height(Length::Fixed(th::DEVICE_BODY_H))
     .into()
 }
 
@@ -205,10 +218,10 @@ pub fn plugin_instrument_card<'a>(
         column![
             title,
             container(text(latency).size(9).color(th::text_dim())).padding([2, 6]),
-            plugin_face(
+            compact_body(plugin_face(
                 format,
                 has_editor.then_some(PluginGuiKey::Instrument { track_id }),
-            ),
+            )),
         ]
         .width(Length::Fixed(PLUGIN_CARD_W)),
     )
