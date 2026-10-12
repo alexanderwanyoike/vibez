@@ -67,7 +67,26 @@ pub fn view_effect_slot<'a>(
         th::text()
     };
 
-    let name_section = crate::widgets::device_chrome::title_name(display_name, name_color);
+    // Fixed width computed from the knob count: a Fill title strip
+    // inside a shrink column collapses the card chrome in iced.
+    let knob_count = if has_params && !has_gui {
+        effect.descriptors.len()
+    } else {
+        0
+    };
+    let card_w = if let Some((_, w)) = custom_body.as_ref() {
+        *w
+    } else if is_plugin {
+        crate::widgets::device_chrome::PLUGIN_CARD_W
+    } else {
+        (knob_count as f32 * 62.0 + 24.0).max(150.0)
+    };
+    let title_w = card_w + sidechain.as_ref().map_or(0.0, |_| sidechain::WIDTH + 1.0);
+    let name_section = crate::widgets::device_chrome::title_name(
+        display_name,
+        name_color,
+        title_w - TITLE_CONTROLS_W,
+    );
 
     let bypass_label = if is_bypassed { "Off" } else { "On" };
     let bypass_color = if is_bypassed {
@@ -141,7 +160,6 @@ pub fn view_effect_slot<'a>(
     let title_bar = crate::widgets::device_chrome::title_bar(title_row);
 
     // ── Body ─────────────────────────────────────────────────
-    let custom_w = custom_body.as_ref().map(|(_, w)| *w);
     let body: Element<'a, Message> = if let Some((custom, _)) = custom_body {
         container(custom)
             .padding([8, 10])
@@ -197,20 +215,6 @@ pub fn view_effect_slot<'a>(
     };
 
     // ── Card ─────────────────────────────────────────────────
-    // Fixed width computed from the knob count: a Fill title strip
-    // inside a shrink column collapses the card chrome in iced.
-    let knob_count = if has_params && !has_gui {
-        effect.descriptors.len()
-    } else {
-        0
-    };
-    let card_w = if let Some(w) = custom_w {
-        w
-    } else if is_plugin {
-        crate::widgets::device_chrome::PLUGIN_CARD_W
-    } else {
-        (knob_count as f32 * 62.0 + 24.0).max(150.0)
-    };
     // Routing reads left to right: what keys the device, then the device.
     let (body, card_w): (Element<'a, Message>, f32) = match sidechain {
         Some(sidechain) => (
@@ -236,3 +240,6 @@ pub fn view_effect_slot<'a>(
 
     crate::widgets::device_chrome::card(card)
 }
+
+/// Width taken by the bypass dot, On, move and remove controls in a title bar.
+const TITLE_CONTROLS_W: f32 = 128.0;

@@ -7,7 +7,6 @@ use iced::{Color, Element, Length, Theme};
 
 use vibez_core::id::TrackId;
 use vibez_core::track::MediaSourceRef;
-use vibez_plugin_host::gui::PluginGuiKey;
 
 use crate::domains::browser::BrowserMsg;
 use crate::icons;
@@ -355,45 +354,19 @@ impl App {
         track: &'a UiTrack,
         track_color: Color,
     ) -> Element<'a, Message> {
-        let dot = text("\u{25CF}").size(9).color(track_color);
-        let plugin_name = track.plugin_instrument_name.as_deref().unwrap_or("Plugin");
-        let remove: Element<'a, Message> = Self::device_icon_btn(
-            icons::X,
-            th::text_dim(),
-            th::danger(),
-            Message::remove_track_instrument(track_id),
-        )
-        .into();
-        let title = Self::device_title_bar(
-            row![
-                dot,
-                crate::widgets::device_chrome::title_name(plugin_name, th::text()),
-                remove
-            ]
-            .spacing(3)
-            .align_y(iced::Alignment::Center),
-        );
-
-        let latency = crate::domains::device_latency::latency_label(
-            track.instrument_latency_samples,
-            self.state.transport.sample_rate,
-        );
-        let face = crate::widgets::device_chrome::plugin_face(
+        crate::widgets::device_chrome::plugin_instrument_card(
+            track_id,
+            track.plugin_instrument_name.as_deref().unwrap_or("Plugin"),
             track
                 .plugin_instrument_ref
                 .as_ref()
                 .map(|device| device.format.as_str()),
-            track
-                .has_plugin_instrument_gui
-                .then_some(PluginGuiKey::Instrument { track_id }),
-        );
-        Self::device_card(
-            column![
-                title,
-                container(text(latency).size(9).color(th::text_dim())).padding([2, 6]),
-                face
-            ]
-            .width(Length::Fixed(crate::widgets::device_chrome::PLUGIN_CARD_W)),
+            track.has_plugin_instrument_gui,
+            crate::domains::device_latency::latency_label(
+                track.instrument_latency_samples,
+                self.state.transport.sample_rate,
+            ),
+            track_color,
         )
     }
 
