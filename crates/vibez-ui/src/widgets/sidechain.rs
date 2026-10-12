@@ -103,25 +103,31 @@ fn meter<'a>(level: (f32, f32)) -> Element<'a, Message> {
     } else {
         th::meter_green()
     };
-    let filled = container(Space::new(
-        Length::Fixed(3.0),
-        Length::Fixed(proportion * 18.0),
-    ))
-    .style(move |_theme| container::Style {
-        background: Some(color.into()),
-        ..Default::default()
-    });
-    container(column![
-        Space::new(Length::Fixed(3.0), Length::Fixed((1.0 - proportion) * 18.0)),
-        filled
-    ])
-    .width(Length::Fixed(5.0))
-    .padding(1)
-    .style(|_theme| container::Style {
-        background: Some(th::bg_dark().into()),
-        ..Default::default()
-    })
-    .into()
+    let fill = (proportion * 1000.0).round() as u16;
+    let mut bar = row![];
+    if fill > 0 {
+        bar = bar.push(
+            container(Space::new(Length::Fill, Length::Fixed(2.0)))
+                .width(Length::FillPortion(fill))
+                .style(move |_theme| container::Style {
+                    background: Some(color.into()),
+                    ..Default::default()
+                }),
+        );
+    }
+    if fill < 1000 {
+        bar = bar.push(Space::new(
+            Length::FillPortion(1000 - fill),
+            Length::Fixed(2.0),
+        ));
+    }
+    container(bar.width(Length::Fill))
+        .width(Length::Fill)
+        .style(|_theme| container::Style {
+            background: Some(th::bg_dark().into()),
+            ..Default::default()
+        })
+        .into()
 }
 
 /// Fixed width of the sidechain section, shared with the card width math.
@@ -147,7 +153,7 @@ pub fn view<'a>(
     if inputs.is_empty() && unavailable.is_empty() {
         return None;
     }
-    let mut content = column![text("SIDECHAIN").size(8).color(th::text_muted())].spacing(7);
+    let mut content = column![crate::widgets::device_chrome::section_label("Sidechain")].spacing(6);
     for input in &inputs {
         let id = input.id;
         let effect_id = effect.id;
@@ -195,21 +201,15 @@ pub fn view<'a>(
         if inputs.len() > 1 {
             controls = controls.push(text(&input.name).size(9).color(th::text_dim()));
         }
-        controls = controls.push(
-            row![
-                source,
-                meter(
-                    state
-                        .sidechain_meters
-                        .get(&(effect_id, id))
-                        .copied()
-                        .unwrap_or_default()
-                )
-            ]
-            .spacing(4)
-            .align_y(iced::Alignment::Center),
-        );
+        controls = controls.push(source);
         if let Some(route) = route {
+            controls = controls.push(meter(
+                state
+                    .sidechain_meters
+                    .get(&(effect_id, id))
+                    .copied()
+                    .unwrap_or_default(),
+            ));
             let taps = allowed
                 .iter()
                 .find(|option| option.source == route.source)
@@ -235,12 +235,6 @@ pub fn view<'a>(
                         .color(th::text_muted()),
                 );
             }
-        } else {
-            controls = controls.push(
-                text(TapChoice(SourceTap::AfterEffects).to_string())
-                    .size(9)
-                    .color(th::text_muted()),
-            );
         }
         content = content.push(controls);
     }
