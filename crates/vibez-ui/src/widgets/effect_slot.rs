@@ -193,9 +193,12 @@ pub fn view_effect_slot<'a>(
             ));
         }
 
-        crate::widgets::device_chrome::compact_body(container(knob_row).padding([8, 10]))
+        container(knob_row)
+            .padding([8, 10])
+            .height(Length::Fixed(th::DEVICE_BODY_H))
+            .into()
     } else if is_plugin {
-        crate::widgets::device_chrome::compact_body(crate::widgets::device_chrome::plugin_face(
+        crate::widgets::device_chrome::plugin_face(
             effect
                 .plugin_ref
                 .as_ref()
@@ -204,7 +207,7 @@ pub fn view_effect_slot<'a>(
                 track_id,
                 effect_id: effect.id,
             }),
-        ))
+        )
     } else {
         container(Space::new(Length::Fixed(120.0), Length::Fixed(2.0)))
             .height(Length::Fixed(th::DEVICE_BODY_H))
@@ -216,7 +219,7 @@ pub fn view_effect_slot<'a>(
     let (body, card_w): (Element<'a, Message>, f32) = match sidechain {
         Some(sidechain) => (
             row![
-                crate::widgets::device_chrome::compact_body(sidechain),
+                sidechain,
                 crate::widgets::device_chrome::divider(),
                 container(body).width(Length::Fixed(card_w))
             ]
