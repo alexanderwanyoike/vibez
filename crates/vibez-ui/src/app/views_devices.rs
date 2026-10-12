@@ -327,14 +327,7 @@ impl App {
 
     /// Thin vertical rule separating device sections.
     pub(super) fn device_divider() -> Element<'static, Message> {
-        container(text(""))
-            .width(Length::Fixed(1.0))
-            .height(Length::Fixed(th::DEVICE_BODY_H - 12.0))
-            .style(|_theme: &Theme| container::Style {
-                background: Some(th::divider().into()),
-                ..Default::default()
-            })
-            .into()
+        crate::widgets::device_chrome::divider()
     }
 
     /// Standard device body: fixed rack height so every card in the
