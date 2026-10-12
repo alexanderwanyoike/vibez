@@ -102,7 +102,7 @@ pub fn view_effect_slot<'a>(
     };
 
     let make_move_up = || -> Element<'a, Message> {
-        action_btn(
+        crate::widgets::device_chrome::icon_button(
             icons::CHEVRON_UP,
             th::text_dim(),
             th::text(),
@@ -111,7 +111,7 @@ pub fn view_effect_slot<'a>(
         .into()
     };
     let make_move_down = || -> Element<'a, Message> {
-        action_btn(
+        crate::widgets::device_chrome::icon_button(
             icons::CHEVRON_DOWN,
             th::text_dim(),
             th::text(),
@@ -119,7 +119,7 @@ pub fn view_effect_slot<'a>(
         )
         .into()
     };
-    let remove: Element<'a, Message> = action_btn(
+    let remove: Element<'a, Message> = crate::widgets::device_chrome::icon_button(
         icons::X,
         th::text_dim(),
         th::danger(),
@@ -138,13 +138,7 @@ pub fn view_effect_slot<'a>(
     .spacing(3)
     .align_y(iced::Alignment::Center);
 
-    let title_bar = container(title_row)
-        .padding([4, 6])
-        .width(Length::Fill)
-        .style(|_theme: &Theme| container::Style {
-            background: Some(th::bg_surface().into()),
-            ..Default::default()
-        });
+    let title_bar = crate::widgets::device_chrome::title_bar(title_row);
 
     // ── Body ─────────────────────────────────────────────────
     let custom_w = custom_body.as_ref().map(|(_, w)| *w);
@@ -240,43 +234,5 @@ pub fn view_effect_slot<'a>(
     ]
     .width(Length::Fixed(card_w));
 
-    container(card)
-        .style(|_theme: &Theme| container::Style {
-            background: Some(th::bg_elevated().into()),
-            border: iced::Border {
-                color: th::border(),
-                width: 1.0,
-                radius: 4.0.into(),
-            },
-            ..Default::default()
-        })
-        .into()
-}
-
-/// Device card action button.
-fn action_btn(
-    icon_char: char,
-    color: Color,
-    hover_color: Color,
-    msg: Message,
-) -> iced::widget::Button<'static, Message> {
-    button(icons::icon(icon_char).size(12).color(color))
-        .on_press(msg)
-        .padding([3, 4])
-        .style(move |_theme: &Theme, status| {
-            let (bg, tc) = match status {
-                button::Status::Hovered => (Some(th::bg_hover().into()), hover_color),
-                button::Status::Pressed => (Some(th::bg_dark().into()), hover_color),
-                _ => (None, color),
-            };
-            button::Style {
-                background: bg,
-                text_color: tc,
-                border: iced::Border {
-                    radius: 3.0.into(),
-                    ..Default::default()
-                },
-                ..Default::default()
-            }
-        })
+    crate::widgets::device_chrome::card(card)
 }

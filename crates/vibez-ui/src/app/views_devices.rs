@@ -286,13 +286,7 @@ impl App {
     pub(super) fn device_title_bar<'a>(
         content: impl Into<Element<'a, Message>>,
     ) -> iced::widget::Container<'a, Message> {
-        container(content)
-            .padding([4, 6])
-            .width(Length::Fill)
-            .style(|_theme: &Theme| container::Style {
-                background: Some(th::bg_surface().into()),
-                ..Default::default()
-            })
+        crate::widgets::device_chrome::title_bar(content)
     }
 
     /// Standard device title row: colored dot, name, optional remove.
@@ -341,17 +335,7 @@ impl App {
 
     /// Wrap card content in the standard device card container.
     pub(super) fn device_card(content: iced::widget::Column<'_, Message>) -> Element<'_, Message> {
-        container(content)
-            .style(|_theme: &Theme| container::Style {
-                background: Some(th::bg_elevated().into()),
-                border: iced::Border {
-                    color: th::border(),
-                    width: 1.0,
-                    radius: 4.0.into(),
-                },
-                ..Default::default()
-            })
-            .into()
+        crate::widgets::device_chrome::card(content)
     }
 
     /// Small icon-only button for device card actions.
@@ -361,25 +345,7 @@ impl App {
         hover_color: Color,
         msg: Message,
     ) -> iced::widget::Button<'static, Message> {
-        button(icons::icon(icon_char).size(12).color(color))
-            .on_press(msg)
-            .padding([3, 5])
-            .style(move |_theme: &Theme, status| {
-                let (bg, tc) = match status {
-                    button::Status::Hovered => (Some(th::bg_hover().into()), hover_color),
-                    button::Status::Pressed => (Some(th::bg_dark().into()), hover_color),
-                    _ => (None, color),
-                };
-                button::Style {
-                    background: bg,
-                    text_color: tc,
-                    border: iced::Border {
-                        radius: 3.0.into(),
-                        ..Default::default()
-                    },
-                    ..Default::default()
-                }
-            })
+        crate::widgets::device_chrome::icon_button(icon_char, color, hover_color, msg)
     }
 
     /// Device card for an external plugin instrument.

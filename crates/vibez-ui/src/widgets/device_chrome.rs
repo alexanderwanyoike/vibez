@@ -23,6 +23,70 @@ pub fn divider() -> Element<'static, Message> {
         .into()
 }
 
+/// Tiny uppercase header above a group of controls inside a device body.
+pub fn section_label<'a>(label: impl ToString) -> Element<'a, Message> {
+    text(label.to_string().to_uppercase())
+        .size(8)
+        .color(th::text_muted())
+        .into()
+}
+
+/// Dark strip across the top of every device card.
+pub fn title_bar<'a>(
+    content: impl Into<Element<'a, Message>>,
+) -> container::Container<'a, Message> {
+    container(content)
+        .padding([4, 6])
+        .width(Length::Fill)
+        .style(|_theme: &Theme| container::Style {
+            background: Some(th::bg_surface().into()),
+            ..Default::default()
+        })
+}
+
+/// Raised, bordered container wrapping a whole device card.
+pub fn card<'a>(content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
+    container(content)
+        .style(|_theme: &Theme| container::Style {
+            background: Some(th::bg_elevated().into()),
+            border: iced::Border {
+                color: th::border(),
+                width: 1.0,
+                radius: 4.0.into(),
+            },
+            ..Default::default()
+        })
+        .into()
+}
+
+/// Small icon-only action in a device title bar.
+pub fn icon_button(
+    icon_char: char,
+    color: iced::Color,
+    hover_color: iced::Color,
+    msg: Message,
+) -> button::Button<'static, Message> {
+    button(icons::icon(icon_char).size(12).color(color))
+        .on_press(msg)
+        .padding([3, 4])
+        .style(move |_theme: &Theme, status| {
+            let (bg, tc) = match status {
+                button::Status::Hovered => (Some(th::bg_hover().into()), hover_color),
+                button::Status::Pressed => (Some(th::bg_dark().into()), hover_color),
+                _ => (None, color),
+            };
+            button::Style {
+                background: bg,
+                text_color: tc,
+                border: iced::Border {
+                    radius: 3.0.into(),
+                    ..Default::default()
+                },
+                ..Default::default()
+            }
+        })
+}
+
 /// Device name for a title bar. Long plugin names clip rather than wrap
 /// so every title bar keeps the same height.
 pub fn title_name<'a>(name: &'a str, color: iced::Color) -> Element<'a, Message> {
