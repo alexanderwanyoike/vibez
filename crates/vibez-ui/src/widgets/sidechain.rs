@@ -28,9 +28,9 @@ struct TapChoice(SourceTap);
 impl std::fmt::Display for TapChoice {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self.0 {
-            SourceTap::BeforeEffects => "Before Effects",
-            SourceTap::AfterEffects => "After Effects",
-            SourceTap::AfterFader => "After Fader",
+            SourceTap::BeforeEffects => "Pre FX",
+            SourceTap::AfterEffects => "Post FX",
+            SourceTap::AfterFader => "Post Fader",
         })
     }
 }
@@ -124,6 +124,9 @@ fn meter<'a>(level: (f32, f32)) -> Element<'a, Message> {
     .into()
 }
 
+/// Fixed width of the sidechain section, shared with the card width math.
+pub const WIDTH: f32 = 132.0;
+
 pub fn view<'a>(
     receiver: TrackId,
     effect: &'a UiEffect,
@@ -194,10 +197,6 @@ pub fn view<'a>(
         }
         controls = controls.push(
             row![
-                text("Source")
-                    .size(9)
-                    .color(th::text_dim())
-                    .width(Length::Fixed(36.0)),
                 source,
                 meter(
                     state
@@ -207,7 +206,7 @@ pub fn view<'a>(
                         .unwrap_or_default()
                 )
             ]
-            .spacing(5)
+            .spacing(4)
             .align_y(iced::Alignment::Center),
         );
         if let Some(route) = route {
@@ -217,26 +216,18 @@ pub fn view<'a>(
                 .map(|option| option.taps.as_slice())
                 .unwrap_or_default();
             if !taps.is_empty() {
-                controls = controls.push(
-                    row![
-                        text("Tap")
-                            .size(9)
-                            .color(th::text_dim())
-                            .width(Length::Fixed(36.0)),
-                        selector(
-                            taps.iter().copied().map(TapChoice).collect(),
-                            TapChoice(route.tap),
-                            move |choice| Message::Devices(DevicesMsg::SetSidechainTap {
-                                track_id: receiver,
-                                effect_id,
-                                input_id: id,
-                                tap: choice.0
-                            })
-                        )
-                    ]
-                    .spacing(5)
-                    .align_y(iced::Alignment::Center),
-                );
+                controls = controls.push(selector(
+                    taps.iter().copied().map(TapChoice).collect(),
+                    TapChoice(route.tap),
+                    move |choice| {
+                        Message::Devices(DevicesMsg::SetSidechainTap {
+                            track_id: receiver,
+                            effect_id,
+                            input_id: id,
+                            tap: choice.0,
+                        })
+                    },
+                ));
             } else {
                 controls = controls.push(
                     text(TapChoice(route.tap).to_string())
@@ -245,7 +236,11 @@ pub fn view<'a>(
                 );
             }
         } else {
-            controls = controls.push(text("After Effects").size(9).color(th::text_muted()));
+            controls = controls.push(
+                text(TapChoice(SourceTap::AfterEffects).to_string())
+                    .size(9)
+                    .color(th::text_muted()),
+            );
         }
         content = content.push(controls);
     }
@@ -284,8 +279,8 @@ pub fn view<'a>(
                 scrollable::Scrollbar::new().width(3).scroller_width(3),
             )),
         )
-        .padding([8, 10])
-        .width(Length::Fixed(230.0))
+        .padding([8, 8])
+        .width(Length::Fixed(WIDTH))
         .height(Length::Fixed(th::DEVICE_BODY_H))
         .into(),
     )

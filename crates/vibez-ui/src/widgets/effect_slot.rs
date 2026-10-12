@@ -285,10 +285,17 @@ pub fn view_effect_slot<'a>(
     } else {
         (knob_count as f32 * 62.0 + 24.0).max(150.0)
     };
+    // Routing reads left to right: what keys the device, then the device.
     let (body, card_w): (Element<'a, Message>, f32) = match sidechain {
         Some(sidechain) => (
-            row![container(body).width(Length::Fixed(card_w)), sidechain].into(),
-            card_w + 230.0,
+            row![
+                sidechain,
+                crate::widgets::device_chrome::divider(),
+                container(body).width(Length::Fixed(card_w))
+            ]
+            .align_y(iced::Alignment::Center)
+            .into(),
+            card_w + sidechain::WIDTH + 1.0,
         ),
         None => (body, card_w),
     };
