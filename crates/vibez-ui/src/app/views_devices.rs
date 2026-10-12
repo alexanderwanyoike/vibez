@@ -391,15 +391,6 @@ impl App {
     ) -> Element<'a, Message> {
         let dot = text("\u{25CF}").size(9).color(track_color);
         let plugin_name = track.plugin_instrument_name.as_deref().unwrap_or("Plugin");
-
-        let name_section =
-            container(text(plugin_name).size(11).color(th::text())).width(Length::Fill);
-
-        // Edit button for plugins with a native GUI
-        let edit_btn = track.has_plugin_instrument_gui.then(|| {
-            crate::widgets::device_chrome::edit_button(PluginGuiKey::Instrument { track_id })
-        });
-
         let remove: Element<'a, Message> = Self::device_icon_btn(
             icons::X,
             th::text_dim(),
@@ -407,27 +398,36 @@ impl App {
             Message::remove_track_instrument(track_id),
         )
         .into();
-
-        let mut title_row = row![dot, name_section]
-            .spacing(4)
-            .align_y(iced::Alignment::Center);
-        if let Some(eb) = edit_btn {
-            title_row = title_row.push(eb);
-        }
-        title_row = title_row.push(remove);
-
-        let title = Self::device_title_bar(title_row);
+        let title = Self::device_title_bar(
+            row![
+                dot,
+                crate::widgets::device_chrome::title_name(plugin_name, th::text()),
+                remove
+            ]
+            .spacing(3)
+            .align_y(iced::Alignment::Center),
+        );
 
         let latency = crate::domains::device_latency::latency_label(
             track.instrument_latency_samples,
             self.state.transport.sample_rate,
         );
+        let face = crate::widgets::device_chrome::plugin_face(
+            track
+                .plugin_instrument_ref
+                .as_ref()
+                .map(|device| device.format.as_str()),
+            track
+                .has_plugin_instrument_gui
+                .then_some(PluginGuiKey::Instrument { track_id }),
+        );
         Self::device_card(
             column![
                 title,
-                container(text(latency).size(9).color(th::text_dim())).padding([2, 6])
+                container(text(latency).size(9).color(th::text_dim())).padding([2, 6]),
+                face
             ]
-            .width(Length::Fixed(200.0)),
+            .width(Length::Fixed(crate::widgets::device_chrome::PLUGIN_CARD_W)),
         )
     }
 

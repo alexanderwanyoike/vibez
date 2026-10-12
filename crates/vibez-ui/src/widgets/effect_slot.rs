@@ -67,24 +67,7 @@ pub fn view_effect_slot<'a>(
         th::text()
     };
 
-    let name_elem = text(display_name).size(11).color(name_color);
-
-    // Name takes remaining width
-    let name_section = container(name_elem).width(Length::Fill);
-
-    // Fixed-size controls on the right
-    // Edit button (open plugin GUI) - only for effects with a native GUI
-    let make_edit = || -> Option<iced::widget::Button<'a, Message>> {
-        if !has_gui {
-            return None;
-        }
-        Some(crate::widgets::device_chrome::edit_button(
-            PluginGuiKey::Effect {
-                track_id,
-                effect_id: effect.id,
-            },
-        ))
-    };
+    let name_section = crate::widgets::device_chrome::title_name(display_name, name_color);
 
     let bypass_label = if is_bypassed { "Off" } else { "On" };
     let bypass_color = if is_bypassed {
@@ -144,23 +127,16 @@ pub fn view_effect_slot<'a>(
     )
     .into();
 
-    let mut title_row = row![dot, name_section]
-        .spacing(3)
-        .align_y(iced::Alignment::Center);
-    if is_plugin {
-        // Plugins: name gets the title to itself; Edit/On/reorder
-        // live in the body where they have room.
-        title_row = title_row.push(remove);
-    } else {
-        if let Some(eb) = make_edit() {
-            title_row = title_row.push(eb);
-        }
-        title_row = title_row
-            .push(make_bypass())
-            .push(make_move_up())
-            .push(make_move_down())
-            .push(remove);
-    }
+    let title_row = row![
+        dot,
+        name_section,
+        make_bypass(),
+        make_move_up(),
+        make_move_down(),
+        remove
+    ]
+    .spacing(3)
+    .align_y(iced::Alignment::Center);
 
     let title_bar = container(title_row)
         .padding([4, 6])
@@ -210,41 +186,16 @@ pub fn view_effect_slot<'a>(
             .height(Length::Fixed(th::DEVICE_BODY_H))
             .into()
     } else if is_plugin {
-        // External plugin face: format badge, prominent Edit, then
-        // bypass and chain-reorder controls.
-        let format_label = effect
-            .plugin_ref
-            .as_ref()
-            .map(|d| d.format.to_uppercase())
-            .unwrap_or_else(|| "PLUGIN".to_string());
-        let badge = container(text(format_label).size(8).color(th::accent()))
-            .padding([2, 8])
-            .style(|_theme: &Theme| container::Style {
-                background: Some(th::bg_dark().into()),
-                border: iced::Border {
-                    color: th::accent_dim(),
-                    width: 1.0,
-                    radius: 3.0.into(),
-                },
-                ..Default::default()
-            });
-
-        let mut face = column![badge].spacing(10).align_x(iced::Alignment::Center);
-        if let Some(eb) = make_edit() {
-            face = face.push(eb.padding([5, 22]));
-        }
-        face = face.push(
-            row![make_bypass(), make_move_up(), make_move_down()]
-                .spacing(4)
-                .align_y(iced::Alignment::Center),
-        );
-
-        container(face)
-            .width(Length::Fill)
-            .height(Length::Fixed(th::DEVICE_BODY_H))
-            .align_x(iced::Alignment::Center)
-            .align_y(iced::Alignment::Center)
-            .into()
+        crate::widgets::device_chrome::plugin_face(
+            effect
+                .plugin_ref
+                .as_ref()
+                .map(|device| device.format.as_str()),
+            has_gui.then_some(PluginGuiKey::Effect {
+                track_id,
+                effect_id: effect.id,
+            }),
+        )
     } else {
         container(Space::new(Length::Fixed(120.0), Length::Fixed(2.0)))
             .height(Length::Fixed(th::DEVICE_BODY_H))
@@ -262,7 +213,7 @@ pub fn view_effect_slot<'a>(
     let card_w = if let Some(w) = custom_w {
         w
     } else if is_plugin {
-        190.0
+        crate::widgets::device_chrome::PLUGIN_CARD_W
     } else {
         (knob_count as f32 * 62.0 + 24.0).max(150.0)
     };
