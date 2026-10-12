@@ -78,31 +78,12 @@ pub fn view_effect_slot<'a>(
         if !has_gui {
             return None;
         }
-        let gui_key = PluginGuiKey::Effect {
-            track_id,
-            effect_id: effect.id,
-        };
-        Some(
-            button(text("Edit").size(9).color(th::text_dim()))
-                .on_press(Message::OpenPluginGui(gui_key))
-                .padding([2, 5])
-                .style(|_theme: &Theme, status| {
-                    let (bg, tc) = match status {
-                        button::Status::Hovered => (Some(th::bg_hover().into()), th::accent()),
-                        _ => (None, th::text_dim()),
-                    };
-                    button::Style {
-                        background: bg,
-                        text_color: tc,
-                        border: iced::Border {
-                            color: th::border(),
-                            width: 1.0,
-                            radius: 3.0.into(),
-                        },
-                        ..Default::default()
-                    }
-                }),
-        )
+        Some(crate::widgets::device_chrome::edit_button(
+            PluginGuiKey::Effect {
+                track_id,
+                effect_id: effect.id,
+            },
+        ))
     };
 
     let bypass_label = if is_bypassed { "Off" } else { "On" };
