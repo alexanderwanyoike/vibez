@@ -10,6 +10,10 @@ impl AudioEngine {
         effective_at_samples: u64,
     ) {
         self.apply_end_of_section_track_mutes(effective_at_samples);
+        if self.presentation_fault {
+            self.present_event(EngineEvent::SectionQueueCancelled { retired: prepared });
+            return;
+        }
         self.begin_performance_clock();
         let section_id = prepared.section_id;
         let length_samples = self.section_length_samples(prepared.length_beats);
@@ -35,7 +39,7 @@ impl AudioEngine {
         self.transport.set_audio_length(None);
         if !self.transport.is_playing() {
             self.transport.play();
-            let _ = self.event_tx.push(EngineEvent::PlaybackStarted);
+            self.present_event(EngineEvent::PlaybackStarted);
         }
         self.stopped_note_repeat_anchor = None;
         self.reanchor_note_repeats(effective_at_samples, effective_at_samples);
@@ -44,11 +48,7 @@ impl AudioEngine {
             effective_at_samples,
             retired: prepared,
         };
-        if let Err(rtrb::PushError::Full(event)) = self.event_tx.push(event) {
-            // Never destroy Vec/Arc owners in the callback. Losing this rare
-            // event leaks one retired source rather than glitching.
-            std::mem::forget(event);
-        }
+        self.present_event(event);
     }
 
     pub(super) fn queue_section(
@@ -58,9 +58,7 @@ impl AudioEngine {
     ) {
         if self.pending_section_record.is_some() || self.active_section_record.is_some() {
             let event = EngineEvent::SectionQueueCancelled { retired: prepared };
-            if let Err(rtrb::PushError::Full(event)) = self.event_tx.push(event) {
-                std::mem::forget(event);
-            }
+            self.present_event(event);
             return;
         }
         self.begin_performance_clock();
@@ -106,9 +104,7 @@ impl AudioEngine {
             effective_at_samples,
             retired: retired.map(|queued| queued.prepared),
         };
-        if let Err(rtrb::PushError::Full(event)) = self.event_tx.push(event) {
-            std::mem::forget(event);
-        }
+        self.present_event(event);
     }
 
     pub(super) fn cancel_section_queue(&mut self) {
@@ -118,9 +114,7 @@ impl AudioEngine {
         let event = EngineEvent::SectionQueueCancelled {
             retired: queued.prepared,
         };
-        if let Err(rtrb::PushError::Full(event)) = self.event_tx.push(event) {
-            std::mem::forget(event);
-        }
+        self.present_event(event);
     }
 
     pub(super) fn process_section_multitrack(
@@ -137,8 +131,16 @@ impl AudioEngine {
             .map(|queued| queued.effective_at_samples);
 
         if boundary.is_some_and(|boundary| boundary <= block_start) {
+            if !self.presentation_room(4) {
+                output.fill(0.0);
+                return;
+            }
             let queued = self.queued_section.take().expect("queued Section");
             self.activate_section(queued.prepared, block_start);
+            if self.presentation_fault {
+                output.fill(0.0);
+                return;
+            }
         }
 
         if let Some(boundary) =
@@ -153,8 +155,16 @@ impl AudioEngine {
                 old_section,
                 block_start,
             );
+            if !self.presentation_room(4) {
+                output.fill(0.0);
+                return;
+            }
             let queued = self.queued_section.take().expect("queued Section");
             self.activate_section(queued.prepared, boundary);
+            if self.presentation_fault {
+                output[frames_before * channels..].fill(0.0);
+                return;
+            }
             let frames_after = frames - frames_before;
             let new_section = self.active_section.expect("active Section");
             self.render_section_frames(

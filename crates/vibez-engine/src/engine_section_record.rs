@@ -96,7 +96,7 @@ impl AudioEngine {
                 if !self.transport.is_playing() {
                     self.transport.play();
                     self.stopped_note_repeat_anchor = None;
-                    let _ = self.event_tx.push(EngineEvent::PlaybackStarted);
+                    self.present_event(EngineEvent::PlaybackStarted);
                 }
                 let count_in_start_samples = self.performance_position;
                 (
@@ -117,7 +117,7 @@ impl AudioEngine {
             count_in_beat_samples,
             replace_existing,
         });
-        let _ = self.event_tx.push(EngineEvent::SectionRecordArmed {
+        self.present_event(EngineEvent::SectionRecordArmed {
             section_id,
             track_id,
             effective_at_samples,
@@ -153,9 +153,7 @@ impl AudioEngine {
             started,
             retired,
         };
-        if let Err(rtrb::PushError::Full(event)) = self.event_tx.push(event) {
-            std::mem::forget(event);
-        }
+        self.present_event(event);
     }
 
     pub(super) fn start_section_record_if_due(&mut self, through_sample: u64) {
@@ -163,12 +161,15 @@ impl AudioEngine {
             .pending_section_record
             .as_ref()
             .is_some_and(|pending| pending.effective_at_samples <= through_sample);
-        if !due {
+        if !due || !self.presentation_room(4) {
             return;
         }
         let mut pending = self.pending_section_record.take().expect("due recording");
         if let Some(prepared) = pending.prepared.take() {
             self.activate_section(prepared, pending.effective_at_samples);
+            if self.presentation_fault {
+                return;
+            }
         }
         self.active_section_record = Some(ActiveSectionRecord {
             section_id: pending.section_id,
@@ -177,7 +178,7 @@ impl AudioEngine {
             replace_first_pass: pending.replace_existing,
             replace_source_flushed: false,
         });
-        let _ = self.event_tx.push(EngineEvent::SectionRecordStarted {
+        self.present_event(EngineEvent::SectionRecordStarted {
             section_id: pending.section_id,
             track_id: pending.track_id,
             effective_at_samples: pending.effective_at_samples,
@@ -235,7 +236,10 @@ impl AudioEngine {
         }
         self.start_section_record_if_due(timing.boundary);
         let frames_after = frames - frames_before;
-        let section = self.active_section.expect("recording activated Section");
+        let Some(section) = self.active_section.filter(|_| !self.presentation_fault) else {
+            output[frames_before * channels..].fill(0.0);
+            return true;
+        };
         self.render_section_frames(
             &mut output[frames_before * channels..],
             frames_after,

@@ -46,8 +46,13 @@ const SPECTRUM_RING_CAPACITY: usize = 16_384;
 /// // Keep `cmd_tx` and `event_rx` on the UI thread.
 /// ```
 pub struct AudioEngine {
-    pending_capture_stop: Option<u64>,
+    scheduled_presentation: Vec<presentation_queue::ScheduledPresentation>,
+    presentation_overflow_owner: Option<EngineEvent>,
     pending_playback_stop: bool,
+    pending_source_cleanup: bool,
+    presentation_fault: bool,
+    pending_capture_stop: Option<u64>,
+    capture_active: bool,
     pending_compensation_failure: Option<(TrackId, Option<vibez_core::id::EffectId>, &'static str)>,
     compensation_callback_heard_start: u64,
     compensation_suspended: bool,
@@ -96,6 +101,7 @@ pub struct AudioEngine {
     split_wrap_handled: bool,
     active_section: Option<ActiveSectionPlayback>,
     clip_performance: bool,
+    pending_clip_batch: Option<clip_batch::PendingClipBatch>,
     queued_section: Option<QueuedSectionPlayback>,
     pending_section_record: Option<section_record::PendingSectionRecord>,
     active_section_record: Option<section_record::ActiveSectionRecord>,
@@ -112,6 +118,7 @@ pub struct AudioEngine {
     /// this follows the active clock domain.
     performance_position: u64,
     output_position: u64,
+    rendered_callback_frames: usize,
     clip_record: Option<clip_record::ClipRecordRuntime>,
     /// The clock currently authorised to advance. Perform owns an independent
     /// zero-based engine timeline; its playback must never mutate the
@@ -221,8 +228,15 @@ impl AudioEngine {
 
         let engine = Self {
             routing: None,
-            pending_capture_stop: None,
+            scheduled_presentation: Vec::with_capacity(
+                presentation_queue::PRESENTATION_EVENT_CAPACITY,
+            ),
+            presentation_overflow_owner: None,
             pending_playback_stop: false,
+            pending_source_cleanup: false,
+            presentation_fault: false,
+            pending_capture_stop: None,
+            capture_active: false,
             pending_compensation_failure: None,
             compensation_callback_heard_start: 0,
             compensation_suspended: false,
@@ -255,6 +269,7 @@ impl AudioEngine {
             split_wrap_handled: false,
             active_section: None,
             clip_performance: false,
+            pending_clip_batch: None,
             queued_section: None,
             pending_section_record: None,
             active_section_record: None,
@@ -264,6 +279,7 @@ impl AudioEngine {
             project_swing: SwingAmount::default(),
             performance_position: 0,
             output_position: 0,
+            rendered_callback_frames: 0,
             clip_record: None,
             clock_domain: ClockDomain::Arrange,
             stopped_note_repeat_anchor: None,
@@ -313,6 +329,7 @@ impl AudioEngine {
             live_input,
             mut track_output_capture,
         } = block;
+        self.rendered_callback_frames = 0;
         self.compensation_callback_heard_start = self.effective_position();
         self.flush_processing_errors();
         self.flush_presentation();
@@ -519,11 +536,12 @@ impl AudioEngine {
             self.stop_section_record();
             self.apply_end_of_section_track_mutes_at_queued_boundary();
             self.cancel_queued_track_mutes();
-            let _ = self.event_tx.push(EngineEvent::PerformanceCaptureStopped {
+            self.capture_active = false;
+            self.present_event(EngineEvent::PerformanceCaptureStopped {
                 effective_at_samples: self.performance_position,
             });
             self.transport.stop();
-            let _ = self.event_tx.push(EngineEvent::PlaybackStopped);
+            self.present_event(EngineEvent::PlaybackStopped);
             self.active_section = None;
             self.clock_domain = ClockDomain::Arrange;
             self.transport
@@ -556,6 +574,7 @@ impl AudioEngine {
         }
 
         self.output_position = self.output_position.saturating_add(frames as u64);
+        self.rendered_callback_frames = 0;
 
         // Master metering event.
         let meters = metering::calculate_meters(output, channels);
@@ -782,6 +801,8 @@ mod capture_commands;
 #[path = "engine_recovery_configuration_tests.rs"]
 mod recovery_configuration_tests;
 
+#[path = "engine_presentation_queue.rs"]
+mod presentation_queue;
 #[cfg(test)]
 #[path = "engine_recovery_review_tests.rs"]
 mod recovery_review_tests;
@@ -789,3 +810,18 @@ mod recovery_review_tests;
 #[cfg(test)]
 #[path = "engine_automation_retirement_tests.rs"]
 mod automation_retirement_tests;
+
+#[cfg(test)]
+#[path = "engine_presentation_runtime_tests.rs"]
+mod presentation_runtime_tests;
+
+#[path = "engine_clip_batch.rs"]
+mod clip_batch;
+
+#[cfg(test)]
+#[path = "engine_section_owner_retention_tests.rs"]
+mod section_owner_retention_tests;
+
+#[cfg(test)]
+#[path = "engine_presentation_review_tests.rs"]
+mod presentation_review_tests;

@@ -38,8 +38,12 @@ UI to engine is an `rtrb` ring of `EngineCommand`; engine to UI is a ring of
 audio thread never allocates or frees large buffers it uniquely owns.
 Events come in two classes, and the class determines the push policy:
 
-- **Authoritative** (Capture consumes them, state depends on them): pushed
-  normally; consumers own staleness handling.
+- **Authoritative** (Capture consumes them, state depends on them): enter
+  `present_event`, or `present_event_at` when a resumed Clip packet must retain
+  its original physical release time. Both use the same bounded queue. Due
+  retained events precede new due events, including when UI capacity returns.
+  Future events do not block an immediate source event. Clip resync snapshots
+  wait for earlier due acknowledgements; consumers still handle staleness.
 - **Cosmetic** (meters, pad flashes): pushed with `let _ =` and deliberately
   lossy. A cosmetic event must never retry, because a retry backlog competes
   with authoritative events for ring slots after a UI stall.
@@ -48,14 +52,30 @@ Events come in two classes, and the class determines the push policy:
 
 Removed devices stop processing on the audio thread before their unique owner
 is sent to the UI for destruction. Channel owners use preallocated pool slots
-with an Acquire/Release handoff. A full event ring retains owners in bounded
-pending retirement storage and pauses command consumption until capacity returns;
-it must never allocate a replacement holder or destroy a device in the callback.
+with an Acquire/Release handoff. Device disposal uses 32 preallocated pending
+retirement slots. State events and source owners use a separate 2048-entry
+presentation queue, ordered by physical due time and insertion order. Command
+admission reserves its bounded body before taking ownership; track-sized cleanup
+retains unprocessed queued owners and mute intents in place and pauses later
+commands. Runtime boundary emitters reserve before changing state. Clip packets
+reuse their transferred Vec for resumable acknowledgements and owner return.
+Neither store grows or destroys undelivered owners in the callback.
+
+Presentation exhaustion stops playback and Capture, retains their terminal state
+and named cause in inline pending slots, and converts canceled Section/Clip
+notifications into owner retirement. One inline overflow holder protects the
+producer that discovered exhaustion. Terminal stop/cause delivery precedes normal
+queued delivery, after already-due accepted Capture start/data have drained.
+Packet admission subtracts pending inline notifications from available UI slots;
+the same slot cannot admit both a terminal event and a transferred owner.
+Subsequent packet publication returns owners without reasserting playing state. Capture-only cancellation preserves continuing-playback Section,
+Clip and transport acknowledgements, and immediate recording feeds.
 
 Once a prepared routing plan is installed, structural channel/effect changes
 must be followed by a new plan prepared outside the callback. Send topology
-includes audible sends and automation that can make a send audible. Parameter
-values are read at render time; dormant sends do not create feedback edges.
+includes every configured Send target, including zero-level sends and empty
+Send automation lanes. Gains are read at render time; a silent connection still
+participates in feedback validation.
 
 Domain code sends engine commands through the `EngineHandle` trait, never
 through a concrete channel. The adapters are the vocabulary:

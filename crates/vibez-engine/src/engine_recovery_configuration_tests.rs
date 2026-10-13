@@ -162,6 +162,32 @@ fn invalid_configuration_cannot_start_a_new_silent_capture() {
 }
 
 #[test]
+fn global_configuration_failure_retains_stopped_acknowledgement_under_backpressure() {
+    let (mut engine, _, mut events, valid, _) = setup();
+    engine.transport.play();
+    while engine.event_tx.push(EngineEvent::PlaybackStarted).is_ok() {}
+    valid.store(false, Ordering::Relaxed);
+    assert_eq!(
+        crate::retirement::tests::allocations(|| engine.process(&mut [0.0; 16], 2)),
+        (0, 0)
+    );
+    assert!(!engine.transport.is_playing());
+    while events.pop().is_ok() {}
+    let mut stopped = false;
+    let mut closed = false;
+    let mut cause = false;
+    for _ in 0..4 {
+        engine.flush_presentation();
+        while let Ok(event) = events.pop() {
+            stopped |= matches!(event, EngineEvent::PlaybackStopped);
+            closed |= matches!(event, EngineEvent::PerformanceCaptureStopped { .. });
+            cause |= matches!(event, EngineEvent::CompensationInvalid { .. });
+        }
+    }
+    assert!(stopped && closed && cause);
+}
+
+#[test]
 fn exhausted_handoff_closes_source_capture_and_retains_original_cause_and_stop() {
     let (mut engine, _, mut events, _, _) = setup();
     engine.next_device_handoff = u64::MAX;

@@ -13,6 +13,11 @@ impl AudioEngine {
         if self.clock_domain == ClockDomain::Perform {
             return;
         }
+        let ending_capture = self.capture_stop_pending();
+        self.cancel_presentation();
+        if ending_capture {
+            self.stop_heard_capture();
+        }
         self.clock_domain = ClockDomain::Perform;
         self.performance_position = 0;
         if let Some(queued) = self.audition.resync_on_transport_start(
@@ -26,9 +31,9 @@ impl AudioEngine {
             } else {
                 EngineEvent::AuditionStarted
             };
-            let _ = self.event_tx.push(event);
+            self.present_event(event);
         }
-        let _ = self.event_tx.push(EngineEvent::PerformancePosition(0));
+        self.present_event(EngineEvent::PerformancePosition(0));
     }
 
     pub(super) fn effective_position(&self) -> u64 {

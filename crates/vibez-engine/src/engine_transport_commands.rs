@@ -4,6 +4,13 @@ use super::*;
 
 impl AudioEngine {
     pub(super) fn command_play(&mut self) {
+        let capture_needs_closure = self.capture_active || self.capture_stop_pending();
+        self.cancel_presentation();
+        if capture_needs_closure {
+            self.stop_heard_capture();
+        }
+        self.pending_playback_stop = false;
+        self.presentation_fault = false;
         let was_clip_performance = self.clip_performance;
         self.clear_clip_performance();
         self.clock_domain = ClockDomain::Arrange;
@@ -24,7 +31,7 @@ impl AudioEngine {
             } else {
                 EngineEvent::AuditionStarted
             };
-            let _ = self.event_tx.push(event);
+            self.present_event(event);
         }
         self.performance_position = self.transport.position();
         self.stopped_note_repeat_anchor = None;
@@ -33,16 +40,14 @@ impl AudioEngine {
         if was_clip_performance {
             self.clip_event(EngineEvent::PlaybackStarted);
         } else {
-            let _ = self.event_tx.push(EngineEvent::PlaybackStarted);
+            self.present_event(EngineEvent::PlaybackStarted);
         }
     }
 
     pub(super) fn command_stop(&mut self) {
-        let was_clip_performance = self.clip_performance;
+        self.cancel_presentation();
         self.stop_section_record();
-        let _ = self.event_tx.push(EngineEvent::PerformanceCaptureStopped {
-            effective_at_samples: self.effective_position(),
-        });
+        self.stop_heard_capture();
         self.clear_clip_performance();
         self.transport.stop();
         self.arrangement_recording = false;
@@ -62,11 +67,7 @@ impl AudioEngine {
         if let Some(anchor) = self.stopped_note_repeat_anchor {
             self.reanchor_note_repeats(anchor, self.performance_position);
         }
-        if was_clip_performance {
-            self.clip_event(EngineEvent::PlaybackStopped);
-        } else {
-            let _ = self.event_tx.push(EngineEvent::PlaybackStopped);
-        }
+        self.present_event(EngineEvent::PlaybackStopped);
     }
 
     pub(super) fn command_seek(&mut self, pos: u64) {
