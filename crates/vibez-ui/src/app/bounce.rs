@@ -92,7 +92,7 @@ impl App {
         }
 
         let assets = self.collect_bounce_assets();
-        let project = self.project_from_state();
+        let project = self.project_for_offline_render();
         let wav_path = self.next_bounce_path();
         let sample_rate = self.state.transport.sample_rate;
         let bpm = self.state.transport.bpm;
@@ -113,10 +113,10 @@ impl App {
             swing: project.swing,
         };
 
-        self.state.status_text = format!("Bouncing {clip_name}...");
-        Task::perform(
-            bounce_async(request, wav_path, clip_name, insert_position_samples),
-            Message::BounceComplete,
+        self.start_offline_render(
+            request,
+            wav_path,
+            Some((clip_name, insert_position_samples)),
         )
     }
 
@@ -183,16 +183,10 @@ impl App {
             .insert(ArrangementSelection::AudioClip { track_id, clip_id });
         self.mark_project_dirty();
 
-        let warnings_note = if outcome.warnings.is_empty() {
-            String::new()
-        } else {
-            format!(" ({} warning(s))", outcome.warnings.len())
-        };
         self.state.status_text = format!(
-            "Bounced '{}' to {}{}",
+            "Bounced '{}' to {}",
             outcome.clip_name,
-            outcome.path.display(),
-            warnings_note
+            outcome.path.display()
         );
     }
 

@@ -5151,6 +5151,7 @@ dependencies = [
  "symphonia",
  "tempfile",
  "vibez-core",
+ "vibez-dsp",
  "vibez-engine",
 ]
 
@@ -5221,7 +5222,9 @@ dependencies = [
  "serde_json",
  "vibez-core",
  "vibez-dsp",
+ "vibez-engine",
  "vibez-instruments",
+ "vibez-routing-fixture",
  "vst3",
 ]
 
@@ -5235,6 +5238,14 @@ dependencies = [
  "sha2",
  "tempfile",
  "vibez-core",
+]
+
+[[package]]
+name = "vibez-routing-fixture"
+version = "0.1.0"
+dependencies = [
+ "clap-sys",
+ "vst3",
 ]
 
 [[package]]

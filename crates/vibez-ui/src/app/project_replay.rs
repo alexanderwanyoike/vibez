@@ -107,6 +107,9 @@ impl App {
             .section_editor
             .editor_mut()
             .discard_audio_clip_inspector_edits();
+        self.plugin_load_requests.reset();
+        self.sidechain_sync_inputs = None;
+        self.track_meter_peaks.clear();
         // Plugin devices cannot live inside snapshots; strip them
         // into reload requests first, capturing the live state of
         // instances that still exist so undo keeps their exact
@@ -398,6 +401,9 @@ impl App {
     /// async pipeline instead.
     fn replay_effects_to_engine(&mut self, track: &ProjectTrack) {
         for effect in &track.effects {
+            if effect.plugin_ref.is_some() {
+                continue;
+            }
             self.send_command(EngineCommand::AddEffect {
                 track_id: track.id,
                 effect_id: effect.id,

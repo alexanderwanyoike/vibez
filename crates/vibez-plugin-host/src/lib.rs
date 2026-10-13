@@ -21,6 +21,7 @@ pub mod gui;
 pub mod info;
 pub mod instance;
 pub mod paths;
+mod process_context;
 pub mod scan_helper;
 pub mod scanner;
 pub mod settings;
@@ -44,3 +45,5 @@ mod macos_bundle;
 
 #[cfg(any(test, feature = "test-fixtures"))]
 pub mod test_fixtures;
+
+mod audio_ports;

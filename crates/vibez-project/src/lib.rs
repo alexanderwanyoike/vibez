@@ -55,6 +55,8 @@ pub struct SectionInfo {
 /// A serializable project containing tracks and clips.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Project {
+    #[serde(default)]
+    pub reduced_latency_monitoring: bool,
     pub name: String,
     pub bpm: f64,
     /// Immutable timing-model identity used to interpret Project Swing.
@@ -87,6 +89,7 @@ pub struct Project {
 impl Default for Project {
     fn default() -> Self {
         Self {
+            reduced_latency_monitoring: false,
             name: "Untitled".to_string(),
             bpm: vibez_core::constants::DEFAULT_BPM,
             groove_profile: GrooveProfile::default(),
@@ -220,6 +223,9 @@ impl Project {
             maximum = maximum.max(track.id.raw());
             for effect in &track.effects {
                 maximum = maximum.max(effect.id.raw());
+                for route in &effect.sidechains {
+                    maximum = maximum.max(route.source.raw());
+                }
             }
             for lane in &track.automation {
                 maximum = maximum.max(lane.id.raw());
@@ -280,11 +286,47 @@ mod tests {
     use vibez_core::track::{InstrumentStateInfo, MediaSourceRef};
 
     #[test]
+    fn missing_source_identity_is_reserved_after_reopen() {
+        use vibez_core::{
+            effect::{EffectInfo, EffectType},
+            id::{EffectId, TrackId},
+            routing::{ExternalInputId, SidechainAssignment, SourceTap},
+        };
+        let mut project = Project::default();
+        let mut receiver = TrackInfo::new("Bass");
+        let deleted_source = serde_json::from_str::<TrackId>("999999").unwrap();
+        receiver.effects.push(EffectInfo {
+            id: EffectId::new(),
+            effect_type: EffectType::Compressor,
+            bypass: false,
+            params: vec![],
+            plugin: None,
+            inactive_sidechains: Default::default(),
+            sidechains: vec![SidechainAssignment {
+                input_id: ExternalInputId(0),
+                input_name: "Sidechain".into(),
+                source: deleted_source,
+                source_name: "Deleted kick".into(),
+                tap: SourceTap::AfterEffects,
+            }],
+        });
+        project.tracks.push(receiver);
+        let reopened: Project =
+            serde_json::from_str(&serde_json::to_string(&project).unwrap()).unwrap();
+        assert!(reopened.max_persisted_id() >= deleted_source.raw());
+        assert_eq!(
+            reopened.tracks[0].effects[0].sidechains[0].source,
+            deleted_source
+        );
+    }
+
+    #[test]
     fn legacy_clip_save_is_rejected_without_overwriting_the_file() {
         let path =
             std::env::temp_dir().join(format!("vibez-clip-legacy-{}.json", ClipId::new().raw()));
         std::fs::write(&path, "existing project").unwrap();
         let project = Project {
+            reduced_latency_monitoring: false,
             perform_layout: PerformLayout::Clips,
             ..Default::default()
         };
@@ -297,6 +339,7 @@ mod tests {
     #[test]
     fn mpc2000xl_profile_and_swing_roundtrip_and_old_documents_default() {
         let mut project = Project {
+            reduced_latency_monitoring: false,
             groove_profile: GrooveProfile::Mpc2000XlV1,
             swing: SwingAmount::new(0.56),
             ..Project::default()
@@ -343,6 +386,8 @@ mod tests {
         };
         let mut track = TrackInfo::new("FX");
         track.effects.push(EffectInfo {
+            inactive_sidechains: Default::default(),
+            sidechains: Default::default(),
             id: vibez_core::id::EffectId::new(),
             effect_type: EffectType::Gain,
             bypass: false,
@@ -432,6 +477,7 @@ mod tests {
         let crossfade_peer = ClipId::new();
 
         let project = Project {
+            reduced_latency_monitoring: false,
             master: None,
             buses: Vec::new(),
             name: "Test Project".into(),
@@ -511,6 +557,7 @@ mod tests {
     fn existing_project_document_roundtrips_semantically_unchanged() {
         let track = TrackInfo::new("Legacy Track");
         let project = Project {
+            reduced_latency_monitoring: false,
             name: "Legacy Layout".into(),
             bpm: 123.0,
             groove_profile: GrooveProfile::default(),
@@ -616,6 +663,7 @@ mod tests {
 
         let tid = TrackId::new();
         let project = Project {
+            reduced_latency_monitoring: false,
             master: None,
             buses: Vec::new(),
             name: "Note Test".into(),
@@ -682,6 +730,8 @@ mod tests {
 
         let mut track = TrackInfo::new("FX Track");
         track.effects.push(EffectInfo {
+            inactive_sidechains: Default::default(),
+            sidechains: Default::default(),
             id: EffectId::new(),
             effect_type: EffectType::Delay,
             bypass: false,
@@ -693,6 +743,7 @@ mod tests {
         });
 
         let project = Project {
+            reduced_latency_monitoring: false,
             master: None,
             buses: Vec::new(),
             name: "FX Test".into(),
@@ -744,6 +795,7 @@ mod automation_persistence_tests {
         track.automation.push(lane.clone());
 
         let project = Project {
+            reduced_latency_monitoring: false,
             master: None,
             buses: Vec::new(),
             name: "roundtrip".to_string(),
@@ -771,3 +823,6 @@ mod automation_persistence_tests {
         assert!(project.tracks[0].automation.is_empty());
     }
 }
+
+#[cfg(test)]
+mod compensation_project_tests;

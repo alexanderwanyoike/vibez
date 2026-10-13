@@ -4,6 +4,7 @@ pub mod browser_drag_ghost;
 pub mod browser_waveform;
 mod clip_loop_markers;
 pub mod clip_slot;
+pub mod device_chrome;
 pub mod double_click;
 pub mod drag;
 pub mod effect_knob;

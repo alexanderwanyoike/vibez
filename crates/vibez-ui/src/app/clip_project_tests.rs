@@ -153,6 +153,7 @@ async fn recorded_audio_cells_require_container_saves_and_reopen_with_embedded_m
             warped_to_bpm: None,
         };
         let project = Project {
+            reduced_latency_monitoring: false,
             perform_layout: PerformLayout::Clips,
             tracks: vec![track.clone()],
             launcher_clips: vec![LauncherClipInfo {

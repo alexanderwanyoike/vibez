@@ -11,6 +11,7 @@ use crate::instance::PluginInstance;
 /// allowing external plugins to slot into the existing instrument slot.
 pub struct PluginInstrumentWrapper {
     inner: Box<dyn PluginInstance>,
+    processing_error: Option<&'static str>,
     /// Leaked to satisfy the `&'static [ParamDescriptor]` requirement.
     descriptors: &'static [ParamDescriptor],
 }
@@ -19,7 +20,11 @@ impl PluginInstrumentWrapper {
     pub fn new(inner: Box<dyn PluginInstance>) -> Self {
         let desc_vec = inner.param_descriptors_vec();
         let descriptors: &'static [ParamDescriptor] = Box::leak(desc_vec.into_boxed_slice());
-        Self { inner, descriptors }
+        Self {
+            inner,
+            descriptors,
+            processing_error: None,
+        }
     }
 
     pub fn plugin_name(&self) -> &str {
@@ -28,6 +33,40 @@ impl PluginInstrumentWrapper {
 }
 
 impl Instrument for PluginInstrumentWrapper {
+    fn set_audio_context(&mut self, context: vibez_core::audio_context::DeviceAudioContext) {
+        self.inner.set_audio_context(context);
+    }
+
+    fn processing_failure_is_local(&self) -> bool {
+        self.inner.processing_failure_is_local()
+    }
+
+    fn processing_recovery_requested(&self) -> bool {
+        self.inner.processing_recovery_requested()
+    }
+
+    fn reconfiguration_requested(&self) -> bool {
+        self.inner.reconfiguration_requested()
+    }
+
+    fn stop_for_reconfiguration(&mut self) {
+        self.inner.stop_for_reconfiguration();
+    }
+
+    fn reconfigure_on_main_thread(&mut self) -> Result<(), String> {
+        self.inner.reconfigure_on_main_thread()
+    }
+
+    fn activation_sample_rate(&self) -> Option<u32> {
+        self.inner.activation_sample_rate()
+    }
+    fn processing_configuration_valid(&self) -> bool {
+        self.inner.processing_configuration_valid()
+    }
+    fn latency_samples(&self) -> u32 {
+        self.inner.latency_samples()
+    }
+
     fn instrument_kind(&self) -> InstrumentKind {
         // External plugins don't map to built-in InstrumentKind.
         // Use SubtractiveSynth as placeholder — UI uses plugin_name for display.
@@ -74,7 +113,7 @@ impl Instrument for PluginInstrumentWrapper {
         }));
         if result.is_err() {
             buffer.fill(0.0);
-            log::error!("Plugin panicked during render");
+            self.processing_error = Some("Plugin panicked during rendering");
         }
     }
 
@@ -82,7 +121,13 @@ impl Instrument for PluginInstrumentWrapper {
         self.inner.reset();
     }
 
-    fn finish_offline_processing(&mut self) {
+    fn take_processing_error(&mut self) -> Option<&'static str> {
+        self.processing_error
+            .take()
+            .or_else(|| self.inner.take_processing_error())
+    }
+
+    fn stop_processing(&mut self) {
         self.inner.stop_processing();
     }
 

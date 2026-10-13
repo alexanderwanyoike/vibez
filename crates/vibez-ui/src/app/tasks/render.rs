@@ -6,11 +6,22 @@ use vibez_core::track::MediaSourceRef;
 
 pub(in crate::app) async fn export_async(
     request: vibez_engine::render::BounceRequest,
-    mut plugins: vibez_engine::render::OfflinePlugins,
+    plugins: vibez_engine::render::OfflinePlugins,
     wav_path: PathBuf,
     progress: Arc<std::sync::atomic::AtomicU8>,
     plugin_return: std::sync::mpsc::Sender<vibez_engine::render::OfflinePlugins>,
 ) -> Result<PathBuf, String> {
+    render_async(request, plugins, wav_path.clone(), progress, plugin_return).await?;
+    Ok(wav_path)
+}
+
+async fn render_async(
+    request: vibez_engine::render::BounceRequest,
+    mut plugins: vibez_engine::render::OfflinePlugins,
+    wav_path: PathBuf,
+    progress: Arc<std::sync::atomic::AtomicU8>,
+    plugin_return: std::sync::mpsc::Sender<vibez_engine::render::OfflinePlugins>,
+) -> Result<vibez_engine::render::BounceResult, String> {
     tokio::task::spawn_blocking(move || {
         use std::sync::atomic::Ordering;
 
@@ -41,7 +52,7 @@ pub(in crate::app) async fn export_async(
                 return Err(format!("could not commit destination WAV: {error}"));
             }
             progress.store(100, Ordering::Relaxed);
-            Ok(wav_path)
+            Ok(result)
         })();
         // Plugin teardown is main-thread-affine for JUCE-based CLAP/VST3
         // devices. Return the instances to App; dropping them here would
@@ -67,27 +78,23 @@ fn temporary_export_path(destination: &std::path::Path) -> PathBuf {
 
 pub(in crate::app) async fn bounce_async(
     request: vibez_engine::render::BounceRequest,
+    plugins: vibez_engine::render::OfflinePlugins,
     wav_path: PathBuf,
     clip_name: String,
     insert_position_samples: u64,
+    progress: Arc<std::sync::atomic::AtomicU8>,
+    plugin_return: std::sync::mpsc::Sender<vibez_engine::render::OfflinePlugins>,
 ) -> Result<crate::message::BounceOutcome, String> {
-    tokio::task::spawn_blocking(move || {
-        let result = vibez_engine::render::render_offline(&request);
-        vibez_audio_io::file_io::write_wav_file(&wav_path, &result.audio)
-            .map_err(|e| format!("WAV write error: {e}"))?;
-        Ok(crate::message::BounceOutcome {
-            audio: Arc::new(result.audio),
-            source: MediaSourceRef::LocalFile {
-                path: wav_path.clone(),
-            },
-            path: wav_path,
-            clip_name,
-            insert_position_samples,
-            warnings: result.warnings,
-        })
+    let result = render_async(request, plugins, wav_path.clone(), progress, plugin_return).await?;
+    Ok(crate::message::BounceOutcome {
+        audio: Arc::new(result.audio),
+        source: MediaSourceRef::LocalFile {
+            path: wav_path.clone(),
+        },
+        path: wav_path,
+        clip_name,
+        insert_position_samples,
     })
-    .await
-    .map_err(|err| format!("bounce task failed: {err}"))?
 }
 
 #[cfg(test)]
@@ -165,5 +172,88 @@ mod export_tests {
             0,
             "failed export must clean up every temporary file"
         );
+    }
+    #[tokio::test]
+    async fn missing_detector_media_fails_bounce_without_committing_audio() {
+        use vibez_core::{
+            effect::{EffectInfo, EffectType},
+            id::{ClipId, EffectId},
+            routing::{ExternalInputId, SidechainAssignment, SourceTap},
+        };
+        let kick = TrackId::new();
+        let bass = TrackId::new();
+        let channel = |id, name: &str| TrackInfo {
+            id,
+            name: name.into(),
+            gain: DEFAULT_TRACK_GAIN,
+            pan: DEFAULT_TRACK_PAN,
+            mute: false,
+            solo: false,
+            audio_input_route: Default::default(),
+            input_monitoring: Default::default(),
+            swing_offset: None,
+            effects: vec![],
+            kind: TrackKind::Audio,
+            color_index: 0,
+            instrument: None,
+            native_instrument: None,
+            plugin_instrument: None,
+            automation: vec![],
+            sends: vec![],
+        };
+        let mut receiver = channel(bass, "Bass");
+        receiver.effects.push(EffectInfo {
+            id: EffectId::new(),
+            effect_type: EffectType::Compressor,
+            bypass: false,
+            params: vec![],
+            plugin: None,
+            inactive_sidechains: vec![],
+            sidechains: vec![SidechainAssignment {
+                input_id: ExternalInputId(0),
+                input_name: "Sidechain".into(),
+                source: kick,
+                source_name: "Kick".into(),
+                tap: SourceTap::BeforeEffects,
+            }],
+        });
+        let clip = serde_json::from_value(
+            serde_json::json!({"id": ClipId::new(), "track_id": kick, "name": "Missing ghost kick",
+            "position": 0, "source_offset": 0, "duration": 128, "file_path": "/missing/kick.wav"}),
+        )
+        .unwrap();
+        let request = vibez_engine::render::BounceRequest {
+            tracks: vec![channel(kick, "Kick"), receiver],
+            master: None,
+            buses: vec![],
+            audio_clips: vec![clip],
+            note_clips: vec![],
+            clip_audio: Default::default(),
+            sampler_audio: Default::default(),
+            drum_pad_audio: Default::default(),
+            mode: vibez_engine::render::BounceMode::Track(bass),
+            range_samples: (0, 128),
+            bpm: 120.0,
+            sample_rate: 44_100,
+            swing: vibez_core::perform::SwingAmount::STRAIGHT,
+        };
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("missing-detector.wav");
+        let (returned, rx) = std::sync::mpsc::channel();
+        let error = bounce_async(
+            request,
+            Default::default(),
+            path.clone(),
+            "Bass".into(),
+            0,
+            Arc::new(std::sync::atomic::AtomicU8::new(0)),
+            returned,
+        )
+        .await
+        .unwrap_err();
+        drop(rx.recv().unwrap());
+        assert!(error.contains("Missing ghost kick"), "{error}");
+        assert!(!path.exists());
+        assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 0);
     }
 }

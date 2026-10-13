@@ -134,6 +134,10 @@ impl AudioEngine {
                 for track in &mut self.tracks {
                     track.flush_notes();
                 }
+                // Held repeats cannot keep deadlines from the later source clock
+                // after Arrange returns to an earlier loop position.
+                let anchor = self.playing_note_repeat_anchor();
+                self.reanchor_note_repeats(anchor, loop_start);
                 if rest > 0 {
                     self.render_multitrack_segment(
                         &mut output[first * channels..],
@@ -231,6 +235,10 @@ impl AudioEngine {
             loop_region,
             live_input,
         } = block;
+        if self.routing.is_some() {
+            self.render_routing_graph(output, block, track_output_capture, false, true);
+            return;
+        }
         let has_track_solo = any_solo(&self.tracks);
         let has_bus_solo = any_solo(&self.buses);
         let bpm = self.transport.bpm();
@@ -240,6 +248,7 @@ impl AudioEngine {
             0.0
         };
 
+        let mut presentation_overflow = false;
         for track_idx in 0..self.tracks.len() {
             let track = &mut self.tracks[track_idx];
             let pos = if self.clip_performance {
@@ -279,35 +288,30 @@ impl AudioEngine {
                 let tempo_map = TempoMap::new(self.transport.bpm(), self.sample_rate);
                 let track_id = track.id;
                 let event_tx = &mut self.event_tx;
+                let scheduled = &mut self.scheduled_presentation;
+                let physical = self.output_position + self.rendered_callback_frames as u64;
                 let section = self.active_section;
                 let mut on_repeat = |trigger: crate::note_repeat::NoteRepeatTrigger| {
-                    let section_position = section.map(|active| {
-                        section_record::section_sample_for_performance(
-                            pos,
-                            repeat_pos,
-                            trigger.effective_at_samples,
-                            active.length_samples,
-                        )
-                    });
-                    let canonical_section_position = section.map(|active| {
-                        section_record::section_sample_for_performance(
-                            pos,
-                            repeat_pos,
-                            trigger.canonical_at_samples,
-                            active.length_samples,
-                        )
-                    });
-                    let _ = event_tx.push(EngineEvent::NoteRepeated {
-                        track_id,
-                        pitch: trigger.pitch,
-                        velocity: trigger.velocity,
-                        rate: trigger.rate,
-                        effective_at_samples: trigger.effective_at_samples,
-                        canonical_at_samples: trigger.canonical_at_samples,
-                        section_id: section.map(|active| active.section_id),
-                        section_position_samples: section_position,
-                        canonical_section_position_samples: canonical_section_position,
-                    });
+                    let recording = crate::events::SourceRecordingPosition::from_trigger(
+                        trigger,
+                        section.map(|active| crate::events::SourceSectionClock {
+                            id: active.section_id,
+                            local_sample: pos,
+                            performance_sample: repeat_pos,
+                            length: active.length_samples,
+                        }),
+                    );
+                    let (source, event) =
+                        EngineEvent::repeated_pair(track_id, trigger, recording, recording.into());
+                    presentation_overflow |= !presentation_queue::emit_repeated(
+                        source,
+                        event,
+                        event_tx,
+                        scheduled,
+                        physical,
+                        physical,
+                        self.output_position,
+                    );
                 };
                 track.render_instrument(
                     InstrumentRenderContext {
@@ -431,7 +435,7 @@ impl AudioEngine {
             // each bus at its send amount.
             for send_idx in 0..track.sends.len() {
                 let (bus_id, amount) = track.sends[send_idx];
-                if amount <= 0.0005 {
+                if amount <= vibez_core::routing::SEND_SILENCE_THRESHOLD {
                     continue;
                 }
                 if let Some(bus) = self.buses.iter_mut().find(|b| b.id == bus_id) {
@@ -464,6 +468,9 @@ impl AudioEngine {
                 peak_l: track_peak_l,
                 peak_r: track_peak_r,
             });
+        }
+        if presentation_overflow {
+            self.fail_presentation();
         }
     }
 
@@ -506,8 +513,26 @@ impl AudioEngine {
         live_input: Option<LiveInputBlock<'_>>,
         mut track_output_capture: Option<&mut TrackOutputCapture<'_>>,
     ) {
+        if self.routing.is_some() {
+            self.render_routing_graph(
+                output,
+                MultitrackRenderBlock {
+                    pos: self.transport.position(),
+                    repeat_pos,
+                    frames,
+                    channels,
+                    loop_region: None,
+                    live_input,
+                },
+                track_output_capture,
+                true,
+                true,
+            );
+            return;
+        }
         let has_track_solo = any_solo(&self.tracks);
         let has_bus_solo = any_solo(&self.buses);
+        let mut presentation_overflow = false;
         for track in &mut self.tracks {
             if has_track_solo && !track.solo && !has_bus_solo {
                 continue;
@@ -531,18 +556,22 @@ impl AudioEngine {
                 let tempo_map = TempoMap::new(self.transport.bpm(), self.sample_rate);
                 let track_id = track.id;
                 let event_tx = &mut self.event_tx;
+                let scheduled = &mut self.scheduled_presentation;
+                let physical = self.output_position + self.rendered_callback_frames as u64;
                 let mut on_repeat = |trigger: crate::note_repeat::NoteRepeatTrigger| {
-                    let _ = event_tx.push(EngineEvent::NoteRepeated {
-                        track_id,
-                        pitch: trigger.pitch,
-                        velocity: trigger.velocity,
-                        rate: trigger.rate,
-                        effective_at_samples: trigger.effective_at_samples,
-                        canonical_at_samples: trigger.canonical_at_samples,
-                        section_id: None,
-                        section_position_samples: None,
-                        canonical_section_position_samples: None,
-                    });
+                    let recording =
+                        crate::events::SourceRecordingPosition::from_trigger(trigger, None);
+                    let (source, event) =
+                        EngineEvent::repeated_pair(track_id, trigger, recording, recording.into());
+                    presentation_overflow |= !presentation_queue::emit_repeated(
+                        source,
+                        event,
+                        event_tx,
+                        scheduled,
+                        physical,
+                        physical,
+                        self.output_position,
+                    );
                 };
                 track.render_instrument_idle(
                     repeat_pos,
@@ -618,7 +647,7 @@ impl AudioEngine {
             // notes reach the returns like in any DAW.
             for send_idx in 0..track.sends.len() {
                 let (bus_id, amount) = track.sends[send_idx];
-                if amount <= 0.0005 {
+                if amount <= vibez_core::routing::SEND_SILENCE_THRESHOLD {
                     continue;
                 }
                 if let Some(bus) = self.buses.iter_mut().find(|b| b.id == bus_id) {
@@ -643,6 +672,9 @@ impl AudioEngine {
                     }
                 }
             }
+        }
+        if presentation_overflow {
+            self.fail_presentation();
         }
     }
 }

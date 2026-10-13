@@ -11,6 +11,11 @@ main <- dev <- feature/your-thing
 - **dev** is the integration branch and the default branch for pull requests.
 - **feature/…** (or `fix/…`, `docs/…`) branches off `dev` and comes back via PR.
 
+Stacked feature PRs use `feature/<topic>-<layer>` names and may target another
+feature branch while their shared foundation is under review. Merge that
+foundation first, then retarget the dependent PR to `dev`. CI tests stacked
+feature PRs on all three platforms.
+
 ## Requirements for a PR
 
 - CI green on all three platforms: `cargo test --workspace` and

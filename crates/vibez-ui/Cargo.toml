@@ -26,7 +26,16 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "sync"] }
 dirs = "5"
 
+[features]
+# Device card gallery for screenshot checks; never part of the app build.
+dev-gallery = []
+
+[[example]]
+name = "device_cards"
+required-features = ["dev-gallery"]
+
 [dev-dependencies]
+vibez-engine = { workspace = true, features = ["test-support"] }
 vibez-plugin-host = { workspace = true, features = ["test-fixtures"] }
 tempfile = "3"
 

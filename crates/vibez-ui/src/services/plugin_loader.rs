@@ -10,12 +10,14 @@ use vibez_core::effect::PluginDeviceInfo;
 use vibez_core::id::{EffectId, TrackId};
 use vibez_plugin_host::{PluginFormat, PluginInfo};
 
+use crate::app::plugin_load_requests::PluginLoadToken;
 use crate::plugin_window::PluginRawPtr;
 
 /// Result of loading a plugin on a background thread.
 /// For CLAP plugins, `clap_partial` carries an un-initialized plugin that
 /// must be finished on the UI thread (for JUCE MessageManager compatibility).
 pub(crate) struct PluginLoadResult {
+    pub(crate) load_token: PluginLoadToken,
     pub(crate) track_id: TrackId,
     pub(crate) effect_id: EffectId,
     pub(crate) plugin_name: String,
@@ -41,6 +43,7 @@ pub(crate) struct PluginLoadResult {
 
 /// Result of loading a plugin instrument on a background thread.
 pub(crate) struct PluginInstrumentLoadResult {
+    pub(crate) load_token: PluginLoadToken,
     pub(crate) track_id: TrackId,
     pub(crate) plugin_name: String,
     /// Fully-loaded instrument (VST3) or None (CLAP — see `clap_partial`).
@@ -124,6 +127,7 @@ pub(crate) fn load_plugin_effect_bg(
                 false,
             )?;
             Ok(PluginLoadResult {
+                load_token: Default::default(),
                 track_id: TrackId::default(), // filled in by caller
                 effect_id: EffectId::new(),
                 plugin_name: info.name.clone(),
@@ -134,7 +138,7 @@ pub(crate) fn load_plugin_effect_bg(
                 sample_rate,
                 device_ref: plugin_device_ref(info),
                 state_ptr: None,
-                // CLAP state must be applied after init_on_main_thread.
+                // State restoration requires initialized native interfaces on the main thread.
                 pending_state: saved_state,
                 position: None,
             })
@@ -146,6 +150,7 @@ pub(crate) fn load_plugin_effect_bg(
                 false,
             )?;
             Ok(PluginLoadResult {
+                load_token: Default::default(),
                 track_id: TrackId::default(),
                 effect_id: EffectId::new(),
                 plugin_name: info.name.clone(),
@@ -177,6 +182,7 @@ pub(crate) fn load_plugin_instrument_bg(
                 true,
             )?;
             Ok(PluginInstrumentLoadResult {
+                load_token: Default::default(),
                 track_id: TrackId::default(),
                 plugin_name: info.name.clone(),
                 instrument: None,
@@ -196,6 +202,7 @@ pub(crate) fn load_plugin_instrument_bg(
                 true,
             )?;
             Ok(PluginInstrumentLoadResult {
+                load_token: Default::default(),
                 track_id: TrackId::default(),
                 plugin_name: info.name.clone(),
                 instrument: None,
@@ -215,8 +222,8 @@ pub(crate) fn load_plugin_instrument_bg(
 /// file order, so results arrive in order and chain positions
 /// restore deterministically.
 pub(crate) fn spawn_device_reloads(
-    effect_requests: Vec<(TrackId, EffectId, usize, PluginDeviceInfo)>,
-    instrument_requests: Vec<(TrackId, PluginDeviceInfo)>,
+    effect_requests: Vec<(PluginLoadToken, TrackId, EffectId, usize, PluginDeviceInfo)>,
+    instrument_requests: Vec<(PluginLoadToken, TrackId, PluginDeviceInfo)>,
     effect_tx: std::sync::mpsc::Sender<PluginLoadResult>,
     instrument_tx: std::sync::mpsc::Sender<PluginInstrumentLoadResult>,
     sample_rate: f64,
@@ -250,10 +257,12 @@ pub(crate) fn spawn_device_reloads(
             }
         };
 
-        for (track_id, effect_id, chain_pos, dev) in effect_requests {
+        for (token, track_id, effect_id, chain_pos, dev) in effect_requests {
             let info = scan_info(&dev, vibez_plugin_host::PluginCategory::Effect);
             match load_plugin_effect_bg(&info, sample_rate, decode(&dev)) {
                 Ok(mut result) => {
+                    result.device_ref = dev;
+                    result.load_token = token;
                     result.track_id = track_id;
                     result.effect_id = effect_id;
                     result.position = Some(chain_pos);
@@ -264,10 +273,12 @@ pub(crate) fn spawn_device_reloads(
                 }
             }
         }
-        for (track_id, dev) in instrument_requests {
+        for (token, track_id, dev) in instrument_requests {
             let info = scan_info(&dev, vibez_plugin_host::PluginCategory::Instrument);
             match load_plugin_instrument_bg(&info, sample_rate, decode(&dev)) {
                 Ok(mut result) => {
+                    result.device_ref = dev;
+                    result.load_token = token;
                     result.track_id = track_id;
                     let _ = instrument_tx.send(result);
                 }
@@ -313,24 +324,16 @@ fn finish_effect_init_inner(
     )>,
     String,
 > {
-    let plugin_name = result.plugin_name.clone();
     if let Some(partial) = result.clap_partial.take() {
-        let mut clap_inst =
-            vibez_plugin_host::clap_host::instance::ClapPluginInstance::init_on_main_thread(
+        let clap_inst =
+            vibez_plugin_host::clap_host::instance::ClapPluginInstance::init_on_main_thread_with_state(
                 partial,
                 result.sample_rate,
                 4096,
+                result.pending_state.as_deref(),
+                strict_state_restore,
             )
             .map_err(|e| format!("CLAP init failed on UI thread: {e}"))?;
-        if let Some(ref data) = result.pending_state {
-            use vibez_plugin_host::PluginInstance;
-            if !clap_inst.load_state(data) {
-                if strict_state_restore {
-                    return Err(format!("{plugin_name} rejected its saved state"));
-                }
-                eprintln!("vibez: {plugin_name} rejected saved state");
-            }
-        }
         let raw_ptr = Some(PluginRawPtr::Clap(
             clap_inst.plugin_ptr() as *const std::ffi::c_void
         ));
@@ -341,22 +344,15 @@ fn finish_effect_init_inner(
         return Ok(Some((Box::new(wrapper), raw_ptr)));
     }
     if let Some(partial) = result.vst3_partial.take() {
-        let mut vst3_inst =
-            vibez_plugin_host::vst3_host::instance::Vst3PluginInstance::init_on_main_thread(
+        let vst3_inst =
+            vibez_plugin_host::vst3_host::instance::Vst3PluginInstance::init_on_main_thread_with_state(
                 partial,
                 result.sample_rate,
                 4096,
+                result.pending_state.as_deref(),
+                strict_state_restore,
             )
             .map_err(|e| format!("VST3 init failed on UI thread: {e}"))?;
-        if let Some(ref data) = result.pending_state {
-            use vibez_plugin_host::PluginInstance;
-            if !vst3_inst.load_state(data) {
-                if strict_state_restore {
-                    return Err(format!("{plugin_name} rejected its saved state"));
-                }
-                eprintln!("vibez: {plugin_name} rejected saved state");
-            }
-        }
         let ctrl = vst3_inst.controller_ptr();
         let raw_ptr = if ctrl.is_null() {
             None
@@ -395,24 +391,16 @@ fn finish_instrument_init_inner(
     result: &mut PluginInstrumentLoadResult,
     strict_state_restore: bool,
 ) -> Result<Option<(Box<dyn vibez_instruments::Instrument>, Option<PluginRawPtr>)>, String> {
-    let plugin_name = result.plugin_name.clone();
     if let Some(partial) = result.clap_partial.take() {
-        let mut clap_inst =
-            vibez_plugin_host::clap_host::instance::ClapPluginInstance::init_on_main_thread(
+        let clap_inst =
+            vibez_plugin_host::clap_host::instance::ClapPluginInstance::init_on_main_thread_with_state(
                 partial,
                 result.sample_rate,
                 4096,
+                result.pending_state.as_deref(),
+                strict_state_restore,
             )
             .map_err(|e| format!("CLAP instrument init failed on UI thread: {e}"))?;
-        if let Some(ref data) = result.pending_state {
-            use vibez_plugin_host::PluginInstance;
-            if !clap_inst.load_state(data) {
-                if strict_state_restore {
-                    return Err(format!("{plugin_name} rejected its saved state"));
-                }
-                eprintln!("vibez: {plugin_name} rejected saved state");
-            }
-        }
         let raw_ptr = Some(PluginRawPtr::Clap(
             clap_inst.plugin_ptr() as *const std::ffi::c_void
         ));
@@ -423,22 +411,15 @@ fn finish_instrument_init_inner(
         return Ok(Some((Box::new(wrapper), raw_ptr)));
     }
     if let Some(partial) = result.vst3_partial.take() {
-        let mut vst3_inst =
-            vibez_plugin_host::vst3_host::instance::Vst3PluginInstance::init_on_main_thread(
+        let vst3_inst =
+            vibez_plugin_host::vst3_host::instance::Vst3PluginInstance::init_on_main_thread_with_state(
                 partial,
                 result.sample_rate,
                 4096,
+                result.pending_state.as_deref(),
+                strict_state_restore,
             )
             .map_err(|e| format!("VST3 instrument init failed on UI thread: {e}"))?;
-        if let Some(ref data) = result.pending_state {
-            use vibez_plugin_host::PluginInstance;
-            if !vst3_inst.load_state(data) {
-                if strict_state_restore {
-                    return Err(format!("{plugin_name} rejected its saved state"));
-                }
-                eprintln!("vibez: {plugin_name} rejected saved state");
-            }
-        }
         let ctrl = vst3_inst.controller_ptr();
         let raw_ptr = if ctrl.is_null() {
             None

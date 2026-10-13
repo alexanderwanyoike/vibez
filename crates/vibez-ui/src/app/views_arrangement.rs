@@ -271,6 +271,11 @@ impl App {
                 &self.state.view.edit_name_text,
                 automation_open,
                 TrackHeaderRecordingView {
+                    output_peaks: self
+                        .track_meter_peaks
+                        .get(&track.id)
+                        .copied()
+                        .unwrap_or_default(),
                     input_channels,
                     armed: self.state.audio_recording.armed_track == Some(track.id),
                     input_peaks: input_target.then_some((

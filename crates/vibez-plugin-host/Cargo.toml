@@ -22,3 +22,7 @@ core-foundation = "0.10"
 
 [features]
 test-fixtures = []
+
+[dev-dependencies]
+vibez-routing-fixture = { path = "tests/fixtures" }
+vibez-engine = { workspace = true }
