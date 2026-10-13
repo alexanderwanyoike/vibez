@@ -106,6 +106,9 @@ impl App {
             Message::UndoGesture { id, edit } => (*edit, Some(id)),
             message => (message, None),
         };
+        if self.prepare_gain_edit(&message) {
+            return Task::none();
+        }
         let message =
             apply_project_track_deletion_policy(message, self.state.confirm_project_track_deletion);
         if self.state.perform.clip_record.is_active()
