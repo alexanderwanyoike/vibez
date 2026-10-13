@@ -70,10 +70,11 @@ fn sampler_echo_fixture() -> (BounceRequest, Vec<Command>) {
         params: Vec::new(),
         source: None,
     });
-    commands.push(Command::AddInstrumentTrack(
+    commands.push(Command::AddMidiTrack(tid, "Vox".into()));
+    commands.push(Command::set_built_in_instrument(
         tid,
-        "Vox".into(),
         InstrumentKind::Sampler,
+        request.sample_rate,
     ));
     commands.push(Command::LoadSamplerSample {
         track_id: tid,
@@ -200,7 +201,7 @@ fn assert_export_preserves_insert_echo(
         commands.push(command).unwrap();
     }
     commands
-        .push(Command::AddPluginEffect {
+        .push(Command::InsertEffect {
             track_id: tid,
             effect_id,
             effect: Box::new(EchoPluginEffect::new()),

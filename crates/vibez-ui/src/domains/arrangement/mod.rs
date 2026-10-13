@@ -55,12 +55,7 @@ pub(crate) fn attach_channel_eq(engine: &mut impl EngineHandle, track: &mut Proj
         has_plugin_gui: false,
         plugin_ref: None,
     });
-    engine.send(EngineCommand::AddEffect {
-        track_id: track.id,
-        effect_id,
-        effect_type,
-        position: None,
-    });
+    engine.insert_built_in_effect(track.id, effect_id, effect_type);
 }
 
 impl ProjectTracksState {

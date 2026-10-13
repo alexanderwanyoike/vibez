@@ -277,7 +277,7 @@ impl App {
         ));
 
         if let Some(kind) = track.instrument_kind {
-            self.send_command(EngineCommand::SetTrackInstrument(track.id, kind));
+            self.set_built_in_instrument(track.id, kind);
             for (idx, value) in track.instrument_params.iter().copied().enumerate() {
                 self.send_command(EngineCommand::SetInstrumentParam {
                     track_id: track.id,
@@ -404,12 +404,7 @@ impl App {
             if effect.plugin_ref.is_some() {
                 continue;
             }
-            self.send_command(EngineCommand::AddEffect {
-                track_id: track.id,
-                effect_id: effect.id,
-                effect_type: effect.effect_type,
-                position: None,
-            });
+            self.insert_built_in_effect(track.id, effect.id, effect.effect_type);
             for (idx, value) in effect.params.iter().copied().enumerate() {
                 self.send_command(EngineCommand::SetEffectParam {
                     track_id: track.id,

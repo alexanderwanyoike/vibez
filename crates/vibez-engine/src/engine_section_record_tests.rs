@@ -256,9 +256,10 @@ fn stopped_count_in_keeps_live_instrument_monitoring() {
         .push(EngineCommand::AddMidiTrack(track_id, "MIDI".into()))
         .unwrap();
     commands
-        .push(EngineCommand::SetTrackInstrument(
+        .push(EngineCommand::set_built_in_instrument(
             track_id,
             InstrumentKind::SubtractiveSynth,
+            8_000,
         ))
         .unwrap();
     commands
@@ -470,9 +471,10 @@ fn repeated_note_reports_swung_truth_and_straight_canonical_position() {
         .push(EngineCommand::AddMidiTrack(track_id, "Hats".into()))
         .unwrap();
     commands
-        .push(EngineCommand::SetTrackInstrument(
+        .push(EngineCommand::set_built_in_instrument(
             track_id,
             InstrumentKind::SubtractiveSynth,
+            96,
         ))
         .unwrap();
     commands
@@ -530,7 +532,7 @@ fn replace_silences_resident_notes_only_until_the_first_section_wrap() {
         .push(EngineCommand::AddMidiTrack(track_id, "MIDI".into()))
         .unwrap();
     commands
-        .push(EngineCommand::SetPluginInstrument {
+        .push(EngineCommand::SetInstrument {
             track_id,
             instrument: Box::new(NoteLogInstrument(Arc::clone(&note_events))),
         })
@@ -617,7 +619,7 @@ fn replace_keeps_live_input_and_note_repeat_audible() {
         .push(EngineCommand::AddMidiTrack(track_id, "MIDI".into()))
         .unwrap();
     commands
-        .push(EngineCommand::SetPluginInstrument {
+        .push(EngineCommand::SetInstrument {
             track_id,
             instrument: Box::new(NoteLogInstrument(Arc::clone(&note_events))),
         })

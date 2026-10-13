@@ -569,6 +569,10 @@ pub struct ProjectTrack {
 pub type UiTrack = ProjectTrack;
 
 impl ProjectTrack {
+    pub fn has_device_room(&self) -> bool {
+        self.effects.len() < vibez_engine::mixer::DEVICE_CHAIN_CAPACITY
+    }
+
     pub fn is_playable_midi_target(&self) -> bool {
         self.kind.is_midi() && self.has_instrument
     }

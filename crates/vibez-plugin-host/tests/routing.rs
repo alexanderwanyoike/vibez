@@ -122,7 +122,7 @@ fn production_engine_routes_two_independent_plugin_inputs_without_audible_source
                 .unwrap();
         }
         commands
-            .push(EngineCommand::AddPluginEffect {
+            .push(EngineCommand::InsertEffect {
                 track_id: receiver,
                 effect_id: effect,
                 effect: Box::new(PluginEffectWrapper::new(plugin)),
@@ -218,7 +218,7 @@ fn loaded_instrument_formats_trigger_other_formats_on_the_exact_note_frames() {
                 .unwrap();
             commands.push(clip(bass, 0.1, 0.1)).unwrap();
             commands
-                .push(EngineCommand::SetPluginInstrument {
+                .push(EngineCommand::SetInstrument {
                     track_id: ghost,
                     instrument: Box::new(PluginInstrumentWrapper::new(source)),
                 })
@@ -252,7 +252,7 @@ fn loaded_instrument_formats_trigger_other_formats_on_the_exact_note_frames() {
                 .push(EngineCommand::SetTrackMute(ghost, true))
                 .unwrap();
             commands
-                .push(EngineCommand::AddPluginEffect {
+                .push(EngineCommand::InsertEffect {
                     track_id: bass,
                     effect_id: effect,
                     effect: Box::new(PluginEffectWrapper::new(receiving)),
@@ -327,10 +327,13 @@ fn all_instrument_source_formats_feed_builtins_and_hosted_receivers() {
             commands.push(main).unwrap();
             if source_format == "builtin" {
                 commands
-                    .push(EngineCommand::AddInstrumentTrack(
+                    .push(EngineCommand::AddMidiTrack(ghost, "Sampler".into()))
+                    .unwrap();
+                commands
+                    .push(EngineCommand::set_built_in_instrument(
                         ghost,
-                        "Sampler".into(),
                         InstrumentKind::Sampler,
+                        48000,
                     ))
                     .unwrap();
                 commands
@@ -348,7 +351,7 @@ fn all_instrument_source_formats_feed_builtins_and_hosted_receivers() {
                     .push(EngineCommand::AddMidiTrack(ghost, "Instrument".into()))
                     .unwrap();
                 commands
-                    .push(EngineCommand::SetPluginInstrument {
+                    .push(EngineCommand::SetInstrument {
                         track_id: ghost,
                         instrument: Box::new(PluginInstrumentWrapper::new(
                             fixture.load_instrument(source_format, 4096),
@@ -396,12 +399,9 @@ fn all_instrument_source_formats_feed_builtins_and_hosted_receivers() {
                 let device = vibez_dsp::factory::create_effect(kind, 48000.0);
                 let inputs = device.external_inputs().to_vec();
                 commands
-                    .push(EngineCommand::AddEffect {
-                        track_id: bass,
-                        effect_id: effect,
-                        effect_type: kind,
-                        position: None,
-                    })
+                    .push(EngineCommand::insert_built_in_effect(
+                        bass, effect, kind, 48000,
+                    ))
                     .unwrap();
                 commands
                     .push(EngineCommand::SetEffectParam {
@@ -416,7 +416,7 @@ fn all_instrument_source_formats_feed_builtins_and_hosted_receivers() {
                 let device = fixture.load(receiver_format, 4096);
                 let inputs = device.external_inputs().to_vec();
                 commands
-                    .push(EngineCommand::AddPluginEffect {
+                    .push(EngineCommand::InsertEffect {
                         track_id: bass,
                         effect_id: effect,
                         effect: Box::new(PluginEffectWrapper::new(device)),
@@ -500,12 +500,12 @@ fn source_taps_apply_effects_fader_and_pan_only_at_the_requested_stage() {
                 .push(EngineCommand::SetTrackSolo(bass, true))
                 .unwrap();
             commands
-                .push(EngineCommand::AddEffect {
-                    track_id: ghost,
-                    effect_id: gain_effect,
-                    effect_type: EffectType::Gain,
-                    position: None,
-                })
+                .push(EngineCommand::insert_built_in_effect(
+                    ghost,
+                    gain_effect,
+                    EffectType::Gain,
+                    48000,
+                ))
                 .unwrap();
             commands
                 .push(EngineCommand::SetEffectParam {
@@ -516,7 +516,7 @@ fn source_taps_apply_effects_fader_and_pan_only_at_the_requested_stage() {
                 })
                 .unwrap();
             commands
-                .push(EngineCommand::AddPluginEffect {
+                .push(EngineCommand::InsertEffect {
                     track_id: bass,
                     effect_id: effect,
                     effect: Box::new(PluginEffectWrapper::new(plugin)),
@@ -783,12 +783,12 @@ fn loadable_bus_effect_has_one_shared_solo_sum_and_an_audible_return_capture() {
                 .push(EngineCommand::SetTrackSolo(bass, bass_solo))
                 .unwrap();
             commands
-                .push(EngineCommand::AddEffect {
-                    track_id: bass,
-                    effect_id: gate,
-                    effect_type: EffectType::Gate,
-                    position: None,
-                })
+                .push(EngineCommand::insert_built_in_effect(
+                    bass,
+                    gate,
+                    EffectType::Gate,
+                    48000,
+                ))
                 .unwrap();
             for (param_index, value) in [(0, -20.0), (1, 0.1)] {
                 commands
@@ -801,7 +801,7 @@ fn loadable_bus_effect_has_one_shared_solo_sum_and_an_audible_return_capture() {
                     .unwrap();
             }
             commands
-                .push(EngineCommand::AddPluginEffect {
+                .push(EngineCommand::InsertEffect {
                     track_id: bus,
                     effect_id: bus_fx,
                     effect: Box::new(PluginEffectWrapper::new(plugin)),

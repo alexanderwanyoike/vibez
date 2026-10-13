@@ -3,36 +3,9 @@
 use super::*;
 
 impl AudioEngine {
-    pub(super) fn command_add_instrument_track(
-        &mut self,
-        id: vibez_core::id::TrackId,
-        _name: String,
-        kind: vibez_core::midi::InstrumentKind,
-    ) {
-        let mut track = EngineTrack::new(id);
-        track.instrument = Some(create_instrument(kind, self.sample_rate as f32));
-        self.tracks.push(track);
-        self.recalculate_audio_length();
-    }
-
     pub(super) fn command_add_midi_track(&mut self, id: vibez_core::id::TrackId, _name: String) {
         self.tracks.push(EngineTrack::new(id));
         self.recalculate_audio_length();
-    }
-
-    pub(super) fn command_set_track_instrument(
-        &mut self,
-        track_id: vibez_core::id::TrackId,
-        kind: vibez_core::midi::InstrumentKind,
-    ) {
-        if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
-            let old = track
-                .instrument
-                .replace(create_instrument(kind, self.sample_rate as f32));
-            if let Some(old) = old {
-                self.dispose_instrument(old);
-            }
-        }
     }
 
     pub(super) fn command_remove_track_instrument(&mut self, track_id: vibez_core::id::TrackId) {

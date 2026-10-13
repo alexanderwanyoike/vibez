@@ -201,7 +201,7 @@ fn state_queued_after_completed_callback_waits_only_its_real_latency() {
     let (mut engine, mut commands, mut events) = AudioEngine::new();
     let effect = EffectId::new();
     commands
-        .push(EngineCommand::AddPluginEffect {
+        .push(EngineCommand::InsertEffect {
             track_id: TrackId::MASTER,
             effect_id: effect,
             effect: Box::new(DelayProbe::new(137)),

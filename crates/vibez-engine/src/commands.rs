@@ -262,12 +262,6 @@ pub enum EngineCommand {
     SetSpectrumTap(Option<TrackId>),
 
     // -- Effects --
-    AddEffect {
-        track_id: TrackId,
-        effect_id: EffectId,
-        effect_type: EffectType,
-        position: Option<usize>,
-    },
     RemoveEffect(TrackId, EffectId),
     SetEffectParam {
         track_id: TrackId,
@@ -287,11 +281,8 @@ pub enum EngineCommand {
     },
 
     // -- Instrument tracks --
-    AddInstrumentTrack(TrackId, String, InstrumentKind),
     /// Add a bare MIDI track (no synth attached).
     AddMidiTrack(TrackId, String),
-    /// Attach an instrument to a track.
-    SetTrackInstrument(TrackId, InstrumentKind),
     /// Remove the instrument from a track.
     RemoveTrackInstrument(TrackId),
     /// Set note clip duration (for halve/double).
@@ -453,7 +444,7 @@ pub enum EngineCommand {
 
     // -- External plugins --
     /// Add a pre-loaded external plugin effect to a track.
-    AddPluginEffect {
+    InsertEffect {
         track_id: TrackId,
         effect_id: EffectId,
         effect: Box<dyn AudioEffect>,
@@ -469,10 +460,40 @@ pub enum EngineCommand {
         velocity: u8,
         on: bool,
     },
-    SetPluginInstrument {
+    SetInstrument {
         track_id: TrackId,
         instrument: Box<dyn Instrument>,
     },
+}
+
+impl EngineCommand {
+    /// Constructs the device on the caller's thread: building one allocates,
+    /// which the audio callback must never do.
+    pub fn insert_built_in_effect(
+        track_id: TrackId,
+        effect_id: EffectId,
+        effect_type: EffectType,
+        sample_rate: u32,
+    ) -> Self {
+        Self::InsertEffect {
+            track_id,
+            effect_id,
+            effect: vibez_dsp::factory::create_effect(effect_type, sample_rate as f32),
+            position: None,
+        }
+    }
+
+    /// See [`EngineCommand::insert_built_in_effect`].
+    pub fn set_built_in_instrument(
+        track_id: TrackId,
+        kind: InstrumentKind,
+        sample_rate: u32,
+    ) -> Self {
+        Self::SetInstrument {
+            track_id,
+            instrument: vibez_instruments::create_instrument(kind, sample_rate as f32),
+        }
+    }
 }
 
 #[cfg(test)]

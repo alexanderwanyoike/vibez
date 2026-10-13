@@ -211,12 +211,7 @@ impl App {
                 has_plugin_gui: false,
                 plugin_ref: None,
             });
-            self.send_command(EngineCommand::AddEffect {
-                track_id: chan_id,
-                effect_id: effect_info.id,
-                effect_type: effect_info.effect_type,
-                position: None,
-            });
+            self.insert_built_in_effect(chan_id, effect_info.id, effect_info.effect_type);
             for (idx, value) in effect_info.params.iter().copied().enumerate() {
                 self.send_command(EngineCommand::SetEffectParam {
                     track_id: chan_id,
@@ -524,7 +519,7 @@ impl App {
             ));
 
             if let Some(kind) = track_info.instrument {
-                self.send_command(EngineCommand::SetTrackInstrument(track_info.id, kind));
+                self.set_built_in_instrument(track_info.id, kind);
             }
 
             if let Some(native) = &track_info.native_instrument {
@@ -616,12 +611,7 @@ impl App {
                     has_plugin_gui: false,
                     plugin_ref: None,
                 });
-                self.send_command(EngineCommand::AddEffect {
-                    track_id: track_info.id,
-                    effect_id: effect_info.id,
-                    effect_type: effect_info.effect_type,
-                    position: None,
-                });
+                self.insert_built_in_effect(track_info.id, effect_info.id, effect_info.effect_type);
                 for (idx, value) in effect_info.params.iter().copied().enumerate() {
                     self.send_command(EngineCommand::SetEffectParam {
                         track_id: track_info.id,
@@ -665,12 +655,7 @@ impl App {
                     has_plugin_gui: false,
                     plugin_ref: None,
                 });
-                self.send_command(EngineCommand::AddEffect {
-                    track_id: track_info.id,
-                    effect_id,
-                    effect_type: EffectType::Eq,
-                    position: None,
-                });
+                self.insert_built_in_effect(track_info.id, effect_id, EffectType::Eq);
             }
 
             let project_tracks = Arc::make_mut(&mut self.state.project_tracks);

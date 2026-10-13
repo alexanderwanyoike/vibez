@@ -90,7 +90,7 @@ fn render_events(
         .push(EngineCommand::AddMidiTrack(track_id, "Groove probe".into()))
         .unwrap();
     commands
-        .push(EngineCommand::SetPluginInstrument {
+        .push(EngineCommand::SetInstrument {
             track_id,
             instrument: Box::new(TimedSpy {
                 events: Arc::clone(&events),
@@ -162,7 +162,7 @@ fn midi_start_plays_once_then_returns_to_loop_start() {
         .push(EngineCommand::AddMidiTrack(track_id, "Start probe".into()))
         .unwrap();
     commands
-        .push(EngineCommand::SetPluginInstrument {
+        .push(EngineCommand::SetInstrument {
             track_id,
             instrument: Box::new(TimedSpy {
                 events: Arc::clone(&events),
@@ -216,10 +216,16 @@ fn dense_recorded_groove_schedules_each_note_once_per_audio_block() {
         .push(EngineCommand::SetProjectSwing(SwingAmount::new(0.59)))
         .unwrap();
     commands
-        .push(EngineCommand::AddInstrumentTrack(
+        .push(EngineCommand::AddMidiTrack(
             track_id,
             "Recorded groove".into(),
+        ))
+        .unwrap();
+    commands
+        .push(EngineCommand::set_built_in_instrument(
+            track_id,
             InstrumentKind::SubtractiveSynth,
+            44_100,
         ))
         .unwrap();
     commands

@@ -20,7 +20,7 @@ fn midi_connection_selection_and_monitoring_changes_keep_running_audio_continuou
             .tracks
             .push(track);
         app.send_command(EngineCommand::AddMidiTrack(id, "Instrument".into()));
-        app.send_command(EngineCommand::SetPluginInstrument {
+        app.send_command(EngineCommand::SetInstrument {
             track_id: id,
             instrument: Box::new(DelayProbeInstrument::new(latency, 0.25)),
         });

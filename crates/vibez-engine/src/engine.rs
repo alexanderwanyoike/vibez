@@ -7,8 +7,6 @@ use vibez_core::id::{SectionId, TrackId};
 use vibez_core::perform::{GrooveProfile, SwingAmount};
 
 use vibez_core::time::TempoMap;
-use vibez_dsp::factory::create_effect;
-use vibez_instruments::create_instrument;
 
 use crate::commands::{AuditionStart, EngineCommand};
 use crate::engine_audition::{audition_fade_frames, next_audition_boundary, AuditionBus};
@@ -27,6 +25,9 @@ use self::clock::ClockDomain;
 /// Capacity of the UI spectrum-analyser sample ring: roughly a third
 /// of a second of mono audio at 48 kHz, ample for a 60 fps drain.
 const SPECTRUM_RING_CAPACITY: usize = 16_384;
+
+/// The rate a new engine runs at until the first `SetSampleRate`.
+pub const DEFAULT_SAMPLE_RATE: u32 = 44_100;
 
 /// The real-time audio engine.
 ///
@@ -281,7 +282,7 @@ impl AudioEngine {
             spectrum_tx,
             spectrum_rx: Some(spectrum_rx),
             audition: AuditionBus::new(),
-            sample_rate: 44100,
+            sample_rate: DEFAULT_SAMPLE_RATE,
             cmd_rx,
             event_tx,
             clip_event_drops: 0,

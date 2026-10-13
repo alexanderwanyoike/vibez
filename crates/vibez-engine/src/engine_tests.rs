@@ -1488,10 +1488,13 @@ fn note_clip_loop_renders() {
     // Set sample rate first so synth is initialized properly
     cmd_tx.push(EngineCommand::SetSampleRate(44_100)).unwrap();
     cmd_tx
-        .push(EngineCommand::AddInstrumentTrack(
+        .push(EngineCommand::AddMidiTrack(tid, "Synth 1".into()))
+        .unwrap();
+    cmd_tx
+        .push(EngineCommand::set_built_in_instrument(
             tid,
-            "Synth 1".into(),
             InstrumentKind::SubtractiveSynth,
+            44_100,
         ))
         .unwrap();
     // Add note clip: 2 beats, looped over [0, 2) with total duration 4 beats
@@ -1552,10 +1555,13 @@ fn note_clip_reports_triggered_pitches_for_device_feedback() {
     let clip_id = ClipId::new();
 
     cmd_tx
-        .push(EngineCommand::AddInstrumentTrack(
+        .push(EngineCommand::AddMidiTrack(track_id, "Drums".into()))
+        .unwrap();
+    cmd_tx
+        .push(EngineCommand::set_built_in_instrument(
             track_id,
-            "Drums".into(),
             InstrumentKind::DrumRack,
+            crate::engine::DEFAULT_SAMPLE_RATE,
         ))
         .unwrap();
     cmd_tx
@@ -1608,10 +1614,13 @@ fn synth_note_clip_does_not_report_drum_pad_activity() {
     let clip_id = ClipId::new();
 
     cmd_tx
-        .push(EngineCommand::AddInstrumentTrack(
+        .push(EngineCommand::AddMidiTrack(track_id, "Synth".into()))
+        .unwrap();
+    cmd_tx
+        .push(EngineCommand::set_built_in_instrument(
             track_id,
-            "Synth".into(),
             InstrumentKind::SubtractiveSynth,
+            crate::engine::DEFAULT_SAMPLE_RATE,
         ))
         .unwrap();
     cmd_tx
@@ -1663,10 +1672,13 @@ fn drum_pad_activity_dropped_by_a_full_event_ring_is_not_replayed_late() {
     let track_id = TrackId::new();
     let clip_id = ClipId::new();
     cmd_tx
-        .push(EngineCommand::AddInstrumentTrack(
+        .push(EngineCommand::AddMidiTrack(track_id, "Drums".into()))
+        .unwrap();
+    cmd_tx
+        .push(EngineCommand::set_built_in_instrument(
             track_id,
-            "Drums".into(),
             InstrumentKind::DrumRack,
+            crate::engine::DEFAULT_SAMPLE_RATE,
         ))
         .unwrap();
     cmd_tx
@@ -2100,12 +2112,12 @@ fn effect_tails_ring_out_after_stop() {
 
     let effect_id = vibez_core::id::EffectId::new();
     cmd_tx
-        .push(EngineCommand::AddEffect {
-            track_id: tid,
+        .push(EngineCommand::insert_built_in_effect(
+            tid,
             effect_id,
-            effect_type: vibez_core::effect::EffectType::Delay,
-            position: None,
-        })
+            vibez_core::effect::EffectType::Delay,
+            crate::engine::DEFAULT_SAMPLE_RATE,
+        ))
         .unwrap();
     cmd_tx.push(EngineCommand::Play).unwrap();
 
@@ -2205,12 +2217,12 @@ fn master_effect_chain_processes_the_summed_mix() {
     // constant (DC-heavy) signal relative to the flat default.
     let eq_id = EffectId::new();
     cmd_tx
-        .push(EngineCommand::AddEffect {
-            track_id: TrackId::MASTER,
-            effect_id: eq_id,
-            effect_type: EffectType::Eq,
-            position: None,
-        })
+        .push(EngineCommand::insert_built_in_effect(
+            TrackId::MASTER,
+            eq_id,
+            EffectType::Eq,
+            crate::engine::DEFAULT_SAMPLE_RATE,
+        ))
         .unwrap();
     cmd_tx
         .push(EngineCommand::SetEffectParam {
@@ -2440,12 +2452,12 @@ fn bus_effect_chain_processes_the_send_mix() {
     // the constant (DC-heavy) signal.
     let eq_id = EffectId::new();
     cmd_tx
-        .push(EngineCommand::AddEffect {
-            track_id: bus,
-            effect_id: eq_id,
-            effect_type: vibez_core::effect::EffectType::Eq,
-            position: None,
-        })
+        .push(EngineCommand::insert_built_in_effect(
+            bus,
+            eq_id,
+            vibez_core::effect::EffectType::Eq,
+            crate::engine::DEFAULT_SAMPLE_RATE,
+        ))
         .unwrap();
     cmd_tx
         .push(EngineCommand::SetEffectParam {

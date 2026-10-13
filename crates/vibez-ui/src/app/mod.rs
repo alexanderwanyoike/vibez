@@ -564,6 +564,28 @@ impl App {
         crate::domains::EngineHandle::send(&mut self.cmd_tx, cmd);
     }
 
+    fn insert_built_in_effect(
+        &mut self,
+        track_id: vibez_core::id::TrackId,
+        effect_id: vibez_core::id::EffectId,
+        effect_type: vibez_core::effect::EffectType,
+    ) {
+        crate::domains::EngineHandle::insert_built_in_effect(
+            &mut self.cmd_tx,
+            track_id,
+            effect_id,
+            effect_type,
+        );
+    }
+
+    fn set_built_in_instrument(
+        &mut self,
+        track_id: vibez_core::id::TrackId,
+        kind: vibez_core::midi::InstrumentKind,
+    ) {
+        crate::domains::EngineHandle::set_built_in_instrument(&mut self.cmd_tx, track_id, kind);
+    }
+
     fn mark_project_dirty(&mut self) {
         self.state.project.dirty = true;
         self.save_runtime.project_changed(

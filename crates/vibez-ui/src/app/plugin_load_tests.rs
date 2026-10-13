@@ -44,7 +44,7 @@ fn repeated_restore_completion_publishes_only_one_native_effect() {
     app.poll_plugin_loads();
     let mut added = 0;
     while let Ok(command) = commands.pop() {
-        if matches!(command, EngineCommand::AddPluginEffect { .. }) {
+        if matches!(command, EngineCommand::InsertEffect { .. }) {
             added += 1;
         }
     }
@@ -125,7 +125,7 @@ fn only_the_latest_reload_is_published_in_both_completion_orders() {
         );
         let mut added = 0;
         while let Ok(command) = commands.pop() {
-            if matches!(command, EngineCommand::AddPluginEffect { .. }) {
+            if matches!(command, EngineCommand::InsertEffect { .. }) {
                 added += 1;
             }
         }
@@ -149,7 +149,7 @@ fn project_reset_rejects_a_completion_even_if_the_same_slot_identity_returns() {
     app.plugin_effect_tx.send(stale).unwrap();
     app.poll_plugin_loads();
     while let Ok(command) = commands.pop() {
-        assert!(!matches!(command, EngineCommand::AddPluginEffect { .. }));
+        assert!(!matches!(command, EngineCommand::InsertEffect { .. }));
     }
     assert!(app.state.find_track(track).unwrap().effects[0]
         .external_inputs

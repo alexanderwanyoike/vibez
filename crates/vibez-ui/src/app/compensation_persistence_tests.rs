@@ -70,13 +70,13 @@ fn failed_restart_invalidates_cached_latency_without_removing_the_insert() {
         .push(track);
     let (producer, mut consumer) = rtrb::RingBuffer::new(8);
     app.cmd_tx = crate::domains::EngineCommandQueue::new(producer);
-    app.send_command(EngineCommand::AddPluginEffect {
+    app.send_command(EngineCommand::InsertEffect {
         track_id,
         effect_id: id,
         effect: Box::new(FailedRestart),
         position: None,
     });
-    let EngineCommand::AddPluginEffect { effect, .. } = consumer.pop().unwrap() else {
+    let EngineCommand::InsertEffect { effect, .. } = consumer.pop().unwrap() else {
         panic!("device creation")
     };
     app.reconfigure_device_timing(

@@ -119,9 +119,10 @@ fn immediate_section_launch_reanchors_held_repeat_to_the_section_downbeat() {
         .push(EngineCommand::AddMidiTrack(track_id, "Hats".into()))
         .unwrap();
     commands
-        .push(EngineCommand::SetTrackInstrument(
+        .push(EngineCommand::set_built_in_instrument(
             track_id,
             InstrumentKind::SubtractiveSynth,
+            96,
         ))
         .unwrap();
     commands.push(EngineCommand::Play).unwrap();
@@ -171,9 +172,10 @@ fn first_section_launch_reanchors_stopped_held_repeat_to_the_perform_downbeat() 
         .push(EngineCommand::AddMidiTrack(track_id, "Hats".into()))
         .unwrap();
     commands
-        .push(EngineCommand::SetTrackInstrument(
+        .push(EngineCommand::set_built_in_instrument(
             track_id,
             InstrumentKind::SubtractiveSynth,
+            96,
         ))
         .unwrap();
     engine.process(&mut vec![0.0; 9_600 * 2], 2);

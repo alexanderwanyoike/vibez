@@ -116,7 +116,7 @@ fn a_plugin_reloading_into_its_retained_slot_keeps_the_project_audible() {
 
     // Undo and project open retain the slot, so the routing model is already
     // final when the loaded instance arrives.
-    app.send_command(EngineCommand::AddPluginEffect {
+    app.send_command(EngineCommand::InsertEffect {
         track_id,
         effect_id,
         effect: vibez_dsp::factory::create_effect(EffectType::Gain, 44_100.0),

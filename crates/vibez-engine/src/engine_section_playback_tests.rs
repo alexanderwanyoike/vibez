@@ -401,7 +401,7 @@ fn switching_sections_releases_notes_from_the_previous_source() {
         .push(EngineCommand::AddMidiTrack(track_id, "MIDI".into()))
         .unwrap();
     commands
-        .push(EngineCommand::SetPluginInstrument {
+        .push(EngineCommand::SetInstrument {
             track_id,
             instrument: Box::new(NoteLogInstrument(Arc::clone(&note_events))),
         })
@@ -466,7 +466,7 @@ fn live_instrument_note_releases_after_a_section_transition() {
         .push(EngineCommand::AddMidiTrack(track_id, "MIDI".into()))
         .unwrap();
     commands
-        .push(EngineCommand::SetPluginInstrument {
+        .push(EngineCommand::SetInstrument {
             track_id,
             instrument: Box::new(NoteLogInstrument(Arc::clone(&note_events))),
         })
@@ -521,7 +521,7 @@ fn absent_track_stops_source_content_without_resetting_effect_tail() {
         .push(EngineCommand::AddTrack(track_id, "Audio".into()))
         .unwrap();
     commands
-        .push(EngineCommand::AddPluginEffect {
+        .push(EngineCommand::InsertEffect {
             track_id,
             effect_id: EffectId::new(),
             effect: Box::new(TailEffect { memory: 0.0 }),

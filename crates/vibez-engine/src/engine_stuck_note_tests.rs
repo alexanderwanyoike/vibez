@@ -57,7 +57,7 @@ fn engine_with_held_note() -> (
         .push(EngineCommand::AddMidiTrack(tid, "midi".into()))
         .unwrap();
     cmd_tx
-        .push(EngineCommand::SetPluginInstrument {
+        .push(EngineCommand::SetInstrument {
             track_id: tid,
             instrument: Box::new(SpyInstrument {
                 events: Arc::clone(&events),
@@ -132,7 +132,7 @@ fn run_scenario(
         .push(EngineCommand::AddMidiTrack(tid, "midi".into()))
         .unwrap();
     cmd_tx
-        .push(EngineCommand::SetPluginInstrument {
+        .push(EngineCommand::SetInstrument {
             track_id: tid,
             instrument: Box::new(SpyInstrument {
                 events: Arc::clone(&events),
@@ -205,7 +205,7 @@ fn looped_note_ons_per_bar(batch_render: bool) -> Vec<usize> {
         .push(EngineCommand::AddMidiTrack(track_id, "kick".into()))
         .unwrap();
     cmd_tx
-        .push(EngineCommand::SetPluginInstrument {
+        .push(EngineCommand::SetInstrument {
             track_id,
             instrument: Box::new(SpyInstrument {
                 events: Arc::clone(&events),
@@ -302,9 +302,10 @@ fn instrument_params_change_the_sound() {
         .push(EngineCommand::AddMidiTrack(tid, "midi".into()))
         .unwrap();
     cmd_tx
-        .push(EngineCommand::SetTrackInstrument(
+        .push(EngineCommand::set_built_in_instrument(
             tid,
             vibez_core::midi::InstrumentKind::SubtractiveSynth,
+            crate::engine::DEFAULT_SAMPLE_RATE,
         ))
         .unwrap();
     cmd_tx
@@ -349,9 +350,10 @@ fn audition_sounds_while_transport_stopped() {
         .push(EngineCommand::AddMidiTrack(tid, "midi".into()))
         .unwrap();
     cmd_tx
-        .push(EngineCommand::SetTrackInstrument(
+        .push(EngineCommand::set_built_in_instrument(
             tid,
             vibez_core::midi::InstrumentKind::SubtractiveSynth,
+            crate::engine::DEFAULT_SAMPLE_RATE,
         ))
         .unwrap();
     cmd_tx
@@ -482,7 +484,7 @@ fn editing_a_launcher_pattern_releases_removed_notes_and_preserves_other_voices(
         EngineCommand::SetSampleRate(8),
         EngineCommand::SetBpm(120.0),
         EngineCommand::AddMidiTrack(track, "Test".into()),
-        EngineCommand::SetPluginInstrument {
+        EngineCommand::SetInstrument {
             track_id: track,
             instrument: Box::new(SpyInstrument {
                 events: log.clone(),

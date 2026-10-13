@@ -88,14 +88,11 @@ fn coverage(command: &EngineCommand) -> Coverage {
         | C::SetSend { .. }
         | C::SetSampleRate(_)
         | C::SetSpectrumTap(_)
-        | C::AddEffect { .. }
         | C::RemoveEffect(..)
         | C::SetEffectParam { .. }
         | C::SetEffectBypass { .. }
         | C::MoveEffect { .. }
-        | C::AddInstrumentTrack(..)
         | C::AddMidiTrack(..)
-        | C::SetTrackInstrument(..)
         | C::RemoveTrackInstrument(_)
         | C::SetNoteClipDuration { .. }
         | C::SetNoteClipGrooveGrid { .. }
@@ -125,9 +122,9 @@ fn coverage(command: &EngineCommand) -> Coverage {
         | C::StartNoteRepeat { .. }
         | C::UpdateNoteRepeatRate { .. }
         | C::StopNoteRepeat { .. }
-        | C::AddPluginEffect { .. }
+        | C::InsertEffect { .. }
         | C::AuditionNote { .. }
-        | C::SetPluginInstrument { .. } => Coverage::Table,
+        | C::SetInstrument { .. } => Coverage::Table,
     }
 }
 
@@ -236,19 +233,19 @@ fn playing(
     for command in [
         EngineCommand::SetSampleRate(48_000),
         EngineCommand::AddMidiTrack(f.synth, "Synth".into()),
-        EngineCommand::SetTrackInstrument(f.synth, InstrumentKind::SubtractiveSynth),
+        EngineCommand::set_built_in_instrument(f.synth, InstrumentKind::SubtractiveSynth, 48_000),
         EngineCommand::AddMidiTrack(f.drums, "Drums".into()),
-        EngineCommand::SetTrackInstrument(f.drums, InstrumentKind::DrumRack),
+        EngineCommand::set_built_in_instrument(f.drums, InstrumentKind::DrumRack, 48_000),
         EngineCommand::AddTrack(f.audio, "Audio".into()),
         EngineCommand::AddMidiTrack(f.empty, "Empty".into()),
         EngineCommand::AddTrack(f.empty_audio, "Empty audio".into()),
         EngineCommand::AddBus(f.bus, "Bus".into()),
-        EngineCommand::AddEffect {
-            track_id: f.synth,
-            effect_id: f.effect,
-            effect_type: vibez_core::effect::EffectType::Gain,
-            position: None,
-        },
+        EngineCommand::insert_built_in_effect(
+            f.synth,
+            f.effect,
+            vibez_core::effect::EffectType::Gain,
+            48_000,
+        ),
         add_clip(f.audio, f.clip),
         add_note_clip(f.synth, f.note_clip),
         EngineCommand::AddNote {
@@ -478,12 +475,6 @@ fn cases() -> Vec<Case> {
         case!("SetSpectrumTap", false, |f| C::SetSpectrumTap(Some(
             f.synth
         ))),
-        case!("AddEffect", true, |f| C::AddEffect {
-            track_id: f.empty,
-            effect_id: EffectId::new(),
-            effect_type: vibez_core::effect::EffectType::Reverb,
-            position: None,
-        }),
         case!("RemoveEffect", false, |f| C::RemoveEffect(
             f.synth, f.effect
         )),
@@ -503,18 +494,9 @@ fn cases() -> Vec<Case> {
             effect_id: f.effect,
             new_index: 0,
         }),
-        case!("AddInstrumentTrack", true, |_| C::AddInstrumentTrack(
-            TrackId::new(),
-            "New".into(),
-            InstrumentKind::SubtractiveSynth
-        )),
         case!("AddMidiTrack", true, |_| C::AddMidiTrack(
             TrackId::new(),
             "New".into()
-        )),
-        case!("SetTrackInstrument", true, |f| C::SetTrackInstrument(
-            f.empty,
-            InstrumentKind::DrumRack
         )),
         case!(
             "RemoveTrackInstrument",
@@ -672,7 +654,7 @@ fn cases() -> Vec<Case> {
             id: 0,
             track_id: f.synth,
         }),
-        case!("AddPluginEffect", true, |f| C::AddPluginEffect {
+        case!("InsertEffect", false, |f| C::InsertEffect {
             track_id: f.empty,
             effect_id: EffectId::new(),
             effect: vibez_dsp::factory::create_effect(
@@ -687,7 +669,7 @@ fn cases() -> Vec<Case> {
             velocity: 100,
             on: true,
         }),
-        case!("SetPluginInstrument", false, |f| C::SetPluginInstrument {
+        case!("SetInstrument", false, |f| C::SetInstrument {
             track_id: f.empty,
             instrument: vibez_instruments::create_instrument(
                 InstrumentKind::SubtractiveSynth,
@@ -717,4 +699,27 @@ fn every_table_command_drains_without_allocating_unless_named_as_card_04_work() 
         }
     }
     assert!(mismatches.is_empty(), "{mismatches:#?}");
+}
+
+#[cfg(debug_assertions)]
+#[test]
+#[should_panic(expected = "the UI keeps device chains within DEVICE_CHAIN_CAPACITY")]
+fn a_device_past_the_reserved_chain_is_a_ui_contract_violation() {
+    let (mut engine, mut commands, _events) = AudioEngine::new();
+    let track_id = TrackId::new();
+    assert!(commands
+        .push(EngineCommand::AddTrack(track_id, "Full".into()))
+        .is_ok());
+    engine.process(&mut [0.0; 2], 2);
+    for _ in 0..=crate::mixer::DEVICE_CHAIN_CAPACITY {
+        assert!(commands
+            .push(EngineCommand::insert_built_in_effect(
+                track_id,
+                EffectId::new(),
+                vibez_core::effect::EffectType::Gain,
+                crate::engine::DEFAULT_SAMPLE_RATE,
+            ))
+            .is_ok());
+        engine.process(&mut [0.0; 2], 2);
+    }
 }

@@ -563,12 +563,6 @@ impl AudioEngine {
                 }
 
                 // -- Arrangement recording / looping --
-                EngineCommand::AddEffect {
-                    track_id,
-                    effect_id,
-                    effect_type,
-                    position,
-                } => self.command_add_effect(track_id, effect_id, effect_type, position),
                 EngineCommand::RemoveEffect(track_id, effect_id) => {
                     self.command_remove_effect(track_id, effect_id)
                 }
@@ -588,13 +582,7 @@ impl AudioEngine {
                     effect_id,
                     new_index,
                 } => self.command_move_effect(track_id, effect_id, new_index),
-                EngineCommand::AddInstrumentTrack(id, _name, kind) => {
-                    self.command_add_instrument_track(id, _name, kind)
-                }
                 EngineCommand::AddMidiTrack(id, _name) => self.command_add_midi_track(id, _name),
-                EngineCommand::SetTrackInstrument(track_id, kind) => {
-                    self.command_set_track_instrument(track_id, kind)
-                }
                 EngineCommand::RemoveTrackInstrument(track_id) => {
                     self.command_remove_track_instrument(track_id)
                 }
@@ -918,22 +906,22 @@ impl AudioEngine {
                     }
                 }
 
-                EngineCommand::AddPluginEffect {
+                EngineCommand::InsertEffect {
                     track_id,
                     effect_id,
                     effect,
                     position,
-                } => self.command_add_plugin_effect(track_id, effect_id, effect, position),
+                } => self.command_insert_effect(track_id, effect_id, effect, position),
                 EngineCommand::AuditionNote {
                     track_id,
                     pitch,
                     velocity,
                     on,
                 } => self.command_audition_note(track_id, pitch, velocity, on),
-                EngineCommand::SetPluginInstrument {
+                EngineCommand::SetInstrument {
                     track_id,
                     instrument,
-                } => self.command_set_plugin_instrument(track_id, instrument),
+                } => self.command_set_instrument(track_id, instrument),
             }
         }
     }

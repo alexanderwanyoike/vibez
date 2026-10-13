@@ -204,7 +204,7 @@ fn actual_engine_delivers_the_cached_native_failure_to_its_ui_consumer() {
         .push(EngineCommand::AddTrack(track, "Failing probe".into()))
         .unwrap();
     commands
-        .push(EngineCommand::AddPluginEffect {
+        .push(EngineCommand::InsertEffect {
             track_id: track,
             effect_id: effect,
             effect: Box::new(

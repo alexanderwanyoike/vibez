@@ -109,6 +109,10 @@ impl AutomationOverrides {
     }
 }
 
+/// Devices one channel holds. The chain is reserved at this size so an
+/// insertion never grows it in the callback; the UI refuses more.
+pub const DEVICE_CHAIN_CAPACITY: usize = 32;
+
 /// A track as it exists at runtime in the engine.
 pub struct EngineTrack {
     pub id: TrackId,

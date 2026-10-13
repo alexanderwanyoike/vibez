@@ -72,7 +72,7 @@ fn send_run(reported: u32) -> Vec<f32> {
         .unwrap();
     commands.push(pulse(track)).unwrap();
     commands
-        .push(EngineCommand::AddPluginEffect {
+        .push(EngineCommand::InsertEffect {
             track_id: track,
             effect_id: insert,
             effect: Box::new(DelayProbe::new(137)),
@@ -80,7 +80,7 @@ fn send_run(reported: u32) -> Vec<f32> {
         })
         .unwrap();
     commands
-        .push(EngineCommand::AddPluginEffect {
+        .push(EngineCommand::InsertEffect {
             track_id: bus,
             effect_id: return_fx,
             effect: Box::new(DelayProbe::with_report(521, reported)),
@@ -184,7 +184,7 @@ fn detector_run(reported: u32) -> Vec<f32> {
         commands.push(pulse(id)).unwrap();
     }
     commands
-        .push(EngineCommand::AddPluginEffect {
+        .push(EngineCommand::InsertEffect {
             track_id: source,
             effect_id: latency,
             effect: Box::new(DelayProbe::with_report(521, reported)),
@@ -192,7 +192,7 @@ fn detector_run(reported: u32) -> Vec<f32> {
         })
         .unwrap();
     commands
-        .push(EngineCommand::AddPluginEffect {
+        .push(EngineCommand::InsertEffect {
             track_id: target,
             effect_id: detector,
             effect: Box::new(Difference {

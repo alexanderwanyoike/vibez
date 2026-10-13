@@ -260,7 +260,7 @@ fn midi_replacement_flushes_only_its_track_and_preserves_sustained_notes_elsewhe
     let log = Arc::new(Mutex::new(Vec::new()));
     for track in [a, b] {
         commands
-            .push(EngineCommand::SetPluginInstrument {
+            .push(EngineCommand::SetInstrument {
                 track_id: track,
                 instrument: Box::new(Notes(Arc::clone(&log))),
             })

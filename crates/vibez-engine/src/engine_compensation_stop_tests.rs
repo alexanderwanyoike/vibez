@@ -22,7 +22,7 @@ fn setup() -> (
         .push(EngineCommand::AddTrack(track, "Stop".into()))
         .unwrap();
     commands
-        .push(EngineCommand::AddPluginEffect {
+        .push(EngineCommand::InsertEffect {
             track_id: track,
             effect_id: effect,
             effect: Box::new(DelayProbe::with_shared_report(521, Arc::clone(&report))),

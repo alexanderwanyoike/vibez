@@ -88,13 +88,7 @@ impl AudioEngine {
                     }
                 }
             }
-            EngineCommand::AddEffect {
-                track_id,
-                effect_id,
-                position,
-                ..
-            }
-            | EngineCommand::AddPluginEffect {
+            EngineCommand::InsertEffect {
                 track_id,
                 effect_id,
                 position,

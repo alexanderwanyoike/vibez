@@ -65,7 +65,7 @@ fn cancellation_run(reported: u32, bypass: bool, order_reversed: bool) -> Vec<f3
     commands.push(pulse_clip(delayed, 1.0)).unwrap();
     commands.push(pulse_clip(dry, -1.0)).unwrap();
     commands
-        .push(EngineCommand::AddPluginEffect {
+        .push(EngineCommand::InsertEffect {
             track_id: delayed,
             effect_id: fx,
             effect: Box::new(DelayProbe::with_report(137, reported)),
@@ -194,7 +194,7 @@ fn coordinated_latency_changes_keep_transport_running_and_regain_alignment() {
         commands.push(clip).unwrap();
     }
     commands
-        .push(EngineCommand::AddPluginEffect {
+        .push(EngineCommand::InsertEffect {
             track_id: delayed,
             effect_id: effect,
             effect: Box::new(ChangingDelay {
@@ -296,7 +296,7 @@ fn structural_effect_edit_can_wait_for_plan_in_a_later_callback() {
         .unwrap();
     commands.push(pulse_clip(track, 1.0)).unwrap();
     commands
-        .push(EngineCommand::AddPluginEffect {
+        .push(EngineCommand::InsertEffect {
             track_id: track,
             effect_id: effect,
             effect: Box::new(DelayProbe::with_report(137, 137)),
@@ -367,7 +367,7 @@ fn automation_target_addition_and_point_edit_preserve_running_delay_history() {
     }
     commands.push(clip).unwrap();
     commands
-        .push(EngineCommand::AddPluginEffect {
+        .push(EngineCommand::InsertEffect {
             track_id: track,
             effect_id: effect,
             effect: Box::new(DelayProbe::with_report(137, 137)),
@@ -468,7 +468,7 @@ fn reduced_monitoring_capture_uses_the_same_heard_section_identity_and_local_clo
             .push(EngineCommand::AddTrack(id, "Input".into()))
             .unwrap();
         commands
-            .push(EngineCommand::AddPluginEffect {
+            .push(EngineCommand::InsertEffect {
                 track_id: id,
                 effect_id: fx,
                 effect: Box::new(DelayProbe::with_report(delay, delay)),
@@ -582,7 +582,7 @@ fn cold_reduced_monitoring_keeps_the_first_clip_sample_on_its_actual_path() {
             .push(pulse_clip(track, if track == fast { 1.0 } else { 0.0 }))
             .unwrap();
         commands
-            .push(EngineCommand::AddPluginEffect {
+            .push(EngineCommand::InsertEffect {
                 track_id: track,
                 effect_id: effect,
                 effect: Box::new(DelayProbe::with_report(delay, delay)),
@@ -672,19 +672,20 @@ fn changed_rate_keeps_native_owners_but_rejects_their_old_configuration_even_aft
             .unwrap();
         if instrument {
             commands
-                .push(EngineCommand::SetTrackInstrument(
+                .push(EngineCommand::set_built_in_instrument(
                     track,
                     vibez_core::midi::InstrumentKind::SubtractiveSynth,
+                    crate::engine::DEFAULT_SAMPLE_RATE,
                 ))
                 .unwrap();
         } else {
             commands
-                .push(EngineCommand::AddEffect {
-                    track_id: track,
-                    effect_id: effect,
-                    effect_type: EffectType::Filter,
-                    position: None,
-                })
+                .push(EngineCommand::insert_built_in_effect(
+                    track,
+                    effect,
+                    EffectType::Filter,
+                    crate::engine::DEFAULT_SAMPLE_RATE,
+                ))
                 .unwrap();
         }
         let channels = [
@@ -812,7 +813,7 @@ fn short_one_shot_section_drains_last_content_before_its_heard_stop_notification
         .push(EngineCommand::AddTrack(track, "One shot".into()))
         .unwrap();
     commands
-        .push(EngineCommand::AddPluginEffect {
+        .push(EngineCommand::InsertEffect {
             track_id: track,
             effect_id: effect,
             effect: Box::new(DelayProbe::with_report(521, 521)),

@@ -63,7 +63,7 @@ fn running_reduced_monitoring_changes_never_refill_or_drop_constant_audio() {
             .unwrap();
     }
     commands
-        .push(EngineCommand::AddPluginEffect {
+        .push(EngineCommand::InsertEffect {
             track_id: delayed,
             effect_id: effect,
             effect: Box::new(DelayProbe::with_report(521, 521)),
@@ -240,7 +240,7 @@ fn midrun_bypass_and_unbypass_keep_the_current_delayed_audio_without_stale_wet_i
         })
         .unwrap();
     commands
-        .push(EngineCommand::AddPluginEffect {
+        .push(EngineCommand::InsertEffect {
             track_id: track,
             effect_id: effect,
             effect: Box::new(DelayProbe::new(137)),

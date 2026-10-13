@@ -323,13 +323,13 @@ fn timing_reactivation_refreshes_choices_and_persists_restored_feedback_silence(
         .contains_key(&(effect_id, ExternalInputId(0))));
     let (producer, mut consumer) = rtrb::RingBuffer::new(8);
     app.cmd_tx = crate::domains::EngineCommandQueue::new(producer);
-    app.send_command(EngineCommand::AddPluginEffect {
+    app.send_command(EngineCommand::InsertEffect {
         track_id,
         effect_id,
         effect: vibez_dsp::factory::create_effect(EffectType::Compressor, 44_100.0),
         position: None,
     });
-    let EngineCommand::AddPluginEffect { effect, .. } = consumer.pop().unwrap() else {
+    let EngineCommand::InsertEffect { effect, .. } = consumer.pop().unwrap() else {
         panic!("device creation")
     };
     app.reconfigure_device_timing(

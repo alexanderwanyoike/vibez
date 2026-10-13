@@ -2,6 +2,7 @@
 
 use super::*;
 use vibez_core::{effect::EffectType, id::EffectId, midi::InstrumentKind, routing::*};
+use vibez_dsp::factory::create_effect;
 
 fn routing(track: TrackId, effect: Option<EffectId>) -> Box<crate::routing::PreparedRouting> {
     let channels = [
@@ -41,7 +42,11 @@ fn instrument_replacement_with_unchanged_timing_does_not_wait_for_a_topology_edi
         .unwrap();
     engine.process(&mut [], 2);
     for command in [
-        EngineCommand::SetTrackInstrument(track, InstrumentKind::SubtractiveSynth),
+        EngineCommand::set_built_in_instrument(
+            track,
+            InstrumentKind::SubtractiveSynth,
+            crate::engine::DEFAULT_SAMPLE_RATE,
+        ),
         EngineCommand::RemoveTrackInstrument(track),
     ] {
         commands.push(command).unwrap();
@@ -226,7 +231,7 @@ fn parameter_intents_do_not_cross_a_replaced_device_lifetime() {
         .push(EngineCommand::RemoveEffect(track, effect))
         .unwrap();
     commands
-        .push(EngineCommand::AddPluginEffect {
+        .push(EngineCommand::InsertEffect {
             track_id: track,
             effect_id: effect,
             effect: Box::new(ParameterProbe {
