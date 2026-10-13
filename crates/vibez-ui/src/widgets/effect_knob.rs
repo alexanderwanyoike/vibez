@@ -1,3 +1,5 @@
+//! Native rotary controls with parameter-specific scaling and undo gestures.
+
 use std::time::{Duration, Instant};
 
 use iced::keyboard;
@@ -30,6 +32,7 @@ const DOUBLE_CLICK_MS: u64 = 300;
 #[derive(Clone, Copy)]
 pub enum KnobTarget {
     Effect(EffectId),
+    EffectDb(EffectId),
     Instrument,
     DrumPad {
         pad_index: usize,
@@ -170,7 +173,7 @@ impl EffectKnobWidget {
 
     fn immediate_value_message(&self, value: f32) -> Message {
         match self.target {
-            KnobTarget::Effect(effect_id) => {
+            KnobTarget::Effect(effect_id) | KnobTarget::EffectDb(effect_id) => {
                 Message::set_effect_param(self.track_id, effect_id, self.param_index, value)
             }
             KnobTarget::Instrument => {
@@ -537,6 +540,31 @@ fn build_arc(center: iced::Point, radius: f32, start: f32, end: f32) -> canvas::
 mod tests {
     use super::*;
     use crate::domains::arrangement::ArrangementMsg;
+
+    #[test]
+    fn gain_decibel_knob_keeps_unity_centered_and_emits_native_amplitude() {
+        let track_id = TrackId::new();
+        let effect_id = EffectId::new();
+        let mut knob = EffectKnobWidget::new(
+            track_id, effect_id, 0, 1.0, 0.0, 2.0, 1.0, Color::WHITE,
+        );
+        knob.target = KnobTarget::EffectDb(effect_id);
+        assert_eq!(knob.normalized(), 0.5);
+        assert!((knob.denormalize(0.25) - 0.031_622_775).abs() < 1e-6);
+        assert!((knob.denormalize(0.75) - 2.0_f32.sqrt()).abs() < 1e-6);
+        assert_eq!(knob.denormalize(0.0), 0.0);
+        assert_eq!(knob.denormalize(0.5), 1.0);
+        assert!((knob.denormalize(1.0) - 2.0).abs() < 1e-6);
+        knob.value = 0.031_622_775;
+        assert!((knob.normalized() - 0.25).abs() < 1e-6);
+        assert!(matches!(
+            knob.drag_value_message(knob.denormalize(0.25)),
+            Message::Devices(crate::domains::devices::DevicesMsg::SetEffectParam(
+                actual_track, actual_effect, 0, value,
+            )) if actual_track == track_id && actual_effect == effect_id
+                && (value - 0.031_622_775).abs() < 1e-6
+        ));
+    }
 
     fn clip_knob(field: AudioClipRotaryField) -> EffectKnobWidget {
         EffectKnobWidget::for_audio_clip(
