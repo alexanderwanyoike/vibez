@@ -1,6 +1,9 @@
 use vibez_core::id::{ClipId, SectionId, TrackId};
 use vibez_core::perform::NoteRepeatRate;
 
+#[path = "event_recording.rs"]
+mod recording;
+
 use crate::playback_source::{PreparedClipPlayback, PreparedSectionPlaybackSource};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -61,6 +64,33 @@ pub struct ClipTrackState {
     pub effective_at_samples: u64,
     pub running: bool,
     pub transport_playing: bool,
+}
+
+/// Source recorders retain renderer coordinates independently of Capture notices.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SourceRecordingPosition {
+    pub effective_at_samples: u64,
+    pub canonical_at_samples: u64,
+    pub section_id: Option<SectionId>,
+    pub section_position_samples: Option<u64>,
+    pub canonical_section_position_samples: Option<u64>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct SourceSectionClock {
+    pub(crate) id: SectionId,
+    pub(crate) local_sample: u64,
+    pub(crate) performance_sample: u64,
+    pub(crate) length: u64,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct RepeatNoticePosition {
+    pub(crate) effective_at_samples: u64,
+    pub(crate) canonical_at_samples: u64,
+    pub(crate) section_id: Option<SectionId>,
+    pub(crate) section_position_samples: Option<u64>,
+    pub(crate) canonical_section_position_samples: Option<u64>,
 }
 
 #[derive(Debug)]
@@ -205,6 +235,21 @@ pub enum EngineEvent {
         effective_at_samples: u64,
     },
 
+    /// Source takes consume renderer coordinates before their recorder closes.
+    SourceNoteRepeated {
+        track_id: TrackId,
+        pitch: u8,
+        velocity: u8,
+        rate: NoteRepeatRate,
+        position: SourceRecordingPosition,
+    },
+    SourceNoteInput {
+        track_id: TrackId,
+        pitch: u8,
+        velocity: u8,
+        on: bool,
+        position: SourceRecordingPosition,
+    },
     /// A generated Note Repeat retrigger became effective at this exact
     /// engine sample. Later recording cards consume the same audible truth.
     NoteRepeated {
@@ -219,8 +264,8 @@ pub enum EngineEvent {
         canonical_section_position_samples: Option<u64>,
     },
 
-    /// A monitored input note became effective on the engine clock. Section
-    /// Record consumes these events; monitoring itself remains immediate.
+    /// Source takes have separate coordinates so Capture and pad feedback
+    /// can follow this notice without changing the recorded source.
     InstrumentNoteInput {
         track_id: TrackId,
         pitch: u8,
@@ -347,6 +392,10 @@ pub enum EngineEvent {
 impl PartialEq for EngineEvent {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
+            (Self::SourceNoteInput { .. }, Self::SourceNoteInput { .. })
+            | (Self::SourceNoteRepeated { .. }, Self::SourceNoteRepeated { .. }) => {
+                recording::source_eq(self, other)
+            }
             (Self::DisposeEffect(left), Self::DisposeEffect(right)) => left == right,
             (Self::DisposeInstrument(left), Self::DisposeInstrument(right)) => left == right,
             (Self::PlaybackPosition(left), Self::PlaybackPosition(right)) => left == right,

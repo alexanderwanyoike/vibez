@@ -29,7 +29,7 @@ pub(super) struct ActiveSectionRecord {
     pub(super) replace_source_flushed: bool,
 }
 
-pub(super) fn section_sample_for_performance(
+pub(crate) fn section_sample_for_performance(
     local_segment_start: u64,
     performance_segment_start: u64,
     event_sample: u64,
