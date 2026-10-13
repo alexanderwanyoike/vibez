@@ -894,6 +894,10 @@ mod compensation_clip_tests;
 #[path = "engine_graph_tests.rs"]
 mod graph_tests;
 
+#[cfg(test)]
+#[path = "engine_gain_meter_tests.rs"]
+mod gain_meter_tests;
+
 #[path = "engine_reconfiguration_edits.rs"]
 mod reconfiguration_edits;
 

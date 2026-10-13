@@ -561,6 +561,7 @@ impl AudioEngine {
                 EngineCommand::SetSpectrumTap(target) => {
                     self.spectrum_track = target;
                 }
+                EngineCommand::SetEffectMeterChannel { .. } => {}
 
                 // -- Arrangement recording / looping --
                 EngineCommand::RemoveEffect(track_id, effect_id) => {

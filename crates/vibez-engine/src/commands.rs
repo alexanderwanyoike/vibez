@@ -260,6 +260,12 @@ pub enum EngineCommand {
     /// spectrum analyser ring (`None` disables the tap).
     /// `TrackId::MASTER` taps the summed master bus.
     SetSpectrumTap(Option<TrackId>),
+    /// The generation prevents queued readings from a previous panel selection
+    /// from appearing after the UI returns to the same channel.
+    SetEffectMeterChannel {
+        track_id: Option<TrackId>,
+        generation: u64,
+    },
 
     // -- Effects --
     RemoveEffect(TrackId, EffectId),
