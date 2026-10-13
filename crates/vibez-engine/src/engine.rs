@@ -883,6 +883,9 @@ mod graph_render;
 mod compensation_tests;
 
 #[cfg(test)]
+#[path = "engine_compensation_clip_tests.rs"]
+mod compensation_clip_tests;
+#[cfg(test)]
 #[path = "engine_graph_tests.rs"]
 mod graph_tests;
 
@@ -913,6 +916,10 @@ mod bus_solo_tests;
 #[path = "engine_offline_routing.rs"]
 mod offline_routing;
 pub(crate) use offline_routing::OfflineRoutingSetup;
+
+#[cfg(test)]
+#[path = "engine_compensation_stop_tests.rs"]
+mod compensation_stop_tests;
 
 #[cfg(test)]
 #[path = "engine_offline_configuration_tests.rs"]
