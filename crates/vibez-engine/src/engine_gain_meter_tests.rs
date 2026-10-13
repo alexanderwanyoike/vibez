@@ -428,6 +428,78 @@ fn gain_meter_reports_bypass_and_audible_reenable_fade() {
     }
 }
 
+#[test]
+fn skipped_gain_processing_counts_as_silence_and_clears_old_peaks() {
+    let (mut engine, mut commands, mut events, track_id, effect_id) = gain_meter_fixture(false);
+    let input = [0.8, -0.4].repeat(960);
+    let mut output = vec![0.0; input.len()];
+    engine.process_block(
+        AudioProcessBlock::new(&mut output[..960], 2).with_live_input(track_id.raw(), &input[..960]),
+    );
+    while let Ok(event) = events.pop() {
+        assert!(
+            !matches!(event, EngineEvent::EffectMeter { .. }),
+            "a half-window must not publish early"
+        );
+    }
+
+    // Stopped, muted channels skip their effect chain in the fallback path.
+    // Their elapsed audio time still belongs to the meter's RMS window.
+    commands
+        .push(EngineCommand::SetTrackMute(track_id, true))
+        .unwrap();
+    engine.process_block(
+        AudioProcessBlock::new(&mut output[..960], 2).with_live_input(track_id.raw(), &input[..960]),
+    );
+    assert!(output[..960].iter().all(|sample| *sample == 0.0));
+    let mut reading = None;
+    while let Ok(event) = events.pop() {
+        if let EngineEvent::EffectMeter { input, output, .. } = event {
+            assert!(reading.is_none());
+            reading = Some((input, output));
+        }
+    }
+    let (input_levels, output_levels) = reading.expect("a skipped chain still publishes its window");
+    let half_window = std::f32::consts::FRAC_1_SQRT_2;
+    for (actual, expected) in [
+        (input_levels.peak_l, 0.8),
+        (input_levels.peak_r, 0.4),
+        (input_levels.rms_l, 0.8 * half_window),
+        (input_levels.rms_r, 0.4 * half_window),
+        (output_levels.peak_l, 0.4),
+        (output_levels.peak_r, 0.2),
+        (output_levels.rms_l, 0.4 * half_window),
+        (output_levels.rms_r, 0.2 * half_window),
+    ] {
+        assert!(
+            (actual - expected).abs() < 1e-5,
+            "skipped frames must contribute silence: expected {expected}, got {actual}"
+        );
+    }
+
+    engine.process_block(
+        AudioProcessBlock::new(&mut output, 2).with_live_input(track_id.raw(), &input),
+    );
+    let mut readings = 0;
+    while let Ok(event) = events.pop() {
+        if let EngineEvent::EffectMeter {
+            track_id: observed_track,
+            effect_id: observed_effect,
+            input,
+            output,
+            ..
+        } = event
+        {
+            readings += 1;
+            assert_eq!(observed_track, track_id);
+            assert_eq!(observed_effect, effect_id);
+            assert_eq!(input, metering::MeterValues::SILENT);
+            assert_eq!(output, metering::MeterValues::SILENT);
+        }
+    }
+    assert_eq!(readings, 1, "a fully skipped window clears the visible meter");
+}
+
 fn gain_meter_fixture(
     use_graph: bool,
 ) -> (
