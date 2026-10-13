@@ -103,7 +103,7 @@ impl PluginWindowManager {
             size,
         };
         let parent = GuiParent::Cocoa(Retained::as_ptr(&opened.view) as *mut _);
-        if !unsafe { opened.gui_handle.attach_to_parent(parent) } || !opened.gui_handle.show() {
+        if !unsafe { opened.gui_handle.open_embedded(parent) } {
             return false;
         }
         // NSView and both plugin APIs use logical points, including on Retina displays.

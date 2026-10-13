@@ -180,6 +180,14 @@ impl PluginGuiHandle {
         }
     }
 
+    /// Embed the created GUI in `parent` and show it.
+    ///
+    /// # Safety
+    /// The parent must be valid on the UI thread and outlive the plugin GUI.
+    pub unsafe fn open_embedded(&mut self, parent: GuiParent) -> bool {
+        self.attach_to_parent(parent) && self.show()
+    }
+
     /// Show the plugin GUI.
     pub fn show(&self) -> bool {
         match self {
