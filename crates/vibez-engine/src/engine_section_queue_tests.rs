@@ -505,3 +505,99 @@ fn queued_track_mute_survives_a_section_transition_until_its_own_boundary() {
     )));
     assert!(engine.tracks()[0].mute);
 }
+
+fn playing_one_shot(
+    value: f32,
+    length_beats: f64,
+) -> (
+    AudioEngine,
+    rtrb::Producer<EngineCommand>,
+    rtrb::Consumer<EngineEvent>,
+    TrackId,
+) {
+    let (mut engine, mut commands, mut events) = AudioEngine::new();
+    let track_id = TrackId::new();
+    commands.push(EngineCommand::SetSampleRate(8)).unwrap();
+    commands.push(EngineCommand::SetBpm(120.0)).unwrap();
+    commands
+        .push(EngineCommand::AddTrack(track_id, "Audio".into()))
+        .unwrap();
+    commands
+        .push(EngineCommand::LaunchSection(source_with_looping(
+            SectionId::new(),
+            track_id,
+            length_beats,
+            value,
+            false,
+        )))
+        .unwrap();
+    engine.process(&mut [0.0], 1);
+    while events.pop().is_ok() {}
+    (engine, commands, events, track_id)
+}
+
+fn stopped(events: &mut rtrb::Consumer<EngineEvent>) -> bool {
+    std::iter::from_fn(|| events.pop().ok())
+        .any(|event| matches!(event, EngineEvent::PlaybackStopped))
+}
+
+#[test]
+fn section_queued_at_a_one_shot_end_starts_when_the_block_ends_on_that_sample() {
+    let (mut engine, mut commands, mut events, track_id) = playing_one_shot(0.6, 2.0);
+    let next = SectionId::new();
+    commands
+        .push(EngineCommand::QueueSection {
+            prepared: source(next, track_id, 4.0, 0.8),
+            quantization: SectionLaunchQuantization::EndOfSection,
+        })
+        .unwrap();
+
+    let mut until_end = [0.0; 7];
+    engine.process(&mut until_end, 1);
+    let mut after_end = [0.0; 4];
+    engine.process(&mut after_end, 1);
+
+    assert_eq!(until_end, [0.6; 7]);
+    assert_eq!(after_end, [0.8; 4]);
+    assert!(engine.transport.is_playing());
+    let mut drained = Vec::new();
+    while let Ok(event) = events.pop() {
+        drained.push(event);
+    }
+    assert!(!drained
+        .iter()
+        .any(|event| matches!(event, EngineEvent::PlaybackStopped)));
+    assert!(drained.iter().any(|event| matches!(
+        event,
+        EngineEvent::SectionTransitioned {
+            section_id,
+            effective_at_samples: 8,
+            ..
+        } if *section_id == next
+    )));
+}
+
+#[test]
+fn section_queued_after_a_one_shot_end_waits_in_silence_for_its_boundary() {
+    let (mut engine, mut commands, mut events, track_id) = playing_one_shot(0.6, 2.0);
+    let next = SectionId::new();
+    commands
+        .push(EngineCommand::QueueSection {
+            prepared: source(next, track_id, 4.0, 0.8),
+            quantization: SectionLaunchQuantization::OneBar,
+        })
+        .unwrap();
+
+    let mut one_shot = [0.0; 7];
+    engine.process(&mut one_shot, 1);
+    let mut gap = [0.0; 8];
+    engine.process(&mut gap, 1);
+    let mut queued = [0.0; 3];
+    engine.process(&mut queued, 1);
+
+    assert_eq!(one_shot, [0.6; 7]);
+    assert_eq!(gap, [0.0; 8]);
+    assert_eq!(queued, [0.8; 3]);
+    assert!(engine.transport.is_playing());
+    assert!(!stopped(&mut events));
+}
