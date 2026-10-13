@@ -27,6 +27,9 @@ pub struct PreparedNode {
     pub inputs: Vec<PreparedInput>,
 }
 
+/// The largest block the graph renders at once; longer callbacks split.
+pub const MAX_BLOCK_FRAMES: usize = 4096;
+
 #[derive(Debug)]
 pub struct PreparedRouting {
     pub(crate) node_indices: HashMap<vibez_core::routing::RoutingNode, usize>,
