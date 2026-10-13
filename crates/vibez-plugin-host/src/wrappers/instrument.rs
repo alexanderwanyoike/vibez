@@ -37,6 +37,14 @@ impl Instrument for PluginInstrumentWrapper {
         self.inner.set_audio_context(context);
     }
 
+    fn processing_failure_is_local(&self) -> bool {
+        self.inner.processing_failure_is_local()
+    }
+
+    fn processing_recovery_requested(&self) -> bool {
+        self.inner.processing_recovery_requested()
+    }
+
     fn reconfiguration_requested(&self) -> bool {
         self.inner.reconfiguration_requested()
     }

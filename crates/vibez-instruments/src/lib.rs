@@ -1,3 +1,5 @@
+//! Instrument rendering and native ownership configuration.
+
 pub mod drum_rack;
 pub(crate) mod envelope;
 pub mod sampler;
@@ -28,6 +30,16 @@ pub fn descriptors_for(kind: InstrumentKind) -> &'static [ParamDescriptor] {
 
 pub trait Instrument: Send {
     fn set_audio_context(&mut self, _context: vibez_core::audio_context::DeviceAudioContext) {}
+    /// A process/start failure can silence this device without invalidating the
+    /// prepared latency graph. Only main-thread reactivation clears its gate.
+    fn processing_failure_is_local(&self) -> bool {
+        false
+    }
+
+    /// Requests bounded main-thread recovery, never a callback-side DSP retry.
+    fn processing_recovery_requested(&self) -> bool {
+        false
+    }
     fn reconfiguration_requested(&self) -> bool {
         false
     }

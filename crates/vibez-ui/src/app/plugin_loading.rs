@@ -73,6 +73,8 @@ impl App {
                     .map(|i| effect.get_param(i))
                     .collect();
                 let ui_effect = UiEffect {
+                    reconfiguration_failed: false,
+                    latency_samples: Some(effect.latency_samples()),
                     inactive_sidechains: track
                         .effects
                         .iter()
@@ -178,6 +180,7 @@ impl App {
                     .map(|_| crate::state::UiDrumPad::default())
                     .collect();
                 track.selected_drum_pad = 0;
+                track.instrument_latency_samples = Some(instrument.latency_samples());
                 track.plugin_instrument_name = Some(plugin_name.clone());
                 track.plugin_instrument_ref = Some(result.device_ref.clone());
                 track.plugin_instrument_descriptors = instrument.param_descriptors();

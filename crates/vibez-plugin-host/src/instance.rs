@@ -1,4 +1,8 @@
+//! Hosted processing metadata, diagnostics and exclusive lifecycle contracts.
+
 use vibez_core::effect::ParamDescriptor;
+
+pub(crate) const MAX_PROCESSING_RECOVERIES: u8 = 2;
 
 /// Trait for a loaded plugin instance ready for audio processing.
 ///
@@ -16,6 +20,16 @@ pub trait PluginInstance: Send {
         self.process_audio(buffer, channels);
     }
     fn set_audio_context(&mut self, _context: vibez_core::audio_context::DeviceAudioContext) {}
+    /// A process/start failure can silence this device without invalidating the
+    /// prepared latency graph. Only main-thread reactivation clears its gate.
+    fn processing_failure_is_local(&self) -> bool {
+        false
+    }
+
+    /// Requests bounded main-thread recovery, never a callback-side DSP retry.
+    fn processing_recovery_requested(&self) -> bool {
+        false
+    }
     fn reconfiguration_requested(&self) -> bool {
         false
     }

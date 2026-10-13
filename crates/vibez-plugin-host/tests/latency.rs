@@ -229,3 +229,54 @@ fn failed_reactivation_invalidates_cached_processing_even_when_latency_still_mat
         assert!(instance.processing_configuration_valid());
     }
 }
+
+#[test]
+fn exclusive_worker_migration_is_valid_but_rate_mismatch_requires_reactivation() {
+    let fixture = support::Fixture::new();
+    for format in ["clap", "vst3"] {
+        let mut instance = fixture.load(format, 64);
+        instance.process_audio(&mut [0.0; 128], 2);
+        instance = std::thread::spawn(move || {
+            assert!(instance.processing_configuration_valid());
+            let mut output = [1.0; 128];
+            instance.process_audio(&mut output, 2);
+            assert!(output.iter().all(|&sample| sample == 1.0));
+            instance
+        })
+        .join()
+        .unwrap();
+        assert!(instance.processing_configuration_valid());
+        instance.stop_for_reconfiguration();
+        instance.reconfigure_on_main_thread().unwrap();
+        assert!(instance.processing_configuration_valid());
+        instance.set_audio_context(vibez_core::audio_context::DeviceAudioContext {
+            musical_sample: 0,
+            continuous_sample: 0,
+            sample_rate: 96000,
+            bpm: 120.0,
+            playing: true,
+        });
+        assert!(!instance.processing_configuration_valid());
+        let mut output = [1.0; 128];
+        instance.process_audio(&mut output, 2);
+        assert!(output.iter().all(|&sample| sample == 0.0));
+        instance.stop_for_reconfiguration();
+        instance.reconfigure_on_main_thread().unwrap();
+        assert!(instance.processing_configuration_valid());
+    }
+}
+
+#[test]
+fn preparation_cannot_relabel_an_active_device_as_activated_at_another_rate() {
+    let fixture = support::Fixture::new();
+    for format in ["clap", "vst3"] {
+        let mut instance = fixture.load(format, 64);
+        instance.prepare(96000.0, 64);
+        assert_eq!(instance.activation_sample_rate(), Some(48000));
+        assert!(!instance.processing_configuration_valid());
+        instance.stop_for_reconfiguration();
+        instance.reconfigure_on_main_thread().unwrap();
+        assert!(instance.processing_configuration_valid());
+        assert_eq!(instance.activation_sample_rate(), Some(48000));
+    }
+}

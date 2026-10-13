@@ -235,6 +235,8 @@ impl DevicesState {
 
                 if let Some(track) = find_track_mut(tracks, master, buses, track_id) {
                     track.effects.push(UiEffect {
+                        reconfiguration_failed: false,
+                        latency_samples: Some(0),
                         inactive_sidechains: Default::default(),
                         sidechains: Default::default(),
                         external_inputs: fx.external_inputs().to_vec(),
@@ -359,6 +361,7 @@ impl DevicesState {
                         || !track.plugin_instrument_descriptors.is_empty()
                         || track.has_plugin_instrument_gui;
                     track.has_instrument = true;
+                    track.instrument_latency_samples = Some(0);
                     track.instrument_kind = Some(instrument_kind);
                     track.sample_name = None;
                     track.sample_source = None;
@@ -388,6 +391,7 @@ impl DevicesState {
             DevicesMsg::RemoveTrackInstrument(track_id) => {
                 if let Some(track) = find_track_mut(tracks, master, buses, track_id) {
                     track.has_instrument = false;
+                    track.instrument_latency_samples = None;
                     track.instrument_kind = None;
                     track.sample_name = None;
                     track.sample_source = None;
@@ -608,6 +612,8 @@ mod tests {
         );
         let effect_id = EffectId::new();
         track.effects.push(UiEffect {
+            reconfiguration_failed: false,
+            latency_samples: Some(0),
             inactive_sidechains: Default::default(),
             sidechains: Default::default(),
             external_inputs: Default::default(),

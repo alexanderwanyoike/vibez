@@ -28,6 +28,17 @@ pub enum AuditionStart {
 /// and safe to drop on the audio thread without blocking.
 pub enum EngineCommand {
     SetRouting(Box<crate::routing::PreparedRouting>),
+    RejectRoutingUpdate {
+        reason: String,
+    },
+    ResumeDeviceReconfiguration {
+        device: crate::engine::reconfiguration::DeviceReconfiguration,
+        routing: Box<crate::routing::PreparedRouting>,
+    },
+    RejectDeviceReconfiguration {
+        device: crate::engine::reconfiguration::DeviceReconfiguration,
+        reason: String,
+    },
     /// Start playback from the current transport position.
     Play,
     /// Stop playback (transport position is preserved).

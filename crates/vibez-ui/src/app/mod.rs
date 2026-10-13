@@ -157,6 +157,7 @@ mod audio_take_finalization;
 mod audio_tasks;
 mod bounce;
 mod capture;
+mod compensation;
 mod drum_rack_preparation;
 mod engine_events;
 mod keyboard;
@@ -709,3 +710,6 @@ mod sidechain_sync;
 
 #[cfg(test)]
 mod sidechain_sync_tests;
+
+#[cfg(test)]
+mod compensation_bridge_tests;
