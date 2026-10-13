@@ -143,7 +143,8 @@ impl PluginWindowManager {
         let _ = self.conn.map_window(window_id);
         let _ = self.conn.flush();
 
-        if !unsafe { handle.attach_to_parent(GuiParent::X11(window_id)) } || !handle.show() {
+        if !unsafe { handle.open_embedded(GuiParent::X11(window_id)) } {
+            eprintln!("vibez: open_window - plugin rejected its parent window");
             handle.destroy();
             let _ = self.conn.destroy_window(window_id);
             let _ = self.conn.flush();
