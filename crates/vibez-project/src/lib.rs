@@ -12,6 +12,7 @@ pub use vibez_core::perform::SectionLaunchQuantization;
 use vibez_core::perform::{GrooveProfile, SwingAmount};
 
 mod clip_launcher;
+pub mod device_preset;
 pub mod project_format_v1;
 pub use clip_launcher::{LauncherClipInfo, PerformLayout};
 
