@@ -8,3 +8,7 @@ pub mod note_repeat;
 pub mod playback_source;
 pub mod render;
 pub mod transport;
+
+pub mod routing;
+
+mod retirement;

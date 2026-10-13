@@ -44,6 +44,18 @@ impl EngineTrack {
 
     /// Apply automation at `beat`; return gain and pan mix overrides.
     pub fn apply_automation(&mut self, beat: f64) -> (Option<f32>, Option<f32>) {
+        self.apply_automation_with_sends(beat, true)
+    }
+
+    pub(crate) fn apply_graph_automation(&mut self, beat: f64) -> (Option<f32>, Option<f32>) {
+        self.apply_automation_with_sends(beat, false)
+    }
+
+    fn apply_automation_with_sends(
+        &mut self,
+        beat: f64,
+        update_sends: bool,
+    ) -> (Option<f32>, Option<f32>) {
         use vibez_core::automation::AutomationTarget;
         let mut gain = None;
         let mut pan = None;
@@ -93,7 +105,7 @@ impl EngineTrack {
                     }
                 }
                 AutomationTarget::PluginParam { .. } => {}
-                AutomationTarget::Send { bus_id } => {
+                AutomationTarget::Send { bus_id } if update_sends => {
                     // Send range is native 0..1, so write the value in place.
                     match self.sends.iter_mut().find(|(b, _)| *b == bus_id) {
                         Some(send) => send.1 = value,
@@ -103,7 +115,8 @@ impl EngineTrack {
                 AutomationTarget::TrackGain
                 | AutomationTarget::TrackPan
                 | AutomationTarget::TrackSwingOffset
-                | AutomationTarget::EffectParam { .. } => {}
+                | AutomationTarget::EffectParam { .. }
+                | AutomationTarget::Send { .. } => {}
             }
         }
         self.automation_swing_offset = swing_offset;
@@ -113,6 +126,41 @@ impl EngineTrack {
             self.set_automation_mute(None, true);
         }
         (gain, pan)
+    }
+
+    pub(crate) fn effective_send_amount(&self, bus: TrackId, beat: f64) -> f32 {
+        self.playback_source
+            .automation
+            .iter()
+            .find(|lane| {
+                lane.target == vibez_core::automation::AutomationTarget::Send { bus_id: bus }
+            })
+            .and_then(|lane| lane.value_at(beat))
+            .or_else(|| {
+                self.sends
+                    .iter()
+                    .find(|(id, _)| *id == bus)
+                    .map(|(_, value)| *value)
+            })
+            .unwrap_or(0.0)
+    }
+
+    pub(crate) fn automation_mix_values(&self, beat: f64) -> (Option<f32>, Option<f32>) {
+        use vibez_core::automation::AutomationTarget;
+        let value = |target| {
+            if self.automation_overrides.contains(target) {
+                return None;
+            }
+            self.playback_source
+                .automation
+                .iter()
+                .find(|lane| lane.target == target)
+                .and_then(|lane| lane.value_at(beat))
+        };
+        (
+            value(AutomationTarget::TrackGain).map(|gain| gain * 2.0),
+            value(AutomationTarget::TrackPan),
+        )
     }
 
     pub(crate) fn has_automation_target(

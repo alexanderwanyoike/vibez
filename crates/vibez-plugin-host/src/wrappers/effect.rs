@@ -7,6 +7,7 @@ use crate::instance::PluginInstance;
 /// allowing external plugins to slot into the existing effect chain.
 pub struct PluginEffectWrapper {
     inner: Box<dyn PluginInstance>,
+    processing_error: Option<&'static str>,
     /// Leaked to satisfy the `&'static [ParamDescriptor]` requirement.
     descriptors: &'static [ParamDescriptor],
 }
@@ -15,7 +16,11 @@ impl PluginEffectWrapper {
     pub fn new(inner: Box<dyn PluginInstance>) -> Self {
         let desc_vec = inner.param_descriptors_vec();
         let descriptors: &'static [ParamDescriptor] = Box::leak(desc_vec.into_boxed_slice());
-        Self { inner, descriptors }
+        Self {
+            inner,
+            descriptors,
+            processing_error: None,
+        }
     }
 
     pub fn plugin_name(&self) -> &str {
@@ -51,7 +56,7 @@ impl AudioEffect for PluginEffectWrapper {
         if result.is_err() {
             // Plugin panicked — zero the buffer to avoid noise.
             buffer.fill(0.0);
-            log::error!("Plugin panicked during process");
+            self.processing_error = Some("Plugin panicked during processing");
         }
     }
 
@@ -59,7 +64,13 @@ impl AudioEffect for PluginEffectWrapper {
         self.inner.reset();
     }
 
-    fn finish_offline_processing(&mut self) {
+    fn take_processing_error(&mut self) -> Option<&'static str> {
+        self.processing_error
+            .take()
+            .or_else(|| self.inner.take_processing_error())
+    }
+
+    fn stop_processing(&mut self) {
         self.inner.stop_processing();
     }
 }
