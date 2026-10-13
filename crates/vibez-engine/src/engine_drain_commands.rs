@@ -6,6 +6,7 @@ use super::*;
 impl AudioEngine {
     /// Drain all pending commands from the ring buffer without blocking.
     pub(super) fn drain_commands(&mut self) {
+        self.rendered_callback_frames = 0;
         self.flush_presentation();
         if self.pending_source_cleanup {
             self.pending_source_cleanup = false;
@@ -15,6 +16,10 @@ impl AudioEngine {
                 return;
             }
         }
+        self.continue_capture_replay();
+        if self.capture_replay.is_some() {
+            return;
+        }
         self.continue_clip_batch(self.performance_position);
         if self.clip_batch_blocks_commands() {
             return;
@@ -23,21 +28,28 @@ impl AudioEngine {
         self.flush_retirements();
         self.clean_removed_bus_automation();
         loop {
-            if self.clip_batch_blocks_commands() {
+            if self.capture_replay.is_some() || self.clip_batch_blocks_commands() {
                 break;
             }
             let Ok(_) = self.cmd_rx.peek() else {
                 break;
             };
-            // Track-sized cancellation loops retain their remaining intents and
-            // owners in place. Admission covers only the bounded command body.
-            let reserve = presentation_queue::COMMAND_PRESENTATION_RESERVE;
-            if self.scheduled_presentation.capacity() - self.scheduled_presentation.len() < reserve
+            // Track-sized cancellation retains the remaining owners/intents.
+            // Admission covers only the bounded command body.
+            if self.scheduled_presentation.capacity() - self.scheduled_presentation.len()
+                < presentation_queue::COMMAND_PRESENTATION_RESERVE
+                || self
+                    .section_capture_timing
+                    .capacity()
+                    .saturating_sub(self.section_capture_timing.len())
+                    < 2
             {
                 self.fail_presentation();
                 break;
             }
-            if self.pending_bus_cleanup.is_some()
+            if self.scheduled_presentation.len() + 2 >= self.scheduled_presentation.capacity()
+                || self.section_capture_timing.len() + 2 >= self.section_capture_timing.capacity()
+                || self.pending_bus_cleanup.is_some()
                 || self
                     .pending_retirements
                     .capacity()
@@ -53,6 +65,7 @@ impl AudioEngine {
                 && matches!(
                     self.cmd_rx.peek(),
                     Ok(EngineCommand::SetRouting(_)
+                        | EngineCommand::UpdateAutomationRouting(_)
                         | EngineCommand::ResumeDeviceReconfiguration { .. })
                 )
             {
@@ -78,6 +91,9 @@ impl AudioEngine {
             }
             match cmd {
                 EngineCommand::SetRouting(prepared) => self.command_set_routing(prepared),
+                EngineCommand::UpdateAutomationRouting(prepared) => {
+                    self.command_update_automation_routing(prepared)
+                }
                 EngineCommand::RejectRoutingUpdate { reason } => {
                     self.command_reject_routing_update(reason)
                 }
@@ -185,6 +201,15 @@ impl AudioEngine {
                         }
                         applied = true;
                     }
+                    if applied {
+                        self.section_capture_source(
+                            section_id,
+                            self.effective_position(),
+                            self.active_section
+                                .map_or(0, |active| active.position_samples),
+                            true,
+                        );
+                    }
                     let event = EngineEvent::SectionSourceRefreshed {
                         section_id,
                         applied,
@@ -196,7 +221,7 @@ impl AudioEngine {
                         }),
                         retired: prepared,
                     };
-                    self.present_event(event);
+                    self.present_event_after(event, if applied { self.mix_latency() } else { 0 });
                 }
                 EngineCommand::ArmSectionRecord {
                     section_id,
@@ -212,7 +237,6 @@ impl AudioEngine {
                     replace_existing,
                 ),
                 EngineCommand::StopSectionRecord => self.stop_section_record(),
-
                 EngineCommand::LoadAudio(audio) => {
                     let len = audio.num_frames() as u64;
                     self.audio = Some(audio);
@@ -229,9 +253,7 @@ impl AudioEngine {
                     let was_clip_performance = self.clip_performance;
                     self.clear_clip_performance();
                     self.stop_section_record();
-                    self.present_event(EngineEvent::PerformanceCaptureStopped {
-                        effective_at_samples: self.effective_position(),
-                    });
+                    self.stop_heard_capture();
                     self.audio = None;
                     self.arrangement_audio_length = None;
                     self.arrangement_recording = false;
@@ -467,10 +489,10 @@ impl AudioEngine {
                     self.set_track_gain(id, gain);
                 }
                 EngineCommand::SetAutomationLane { track_id, lane } => {
-                    self.set_automation_lane(track_id, lane);
+                    self.set_automation_lane(track_id, lane)
                 }
                 EngineCommand::RemoveAutomationLane { track_id, lane_id } => {
-                    self.remove_automation_lane(track_id, lane_id);
+                    self.remove_automation_lane(track_id, lane_id)
                 }
                 EngineCommand::SetTrackPan(id, pan) => {
                     self.set_track_pan(id, pan);
@@ -548,6 +570,7 @@ impl AudioEngine {
                     self.spectrum_track = target;
                 }
 
+                // -- Arrangement recording / looping --
                 EngineCommand::AddEffect {
                     track_id,
                     effect_id,
@@ -665,8 +688,6 @@ impl AudioEngine {
                     pad_index,
                     state,
                 } => self.command_set_drum_rack_pad_state(track_id, pad_index, state),
-
-                // -- Arrangement recording / looping --
                 EngineCommand::SetArrangementRecording(active) => {
                     self.arrangement_recording = active;
                     if self.active_section.is_none() {
@@ -837,7 +858,7 @@ impl AudioEngine {
                         if let Some(instrument) = self.tracks[track_index].instrument.as_mut() {
                             instrument.note_on(pitch, velocity);
                         }
-                        let source_position = self.source_recording_position();
+                        let recording = self.source_recording_position();
                         let trigger = crate::note_repeat::NoteRepeatTrigger {
                             pitch,
                             velocity,
@@ -845,14 +866,23 @@ impl AudioEngine {
                             effective_at_samples: position,
                             canonical_at_samples: position,
                         };
-                        let (source, notice) = EngineEvent::repeated_pair(
+                        let (source, event) = EngineEvent::repeated_pair(
                             track_id,
                             trigger,
-                            source_position,
-                            source_position.into(),
+                            recording,
+                            recording.into(),
                         );
-                        self.present_event(source);
-                        self.present_event(notice);
+                        if !presentation_queue::emit_repeated(
+                            source,
+                            event,
+                            &mut self.event_tx,
+                            &mut self.scheduled_presentation,
+                            self.output_position,
+                            self.output_position,
+                            self.output_position,
+                        ) {
+                            self.fail_presentation();
+                        }
                     }
                     self.tracks[track_index].start_note_repeat(
                         NoteRepeatStart {
@@ -896,7 +926,6 @@ impl AudioEngine {
                     }
                 }
 
-                // -- External plugins --
                 EngineCommand::AddPluginEffect {
                     track_id,
                     effect_id,

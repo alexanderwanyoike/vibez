@@ -37,7 +37,6 @@ fn returned_device_event_reconfigures_on_main_and_publishes_resume_or_reject_wit
         let mut track = ProjectTrack::new(TrackId::new(), "Track".into(), 0);
         let id = EffectId::new();
         track.effects.push(UiEffect {
-            reconfiguration_failed: false,
             id,
             effect_type: EffectType::Gain,
             bypass: false,
@@ -49,6 +48,7 @@ fn returned_device_event_reconfigures_on_main_and_publishes_resume_or_reject_wit
             sidechains: vec![],
             inactive_sidechains: vec![],
             external_inputs: vec![],
+            reconfiguration_failed: false,
             latency_samples: Some(521),
         });
         let track_id = track.id;
@@ -108,10 +108,21 @@ fn returned_device_event_reconfigures_on_main_and_publishes_resume_or_reject_wit
             EngineCommand::ResumeDeviceReconfiguration { device, routing } if !fail => {
                 assert_eq!(device.effect_id(), Some(id));
                 assert_eq!(
+                    routing.compensation.generation,
+                    app.state.devices.compensation_generation
+                );
+                assert_eq!(
                     app.state.project_tracks.tracks[0].effects[0].latency_samples,
                     Some(0)
                 );
-                assert_eq!(routing.compensation.output_latency, 0);
+                assert!(app
+                    .state
+                    .devices
+                    .last_timing
+                    .as_ref()
+                    .unwrap()
+                    .reduced_tracks
+                    .is_empty());
             }
             _ => panic!("Unexpected ownership result"),
         }
@@ -150,7 +161,6 @@ fn queued_replacement_or_project_reset_revokes_old_event_before_main_activation(
         let track_id = track.id;
         let effect_id = EffectId::new();
         let mut ui_effect = UiEffect {
-            reconfiguration_failed: false,
             id: effect_id,
             effect_type: EffectType::Gain,
             bypass: false,
@@ -162,6 +172,7 @@ fn queued_replacement_or_project_reset_revokes_old_event_before_main_activation(
             sidechains: vec![],
             inactive_sidechains: vec![],
             external_inputs: vec![],
+            reconfiguration_failed: false,
             latency_samples: None,
         };
         ui_effect.latency_samples = Some(777);
@@ -220,6 +231,7 @@ fn queued_replacement_or_project_reset_revokes_old_event_before_main_activation(
             app.state.project_tracks.tracks[0].effects[0].latency_samples,
             Some(777)
         );
+        assert_eq!(app.state.devices.compensation_generation, 0);
         assert_eq!(app.cmd_tx.pending_len(), pending);
     }
 }

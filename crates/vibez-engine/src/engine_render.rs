@@ -134,6 +134,10 @@ impl AudioEngine {
                 for track in &mut self.tracks {
                     track.flush_notes();
                 }
+                // Held repeats cannot keep deadlines from the later source clock
+                // after Arrange returns to an earlier loop position.
+                let anchor = self.playing_note_repeat_anchor();
+                self.reanchor_note_repeats(anchor, loop_start);
                 if rest > 0 {
                     self.render_multitrack_segment(
                         &mut output[first * channels..],
@@ -285,10 +289,10 @@ impl AudioEngine {
                 let track_id = track.id;
                 let event_tx = &mut self.event_tx;
                 let scheduled = &mut self.scheduled_presentation;
-                let physical = self.output_position;
+                let physical = self.output_position + self.rendered_callback_frames as u64;
                 let section = self.active_section;
                 let mut on_repeat = |trigger: crate::note_repeat::NoteRepeatTrigger| {
-                    let source_position = crate::events::SourceRecordingPosition::from_trigger(
+                    let recording = crate::events::SourceRecordingPosition::from_trigger(
                         trigger,
                         section.map(|active| crate::events::SourceSectionClock {
                             id: active.section_id,
@@ -297,14 +301,16 @@ impl AudioEngine {
                             length: active.length_samples,
                         }),
                     );
-                    let (source, event) = EngineEvent::repeated_pair(
-                        track_id,
-                        trigger,
-                        source_position,
-                        source_position.into(),
-                    );
+                    let (source, event) =
+                        EngineEvent::repeated_pair(track_id, trigger, recording, recording.into());
                     presentation_overflow |= !presentation_queue::emit_repeated(
-                        source, event, event_tx, scheduled, physical,
+                        source,
+                        event,
+                        event_tx,
+                        scheduled,
+                        physical,
+                        physical,
+                        self.output_position,
                     );
                 };
                 track.render_instrument(
@@ -551,18 +557,20 @@ impl AudioEngine {
                 let track_id = track.id;
                 let event_tx = &mut self.event_tx;
                 let scheduled = &mut self.scheduled_presentation;
-                let physical = self.output_position;
+                let physical = self.output_position + self.rendered_callback_frames as u64;
                 let mut on_repeat = |trigger: crate::note_repeat::NoteRepeatTrigger| {
-                    let source_position =
+                    let recording =
                         crate::events::SourceRecordingPosition::from_trigger(trigger, None);
-                    let (source, event) = EngineEvent::repeated_pair(
-                        track_id,
-                        trigger,
-                        source_position,
-                        source_position.into(),
-                    );
+                    let (source, event) =
+                        EngineEvent::repeated_pair(track_id, trigger, recording, recording.into());
                     presentation_overflow |= !presentation_queue::emit_repeated(
-                        source, event, event_tx, scheduled, physical,
+                        source,
+                        event,
+                        event_tx,
+                        scheduled,
+                        physical,
+                        physical,
+                        self.output_position,
                     );
                 };
                 track.render_instrument_idle(

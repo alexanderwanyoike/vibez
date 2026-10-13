@@ -20,3 +20,5 @@ mod retirement;
 mod guarded_history;
 
 pub mod command_ownership;
+#[cfg(any(test, feature = "test-support"))]
+pub mod test_support;

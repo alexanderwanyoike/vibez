@@ -46,6 +46,9 @@ impl AudioEngine {
                 samples,
             }
         });
+        if !self.compensation_valid {
+            return;
+        }
         self.render_routing_graph(
             output,
             render_paths::MultitrackRenderBlock {

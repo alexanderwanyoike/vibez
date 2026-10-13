@@ -53,7 +53,7 @@ fn rejected_capture_during_recovery_preserves_applied_section_acknowledgement_an
     let mut recording_note = false;
     while let Ok(event) = events.pop() {
         started |= matches!(event, EngineEvent::PlaybackStarted);
-        recording_note |= matches!(event, EngineEvent::InstrumentNoteInput { section_id: Some(section), track_id, .. } if section == id && track_id == note_track);
+        recording_note |= matches!(event, EngineEvent::SourceNoteInput { position, track_id, .. } if position.section_id == Some(id) && track_id == note_track);
         if let EngineEvent::SectionTransitioned {
             section_id,
             retired,

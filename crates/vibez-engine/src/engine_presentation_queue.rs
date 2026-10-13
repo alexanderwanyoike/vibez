@@ -21,17 +21,28 @@ fn cancelled_event(event: EngineEvent) -> EngineEvent {
             retired: Some(retired),
             ..
         } => EngineEvent::ClipRequestRetired(retired),
+        EngineEvent::SectionCaptureSource { offsets, .. }
+        | EngineEvent::PerformanceCaptureStarted { offsets, .. } => {
+            EngineEvent::CaptureTimingRetired(offsets)
+        }
         EngineEvent::PlaybackStarted
         | EngineEvent::ClipTransitioned { .. }
         | EngineEvent::ClipSourceRefreshed { .. }
         | EngineEvent::ClipCaptureSource { .. }
-        | EngineEvent::PerformanceCaptureStarted { .. }
+        | EngineEvent::SectionCaptureStopped { .. }
         | EngineEvent::PerformanceCaptureStopped { .. }
         | EngineEvent::InstrumentNoteInput { .. }
         | EngineEvent::NoteRepeated { .. }
         | EngineEvent::AutomationGestureChanged { .. } => EngineEvent::PresentationCancelled,
         event => event,
     }
+}
+
+fn source_feed(event: &EngineEvent) -> bool {
+    matches!(
+        event,
+        EngineEvent::SourceNoteInput { .. } | EngineEvent::SourceNoteRepeated { .. }
+    )
 }
 
 fn capture_feed(event: &EngineEvent) -> bool {
@@ -43,8 +54,19 @@ fn capture_feed(event: &EngineEvent) -> bool {
             | EngineEvent::NoteRepeated { .. }
             | EngineEvent::AutomationGestureChanged { .. }
             | EngineEvent::TrackMuteChanged { .. }
+            | EngineEvent::SectionCaptureSource { .. }
+            | EngineEvent::SectionCaptureStopped { .. }
             | EngineEvent::ClipCaptureSource { .. }
     )
+}
+
+fn ready(pending: &ScheduledPresentation, source_now: u64, heard_now: u64) -> bool {
+    pending.due
+        <= if source_feed(&pending.event) {
+            source_now
+        } else {
+            heard_now
+        }
 }
 
 fn flush_ready(
@@ -53,8 +75,8 @@ fn flush_ready(
     eligible: impl Fn(&ScheduledPresentation) -> bool,
 ) {
     let mut slots = events.slots();
-    // Stable compaction moves accepted Capture data before its terminal
-    // notification without freeing any retained source owner in the callback.
+    // Stable compaction visits each retained owner once, even when immediate
+    // recording feeds sit beyond future heard events in physical-time order.
     scheduled.retain_mut(|pending| {
         if slots == 0 || !eligible(pending) {
             return true;
@@ -73,8 +95,14 @@ fn queue_event(
     scheduled: &mut Vec<ScheduledPresentation>,
     now: u64,
     due: u64,
+    heard_now: u64,
 ) -> Option<EngineEvent> {
-    let event = if due <= now && scheduled.first().is_none_or(|pending| pending.due > now) {
+    let cutoff = if source_feed(&event) { now } else { heard_now };
+    let event = if due <= cutoff
+        && !scheduled
+            .iter()
+            .any(|pending| ready(pending, now, heard_now))
+    {
         match events.push(event) {
             Ok(()) => return None,
             Err(rtrb::PushError::Full(event)) => event,
@@ -92,22 +120,30 @@ fn queue_event(
 
 pub(super) fn emit_repeated(
     source: EngineEvent,
-    event: EngineEvent,
+    heard: EngineEvent,
     events: &mut rtrb::Producer<EngineEvent>,
     scheduled: &mut Vec<ScheduledPresentation>,
     now: u64,
+    due: u64,
+    heard_now: u64,
 ) -> bool {
+    flush_ready(events, scheduled, |pending| ready(pending, now, heard_now));
     if scheduled.capacity() - scheduled.len() < 2 {
         return false;
     }
-    queue_event(source, events, scheduled, now, now).is_none()
-        && queue_event(event, events, scheduled, now, now).is_none()
+    queue_event(source, events, scheduled, now, now, heard_now).is_none()
+        && queue_event(heard, events, scheduled, now, due, heard_now).is_none()
 }
 
 impl AudioEngine {
     pub(super) fn present_event(&mut self, event: EngineEvent) {
         let now = self.output_position + self.rendered_callback_frames as u64;
         self.present_event_at(event, now);
+    }
+
+    pub(super) fn present_event_after(&mut self, event: EngineEvent, delay: u32) {
+        let now = self.output_position + self.rendered_callback_frames as u64;
+        self.present_event_at(event, now.saturating_add(delay as u64));
     }
 
     pub(super) fn present_event_at(&mut self, event: EngineEvent, due: u64) {
@@ -137,6 +173,7 @@ impl AudioEngine {
             &mut self.scheduled_presentation,
             now,
             due,
+            self.output_position,
         ) {
             self.fail_presentation();
             // Ownership producers reserve before handoff. Retain the discovering
@@ -152,19 +189,19 @@ impl AudioEngine {
 
     pub(super) fn flush_presentation(&mut self) {
         if let Some(effective_at_samples) = self.pending_capture_stop {
-            let now = self.output_position + self.rendered_callback_frames as u64;
             flush_ready(
                 &mut self.event_tx,
                 &mut self.scheduled_presentation,
-                |pending| pending.due <= now && capture_feed(&pending.event),
+                |pending| pending.due <= self.output_position && capture_feed(&pending.event),
             );
             if self
                 .scheduled_presentation
                 .iter()
-                .any(|pending| pending.due <= now && capture_feed(&pending.event))
+                .any(|pending| pending.due <= self.output_position && capture_feed(&pending.event))
             {
                 return;
             }
+
             if self
                 .event_tx
                 .push(EngineEvent::PerformanceCaptureStopped {
@@ -204,11 +241,11 @@ impl AudioEngine {
                 return;
             }
         }
-        let now = self.output_position + self.rendered_callback_frames as u64;
+        let source_now = self.output_position + self.rendered_callback_frames as u64;
         flush_ready(
             &mut self.event_tx,
             &mut self.scheduled_presentation,
-            |pending| pending.due <= now,
+            |pending| ready(pending, source_now, self.output_position),
         );
     }
 
@@ -249,10 +286,10 @@ impl AudioEngine {
     }
 
     pub(super) fn cancel_presentation(&mut self) {
-        let now = self.output_position + self.rendered_callback_frames as u64;
+        self.cancel_capture_timing();
         for pending in &mut self.scheduled_presentation {
             let event = std::mem::replace(&mut pending.event, EngineEvent::PresentationCancelled);
-            pending.event = if pending.due <= now && capture_feed(&event) {
+            pending.event = if pending.due <= self.output_position && capture_feed(&event) {
                 event
             } else {
                 cancelled_event(event)
@@ -266,15 +303,27 @@ impl AudioEngine {
     }
 
     pub(super) fn cancel_capture_presentation(&mut self) {
-        let now = self.output_position + self.rendered_callback_frames as u64;
-        self.scheduled_presentation.retain(|pending| {
-            (pending.due <= now && capture_feed(&pending.event))
-                || !matches!(
-                    pending.event,
-                    EngineEvent::PerformanceCaptureStarted { .. }
-                        | EngineEvent::PerformanceCaptureStopped { .. }
-                        | EngineEvent::ClipCaptureSource { .. }
-                )
-        });
+        self.cancel_capture_timing();
+        // Preserve physical deadlines so Capture cancellation cannot advance
+        // unrelated public state or invalidate the queue's sorted prefix.
+        for pending in &mut self.scheduled_presentation {
+            let event = std::mem::replace(&mut pending.event, EngineEvent::PresentationCancelled);
+            pending.event = match event {
+                event if pending.due <= self.output_position && capture_feed(&event) => event,
+                EngineEvent::SectionCaptureSource { offsets, .. }
+                | EngineEvent::PerformanceCaptureStarted { offsets, .. } => {
+                    EngineEvent::CaptureTimingRetired(offsets)
+                }
+                EngineEvent::ClipCaptureSource { .. }
+                | EngineEvent::SectionCaptureStopped { .. }
+                | EngineEvent::PerformanceCaptureStopped { .. }
+                | EngineEvent::AutomationGestureChanged { .. } => {
+                    EngineEvent::PresentationCancelled
+                }
+                event => event,
+            };
+        }
+        self.scheduled_presentation
+            .retain(|pending| !matches!(pending.event, EngineEvent::PresentationCancelled));
     }
 }

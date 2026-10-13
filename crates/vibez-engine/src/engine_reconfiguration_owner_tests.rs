@@ -112,6 +112,70 @@ fn handed_off(
 }
 
 #[test]
+fn exhausted_handoff_reports_only_its_real_failure_with_available_ui_capacity() {
+    assert_handoff_failure_cause(false);
+}
+
+#[test]
+fn exhausted_handoff_retains_its_real_failure_through_ui_backpressure() {
+    assert_handoff_failure_cause(true);
+}
+
+fn assert_handoff_failure_cause(backpressured: bool) {
+    let (mut engine, mut commands, mut events) = AudioEngine::new();
+    let id = TrackId::new();
+    let effect = EffectId::new();
+    let mut track = EngineTrack::new(id);
+    track.effects.push(EffectSlot {
+        id: effect,
+        effect: Box::new(EffectProbe(true)),
+        bypass: false,
+    });
+    engine.tracks.push(track);
+    engine.next_device_handoff = u64::MAX;
+    commands
+        .push(EngineCommand::SetRouting(plan(id, &[effect], 1)))
+        .unwrap();
+    commands.push(EngineCommand::Play).unwrap();
+    if backpressured {
+        while engine.event_tx.push(EngineEvent::PlaybackStopped).is_ok() {}
+    }
+    let mut output = [0.0; 32];
+    assert_eq!(
+        crate::retirement::tests::allocations(|| engine.process(&mut output, 2)),
+        (0, 0),
+    );
+    assert!(!engine.compensation_valid);
+    assert!(engine.pending_device_reconfiguration.is_none());
+    let mut causes = Vec::new();
+    let mut drain = |events: &mut Consumer<EngineEvent>| {
+        while let Ok(event) = events.pop() {
+            if let EngineEvent::CompensationInvalid {
+                track_id,
+                effect_id,
+                reason,
+            } = event
+            {
+                causes.push((track_id, effect_id, reason));
+            }
+        }
+    };
+    drain(&mut events);
+    for _ in 0..3 {
+        assert_eq!(
+            crate::retirement::tests::allocations(|| engine.process(&mut output, 2)),
+            (0, 0),
+        );
+        drain(&mut events);
+    }
+    assert_eq!(
+        causes,
+        [(TrackId::MASTER, None, "Device handoff identity exhausted")],
+        "an invalid plan must not invent event-history exhaustion or repeat its diagnostic",
+    );
+}
+
+#[test]
 fn delayed_effect_return_cannot_resurrect_owner_into_reopened_same_id_channel() {
     let (mut engine, mut commands, mut events) = AudioEngine::new();
     let id = TrackId::new();

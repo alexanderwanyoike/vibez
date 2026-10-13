@@ -66,7 +66,9 @@ pub struct ClipTrackState {
     pub transport_playing: bool,
 }
 
-/// Source recorders retain renderer coordinates independently of Capture notices.
+/// Source recorders write into the renderer's current source. Capture uses
+/// presentation coordinates so reduced monitoring cannot move the source take
+/// behind its own count-in or change its local musical intent.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct SourceRecordingPosition {
     pub effective_at_samples: u64,
@@ -96,12 +98,11 @@ pub(crate) struct RepeatNoticePosition {
 #[derive(Debug)]
 pub enum EngineEvent {
     PresentationCancelled,
-    DeviceReconfiguration(crate::engine::reconfiguration::DeviceReconfiguration),
     DeviceReconfigurationRetired {
         device: crate::engine::reconfiguration::DeviceReconfiguration,
         reason: Option<String>,
     },
-    RetiredEffectStorage(crate::engine::reconfiguration::RetiredEffectStorage),
+    DeviceReconfiguration(crate::engine::reconfiguration::DeviceReconfiguration),
     CompensationFailed {
         reason: String,
     },
@@ -110,12 +111,12 @@ pub enum EngineEvent {
         effect_id: Option<vibez_core::id::EffectId>,
         reason: &'static str,
     },
-
     DeviceProcessingFailed {
         track_id: TrackId,
         effect_id: Option<vibez_core::id::EffectId>,
         reason: &'static str,
     },
+    RetiredEffectStorage(crate::engine::reconfiguration::RetiredEffectStorage),
     RetiredChannel(crate::retirement::RetiredChannel),
     RetiredAutomationLane(vibez_core::automation::AutomationLane),
     RoutingRetired(Box<crate::routing::PreparedRouting>),
@@ -235,7 +236,8 @@ pub enum EngineEvent {
         effective_at_samples: u64,
     },
 
-    /// Source takes consume renderer coordinates before their recorder closes.
+    /// Source takes can close before delayed audio reaches output, so their
+    /// recorder feed must retain delivery coordinates independently of Capture.
     SourceNoteRepeated {
         track_id: TrackId,
         pitch: u8,
@@ -250,8 +252,7 @@ pub enum EngineEvent {
         on: bool,
         position: SourceRecordingPosition,
     },
-    /// A generated Note Repeat retrigger became effective at this exact
-    /// engine sample. Later recording cards consume the same audible truth.
+    /// Capture follows the heard retrigger while source takes use SourceNoteRepeated.
     NoteRepeated {
         track_id: TrackId,
         pitch: u8,
@@ -264,8 +265,7 @@ pub enum EngineEvent {
         canonical_section_position_samples: Option<u64>,
     },
 
-    /// Source takes have separate coordinates so Capture and pad feedback
-    /// can follow this notice without changing the recorded source.
+    /// Capture follows the heard input while source takes use SourceNoteInput.
     InstrumentNoteInput {
         track_id: TrackId,
         pitch: u8,
@@ -325,6 +325,7 @@ pub enum EngineEvent {
     /// Capture into Arrange began on this exact engine boundary. An already
     /// active Section includes its exact local playhead for a mid-loop start.
     PerformanceCaptureStarted {
+        offsets: std::sync::Arc<[(TrackId, u32)]>,
         effective_at_samples: u64,
         section_id: Option<SectionId>,
         section_position_samples: Option<u64>,
@@ -350,6 +351,17 @@ pub enum EngineEvent {
 
     /// A resident Section became active at this exact transport sample.
     /// `retired` carries displaced sources to the UI thread for destruction.
+    CaptureTimingRetired(std::sync::Arc<[(TrackId, u32)]>),
+    SectionCaptureStopped {
+        effective_at_samples: u64,
+    },
+    SectionCaptureSource {
+        section_id: SectionId,
+        effective_at_samples: u64,
+        section_position_samples: u64,
+        refreshed: bool,
+        offsets: std::sync::Arc<[(TrackId, u32)]>,
+    },
     SectionTransitioned {
         section_id: SectionId,
         effective_at_samples: u64,
@@ -612,16 +624,18 @@ impl PartialEq for EngineEvent {
             }
             (
                 Self::PerformanceCaptureStarted {
+                    offsets: lo,
                     effective_at_samples: le,
                     section_id: ls,
                     section_position_samples: lp,
                 },
                 Self::PerformanceCaptureStarted {
+                    offsets: ro,
                     effective_at_samples: re,
                     section_id: rs,
                     section_position_samples: rp,
                 },
-            ) => le == re && ls == rs && lp == rp,
+            ) => le == re && ls == rs && lp == rp && lo == ro,
             (
                 Self::PerformanceCaptureStopped {
                     effective_at_samples: left,
@@ -710,9 +724,9 @@ impl PartialEq for EngineEvent {
                 left == right
             }
             (Self::ClipStateResynced(left), Self::ClipStateResynced(right)) => left == right,
-            (Self::PresentationCancelled, Self::PresentationCancelled)
-            | (Self::PlaybackStarted, Self::PlaybackStarted)
+            (Self::PlaybackStarted, Self::PlaybackStarted)
             | (Self::PlaybackStopped, Self::PlaybackStopped)
+            | (Self::PresentationCancelled, Self::PresentationCancelled)
             | (Self::AuditionStopped, Self::AuditionStopped)
             | (Self::AuditionQueued, Self::AuditionQueued)
             | (Self::AuditionStarted, Self::AuditionStarted) => true,

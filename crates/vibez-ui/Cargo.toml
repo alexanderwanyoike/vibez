@@ -27,6 +27,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time",
 dirs = "5"
 
 [dev-dependencies]
+vibez-engine = { workspace = true, features = ["test-support"] }
 vibez-plugin-host = { workspace = true, features = ["test-fixtures"] }
 tempfile = "3"
 

@@ -1,13 +1,13 @@
-//! Typed audio-thread commands with explicit ownership and arguments.
+//! Typed audio-thread compensation commands helpers.
 
 use super::*;
 
 impl AudioEngine {
-    pub(super) fn command_set_routing(&mut self, prepared: Box<crate::routing::PreparedRouting>) {
-        self.graph_edit_pending = false;
-        self.compensation_valid = true;
-        self.retired_routing = self.routing.replace(prepared);
-        self.return_retired_routing();
+    pub(super) fn command_update_automation_routing(
+        &mut self,
+        prepared: Box<crate::routing::PreparedRouting>,
+    ) {
+        self.publish_compensation_plan(prepared);
     }
 
     pub(super) fn command_reject_routing_update(&mut self, reason: String) {
@@ -23,7 +23,7 @@ impl AudioEngine {
 
     pub(super) fn command_resume_device_reconfiguration(
         &mut self,
-        device: reconfiguration::DeviceReconfiguration,
+        device: crate::engine::reconfiguration::DeviceReconfiguration,
         routing: Box<crate::routing::PreparedRouting>,
     ) {
         if !self.handoff_is_current(&device) {
@@ -48,13 +48,12 @@ impl AudioEngine {
         self.compensation_suspended = false;
         self.graph_edit_pending = false;
         self.compensation_valid = true;
-        self.retired_routing = self.routing.replace(routing);
-        self.return_retired_routing();
+        self.publish_compensation_plan(routing);
     }
 
     pub(super) fn command_reject_device_reconfiguration(
         &mut self,
-        device: reconfiguration::DeviceReconfiguration,
+        device: crate::engine::reconfiguration::DeviceReconfiguration,
         reason: String,
     ) {
         if !self.handoff_is_current(&device) {
@@ -72,5 +71,11 @@ impl AudioEngine {
         self.retire_event(EngineEvent::CompensationFailed { reason });
         self.pending_playback_stop = true;
         self.flush_presentation();
+    }
+
+    pub(super) fn command_set_routing(&mut self, prepared: Box<crate::routing::PreparedRouting>) {
+        self.graph_edit_pending = false;
+        self.compensation_valid = true;
+        self.publish_compensation_plan(prepared);
     }
 }

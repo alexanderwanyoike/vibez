@@ -197,7 +197,7 @@ impl AudioEngine {
         };
         let mut invalid = None;
         let mut local_failure = false;
-        for node in &routing.graph.nodes {
+        for (index, node) in routing.graph.nodes.iter().enumerate() {
             let track = if node.channel.is_master() {
                 Some(&self.master)
             } else {
@@ -269,6 +269,34 @@ impl AudioEngine {
                         _ => None,
                     },
                     "Device processing configuration is unavailable or failed",
+                ));
+                break;
+            }
+            let (effect_id, actual) = match node.stage {
+                vibez_core::routing::NodeStage::Source => (
+                    None,
+                    Some(
+                        track
+                            .instrument
+                            .as_ref()
+                            .map_or(0, |instrument| instrument.latency_samples()),
+                    ),
+                ),
+                vibez_core::routing::NodeStage::Effect(id) => (
+                    Some(id),
+                    track
+                        .effects
+                        .iter()
+                        .find(|slot| slot.id == id)
+                        .map(|slot| slot.effect.latency_samples()),
+                ),
+                _ => continue,
+            };
+            if actual != Some(routing.device_latencies[index]) {
+                invalid = Some((
+                    node.channel,
+                    effect_id,
+                    "Device latency no longer matches the applied compensation plan",
                 ));
                 break;
             }

@@ -2,6 +2,10 @@ use super::*;
 use vibez_engine::engine::reconfiguration::DeviceReconfiguration;
 
 impl App {
+    pub(super) fn compensation_signature(&self) -> crate::domains::compensation::TimingSignature {
+        crate::domains::compensation::signature_for_state(&self.state)
+    }
+
     pub(super) fn reconfigure_device_timing(&mut self, mut device: DeviceReconfiguration) {
         if !self.cmd_tx.owns_reconfiguration(&device) {
             return;
@@ -55,6 +59,8 @@ impl App {
                 }
             }
         }
+        let timing = self.compensation_signature();
+        let generation = self.state.devices.compensation_generation.checked_add(1);
         let prepared = reconfigured.and_then(|()| {
             let model = channels.clone();
             channels = vibez_core::routing::resolve_restored(
@@ -63,7 +69,15 @@ impl App {
             )
             .map_err(|error| format!("Routing unavailable: {error:?}"))?;
             self.retain_routing_activation(&channels, &model);
-            let prepared = vibez_engine::routing::PreparedRouting::prepare(&channels, 4096)?;
+            let generation = generation.ok_or("Compensation plan generation overflow")?;
+            let mut prepared = vibez_engine::routing::PreparedRouting::prepare_compensated(
+                &channels,
+                4096,
+                &timing.reports,
+                &timing.reduced_tracks,
+                generation,
+            )?;
+            prepared.configure_automation(&timing.controls)?;
             Ok(prepared)
         });
         match prepared {
@@ -73,6 +87,8 @@ impl App {
                         crate::domains::sidechain::input_source_choices(&channels);
                 }
                 self.state.devices.last_routing = Some(channels);
+                self.state.devices.last_timing = Some(timing);
+                self.state.devices.compensation_generation = generation.unwrap();
                 self.send_command(EngineCommand::ResumeDeviceReconfiguration { device, routing });
                 self.state.status_text = if recovering {
                     format!("Recovered {name} processing")
