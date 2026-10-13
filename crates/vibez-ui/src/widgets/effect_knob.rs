@@ -7,6 +7,7 @@ use iced::mouse;
 use iced::widget::{canvas, column, text};
 use iced::{Color, Element, Length, Rectangle, Renderer, Theme};
 
+use crate::domains::gain::{db_to_gain, gain_to_db, MAX_GAIN_DB, MIN_GAIN_DB};
 use crate::message::{DrumPadParam, Message};
 use crate::state::{AudioClipInspectorField, AudioClipRotaryField, UndoGestureId};
 use crate::theme;
@@ -250,6 +251,14 @@ impl EffectKnobWidget {
 
     /// Normalize value to 0.0..1.0 range.
     fn normalized(&self) -> f32 {
+        if matches!(self.target, KnobTarget::EffectDb(_)) {
+            let db = gain_to_db(self.value).clamp(MIN_GAIN_DB, MAX_GAIN_DB);
+            return if db <= 0.0 {
+                (db - MIN_GAIN_DB) / (-2.0 * MIN_GAIN_DB)
+            } else {
+                0.5 + db / (2.0 * MAX_GAIN_DB)
+            };
+        }
         let range = self.max - self.min;
         if range <= 0.0 {
             0.0
@@ -260,6 +269,18 @@ impl EffectKnobWidget {
 
     /// Denormalize from 0.0..1.0 to actual value range.
     fn denormalize(&self, n: f32) -> f32 {
+        if matches!(self.target, KnobTarget::EffectDb(_)) {
+            let n = n.clamp(0.0, 1.0);
+            if n == 0.0 {
+                return 0.0;
+            }
+            let db = if n <= 0.5 {
+                MIN_GAIN_DB * (1.0 - 2.0 * n)
+            } else {
+                MAX_GAIN_DB * (2.0 * n - 1.0)
+            };
+            return db_to_gain(db).clamp(self.min, self.max);
+        }
         self.min + n.clamp(0.0, 1.0) * (self.max - self.min)
     }
 }
@@ -545,9 +566,8 @@ mod tests {
     fn gain_decibel_knob_keeps_unity_centered_and_emits_native_amplitude() {
         let track_id = TrackId::new();
         let effect_id = EffectId::new();
-        let mut knob = EffectKnobWidget::new(
-            track_id, effect_id, 0, 1.0, 0.0, 2.0, 1.0, Color::WHITE,
-        );
+        let mut knob =
+            EffectKnobWidget::new(track_id, effect_id, 0, 1.0, 0.0, 2.0, 1.0, Color::WHITE);
         knob.target = KnobTarget::EffectDb(effect_id);
         assert_eq!(knob.normalized(), 0.5);
         assert!((knob.denormalize(0.25) - 0.031_622_775).abs() < 1e-6);
