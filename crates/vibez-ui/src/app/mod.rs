@@ -723,4 +723,7 @@ mod compensation_live_timing_tests;
 #[cfg(test)]
 mod compensation_selection_tests;
 
+#[cfg(test)]
+mod undo_replay_routing_tests;
+
 mod midi_input;
