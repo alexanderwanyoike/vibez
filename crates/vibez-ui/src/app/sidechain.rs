@@ -113,10 +113,12 @@ impl App {
     }
 
     pub(super) fn sync_sidechain_routing_for_input(&mut self, midi_connected: bool) {
-        if self
-            .sidechain_sync_inputs
-            .as_ref()
-            .is_some_and(|inputs| inputs.matches(&self.state, midi_connected))
+        let republish = self.cmd_tx.take_effect_chain_edit();
+        if !republish
+            && self
+                .sidechain_sync_inputs
+                .as_ref()
+                .is_some_and(|inputs| inputs.matches(&self.state, midi_connected))
         {
             return;
         }
@@ -197,7 +199,8 @@ impl App {
             }
         }
         let timing = self.compensation_signature_for_input(midi_connected);
-        if self.state.devices.last_routing.as_ref() == Some(&channels)
+        if !republish
+            && self.state.devices.last_routing.as_ref() == Some(&channels)
             && self.state.devices.last_timing.as_ref() == Some(&timing)
         {
             self.sidechain_sync_inputs = Some(super::sidechain_sync::RoutingInputs::capture(
@@ -239,7 +242,7 @@ impl App {
                     self.state.devices.sidechain_choices =
                         crate::domains::sidechain::input_source_choices(&channels);
                 }
-                if same_alignment {
+                if same_alignment && !republish {
                     self.send_command(EngineCommand::UpdateAutomationRouting(prepared));
                 } else {
                     self.send_command(EngineCommand::SetRouting(prepared));
