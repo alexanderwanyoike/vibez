@@ -110,7 +110,9 @@ fn prepared_plan_change_blends_to_new_audio_without_a_silent_wait() {
     engine.apply_compensation_transition(&mut output, 2, false);
     assert_eq!(output[0], 0.5);
     assert!(output
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|frame| frame[0])
         .collect::<Vec<_>>()
         .windows(2)
@@ -321,7 +323,9 @@ fn awaiting_main_thread_preparation_fades_out_and_retains_the_resume_fade() {
     assert_eq!(paused[0], 0.5);
     assert_eq!(paused[254], 0.0);
     assert!(paused
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|frame| frame[0])
         .collect::<Vec<_>>()
         .windows(2)

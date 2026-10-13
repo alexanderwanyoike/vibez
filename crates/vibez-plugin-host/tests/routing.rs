@@ -77,7 +77,7 @@ fn loadable_formats_deliver_declared_inputs_at_short_and_variable_blocks() {
                 )
             });
             assert_eq!(allocations, 0, "{format} input delivery allocated");
-            for frame in main.chunks_exact(2) {
+            for frame in main.as_chunks::<2>().0 {
                 assert!((frame[0] - 1.2).abs() < 1e-6);
                 assert!((frame[1] - 1.8).abs() < 1e-6);
             }
@@ -169,7 +169,7 @@ fn production_engine_routes_two_independent_plugin_inputs_without_audible_source
         for frames in [1, 7, 31, 64] {
             let mut output = vec![0.0; frames * 2];
             engine.process_block(vibez_engine::engine::AudioProcessBlock::new(&mut output, 2));
-            for frame in output.chunks_exact(2) {
+            for frame in output.as_chunks::<2>().0 {
                 assert!(
                     (frame[0] - 1.2 * std::f32::consts::FRAC_1_SQRT_2).abs() < 1e-6,
                     "{format}: {}",
@@ -284,7 +284,7 @@ fn loaded_instrument_formats_trigger_other_formats_on_the_exact_note_frames() {
             commands.push(EngineCommand::Play).unwrap();
             let mut output = [0.0; 34];
             engine.process_block(vibez_engine::engine::AudioProcessBlock::new(&mut output, 2));
-            for (frame, samples) in output.chunks_exact(2).enumerate() {
+            for (frame, samples) in output.as_chunks::<2>().0.iter().enumerate() {
                 let expected = if (3..7).contains(&frame) { 1.6 } else { 0.1 };
                 for sample in samples {
                     assert!(
@@ -727,7 +727,7 @@ fn same_pitch_release_precedes_retrigger_in_mixed_timestamp_plugin_events() {
         let allocations =
             support::allocation::count_allocations(|| plugin.process_audio(&mut output, 2));
         assert_eq!(allocations, 0);
-        for (frame, channels) in output.chunks_exact(2).enumerate() {
+        for (frame, channels) in output.as_chunks::<2>().0.iter().enumerate() {
             assert_eq!(
                 channels,
                 &[if frame < 9 { 0.75 } else { 0.0 }; 2],

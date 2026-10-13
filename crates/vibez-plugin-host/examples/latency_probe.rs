@@ -70,7 +70,7 @@ fn main() -> Result<(), String> {
             samples[1] = 0.0001;
         }
         plugin.process_audio(&mut samples, 2);
-        for (frame, pair) in samples.chunks_exact(2).enumerate() {
+        for (frame, pair) in samples.as_chunks::<2>().0.iter().enumerate() {
             let magnitude = pair[0].abs().max(pair[1].abs());
             let position = iteration * 512 + frame;
             if magnitude > 1e-8 {

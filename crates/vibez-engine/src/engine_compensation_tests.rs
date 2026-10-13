@@ -633,7 +633,9 @@ fn cold_reduced_monitoring_keeps_the_first_clip_sample_on_its_actual_path() {
     }
     assert_eq!(
         output
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .position(|frame| frame[0].abs() > 0.1),
         Some(137)
     );
@@ -647,7 +649,9 @@ fn cold_reduced_monitoring_keeps_the_first_clip_sample_on_its_actual_path() {
     }
     assert_eq!(
         output
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .position(|frame| frame[0].abs() > 0.1),
         Some(8)
     );
@@ -884,7 +888,7 @@ fn short_one_shot_section_drains_last_content_before_its_heard_stop_notification
     assert!(transitioned.unwrap() >= 521);
     assert!(stopped.unwrap() >= 128 + 521);
     assert!(stopped > transitioned);
-    for (frame, samples) in rendered.chunks_exact(2).enumerate() {
+    for (frame, samples) in rendered.as_chunks::<2>().0.iter().enumerate() {
         assert_eq!(
             samples[0] > 0.1,
             (521..649).contains(&frame),

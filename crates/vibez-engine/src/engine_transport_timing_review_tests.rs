@@ -471,7 +471,7 @@ fn unchanged_alignment_publication_preserves_a_varying_waveform_sample_for_sampl
         crate::retirement::tests::allocations(|| engine.process(&mut output, 2)),
         (0, 0)
     );
-    for (frame, pair) in output.chunks_exact(2).enumerate() {
+    for (frame, pair) in output.as_chunks::<2>().0.iter().enumerate() {
         let expected = (0.2 + 0.2 * (position + frame as u64 - 137) as f32 / 8192.0)
             * std::f32::consts::FRAC_1_SQRT_2;
         assert!(

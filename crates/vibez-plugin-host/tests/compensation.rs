@@ -357,7 +357,7 @@ fn delayed_loadable_one_shot_notes_release_at_an_exact_callback_boundary_and_dra
                     }
                 }
             }
-            for (frame, values) in output.chunks_exact(2).enumerate() {
+            for (frame, values) in output.as_chunks::<2>().0.iter().enumerate() {
                 let expected = if (658..786).contains(&frame) {
                     0.75 * std::f32::consts::FRAC_1_SQRT_2
                 } else {

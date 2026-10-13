@@ -163,7 +163,11 @@ fn main_thread_recovery_keeps_other_delayed_branch_audible_and_silences_the_abse
                 "absent insert leaked dry audio: {healthy:?}"
             );
             assert!(
-                output.chunks_exact(2).all(|frame| frame == healthy),
+                output
+                    .as_chunks::<2>()
+                    .0
+                    .iter()
+                    .all(|frame| *frame == healthy),
                 "absent insert leaked its dry input"
             );
             if bypass_while_held {
@@ -185,7 +189,7 @@ fn main_thread_recovery_keeps_other_delayed_branch_audible_and_silences_the_abse
                     bypassed.extend_from_slice(&output);
                     while events.pop().is_ok() {}
                 }
-                for (frame, pair) in bypassed.chunks_exact(2).enumerate() {
+                for (frame, pair) in bypassed.as_chunks::<2>().0.iter().enumerate() {
                     for channel in 0..2 {
                         let expected = healthy[channel] * if frame < 521 - 137 { 1.0 } else { 3.0 };
                         assert!(
@@ -216,7 +220,7 @@ fn main_thread_recovery_keeps_other_delayed_branch_audible_and_silences_the_abse
                 recovered.extend_from_slice(&output);
                 while events.pop().is_ok() {}
             }
-            for (frame, pair) in recovered.chunks_exact(2).enumerate() {
+            for (frame, pair) in recovered.as_chunks::<2>().0.iter().enumerate() {
                 for channel in 0..2 {
                     let expected = healthy[channel]
                         * if !bypass_while_held && frame < 521 {
