@@ -47,6 +47,7 @@ pub struct EngineCommandQueue {
         (vibez_core::id::TrackId, Option<vibez_core::id::EffectId>),
         usize,
     >,
+    effect_chain_edited: bool,
 }
 
 impl EngineCommandQueue {
@@ -55,7 +56,14 @@ impl EngineCommandQueue {
             producer: Some(producer),
             pending: VecDeque::new(),
             device_owners: Default::default(),
+            effect_chain_edited: false,
         }
+    }
+
+    /// Whether an effect-chain edit was sent since the last call; routing must
+    /// be republished after one even when its model is unchanged.
+    pub fn take_effect_chain_edit(&mut self) -> bool {
+        std::mem::take(&mut self.effect_chain_edited)
     }
 
     pub fn owns_reconfiguration(
@@ -126,6 +134,7 @@ impl EngineHandle for EngineCommandQueue {
         // Lifetime changes take effect in the UI even when the command ring is
         // full; a delayed native handoff cannot reactivate a replaced owner.
         self.record_device_owner(&cmd);
+        self.effect_chain_edited |= cmd.edits_effect_chain();
         let Some(producer) = self.producer.as_mut() else {
             return;
         };
