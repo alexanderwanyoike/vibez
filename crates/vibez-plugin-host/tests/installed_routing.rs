@@ -231,7 +231,7 @@ fn independently_installed_instruments_feed_engine_sidechain_inputs() {
             .push(EngineCommand::AddTrack(receiver, "Receiver".into()))
             .unwrap();
         commands
-            .push(EngineCommand::SetPluginInstrument {
+            .push(EngineCommand::SetInstrument {
                 track_id: source,
                 instrument: Box::new(PluginInstrumentWrapper::new(plugin)),
             })

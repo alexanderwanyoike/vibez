@@ -113,7 +113,7 @@ impl App {
                     }
                 }
             }
-            self.send_command(EngineCommand::AddPluginEffect {
+            self.send_command(EngineCommand::InsertEffect {
                 track_id,
                 effect_id,
                 effect,
@@ -186,7 +186,7 @@ impl App {
                 track.plugin_instrument_descriptors = instrument.param_descriptors();
                 track.has_plugin_instrument_gui = has_gui;
             }
-            self.send_command(EngineCommand::SetPluginInstrument {
+            self.send_command(EngineCommand::SetInstrument {
                 track_id,
                 instrument,
             });

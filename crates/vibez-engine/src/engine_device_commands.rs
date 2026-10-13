@@ -3,7 +3,7 @@
 use super::*;
 
 impl AudioEngine {
-    pub(super) fn command_add_plugin_effect(
+    pub(super) fn command_insert_effect(
         &mut self,
         track_id: vibez_core::id::TrackId,
         effect_id: vibez_core::id::EffectId,
@@ -45,7 +45,7 @@ impl AudioEngine {
         }
     }
 
-    pub(super) fn command_set_plugin_instrument(
+    pub(super) fn command_set_instrument(
         &mut self,
         track_id: vibez_core::id::TrackId,
         instrument: Box<dyn vibez_instruments::Instrument>,

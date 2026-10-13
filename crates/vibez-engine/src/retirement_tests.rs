@@ -109,7 +109,7 @@ fn source_and_effect_removal_stop_on_audio_and_drop_on_ui_without_callback_alloc
             .push(EngineCommand::AddTrack(track, "Source".into()))
             .unwrap();
         commands
-            .push(EngineCommand::AddPluginEffect {
+            .push(EngineCommand::InsertEffect {
                 track_id: track,
                 effect_id: effect,
                 effect: Box::new(Probe {

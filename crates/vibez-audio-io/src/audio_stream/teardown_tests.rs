@@ -70,7 +70,7 @@ fn teardown_extracts_engine_on_main_after_inflight_processing_and_before_late_ca
         .push(EngineCommand::AddTrack(track, "Owner".into()))
         .unwrap();
     commands
-        .push(EngineCommand::AddPluginEffect {
+        .push(EngineCommand::InsertEffect {
             track_id: track,
             effect_id: effect,
             position: None,

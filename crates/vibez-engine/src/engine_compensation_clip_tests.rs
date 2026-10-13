@@ -109,7 +109,7 @@ fn wider_hardware_keeps_compensated_live_and_capture_frames_on_the_first_pair() 
             .push(EngineCommand::AddTrack(track, "Live".into()))
             .unwrap();
         commands
-            .push(EngineCommand::AddPluginEffect {
+            .push(EngineCommand::InsertEffect {
                 track_id: track,
                 effect_id: effect,
                 effect: Box::new(DelayProbe::with_report(137, 137)),
@@ -210,7 +210,7 @@ fn independent_clip_wraps_retain_effect_fader_send_and_device_audio_context() {
         .unwrap();
     for (id, report) in [(effects[0], 137), (slow_fx, 521)] {
         commands
-            .push(EngineCommand::AddPluginEffect {
+            .push(EngineCommand::InsertEffect {
                 track_id: if id == slow_fx { slow } else { track },
                 effect_id: id,
                 effect: Box::new(DelayProbe::with_report(report, report)),
@@ -227,7 +227,7 @@ fn independent_clip_wraps_retain_effect_fader_send_and_device_audio_context() {
         })
         .unwrap();
     commands
-        .push(EngineCommand::AddPluginEffect {
+        .push(EngineCommand::InsertEffect {
             track_id: track,
             effect_id: effects[2],
             effect: Box::new(PositionProbe(0)),
@@ -378,7 +378,7 @@ fn late_bar_launch_waits_for_the_next_achievable_boundary_and_reports_it_when_he
             .unwrap();
     }
     commands
-        .push(EngineCommand::AddPluginEffect {
+        .push(EngineCommand::InsertEffect {
             track_id: slow,
             effect_id: effect,
             effect: Box::new(DelayProbe::with_report(521, 521)),

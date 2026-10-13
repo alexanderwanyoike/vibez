@@ -918,22 +918,22 @@ impl AudioEngine {
                     }
                 }
 
-                EngineCommand::AddPluginEffect {
+                EngineCommand::InsertEffect {
                     track_id,
                     effect_id,
                     effect,
                     position,
-                } => self.command_add_plugin_effect(track_id, effect_id, effect, position),
+                } => self.command_insert_effect(track_id, effect_id, effect, position),
                 EngineCommand::AuditionNote {
                     track_id,
                     pitch,
                     velocity,
                     on,
                 } => self.command_audition_note(track_id, pitch, velocity, on),
-                EngineCommand::SetPluginInstrument {
+                EngineCommand::SetInstrument {
                     track_id,
                     instrument,
-                } => self.command_set_plugin_instrument(track_id, instrument),
+                } => self.command_set_instrument(track_id, instrument),
             }
         }
     }

@@ -195,7 +195,7 @@ fn delayed_effect_return_cannot_resurrect_owner_into_reopened_same_id_channel() 
     let ids = [effect, EffectId::new(), EffectId::new(), EffectId::new()];
     for &effect_id in &ids {
         commands
-            .push(EngineCommand::AddPluginEffect {
+            .push(EngineCommand::InsertEffect {
                 track_id: id,
                 effect_id,
                 effect: Box::new(EffectProbe(false)),
@@ -243,7 +243,7 @@ fn delayed_instrument_return_keeps_replacement_and_does_not_drop_it_in_callback(
     engine.tracks.push(track);
     let device = handed_off(&mut engine, &mut events);
     commands
-        .push(EngineCommand::SetPluginInstrument {
+        .push(EngineCommand::SetInstrument {
             track_id: id,
             instrument: Box::new(InstrumentProbe {
                 requested: false,
@@ -392,7 +392,7 @@ fn additions_around_held_slot_use_logical_order_and_main_reserved_capacity() {
         expected.insert(position.unwrap_or(expected.len()), added);
         device.prepare_effect_storage(expected.len());
         commands
-            .push(EngineCommand::AddPluginEffect {
+            .push(EngineCommand::InsertEffect {
                 track_id,
                 effect_id: added,
                 effect: Box::new(EffectProbe(false)),

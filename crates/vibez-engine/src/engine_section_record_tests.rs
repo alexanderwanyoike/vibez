@@ -530,7 +530,7 @@ fn replace_silences_resident_notes_only_until_the_first_section_wrap() {
         .push(EngineCommand::AddMidiTrack(track_id, "MIDI".into()))
         .unwrap();
     commands
-        .push(EngineCommand::SetPluginInstrument {
+        .push(EngineCommand::SetInstrument {
             track_id,
             instrument: Box::new(NoteLogInstrument(Arc::clone(&note_events))),
         })
@@ -617,7 +617,7 @@ fn replace_keeps_live_input_and_note_repeat_audible() {
         .push(EngineCommand::AddMidiTrack(track_id, "MIDI".into()))
         .unwrap();
     commands
-        .push(EngineCommand::SetPluginInstrument {
+        .push(EngineCommand::SetInstrument {
             track_id,
             instrument: Box::new(NoteLogInstrument(Arc::clone(&note_events))),
         })

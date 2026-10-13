@@ -200,7 +200,7 @@ fn assert_export_preserves_insert_echo(
         commands.push(command).unwrap();
     }
     commands
-        .push(Command::AddPluginEffect {
+        .push(Command::InsertEffect {
             track_id: tid,
             effect_id,
             effect: Box::new(EchoPluginEffect::new()),

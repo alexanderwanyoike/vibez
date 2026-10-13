@@ -85,7 +85,7 @@ impl EngineCommandQueue {
                 .retain(|(track, effect), _| !invalidation.matches(*track, *effect));
         }
         match command {
-            EngineCommand::AddPluginEffect {
+            EngineCommand::InsertEffect {
                 track_id,
                 effect_id,
                 effect,
@@ -96,7 +96,7 @@ impl EngineCommandQueue {
                     effect_owner_identity(&**effect),
                 );
             }
-            EngineCommand::SetPluginInstrument {
+            EngineCommand::SetInstrument {
                 track_id,
                 instrument,
             } => {

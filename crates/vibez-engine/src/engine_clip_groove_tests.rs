@@ -90,7 +90,7 @@ fn render_events(
         .push(EngineCommand::AddMidiTrack(track_id, "Groove probe".into()))
         .unwrap();
     commands
-        .push(EngineCommand::SetPluginInstrument {
+        .push(EngineCommand::SetInstrument {
             track_id,
             instrument: Box::new(TimedSpy {
                 events: Arc::clone(&events),
@@ -162,7 +162,7 @@ fn midi_start_plays_once_then_returns_to_loop_start() {
         .push(EngineCommand::AddMidiTrack(track_id, "Start probe".into()))
         .unwrap();
     commands
-        .push(EngineCommand::SetPluginInstrument {
+        .push(EngineCommand::SetInstrument {
             track_id,
             instrument: Box::new(TimedSpy {
                 events: Arc::clone(&events),

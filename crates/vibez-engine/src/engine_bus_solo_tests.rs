@@ -117,7 +117,7 @@ fn kick_and_bass_solo_keep_the_audible_bus_return_without_ghost_snare_leakage() 
             .unwrap();
         let processed = Arc::new(AtomicUsize::new(0));
         commands
-            .push(EngineCommand::AddPluginEffect {
+            .push(EngineCommand::InsertEffect {
                 track_id: drums,
                 effect_id: bus_fx,
                 effect: Box::new(BusProcessor(Arc::clone(&processed))),

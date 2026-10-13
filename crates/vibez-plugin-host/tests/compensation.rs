@@ -89,7 +89,7 @@ fn mixed_loadable_effects_cancel_after_exact_parallel_compensation() {
                     .push(pulses(tracks[index], if index == 0 { 1.0 } else { -1.0 }))
                     .unwrap();
                 commands
-                    .push(EngineCommand::AddPluginEffect {
+                    .push(EngineCommand::InsertEffect {
                         track_id: tracks[index],
                         effect_id: effects[index],
                         effect: Box::new(PluginEffectWrapper::new(delay(
@@ -171,7 +171,7 @@ fn loaded_instrument_latency_joins_the_same_compensated_mix() {
                     .unwrap();
             }
             commands
-                .push(EngineCommand::SetPluginInstrument {
+                .push(EngineCommand::SetInstrument {
                     track_id: instrument_track,
                     instrument: Box::new(vibez_plugin_host::PluginInstrumentWrapper::new(
                         instrument,
@@ -187,7 +187,7 @@ fn loaded_instrument_latency_joins_the_same_compensated_mix() {
             }
             commands.push(audio).unwrap();
             commands
-                .push(EngineCommand::AddPluginEffect {
+                .push(EngineCommand::InsertEffect {
                     track_id: audio_track,
                     effect_id: effect,
                     effect: Box::new(PluginEffectWrapper::new(delay(
@@ -274,13 +274,13 @@ fn delayed_loadable_one_shot_notes_release_at_an_exact_callback_boundary_and_dra
                 .push(EngineCommand::AddMidiTrack(track, "One shot".into()))
                 .unwrap();
             commands
-                .push(EngineCommand::SetPluginInstrument {
+                .push(EngineCommand::SetInstrument {
                     track_id: track,
                     instrument: Box::new(PluginInstrumentWrapper::new(instrument)),
                 })
                 .unwrap();
             commands
-                .push(EngineCommand::AddPluginEffect {
+                .push(EngineCommand::InsertEffect {
                     track_id: track,
                     effect_id: effect,
                     effect: Box::new(PluginEffectWrapper::new(delay(

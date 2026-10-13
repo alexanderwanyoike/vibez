@@ -453,7 +453,7 @@ pub enum EngineCommand {
 
     // -- External plugins --
     /// Add a pre-loaded external plugin effect to a track.
-    AddPluginEffect {
+    InsertEffect {
         track_id: TrackId,
         effect_id: EffectId,
         effect: Box<dyn AudioEffect>,
@@ -469,7 +469,7 @@ pub enum EngineCommand {
         velocity: u8,
         on: bool,
     },
-    SetPluginInstrument {
+    SetInstrument {
         track_id: TrackId,
         instrument: Box<dyn Instrument>,
     },

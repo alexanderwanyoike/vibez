@@ -49,7 +49,7 @@ fn stop_then_seek_preserves_a_musical_tail_with_zero_processing_latency() {
         .unwrap();
     commands.push(source(track)).unwrap();
     commands
-        .push(EngineCommand::AddPluginEffect {
+        .push(EngineCommand::InsertEffect {
             track_id: track,
             effect_id: effect,
             effect: Box::new(MusicalTail([0.0; 2])),
@@ -163,7 +163,7 @@ fn setup() -> (
         commands.push(source(id)).unwrap();
     }
     commands
-        .push(EngineCommand::AddPluginEffect {
+        .push(EngineCommand::InsertEffect {
             track_id: delayed,
             effect_id: effect,
             effect: Box::new(DelayProbe::new(137)),
@@ -308,7 +308,7 @@ fn structural_zero_delay_insert_keeps_existing_parallel_audio_continuous() {
         .reserve(1);
     let extra = EffectId::new();
     commands
-        .push(EngineCommand::AddPluginEffect {
+        .push(EngineCommand::InsertEffect {
             track_id: dry,
             effect_id: extra,
             effect: Box::new(DelayProbe::new(0)),

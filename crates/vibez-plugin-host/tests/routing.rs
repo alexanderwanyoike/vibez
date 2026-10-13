@@ -122,7 +122,7 @@ fn production_engine_routes_two_independent_plugin_inputs_without_audible_source
                 .unwrap();
         }
         commands
-            .push(EngineCommand::AddPluginEffect {
+            .push(EngineCommand::InsertEffect {
                 track_id: receiver,
                 effect_id: effect,
                 effect: Box::new(PluginEffectWrapper::new(plugin)),
@@ -218,7 +218,7 @@ fn loaded_instrument_formats_trigger_other_formats_on_the_exact_note_frames() {
                 .unwrap();
             commands.push(clip(bass, 0.1, 0.1)).unwrap();
             commands
-                .push(EngineCommand::SetPluginInstrument {
+                .push(EngineCommand::SetInstrument {
                     track_id: ghost,
                     instrument: Box::new(PluginInstrumentWrapper::new(source)),
                 })
@@ -252,7 +252,7 @@ fn loaded_instrument_formats_trigger_other_formats_on_the_exact_note_frames() {
                 .push(EngineCommand::SetTrackMute(ghost, true))
                 .unwrap();
             commands
-                .push(EngineCommand::AddPluginEffect {
+                .push(EngineCommand::InsertEffect {
                     track_id: bass,
                     effect_id: effect,
                     effect: Box::new(PluginEffectWrapper::new(receiving)),
@@ -348,7 +348,7 @@ fn all_instrument_source_formats_feed_builtins_and_hosted_receivers() {
                     .push(EngineCommand::AddMidiTrack(ghost, "Instrument".into()))
                     .unwrap();
                 commands
-                    .push(EngineCommand::SetPluginInstrument {
+                    .push(EngineCommand::SetInstrument {
                         track_id: ghost,
                         instrument: Box::new(PluginInstrumentWrapper::new(
                             fixture.load_instrument(source_format, 4096),
@@ -416,7 +416,7 @@ fn all_instrument_source_formats_feed_builtins_and_hosted_receivers() {
                 let device = fixture.load(receiver_format, 4096);
                 let inputs = device.external_inputs().to_vec();
                 commands
-                    .push(EngineCommand::AddPluginEffect {
+                    .push(EngineCommand::InsertEffect {
                         track_id: bass,
                         effect_id: effect,
                         effect: Box::new(PluginEffectWrapper::new(device)),
@@ -516,7 +516,7 @@ fn source_taps_apply_effects_fader_and_pan_only_at_the_requested_stage() {
                 })
                 .unwrap();
             commands
-                .push(EngineCommand::AddPluginEffect {
+                .push(EngineCommand::InsertEffect {
                     track_id: bass,
                     effect_id: effect,
                     effect: Box::new(PluginEffectWrapper::new(plugin)),
@@ -801,7 +801,7 @@ fn loadable_bus_effect_has_one_shared_solo_sum_and_an_audible_return_capture() {
                     .unwrap();
             }
             commands
-                .push(EngineCommand::AddPluginEffect {
+                .push(EngineCommand::InsertEffect {
                     track_id: bus,
                     effect_id: bus_fx,
                     effect: Box::new(PluginEffectWrapper::new(plugin)),

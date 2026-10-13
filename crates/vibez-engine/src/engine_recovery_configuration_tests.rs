@@ -50,7 +50,7 @@ fn setup() -> (
         .push(EngineCommand::AddTrack(track, "Probe".into()))
         .unwrap();
     commands
-        .push(EngineCommand::AddPluginEffect {
+        .push(EngineCommand::InsertEffect {
             track_id: track,
             effect_id: effect,
             effect: Box::new(ConfigurationProbe(Arc::clone(&valid))),

@@ -226,7 +226,7 @@ fn parameter_intents_do_not_cross_a_replaced_device_lifetime() {
         .push(EngineCommand::RemoveEffect(track, effect))
         .unwrap();
     commands
-        .push(EngineCommand::AddPluginEffect {
+        .push(EngineCommand::InsertEffect {
             track_id: track,
             effect_id: effect,
             effect: Box::new(ParameterProbe {

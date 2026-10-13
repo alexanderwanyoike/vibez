@@ -847,7 +847,7 @@ mod tests {
             .push(EngineCommand::AddMidiTrack(audible_track, "Audible".into()))
             .unwrap();
         producer
-            .push(EngineCommand::SetPluginInstrument {
+            .push(EngineCommand::SetInstrument {
                 track_id: audible_track,
                 instrument: Box::new(NoteLogInstrument(Arc::clone(&heard))),
             })

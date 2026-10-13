@@ -104,7 +104,7 @@ fn main_thread_recovery_keeps_other_delayed_branch_audible_and_silences_the_abse
                     .push(clip(tracks[index], if index == 0 { 0.4 } else { 0.2 }))
                     .unwrap();
                 commands
-                    .push(EngineCommand::AddPluginEffect {
+                    .push(EngineCommand::InsertEffect {
                         track_id: tracks[index],
                         effect_id: effects[index],
                         effect: Box::new(PluginEffectWrapper::new(plugin)),
@@ -253,7 +253,7 @@ fn owner_commands_for_missing_targets_retire_on_main_without_callback_destructio
         };
         let (engine, mut commands, mut events) = AudioEngine::new();
         commands
-            .push(EngineCommand::AddPluginEffect {
+            .push(EngineCommand::InsertEffect {
                 track_id: TrackId::new(),
                 effect_id: EffectId::new(),
                 effect: Box::new(PluginEffectWrapper::new(fixture.load(format, 64))),
@@ -261,7 +261,7 @@ fn owner_commands_for_missing_targets_retire_on_main_without_callback_destructio
             })
             .unwrap();
         commands
-            .push(EngineCommand::SetPluginInstrument {
+            .push(EngineCommand::SetInstrument {
                 track_id: TrackId::new(),
                 instrument: Box::new(vibez_plugin_host::PluginInstrumentWrapper::new(
                     fixture.load_instrument(format, 64),

@@ -125,9 +125,9 @@ fn coverage(command: &EngineCommand) -> Coverage {
         | C::StartNoteRepeat { .. }
         | C::UpdateNoteRepeatRate { .. }
         | C::StopNoteRepeat { .. }
-        | C::AddPluginEffect { .. }
+        | C::InsertEffect { .. }
         | C::AuditionNote { .. }
-        | C::SetPluginInstrument { .. } => Coverage::Table,
+        | C::SetInstrument { .. } => Coverage::Table,
     }
 }
 
@@ -672,7 +672,7 @@ fn cases() -> Vec<Case> {
             id: 0,
             track_id: f.synth,
         }),
-        case!("AddPluginEffect", true, |f| C::AddPluginEffect {
+        case!("InsertEffect", true, |f| C::InsertEffect {
             track_id: f.empty,
             effect_id: EffectId::new(),
             effect: vibez_dsp::factory::create_effect(
@@ -687,7 +687,7 @@ fn cases() -> Vec<Case> {
             velocity: 100,
             on: true,
         }),
-        case!("SetPluginInstrument", false, |f| C::SetPluginInstrument {
+        case!("SetInstrument", false, |f| C::SetInstrument {
             track_id: f.empty,
             instrument: vibez_instruments::create_instrument(
                 InstrumentKind::SubtractiveSynth,

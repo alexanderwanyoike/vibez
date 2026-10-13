@@ -38,12 +38,12 @@ impl EngineCommand {
                 effect_id: effect,
                 ..
             }
-            | Self::AddPluginEffect {
+            | Self::InsertEffect {
                 track_id: track,
                 effect_id: effect,
                 ..
             } => DeviceOwnerInvalidation::Effect(*track, *effect),
-            Self::SetPluginInstrument { track_id, .. }
+            Self::SetInstrument { track_id, .. }
             | Self::SetTrackInstrument(track_id, ..)
             | Self::RemoveTrackInstrument(track_id) => {
                 DeviceOwnerInvalidation::Instrument(*track_id)
@@ -59,7 +59,7 @@ impl EngineCommand {
             Self::AddEffect { .. }
                 | Self::RemoveEffect(..)
                 | Self::MoveEffect { .. }
-                | Self::AddPluginEffect { .. }
+                | Self::InsertEffect { .. }
         )
     }
     pub(crate) fn retirement_reserve(&self) -> usize {
