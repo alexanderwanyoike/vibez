@@ -185,7 +185,15 @@ impl PluginGuiHandle {
     /// # Safety
     /// The parent must be valid on the UI thread and outlive the plugin GUI.
     pub unsafe fn open_embedded(&mut self, parent: GuiParent) -> bool {
-        self.attach_to_parent(parent) && self.show()
+        if !self.attach_to_parent(parent) {
+            return false;
+        }
+        // An embedded editor is visible once parented; `show` is aimed at
+        // floating windows, and nih-plug editors decline it when embedded.
+        if !self.show() {
+            eprintln!("vibez: plugin declined gui.show() for an embedded editor; keeping it open");
+        }
+        true
     }
 
     /// Show the plugin GUI.
