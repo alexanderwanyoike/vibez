@@ -427,6 +427,12 @@ impl PreparedRouting {
                 .iter()
                 .rposition(|node| node.channel == channel.id)
                 .map_or(first, |last| last + 1);
+            debug_assert!(
+                self.graph.nodes[first..end]
+                    .iter()
+                    .all(|node| node.channel == channel.id),
+                "RoutingGraph::prepare must keep each channel's nodes contiguous"
+            );
             channel.controls = self
                 .automation_controls
                 .partition_point(|control| control.node < first)
