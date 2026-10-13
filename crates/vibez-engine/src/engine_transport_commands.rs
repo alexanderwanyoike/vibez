@@ -30,7 +30,7 @@ impl AudioEngine {
     }
 
     pub(super) fn command_play(&mut self) {
-        let capture_needs_closure = self.capture_active || self.capture_stop_pending();
+        let capture_needs_closure = self.capture_needs_closure();
         self.cancel_presentation();
         if capture_needs_closure {
             self.stop_heard_capture();
