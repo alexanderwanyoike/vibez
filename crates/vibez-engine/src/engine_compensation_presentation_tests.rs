@@ -90,6 +90,7 @@ fn due_capture_notes_precede_closure_and_continuing_pad_feedback_survives() {
         };
         engine.present_event_after(note(60), 137);
         engine.present_event_after(note(61), 138);
+        engine.capture_active = true;
         engine.output_position = 137;
         engine.compensation_callback_heard_start = 137;
         engine.transport.seek(137);
@@ -156,6 +157,7 @@ fn accepted_due_capture_start_reaches_the_ui_before_its_note_and_closure() {
             },
             100,
         );
+        engine.capture_active = true;
         engine.output_position = 137;
         engine.compensation_callback_heard_start = 137;
         engine.transport.seek(137);
