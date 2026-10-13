@@ -29,6 +29,7 @@ pub struct TrackHeaderRecordingView<'a> {
     pub input_channels: u16,
     pub armed: bool,
     pub input_peaks: Option<(f32, f32)>,
+    pub output_peaks: (f32, f32),
     pub source_tracks: &'a [ProjectTrack],
 }
 
@@ -147,6 +148,7 @@ pub fn view_track_header<'a>(
         input_channels: audio_input_channels,
         armed,
         input_peaks,
+        output_peaks,
         source_tracks,
     } = recording;
     let track_color = th::track_color(track.color_index);
@@ -413,7 +415,7 @@ pub fn view_track_header<'a>(
         .into();
 
     // Row 4: Horizontal VU meter (spans width)
-    let (meter_l, meter_r) = input_peaks.unwrap_or((track.peak_l, track.peak_r));
+    let (meter_l, meter_r) = input_peaks.unwrap_or(output_peaks);
     let meter_color = if armed {
         th::danger()
     } else if input_peaks.is_some() {

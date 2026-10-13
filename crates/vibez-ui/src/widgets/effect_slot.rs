@@ -9,6 +9,10 @@ use crate::widgets::effect_knob::{param_column, EffectKnobWidget};
 use vibez_core::id::TrackId;
 use vibez_plugin_host::gui::PluginGuiKey;
 
+#[path = "sidechain.rs"]
+mod sidechain;
+pub use sidechain::view as view_sidechain;
+
 /// Render an Ableton-style device card for the detail panel.
 ///
 /// `custom_body` swaps the generic knob-row body for a purpose-built
@@ -19,6 +23,7 @@ pub fn view_effect_slot<'a>(
     effect: &'a UiEffect,
     track_color: Color,
     custom_body: Option<(Element<'a, Message>, f32)>,
+    sidechain: Option<Element<'a, Message>>,
 ) -> Element<'a, Message> {
     let is_bypassed = effect.bypass;
     let has_params = !effect.descriptors.is_empty();
@@ -67,7 +72,7 @@ pub fn view_effect_slot<'a>(
     let name_section = container(name_elem).width(Length::Fill);
 
     // Fixed-size controls on the right
-    // Edit button (open plugin GUI) — only for effects with a native GUI
+    // Edit button (open plugin GUI) - only for effects with a native GUI
     let make_edit = || -> Option<iced::widget::Button<'a, Message>> {
         if !has_gui {
             return None;
@@ -278,6 +283,13 @@ pub fn view_effect_slot<'a>(
         190.0
     } else {
         (knob_count as f32 * 62.0 + 24.0).max(150.0)
+    };
+    let (body, card_w): (Element<'a, Message>, f32) = match sidechain {
+        Some(sidechain) => (
+            row![container(body).width(Length::Fixed(card_w)), sidechain].into(),
+            card_w + 230.0,
+        ),
+        None => (body, card_w),
     };
     let card = column![title_bar, body].width(Length::Fixed(card_w));
 

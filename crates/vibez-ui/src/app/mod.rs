@@ -35,6 +35,8 @@ pub(super) const WARP_AUDITION_PREPARING: &str = "Preparing WARP Audition";
 
 struct App {
     state: AppState,
+    sidechain_sync_inputs: Option<sidechain_sync::RoutingInputs>,
+    track_meter_peaks: std::collections::HashMap<vibez_core::id::TrackId, (f32, f32)>,
     edge_shortcuts: EdgeShortcutState,
     cmd_tx: crate::domains::EngineCommandQueue,
     event_rx: Option<Consumer<EngineEvent>>,
@@ -53,6 +55,7 @@ struct App {
     plugin_effect_tx: std::sync::mpsc::Sender<PluginLoadResult>,
     plugin_instrument_rx: std::sync::mpsc::Receiver<PluginInstrumentLoadResult>,
     plugin_instrument_tx: std::sync::mpsc::Sender<PluginInstrumentLoadResult>,
+    plugin_load_requests: plugin_load_requests::PluginLoadRequests,
     // Plugin GUI support
     plugin_window_manager: Option<PluginWindowManager>,
     plugin_gui_raw_ptrs: std::collections::HashMap<PluginGuiKey, PluginRawPtr>,
@@ -60,7 +63,7 @@ struct App {
     /// the GUI pointers. Entries live exactly as long as the device.
     plugin_state_ptrs: std::collections::HashMap<PluginGuiKey, vibez_plugin_host::PluginStatePtr>,
     /// Plugin preflight and render progress for the one active project export.
-    export_job: Option<project_io::ExportJob>,
+    export_job: Option<project_export::ExportJob>,
     export_render_progress: Option<Arc<std::sync::atomic::AtomicU8>>,
     export_plugin_return_rx:
         Option<std::sync::mpsc::Receiver<vibez_engine::render::OfflinePlugins>>,
@@ -170,18 +173,23 @@ mod dropbox_io;
 mod media;
 mod media_import;
 mod plugins;
+mod project_export;
 mod project_io;
 mod project_replay;
 mod project_sections;
+mod project_serialization;
 mod save_runtime;
 mod section_record;
+mod sidechain;
 mod timeline_results;
 mod transient_markers;
 mod update;
+mod update_audio_edits;
 mod update_media;
 mod update_policy;
 mod update_project;
 mod update_remote;
+mod update_services;
 mod update_timeline;
 mod update_view;
 mod views_about;
@@ -419,6 +427,9 @@ impl App {
             _input_stream: None,
             plugin_effect_rx,
             plugin_effect_tx,
+            plugin_load_requests: Default::default(),
+            sidechain_sync_inputs: None,
+            track_meter_peaks: Default::default(),
             plugin_instrument_rx,
             plugin_instrument_tx,
             plugin_window_manager,
@@ -685,3 +696,16 @@ mod views_clip_launcher;
 
 #[cfg(test)]
 mod clip_project_tests;
+
+#[cfg(test)]
+mod plugin_load_tests;
+#[cfg(test)]
+mod test_support;
+
+pub(crate) mod plugin_load_requests;
+mod plugin_loading;
+
+mod sidechain_sync;
+
+#[cfg(test)]
+mod sidechain_sync_tests;

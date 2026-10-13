@@ -16,15 +16,9 @@ use std::sync::Arc;
 use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::id::{ClipId, EffectId, TrackId};
 use vibez_core::midi::NoteClipInfo;
-use vibez_core::time::TempoMap;
 use vibez_core::track::{ClipInfo, InstrumentStateInfo, TrackInfo};
-use vibez_dsp::factory::create_effect_with_params;
-use vibez_instruments::create_instrument;
 
-use crate::mixer::{
-    any_solo, equal_power_pan, EffectSlot, EngineClip, EngineNoteClip, EngineTrack,
-    InstrumentRenderContext,
-};
+use crate::mixer::{EffectSlot, EngineTrack};
 
 /// What to render offline.
 #[derive(Debug, Clone, Copy)]
@@ -75,12 +69,14 @@ pub struct BounceResult {
 
 /// Isolated third-party devices prepared for one offline render.
 ///
-/// Keys are project ids, so each declared slot consumes exactly the instance
-/// prepared for it. Missing devices are fatal in the strict export path.
+/// Keys are project identities; only devices required by the selected output
+/// and its active dependencies enter processing.
 #[derive(Default)]
 pub struct OfflinePlugins {
     pub instruments: HashMap<TrackId, Box<dyn vibez_instruments::Instrument>>,
     pub effects: HashMap<EffectId, Box<dyn vibez_dsp::effect::AudioEffect>>,
+    pub failures: HashMap<EffectId, String>,
+    pub instrument_failures: HashMap<TrackId, String>,
 }
 
 const BLOCK_FRAMES: usize = 512;
@@ -90,32 +86,29 @@ const CHANNELS: usize = 2;
 /// project's sample rate.
 pub fn render_offline(req: &BounceRequest) -> BounceResult {
     render_offline_inner(req, None, |_| {})
-        .expect("the compatibility renderer cannot fail without strict plugin preparation")
+        .expect("offline rendering requires a valid graph and render range")
 }
 
 /// Strict production renderer used by project export.
 ///
-/// Every plugin declared by the snapshot must have a matching isolated
-/// instance in `plugins`. `progress` receives monotonic percentages from
+/// Every required plugin must have a matching isolated instance in `plugins`. `progress` receives monotonic percentages from
 /// 0 through 100.
 pub fn render_offline_with_plugins(
     req: &BounceRequest,
     plugins: &mut OfflinePlugins,
     progress: impl FnMut(u8),
 ) -> Result<BounceResult, String> {
-    validate_offline_plugins(req, plugins)?;
     render_offline_inner(req, Some(plugins), progress)
 }
 
-#[path = "render_execute.rs"]
-mod execute;
+#[path = "render_dependencies.rs"]
+mod dependencies;
 #[path = "render_prepare.rs"]
 mod prepare;
+pub use dependencies::potential_dependency_ids;
+#[path = "render_execute.rs"]
+mod execute;
 use execute::render_offline_inner;
-use prepare::{
-    clip_included_for_mode, return_offline_plugins, track_is_active_for_mode,
-    validate_offline_plugins,
-};
 #[cfg(test)]
 #[path = "render_tests.rs"]
 mod tests;

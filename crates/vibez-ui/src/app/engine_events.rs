@@ -1,7 +1,5 @@
 //! UI-thread consumption of audio-engine events.
 
-use std::sync::Arc;
-
 use vibez_engine::events::EngineEvent;
 
 use crate::domains::perform::CapturedTimelineSource;
@@ -91,6 +89,17 @@ fn apply_clip_resync(
 }
 
 impl App {
+    pub(super) fn observe_track_meter(
+        &mut self,
+        track_id: vibez_core::id::TrackId,
+        peak_l: f32,
+        peak_r: f32,
+    ) {
+        let peaks = self.track_meter_peaks.entry(track_id).or_default();
+        peaks.0 = peak_l.max(peaks.0 * 0.85);
+        peaks.1 = peak_r.max(peaks.1 * 0.85);
+    }
+
     pub(super) fn poll_engine_events(&mut self) {
         if let Some(command) = self
             .state
@@ -107,8 +116,21 @@ impl App {
                 apply_drum_pad_flash(&mut self.state.view, &event, std::time::Instant::now());
                 match event {
                     EngineEvent::RetiredAutomationLane(lane) => drop(lane),
-                    EngineEvent::RetiredChannel(channel) => drop(channel),
+                    EngineEvent::RetiredChannel(channel) => {
+                        drop(channel);
+                    }
                     EngineEvent::RoutingRetired(plan) => drop(plan),
+                    EngineEvent::SidechainInputMeter {
+                        effect_id,
+                        input_id,
+                        peak_l,
+                        peak_r,
+                    } => {
+                        self.state
+                            .devices
+                            .sidechain_meters
+                            .insert((effect_id, input_id), (peak_l, peak_r));
+                    }
                     event @ (EngineEvent::ClipRecordArmed { .. }
                     | EngineEvent::ClipRecordStarted { .. }
                     | EngineEvent::ClipRecordStopped { .. }) => self.clip_record_event(event),
@@ -135,9 +157,10 @@ impl App {
                     EngineEvent::Metering { peak_l, peak_r, .. } => {
                         self.state.peak_l = peak_l.max(self.state.peak_l * 0.85);
                         self.state.peak_r = peak_r.max(self.state.peak_r * 0.85);
-                        let project_tracks = Arc::make_mut(&mut self.state.project_tracks);
-                        project_tracks.master.peak_l = self.state.peak_l;
-                        project_tracks.master.peak_r = self.state.peak_r;
+                        self.track_meter_peaks.insert(
+                            vibez_core::id::TrackId::MASTER,
+                            (self.state.peak_l, self.state.peak_r),
+                        );
                     }
                     EngineEvent::ClipQueued {
                         request_id,
@@ -288,10 +311,7 @@ impl App {
                         peak_l,
                         peak_r,
                     } => {
-                        if let Some(track) = self.state.find_track_mut(track_id) {
-                            track.peak_l = peak_l.max(track.peak_l * 0.85);
-                            track.peak_r = peak_r.max(track.peak_r * 0.85);
-                        }
+                        self.observe_track_meter(track_id, peak_l, peak_r);
                     }
                     EngineEvent::TrackNoteActivity { .. } => {}
                     EngineEvent::TrackMuteChanged {

@@ -220,6 +220,9 @@ impl Project {
             maximum = maximum.max(track.id.raw());
             for effect in &track.effects {
                 maximum = maximum.max(effect.id.raw());
+                for route in &effect.sidechains {
+                    maximum = maximum.max(route.source.raw());
+                }
             }
             for lane in &track.automation {
                 maximum = maximum.max(lane.id.raw());
@@ -278,6 +281,41 @@ mod tests {
     use vibez_core::id::{ClipId, TrackId};
     use vibez_core::midi::{MidiNote, NoteClipInfo};
     use vibez_core::track::{InstrumentStateInfo, MediaSourceRef};
+
+    #[test]
+    fn missing_source_identity_is_reserved_after_reopen() {
+        use vibez_core::{
+            effect::{EffectInfo, EffectType},
+            id::{EffectId, TrackId},
+            routing::{ExternalInputId, SidechainAssignment, SourceTap},
+        };
+        let mut project = Project::default();
+        let mut receiver = TrackInfo::new("Bass");
+        let deleted_source = serde_json::from_str::<TrackId>("999999").unwrap();
+        receiver.effects.push(EffectInfo {
+            id: EffectId::new(),
+            effect_type: EffectType::Compressor,
+            bypass: false,
+            params: vec![],
+            plugin: None,
+            inactive_sidechains: Default::default(),
+            sidechains: vec![SidechainAssignment {
+                input_id: ExternalInputId(0),
+                input_name: "Sidechain".into(),
+                source: deleted_source,
+                source_name: "Deleted kick".into(),
+                tap: SourceTap::AfterEffects,
+            }],
+        });
+        project.tracks.push(receiver);
+        let reopened: Project =
+            serde_json::from_str(&serde_json::to_string(&project).unwrap()).unwrap();
+        assert!(reopened.max_persisted_id() >= deleted_source.raw());
+        assert_eq!(
+            reopened.tracks[0].effects[0].sidechains[0].source,
+            deleted_source
+        );
+    }
 
     #[test]
     fn legacy_clip_save_is_rejected_without_overwriting_the_file() {
@@ -343,6 +381,8 @@ mod tests {
         };
         let mut track = TrackInfo::new("FX");
         track.effects.push(EffectInfo {
+            inactive_sidechains: Default::default(),
+            sidechains: Default::default(),
             id: vibez_core::id::EffectId::new(),
             effect_type: EffectType::Gain,
             bypass: false,
@@ -682,6 +722,8 @@ mod tests {
 
         let mut track = TrackInfo::new("FX Track");
         track.effects.push(EffectInfo {
+            inactive_sidechains: Default::default(),
+            sidechains: Default::default(),
             id: EffectId::new(),
             effect_type: EffectType::Delay,
             bypass: false,

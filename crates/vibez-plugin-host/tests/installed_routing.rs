@@ -160,3 +160,155 @@ fn independently_installed_effects_respond_to_external_audio() {
         &state_dir,
     );
 }
+
+#[test]
+#[ignore = "Requires VIBEZ_SURGE_CLAP and VIBEZ_SURGE_VST3 installed plugin paths"]
+fn independently_installed_instruments_feed_engine_sidechain_inputs() {
+    use vibez_core::{
+        id::{EffectId, TrackId},
+        routing::*,
+    };
+    use vibez_engine::{
+        commands::EngineCommand,
+        engine::{AudioEngine, AudioProcessBlock},
+        routing::PreparedRouting,
+    };
+    use vibez_plugin_host::wrappers::instrument::PluginInstrumentWrapper;
+    let clap = std::env::var_os("VIBEZ_SURGE_CLAP").expect("Set VIBEZ_SURGE_CLAP");
+    let vst3 = std::env::var_os("VIBEZ_SURGE_VST3").expect("Set VIBEZ_SURGE_VST3");
+    for format in ["clap", "vst3"] {
+        let plugin: Box<dyn PluginInstance> = if format == "clap" {
+            let plugins =
+                vibez_plugin_host::clap_host::scanner::scan_clap(std::path::Path::new(&clap))
+                    .unwrap();
+            let info = plugins
+                .iter()
+                .find(|plugin| plugin.name == "Surge XT")
+                .unwrap();
+            Box::new(
+                vibez_plugin_host::clap_host::instance::ClapPluginInstance::load(
+                    &info.path,
+                    &info.id.uid,
+                    true,
+                    48000.0,
+                    64,
+                )
+                .unwrap(),
+            )
+        } else {
+            let plugins =
+                vibez_plugin_host::vst3_host::scanner::scan_vst3(std::path::Path::new(&vst3))
+                    .unwrap();
+            let info = plugins
+                .iter()
+                .find(|plugin| plugin.name == "Surge XT")
+                .unwrap();
+            Box::new(
+                vibez_plugin_host::vst3_host::instance::Vst3PluginInstance::load(
+                    &info.path,
+                    &info.id.uid,
+                    true,
+                    48000.0,
+                    64,
+                )
+                .unwrap(),
+            )
+        };
+        let source = TrackId::new();
+        let receiver = TrackId::new();
+        let effect = EffectId::new();
+        let input = ExternalInputDescriptor {
+            id: ExternalInputId(0),
+            name: "Sidechain".into(),
+            channels: 2,
+        };
+        let (mut engine, mut commands, mut events) = AudioEngine::new();
+        commands.push(EngineCommand::SetSampleRate(48000)).unwrap();
+        commands
+            .push(EngineCommand::AddMidiTrack(source, "Surge".into()))
+            .unwrap();
+        commands
+            .push(EngineCommand::AddTrack(receiver, "Receiver".into()))
+            .unwrap();
+        commands
+            .push(EngineCommand::SetPluginInstrument {
+                track_id: source,
+                instrument: Box::new(PluginInstrumentWrapper::new(plugin)),
+            })
+            .unwrap();
+        commands
+            .push(EngineCommand::AddEffect {
+                track_id: receiver,
+                effect_id: effect,
+                effect_type: vibez_core::effect::EffectType::Gate,
+                position: None,
+            })
+            .unwrap();
+        commands
+            .push(EngineCommand::SetTrackMute(source, true))
+            .unwrap();
+        commands
+            .push(EngineCommand::AuditionNote {
+                track_id: source,
+                pitch: 60,
+                velocity: 100,
+                on: true,
+            })
+            .unwrap();
+        let receiver_model = RoutingChannel {
+            id: receiver,
+            is_bus: false,
+            sends: vec![],
+            effects: vec![RoutingEffect {
+                inactive_inputs: vec![],
+                id: effect,
+                inputs: vec![input],
+                assignments: vec![SidechainAssignment {
+                    input_id: ExternalInputId(0),
+                    input_name: "Sidechain".into(),
+                    source,
+                    source_name: "Surge".into(),
+                    tap: SourceTap::AfterEffects,
+                }],
+            }],
+        };
+        let source_model = RoutingChannel {
+            id: source,
+            is_bus: false,
+            effects: vec![],
+            sends: vec![],
+        };
+        let master = RoutingChannel {
+            id: TrackId::MASTER,
+            is_bus: false,
+            effects: vec![],
+            sends: vec![],
+        };
+        commands
+            .push(EngineCommand::SetRouting(
+                PreparedRouting::prepare(&[receiver_model, source_model, master], 64).unwrap(),
+            ))
+            .unwrap();
+        let mut maximum = 0.0f32;
+        for _ in 0..100 {
+            let mut output = [0.0; 128];
+            engine.process_block(AudioProcessBlock::new(&mut output, 2));
+            assert!(
+                output.iter().all(|sample| *sample == 0.0),
+                "Muted instrument leaked"
+            );
+            while let Ok(event) = events.pop() {
+                if let vibez_engine::events::EngineEvent::SidechainInputMeter {
+                    peak_l,
+                    peak_r,
+                    ..
+                } = event
+                {
+                    maximum = maximum.max(peak_l).max(peak_r);
+                }
+            }
+        }
+        println!("Surge XT {format}: default initialized patch note60 velocity100 rate48000 block64 delivered_peak={maximum:.9}");
+        assert!(maximum > 0.001, "Instrument delivered silence");
+    }
+}
