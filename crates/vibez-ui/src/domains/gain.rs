@@ -1,7 +1,7 @@
 //! Gain control values and transient metering state, independent of rendering.
 
 use std::collections::VecDeque;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use vibez_core::id::{EffectId, TrackId};
 use vibez_engine::metering::MeterValues;
@@ -37,11 +37,39 @@ pub struct GainPanelState {
 }
 
 impl GainPanelState {
-    pub fn accept_meter(&mut self, _input: MeterValues, _output: MeterValues, _now: Instant) {}
+    pub fn accept_meter(&mut self, input: MeterValues, output: MeterValues, now: Instant) {
+        self.input = input;
+        self.output = output;
+        self.clip_latched |= output.peak_l >= 1.0 || output.peak_r >= 1.0;
+        self.last_meter_at = Some(now);
+        while self.history.front().is_some_and(|point| {
+            self.history.len() >= 600
+                || now.saturating_duration_since(point.at) > Duration::from_secs(10)
+        }) {
+            self.history.pop_front();
+        }
+        self.history.push_back(GainHistoryPoint {
+            at: now,
+            peak: output.peak_l.max(output.peak_r),
+            rms: output.rms_l.max(output.rms_r),
+        });
+    }
 
-    pub fn clear_clip(&mut self) {}
+    pub fn clear_clip(&mut self) {
+        self.clip_latched = false;
+    }
 
-    pub fn reset_stale(&mut self, _now: Instant) {}
+    pub fn reset_stale(&mut self, now: Instant) {
+        if self
+            .last_meter_at
+            .is_some_and(|last| now.saturating_duration_since(last) >= Duration::from_millis(250))
+        {
+            self.input = MeterValues::SILENT;
+            self.output = MeterValues::SILENT;
+            self.history.clear();
+            self.last_meter_at = None;
+        }
+    }
 }
 
 pub fn gain_to_db(gain: f32) -> f32 {
