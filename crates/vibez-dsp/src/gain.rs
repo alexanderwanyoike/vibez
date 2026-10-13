@@ -186,4 +186,29 @@ mod tests {
         assert!(!fx.set_param(5, 0.5));
         assert!((fx.get_param(5) - 0.0).abs() < 1e-6);
     }
+
+    #[test]
+    fn gain_rejects_nonfinite_parameters_without_changing_output() {
+        let parameters = [0.5, 6.0, -6.0, 1.0, 1.0];
+        for index in 0..parameters.len() {
+            for invalid in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+                let mut fx = GainEffect::new();
+                for (parameter, value) in parameters.iter().copied().enumerate() {
+                    assert!(fx.set_param(parameter, value));
+                }
+                let input = [0.5, -0.5, -0.25, 0.25];
+                let mut expected = input;
+                fx.process(&mut expected, 2);
+
+                assert!(!fx.set_param(index, invalid));
+                for (parameter, expected) in parameters.iter().copied().enumerate() {
+                    assert_eq!(fx.get_param(parameter), expected);
+                }
+                let mut actual = input;
+                fx.process(&mut actual, 2);
+                assert!(actual.iter().all(|sample| sample.is_finite()));
+                assert_eq!(actual, expected);
+            }
+        }
+    }
 }
