@@ -202,7 +202,9 @@ impl App {
             while let Some(event) = self.event_rx.as_mut().and_then(|rx| rx.pop().ok()) {
                 apply_drum_pad_flash(&mut self.state.view, &event, std::time::Instant::now());
                 match event {
-                    EngineEvent::EffectMeter { .. } => {}
+                    EngineEvent::EffectMeter { track_id, effect_id, generation, input, output } => {
+                        self.accept_gain_meter(track_id, effect_id, generation, input, output);
+                    }
                     EngineEvent::RetiredEffectStorage(storage) => drop(storage),
                     EngineEvent::DeviceReconfigurationRetired { device, reason } => {
                         drop((device, reason));

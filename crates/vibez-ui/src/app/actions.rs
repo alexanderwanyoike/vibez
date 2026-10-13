@@ -602,6 +602,7 @@ impl App {
         if let Some(task) = self.poll_audio_input() {
             return task;
         }
+        self.poll_gain_devices();
         self.poll_engine_events();
         self.state
             .view

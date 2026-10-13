@@ -56,6 +56,7 @@ struct App {
     plugin_instrument_rx: std::sync::mpsc::Receiver<PluginInstrumentLoadResult>,
     plugin_instrument_tx: std::sync::mpsc::Sender<PluginInstrumentLoadResult>,
     plugin_load_requests: plugin_load_requests::PluginLoadRequests,
+    gain_devices: gain_devices::GainDevices,
     device_preset_load_request: tracked_request::TrackedRequest,
     // Plugin GUI support
     plugin_window_manager: Option<PluginWindowManager>,
@@ -160,6 +161,7 @@ mod bounce;
 mod capture;
 mod compensation;
 mod device_presets;
+mod gain_devices;
 mod drum_rack_preparation;
 mod engine_events;
 mod keyboard;
@@ -431,6 +433,7 @@ impl App {
             plugin_effect_rx,
             plugin_effect_tx,
             plugin_load_requests: Default::default(),
+            gain_devices: Default::default(),
             device_preset_load_request: Default::default(),
             sidechain_sync_inputs: None,
             track_meter_peaks: Default::default(),

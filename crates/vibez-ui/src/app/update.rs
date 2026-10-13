@@ -237,6 +237,7 @@ impl App {
         }
 
         match message {
+            Message::GainControl(message) => return self.update_gain_control(message),
             Message::ApplyDevicePreset(track_id, effect_id, preset) => {
                 return self.apply_device_preset(track_id, effect_id, preset);
             }
