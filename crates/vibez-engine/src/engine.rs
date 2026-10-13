@@ -722,3 +722,9 @@ mod bus_solo_tests;
 #[path = "engine_offline_routing.rs"]
 mod offline_routing;
 pub(crate) use offline_routing::OfflineRoutingSetup;
+
+#[path = "engine_device_commands.rs"]
+mod device_commands;
+
+#[path = "engine_transport_commands.rs"]
+mod transport_commands;
