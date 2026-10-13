@@ -70,13 +70,12 @@ fn settled_level(engine: &mut AudioEngine) -> f32 {
         .fold(0.0, |peak, sample| peak.max(sample.abs()))
 }
 
-#[test]
-fn undo_while_playing_keeps_a_project_with_built_in_devices_audible() {
-    let mut app = super::test_support::app();
-    let (mut engine, commands, _events) = AudioEngine::new();
-    app.cmd_tx = crate::domains::EngineCommandQueue::new(commands);
+/// One audio track with a built-in device, already playing a steady clip.
+fn playing_project(app: &mut App, engine: &mut AudioEngine) -> (TrackId, EffectId) {
     let mut track = ProjectTrack::new(TrackId::new(), "Pad".into(), 0);
-    track.effects.push(gain_effect());
+    let effect = gain_effect();
+    let effect_id = effect.id;
+    track.effects.push(effect);
     Arc::make_mut(&mut app.state.arrangement.timeline)
         .ensure(track.id)
         .clips
@@ -87,10 +86,16 @@ fn undo_while_playing_keeps_a_project_with_built_in_devices_audible() {
     app.replay_track_to_engine(&track);
     app.sync_sidechain_routing();
     app.send_command(EngineCommand::Play);
-    assert!(
-        settled_level(&mut engine) > 0.1,
-        "project plays before the edit"
-    );
+    assert!(settled_level(engine) > 0.1, "project plays before the edit");
+    (track.id, effect_id)
+}
+
+#[test]
+fn undo_while_playing_keeps_a_project_with_built_in_devices_audible() {
+    let mut app = super::test_support::app();
+    let (mut engine, commands, _events) = AudioEngine::new();
+    app.cmd_tx = crate::domains::EngineCommandQueue::new(commands);
+    playing_project(&mut app, &mut engine);
 
     app.push_undo_snapshot(None);
     Arc::make_mut(&mut app.state.project_tracks).tracks[0].gain = 0.5;
@@ -99,5 +104,28 @@ fn undo_while_playing_keeps_a_project_with_built_in_devices_audible() {
     assert!(
         settled_level(&mut engine) > 0.1,
         "Undo must leave the replayed project audible"
+    );
+}
+
+#[test]
+fn a_plugin_reloading_into_its_retained_slot_keeps_the_project_audible() {
+    let mut app = super::test_support::app();
+    let (mut engine, commands, _events) = AudioEngine::new();
+    app.cmd_tx = crate::domains::EngineCommandQueue::new(commands);
+    let (track_id, effect_id) = playing_project(&mut app, &mut engine);
+
+    // Undo and project open retain the slot, so the routing model is already
+    // final when the loaded instance arrives.
+    app.send_command(EngineCommand::AddPluginEffect {
+        track_id,
+        effect_id,
+        effect: vibez_dsp::factory::create_effect(EffectType::Gain, 44_100.0),
+        position: None,
+    });
+    let _ = app.update_and_refresh_clips(Message::Project(ProjectMsg::ToggleFileMenu));
+
+    assert!(
+        settled_level(&mut engine) > 0.1,
+        "a reloaded plugin must not leave the project muted"
     );
 }
