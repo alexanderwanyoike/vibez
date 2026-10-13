@@ -55,9 +55,7 @@ fn setup() -> (
     let track_id = TrackId::new();
     commands.push(EngineCommand::SetSampleRate(8)).unwrap();
     commands.push(EngineCommand::SetBpm(120.0)).unwrap();
-    commands
-        .push(EngineCommand::AddTrack(track_id, "Audio".into()))
-        .unwrap();
+    commands.push(EngineCommand::add_track(track_id)).unwrap();
     engine.process(&mut [0.0; 8], 1);
     while events.pop().is_ok() {}
     (engine, commands, events, track_id)

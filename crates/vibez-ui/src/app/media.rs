@@ -405,14 +405,17 @@ impl App {
         self.state.status_text = format!("Loaded pad {}: {name}", pad_index + 1);
     }
 
-    pub(super) fn ensure_audio_track_for_import(&mut self, preferred: Option<TrackId>) -> TrackId {
+    pub(super) fn ensure_audio_track_for_import(
+        &mut self,
+        preferred: Option<TrackId>,
+    ) -> Option<TrackId> {
         if let Some(track_id) = preferred {
             if self
                 .state
                 .find_track(track_id)
                 .is_some_and(|track| matches!(track.kind, TrackKind::Audio))
             {
-                return track_id;
+                return Some(track_id);
             }
         }
 
@@ -423,10 +426,10 @@ impl App {
                 TrackKind::Audio,
                 &mut engine,
             )
-        };
+        }?;
         self.state.arrange_content_mut(id);
         self.state.arrangement.selected_track = Some(id);
-        id
+        Some(id)
     }
 
     pub(super) fn prepare_browser_sample_import(
@@ -482,7 +485,11 @@ impl App {
                 self.add_audio_launcher_clip(track_id, row, payload)
             }
             BrowserImportTarget::ArrangementClip(preferred_track) => {
-                let track_id = self.ensure_audio_track_for_import(preferred_track);
+                let Some(track_id) = self.ensure_audio_track_for_import(preferred_track) else {
+                    self.state.status_text =
+                        crate::domains::arrangement::PROJECT_TRACKS_FULL.into();
+                    return Task::none();
+                };
                 let position = self.state.transport.position_samples;
                 self.add_audio_clip_to_track_at(track_id, position, payload)
             }
@@ -496,7 +503,11 @@ impl App {
                 position_samples,
             } => self.add_audio_clip_to_section_at(section_id, track_id, position_samples, payload),
             BrowserImportTarget::ArrangementNewTrackAt { position_samples } => {
-                let track_id = self.ensure_audio_track_for_import(None);
+                let Some(track_id) = self.ensure_audio_track_for_import(None) else {
+                    self.state.status_text =
+                        crate::domains::arrangement::PROJECT_TRACKS_FULL.into();
+                    return Task::none();
+                };
                 self.add_audio_clip_to_track_at(track_id, position_samples, payload)
             }
             BrowserImportTarget::Sampler(track_id) => {

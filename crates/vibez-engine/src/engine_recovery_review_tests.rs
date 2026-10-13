@@ -34,9 +34,7 @@ fn routing(track: TrackId, effect: Option<EffectId>) -> Box<crate::routing::Prep
 fn instrument_replacement_with_unchanged_timing_does_not_wait_for_a_topology_edit() {
     let (mut engine, mut commands, _) = AudioEngine::new();
     let track = TrackId::new();
-    commands
-        .push(EngineCommand::AddTrack(track, "Keys".into()))
-        .unwrap();
+    commands.push(EngineCommand::add_track(track)).unwrap();
     commands
         .push(EngineCommand::SetRouting(routing(track, None)))
         .unwrap();
@@ -73,7 +71,7 @@ fn reject_worst_case_retirement_is_reserved_before_command_ownership_is_popped()
             bypass: false,
         });
     }
-    engine.tracks.push(channel);
+    engine.tracks.push(Box::new(channel));
     engine.pending_device_reconfiguration = Some(reconfiguration::PendingDeviceReconfiguration {
         local_recovery: false,
         handoff_id: 7,
@@ -163,7 +161,7 @@ fn parameter_edits_while_main_holds_the_owner_are_coalesced_and_restored_without
             values: [0.0; 2],
         }),
     });
-    engine.tracks.push(channel);
+    engine.tracks.push(Box::new(channel));
     engine.routing = Some(routing(track, Some(effect)));
     engine.begin_device_reconfiguration();
     let EngineEvent::DeviceReconfiguration(mut device) = events.pop().unwrap() else {
@@ -214,7 +212,7 @@ fn parameter_intents_do_not_cross_a_replaced_device_lifetime() {
             values: [0.0; 2],
         }),
     });
-    engine.tracks.push(channel);
+    engine.tracks.push(Box::new(channel));
     engine.begin_device_reconfiguration();
     let EngineEvent::DeviceReconfiguration(device) = events.pop().unwrap() else {
         panic!("owner");
@@ -288,7 +286,7 @@ fn instrument_parameter_edits_survive_the_main_thread_handoff() {
         requested: true,
         values: [0.0; 2],
     }));
-    engine.tracks.push(channel);
+    engine.tracks.push(Box::new(channel));
     engine.begin_device_reconfiguration();
     let EngineEvent::DeviceReconfiguration(mut device) = events.pop().unwrap() else {
         panic!("owner");

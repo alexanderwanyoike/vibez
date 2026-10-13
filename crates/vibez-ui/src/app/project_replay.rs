@@ -261,10 +261,10 @@ impl App {
         }
         match track.kind {
             TrackKind::Audio => {
-                self.send_command(EngineCommand::AddTrack(track.id, track.name.clone()));
+                self.send_command(EngineCommand::add_track(track.id));
             }
             TrackKind::Midi | TrackKind::Instrument(_) => {
-                self.send_command(EngineCommand::AddTrack(track.id, track.name.clone()));
+                self.send_command(EngineCommand::add_track(track.id));
             }
         }
         self.send_command(EngineCommand::SetTrackGain(track.id, track.gain));
@@ -382,7 +382,7 @@ impl App {
             .arrange_content(bus.id)
             .map(|content| content.automation.clone())
             .unwrap_or_default();
-        self.send_command(EngineCommand::AddBus(bus.id, bus.name.clone()));
+        self.send_command(EngineCommand::add_bus(bus.id));
         self.send_command(EngineCommand::SetTrackGain(bus.id, bus.gain));
         self.send_command(EngineCommand::SetTrackPan(bus.id, bus.pan));
         self.send_command(EngineCommand::SetTrackMute(bus.id, bus.mute));

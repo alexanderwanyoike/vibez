@@ -51,9 +51,7 @@ fn process_outputs_silence_when_stopped() {
 fn live_input_uses_the_target_track_while_transport_is_stopped() {
     let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
     let target = TrackId::new();
-    cmd_tx
-        .push(EngineCommand::AddTrack(target, "Input".into()))
-        .unwrap();
+    cmd_tx.push(EngineCommand::add_track(target)).unwrap();
     let input = [0.5f32, -0.25, 0.25, -0.5];
     let mut output = [0.0; 4];
 
@@ -83,9 +81,7 @@ fn midi_clip_commands_keep_project_length_in_sync() {
     let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
     let track_id = TrackId::new();
     let clip_id = ClipId::new();
-    cmd_tx
-        .push(EngineCommand::AddTrack(track_id, "MIDI".into()))
-        .unwrap();
+    cmd_tx.push(EngineCommand::add_track(track_id)).unwrap();
     cmd_tx
         .push(EngineCommand::AddNoteClip {
             track_id,
@@ -395,12 +391,8 @@ fn add_and_remove_tracks() {
     let tid1 = TrackId::new();
     let tid2 = TrackId::new();
 
-    cmd_tx
-        .push(EngineCommand::AddTrack(tid1, "Track 1".into()))
-        .unwrap();
-    cmd_tx
-        .push(EngineCommand::AddTrack(tid2, "Track 2".into()))
-        .unwrap();
+    cmd_tx.push(EngineCommand::add_track(tid1)).unwrap();
+    cmd_tx.push(EngineCommand::add_track(tid2)).unwrap();
 
     let mut buf = vec![0.0f32; 8];
     engine.process(&mut buf, 2);
@@ -419,15 +411,9 @@ fn reorder_tracks() {
     let tid2 = TrackId::new();
     let tid3 = TrackId::new();
 
-    cmd_tx
-        .push(EngineCommand::AddTrack(tid1, "Track 1".into()))
-        .unwrap();
-    cmd_tx
-        .push(EngineCommand::AddTrack(tid2, "Track 2".into()))
-        .unwrap();
-    cmd_tx
-        .push(EngineCommand::AddTrack(tid3, "Track 3".into()))
-        .unwrap();
+    cmd_tx.push(EngineCommand::add_track(tid1)).unwrap();
+    cmd_tx.push(EngineCommand::add_track(tid2)).unwrap();
+    cmd_tx.push(EngineCommand::add_track(tid3)).unwrap();
 
     let mut buf = vec![0.0f32; 8];
     engine.process(&mut buf, 2);
@@ -453,9 +439,7 @@ fn add_clip_and_play() {
     let cid = ClipId::new();
     let audio = make_constant_audio(100, 0.5);
 
-    cmd_tx
-        .push(EngineCommand::AddTrack(tid, "Track 1".into()))
-        .unwrap();
+    cmd_tx.push(EngineCommand::add_track(tid)).unwrap();
     cmd_tx
         .push(EngineCommand::AddClip {
             track_id: tid,
@@ -504,9 +488,7 @@ fn clip_gain_is_applied_before_the_track_channel_strip() {
     let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
     let track_id = TrackId::new();
     let clip_id = ClipId::new();
-    cmd_tx
-        .push(EngineCommand::AddTrack(track_id, "Audio".into()))
-        .unwrap();
+    cmd_tx.push(EngineCommand::add_track(track_id)).unwrap();
     cmd_tx
         .push(EngineCommand::AddClip {
             track_id,
@@ -549,9 +531,7 @@ fn mute_silences_track() {
     let cid = ClipId::new();
     let audio = make_constant_audio(100, 0.8);
 
-    cmd_tx
-        .push(EngineCommand::AddTrack(tid, "Track 1".into()))
-        .unwrap();
+    cmd_tx.push(EngineCommand::add_track(tid)).unwrap();
     cmd_tx
         .push(EngineCommand::AddClip {
             track_id: tid,
@@ -590,12 +570,8 @@ fn solo_isolates_track() {
     let audio1 = make_constant_audio(100, 0.5);
     let audio2 = make_constant_audio(100, 0.3);
 
-    cmd_tx
-        .push(EngineCommand::AddTrack(tid1, "Track 1".into()))
-        .unwrap();
-    cmd_tx
-        .push(EngineCommand::AddTrack(tid2, "Track 2".into()))
-        .unwrap();
+    cmd_tx.push(EngineCommand::add_track(tid1)).unwrap();
+    cmd_tx.push(EngineCommand::add_track(tid2)).unwrap();
     cmd_tx
         .push(EngineCommand::AddClip {
             track_id: tid1,
@@ -661,9 +637,7 @@ fn gain_scaling() {
     let cid = ClipId::new();
     let audio = make_constant_audio(100, 1.0);
 
-    cmd_tx
-        .push(EngineCommand::AddTrack(tid, "Track 1".into()))
-        .unwrap();
+    cmd_tx.push(EngineCommand::add_track(tid)).unwrap();
     cmd_tx
         .push(EngineCommand::AddClip {
             track_id: tid,
@@ -699,9 +673,7 @@ fn pan_hard_left() {
     let cid = ClipId::new();
     let audio = make_constant_audio(100, 1.0);
 
-    cmd_tx
-        .push(EngineCommand::AddTrack(tid, "Track 1".into()))
-        .unwrap();
+    cmd_tx.push(EngineCommand::add_track(tid)).unwrap();
     cmd_tx
         .push(EngineCommand::AddClip {
             track_id: tid,
@@ -742,12 +714,8 @@ fn multi_track_summing() {
     let audio1 = make_constant_audio(100, 0.3);
     let audio2 = make_constant_audio(100, 0.4);
 
-    cmd_tx
-        .push(EngineCommand::AddTrack(tid1, "Track 1".into()))
-        .unwrap();
-    cmd_tx
-        .push(EngineCommand::AddTrack(tid2, "Track 2".into()))
-        .unwrap();
+    cmd_tx.push(EngineCommand::add_track(tid1)).unwrap();
+    cmd_tx.push(EngineCommand::add_track(tid2)).unwrap();
     cmd_tx
         .push(EngineCommand::AddClip {
             track_id: tid1,
@@ -807,9 +775,7 @@ fn legacy_compat_with_tracks_present() {
     let tid = TrackId::new();
 
     cmd_tx.push(EngineCommand::LoadAudio(legacy_audio)).unwrap();
-    cmd_tx
-        .push(EngineCommand::AddTrack(tid, "Track 1".into()))
-        .unwrap();
+    cmd_tx.push(EngineCommand::add_track(tid)).unwrap();
     cmd_tx.push(EngineCommand::Play).unwrap();
 
     let mut buf = vec![0.0f32; 16];
@@ -826,9 +792,7 @@ fn per_track_metering_events() {
     let cid = ClipId::new();
     let audio = make_constant_audio(100, 0.5);
 
-    cmd_tx
-        .push(EngineCommand::AddTrack(tid, "Track 1".into()))
-        .unwrap();
+    cmd_tx.push(EngineCommand::add_track(tid)).unwrap();
     cmd_tx
         .push(EngineCommand::AddClip {
             track_id: tid,
@@ -877,9 +841,7 @@ fn transport_auto_stop_multitrack() {
     let cid = ClipId::new();
     let audio = make_constant_audio(16, 0.5);
 
-    cmd_tx
-        .push(EngineCommand::AddTrack(tid, "Track 1".into()))
-        .unwrap();
+    cmd_tx.push(EngineCommand::add_track(tid)).unwrap();
     cmd_tx
         .push(EngineCommand::AddClip {
             track_id: tid,
@@ -915,9 +877,7 @@ fn move_clip_changes_position() {
     let cid = ClipId::new();
     let audio = make_constant_audio(100, 0.5);
 
-    cmd_tx
-        .push(EngineCommand::AddTrack(tid, "Track 1".into()))
-        .unwrap();
+    cmd_tx.push(EngineCommand::add_track(tid)).unwrap();
     cmd_tx
         .push(EngineCommand::AddClip {
             track_id: tid,
@@ -958,9 +918,7 @@ fn add_clip_with_loop_plays_looped_audio() {
     let cid = ClipId::new();
     let audio = make_constant_audio(100, 0.5);
 
-    cmd_tx
-        .push(EngineCommand::AddTrack(tid, "Track 1".into()))
-        .unwrap();
+    cmd_tx.push(EngineCommand::add_track(tid)).unwrap();
     cmd_tx
         .push(EngineCommand::AddClip {
             track_id: tid,
@@ -1002,9 +960,7 @@ fn resize_clip_preserves_loop_state() {
     let cid = ClipId::new();
     let audio = make_constant_audio(100, 0.5);
 
-    cmd_tx
-        .push(EngineCommand::AddTrack(tid, "Track 1".into()))
-        .unwrap();
+    cmd_tx.push(EngineCommand::add_track(tid)).unwrap();
     // Add clip without loop
     cmd_tx
         .push(EngineCommand::AddClip {
@@ -1487,9 +1443,7 @@ fn note_clip_loop_renders() {
 
     // Set sample rate first so synth is initialized properly
     cmd_tx.push(EngineCommand::SetSampleRate(44_100)).unwrap();
-    cmd_tx
-        .push(EngineCommand::AddTrack(tid, "Synth 1".into()))
-        .unwrap();
+    cmd_tx.push(EngineCommand::add_track(tid)).unwrap();
     cmd_tx
         .push(EngineCommand::set_built_in_instrument(
             tid,
@@ -1554,9 +1508,7 @@ fn note_clip_reports_triggered_pitches_for_device_feedback() {
     let track_id = TrackId::new();
     let clip_id = ClipId::new();
 
-    cmd_tx
-        .push(EngineCommand::AddTrack(track_id, "Drums".into()))
-        .unwrap();
+    cmd_tx.push(EngineCommand::add_track(track_id)).unwrap();
     cmd_tx
         .push(EngineCommand::set_built_in_instrument(
             track_id,
@@ -1613,9 +1565,7 @@ fn synth_note_clip_does_not_report_drum_pad_activity() {
     let track_id = TrackId::new();
     let clip_id = ClipId::new();
 
-    cmd_tx
-        .push(EngineCommand::AddTrack(track_id, "Synth".into()))
-        .unwrap();
+    cmd_tx.push(EngineCommand::add_track(track_id)).unwrap();
     cmd_tx
         .push(EngineCommand::set_built_in_instrument(
             track_id,
@@ -1671,9 +1621,7 @@ fn drum_pad_activity_dropped_by_a_full_event_ring_is_not_replayed_late() {
     let (mut engine, mut cmd_tx, mut event_rx) = AudioEngine::new();
     let track_id = TrackId::new();
     let clip_id = ClipId::new();
-    cmd_tx
-        .push(EngineCommand::AddTrack(track_id, "Drums".into()))
-        .unwrap();
+    cmd_tx.push(EngineCommand::add_track(track_id)).unwrap();
     cmd_tx
         .push(EngineCommand::set_built_in_instrument(
             track_id,
@@ -1741,9 +1689,7 @@ fn constant_clip_track(
 ) -> (TrackId, ClipId) {
     let tid = TrackId::new();
     let cid = ClipId::new();
-    cmd_tx
-        .push(EngineCommand::AddTrack(tid, "Track".into()))
-        .unwrap();
+    cmd_tx.push(EngineCommand::add_track(tid)).unwrap();
     cmd_tx
         .push(EngineCommand::AddClip {
             track_id: tid,
@@ -1801,9 +1747,7 @@ fn track_output_capture_is_post_fader_and_excludes_other_tracks() {
 fn track_output_capture_stays_aligned_across_arrangement_loop_wrap() {
     let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
     let source = TrackId::new();
-    cmd_tx
-        .push(EngineCommand::AddTrack(source, "Source".into()))
-        .unwrap();
+    cmd_tx.push(EngineCommand::add_track(source)).unwrap();
     cmd_tx
         .push(EngineCommand::AddClip {
             track_id: source,
@@ -1873,9 +1817,7 @@ fn track_output_capture_excludes_sends_returns_master_and_inaudible_sources() {
     );
 
     let solo = TrackId::new();
-    cmd_tx
-        .push(EngineCommand::AddTrack(solo, "Solo".into()))
-        .unwrap();
+    cmd_tx.push(EngineCommand::add_track(solo)).unwrap();
     cmd_tx
         .push(EngineCommand::AddClip {
             track_id: solo,
@@ -2149,9 +2091,7 @@ fn master_gain_scales_the_summed_mix() {
     let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
     let tid = TrackId::new();
     let cid = ClipId::new();
-    cmd_tx
-        .push(EngineCommand::AddTrack(tid, "Track 1".into()))
-        .unwrap();
+    cmd_tx.push(EngineCommand::add_track(tid)).unwrap();
     cmd_tx
         .push(EngineCommand::AddClip {
             track_id: tid,
@@ -2192,9 +2132,7 @@ fn master_effect_chain_processes_the_summed_mix() {
     let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
     let tid = TrackId::new();
     let cid = ClipId::new();
-    cmd_tx
-        .push(EngineCommand::AddTrack(tid, "Track 1".into()))
-        .unwrap();
+    cmd_tx.push(EngineCommand::add_track(tid)).unwrap();
     cmd_tx
         .push(EngineCommand::AddClip {
             track_id: tid,
@@ -2278,9 +2216,7 @@ fn spectrum_tap_streams_track_samples() {
     let mut spectrum_rx = engine.take_spectrum_consumer().unwrap();
     let tid = TrackId::new();
     let cid = ClipId::new();
-    cmd_tx
-        .push(EngineCommand::AddTrack(tid, "T".into()))
-        .unwrap();
+    cmd_tx.push(EngineCommand::add_track(tid)).unwrap();
     cmd_tx
         .push(EngineCommand::AddClip {
             track_id: tid,
@@ -2338,9 +2274,7 @@ fn engine_with_send(send: f32) -> (AudioEngine, rtrb::Producer<EngineCommand>, T
     let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
     let tid = TrackId::new();
     let bus = TrackId::new();
-    cmd_tx
-        .push(EngineCommand::AddTrack(tid, "T".into()))
-        .unwrap();
+    cmd_tx.push(EngineCommand::add_track(tid)).unwrap();
     cmd_tx
         .push(EngineCommand::AddClip {
             track_id: tid,
@@ -2359,7 +2293,7 @@ fn engine_with_send(send: f32) -> (AudioEngine, rtrb::Producer<EngineCommand>, T
             warp_markers: Default::default(),
         })
         .unwrap();
-    cmd_tx.push(EngineCommand::AddBus(bus, "A".into())).unwrap();
+    cmd_tx.push(EngineCommand::add_bus(bus)).unwrap();
     cmd_tx
         .push(EngineCommand::SetSend {
             track_id: tid,

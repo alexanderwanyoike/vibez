@@ -70,7 +70,7 @@ fn sampler_echo_fixture() -> (BounceRequest, Vec<Command>) {
         params: Vec::new(),
         source: None,
     });
-    commands.push(Command::AddTrack(tid, "Vox".into()));
+    commands.push(Command::add_track(tid));
     commands.push(Command::set_built_in_instrument(
         tid,
         InstrumentKind::Sampler,
@@ -132,7 +132,7 @@ fn audio_echo_fixture() -> (BounceRequest, Vec<Command>) {
     let tid = request.tracks[0].id;
     let sample = audio_of(128, 0.5);
     let mut commands = Vec::new();
-    commands.push(Command::AddTrack(tid, "Vox".into()));
+    commands.push(Command::add_track(tid));
     for position in [0, 1536] {
         let clip = ClipInfo {
             id: ClipId::new(),

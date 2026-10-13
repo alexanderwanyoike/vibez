@@ -17,9 +17,7 @@ fn repeat_engine() -> (
     let track_id = TrackId::new();
     commands.push(EngineCommand::SetSampleRate(100)).unwrap();
     commands.push(EngineCommand::SetBpm(60.0)).unwrap();
-    commands
-        .push(EngineCommand::AddTrack(track_id, "Hats".into()))
-        .unwrap();
+    commands.push(EngineCommand::add_track(track_id)).unwrap();
     commands
         .push(EngineCommand::set_built_in_instrument(
             track_id,
@@ -78,9 +76,7 @@ fn stopped_repeat_engine_at(
     commands
         .push(EngineCommand::SetProjectSwing(swing))
         .unwrap();
-    commands
-        .push(EngineCommand::AddTrack(track_id, "Hats".into()))
-        .unwrap();
+    commands.push(EngineCommand::add_track(track_id)).unwrap();
     commands
         .push(EngineCommand::set_built_in_instrument(
             track_id,
@@ -435,9 +431,7 @@ fn clip_engine(
     commands
         .push(EngineCommand::SetProjectSwing(swing))
         .unwrap();
-    commands
-        .push(EngineCommand::AddTrack(track_id, "Clip".into()))
-        .unwrap();
+    commands.push(EngineCommand::add_track(track_id)).unwrap();
     commands
         .push(EngineCommand::set_built_in_instrument(
             track_id,
@@ -530,9 +524,7 @@ fn render_prepared_section_with_swing(swing: SwingAmount) -> Vec<f32> {
     );
     commands.push(EngineCommand::SetSampleRate(8_000)).unwrap();
     commands.push(EngineCommand::SetBpm(120.0)).unwrap();
-    commands
-        .push(EngineCommand::AddTrack(track_id, "Section clip".into()))
-        .unwrap();
+    commands.push(EngineCommand::add_track(track_id)).unwrap();
     commands
         .push(EngineCommand::set_built_in_instrument(
             track_id,

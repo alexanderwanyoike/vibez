@@ -66,9 +66,7 @@ fn teardown_extracts_engine_on_main_after_inflight_processing_and_before_late_ca
     let (engine, mut commands, _events) = AudioEngine::new();
     let track = TrackId::new();
     let effect = EffectId::new();
-    commands
-        .push(EngineCommand::AddTrack(track, "Owner".into()))
-        .unwrap();
+    commands.push(EngineCommand::add_track(track)).unwrap();
     commands
         .push(EngineCommand::InsertEffect {
             track_id: track,

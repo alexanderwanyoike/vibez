@@ -98,7 +98,7 @@ fn main_thread_recovery_keeps_other_delayed_branch_audible_and_silences_the_abse
                 assert!(plugin.load_state(&bytes));
                 plugin.reconfigure_on_main_thread().unwrap();
                 commands
-                    .push(EngineCommand::AddTrack(tracks[index], "Constant".into()))
+                    .push(EngineCommand::add_track(tracks[index]))
                     .unwrap();
                 commands
                     .push(clip(tracks[index], if index == 0 { 0.4 } else { 0.2 }))

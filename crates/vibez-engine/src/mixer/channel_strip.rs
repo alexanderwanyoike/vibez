@@ -7,6 +7,9 @@ use vibez_core::constants::{DEFAULT_TRACK_GAIN, DEFAULT_TRACK_PAN};
 #[cfg(test)]
 thread_local! { static SEND_SCAN_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }
 
+/// Note events one block schedules before its scratch would grow.
+const SCHEDULED_NOTES_PER_BLOCK: usize = 128;
+
 impl EngineTrack {
     pub fn new(id: TrackId) -> Self {
         Self::with_playback_source(id, ArrangementPlaybackSource::prepare_empty())
@@ -32,12 +35,12 @@ impl EngineTrack {
             solo: false,
             swing_offset: None,
             automation_swing_offset: None,
-            mix_buffer: Vec::new(),
+            mix_buffer: Vec::with_capacity(crate::routing::MAX_BLOCK_FRAMES * 2),
             effects: Vec::with_capacity(super::DEVICE_CHAIN_CAPACITY),
             sends: Vec::new(),
             instrument: None,
-            timed_note_ons: Vec::new(),
-            timed_note_offs: Vec::new(),
+            timed_note_ons: Vec::with_capacity(SCHEDULED_NOTES_PER_BLOCK),
+            timed_note_offs: Vec::with_capacity(SCHEDULED_NOTES_PER_BLOCK),
             note_repeats: TrackNoteRepeats::default(),
             active_notes: 0,
             pending_note_activity: 0,

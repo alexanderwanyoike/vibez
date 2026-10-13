@@ -496,16 +496,10 @@ impl App {
 
             match track.kind {
                 TrackKind::Audio => {
-                    self.send_command(EngineCommand::AddTrack(
-                        track_info.id,
-                        track_info.name.clone(),
-                    ));
+                    self.send_command(EngineCommand::add_track(track_info.id));
                 }
                 TrackKind::Midi | TrackKind::Instrument(_) => {
-                    self.send_command(EngineCommand::AddTrack(
-                        track_info.id,
-                        track_info.name.clone(),
-                    ));
+                    self.send_command(EngineCommand::add_track(track_info.id));
                 }
             }
 
@@ -697,7 +691,7 @@ impl App {
         // Return buses: recreate each channel, then its chain; sends
         // were restored with their tracks above.
         for bus_info in &loaded.project.buses {
-            self.send_command(EngineCommand::AddBus(bus_info.id, bus_info.name.clone()));
+            self.send_command(EngineCommand::add_bus(bus_info.id));
             let mut bus =
                 ProjectTrack::new(bus_info.id, bus_info.name.clone(), bus_info.color_index);
             bus.gain = bus_info.gain;

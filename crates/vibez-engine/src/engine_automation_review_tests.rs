@@ -35,7 +35,7 @@ fn setup(
     source.automation.push(lane);
     engine
         .tracks
-        .push(EngineTrack::with_playback_source(id, source));
+        .push(Box::new(EngineTrack::with_playback_source(id, source)));
     let channels = [
         RoutingChannel {
             id,
@@ -150,7 +150,7 @@ fn graph_control_visits_are_linear_in_configured_controls_not_channels_times_con
     let mut channels = Vec::new();
     let mut targets = Vec::new();
     for &id in &ids {
-        engine.tracks.push(EngineTrack::new(id));
+        engine.tracks.push(Box::new(EngineTrack::new(id)));
         channels.push(RoutingChannel {
             id,
             is_bus: false,
@@ -188,8 +188,8 @@ fn static_send_gains_do_not_scan_automation_per_audio_frame() {
     let bus = TrackId::new();
     let mut source = EngineTrack::new(track);
     source.sends.push((bus, 0.5));
-    engine.tracks.push(source);
-    engine.buses.push(EngineTrack::new(bus));
+    engine.tracks.push(Box::new(source));
+    engine.buses.push(Box::new(EngineTrack::new(bus)));
     let channels = [
         RoutingChannel {
             id: track,
@@ -301,8 +301,8 @@ fn prepared_and_new_send_automation_keep_sample_exact_ramps() {
             }
             source.playback_source.automation.push(lane);
         }
-        engine.tracks.push(source);
-        engine.buses.push(EngineTrack::new(bus));
+        engine.tracks.push(Box::new(source));
+        engine.buses.push(Box::new(EngineTrack::new(bus)));
         let channels = [
             RoutingChannel {
                 id: track,

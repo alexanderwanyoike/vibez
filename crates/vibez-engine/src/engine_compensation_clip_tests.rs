@@ -105,9 +105,7 @@ fn wider_hardware_keeps_compensated_live_and_capture_frames_on_the_first_pair() 
         let (mut engine, mut commands, mut events) = AudioEngine::new();
         let track = TrackId::new();
         let effect = EffectId::new();
-        commands
-            .push(EngineCommand::AddTrack(track, "Live".into()))
-            .unwrap();
+        commands.push(EngineCommand::add_track(track)).unwrap();
         commands
             .push(EngineCommand::InsertEffect {
                 track_id: track,
@@ -194,13 +192,9 @@ fn independent_clip_wraps_retain_effect_fader_send_and_device_audio_context() {
     commands.push(EngineCommand::SetSampleRate(128)).unwrap();
     commands.push(EngineCommand::SetBpm(60.0)).unwrap();
     for id in [track, slow] {
-        commands
-            .push(EngineCommand::AddTrack(id, "Clip".into()))
-            .unwrap();
+        commands.push(EngineCommand::add_track(id)).unwrap();
     }
-    commands
-        .push(EngineCommand::AddBus(bus, "Return".into()))
-        .unwrap();
+    commands.push(EngineCommand::add_bus(bus)).unwrap();
     commands
         .push(EngineCommand::SetSend {
             track_id: track,
@@ -373,9 +367,7 @@ fn late_bar_launch_waits_for_the_next_achievable_boundary_and_reports_it_when_he
     commands.push(EngineCommand::SetSampleRate(128)).unwrap();
     commands.push(EngineCommand::SetBpm(60.0)).unwrap();
     for id in [track, slow] {
-        commands
-            .push(EngineCommand::AddTrack(id, "Clip".into()))
-            .unwrap();
+        commands.push(EngineCommand::add_track(id)).unwrap();
     }
     commands
         .push(EngineCommand::InsertEffect {

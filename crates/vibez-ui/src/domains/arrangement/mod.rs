@@ -33,6 +33,9 @@ mod slice_to_drum_rack;
 mod slicing;
 pub(crate) use slicing::slice_region_count;
 
+pub const PROJECT_TRACKS_FULL: &str = "This project has no room for another track";
+pub const PROJECT_BUSES_FULL: &str = "This project has no room for another return";
+
 /// Every channel carries a flat SSL-style EQ. Also used for the master
 /// bus, which is why it is crate-visible.
 pub(crate) fn attach_channel_eq(engine: &mut impl EngineHandle, track: &mut ProjectTrack) {
@@ -71,29 +74,32 @@ impl ProjectTracksState {
         }
     }
 
-    /// Create one numbered Project Track with the standard channel strip.
+    /// Create one numbered Project Track with the standard channel strip, or
+    /// `None` when the project already holds `CHANNEL_CAPACITY` tracks.
     /// Callers remain responsible for adding its timeline lane and selecting it.
     pub(crate) fn add_numbered_track(
         &mut self,
         prefix: &str,
         kind: TrackKind,
         engine: &mut impl EngineHandle,
-    ) -> TrackId {
+    ) -> Option<TrackId> {
+        if self.tracks.len() >= vibez_engine::mixer::CHANNEL_CAPACITY {
+            return None;
+        }
         let track_number = self.next_unique_track_number(prefix);
         self.next_track_number = track_number + 1;
         let id = TrackId::new();
         let name = format!("{prefix} {track_number}");
         let color_index = (track_number.wrapping_sub(1) % 8) as u8;
+        engine.send(EngineCommand::add_track(id));
         let mut track = if kind.is_midi() {
-            engine.send(EngineCommand::AddTrack(id, name.clone()));
             ProjectTrack::new_instrument(id, name, kind, color_index)
         } else {
-            engine.send(EngineCommand::AddTrack(id, name.clone()));
             ProjectTrack::new(id, name, color_index)
         };
         attach_channel_eq(engine, &mut track);
         self.tracks.push(track);
-        id
+        Some(id)
     }
 
     fn move_track(&mut self, track_id: TrackId, up: bool, engine: &mut impl EngineHandle) {

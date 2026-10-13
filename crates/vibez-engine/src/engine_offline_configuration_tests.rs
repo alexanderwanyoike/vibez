@@ -64,7 +64,7 @@ fn offline_rate_reuse_is_rejected_before_processing_and_retains_the_owner() {
         sample_rate: 44_100,
         bpm: 120.0,
         swing: SwingAmount::STRAIGHT,
-        tracks: vec![track],
+        tracks: vec![Box::new(track)],
         buses: vec![],
         master: EngineTrack::new(TrackId::MASTER),
         routing: crate::routing::PreparedRouting::prepare(&model, 16).unwrap(),

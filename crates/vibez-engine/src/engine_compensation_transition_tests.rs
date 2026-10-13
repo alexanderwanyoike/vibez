@@ -37,9 +37,7 @@ fn running_reduced_monitoring_changes_never_refill_or_drop_constant_audio() {
         521,
     )];
     for id in [dry, delayed] {
-        commands
-            .push(EngineCommand::AddTrack(id, "Constant".into()))
-            .unwrap();
+        commands.push(EngineCommand::add_track(id)).unwrap();
         commands
             .push(EngineCommand::AddClip {
                 track_id: id,
@@ -134,14 +132,14 @@ fn reduced_repeat_coordinates_follow_arrange_history_across_loop_wrap() {
     let effect = EffectId::new();
     let mut dry_track = EngineTrack::new(dry);
     dry_track.instrument = Some(Box::new(DelayProbeInstrument::new(0, 0.1)));
-    engine.tracks.push(dry_track);
+    engine.tracks.push(Box::new(dry_track));
     let mut delayed_track = EngineTrack::new(delayed);
     delayed_track.effects.push(EffectSlot {
         id: effect,
         bypass: false,
         effect: Box::new(DelayProbe::new(137)),
     });
-    engine.tracks.push(delayed_track);
+    engine.tracks.push(Box::new(delayed_track));
     let channels: Vec<_> = [dry, delayed, TrackId::MASTER]
         .into_iter()
         .map(|id| RoutingChannel {
@@ -214,9 +212,7 @@ fn midrun_bypass_and_unbypass_keep_the_current_delayed_audio_without_stale_wet_i
     let (mut engine, mut commands, mut events) = AudioEngine::new();
     let track = TrackId::new();
     let effect = EffectId::new();
-    commands
-        .push(EngineCommand::AddTrack(track, "Ramp".into()))
-        .unwrap();
+    commands.push(EngineCommand::add_track(track)).unwrap();
     let signal: Vec<_> = (0..4096).map(|sample| sample as f32 / 4096.0).collect();
     commands
         .push(EngineCommand::AddClip {

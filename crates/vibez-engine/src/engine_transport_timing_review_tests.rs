@@ -44,9 +44,7 @@ fn stop_then_seek_preserves_a_musical_tail_with_zero_processing_latency() {
     let (mut engine, mut commands, mut events) = AudioEngine::new();
     let track = TrackId::new();
     let effect = EffectId::new();
-    commands
-        .push(EngineCommand::AddTrack(track, "Tail".into()))
-        .unwrap();
+    commands.push(EngineCommand::add_track(track)).unwrap();
     commands.push(source(track)).unwrap();
     commands
         .push(EngineCommand::InsertEffect {
@@ -157,9 +155,7 @@ fn setup() -> (
     let delayed = TrackId::new();
     let effect = EffectId::new();
     for id in [dry, delayed] {
-        commands
-            .push(EngineCommand::AddTrack(id, "Constant".into()))
-            .unwrap();
+        commands.push(EngineCommand::add_track(id)).unwrap();
         commands.push(source(id)).unwrap();
     }
     commands

@@ -260,8 +260,10 @@ impl AudioEngine {
                     }
                 }
                 // -- Multi-track commands --
-                EngineCommand::AddTrack(id, _name) => {
-                    self.tracks.push(EngineTrack::new(id));
+                EngineCommand::AddTrack(track) => {
+                    if let Some(track) = admit_channel(&mut self.tracks, track) {
+                        self.dispose_channel(track);
+                    }
                     self.recalculate_audio_length();
                 }
                 EngineCommand::RemoveTrack(id) => {
@@ -519,8 +521,10 @@ impl AudioEngine {
                 }
 
                 // -- Busses --
-                EngineCommand::AddBus(id, _name) => {
-                    self.buses.push(EngineTrack::new(id));
+                EngineCommand::AddBus(bus) => {
+                    if let Some(bus) = admit_channel(&mut self.buses, bus) {
+                        self.dispose_channel(bus);
+                    }
                 }
                 EngineCommand::RemoveBus(id) => {
                     if let Some(pos) = self.buses.iter().position(|b| b.id == id) {
@@ -946,5 +950,20 @@ impl AudioEngine {
             self.transport
                 .set_audio_length(self.arrangement_audio_length);
         }
+    }
+}
+
+/// Returns the channel when its reserved list is full, so it is retired
+/// instead of growing the list in the callback.
+fn admit_channel(
+    channels: &mut crate::mixer::ChannelList,
+    channel: Box<EngineTrack>,
+) -> Option<Box<EngineTrack>> {
+    if channels.len() < channels.capacity() {
+        channels.push(channel);
+        None
+    } else {
+        debug_assert!(false, "the UI keeps channels within CHANNEL_CAPACITY");
+        Some(channel)
     }
 }

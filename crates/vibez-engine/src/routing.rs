@@ -490,8 +490,8 @@ pub struct PreparedChannel {
 impl PreparedChannel {
     pub(crate) fn bind(
         &mut self,
-        tracks: &[crate::mixer::EngineTrack],
-        buses: &[crate::mixer::EngineTrack],
+        tracks: &[Box<crate::mixer::EngineTrack>],
+        buses: &[Box<crate::mixer::EngineTrack>],
     ) {
         let valid = match self.binding {
             ChannelIndex::Track(index) => {
@@ -519,26 +519,26 @@ impl PreparedChannel {
 impl ChannelIndex {
     pub(crate) fn get<'a>(
         self,
-        tracks: &'a [crate::mixer::EngineTrack],
-        buses: &'a [crate::mixer::EngineTrack],
+        tracks: &'a [Box<crate::mixer::EngineTrack>],
+        buses: &'a [Box<crate::mixer::EngineTrack>],
         master: &'a crate::mixer::EngineTrack,
     ) -> Option<&'a crate::mixer::EngineTrack> {
         match self {
-            Self::Track(index) => tracks.get(index),
-            Self::Bus(index) => buses.get(index),
+            Self::Track(index) => tracks.get(index).map(|track| &**track),
+            Self::Bus(index) => buses.get(index).map(|bus| &**bus),
             Self::Master => Some(master),
             Self::Missing => None,
         }
     }
     pub(crate) fn get_mut<'a>(
         self,
-        tracks: &'a mut [crate::mixer::EngineTrack],
-        buses: &'a mut [crate::mixer::EngineTrack],
+        tracks: &'a mut [Box<crate::mixer::EngineTrack>],
+        buses: &'a mut [Box<crate::mixer::EngineTrack>],
         master: &'a mut crate::mixer::EngineTrack,
     ) -> Option<&'a mut crate::mixer::EngineTrack> {
         match self {
-            Self::Track(index) => tracks.get_mut(index),
-            Self::Bus(index) => buses.get_mut(index),
+            Self::Track(index) => tracks.get_mut(index).map(|track| &mut **track),
+            Self::Bus(index) => buses.get_mut(index).map(|bus| &mut **bus),
             Self::Master => Some(master),
             Self::Missing => None,
         }

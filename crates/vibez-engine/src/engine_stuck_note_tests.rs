@@ -53,9 +53,7 @@ fn engine_with_held_note() -> (
     let events = Arc::new(Mutex::new(Vec::new()));
     let tid = TrackId::new();
     let cid = ClipId::new();
-    cmd_tx
-        .push(EngineCommand::AddTrack(tid, "midi".into()))
-        .unwrap();
+    cmd_tx.push(EngineCommand::add_track(tid)).unwrap();
     cmd_tx
         .push(EngineCommand::SetInstrument {
             track_id: tid,
@@ -128,9 +126,7 @@ fn run_scenario(
     let events = Arc::new(Mutex::new(Vec::new()));
     let tid = TrackId::new();
     let cid = ClipId::new();
-    cmd_tx
-        .push(EngineCommand::AddTrack(tid, "midi".into()))
-        .unwrap();
+    cmd_tx.push(EngineCommand::add_track(tid)).unwrap();
     cmd_tx
         .push(EngineCommand::SetInstrument {
             track_id: tid,
@@ -201,9 +197,7 @@ fn looped_note_ons_per_bar(batch_render: bool) -> Vec<usize> {
     let track_id = TrackId::new();
     let clip_id = ClipId::new();
     cmd_tx.push(EngineCommand::SetSampleRate(44_100)).unwrap();
-    cmd_tx
-        .push(EngineCommand::AddTrack(track_id, "kick".into()))
-        .unwrap();
+    cmd_tx.push(EngineCommand::add_track(track_id)).unwrap();
     cmd_tx
         .push(EngineCommand::SetInstrument {
             track_id,
@@ -298,9 +292,7 @@ fn dogfood_note_spanning_clip_loop_boundary() {
 fn instrument_params_change_the_sound() {
     let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
     let tid = TrackId::new();
-    cmd_tx
-        .push(EngineCommand::AddTrack(tid, "midi".into()))
-        .unwrap();
+    cmd_tx.push(EngineCommand::add_track(tid)).unwrap();
     cmd_tx
         .push(EngineCommand::set_built_in_instrument(
             tid,
@@ -346,9 +338,7 @@ fn instrument_params_change_the_sound() {
 fn audition_sounds_while_transport_stopped() {
     let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
     let tid = TrackId::new();
-    cmd_tx
-        .push(EngineCommand::AddTrack(tid, "midi".into()))
-        .unwrap();
+    cmd_tx.push(EngineCommand::add_track(tid)).unwrap();
     cmd_tx
         .push(EngineCommand::set_built_in_instrument(
             tid,
@@ -483,7 +473,7 @@ fn editing_a_launcher_pattern_releases_removed_notes_and_preserves_other_voices(
     for command in [
         EngineCommand::SetSampleRate(8),
         EngineCommand::SetBpm(120.0),
-        EngineCommand::AddTrack(track, "Test".into()),
+        EngineCommand::add_track(track),
         EngineCommand::SetInstrument {
             track_id: track,
             instrument: Box::new(SpyInstrument {

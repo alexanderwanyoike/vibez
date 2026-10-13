@@ -108,9 +108,7 @@ fn stopped_count_in_variants_activate_section_at_exact_boundary() {
         commands.push(EngineCommand::SetSampleRate(8)).unwrap();
         commands.push(EngineCommand::SetBpm(120.0)).unwrap();
         commands.push(EngineCommand::Seek(40)).unwrap();
-        commands
-            .push(EngineCommand::AddTrack(track_id, "Audio".into()))
-            .unwrap();
+        commands.push(EngineCommand::add_track(track_id)).unwrap();
         commands
             .push(EngineCommand::ArmSectionRecord {
                 section_id,
@@ -153,9 +151,7 @@ fn stopped_count_in_ignores_the_idle_performance_clock_before_transport_reset() 
     let section_id = SectionId::new();
     commands.push(EngineCommand::SetSampleRate(8)).unwrap();
     commands.push(EngineCommand::SetBpm(120.0)).unwrap();
-    commands
-        .push(EngineCommand::AddTrack(track_id, "Audio".into()))
-        .unwrap();
+    commands.push(EngineCommand::add_track(track_id)).unwrap();
 
     engine.process(&mut [0.0; 40], 1);
     commands
@@ -194,9 +190,7 @@ fn stopped_count_in_does_not_play_arrangement_content() {
     });
     commands.push(EngineCommand::SetSampleRate(8)).unwrap();
     commands.push(EngineCommand::SetBpm(120.0)).unwrap();
-    commands
-        .push(EngineCommand::AddTrack(track_id, "Audio".into()))
-        .unwrap();
+    commands.push(EngineCommand::add_track(track_id)).unwrap();
     commands
         .push(EngineCommand::AddClip {
             track_id,
@@ -252,9 +246,7 @@ fn stopped_count_in_keeps_live_instrument_monitoring() {
     let section_id = SectionId::new();
     commands.push(EngineCommand::SetSampleRate(8_000)).unwrap();
     commands.push(EngineCommand::SetBpm(120.0)).unwrap();
-    commands
-        .push(EngineCommand::AddTrack(track_id, "MIDI".into()))
-        .unwrap();
+    commands.push(EngineCommand::add_track(track_id)).unwrap();
     commands
         .push(EngineCommand::set_built_in_instrument(
             track_id,
@@ -295,9 +287,7 @@ fn stopped_count_in_click_accents_each_bar_and_clicks_each_beat() {
     let section_id = SectionId::new();
     commands.push(EngineCommand::SetSampleRate(8_000)).unwrap();
     commands.push(EngineCommand::SetBpm(120.0)).unwrap();
-    commands
-        .push(EngineCommand::AddTrack(track_id, "Audio".into()))
-        .unwrap();
+    commands.push(EngineCommand::add_track(track_id)).unwrap();
     commands
         .push(EngineCommand::ArmSectionRecord {
             section_id,
@@ -328,9 +318,7 @@ fn playing_arm_uses_next_section_bar_without_restart() {
     let section_id = SectionId::new();
     commands.push(EngineCommand::SetSampleRate(8)).unwrap();
     commands.push(EngineCommand::SetBpm(120.0)).unwrap();
-    commands
-        .push(EngineCommand::AddTrack(track_id, "Audio".into()))
-        .unwrap();
+    commands.push(EngineCommand::add_track(track_id)).unwrap();
     commands
         .push(EngineCommand::LaunchSection(source(
             section_id, track_id, 0.5,
@@ -367,9 +355,7 @@ fn note_at_block_start_boundary_is_reported_after_recording_starts() {
     let section_id = SectionId::new();
     commands.push(EngineCommand::SetSampleRate(8)).unwrap();
     commands.push(EngineCommand::SetBpm(120.0)).unwrap();
-    commands
-        .push(EngineCommand::AddTrack(track_id, "MIDI".into()))
-        .unwrap();
+    commands.push(EngineCommand::add_track(track_id)).unwrap();
     commands
         .push(EngineCommand::LaunchSection(source(
             section_id, track_id, 0.0,
@@ -428,9 +414,7 @@ fn stop_reports_the_engine_timestamp_and_local_playhead() {
     let section_id = SectionId::new();
     commands.push(EngineCommand::SetSampleRate(8)).unwrap();
     commands.push(EngineCommand::SetBpm(120.0)).unwrap();
-    commands
-        .push(EngineCommand::AddTrack(track_id, "Audio".into()))
-        .unwrap();
+    commands.push(EngineCommand::add_track(track_id)).unwrap();
     commands
         .push(EngineCommand::ArmSectionRecord {
             section_id,
@@ -467,9 +451,7 @@ fn repeated_note_reports_swung_truth_and_straight_canonical_position() {
     commands
         .push(EngineCommand::SetProjectSwing(SwingAmount::new(0.75)))
         .unwrap();
-    commands
-        .push(EngineCommand::AddTrack(track_id, "Hats".into()))
-        .unwrap();
+    commands.push(EngineCommand::add_track(track_id)).unwrap();
     commands
         .push(EngineCommand::set_built_in_instrument(
             track_id,
@@ -528,9 +510,7 @@ fn replace_silences_resident_notes_only_until_the_first_section_wrap() {
     let note_events = Arc::new(Mutex::new(Vec::new()));
     commands.push(EngineCommand::SetSampleRate(8)).unwrap();
     commands.push(EngineCommand::SetBpm(120.0)).unwrap();
-    commands
-        .push(EngineCommand::AddTrack(track_id, "MIDI".into()))
-        .unwrap();
+    commands.push(EngineCommand::add_track(track_id)).unwrap();
     commands
         .push(EngineCommand::SetInstrument {
             track_id,
@@ -615,9 +595,7 @@ fn replace_keeps_live_input_and_note_repeat_audible() {
     let note_events = Arc::new(Mutex::new(Vec::new()));
     commands.push(EngineCommand::SetSampleRate(8)).unwrap();
     commands.push(EngineCommand::SetBpm(120.0)).unwrap();
-    commands
-        .push(EngineCommand::AddTrack(track_id, "MIDI".into()))
-        .unwrap();
+    commands.push(EngineCommand::add_track(track_id)).unwrap();
     commands
         .push(EngineCommand::SetInstrument {
             track_id,

@@ -11,7 +11,7 @@ fn external_input_observations_keep_the_applied_section_coordinate() {
     let (mut engine, mut commands, mut events) = AudioEngine::new();
     let track = TrackId::new();
     let section = SectionId::new();
-    engine.tracks.push(EngineTrack::new(track));
+    engine.tracks.push(Box::new(EngineTrack::new(track)));
     engine.process(&mut [0.0; 8], 1);
     commands
         .push(EngineCommand::LaunchSection(Box::new(
@@ -88,7 +88,7 @@ fn repeats_observe_the_same_coordinates_in_graph_legacy_and_stopped_paths() {
         let id = TrackId::new();
         let mut track = EngineTrack::new(id);
         track.instrument = Some(create_instrument(InstrumentKind::SubtractiveSynth, 128.0));
-        engine.tracks.push(track);
+        engine.tracks.push(Box::new(track));
         engine.process(&mut [0.0; 256], 2);
         if graph {
             let channels = [

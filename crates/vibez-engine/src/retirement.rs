@@ -9,7 +9,7 @@ use crate::{events::EngineEvent, mixer::EngineTrack};
 pub(crate) const RETIREMENT_CAPACITY: usize = 32;
 struct ChannelSlot {
     occupied: AtomicBool,
-    owner: UnsafeCell<Option<EngineTrack>>,
+    owner: UnsafeCell<Option<Box<EngineTrack>>>,
 }
 // The audio producer writes only a free slot. Its unique event token publishes
 // that owner to the UI, whose final Release makes the empty slot reusable.
@@ -35,7 +35,7 @@ impl ChannelRetirementPool {
             .iter()
             .any(|slot| !slot.occupied.load(Ordering::Acquire))
     }
-    fn retire(self: &Arc<Self>, track: EngineTrack) -> RetiredChannel {
+    fn retire(self: &Arc<Self>, track: Box<EngineTrack>) -> RetiredChannel {
         let index = self
             .slots
             .iter()
@@ -53,7 +53,7 @@ impl ChannelRetirementPool {
             index,
         }
     }
-    fn take(&self, index: usize) -> Option<EngineTrack> {
+    fn take(&self, index: usize) -> Option<Box<EngineTrack>> {
         let slot = &self.slots[index];
         let owner = unsafe { (*slot.owner.get()).take() };
         slot.occupied.store(false, Ordering::Release);
@@ -130,7 +130,7 @@ impl crate::engine::AudioEngine {
             crate::events::DisposalCell::new(instrument),
         ));
     }
-    pub(super) fn dispose_channel(&mut self, mut channel: EngineTrack) {
+    pub(super) fn dispose_channel(&mut self, mut channel: Box<EngineTrack>) {
         for slot in &mut channel.effects {
             slot.effect.stop_processing();
         }

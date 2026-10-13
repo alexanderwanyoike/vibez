@@ -87,26 +87,26 @@ pub(super) fn render_offline_inner(
         .iter()
         .filter(|info| dependencies.taps.contains_key(&info.id))
     {
-        tracks.push(prepare::channel(
+        tracks.push(Box::new(prepare::channel(
             req,
             info,
             dependencies.taps[&info.id],
             plugins.as_deref_mut(),
             &mut warnings,
-        ));
+        )));
     }
     for info in req
         .buses
         .iter()
         .filter(|info| dependencies.taps.contains_key(&info.id))
     {
-        buses.push(prepare::channel(
+        buses.push(Box::new(prepare::channel(
             req,
             info,
             dependencies.taps[&info.id],
             plugins.as_deref_mut(),
             &mut warnings,
-        ));
+        )));
     }
     let master = req
         .master

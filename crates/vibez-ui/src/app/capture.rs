@@ -841,10 +841,10 @@ mod tests {
         let audible_track = TrackId::new();
         let heard = Arc::new(Mutex::new(Vec::new()));
         producer
-            .push(EngineCommand::AddTrack(filler_track, "Filler".into()))
+            .push(EngineCommand::add_track(filler_track))
             .unwrap();
         producer
-            .push(EngineCommand::AddTrack(audible_track, "Audible".into()))
+            .push(EngineCommand::add_track(audible_track))
             .unwrap();
         producer
             .push(EngineCommand::SetInstrument {

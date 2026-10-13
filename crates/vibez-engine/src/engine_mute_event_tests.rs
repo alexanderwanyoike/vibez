@@ -6,9 +6,7 @@ use vibez_core::perform::TrackMuteQuantization;
 fn mute_change_reports_engine_effective_state_and_sample_time() {
     let (mut engine, mut cmd_tx, mut event_rx) = AudioEngine::new();
     let track_id = TrackId::new();
-    cmd_tx
-        .push(EngineCommand::AddTrack(track_id, "Track 1".into()))
-        .unwrap();
+    cmd_tx.push(EngineCommand::add_track(track_id)).unwrap();
     cmd_tx.push(EngineCommand::Play).unwrap();
 
     let mut first_block = [0.0; 8];
@@ -38,9 +36,7 @@ fn one_beat_mute_becomes_effective_at_the_exact_engine_boundary() {
     let track_id = TrackId::new();
     cmd_tx.push(EngineCommand::SetSampleRate(8)).unwrap();
     cmd_tx.push(EngineCommand::SetBpm(120.0)).unwrap();
-    cmd_tx
-        .push(EngineCommand::AddTrack(track_id, "Track 1".into()))
-        .unwrap();
+    cmd_tx.push(EngineCommand::add_track(track_id)).unwrap();
     cmd_tx.push(EngineCommand::Play).unwrap();
 
     engine.process(&mut [0.0], 1);
@@ -73,9 +69,7 @@ fn second_quantized_gesture_cancels_without_changing_effective_mute() {
     let track_id = TrackId::new();
     cmd_tx.push(EngineCommand::SetSampleRate(8)).unwrap();
     cmd_tx.push(EngineCommand::SetBpm(120.0)).unwrap();
-    cmd_tx
-        .push(EngineCommand::AddTrack(track_id, "Track 1".into()))
-        .unwrap();
+    cmd_tx.push(EngineCommand::add_track(track_id)).unwrap();
     cmd_tx.push(EngineCommand::Play).unwrap();
     engine.process(&mut [0.0], 1);
     while event_rx.pop().is_ok() {}
@@ -112,9 +106,7 @@ fn second_quantized_gesture_cancels_without_changing_effective_mute() {
 fn quantized_choice_applies_immediately_while_stopped() {
     let (mut engine, mut cmd_tx, mut event_rx) = AudioEngine::new();
     let track_id = TrackId::new();
-    cmd_tx
-        .push(EngineCommand::AddTrack(track_id, "Track 1".into()))
-        .unwrap();
+    cmd_tx.push(EngineCommand::add_track(track_id)).unwrap();
     cmd_tx
         .push(EngineCommand::QueueTrackMute {
             track_id,
@@ -146,9 +138,7 @@ fn one_bar_mute_uses_the_next_bar_boundary() {
     let track_id = TrackId::new();
     cmd_tx.push(EngineCommand::SetSampleRate(8)).unwrap();
     cmd_tx.push(EngineCommand::SetBpm(120.0)).unwrap();
-    cmd_tx
-        .push(EngineCommand::AddTrack(track_id, "Track 1".into()))
-        .unwrap();
+    cmd_tx.push(EngineCommand::add_track(track_id)).unwrap();
     cmd_tx.push(EngineCommand::Play).unwrap();
     engine.process(&mut [0.0], 1);
     while event_rx.pop().is_ok() {}
@@ -180,9 +170,7 @@ fn one_bar_mute_at_an_arrangement_loop_end_applies_on_the_wrap() {
     let track_id = TrackId::new();
     cmd_tx.push(EngineCommand::SetSampleRate(8)).unwrap();
     cmd_tx.push(EngineCommand::SetBpm(120.0)).unwrap();
-    cmd_tx
-        .push(EngineCommand::AddTrack(track_id, "Track 1".into()))
-        .unwrap();
+    cmd_tx.push(EngineCommand::add_track(track_id)).unwrap();
     cmd_tx
         .push(EngineCommand::SetArrangementLoopRegion { start: 0, end: 16 })
         .unwrap();
@@ -224,9 +212,7 @@ fn stopping_cancels_a_pending_quantized_mute() {
     let track_id = TrackId::new();
     cmd_tx.push(EngineCommand::SetSampleRate(8)).unwrap();
     cmd_tx.push(EngineCommand::SetBpm(120.0)).unwrap();
-    cmd_tx
-        .push(EngineCommand::AddTrack(track_id, "Track 1".into()))
-        .unwrap();
+    cmd_tx.push(EngineCommand::add_track(track_id)).unwrap();
     cmd_tx.push(EngineCommand::Play).unwrap();
     engine.process(&mut [0.0], 1);
     while event_rx.pop().is_ok() {}
@@ -257,9 +243,7 @@ fn quantized_mute_on_a_boundary_still_reports_deferred_ownership_before_effectiv
     let track_id = TrackId::new();
     cmd_tx.push(EngineCommand::SetSampleRate(8)).unwrap();
     cmd_tx.push(EngineCommand::SetBpm(120.0)).unwrap();
-    cmd_tx
-        .push(EngineCommand::AddTrack(track_id, "Track 1".into()))
-        .unwrap();
+    cmd_tx.push(EngineCommand::add_track(track_id)).unwrap();
     cmd_tx.push(EngineCommand::Play).unwrap();
     engine.process(&mut [0.0; 4], 1);
     while event_rx.pop().is_ok() {}
@@ -304,9 +288,7 @@ fn immediate_mixer_mute_cancels_a_pending_pad_change_before_applying() {
     let track_id = TrackId::new();
     cmd_tx.push(EngineCommand::SetSampleRate(8)).unwrap();
     cmd_tx.push(EngineCommand::SetBpm(120.0)).unwrap();
-    cmd_tx
-        .push(EngineCommand::AddTrack(track_id, "Track 1".into()))
-        .unwrap();
+    cmd_tx.push(EngineCommand::add_track(track_id)).unwrap();
     cmd_tx.push(EngineCommand::Play).unwrap();
     engine.process(&mut [0.0], 1);
     while event_rx.pop().is_ok() {}
