@@ -36,6 +36,13 @@ The applier is the only place cross-domain choreography happens.
 UI to engine is an `rtrb` ring of `EngineCommand`; engine to UI is a ring of
 `EngineEvent`, drained once per frame tick. Commands carry `Arc`s so the
 audio thread never allocates or frees large buffers it uniquely owns.
+Commands carry or reserve their storage, and the callback never grows a
+collection: devices are built on the sender's thread
+(`EngineCommand::insert_built_in_effect`, `set_built_in_instrument`) at the
+rate `EngineHandle::sample_rate` last forwarded, and device chains are
+reserved at `DEVICE_CHAIN_CAPACITY`, which the UI refuses to exceed.
+`engine_command_allocation_tests` measures every command; its list of commands
+that still allocate may only shrink.
 Events come in two classes, and the class determines the push policy:
 
 - **Authoritative** (Capture consumes them, state depends on them): enter
