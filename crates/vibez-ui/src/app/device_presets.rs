@@ -15,10 +15,35 @@ pub(crate) struct PresetLoadRequest {
 impl App {
     pub(super) fn finish_device_preset_load(
         &mut self,
-        _request: PresetLoadRequest,
-        _result: Result<DevicePreset, String>,
+        request: PresetLoadRequest,
+        result: Result<DevicePreset, String>,
     ) -> Task<Message> {
-        Task::none()
+        if !self.device_preset_load_request.finish(request.token) {
+            return Task::none();
+        }
+        let expected_is_current = self
+            .state
+            .find_track(request.track_id)
+            .and_then(|track| {
+                track
+                    .effects
+                    .iter()
+                    .find(|effect| effect.id == request.effect_id)
+            })
+            .and_then(|effect| {
+                crate::domains::device_presets::capture(effect, request.expected.name()).ok()
+            })
+            .is_some_and(|current| current == request.expected);
+        if !expected_is_current {
+            return Task::none();
+        }
+        match result {
+            Ok(preset) => self.apply_device_preset(request.track_id, request.effect_id, preset),
+            Err(error) => {
+                self.state.status_text = format!("Preset load failed: {error}");
+                Task::none()
+            }
+        }
     }
 
     pub(super) fn apply_device_preset(
