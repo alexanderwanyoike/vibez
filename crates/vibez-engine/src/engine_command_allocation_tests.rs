@@ -665,7 +665,7 @@ fn cases() -> Vec<Case> {
             id: 0,
             track_id: f.synth,
         }),
-        case!("InsertEffect", true, |f| C::InsertEffect {
+        case!("InsertEffect", false, |f| C::InsertEffect {
             track_id: f.empty,
             effect_id: EffectId::new(),
             effect: vibez_dsp::factory::create_effect(
