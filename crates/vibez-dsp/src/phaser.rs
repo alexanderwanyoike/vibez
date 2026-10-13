@@ -72,6 +72,10 @@ impl PhaserEffect {
 }
 
 impl AudioEffect for PhaserEffect {
+    fn activation_sample_rate(&self) -> Option<u32> {
+        Some(self.sample_rate as u32)
+    }
+
     fn effect_type(&self) -> EffectType {
         EffectType::Phaser
     }

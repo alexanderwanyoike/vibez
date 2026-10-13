@@ -211,6 +211,10 @@ fn equal_power_pan(pan: f32) -> (f32, f32) {
 }
 
 impl Instrument for DrumRack {
+    fn activation_sample_rate(&self) -> Option<u32> {
+        Some(self.sample_rate as u32)
+    }
+
     fn instrument_kind(&self) -> InstrumentKind {
         InstrumentKind::DrumRack
     }
