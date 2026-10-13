@@ -118,3 +118,157 @@ fn monitored_gain_chain_reports_each_inserts_stereo_input_and_output() {
         }
     }
 }
+
+#[test]
+fn return_and_master_gain_meters_observe_insert_levels_in_both_render_paths() {
+    for use_graph in [false, true] {
+        for monitor_master in [false, true] {
+            let (mut engine, mut commands, mut events) = AudioEngine::new();
+            let source_id = TrackId::new();
+            let return_id = TrackId::new();
+            let return_effect = EffectId::new();
+            let master_effect = EffectId::new();
+            commands.push(EngineCommand::SetSampleRate(48_000)).unwrap();
+            commands
+                .push(EngineCommand::AddTrack(source_id, "Source".into()))
+                .unwrap();
+            commands
+                .push(EngineCommand::AddBus(return_id, "Return".into()))
+                .unwrap();
+            commands
+                .push(EngineCommand::SetSend {
+                    track_id: source_id,
+                    bus_id: return_id,
+                    amount: 0.25,
+                })
+                .unwrap();
+            for (track_id, effect_id) in [
+                (return_id, return_effect),
+                (TrackId::MASTER, master_effect),
+            ] {
+                commands
+                    .push(EngineCommand::insert_built_in_effect(
+                        track_id,
+                        effect_id,
+                        EffectType::Gain,
+                        48_000,
+                    ))
+                    .unwrap();
+                commands
+                    .push(EngineCommand::SetEffectParam {
+                        track_id,
+                        effect_id,
+                        param_index: 0,
+                        value: 0.5,
+                    })
+                    .unwrap();
+            }
+            for (track_id, gain) in [
+                (source_id, 0.5),
+                (return_id, 0.25),
+                (TrackId::MASTER, 0.125),
+            ] {
+                commands
+                    .push(EngineCommand::SetTrackGain(track_id, gain))
+                    .unwrap();
+            }
+            if use_graph {
+                let routing = crate::routing::PreparedRouting::prepare(
+                    &[
+                        RoutingChannel {
+                            id: source_id,
+                            is_bus: false,
+                            effects: vec![],
+                            sends: vec![return_id],
+                        },
+                        RoutingChannel {
+                            id: return_id,
+                            is_bus: true,
+                            effects: vec![RoutingEffect {
+                                id: return_effect,
+                                inputs: vec![],
+                                assignments: vec![],
+                                inactive_inputs: vec![],
+                            }],
+                            sends: vec![],
+                        },
+                        RoutingChannel {
+                            id: TrackId::MASTER,
+                            is_bus: true,
+                            effects: vec![RoutingEffect {
+                                id: master_effect,
+                                inputs: vec![],
+                                assignments: vec![],
+                                inactive_inputs: vec![],
+                            }],
+                            sends: vec![],
+                        },
+                    ],
+                    128,
+                )
+                .unwrap();
+                commands
+                    .push(EngineCommand::SetRouting(routing))
+                    .unwrap();
+            }
+            let (monitored_channel, monitored_effect) = if monitor_master {
+                (TrackId::MASTER, master_effect)
+            } else {
+                (return_id, return_effect)
+            };
+            commands
+                .push(EngineCommand::SetEffectMeterChannel {
+                    track_id: Some(monitored_channel),
+                    generation: 19,
+                })
+                .unwrap();
+            let input: Vec<f32> = [0.8, -0.1, 0.0, 0.3].repeat(480);
+            let mut output = vec![0.0; input.len()];
+            let mut reading = None;
+            for _ in 0..12 {
+                engine.process_block(
+                    AudioProcessBlock::new(&mut output, 2)
+                        .with_live_input(source_id.raw(), &input),
+                );
+                while let Ok(event) = events.pop() {
+                    if let EngineEvent::EffectMeter {
+                        track_id,
+                        effect_id,
+                        generation,
+                        input,
+                        output,
+                    } = event
+                    {
+                        assert_eq!(track_id, monitored_channel);
+                        assert_eq!(effect_id, monitored_effect);
+                        assert_eq!(generation, 19);
+                        reading = Some((input, output));
+                    }
+                }
+            }
+            let (input, output) = reading.expect("selected return and master Gains need readings");
+            let source_gain = 0.5 * std::f32::consts::FRAC_1_SQRT_2;
+            let incoming_gain = source_gain
+                * if monitor_master {
+                    1.0 + 0.25 * 0.5 * 0.25
+                } else {
+                    0.25
+                };
+            for (actual, expected) in [
+                (input.peak_l, 0.8 * incoming_gain),
+                (input.peak_r, 0.3 * incoming_gain),
+                (input.rms_l, 0.32_f32.sqrt() * incoming_gain),
+                (input.rms_r, 0.05_f32.sqrt() * incoming_gain),
+                (output.peak_l, 0.4 * incoming_gain),
+                (output.peak_r, 0.15 * incoming_gain),
+                (output.rms_l, 0.32_f32.sqrt() * incoming_gain * 0.5),
+                (output.rms_r, 0.05_f32.sqrt() * incoming_gain * 0.5),
+            ] {
+                assert!(
+                    (actual - expected).abs() < 1e-5,
+                    "graph={use_graph}, master={monitor_master}: expected {expected}, got {actual}"
+                );
+            }
+        }
+    }
+}
