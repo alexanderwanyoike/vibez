@@ -104,6 +104,7 @@ impl PluginWindowManager {
         };
         let parent = GuiParent::Cocoa(Retained::as_ptr(&opened.view) as *mut _);
         if !unsafe { opened.gui_handle.open_embedded(parent) } {
+            eprintln!("vibez: open_window - plugin rejected its parent view");
             return false;
         }
         // NSView and both plugin APIs use logical points, including on Retina displays.
