@@ -19,6 +19,10 @@ pub(super) struct CaptureReplay {
 }
 
 impl AudioEngine {
+    pub(super) fn capture_needs_closure(&self) -> bool {
+        self.capture_active || self.capture_stop_pending()
+    }
+
     pub(super) fn capture_stop_pending(&self) -> bool {
         self.pending_capture_stop.is_some()
             || self.scheduled_presentation.iter().any(|pending| {

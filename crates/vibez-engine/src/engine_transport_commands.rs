@@ -4,9 +4,12 @@ use super::*;
 
 impl AudioEngine {
     pub(super) fn command_stop(&mut self) {
+        let capture_needs_closure = self.capture_needs_closure();
         self.cancel_presentation();
         self.stop_section_record();
-        self.stop_heard_capture();
+        if capture_needs_closure {
+            self.stop_heard_capture();
+        }
         self.clear_clip_performance();
         self.transport.stop();
         self.arrangement_recording = false;
@@ -30,7 +33,7 @@ impl AudioEngine {
     }
 
     pub(super) fn command_play(&mut self) {
-        let capture_needs_closure = self.capture_active || self.capture_stop_pending();
+        let capture_needs_closure = self.capture_needs_closure();
         self.cancel_presentation();
         if capture_needs_closure {
             self.stop_heard_capture();
@@ -87,7 +90,7 @@ impl AudioEngine {
     }
 
     pub(super) fn command_seek(&mut self, pos: u64) {
-        if self.clock_domain == ClockDomain::Arrange {
+        if self.clock_domain == ClockDomain::Arrange && self.capture_needs_closure() {
             self.stop_heard_capture();
         }
         self.transport.seek(pos);
