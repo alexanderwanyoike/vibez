@@ -356,7 +356,7 @@ fn cases() -> Vec<Case> {
         }),
         case!("LoadAudio", false, |_| C::LoadAudio(audio(4096))),
         case!("UnloadAudio", false, |_| C::UnloadAudio),
-        case!("AddTrack", true, |_| C::AddTrack(
+        case!("AddTrack", false, |_| C::AddTrack(
             TrackId::new(),
             "New".into()
         )),
@@ -460,7 +460,7 @@ fn cases() -> Vec<Case> {
         case!("SetTrackSwingOffset", false, |f| C::SetTrackSwingOffset(
             f.synth, None
         )),
-        case!("AddBus", true, |_| C::AddBus(
+        case!("AddBus", false, |_| C::AddBus(
             TrackId::new(),
             "New bus".into()
         )),
