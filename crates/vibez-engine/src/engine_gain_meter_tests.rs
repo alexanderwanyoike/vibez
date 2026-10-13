@@ -500,6 +500,63 @@ fn skipped_gain_processing_counts_as_silence_and_clears_old_peaks() {
     assert_eq!(readings, 1, "a fully skipped window clears the visible meter");
 }
 
+#[test]
+fn legacy_gain_automation_keeps_linear_mapping_with_neutral_new_controls() {
+    use vibez_core::automation::{AutomationLane, AutomationPoint, AutomationTarget};
+
+    for use_graph in [false, true] {
+        let (mut engine, mut commands, _events, track_id, effect_id) = gain_meter_fixture(use_graph);
+        commands
+            .push(EngineCommand::SetEffectParam {
+                track_id,
+                effect_id,
+                param_index: 0,
+                value: 1.5,
+            })
+            .unwrap();
+        let target = AutomationTarget::EffectParam {
+            effect_id,
+            param_index: 0,
+        };
+        let mut lane = AutomationLane::new(target);
+        lane.insert_point(AutomationPoint {
+            beat: 0.0,
+            value: 0.25,
+            curve: 0.0,
+        });
+        commands
+            .push(EngineCommand::SetAutomationLane { track_id, lane })
+            .unwrap();
+        engine.process(&mut [], 2);
+        if let Some(routing) = engine.routing.as_mut() {
+            routing.configure_automation(&[(track_id, target)]).unwrap();
+        }
+
+        let input = [0.8, -0.4].repeat(960);
+        let mut output = vec![0.0; input.len()];
+        engine.process_block(
+            AudioProcessBlock::new(&mut output, 2).with_live_input(track_id.raw(), &input),
+        );
+        for frame in output.chunks_exact(2) {
+            for (actual, expected) in frame
+                .iter()
+                .copied()
+                .zip([0.4, -0.2].map(|sample| sample * std::f32::consts::FRAC_1_SQRT_2))
+            {
+                assert!(
+                    (actual - expected).abs() < 1e-5,
+                    "legacy normalized 0.25 must render half gain: expected {expected}, got {actual}, graph={use_graph}"
+                );
+            }
+        }
+        let effect = &engine.tracks[0].effects[0].effect;
+        assert_eq!(effect.get_param(0), 0.5);
+        for index in 1..5 {
+            assert_eq!(effect.get_param(index), 0.0);
+        }
+    }
+}
+
 fn gain_meter_fixture(
     use_graph: bool,
 ) -> (
