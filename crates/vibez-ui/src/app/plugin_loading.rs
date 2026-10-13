@@ -28,6 +28,9 @@ impl App {
                 result.position.is_some(),
                 &result.device_ref,
             ) {
+                if result.position.is_none() && track.is_some() {
+                    self.state.status_text = crate::domains::devices::DEVICE_CHAIN_FULL.to_string();
+                }
                 continue;
             }
             if result.position.is_some() {

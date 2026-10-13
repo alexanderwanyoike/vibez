@@ -130,6 +130,16 @@ impl App {
                         .buses
                         .iter()
                         .any(|b| b.id == track_id);
+                    if !is_instrument
+                        && self
+                            .state
+                            .find_track(track_id)
+                            .is_some_and(|track| !track.has_device_room())
+                    {
+                        self.state.status_text =
+                            crate::domains::devices::DEVICE_CHAIN_FULL.to_string();
+                        return Task::none();
+                    }
                     if is_instrument && (track_id.is_master() || is_bus) {
                         // Master and buses host effects only.
                         self.state.status_text = format!(

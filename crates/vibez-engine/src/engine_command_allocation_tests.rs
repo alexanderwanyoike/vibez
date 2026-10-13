@@ -711,3 +711,26 @@ fn every_table_command_drains_without_allocating_unless_named_as_card_04_work() 
     }
     assert!(mismatches.is_empty(), "{mismatches:#?}");
 }
+
+#[cfg(debug_assertions)]
+#[test]
+#[should_panic(expected = "the UI keeps device chains within DEVICE_CHAIN_CAPACITY")]
+fn a_device_past_the_reserved_chain_is_a_ui_contract_violation() {
+    let (mut engine, mut commands, _events) = AudioEngine::new();
+    let track_id = TrackId::new();
+    assert!(commands
+        .push(EngineCommand::AddTrack(track_id, "Full".into()))
+        .is_ok());
+    engine.process(&mut [0.0; 2], 2);
+    for _ in 0..=crate::mixer::DEVICE_CHAIN_CAPACITY {
+        assert!(commands
+            .push(EngineCommand::insert_built_in_effect(
+                track_id,
+                EffectId::new(),
+                vibez_core::effect::EffectType::Gain,
+                crate::engine::DEFAULT_SAMPLE_RATE,
+            ))
+            .is_ok());
+        engine.process(&mut [0.0; 2], 2);
+    }
+}

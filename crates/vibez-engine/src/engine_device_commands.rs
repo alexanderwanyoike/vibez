@@ -10,20 +10,25 @@ impl AudioEngine {
         effect: Box<dyn vibez_dsp::effect::AudioEffect>,
         position: Option<usize>,
     ) {
-        if let Some(track) = self.channel_mut(track_id) {
-            let slot = EffectSlot {
-                id: effect_id,
-                effect,
-                bypass: false,
-            };
-            if let Some(pos) = position {
-                let idx = pos.min(track.effects.len());
-                track.effects.insert(idx, slot);
-            } else {
-                track.effects.push(slot);
-            }
-        } else {
+        let Some(track) = self
+            .channel_mut(track_id)
+            .filter(|track| track.effects.len() < track.effects.capacity())
+        else {
+            debug_assert!(
+                self.channel_mut(track_id).is_none(),
+                "the UI keeps device chains within DEVICE_CHAIN_CAPACITY"
+            );
             self.dispose_effect(effect);
+            return;
+        };
+        let slot = EffectSlot {
+            id: effect_id,
+            effect,
+            bypass: false,
+        };
+        match position {
+            Some(pos) => track.effects.insert(pos.min(track.effects.len()), slot),
+            None => track.effects.push(slot),
         }
     }
 

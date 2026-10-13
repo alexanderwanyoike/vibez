@@ -33,7 +33,7 @@ impl EngineTrack {
             swing_offset: None,
             automation_swing_offset: None,
             mix_buffer: Vec::new(),
-            effects: Vec::new(),
+            effects: Vec::with_capacity(super::DEVICE_CHAIN_CAPACITY),
             sends: Vec::new(),
             instrument: None,
             timed_note_ons: Vec::new(),

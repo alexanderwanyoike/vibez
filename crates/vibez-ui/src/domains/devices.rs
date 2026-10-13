@@ -176,6 +176,8 @@ fn sync_pad(
     }
 }
 
+pub const DEVICE_CHAIN_FULL: &str = "This channel's device chain is full";
+
 #[derive(Default)]
 pub struct DevicesCtx<'a> {
     pub sample_rate: u32,
@@ -230,6 +232,13 @@ impl DevicesState {
                 }));
             }
             DevicesMsg::AddEffect(track_id, effect_type) => {
+                if find_track_mut(tracks, master, buses, track_id)
+                    .is_some_and(|track| !track.has_device_room())
+                {
+                    self.context_menu = None;
+                    action.status = Some(DEVICE_CHAIN_FULL.to_string());
+                    return action;
+                }
                 let effect_id = EffectId::new();
                 let fx = vibez_dsp::factory::create_effect(effect_type, sample_rate as f32);
                 let descriptors = fx.param_descriptors();
@@ -625,6 +634,36 @@ mod tests {
             plugin_ref: None,
         });
         (vec![track], track_id, effect_id)
+    }
+
+    #[test]
+    fn a_full_device_chain_refuses_another_device_without_reaching_the_engine() {
+        let (mut tracks, track_id, _) = midi_track_with_effect();
+        let template = tracks[0].effects[0].clone();
+        while tracks[0].has_device_room() {
+            let mut effect = template.clone();
+            effect.id = EffectId::new();
+            tracks[0].effects.push(effect);
+        }
+        let mut devices = DevicesState::default();
+        let mut engine = RecordingEngine::default();
+        let action = devices.update(
+            DevicesMsg::AddEffect(track_id, EffectType::Reverb),
+            &mut engine,
+            &mut tracks,
+            &mut crate::state::new_master_track(),
+            &mut [],
+            DevicesCtx {
+                sample_rate: 44_100,
+                ..Default::default()
+            },
+        );
+        assert_eq!(
+            tracks[0].effects.len(),
+            vibez_engine::mixer::DEVICE_CHAIN_CAPACITY
+        );
+        assert!(engine.0.is_empty());
+        assert_eq!(action.status.as_deref(), Some(DEVICE_CHAIN_FULL));
     }
 
     #[test]
