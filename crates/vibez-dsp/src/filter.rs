@@ -79,6 +79,10 @@ impl FilterEffect {
 }
 
 impl AudioEffect for FilterEffect {
+    fn activation_sample_rate(&self) -> Option<u32> {
+        Some(self.sample_rate as u32)
+    }
+
     fn effect_type(&self) -> EffectType {
         EffectType::Filter
     }

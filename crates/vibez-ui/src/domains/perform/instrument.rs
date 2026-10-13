@@ -184,6 +184,21 @@ impl PerformState {
         self.instrument.target
     }
 
+    pub(crate) fn live_instrument_target(
+        &self,
+        workspace_visible: bool,
+        project_tracks: &[ProjectTrack],
+    ) -> Option<TrackId> {
+        if !workspace_visible || self.mode != PerformMode::Instrument {
+            return None;
+        }
+        self.instrument_target().filter(|track_id| {
+            project_tracks
+                .iter()
+                .any(|track| track.id == *track_id && track.is_playable_midi_target())
+        })
+    }
+
     pub(crate) fn sync_instrument_target_from_selection(
         &mut self,
         selected: Option<TrackId>,

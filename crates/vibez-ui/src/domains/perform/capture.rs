@@ -44,6 +44,7 @@ pub struct CapturedTimelineSource {
     pub length_beats: f64,
     pub looping: bool,
     pub timeline: Arc<ArrangementTimeline>,
+    pub direct_leads: Arc<[(TrackId, u32)]>,
 }
 
 impl CapturedTimelineSource {
@@ -54,6 +55,7 @@ impl CapturedTimelineSource {
             length_beats: length as f64 / samples_per_beat,
             looping,
             timeline: Arc::clone(&clip.timeline),
+            direct_leads: Arc::from([]),
         }
     }
 
@@ -63,7 +65,14 @@ impl CapturedTimelineSource {
             length_beats: section.length_beats,
             looping: section.looping,
             timeline: Arc::clone(&section.timeline),
+            direct_leads: Arc::from([]),
         }
+    }
+
+    pub fn from_section_with_offsets(section: &Section, offsets: Arc<[(TrackId, u32)]>) -> Self {
+        let mut source = Self::from_section(section);
+        source.direct_leads = offsets;
+        source
     }
 }
 
@@ -84,6 +93,7 @@ struct ActiveSpan {
 #[derive(Debug, Clone)]
 struct CapturedTimelineSpan {
     source: CapturedTimelineSource,
+    end_follows_source: bool,
     effective_start_samples: u64,
     effective_end_samples: u64,
     source_start_samples: u64,
@@ -162,35 +172,60 @@ impl CompletedCapture {
         }
 
         for span in &self.spans {
-            let span_length = span
-                .effective_end_samples
-                .saturating_sub(span.effective_start_samples);
             let section_length = (span.source.length_beats * samples_per_beat)
                 .round()
                 .max(1.0) as u64;
-            let mut remaining = span_length;
-            let mut source_cursor = span.source_start_samples.min(section_length);
-            let mut destination_cursor = self.clock.arrange_start_samples.saturating_add(
-                span.effective_start_samples
-                    .saturating_sub(self.engine_start_samples),
-            );
-
-            while remaining > 0 && source_cursor < section_length {
-                let segment_length = remaining.min(section_length - source_cursor);
-                append_timeline_window(
-                    &mut result.by_track,
-                    &span.source,
-                    source_cursor,
-                    source_cursor + segment_length,
-                    destination_cursor,
-                    samples_per_beat,
-                );
-                remaining -= segment_length;
-                destination_cursor = destination_cursor.saturating_add(segment_length);
-                if remaining == 0 || !span.source.looping {
-                    break;
+            for (track_id, content) in &span.source.timeline.by_track {
+                let lead = span
+                    .source
+                    .direct_leads
+                    .iter()
+                    .find(|(id, _)| id == track_id)
+                    .map_or(0, |(_, lead)| *lead);
+                let start = i128::from(span.effective_start_samples) - i128::from(lead);
+                // A source change moves its audible boundary. Ending the take
+                // only clips the source that is still sounding at that moment.
+                let end = if span.end_follows_source {
+                    i128::from(span.effective_end_samples) - i128::from(lead)
+                } else {
+                    i128::from(self.engine_end_samples)
+                };
+                let kept_start = start.max(i128::from(self.engine_start_samples));
+                let kept_end = end.min(i128::from(self.engine_end_samples));
+                if kept_end <= kept_start {
+                    continue;
                 }
-                source_cursor = 0;
+                let source_start = span
+                    .source_start_samples
+                    .saturating_add((kept_start - start) as u64);
+                let mut source_cursor = if span.source.looping {
+                    source_start % section_length
+                } else {
+                    source_start
+                };
+                let mut remaining = (kept_end - kept_start) as u64;
+                let mut destination_cursor = self
+                    .clock
+                    .arrange_start_samples
+                    .saturating_add((kept_start - i128::from(self.engine_start_samples)) as u64);
+                while remaining > 0 && source_cursor < section_length {
+                    let segment_length = remaining.min(section_length - source_cursor);
+                    append_track_window(
+                        result.by_track.entry(*track_id).or_default(),
+                        content,
+                        &span.source,
+                        source_cursor,
+                        source_cursor + segment_length,
+                        destination_cursor,
+                        samples_per_beat,
+                    );
+                    remaining -= segment_length;
+                    destination_cursor = destination_cursor.saturating_add(segment_length);
+                    if remaining == 0 || !span.source.looping {
+                        break;
+                    }
+                    source_cursor = 0;
+                }
             }
         }
 
@@ -516,7 +551,7 @@ impl CaptureState {
         let Some(session) = &mut self.session else {
             return;
         };
-        close_active_span(session, effective_at_samples);
+        close_active_span(session, effective_at_samples, true);
         session.active = Some(ActiveSpan {
             source,
             effective_start_samples: effective_at_samples,
@@ -535,7 +570,7 @@ impl CaptureState {
             return;
         };
         if let Some(active) = session.active_clips.remove(&track_id) {
-            close_span(&mut session.spans, active, effective_at_samples);
+            close_span(&mut session.spans, active, effective_at_samples, true);
         }
         if let Some(source) = source {
             session.active_clips.insert(
@@ -549,14 +584,20 @@ impl CaptureState {
         }
     }
 
+    pub fn end_source(&mut self, effective_at_samples: u64) {
+        if let Some(session) = &mut self.session {
+            close_active_span(session, effective_at_samples, true);
+        }
+    }
+
     pub fn finish(&mut self, effective_at_samples: u64) -> Option<CompletedCapture> {
         let Some(mut session) = self.session.take() else {
             self.cancel();
             return None;
         };
-        close_active_span(&mut session, effective_at_samples);
+        close_active_span(&mut session, effective_at_samples, false);
         for (_, active) in session.active_clips.drain() {
-            close_span(&mut session.spans, active, effective_at_samples);
+            close_span(&mut session.spans, active, effective_at_samples, false);
         }
         let performance = session.performance.finish(effective_at_samples);
         self.phase = CapturePhase::Idle;
@@ -584,21 +625,34 @@ impl CaptureState {
     }
 }
 
-fn close_active_span(session: &mut CaptureSession, effective_end_samples: u64) {
+fn close_active_span(
+    session: &mut CaptureSession,
+    effective_end_samples: u64,
+    end_follows_source: bool,
+) {
     let Some(active) = session.active.take() else {
         return;
     };
-    close_span(&mut session.spans, active, effective_end_samples);
+    close_span(
+        &mut session.spans,
+        active,
+        effective_end_samples,
+        end_follows_source,
+    );
 }
 
 fn close_span(
     spans: &mut Vec<CapturedTimelineSpan>,
     active: ActiveSpan,
     effective_end_samples: u64,
+    end_follows_source: bool,
 ) {
-    if effective_end_samples > active.effective_start_samples {
+    if effective_end_samples > active.effective_start_samples
+        || (!end_follows_source && active.source.direct_leads.iter().any(|(_, lead)| *lead > 0))
+    {
         spans.push(CapturedTimelineSpan {
             source: active.source,
+            end_follows_source,
             effective_start_samples: active.effective_start_samples,
             effective_end_samples,
             source_start_samples: active.source_start_samples,
@@ -614,8 +668,9 @@ fn samples_per_beat(sample_rate: u32, bpm: f64) -> f64 {
     }
 }
 
-fn append_timeline_window(
-    destination: &mut HashMap<TrackId, TrackTimelineContent>,
+fn append_track_window(
+    destination: &mut TrackTimelineContent,
+    content: &TrackTimelineContent,
     source: &CapturedTimelineSource,
     window_start_samples: u64,
     window_end_samples: u64,
@@ -626,104 +681,94 @@ fn append_timeline_window(
     let window_end_beats = window_end_samples as f64 / samples_per_beat;
     let destination_start_beats = destination_start_samples as f64 / samples_per_beat;
 
-    for (track_id, content) in &source.timeline.by_track {
-        for clip in &content.clips {
-            let overlap_start = clip.position.max(window_start_samples);
-            let overlap_end = clip
-                .position
-                .saturating_add(clip.duration)
-                .min(window_end_samples);
-            if overlap_end <= overlap_start {
-                continue;
-            }
-            let delta = overlap_start - clip.position;
-            let fragment_duration = overlap_end - overlap_start;
-            let (fragment_start, fragment_start_marker, fragment_warp_markers) =
-                clip.warp_geometry_for_fragment(delta, fragment_duration);
-            let mut fragment = UiClip {
-                id: ClipId::new(),
-                name: if source.name == clip.name {
-                    format!("Capture · {}", clip.name)
-                } else {
-                    format!("Capture · {} · {}", source.name, clip.name)
-                },
-                audio: Arc::clone(&clip.audio),
-                source: clip.source.clone(),
-                position: destination_start_samples + (overlap_start - window_start_samples),
-                source_offset: fragment_start,
-                start_marker: fragment_start_marker,
-                duration: fragment_duration,
-                loop_enabled: clip.loop_enabled,
-                loop_start: clip.loop_start,
-                loop_end: clip.loop_end,
-                gain_db: clip.gain_db,
-                fades: clip.fades,
-                playback_direction: clip.playback_direction,
-                transient_markers: clip.transient_markers.clone(),
-                warp_markers: fragment_warp_markers,
-                transpose: clip.transpose,
-                original_bpm: clip.original_bpm,
-                warped: clip.warped,
-                warped_to_bpm: clip.warped_to_bpm,
-                original_audio: clip.original_audio.as_ref().map(Arc::clone),
-            };
-            fragment.fades = clip
-                .fades
-                .for_fragment(clip.duration, delta, fragment.duration);
-            fragment
-                .transient_markers
-                .retain_source_range(fragment.source_offset, fragment.source_end());
-            if fragment.loop_enabled && fragment.loop_end <= fragment.loop_start {
-                fragment.loop_enabled = false;
-            }
-            destination
-                .entry(*track_id)
-                .or_default()
-                .clips
-                .push(fragment);
+    for clip in &content.clips {
+        let overlap_start = clip.position.max(window_start_samples);
+        let overlap_end = clip
+            .position
+            .saturating_add(clip.duration)
+            .min(window_end_samples);
+        if overlap_end <= overlap_start {
+            continue;
         }
-
-        for clip in &content.note_clips {
-            let clip_end = clip.position_beats + clip.duration_beats;
-            let overlap_start = clip.position_beats.max(window_start_beats);
-            let overlap_end = clip_end.min(window_end_beats);
-            if overlap_end <= overlap_start {
-                continue;
-            }
-            let local_start = overlap_start - clip.position_beats;
-            let local_end = overlap_end - clip.position_beats;
-            let notes = captured_visible_notes(clip, local_start, local_end);
-            let fragment = UiNoteClip {
-                id: ClipId::new(),
-                name: if source.name == clip.name {
-                    format!("Capture · {}", clip.name)
-                } else {
-                    format!("Capture · {} · {}", source.name, clip.name)
-                },
-                position_beats: destination_start_beats + (overlap_start - window_start_beats),
-                duration_beats: overlap_end - overlap_start,
-                notes,
-                selected_notes: Default::default(),
-                start_marker_beats: 0.0,
-                loop_enabled: false,
-                loop_start_beats: 0.0,
-                loop_end_beats: 0.0,
-                groove_grid: clip.groove_grid,
-            };
-            destination
-                .entry(*track_id)
-                .or_default()
-                .note_clips
-                .push(fragment);
+        let delta = overlap_start - clip.position;
+        let fragment_duration = overlap_end - overlap_start;
+        let (fragment_start, fragment_start_marker, fragment_warp_markers) =
+            clip.warp_geometry_for_fragment(delta, fragment_duration);
+        let mut fragment = UiClip {
+            id: ClipId::new(),
+            name: if source.name == clip.name {
+                format!("Capture · {}", clip.name)
+            } else {
+                format!("Capture · {} · {}", source.name, clip.name)
+            },
+            audio: Arc::clone(&clip.audio),
+            source: clip.source.clone(),
+            position: destination_start_samples + (overlap_start - window_start_samples),
+            source_offset: fragment_start,
+            start_marker: fragment_start_marker,
+            duration: fragment_duration,
+            loop_enabled: clip.loop_enabled,
+            loop_start: clip.loop_start,
+            loop_end: clip.loop_end,
+            gain_db: clip.gain_db,
+            fades: clip.fades,
+            playback_direction: clip.playback_direction,
+            transient_markers: clip.transient_markers.clone(),
+            warp_markers: fragment_warp_markers,
+            transpose: clip.transpose,
+            original_bpm: clip.original_bpm,
+            warped: clip.warped,
+            warped_to_bpm: clip.warped_to_bpm,
+            original_audio: clip.original_audio.as_ref().map(Arc::clone),
+        };
+        fragment.fades = clip
+            .fades
+            .for_fragment(clip.duration, delta, fragment.duration);
+        fragment
+            .transient_markers
+            .retain_source_range(fragment.source_offset, fragment.source_end());
+        if fragment.loop_enabled && fragment.loop_end <= fragment.loop_start {
+            fragment.loop_enabled = false;
         }
-        performance_log::append_automation_window(
-            destination.entry(*track_id).or_default(),
-            content,
-            window_start_beats,
-            window_end_beats,
-            destination_start_beats,
-        );
+        destination.clips.push(fragment);
     }
+
+    for clip in &content.note_clips {
+        let clip_end = clip.position_beats + clip.duration_beats;
+        let overlap_start = clip.position_beats.max(window_start_beats);
+        let overlap_end = clip_end.min(window_end_beats);
+        if overlap_end <= overlap_start {
+            continue;
+        }
+        let local_start = overlap_start - clip.position_beats;
+        let local_end = overlap_end - clip.position_beats;
+        let notes = captured_visible_notes(clip, local_start, local_end);
+        let fragment = UiNoteClip {
+            id: ClipId::new(),
+            name: if source.name == clip.name {
+                format!("Capture · {}", clip.name)
+            } else {
+                format!("Capture · {} · {}", source.name, clip.name)
+            },
+            position_beats: destination_start_beats + (overlap_start - window_start_beats),
+            duration_beats: overlap_end - overlap_start,
+            notes,
+            selected_notes: Default::default(),
+            start_marker_beats: 0.0,
+            loop_enabled: false,
+            loop_start_beats: 0.0,
+            loop_end_beats: 0.0,
+            groove_grid: clip.groove_grid,
+        };
+        destination.note_clips.push(fragment);
+    }
+    performance_log::append_automation_window(
+        destination,
+        content,
+        window_start_beats,
+        window_end_beats,
+        destination_start_beats,
+    );
 }
 
 pub(crate) fn captured_audio_offset(clip: &UiClip, timeline_delta: u64) -> u64 {
@@ -759,423 +804,15 @@ pub(crate) fn captured_visible_notes(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use vibez_core::audio_buffer::DecodedAudio;
-    use vibez_core::perform::GrooveGrid;
-
-    fn audio_section(name: &str, length_beats: f64, frames: u64) -> Section {
-        let mut section = Section::new(0);
-        section.name = name.into();
-        section.length_beats = length_beats;
-        let track_id = TrackId::new();
-        Arc::make_mut(&mut section.timeline)
-            .ensure(track_id)
-            .clips
-            .push(UiClip {
-                id: ClipId::new(),
-                name: format!("{name} Audio"),
-                audio: Arc::new(DecodedAudio {
-                    channels: vec![vec![0.5; frames as usize]],
-                    sample_rate: 8,
-                }),
-                source: None,
-                position: 0,
-                source_offset: 0,
-                start_marker: 0,
-                duration: frames,
-                loop_enabled: false,
-                loop_start: 0,
-                loop_end: 0,
-                gain_db: Default::default(),
-                fades: Default::default(),
-                playback_direction: Default::default(),
-                transient_markers: Default::default(),
-                warp_markers: Default::default(),
-                transpose: Default::default(),
-                original_bpm: None,
-                warped: false,
-                warped_to_bpm: None,
-                original_audio: None,
-            });
-        section
-    }
-
-    fn midi_section(name: &str, track_id: TrackId, pitch: u8) -> Section {
-        let mut section = Section::new(0);
-        section.name = name.into();
-        section.length_beats = 4.0;
-        Arc::make_mut(&mut section.timeline)
-            .ensure(track_id)
-            .note_clips
-            .push(UiNoteClip {
-                id: ClipId::new(),
-                name: format!("{name} Notes"),
-                position_beats: 0.0,
-                duration_beats: 4.0,
-                notes: vec![MidiNote {
-                    pitch,
-                    velocity: 100,
-                    start_beat: 0.0,
-                    duration_beats: 0.25,
-                }],
-                selected_notes: Default::default(),
-                start_marker_beats: 0.0,
-                loop_enabled: false,
-                loop_start_beats: 0.0,
-                loop_end_beats: 0.0,
-                groove_grid: GrooveGrid::Sixteenth,
-            });
-        section
-    }
-
-    fn starting_capture() -> CaptureState {
-        CaptureState {
-            phase: CapturePhase::Starting,
-            ..CaptureState::default()
-        }
-    }
-
-    #[test]
-    fn effective_mid_buffer_boundaries_become_exact_arrange_positions() {
-        let first = audio_section("Groove A", 4.0, 16);
-        let second = audio_section("Groove B", 4.0, 16);
-        let track_id = *first.timeline.by_track.keys().next().unwrap();
-        let mut second = second;
-        let second_track_id = *second.timeline.by_track.keys().next().unwrap();
-        let second_content = Arc::make_mut(&mut second.timeline)
-            .by_track
-            .remove(&second_track_id)
-            .unwrap();
-        Arc::make_mut(&mut second.timeline)
-            .by_track
-            .insert(track_id, second_content);
-
-        let mut capture = starting_capture();
-        capture.prepare(40, 8, 120.0);
-        capture.start(3, Some((CapturedTimelineSource::from_section(&first), 0)));
-        assert_eq!(capture.arrange_start_samples(), Some(40));
-        capture.transition(CapturedTimelineSource::from_section(&second), 10);
-        let completed = capture.finish(15).unwrap();
-        assert_eq!(capture.arrange_start_samples(), None);
-        let materialized = completed.materialize();
-        let clips = &materialized.by_track[&track_id].clips;
-
-        assert_eq!(clips.len(), 2);
-        assert_eq!((clips[0].position, clips[0].duration), (40, 7));
-        assert_eq!((clips[1].position, clips[1].duration), (47, 5));
-        assert_eq!(materialized.arrange_end_samples, 52);
-    }
-
-    #[test]
-    fn source_refresh_resnapshots_at_the_exact_local_playhead() {
-        let first = audio_section("Before edit", 4.0, 16);
-        let track_id = *first.timeline.by_track.keys().next().unwrap();
-        let mut refreshed = audio_section("After edit", 4.0, 16);
-        let refreshed_track = *refreshed.timeline.by_track.keys().next().unwrap();
-        let content = Arc::make_mut(&mut refreshed.timeline)
-            .by_track
-            .remove(&refreshed_track)
-            .unwrap();
-        Arc::make_mut(&mut refreshed.timeline)
-            .by_track
-            .insert(track_id, content);
-
-        let mut capture = starting_capture();
-        capture.prepare(0, 8, 120.0);
-        capture.start(0, Some((CapturedTimelineSource::from_section(&first), 0)));
-        capture.refresh(CapturedTimelineSource::from_section(&refreshed), 4, 4);
-        let materialized = capture.finish(8).unwrap().materialize();
-        let clips = &materialized.by_track[&track_id].clips;
-
-        assert_eq!(clips.len(), 2);
-        assert_eq!(
-            (clips[0].position, clips[0].source_offset, clips[0].duration),
-            (0, 0, 4)
-        );
-        assert_eq!(
-            (clips[1].position, clips[1].source_offset, clips[1].duration),
-            (4, 4, 4)
-        );
-        assert!(clips[0].name.contains("Before edit"));
-        assert!(clips[1].name.contains("After edit"));
-    }
-
-    #[test]
-    fn looping_section_is_flattened_into_independent_linear_passes() {
-        let mut section = audio_section("Groove A", 1.0, 4);
-        section.looping = true;
-        let track_id = *section.timeline.by_track.keys().next().unwrap();
-        let mut capture = starting_capture();
-        capture.prepare(0, 8, 120.0);
-        capture.start(0, Some((CapturedTimelineSource::from_section(&section), 0)));
-        let clips = &capture.finish(10).unwrap().materialize().by_track[&track_id].clips;
-
-        assert_eq!(clips.len(), 3);
-        assert_eq!(
-            clips.iter().map(|clip| clip.position).collect::<Vec<_>>(),
-            [0, 4, 8]
-        );
-        assert_eq!(
-            clips.iter().map(|clip| clip.duration).collect::<Vec<_>>(),
-            [4, 4, 2]
-        );
-        assert!(clips.windows(2).all(|pair| pair[0].id != pair[1].id));
-    }
-
-    #[test]
-    fn midi_sections_keep_effective_transition_alignment_and_groove_identity() {
-        let track_id = TrackId::new();
-        let first = midi_section("Groove A", track_id, 36);
-        let second = midi_section("Groove B", track_id, 38);
-        let source_ids = [
-            first.timeline.get(track_id).unwrap().note_clips[0].id,
-            second.timeline.get(track_id).unwrap().note_clips[0].id,
-        ];
-        let mut capture = starting_capture();
-        capture.prepare(8, 8, 120.0);
-        capture.start(0, Some((CapturedTimelineSource::from_section(&first), 0)));
-        capture.transition(CapturedTimelineSource::from_section(&second), 5);
-        let clips = &capture.finish(9).unwrap().materialize().by_track[&track_id].note_clips;
-
-        assert_eq!(clips.len(), 2);
-        assert!((clips[0].position_beats - 2.0).abs() < 1e-9);
-        assert!((clips[0].duration_beats - 1.25).abs() < 1e-9);
-        assert!((clips[1].position_beats - 3.25).abs() < 1e-9);
-        assert_eq!([clips[0].notes[0].pitch, clips[1].notes[0].pitch], [36, 38]);
-        assert!(clips
-            .iter()
-            .all(|clip| clip.groove_grid == GrooveGrid::Sixteenth));
-        assert!(clips.iter().all(|clip| !source_ids.contains(&clip.id)));
-    }
-
-    #[test]
-    fn coincident_live_and_section_notes_are_both_preserved_without_source_mutation() {
-        let track_id = TrackId::new();
-        let section = midi_section("Layer", track_id, 36);
-        let source_id = section.timeline.get(track_id).unwrap().note_clips[0].id;
-        let mut capture = starting_capture();
-        capture.prepare(0, 8, 120.0);
-        capture.prepare_controlled_tracks([(track_id, false)]);
-        capture.start(0, Some((CapturedTimelineSource::from_section(&section), 0)));
-        capture.input_note(track_id, 36, 127, true, 0);
-        capture.input_note(track_id, 36, 0, false, 1);
-
-        let materialized = capture.finish(4).unwrap().materialize();
-        let clips = &materialized.by_track[&track_id].note_clips;
-        assert_eq!(
-            clips
-                .iter()
-                .flat_map(|clip| &clip.notes)
-                .filter(|note| note.pitch == 36)
-                .count(),
-            2
-        );
-        assert_eq!(
-            section.timeline.get(track_id).unwrap().note_clips[0].id,
-            source_id
-        );
-        assert!(clips.iter().all(|clip| clip.id != source_id));
-    }
-
-    #[test]
-    fn transition_reported_after_stop_cannot_extend_the_capture() {
-        let first = audio_section("Groove A", 4.0, 16);
-        let second = audio_section("Groove B", 4.0, 16);
-        let track_id = *first.timeline.by_track.keys().next().unwrap();
-        let mut capture = starting_capture();
-        capture.prepare(0, 8, 120.0);
-        capture.start(0, Some((CapturedTimelineSource::from_section(&first), 0)));
-        let completed = capture.finish(4).unwrap();
-        capture.transition(CapturedTimelineSource::from_section(&second), 6);
-
-        let clips = &completed.materialize().by_track[&track_id].clips;
-        assert_eq!(clips.len(), 1);
-        assert_eq!((clips[0].position, clips[0].duration), (0, 4));
-        assert_eq!(capture.phase, CapturePhase::Idle);
-    }
-
-    #[test]
-    fn source_edits_after_transition_cannot_rewrite_capture_snapshot() {
-        let mut section = audio_section("Breakdown", 4.0, 16);
-        let track_id = *section.timeline.by_track.keys().next().unwrap();
-        let mut capture = starting_capture();
-        capture.prepare(20, 8, 120.0);
-        capture.start(
-            100,
-            Some((CapturedTimelineSource::from_section(&section), 0)),
-        );
-        Arc::make_mut(&mut section.timeline)
-            .ensure(track_id)
-            .clips
-            .clear();
-
-        let materialized = capture.finish(108).unwrap().materialize();
-        assert_eq!(materialized.by_track[&track_id].clips.len(), 1);
-        assert!(section.timeline.get(track_id).unwrap().clips.is_empty());
-    }
-
-    #[test]
-    fn effective_mute_event_materializes_as_steps_with_start_and_closing_state() {
-        let track_id = TrackId::new();
-        let section = midi_section("Groove A", track_id, 36);
-        let mut capture = starting_capture();
-        capture.prepare(40, 8, 120.0);
-        capture.prepare_controlled_tracks([(track_id, false)]);
-        capture.start(
-            100,
-            Some((CapturedTimelineSource::from_section(&section), 0)),
-        );
-        capture.track_mute_changed(track_id, true, 103);
-        // A Section transition while held must not synthesize another gesture.
-        capture.transition(CapturedTimelineSource::from_section(&section), 105);
-        let materialized = capture.finish(110).unwrap().materialize();
-        let lane = materialized.by_track[&track_id]
-            .automation
-            .iter()
-            .find(|lane| lane.target == AutomationTarget::TrackMute)
-            .unwrap();
-
-        assert_eq!(
-            lane.points
-                .iter()
-                .map(|point| (point.beat, point.value))
-                .collect::<Vec<_>>(),
-            [(10.0, 0.0), (10.75, 1.0), (12.5, 0.0)]
-        );
-        assert_eq!(lane.value_at(10.5), Some(0.0));
-        assert_eq!(lane.value_at(11.0), Some(1.0));
-        assert_eq!(lane.value_at(12.5), Some(0.0));
-    }
-}
+#[path = "capture_clip_tests.rs"]
+mod clip_capture_tests;
+#[cfg(test)]
+#[path = "capture_compensation_tests.rs"]
+mod compensation_tests;
+#[cfg(test)]
+#[path = "capture_tests.rs"]
+mod tests;
 
 #[cfg(test)]
-mod clip_capture_tests {
-    use super::*;
-    use crate::domains::perform::LauncherClip;
-
-    fn source(track_id: TrackId, pitch: u8, beats: f64) -> LauncherClip {
-        let id = ClipId::new();
-        let mut timeline = ArrangementTimeline::default();
-        timeline.ensure(track_id).note_clips.push(UiNoteClip {
-            id,
-            name: "Part".into(),
-            position_beats: 0.0,
-            duration_beats: beats,
-            notes: vec![MidiNote {
-                pitch,
-                velocity: 100,
-                start_beat: 0.0,
-                duration_beats: beats,
-            }],
-            selected_notes: Default::default(),
-            start_marker_beats: 0.0,
-            loop_enabled: true,
-            loop_start_beats: 0.0,
-            loop_end_beats: beats,
-            groove_grid: Default::default(),
-        });
-        LauncherClip {
-            id,
-            track_id,
-            row: 0,
-            timeline: Arc::new(timeline),
-        }
-    }
-
-    #[test]
-    fn independent_combinations_capture_mid_loop_replacements_and_silence() {
-        let bass = TrackId::new();
-        let hat = TrackId::new();
-        let mut bass_clip = source(bass, 36, 4.0);
-        let hat_clip = source(hat, 42, 1.0);
-        let replacement = source(bass, 40, 2.0);
-        let mut capture = CaptureState::default();
-        capture.update(CaptureMsg::Toggle);
-        capture.prepare(40, 8, 120.0);
-        capture.prepare_controlled_tracks([(bass, false), (hat, false)]);
-        capture.start(6, None);
-        capture.clip_transition(
-            bass,
-            Some(CapturedTimelineSource::from_clip(&bass_clip, 4.0)),
-            6,
-            6,
-        );
-        capture.clip_transition(
-            hat,
-            Some(CapturedTimelineSource::from_clip(&hat_clip, 4.0)),
-            8,
-            0,
-        );
-        capture.clip_transition(hat, None, 12, 0);
-        capture.clip_transition(
-            bass,
-            Some(CapturedTimelineSource::from_clip(&replacement, 4.0)),
-            16,
-            0,
-        );
-        Arc::make_mut(&mut bass_clip.timeline)
-            .ensure(bass)
-            .note_clips[0]
-            .notes[0]
-            .pitch = 99;
-        let take = capture.finish(20).unwrap().materialize();
-        assert_eq!(
-            (take.arrange_start_samples, take.arrange_end_samples),
-            (40, 54)
-        );
-        let bass_notes = &take.by_track[&bass].note_clips;
-        assert_eq!(bass_notes.len(), 2);
-        assert_eq!(
-            (bass_notes[0].position_beats, bass_notes[0].duration_beats),
-            (10.0, 2.5)
-        );
-        assert_eq!(bass_notes[0].notes[0].pitch, 36);
-        assert_eq!(
-            (bass_notes[1].position_beats, bass_notes[1].duration_beats),
-            (12.5, 1.0)
-        );
-        assert_eq!(bass_notes[1].notes[0].pitch, 40);
-        let hats = &take.by_track[&hat].note_clips;
-        assert_eq!(hats.len(), 1);
-        assert_eq!(
-            (hats[0].position_beats, hats[0].duration_beats),
-            (10.5, 1.0)
-        );
-        assert_ne!(hats[0].id, hat_clip.id);
-        assert!(take.controlled_track_ids.contains(&hat));
-    }
-
-    #[test]
-    fn independent_loops_flatten_without_moving_other_tracks_boundaries() {
-        let a = TrackId::new();
-        let b = TrackId::new();
-        let mut capture = CaptureState::default();
-        capture.update(CaptureMsg::Toggle);
-        capture.prepare(0, 8, 120.0);
-        capture.start(0, None);
-        capture.clip_transition(
-            a,
-            Some(CapturedTimelineSource::from_clip(&source(a, 36, 1.0), 4.0)),
-            0,
-            0,
-        );
-        capture.clip_transition(
-            b,
-            Some(CapturedTimelineSource::from_clip(&source(b, 48, 3.0), 4.0)),
-            2,
-            0,
-        );
-        let take = capture.finish(14).unwrap().materialize();
-        let a_clips = &take.by_track[&a].note_clips;
-        assert_eq!(
-            a_clips
-                .iter()
-                .map(|clip| (clip.position_beats, clip.duration_beats))
-                .collect::<Vec<_>>(),
-            [(0.0, 1.0), (1.0, 1.0), (2.0, 1.0), (3.0, 0.5)]
-        );
-        assert_eq!(take.by_track[&b].note_clips.len(), 1);
-        assert_eq!(take.by_track[&b].note_clips[0].position_beats, 0.5);
-    }
-}
+#[path = "capture_replay_tests.rs"]
+mod replay_tests;

@@ -1,5 +1,8 @@
 mod about;
 mod app;
+#[cfg(feature = "dev-gallery")]
+#[doc(hidden)]
+pub mod dev_gallery;
 mod domains;
 pub mod icons;
 mod message;

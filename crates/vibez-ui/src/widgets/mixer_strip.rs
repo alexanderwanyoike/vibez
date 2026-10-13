@@ -26,6 +26,7 @@ pub enum StripRole {
 
 /// Per-render inputs that are not part of the project-owned channel itself.
 pub struct MixerStripView<'a> {
+    pub peaks: (f32, f32),
     pub selected: bool,
     pub editing_name: bool,
     pub edit_text: &'a str,
@@ -121,8 +122,8 @@ pub fn view_mixer_strip<'a>(
 
     // VU meter (wider)
     let meter = VuMeterWidget {
-        peak_l: track.peak_l,
-        peak_r: track.peak_r,
+        peak_l: view.peaks.0,
+        peak_r: view.peaks.1,
     };
     let meter_canvas: Element<'_, Message> = canvas(meter)
         .width(Length::Fixed(24.0))

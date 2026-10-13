@@ -20,6 +20,8 @@ pub struct State {
     pub destroys: Cell<usize>,
     pub parent_alive_at_destroy: Cell<bool>,
     pub size: Cell<(u32, u32)>,
+    /// Result of `gui.show()`; nih-plug editors return false when embedded.
+    pub show_result: Cell<bool>,
 }
 
 impl State {
@@ -37,6 +39,7 @@ impl State {
             destroys: Cell::new(0),
             parent_alive_at_destroy: Cell::new(false),
             size: Cell::new((320, 240)),
+            show_result: Cell::new(true),
         }
     }
 
@@ -133,6 +136,9 @@ unsafe extern "C" fn set_parent(plugin: *const clap_plugin, parent: *const clap_
     });
     true
 }
+unsafe extern "C" fn show(plugin: *const clap_plugin) -> bool {
+    state(plugin).show_result.get()
+}
 static GUI: clap_plugin_gui = clap_plugin_gui {
     is_api_supported: Some(supports),
     get_preferred_api: None,
@@ -147,7 +153,7 @@ static GUI: clap_plugin_gui = clap_plugin_gui {
     set_parent: Some(set_parent),
     set_transient: None,
     suggest_title: None,
-    show: None,
+    show: Some(show),
     hide: None,
 };
 pub struct Clap<'a> {

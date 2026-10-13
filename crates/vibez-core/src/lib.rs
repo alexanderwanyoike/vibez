@@ -1,4 +1,5 @@
 pub mod audio_buffer;
+pub mod audio_context;
 pub mod audio_format;
 pub mod automation;
 pub mod clip_timeline;
@@ -8,6 +9,7 @@ pub mod id;
 pub mod midi;
 pub mod onset;
 pub mod perform;
+pub mod routing;
 pub mod time;
 pub mod track;
 pub mod transient;

@@ -4,6 +4,9 @@ use super::*;
 use crate::playback_source::ArrangementPlaybackSource;
 use vibez_core::constants::{DEFAULT_TRACK_GAIN, DEFAULT_TRACK_PAN};
 
+#[cfg(test)]
+thread_local! { static SEND_SCAN_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }
+
 impl EngineTrack {
     pub fn new(id: TrackId) -> Self {
         Self::with_playback_source(id, ArrangementPlaybackSource::prepare_empty())
@@ -44,6 +47,22 @@ impl EngineTrack {
 
     /// Apply automation at `beat`; return gain and pan mix overrides.
     pub fn apply_automation(&mut self, beat: f64) -> (Option<f32>, Option<f32>) {
+        self.apply_scoped_automation(beat, None)
+    }
+
+    pub(crate) fn apply_node_automation(
+        &mut self,
+        beat: f64,
+        stage: vibez_core::routing::NodeStage,
+    ) -> (Option<f32>, Option<f32>) {
+        self.apply_scoped_automation(beat, Some(stage))
+    }
+
+    fn apply_scoped_automation(
+        &mut self,
+        beat: f64,
+        stage: Option<vibez_core::routing::NodeStage>,
+    ) -> (Option<f32>, Option<f32>) {
         use vibez_core::automation::AutomationTarget;
         let mut gain = None;
         let mut pan = None;
@@ -52,6 +71,12 @@ impl EngineTrack {
         let mut has_mute_lane = false;
         for lane_idx in 0..self.playback_source.automation.len() {
             let lane = &self.playback_source.automation[lane_idx];
+            if let Some(stage) = stage {
+                if crate::compensation_controls::automation_stage(lane.target) != stage {
+                    continue;
+                }
+            }
+
             if lane.target == AutomationTarget::TrackMute {
                 has_mute_lane = true;
             }
@@ -93,7 +118,7 @@ impl EngineTrack {
                     }
                 }
                 AutomationTarget::PluginParam { .. } => {}
-                AutomationTarget::Send { bus_id } => {
+                AutomationTarget::Send { bus_id } if stage.is_none() => {
                     // Send range is native 0..1, so write the value in place.
                     match self.sends.iter_mut().find(|(b, _)| *b == bus_id) {
                         Some(send) => send.1 = value,
@@ -103,16 +128,127 @@ impl EngineTrack {
                 AutomationTarget::TrackGain
                 | AutomationTarget::TrackPan
                 | AutomationTarget::TrackSwingOffset
-                | AutomationTarget::EffectParam { .. } => {}
+                | AutomationTarget::EffectParam { .. }
+                | AutomationTarget::Send { .. } => {}
             }
         }
-        self.automation_swing_offset = swing_offset;
-        if has_mute_lane {
-            self.set_automation_mute(mute, true);
-        } else {
-            self.set_automation_mute(None, true);
+        if stage.is_none() || stage == Some(vibez_core::routing::NodeStage::Source) {
+            self.automation_swing_offset = swing_offset;
+        }
+        if stage.is_none() || stage == Some(vibez_core::routing::NodeStage::AfterFader) {
+            if has_mute_lane {
+                self.set_automation_mute(mute, true);
+            } else {
+                self.set_automation_mute(None, true);
+            }
         }
         (gain, pan)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn take_send_scan_calls() -> usize {
+        SEND_SCAN_CALLS.with(|count| count.replace(0))
+    }
+
+    pub(crate) fn static_send_amount(&self, bus: TrackId) -> f32 {
+        #[cfg(test)]
+        SEND_SCAN_CALLS.with(|count| count.set(count.get() + 1));
+        self.sends
+            .iter()
+            .find(|(id, _)| *id == bus)
+            .map_or(0.0, |(_, value)| *value)
+    }
+
+    pub(crate) fn apply_delayed_automation(
+        &mut self,
+        controls: &[crate::compensation_controls::PreparedAutomationControl],
+        offset: usize,
+        stage: vibez_core::routing::NodeStage,
+    ) -> (Option<f32>, Option<f32>) {
+        use vibez_core::automation::AutomationTarget;
+        if stage == vibez_core::routing::NodeStage::Source {
+            // NaN denotes an absent lane, not a latched automation override.
+            self.automation_swing_offset = None;
+        }
+        let mut gain = None;
+        let mut pan = None;
+        for control in controls {
+            let value = control.values[offset];
+            if value.is_nan() || self.automation_overrides.contains(control.target) {
+                continue;
+            }
+            match control.target {
+                AutomationTarget::TrackGain => gain = Some(value * 2.0),
+                AutomationTarget::TrackPan => pan = Some(value),
+                AutomationTarget::EffectParam {
+                    effect_id,
+                    param_index,
+                } => {
+                    if let Some(slot) = self.effects.iter_mut().find(|slot| slot.id == effect_id) {
+                        let native = slot
+                            .effect
+                            .param_descriptors()
+                            .get(param_index)
+                            .map_or(value, |descriptor| {
+                                descriptor.min + value * (descriptor.max - descriptor.min)
+                            });
+                        slot.effect.set_param(param_index, native);
+                    }
+                }
+                AutomationTarget::InstrumentParam { param_index } => {
+                    if let Some(instrument) = self.instrument.as_mut() {
+                        let native = instrument
+                            .param_descriptors()
+                            .get(param_index)
+                            .map_or(value, |descriptor| {
+                                descriptor.min + value * (descriptor.max - descriptor.min)
+                            });
+                        instrument.set_param(param_index, native);
+                    }
+                }
+                AutomationTarget::TrackSwingOffset => {
+                    self.automation_swing_offset = Some(SwingOffset::from_normalized(value))
+                }
+                _ => {}
+            }
+        }
+        (gain, pan)
+    }
+
+    pub(crate) fn delayed_mix_values(
+        &self,
+        controls: &[crate::compensation_controls::PreparedAutomationControl],
+        offset: usize,
+    ) -> (Option<f32>, Option<f32>) {
+        let mut gain = None;
+        let mut pan = None;
+        for control in controls {
+            let value = control.values[offset];
+            if value.is_nan() || self.automation_overrides.contains(control.target) {
+                continue;
+            }
+            match control.target {
+                vibez_core::automation::AutomationTarget::TrackGain => gain = Some(value * 2.0),
+                vibez_core::automation::AutomationTarget::TrackPan => pan = Some(value),
+                _ => {}
+            }
+        }
+        (gain, pan)
+    }
+
+    pub(crate) fn apply_delayed_mute_envelope(
+        &mut self,
+        values: &[f32],
+        frames: usize,
+        channels: usize,
+    ) {
+        for (frame, &value) in values.iter().take(frames).enumerate() {
+            self.set_automation_mute((!value.is_nan()).then_some(value >= 0.5), false);
+            let gain = self.mute_ramp.next_gain();
+            for sample in &mut self.mix_buffer[frame * channels..(frame + 1) * channels] {
+                *sample *= gain;
+            }
+        }
     }
 
     pub(crate) fn has_automation_target(

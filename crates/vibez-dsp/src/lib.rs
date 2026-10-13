@@ -1,5 +1,6 @@
 pub mod auto_pan;
 pub mod bitcrush;
+pub mod compensation_delay;
 pub mod compressor;
 pub mod delay;
 pub mod drive;

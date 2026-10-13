@@ -1,3 +1,5 @@
+//! Native CLAP lifecycle and allocation-free declared-port processing.
+
 use std::ffi::CString;
 use std::path::Path;
 
@@ -11,7 +13,6 @@ use clap_sys::process::{clap_process, clap_process_status};
 
 use vibez_core::effect::ParamDescriptor;
 
-use crate::buffer::AudioBufferAdapter;
 use crate::instance::PluginInstance;
 
 /// A loaded CLAP plugin instance.
@@ -19,6 +20,7 @@ pub struct ClapPluginInstance {
     name: String,
     is_instrument: bool,
     plugin_ptr: *const clap_plugin,
+    host_ptr: *const clap_sys::host::clap_host,
     _lib: libloading::Library,
     param_descriptors: Vec<ParamDescriptor>,
     param_values: Vec<f32>,
@@ -28,11 +30,26 @@ pub struct ClapPluginInstance {
     param_cookies: Vec<usize>,
     /// (id, cookie, native value) queued for the next process block.
     pending_params: Vec<(u32, usize, f64)>,
-    buffer_adapter: AudioBufferAdapter,
+    input_ports: Vec<(String, crate::audio_ports::AudioPort)>,
+    output_ports: Vec<(String, crate::audio_ports::AudioPort)>,
+    input_buffers: Vec<clap_sys::audio_buffer::clap_audio_buffer>,
+    output_buffers: Vec<clap_sys::audio_buffer::clap_audio_buffer>,
+    external_inputs: Vec<vibez_core::routing::ExternalInputDescriptor>,
+    max_frames: u32,
+    input_events_storage: Vec<ClapNoteEventWrapper>,
+    param_events_storage: Vec<clap_sys::events::clap_event_param_value>,
+    event_headers: Vec<*const clap_event_header>,
     note_events: Vec<NoteEvent>,
     sample_rate: f64,
+    latency_samples: u32,
+    audio_context: Option<vibez_core::audio_context::DeviceAudioContext>,
+    main_thread: std::thread::ThreadId,
     active: bool,
     processing: bool,
+    processing_error: Option<&'static str>,
+    processing_failed: bool,
+    configuration_failed: bool,
+    recovery_attempts: u8,
 }
 
 // Safety: CLAP plugins are expected to be thread-safe for audio processing.
@@ -123,6 +140,17 @@ impl ClapPluginInstance {
         sample_rate: f64,
         max_buffer_size: u32,
     ) -> Result<Self, String> {
+        Self::init_on_main_thread_with_state(partial, sample_rate, max_buffer_size, None, false)
+    }
+
+    /// Restores state while inactive so ports and latency describe the first activation.
+    pub fn init_on_main_thread_with_state(
+        partial: PartialClapPlugin,
+        sample_rate: f64,
+        max_buffer_size: u32,
+        saved_state: Option<&[u8]>,
+        strict_state_restore: bool,
+    ) -> Result<Self, String> {
         let entry_ref = unsafe { &*partial.entry_ptr };
 
         // entry.init() — lightweight, just returns true for clap-juce-extensions
@@ -185,34 +213,79 @@ impl ClapPluginInstance {
         // plugin.init() — on the SAME thread as create_plugin()
         let init_ok = unsafe { (plugin_ref.init.unwrap())(plugin_ptr) };
         if !init_ok {
+            super::host_impl::unregister_host_callbacks(host);
             unsafe { (plugin_ref.destroy.unwrap())(plugin_ptr) };
             return Err("Plugin init() failed".into());
         }
-
-        let (param_descriptors, param_values, param_ids, param_cookies) = query_params(plugin_ptr);
-        let buffer_adapter = AudioBufferAdapter::new(2, max_buffer_size as usize);
 
         let mut instance = Self {
             name,
             is_instrument: partial.is_instrument,
             plugin_ptr,
+            host_ptr: host,
             _lib: partial.lib,
-            param_descriptors,
-            param_values,
-            param_ids,
-            param_cookies,
-            pending_params: Vec::new(),
-            buffer_adapter,
-            note_events: Vec::new(),
+            param_descriptors: Vec::new(),
+            param_values: Vec::new(),
+            param_ids: Vec::new(),
+            param_cookies: Vec::new(),
+            pending_params: Vec::with_capacity(2048),
+            input_ports: Vec::new(),
+            output_ports: Vec::new(),
+            input_buffers: Vec::new(),
+            output_buffers: Vec::new(),
+            external_inputs: Vec::new(),
+            max_frames: max_buffer_size,
+            input_events_storage: Vec::with_capacity(2048),
+            param_events_storage: Vec::with_capacity(2048),
+            event_headers: Vec::with_capacity(4096),
+            note_events: Vec::with_capacity(2048),
             sample_rate,
+            latency_samples: 0,
+            audio_context: None,
+            main_thread: std::thread::current().id(),
             active: false,
             processing: false,
+            processing_error: None,
+            processing_failed: false,
+            configuration_failed: false,
+            recovery_attempts: 0,
         };
 
+        if let Some(state) = saved_state {
+            if !instance.load_state(state) {
+                if strict_state_restore {
+                    return Err(format!("{} rejected its saved state", instance.name));
+                }
+                eprintln!("vibez: {} rejected saved state", instance.name);
+            }
+        }
+        (
+            instance.param_descriptors,
+            instance.param_values,
+            instance.param_ids,
+            instance.param_cookies,
+        ) = query_params(plugin_ptr);
+        instance.rebuild_ports()?;
         instance.prepare(sample_rate, max_buffer_size);
-        instance.activate();
+        if !instance.activate() {
+            return Err(format!(
+                "{} failed activation or latency preparation",
+                instance.name
+            ));
+        }
 
         Ok(instance)
+    }
+
+    fn rebuild_ports(&mut self) -> Result<(), String> {
+        self.input_ports =
+            unsafe { super::audio_ports::query(self.plugin_ptr, true, self.max_frames as usize) }?;
+        self.output_ports =
+            unsafe { super::audio_ports::query(self.plugin_ptr, false, self.max_frames as usize) }?;
+        self.external_inputs = crate::audio_ports::descriptors(&self.input_ports);
+        self.input_buffers = super::audio_ports::buffers(&mut self.input_ports);
+        self.output_buffers = super::audio_ports::buffers(&mut self.output_ports);
+        Ok(())
     }
 
     /// Single-shot load (convenience — calls both phases on the current thread).
@@ -299,6 +372,73 @@ fn query_params(
 }
 
 impl PluginInstance for ClapPluginInstance {
+    fn set_audio_context(&mut self, context: vibez_core::audio_context::DeviceAudioContext) {
+        if context.sample_rate as f64 != self.sample_rate {
+            self.processing_failed = true;
+            self.configuration_failed = true;
+        }
+        self.audio_context = Some(context);
+    }
+
+    fn processing_failure_is_local(&self) -> bool {
+        self.active && self.processing_failed && !self.configuration_failed
+    }
+
+    fn processing_recovery_requested(&self) -> bool {
+        self.active
+            && self.processing_failed
+            && !self.configuration_failed
+            && self.recovery_attempts < crate::instance::MAX_PROCESSING_RECOVERIES
+    }
+
+    fn reconfiguration_requested(&self) -> bool {
+        let data =
+            unsafe { &*((*self.host_ptr).host_data as *const super::host_impl::ClapHostUserData) };
+        self.processing_recovery_requested()
+            || data
+                .restart_requested
+                .load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    fn stop_for_reconfiguration(&mut self) {
+        self.stop_processing();
+    }
+
+    fn reconfigure_on_main_thread(&mut self) -> Result<(), String> {
+        if self.main_thread != std::thread::current().id() {
+            return Err(format!("{} requires its owning main thread", self.name));
+        }
+        if self.processing {
+            return Err(format!("{} is still processing", self.name));
+        }
+        let data =
+            unsafe { &*((*self.host_ptr).host_data as *const super::host_impl::ClapHostUserData) };
+        data.restart_requested
+            .store(false, std::sync::atomic::Ordering::Release);
+        let _activation = super::host_impl::activation_scope(self.host_ptr);
+        if self.processing_recovery_requested() {
+            self.recovery_attempts += 1;
+        }
+        self.deactivate();
+        self.latency_samples = 0;
+        self.rebuild_ports()?;
+        if !self.activate() {
+            return Err(format!("{} failed to reactivate", self.name));
+        }
+
+        Ok(())
+    }
+
+    fn activation_sample_rate(&self) -> Option<u32> {
+        Some(self.sample_rate as u32)
+    }
+    fn processing_configuration_valid(&self) -> bool {
+        self.active && !self.processing_failed
+    }
+    fn latency_samples(&self) -> u32 {
+        self.latency_samples
+    }
+
     fn name(&self) -> &str {
         &self.name
     }
@@ -321,8 +461,10 @@ impl PluginInstance for ClapPluginInstance {
 
     fn set_param(&mut self, index: usize, value: f32) -> bool {
         if index < self.param_values.len() {
+            if self.pending_params.len() == self.pending_params.capacity() {
+                return false;
+            }
             self.param_values[index] = value;
-            // Deliver as a CLAP param event on the next process block.
             self.pending_params.push((
                 self.param_ids[index],
                 self.param_cookies[index],
@@ -338,16 +480,35 @@ impl PluginInstance for ClapPluginInstance {
         self.param_values.get(index).copied().unwrap_or(0.0)
     }
 
+    fn external_inputs(&self) -> &[vibez_core::routing::ExternalInputDescriptor] {
+        &self.external_inputs
+    }
     fn process_audio(&mut self, buffer: &mut [f32], channels: usize) {
+        self.process_with_inputs(buffer, channels, &[]);
+    }
+    fn process_with_inputs(
+        &mut self,
+        buffer: &mut [f32],
+        channels: usize,
+        inputs: &[vibez_core::routing::ExternalInputBlock<'_>],
+    ) {
         if !self.active || self.plugin_ptr.is_null() {
+            buffer.fill(0.0);
             return;
         }
 
-        super::host_impl::mark_clap_audio_thread();
+        let _audio_role = super::host_impl::audio_role();
+        if !self.processing_configuration_valid() {
+            self.processing_failed = true;
+            buffer.fill(0.0);
+            return;
+        }
         if !self.processing {
             let plugin_ref = unsafe { &*self.plugin_ptr };
             let started = unsafe { (plugin_ref.start_processing.unwrap())(self.plugin_ptr) };
             if !started {
+                self.processing_error = Some("CLAP start_processing failed");
+                self.processing_failed = true;
                 buffer.fill(0.0);
                 return;
             }
@@ -355,16 +516,25 @@ impl PluginInstance for ClapPluginInstance {
         }
 
         let frames = buffer.len() / channels.max(1);
-        if frames == 0 {
+        if frames == 0 || frames > self.max_frames as usize {
             return;
         }
 
-        self.buffer_adapter.deinterleave(buffer, frames);
+        crate::audio_ports::prepare_process_ports(
+            &mut self.input_ports,
+            &mut self.output_ports,
+            buffer,
+            channels,
+            inputs,
+            frames,
+        );
 
         // Build note events — sorted by time for CLAP spec compliance
-        let mut input_events_storage: Vec<ClapNoteEventWrapper> = Vec::new();
+        self.input_events_storage.clear();
+        let input_events_storage = &mut self.input_events_storage;
         // Sort events by frame offset so the plugin sees them in order
-        self.note_events.sort_by_key(|e| e.time);
+        self.note_events
+            .sort_unstable_by_key(|event| (event.time, event.is_on));
         for ne in self.note_events.drain(..) {
             let event = clap_event_note {
                 header: clap_event_header {
@@ -388,11 +558,10 @@ impl PluginInstance for ClapPluginInstance {
         }
 
         // Param events (automation): delivered at block start.
-        let param_events_storage: Vec<clap_sys::events::clap_event_param_value> = self
-            .pending_params
-            .drain(..)
-            .map(
-                |(id, cookie, value)| clap_sys::events::clap_event_param_value {
+        self.param_events_storage.clear();
+        for (id, cookie, value) in self.pending_params.drain(..) {
+            self.param_events_storage
+                .push(clap_sys::events::clap_event_param_value {
                     header: clap_event_header {
                         size: std::mem::size_of::<clap_sys::events::clap_event_param_value>()
                             as u32,
@@ -408,24 +577,23 @@ impl PluginInstance for ClapPluginInstance {
                     channel: -1,
                     key: -1,
                     value,
-                },
-            )
-            .collect();
-
+                });
+        }
+        let param_events_storage = &self.param_events_storage;
         // Merge into one header list: params first (time 0), then the
         // time-sorted notes.
-        let mut event_headers: Vec<*const clap_event_header> =
-            Vec::with_capacity(param_events_storage.len() + input_events_storage.len());
-        for pe in &param_events_storage {
-            event_headers.push(&pe.header as *const clap_event_header);
+        self.event_headers.clear();
+        let event_headers = &mut self.event_headers;
+        for pe in param_events_storage {
+            event_headers.push(&pe.header);
         }
-        for ne in &input_events_storage {
-            event_headers.push(&ne.0.header as *const clap_event_header);
+        for ne in input_events_storage {
+            event_headers.push(&ne.0.header);
         }
 
         // Create input/output event lists
         let input_events = ClapInputEvents {
-            events: &event_headers,
+            events: event_headers,
         };
         let input_events_clap = clap_input_events {
             ctx: &input_events as *const ClapInputEvents as *const std::ffi::c_void
@@ -439,44 +607,42 @@ impl PluginInstance for ClapPluginInstance {
             try_push: Some(output_events_try_push),
         };
 
-        // Set up audio buffers
-        let bufs = self.buffer_adapter.channel_buffers_mut();
-        let mut data_ptrs: Vec<*mut f32> = bufs.iter_mut().map(|b| b.as_mut_ptr()).collect();
-        let mut audio_inputs = [clap_sys::audio_buffer::clap_audio_buffer {
-            data32: data_ptrs.as_mut_ptr(),
-            data64: std::ptr::null_mut(),
-            channel_count: channels as u32,
-            latency: 0,
-            constant_mask: 0,
-        }];
-        let mut audio_outputs = [clap_sys::audio_buffer::clap_audio_buffer {
-            data32: data_ptrs.as_mut_ptr(),
-            data64: std::ptr::null_mut(),
-            channel_count: channels as u32,
-            latency: 0,
-            constant_mask: 0,
-        }];
-
+        let transport = self.audio_context.map(crate::process_context::clap);
         let process = clap_process {
-            steady_time: -1,
+            steady_time: self
+                .audio_context
+                .map_or(-1, |context| context.continuous_sample as i64),
             frames_count: frames as u32,
-            transport: std::ptr::null(),
-            audio_inputs: audio_inputs.as_mut_ptr(),
-            audio_outputs: audio_outputs.as_mut_ptr(),
-            audio_inputs_count: if self.is_instrument { 0 } else { 1 },
-            audio_outputs_count: 1,
+            transport: transport
+                .as_ref()
+                .map_or(std::ptr::null(), |transport| transport as *const _),
+            audio_inputs: self.input_buffers.as_ptr(),
+            audio_outputs: self.output_buffers.as_mut_ptr(),
+            audio_inputs_count: self.input_buffers.len() as u32,
+            audio_outputs_count: self.output_buffers.len() as u32,
             in_events: &input_events_clap,
             out_events: &output_events_clap,
         };
 
         let plugin_ref = unsafe { &*self.plugin_ptr };
-        let _status: clap_process_status =
+        let status: clap_process_status =
             unsafe { (plugin_ref.process.unwrap())(self.plugin_ptr, &process) };
 
-        self.buffer_adapter.interleave(buffer, frames);
+        if status == clap_sys::process::CLAP_PROCESS_ERROR {
+            if !self.processing_failed {
+                self.processing_error = Some("CLAP process returned failure");
+            }
+            self.processing_failed = true;
+            buffer.fill(0.0);
+        } else {
+            crate::audio_ports::copy_process_output(&self.output_ports, buffer, channels, frames);
+        }
     }
 
     fn note_on(&mut self, pitch: u8, velocity: u8) {
+        if self.note_events.len() == self.note_events.capacity() {
+            return;
+        }
         self.note_events.push(NoteEvent {
             is_on: true,
             pitch,
@@ -486,6 +652,9 @@ impl PluginInstance for ClapPluginInstance {
     }
 
     fn note_off(&mut self, pitch: u8) {
+        if self.note_events.len() == self.note_events.capacity() {
+            return;
+        }
         self.note_events.push(NoteEvent {
             is_on: false,
             pitch,
@@ -495,6 +664,9 @@ impl PluginInstance for ClapPluginInstance {
     }
 
     fn note_on_at(&mut self, pitch: u8, velocity: u8, frame_offset: u32) {
+        if self.note_events.len() == self.note_events.capacity() {
+            return;
+        }
         self.note_events.push(NoteEvent {
             is_on: true,
             pitch,
@@ -504,6 +676,9 @@ impl PluginInstance for ClapPluginInstance {
     }
 
     fn note_off_at(&mut self, pitch: u8, frame_offset: u32) {
+        if self.note_events.len() == self.note_events.capacity() {
+            return;
+        }
         self.note_events.push(NoteEvent {
             is_on: false,
             pitch,
@@ -513,15 +688,30 @@ impl PluginInstance for ClapPluginInstance {
     }
 
     fn reset(&mut self) {
+        let _audio_role = super::host_impl::audio_role();
         self.note_events.clear();
+        if self.processing {
+            let plugin = unsafe { &*self.plugin_ptr };
+            if let Some(reset) = plugin.reset {
+                unsafe { reset(self.plugin_ptr) };
+            }
+        }
     }
 
     fn is_instrument(&self) -> bool {
         self.is_instrument
     }
 
-    fn prepare(&mut self, sample_rate: f64, _max_buffer_size: u32) {
+    fn prepare(&mut self, sample_rate: f64, max_buffer_size: u32) {
+        if self.active || self.processing {
+            if sample_rate != self.sample_rate || max_buffer_size != self.max_frames {
+                self.processing_failed = true;
+                self.configuration_failed = true;
+            }
+            return;
+        }
         self.sample_rate = sample_rate;
+        self.max_frames = max_buffer_size;
     }
 
     fn activate(&mut self) -> bool {
@@ -529,15 +719,38 @@ impl PluginInstance for ClapPluginInstance {
             return false;
         }
         let plugin_ref = unsafe { &*self.plugin_ptr };
-        let ok =
-            unsafe { (plugin_ref.activate.unwrap())(self.plugin_ptr, self.sample_rate, 32, 4096) };
+        let _activation = super::host_impl::activation_scope(self.host_ptr);
+        let ok = unsafe {
+            (plugin_ref.activate.unwrap())(self.plugin_ptr, self.sample_rate, 1, self.max_frames)
+        };
         if ok {
             self.active = true;
+            self.processing_failed = false;
+            self.configuration_failed = false;
+            match super::latency::query(self.plugin_ptr) {
+                Ok(samples) => self.latency_samples = samples,
+                Err(_) => {
+                    self.deactivate();
+                    self.latency_samples = 0;
+                    return false;
+                }
+            }
+        }
+        if !ok {
+            self.latency_samples = 0;
         }
         ok
     }
 
+    fn take_processing_error(&mut self) -> Option<&'static str> {
+        self.processing_error.take()
+    }
+
     fn stop_processing(&mut self) {
+        // Exclusive &mut ownership proves the previous worker has yielded.
+        // CLAP permits the symbolic audio role on main during final teardown.
+        let _audio_role = super::host_impl::audio_role();
+
         if self.plugin_ptr.is_null() || !self.processing {
             return;
         }
@@ -560,6 +773,7 @@ impl PluginInstance for ClapPluginInstance {
 impl Drop for ClapPluginInstance {
     fn drop(&mut self) {
         if !self.plugin_ptr.is_null() {
+            super::host_impl::unregister_host_callbacks(self.host_ptr);
             if self.active {
                 self.deactivate();
             }

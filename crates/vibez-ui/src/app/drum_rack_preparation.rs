@@ -200,6 +200,7 @@ mod tests {
             }],
         });
         let project = vibez_project::Project {
+            reduced_latency_monitoring: false,
             tracks: vec![track],
             ..vibez_project::Project::default()
         };
