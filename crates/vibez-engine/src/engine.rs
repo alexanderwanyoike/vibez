@@ -950,6 +950,10 @@ mod presentation_runtime_tests;
 mod time_domain_tests;
 
 #[cfg(test)]
+#[path = "engine_command_allocation_tests.rs"]
+mod command_allocation_tests;
+
+#[cfg(test)]
 #[path = "engine_compensation_presentation_tests.rs"]
 mod compensation_presentation_tests;
 
