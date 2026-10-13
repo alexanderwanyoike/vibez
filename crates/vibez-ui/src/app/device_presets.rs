@@ -83,6 +83,38 @@ mod tests {
     use vibez_core::effect::EffectType;
 
     #[test]
+    fn restoring_a_snapshot_cancels_a_pending_preset_load() {
+        let mut app = super::super::test_support::app();
+        let track = ProjectTrack::new(TrackId::new(), "Bass".into(), 2);
+        let track_id = track.id;
+        Arc::make_mut(&mut app.state.project_tracks)
+            .tracks
+            .push(track);
+        let _ = app.update(Message::Devices(DevicesMsg::AddEffect(
+            track_id,
+            EffectType::Gain,
+        )));
+        let before = app.state.find_track(track_id).unwrap().effects[0].clone();
+        let request = PresetLoadRequest {
+            token: app.device_preset_load_request.begin(),
+            track_id,
+            effect_id: before.id,
+            expected: crate::domains::device_presets::capture(&before, "Current").unwrap(),
+        };
+        let snapshot = app.take_snapshot();
+
+        app.apply_snapshot(snapshot);
+
+        assert!(!app.device_preset_load_request.is_current(request.token));
+        let preset = crate::domains::device_presets::factory_presets(EffectType::Gain)[1].clone();
+        let _ = app.finish_device_preset_load(request, Ok(preset));
+        assert_eq!(
+            app.state.find_track(track_id).unwrap().effects[0].params,
+            before.params
+        );
+    }
+
+    #[test]
     fn only_the_current_async_load_applies_one_undoable_preset() {
         let mut app = super::super::test_support::app();
         let track = ProjectTrack::new(TrackId::new(), "Bass".into(), 2);
