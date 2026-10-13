@@ -44,4 +44,17 @@ mod tests {
             assert_eq!(parse_input(0, invalid), None, "accepted {invalid}");
         }
     }
+
+    #[test]
+    fn trim_entry_preserves_decibels_and_rejects_values_outside_its_range() {
+        for index in [1, 2] {
+            for db in [-24.0, -6.0, 0.0, 6.0, 24.0] {
+                assert_eq!(parse_input(index, &db.to_string()), Some(db));
+            }
+            for invalid in ["-inf", "-∞", "NaN", "inf", "-24.1", "24.1", "oops"] {
+                assert_eq!(parse_input(index, invalid), None, "accepted {invalid}");
+            }
+        }
+        assert_eq!(parse_input(3, "0"), None);
+    }
 }
