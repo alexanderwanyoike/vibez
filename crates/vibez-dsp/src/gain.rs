@@ -4,21 +4,59 @@ use vibez_core::effect::{EffectType, ParamDescriptor};
 
 use crate::effect::AudioEffect;
 
-static GAIN_PARAMS: &[ParamDescriptor] = &[ParamDescriptor {
-    name: "Gain",
-    min: 0.0,
-    max: 2.0,
-    default: 1.0,
-    unit: "x",
-}];
+static GAIN_PARAMS: &[ParamDescriptor] = &[
+    ParamDescriptor {
+        name: "Gain",
+        min: 0.0,
+        max: 2.0,
+        default: 1.0,
+        unit: "x",
+    },
+    ParamDescriptor {
+        name: "L Trim",
+        min: -24.0,
+        max: 24.0,
+        default: 0.0,
+        unit: "dB",
+    },
+    ParamDescriptor {
+        name: "R Trim",
+        min: -24.0,
+        max: 24.0,
+        default: 0.0,
+        unit: "dB",
+    },
+    ParamDescriptor {
+        name: "L Polarity",
+        min: 0.0,
+        max: 1.0,
+        default: 0.0,
+        unit: "",
+    },
+    ParamDescriptor {
+        name: "R Polarity",
+        min: 0.0,
+        max: 1.0,
+        default: 0.0,
+        unit: "",
+    },
+];
 
 pub struct GainEffect {
     gain: f32,
+    trim_db: [f32; 2],
+    inverted: [bool; 2],
+    channel_gains: [f32; 2],
 }
 
 impl Default for GainEffect {
     fn default() -> Self {
-        Self { gain: 1.0 }
+        Self {
+            gain: 1.0,
+            trim_db: [0.0; 2],
+            inverted: [false; 2],
+            channel_gains: [1.0; 2],
+        }
     }
 }
 
@@ -38,25 +76,40 @@ impl AudioEffect for GainEffect {
     }
 
     fn set_param(&mut self, index: usize, value: f32) -> bool {
-        if index == 0 {
-            self.gain = value.clamp(0.0, 2.0);
-            true
-        } else {
-            false
+        match index {
+            0 => self.gain = value.clamp(0.0, 2.0),
+            1 | 2 => self.trim_db[index - 1] = value.clamp(-24.0, 24.0),
+            3 | 4 => self.inverted[index - 3] = value >= 0.5,
+            _ => return false,
         }
+        for channel in 0..2 {
+            let polarity = if self.inverted[channel] { -1.0 } else { 1.0 };
+            self.channel_gains[channel] =
+                self.gain * 10.0_f32.powf(self.trim_db[channel] / 20.0) * polarity;
+        }
+        true
     }
 
     fn get_param(&self, index: usize) -> f32 {
-        if index == 0 {
-            self.gain
-        } else {
-            0.0
+        match index {
+            0 => self.gain,
+            1 | 2 => self.trim_db[index - 1],
+            3 | 4 => {
+                if self.inverted[index - 3] {
+                    1.0
+                } else {
+                    0.0
+                }
+            }
+            _ => 0.0,
         }
     }
 
-    fn process(&mut self, buffer: &mut [f32], _channels: usize) {
-        for sample in buffer.iter_mut() {
-            *sample *= self.gain;
+    fn process(&mut self, buffer: &mut [f32], channels: usize) {
+        for frame in buffer.chunks_mut(channels.max(1)) {
+            for (channel, sample) in frame.iter_mut().enumerate() {
+                *sample *= self.channel_gains.get(channel).copied().unwrap_or(self.gain);
+            }
         }
     }
 
@@ -130,7 +183,7 @@ mod tests {
     #[test]
     fn gain_invalid_param() {
         let mut fx = GainEffect::new();
-        assert!(!fx.set_param(1, 0.5));
-        assert!((fx.get_param(1) - 0.0).abs() < 1e-6);
+        assert!(!fx.set_param(5, 0.5));
+        assert!((fx.get_param(5) - 0.0).abs() < 1e-6);
     }
 }
