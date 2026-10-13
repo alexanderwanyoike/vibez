@@ -253,7 +253,7 @@ fn stopped_count_in_keeps_live_instrument_monitoring() {
     commands.push(EngineCommand::SetSampleRate(8_000)).unwrap();
     commands.push(EngineCommand::SetBpm(120.0)).unwrap();
     commands
-        .push(EngineCommand::AddMidiTrack(track_id, "MIDI".into()))
+        .push(EngineCommand::AddTrack(track_id, "MIDI".into()))
         .unwrap();
     commands
         .push(EngineCommand::set_built_in_instrument(
@@ -368,7 +368,7 @@ fn note_at_block_start_boundary_is_reported_after_recording_starts() {
     commands.push(EngineCommand::SetSampleRate(8)).unwrap();
     commands.push(EngineCommand::SetBpm(120.0)).unwrap();
     commands
-        .push(EngineCommand::AddMidiTrack(track_id, "MIDI".into()))
+        .push(EngineCommand::AddTrack(track_id, "MIDI".into()))
         .unwrap();
     commands
         .push(EngineCommand::LaunchSection(source(
@@ -468,7 +468,7 @@ fn repeated_note_reports_swung_truth_and_straight_canonical_position() {
         .push(EngineCommand::SetProjectSwing(SwingAmount::new(0.75)))
         .unwrap();
     commands
-        .push(EngineCommand::AddMidiTrack(track_id, "Hats".into()))
+        .push(EngineCommand::AddTrack(track_id, "Hats".into()))
         .unwrap();
     commands
         .push(EngineCommand::set_built_in_instrument(
@@ -529,7 +529,7 @@ fn replace_silences_resident_notes_only_until_the_first_section_wrap() {
     commands.push(EngineCommand::SetSampleRate(8)).unwrap();
     commands.push(EngineCommand::SetBpm(120.0)).unwrap();
     commands
-        .push(EngineCommand::AddMidiTrack(track_id, "MIDI".into()))
+        .push(EngineCommand::AddTrack(track_id, "MIDI".into()))
         .unwrap();
     commands
         .push(EngineCommand::SetInstrument {
@@ -616,7 +616,7 @@ fn replace_keeps_live_input_and_note_repeat_audible() {
     commands.push(EngineCommand::SetSampleRate(8)).unwrap();
     commands.push(EngineCommand::SetBpm(120.0)).unwrap();
     commands
-        .push(EngineCommand::AddMidiTrack(track_id, "MIDI".into()))
+        .push(EngineCommand::AddTrack(track_id, "MIDI".into()))
         .unwrap();
     commands
         .push(EngineCommand::SetInstrument {

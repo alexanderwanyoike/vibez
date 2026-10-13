@@ -70,7 +70,7 @@ fn sampler_echo_fixture() -> (BounceRequest, Vec<Command>) {
         params: Vec::new(),
         source: None,
     });
-    commands.push(Command::AddMidiTrack(tid, "Vox".into()));
+    commands.push(Command::AddTrack(tid, "Vox".into()));
     commands.push(Command::set_built_in_instrument(
         tid,
         InstrumentKind::Sampler,

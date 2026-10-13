@@ -84,7 +84,7 @@ fn midi_clip_commands_keep_project_length_in_sync() {
     let track_id = TrackId::new();
     let clip_id = ClipId::new();
     cmd_tx
-        .push(EngineCommand::AddMidiTrack(track_id, "MIDI".into()))
+        .push(EngineCommand::AddTrack(track_id, "MIDI".into()))
         .unwrap();
     cmd_tx
         .push(EngineCommand::AddNoteClip {
@@ -1488,7 +1488,7 @@ fn note_clip_loop_renders() {
     // Set sample rate first so synth is initialized properly
     cmd_tx.push(EngineCommand::SetSampleRate(44_100)).unwrap();
     cmd_tx
-        .push(EngineCommand::AddMidiTrack(tid, "Synth 1".into()))
+        .push(EngineCommand::AddTrack(tid, "Synth 1".into()))
         .unwrap();
     cmd_tx
         .push(EngineCommand::set_built_in_instrument(
@@ -1555,7 +1555,7 @@ fn note_clip_reports_triggered_pitches_for_device_feedback() {
     let clip_id = ClipId::new();
 
     cmd_tx
-        .push(EngineCommand::AddMidiTrack(track_id, "Drums".into()))
+        .push(EngineCommand::AddTrack(track_id, "Drums".into()))
         .unwrap();
     cmd_tx
         .push(EngineCommand::set_built_in_instrument(
@@ -1614,7 +1614,7 @@ fn synth_note_clip_does_not_report_drum_pad_activity() {
     let clip_id = ClipId::new();
 
     cmd_tx
-        .push(EngineCommand::AddMidiTrack(track_id, "Synth".into()))
+        .push(EngineCommand::AddTrack(track_id, "Synth".into()))
         .unwrap();
     cmd_tx
         .push(EngineCommand::set_built_in_instrument(
@@ -1672,7 +1672,7 @@ fn drum_pad_activity_dropped_by_a_full_event_ring_is_not_replayed_late() {
     let track_id = TrackId::new();
     let clip_id = ClipId::new();
     cmd_tx
-        .push(EngineCommand::AddMidiTrack(track_id, "Drums".into()))
+        .push(EngineCommand::AddTrack(track_id, "Drums".into()))
         .unwrap();
     cmd_tx
         .push(EngineCommand::set_built_in_instrument(

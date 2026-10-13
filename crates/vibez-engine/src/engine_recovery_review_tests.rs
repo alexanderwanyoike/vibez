@@ -35,7 +35,7 @@ fn instrument_replacement_with_unchanged_timing_does_not_wait_for_a_topology_edi
     let (mut engine, mut commands, _) = AudioEngine::new();
     let track = TrackId::new();
     commands
-        .push(EngineCommand::AddMidiTrack(track, "Keys".into()))
+        .push(EngineCommand::AddTrack(track, "Keys".into()))
         .unwrap();
     commands
         .push(EngineCommand::SetRouting(routing(track, None)))

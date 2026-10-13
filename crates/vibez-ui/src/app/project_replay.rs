@@ -264,7 +264,7 @@ impl App {
                 self.send_command(EngineCommand::AddTrack(track.id, track.name.clone()));
             }
             TrackKind::Midi | TrackKind::Instrument(_) => {
-                self.send_command(EngineCommand::AddMidiTrack(track.id, track.name.clone()));
+                self.send_command(EngineCommand::AddTrack(track.id, track.name.clone()));
             }
         }
         self.send_command(EngineCommand::SetTrackGain(track.id, track.gain));

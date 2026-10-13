@@ -271,7 +271,7 @@ fn delayed_loadable_one_shot_notes_release_at_an_exact_callback_boundary_and_dra
             instrument.reconfigure_on_main_thread().unwrap();
             commands.push(EngineCommand::SetSampleRate(48000)).unwrap();
             commands
-                .push(EngineCommand::AddMidiTrack(track, "One shot".into()))
+                .push(EngineCommand::AddTrack(track, "One shot".into()))
                 .unwrap();
             commands
                 .push(EngineCommand::SetInstrument {

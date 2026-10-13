@@ -502,7 +502,7 @@ impl App {
                     ));
                 }
                 TrackKind::Midi | TrackKind::Instrument(_) => {
-                    self.send_command(EngineCommand::AddMidiTrack(
+                    self.send_command(EngineCommand::AddTrack(
                         track_info.id,
                         track_info.name.clone(),
                     ));

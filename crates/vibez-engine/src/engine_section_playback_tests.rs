@@ -398,7 +398,7 @@ fn switching_sections_releases_notes_from_the_previous_source() {
     let note_events = Arc::new(Mutex::new(Vec::new()));
     commands.push(EngineCommand::SetSampleRate(8)).unwrap();
     commands
-        .push(EngineCommand::AddMidiTrack(track_id, "MIDI".into()))
+        .push(EngineCommand::AddTrack(track_id, "MIDI".into()))
         .unwrap();
     commands
         .push(EngineCommand::SetInstrument {
@@ -463,7 +463,7 @@ fn live_instrument_note_releases_after_a_section_transition() {
     let track_id = TrackId::new();
     let note_events = Arc::new(Mutex::new(Vec::new()));
     commands
-        .push(EngineCommand::AddMidiTrack(track_id, "MIDI".into()))
+        .push(EngineCommand::AddTrack(track_id, "MIDI".into()))
         .unwrap();
     commands
         .push(EngineCommand::SetInstrument {

@@ -18,7 +18,7 @@ fn repeat_engine() -> (
     commands.push(EngineCommand::SetSampleRate(100)).unwrap();
     commands.push(EngineCommand::SetBpm(60.0)).unwrap();
     commands
-        .push(EngineCommand::AddMidiTrack(track_id, "Hats".into()))
+        .push(EngineCommand::AddTrack(track_id, "Hats".into()))
         .unwrap();
     commands
         .push(EngineCommand::set_built_in_instrument(
@@ -79,7 +79,7 @@ fn stopped_repeat_engine_at(
         .push(EngineCommand::SetProjectSwing(swing))
         .unwrap();
     commands
-        .push(EngineCommand::AddMidiTrack(track_id, "Hats".into()))
+        .push(EngineCommand::AddTrack(track_id, "Hats".into()))
         .unwrap();
     commands
         .push(EngineCommand::set_built_in_instrument(
@@ -436,7 +436,7 @@ fn clip_engine(
         .push(EngineCommand::SetProjectSwing(swing))
         .unwrap();
     commands
-        .push(EngineCommand::AddMidiTrack(track_id, "Clip".into()))
+        .push(EngineCommand::AddTrack(track_id, "Clip".into()))
         .unwrap();
     commands
         .push(EngineCommand::set_built_in_instrument(
@@ -531,7 +531,7 @@ fn render_prepared_section_with_swing(swing: SwingAmount) -> Vec<f32> {
     commands.push(EngineCommand::SetSampleRate(8_000)).unwrap();
     commands.push(EngineCommand::SetBpm(120.0)).unwrap();
     commands
-        .push(EngineCommand::AddMidiTrack(track_id, "Section clip".into()))
+        .push(EngineCommand::AddTrack(track_id, "Section clip".into()))
         .unwrap();
     commands
         .push(EngineCommand::set_built_in_instrument(

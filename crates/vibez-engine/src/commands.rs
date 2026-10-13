@@ -281,8 +281,6 @@ pub enum EngineCommand {
     },
 
     // -- Instrument tracks --
-    /// Add a bare MIDI track (no synth attached).
-    AddMidiTrack(TrackId, String),
     /// Remove the instrument from a track.
     RemoveTrackInstrument(TrackId),
     /// Set note clip duration (for halve/double).

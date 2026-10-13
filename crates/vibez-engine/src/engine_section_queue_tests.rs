@@ -116,7 +116,7 @@ fn immediate_section_launch_reanchors_held_repeat_to_the_section_downbeat() {
         .push(EngineCommand::SetProjectSwing(SwingAmount::new(0.62)))
         .unwrap();
     commands
-        .push(EngineCommand::AddMidiTrack(track_id, "Hats".into()))
+        .push(EngineCommand::AddTrack(track_id, "Hats".into()))
         .unwrap();
     commands
         .push(EngineCommand::set_built_in_instrument(
@@ -169,7 +169,7 @@ fn first_section_launch_reanchors_stopped_held_repeat_to_the_perform_downbeat() 
         .push(EngineCommand::SetProjectSwing(SwingAmount::new(0.62)))
         .unwrap();
     commands
-        .push(EngineCommand::AddMidiTrack(track_id, "Hats".into()))
+        .push(EngineCommand::AddTrack(track_id, "Hats".into()))
         .unwrap();
     commands
         .push(EngineCommand::set_built_in_instrument(

@@ -92,7 +92,6 @@ fn coverage(command: &EngineCommand) -> Coverage {
         | C::SetEffectParam { .. }
         | C::SetEffectBypass { .. }
         | C::MoveEffect { .. }
-        | C::AddMidiTrack(..)
         | C::RemoveTrackInstrument(_)
         | C::SetNoteClipDuration { .. }
         | C::SetNoteClipGrooveGrid { .. }
@@ -232,12 +231,12 @@ fn playing(
     lane.id = f.lane;
     for command in [
         EngineCommand::SetSampleRate(48_000),
-        EngineCommand::AddMidiTrack(f.synth, "Synth".into()),
+        EngineCommand::AddTrack(f.synth, "Synth".into()),
         EngineCommand::set_built_in_instrument(f.synth, InstrumentKind::SubtractiveSynth, 48_000),
-        EngineCommand::AddMidiTrack(f.drums, "Drums".into()),
+        EngineCommand::AddTrack(f.drums, "Drums".into()),
         EngineCommand::set_built_in_instrument(f.drums, InstrumentKind::DrumRack, 48_000),
         EngineCommand::AddTrack(f.audio, "Audio".into()),
-        EngineCommand::AddMidiTrack(f.empty, "Empty".into()),
+        EngineCommand::AddTrack(f.empty, "Empty".into()),
         EngineCommand::AddTrack(f.empty_audio, "Empty audio".into()),
         EngineCommand::AddBus(f.bus, "Bus".into()),
         EngineCommand::insert_built_in_effect(
@@ -494,10 +493,6 @@ fn cases() -> Vec<Case> {
             effect_id: f.effect,
             new_index: 0,
         }),
-        case!("AddMidiTrack", true, |_| C::AddMidiTrack(
-            TrackId::new(),
-            "New".into()
-        )),
         case!(
             "RemoveTrackInstrument",
             false,

@@ -54,7 +54,7 @@ fn engine_with_held_note() -> (
     let tid = TrackId::new();
     let cid = ClipId::new();
     cmd_tx
-        .push(EngineCommand::AddMidiTrack(tid, "midi".into()))
+        .push(EngineCommand::AddTrack(tid, "midi".into()))
         .unwrap();
     cmd_tx
         .push(EngineCommand::SetInstrument {
@@ -129,7 +129,7 @@ fn run_scenario(
     let tid = TrackId::new();
     let cid = ClipId::new();
     cmd_tx
-        .push(EngineCommand::AddMidiTrack(tid, "midi".into()))
+        .push(EngineCommand::AddTrack(tid, "midi".into()))
         .unwrap();
     cmd_tx
         .push(EngineCommand::SetInstrument {
@@ -202,7 +202,7 @@ fn looped_note_ons_per_bar(batch_render: bool) -> Vec<usize> {
     let clip_id = ClipId::new();
     cmd_tx.push(EngineCommand::SetSampleRate(44_100)).unwrap();
     cmd_tx
-        .push(EngineCommand::AddMidiTrack(track_id, "kick".into()))
+        .push(EngineCommand::AddTrack(track_id, "kick".into()))
         .unwrap();
     cmd_tx
         .push(EngineCommand::SetInstrument {
@@ -299,7 +299,7 @@ fn instrument_params_change_the_sound() {
     let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
     let tid = TrackId::new();
     cmd_tx
-        .push(EngineCommand::AddMidiTrack(tid, "midi".into()))
+        .push(EngineCommand::AddTrack(tid, "midi".into()))
         .unwrap();
     cmd_tx
         .push(EngineCommand::set_built_in_instrument(
@@ -347,7 +347,7 @@ fn audition_sounds_while_transport_stopped() {
     let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
     let tid = TrackId::new();
     cmd_tx
-        .push(EngineCommand::AddMidiTrack(tid, "midi".into()))
+        .push(EngineCommand::AddTrack(tid, "midi".into()))
         .unwrap();
     cmd_tx
         .push(EngineCommand::set_built_in_instrument(
@@ -483,7 +483,7 @@ fn editing_a_launcher_pattern_releases_removed_notes_and_preserves_other_voices(
     for command in [
         EngineCommand::SetSampleRate(8),
         EngineCommand::SetBpm(120.0),
-        EngineCommand::AddMidiTrack(track, "Test".into()),
+        EngineCommand::AddTrack(track, "Test".into()),
         EngineCommand::SetInstrument {
             track_id: track,
             instrument: Box::new(SpyInstrument {

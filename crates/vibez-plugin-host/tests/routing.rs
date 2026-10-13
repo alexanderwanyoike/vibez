@@ -214,7 +214,7 @@ fn loaded_instrument_formats_trigger_other_formats_on_the_exact_note_frames() {
                 .push(EngineCommand::AddTrack(bass, "Bass".into()))
                 .unwrap();
             commands
-                .push(EngineCommand::AddMidiTrack(ghost, "Pulse".into()))
+                .push(EngineCommand::AddTrack(ghost, "Pulse".into()))
                 .unwrap();
             commands.push(clip(bass, 0.1, 0.1)).unwrap();
             commands
@@ -327,7 +327,7 @@ fn all_instrument_source_formats_feed_builtins_and_hosted_receivers() {
             commands.push(main).unwrap();
             if source_format == "builtin" {
                 commands
-                    .push(EngineCommand::AddMidiTrack(ghost, "Sampler".into()))
+                    .push(EngineCommand::AddTrack(ghost, "Sampler".into()))
                     .unwrap();
                 commands
                     .push(EngineCommand::set_built_in_instrument(
@@ -348,7 +348,7 @@ fn all_instrument_source_formats_feed_builtins_and_hosted_receivers() {
                     .unwrap();
             } else {
                 commands
-                    .push(EngineCommand::AddMidiTrack(ghost, "Instrument".into()))
+                    .push(EngineCommand::AddTrack(ghost, "Instrument".into()))
                     .unwrap();
                 commands
                     .push(EngineCommand::SetInstrument {

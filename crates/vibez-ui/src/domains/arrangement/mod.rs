@@ -85,7 +85,7 @@ impl ProjectTracksState {
         let name = format!("{prefix} {track_number}");
         let color_index = (track_number.wrapping_sub(1) % 8) as u8;
         let mut track = if kind.is_midi() {
-            engine.send(EngineCommand::AddMidiTrack(id, name.clone()));
+            engine.send(EngineCommand::AddTrack(id, name.clone()));
             ProjectTrack::new_instrument(id, name, kind, color_index)
         } else {
             engine.send(EngineCommand::AddTrack(id, name.clone()));

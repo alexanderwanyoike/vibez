@@ -582,7 +582,6 @@ impl AudioEngine {
                     effect_id,
                     new_index,
                 } => self.command_move_effect(track_id, effect_id, new_index),
-                EngineCommand::AddMidiTrack(id, _name) => self.command_add_midi_track(id, _name),
                 EngineCommand::RemoveTrackInstrument(track_id) => {
                     self.command_remove_track_instrument(track_id)
                 }
