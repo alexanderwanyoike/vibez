@@ -117,3 +117,16 @@ fn gui_keys_resolve_their_owning_track() {
         track_id
     );
 }
+
+#[test]
+fn embedded_clap_editor_opens_when_show_is_declined() {
+    let state = State::new(GuiApi::X11);
+    state.show_result.set(false);
+    let plugin = Clap::new(&state);
+    let mut handle = PluginGuiHandle::Clap(
+        unsafe { ClapGuiHandle::new_for_api(plugin.ptr(), GuiApi::X11) }.unwrap(),
+    );
+    assert!(handle.create_gui());
+    assert!(unsafe { handle.open_embedded(GuiParent::X11(42)) });
+    assert_eq!(state.parent.get() as usize, 42);
+}
