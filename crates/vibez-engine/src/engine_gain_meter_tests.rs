@@ -272,3 +272,158 @@ fn return_and_master_gain_meters_observe_insert_levels_in_both_render_paths() {
         }
     }
 }
+
+#[test]
+fn gain_meter_backpressure_drops_old_windows_without_callback_allocation() {
+    for use_graph in [false, true] {
+        let (mut engine, _commands, mut events, track_id, effect_id) = gain_meter_fixture(use_graph);
+        let loud_input = [0.8, -0.4].repeat(960);
+        let quiet_input = [0.2, -0.1].repeat(960);
+        let mut output = vec![0.0; loud_input.len()];
+        engine.process_block(
+            AudioProcessBlock::new(&mut output, 2).with_live_input(track_id.raw(), &loud_input),
+        );
+        while events.pop().is_ok() {}
+
+        assert_eq!(
+            crate::retirement::tests::allocations(|| {
+                engine.process_block(
+                    AudioProcessBlock::new(&mut output, 2)
+                        .with_live_input(track_id.raw(), &loud_input),
+                );
+            }),
+            (0, 0),
+            "active meters must not allocate or deallocate, graph={use_graph}"
+        );
+        let mut saw_meter = false;
+        while let Ok(event) = events.pop() {
+            saw_meter |= matches!(event, EngineEvent::EffectMeter { .. });
+        }
+        assert!(saw_meter);
+        let audible_output = output.clone();
+        while engine
+            .event_tx
+            .push(EngineEvent::PlaybackPosition(0))
+            .is_ok()
+        {}
+        assert_eq!(
+            crate::retirement::tests::allocations(|| {
+                engine.process_block(
+                    AudioProcessBlock::new(&mut output, 2)
+                        .with_live_input(track_id.raw(), &loud_input),
+                );
+            }),
+            (0, 0),
+            "meter backpressure must not allocate or deallocate, graph={use_graph}"
+        );
+        assert_eq!(output, audible_output);
+        while let Ok(event) = events.pop() {
+            assert!(!matches!(event, EngineEvent::EffectMeter { .. }));
+        }
+
+        engine.process_block(
+            AudioProcessBlock::new(&mut output, 2).with_live_input(track_id.raw(), &quiet_input),
+        );
+        let mut readings = 0;
+        while let Ok(event) = events.pop() {
+            if let EngineEvent::EffectMeter {
+                track_id: observed_track,
+                effect_id: observed_effect,
+                input,
+                output,
+                ..
+            } = event
+            {
+                readings += 1;
+                assert_eq!(observed_track, track_id);
+                assert_eq!(observed_effect, effect_id);
+                for (actual, expected) in [
+                    (input.peak_l, 0.2),
+                    (input.peak_r, 0.1),
+                    (input.rms_l, 0.2),
+                    (input.rms_r, 0.1),
+                    (output.peak_l, 0.1),
+                    (output.peak_r, 0.05),
+                    (output.rms_l, 0.1),
+                    (output.rms_r, 0.05),
+                ] {
+                    assert!(
+                        (actual - expected).abs() < 1e-5,
+                        "a dropped loud window must not leak into new readings: expected {expected}, got {actual}, graph={use_graph}"
+                    );
+                }
+            }
+        }
+        assert_eq!(readings, 1);
+    }
+}
+
+fn gain_meter_fixture(
+    use_graph: bool,
+) -> (
+    AudioEngine,
+    Producer<EngineCommand>,
+    Consumer<EngineEvent>,
+    TrackId,
+    EffectId,
+) {
+    let (engine, mut commands, events) = AudioEngine::new();
+    let track_id = TrackId::new();
+    let effect_id = EffectId::new();
+    commands.push(EngineCommand::SetSampleRate(48_000)).unwrap();
+    commands
+        .push(EngineCommand::AddTrack(track_id, "Metered".into()))
+        .unwrap();
+    commands
+        .push(EngineCommand::insert_built_in_effect(
+            track_id,
+            effect_id,
+            EffectType::Gain,
+            48_000,
+        ))
+        .unwrap();
+    commands
+        .push(EngineCommand::SetEffectParam {
+            track_id,
+            effect_id,
+            param_index: 0,
+            value: 0.5,
+        })
+        .unwrap();
+    if use_graph {
+        commands
+            .push(EngineCommand::SetRouting(
+                crate::routing::PreparedRouting::prepare(
+                    &[
+                        RoutingChannel {
+                            id: track_id,
+                            is_bus: false,
+                            effects: vec![RoutingEffect {
+                                id: effect_id,
+                                inputs: vec![],
+                                assignments: vec![],
+                                inactive_inputs: vec![],
+                            }],
+                            sends: vec![],
+                        },
+                        RoutingChannel {
+                            id: TrackId::MASTER,
+                            is_bus: true,
+                            effects: vec![],
+                            sends: vec![],
+                        },
+                    ],
+                    128,
+                )
+                .unwrap(),
+            ))
+            .unwrap();
+    }
+    commands
+        .push(EngineCommand::SetEffectMeterChannel {
+            track_id: Some(track_id),
+            generation: 1,
+        })
+        .unwrap();
+    (engine, commands, events, track_id, effect_id)
+}
