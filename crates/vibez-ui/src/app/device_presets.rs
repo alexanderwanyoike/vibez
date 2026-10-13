@@ -7,11 +7,28 @@ use vibez_core::id::{EffectId, TrackId};
 impl App {
     pub(super) fn apply_device_preset(
         &mut self,
-        _track_id: TrackId,
-        _effect_id: EffectId,
-        _preset: DevicePreset,
+        track_id: TrackId,
+        effect_id: EffectId,
+        preset: DevicePreset,
     ) -> Task<Message> {
-        Task::none()
+        let Some(effect) = self.state.find_track(track_id)
+            .and_then(|track| track.effects.iter().find(|effect| effect.id == effect_id))
+        else {
+            return Task::none();
+        };
+        let updates = match crate::domains::device_presets::prepare_updates(effect, &preset) {
+            Ok(updates) => updates,
+            Err(error) => {
+                self.state.status_text = error;
+                return Task::none();
+            }
+        };
+        if updates.is_empty() {
+            return Task::none();
+        }
+        self.update(Message::Devices(crate::domains::devices::DevicesMsg::SetEffectParams(
+            track_id, effect_id, updates,
+        )))
     }
 }
 
