@@ -171,3 +171,23 @@ fn moving_the_arrange_cursor_during_perform_does_not_retime_performance_events()
     assert_eq!(engine.transport().position(), 40);
     assert_eq!(capture_started(&mut events), Some((5, section_id, 5)));
 }
+
+#[test]
+fn arrange_seek_and_stop_without_capture_announce_no_capture_stop() {
+    let (mut engine, mut commands, mut events) = AudioEngine::new();
+    commands.push(EngineCommand::Play).unwrap();
+    engine.process(&mut [0.0; 7], 1);
+    while events.pop().is_ok() {}
+
+    commands.push(EngineCommand::Seek(3)).unwrap();
+    commands.push(EngineCommand::Stop).unwrap();
+    for _ in 0..4 {
+        engine.process(&mut [0.0; 3], 1);
+    }
+
+    assert!(
+        !std::iter::from_fn(|| events.pop().ok())
+            .any(|event| matches!(event, EngineEvent::PerformanceCaptureStopped { .. })),
+        "no Capture was running"
+    );
+}
