@@ -169,6 +169,7 @@ fn effects(
                 )
             };
             Some(EffectSlot {
+                levels: Default::default(),
                 id: info.id,
                 effect,
                 bypass: info.bypass,

@@ -527,16 +527,13 @@ impl EngineTrack {
         )
     }
 
-    pub fn process_effects(&mut self, frames: usize, channels: usize) {
+    pub fn process_effects(&mut self, frames: usize, channels: usize, meter_generation: Option<u64>) {
         let buf_size = frames * channels;
         if buf_size == 0 {
             return;
         }
         for slot in &mut self.effects {
-            if !slot.bypass {
-                slot.effect
-                    .process(&mut self.mix_buffer[..buf_size], channels);
-            }
+            slot.process(&mut self.mix_buffer[..buf_size], channels, meter_generation);
         }
     }
 }

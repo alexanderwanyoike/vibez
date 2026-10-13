@@ -127,6 +127,7 @@ fn assert_handoff_failure_cause(backpressured: bool) {
     let effect = EffectId::new();
     let mut track = EngineTrack::new(id);
     track.effects.push(EffectSlot {
+        levels: Default::default(),
         id: effect,
         effect: Box::new(EffectProbe(true)),
         bypass: false,
@@ -182,6 +183,7 @@ fn delayed_effect_return_cannot_resurrect_owner_into_reopened_same_id_channel() 
     let effect = EffectId::new();
     let mut track = EngineTrack::new(id);
     track.effects.push(EffectSlot {
+        levels: Default::default(),
         id: effect,
         effect: Box::new(EffectProbe(true)),
         bypass: false,
@@ -283,6 +285,7 @@ fn stopped_effect_retains_bypass_and_reorder_edits_when_owner_returns() {
     let mut track = EngineTrack::new(track_id);
     for (index, id) in ids.into_iter().enumerate() {
         track.effects.push(EffectSlot {
+            levels: Default::default(),
             id,
             effect: Box::new(EffectProbe(index == 1)),
             bypass: false,
@@ -330,6 +333,7 @@ fn stale_reject_with_full_event_ring_retains_device_reason_and_current_plan() {
     let effect = EffectId::new();
     let mut track = EngineTrack::new(id);
     track.effects.push(EffectSlot {
+        levels: Default::default(),
         id: effect,
         effect: Box::new(EffectProbe(true)),
         bypass: false,
@@ -380,6 +384,7 @@ fn additions_around_held_slot_use_logical_order_and_main_reserved_capacity() {
         track.effects = Vec::with_capacity(4);
         for (index, id) in ids.into_iter().enumerate() {
             track.effects.push(EffectSlot {
+                levels: Default::default(),
                 id,
                 effect: Box::new(EffectProbe(index == 1)),
                 bypass: false,

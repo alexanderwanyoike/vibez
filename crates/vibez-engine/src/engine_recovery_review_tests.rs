@@ -68,6 +68,7 @@ fn reject_worst_case_retirement_is_reserved_before_command_ownership_is_popped()
     channel.effects.reserve(4);
     while channel.effects.len() < channel.effects.capacity() {
         channel.effects.push(EffectSlot {
+            levels: Default::default(),
             id: EffectId::new(),
             effect: create_effect(EffectType::Gain, 44100.0),
             bypass: false,
@@ -89,6 +90,7 @@ fn reject_worst_case_retirement_is_reserved_before_command_ownership_is_popped()
         track_id: track,
         position: 0,
         slot: EffectSlot {
+            levels: Default::default(),
             id: effect,
             effect: create_effect(EffectType::Gain, 44100.0),
             bypass: false,
@@ -156,6 +158,7 @@ fn parameter_edits_while_main_holds_the_owner_are_coalesced_and_restored_without
     let effect = EffectId::new();
     let mut channel = EngineTrack::new(track);
     channel.effects.push(EffectSlot {
+        levels: Default::default(),
         id: effect,
         bypass: false,
         effect: Box::new(ParameterProbe {
@@ -207,6 +210,7 @@ fn parameter_intents_do_not_cross_a_replaced_device_lifetime() {
     let effect = EffectId::new();
     let mut channel = EngineTrack::new(track);
     channel.effects.push(EffectSlot {
+        levels: Default::default(),
         id: effect,
         bypass: false,
         effect: Box::new(ParameterProbe {

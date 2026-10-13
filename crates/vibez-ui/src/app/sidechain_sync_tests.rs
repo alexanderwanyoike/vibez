@@ -339,6 +339,7 @@ fn timing_reactivation_refreshes_choices_and_persists_restored_feedback_silence(
             track_id,
             position: 0,
             slot: vibez_engine::mixer::EffectSlot {
+                levels: Default::default(),
                 id: effect_id,
                 effect,
                 bypass: false,

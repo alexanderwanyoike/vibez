@@ -436,6 +436,8 @@ impl AudioEngine {
                 }
                 NodeStage::Effect(effect_id) => {
                     let recovery_bypass = self.recovering_effect_bypass(node.channel, effect_id);
+                    let meter_generation = (self.effect_meter_channel == Some(node.channel))
+                        .then_some(self.effect_meter_generation);
                     for incoming_index in 0..prepared.nodes[index].incoming.len() {
                         let edge_index = prepared.nodes[index].incoming[incoming_index];
                         if prepared.graph.edges[edge_index].kind != EdgeKind::Main {
@@ -489,6 +491,13 @@ impl AudioEngine {
                     let track =
                         binding.get_mut(&mut self.tracks, &mut self.buses, &mut self.master);
                     if let Some(track) = track {
+                        if meter_generation.is_some() {
+                            if let Some(slot) =
+                                track.effects.iter_mut().find(|slot| slot.id == effect_id)
+                            {
+                                slot.observe_input(&destination.samples[..len], channels, meter_generation);
+                            }
+                        }
                         prepared.bypass_samples[index][..len]
                             .copy_from_slice(&destination.samples[..len]);
                         prepared.bypass_delays[index]
@@ -499,6 +508,13 @@ impl AudioEngine {
                                     .copy_from_slice(&prepared.bypass_samples[index][..len]);
                             } else {
                                 destination.samples[..len].fill(0.0);
+                            }
+                            if meter_generation.is_some() {
+                                if let Some(slot) =
+                                    track.effects.iter_mut().find(|slot| slot.id == effect_id)
+                                {
+                                    slot.observe_output(&destination.samples[..len], channels, meter_generation);
+                                }
                             }
                             continue;
                         }
@@ -594,6 +610,13 @@ impl AudioEngine {
                                 }
                             }
                             offset = end;
+                        }
+                        if meter_generation.is_some() {
+                            if let Some(slot) =
+                                track.effects.iter_mut().find(|slot| slot.id == effect_id)
+                            {
+                                slot.observe_output(&destination.samples[..len], channels, meter_generation);
+                            }
                         }
                     }
                 }

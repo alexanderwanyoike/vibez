@@ -616,6 +616,7 @@ fn delayed_engine() -> (AudioEngine, Consumer<EngineEvent>, TrackId) {
     let effect = vibez_core::id::EffectId::new();
     let mut track = EngineTrack::new(id);
     track.effects.push(EffectSlot {
+        levels: Default::default(),
         id: effect,
         effect: Box::new(crate::test_support::DelayProbe::new(137)),
         bypass: false,

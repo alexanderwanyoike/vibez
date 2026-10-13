@@ -67,6 +67,10 @@ impl GainEffect {
 }
 
 impl AudioEffect for GainEffect {
+    fn supports_level_meter(&self) -> bool {
+        true
+    }
+
     fn effect_type(&self) -> EffectType {
         EffectType::Gain
     }

@@ -86,6 +86,7 @@ fn failed_restart_invalidates_cached_latency_without_removing_the_insert() {
             track_id,
             position: 0,
             slot: vibez_engine::mixer::EffectSlot {
+                levels: Default::default(),
                 id,
                 effect,
                 bypass: false,

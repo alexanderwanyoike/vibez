@@ -91,6 +91,9 @@ pub struct AudioEngine {
     buses: Vec<EngineTrack>,
     /// Which track streams samples to the UI spectrum analyser.
     spectrum_track: Option<TrackId>,
+    effect_meter_channel: Option<TrackId>,
+    effect_meter_generation: u64,
+    effect_meter_frames: u64,
     /// Producer side of the spectrum ring (mono samples).
     spectrum_tx: Producer<f32>,
     /// Consumer side, parked here until the UI takes it before the
@@ -279,6 +282,9 @@ impl AudioEngine {
             master: EngineTrack::new(TrackId::MASTER),
             buses: Vec::new(),
             spectrum_track: None,
+            effect_meter_channel: None,
+            effect_meter_generation: 0,
+            effect_meter_frames: 0,
             spectrum_tx,
             spectrum_rx: Some(spectrum_rx),
             audition: AuditionBus::new(),
@@ -424,10 +430,12 @@ impl AudioEngine {
                     bus.clear_buffer(frames, channels);
                 }
                 for slot in &mut bus.effects {
-                    if !slot.bypass {
-                        slot.effect
-                            .process(&mut bus.mix_buffer[..buf_size], channels);
-                    }
+                    slot.process(
+                        &mut bus.mix_buffer[..buf_size],
+                        channels,
+                        (self.effect_meter_channel == Some(bus.id))
+                            .then_some(self.effect_meter_generation),
+                    );
                 }
                 if self.spectrum_track == Some(bus.id) {
                     push_spectrum(&mut self.spectrum_tx, &bus.mix_buffer[..buf_size], channels);
@@ -481,9 +489,12 @@ impl AudioEngine {
                 None => (None, None),
             };
             for slot in &mut self.master.effects {
-                if !slot.bypass {
-                    slot.effect.process(output, channels);
-                }
+                slot.process(
+                    output,
+                    channels,
+                    (self.effect_meter_channel == Some(TrackId::MASTER))
+                        .then_some(self.effect_meter_generation),
+                );
             }
             let master_gain = master_auto_gain.unwrap_or(self.master.gain);
             if (master_gain - 1.0).abs() > f32::EPSILON {
@@ -697,6 +708,7 @@ impl AudioEngine {
         self.continue_capture_replay();
         self.flush_presentation();
         self.retire_section_capture_timing();
+        self.publish_effect_meters(frames);
 
         // Master metering event.
         let meters = metering::calculate_meters(output, channels);
@@ -917,6 +929,9 @@ mod instrument_commands;
 
 #[path = "engine_effect_commands.rs"]
 mod effect_commands;
+
+#[path = "engine_effect_meters.rs"]
+mod effect_meters;
 
 #[cfg(test)]
 #[path = "engine_bus_solo_tests.rs"]

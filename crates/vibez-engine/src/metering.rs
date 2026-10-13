@@ -83,6 +83,44 @@ impl LevelAccumulator {
     }
 }
 
+/// Fixed-size state follows an insert through chain reordering and ownership
+/// handoffs without introducing a callback-side allocation.
+#[derive(Default)]
+pub struct EffectMeterState {
+    generation: Option<u64>,
+    input: LevelAccumulator,
+    output: LevelAccumulator,
+}
+
+impl EffectMeterState {
+    fn prepare(&mut self, generation: u64) {
+        if self.generation != Some(generation) {
+            *self = Self {
+                generation: Some(generation),
+                ..Self::default()
+            };
+        }
+    }
+
+    pub(crate) fn observe_input(&mut self, samples: &[f32], channels: usize, generation: u64) {
+        self.prepare(generation);
+        self.input.observe(samples, channels);
+    }
+
+    pub(crate) fn observe_output(&mut self, samples: &[f32], channels: usize, generation: u64) {
+        self.prepare(generation);
+        self.output.observe(samples, channels);
+    }
+
+    pub(crate) fn finish(&mut self, frames: u64, generation: u64) -> (MeterValues, MeterValues) {
+        self.prepare(generation);
+        let values = (self.input.values(frames), self.output.values(frames));
+        self.input = LevelAccumulator::default();
+        self.output = LevelAccumulator::default();
+        values
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
