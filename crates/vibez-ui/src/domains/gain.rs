@@ -1,7 +1,30 @@
 //! Gain control values and transient metering state, independent of rendering.
 
-pub fn parse_input(_index: usize, _text: &str) -> Option<f32> {
-    None
+pub const MIN_GAIN_DB: f32 = -60.0;
+pub const MAX_GAIN_DB: f32 = 6.020_6;
+
+pub fn gain_to_db(gain: f32) -> f32 {
+    if gain > 0.0 {
+        20.0 * gain.log10()
+    } else {
+        f32::NEG_INFINITY
+    }
+}
+
+pub fn db_to_gain(db: f32) -> f32 {
+    10.0_f32.powf(db / 20.0)
+}
+
+pub fn parse_input(index: usize, text: &str) -> Option<f32> {
+    if index != 0 {
+        return None;
+    }
+    let text = text.trim();
+    if text.eq_ignore_ascii_case("-inf") || text == "-∞" {
+        return Some(0.0);
+    }
+    let db = text.parse::<f32>().ok()?;
+    (db.is_finite() && (MIN_GAIN_DB..=MAX_GAIN_DB).contains(&db)).then(|| db_to_gain(db))
 }
 
 #[cfg(test)]
