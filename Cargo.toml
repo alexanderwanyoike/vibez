@@ -6,6 +6,7 @@ members = [
     "crates/vibez-dsp",
     "crates/vibez-instruments",
     "crates/vibez-plugin-host",
+    "crates/vibez-plugin-host/tests/fixtures",
     "crates/vibez-project",
     "crates/vibez-dropbox",
     "crates/vibez-ui",

@@ -29,6 +29,24 @@ impl PluginEffectWrapper {
 }
 
 impl AudioEffect for PluginEffectWrapper {
+    fn external_inputs(&self) -> &[vibez_core::routing::ExternalInputDescriptor] {
+        self.inner.external_inputs()
+    }
+    fn process_with_inputs(
+        &mut self,
+        buffer: &mut [f32],
+        channels: usize,
+        inputs: &[vibez_core::routing::ExternalInputBlock<'_>],
+    ) {
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            self.inner.process_with_inputs(buffer, channels, inputs)
+        }));
+        if result.is_err() {
+            buffer.fill(0.0);
+            self.processing_error = Some("Plugin panicked during external-input processing");
+        }
+    }
+
     fn effect_type(&self) -> EffectType {
         // External plugins don't map to built-in EffectType.
         // We use Gain as a placeholder — the UI uses plugin_name for display.
