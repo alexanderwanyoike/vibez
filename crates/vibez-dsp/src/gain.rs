@@ -76,6 +76,9 @@ impl AudioEffect for GainEffect {
     }
 
     fn set_param(&mut self, index: usize, value: f32) -> bool {
+        if !value.is_finite() {
+            return false;
+        }
         match index {
             0 => self.gain = value.clamp(0.0, 2.0),
             1 | 2 => self.trim_db[index - 1] = value.clamp(-24.0, 24.0),
