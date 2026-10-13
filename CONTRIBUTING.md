@@ -24,7 +24,9 @@ feature PRs on all three platforms.
 - New logic comes with unit tests; UI logic belongs in a domain module
   (see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)) so it is testable
   without the GUI
-- No source file over 1,000 lines; split along the existing seams instead
+- Every source file states its single responsibility in its `//!` header, and
+  splits when that sentence no longer covers it (see
+  [docs/PATTERNS.md](docs/PATTERNS.md#8-naming-and-language))
 - Nothing that allocates, locks, or does I/O in the audio callback
 
 ## CI scope
