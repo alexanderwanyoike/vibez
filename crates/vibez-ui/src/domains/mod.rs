@@ -16,6 +16,7 @@ pub mod browser;
 pub mod compensation;
 pub mod device_latency;
 pub mod devices;
+pub mod gain;
 pub mod perform;
 pub mod piano_roll;
 pub mod project;
