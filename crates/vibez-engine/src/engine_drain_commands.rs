@@ -563,12 +563,6 @@ impl AudioEngine {
                 }
 
                 // -- Arrangement recording / looping --
-                EngineCommand::AddEffect {
-                    track_id,
-                    effect_id,
-                    effect_type,
-                    position,
-                } => self.command_add_effect(track_id, effect_id, effect_type, position),
                 EngineCommand::RemoveEffect(track_id, effect_id) => {
                     self.command_remove_effect(track_id, effect_id)
                 }

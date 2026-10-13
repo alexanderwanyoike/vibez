@@ -100,12 +100,12 @@ fn kick_and_bass_solo_keep_the_audible_bus_return_without_ghost_snare_leakage() 
             .push(EngineCommand::SetTrackSolo(bass, bass_solo))
             .unwrap();
         commands
-            .push(EngineCommand::AddEffect {
-                track_id: bass,
-                effect_id: gate,
-                effect_type: EffectType::Gate,
-                position: None,
-            })
+            .push(EngineCommand::insert_built_in_effect(
+                bass,
+                gate,
+                EffectType::Gate,
+                crate::engine::DEFAULT_SAMPLE_RATE,
+            ))
             .unwrap();
         commands
             .push(EngineCommand::SetEffectParam {
@@ -311,12 +311,12 @@ fn ordinary_bus_delay_tail_survives_solo_without_a_selected_track_send() {
         })
         .unwrap();
     commands
-        .push(EngineCommand::AddEffect {
-            track_id: bus,
-            effect_id: effect,
-            effect_type: EffectType::Delay,
-            position: None,
-        })
+        .push(EngineCommand::insert_built_in_effect(
+            bus,
+            effect,
+            EffectType::Delay,
+            crate::engine::DEFAULT_SAMPLE_RATE,
+        ))
         .unwrap();
     for (param_index, value) in [(0, 1.0), (1, 0.5), (2, 1.0)] {
         commands

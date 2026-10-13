@@ -2,6 +2,7 @@
 
 use super::*;
 use vibez_core::{effect::EffectType, id::EffectId, midi::InstrumentKind, routing::*};
+use vibez_dsp::factory::create_effect;
 
 fn routing(track: TrackId, effect: Option<EffectId>) -> Box<crate::routing::PreparedRouting> {
     let channels = [

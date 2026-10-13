@@ -33,11 +33,6 @@ impl EngineCommand {
             | Self::AddMidiTrack(id, _)
             | Self::AddInstrumentTrack(id, _, _) => DeviceOwnerInvalidation::Channel(*id),
             Self::RemoveEffect(track, effect)
-            | Self::AddEffect {
-                track_id: track,
-                effect_id: effect,
-                ..
-            }
             | Self::InsertEffect {
                 track_id: track,
                 effect_id: effect,
@@ -56,10 +51,7 @@ impl EngineCommand {
     pub fn edits_effect_chain(&self) -> bool {
         matches!(
             self,
-            Self::AddEffect { .. }
-                | Self::RemoveEffect(..)
-                | Self::MoveEffect { .. }
-                | Self::InsertEffect { .. }
+            Self::RemoveEffect(..) | Self::MoveEffect { .. } | Self::InsertEffect { .. }
         )
     }
     pub(crate) fn retirement_reserve(&self) -> usize {

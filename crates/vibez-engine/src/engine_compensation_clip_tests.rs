@@ -219,12 +219,12 @@ fn independent_clip_wraps_retain_effect_fader_send_and_device_audio_context() {
             .unwrap();
     }
     commands
-        .push(EngineCommand::AddEffect {
-            track_id: track,
-            effect_id: effects[1],
-            effect_type: EffectType::Gain,
-            position: None,
-        })
+        .push(EngineCommand::insert_built_in_effect(
+            track,
+            effects[1],
+            EffectType::Gain,
+            128,
+        ))
         .unwrap();
     commands
         .push(EngineCommand::InsertEffect {

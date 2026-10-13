@@ -3,29 +3,6 @@
 use super::*;
 
 impl AudioEngine {
-    pub(super) fn command_add_effect(
-        &mut self,
-        track_id: vibez_core::id::TrackId,
-        effect_id: vibez_core::id::EffectId,
-        effect_type: vibez_core::effect::EffectType,
-        position: Option<usize>,
-    ) {
-        let effect = create_effect(effect_type, self.sample_rate as f32);
-        if let Some(track) = self.channel_mut(track_id) {
-            let slot = EffectSlot {
-                id: effect_id,
-                effect,
-                bypass: false,
-            };
-            if let Some(pos) = position {
-                let idx = pos.min(track.effects.len());
-                track.effects.insert(idx, slot);
-            } else {
-                track.effects.push(slot);
-            }
-        }
-    }
-
     pub(super) fn command_remove_effect(
         &mut self,
         track_id: vibez_core::id::TrackId,

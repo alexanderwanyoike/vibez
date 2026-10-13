@@ -404,12 +404,7 @@ impl App {
             if effect.plugin_ref.is_some() {
                 continue;
             }
-            self.send_command(EngineCommand::AddEffect {
-                track_id: track.id,
-                effect_id: effect.id,
-                effect_type: effect.effect_type,
-                position: None,
-            });
+            self.insert_built_in_effect(track.id, effect.id, effect.effect_type);
             for (idx, value) in effect.params.iter().copied().enumerate() {
                 self.send_command(EngineCommand::SetEffectParam {
                     track_id: track.id,

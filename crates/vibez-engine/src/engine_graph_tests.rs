@@ -50,12 +50,12 @@ fn full_ring_retains_the_first_processing_failure_and_prioritizes_it_next_callba
         .push(EngineCommand::AddTrack(track, "Failure".into()))
         .unwrap();
     commands
-        .push(EngineCommand::AddEffect {
-            track_id: track,
-            effect_id: effect,
-            effect_type: EffectType::Gain,
-            position: None,
-        })
+        .push(EngineCommand::insert_built_in_effect(
+            track,
+            effect,
+            EffectType::Gain,
+            crate::engine::DEFAULT_SAMPLE_RATE,
+        ))
         .unwrap();
     let mut model = channel(track);
     model.effects.push(RoutingEffect {
@@ -124,12 +124,12 @@ fn hardware_first_pair_live_capture_and_populated_graph_are_allocation_free() {
         .push(EngineCommand::AddBus(bus, "Bus".into()))
         .unwrap();
     commands
-        .push(EngineCommand::AddEffect {
-            track_id: receiver,
-            effect_id: effect,
-            effect_type: EffectType::Gate,
-            position: None,
-        })
+        .push(EngineCommand::insert_built_in_effect(
+            receiver,
+            effect,
+            EffectType::Gate,
+            crate::engine::DEFAULT_SAMPLE_RATE,
+        ))
         .unwrap();
     commands
         .push(EngineCommand::SetSend {
@@ -375,12 +375,12 @@ fn routed_gate_preserves_muted_source_and_solo_without_trigger_leakage() {
         commands.push(clip(receiver, 0.01)).unwrap();
         commands.push(clip(source, 1.0)).unwrap();
         commands
-            .push(EngineCommand::AddEffect {
-                track_id: receiver,
-                effect_id: effect,
-                effect_type: EffectType::Gate,
-                position: None,
-            })
+            .push(EngineCommand::insert_built_in_effect(
+                receiver,
+                effect,
+                EffectType::Gate,
+                crate::engine::DEFAULT_SAMPLE_RATE,
+            ))
             .unwrap();
         commands
             .push(EngineCommand::SetEffectParam {
@@ -441,12 +441,12 @@ fn live_route_swap_retains_effect_state_and_missing_sources_supply_silence() {
     commands.push(clip(receiver, 0.01)).unwrap();
     commands.push(clip(source, 1.0)).unwrap();
     commands
-        .push(EngineCommand::AddEffect {
-            track_id: receiver,
-            effect_id: effect,
-            effect_type: EffectType::Compressor,
-            position: None,
-        })
+        .push(EngineCommand::insert_built_in_effect(
+            receiver,
+            effect,
+            EffectType::Compressor,
+            crate::engine::DEFAULT_SAMPLE_RATE,
+        ))
         .unwrap();
     commands
         .push(EngineCommand::SetTrackMute(source, true))
@@ -512,12 +512,12 @@ fn soloed_receiver_keeps_bus_detector_source_inaudible() {
         .push(EngineCommand::SetTrackSolo(bass, true))
         .unwrap();
     commands
-        .push(EngineCommand::AddEffect {
-            track_id: bass,
-            effect_id: effect,
-            effect_type: EffectType::Gate,
-            position: None,
-        })
+        .push(EngineCommand::insert_built_in_effect(
+            bass,
+            effect,
+            EffectType::Gate,
+            crate::engine::DEFAULT_SAMPLE_RATE,
+        ))
         .unwrap();
     commands
         .push(EngineCommand::SetEffectParam {
@@ -605,12 +605,12 @@ fn master_receives_a_muted_prefader_source() {
         .push(EngineCommand::SetTrackMute(ghost, true))
         .unwrap();
     commands
-        .push(EngineCommand::AddEffect {
-            track_id: TrackId::MASTER,
-            effect_id: effect,
-            effect_type: EffectType::Gate,
-            position: None,
-        })
+        .push(EngineCommand::insert_built_in_effect(
+            TrackId::MASTER,
+            effect,
+            EffectType::Gate,
+            crate::engine::DEFAULT_SAMPLE_RATE,
+        ))
         .unwrap();
     commands
         .push(EngineCommand::SetEffectParam {
@@ -825,12 +825,12 @@ fn live_selected_output_capture_remains_silent_when_solo_excludes_its_source() {
     commands.push(clip(bass, 0.01)).unwrap();
     commands.push(clip(ghost, 1.0)).unwrap();
     commands
-        .push(EngineCommand::AddEffect {
-            track_id: bass,
-            effect_id: effect,
-            effect_type: EffectType::Gate,
-            position: None,
-        })
+        .push(EngineCommand::insert_built_in_effect(
+            bass,
+            effect,
+            EffectType::Gate,
+            crate::engine::DEFAULT_SAMPLE_RATE,
+        ))
         .unwrap();
     commands
         .push(EngineCommand::SetTrackSolo(bass, true))

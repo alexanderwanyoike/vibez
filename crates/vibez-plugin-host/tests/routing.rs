@@ -396,12 +396,9 @@ fn all_instrument_source_formats_feed_builtins_and_hosted_receivers() {
                 let device = vibez_dsp::factory::create_effect(kind, 48000.0);
                 let inputs = device.external_inputs().to_vec();
                 commands
-                    .push(EngineCommand::AddEffect {
-                        track_id: bass,
-                        effect_id: effect,
-                        effect_type: kind,
-                        position: None,
-                    })
+                    .push(EngineCommand::insert_built_in_effect(
+                        bass, effect, kind, 48000,
+                    ))
                     .unwrap();
                 commands
                     .push(EngineCommand::SetEffectParam {
@@ -500,12 +497,12 @@ fn source_taps_apply_effects_fader_and_pan_only_at_the_requested_stage() {
                 .push(EngineCommand::SetTrackSolo(bass, true))
                 .unwrap();
             commands
-                .push(EngineCommand::AddEffect {
-                    track_id: ghost,
-                    effect_id: gain_effect,
-                    effect_type: EffectType::Gain,
-                    position: None,
-                })
+                .push(EngineCommand::insert_built_in_effect(
+                    ghost,
+                    gain_effect,
+                    EffectType::Gain,
+                    48000,
+                ))
                 .unwrap();
             commands
                 .push(EngineCommand::SetEffectParam {
@@ -783,12 +780,12 @@ fn loadable_bus_effect_has_one_shared_solo_sum_and_an_audible_return_capture() {
                 .push(EngineCommand::SetTrackSolo(bass, bass_solo))
                 .unwrap();
             commands
-                .push(EngineCommand::AddEffect {
-                    track_id: bass,
-                    effect_id: gate,
-                    effect_type: EffectType::Gate,
-                    position: None,
-                })
+                .push(EngineCommand::insert_built_in_effect(
+                    bass,
+                    gate,
+                    EffectType::Gate,
+                    48000,
+                ))
                 .unwrap();
             for (param_index, value) in [(0, -20.0), (1, 0.1)] {
                 commands

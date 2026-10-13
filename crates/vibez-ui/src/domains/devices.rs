@@ -253,12 +253,7 @@ impl DevicesState {
                         plugin_ref: None,
                     });
                 }
-                engine.send(EngineCommand::AddEffect {
-                    track_id,
-                    effect_id,
-                    effect_type,
-                    position: None,
-                });
+                engine.insert_built_in_effect(track_id, effect_id, effect_type);
                 self.context_menu = None;
                 action.status = Some(format!("Added {} effect", effect_type.name()));
             }

@@ -262,12 +262,6 @@ pub enum EngineCommand {
     SetSpectrumTap(Option<TrackId>),
 
     // -- Effects --
-    AddEffect {
-        track_id: TrackId,
-        effect_id: EffectId,
-        effect_type: EffectType,
-        position: Option<usize>,
-    },
     RemoveEffect(TrackId, EffectId),
     SetEffectParam {
         track_id: TrackId,
@@ -473,6 +467,24 @@ pub enum EngineCommand {
         track_id: TrackId,
         instrument: Box<dyn Instrument>,
     },
+}
+
+impl EngineCommand {
+    /// Constructs the device on the caller's thread: building one allocates,
+    /// which the audio callback must never do.
+    pub fn insert_built_in_effect(
+        track_id: TrackId,
+        effect_id: EffectId,
+        effect_type: EffectType,
+        sample_rate: u32,
+    ) -> Self {
+        Self::InsertEffect {
+            track_id,
+            effect_id,
+            effect: vibez_dsp::factory::create_effect(effect_type, sample_rate as f32),
+            position: None,
+        }
+    }
 }
 
 #[cfg(test)]

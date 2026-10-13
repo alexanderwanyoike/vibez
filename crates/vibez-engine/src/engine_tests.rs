@@ -2100,12 +2100,12 @@ fn effect_tails_ring_out_after_stop() {
 
     let effect_id = vibez_core::id::EffectId::new();
     cmd_tx
-        .push(EngineCommand::AddEffect {
-            track_id: tid,
+        .push(EngineCommand::insert_built_in_effect(
+            tid,
             effect_id,
-            effect_type: vibez_core::effect::EffectType::Delay,
-            position: None,
-        })
+            vibez_core::effect::EffectType::Delay,
+            crate::engine::DEFAULT_SAMPLE_RATE,
+        ))
         .unwrap();
     cmd_tx.push(EngineCommand::Play).unwrap();
 
@@ -2205,12 +2205,12 @@ fn master_effect_chain_processes_the_summed_mix() {
     // constant (DC-heavy) signal relative to the flat default.
     let eq_id = EffectId::new();
     cmd_tx
-        .push(EngineCommand::AddEffect {
-            track_id: TrackId::MASTER,
-            effect_id: eq_id,
-            effect_type: EffectType::Eq,
-            position: None,
-        })
+        .push(EngineCommand::insert_built_in_effect(
+            TrackId::MASTER,
+            eq_id,
+            EffectType::Eq,
+            crate::engine::DEFAULT_SAMPLE_RATE,
+        ))
         .unwrap();
     cmd_tx
         .push(EngineCommand::SetEffectParam {
@@ -2440,12 +2440,12 @@ fn bus_effect_chain_processes_the_send_mix() {
     // the constant (DC-heavy) signal.
     let eq_id = EffectId::new();
     cmd_tx
-        .push(EngineCommand::AddEffect {
-            track_id: bus,
-            effect_id: eq_id,
-            effect_type: vibez_core::effect::EffectType::Eq,
-            position: None,
-        })
+        .push(EngineCommand::insert_built_in_effect(
+            bus,
+            eq_id,
+            vibez_core::effect::EffectType::Eq,
+            crate::engine::DEFAULT_SAMPLE_RATE,
+        ))
         .unwrap();
     cmd_tx
         .push(EngineCommand::SetEffectParam {

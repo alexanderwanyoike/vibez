@@ -679,12 +679,12 @@ fn changed_rate_keeps_native_owners_but_rejects_their_old_configuration_even_aft
                 .unwrap();
         } else {
             commands
-                .push(EngineCommand::AddEffect {
-                    track_id: track,
-                    effect_id: effect,
-                    effect_type: EffectType::Filter,
-                    position: None,
-                })
+                .push(EngineCommand::insert_built_in_effect(
+                    track,
+                    effect,
+                    EffectType::Filter,
+                    crate::engine::DEFAULT_SAMPLE_RATE,
+                ))
                 .unwrap();
         }
         let channels = [

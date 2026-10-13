@@ -88,7 +88,6 @@ fn coverage(command: &EngineCommand) -> Coverage {
         | C::SetSend { .. }
         | C::SetSampleRate(_)
         | C::SetSpectrumTap(_)
-        | C::AddEffect { .. }
         | C::RemoveEffect(..)
         | C::SetEffectParam { .. }
         | C::SetEffectBypass { .. }
@@ -243,12 +242,12 @@ fn playing(
         EngineCommand::AddMidiTrack(f.empty, "Empty".into()),
         EngineCommand::AddTrack(f.empty_audio, "Empty audio".into()),
         EngineCommand::AddBus(f.bus, "Bus".into()),
-        EngineCommand::AddEffect {
-            track_id: f.synth,
-            effect_id: f.effect,
-            effect_type: vibez_core::effect::EffectType::Gain,
-            position: None,
-        },
+        EngineCommand::insert_built_in_effect(
+            f.synth,
+            f.effect,
+            vibez_core::effect::EffectType::Gain,
+            48_000,
+        ),
         add_clip(f.audio, f.clip),
         add_note_clip(f.synth, f.note_clip),
         EngineCommand::AddNote {
@@ -478,12 +477,6 @@ fn cases() -> Vec<Case> {
         case!("SetSpectrumTap", false, |f| C::SetSpectrumTap(Some(
             f.synth
         ))),
-        case!("AddEffect", true, |f| C::AddEffect {
-            track_id: f.empty,
-            effect_id: EffectId::new(),
-            effect_type: vibez_core::effect::EffectType::Reverb,
-            position: None,
-        }),
         case!("RemoveEffect", false, |f| C::RemoveEffect(
             f.synth, f.effect
         )),
