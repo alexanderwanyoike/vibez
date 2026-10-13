@@ -16,15 +16,21 @@ pub fn db_to_gain(db: f32) -> f32 {
 }
 
 pub fn parse_input(index: usize, text: &str) -> Option<f32> {
-    if index != 0 {
-        return None;
-    }
     let text = text.trim();
-    if text.eq_ignore_ascii_case("-inf") || text == "-∞" {
+    if index == 0 && (text.eq_ignore_ascii_case("-inf") || text == "-∞") {
         return Some(0.0);
     }
     let db = text.parse::<f32>().ok()?;
-    (db.is_finite() && (MIN_GAIN_DB..=MAX_GAIN_DB).contains(&db)).then(|| db_to_gain(db))
+    if !db.is_finite() {
+        return None;
+    }
+    match index {
+        0 => (MIN_GAIN_DB..=MAX_GAIN_DB)
+            .contains(&db)
+            .then(|| db_to_gain(db)),
+        1 | 2 => (-24.0..=24.0).contains(&db).then_some(db),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
