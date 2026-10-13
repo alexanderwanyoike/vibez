@@ -1,3 +1,5 @@
+//! Gain processing with independently adjustable stereo balance and polarity.
+
 use vibez_core::effect::{EffectType, ParamDescriptor};
 
 use crate::effect::AudioEffect;
@@ -84,6 +86,30 @@ mod tests {
         fx.process(&mut buf, 2);
         assert!((buf[0] - 0.5).abs() < 1e-6);
         assert!((buf[1] - (-0.5)).abs() < 1e-6);
+    }
+
+    #[test]
+    fn gain_stereo_trim_and_polarity_are_independent() {
+        let mut fx = GainEffect::new();
+        let double_amplitude_db = 20.0 * 2.0_f32.log10();
+        assert!(fx.set_param(0, 0.5));
+        assert!(fx.set_param(1, double_amplitude_db));
+        assert!(fx.set_param(2, -double_amplitude_db));
+        assert!(fx.set_param(3, 1.0));
+        assert!(fx.set_param(4, 0.0));
+
+        let mut buffer = [0.5, 0.5, -0.25, -0.25];
+        fx.process(&mut buffer, 2);
+        for (actual, expected) in buffer.iter().zip([-0.5, 0.125, 0.25, -0.0625]) {
+            assert!((actual - expected).abs() < 1e-6);
+        }
+
+        assert!(fx.set_param(3, 0.0));
+        assert!(fx.set_param(4, 1.0));
+        let mut buffer = [0.5, 0.5];
+        fx.process(&mut buffer, 2);
+        assert!((buffer[0] - 0.5).abs() < 1e-6);
+        assert!((buffer[1] - (-0.125)).abs() < 1e-6);
     }
 
     #[test]
