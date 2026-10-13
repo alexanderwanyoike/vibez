@@ -4,7 +4,7 @@ on:
   push:
     branches: [main, dev, 'codex/epic-*']
   pull_request:
-    branches: [main, dev, 'codex/epic-*']
+    branches: [main, dev, 'feature/**', 'codex/epic-*']
 
 env:
   CARGO_TERM_COLOR: always
