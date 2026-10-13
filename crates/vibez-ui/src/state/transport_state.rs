@@ -1,5 +1,3 @@
-//! Transport state and its unchanged default values.
-
 /// Transport domain state: playback position, tempo, and the
 /// arrangement loop. First extracted domain slice of the
 /// architecture refactor: owns everything the transport bar and the

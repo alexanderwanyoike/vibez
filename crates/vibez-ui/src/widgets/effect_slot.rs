@@ -24,6 +24,7 @@ pub fn view_effect_slot<'a>(
     track_color: Color,
     custom_body: Option<(Element<'a, Message>, f32)>,
     sidechain: Option<Element<'a, Message>>,
+    sample_rate: u32,
 ) -> Element<'a, Message> {
     let is_bypassed = effect.bypass;
     let has_params = !effect.descriptors.is_empty();
@@ -291,7 +292,14 @@ pub fn view_effect_slot<'a>(
         ),
         None => (body, card_w),
     };
-    let card = column![title_bar, body].width(Length::Fixed(card_w));
+    let latency =
+        crate::domains::device_latency::latency_label(effect.latency_samples, sample_rate);
+    let card = column![
+        title_bar,
+        container(text(latency).size(9).color(th::text_dim())).padding([2, 6]),
+        body
+    ]
+    .width(Length::Fixed(card_w));
 
     container(card)
         .style(|_theme: &Theme| container::Style {

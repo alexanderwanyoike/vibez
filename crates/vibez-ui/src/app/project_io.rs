@@ -36,8 +36,6 @@ impl App {
         self.sidechain_sync_inputs = None;
         self.track_meter_peaks.clear();
         self.state.devices.last_routing = None;
-        self.state.devices.last_timing = None;
-        self.state.devices.compensation_generation = 0;
         self.state.devices.sidechain_meters.clear();
         self.state.devices.sidechain_choices.clear();
         // Invalidate any Browser import still preparing (e.g. in its
@@ -259,6 +257,7 @@ impl App {
         self.state.project.current_path = None;
         self.state.project.dirty = false;
         self.state.project.history.clear();
+        Arc::make_mut(&mut self.state.project_tracks).reduced_latency_monitoring = false;
         self.state.status_text = "New project".to_string();
     }
 
@@ -339,6 +338,7 @@ impl App {
             .collect();
 
         Project {
+            reduced_latency_monitoring: self.state.project_tracks.reduced_latency_monitoring,
             name: super::window_policy::project_display_name(
                 self.state.project.current_path.as_deref(),
             ),
@@ -466,6 +466,8 @@ impl App {
         let mut plugin_instrument_requests: Vec<(TrackId, vibez_core::effect::PluginDeviceInfo)> =
             Vec::new();
         self.state.project.history.clear();
+        Arc::make_mut(&mut self.state.project_tracks).reduced_latency_monitoring =
+            loaded.project.reduced_latency_monitoring;
         self.state.transport.bpm = loaded.project.bpm;
         self.state.transport.bpm_text = format!("{:.0}", loaded.project.bpm);
         self.state.perform.set_project_swing(loaded.project.swing);

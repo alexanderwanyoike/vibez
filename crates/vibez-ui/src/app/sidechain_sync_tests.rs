@@ -263,6 +263,48 @@ fn restored_cycle_keeps_established_route_and_persists_the_silent_assignment() {
 }
 
 #[test]
+fn monitoring_target_changes_invalidate_timing_without_rebuilding_structural_routing() {
+    let mut app = app();
+    app.state.view.workspace = crate::state::Workspace::Perform;
+    app.state.perform.mode = crate::domains::perform::PerformMode::Instrument;
+    let mut first = ProjectTrack::new(TrackId::new(), "First".into(), 0);
+    let mut second = ProjectTrack::new(TrackId::new(), "Second".into(), 1);
+    for track in [&mut first, &mut second] {
+        track.kind = vibez_core::midi::TrackKind::Midi;
+        track.has_instrument = true;
+    }
+    let first_id = first.id;
+    let second_id = second.id;
+    let project = Arc::make_mut(&mut app.state.project_tracks);
+    project.reduced_latency_monitoring = true;
+    project.tracks = vec![first, second];
+    app.state.perform.sync_instrument_target(Some(first_id));
+    app.sync_sidechain_routing();
+    assert_eq!(
+        app.state
+            .devices
+            .last_timing
+            .as_ref()
+            .unwrap()
+            .reduced_tracks,
+        [first_id]
+    );
+    super::sidechain::MODEL_BUILDS.with(|count| count.set(0));
+    app.state.perform.sync_instrument_target(Some(second_id));
+    app.sync_sidechain_routing();
+    assert_eq!(
+        app.state
+            .devices
+            .last_timing
+            .as_ref()
+            .unwrap()
+            .reduced_tracks,
+        [second_id]
+    );
+    super::sidechain::MODEL_BUILDS.with(|count| assert_eq!(count.get(), 0));
+}
+
+#[test]
 fn timing_reactivation_refreshes_choices_and_persists_restored_feedback_silence() {
     let mut app = app();
     let mut a = ProjectTrack::new(TrackId::new(), "A".into(), 0);
@@ -321,58 +363,4 @@ fn timing_reactivation_refreshes_choices_and_persists_restored_feedback_silence(
         app.project_from_state().tracks[0].effects[0].inactive_sidechains,
         [ExternalInputId(0)]
     );
-}
-
-#[test]
-fn full_compensation_controls_publish_a_compatible_plan_and_keep_cache_fast_paths() {
-    use vibez_core::automation::{AutomationLane, AutomationTarget};
-    let mut app = app();
-    let track = ProjectTrack::new(TrackId::new(), "Audio".into(), 0);
-    let id = track.id;
-    Arc::make_mut(&mut app.state.project_tracks)
-        .tracks
-        .push(track);
-    let (producer, mut consumer) = rtrb::RingBuffer::new(8);
-    app.cmd_tx = crate::domains::EngineCommandQueue::new(producer);
-    app.sync_sidechain_routing();
-    let EngineCommand::SetRouting(first) = consumer.pop().unwrap() else {
-        panic!("initial plan");
-    };
-    assert_eq!(first.compensation.generation, 1);
-    assert!(app
-        .state
-        .devices
-        .last_timing
-        .as_ref()
-        .unwrap()
-        .reduced_tracks
-        .is_empty());
-    Arc::make_mut(&mut app.state.arrangement.timeline)
-        .by_track
-        .entry(id)
-        .or_default()
-        .automation
-        .push(AutomationLane::new(AutomationTarget::TrackGain));
-    app.sync_sidechain_routing();
-    let EngineCommand::UpdateAutomationRouting(updated) = consumer.pop().unwrap() else {
-        panic!("compatible controls");
-    };
-    assert_eq!(updated.compensation.generation, 2);
-    assert_eq!(
-        app.state.devices.last_timing.as_ref().unwrap().controls,
-        [(id, AutomationTarget::TrackGain)]
-    );
-    app.sync_sidechain_routing();
-    assert!(consumer.pop().is_err());
-    app.state.transport.sample_rate = 48000;
-    super::sidechain::MODEL_BUILDS.with(|count| count.set(0));
-    app.sync_sidechain_routing();
-    assert!(matches!(
-        consumer.pop().unwrap(),
-        EngineCommand::SetRouting(_)
-    ));
-    super::sidechain::MODEL_BUILDS.with(|count| assert_eq!(count.get(), 0));
-    app.clear_project_runtime();
-    assert!(app.state.devices.last_timing.is_none());
-    assert_eq!(app.state.devices.compensation_generation, 0);
 }

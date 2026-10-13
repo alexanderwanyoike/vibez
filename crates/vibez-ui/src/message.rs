@@ -1,5 +1,3 @@
-//! UI messages and cloneable transient payload owners.
-
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -242,6 +240,7 @@ pub enum Message {
     ToggleProjectTrackDeleteConfirmation,
     /// Settings: save named projects shortly after editing stops.
     ToggleAutoSave,
+    SetReducedLatencyMonitoring(bool),
     /// Settings: resize the whole interface. Distinct from timeline
     /// zoom, which changes visible musical time instead.
     SetInterfaceScale(f32),

@@ -1,5 +1,3 @@
-//! Existing Section Capture materialization regressions.
-
 use super::*;
 use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::perform::GrooveGrid;

@@ -155,6 +155,7 @@ pub fn collect_plugin_reload_requests(
                 effect.plugin_ref = Some(dev.clone());
                 effect.external_inputs.clear();
                 effect.latency_samples = None;
+                effect.reconfiguration_failed = false;
                 effect.descriptors = &[];
                 effect.has_plugin_gui = false;
                 requests.effects.push((track_id, effect.id, chain_pos, dev));
@@ -211,6 +212,7 @@ mod tests {
         track.effects = effects;
         ProjectSnapshot {
             project_tracks: std::sync::Arc::new(ProjectTracksState {
+                reduced_latency_monitoring: false,
                 tracks: vec![track],
                 master: crate::state::new_master_track(),
                 buses: Vec::new(),

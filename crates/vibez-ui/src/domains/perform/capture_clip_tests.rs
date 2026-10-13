@@ -1,5 +1,3 @@
-//! Existing independent Clip Capture materialization regressions.
-
 use super::*;
 use crate::domains::perform::LauncherClip;
 

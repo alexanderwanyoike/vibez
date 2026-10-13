@@ -1,5 +1,3 @@
-//! Shared application state and ownership of domain state slices.
-
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -8,10 +6,10 @@ mod browser_results;
 mod browser_state;
 mod project_tracks;
 mod snapshot;
-mod transport_state;
 pub use project_tracks::ProjectTracksState;
-pub use transport_state::TransportState;
+mod transport_state;
 mod ui_types;
+pub use transport_state::TransportState;
 
 use crate::remote_provider::RemoteCatalogSnapshot;
 pub use browser_results::LocalResults;
@@ -683,6 +681,7 @@ impl Default for AppState {
             piano_roll: PianoRollState::default(),
             perform: crate::domains::perform::PerformState::default(),
             project_tracks: Arc::new(ProjectTracksState {
+                reduced_latency_monitoring: false,
                 next_track_number: 1,
                 ..ProjectTracksState::default()
             }),
