@@ -51,6 +51,17 @@ impl EngineCommand {
             _ => DeviceOwnerInvalidation::None,
         }
     }
+    /// Edits that leave a published routing graph stale until the next
+    /// `SetRouting`; the engine mutes the project in between.
+    pub fn edits_effect_chain(&self) -> bool {
+        matches!(
+            self,
+            Self::AddEffect { .. }
+                | Self::RemoveEffect(..)
+                | Self::MoveEffect { .. }
+                | Self::AddPluginEffect { .. }
+        )
+    }
     pub(crate) fn retirement_reserve(&self) -> usize {
         match self {
             // Failed restoration can return reserved storage, the device,
