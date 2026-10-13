@@ -24,7 +24,7 @@ fn impulse(instance: &mut dyn vibez_plugin_host::PluginInstance, expected: usize
         assert_eq!(allocations, 0);
         rendered.extend(main);
     }
-    for (frame, values) in rendered.chunks_exact(2).enumerate() {
+    for (frame, values) in rendered.as_chunks::<2>().0.iter().enumerate() {
         assert_eq!(
             values,
             if frame == expected {
@@ -100,7 +100,7 @@ fn loadable_instrument_reports_and_applies_its_processing_delay() {
             instance.process_audio(&mut block, 2);
             rendered.extend(block);
         }
-        for (frame, values) in rendered.chunks_exact(2).enumerate() {
+        for (frame, values) in rendered.as_chunks::<2>().0.iter().enumerate() {
             assert_eq!(
                 values,
                 if frame < 144 {
@@ -135,7 +135,7 @@ fn loadable_formats_receive_target_audio_context_at_varied_rates() {
             });
             let mut output = [0.0; 62];
             instance.process_audio(&mut output, 2);
-            for (frame, sample) in output.chunks_exact(2).enumerate() {
+            for (frame, sample) in output.as_chunks::<2>().0.iter().enumerate() {
                 assert_eq!(sample, &[(800 + frame) as f32; 2]);
             }
             instance.stop_processing();

@@ -324,7 +324,7 @@ fn independent_clip_wraps_retain_effect_fader_send_and_device_audio_context() {
         rendered.extend(block);
         while events.pop().is_ok() {}
     }
-    for (physical, values) in rendered.chunks_exact(2).enumerate().skip(521) {
+    for (physical, values) in rendered.as_chunks::<2>().0.iter().enumerate().skip(521) {
         let changed = physical >= launch + 521;
         let phase = if changed {
             (physical - launch - 521) % 16
@@ -434,7 +434,9 @@ fn late_bar_launch_waits_for_the_next_achievable_boundary_and_reports_it_when_he
         engine.process(&mut output, 2);
         if onset.is_none() {
             onset = output
-                .chunks_exact(2)
+                .as_chunks::<2>()
+                .0
+                .iter()
                 .position(|frame| frame[0] > 0.1)
                 .map(|offset| rendered + offset);
         }

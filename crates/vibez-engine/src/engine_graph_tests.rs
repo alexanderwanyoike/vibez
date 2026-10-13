@@ -184,7 +184,12 @@ fn hardware_first_pair_live_capture_and_populated_graph_are_allocation_free() {
         )
     });
     assert_eq!(count, (0, 0));
-    for (output, capture) in output.chunks_exact(6).zip(capture.chunks_exact(6)) {
+    for (output, capture) in output
+        .as_chunks::<6>()
+        .0
+        .iter()
+        .zip(capture.as_chunks::<6>().0.iter())
+    {
         assert!(output[0] > 0.0 && output[1] > 0.0);
         assert!(capture[0] > 0.1 && capture[1] > 0.1);
         assert_eq!(&output[2..], &[0.0; 4]);

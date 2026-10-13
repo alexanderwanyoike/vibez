@@ -217,7 +217,7 @@ fn sequential_worker_migration_preserves_delay_history_and_fatal_failure_latchin
                     support::allocation::count_allocations(|| plugin.process_audio(&mut output, 2)),
                     0
                 );
-                for (frame, sample) in output.chunks_exact(2).enumerate() {
+                for (frame, sample) in output.as_chunks::<2>().0.iter().enumerate() {
                     assert_eq!(
                         sample,
                         if index == 1 && frame == 9 {

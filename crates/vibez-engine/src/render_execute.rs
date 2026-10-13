@@ -175,8 +175,9 @@ pub(super) fn render_offline_inner(
             } else {
                 output
             };
-            for frame in
-                written[selection.start * CHANNELS..selection.end * CHANNELS].chunks_exact(CHANNELS)
+            for frame in written[selection.start * CHANNELS..selection.end * CHANNELS]
+                .as_chunks::<CHANNELS>()
+                .0
             {
                 left.push(frame[0]);
                 right.push(frame[1]);
