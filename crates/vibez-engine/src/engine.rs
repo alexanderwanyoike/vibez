@@ -946,6 +946,10 @@ mod graph_runtime_tests;
 mod presentation_runtime_tests;
 
 #[cfg(test)]
+#[path = "engine_time_domain_tests.rs"]
+mod time_domain_tests;
+
+#[cfg(test)]
 #[path = "engine_compensation_presentation_tests.rs"]
 mod compensation_presentation_tests;
 

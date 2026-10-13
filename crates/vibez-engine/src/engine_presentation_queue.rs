@@ -127,6 +127,8 @@ pub(super) fn emit_repeated(
     due: u64,
     heard_now: u64,
 ) -> bool {
+    debug_assert_eq!(source.time_domain(), crate::events::TimeDomain::Source);
+    debug_assert_eq!(heard.time_domain(), crate::events::TimeDomain::Heard);
     flush_ready(events, scheduled, |pending| ready(pending, now, heard_now));
     if scheduled.capacity() - scheduled.len() < 2 {
         return false;
@@ -147,6 +149,11 @@ impl AudioEngine {
     }
 
     pub(super) fn present_event_at(&mut self, event: EngineEvent, due: u64) {
+        debug_assert!(
+            due <= self.output_position + self.rendered_callback_frames as u64
+                || event.time_domain() == crate::events::TimeDomain::Heard,
+            "only heard-time events wait for output latency: {event:?}"
+        );
         if self.presentation_fault {
             match event {
                 EngineEvent::PlaybackStopped => {

@@ -349,8 +349,6 @@ pub enum EngineEvent {
         retired: Box<PreparedSectionPlaybackSource>,
     },
 
-    /// A resident Section became active at this exact transport sample.
-    /// `retired` carries displaced sources to the UI thread for destruction.
     CaptureTimingRetired(std::sync::Arc<[(TrackId, u32)]>),
     SectionCaptureStopped {
         effective_at_samples: u64,
@@ -362,6 +360,8 @@ pub enum EngineEvent {
         refreshed: bool,
         offsets: std::sync::Arc<[(TrackId, u32)]>,
     },
+    /// A resident Section became active at this exact transport sample.
+    /// `retired` carries displaced sources to the UI thread for destruction.
     SectionTransitioned {
         section_id: SectionId,
         effective_at_samples: u64,
@@ -399,6 +399,81 @@ pub enum EngineEvent {
     AuditionStarted,
     /// Current frame inside the active Browser Audition source.
     AuditionPosition(u64),
+}
+
+/// The clock an event's consumer follows. `docs/PATTERNS.md` states the rule.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TimeDomain {
+    /// Render position: recorders keep the coordinates the player intended.
+    Source,
+    /// What the listener hears: render position plus compensated output latency.
+    Heard,
+    /// Acknowledgements, meters, failures and ownership returns.
+    Untimed,
+}
+
+impl EngineEvent {
+    pub fn time_domain(&self) -> TimeDomain {
+        match self {
+            Self::SourceNoteInput { .. }
+            | Self::SourceNoteRepeated { .. }
+            | Self::ClipRecordArmed { .. }
+            | Self::ClipRecordStarted { .. }
+            | Self::ClipRecordStopped { .. }
+            | Self::SectionRecordArmed { .. }
+            | Self::SectionRecordStarted { .. }
+            | Self::SectionRecordStopped { .. } => TimeDomain::Source,
+            Self::PlaybackPosition(_)
+            | Self::PerformancePosition(_)
+            | Self::SectionPlaybackPosition { .. }
+            | Self::PlaybackStarted
+            | Self::PlaybackStopped
+            | Self::ClipTransitioned { .. }
+            | Self::ClipSourceRefreshed { .. }
+            | Self::ClipCaptureSource { .. }
+            | Self::SectionTransitioned { .. }
+            | Self::SectionCaptureSource { .. }
+            | Self::SectionCaptureStopped { .. }
+            | Self::PerformanceCaptureStarted { .. }
+            | Self::PerformanceCaptureStopped { .. }
+            | Self::TrackMuteChanged { .. }
+            | Self::AutomationGestureChanged { .. }
+            | Self::InstrumentNoteInput { .. }
+            | Self::NoteRepeated { .. } => TimeDomain::Heard,
+            Self::PresentationCancelled
+            | Self::DeviceReconfigurationRetired { .. }
+            | Self::DeviceReconfiguration(_)
+            | Self::CompensationFailed { .. }
+            | Self::CompensationInvalid { .. }
+            | Self::DeviceProcessingFailed { .. }
+            | Self::RetiredEffectStorage(_)
+            | Self::RetiredChannel(_)
+            | Self::RetiredAutomationLane(_)
+            | Self::RoutingRetired(_)
+            | Self::DisposeEffect(_)
+            | Self::DisposeInstrument(_)
+            | Self::SidechainInputMeter { .. }
+            | Self::Metering { .. }
+            | Self::TrackMeter { .. }
+            | Self::TrackNoteActivity { .. }
+            | Self::ClipQueued { .. }
+            | Self::ClipEventsDropped { .. }
+            | Self::ClipStateResynced(_)
+            | Self::ClipRequestRetired(_)
+            | Self::ClipBatchRetired(_)
+            | Self::TrackMuteQueued { .. }
+            | Self::TrackMuteQueueCancelled { .. }
+            | Self::AutomationOverrideChanged { .. }
+            | Self::SectionQueued { .. }
+            | Self::SectionQueueCancelled { .. }
+            | Self::CaptureTimingRetired(_)
+            | Self::SectionSourceRefreshed { .. }
+            | Self::AuditionStopped
+            | Self::AuditionQueued
+            | Self::AuditionStarted
+            | Self::AuditionPosition(_) => TimeDomain::Untimed,
+        }
+    }
 }
 
 impl PartialEq for EngineEvent {
