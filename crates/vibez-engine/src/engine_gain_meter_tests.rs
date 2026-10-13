@@ -358,6 +358,76 @@ fn gain_meter_backpressure_drops_old_windows_without_callback_allocation() {
     }
 }
 
+#[test]
+fn gain_meter_reports_bypass_and_audible_reenable_fade() {
+    for use_graph in [false, true] {
+        let (mut engine, mut commands, mut events, track_id, effect_id) = gain_meter_fixture(use_graph);
+        let input = [0.8, -0.4].repeat(960);
+        let mut output = vec![0.0; input.len()];
+        engine.process_block(
+            AudioProcessBlock::new(&mut output, 2).with_live_input(track_id.raw(), &input),
+        );
+        while events.pop().is_ok() {}
+
+        for bypass in [true, false] {
+            commands
+                .push(EngineCommand::SetEffectBypass {
+                    track_id,
+                    effect_id,
+                    bypass,
+                })
+                .unwrap();
+            engine.process_block(
+                AudioProcessBlock::new(&mut output, 2).with_live_input(track_id.raw(), &input),
+            );
+            let mut reading = None;
+            while let Ok(event) = events.pop() {
+                if let EngineEvent::EffectMeter { input, output, .. } = event {
+                    assert!(reading.is_none());
+                    reading = Some((input, output));
+                }
+            }
+            let (input_levels, output_levels) = reading.expect("bypassed Gains still need readings");
+            assert!((input_levels.peak_l - 0.8).abs() < 1e-5);
+            assert!((input_levels.peak_r - 0.4).abs() < 1e-5);
+            assert!((input_levels.rms_l - 0.8).abs() < 1e-5);
+            assert!((input_levels.rms_r - 0.4).abs() < 1e-5);
+
+            // The insert precedes equal-power channel pan. Its meter must
+            // include the graph's dry/wet recovery blend heard downstream.
+            let mut heard_peak = [0.0_f32; 2];
+            let mut heard_squares = [0.0_f64; 2];
+            for frame in output.chunks_exact(2) {
+                for channel in 0..2 {
+                    let sample = frame[channel] / std::f32::consts::FRAC_1_SQRT_2;
+                    heard_peak[channel] = heard_peak[channel].max(sample.abs());
+                    heard_squares[channel] += f64::from(sample).powi(2);
+                }
+            }
+            for (actual, expected) in [
+                (output_levels.peak_l, heard_peak[0]),
+                (output_levels.peak_r, heard_peak[1]),
+                (output_levels.rms_l, (heard_squares[0] / 960.0).sqrt() as f32),
+                (output_levels.rms_r, (heard_squares[1] / 960.0).sqrt() as f32),
+            ] {
+                assert!(
+                    (actual - expected).abs() < 1e-5,
+                    "graph={use_graph}, bypass={bypass}: meter {actual}, heard {expected}"
+                );
+            }
+            if bypass {
+                assert_eq!(input_levels, output_levels);
+            } else if use_graph {
+                assert!((output_levels.peak_l - 0.8).abs() < 1e-5);
+                assert!(output_levels.rms_l > 0.4 && output_levels.rms_l < 0.8);
+            } else {
+                assert!((output_levels.peak_l - 0.4).abs() < 1e-5);
+                assert!((output_levels.rms_l - 0.4).abs() < 1e-5);
+            }
+        }
+    }
+}
+
 fn gain_meter_fixture(
     use_graph: bool,
 ) -> (
