@@ -5,6 +5,8 @@ pub struct Fixture {
     pub root: PathBuf,
     pub clap: PathBuf,
     pub vst3: PathBuf,
+    #[allow(dead_code)]
+    pub module: PathBuf,
 }
 impl Fixture {
     pub fn new() -> Self {
@@ -41,10 +43,15 @@ impl Fixture {
         #[cfg(target_os = "macos")]
         let module = vst3.join("Contents/MacOS/Probe");
         std::fs::create_dir_all(module.parent().unwrap()).unwrap();
-        std::fs::copy(&binary, module).unwrap();
+        std::fs::copy(&binary, &module).unwrap();
         #[cfg(target_os="macos")]
         std::fs::write(vst3.join("Contents/Info.plist"),r#"<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>CFBundleExecutable</key><string>Probe</string><key>CFBundleIdentifier</key><string>vibez.fixture.routing</string><key>CFBundlePackageType</key><string>BNDL</string></dict></plist>"#).unwrap();
-        Self { root, clap, vst3 }
+        Self {
+            root,
+            clap,
+            vst3,
+            module,
+        }
     }
     pub fn load_instrument(
         &self,
@@ -81,13 +88,22 @@ impl Fixture {
         format: &str,
         frames: u32,
     ) -> Box<dyn vibez_plugin_host::instance::PluginInstance> {
+        self.load_at_rate(format, frames, 48000.0)
+    }
+
+    pub fn load_at_rate(
+        &self,
+        format: &str,
+        frames: u32,
+        sample_rate: f64,
+    ) -> Box<dyn vibez_plugin_host::instance::PluginInstance> {
         if format == "clap" {
             Box::new(
                 vibez_plugin_host::clap_host::instance::ClapPluginInstance::load(
                     &self.clap,
                     vibez_routing_fixture::CLAP_ID,
                     false,
-                    48000.0,
+                    sample_rate,
                     frames,
                 )
                 .unwrap(),
@@ -99,7 +115,7 @@ impl Fixture {
                     &self.vst3,
                     &plugins[0].id.uid,
                     false,
-                    48000.0,
+                    sample_rate,
                     frames,
                 )
                 .unwrap(),

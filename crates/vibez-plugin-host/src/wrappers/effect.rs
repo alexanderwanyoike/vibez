@@ -46,6 +46,21 @@ impl AudioEffect for PluginEffectWrapper {
             self.processing_error = Some("Plugin panicked during external-input processing");
         }
     }
+    fn reconfiguration_requested(&self) -> bool {
+        self.inner.reconfiguration_requested()
+    }
+
+    fn stop_for_reconfiguration(&mut self) {
+        self.inner.stop_for_reconfiguration();
+    }
+
+    fn reconfigure_on_main_thread(&mut self) -> Result<(), String> {
+        self.inner.reconfigure_on_main_thread()
+    }
+
+    fn latency_samples(&self) -> u32 {
+        self.inner.latency_samples()
+    }
 
     fn effect_type(&self) -> EffectType {
         // External plugins don't map to built-in EffectType.

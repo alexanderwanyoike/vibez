@@ -20,6 +20,7 @@ pub struct ClapPluginInstance {
     name: String,
     is_instrument: bool,
     plugin_ptr: *const clap_plugin,
+    host_ptr: *const clap_sys::host::clap_host,
     _lib: libloading::Library,
     param_descriptors: Vec<ParamDescriptor>,
     param_values: Vec<f32>,
@@ -40,6 +41,8 @@ pub struct ClapPluginInstance {
     event_headers: Vec<*const clap_event_header>,
     note_events: Vec<NoteEvent>,
     sample_rate: f64,
+    latency_samples: u32,
+    main_thread: std::thread::ThreadId,
     active: bool,
     processing: bool,
     processing_error: Option<&'static str>,
@@ -134,6 +137,17 @@ impl ClapPluginInstance {
         sample_rate: f64,
         max_buffer_size: u32,
     ) -> Result<Self, String> {
+        Self::init_on_main_thread_with_state(partial, sample_rate, max_buffer_size, None, false)
+    }
+
+    /// Restores state while inactive so ports and latency describe the first activation.
+    pub fn init_on_main_thread_with_state(
+        partial: PartialClapPlugin,
+        sample_rate: f64,
+        max_buffer_size: u32,
+        saved_state: Option<&[u8]>,
+        strict_state_restore: bool,
+    ) -> Result<Self, String> {
         let entry_ref = unsafe { &*partial.entry_ptr };
 
         // entry.init() — lightweight, just returns true for clap-juce-extensions
@@ -196,61 +210,76 @@ impl ClapPluginInstance {
         // plugin.init() — on the SAME thread as create_plugin()
         let init_ok = unsafe { (plugin_ref.init.unwrap())(plugin_ptr) };
         if !init_ok {
+            super::host_impl::unregister_host_callbacks(host);
             unsafe { (plugin_ref.destroy.unwrap())(plugin_ptr) };
             return Err("Plugin init() failed".into());
         }
-
-        let (param_descriptors, param_values, param_ids, param_cookies) = query_params(plugin_ptr);
-        let ports = (|| unsafe {
-            Ok::<_, String>((
-                super::audio_ports::query(plugin_ptr, true, max_buffer_size as usize)?,
-                super::audio_ports::query(plugin_ptr, false, max_buffer_size as usize)?,
-            ))
-        })();
-        let (mut input_ports, mut output_ports) = match ports {
-            Ok(ports) => ports,
-            Err(error) => {
-                unsafe { (plugin_ref.destroy.unwrap())(plugin_ptr) };
-                return Err(error);
-            }
-        };
-        let external_inputs = crate::audio_ports::descriptors(&input_ports);
-        let input_buffers = super::audio_ports::buffers(&mut input_ports);
-        let output_buffers = super::audio_ports::buffers(&mut output_ports);
 
         let mut instance = Self {
             name,
             is_instrument: partial.is_instrument,
             plugin_ptr,
+            host_ptr: host,
             _lib: partial.lib,
-            param_descriptors,
-            param_values,
-            param_ids,
-            param_cookies,
+            param_descriptors: Vec::new(),
+            param_values: Vec::new(),
+            param_ids: Vec::new(),
+            param_cookies: Vec::new(),
             pending_params: Vec::with_capacity(2048),
-            input_ports,
-            output_ports,
-            input_buffers,
-            output_buffers,
-            external_inputs,
+            input_ports: Vec::new(),
+            output_ports: Vec::new(),
+            input_buffers: Vec::new(),
+            output_buffers: Vec::new(),
+            external_inputs: Vec::new(),
             max_frames: max_buffer_size,
             input_events_storage: Vec::with_capacity(2048),
             param_events_storage: Vec::with_capacity(2048),
             event_headers: Vec::with_capacity(4096),
             note_events: Vec::with_capacity(2048),
             sample_rate,
+            latency_samples: 0,
+            main_thread: std::thread::current().id(),
             active: false,
             processing: false,
             processing_error: None,
             processing_failed: false,
         };
 
+        if let Some(state) = saved_state {
+            if !instance.load_state(state) {
+                if strict_state_restore {
+                    return Err(format!("{} rejected its saved state", instance.name));
+                }
+                eprintln!("vibez: {} rejected saved state", instance.name);
+            }
+        }
+        (
+            instance.param_descriptors,
+            instance.param_values,
+            instance.param_ids,
+            instance.param_cookies,
+        ) = query_params(plugin_ptr);
+        instance.rebuild_ports()?;
         instance.prepare(sample_rate, max_buffer_size);
         if !instance.activate() {
-            return Err("CLAP activation failed".into());
+            return Err(format!(
+                "{} failed activation or latency preparation",
+                instance.name
+            ));
         }
 
         Ok(instance)
+    }
+
+    fn rebuild_ports(&mut self) -> Result<(), String> {
+        self.input_ports =
+            unsafe { super::audio_ports::query(self.plugin_ptr, true, self.max_frames as usize) }?;
+        self.output_ports =
+            unsafe { super::audio_ports::query(self.plugin_ptr, false, self.max_frames as usize) }?;
+        self.external_inputs = crate::audio_ports::descriptors(&self.input_ports);
+        self.input_buffers = super::audio_ports::buffers(&mut self.input_ports);
+        self.output_buffers = super::audio_ports::buffers(&mut self.output_ports);
+        Ok(())
     }
 
     /// Single-shot load (convenience — calls both phases on the current thread).
@@ -337,6 +366,43 @@ fn query_params(
 }
 
 impl PluginInstance for ClapPluginInstance {
+    fn reconfiguration_requested(&self) -> bool {
+        let data =
+            unsafe { &*((*self.host_ptr).host_data as *const super::host_impl::ClapHostUserData) };
+        data.restart_requested
+            .load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    fn stop_for_reconfiguration(&mut self) {
+        self.stop_processing();
+    }
+
+    fn reconfigure_on_main_thread(&mut self) -> Result<(), String> {
+        if self.main_thread != std::thread::current().id() {
+            return Err(format!("{} requires its owning main thread", self.name));
+        }
+        if self.processing {
+            return Err(format!("{} is still processing", self.name));
+        }
+        let data =
+            unsafe { &*((*self.host_ptr).host_data as *const super::host_impl::ClapHostUserData) };
+        data.restart_requested
+            .store(false, std::sync::atomic::Ordering::Release);
+        let _activation = super::host_impl::activation_scope(self.host_ptr);
+        self.deactivate();
+        self.latency_samples = 0;
+        self.rebuild_ports()?;
+        if !self.activate() {
+            return Err(format!("{} failed to reactivate", self.name));
+        }
+
+        Ok(())
+    }
+
+    fn latency_samples(&self) -> u32 {
+        self.latency_samples
+    }
+
     fn name(&self) -> &str {
         &self.name
     }
@@ -391,14 +457,16 @@ impl PluginInstance for ClapPluginInstance {
         inputs: &[vibez_core::routing::ExternalInputBlock<'_>],
     ) {
         if !self.active || self.plugin_ptr.is_null() {
+            buffer.fill(0.0);
             return;
         }
 
-        super::host_impl::mark_clap_audio_thread();
+        let _audio_role = super::host_impl::audio_role();
         if !self.processing {
             let plugin_ref = unsafe { &*self.plugin_ptr };
             let started = unsafe { (plugin_ref.start_processing.unwrap())(self.plugin_ptr) };
             if !started {
+                self.processing_error = Some("CLAP start_processing failed");
                 buffer.fill(0.0);
                 return;
             }
@@ -573,15 +641,26 @@ impl PluginInstance for ClapPluginInstance {
     }
 
     fn reset(&mut self) {
+        let _audio_role = super::host_impl::audio_role();
         self.note_events.clear();
+        if self.processing {
+            let plugin = unsafe { &*self.plugin_ptr };
+            if let Some(reset) = plugin.reset {
+                unsafe { reset(self.plugin_ptr) };
+            }
+        }
     }
 
     fn is_instrument(&self) -> bool {
         self.is_instrument
     }
 
-    fn prepare(&mut self, sample_rate: f64, _max_buffer_size: u32) {
+    fn prepare(&mut self, sample_rate: f64, max_buffer_size: u32) {
+        if self.active || self.processing {
+            return;
+        }
         self.sample_rate = sample_rate;
+        self.max_frames = max_buffer_size;
     }
 
     fn activate(&mut self) -> bool {
@@ -589,11 +668,24 @@ impl PluginInstance for ClapPluginInstance {
             return false;
         }
         let plugin_ref = unsafe { &*self.plugin_ptr };
+        let _activation = super::host_impl::activation_scope(self.host_ptr);
         let ok = unsafe {
             (plugin_ref.activate.unwrap())(self.plugin_ptr, self.sample_rate, 1, self.max_frames)
         };
         if ok {
             self.active = true;
+            self.processing_failed = false;
+            match super::latency::query(self.plugin_ptr) {
+                Ok(samples) => self.latency_samples = samples,
+                Err(_) => {
+                    self.deactivate();
+                    self.latency_samples = 0;
+                    return false;
+                }
+            }
+        }
+        if !ok {
+            self.latency_samples = 0;
         }
         ok
     }
@@ -603,6 +695,10 @@ impl PluginInstance for ClapPluginInstance {
     }
 
     fn stop_processing(&mut self) {
+        // Exclusive &mut ownership proves the previous worker has yielded.
+        // CLAP permits the symbolic audio role on main during final teardown.
+        let _audio_role = super::host_impl::audio_role();
+
         if self.plugin_ptr.is_null() || !self.processing {
             return;
         }
@@ -625,6 +721,7 @@ impl PluginInstance for ClapPluginInstance {
 impl Drop for ClapPluginInstance {
     fn drop(&mut self) {
         if !self.plugin_ptr.is_null() {
+            super::host_impl::unregister_host_callbacks(self.host_ptr);
             if self.active {
                 self.deactivate();
             }
