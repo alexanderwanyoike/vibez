@@ -129,3 +129,38 @@ impl App {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domains::devices::DevicesMsg;
+    use crate::state::ProjectTrack;
+
+    fn gain_app() -> (App, TrackId, EffectId) {
+        let mut app = super::super::test_support::app();
+        let track = ProjectTrack::new(TrackId::new(), "Metered".into(), 3);
+        let id = track.id;
+        Arc::make_mut(&mut app.state.project_tracks).tracks.push(track);
+        let _ = app.update(Message::Devices(DevicesMsg::AddEffect(id, EffectType::Gain)));
+        let effect = app.state.find_track(id).unwrap().effects[0].id;
+        app.state.arrangement.selected_track = Some(id);
+        app.state.view.detail_panel_tab = DetailPanelTab::Devices;
+        app.state.project.history = Default::default();
+        app.state.project.dirty = false;
+        app.poll_gain_devices();
+        (app, id, effect)
+    }
+
+    #[test]
+    fn gain_unity_clears_a_stale_input_without_dirtying_an_unchanged_device() {
+        let (mut app, track, effect) = gain_app();
+        let panel = app.gain_devices.panels.get_mut(&effect).unwrap();
+        panel.input_text[0] = Some("invalid".into());
+        panel.input_error[0] = true;
+        let _ = app.update(Message::set_effect_param(track, effect, 0, 1.0));
+        assert!(!app.state.project.dirty);
+        assert!(!app.state.project.history.can_undo());
+        let panel = &app.gain_devices.panels[&effect];
+        assert!(panel.input_text[0].is_none());
+        assert!(!panel.input_error[0]);
+    }
+}
