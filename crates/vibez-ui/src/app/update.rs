@@ -237,6 +237,9 @@ impl App {
         }
 
         match message {
+            Message::ApplyDevicePreset(track_id, effect_id, preset) => {
+                return self.apply_device_preset(track_id, effect_id, preset);
+            }
             Message::SectionTimeline(_) => {
                 unreachable!("section timeline wrappers are removed before routing")
             }

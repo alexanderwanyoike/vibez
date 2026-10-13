@@ -158,6 +158,7 @@ mod audio_tasks;
 mod bounce;
 mod capture;
 mod compensation;
+mod device_presets;
 mod drum_rack_preparation;
 mod engine_events;
 mod keyboard;

@@ -92,6 +92,7 @@ pub enum Message {
     Transport(crate::domains::transport::TransportMsg),
     /// Devices domain (effect chain, instruments, drum pads, menu).
     Devices(crate::domains::devices::DevicesMsg),
+    ApplyDevicePreset(TrackId, EffectId, vibez_core::device_preset::DevicePreset),
     /// Arrangement domain (tracks, selection; clips arriving next).
     Arrangement(crate::domains::arrangement::ArrangementMsg),
     SetDrumRackSliceMarkers(crate::domains::arrangement::AudioSliceMarkers),
