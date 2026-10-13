@@ -50,6 +50,26 @@ Events come in two classes, and the class determines the push policy:
   lossy. A cosmetic event must never retry, because a retry backlog competes
   with authoritative events for ring slots after a UI stall.
 
+### Time domains
+
+With plugin delay compensation the engine renders ahead of what the listener
+hears, so every event names the clock its consumer follows
+(`EngineEvent::time_domain`, an exhaustive match):
+
+- **Source**: the render position. Clip and Section recorders and their
+  lifecycle events use it, so a recorded note lands where the player intended
+  and cannot fall behind its count-in or arrive after its take has closed.
+- **Heard**: the render position plus compensated output latency. Playheads,
+  transitions, Capture, mute and automation feedback, and live-input pad
+  feedback use it, so the screen follows the speakers.
+- **Untimed**: acknowledgements, failures, meters and ownership returns.
+
+Only heard events wait for output latency (`present_event_after`, or a future
+deadline for `present_event_at`); debug builds assert it there and in the Note
+Repeat pair. Cancelling the queue (Stop, Play, a presentation fault) keeps
+Capture events that are already due, replaces pending transitions with their
+ownership returns, and drops other pending heard feedback.
+
 ## 3. Ports and adapters: EngineHandle
 
 Removed devices stop processing on the audio thread before their unique owner
