@@ -349,8 +349,6 @@ pub enum EngineEvent {
         retired: Box<PreparedSectionPlaybackSource>,
     },
 
-    /// A resident Section became active at this exact transport sample.
-    /// `retired` carries displaced sources to the UI thread for destruction.
     CaptureTimingRetired(std::sync::Arc<[(TrackId, u32)]>),
     SectionCaptureStopped {
         effective_at_samples: u64,
@@ -362,6 +360,8 @@ pub enum EngineEvent {
         refreshed: bool,
         offsets: std::sync::Arc<[(TrackId, u32)]>,
     },
+    /// A resident Section became active at this exact transport sample.
+    /// `retired` carries displaced sources to the UI thread for destruction.
     SectionTransitioned {
         section_id: SectionId,
         effective_at_samples: u64,
