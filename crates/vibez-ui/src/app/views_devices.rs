@@ -7,7 +7,6 @@ use iced::{Color, Element, Length, Theme};
 
 use vibez_core::id::TrackId;
 use vibez_core::track::MediaSourceRef;
-use vibez_plugin_host::gui::PluginGuiKey;
 
 use crate::domains::browser::BrowserMsg;
 use crate::icons;
@@ -286,13 +285,7 @@ impl App {
     pub(super) fn device_title_bar<'a>(
         content: impl Into<Element<'a, Message>>,
     ) -> iced::widget::Container<'a, Message> {
-        container(content)
-            .padding([4, 6])
-            .width(Length::Fill)
-            .style(|_theme: &Theme| container::Style {
-                background: Some(th::bg_surface().into()),
-                ..Default::default()
-            })
+        crate::widgets::device_chrome::title_bar(content)
     }
 
     /// Standard device title row: colored dot, name, optional remove.
@@ -327,14 +320,7 @@ impl App {
 
     /// Thin vertical rule separating device sections.
     pub(super) fn device_divider() -> Element<'static, Message> {
-        container(text(""))
-            .width(Length::Fixed(1.0))
-            .height(Length::Fixed(th::DEVICE_BODY_H - 12.0))
-            .style(|_theme: &Theme| container::Style {
-                background: Some(th::divider().into()),
-                ..Default::default()
-            })
-            .into()
+        crate::widgets::device_chrome::divider()
     }
 
     /// Standard device body: fixed rack height so every card in the
@@ -348,17 +334,7 @@ impl App {
 
     /// Wrap card content in the standard device card container.
     pub(super) fn device_card(content: iced::widget::Column<'_, Message>) -> Element<'_, Message> {
-        container(content)
-            .style(|_theme: &Theme| container::Style {
-                background: Some(th::bg_elevated().into()),
-                border: iced::Border {
-                    color: th::border(),
-                    width: 1.0,
-                    radius: 4.0.into(),
-                },
-                ..Default::default()
-            })
-            .into()
+        crate::widgets::device_chrome::card(content)
     }
 
     /// Small icon-only button for device card actions.
@@ -368,25 +344,7 @@ impl App {
         hover_color: Color,
         msg: Message,
     ) -> iced::widget::Button<'static, Message> {
-        button(icons::icon(icon_char).size(12).color(color))
-            .on_press(msg)
-            .padding([3, 5])
-            .style(move |_theme: &Theme, status| {
-                let (bg, tc) = match status {
-                    button::Status::Hovered => (Some(th::bg_hover().into()), hover_color),
-                    button::Status::Pressed => (Some(th::bg_dark().into()), hover_color),
-                    _ => (None, color),
-                };
-                button::Style {
-                    background: bg,
-                    text_color: tc,
-                    border: iced::Border {
-                        radius: 3.0.into(),
-                        ..Default::default()
-                    },
-                    ..Default::default()
-                }
-            })
+        crate::widgets::device_chrome::icon_button(icon_char, color, hover_color, msg)
     }
 
     /// Device card for an external plugin instrument.
@@ -396,69 +354,19 @@ impl App {
         track: &'a UiTrack,
         track_color: Color,
     ) -> Element<'a, Message> {
-        let dot = text("\u{25CF}").size(9).color(track_color);
-        let plugin_name = track.plugin_instrument_name.as_deref().unwrap_or("Plugin");
-
-        let name_section =
-            container(text(plugin_name).size(11).color(th::text())).width(Length::Fill);
-
-        // Edit button for plugins with a native GUI
-        let edit_btn: Option<iced::widget::Button<'_, Message>> = if track.has_plugin_instrument_gui
-        {
-            let gui_key = PluginGuiKey::Instrument { track_id };
-            Some(
-                button(text("Edit").size(9).color(th::text_dim()))
-                    .on_press(Message::OpenPluginGui(gui_key))
-                    .padding([2, 5])
-                    .style(|_theme: &Theme, status| {
-                        let (bg, tc) = match status {
-                            button::Status::Hovered => (Some(th::bg_hover().into()), th::accent()),
-                            _ => (None, th::text_dim()),
-                        };
-                        button::Style {
-                            background: bg,
-                            text_color: tc,
-                            border: iced::Border {
-                                color: th::border(),
-                                width: 1.0,
-                                radius: 3.0.into(),
-                            },
-                            ..Default::default()
-                        }
-                    }),
-            )
-        } else {
-            None
-        };
-
-        let remove: Element<'a, Message> = Self::device_icon_btn(
-            icons::X,
-            th::text_dim(),
-            th::danger(),
-            Message::remove_track_instrument(track_id),
-        )
-        .into();
-
-        let mut title_row = row![dot, name_section]
-            .spacing(4)
-            .align_y(iced::Alignment::Center);
-        if let Some(eb) = edit_btn {
-            title_row = title_row.push(eb);
-        }
-        title_row = title_row.push(remove);
-
-        let title = Self::device_title_bar(title_row);
-
-        let latency = crate::domains::device_latency::latency_label(
-            track.instrument_latency_samples,
-            self.state.transport.sample_rate,
-        );
-        Self::device_card(
-            column![
-                title,
-                container(text(latency).size(9).color(th::text_dim())).padding([2, 6])
-            ]
-            .width(Length::Fixed(200.0)),
+        crate::widgets::device_chrome::plugin_instrument_card(
+            track_id,
+            track.plugin_instrument_name.as_deref().unwrap_or("Plugin"),
+            track
+                .plugin_instrument_ref
+                .as_ref()
+                .map(|device| device.format.as_str()),
+            track.has_plugin_instrument_gui,
+            crate::domains::device_latency::latency_label(
+                track.instrument_latency_samples,
+                self.state.transport.sample_rate,
+            ),
+            track_color,
         )
     }
 

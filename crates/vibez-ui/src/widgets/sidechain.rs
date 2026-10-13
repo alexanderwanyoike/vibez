@@ -28,9 +28,9 @@ struct TapChoice(SourceTap);
 impl std::fmt::Display for TapChoice {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self.0 {
-            SourceTap::BeforeEffects => "Before Effects",
-            SourceTap::AfterEffects => "After Effects",
-            SourceTap::AfterFader => "After Fader",
+            SourceTap::BeforeEffects => "Pre FX",
+            SourceTap::AfterEffects => "Post FX",
+            SourceTap::AfterFader => "Post Fader",
         })
     }
 }
@@ -103,26 +103,35 @@ fn meter<'a>(level: (f32, f32)) -> Element<'a, Message> {
     } else {
         th::meter_green()
     };
-    let filled = container(Space::new(
-        Length::Fixed(3.0),
-        Length::Fixed(proportion * 18.0),
-    ))
-    .style(move |_theme| container::Style {
-        background: Some(color.into()),
-        ..Default::default()
-    });
-    container(column![
-        Space::new(Length::Fixed(3.0), Length::Fixed((1.0 - proportion) * 18.0)),
-        filled
-    ])
-    .width(Length::Fixed(5.0))
-    .padding(1)
-    .style(|_theme| container::Style {
-        background: Some(th::bg_dark().into()),
-        ..Default::default()
-    })
-    .into()
+    let fill = (proportion * 1000.0).round() as u16;
+    let mut bar = row![];
+    if fill > 0 {
+        bar = bar.push(
+            container(Space::new(Length::Fill, Length::Fixed(2.0)))
+                .width(Length::FillPortion(fill))
+                .style(move |_theme| container::Style {
+                    background: Some(color.into()),
+                    ..Default::default()
+                }),
+        );
+    }
+    if fill < 1000 {
+        bar = bar.push(Space::new(
+            Length::FillPortion(1000 - fill),
+            Length::Fixed(2.0),
+        ));
+    }
+    container(bar.width(Length::Fill))
+        .width(Length::Fill)
+        .style(|_theme| container::Style {
+            background: Some(th::bg_dark().into()),
+            ..Default::default()
+        })
+        .into()
 }
+
+/// Fixed width of the sidechain section, shared with the card width math.
+pub const WIDTH: f32 = 132.0;
 
 pub fn view<'a>(
     receiver: TrackId,
@@ -144,7 +153,7 @@ pub fn view<'a>(
     if inputs.is_empty() && unavailable.is_empty() {
         return None;
     }
-    let mut content = column![text("SIDECHAIN").size(8).color(th::text_muted())].spacing(7);
+    let mut content = column![crate::widgets::device_chrome::section_label("Sidechain")].spacing(6);
     for input in &inputs {
         let id = input.id;
         let effect_id = effect.id;
@@ -192,51 +201,33 @@ pub fn view<'a>(
         if inputs.len() > 1 {
             controls = controls.push(text(&input.name).size(9).color(th::text_dim()));
         }
-        controls = controls.push(
-            row![
-                text("Source")
-                    .size(9)
-                    .color(th::text_dim())
-                    .width(Length::Fixed(36.0)),
-                source,
-                meter(
-                    state
-                        .sidechain_meters
-                        .get(&(effect_id, id))
-                        .copied()
-                        .unwrap_or_default()
-                )
-            ]
-            .spacing(5)
-            .align_y(iced::Alignment::Center),
-        );
+        controls = controls.push(source);
         if let Some(route) = route {
+            controls = controls.push(meter(
+                state
+                    .sidechain_meters
+                    .get(&(effect_id, id))
+                    .copied()
+                    .unwrap_or_default(),
+            ));
             let taps = allowed
                 .iter()
                 .find(|option| option.source == route.source)
                 .map(|option| option.taps.as_slice())
                 .unwrap_or_default();
             if !taps.is_empty() {
-                controls = controls.push(
-                    row![
-                        text("Tap")
-                            .size(9)
-                            .color(th::text_dim())
-                            .width(Length::Fixed(36.0)),
-                        selector(
-                            taps.iter().copied().map(TapChoice).collect(),
-                            TapChoice(route.tap),
-                            move |choice| Message::Devices(DevicesMsg::SetSidechainTap {
-                                track_id: receiver,
-                                effect_id,
-                                input_id: id,
-                                tap: choice.0
-                            })
-                        )
-                    ]
-                    .spacing(5)
-                    .align_y(iced::Alignment::Center),
-                );
+                controls = controls.push(selector(
+                    taps.iter().copied().map(TapChoice).collect(),
+                    TapChoice(route.tap),
+                    move |choice| {
+                        Message::Devices(DevicesMsg::SetSidechainTap {
+                            track_id: receiver,
+                            effect_id,
+                            input_id: id,
+                            tap: choice.0,
+                        })
+                    },
+                ));
             } else {
                 controls = controls.push(
                     text(TapChoice(route.tap).to_string())
@@ -244,8 +235,6 @@ pub fn view<'a>(
                         .color(th::text_muted()),
                 );
             }
-        } else {
-            controls = controls.push(text("After Effects").size(9).color(th::text_muted()));
         }
         content = content.push(controls);
     }
@@ -284,8 +273,8 @@ pub fn view<'a>(
                 scrollable::Scrollbar::new().width(3).scroller_width(3),
             )),
         )
-        .padding([8, 10])
-        .width(Length::Fixed(230.0))
+        .padding([8, 8])
+        .width(Length::Fixed(WIDTH))
         .height(Length::Fixed(th::DEVICE_BODY_H))
         .into(),
     )
