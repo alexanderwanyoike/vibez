@@ -30,17 +30,14 @@ impl EngineCommand {
             | Self::RemoveBus(id)
             | Self::AddTrack(id, _)
             | Self::AddBus(id, _)
-            | Self::AddMidiTrack(id, _)
-            | Self::AddInstrumentTrack(id, _, _) => DeviceOwnerInvalidation::Channel(*id),
+            | Self::AddMidiTrack(id, _) => DeviceOwnerInvalidation::Channel(*id),
             Self::RemoveEffect(track, effect)
             | Self::InsertEffect {
                 track_id: track,
                 effect_id: effect,
                 ..
             } => DeviceOwnerInvalidation::Effect(*track, *effect),
-            Self::SetInstrument { track_id, .. }
-            | Self::SetTrackInstrument(track_id, ..)
-            | Self::RemoveTrackInstrument(track_id) => {
+            Self::SetInstrument { track_id, .. } | Self::RemoveTrackInstrument(track_id) => {
                 DeviceOwnerInvalidation::Instrument(*track_id)
             }
             _ => DeviceOwnerInvalidation::None,

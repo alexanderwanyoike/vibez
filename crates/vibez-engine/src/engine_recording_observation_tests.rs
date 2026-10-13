@@ -4,6 +4,7 @@ use super::*;
 use crate::events::SourceRecordingPosition;
 use crate::playback_source::PreparedSectionPlaybackSource;
 use vibez_core::{midi::InstrumentKind, perform::NoteRepeatRate, routing::*};
+use vibez_instruments::create_instrument;
 
 #[test]
 fn external_input_observations_keep_the_applied_section_coordinate() {

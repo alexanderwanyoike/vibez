@@ -302,9 +302,10 @@ fn instrument_params_change_the_sound() {
         .push(EngineCommand::AddMidiTrack(tid, "midi".into()))
         .unwrap();
     cmd_tx
-        .push(EngineCommand::SetTrackInstrument(
+        .push(EngineCommand::set_built_in_instrument(
             tid,
             vibez_core::midi::InstrumentKind::SubtractiveSynth,
+            crate::engine::DEFAULT_SAMPLE_RATE,
         ))
         .unwrap();
     cmd_tx
@@ -349,9 +350,10 @@ fn audition_sounds_while_transport_stopped() {
         .push(EngineCommand::AddMidiTrack(tid, "midi".into()))
         .unwrap();
     cmd_tx
-        .push(EngineCommand::SetTrackInstrument(
+        .push(EngineCommand::set_built_in_instrument(
             tid,
             vibez_core::midi::InstrumentKind::SubtractiveSynth,
+            crate::engine::DEFAULT_SAMPLE_RATE,
         ))
         .unwrap();
     cmd_tx

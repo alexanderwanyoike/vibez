@@ -281,11 +281,8 @@ pub enum EngineCommand {
     },
 
     // -- Instrument tracks --
-    AddInstrumentTrack(TrackId, String, InstrumentKind),
     /// Add a bare MIDI track (no synth attached).
     AddMidiTrack(TrackId, String),
-    /// Attach an instrument to a track.
-    SetTrackInstrument(TrackId, InstrumentKind),
     /// Remove the instrument from a track.
     RemoveTrackInstrument(TrackId),
     /// Set note clip duration (for halve/double).
@@ -483,6 +480,18 @@ impl EngineCommand {
             effect_id,
             effect: vibez_dsp::factory::create_effect(effect_type, sample_rate as f32),
             position: None,
+        }
+    }
+
+    /// See [`EngineCommand::insert_built_in_effect`].
+    pub fn set_built_in_instrument(
+        track_id: TrackId,
+        kind: InstrumentKind,
+        sample_rate: u32,
+    ) -> Self {
+        Self::SetInstrument {
+            track_id,
+            instrument: vibez_instruments::create_instrument(kind, sample_rate as f32),
         }
     }
 }

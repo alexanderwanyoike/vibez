@@ -672,9 +672,10 @@ fn changed_rate_keeps_native_owners_but_rejects_their_old_configuration_even_aft
             .unwrap();
         if instrument {
             commands
-                .push(EngineCommand::SetTrackInstrument(
+                .push(EngineCommand::set_built_in_instrument(
                     track,
                     vibez_core::midi::InstrumentKind::SubtractiveSynth,
+                    crate::engine::DEFAULT_SAMPLE_RATE,
                 ))
                 .unwrap();
         } else {

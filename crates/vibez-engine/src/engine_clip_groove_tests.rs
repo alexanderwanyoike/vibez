@@ -216,10 +216,16 @@ fn dense_recorded_groove_schedules_each_note_once_per_audio_block() {
         .push(EngineCommand::SetProjectSwing(SwingAmount::new(0.59)))
         .unwrap();
     commands
-        .push(EngineCommand::AddInstrumentTrack(
+        .push(EngineCommand::AddMidiTrack(
             track_id,
             "Recorded groove".into(),
+        ))
+        .unwrap();
+    commands
+        .push(EngineCommand::set_built_in_instrument(
+            track_id,
             InstrumentKind::SubtractiveSynth,
+            44_100,
         ))
         .unwrap();
     commands

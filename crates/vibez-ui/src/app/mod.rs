@@ -578,6 +578,14 @@ impl App {
         );
     }
 
+    fn set_built_in_instrument(
+        &mut self,
+        track_id: vibez_core::id::TrackId,
+        kind: vibez_core::midi::InstrumentKind,
+    ) {
+        crate::domains::EngineHandle::set_built_in_instrument(&mut self.cmd_tx, track_id, kind);
+    }
+
     fn mark_project_dirty(&mut self) {
         self.state.project.dirty = true;
         self.save_runtime.project_changed(

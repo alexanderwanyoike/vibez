@@ -6,6 +6,7 @@ use vibez_core::{
     id::EffectId,
     routing::{NodeStage, RoutingChannel, RoutingEffect, RoutingNode},
 };
+use vibez_instruments::create_instrument;
 
 #[test]
 fn entering_perform_rebases_the_heard_clock_before_launch_or_capture() {

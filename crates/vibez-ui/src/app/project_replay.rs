@@ -277,7 +277,7 @@ impl App {
         ));
 
         if let Some(kind) = track.instrument_kind {
-            self.send_command(EngineCommand::SetTrackInstrument(track.id, kind));
+            self.set_built_in_instrument(track.id, kind);
             for (idx, value) in track.instrument_params.iter().copied().enumerate() {
                 self.send_command(EngineCommand::SetInstrumentParam {
                     track_id: track.id,

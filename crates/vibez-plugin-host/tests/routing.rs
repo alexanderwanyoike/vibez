@@ -327,10 +327,13 @@ fn all_instrument_source_formats_feed_builtins_and_hosted_receivers() {
             commands.push(main).unwrap();
             if source_format == "builtin" {
                 commands
-                    .push(EngineCommand::AddInstrumentTrack(
+                    .push(EngineCommand::AddMidiTrack(ghost, "Sampler".into()))
+                    .unwrap();
+                commands
+                    .push(EngineCommand::set_built_in_instrument(
                         ghost,
-                        "Sampler".into(),
                         InstrumentKind::Sampler,
+                        48000,
                     ))
                     .unwrap();
                 commands

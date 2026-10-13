@@ -42,7 +42,11 @@ fn instrument_replacement_with_unchanged_timing_does_not_wait_for_a_topology_edi
         .unwrap();
     engine.process(&mut [], 2);
     for command in [
-        EngineCommand::SetTrackInstrument(track, InstrumentKind::SubtractiveSynth),
+        EngineCommand::set_built_in_instrument(
+            track,
+            InstrumentKind::SubtractiveSynth,
+            crate::engine::DEFAULT_SAMPLE_RATE,
+        ),
         EngineCommand::RemoveTrackInstrument(track),
     ] {
         commands.push(command).unwrap();

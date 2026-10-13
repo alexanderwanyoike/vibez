@@ -8,6 +8,7 @@ use vibez_core::{
     perform::{SwingAmount, SwingOffset},
     routing::*,
 };
+use vibez_instruments::create_instrument;
 
 fn swing_lane() -> AutomationLane {
     let mut lane = AutomationLane::new(AutomationTarget::TrackSwingOffset);

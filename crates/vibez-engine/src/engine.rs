@@ -7,7 +7,6 @@ use vibez_core::id::{SectionId, TrackId};
 use vibez_core::perform::{GrooveProfile, SwingAmount};
 
 use vibez_core::time::TempoMap;
-use vibez_instruments::create_instrument;
 
 use crate::commands::{AuditionStart, EngineCommand};
 use crate::engine_audition::{audition_fade_frames, next_audition_boundary, AuditionBus};

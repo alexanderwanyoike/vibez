@@ -48,6 +48,15 @@ pub trait EngineHandle {
         );
         self.send(command);
     }
+
+    fn set_built_in_instrument(
+        &mut self,
+        track_id: vibez_core::id::TrackId,
+        kind: vibez_core::midi::InstrumentKind,
+    ) {
+        let command = EngineCommand::set_built_in_instrument(track_id, kind, self.sample_rate());
+        self.send(command);
+    }
 }
 
 /// Ordered UI-side delivery for the bounded real-time engine queue.

@@ -519,7 +519,7 @@ impl App {
             ));
 
             if let Some(kind) = track_info.instrument {
-                self.send_command(EngineCommand::SetTrackInstrument(track_info.id, kind));
+                self.set_built_in_instrument(track_info.id, kind);
             }
 
             if let Some(native) = &track_info.native_instrument {

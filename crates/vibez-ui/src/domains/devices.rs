@@ -380,7 +380,7 @@ impl DevicesState {
                     track.plugin_instrument_descriptors = &[];
                     track.has_plugin_instrument_gui = false;
                 }
-                engine.send(EngineCommand::SetTrackInstrument(track_id, instrument_kind));
+                engine.set_built_in_instrument(track_id, instrument_kind);
                 for (param_index, value) in instrument_params.into_iter().enumerate() {
                     engine.send(EngineCommand::SetInstrumentParam {
                         track_id,

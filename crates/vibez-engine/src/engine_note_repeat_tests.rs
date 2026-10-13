@@ -21,9 +21,10 @@ fn repeat_engine() -> (
         .push(EngineCommand::AddMidiTrack(track_id, "Hats".into()))
         .unwrap();
     commands
-        .push(EngineCommand::SetTrackInstrument(
+        .push(EngineCommand::set_built_in_instrument(
             track_id,
             InstrumentKind::SubtractiveSynth,
+            100,
         ))
         .unwrap();
     commands.push(EngineCommand::Play).unwrap();
@@ -81,9 +82,10 @@ fn stopped_repeat_engine_at(
         .push(EngineCommand::AddMidiTrack(track_id, "Hats".into()))
         .unwrap();
     commands
-        .push(EngineCommand::SetTrackInstrument(
+        .push(EngineCommand::set_built_in_instrument(
             track_id,
             InstrumentKind::SubtractiveSynth,
+            96,
         ))
         .unwrap();
     engine.process(&mut [], 2);
@@ -437,9 +439,10 @@ fn clip_engine(
         .push(EngineCommand::AddMidiTrack(track_id, "Clip".into()))
         .unwrap();
     commands
-        .push(EngineCommand::SetTrackInstrument(
+        .push(EngineCommand::set_built_in_instrument(
             track_id,
             InstrumentKind::SubtractiveSynth,
+            8_000,
         ))
         .unwrap();
     commands
@@ -531,9 +534,10 @@ fn render_prepared_section_with_swing(swing: SwingAmount) -> Vec<f32> {
         .push(EngineCommand::AddMidiTrack(track_id, "Section clip".into()))
         .unwrap();
     commands
-        .push(EngineCommand::SetTrackInstrument(
+        .push(EngineCommand::set_built_in_instrument(
             track_id,
             InstrumentKind::SubtractiveSynth,
+            8_000,
         ))
         .unwrap();
     commands
