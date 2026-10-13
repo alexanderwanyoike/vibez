@@ -205,7 +205,7 @@ impl App {
                 id: effect_info.id,
                 effect_type: effect_info.effect_type,
                 bypass: effect_info.bypass,
-                params: effect_info.params.clone(),
+                params: restored_effect_params(&effect_info.params, fx.param_descriptors()),
                 descriptors: fx.param_descriptors(),
                 plugin_name: None,
                 has_plugin_gui: false,
@@ -605,7 +605,7 @@ impl App {
                     id: effect_info.id,
                     effect_type: effect_info.effect_type,
                     bypass: effect_info.bypass,
-                    params: effect_info.params.clone(),
+                    params: restored_effect_params(&effect_info.params, descriptors),
                     descriptors,
                     plugin_name: None,
                     has_plugin_gui: false,
@@ -923,6 +923,14 @@ fn first_remote_provenance_label(project: &Project) -> Option<String> {
             vibez_core::track::MediaProvenance::Remote { .. } => Some(provenance.display_label()),
             vibez_core::track::MediaProvenance::Local { .. } => None,
         })
+}
+
+fn restored_effect_params(saved: &[f32], descriptors: &[vibez_core::effect::ParamDescriptor]) -> Vec<f32> {
+    let mut params = saved.to_vec();
+    // Older projects lack appended controls; keep their existing values and
+    // make the same neutral defaults editable that the DSP already restored.
+    params.extend(descriptors.iter().skip(saved.len()).map(|descriptor| descriptor.default));
+    params
 }
 
 fn expand_drum_rack_pads(pads: &[vibez_core::track::DrumPadState]) -> Vec<UiDrumPad> {
