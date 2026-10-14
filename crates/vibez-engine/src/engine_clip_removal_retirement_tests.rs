@@ -54,10 +54,10 @@ fn removing_a_unique_audio_clip_preserves_survivors_without_callback_destruction
         let survivor_geometry: Vec<_> = engine.tracks()[0].playback_source.clips.iter()
             .filter(|clip| clip.id != ids[1])
             .map(|clip| (
-                clip.id, Arc::as_ptr(&clip.audio), clip.position, clip.source_offset,
-                clip.start_marker, clip.duration, clip.loop_enabled, clip.loop_start,
+                (clip.id, Arc::as_ptr(&clip.audio), clip.position, clip.source_offset,
+                clip.start_marker, clip.duration, clip.loop_enabled), (clip.loop_start,
                 clip.loop_end, clip.linear_gain, clip.fades, clip.playback_direction,
-                clip.warp_markers.as_slice().as_ptr(), clip.warp_markers.clone(),
+                clip.warp_markers.as_slice().as_ptr(), clip.warp_markers.clone()),
             )).collect();
         while events.pop().is_ok() {}
         if full_ring {
@@ -73,12 +73,11 @@ fn removing_a_unique_audio_clip_preserves_survivors_without_callback_destruction
         assert_eq!(survivors.len(), 2);
         for (clip, expected) in survivors.iter().zip(&survivor_geometry) {
             assert_eq!((clip.id, Arc::as_ptr(&clip.audio), clip.position, clip.source_offset,
-                clip.start_marker, clip.duration, clip.loop_enabled, clip.loop_start,
-                clip.loop_end, clip.linear_gain, clip.fades, clip.playback_direction,
-                clip.warp_markers.as_slice().as_ptr(), &clip.warp_markers),
-                (expected.0, expected.1, expected.2, expected.3, expected.4, expected.5,
-                expected.6, expected.7, expected.8, expected.9, expected.10, expected.11,
-                expected.12, &expected.13));
+                clip.start_marker, clip.duration, clip.loop_enabled), expected.0);
+            assert_eq!((clip.loop_start, clip.loop_end, clip.linear_gain, clip.fades,
+                clip.playback_direction, clip.warp_markers.as_slice().as_ptr(),
+                &clip.warp_markers), (expected.1.0, expected.1.1, expected.1.2,
+                expected.1.3, expected.1.4, expected.1.5, &expected.1.6));
         }
         assert_eq!(allocation, (0, 0), "full_ring={full_ring}");
         assert_eq!(removed_owner.strong_count(), 1);
