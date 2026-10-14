@@ -120,7 +120,7 @@ fn exactly_full_retirement_storage_keeps_removal_queued_until_ui_delivery() {
 }
 
 #[test]
-fn empty_missing_and_repeated_removals_keep_note_flush_and_length_semantics() {
+fn empty_missing_and_repeated_removals_preserve_independent_live_notes_and_length_semantics() {
     let (mut engine, mut commands, mut events) = AudioEngine::new();
     let track = TrackId::new();
     let id = ClipId::new();
@@ -140,6 +140,9 @@ fn empty_missing_and_repeated_removals_keep_note_flush_and_length_semantics() {
         EngineCommand::RemoveClip(track, id), EngineCommand::RemoveNoteClip(track, id)] {
         commands.push(command).unwrap();
     }
+    assert_eq!(crate::retirement::tests::allocations(|| engine.process(&mut output, 2)), (0, 0));
+    assert!(output.iter().all(|sample| *sample > 0.1));
+    commands.push(EngineCommand::ExternalNoteOff { track_id: track, pitch: 60 }).unwrap();
     assert_eq!(crate::retirement::tests::allocations(|| engine.process(&mut output, 2)), (0, 0));
     assert_eq!(output, [0.0; 16]);
     assert_eq!(engine.transport().audio_length(), None);
