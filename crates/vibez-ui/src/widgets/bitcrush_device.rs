@@ -76,7 +76,7 @@ pub fn view<'a>(
     let body: Element<'a, Message> = if let Some(scope) = layout.scope {
         let waveform = tooltip(
             canvas(SampleHoldScope { meter, accent }).width(scope.width).height(scope.height),
-            text("Actual sanitized LEFT input before Drive and final mixed output. Lines connect adjacent measured samples, including dry Mix and Post LP; no artificial staircase. Time uses this packet's count and sample rate. Ticks1/2 mark historical primary/secondary acquisitions, tint marks samples blended between lanes. f is the absolute first source frame. Each packet is a separate measured window.").size(9),
+            text("Actual sanitized LEFT input before Drive and final mixed output. Lines connect adjacent measured samples, including dry Mix and Post LP; no artificial staircase. Time uses this packet's count and sample rate. Ticks1/2 mark historical primary/secondary acquisitions, tint marks scheduled transition frames. f is the absolute first source frame. Each packet is a separate measured window.").size(9),
             tooltip::Position::Top,
         );
         let plot_bank: Element<'a, Message> = if let (Some(input), Some(output)) = (layout.input_meter, layout.output_meter) {

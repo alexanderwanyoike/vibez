@@ -138,7 +138,7 @@ impl canvas::Program<Message> for SampleHoldScope {
                 horizontal_alignment: iced::alignment::Horizontal::Right,
                 ..Default::default()
             });
-            caption(&mut frame, format!("f{} · ticks 1/2 · tint: blend", meter.first_source_frame),
+            caption(&mut frame, format!("f{} · ticks 1/2 · tint: transition", meter.first_source_frame),
                 Point::new(area.x, bounds.height - 10.0), th::text_dim());
         } else {
             frame.fill_text(canvas::Text {
