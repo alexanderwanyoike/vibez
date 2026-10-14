@@ -49,13 +49,13 @@ impl EngineTrack {
     }
 
     pub(crate) fn set_send(&mut self, bus_id: TrackId, amount: f32) {
+        let can_insert = self.sends.len() < super::CHANNEL_CAPACITY
+            && self.sends.len() < self.sends.capacity();
         match self.sends.iter_mut().find(|(id, _)| *id == bus_id) {
             Some(send) => send.1 = amount,
             // Each admitted return channel needs at most one slot. Invalid
             // target lists cannot grow callback-owned storage beyond that bound.
-            None if self.sends.len() < super::CHANNEL_CAPACITY
-                && self.sends.len() < self.sends.capacity() =>
-            {
+            None if can_insert => {
                 self.sends.push((bus_id, amount));
             }
             None => {}
