@@ -331,3 +331,6 @@ fn ready_clip_reply_waits_for_one_completion_credit_and_keeps_later_fifo_queued(
     assert_eq!(delta.audio.strong_count(), 0);
     assert_eq!(fixture.resident.strong_count(), 0);
 }
+
+#[path = "clip_insertion_lifecycle_tests.rs"]
+mod lifecycle_tests;
