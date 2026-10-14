@@ -211,3 +211,70 @@ fn clip_request_polling_serves_current_stale_delete_undo_stop_and_clear_state() 
         assert_eq!(fixture.audio.strong_count(), 0, "{change:?}");
     }
 }
+
+#[test]
+fn clip_completion_polling_drops_unique_rejected_owners_with_current_or_stale_ui_targets() {
+    for stale in [false, true] {
+        let mut app = super::test_support::app();
+        let (mut engine, commands, events) = AudioEngine::new();
+        app.cmd_tx = crate::domains::EngineCommandQueue::new(commands);
+        app.event_rx = Some(events);
+        let track = TrackId::new();
+        if !stale {
+            Arc::make_mut(&mut app.state.project_tracks).tracks.push(
+                ProjectTrack::new(track, "UI-only target".into(), 0));
+        }
+        let mut incoming = clip("Rejected", 0.0625);
+        assert!(incoming.warp_markers.add(32, 64, 0, 128, 128));
+        let clip_id = incoming.id;
+        let audio = Arc::downgrade(&incoming.audio);
+        let insertion = PreparedClipInsertion::new();
+        let operation = insertion.id();
+        app.send_command(command(track, &incoming, insertion));
+        drop(incoming);
+        assert_eq!(audio.strong_count(), 1);
+        app.state.status_text = "Retain this status".into();
+        render(&mut engine, false);
+        assert_eq!(audio.strong_count(), 1);
+        assert!(matches!(app.event_rx.as_ref().unwrap().peek().unwrap(),
+            EngineEvent::ClipInsertionCompleted(completed)
+                if completed.id() == operation
+                    && completed.outcome == ClipInsertionOutcome::MissingTrack
+                    && (completed.track_id, completed.clip_id) == (track, clip_id)));
+        app.poll_engine_events();
+        assert_eq!(audio.strong_count(), 0);
+        assert_eq!(app.state.find_track(track).is_none(), stale);
+        assert!(app.state.arrange_content(track).is_none());
+        assert!(engine.tracks().is_empty());
+        assert_eq!(app.state.status_text, "Retain this status");
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum ShutdownStage {
+    RequestUnpolled,
+    ReplyReady,
+    CompletionUnpolled,
+}
+
+#[test]
+fn clip_app_idle_stream_shutdown_disposes_undrained_request_reply_and_completion_owners() {
+    for stage in [ShutdownStage::RequestUnpolled, ShutdownStage::ReplyReady,
+        ShutdownStage::CompletionUnpolled] {
+        let mut fixture = pending();
+        if !matches!(stage, ShutdownStage::RequestUnpolled) {
+            fixture.app.poll_engine_events();
+            assert_eq!(fixture.engine.tracks()[0].playback_source.clips.len(), 1);
+        }
+        if matches!(stage, ShutdownStage::CompletionUnpolled) {
+            render(&mut fixture.engine, false);
+            assert_eq!(fixture.engine.tracks()[0].playback_source.clips.len(), 2);
+            assert!(matches!(fixture.app.event_rx.as_ref().unwrap().peek().unwrap(),
+                EngineEvent::ClipInsertionCompleted(completed) if completed.id() == fixture.operation));
+        }
+        assert!(fixture.audio.strong_count() > 0);
+        fixture.app._stream = Some(vibez_audio_io::AudioOutputStream::idle(fixture.engine));
+        drop(fixture.app);
+        assert_eq!(fixture.audio.strong_count(), 0, "{stage:?}");
+    }
+}
