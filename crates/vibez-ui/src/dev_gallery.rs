@@ -388,3 +388,114 @@ pub fn run_gain() -> iced::Result {
     .font(crate::typography::PLEX_MONO_SEMIBOLD_BYTES)
     .run_with(|| (GainGallery::new(), iced::Task::none()))
 }
+
+struct CompressorGallery {
+    track: TrackId,
+    effect: UiEffect,
+    open: crate::domains::device_controls::DeviceControlState,
+    closed: crate::domains::device_controls::DeviceControlState,
+    panel: crate::domains::compressor::CompressorPanel,
+    devices: DevicesState,
+}
+
+impl CompressorGallery {
+    fn new() -> Self {
+        let mut compressor = effect(EffectType::Compressor, None, false, false, None, 0);
+        compressor.params = compressor
+            .descriptors
+            .iter()
+            .map(|descriptor| descriptor.default)
+            .collect();
+        Self {
+            track: TrackId::new(),
+            effect: compressor,
+            open: crate::domains::device_controls::DeviceControlState {
+                advanced: true,
+                ..Default::default()
+            },
+            closed: Default::default(),
+            panel: Default::default(),
+            devices: Default::default(),
+        }
+    }
+    fn scene(&self, width: f32, height: f32, advanced: bool) -> Element<'_, Message> {
+        let effect = &self.effect;
+        let state = if advanced { &self.open } else { &self.closed };
+        let body = iced::widget::responsive(move |size| {
+            crate::widgets::compressor_device::view(
+                self.track,
+                effect,
+                th::track_color(0),
+                state,
+                &self.panel,
+                crate::widgets::device_preset_bar::view(
+                    self.track,
+                    effect,
+                    None,
+                    th::track_color(0),
+                    crate::widgets::compressor_device::preset_bar_width(size),
+                ),
+                vibez_engine::metering::MeterValues::SILENT,
+                vibez_engine::metering::MeterValues::SILENT,
+                &[],
+                &[],
+                &self.devices,
+                size,
+            )
+        });
+        let card = view_effect_slot(
+            self.track,
+            effect,
+            th::track_color(0),
+            Some(crate::widgets::effect_slot::DeviceBody {
+                content: body.into(),
+                width,
+                padding: iced::Padding::ZERO,
+            }),
+            None,
+            48000,
+        );
+        container(card).width(width).height(height).into()
+    }
+    fn view(&self) -> Element<'_, Message> {
+        container(
+            column![
+                row![
+                    self.scene(900.0, 340.0, true),
+                    self.scene(430.0, 340.0, false)
+                ]
+                .spacing(12),
+                row![
+                    self.scene(620.0, 220.0, false),
+                    self.scene(620.0, 220.0, true)
+                ]
+                .spacing(12),
+                row![
+                    self.scene(430.0, 140.0, false),
+                    self.scene(430.0, 140.0, true)
+                ]
+                .spacing(12)
+            ]
+            .spacing(12),
+        )
+        .padding(12)
+        .into()
+    }
+}
+
+pub fn run_compressor() -> iced::Result {
+    iced::application(
+        "Compressor device gallery",
+        |_: &mut CompressorGallery, _: Message| {},
+        CompressorGallery::view,
+    )
+    .theme(|_| th::vibez_theme())
+    .antialiasing(true)
+    .window_size((1400.0, 1000.0))
+    .font(crate::icons::ICON_FONT_BYTES)
+    .font(crate::typography::PLEX_SANS_CONDENSED_MEDIUM_BYTES)
+    .font(crate::typography::PLEX_SANS_CONDENSED_SEMIBOLD_BYTES)
+    .font(crate::typography::PLEX_MONO_MEDIUM_BYTES)
+    .font(crate::typography::PLEX_MONO_SEMIBOLD_BYTES)
+    .run_with(|| (CompressorGallery::new(), iced::Task::none()))
+}
