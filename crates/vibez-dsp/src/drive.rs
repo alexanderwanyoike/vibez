@@ -1,6 +1,6 @@
 //! Legacy-compatible drive with a stable native character and quality parameter contract.
 
-use vibez_core::effect::{EffectType, ParamDescriptor};
+use vibez_core::effect::{EffectType, ParamDescriptor, WaveShaperMeter};
 
 use crate::effect::AudioEffect;
 
@@ -78,10 +78,19 @@ pub struct DriveEffect {
     delay_position: usize,
     dry_delay: [[f32; 2]; 64],
     oversampling: [oversampling::OversamplingPath; 3],
+    sample_rate: f32,
+    meter: WaveShaperMeter,
+    meter_samples: u64,
+    meter_count: u16,
 }
 
 impl DriveEffect {
     pub fn new() -> Self {
+        Self::with_sample_rate(44_100.0)
+    }
+
+    pub fn with_sample_rate(sample_rate: f32) -> Self {
+        let sample_rate = if sample_rate.is_finite() && sample_rate >= 2.0 { sample_rate } else { 48_000.0 };
         Self {
             amount: 0.35,
             tone: 0.5,
@@ -93,6 +102,10 @@ impl DriveEffect {
             delay_position: 0,
             dry_delay: [[0.0; 2]; 64],
             oversampling: [2, 4, 8].map(oversampling::OversamplingPath::new),
+            sample_rate,
+            meter: WaveShaperMeter::default(),
+            meter_samples: 0,
+            meter_count: 0,
         }
     }
 
@@ -110,6 +123,41 @@ impl Default for DriveEffect {
 }
 
 impl AudioEffect for DriveEffect {
+    fn supports_level_meter(&self) -> bool { true }
+
+    fn activation_sample_rate(&self) -> Option<u32> { Some(self.sample_rate as u32) }
+
+    fn take_waveshaper_meter(&mut self) -> Option<WaveShaperMeter> {
+        let count = self.meter_count as usize;
+        let first_output_sample = self.meter_samples.saturating_sub(count as u64);
+        let mut meter = WaveShaperMeter {
+            count: self.meter_count,
+            sample_rate: self.sample_rate,
+            first_output_sample,
+            latency_samples: LATENCY_SAMPLES,
+            ..WaveShaperMeter::default()
+        };
+        for point in 0..count {
+            let position = (first_output_sample as usize + point) % 128;
+            meter.input[point] = self.meter.input[position];
+            meter.output[point] = self.meter.output[position];
+        }
+        let gain = self.drive_gain();
+        for (point, output) in meter.transfer.iter_mut().enumerate() {
+            let input = -1.0 + point as f32 / 32.0;
+            let u = (input * gain).clamp(-1.0, 1.0);
+            let shaped = match self.extra[0] as usize {
+                2 => 1.5 * u - 0.5 * u * u * u,
+                3 => u,
+                _ => (input * gain).tanh() / gain.tanh(),
+            };
+            let processed = input * (1.0 - self.amount) + shaped * self.amount;
+            *output = (input * (1.0 - self.mix) + processed * self.mix) * self.output;
+        }
+        self.meter_count = 0;
+        Some(meter)
+    }
+
     fn latency_samples(&self) -> u32 {
         LATENCY_SAMPLES
     }
@@ -208,8 +256,15 @@ impl AudioEffect for DriveEffect {
                     aligned_dry * (1.0 - amount) + modern[character - 1] * amount
                 };
                 buffer[idx] = (aligned_dry * (1.0 - self.mix) + processed * self.mix) * self.output;
+                if c == 0 {
+                    let point = self.meter_samples as usize % 128;
+                    self.meter.input[point] = aligned_dry;
+                    self.meter.output[point] = buffer[idx];
+                }
             }
             self.delay_position = (self.delay_position + 1) % 64;
+            self.meter_samples = self.meter_samples.saturating_add(1);
+            self.meter_count = (self.meter_count + 1).min(128);
         }
     }
 
@@ -219,6 +274,9 @@ impl AudioEffect for DriveEffect {
         self.delay_position = 0;
         self.dry_delay = [[0.0; 2]; 64];
         self.oversampling.iter_mut().for_each(oversampling::OversamplingPath::reset);
+        self.meter = WaveShaperMeter::default();
+        self.meter_samples = 0;
+        self.meter_count = 0;
     }
 }
 

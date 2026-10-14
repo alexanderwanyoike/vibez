@@ -20,7 +20,7 @@ pub fn create_effect(effect_type: EffectType, sample_rate: f32) -> Box<dyn Audio
         EffectType::Filter => Box::new(FilterEffect::new(sample_rate)),
         EffectType::Delay => Box::new(DelayEffect::new(sample_rate)),
         EffectType::Reverb => Box::new(ReverbEffect::new(sample_rate)),
-        EffectType::Drive => Box::new(DriveEffect::new()),
+        EffectType::Drive => Box::new(DriveEffect::with_sample_rate(sample_rate)),
         EffectType::Bitcrush => Box::new(BitcrushEffect::new()),
         EffectType::Compressor => Box::new(CompressorEffect::new(sample_rate)),
         EffectType::AutoPan => Box::new(AutoPanEffect::new(sample_rate)),
