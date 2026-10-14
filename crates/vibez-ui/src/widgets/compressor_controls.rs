@@ -18,7 +18,7 @@ use iced::{
     widget::{button, column, container, pick_list, row, text, tooltip},
     Color, Element, Length,
 };
-use vibez_core::id::TrackId;
+use vibez_core::id::{EffectId, TrackId};
 use vibez_dsp::compressor::param;
 use vibez_engine::metering::MeterValues;
 
@@ -184,21 +184,14 @@ fn reading<'a>(label: &'static str, value: f32, db: bool) -> Element<'a, Message
     .width(Length::Fill)
     .into()
 }
-#[allow(clippy::too_many_arguments)]
-pub fn advanced<'a>(
+fn page_selector<'a>(
     track: TrackId,
-    effect: &'a UiEffect,
-    state: &'a DeviceControlState,
-    panel: &CompressorPanel,
+    id: EffectId,
+    pages: Vec<CompressorPage>,
+    selected: CompressorPage,
     accent: Color,
-    sources: &[ProjectTrack],
-    buses: &[ProjectTrack],
-    devices: &DevicesState,
-    input: MeterValues,
-    output: MeterValues,
 ) -> Element<'a, Message> {
-    let id = effect.id;
-    let page = pick_list(CompressorPage::ALL, Some(panel.page), move |page| {
+    pick_list(pages, Some(selected), move |page| {
         Message::CompressorControl(CompressorMsg::Page(track, id, page))
     })
     .text_size(10)
@@ -225,7 +218,24 @@ pub fn advanced<'a>(
             width: 1.0,
             radius: 2.0.into(),
         },
-    });
+    })
+    .into()
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn advanced<'a>(
+    track: TrackId,
+    effect: &'a UiEffect,
+    state: &'a DeviceControlState,
+    panel: &CompressorPanel,
+    accent: Color,
+    sources: &[ProjectTrack],
+    buses: &[ProjectTrack],
+    devices: &DevicesState,
+    input: MeterValues,
+    output: MeterValues,
+) -> Element<'a, Message> {
+    let page = page_selector(track, effect.id, CompressorPage::ALL.to_vec(), panel.page, accent);
     let page = column![section_label("Details"), page]
         .spacing(3)
         .width(88.0);
