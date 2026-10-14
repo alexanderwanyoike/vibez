@@ -51,8 +51,12 @@ pub struct EngineClip {
 
 impl std::fmt::Debug for EngineClip {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.debug_struct("EngineClip").field("id", &self.id)
-            .field("position", &self.position).field("duration", &self.duration).finish()
+        formatter
+            .debug_struct("EngineClip")
+            .field("id", &self.id)
+            .field("position", &self.position)
+            .field("duration", &self.duration)
+            .finish()
     }
 }
 
@@ -60,11 +64,16 @@ impl EngineClip {
     pub(crate) fn same_retired_owner(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.audio, &other.audio)
             && std::ptr::eq(self.warp_markers.as_slice(), other.warp_markers.as_slice())
-            && self.id == other.id && self.position == other.position
-            && self.source_offset == other.source_offset && self.start_marker == other.start_marker
-            && self.duration == other.duration && self.loop_enabled == other.loop_enabled
-            && self.loop_start == other.loop_start && self.loop_end == other.loop_end
-            && self.linear_gain == other.linear_gain && self.fades == other.fades
+            && self.id == other.id
+            && self.position == other.position
+            && self.source_offset == other.source_offset
+            && self.start_marker == other.start_marker
+            && self.duration == other.duration
+            && self.loop_enabled == other.loop_enabled
+            && self.loop_start == other.loop_start
+            && self.loop_end == other.loop_end
+            && self.linear_gain == other.linear_gain
+            && self.fades == other.fades
             && self.playback_direction == other.playback_direction
     }
     pub fn timeline(&self) -> FrameClipTimeline {
@@ -125,29 +134,43 @@ pub struct EngineNoteClip {
 
 impl std::fmt::Debug for EngineNoteClip {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.debug_struct("EngineNoteClip").field("id", &self.id)
-            .field("note_count", &self.notes.len()).finish()
+        formatter
+            .debug_struct("EngineNoteClip")
+            .field("id", &self.id)
+            .field("note_count", &self.notes.len())
+            .finish()
     }
 }
 
 impl EngineNoteClip {
     #[cfg(test)]
     pub(crate) fn retirement_storage(&self) -> [usize; 3] {
-        [self.notes.as_ptr() as usize, self.next_same_pitch_start_beats.as_ptr() as usize,
-            self.note_sort_indices.as_ptr() as usize]
+        [
+            self.notes.as_ptr() as usize,
+            self.next_same_pitch_start_beats.as_ptr() as usize,
+            self.note_sort_indices.as_ptr() as usize,
+        ]
     }
 
     pub(crate) fn same_retired_owner(&self, other: &Self) -> bool {
-        self.id == other.id && self.position_beats == other.position_beats
+        self.id == other.id
+            && self.position_beats == other.position_beats
             && self.duration_beats == other.duration_beats
             && std::ptr::eq(self.notes.as_slice(), other.notes.as_slice())
-            && std::ptr::eq(self.next_same_pitch_start_beats.as_slice(), other.next_same_pitch_start_beats.as_slice())
-            && std::ptr::eq(self.note_sort_indices.as_slice(), other.note_sort_indices.as_slice())
+            && std::ptr::eq(
+                self.next_same_pitch_start_beats.as_slice(),
+                other.next_same_pitch_start_beats.as_slice(),
+            )
+            && std::ptr::eq(
+                self.note_sort_indices.as_slice(),
+                other.note_sort_indices.as_slice(),
+            )
             && self.start_marker_beats == other.start_marker_beats
             && self.loop_enabled == other.loop_enabled
             && self.loop_start_beats == other.loop_start_beats
             && self.loop_end_beats == other.loop_end_beats
-            && self.groove_grid == other.groove_grid && self.groove_latch == other.groove_latch
+            && self.groove_grid == other.groove_grid
+            && self.groove_latch == other.groove_latch
     }
     pub(crate) fn same_pitch_schedule(&self, other: &Self, pitch: u8) -> bool {
         self.position_beats == other.position_beats
@@ -443,7 +466,8 @@ impl PreparedPlaybackSource {
         // Insertion still allocates; future removal must never grow its owner staging.
         let required = self.clips.len() + 1;
         if self.removed_audio_clips.capacity() < required {
-            self.removed_audio_clips.reserve(required - self.removed_audio_clips.len());
+            self.removed_audio_clips
+                .reserve(required - self.removed_audio_clips.len());
         }
         self.clips.push(clip);
     }
@@ -459,7 +483,8 @@ impl PreparedPlaybackSource {
     pub(crate) fn push_note_clip(&mut self, clip: EngineNoteClip) {
         let required = self.note_clips.len() + 1;
         if self.removed_note_clips.capacity() < required {
-            self.removed_note_clips.reserve(required - self.removed_note_clips.len());
+            self.removed_note_clips
+                .reserve(required - self.removed_note_clips.len());
         }
         self.note_clips.push(clip);
     }

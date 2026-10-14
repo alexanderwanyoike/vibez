@@ -93,11 +93,18 @@ impl crate::engine::AudioEngine {
     pub(super) fn flush_removed_clip_owners(&mut self) -> bool {
         for index in 0..self.tracks().len() {
             loop {
-                let available = self.pending_retirements.len() < self.pending_retirements.capacity();
+                let available =
+                    self.pending_retirements.len() < self.pending_retirements.capacity();
                 let track = &mut self.tracks_mut_for_retirement()[index];
-                let sources = [track.playback_source.as_mut(), track.section_playback_source.as_mut(),
-                    track.launcher_source.as_mut(), track.empty_launcher_source.as_mut()];
-                let Some(source) = sources.into_iter().find(|source| source.has_removed_audio_clips() || source.has_removed_note_clips()) else {
+                let sources = [
+                    track.playback_source.as_mut(),
+                    track.section_playback_source.as_mut(),
+                    track.launcher_source.as_mut(),
+                    track.empty_launcher_source.as_mut(),
+                ];
+                let Some(source) = sources.into_iter().find(|source| {
+                    source.has_removed_audio_clips() || source.has_removed_note_clips()
+                }) else {
                     break;
                 };
                 // Take ownership only after admission, including when the UI ring stays full.
@@ -107,7 +114,11 @@ impl crate::engine::AudioEngine {
                 let event = if let Some(clip) = source.pop_removed_audio_clip() {
                     EngineEvent::RetiredAudioClip(clip)
                 } else {
-                    EngineEvent::RetiredNoteClip(source.pop_removed_note_clip().expect("pending note clip owner"))
+                    EngineEvent::RetiredNoteClip(
+                        source
+                            .pop_removed_note_clip()
+                            .expect("pending note clip owner"),
+                    )
                 };
                 self.retire_event(event);
             }
