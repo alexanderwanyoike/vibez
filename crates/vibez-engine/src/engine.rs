@@ -972,6 +972,10 @@ mod clip_audio_retirement_tests;
 mod warp_marker_retirement_tests;
 
 #[cfg(test)]
+#[path = "engine_track_reorder_tests.rs"]
+mod track_reorder_tests;
+
+#[cfg(test)]
 #[path = "engine_compensation_presentation_tests.rs"]
 mod compensation_presentation_tests;
 
