@@ -409,3 +409,89 @@ fn public_note_growth_keeps_edited_and_removed_clamps_correct_without_callback_a
         assert_note_intervals(&format!("remove after {count} additions"), &output, unit, &intervals);
     }
 }
+
+#[test]
+fn public_note_edit_boundaries_release_voices_and_preserve_audio_across_callback_partitions() {
+    let notes = [held_note(1.0, 0.75), held_note(0.0, 2.5), held_note(1.0, 1.0)];
+    let mut reference = None;
+    for frames in [1, 13, 96, 127] {
+        let (mut engine, mut commands, mut events, track, clip) = public_note_fixture(&notes, 4.0);
+        let mut output = vec![0.0; 384 * 2];
+        begin_note_replay(&mut engine, &mut commands);
+        render_note_blocks(&mut engine, &mut output, frames);
+        let unit = output[0];
+        assert!(unit > 0.01);
+        assert_note_intervals("partition baseline", &output, unit, &[(0, 168)]);
+        if let Some(expected) = &reference {
+            assert_eq!(&output, expected, "{frames}-frame callback baseline");
+        } else {
+            reference = Some(output.clone());
+        }
+
+        let missing_track = TrackId::new();
+        let missing_clip = ClipId::new();
+        let replacement = MidiNote { pitch: 61, ..held_note(0.5, 0.25) };
+        for (stage, command, releases_voice) in [
+            ("edit missing track", EngineCommand::EditNote { track_id: missing_track, clip_id: clip, note_index: 0, note: replacement }, false),
+            ("remove missing track", EngineCommand::RemoveNote { track_id: missing_track, clip_id: clip, note_index: 0 }, false),
+            ("edit missing clip", EngineCommand::EditNote { track_id: track, clip_id: missing_clip, note_index: 0, note: replacement }, true),
+            ("remove missing clip", EngineCommand::RemoveNote { track_id: track, clip_id: missing_clip, note_index: 0 }, true),
+            ("edit index at length", EngineCommand::EditNote { track_id: track, clip_id: clip, note_index: 3, note: replacement }, true),
+            ("remove index at length", EngineCommand::RemoveNote { track_id: track, clip_id: clip, note_index: 3 }, true),
+            ("edit maximum index", EngineCommand::EditNote { track_id: track, clip_id: clip, note_index: usize::MAX, note: replacement }, true),
+            ("remove maximum index", EngineCommand::RemoveNote { track_id: track, clip_id: clip, note_index: usize::MAX }, true),
+        ] {
+            begin_note_replay(&mut engine, &mut commands);
+            let mut sounding = [0.0; 24 * 2];
+            render_note_blocks(&mut engine, &mut sounding, frames);
+            assert_note_intervals(stage, &sounding, unit, &[(0, 24)]);
+            while events.pop().is_ok() {}
+            commands.push(command).unwrap();
+            let mut following = [0.0; 16 * 2];
+            assert_eq!(crate::retirement::tests::allocations(|| {
+                engine.process_block(AudioProcessBlock::new(&mut [], 2));
+                render_note_blocks(&mut engine, &mut following, frames);
+            }), (0, 0), "{stage}, {frames}-frame callbacks");
+            // Existing-track commands flush voices even when no note matches;
+            // replay separately verifies their note-data no-op contract.
+            let intervals = if releases_voice { &[][..] } else { &[(0, 16)][..] };
+            assert_note_intervals(stage, &following, unit, intervals);
+            render_note_blocks(&mut engine, &mut output, frames);
+            assert!(!engine.transport().is_playing(), "{stage}: voices finished");
+            while events.pop().is_ok() {}
+            begin_note_replay(&mut engine, &mut commands);
+            assert_eq!(crate::retirement::tests::allocations(|| {
+                render_note_blocks(&mut engine, &mut output, frames);
+            }), (0, 0), "{stage}: replay with {frames}-frame callbacks");
+            assert_eq!(&output, reference.as_ref().unwrap(), "{stage}: note data changed with {frames}-frame callbacks");
+        }
+
+        for note_index in [0, 1] {
+            commands.push(EngineCommand::RemoveNote { track_id: track, clip_id: clip, note_index }).unwrap();
+            assert_eq!(crate::retirement::tests::allocations(|| {
+                engine.process_block(AudioProcessBlock::new(&mut [], 2));
+            }), (0, 0));
+        }
+        begin_note_replay(&mut engine, &mut commands);
+        let mut sounding = [0.0; 24 * 2];
+        render_note_blocks(&mut engine, &mut sounding, frames);
+        assert_note_intervals("last note is sounding", &sounding, unit, &[(0, 24)]);
+        while events.pop().is_ok() {}
+        commands.push(EngineCommand::RemoveNote { track_id: track, clip_id: clip, note_index: 0 }).unwrap();
+        let mut released = [0.0; 16 * 2];
+        assert_eq!(crate::retirement::tests::allocations(|| {
+            engine.process_block(AudioProcessBlock::new(&mut [], 2));
+            render_note_blocks(&mut engine, &mut released, frames);
+        }), (0, 0), "remove last sounding note with {frames}-frame callbacks");
+        assert_eq!(released, [0.0; 16 * 2]);
+        render_note_blocks(&mut engine, &mut output, frames);
+        assert!(output.iter().all(|sample| *sample == 0.0));
+        assert!(!engine.transport().is_playing());
+        while events.pop().is_ok() {}
+        begin_note_replay(&mut engine, &mut commands);
+        assert_eq!(crate::retirement::tests::allocations(|| {
+            render_note_blocks(&mut engine, &mut output, frames);
+        }), (0, 0), "empty clip replay with {frames}-frame callbacks");
+        assert!(output.iter().all(|sample| *sample == 0.0));
+    }
+}
