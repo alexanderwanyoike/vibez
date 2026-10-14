@@ -1,3 +1,6 @@
+use std::sync::Arc;
+
+use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::id::{ClipId, SectionId, TrackId};
 use vibez_core::perform::NoteRepeatRate;
 
@@ -119,6 +122,7 @@ pub enum EngineEvent {
     RetiredEffectStorage(crate::engine::reconfiguration::RetiredEffectStorage),
     RetiredChannel(crate::retirement::RetiredChannel),
     RetiredAutomationLane(vibez_core::automation::AutomationLane),
+    RetiredAudioBuffer(Arc<DecodedAudio>),
     RoutingRetired(Box<crate::routing::PreparedRouting>),
     SidechainInputMeter {
         effect_id: vibez_core::id::EffectId,
@@ -449,6 +453,7 @@ impl EngineEvent {
             | Self::RetiredEffectStorage(_)
             | Self::RetiredChannel(_)
             | Self::RetiredAutomationLane(_)
+            | Self::RetiredAudioBuffer(_)
             | Self::RoutingRetired(_)
             | Self::DisposeEffect(_)
             | Self::DisposeInstrument(_)
@@ -487,6 +492,9 @@ impl PartialEq for EngineEvent {
             (Self::DisposeInstrument(left), Self::DisposeInstrument(right)) => left == right,
             (Self::PlaybackPosition(left), Self::PlaybackPosition(right)) => left == right,
             (Self::PerformancePosition(left), Self::PerformancePosition(right)) => left == right,
+            (Self::RetiredAudioBuffer(left), Self::RetiredAudioBuffer(right)) => {
+                Arc::ptr_eq(left, right)
+            },
             (
                 Self::Metering {
                     peak_l: left_peak_l,
