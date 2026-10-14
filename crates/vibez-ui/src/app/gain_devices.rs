@@ -223,6 +223,43 @@ mod tests {
     }
 
     #[test]
+    fn an_unchanged_edit_to_any_effect_is_not_a_project_edit() {
+        let (mut app, track, _) = gain_app();
+        let _ = app.update(Message::Devices(DevicesMsg::AddEffect(
+            track,
+            EffectType::Compressor,
+        )));
+        let compressor = app.state.find_track(track).unwrap().effects[1].clone();
+        app.state.project.history = Default::default();
+        app.state.project.dirty = false;
+        let current = compressor.params[0];
+        let past_the_limit = compressor.descriptors[0].max + 10.0;
+        let _ = app.update(Message::set_effect_param(track, compressor.id, 0, current));
+        assert!(!app.state.project.dirty);
+        assert!(!app.state.project.history.can_undo());
+
+        let _ = app.update(Message::set_effect_param(
+            track,
+            compressor.id,
+            0,
+            compressor.descriptors[0].max,
+        ));
+        app.state.project.history = Default::default();
+        app.state.project.dirty = false;
+        let _ = app.update(Message::set_effect_param(
+            track,
+            compressor.id,
+            0,
+            past_the_limit,
+        ));
+        assert!(
+            !app.state.project.dirty,
+            "clamps to the value it already has"
+        );
+        assert!(!app.state.project.history.can_undo());
+    }
+
+    #[test]
     fn gain_unity_clears_a_stale_input_without_dirtying_an_unchanged_device() {
         let (mut app, track, effect) = gain_app();
         let panel = app.gain_devices.panels.get_mut(&effect).unwrap();
