@@ -244,3 +244,21 @@ fn same_drain_capture_starts_observe_effect_and_instrument_manual_edits() {
         }
     }
 }
+
+#[test]
+fn a_play_reset_between_capture_commands_is_observed_in_the_same_drain() {
+    let mut fixture = fixture(false);
+    fixture.controls[1].local.store(true, Ordering::Release);
+    fixture.commands.push(EngineCommand::StartPerformanceCapture).unwrap();
+    fixture.commands.push(EngineCommand::Play).unwrap();
+    fixture.commands.push(EngineCommand::StartPerformanceCapture).unwrap();
+    drain(&mut fixture);
+    let calls = fixture.calls.observed();
+    assert_eq!(calls, [110, 211, 230, 110, 210]);
+    let events = collect(&mut fixture);
+    assert_eq!(events.order, ["stop", "refused", "play", "start", "source"]);
+    assert_eq!(events.reasons, [LOCAL_REASON]);
+    assert!(fixture.engine.capture_active);
+    assert!(fixture.engine.transport.is_playing());
+    report("play-reset", false, true, &calls, &events, &fixture);
+}
