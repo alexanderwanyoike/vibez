@@ -28,7 +28,9 @@ impl AudioEngine {
         let Some((index, value)) = parameter else {
             return false;
         };
-        if let device_handoff::ParameterRetention::Full = self.device_handoff.retain_parameter(index, value) {
+        if let device_handoff::ParameterRetention::Full =
+            self.device_handoff.retain_parameter(index, value)
+        {
             // Match the hosted parameter event bound without blocking the
             // returning owner behind its own queued edits.
             self.report_compensation_failure(

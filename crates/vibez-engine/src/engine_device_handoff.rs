@@ -75,7 +75,10 @@ impl DeviceHandoffState {
         ParameterRetention::Stored
     }
 
-    pub(super) fn apply_retained_parameters(&mut self, mut set: impl FnMut(usize, f32) -> bool) -> bool {
+    pub(super) fn apply_retained_parameters(
+        &mut self,
+        mut set: impl FnMut(usize, f32) -> bool,
+    ) -> bool {
         let mut rejected = false;
         for &(index, value) in &self.parameters {
             rejected |= !set(index, value);
