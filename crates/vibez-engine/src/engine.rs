@@ -1047,3 +1047,7 @@ mod automation_retirement_tests;
 #[cfg(test)]
 #[path = "engine_effect_spectrum_tests.rs"]
 mod effect_spectrum_tests;
+
+#[cfg(test)]
+#[path = "engine_dynamics_meter_tests.rs"]
+mod dynamics_meter_tests;
