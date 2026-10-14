@@ -353,3 +353,42 @@ fn manual_mix_takes_exactly_512_frames_and_automation_snaps_only_the_edited_ramp
     gate.process(&mut [0.01], 1);
     assert_eq!(gate.take_dynamics_meter().unwrap().gate.unwrap().open_threshold_db, -5.0);
 }
+
+#[test]
+fn manual_choice_changes_crossfade_warm_paths_without_switching_halfway() {
+    use vibez_core::routing::{ExternalInputBlock, ExternalInputId};
+    for index in [5, 7, 13] {
+        let mut effect = GateEffect::new(2.0);
+        for (parameter, value) in [(0, -20.0), (1, 0.1), (2, 5.0), (3, 0.0), (6, 12.0), (8, 1.0)] {
+            assert!(effect.set_param(parameter, value));
+        }
+        let source = if index == 13 { 0.02 } else { 0.001 };
+        let detector = if index == 13 { -0.04 } else { 0.001 };
+        let mut warm = [source; 8];
+        effect.process_with_inputs(&mut warm, 1, &[ExternalInputBlock {
+            id: ExternalInputId(0), channels: 1, samples: &[detector; 8], connected: true,
+        }]);
+        assert!(effect.set_param(index, 1.0));
+        let mut audio = [source; 513];
+        effect.process_with_inputs(&mut audio, 1, &[ExternalInputBlock {
+            id: ExternalInputId(0), channels: 1, samples: &[detector; 513], connected: true,
+        }]);
+        let destination = match index {
+            5 => source * 10.0_f32.powf(-12.0 / 20.0),
+            7 => source,
+            13 => detector,
+            _ => unreachable!(),
+        };
+        for (frame, output) in audio.into_iter().enumerate() {
+            let expected = destination * ((frame + 1).min(512) as f32 / 512.0);
+            assert!((output - expected).abs() < 1e-7,
+                "choice index{index} frame{frame} changed abruptly: {output} vs {expected}");
+        }
+        assert!(effect.set_automated_param(index, 0.0));
+        let mut frame = [source];
+        effect.process_with_inputs(&mut frame, 1, &[ExternalInputBlock {
+            id: ExternalInputId(0), channels: 1, samples: &[detector], connected: true,
+        }]);
+        assert!(frame[0].abs() < 1e-7, "choice automation was smoothed at index{index}");
+    }
+}
