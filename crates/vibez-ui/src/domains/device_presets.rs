@@ -6,6 +6,9 @@ use vibez_core::id::{EffectId, TrackId};
 
 use crate::state::UiEffect;
 
+#[path = "bitcrush_presets.rs"]
+pub(super) mod bitcrush;
+
 #[derive(Debug, Clone)]
 pub enum DevicePresetMsg {
     Load(TrackId, EffectId),
@@ -165,6 +168,9 @@ pub fn prepare_updates(
 }
 
 pub fn factory_presets(effect_type: EffectType) -> Vec<DevicePreset> {
+    if effect_type == EffectType::Bitcrush {
+        return bitcrush::factory_presets();
+    }
     if effect_type != EffectType::Gain {
         return Vec::new();
     }
