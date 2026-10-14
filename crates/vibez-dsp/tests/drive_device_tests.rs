@@ -211,3 +211,32 @@ fn nonfinite_edits_are_rejected_without_mutating_targets_or_active_ramps() {
         assert_eq!(actual, expected, "frame={frame}");
     }
 }
+
+#[test]
+fn nonfinite_audio_is_silenced_without_poisoning_histories_and_finite_headroom_survives() {
+    for rate in [f32::NAN, f32::INFINITY, 0.0, 2.0, 44_100.0, 96_000.0] {
+        for character in 0..4 {
+            let params = [0.7, 0.2, 1.8, 0.73, character as f32, 2.0, 1.0, 80.0, 1.0, 12000.0];
+            let mut dirty = create_effect_with_params(EffectType::Drive, rate, &params);
+            let mut clean = create_effect_with_params(EffectType::Drive, rate, &params);
+            let mut input: Vec<_> = (0..1024).map(|frame| 0.1 * (frame as f32 * 0.7).sin()).collect();
+            input[13] = f32::NAN;
+            input[61] = f32::INFINITY;
+            input[137] = f32::NEG_INFINITY;
+            let mut reference: Vec<_> = input.iter().map(|&sample| if sample.is_finite() { sample } else { 0.0 }).collect();
+            dirty.process(&mut input, 1);
+            clean.process(&mut reference, 1);
+            assert!(input.iter().all(|sample| sample.is_finite()), "rate={rate}, character={character}");
+            assert_eq!(input, reference);
+            let mut extremes = [f32::MAX, -f32::MAX, f32::MIN_POSITIVE, -f32::MIN_POSITIVE].repeat(256);
+            dirty.process(&mut extremes, 1);
+            assert!(extremes.iter().all(|sample| sample.is_finite()), "extremes rate={rate}, character={character}");
+            let meter = dirty.take_waveshaper_meter().unwrap();
+            assert!(meter.input.iter().chain(&meter.output).all(|sample| sample.is_finite()));
+        }
+    }
+    let mut dry = create_effect_with_params(EffectType::Drive, 48_000.0, &[1.0, 0.5, 1.7, 0.0, 3.0]);
+    let mut signal = [4.5; 256];
+    dry.process(&mut signal, 1);
+    assert!(signal[64..].iter().all(|&sample| sample == 4.5 * 1.7));
+}
