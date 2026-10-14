@@ -199,7 +199,7 @@ impl App {
             );
             out.push(UiEffect {
                 reconfiguration_failed: false,
-                latency_samples: Some(0),
+                latency_samples: Some(fx.latency_samples()),
                 inactive_sidechains: effect_info.inactive_sidechains.clone(),
                 sidechains: effect_info.sidechains.clone(),
                 external_inputs: fx.external_inputs().to_vec(),
@@ -213,15 +213,7 @@ impl App {
                 has_plugin_gui: false,
                 plugin_ref: None,
             });
-            self.insert_built_in_effect(chan_id, effect_info.id, effect_info.effect_type);
-            for (idx, value) in effect_info.params.iter().copied().enumerate() {
-                self.send_command(EngineCommand::SetEffectParam {
-                    track_id: chan_id,
-                    effect_id: effect_info.id,
-                    param_index: idx,
-                    value,
-                });
-            }
+            self.insert_built_in_effect_with_params(chan_id, effect_info.id, effect_info.effect_type, &effect_info.params);
             self.send_command(EngineCommand::SetEffectBypass {
                 track_id: chan_id,
                 effect_id: effect_info.id,
@@ -593,7 +585,7 @@ impl App {
                 let descriptors = fx.param_descriptors();
                 track.effects.push(UiEffect {
                     reconfiguration_failed: false,
-                    latency_samples: Some(0),
+                    latency_samples: Some(fx.latency_samples()),
                     inactive_sidechains: effect_info.inactive_sidechains.clone(),
                     sidechains: effect_info.sidechains.clone(),
                     external_inputs: fx.external_inputs().to_vec(),
@@ -607,15 +599,7 @@ impl App {
                     has_plugin_gui: false,
                     plugin_ref: None,
                 });
-                self.insert_built_in_effect(track_info.id, effect_info.id, effect_info.effect_type);
-                for (idx, value) in effect_info.params.iter().copied().enumerate() {
-                    self.send_command(EngineCommand::SetEffectParam {
-                        track_id: track_info.id,
-                        effect_id: effect_info.id,
-                        param_index: idx,
-                        value,
-                    });
-                }
+                self.insert_built_in_effect_with_params(track_info.id, effect_info.id, effect_info.effect_type, &effect_info.params);
                 self.send_command(EngineCommand::SetEffectBypass {
                     track_id: track_info.id,
                     effect_id: effect_info.id,

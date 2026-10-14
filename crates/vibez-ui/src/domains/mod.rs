@@ -54,6 +54,17 @@ pub trait EngineHandle {
         self.send(command);
     }
 
+    fn insert_built_in_effect_with_params(
+        &mut self,
+        track_id: vibez_core::id::TrackId,
+        effect_id: vibez_core::id::EffectId,
+        effect_type: vibez_core::effect::EffectType,
+        params: &[f32],
+    ) {
+        let effect = vibez_dsp::factory::create_effect_with_params(effect_type, self.sample_rate() as f32, params);
+        self.send(EngineCommand::InsertEffect { track_id, effect_id, effect, position: None });
+    }
+
     fn set_built_in_instrument(
         &mut self,
         track_id: vibez_core::id::TrackId,
