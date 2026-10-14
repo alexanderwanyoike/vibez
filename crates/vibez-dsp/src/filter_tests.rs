@@ -201,15 +201,35 @@ fn static_response_matches_rendered_audio_including_parallel_phase_cancellation(
             for mix in [0.0, 0.5, 1.0] {
                 for frequency in [187.5, 937.5, 3750.0] {
                     let mut effect = FilterEffect::new(48000.0);
-                    for (index, value) in [(0, 1500.0), (2, mode as f32), (3, slope as f32), (5, mix)] {
+                    for (index, value) in
+                        [(0, 1500.0), (2, mode as f32), (3, slope as f32), (5, mix)]
+                    {
                         effect.set_param(index, value);
                     }
-                    let mut audio: Vec<f32> = (0..8192).map(|frame| {
-                        (0.1 * (std::f64::consts::TAU * frequency as f64 * frame as f64 / 48000.0).sin()) as f32
-                    }).collect();
+                    let mut audio: Vec<f32> = (0..8192)
+                        .map(|frame| {
+                            (0.1 * (std::f64::consts::TAU * frequency as f64 * frame as f64
+                                / 48000.0)
+                                .sin()) as f32
+                        })
+                        .collect();
                     effect.process(&mut audio, 1);
-                    let measured = (audio[4096..].iter().map(|sample| (*sample as f64).powi(2)).sum::<f64>() / 4096.0).sqrt() / (0.1 / 2.0_f64.sqrt());
-                    let displayed = response_magnitude(48000.0, 1500.0, 0.707, mode as f32, slope as f32, mix, frequency);
+                    let measured = (audio[4096..]
+                        .iter()
+                        .map(|sample| (*sample as f64).powi(2))
+                        .sum::<f64>()
+                        / 4096.0)
+                        .sqrt()
+                        / (0.1 / 2.0_f64.sqrt());
+                    let displayed = response_magnitude(
+                        48000.0,
+                        1500.0,
+                        0.707,
+                        mode as f32,
+                        slope as f32,
+                        mix,
+                        frequency,
+                    );
                     assert!((measured - displayed as f64).abs() < 1e-4, "mode {mode} slope {slope} mix {mix} f {frequency}: rendered {measured}, displayed {displayed}");
                 }
             }
@@ -233,13 +253,28 @@ fn constructor_and_response_handle_boundary_and_invalid_sample_rates() {
 fn drive_zero_keeps_the_legacy_linear_path_and_positive_drive_creates_harmonics() {
     let mut clean = FilterEffect::new(48000.0);
     let mut driven = FilterEffect::new(48000.0);
-    for effect in [&mut clean, &mut driven] { effect.set_param(0, 18000.0); }
+    for effect in [&mut clean, &mut driven] {
+        effect.set_param(0, 18000.0);
+    }
     driven.set_param(4, 18.0);
-    let mut input: Vec<_> = (0..8192).map(|frame| (0.5 * (std::f64::consts::TAU * 375.0 * frame as f64 / 48000.0).sin()) as f32).collect();
+    let mut input: Vec<_> = (0..8192)
+        .map(|frame| (0.5 * (std::f64::consts::TAU * 375.0 * frame as f64 / 48000.0).sin()) as f32)
+        .collect();
     let mut output = input.clone();
     clean.process(&mut input, 1);
     driven.process(&mut output, 1);
-    let harmonic = |samples: &[f32]| samples[4096..].iter().enumerate().map(|(frame, sample)| *sample as f64 * (std::f64::consts::TAU * 1125.0 * frame as f64 / 48000.0).sin()).sum::<f64>().abs() * 2.0 / 4096.0;
+    let harmonic = |samples: &[f32]| {
+        samples[4096..]
+            .iter()
+            .enumerate()
+            .map(|(frame, sample)| {
+                *sample as f64 * (std::f64::consts::TAU * 1125.0 * frame as f64 / 48000.0).sin()
+            })
+            .sum::<f64>()
+            .abs()
+            * 2.0
+            / 4096.0
+    };
     assert!(harmonic(&input) < 1e-5);
     assert!(harmonic(&output) > 0.05);
     assert!(output.into_iter().all(f32::is_finite));
@@ -261,7 +296,12 @@ fn sweeps_and_rapid_manual_edits_remain_finite_across_rates_and_block_sizes() {
                     frame.fill((0.1 * (std::f64::consts::TAU * phase).sin()) as f32);
                 }
                 effect.process(&mut sweep, 2);
-                assert!(sweep.iter().all(|sample| sample.is_finite() && sample.abs() < 100.0), "rate {rate}, block {block}, step {step}");
+                assert!(
+                    sweep
+                        .iter()
+                        .all(|sample| sample.is_finite() && sample.abs() < 100.0),
+                    "rate {rate}, block {block}, step {step}"
+                );
             }
         }
     }
@@ -281,7 +321,10 @@ fn manual_mode_changes_crossfade_without_clicks_and_automation_is_immediate() {
     automated.process(&mut automated_output, 1);
     let mut previous = 0.25;
     for sample in manual_output {
-        assert!((sample - previous).abs() < 0.002, "mode transition stepped from {previous} to {sample}");
+        assert!(
+            (sample - previous).abs() < 0.002,
+            "mode transition stepped from {previous} to {sample}"
+        );
         previous = sample;
     }
     assert!(manual_output[2047].abs() < 1e-5);
@@ -294,9 +337,13 @@ fn manual_modulation_source_change_preserves_the_first_frame_but_automation_is_e
     let mut reference = FilterEffect::new(48000.0);
     let mut manual = FilterEffect::new(48000.0);
     let mut automated = FilterEffect::new(48000.0);
-    let signal = |start, len| (start..start + len).map(|frame| {
-        (0.25 * (std::f64::consts::TAU * 1000.0 * frame as f64 / 48000.0).sin()) as f32
-    }).collect::<Vec<_>>();
+    let signal = |start, len| {
+        (start..start + len)
+            .map(|frame| {
+                (0.25 * (std::f64::consts::TAU * 1000.0 * frame as f64 / 48000.0).sin()) as f32
+            })
+            .collect::<Vec<_>>()
+    };
     for effect in [&mut reference, &mut manual, &mut automated] {
         effect.set_param(param::DEPTH, 6.0);
         effect.process(&mut signal(0, 12000), 1);
@@ -309,7 +356,14 @@ fn manual_modulation_source_change_preserves_the_first_frame_but_automation_is_e
     reference.process(&mut unchanged, 1);
     manual.process(&mut smoothed, 1);
     automated.process(&mut exact, 1);
-    assert!((smoothed[0] - unchanged[0]).abs() < 0.002, "first frame changed by {}", smoothed[0] - unchanged[0]);
+    assert!(
+        (smoothed[0] - unchanged[0]).abs() < 0.002,
+        "first frame changed by {}",
+        smoothed[0] - unchanged[0]
+    );
     assert!((exact[0] - unchanged[0]).abs() > 0.005);
-    assert!(smoothed[512..].iter().zip(&unchanged[512..]).any(|(a, b)| (a - b).abs() > 0.01));
+    assert!(smoothed[512..]
+        .iter()
+        .zip(&unchanged[512..])
+        .any(|(a, b)| (a - b).abs() > 0.01));
 }
