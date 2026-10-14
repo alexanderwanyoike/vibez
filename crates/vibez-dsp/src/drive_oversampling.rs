@@ -42,7 +42,7 @@ impl OversamplingPath {
         }
     }
 
-    pub(super) fn process(&mut self, input: f32, channel: usize, gain: f32, audible: bool) -> [f32; 3] {
+    pub(super) fn process(&mut self, input: f32, channel: usize, gain: f32, normalizer: f32, audible: bool) -> [f32; 3] {
         let head = self.input_position[channel];
         self.input[channel][head] = input;
         self.input[channel][head + HOST_TAPS] = input;
@@ -52,7 +52,7 @@ impl OversamplingPath {
             let interpolated: f32 = history.iter().rev().zip(&self.phases[phase]).map(|(sample, coefficient)| sample * coefficient).sum();
             let driven = interpolated * gain;
             let limited = driven.clamp(-1.0, 1.0);
-            let curves = [driven.tanh() / gain.tanh(), 1.5 * limited - 0.5 * limited * limited * limited, limited];
+            let curves = [driven.tanh() / normalizer, 1.5 * limited - 0.5 * limited * limited * limited, limited];
             let position = self.shaped_position[channel];
             for character in 0..3 {
                 let samples = &mut self.shaped[channel][character];

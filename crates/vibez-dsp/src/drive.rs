@@ -224,7 +224,7 @@ impl AudioEffect for DriveEffect {
                 let mut modern = [0.0; 3];
                 for (index, path) in self.oversampling.iter_mut().enumerate() {
                     let audible = index == quality;
-                    let output = path.process(shaper_input, c, drive, audible);
+                    let output = path.process(shaper_input, c, drive, norm, audible);
                     if audible { modern = output; }
                 }
                 for (index, sample) in modern.iter_mut().enumerate() {
