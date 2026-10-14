@@ -7,9 +7,12 @@ use iced::mouse;
 use iced::widget::{button, canvas, column, container, row, text, text_input, tooltip, Space};
 use iced::{Alignment, Color, Element, Length, Point, Rectangle, Renderer, Size, Theme};
 use vibez_core::id::TrackId;
+use vibez_dsp::gain::{param, MAX_GAIN, TRIM_RANGE_DB};
 use vibez_engine::metering::MeterValues;
 
-use crate::domains::gain::{gain_to_db, GainHistoryPoint, GainMsg, GainPanelState};
+use crate::domains::gain::{
+    gain_to_db, GainHistoryPoint, GainMsg, GainPanelState, MAX_GAIN_DB, MIN_GAIN_DB,
+};
 use crate::message::Message;
 use crate::state::UiEffect;
 use crate::theme as th;
@@ -294,22 +297,22 @@ fn gain_column<'a>(
     let mut knob = EffectKnobWidget::new(
         track_id,
         effect.id,
-        0,
-        effect.params.first().copied().unwrap_or(1.0),
+        param::GAIN,
+        effect.params.get(param::GAIN).copied().unwrap_or(1.0),
         0.0,
-        2.0,
+        MAX_GAIN,
         1.0,
         accent,
     );
     knob.target = KnobTarget::EffectDb(effect.id);
     let unity = small_button(
         "Unity",
-        Message::set_effect_param(track_id, effect.id, 0, 1.0),
+        Message::set_effect_param(track_id, effect.id, param::GAIN, 1.0),
         accent,
         false,
     );
     let stacked = height >= 104.0;
-    let entry = value_input(track_id, effect, state, 0, accent, !stacked);
+    let entry = value_input(track_id, effect, state, param::GAIN, accent, !stacked);
     let knob_size = (height - 60.0).clamp(28.0, 64.0);
     let controls: Element<'a, Message> = if stacked {
         column![
@@ -346,13 +349,29 @@ fn advanced_controls<'a>(
 ) -> Element<'a, Message> {
     let roomy = height >= 70.0;
     let trims = row![
-        trim_control(track_id, effect, state, 1, "L trim", accent, roomy),
-        trim_control(track_id, effect, state, 2, "R trim", accent, roomy),
+        trim_control(
+            track_id,
+            effect,
+            state,
+            param::TRIM[0],
+            "L trim",
+            accent,
+            roomy
+        ),
+        trim_control(
+            track_id,
+            effect,
+            state,
+            param::TRIM[1],
+            "R trim",
+            accent,
+            roomy
+        ),
     ]
     .spacing(10);
     let polarity = row![
-        polarity_control(track_id, effect, 3, "L polarity", accent),
-        polarity_control(track_id, effect, 4, "R polarity", accent),
+        polarity_control(track_id, effect, param::POLARITY[0], "L polarity", accent),
+        polarity_control(track_id, effect, param::POLARITY[1], "R polarity", accent),
     ]
     .spacing(10);
     container(
@@ -380,8 +399,8 @@ fn trim_control<'a>(
         effect.id,
         index,
         effect.params.get(index).copied().unwrap_or(0.0),
-        -24.0,
-        24.0,
+        -TRIM_RANGE_DB,
+        TRIM_RANGE_DB,
         0.0,
         accent,
     );
@@ -466,9 +485,9 @@ fn value_input<'a>(
         .params
         .get(index)
         .copied()
-        .unwrap_or(if index == 0 { 1.0 } else { 0.0 });
+        .unwrap_or(if index == param::GAIN { 1.0 } else { 0.0 });
     let shown = state.input_text[index].clone().unwrap_or_else(|| {
-        if index == 0 {
+        if index == param::GAIN {
             db_text(value)
         } else {
             format!("{value:.1}")
@@ -512,11 +531,15 @@ fn value_input<'a>(
     ]
     .spacing(3)
     .align_y(Alignment::Center);
-    let help = match (index, invalid) {
-        (0, true) => "Invalid: enter -60 to +6.02 dB, or -inf",
-        (0, false) => "-60 to +6.02 dB, or -inf for silence. Enter applies.",
-        (_, true) => "Invalid: enter -24 to +24 dB",
-        (_, false) => "-24 to +24 dB. Enter applies.",
+    let range = if index == param::GAIN {
+        format!("{MIN_GAIN_DB:.0} to +{MAX_GAIN_DB:.2} dB, or -inf")
+    } else {
+        format!("-{TRIM_RANGE_DB:.0} to +{TRIM_RANGE_DB:.0} dB")
+    };
+    let help = if invalid {
+        format!("Invalid: enter {range}")
+    } else {
+        format!("{range}. Enter applies.")
     };
     tooltip(field, text(help).size(9), tooltip::Position::Bottom).into()
 }

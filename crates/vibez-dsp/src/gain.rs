@@ -4,25 +4,36 @@ use vibez_core::effect::{EffectType, ParamDescriptor};
 
 use crate::effect::AudioEffect;
 
+/// Parameter indices. Gain stays linear amplitude at index 0 so saved projects
+/// and automation keep their meaning.
+pub mod param {
+    pub const GAIN: usize = 0;
+    pub const TRIM: [usize; 2] = [1, 2];
+    pub const POLARITY: [usize; 2] = [3, 4];
+}
+
+pub const MAX_GAIN: f32 = 2.0;
+pub const TRIM_RANGE_DB: f32 = 24.0;
+
 static GAIN_PARAMS: &[ParamDescriptor] = &[
     ParamDescriptor {
         name: "Gain",
         min: 0.0,
-        max: 2.0,
+        max: MAX_GAIN,
         default: 1.0,
         unit: "x",
     },
     ParamDescriptor {
         name: "L Trim",
-        min: -24.0,
-        max: 24.0,
+        min: -TRIM_RANGE_DB,
+        max: TRIM_RANGE_DB,
         default: 0.0,
         unit: "dB",
     },
     ParamDescriptor {
         name: "R Trim",
-        min: -24.0,
-        max: 24.0,
+        min: -TRIM_RANGE_DB,
+        max: TRIM_RANGE_DB,
         default: 0.0,
         unit: "dB",
     },
@@ -82,11 +93,14 @@ impl GainEffect {
         if !value.is_finite() {
             return false;
         }
-        match index {
-            0 => self.gain = value.clamp(0.0, 2.0),
-            1 | 2 => self.trim_db[index - 1] = value.clamp(-24.0, 24.0),
-            3 | 4 => self.inverted[index - 3] = value >= 0.5,
-            _ => return false,
+        if index == param::GAIN {
+            self.gain = value.clamp(0.0, MAX_GAIN);
+        } else if let Some(channel) = param::TRIM.iter().position(|&trim| trim == index) {
+            self.trim_db[channel] = value.clamp(-TRIM_RANGE_DB, TRIM_RANGE_DB);
+        } else if let Some(channel) = param::POLARITY.iter().position(|&flip| flip == index) {
+            self.inverted[channel] = value >= 0.5;
+        } else {
+            return false;
         }
         for channel in 0..2 {
             let polarity = if self.inverted[channel] { -1.0 } else { 1.0 };
@@ -136,11 +150,18 @@ impl AudioEffect for GainEffect {
     }
 
     fn get_param(&self, index: usize) -> f32 {
-        match index {
-            0 => self.gain,
-            1 | 2 => self.trim_db[index - 1],
-            3 | 4 if self.inverted[index - 3] => 1.0,
-            _ => 0.0,
+        if index == param::GAIN {
+            self.gain
+        } else if let Some(channel) = param::TRIM.iter().position(|&trim| trim == index) {
+            self.trim_db[channel]
+        } else if param::POLARITY
+            .iter()
+            .position(|&flip| flip == index)
+            .is_some_and(|channel| self.inverted[channel])
+        {
+            1.0
+        } else {
+            0.0
         }
     }
 

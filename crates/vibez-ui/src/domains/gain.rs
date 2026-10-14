@@ -8,6 +8,10 @@ use vibez_engine::metering::MeterValues;
 
 pub const MIN_GAIN_DB: f32 = -60.0;
 pub const MAX_GAIN_DB: f32 = 6.020_6;
+const _: () = assert!(
+    vibez_dsp::gain::MAX_GAIN == 2.0,
+    "MAX_GAIN_DB is 20 log10(MAX_GAIN)"
+);
 
 #[derive(Debug, Clone)]
 pub enum GainMsg {
@@ -160,19 +164,23 @@ pub fn db_to_gain(db: f32) -> f32 {
 
 pub fn parse_input(index: usize, text: &str) -> Option<f32> {
     let text = text.trim();
-    if index == 0 && (text.eq_ignore_ascii_case("-inf") || text == "-∞") {
+    if index == vibez_dsp::gain::param::GAIN && (text.eq_ignore_ascii_case("-inf") || text == "-∞")
+    {
         return Some(0.0);
     }
     let db = text.parse::<f32>().ok()?;
     if !db.is_finite() {
         return None;
     }
-    match index {
-        0 => (MIN_GAIN_DB..=MAX_GAIN_DB)
+    use vibez_dsp::gain::{param, TRIM_RANGE_DB};
+    if index == param::GAIN {
+        (MIN_GAIN_DB..=MAX_GAIN_DB)
             .contains(&db)
-            .then(|| db_to_gain(db)),
-        1 | 2 => (-24.0..=24.0).contains(&db).then_some(db),
-        _ => None,
+            .then(|| db_to_gain(db))
+    } else if param::TRIM.contains(&index) {
+        (-TRIM_RANGE_DB..=TRIM_RANGE_DB).contains(&db).then_some(db)
+    } else {
+        None
     }
 }
 
