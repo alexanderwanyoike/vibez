@@ -202,6 +202,15 @@ impl App {
             while let Some(event) = self.event_rx.as_mut().and_then(|rx| rx.pop().ok()) {
                 apply_drum_pad_flash(&mut self.state.view, &event, std::time::Instant::now());
                 match event {
+                    EngineEvent::ClipInsertionStorageRequested(request) => request.fulfill(),
+                    EngineEvent::ClipInsertionCompleted(completed) => {
+                        if completed.outcome
+                            == vibez_engine::clip_insertion::ClipInsertionOutcome::Abandoned
+                        {
+                            self.state.status_text = "Audio Clip insertion was abandoned".into();
+                        }
+                        drop(completed);
+                    }
                     EngineEvent::RetiredEffectStorage(storage) => drop(storage),
                     EngineEvent::DeviceReconfigurationRetired { device, reason } => {
                         drop((device, reason));
