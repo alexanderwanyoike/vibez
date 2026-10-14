@@ -194,27 +194,35 @@ fn rejected_plan_and_accepted_recovery_keep_audio_envelopes_across_callback_part
         assert!(!fixture.engine.presentation_fault);
         assert!(!fixture.engine.transport.is_playing());
         assert!(fixture.engine.project_processing_muted());
-        assert_eq!(std::ptr::from_ref(fixture.engine.routing.as_ref()), previous_plan);
+        assert_eq!(
+            std::ptr::from_ref(fixture.engine.routing.as_ref()),
+            previous_plan
+        );
         let events = fixture.drain_events();
-        let failure_order = events.iter().filter_map(|event| match event {
-            EngineEvent::PlaybackStopped => Some("stopped"),
-            EngineEvent::CompensationFailed { reason } => {
-                assert_eq!(reason, "characterized failed plan publication");
-                Some("failed")
-            }
-            EngineEvent::RoutingRetired(_) | EngineEvent::DeviceReconfiguration(_) => {
-                panic!("a rejected plan must retain the installed graph and device owners")
-            }
-            _ => None,
-        }).collect::<Vec<_>>();
+        let failure_order = events
+            .iter()
+            .filter_map(|event| match event {
+                EngineEvent::PlaybackStopped => Some("stopped"),
+                EngineEvent::CompensationFailed { reason } => {
+                    assert_eq!(reason, "characterized failed plan publication");
+                    Some("failed")
+                }
+                EngineEvent::RoutingRetired(_) | EngineEvent::DeviceReconfiguration(_) => {
+                    panic!("a rejected plan must retain the installed graph and device owners")
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
         assert_eq!(failure_order, ["stopped", "failed"]);
         let failed = render(&mut fixture, partitions);
         for (frame, pair) in failed.as_chunks::<2>().0.iter().enumerate() {
             for channel in 0..2 {
                 let expected = level[channel] * 64usize.saturating_sub(frame) as f32 / 64.0;
-                assert!((pair[channel] - expected).abs() < 1e-7,
+                assert!(
+                    (pair[channel] - expected).abs() < 1e-7,
                     "failed {partitions:?}, frame={frame}, channel={channel}: {} != {expected}",
-                    pair[channel]);
+                    pair[channel]
+                );
             }
         }
         assert_eq!(fixture.engine.transport.position(), stopped_at);
@@ -228,26 +236,42 @@ fn rejected_plan_and_accepted_recovery_keep_audio_envelopes_across_callback_part
         assert!(!fixture.engine.transport.is_playing());
         assert_eq!(fixture.engine.compensation_plan_fade, 0);
         let events = fixture.drain_events();
-        let retired = events.iter().filter_map(|event| match event {
-            EngineEvent::RoutingRetired(plan) => Some(std::ptr::from_ref(plan.as_ref())),
-            _ => None,
-        }).collect::<Vec<_>>();
+        let retired = events
+            .iter()
+            .filter_map(|event| match event {
+                EngineEvent::RoutingRetired(plan) => Some(std::ptr::from_ref(plan.as_ref())),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
         assert_eq!(retired, [previous_plan]);
-        assert_eq!(std::ptr::from_ref(fixture.engine.routing.as_ref()), accepted_plan);
-        assert!(!events.iter().any(|event| matches!(event,
-            EngineEvent::PlaybackStarted | EngineEvent::CompensationFailed { .. })));
+        assert_eq!(
+            std::ptr::from_ref(fixture.engine.routing.as_ref()),
+            accepted_plan
+        );
+        assert!(!events.iter().any(|event| matches!(
+            event,
+            EngineEvent::PlaybackStarted | EngineEvent::CompensationFailed { .. }
+        )));
         fixture.drain_command(EngineCommand::Play);
         assert!(fixture.engine.transport.is_playing());
         assert!(!fixture.engine.project_processing_muted());
-        assert_eq!(fixture.drain_events().iter().filter(|event|
-            matches!(event, EngineEvent::PlaybackStarted)).count(), 1);
+        assert_eq!(
+            fixture
+                .drain_events()
+                .iter()
+                .filter(|event| matches!(event, EngineEvent::PlaybackStarted))
+                .count(),
+            1
+        );
         let resumed = render(&mut fixture, partitions);
         for (frame, pair) in resumed.as_chunks::<2>().0.iter().enumerate() {
             for channel in 0..2 {
                 let expected = level[channel] * frame.min(64) as f32 / 64.0;
-                assert!((pair[channel] - expected).abs() < 1e-7,
+                assert!(
+                    (pair[channel] - expected).abs() < 1e-7,
                     "recovered {partitions:?}, frame={frame}, channel={channel}: {} != {expected}",
-                    pair[channel]);
+                    pair[channel]
+                );
             }
         }
         assert_eq!(fixture.engine.transport.position(), stopped_at + 128);
