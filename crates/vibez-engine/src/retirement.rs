@@ -97,15 +97,19 @@ impl crate::engine::AudioEngine {
                 let track = &mut self.tracks_mut_for_retirement()[index];
                 let sources = [track.playback_source.as_mut(), track.section_playback_source.as_mut(),
                     track.launcher_source.as_mut(), track.empty_launcher_source.as_mut()];
-                let Some(source) = sources.into_iter().find(|source| source.has_removed_audio_clips()) else {
+                let Some(source) = sources.into_iter().find(|source| source.has_removed_audio_clips() || source.has_removed_note_clips()) else {
                     break;
                 };
                 // Take ownership only after admission, including when the UI ring stays full.
                 if !available {
                     return false;
                 }
-                let clip = source.pop_removed_audio_clip().expect("pending clip owner");
-                self.retire_event(EngineEvent::RetiredAudioClip(clip));
+                let event = if let Some(clip) = source.pop_removed_audio_clip() {
+                    EngineEvent::RetiredAudioClip(clip)
+                } else {
+                    EngineEvent::RetiredNoteClip(source.pop_removed_note_clip().expect("pending note clip owner"))
+                };
+                self.retire_event(event);
             }
         }
         true

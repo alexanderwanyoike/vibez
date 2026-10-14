@@ -123,6 +123,7 @@ pub enum EngineEvent {
     RetiredAutomationLane(vibez_core::automation::AutomationLane),
     RetiredAudioBuffer(Arc<DecodedAudio>),
     RetiredAudioClip(crate::playback_source::EngineClip),
+    RetiredNoteClip(crate::playback_source::EngineNoteClip),
     RetiredWarpMarkers(vibez_core::warp_marker::WarpMarkers),
     RetiredTrackOrder(Vec<TrackId>),
     RoutingRetired(Box<crate::routing::PreparedRouting>),
@@ -455,6 +456,7 @@ impl EngineEvent {
             | Self::RetiredEffectStorage(_)
             | Self::RetiredChannel(_)
             | Self::RetiredAutomationLane(_)
+            | Self::RetiredNoteClip(_)
             | Self::RetiredAudioClip(_)
             | Self::RetiredAudioBuffer(_)
             | Self::RetiredWarpMarkers(_)
@@ -497,6 +499,7 @@ impl PartialEq for EngineEvent {
             (Self::DisposeInstrument(left), Self::DisposeInstrument(right)) => left == right,
             (Self::PlaybackPosition(left), Self::PlaybackPosition(right)) => left == right,
             (Self::PerformancePosition(left), Self::PerformancePosition(right)) => left == right,
+            (Self::RetiredNoteClip(left), Self::RetiredNoteClip(right)) => left.same_retired_owner(right),
             (Self::RetiredAudioClip(left), Self::RetiredAudioClip(right)) => left.same_retired_owner(right),
             (Self::RetiredAudioBuffer(left), Self::RetiredAudioBuffer(right)) => {
                 Arc::ptr_eq(left, right)

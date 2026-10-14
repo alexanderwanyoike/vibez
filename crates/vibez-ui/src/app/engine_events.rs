@@ -237,6 +237,7 @@ impl App {
                     EngineEvent::RetiredAutomationLane(lane) => drop(lane),
                     EngineEvent::RetiredAudioBuffer(audio) => drop(audio),
                     EngineEvent::RetiredAudioClip(clip) => drop(clip),
+                    EngineEvent::RetiredNoteClip(clip) => drop(clip),
                     EngineEvent::RetiredWarpMarkers(markers) => drop(markers),
                     EngineEvent::RetiredTrackOrder(order) => drop(order),
                     EngineEvent::RetiredChannel(channel) => {
