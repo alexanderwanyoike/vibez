@@ -253,7 +253,12 @@ fn meter_column<'a>(
             tooltip::Position::Top,
         ));
     }
-    let readouts = column![readout("L", levels.peak_l), readout("R", levels.peak_r),].spacing(2);
+    let readouts = column![
+        text("PEAK").size(7).color(th::text_dim()),
+        readout("L", levels.peak_l),
+        readout("R", levels.peak_r),
+    ]
+    .spacing(2);
     column![
         heading,
         row![
@@ -676,20 +681,35 @@ impl canvas::Program<Message> for LevelHistory<'_> {
                     .with_width(if peak { 1.0 } else { 1.5 }),
             );
         }
-        for (content, x, alignment) in [
-            ("RMS / peak", left, iced::alignment::Horizontal::Left),
-            ("10 s", bounds.width, iced::alignment::Horizontal::Right),
-        ] {
+        // The legend draws each line's own stroke beside its name.
+        let mut x = left;
+        for (label, peak) in [("RMS", false), ("Peak", true)] {
+            let y = bounds.height - 4.0;
+            frame.stroke(
+                &canvas::Path::line(Point::new(x, y), Point::new(x + 10.0, y)),
+                canvas::Stroke::default()
+                    .with_color(th::with_alpha(self.accent, if peak { 0.35 } else { 1.0 }))
+                    .with_width(if peak { 1.0 } else { 1.5 }),
+            );
             frame.fill_text(canvas::Text {
-                content: content.into(),
-                position: Point::new(x, bounds.height),
+                content: label.into(),
+                position: Point::new(x + 13.0, bounds.height),
                 color: th::text_dim(),
                 size: 8.0.into(),
-                horizontal_alignment: alignment,
                 vertical_alignment: iced::alignment::Vertical::Bottom,
                 ..canvas::Text::default()
             });
+            x += 46.0;
         }
+        frame.fill_text(canvas::Text {
+            content: "10 s".into(),
+            position: Point::new(bounds.width, bounds.height),
+            color: th::text_dim(),
+            size: 8.0.into(),
+            horizontal_alignment: iced::alignment::Horizontal::Right,
+            vertical_alignment: iced::alignment::Vertical::Bottom,
+            ..canvas::Text::default()
+        });
         vec![frame.into_geometry()]
     }
 }
