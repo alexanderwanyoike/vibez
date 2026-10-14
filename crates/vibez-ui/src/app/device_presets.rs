@@ -185,6 +185,8 @@ impl App {
         if invalidated {
             self.device_preset_load_request.cancel();
             self.device_preset_load_target = None;
+            self.state.status_text =
+                "Preset load cancelled: the device changed while choosing a file".into();
         }
     }
 
