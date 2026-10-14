@@ -1,3 +1,5 @@
+//! Audio callback orchestration and bounded playback engine state.
+
 use std::sync::Arc;
 
 use rtrb::{Consumer, Producer, RingBuffer};

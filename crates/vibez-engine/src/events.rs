@@ -1,3 +1,5 @@
+//! Engine-to-UI playback feedback and owner-return event contracts.
+
 use std::sync::Arc;
 
 use vibez_core::audio_buffer::DecodedAudio;
