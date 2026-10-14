@@ -45,6 +45,18 @@ chains and channel lists are reserved at `DEVICE_CHAIN_CAPACITY` and
 `CHANNEL_CAPACITY`, which the UI refuses to exceed.
 `engine_command_allocation_tests` measures every command; its list of commands
 that still allocate may only shrink.
+Legacy `LoadAudio` and `UnloadAudio` return displaced decoded buffers through
+`RetiredAudioBuffer`. The legacy renderer only borrows the current buffer during
+the callback, so the UI disposes this Untimed return immediately, including
+after project reset. Equality identifies the Arc allocation, not PCM contents.
+Load reserves one retirement slot before taking its incoming command payload;
+Unload keeps its conservative two-slot admission and existing source/Capture
+cleanup order. When credits run out, the resident audio and queued command stay
+owned until UI consumption permits FIFO command progress. Same-Arc reloads
+return one displaced reference while retaining the incoming reference. This
+protocol does not extend to instruments with independently sounding sample
+voices.
+
 Events come in two classes, and the class determines the push policy:
 
 - **Authoritative** (Capture consumes them, state depends on them): enter
