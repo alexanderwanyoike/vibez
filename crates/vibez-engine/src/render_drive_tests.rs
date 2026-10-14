@@ -105,3 +105,105 @@ fn drive_bounce_retains_leading_and_trailing_impulses_at_every_rate_and_bypass_s
         }
     }
 }
+
+fn realtime(req: &BounceRequest) -> Vec<f32> {
+    use vibez_core::routing::{NodeStage, RoutingChannel, RoutingEffect, RoutingNode, SourceTap};
+
+    let (mut engine, mut commands, mut events) = AudioEngine::new();
+    commands.push(Command::SetSampleRate(req.sample_rate)).unwrap();
+    let mut channels = Vec::new();
+    let mut reports = Vec::new();
+    let mut warnings = Vec::new();
+    for info in &req.tracks {
+        let channel = super::super::prepare::channel(
+            req, info, SourceTap::AfterFader, None, &mut warnings,
+        );
+        for slot in &channel.effects {
+            assert_eq!(slot.effect.latency_samples(), 64);
+            reports.push((RoutingNode { channel: info.id, stage: NodeStage::Effect(slot.id) }, 64));
+        }
+        channels.push(RoutingChannel {
+            id: info.id,
+            is_bus: false,
+            sends: vec![],
+            effects: info.effects.iter().map(|effect| RoutingEffect {
+                id: effect.id,
+                inputs: vec![],
+                assignments: vec![],
+                inactive_inputs: vec![],
+            }).collect(),
+        });
+        commands.push(Command::AddTrack(Box::new(channel))).unwrap();
+    }
+    assert!(warnings.is_empty());
+    channels.push(RoutingChannel {
+        id: TrackId::MASTER,
+        is_bus: true,
+        sends: vec![],
+        effects: vec![],
+    });
+    commands.push(Command::SetRouting(
+        crate::routing::PreparedRouting::prepare_compensated(
+            &channels, 128, &reports, &[], 1,
+        ).unwrap(),
+    )).unwrap();
+    commands.push(Command::Play).unwrap();
+    let frames = req.range_samples.1 as usize + 64;
+    let mut output = Vec::with_capacity(frames * 2);
+    let mut partition = [1, 31, 127, 64].into_iter().cycle();
+    while output.len() < frames * 2 {
+        let count = partition.next().unwrap().min(frames - output.len() / 2);
+        let mut block = [0.0; 256];
+        engine.process_block(AudioProcessBlock::new(&mut block[..count * 2], 2));
+        output.extend_from_slice(&block[..count * 2]);
+        while let Ok(event) = events.pop() {
+            assert!(!matches!(event,
+                crate::events::EngineEvent::CompensationInvalid { .. }
+                | crate::events::EngineEvent::CompensationFailed { .. }
+                | crate::events::EngineEvent::DeviceProcessingFailed { .. }
+            ), "{event:?}");
+        }
+    }
+    output
+}
+
+#[test]
+fn drive_realtime_parallel_paths_cancel_at_declared_latency_including_bypass() {
+    for sample_rate in [44_100, 48_000, 96_000] {
+        for character in [0.0, 1.0] {
+            for bypass in [false, true] {
+                let mut req = request(sample_rate, bypass, character);
+                let audible = realtime(&req);
+                for (frame, pair) in audible.as_chunks::<2>().0.iter().enumerate() {
+                    let expected = if [64, 263, 264, 2111].contains(&frame) {
+                        0.25 * std::f32::consts::FRAC_1_SQRT_2
+                    } else {
+                        0.0
+                    };
+                    assert!(pair.iter().all(|sample| (*sample - expected).abs() < 1e-6),
+                        "rate={sample_rate}, character={character}, bypass={bypass}, frame={frame}: {pair:?}");
+                }
+                let dry = bare_track("Inverse dry reference");
+                let mut clip = req.audio_clips[0].clone();
+                let original = &req.clip_audio[&clip.id];
+                let inverse = Arc::new(DecodedAudio {
+                    channels: original.channels.iter().map(|channel| {
+                        channel.iter().map(|sample| -*sample).collect()
+                    }).collect(),
+                    sample_rate,
+                });
+                clip.id = ClipId::new();
+                clip.track_id = dry.id;
+                req.clip_audio.insert(clip.id, inverse);
+                req.audio_clips.push(clip);
+                req.tracks.push(dry);
+                assert!(realtime(&req).iter().all(|sample| sample.abs() < 1e-6));
+                let bounced = render_offline_with_plugins(
+                    &req, &mut OfflinePlugins::default(), |_| {},
+                ).unwrap();
+                assert!(bounced.warnings.is_empty());
+                assert!(bounced.audio.channels.iter().flatten().all(|sample| sample.abs() < 1e-6));
+            }
+        }
+    }
+}
