@@ -296,7 +296,11 @@ impl DevicesState {
                 let effect_id = EffectId::new();
                 let fx = vibez_dsp::factory::create_effect(effect_type, sample_rate as f32);
                 let descriptors = fx.param_descriptors();
-                let params: Vec<f32> = descriptors.iter().map(|d| d.default).collect();
+                let params: Vec<f32> = if effect_type == EffectType::Bitcrush {
+                    super::device_presets::bitcrush::fresh_sound().to_vec()
+                } else {
+                    descriptors.iter().map(|d| d.default).collect()
+                };
 
                 if let Some(track) = find_track_mut(tracks, master, buses, track_id) {
                     track.effects.push(UiEffect {
