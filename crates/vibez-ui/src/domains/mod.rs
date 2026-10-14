@@ -18,6 +18,7 @@ pub mod device_controls;
 pub mod device_latency;
 pub mod device_presets;
 pub mod devices;
+pub mod filter_layout;
 pub mod gain;
 pub mod perform;
 pub mod piano_roll;
