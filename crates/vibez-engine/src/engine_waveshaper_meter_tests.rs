@@ -47,9 +47,16 @@ fn waveshaper_event_equality_compares_identity_generation_and_every_snapshot_fie
     assert_eq!(event(track, effect, 7, meter).time_domain(), crate::events::TimeDomain::Untimed);
 }
 
-#[test]
-fn drive_waveform_publishes_real_chronological_pairs_at_fifty_hertz() {
-    let (mut engine, mut commands, mut events) = AudioEngine::new();
+type Fixture = (
+    AudioEngine,
+    Producer<EngineCommand>,
+    Consumer<EngineEvent>,
+    TrackId,
+    EffectId,
+);
+
+fn fixture() -> Fixture {
+    let (engine, mut commands, events) = AudioEngine::new();
     let track_id = TrackId::new();
     let effect_id = EffectId::new();
     commands.push(EngineCommand::SetSampleRate(48_000)).unwrap();
@@ -76,6 +83,12 @@ fn drive_waveform_publishes_real_chronological_pairs_at_fifty_hertz() {
             generation: 7,
         })
         .unwrap();
+    (engine, commands, events, track_id, effect_id)
+}
+
+#[test]
+fn drive_waveform_publishes_real_chronological_pairs_at_fifty_hertz() {
+    let (mut engine, _commands, mut events, track_id, effect_id) = fixture();
     let input: [f32; 1920] = std::array::from_fn(|index| {
         if index % 2 == 0 {
             0.01 + index as f32 * 0.000_005
