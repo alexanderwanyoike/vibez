@@ -68,6 +68,7 @@ pub struct AudioEngine {
     bootstrap_routing: Option<Box<crate::routing::PreparedRouting>>,
     retired_routing: Option<Box<crate::routing::PreparedRouting>>,
     pub(super) pending_retirements: Vec<EngineEvent>,
+    pending_clip_insertion: Option<Box<crate::clip_insertion::PreparedClipInsertion>>,
     pub(super) pending_bus_cleanup: Option<(TrackId, usize)>,
     pub(super) channel_retirement: Arc<crate::retirement::ChannelRetirementPool>,
     transport: Transport,
@@ -260,6 +261,7 @@ impl AudioEngine {
             retired_routing: None,
             pending_bus_cleanup: None,
             pending_retirements: Vec::with_capacity(crate::retirement::RETIREMENT_CAPACITY),
+            pending_clip_insertion: None,
             channel_retirement: crate::retirement::ChannelRetirementPool::new(),
             transport: Transport::new(),
             tracks: Vec::with_capacity(crate::mixer::CHANNEL_CAPACITY),
@@ -947,6 +949,9 @@ mod compensation_presentation_tests;
 mod compensation_transition;
 #[path = "engine_output_gate.rs"]
 mod output_gate;
+
+#[path = "engine_clip_insertion.rs"]
+mod clip_insertion;
 
 #[cfg(test)]
 #[path = "engine_compensation_transition_tests.rs"]

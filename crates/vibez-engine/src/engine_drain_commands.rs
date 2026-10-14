@@ -28,12 +28,16 @@ impl AudioEngine {
         self.return_retired_routing();
         self.flush_retirements();
         self.clean_removed_bus_automation();
+        self.continue_clip_insertion();
         loop {
             self.flush_retirements();
             if !self.flush_removed_clip_owners() {
                 break;
             }
-            if self.capture_replay.is_some() || self.clip_batch_blocks_commands() {
+            if self.pending_clip_insertion.is_some()
+                || self.capture_replay.is_some()
+                || self.clip_batch_blocks_commands()
+            {
                 break;
             }
             let Ok(_) = self.cmd_rx.peek() else {
@@ -282,6 +286,7 @@ impl AudioEngine {
                     self.retire_event(EngineEvent::RetiredTrackOrder(order));
                 }
                 EngineCommand::AddClip {
+                    insertion,
                     track_id,
                     clip_id,
                     audio,
@@ -297,8 +302,7 @@ impl AudioEngine {
                     playback_direction,
                     warp_markers,
                 } => {
-                    if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
-                        track.playback_source.push_audio_clip(EngineClip {
+                    self.command_add_clip(track_id, EngineClip {
                             id: clip_id,
                             audio,
                             position,
@@ -312,9 +316,7 @@ impl AudioEngine {
                             fades: fades.clamped_to(duration),
                             playback_direction,
                             warp_markers,
-                        });
-                    }
-                    self.recalculate_audio_length();
+                        }, insertion);
                 }
                 EngineCommand::RemoveClip(track_id, clip_id) => {
                     if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {

@@ -115,6 +115,7 @@ pub enum EngineCommand {
     ReorderTracks(Vec<TrackId>),
     /// Add a clip to a track.
     AddClip {
+        insertion: Box<crate::clip_insertion::PreparedClipInsertion>,
         track_id: TrackId,
         clip_id: ClipId,
         audio: Arc<DecodedAudio>,

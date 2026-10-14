@@ -101,6 +101,8 @@ pub(crate) struct RepeatNoticePosition {
 
 #[derive(Debug)]
 pub enum EngineEvent {
+    ClipInsertionStorageRequested(crate::clip_insertion::ClipInsertionStorageRequest),
+    ClipInsertionCompleted(crate::clip_insertion::CompletedClipInsertion),
     PresentationCancelled,
     DeviceReconfigurationRetired {
         device: crate::engine::reconfiguration::DeviceReconfiguration,
@@ -451,6 +453,8 @@ impl EngineEvent {
             | Self::InstrumentNoteInput { .. }
             | Self::NoteRepeated { .. } => TimeDomain::Heard,
             Self::PresentationCancelled
+            | Self::ClipInsertionStorageRequested(_)
+            | Self::ClipInsertionCompleted(_)
             | Self::DeviceReconfigurationRetired { .. }
             | Self::DeviceReconfiguration(_)
             | Self::CompensationFailed { .. }
@@ -495,6 +499,8 @@ impl EngineEvent {
 impl PartialEq for EngineEvent {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
+            (Self::ClipInsertionStorageRequested(left), Self::ClipInsertionStorageRequested(right)) => left == right,
+            (Self::ClipInsertionCompleted(left), Self::ClipInsertionCompleted(right)) => left == right,
             (Self::SourceNoteInput { .. }, Self::SourceNoteInput { .. })
             | (Self::SourceNoteRepeated { .. }, Self::SourceNoteRepeated { .. }) => {
                 recording::source_eq(self, other)
