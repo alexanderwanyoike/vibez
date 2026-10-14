@@ -1,4 +1,7 @@
+//! Live and offline plugin insert tails follow the same prepared routing.
+
 use super::*;
+use vibez_core::routing::{RoutingChannel, RoutingEffect};
 
 struct EchoPluginEffect {
     delay: [f32; 1024],
@@ -196,6 +199,25 @@ fn assert_export_preserves_insert_echo(
         plugin: Some(plugin_device("Echo")),
     });
     let (mut engine, mut commands, mut events) = AudioEngine::new();
+    let channels = [
+        RoutingChannel {
+            id: tid,
+            is_bus: false,
+            sends: vec![],
+            effects: vec![RoutingEffect {
+                id: effect_id,
+                inputs: vec![],
+                assignments: vec![],
+                inactive_inputs: vec![],
+            }],
+        },
+        RoutingChannel {
+            id: TrackId::MASTER,
+            is_bus: true,
+            sends: vec![],
+            effects: vec![],
+        },
+    ];
     commands.push(Command::SetBpm(request.bpm)).unwrap();
     for command in setup_commands {
         commands.push(command).unwrap();
@@ -207,6 +229,11 @@ fn assert_export_preserves_insert_echo(
             effect: Box::new(EchoPluginEffect::new()),
             position: None,
         })
+        .unwrap();
+    commands
+        .push(Command::SetRouting(
+            crate::routing::PreparedRouting::prepare(&channels, BLOCK_FRAMES).unwrap(),
+        ))
         .unwrap();
     // Recording mode disables end-of-content auto-stop without looping.
     // This lets the live path cover the export range after the last hit;
