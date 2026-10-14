@@ -540,11 +540,7 @@ impl AudioEngine {
                     amount,
                 } => {
                     if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
-                        let amount = amount.clamp(0.0, 1.0);
-                        match track.sends.iter_mut().find(|(b, _)| *b == bus_id) {
-                            Some(send) => send.1 = amount,
-                            None => track.sends.push((bus_id, amount)),
-                        }
+                        track.set_send(bus_id, amount.clamp(0.0, 1.0));
                     }
                 }
                 EngineCommand::SetTrackSolo(id, solo) => {

@@ -48,6 +48,13 @@ impl EngineTrack {
         }
     }
 
+    pub(crate) fn set_send(&mut self, bus_id: TrackId, amount: f32) {
+        match self.sends.iter_mut().find(|(id, _)| *id == bus_id) {
+            Some(send) => send.1 = amount,
+            None => self.sends.push((bus_id, amount)),
+        }
+    }
+
     /// Apply automation at `beat`; return gain and pan mix overrides.
     pub fn apply_automation(&mut self, beat: f64) -> (Option<f32>, Option<f32>) {
         self.apply_scoped_automation(beat, None)
@@ -122,11 +129,7 @@ impl EngineTrack {
                 }
                 AutomationTarget::PluginParam { .. } => {}
                 AutomationTarget::Send { bus_id } if stage.is_none() => {
-                    // Send range is native 0..1, so write the value in place.
-                    match self.sends.iter_mut().find(|(b, _)| *b == bus_id) {
-                        Some(send) => send.1 = value,
-                        None => self.sends.push((bus_id, value)),
-                    }
+                    self.set_send(bus_id, value);
                 }
                 AutomationTarget::TrackGain
                 | AutomationTarget::TrackPan
