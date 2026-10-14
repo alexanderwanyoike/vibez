@@ -103,18 +103,29 @@ impl DevicesMsg {
     }
 }
 
+/// The effect and parameter values a parameter edit asks for.
+pub struct ParamEdit {
+    pub track_id: TrackId,
+    pub effect_id: EffectId,
+    pub updates: Vec<(usize, f32)>,
+}
+
 impl DevicesMsg {
-    /// The effect and parameter values a parameter edit asks for.
-    pub fn param_edit(&self) -> Option<(TrackId, EffectId, Vec<(usize, f32)>)> {
-        match self {
+    pub fn param_edit(&self) -> Option<ParamEdit> {
+        let (track_id, effect_id, updates) = match self {
             DevicesMsg::SetEffectParam(track, effect, index, value) => {
-                Some((*track, *effect, vec![(*index, *value)]))
+                (*track, *effect, vec![(*index, *value)])
             }
             DevicesMsg::SetEffectParams(track, effect, updates) => {
-                Some((*track, *effect, updates.clone()))
+                (*track, *effect, updates.clone())
             }
-            _ => None,
-        }
+            _ => return None,
+        };
+        Some(ParamEdit {
+            track_id,
+            effect_id,
+            updates,
+        })
     }
 }
 
@@ -124,16 +135,18 @@ pub fn is_unchanged_param_edit(
     project: &crate::state::ProjectTracksState,
     message: &DevicesMsg,
 ) -> bool {
-    let Some((track_id, effect_id, updates)) = message.param_edit() else {
+    let Some(edit) = message.param_edit() else {
         return false;
     };
-    let Some(effect) = project
-        .find(track_id)
-        .and_then(|track| track.effects.iter().find(|effect| effect.id == effect_id))
-    else {
+    let Some(effect) = project.find(edit.track_id).and_then(|track| {
+        track
+            .effects
+            .iter()
+            .find(|effect| effect.id == edit.effect_id)
+    }) else {
         return false;
     };
-    updates.iter().all(|&(index, value)| {
+    edit.updates.iter().all(|&(index, value)| {
         effect
             .descriptors
             .get(index)

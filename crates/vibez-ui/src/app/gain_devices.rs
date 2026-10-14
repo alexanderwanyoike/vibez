@@ -22,11 +22,11 @@ pub(super) struct GainDevices {
 impl App {
     /// A parameter edit supersedes whatever was typed into that Gain field.
     pub(super) fn discard_gain_entries(&mut self, message: &crate::domains::devices::DevicesMsg) {
-        let Some((_, effect_id, updates)) = message.param_edit() else {
+        let Some(edit) = message.param_edit() else {
             return;
         };
-        if let Some(panel) = self.gain_devices.panels.get_mut(&effect_id) {
-            for (index, _) in updates {
+        if let Some(panel) = self.gain_devices.panels.get_mut(&edit.effect_id) {
+            for (index, _) in edit.updates {
                 panel.discard_input(index);
             }
         }
