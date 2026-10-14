@@ -216,6 +216,59 @@ mod presentation_tests {
     use vibez_core::id::EffectId;
 
     #[test]
+    fn bitcrush_factory_catalogue_has_complete_distinct_sounds_and_a_dry_init() {
+        let presets = factory_presets(EffectType::Bitcrush);
+        assert_eq!(presets.len(), 8, "the complete Bitcrush sound catalogue");
+        let keys = [
+            "bits",
+            "sr_reduce",
+            "mix",
+            "drive_db",
+            "rounding",
+            "dither",
+            "jitter",
+            "post_lp_enabled",
+            "post_lp_frequency_hz",
+        ];
+        let mut names = std::collections::BTreeSet::new();
+        for preset in &presets {
+            assert_eq!(preset.kind(), DevicePresetKind::Effect(EffectType::Bitcrush));
+            assert!(names.insert(preset.name()), "duplicate preset name");
+            assert_eq!(preset.parameters().len(), keys.len());
+            for key in keys {
+                assert!(preset.parameters().contains_key(key), "missing {key}");
+            }
+        }
+        for (index, preset) in presets.iter().enumerate() {
+            for other in &presets[index + 1..] {
+                assert_ne!(preset.parameters(), other.parameters(), "duplicate sounds");
+            }
+        }
+        let values = |name: &str| {
+            presets
+                .iter()
+                .find(|preset| preset.name() == name)
+                .unwrap_or_else(|| panic!("missing {name}"))
+                .parameters()
+        };
+        let init = values("Init");
+        assert_eq!(init["mix"], 0.0, "full-wet 16-bit quantization is not dry");
+        assert_eq!(init["drive_db"], 0.0);
+        assert_eq!(init["jitter"], 0.0);
+        assert_eq!(init["dither"], 0.0);
+        assert_eq!(init["post_lp_enabled"], 0.0);
+        let concept = values("Crunchy 12");
+        assert_eq!(concept["bits"], 12.0);
+        assert_eq!(concept["sr_reduce"], 4.0);
+        assert_eq!(concept["drive_db"], 2.0);
+        assert_eq!(concept["mix"], 0.65);
+        assert_eq!(values("Pocket Sampler")["dither"], 1.0);
+        assert_eq!(values("Broken Clock")["jitter"], 0.35);
+        assert_eq!(values("Parallel Arcade")["rounding"], 2.0);
+        assert_eq!(values("Dusty Bass")["post_lp_frequency_hz"], 3500.0);
+    }
+
+    #[test]
     fn gain_factory_presets_cover_balance_and_single_channel_polarity() {
         let presets = factory_presets(EffectType::Gain);
         let values = |name: &str| {
