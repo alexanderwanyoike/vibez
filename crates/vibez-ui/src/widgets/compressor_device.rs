@@ -9,7 +9,9 @@ use crate::widgets::{
 use crate::{
     domains::{
         compressor::{CompressorMsg, CompressorPanel, CompressorVisual},
-        compressor_layout::{self, plot_widths, ASIDE_W, GAUGE_W, INLINE_CORE_W, SIDECHAIN_W, TOOLBAR_H},
+        compressor_layout::{
+            self, plot_widths, ASIDE_W, GAUGE_W, INLINE_CORE_W, SIDECHAIN_W, TOOLBAR_H,
+        },
         device_controls::{DeviceControlMsg, DeviceControlState},
         devices::DevicesState,
     },
@@ -353,7 +355,8 @@ pub fn view<'a>(
         row![
             container(compressor_controls::primary(
                 track, effect, state, accent, None, primary,
-            )).width(INLINE_CORE_W),
+            ))
+            .width(INLINE_CORE_W),
             iced::widget::vertical_rule(1),
             advanced(),
         ]

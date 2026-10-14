@@ -406,11 +406,20 @@ mod tests {
         for width in [740.0, 804.0, 871.0, 872.0, 892.0, 900.0] {
             for height in 64..112 {
                 let layout = arrange(width, height as f32, true);
-                assert!(layout.primary_visible_with_details,
-                    "Advanced replaced Threshold/Ratio/Attack/Release at {width}x{height}");
+                assert!(
+                    layout.primary_visible_with_details,
+                    "Advanced replaced Threshold/Ratio/Attack/Release at {width}x{height}"
+                );
                 assert_eq!(layout.primary_controls(), PrimaryControls::Core);
-                assert_eq!(layout.primary_controls().indices(),
-                    &[param::THRESHOLD, param::RATIO, param::ATTACK, param::RELEASE]);
+                assert_eq!(
+                    layout.primary_controls().indices(),
+                    &[
+                        param::THRESHOLD,
+                        param::RATIO,
+                        param::ATTACK,
+                        param::RELEASE
+                    ]
+                );
                 assert_eq!(layout.knobs, None);
                 let field_height = 8.0 * 1.3 + 3.0 + 10.0 * 1.3 + 2.0;
                 let content_height = layout.controls - 5.0;
@@ -427,15 +436,18 @@ mod tests {
                         CompressorPage::Sidechain => 96.0 + 76.0 + 62.0 + 82.0 + 3.0 * 6.0,
                         CompressorPage::Metering => 8.0 * 36.0 + 7.0 * 4.0,
                     };
-                    assert!(detail_controls_width >= minimum_width,
-                        "{page} clips beside the core bank at {width}x{height}");
-                    assert!(content_height >= field_height,
-                        "{page} clips its label and selector at {width}x{height}");
+                    assert!(
+                        detail_controls_width >= minimum_width,
+                        "{page} clips beside the core bank at {width}x{height}"
+                    );
+                    assert!(
+                        content_height >= field_height,
+                        "{page} clips its label and selector at {width}x{height}"
+                    );
                 }
             }
         }
         let compact = arrange(430.0, 64.0, true);
         assert!(!compact.primary_visible_with_details);
     }
-
 }
