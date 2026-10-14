@@ -4,6 +4,50 @@ use super::*;
 use vibez_core::{effect::EffectType, id::EffectId};
 
 #[test]
+fn waveshaper_event_equality_compares_identity_generation_and_every_snapshot_field() {
+    let track = TrackId::new();
+    let effect = EffectId::new();
+    let meter = vibez_core::effect::WaveShaperMeter {
+        input: [0.25; 128],
+        output: [0.5; 128],
+        count: 128,
+        sample_rate: 48_000.0,
+        first_output_sample: 64,
+        latency_samples: 64,
+        transfer: [0.75; 65],
+    };
+    let event = |track_id, effect_id, generation, meter| EngineEvent::EffectWaveshaper {
+        track_id,
+        effect_id,
+        generation,
+        meter,
+    };
+    assert_eq!(event(track, effect, 7, meter), event(track, effect, 7, meter));
+    for changed in [
+        event(TrackId::new(), effect, 7, meter),
+        event(track, EffectId::new(), 7, meter),
+        event(track, effect, 8, meter),
+    ] {
+        assert_ne!(event(track, effect, 7, meter), changed);
+    }
+    for field in 0..7 {
+        let mut changed = meter;
+        match field {
+            0 => changed.input[127] = -0.25,
+            1 => changed.output[127] = -0.5,
+            2 => changed.count = 127,
+            3 => changed.sample_rate = 44_100.0,
+            4 => changed.first_output_sample += 1,
+            5 => changed.latency_samples += 1,
+            6 => changed.transfer[64] = -0.75,
+            _ => unreachable!(),
+        }
+        assert_ne!(event(track, effect, 7, meter), event(track, effect, 7, changed));
+    }
+    assert_eq!(event(track, effect, 7, meter).time_domain(), crate::events::TimeDomain::Untimed);
+}
+
+#[test]
 fn drive_waveform_publishes_real_chronological_pairs_at_fifty_hertz() {
     let (mut engine, mut commands, mut events) = AudioEngine::new();
     let track_id = TrackId::new();
