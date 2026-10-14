@@ -1,4 +1,4 @@
-//! Live and offline plugin insert tails follow the same prepared routing.
+//! Offline plugin rendering matches the equivalent prepared live-engine signal.
 
 use super::*;
 use vibez_core::routing::{RoutingChannel, RoutingEffect};

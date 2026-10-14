@@ -1,4 +1,4 @@
-//! Prepared graph ownership and playback regression coverage.
+//! Compensated routing preserves alignment across prepared graph and device edits.
 
 use super::*;
 use crate::test_support::DelayProbe;

@@ -1,4 +1,4 @@
-//! Prepared graph ownership and playback regression coverage.
+//! Public routing graphs preserve audible, detector and capture signal paths.
 
 use super::*;
 use vibez_core::effect::EffectType;

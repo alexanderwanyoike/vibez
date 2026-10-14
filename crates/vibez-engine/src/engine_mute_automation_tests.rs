@@ -1,4 +1,4 @@
-//! Automation gestures and mute ramps through prepared routing.
+//! Manual and automated Track Mute preserve engine-timed playback and Capture.
 
 use std::sync::Arc;
 
