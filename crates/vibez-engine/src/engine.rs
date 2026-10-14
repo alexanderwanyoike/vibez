@@ -885,10 +885,10 @@ mod command_allocation_tests;
 #[path = "engine_compensation_presentation_tests.rs"]
 mod compensation_presentation_tests;
 
-#[path = "engine_output_gate.rs"]
-mod output_gate;
 #[path = "engine_compensation_transition.rs"]
 mod compensation_transition;
+#[path = "engine_output_gate.rs"]
+mod output_gate;
 
 #[cfg(test)]
 #[path = "engine_compensation_transition_tests.rs"]
