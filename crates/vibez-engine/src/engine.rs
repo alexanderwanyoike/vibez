@@ -1,3 +1,5 @@
+//! Real-time project playback, prepared ownership and callback clock coordination.
+
 use std::sync::Arc;
 
 use rtrb::{Consumer, Producer, RingBuffer};
@@ -78,8 +80,6 @@ pub struct AudioEngine {
     pub(super) pending_bus_cleanup: Option<(TrackId, usize)>,
     pub(super) channel_retirement: Arc<crate::retirement::ChannelRetirementPool>,
     transport: Transport,
-    /// Legacy single-audio field for backward compatibility.
-    audio: Option<Arc<DecodedAudio>>,
     /// Multi-track state.
     tracks: crate::mixer::ChannelList,
     /// The master bus: a track-shaped channel (gain + effect chain,
@@ -274,7 +274,6 @@ impl AudioEngine {
             pending_retirements: Vec::with_capacity(crate::retirement::RETIREMENT_CAPACITY),
             channel_retirement: crate::retirement::ChannelRetirementPool::new(),
             transport: Transport::new(),
-            audio: None,
             tracks: Vec::with_capacity(crate::mixer::CHANNEL_CAPACITY),
             master: Box::new(EngineTrack::new(TrackId::MASTER)),
             buses: Vec::with_capacity(crate::mixer::CHANNEL_CAPACITY),
@@ -327,9 +326,8 @@ impl AudioEngine {
     /// This method is **lock-free and allocation-free**.  It:
     /// 1. Drains all pending commands from the ring buffer.
     /// 2. Zeros the output buffer.
-    /// 3. If tracks exist: renders each → applies gain/pan → sums into output.
-    /// 4. Otherwise: falls back to legacy single-audio path.
-    /// 5. Sends metering and position events to the UI thread.
+    /// 3. Renders project sources, effects and channels.
+    /// 4. Sends metering and position events to the UI thread.
     #[cfg(test)]
     fn process(&mut self, output: &mut [f32], channels: usize) {
         self.process_block(AudioProcessBlock::new(output, channels));
@@ -384,19 +382,13 @@ impl AudioEngine {
             }
         }
 
-        if !self.tracks.is_empty() || self.routing.is_some() {
-            // ---- 3. Multi-track rendering path --------------------------
-            self.process_multitrack(
-                output,
-                frames,
-                channels,
-                live_input,
-                track_output_capture.as_mut(),
-            );
-        } else {
-            // ---- 4. Legacy single-audio path ----------------------------
-            self.process_legacy(output, frames, channels);
-        }
+        self.process_multitrack(
+            output,
+            frames,
+            channels,
+            live_input,
+            track_output_capture.as_mut(),
+        );
 
         if self.routing.is_none() {
             // ---- 4.3 Buses: each return processes its send mix through
@@ -711,11 +703,6 @@ impl AudioEngine {
     /// Read the current transport (for inspection / testing).
     pub fn transport(&self) -> &Transport {
         &self.transport
-    }
-
-    /// Read the currently loaded audio (for inspection / testing).
-    pub fn audio(&self) -> Option<&Arc<DecodedAudio>> {
-        self.audio.as_ref()
     }
 
     /// Read the tracks (for inspection / testing).
