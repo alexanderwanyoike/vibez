@@ -266,18 +266,24 @@ mod tests {
     }
 
     #[test]
-    fn bitcrush_reentering_effective_bits_keeps_exact_fractional_legacy_storage() {
+    fn bitcrush_effective_bits_readout_reenters_without_changing_fractional_legacy_storage() {
         let (mut app, track, effect) = legacy_bitcrush_app();
         let target = &mut app.state.find_track_mut(track).unwrap().effects[0];
         target.params[vibez_dsp::bitcrush::param::BITS] = 8.75;
         let before = target.params.clone();
+        let shown = crate::domains::device_controls::presented_value(
+            target,
+            vibez_dsp::bitcrush::param::BITS,
+            target.params[vibez_dsp::bitcrush::param::BITS],
+        );
+        assert_eq!(shown, "8");
         app.state.project.history = Default::default();
         app.state.project.dirty = false;
         let _ = app.update(Message::DeviceControl(DeviceControlMsg::Input(
             track,
             effect,
             0,
-            "8 bit".into(),
+            format!("{shown} bit"),
         )));
         let _ = app.update(Message::DeviceControl(DeviceControlMsg::Submit(
             track, effect, 0,
