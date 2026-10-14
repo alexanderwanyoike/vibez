@@ -174,7 +174,9 @@ fn synced_lfo_follows_tempo_and_preserves_block_partition_invariance() {
         .zip(&partitioned)
         .all(|(a, b)| (a - b).abs() < 1e-5));
     assert!(slow
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .any(|frame| (frame[0] - frame[1]).abs() > 0.01));
 }
 
@@ -291,7 +293,7 @@ fn sweeps_and_rapid_manual_edits_remain_finite_across_rates_and_block_sizes() {
             for step in 0..128 {
                 effect.set_param(0, if step % 2 == 0 { 20.0 } else { 20000.0 });
                 let mut sweep = vec![0.0; block * 2];
-                for frame in sweep.chunks_exact_mut(2) {
+                for frame in sweep.as_chunks_mut::<2>().0 {
                     phase += (50.0 + step as f64 * 25.0) / rate as f64;
                     frame.fill((0.1 * (std::f64::consts::TAU * phase).sin()) as f32);
                 }
