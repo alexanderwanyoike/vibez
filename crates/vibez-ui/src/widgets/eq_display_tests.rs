@@ -44,3 +44,59 @@ fn wheel_edits_only_mid_band_q_and_preserves_shelf_bell_modes() {
         }
     }
 }
+
+#[test]
+fn pointer_selects_the_band_and_one_drag_shares_a_single_undo_gesture() {
+    let effect = vibez_dsp::eq::EqEffect::new(48_000.0);
+    let descriptors = effect.param_descriptors();
+    let display = EqDisplayWidget {
+        track_id: TrackId::new(),
+        effect_id: EffectId::new(),
+        params: descriptors.iter().map(|d| d.default).collect(),
+        descriptors,
+        bypass: false,
+        accent: Color::WHITE,
+        selected_band: 0,
+        sample_rate: 48_000.0,
+        spectrum: vec![],
+        spectrum_active: false,
+    };
+    let bounds = Rectangle::new(Point::ORIGIN, iced::Size::new(400.0, 180.0));
+    let mut state = EqDisplayState::default();
+    let start = display.handle_pos(&BANDS[2], bounds);
+    let (_, select) = display.update(
+        &mut state,
+        canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)),
+        bounds,
+        mouse::Cursor::Available(start),
+    );
+    assert!(
+        matches!(select,Some(Message::EqControl(crate::domains::eq::EqMsg::SelectBand(track,effect,2))) if track == display.track_id && effect == display.effect_id)
+    );
+    let mut gesture = None;
+    for offset in [8.0, 16.0] {
+        let point = Point::new(start.x + offset, start.y - offset);
+        let (_, message) = display.update(
+            &mut state,
+            canvas::Event::Mouse(mouse::Event::CursorMoved { position: point }),
+            bounds,
+            mouse::Cursor::Available(point),
+        );
+        let Some(Message::UndoGesture { id, edit }) = message else {
+            panic!("drag must carry one gesture");
+        };
+        assert!(gesture.is_none_or(|previous| previous == id));
+        gesture = Some(id);
+        assert!(
+            matches!(*edit,Message::Devices(DevicesMsg::SetEffectParams(_,_,ref updates)) if updates.len()==2 && updates[0].0 == 7 && updates[1].0 ==6)
+        );
+    }
+    display.update(
+        &mut state,
+        canvas::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)),
+        bounds,
+        mouse::Cursor::Available(start),
+    );
+    assert!(state.drag.is_none());
+    assert!(state.undo_gesture.is_none());
+}
