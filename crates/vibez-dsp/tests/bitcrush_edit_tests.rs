@@ -59,3 +59,42 @@ fn manual_drive_ramps_on_source_frames_and_automation_snaps_without_reviving_the
         );
     }
 }
+
+
+#[test]
+fn mix_ramp_survives_unrelated_automation_and_unchanged_manual_targets() {
+    for channels in [1, 2] {
+        let build = || {
+            let mut effect = create_effect_with_params(
+                EffectType::Bitcrush, 48_000.0, &[2.0, 3.0, 0.0, 0.0]);
+            effect.process(&mut vec![0.26; 9 * channels], channels);
+            assert!(effect.set_param(2, 1.0));
+            assert_eq!(effect.get_param(2), 1.0);
+            effect
+        };
+        let mut whole = vec![0.26; 640 * channels];
+        build().process(&mut whole, channels);
+        let mut effect = build();
+        let mut actual = vec![0.26; 640 * channels];
+        let mut position = 0;
+        for frames in [127, 46, 1, 7, 31, 428] {
+            let end = position + frames * channels;
+            effect.process(&mut actual[position..end], channels);
+            position = end;
+            if position == 127 * channels {
+                assert!(effect.set_automated_param(3, 6.0));
+            }
+            if position == 173 * channels {
+                assert!(effect.set_param(2, 1.0));
+            }
+        }
+        assert_eq!(actual, whole, "channels={channels}");
+        for (frame, samples) in actual.chunks_exact(channels).enumerate() {
+            let mix = (frame + 1).min(512) as f32 / 512.0;
+            let expected = 0.26 * (1.0 - mix) + 0.5 * mix;
+            for &sample in samples {
+                assert_eq!(sample, expected, "frame={frame}, channels={channels}");
+            }
+        }
+    }
+}
