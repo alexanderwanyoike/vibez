@@ -283,4 +283,35 @@ mod tests {
         assert!(!app.state.project.history.can_undo());
         assert!(!app.state.project.dirty);
     }
+
+    #[test]
+    fn bitcrush_percent_controls_preserve_rounded_noops_and_edit_with_one_undo() {
+        use vibez_dsp::bitcrush::param;
+        for index in [param::MIX, param::JITTER] {
+            let (mut app, track, effect) = legacy_bitcrush_app();
+            let target = &mut app.state.find_track_mut(track).unwrap().effects[0];
+            target.params[index] = 0.373_14;
+            assert_eq!(target.descriptors[index].unit, "");
+            let before = target.params.clone();
+            app.state.project.history = Default::default();
+            app.state.project.dirty = false;
+            let _ = app.update(Message::DeviceControl(DeviceControlMsg::Input(
+                track, effect, index, "37 %".into(),
+            )));
+            let _ = app.update(Message::DeviceControl(DeviceControlMsg::Submit(track, effect, index)));
+            assert_eq!(app.state.find_track(track).unwrap().effects[0].params, before);
+            assert!(app.device_controls[&effect].errors.is_empty(), "unchanged percentage rejected");
+            assert!(!app.state.project.history.can_undo());
+            assert!(!app.state.project.dirty);
+            let _ = app.update(Message::DeviceControl(DeviceControlMsg::Input(
+                track, effect, index, "65 %".into(),
+            )));
+            let _ = app.update(Message::DeviceControl(DeviceControlMsg::Submit(track, effect, index)));
+            assert_eq!(app.state.find_track(track).unwrap().effects[0].params[index], 0.65);
+            let snapshot = app.state.project.history.pop_undo().expect("one percent edit");
+            assert!(!app.state.project.history.can_undo());
+            app.apply_snapshot(snapshot);
+            assert_eq!(app.state.find_track(track).unwrap().effects[0].params, before);
+        }
+    }
 }
