@@ -3,8 +3,8 @@
 pub mod drum_rack;
 mod media_owners;
 mod prepared_pad_state;
-pub use prepared_pad_state::PreparedDrumPadState;
 pub use media_owners::InstrumentMediaOwners;
+pub use prepared_pad_state::PreparedDrumPadState;
 pub(crate) mod envelope;
 pub mod sampler;
 pub mod synth;
@@ -119,8 +119,15 @@ pub trait Instrument: Send {
     }
 
     /// Apply pad settings to a drum-rack pad. No-op for other instruments.
-    fn set_drum_pad_state(&mut self, _pad_index: usize, state: PreparedDrumPadState) -> InstrumentMediaOwners {
-        InstrumentMediaOwners { sample: None, name: state.name }
+    fn set_drum_pad_state(
+        &mut self,
+        _pad_index: usize,
+        state: PreparedDrumPadState,
+    ) -> InstrumentMediaOwners {
+        InstrumentMediaOwners {
+            sample: None,
+            name: state.name,
+        }
     }
 
     /// Sample name for UI display. None for non-sample instruments.

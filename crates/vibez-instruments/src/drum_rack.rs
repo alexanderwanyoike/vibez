@@ -4,8 +4,7 @@ use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::effect::ParamDescriptor;
 use vibez_core::midi::InstrumentKind;
 use vibez_core::track::{
-    drum_rack_pad_index, DRUM_PAD_DEFAULT_FADE_MS, DRUM_PAD_MAX_FADE_MS,
-    DRUM_RACK_PAD_COUNT,
+    drum_rack_pad_index, DRUM_PAD_DEFAULT_FADE_MS, DRUM_PAD_MAX_FADE_MS, DRUM_RACK_PAD_COUNT,
 };
 
 use crate::{Instrument, InstrumentMediaOwners, PreparedDrumPadState};
@@ -386,10 +385,14 @@ impl Instrument for DrumRack {
     }
 
     fn clear_drum_pad(&mut self, pad_index: usize) -> InstrumentMediaOwners {
-        let retired = self.pads.get_mut(pad_index).map(|pad| InstrumentMediaOwners {
-            sample: pad.sample.take(),
-            name: pad.sample_name.take(),
-        }).unwrap_or_default();
+        let retired = self
+            .pads
+            .get_mut(pad_index)
+            .map(|pad| InstrumentMediaOwners {
+                sample: pad.sample.take(),
+                name: pad.sample_name.take(),
+            })
+            .unwrap_or_default();
         for voice in &mut self.voices {
             if voice.pad_index == pad_index {
                 voice.active = false;
@@ -399,7 +402,11 @@ impl Instrument for DrumRack {
         retired
     }
 
-    fn set_drum_pad_state(&mut self, pad_index: usize, state: PreparedDrumPadState) -> InstrumentMediaOwners {
+    fn set_drum_pad_state(
+        &mut self,
+        pad_index: usize,
+        state: PreparedDrumPadState,
+    ) -> InstrumentMediaOwners {
         if let Some(pad) = self.pads.get_mut(pad_index) {
             pad.gain = state.gain;
             pad.pan = state.pan;
@@ -411,9 +418,15 @@ impl Instrument for DrumRack {
             pad.fine_tune = state.fine_tune;
             pad.one_shot = state.one_shot;
             pad.choke_group = state.choke_group;
-            InstrumentMediaOwners { sample: None, name: std::mem::replace(&mut pad.sample_name, state.name) }
+            InstrumentMediaOwners {
+                sample: None,
+                name: std::mem::replace(&mut pad.sample_name, state.name),
+            }
         } else {
-            InstrumentMediaOwners { sample: None, name: state.name }
+            InstrumentMediaOwners {
+                sample: None,
+                name: state.name,
+            }
         }
     }
 }
@@ -469,14 +482,17 @@ mod tests {
     fn pad_fades_start_and_end_at_silence() {
         let mut rack = DrumRack::new(1_000.0);
         drop(rack.load_drum_pad_sample(0, make_test_audio(10, 1.0), "click.wav".into()));
-        drop(rack.set_drum_pad_state(
-            0,
-            DrumPadState {
-                fade_in_ms: 3.0,
-                fade_out_ms: 3.0,
-                ..DrumPadState::default()
-            }.into(),
-        ));
+        drop(
+            rack.set_drum_pad_state(
+                0,
+                DrumPadState {
+                    fade_in_ms: 3.0,
+                    fade_out_ms: 3.0,
+                    ..DrumPadState::default()
+                }
+                .into(),
+            ),
+        );
         rack.note_on(36, 127);
 
         let mut buffer = vec![0.0; 10];
@@ -492,15 +508,18 @@ mod tests {
     fn pad_fade_out_releases_a_gated_voice_without_a_step() {
         let mut rack = DrumRack::new(1_000.0);
         drop(rack.load_drum_pad_sample(0, make_test_audio(20, 1.0), "gate.wav".into()));
-        drop(rack.set_drum_pad_state(
-            0,
-            DrumPadState {
-                fade_in_ms: 0.0,
-                fade_out_ms: 3.0,
-                one_shot: false,
-                ..DrumPadState::default()
-            }.into(),
-        ));
+        drop(
+            rack.set_drum_pad_state(
+                0,
+                DrumPadState {
+                    fade_in_ms: 0.0,
+                    fade_out_ms: 3.0,
+                    one_shot: false,
+                    ..DrumPadState::default()
+                }
+                .into(),
+            ),
+        );
         rack.note_on(36, 127);
         let mut attack = vec![0.0; 2];
         rack.render(&mut attack, 1);
@@ -521,15 +540,18 @@ mod tests {
         drop(rack.load_drum_pad_sample(0, make_test_audio(20, 1.0), "open.wav".into()));
         drop(rack.load_drum_pad_sample(1, make_test_audio(20, 0.0), "closed.wav".into()));
         for pad_index in [0, 1] {
-            drop(rack.set_drum_pad_state(
-                pad_index,
-                DrumPadState {
-                    fade_in_ms: 0.0,
-                    fade_out_ms: 3.0,
-                    choke_group: Some(1),
-                    ..DrumPadState::default()
-                }.into(),
-            ));
+            drop(
+                rack.set_drum_pad_state(
+                    pad_index,
+                    DrumPadState {
+                        fade_in_ms: 0.0,
+                        fade_out_ms: 3.0,
+                        choke_group: Some(1),
+                        ..DrumPadState::default()
+                    }
+                    .into(),
+                ),
+            );
         }
         rack.note_on(36, 127);
         let mut attack = vec![0.0; 2];

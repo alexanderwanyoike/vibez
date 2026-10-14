@@ -555,7 +555,11 @@ fn cases() -> Vec<Case> {
             track_id: f.drums,
             pad_index: 0,
         }),
-        case!("SetDrumRackPadState", false, |f| C::set_drum_rack_pad_state(f.drums, 0, Default::default())),
+        case!(
+            "SetDrumRackPadState",
+            false,
+            |f| C::set_drum_rack_pad_state(f.drums, 0, Default::default())
+        ),
         case!("SetArrangementRecording", false, |_| {
             C::SetArrangementRecording(true)
         }),

@@ -544,7 +544,11 @@ impl App {
                         track.drum_rack_pads = expand_drum_rack_pads(pads);
                         track.selected_drum_pad = 0;
                         for (pad_index, pad) in pads.iter().cloned().enumerate() {
-                            self.send_command(EngineCommand::set_drum_rack_pad_state(track_info.id, pad_index, pad));
+                            self.send_command(EngineCommand::set_drum_rack_pad_state(
+                                track_info.id,
+                                pad_index,
+                                pad,
+                            ));
                         }
                     }
                 }
@@ -812,7 +816,11 @@ impl App {
                     slot.audio = Some(Arc::clone(&pad.audio));
                 }
             }
-            self.send_command(EngineCommand::set_drum_rack_pad_state(pad.track_id, pad.pad_index, pad.state));
+            self.send_command(EngineCommand::set_drum_rack_pad_state(
+                pad.track_id,
+                pad.pad_index,
+                pad.state,
+            ));
             self.send_command(EngineCommand::LoadDrumRackPadSample {
                 track_id: pad.track_id,
                 pad_index: pad.pad_index,

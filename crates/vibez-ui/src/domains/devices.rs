@@ -168,7 +168,9 @@ fn sync_pad(
         .and_then(|track| track.drum_rack_pads.get(pad_index))
         .map(UiDrumPad::to_state);
     if let Some(state) = state {
-        engine.send(EngineCommand::set_drum_rack_pad_state(track_id, pad_index, state));
+        engine.send(EngineCommand::set_drum_rack_pad_state(
+            track_id, pad_index, state,
+        ));
     }
 }
 
