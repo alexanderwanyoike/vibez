@@ -67,6 +67,9 @@ impl AudioEffect for BitcrushEffect {
     }
 
     fn set_param(&mut self, index: usize, value: f32) -> bool {
+        if !value.is_finite() {
+            return false;
+        }
         match index {
             0 => {
                 self.bits = value.clamp(2.0, 16.0);
