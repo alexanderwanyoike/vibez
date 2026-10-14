@@ -49,6 +49,7 @@ pub struct GateEffect {
     open: bool,
     inputs: [vibez_core::routing::ExternalInputDescriptor; 1],
     gain: f32,
+    expander_gain: f32,
     hold_counter: u32,
 }
 
@@ -65,6 +66,7 @@ impl GateEffect {
                 channels: 2,
             }],
             gain: 0.0,
+            expander_gain: 1.0,
             hold_counter: 0,
         }
     }
@@ -152,6 +154,17 @@ impl AudioEffect for GateEffect {
             };
             let g_coef = if target > self.gain { att } else { rel };
             self.gain = target + g_coef * (self.gain - target);
+            let deficit = (self.params[param::THRESHOLD] - self.env_db).max(0.0)
+                * (self.params[param::EXPANSION_RATIO] - 1.0);
+            let reduction = if self.params[param::RANGE_ENABLED] >= 0.5 {
+                deficit.min(self.params[param::RANGE])
+            } else { deficit };
+            let expansion_target = if self.open || self.hold_counter > 0 {
+                1.0
+            } else { 10.0_f32.powf(-reduction / 20.0) };
+            let coefficient = if expansion_target > self.expander_gain { att } else { rel };
+            self.expander_gain = expansion_target + coefficient * (self.expander_gain - expansion_target);
+            let gain = if self.params[param::MODE] >= 0.5 { self.expander_gain } else { self.gain };
 
             if self.open {
                 self.hold_counter = hold_frames;
@@ -160,7 +173,7 @@ impl AudioEffect for GateEffect {
             }
 
             for c in 0..ch {
-                buffer[frame * channels + c] *= self.gain;
+                buffer[frame * channels + c] *= gain;
             }
         }
     }
@@ -169,6 +182,7 @@ impl AudioEffect for GateEffect {
         self.env_db = -120.0;
         self.open = false;
         self.gain = 0.0;
+        self.expander_gain = 1.0;
         self.hold_counter = 0;
     }
 }
