@@ -77,6 +77,7 @@ pub struct DriveEffect {
     sample_rate: f32,
     modern_low: [[f64; 2]; 3],
     pre_hp: ButterworthFilter,
+    post_lp: ButterworthFilter,
     meter: WaveShaperMeter,
     meter_samples: u64,
     meter_count: u16,
@@ -99,6 +100,7 @@ impl DriveEffect {
             sample_rate,
             modern_low: [[0.0; 2]; 3],
             pre_hp: ButterworthFilter::EMPTY,
+            post_lp: ButterworthFilter::EMPTY,
             meter: WaveShaperMeter::default(),
             meter_samples: 0,
             meter_count: 0,
@@ -187,6 +189,7 @@ impl AudioEffect for DriveEffect {
             return;
         }
         self.pre_hp.configure(self.sample_rate, self.params[param::PRE_HP_FREQUENCY], true);
+        self.post_lp.configure(self.sample_rate, self.params[param::POST_LP_FREQUENCY], false);
         let ch = channels.min(2);
         let frames = buffer.len() / channels;
         let drive = self.drive_gain();
@@ -235,6 +238,8 @@ impl AudioEffect for DriveEffect {
                 } else {
                     aligned_dry * (1.0 - amount) + modern[character - 1] * amount
                 };
+                let filtered = self.post_lp.process(processed, c);
+                let processed = if self.params[param::POST_LP_ENABLED] == 0.0 { processed } else { filtered };
                 buffer[idx] = (aligned_dry * (1.0 - self.params[param::MIX]) + processed * self.params[param::MIX]) * self.params[param::OUTPUT];
                 if c == 0 {
                     let point = self.meter_samples as usize % 128;
@@ -256,6 +261,7 @@ impl AudioEffect for DriveEffect {
         self.oversampling.iter_mut().for_each(oversampling::OversamplingPath::reset);
         self.modern_low = [[0.0; 2]; 3];
         self.pre_hp.reset();
+        self.post_lp.reset();
         self.meter = WaveShaperMeter::default();
         self.meter_samples = 0;
         self.meter_count = 0;
