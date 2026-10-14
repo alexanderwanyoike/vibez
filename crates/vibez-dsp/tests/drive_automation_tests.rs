@@ -115,3 +115,29 @@ fn manual_character_changes_crossfade_only_the_requested_warm_characters() {
         }
     }
 }
+
+#[test]
+fn quality_switches_mix_only_aligned_warm_paths_and_automation_does_not_ramp() {
+    let input: Vec<_> = (0..1280).map(|frame| (0.2 * (frame as f32 * 2.47).sin()) + 0.01).collect();
+    for (from, to) in [(0, 2), (2, 1), (1, 0)] {
+        for automated in [false, true] {
+            let build = |quality| create_effect_with_params(EffectType::Drive, 48_000.0, &[1.0, 0.5, 1.0, 1.0, 3.0, quality as f32]);
+            let mut moving = build(from);
+            let mut first = build(from);
+            let mut last = build(to);
+            for effect in [&mut moving, &mut first, &mut last] { effect.process(&mut input[..640].to_vec(), 1); }
+            if automated { assert!(moving.set_automated_param(5, to as f32)); } else { assert!(moving.set_param(5, to as f32)); }
+            let mut actual = input[640..].to_vec();
+            let mut before = actual.clone();
+            let mut after = actual.clone();
+            first.process(&mut before, 1);
+            last.process(&mut after, 1);
+            for chunk in actual.chunks_mut(31) { moving.process(chunk, 1); }
+            for (frame, actual) in actual.into_iter().enumerate() {
+                let weight = if automated { f32::from(frame >= 64) } else { (frame + 1).saturating_sub(64).min(512) as f32 / 512.0 };
+                let expected = before[frame] * (1.0 - weight) + after[frame] * weight;
+                assert!((actual - expected).abs() < 3e-6, "quality {from}->{to}, automated={automated}, frame={frame}: {actual} != {expected}");
+            }
+        }
+    }
+}
