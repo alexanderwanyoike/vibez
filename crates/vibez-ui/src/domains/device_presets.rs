@@ -204,6 +204,27 @@ mod presentation_tests {
     use super::*;
     use vibez_core::id::EffectId;
 
+    #[test]
+    fn gain_factory_presets_cover_balance_and_single_channel_polarity() {
+        let presets = factory_presets(EffectType::Gain);
+        let values = |name: &str| {
+            let preset = presets
+                .iter()
+                .find(|preset| preset.name() == name)
+                .unwrap_or_else(|| panic!("missing {name}"));
+            GAIN_KEYS.map(|key| preset.parameters()[key])
+        };
+        assert_eq!(values("Balance left 3 dB"), [1.0, 0.0, -3.0, 0.0, 0.0]);
+        assert_eq!(values("Balance right 3 dB"), [1.0, -3.0, 0.0, 0.0, 0.0]);
+        assert_eq!(values("Invert left"), [1.0, 0.0, 0.0, 1.0, 0.0]);
+        assert_eq!(values("Invert right"), [1.0, 0.0, 0.0, 0.0, 1.0]);
+        assert!(values("Boost 6 dB")[0] > 1.99);
+        let mut names: Vec<_> = presets.iter().map(DevicePreset::name).collect();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(names.len(), presets.len(), "names are unique");
+    }
+
     fn gain() -> UiEffect {
         let descriptors =
             vibez_dsp::factory::create_effect(EffectType::Gain, 44_100.0).param_descriptors();
