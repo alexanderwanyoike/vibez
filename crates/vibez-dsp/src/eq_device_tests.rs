@@ -181,12 +181,12 @@ fn multichannel_frames_preserve_extra_channels_and_zero_channels_is_a_noop() {
     let mut effect = EqEffect::new(48_000.0);
     effect.set_param(0, 12.0);
     let mut samples = vec![0.2; 4 * 1000];
-    for frame in samples.chunks_exact_mut(4) {
+    for frame in samples.as_chunks_mut::<4>().0 {
         frame[2] = 0.37;
         frame[3] = -0.63;
     }
     effect.process(&mut samples, 4);
-    for frame in samples.chunks_exact(4) {
+    for frame in samples.as_chunks::<4>().0 {
         assert_eq!(frame[2..], [0.37, -0.63]);
     }
     let original = samples.clone();
