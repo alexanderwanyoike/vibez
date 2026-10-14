@@ -81,3 +81,22 @@ fn waveshaper_diagnostics_default_to_unavailable_instead_of_invented_silence() {
     assert_eq!(empty.transfer, [0.0; 65]);
     assert!(create_effect_with_params(EffectType::Gain, 48_000.0, &[]).take_waveshaper_meter().is_none());
 }
+
+#[test]
+fn each_modern_character_has_its_declared_curve_and_retains_amount_mix_output_blends() {
+    for rate in [44_100.0, 48_000.0, 96_000.0] {
+        for character in 1..=3 {
+            for (input, amount, output, mix) in [(0.02_f32, 1.0_f32, 1.0_f32, 1.0_f32), (-0.08, 0.4, 1.4, 0.37)] {
+                let gain = 1.0 + 29.0 * amount * amount;
+                let u = (gain * input).clamp(-1.0, 1.0);
+                let shaped = match character { 1 => (gain * input).tanh() / gain.tanh(), 2 => 1.5 * u - 0.5 * u.powi(3), _ => u };
+                let expected = output * ((1.0 - mix) * input + mix * ((1.0 - amount) * input + amount * shaped));
+                let mut effect = create_effect_with_params(EffectType::Drive, rate, &[amount, 0.5, output, mix, character as f32]);
+                let mut dc = [input; 512];
+                effect.process(&mut dc, 1);
+                assert!(dc[480..].iter().all(|&sample| (sample - expected).abs() < 5e-5), "rate={rate}, character={character}, actual={}, expected={expected}",dc[511]);
+                assert_eq!(effect.latency_samples(), 64);
+            }
+        }
+    }
+}
