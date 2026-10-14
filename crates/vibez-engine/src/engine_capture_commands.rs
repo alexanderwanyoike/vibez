@@ -4,22 +4,9 @@ use super::*;
 
 impl AudioEngine {
     pub(super) fn command_start_performance_capture(&mut self) {
-        if self.local_device_failure_pending() {
+        if let Some(reason) = self.observe_capture_admission().refusal_reason() {
             self.close_capture_for_device_failure();
-            self.report_compensation_failure(
-                TrackId::MASTER,
-                None,
-                "Capture requires recovery or reload of the failed device",
-            );
-            return;
-        }
-        if !self.compensation_plan.applied_plan_is_valid() {
-            self.close_capture_for_device_failure();
-            self.report_compensation_failure(
-                TrackId::MASTER,
-                None,
-                "Capture requires a valid applied audio configuration",
-            );
+            self.report_compensation_failure(TrackId::MASTER, None, reason);
             return;
         }
         if self.clip_performance {
