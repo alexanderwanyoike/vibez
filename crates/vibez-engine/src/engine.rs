@@ -842,6 +842,10 @@ mod tests;
 mod stuck_note_tests;
 
 #[cfg(test)]
+#[path = "engine_note_edit_allocation_tests.rs"]
+mod note_edit_allocation_tests;
+
+#[cfg(test)]
 #[path = "engine_mute_automation_tests.rs"]
 mod mute_automation_tests;
 #[cfg(test)]
