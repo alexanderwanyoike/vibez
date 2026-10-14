@@ -4,6 +4,9 @@ use vibez_core::effect::{EffectType, ParamDescriptor};
 
 use crate::effect::AudioEffect;
 
+#[path = "drive_oversampling.rs"]
+mod oversampling;
+
 pub mod param {
     pub const AMOUNT: usize = 0;
     pub const TONE: usize = 1;
@@ -73,6 +76,8 @@ pub struct DriveEffect {
     extra: [f32; 6],
     delay: [[f32; 2]; 64],
     delay_position: usize,
+    dry_delay: [[f32; 2]; 64],
+    oversampling: [oversampling::OversamplingPath; 3],
 }
 
 impl DriveEffect {
@@ -86,6 +91,8 @@ impl DriveEffect {
             extra: [0.0, 2.0, 0.0, 80.0, 0.0, 12000.0],
             delay: [[0.0; 2]; 64],
             delay_position: 0,
+            dry_delay: [[0.0; 2]; 64],
+            oversampling: [2, 4, 8].map(oversampling::OversamplingPath::new),
         }
     }
 
@@ -174,12 +181,7 @@ impl AudioEffect for DriveEffect {
             for c in 0..ch {
                 let idx = frame * channels + c;
                 let dry = buffer[idx];
-                let u = (dry * drive).clamp(-1.0, 1.0);
-                let sat = match self.extra[0] as usize {
-                    2 => 1.5 * u - 0.5 * u * u * u,
-                    3 => u,
-                    _ => (dry * drive).tanh() / norm,
-                };
+                let sat = (dry * drive).tanh() / norm;
                 // One-pole tilt: mixes current with previous sample.
                 // tilt > 0 emphasises difference (bright); < 0 smooths.
                 let shelved = sat + tilt * (sat - self.z[c]);
@@ -188,9 +190,24 @@ impl AudioEffect for DriveEffect {
                 // `Amount` blends between dry and saturated so amount=0 is
                 // true passthrough; `Mix` then wet/dries the result.
                 let processed = dry * (1.0 - amount) + shelved * amount;
-                let processed = (dry * (1.0 - self.mix) + processed * self.mix) * self.output;
-                buffer[idx] = self.delay[self.delay_position][c];
+                let legacy = self.delay[self.delay_position][c];
                 self.delay[self.delay_position][c] = processed;
+                let aligned_dry = self.dry_delay[self.delay_position][c];
+                self.dry_delay[self.delay_position][c] = dry;
+                let character = self.extra[0] as usize;
+                let quality = self.extra[1] as usize;
+                let mut modern = [0.0; 3];
+                for (index, path) in self.oversampling.iter_mut().enumerate() {
+                    let audible = character != 0 && index == quality;
+                    let output = path.process(dry, c, drive, audible);
+                    if audible { modern = output; }
+                }
+                let processed = if character == 0 {
+                    legacy
+                } else {
+                    aligned_dry * (1.0 - amount) + modern[character - 1] * amount
+                };
+                buffer[idx] = (aligned_dry * (1.0 - self.mix) + processed * self.mix) * self.output;
             }
             self.delay_position = (self.delay_position + 1) % 64;
         }
@@ -200,6 +217,8 @@ impl AudioEffect for DriveEffect {
         self.z = [0.0; 2];
         self.delay = [[0.0; 2]; 64];
         self.delay_position = 0;
+        self.dry_delay = [[0.0; 2]; 64];
+        self.oversampling.iter_mut().for_each(oversampling::OversamplingPath::reset);
     }
 }
 
