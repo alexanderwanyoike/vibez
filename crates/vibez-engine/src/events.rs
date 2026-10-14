@@ -853,13 +853,24 @@ mod tests {
             assert_ne!(left, EngineEvent::PlaybackStopped);
             for (right_index, &(right_audio, right_name)) in cases.iter().enumerate() {
                 let right = event(right_audio, right_name);
-                assert_eq!(left == right, left_index == right_index,
-                    "left={left_index}, right={right_index}");
+                assert_eq!(
+                    left == right,
+                    left_index == right_index,
+                    "left={left_index}, right={right_index}"
+                );
                 if left_index == right_index {
-                    if let (EngineEvent::RetiredInstrumentMedia(left), EngineEvent::RetiredInstrumentMedia(right)) = (&left, &right) {
+                    if let (
+                        EngineEvent::RetiredInstrumentMedia(left),
+                        EngineEvent::RetiredInstrumentMedia(right),
+                    ) = (&left, &right)
+                    {
                         if let (Some(left_name), Some(right_name)) = (&left.name, &right.name) {
                             if !left_name.is_empty() {
-                                assert_ne!(left_name.as_ptr(), right_name.as_ptr(), "equal names use independent storage");
+                                assert_ne!(
+                                    left_name.as_ptr(),
+                                    right_name.as_ptr(),
+                                    "equal names use independent storage"
+                                );
                             }
                         }
                     }

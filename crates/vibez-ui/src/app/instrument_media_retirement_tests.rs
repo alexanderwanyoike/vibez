@@ -366,7 +366,9 @@ fn stale_media_returns_queued_before_or_delivered_after_project_reset_are_guarde
         let old_audio = Arc::downgrade(&voice);
         let mut track = ProjectTrack::new(old_track, "Removed old sampler".into(), 0);
         track.sample_audio = Some(Arc::clone(&voice));
-        Arc::make_mut(&mut app.state.project_tracks).tracks.push(track);
+        Arc::make_mut(&mut app.state.project_tracks)
+            .tracks
+            .push(track);
         let mut old_return = Some(EngineEvent::RetiredInstrumentMedia(
             InstrumentMediaOwners::incoming(Arc::clone(&voice), "old-project-media.wav".into()),
         ));
@@ -375,23 +377,46 @@ fn stale_media_returns_queued_before_or_delivered_after_project_reset_are_guarde
         }
         app.clear_project_runtime();
         assert!(app.state.find_track(old_track).is_none());
-        assert_eq!(old_audio.strong_count(), 2, "old voice and unconsumed return remain");
+        assert_eq!(
+            old_audio.strong_count(),
+            2,
+            "old voice and unconsumed return remain"
+        );
         // A cache in the current UI can independently share media returned by the old engine.
         app.state.browser.waveform_audio = Some(Arc::clone(&voice));
         if let Some(event) = old_return {
             events.push(event).unwrap();
         }
         app.poll_engine_events();
-        assert_eq!(events.slots(), 8, "owner delivery releases ordinary event-ring capacity");
+        assert_eq!(
+            events.slots(),
+            8,
+            "owner delivery releases ordinary event-ring capacity"
+        );
         assert!(app.state.find_track(old_track).is_none());
-        assert_eq!(old_audio.strong_count(), 3, "same allocation is held by voice, cache and actual App guard");
-        assert_eq!(app.state.browser.waveform_audio.as_ref().map(Arc::as_ptr), Some(old_audio.as_ptr()));
+        assert_eq!(
+            old_audio.strong_count(),
+            3,
+            "same allocation is held by voice, cache and actual App guard"
+        );
+        assert_eq!(
+            app.state.browser.waveform_audio.as_ref().map(Arc::as_ptr),
+            Some(old_audio.as_ptr())
+        );
         drop(voice);
         app.poll_engine_events();
-        assert_eq!(old_audio.strong_count(), 2, "cache keeps the old allocation readable");
+        assert_eq!(
+            old_audio.strong_count(),
+            2,
+            "cache keeps the old allocation readable"
+        );
         app.state.browser.waveform_audio = None;
         assert_eq!(old_audio.strong_count(), 1, "only actual App guard remains");
         app.poll_engine_events();
-        assert_eq!(old_audio.strong_count(), 0, "last owner is released by UI polling");
+        assert_eq!(
+            old_audio.strong_count(),
+            0,
+            "last owner is released by UI polling"
+        );
     }
 }
