@@ -18,14 +18,13 @@ impl App {
         let descriptors: Vec<_> = (0..effect.descriptors.len())
             .map(|index| crate::domains::device_controls::presentation_descriptor(effect, index))
             .collect();
-        let sample_rate = crate::domains::EngineHandle::sample_rate(&self.cmd_tx);
+        let sample_rate = self.cmd_tx.prepared_effect_sample_rate(track_id, effect_id);
         let state = self.device_controls.entry(effect_id).or_default();
         let edit = if effect.effect_type == vibez_core::effect::EffectType::Bitcrush {
             state.update_with_parser(message, &descriptors, &effect.params, |index, text| {
                 if index == vibez_dsp::bitcrush::param::SR_REDUCE {
-                    (!effect.reconfiguration_failed)
-                        .then(|| crate::domains::bitcrush_values::parse_rate(text, sample_rate))
-                        .flatten()
+                    let rate = sample_rate.filter(|_| !effect.reconfiguration_failed)?;
+                    crate::domains::bitcrush_values::parse_rate(text, rate)
                 } else {
                     crate::domains::device_controls::parse_value(text, descriptors.get(index)?)
                 }

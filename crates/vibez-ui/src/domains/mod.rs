@@ -94,10 +94,15 @@ pub struct EngineCommandQueue {
     pending: VecDeque<EngineCommand>,
     device_owners: std::collections::HashMap<
         (vibez_core::id::TrackId, Option<vibez_core::id::EffectId>),
-        usize,
+        PreparedDeviceOwner,
     >,
     effect_chain_edited: bool,
     sample_rate: u32,
+}
+
+struct PreparedDeviceOwner {
+    identity: usize,
+    activation_sample_rate: Option<u32>,
 }
 
 impl Default for EngineCommandQueue {
@@ -132,7 +137,18 @@ impl EngineCommandQueue {
     ) -> bool {
         self.device_owners
             .get(&(device.track_id(), device.effect_id()))
-            == Some(&device.owner_identity())
+            .is_some_and(|owner| owner.identity == device.owner_identity())
+    }
+
+    pub fn prepared_effect_sample_rate(
+        &self,
+        track_id: vibez_core::id::TrackId,
+        effect_id: vibez_core::id::EffectId,
+    ) -> Option<u32> {
+        self.device_owners
+            .get(&(track_id, Some(effect_id)))?
+            .activation_sample_rate
+            .filter(|rate| *rate >= 2 && *rate == self.sample_rate)
     }
 
     fn record_device_owner(&mut self, command: &EngineCommand) {
@@ -153,15 +169,23 @@ impl EngineCommandQueue {
             } => {
                 self.device_owners.insert(
                     (*track_id, Some(*effect_id)),
-                    effect_owner_identity(&**effect),
+                    PreparedDeviceOwner {
+                        identity: effect_owner_identity(&**effect),
+                        activation_sample_rate: effect.activation_sample_rate(),
+                    },
                 );
             }
             EngineCommand::SetInstrument {
                 track_id,
                 instrument,
             } => {
-                self.device_owners
-                    .insert((*track_id, None), instrument_owner_identity(&**instrument));
+                self.device_owners.insert(
+                    (*track_id, None),
+                    PreparedDeviceOwner {
+                        identity: instrument_owner_identity(&**instrument),
+                        activation_sample_rate: instrument.activation_sample_rate(),
+                    },
+                );
             }
             _ => {}
         }
