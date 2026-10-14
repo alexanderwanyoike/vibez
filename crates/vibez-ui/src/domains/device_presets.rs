@@ -1,4 +1,4 @@
-//! Converts portable presets into validated edits of existing built-in devices.
+//! Built-in device preset selection and validated parameter changes.
 
 use vibez_core::device_preset::{DevicePreset, DevicePresetKind};
 use vibez_core::effect::EffectType;
@@ -12,6 +12,51 @@ const GAIN_KEYS: [&str; 5] = [
     "left_polarity",
     "right_polarity",
 ];
+
+pub struct PresetPresentation {
+    pub options: Vec<DevicePreset>,
+    pub selected: Option<DevicePreset>,
+    pub modified: bool,
+    pub previous: Option<DevicePreset>,
+    pub next: Option<DevicePreset>,
+}
+
+pub fn presentation(effect: &UiEffect, remembered: Option<&DevicePreset>) -> PresetPresentation {
+    let presets = factory_presets(effect.effect_type);
+    let selected = remembered.cloned().or_else(|| {
+        presets
+            .iter()
+            .find(|preset| prepare_updates(effect, preset).is_ok_and(|updates| updates.is_empty()))
+            .cloned()
+    });
+    let position = selected
+        .as_ref()
+        .and_then(|selected| presets.iter().position(|preset| preset == selected));
+    let adjacent = |forward: bool| {
+        if presets.is_empty() {
+            return None;
+        }
+        let index = match (position, forward) {
+            (Some(index), true) => (index + 1) % presets.len(),
+            (Some(index), false) => (index + presets.len() - 1) % presets.len(),
+            (None, true) => 0,
+            (None, false) => presets.len() - 1,
+        };
+        Some(presets[index].clone())
+    };
+    let previous = adjacent(false);
+    let next = adjacent(true);
+    let modified = selected.as_ref().is_some_and(|preset| {
+        prepare_updates(effect, preset).map_or(true, |updates| !updates.is_empty())
+    });
+    PresetPresentation {
+        options: presets,
+        selected,
+        modified,
+        previous,
+        next,
+    }
+}
 
 fn parameter_keys(effect: &UiEffect) -> Result<&'static [&'static str], String> {
     if effect.plugin_ref.is_some() || effect.plugin_name.is_some() {
@@ -121,4 +166,88 @@ pub fn factory_presets(effect_type: EffectType) -> Vec<DevicePreset> {
         .expect("Factory preset values are valid")
     })
     .collect()
+}
+
+#[cfg(test)]
+mod presentation_tests {
+    use super::*;
+    use vibez_core::id::EffectId;
+
+    fn gain() -> UiEffect {
+        let descriptors =
+            vibez_dsp::factory::create_effect(EffectType::Gain, 44_100.0).param_descriptors();
+        UiEffect {
+            reconfiguration_failed: false,
+            latency_samples: Some(0),
+            id: EffectId::new(),
+            effect_type: EffectType::Gain,
+            bypass: false,
+            params: descriptors
+                .iter()
+                .map(|descriptor| descriptor.default)
+                .collect(),
+            descriptors,
+            plugin_name: None,
+            has_plugin_gui: false,
+            plugin_ref: None,
+            sidechains: Vec::new(),
+            inactive_sidechains: Vec::new(),
+            external_inputs: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn matching_factory_selection_cycles_in_both_directions() {
+        let mut effect = gain();
+        let initial = presentation(&effect, None);
+        assert_eq!(initial.selected, Some(initial.options[0].clone()));
+        assert!(!initial.modified);
+        assert_eq!(initial.previous, initial.options.last().cloned());
+        assert_eq!(initial.next, Some(initial.options[1].clone()));
+
+        let last = initial.previous.unwrap();
+        for (index, value) in prepare_updates(&effect, &last).unwrap() {
+            effect.params[index] = value;
+        }
+        let inverted = presentation(&effect, None);
+        assert_eq!(inverted.selected, Some(last));
+        assert!(!inverted.modified);
+        assert_eq!(inverted.next, Some(initial.options[0].clone()));
+        assert_eq!(inverted.previous, Some(initial.options[2].clone()));
+    }
+
+    #[test]
+    fn edited_factory_and_user_presets_keep_their_selection_and_modified_state() {
+        let mut effect = gain();
+        let unity = factory_presets(EffectType::Gain)[0].clone();
+        effect.params[0] = 0.25;
+        let edited = presentation(&effect, Some(&unity));
+        assert_eq!(edited.selected, Some(unity));
+        assert!(edited.modified);
+        assert_eq!(edited.next, Some(edited.options[1].clone()));
+
+        let user = capture(&effect, "Quiet bass").unwrap();
+        let unchanged = presentation(&effect, Some(&user));
+        assert_eq!(unchanged.selected, Some(user));
+        assert!(!unchanged.modified);
+        assert_eq!(unchanged.previous, unchanged.options.last().cloned());
+        assert_eq!(unchanged.next, unchanged.options.first().cloned());
+
+        let custom = presentation(&effect, None);
+        assert!(custom.selected.is_none());
+        assert!(!custom.modified);
+        assert_eq!(custom.previous, custom.options.last().cloned());
+        assert_eq!(custom.next, custom.options.first().cloned());
+    }
+
+    #[test]
+    fn a_device_without_factory_presets_has_no_navigation() {
+        let mut effect = gain();
+        effect.effect_type = EffectType::Reverb;
+        let unsupported = presentation(&effect, None);
+        assert!(unsupported.options.is_empty());
+        assert!(unsupported.selected.is_none());
+        assert!(unsupported.previous.is_none());
+        assert!(unsupported.next.is_none());
+    }
 }

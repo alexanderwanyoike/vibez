@@ -6,7 +6,7 @@ use vibez_core::device_preset::DevicePreset;
 use vibez_core::id::TrackId;
 
 use crate::app::device_presets::DevicePresetMsg;
-use crate::domains::device_presets::{factory_presets, prepare_updates};
+use crate::domains::device_presets::presentation;
 use crate::message::Message;
 use crate::state::UiEffect;
 use crate::theme as th;
@@ -42,36 +42,15 @@ pub(crate) fn view<'a>(
     accent: Color,
     available_width: f32,
 ) -> Element<'a, Message> {
-    let presets = factory_presets(effect.effect_type);
-    let selected = remembered.cloned().or_else(|| {
-        presets
-            .iter()
-            .find(|preset| prepare_updates(effect, preset).is_ok_and(|updates| updates.is_empty()))
-            .cloned()
-    });
-    let position = selected
-        .as_ref()
-        .and_then(|selected| presets.iter().position(|preset| preset == selected));
-    let adjacent = |forward: bool| {
-        if presets.is_empty() {
-            return None;
-        }
-        let index = match (position, forward) {
-            (Some(index), true) => (index + 1) % presets.len(),
-            (Some(index), false) => (index + presets.len() - 1) % presets.len(),
-            (None, true) => 0,
-            (None, false) => presets.len() - 1,
-        };
-        Some(Message::ApplyDevicePreset(
-            track_id,
-            effect.id,
-            presets[index].clone(),
-        ))
-    };
-    let previous = adjacent(false);
-    let next = adjacent(true);
-    let choice = selected.map(|preset| PresetChoice {
-        modified: prepare_updates(effect, &preset).map_or(true, |updates| !updates.is_empty()),
+    let presentation = presentation(effect, remembered);
+    let previous = presentation
+        .previous
+        .map(|preset| Message::ApplyDevicePreset(track_id, effect.id, preset));
+    let next = presentation
+        .next
+        .map(|preset| Message::ApplyDevicePreset(track_id, effect.id, preset));
+    let choice = presentation.selected.map(|preset| PresetChoice {
+        modified: presentation.modified,
         preset,
     });
     let hint = choice.as_ref().map_or_else(
@@ -84,7 +63,8 @@ pub(crate) fn view<'a>(
             )
         },
     );
-    let options = presets
+    let options = presentation
+        .options
         .into_iter()
         .map(|preset| PresetChoice {
             preset,
