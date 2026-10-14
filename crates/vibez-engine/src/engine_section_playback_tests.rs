@@ -849,11 +849,12 @@ fn section_refresh_full_ui_ring_retains_unique_owner_and_allows_fifo_command_pro
     let prepared = section_refresh_source(fixture.track_id, fixture.section_id, incoming);
     let pointer = &*prepared as *const PreparedSectionPlaybackSource;
     fixture.commands.push(EngineCommand::RefreshSection(prepared)).unwrap();
-    fixture.commands.push(EngineCommand::SetBpm(137.0)).unwrap();
+    let swing = vibez_core::perform::SwingAmount::new(0.625);
+    fixture.commands.push(EngineCommand::SetProjectSwing(swing)).unwrap();
     let mut output = [0.0; 64];
     process_refresh_block(&mut fixture.engine, &mut output);
     assert_refresh_left_audio(&output, 0.25);
-    assert_eq!(fixture.engine.transport().bpm(), 137.0);
+    assert_eq!(fixture.engine.project_swing, swing);
     assert!(fixture.engine.cmd_rx.peek().is_err(), "a held owner return cannot retain command admission credits");
     assert_eq!(fixture.engine.active_section.unwrap().position_samples, 128);
     assert_eq!(fixture.old_owner.strong_count(), 1);
