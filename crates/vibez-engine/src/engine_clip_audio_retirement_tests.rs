@@ -231,3 +231,30 @@ fn replacement_renders_the_incoming_samples_through_the_playing_channel_strip() 
         assert!(output.iter().all(|sample| (*sample - expected).abs() < 1e-6));
     }
 }
+
+#[test]
+fn returned_audio_events_keep_the_exact_owner_and_untimed_identity_semantics() {
+    for replacement in [Replacement::Geometry, Replacement::BufferOnly] {
+        for valid_target in [false, true] {
+            let mut fixture = Fixture::new();
+            let incoming = audio(0.75);
+            let expected = if valid_target { fixture.original.as_ptr() } else { Arc::as_ptr(&incoming) };
+            let target = if valid_target { fixture.clip } else { ClipId::new() };
+            fixture.commands.push(replacement.command(fixture.track, target, incoming)).unwrap();
+            assert_eq!(
+                crate::retirement::tests::allocations(|| fixture.engine.process(&mut [0.0; 32], 2)),
+                (0, 0)
+            );
+            let owner = std::iter::from_fn(|| fixture.events.pop().ok())
+                .find_map(|event| match event {
+                    EngineEvent::RetiredAudioBuffer(owner) => Some(owner),
+                    _ => None,
+                }).expect("the replacement returns its audio owner");
+            assert_eq!(Arc::as_ptr(&owner), expected);
+            let event = EngineEvent::RetiredAudioBuffer(Arc::clone(&owner));
+            assert_eq!(event.time_domain(), crate::events::TimeDomain::Untimed);
+            assert_eq!(event, EngineEvent::RetiredAudioBuffer(owner));
+            assert_ne!(event, EngineEvent::RetiredAudioBuffer(audio(0.75)));
+        }
+    }
+}

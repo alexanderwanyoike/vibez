@@ -367,7 +367,7 @@ fn cases() -> Vec<Case> {
         ])),
         case!("AddClip", true, |f| add_clip(f.empty_audio, ClipId::new())),
         case!("RemoveClip", true, |f| C::RemoveClip(f.audio, f.clip)),
-        case!("ReplaceClipAudio", true, |f| C::ReplaceClipAudio {
+        case!("ReplaceClipAudio", false, |f| C::ReplaceClipAudio {
             track_id: f.audio,
             clip_id: f.clip,
             audio: audio(2048),
@@ -377,7 +377,7 @@ fn cases() -> Vec<Case> {
             loop_start: 0,
             loop_end: 0,
         }),
-        case!("ReplaceClipBuffer", true, |f| C::ReplaceClipBuffer {
+        case!("ReplaceClipBuffer", false, |f| C::ReplaceClipBuffer {
             track_id: f.audio,
             clip_id: f.clip,
             audio: audio(4096),

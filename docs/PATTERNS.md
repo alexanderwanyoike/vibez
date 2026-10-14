@@ -83,8 +83,11 @@ ownership returns, and drops other pending heard feedback.
 
 Removed devices stop processing on the audio thread before their unique owner
 is sent to the UI for destruction. Channel owners use preallocated pool slots
-with an Acquire/Release handoff. Device disposal uses 32 preallocated pending
-retirement slots. State events and source owners use a separate 2048-entry
+with an Acquire/Release handoff. Clip audio replacement also returns its displaced
+sample owner to the UI; rejected replacements return their incoming owner.
+Each replacement reserves one retirement slot before the command is consumed.
+Device disposal uses 32 preallocated pending retirement slots.
+State events and source owners use a separate 2048-entry
 presentation queue, ordered by physical due time and insertion order. Command
 admission reserves its bounded body before taking ownership; track-sized cleanup
 retains unprocessed queued owners and mute intents in place and pauses later
