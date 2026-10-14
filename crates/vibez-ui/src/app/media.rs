@@ -1,4 +1,4 @@
-//! Split out of app.rs; inherent methods on [`super::App`].
+//! Media import and native instrument sample synchronization.
 
 use std::sync::Arc;
 
