@@ -192,6 +192,7 @@ pub struct EqEffect {
     audition_steps: [f32; 5],
     audition_remaining: u32,
     sample_rate: f32,
+    output_gain: f32,
     bells: [Biquad; 4],
     shelves: [Biquad; 2],
     audition_bells: [Biquad; 4],
@@ -217,6 +218,7 @@ impl EqEffect {
             } else {
                 48_000.0
             },
+            output_gain: 1.0,
             bells: [Biquad::IDENTITY; 4],
             shelves: [Biquad::IDENTITY; 2],
             audition_bells: [Biquad::IDENTITY; 4],
@@ -280,6 +282,9 @@ impl EqEffect {
             self.steps[index] = (target - self.applied[index]) / RAMP_FRAMES as f32;
             self.remaining[index] = if snap { 0 } else { RAMP_FRAMES };
         }
+        if snap && index == param::OUTPUT {
+            self.output_gain = vibez_core::level::db_to_amplitude(self.applied[param::OUTPUT]);
+        }
         self.recompute();
         true
     }
@@ -317,6 +322,7 @@ impl EqEffect {
     }
 
     fn advance(&mut self) {
+        let output_ramping = self.remaining[param::OUTPUT] > 0;
         let mut coefficients_changed = false;
         let mut coefficient_ramp_ended = false;
         for index in 0..param::COUNT {
@@ -336,6 +342,9 @@ impl EqEffect {
                 coefficients_changed = true;
                 coefficient_ramp_ended |= self.remaining[index] == 0;
             }
+        }
+        if output_ramping {
+            self.output_gain = vibez_core::level::db_to_amplitude(self.applied[param::OUTPUT]);
         }
         if self.audition_remaining > 0 {
             self.audition_remaining -= 1;
@@ -437,7 +446,7 @@ impl EqEffect {
             };
             output += wet * self.audition[band + 1];
         }
-        output * vibez_core::level::db_to_amplitude(self.applied[param::OUTPUT])
+        output * self.output_gain
     }
 }
 
@@ -489,6 +498,7 @@ impl AudioEffect for EqEffect {
             filter.reset();
         }
         self.applied = std::array::from_fn(|index| self.applied_target(index));
+        self.output_gain = vibez_core::level::db_to_amplitude(self.applied[param::OUTPUT]);
         self.remaining = [0; param::COUNT];
         self.audition = std::array::from_fn(|choice| {
             if choice == self.params[param::AUDITION] as usize {
