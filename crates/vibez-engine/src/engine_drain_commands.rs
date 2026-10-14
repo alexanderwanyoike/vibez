@@ -231,13 +231,16 @@ impl AudioEngine {
                 EngineCommand::StopSectionRecord => self.stop_section_record(),
                 EngineCommand::LoadAudio(audio) => {
                     let len = audio.num_frames() as u64;
-                    self.audio = Some(audio);
+                    let retired = self.audio.replace(audio);
                     self.arrangement_audio_length = Some(len);
                     if !self.clip_performance
                         && self.active_section.is_none()
                         && !self.arrangement_recording
                     {
                         self.transport.set_audio_length(Some(len));
+                    }
+                    if let Some(retired) = retired {
+                        self.retire_event(EngineEvent::RetiredAudioBuffer(retired));
                     }
                 }
                 EngineCommand::UnloadAudio => {
