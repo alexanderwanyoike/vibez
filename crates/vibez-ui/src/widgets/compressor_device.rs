@@ -51,7 +51,7 @@ pub fn arrange(size: Size, advanced: bool) -> Arrangement {
     let (controls, knobs) = if size.height >= 280.0 {
         (84.0, Some(34.0))
     } else if size.height >= 160.0 {
-        (56.0, Some(20.0))
+        (57.0, Some(20.0))
     } else {
         (36.0, None)
     };
