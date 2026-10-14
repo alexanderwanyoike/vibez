@@ -45,17 +45,18 @@ struct Lane {
 }
 
 impl Lane {
-    fn step(&mut self, frame: usize) -> ([f32; 2], bool) {
+    fn step_driven(&mut self, frame: usize, drive_db: f32) -> ([f32; 2], bool) {
         let acquired = self.counter == 0;
         if acquired {
             let quantum = 2.0_f32 / (1_u32 << self.tuple.bits) as f32;
             for channel in 0..2 {
                 let input = input(frame)[channel];
-                let scaled = if self.tuple.dither {
-                    f64::from(input) / f64::from(quantum) + noise(frame, channel)
-                } else {
+                let scaled = if drive_db == 0.0 && !self.tuple.dither {
                     f64::from(input / quantum)
+                } else {
+                    f64::from(input) * 10.0_f64.powf(f64::from(drive_db) / 20.0) / f64::from(quantum)
                 };
+                let scaled = scaled + if self.tuple.dither { noise(frame, channel) } else { 0.0 };
                 let code = match self.tuple.rounding {
                     1 => scaled.floor(),
                     2 => scaled.trunc(),
@@ -98,19 +99,32 @@ impl Reference {
     }
 
     fn step(&mut self, frame: usize) -> Frame {
+        self.step_driven(frame, 0.0)
+    }
+
+    fn clear_histories(&mut self) {
+        self.incumbent.counter = 0;
+        self.incumbent.held = [0.0; 2];
+        if let Some(incoming) = &mut self.incoming {
+            incoming.counter = 0;
+            incoming.held = [0.0; 2];
+        }
+    }
+
+    fn step_driven(&mut self, frame: usize, drive_db: f32) -> Frame {
         if self.incoming.is_none() && self.latest != self.incumbent.tuple {
             let mut incoming = self.incumbent;
             incoming.tuple = self.latest;
             self.incoming = Some(incoming);
             self.progress = 0;
         }
-        let (outgoing, primary) = self.incumbent.step(frame);
+        let (outgoing, primary) = self.incumbent.step_driven(frame, drive_db);
         let Some(incoming) = &mut self.incoming else {
             return Frame { output: outgoing, primary, secondary: false, transition: false,
                 end_primary_interval: self.incumbent.tuple.divider,
                 end_secondary_interval: 0, end_transition: false };
         };
-        let (incoming_output, secondary) = incoming.step(frame);
+        let (incoming_output, secondary) = incoming.step_driven(frame, drive_db);
         self.progress += 1;
         let weight = self.progress as f32 / 512.0;
         let output = std::array::from_fn(|channel| outgoing[channel] * (1.0 - weight)
@@ -273,4 +287,144 @@ fn effective_fractional_noops_preserve_raw_targets_and_clock_history() {
         automated(32, 1, 4.49), manual(64, 4, 0.0), manual(64, 5, 0.0)];
     let expected = check([10.49, 4.49, 0.0, 0.0], 200, &edits);
     assert!(expected.iter().all(|frame| !frame.transition));
+}
+
+#[derive(Default)]
+struct FormatFilter {
+    history: [[f64; 4]; 2],
+}
+
+impl FormatFilter {
+    fn process(&mut self, input: f32, channel: usize, cutoff: f32) -> f32 {
+        let k = (std::f64::consts::PI * f64::from(cutoff) / 48_000.0).tan();
+        let divisor = 1.0 + std::f64::consts::SQRT_2 * k + k * k;
+        let b = [k * k, 2.0 * k * k, k * k].map(|value| value / divisor);
+        let a = [2.0 * (k * k - 1.0) / divisor,
+            (1.0 - std::f64::consts::SQRT_2 * k + k * k) / divisor];
+        let [x1, x2, y1, y2] = self.history[channel];
+        let output = b[0] * f64::from(input) + b[1] * x1 + b[2] * x2 - a[0] * y1 - a[1] * y2;
+        self.history[channel] = [f64::from(input), x1, output, y1];
+        output as f32
+    }
+}
+
+fn format_at(frame: usize) -> usize {
+    match frame {
+        0..32 => 2,
+        32..64 => 1,
+        64..96 => 3,
+        96..128 => 8,
+        128..176 => 2,
+        176..192 => 1,
+        192..600 => 2,
+        600..700 => 1,
+        700..1020 => 8,
+        1020..1030 => 1,
+        _ => 3,
+    }
+}
+
+#[test]
+fn processed_format_changes_clear_histories_without_restarting_fades_ramps_or_random_time() {
+    let initial = Tuple::from_raw([12.0, 7.0, 0.0, 1.0]);
+    let changes = [manual(16, 0, 4.0), manual(16, 1, 5.0), manual(16, 4, 1.0),
+        manual(48, 0, 8.0), manual(48, 1, 3.0), manual(48, 4, 2.0), manual(48, 5, 0.0),
+        automated(320, 0, 6.0)];
+    let mut reference = Reference { incumbent: Lane { tuple: initial, counter: 0, held: [0.0; 2] },
+        incoming: None, latest: initial, progress: 0 };
+    let mut filter = FormatFilter::default();
+    let mut effect = create_effect_for_instance(
+        EffectType::Bitcrush, 48_000.0,
+        &[12.0, 7.0, 1.0, 0.0, 0.0, 1.0, 0.0, 1.0, 2_000.0],
+        serde_json::from_str::<EffectId>("17").unwrap(),
+    );
+    let mut previous = 0;
+    for frame in 0..1100 {
+        let channels = format_at(frame);
+        let processed = channels.min(2);
+        if previous != 0 && previous != processed {
+            reference.clear_histories();
+            filter = FormatFilter::default();
+        }
+        previous = processed;
+        for edit in changes.iter().filter(|edit| edit.frame == frame) {
+            reference.edit(edit);
+            assert!(if edit.automated { effect.set_automated_param(edit.index, edit.value) }
+                else { effect.set_param(edit.index, edit.value) });
+        }
+        if frame == 20 {
+            for (index, value) in [(3, 6.0), (2, 0.5), (8, 1_000.0), (7, 0.0)] {
+                assert!(effect.set_param(index, value));
+            }
+        }
+        if [40, 80, 180, 710, 1025].contains(&frame) {
+            let phantom_channels = if processed == 1 { 8 } else { 1 };
+            effect.process(&mut [], phantom_channels);
+            if processed == 1 {
+                let mut partial = [0.731];
+                effect.process(&mut partial, 8);
+                assert_eq!(partial, [0.731]);
+            }
+            let mut zero_channels = [0.123, -0.456, 0.789];
+            effect.process(&mut zero_channels, 0);
+            assert_eq!(zero_channels, [0.123, -0.456, 0.789]);
+        }
+        let progress = if frame < 20 { 0.0 } else { (frame - 19).min(512) as f32 / 512.0 };
+        let drive = 6.0 * progress;
+        let mix = 1.0 - 0.5 * progress;
+        let cutoff = 2_000.0 - 1_000.0 * progress;
+        let enabled = 1.0 - progress;
+        let expected = reference.step_driven(frame, drive);
+        let mut actual = vec![0.731; channels + usize::from(channels > 1)];
+        for (channel, sample) in actual.iter_mut().enumerate().take(processed) {
+            *sample = input(frame)[channel];
+        }
+        let original = actual.clone();
+        effect.process(&mut actual, channels);
+        for channel in 0..processed {
+            let filtered = filter.process(expected.output[channel], channel, cutoff);
+            let wet = expected.output[channel] * (1.0 - enabled) + filtered * enabled;
+            let output = input(frame)[channel] * (1.0 - mix) + wet * mix;
+            assert!((actual[channel] - output).abs() < 3e-6,
+                "format frame={frame}, stride={channels}, channel={channel}, actual={}, expected={output}", actual[channel]);
+        }
+        assert_eq!(&actual[processed..], &original[processed..], "extra/trailing samples frame{frame}");
+        let meter = effect.take_sample_hold_meter().unwrap();
+        assert_eq!(meter.count, 1);
+        assert_eq!(meter.first_source_frame, frame as u64);
+        assert_eq!(meter.input[0], input(frame)[0]);
+        assert_eq!(meter.output[0], actual[0]);
+        assert_eq!(meter.primary_acquisitions, [u64::from(expected.primary), 0], "primary frame{frame}");
+        assert_eq!(meter.secondary_acquisitions, [u64::from(expected.secondary), 0], "secondary frame{frame}");
+        assert_eq!(meter.blending, [u64::from(expected.transition), 0], "transition frame{frame}");
+        assert_eq!(meter.primary_interval_frames, expected.end_primary_interval, "primary interval frame{frame}");
+        assert_eq!(meter.secondary_interval_frames, expected.end_secondary_interval, "secondary interval frame{frame}");
+        assert_eq!(meter.transition_active, expected.end_transition, "end transition frame{frame}");
+    }
+    assert!(effect.set_automated_param(5, 1.0));
+    effect.reset();
+    assert_eq!(effect.take_sample_hold_meter().unwrap().count, 0);
+    let final_tuple = Tuple::from_raw([6.0, 3.0, 2.0, 1.0]);
+    let mut reference = Reference { incumbent: Lane { tuple: final_tuple, counter: 0, held: [0.0; 2] },
+        incoming: None, latest: final_tuple, progress: 0 };
+    let mut reset_filter = FormatFilter::default();
+    for frame in 0..64 {
+        if frame == 32 {
+            assert!(effect.set_automated_param(7, 1.0));
+        }
+        let expected = reference.step_driven(frame, 6.0);
+        let mut actual = input(frame);
+        effect.process(&mut actual, 2);
+        for channel in 0..2 {
+            let filtered = reset_filter.process(expected.output[channel], channel, 1_000.0);
+            let wet = if frame < 32 { expected.output[channel] } else { filtered };
+            let output = input(frame)[channel] * 0.5 + wet * 0.5;
+            assert!((actual[channel] - output).abs() < 3e-6, "explicit reset frame{frame}");
+        }
+        let meter = effect.take_sample_hold_meter().unwrap();
+        assert_eq!(meter.first_source_frame, frame as u64);
+        assert_eq!(meter.primary_acquisitions, [u64::from(expected.primary), 0]);
+        assert_eq!(meter.blending, [0; 2]);
+        assert!(!meter.transition_active);
+    }
 }
