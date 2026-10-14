@@ -31,7 +31,7 @@ pub fn divider() -> Element<'static, Message> {
 pub fn section_label<'a>(label: impl ToString) -> Element<'a, Message> {
     text(label.to_string().to_uppercase())
         .size(8)
-        .color(th::text_muted())
+        .color(th::text_dim())
         .into()
 }
 
