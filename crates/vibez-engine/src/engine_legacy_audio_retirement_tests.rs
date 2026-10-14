@@ -1017,3 +1017,58 @@ fn legacy_audio_owners_are_released_when_engine_and_undrained_queues_teardown_in
         assert!(owners.iter().all(|owner| owner.strong_count() == 0));
     }
 }
+
+#[test]
+fn legacy_load_and_unload_preserve_loop_region_and_existing_short_buffer_playback() {
+    let (mut engine, mut commands, mut events) = AudioEngine::new();
+    let old = stereo_ramp(32, 0.125, -0.25, 1000);
+    let old_owner = Arc::downgrade(&old);
+    commands.push(EngineCommand::SetSampleRate(1000)).unwrap();
+    commands.push(EngineCommand::LoadAudio(old)).unwrap();
+    commands.push(EngineCommand::SetArrangementLoopRegion { start: 2, end: 8 }).unwrap();
+    commands.push(EngineCommand::SetArrangementLoop(true)).unwrap();
+    commands.push(EngineCommand::Seek(6)).unwrap();
+    commands.push(EngineCommand::Play).unwrap();
+    let mut output = [0.0; 8];
+    engine.process_block(AudioProcessBlock::new(&mut output, 2));
+    assert_ramp_block(&output, 6, 0.125, -0.25);
+    assert_eq!(engine.transport().position(), 4);
+    while events.pop().is_ok() {}
+    assert_eq!(old_owner.strong_count(), 1);
+
+    let incoming = stereo_ramp(3, 0.5, -0.75, 2000);
+    let incoming_owner = Arc::downgrade(&incoming);
+    commands.push(EngineCommand::LoadAudio(incoming)).unwrap();
+    assert_eq!(crate::retirement::tests::allocations(|| engine.process_block(AudioProcessBlock::new(&mut output, 2))), (0, 0));
+    assert_eq!(output, [0.0; 8], "legacy reads beyond its shorter media remain silent");
+    assert_eq!(engine.audio().map(Arc::as_ptr), Some(incoming_owner.as_ptr()));
+    assert_eq!(engine.transport().audio_length(), Some(3));
+    assert_eq!(engine.transport().position(), 2);
+    assert!(engine.transport().is_playing(), "loop wrapping retains priority over content-end auto-stop");
+    assert_eq!(engine.transport().active_loop_region(), Some((2, 8)));
+    assert_eq!(engine.sample_rate(), 1000);
+    let retired = returned_legacy_audio(&mut events);
+    assert_eq!(retired.len(), 1);
+    assert_eq!(Arc::as_ptr(&retired[0]), old_owner.as_ptr());
+    drop(retired);
+    assert_eq!(old_owner.strong_count(), 0);
+
+    assert_eq!(crate::retirement::tests::allocations(|| engine.process_block(AudioProcessBlock::new(&mut output, 2))), (0, 0));
+    assert_eq!(&output[..2], &[0.5 + 2.0 / 1024.0, -0.75 + 2.0 / 2048.0]);
+    assert_eq!(&output[2..], &[0.0; 6]);
+    assert_eq!(engine.transport().position(), 6);
+    assert!(engine.transport().is_playing());
+    assert!(returned_legacy_audio(&mut events).is_empty());
+    commands.push(EngineCommand::UnloadAudio).unwrap();
+    assert_eq!(crate::retirement::tests::allocations(|| engine.process_block(AudioProcessBlock::new(&mut output, 2))), (0, 0));
+    assert_eq!(output, [0.0; 8]);
+    assert_eq!(engine.transport().position(), 6);
+    assert_eq!(engine.transport().audio_length(), None);
+    assert!(!engine.transport().is_playing());
+    assert_eq!(engine.transport().active_loop_region(), Some((2, 8)));
+    let retired = returned_legacy_audio(&mut events);
+    assert_eq!(retired.len(), 1);
+    assert_eq!(Arc::as_ptr(&retired[0]), incoming_owner.as_ptr());
+    drop(retired);
+    assert_eq!(incoming_owner.strong_count(), 0);
+}
