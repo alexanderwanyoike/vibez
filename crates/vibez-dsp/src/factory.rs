@@ -1,4 +1,5 @@
 use vibez_core::effect::EffectType;
+use vibez_core::id::EffectId;
 
 use crate::auto_pan::AutoPanEffect;
 use crate::bitcrush::BitcrushEffect;
@@ -41,6 +42,23 @@ pub fn create_effect_with_params(
         fx.set_param(i, val);
     }
     fx
+}
+
+/// Uses persisted identity for native effects with independent random streams.
+pub fn create_effect_for_instance(
+    effect_type: EffectType,
+    sample_rate: f32,
+    params: &[f32],
+    effect_id: EffectId,
+) -> Box<dyn AudioEffect> {
+    if effect_type != EffectType::Bitcrush {
+        return create_effect_with_params(effect_type, sample_rate, params);
+    }
+    let mut effect = BitcrushEffect::for_instance(sample_rate, effect_id);
+    for (index, &value) in params.iter().enumerate() {
+        effect.set_param(index, value);
+    }
+    Box::new(effect)
 }
 
 #[cfg(test)]

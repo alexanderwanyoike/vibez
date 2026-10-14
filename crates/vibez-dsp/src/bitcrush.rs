@@ -1,6 +1,7 @@
 //! Bitcrush quantization and source-frame sample-and-hold processing.
 
 use vibez_core::effect::{EffectType, ParamDescriptor};
+use vibez_core::id::EffectId;
 
 use crate::effect::AudioEffect;
 
@@ -117,6 +118,14 @@ impl BitcrushEffect {
 
     /// Standalone processors share the deterministic identity-zero dither stream.
     pub fn with_sample_rate(sample_rate: f32) -> Self {
+        Self::with_identity(sample_rate, 0)
+    }
+
+    pub(crate) fn for_instance(sample_rate: f32, effect_id: EffectId) -> Self {
+        Self::with_identity(sample_rate, effect_id.raw())
+    }
+
+    fn with_identity(sample_rate: f32, identity: u64) -> Self {
         let sample_rate = if sample_rate.is_finite() && sample_rate >= 2.0 {
             sample_rate
         } else {
@@ -130,7 +139,7 @@ impl BitcrushEffect {
             drive_gain: 1.0,
             started: false,
             scope: Scope::default(),
-            random: Random::new(),
+            random: Random::for_identity(identity),
             source_frames: 0,
             hold: [0.0; 2],
             counter: [0; 2],

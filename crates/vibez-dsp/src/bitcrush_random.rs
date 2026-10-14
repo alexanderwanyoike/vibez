@@ -27,8 +27,8 @@ pub(super) struct Random {
 }
 
 impl Random {
-    pub(super) fn new() -> Self {
-        let base = scramble(IDENTITY_DOMAIN);
+    pub(super) fn for_identity(identity: u64) -> Self {
+        let base = scramble(identity ^ IDENTITY_DOMAIN);
         Self {
             streams: std::array::from_fn(|tag| {
                 scramble(base.wrapping_add(GAMMA.wrapping_mul(tag as u64 + 1)))
