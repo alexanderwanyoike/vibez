@@ -1,3 +1,5 @@
+//! Compensation recovery failures preserve transport stop and Capture event ordering.
+
 use super::*;
 use crate::playback_source::{PreparedPlaybackSource, PreparedSectionPlaybackSource};
 use crate::test_support::DelayProbe;
