@@ -136,3 +136,6 @@ fn bitcrush_fresh_insert_selects_crunchy_twelve_without_rewriting_legacy_default
     );
     assert!(!presets.modified);
 }
+
+#[path = "bitcrush_acceptance_flow_tests.rs"]
+mod acceptance;
