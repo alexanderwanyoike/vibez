@@ -239,28 +239,55 @@ fn actual_pad_sync_prepares_all_source_names_and_preserves_canonical_media_and_s
     use vibez_engine::commands::EngineCommand;
 
     let sources = [
-        (Some(MediaSourceRef::LocalFile { path: "/samples/kick.wav".into() }), Some("kick.wav")),
-        (Some(MediaSourceRef::StagedProjectMedia {
-            id: "staged-id".into(), file_name: "snare.wav".into(),
-            staging_path: "/staging/snare.wav".into(), source_path: "/source/snare-original.wav".into(),
-        }), Some("snare.wav")),
-        (Some(MediaSourceRef::StagedRemoteProjectMedia {
-            id: "remote-staged-id".into(), file_name: "remote.wav".into(),
-            staging_path: "/staging/remote.wav".into(),
-            provenance: Box::new(MediaProvenance::Remote {
-                provider: "dropbox".into(), connection_id: "connection-id".into(),
-                connection_name: Some("Studio".into()), source_id: "remote-source-id".into(),
-                source_path: "/remote/original.wav".into(), revision: Some("revision-123".into()),
+        (
+            Some(MediaSourceRef::LocalFile {
+                path: "/samples/kick.wav".into(),
             }),
-        }), Some("remote.wav")),
-        (Some(MediaSourceRef::ProjectMedia {
-            id: "embedded-id".into(), file_name: "embedded.wav".into(),
-            provenance: Some(Box::new(MediaProvenance::Local { source_path: "/old/original.wav".into() })),
-        }), Some("embedded.wav")),
-        (Some(MediaSourceRef::DropboxFile {
-            path_lower: "/drums/hat.wav".into(), display_path: "/Drums/Hat.wav".into(),
-            rev: Some("dropbox-revision".into()),
-        }), Some("Hat.wav")),
+            Some("kick.wav"),
+        ),
+        (
+            Some(MediaSourceRef::StagedProjectMedia {
+                id: "staged-id".into(),
+                file_name: "snare.wav".into(),
+                staging_path: "/staging/snare.wav".into(),
+                source_path: "/source/snare-original.wav".into(),
+            }),
+            Some("snare.wav"),
+        ),
+        (
+            Some(MediaSourceRef::StagedRemoteProjectMedia {
+                id: "remote-staged-id".into(),
+                file_name: "remote.wav".into(),
+                staging_path: "/staging/remote.wav".into(),
+                provenance: Box::new(MediaProvenance::Remote {
+                    provider: "dropbox".into(),
+                    connection_id: "connection-id".into(),
+                    connection_name: Some("Studio".into()),
+                    source_id: "remote-source-id".into(),
+                    source_path: "/remote/original.wav".into(),
+                    revision: Some("revision-123".into()),
+                }),
+            }),
+            Some("remote.wav"),
+        ),
+        (
+            Some(MediaSourceRef::ProjectMedia {
+                id: "embedded-id".into(),
+                file_name: "embedded.wav".into(),
+                provenance: Some(Box::new(MediaProvenance::Local {
+                    source_path: "/old/original.wav".into(),
+                })),
+            }),
+            Some("embedded.wav"),
+        ),
+        (
+            Some(MediaSourceRef::DropboxFile {
+                path_lower: "/drums/hat.wav".into(),
+                display_path: "/Drums/Hat.wav".into(),
+                rev: Some("dropbox-revision".into()),
+            }),
+            Some("Hat.wav"),
+        ),
         (None, None),
     ];
     for (source, fallback) in sources {
@@ -272,18 +299,34 @@ fn actual_pad_sync_prepares_all_source_names_and_preserves_canonical_media_and_s
             let canonical_audio = sample();
             let audio_pointer = Arc::as_ptr(&canonical_audio);
             let pad = UiDrumPad {
-                name: explicit.map(str::to_owned), source: source.clone(), audio: Some(canonical_audio),
-                gain: 0.37, pan: -0.23, start: 0.12, end: 0.83,
-                fade_in_ms: -2.0, fade_out_ms: 300.0, coarse_tune: -7, fine_tune: 31.25,
-                one_shot: false, choke_group: Some(11),
+                name: explicit.map(str::to_owned),
+                source: source.clone(),
+                audio: Some(canonical_audio),
+                gain: 0.37,
+                pan: -0.23,
+                start: 0.12,
+                end: 0.83,
+                fade_in_ms: -2.0,
+                fade_out_ms: 300.0,
+                coarse_tune: -7,
+                fine_tune: 31.25,
+                one_shot: false,
+                choke_group: Some(11),
             };
             let canonical = pad.to_state();
             let serialized = serde_json::to_value(&canonical).unwrap();
             let mut track = ProjectTrack::new(track_id, "Canonical drum rack".into(), 0);
             track.drum_rack_pads = vec![pad];
-            Arc::make_mut(&mut app.state.project_tracks).tracks.push(track);
+            Arc::make_mut(&mut app.state.project_tracks)
+                .tracks
+                .push(track);
             app.sync_drum_rack_pad_state(track_id, 0);
-            let EngineCommand::SetDrumRackPadState { track_id: actual_track, pad_index, state } = received.pop().unwrap() else {
+            let EngineCommand::SetDrumRackPadState {
+                track_id: actual_track,
+                pad_index,
+                state,
+            } = received.pop().unwrap()
+            else {
                 panic!("actual App sync must send the prepared state command");
             };
             assert_eq!(actual_track, track_id);
