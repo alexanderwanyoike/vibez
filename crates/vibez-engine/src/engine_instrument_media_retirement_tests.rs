@@ -91,3 +91,57 @@ fn unsupported_and_missing_sampler_targets_return_exact_incoming_owners() {
         }
     }
 }
+
+#[test]
+fn drum_sample_replacement_returns_old_owners_and_keeps_sounding_pad_voices() {
+    for full_ring in [false, true] {
+        let (mut engine, mut commands, mut events) = AudioEngine::new();
+        let track = TrackId::new();
+        let original = audio(0.5);
+        let owner = Arc::downgrade(&original);
+        commands.push(EngineCommand::SetSampleRate(1000)).unwrap();
+        commands.push(EngineCommand::add_track(track)).unwrap();
+        commands.push(EngineCommand::set_built_in_instrument(track, InstrumentKind::DrumRack, 1000)).unwrap();
+        for pad in [0, 1] {
+            commands.push(EngineCommand::SetDrumRackPadState { track_id: track, pad_index: pad,
+                state: vibez_core::track::DrumPadState { fade_in_ms: 0.0, fade_out_ms: 0.0, ..Default::default() } }).unwrap();
+        }
+        commands.push(EngineCommand::LoadDrumRackPadSample { track_id: track, pad_index: 0,
+            sample: original, sample_name: "sounding-original-pad.wav".into() }).unwrap();
+        commands.push(EngineCommand::LoadDrumRackPadSample { track_id: track, pad_index: 1,
+            sample: audio(0.125), sample_name: "unrelated-pad.wav".into() }).unwrap();
+        for pitch in [36, 37] {
+            commands.push(EngineCommand::ExternalNoteOn { track_id: track, pitch, velocity: 127 }).unwrap();
+        }
+        let mut output = [0.0; 16];
+        engine.process(&mut output, 1);
+        assert_eq!(output, [0.625; 16]);
+        while events.pop().is_ok() {}
+        if full_ring {
+            while engine.event_tx.push(EngineEvent::PlaybackStarted).is_ok() {}
+        }
+        commands.push(EngineCommand::LoadDrumRackPadSample { track_id: track, pad_index: 0,
+            sample: audio(0.25), sample_name: "replacement-pad.wav".into() }).unwrap();
+        let measured = crate::retirement::tests::allocations(|| engine.process(&mut output, 1));
+        assert_eq!(output, [0.625; 16]);
+        assert_eq!(measured, (0, 0), "full_ring={full_ring}");
+        assert_eq!(owner.strong_count(), 2);
+        let mut returned = None;
+        for _ in 0..2 {
+            while let Ok(event) = events.pop() {
+                if let EngineEvent::RetiredInstrumentMedia(owners) = event {
+                    assert!(returned.is_none());
+                    assert_eq!(owners.sample.as_ref().map(Arc::as_ptr), Some(owner.as_ptr()));
+                    assert_eq!(owners.name.as_deref(), Some("sounding-original-pad.wav"));
+                    returned = Some(owners);
+                }
+            }
+            engine.process(&mut [], 1);
+        }
+        drop(returned.expect("displaced pad owners returned"));
+        assert_eq!(owner.strong_count(), 1);
+        commands.push(EngineCommand::ExternalNoteOn { track_id: track, pitch: 36, velocity: 127 }).unwrap();
+        engine.process(&mut output, 1);
+        assert_eq!(output, [0.875; 16]);
+    }
+}
