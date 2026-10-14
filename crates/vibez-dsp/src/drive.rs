@@ -77,6 +77,7 @@ pub struct DriveEffect {
     delay: [[f32; 2]; 64],
     delay_position: usize,
     dry_delay: [[f32; 2]; 64],
+    mix_output_delay: [[f32; 2]; 64],
     oversampling: [oversampling::OversamplingPath; 3],
     sample_rate: f32,
     modern_low: [f64; 2],
@@ -104,6 +105,7 @@ impl DriveEffect {
             delay: [[0.0; 2]; 64],
             delay_position: 0,
             dry_delay: [[0.0; 2]; 64],
+            mix_output_delay: [[1.0; 2]; 64],
             oversampling: [2, 4, 8].map(oversampling::OversamplingPath::new),
             sample_rate,
             modern_low: [0.0; 2],
@@ -249,6 +251,9 @@ impl AudioEffect for DriveEffect {
             filter_frequencies = frequencies;
             let amount = self.applied[param::AMOUNT];
             let tilt = self.applied[param::TONE] * 2.0 - 1.0;
+            // Effect automation is scheduled at the input clock, including final-stage controls.
+            let [mix, output] = self.mix_output_delay[self.delay_position];
+            self.mix_output_delay[self.delay_position] = [self.applied[param::MIX], self.applied[param::OUTPUT]];
             for c in 0..ch {
                 let idx = frame * channels + c;
                 let dry = buffer[idx];
@@ -285,7 +290,7 @@ impl AudioEffect for DriveEffect {
                 };
                 let filtered = self.post_lp.process(processed, c);
                 let processed = if self.applied[param::POST_LP_ENABLED] == 0.0 { processed } else { filtered };
-                buffer[idx] = (aligned_dry * (1.0 - self.applied[param::MIX]) + processed * self.applied[param::MIX]) * self.applied[param::OUTPUT];
+                buffer[idx] = (aligned_dry * (1.0 - mix) + processed * mix) * output;
                 if c == 0 {
                     let point = self.meter_samples as usize % 128;
                     self.meter.input[point] = aligned_dry;
@@ -306,6 +311,7 @@ impl AudioEffect for DriveEffect {
         self.delay = [[0.0; 2]; 64];
         self.delay_position = 0;
         self.dry_delay = [[0.0; 2]; 64];
+        self.mix_output_delay = [[self.params[param::MIX], self.params[param::OUTPUT]]; 64];
         self.oversampling.iter_mut().for_each(oversampling::OversamplingPath::reset);
         self.modern_low = [0.0; 2];
         self.pre_hp.reset();
