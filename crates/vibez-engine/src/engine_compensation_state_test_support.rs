@@ -169,7 +169,14 @@ impl Fixture {
         crate::routing::PreparedRouting::prepare_compensated(
             &[
                 affected,
-                routing_channel(self.tracks[1]),
+                vibez_core::routing::RoutingChannel {
+                    effects: self.engine.tracks[1]
+                        .effects
+                        .iter()
+                        .map(|slot| routing_effect(slot.id))
+                        .collect(),
+                    ..routing_channel(self.tracks[1])
+                },
                 routing_channel(TrackId::MASTER),
             ],
             64,
