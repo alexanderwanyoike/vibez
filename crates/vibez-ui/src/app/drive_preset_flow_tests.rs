@@ -170,10 +170,10 @@ fn drive_neutral_init_renders_uncolored_audio_after_the_declared_delay() {
         let mut effect = vibez_dsp::factory::create_effect_with_params(EffectType::Drive, rate, &parameters);
         let latency = effect.latency_samples() as usize;
         assert_eq!(latency, 64);
-        let input: Vec<_> = (0..2048).map(|frame| {
+        let input: Vec<_> = (0..2048).flat_map(|frame| {
             let phase = std::f32::consts::TAU * frame as f32 / 127.0;
             [0.7 * phase.sin(), 0.4 * (3.0 * phase).cos()]
-        }).flatten().collect();
+        }).collect();
         let mut output = input.clone();
         output.resize(input.len() + latency * 2, 0.0);
         for block in output.chunks_mut(74) { effect.process(block, 2); }
