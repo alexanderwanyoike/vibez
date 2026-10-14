@@ -846,3 +846,6 @@ mod plugin_tests;
 
 #[path = "render_sidechain_tests.rs"]
 mod sidechain_tests;
+
+#[path = "render_bitcrush_tests.rs"]
+mod bitcrush_tests;
