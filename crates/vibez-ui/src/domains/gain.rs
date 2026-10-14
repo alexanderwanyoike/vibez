@@ -17,6 +17,32 @@ pub enum GainMsg {
     ClearClip(EffectId),
 }
 
+pub fn is_native_gain(effect: &crate::state::UiEffect) -> bool {
+    effect.effect_type == vibez_core::effect::EffectType::Gain
+        && effect.plugin_ref.is_none()
+        && effect.plugin_name.is_none()
+}
+
+impl GainMsg {
+    pub fn destination(&self, channel: Option<TrackId>) -> Option<(TrackId, EffectId)> {
+        match self {
+            Self::SetInput(track, effect, ..) | Self::SubmitInput(track, effect, ..) => {
+                (Some(*track) == channel).then_some((*track, *effect))
+            }
+            Self::ToggleAdvanced(effect) | Self::ClearClip(effect) => {
+                channel.map(|track| (track, *effect))
+            }
+        }
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub enum GainAction {
+    None,
+    SetParameter(usize, f32),
+    RevealAdvanced(bool),
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct GainHistoryPoint {
     pub at: Instant,
@@ -37,6 +63,45 @@ pub struct GainPanelState {
 }
 
 impl GainPanelState {
+    pub fn update(&mut self, message: GainMsg, parameters: &[f32]) -> GainAction {
+        match message {
+            GainMsg::ToggleAdvanced(_) => {
+                self.advanced = !self.advanced;
+                return GainAction::RevealAdvanced(self.advanced);
+            }
+            GainMsg::ClearClip(_) => self.clear_clip(),
+            GainMsg::SetInput(_, _, index, value) if index < self.input_text.len() => {
+                self.input_text[index] = Some(value);
+                self.input_error[index] = false;
+            }
+            GainMsg::SubmitInput(_, _, index) if index < self.input_text.len() => {
+                let Some(text) = self.input_text[index].as_deref() else {
+                    return GainAction::None;
+                };
+                let Some(value) = parse_input(index, text) else {
+                    self.input_error[index] = true;
+                    return GainAction::None;
+                };
+                self.discard_input(index);
+                if parameters
+                    .get(index)
+                    .is_some_and(|current| *current != value)
+                {
+                    return GainAction::SetParameter(index, value);
+                }
+            }
+            _ => {}
+        }
+        GainAction::None
+    }
+
+    pub fn discard_input(&mut self, index: usize) {
+        if index < self.input_text.len() {
+            self.input_text[index] = None;
+            self.input_error[index] = false;
+        }
+    }
+
     pub fn accept_meter(&mut self, input: MeterValues, output: MeterValues, now: Instant) {
         self.input = input;
         self.output = output;

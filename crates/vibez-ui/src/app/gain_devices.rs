@@ -3,11 +3,10 @@
 use std::collections::HashMap;
 use std::time::Instant;
 
-use vibez_core::effect::EffectType;
 use vibez_core::id::{EffectId, TrackId};
 use vibez_engine::metering::MeterValues;
 
-use crate::domains::gain::{GainMsg, GainPanelState};
+use crate::domains::gain::{is_native_gain, GainAction, GainMsg, GainPanelState};
 use crate::state::DetailPanelTab;
 
 use super::*;
@@ -38,20 +37,13 @@ impl App {
             .state
             .find_track(track_id)
             .and_then(|track| track.effects.iter().find(|effect| effect.id == effect_id))
-            .filter(|effect| {
-                effect.effect_type == EffectType::Gain
-                    && effect.plugin_ref.is_none()
-                    && effect.plugin_name.is_none()
-            })
+            .filter(|effect| is_native_gain(effect))
         else {
             return false;
         };
         if let Some(panel) = self.gain_devices.panels.get_mut(&effect_id) {
             for &(index, _) in updates {
-                if index < panel.input_text.len() {
-                    panel.input_text[index] = None;
-                    panel.input_error[index] = false;
-                }
+                panel.discard_input(index);
             }
         }
         updates
@@ -64,13 +56,9 @@ impl App {
             .then(|| self.state.active_timeline_editor().selected_track)
             .flatten()
             .filter(|track_id| {
-                self.state.find_track(*track_id).is_some_and(|track| {
-                    track.effects.iter().any(|effect| {
-                        effect.effect_type == EffectType::Gain
-                            && effect.plugin_ref.is_none()
-                            && effect.plugin_name.is_none()
-                    })
-                })
+                self.state
+                    .find_track(*track_id)
+                    .is_some_and(|track| track.effects.iter().any(is_native_gain))
             });
         if wanted != self.gain_devices.channel {
             self.gain_devices.channel = wanted;
@@ -87,10 +75,7 @@ impl App {
                 .retain(|id, _| track.effects.iter().any(|effect| effect.id == *id));
             let now = Instant::now();
             for effect in &track.effects {
-                if effect.effect_type == EffectType::Gain
-                    && effect.plugin_ref.is_none()
-                    && effect.plugin_name.is_none()
-                {
+                if is_native_gain(effect) {
                     self.gain_devices
                         .panels
                         .entry(effect.id)
@@ -124,12 +109,10 @@ impl App {
             return;
         }
         if self.state.find_track(track_id).is_some_and(|track| {
-            track.effects.iter().any(|effect| {
-                effect.id == effect_id
-                    && effect.effect_type == EffectType::Gain
-                    && effect.plugin_ref.is_none()
-                    && effect.plugin_name.is_none()
-            })
+            track
+                .effects
+                .iter()
+                .any(|effect| effect.id == effect_id && is_native_gain(effect))
         }) {
             self.gain_devices
                 .panels
@@ -140,55 +123,26 @@ impl App {
     }
 
     pub(super) fn update_gain_control(&mut self, message: GainMsg) -> Task<Message> {
-        match message {
-            GainMsg::ToggleAdvanced(effect_id) => {
-                if let Some(panel) = self.gain_devices.panels.get_mut(&effect_id) {
-                    panel.advanced = !panel.advanced;
-                }
+        let Some((track_id, effect_id)) = message.destination(self.gain_devices.channel) else {
+            return Task::none();
+        };
+        let Some(effect) = self
+            .state
+            .find_track(track_id)
+            .and_then(|track| track.effects.iter().find(|effect| effect.id == effect_id))
+            .filter(|effect| is_native_gain(effect))
+        else {
+            return Task::none();
+        };
+        let Some(panel) = self.gain_devices.panels.get_mut(&effect_id) else {
+            return Task::none();
+        };
+        match panel.update(message, &effect.params) {
+            GainAction::SetParameter(index, value) => {
+                self.update(Message::set_effect_param(track_id, effect_id, index, value))
             }
-            GainMsg::ClearClip(effect_id) => {
-                if let Some(panel) = self.gain_devices.panels.get_mut(&effect_id) {
-                    panel.clear_clip();
-                }
-            }
-            GainMsg::SetInput(track_id, effect_id, index, value) if index < 3 => {
-                if self.gain_devices.channel == Some(track_id) {
-                    if let Some(panel) = self.gain_devices.panels.get_mut(&effect_id) {
-                        panel.input_text[index] = Some(value);
-                        panel.input_error[index] = false;
-                    }
-                }
-            }
-            GainMsg::SubmitInput(track_id, effect_id, index) if index < 3 => {
-                let Some(panel) = self.gain_devices.panels.get_mut(&effect_id) else {
-                    return Task::none();
-                };
-                let Some(text) = panel.input_text[index].as_deref() else {
-                    return Task::none();
-                };
-                let Some(value) = crate::domains::gain::parse_input(index, text) else {
-                    panel.input_error[index] = true;
-                    return Task::none();
-                };
-                panel.input_text[index] = None;
-                panel.input_error[index] = false;
-                let current = self
-                    .state
-                    .find_track(track_id)
-                    .and_then(|track| track.effects.iter().find(|effect| effect.id == effect_id))
-                    .filter(|effect| {
-                        effect.effect_type == EffectType::Gain && effect.plugin_ref.is_none()
-                    })
-                    .and_then(|effect| effect.params.get(index))
-                    .copied();
-                if current.is_some_and(|current| current != value) {
-                    return self
-                        .update(Message::set_effect_param(track_id, effect_id, index, value));
-                }
-            }
-            _ => {}
+            GainAction::None | GainAction::RevealAdvanced(_) => Task::none(),
         }
-        Task::none()
     }
 }
 
@@ -197,6 +151,7 @@ mod tests {
     use super::*;
     use crate::domains::devices::DevicesMsg;
     use crate::state::ProjectTrack;
+    use vibez_core::effect::EffectType;
 
     fn gain_app() -> (App, TrackId, EffectId) {
         let mut app = super::super::test_support::app();

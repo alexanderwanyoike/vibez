@@ -96,10 +96,7 @@ impl App {
                         height: th::DEVICE_BODY_H,
                     })
                 }
-            } else if effect.effect_type == vibez_core::effect::EffectType::Gain
-                && effect.plugin_ref.is_none()
-                && effect.plugin_name.is_none()
-            {
+            } else if crate::domains::gain::is_native_gain(effect) {
                 Some(self.gain_device_body(track_id, effect, track_color))
             } else {
                 None
