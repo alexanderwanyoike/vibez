@@ -1,3 +1,5 @@
+//! Hosted plugin latency participates in the public compensated engine mix.
+
 mod support;
 #[global_allocator]
 static ALLOCATOR: support::allocation::AllocationCounter = support::allocation::AllocationCounter;

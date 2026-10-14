@@ -1,3 +1,5 @@
+//! Compensated routing preserves alignment across prepared graph and device edits.
+
 use super::*;
 use crate::test_support::DelayProbe;
 use vibez_core::effect::{EffectType, ParamDescriptor};
