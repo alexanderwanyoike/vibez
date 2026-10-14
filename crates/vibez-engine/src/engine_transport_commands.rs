@@ -38,9 +38,9 @@ impl AudioEngine {
         if capture_needs_closure {
             self.stop_heard_capture();
         }
-        self.terminal_notifications.cancel_playback_stop();
+        self.presentation_state.terminals.cancel_playback_stop();
         self.output_gate.clear_plan_morph();
-        self.presentation_fault = false;
+        self.presentation_state.resume();
         if !self.transport.is_playing() {
             for track in self
                 .tracks

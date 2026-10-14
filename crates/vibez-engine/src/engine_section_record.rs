@@ -167,7 +167,7 @@ impl AudioEngine {
         let mut pending = self.pending_section_record.take().expect("due recording");
         if let Some(prepared) = pending.prepared.take() {
             self.activate_section(prepared, pending.effective_at_samples);
-            if self.presentation_fault {
+            if self.presentation_state.is_faulted() {
                 return;
             }
         }
@@ -236,7 +236,7 @@ impl AudioEngine {
         }
         self.start_section_record_if_due(timing.boundary);
         let frames_after = frames - frames_before;
-        let Some(section) = self.active_section.filter(|_| !self.presentation_fault) else {
+        let Some(section) = self.active_section.filter(|_| !self.presentation_state.is_faulted()) else {
             output[frames_before * channels..].fill(0.0);
             return true;
         };

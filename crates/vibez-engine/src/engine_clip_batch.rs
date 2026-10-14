@@ -36,7 +36,7 @@ impl AudioEngine {
 
     fn clip_batch_event_room(&self, future: bool) -> usize {
         let scheduled = self.scheduled_presentation.capacity() - self.scheduled_presentation.len();
-        let inline = self.terminal_notifications.occupied_slots();
+        let inline = self.presentation_state.terminals.occupied_slots();
         // Inline notifications flush before packet publication, so their
         // reserved ring credits cannot also admit the next retained owner.
         scheduled
@@ -48,7 +48,7 @@ impl AudioEngine {
     }
 
     pub(super) fn clip_batch_holds_transition(&self, track: TrackId) -> bool {
-        !self.presentation_fault
+        !self.presentation_state.is_faulted()
             && self.pending_clip_batch.as_ref().is_some_and(|batch| {
                 matches!(batch.phase, BatchPhase::Publishing { .. })
                     && batch
@@ -99,7 +99,7 @@ impl AudioEngine {
         let Some(mut batch) = self.pending_clip_batch.take() else {
             return;
         };
-        if self.presentation_fault {
+        if self.presentation_state.is_faulted() {
             for track in &mut self.tracks {
                 if track
                     .queued_clip
