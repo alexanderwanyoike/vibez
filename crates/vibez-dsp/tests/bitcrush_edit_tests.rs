@@ -60,13 +60,12 @@ fn manual_drive_ramps_on_source_frames_and_automation_snaps_without_reviving_the
     }
 }
 
-
 #[test]
 fn mix_ramp_survives_unrelated_automation_and_unchanged_manual_targets() {
     for channels in [1, 2] {
         let build = || {
-            let mut effect = create_effect_with_params(
-                EffectType::Bitcrush, 48_000.0, &[2.0, 3.0, 0.0, 0.0]);
+            let mut effect =
+                create_effect_with_params(EffectType::Bitcrush, 48_000.0, &[2.0, 3.0, 0.0, 0.0]);
             effect.process(&mut vec![0.26; 9 * channels], channels);
             assert!(effect.set_param(2, 1.0));
             assert_eq!(effect.get_param(2), 1.0);

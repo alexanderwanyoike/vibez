@@ -31,7 +31,12 @@ impl App {
                         rate,
                         *effect.params.get(index)?,
                     )
-                } else if [vibez_dsp::bitcrush::param::MIX, vibez_dsp::bitcrush::param::JITTER].contains(&index) {
+                } else if [
+                    vibez_dsp::bitcrush::param::MIX,
+                    vibez_dsp::bitcrush::param::JITTER,
+                ]
+                .contains(&index)
+                {
                     crate::domains::device_controls::parse_percent(text, *effect.params.get(index)?)
                 } else {
                     crate::domains::device_controls::parse_value(text, descriptors.get(index)?)
@@ -298,22 +303,49 @@ mod tests {
             app.state.project.history = Default::default();
             app.state.project.dirty = false;
             let _ = app.update(Message::DeviceControl(DeviceControlMsg::Input(
-                track, effect, index, "37 %".into(),
+                track,
+                effect,
+                index,
+                "37 %".into(),
             )));
-            let _ = app.update(Message::DeviceControl(DeviceControlMsg::Submit(track, effect, index)));
-            assert_eq!(app.state.find_track(track).unwrap().effects[0].params, before);
-            assert!(app.device_controls[&effect].errors.is_empty(), "unchanged percentage rejected");
+            let _ = app.update(Message::DeviceControl(DeviceControlMsg::Submit(
+                track, effect, index,
+            )));
+            assert_eq!(
+                app.state.find_track(track).unwrap().effects[0].params,
+                before
+            );
+            assert!(
+                app.device_controls[&effect].errors.is_empty(),
+                "unchanged percentage rejected"
+            );
             assert!(!app.state.project.history.can_undo());
             assert!(!app.state.project.dirty);
             let _ = app.update(Message::DeviceControl(DeviceControlMsg::Input(
-                track, effect, index, "65 %".into(),
+                track,
+                effect,
+                index,
+                "65 %".into(),
             )));
-            let _ = app.update(Message::DeviceControl(DeviceControlMsg::Submit(track, effect, index)));
-            assert_eq!(app.state.find_track(track).unwrap().effects[0].params[index], 0.65);
-            let snapshot = app.state.project.history.pop_undo().expect("one percent edit");
+            let _ = app.update(Message::DeviceControl(DeviceControlMsg::Submit(
+                track, effect, index,
+            )));
+            assert_eq!(
+                app.state.find_track(track).unwrap().effects[0].params[index],
+                0.65
+            );
+            let snapshot = app
+                .state
+                .project
+                .history
+                .pop_undo()
+                .expect("one percent edit");
             assert!(!app.state.project.history.can_undo());
             app.apply_snapshot(snapshot);
-            assert_eq!(app.state.find_track(track).unwrap().effects[0].params, before);
+            assert_eq!(
+                app.state.find_track(track).unwrap().effects[0].params,
+                before
+            );
         }
     }
 }

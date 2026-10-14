@@ -9,7 +9,11 @@ pub fn presentation_descriptor(effect: &crate::state::UiEffect, index: usize) ->
     if effect.effect_type == vibez_core::effect::EffectType::Bitcrush
         && effect.plugin_ref.is_none()
         && effect.plugin_name.is_none()
-        && [vibez_dsp::bitcrush::param::MIX, vibez_dsp::bitcrush::param::JITTER].contains(&index)
+        && [
+            vibez_dsp::bitcrush::param::MIX,
+            vibez_dsp::bitcrush::param::JITTER,
+        ]
+        .contains(&index)
     {
         descriptor.unit = "%";
     }
@@ -112,11 +116,18 @@ pub fn parse_value(text: &str, descriptor: &ParamDescriptor) -> Option<f32> {
 }
 
 pub fn parse_percent(text: &str, current: f32) -> Option<f32> {
-    let number = text.trim().trim_end_matches('%').trim().parse::<f32>().ok()?;
+    let number = text
+        .trim()
+        .trim_end_matches('%')
+        .trim()
+        .parse::<f32>()
+        .ok()?;
     if !number.is_finite() || !(0.0..=100.0).contains(&number) {
         return None;
     }
-    if (0.0..=1.0).contains(&current) && display_percent(current).parse::<f32>().ok() == Some(number) {
+    if (0.0..=1.0).contains(&current)
+        && display_percent(current).parse::<f32>().ok() == Some(number)
+    {
         return Some(current);
     }
     Some(number / 100.0)
