@@ -35,8 +35,22 @@ fn plot(bounds: Rectangle) -> Rectangle {
         }
     }
 }
-fn transfer_plot(bounds: Rectangle) -> Rectangle {
-    plot(bounds)
+pub(super) fn transfer_plot(bounds: Rectangle) -> Rectangle {
+    if bounds.height >= 80.0 {
+        Rectangle {
+            x: 25.0,
+            y: 16.0,
+            width: (bounds.width - 33.0).max(1.0),
+            height: (bounds.height - 48.0).max(1.0),
+        }
+    } else {
+        Rectangle {
+            x: 4.0,
+            y: 4.0,
+            width: (bounds.width - 8.0).max(1.0),
+            height: (bounds.height - 8.0).max(1.0),
+        }
+    }
 }
 
 fn backdrop(frame: &mut canvas::Frame, bounds: Rectangle) {
@@ -63,7 +77,7 @@ impl canvas::Program<Message> for TransferCurve<'_> {
     ) -> Vec<canvas::Geometry> {
         let mut frame = canvas::Frame::new(renderer, bounds.size());
         backdrop(&mut frame, bounds);
-        let area = plot(bounds);
+        let area = transfer_plot(bounds);
         let x = |db: f32| area.x + (db + 60.0) / 60.0 * area.width;
         let y = |db: f32| area.y + (24.0 - db.clamp(-60.0, 24.0)) / 84.0 * area.height;
         for db in [-60.0, -48.0, -36.0, -24.0, -12.0, 0.0] {
@@ -74,10 +88,10 @@ impl canvas::Program<Message> for TransferCurve<'_> {
                 ),
                 canvas::Stroke::default().with_color(th::divider()),
             );
-            if bounds.height >= 64.0 {
+            if bounds.height >= 80.0 {
                 frame.fill_text(canvas::Text {
                     content: format!("{db:.0}"),
-                    position: Point::new(x(db), bounds.height - 1.0),
+                    position: Point::new(x(db), bounds.height - 14.0),
                     color: th::text_dim(),
                     size: 8.0.into(),
                     horizontal_alignment: iced::alignment::Horizontal::Center,
@@ -94,7 +108,7 @@ impl canvas::Program<Message> for TransferCurve<'_> {
                 ),
                 canvas::Stroke::default().with_color(th::divider()),
             );
-            if bounds.height >= 64.0 {
+            if bounds.height >= 80.0 {
                 frame.fill_text(canvas::Text {
                     content: format!("{db:.0}"),
                     position: Point::new(area.x - 3.0, y(db)),
@@ -110,6 +124,24 @@ impl canvas::Program<Message> for TransferCurve<'_> {
             &canvas::Path::line(Point::new(x(-60.0), y(-60.0)), Point::new(x(0.0), y(0.0))),
             canvas::Stroke::default().with_color(th::text_muted()),
         );
+        if bounds.height >= 80.0 {
+            frame.fill_text(canvas::Text {
+                content: "Output (dB)".into(),
+                position: Point::new(area.x + 3.0, 2.0),
+                color: th::text_dim(),
+                size: 8.0.into(),
+                ..Default::default()
+            });
+            frame.fill_text(canvas::Text {
+                content: "Input (dB)".into(),
+                position: Point::new(area.x + area.width, bounds.height - 1.0),
+                color: th::text_dim(),
+                size: 8.0.into(),
+                horizontal_alignment: iced::alignment::Horizontal::Right,
+                vertical_alignment: iced::alignment::Vertical::Bottom,
+                ..Default::default()
+            });
+        }
         let response = |db| {
             if self.effect.bypass {
                 db
@@ -174,7 +206,7 @@ impl canvas::Program<Message> for TransferCurve<'_> {
                                 self.track,
                                 self.effect.id,
                                 param::THRESHOLD,
-                                Self::x_value(cursor.x - bounds.x, plot(bounds)),
+                                Self::x_value(cursor.x - bounds.x, transfer_plot(bounds)),
                             )
                             .in_undo_gesture(gesture),
                         ),

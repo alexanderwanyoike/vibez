@@ -46,10 +46,11 @@ pub fn arrange(size: Size, advanced: bool) -> Arrangement {
     } else {
         (36.0, None)
     };
-    let plot = if size.height < 116.0 {
-        0.0
+    let available_plot = (size.height - TOOLBAR_H - controls).max(0.0);
+    let plot = if available_plot >= 76.0 {
+        available_plot
     } else {
-        (size.height - TOOLBAR_H - controls).max(0.0)
+        0.0
     };
     Arrangement {
         plot,
@@ -222,24 +223,35 @@ pub fn view<'a>(
             }
         };
         let transfer = || -> Element<'a, Message> {
-            column![
-                header(if layout.both_plots {
-                    "Static transfer · manual internal detector"
-                } else {
-                    "Manual internal transfer"
-                }),
-                canvas(TransferCurve {
-                    track,
-                    effect,
-                    accent
-                })
+            let title = header(if layout.both_plots {
+                "Static transfer · manual internal detector"
+            } else {
+                "Manual internal transfer"
+            });
+            let title_height = if layout.both_plots {
+                8.0 * 1.3 + 3.0
+            } else {
+                9.0 * 1.3 + 2.0 + 3.0
+            };
+            let compact_axes = layout.plot - 4.0 - title_height < 80.0;
+            let mut content = column![title];
+            if compact_axes {
+                content = content.push(section_label("Output (dB) ↑ · Input (dB) →"));
+            }
+            content
+                .push(
+                    canvas(TransferCurve {
+                        track,
+                        effect,
+                        accent,
+                    })
+                    .width(Length::Fill)
+                    .height(Length::Fill),
+                )
+                .spacing(3)
                 .width(Length::Fill)
                 .height(Length::Fill)
-            ]
-            .spacing(3)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into()
+                .into()
         };
         let history = || -> Element<'a, Message> {
             column![
@@ -399,7 +411,9 @@ mod tests {
     #[test]
     fn transfer_axes_keep_a_real_plot_after_compact_axis_qualification() {
         for width in [430.0, 620.0, 900.0] {
-            for height in [64.0, 114.0, 116.0, 120.0, 130.0, 160.0, 240.0, 304.0] {
+            for height in [
+                64.0, 114.0, 116.0, 120.0, 130.0, 138.0, 140.0, 160.0, 182.0, 240.0, 304.0,
+            ] {
                 let layout = arrange(Size::new(width, height), false);
                 if layout.plot == 0.0 {
                     continue;
@@ -410,11 +424,15 @@ mod tests {
                     9.0 * 1.3 + 2.0 + 3.0
                 };
                 let available = layout.plot - 4.0 - caption;
-                let actual = if available < 80.0 {
+                let canvas_height = if available < 80.0 {
                     available - (8.0 * 1.3 + 3.0)
                 } else {
-                    available - 48.0
+                    available
                 };
+                let actual = crate::widgets::compressor_display::transfer_plot(
+                    iced::Rectangle::new(iced::Point::ORIGIN, Size::new(240.0, canvas_height)),
+                )
+                .height;
                 assert!(
                     actual >= 32.0,
                     "named axes leave only {actual}px at {width}x{height}"
