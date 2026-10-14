@@ -259,7 +259,7 @@ fn playing_audio_follows_the_replacement_warp_map_numerically() {
         crate::retirement::tests::allocations(|| fixture.engine.process(&mut output, 2)),
         (0, 0)
     );
-    for (frame, samples) in output.chunks_exact(2).enumerate() {
+    for (frame, samples) in output.as_chunks::<2>().0.iter().enumerate() {
         let source_frame = 8.0 + frame as f32 * 32.0 / 70.0;
         let expected = source_frame / 128.0 * 0.75 * std::f32::consts::FRAC_1_SQRT_2;
         assert!(samples
