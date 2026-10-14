@@ -105,11 +105,20 @@ commands. Runtime boundary emitters reserve before changing state. Clip packets
 reuse their transferred Vec for resumable acknowledgements and owner return.
 Neither store grows or destroys undelivered owners in the callback.
 
-Presentation exhaustion stops playback and Capture, retains their terminal state
-and named cause in inline pending slots, and converts canceled Section/Clip
-notifications into owner retirement. One inline overflow holder protects the
-producer that discovered exhaustion. Terminal stop/cause delivery precedes normal
-queued delivery, after already-due accepted Capture start/data have drained.
+`PresentationState` owns Normal/Faulted health independently of its singular
+`TerminalNotifications` aggregate. The aggregate retains one Capture stop, one
+named cause, one playback-stop acknowledgement and one discovering overflow
+owner. Capture stop and cause retain the first request, including when Seek
+moves the clock backwards. Fault entry is idempotent. Play resumes health and
+cancels only the inline playback-stop acknowledgement; it retains the other
+slots and does not repair compensation readiness or device ownership.
+
+Presentation exhaustion stops playback and Capture and converts canceled
+Section/Clip notifications into owner retirement. After already-due accepted
+Capture start/data drain, delivery proceeds through Capture stop, named cause,
+playback stop, overflow owner and then normal queued feedback. Each slot clears
+only after successful publication; a Full response restores the exact overflow
+owner without cloning it. These owners survive resumed presentation health.
 Packet admission subtracts pending inline notifications from available UI slots;
 the same slot cannot admit both a terminal event and a transferred owner.
 Subsequent packet publication returns owners without reasserting playing state. Capture-only cancellation preserves continuing-playback Section,
