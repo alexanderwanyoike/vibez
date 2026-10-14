@@ -102,6 +102,43 @@ fn bare_track(name: &str) -> TrackInfo {
 }
 
 #[test]
+fn offline_channels_keep_prepared_send_capacity_for_automation() {
+    use vibez_core::automation::{AutomationLane, AutomationPoint, AutomationTarget};
+    let bus = TrackId::new();
+    let mut lane = AutomationLane::new(AutomationTarget::Send { bus_id: bus });
+    lane.insert_point(AutomationPoint { beat: 0.0, value: 0.75, curve: 0.0 });
+    let mut track = bare_track("Send automation");
+    track.automation.push(lane);
+    let request = BounceRequest {
+        tracks: vec![track],
+        master: None,
+        buses: Vec::new(),
+        audio_clips: Vec::new(),
+        note_clips: Vec::new(),
+        clip_audio: HashMap::new(),
+        sampler_audio: HashMap::new(),
+        drum_pad_audio: HashMap::new(),
+        mode: BounceMode::Master,
+        range_samples: (0, 512),
+        bpm: 120.0,
+        sample_rate: 44_100,
+        swing: vibez_core::perform::SwingAmount::STRAIGHT,
+    };
+    let mut channel = prepare::channel(
+        &request,
+        &request.tracks[0],
+        vibez_core::routing::SourceTap::AfterEffects,
+        None,
+        &mut Vec::new(),
+    );
+    assert_eq!(
+        crate::retirement::tests::allocations(|| { channel.apply_automation(0.0); }),
+        (0, 0)
+    );
+    assert_eq!(channel.sends, [(bus, 0.75)]);
+}
+
+#[test]
 fn offline_project_render_has_no_audition_bus_input() {
     let request = BounceRequest {
         tracks: Vec::new(),
