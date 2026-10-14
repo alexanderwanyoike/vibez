@@ -108,3 +108,26 @@ fn hysteresis_retains_the_open_band_including_its_closing_boundary_and_resets_cl
         assert!(below_open_threshold[0].abs() < 1e-7, "reset retained an open latch");
     }
 }
+
+#[test]
+fn expander_ratio_sets_the_below_threshold_slope_with_optional_range_and_unity_at_one() {
+    for (ratio, range, expected_gain) in [(1.0_f32, None, 1.0), (2.0, None, 0.1),
+                                         (4.0, None, 0.001), (4.0, Some(12.0), 10.0_f32.powf(-12.0 / 20.0))] {
+        let mut effect = GateEffect::new(48_000.0);
+        for (index, value) in [(0, -20.0), (1, 0.1), (2, 5.0), (3, 0.0), (7, 1.0), (8, ratio)] {
+            assert!(effect.set_param(index, value));
+        }
+        if let Some(depth) = range {
+            assert!(effect.set_param(5, 1.0));
+            assert!(effect.set_param(6, depth));
+        }
+        let mut signal = vec![0.01; 48_000];
+        effect.process(&mut signal, 1);
+        let samples = if ratio == 1.0 { &signal[..] } else { &signal[signal.len() - 128..] };
+        for sample in samples {
+            let expected = 0.01 * expected_gain;
+            assert!((*sample - expected).abs() <= 2e-8 + expected * 2e-6,
+                "ratio {ratio}, Range {range:?}: actual {sample}, expected {expected}");
+        }
+    }
+}
