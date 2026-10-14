@@ -122,10 +122,12 @@ fn thirty_two_sounding_retired_generations_do_not_block_note_off_or_stop_and_ui_
         app.poll_engine_events();
         assert!(engine.transport().is_playing());
 
-        let make_sample = || Arc::new(DecodedAudio {
-            channels: vec![vec![0.001; 4096]],
-            sample_rate: 1000,
-        });
+        let make_sample = || {
+            Arc::new(DecodedAudio {
+                channels: vec![vec![0.001; 4096]],
+                sample_rate: 1000,
+            })
+        };
         let initial = make_sample();
         let mut old_generations = vec![Arc::downgrade(&initial)];
         commands
@@ -165,12 +167,18 @@ fn thirty_two_sounding_retired_generations_do_not_block_note_off_or_stop_and_ui_
             engine.process_block(AudioProcessBlock::new(&mut [], 1));
             app.poll_engine_events();
         }
-        assert!(old_generations.iter().all(|sample| sample.strong_count() == 2));
+        assert!(old_generations
+            .iter()
+            .all(|sample| sample.strong_count() == 2));
         let mut sustained = [0.0; 16];
         engine.process_block(AudioProcessBlock::new(&mut sustained, 1));
         app.poll_engine_events();
-        assert!(sustained.iter().all(|sample| (*sample - 0.032).abs() < 1e-6));
-        assert!(old_generations.iter().all(|sample| sample.strong_count() == 2));
+        assert!(sustained
+            .iter()
+            .all(|sample| (*sample - 0.032).abs() < 1e-6));
+        assert!(old_generations
+            .iter()
+            .all(|sample| sample.strong_count() == 2));
 
         commands
             .push(if stop {
@@ -185,14 +193,22 @@ fn thirty_two_sounding_retired_generations_do_not_block_note_off_or_stop_and_ui_
         commands.push(EngineCommand::SetBpm(137.0)).unwrap();
         let mut released = [0.0; 16];
         engine.process_block(AudioProcessBlock::new(&mut released, 1));
-        assert_eq!(engine.transport().bpm(), 137.0, "FIFO command after release must run");
+        assert_eq!(
+            engine.transport().bpm(),
+            137.0,
+            "FIFO command after release must run"
+        );
         assert_eq!(engine.transport().is_playing(), !stop);
         if stop {
             // Stop flushes scheduled notes; external live notes retain their existing behavior.
             assert!(released.iter().all(|sample| (*sample - 0.032).abs() < 1e-6));
-            assert!(old_generations.iter().all(|sample| sample.strong_count() == 2));
+            assert!(old_generations
+                .iter()
+                .all(|sample| sample.strong_count() == 2));
             app.poll_engine_events();
-            assert!(old_generations.iter().all(|sample| sample.strong_count() == 2));
+            assert!(old_generations
+                .iter()
+                .all(|sample| sample.strong_count() == 2));
             commands
                 .push(EngineCommand::ExternalNoteOff {
                     track_id: track,
@@ -201,9 +217,16 @@ fn thirty_two_sounding_retired_generations_do_not_block_note_off_or_stop_and_ui_
                 .unwrap();
             engine.process_block(AudioProcessBlock::new(&mut released, 1));
         }
-        assert_eq!(released, [0.0; 16], "NoteOff must not wait for voice completion");
-        assert!(old_generations.iter().all(|sample| sample.strong_count() == 1));
+        assert_eq!(
+            released, [0.0; 16],
+            "NoteOff must not wait for voice completion"
+        );
+        assert!(old_generations
+            .iter()
+            .all(|sample| sample.strong_count() == 1));
         app.poll_engine_events();
-        assert!(old_generations.iter().all(|sample| sample.strong_count() == 0));
+        assert!(old_generations
+            .iter()
+            .all(|sample| sample.strong_count() == 0));
     }
 }
