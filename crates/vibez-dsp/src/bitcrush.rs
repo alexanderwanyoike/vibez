@@ -3,7 +3,7 @@
 use vibez_core::effect::{EffectType, ParamDescriptor};
 use vibez_core::id::EffectId;
 
-use crate::effect::AudioEffect;
+use crate::{butterworth_filter::ButterworthFilter, effect::AudioEffect};
 
 #[path = "bitcrush_clock.rs"]
 mod clock;
@@ -104,6 +104,9 @@ pub struct BitcrushEffect {
     drive: Ramp,
     mix: Ramp,
     jitter: Ramp,
+    post_lp_amount: Ramp,
+    post_lp_cutoff: Ramp,
+    post_lp: ButterworthFilter,
     drive_gain: f64,
     started: bool,
     scope: Scope,
@@ -133,12 +136,17 @@ impl BitcrushEffect {
         } else {
             48_000.0
         };
+        let mut post_lp = ButterworthFilter::EMPTY;
+        post_lp.configure(sample_rate, BITCRUSH_PARAMS[param::POST_LP_HZ].default, false);
         Self {
             params: std::array::from_fn(|index| BITCRUSH_PARAMS[index].default),
             sample_rate,
             drive: Ramp::new(0.0),
             mix: Ramp::new(1.0),
             jitter: Ramp::new(0.0),
+            post_lp_amount: Ramp::new(0.0),
+            post_lp_cutoff: Ramp::new(BITCRUSH_PARAMS[param::POST_LP_HZ].default),
+            post_lp,
             drive_gain: 1.0,
             started: false,
             scope: Scope::default(),
@@ -178,6 +186,16 @@ impl BitcrushEffect {
         }
         if index == param::JITTER && (value != *target || automated) {
             self.jitter.edit(value, automated || !self.started);
+        }
+        if index == param::POST_LP_ENABLED && (value != *target || automated) {
+            self.post_lp_amount.edit(value, automated || !self.started);
+        }
+        if index == param::POST_LP_HZ && (value != *target || automated) {
+            let immediate = automated || !self.started;
+            self.post_lp_cutoff.edit(value, immediate);
+            if immediate {
+                self.post_lp.configure(self.sample_rate, value, false);
+            }
         }
         *target = value;
         true
@@ -244,6 +262,10 @@ impl AudioEffect for BitcrushEffect {
             }
             let _ = self.mix.advance(self.params[param::MIX]);
             let _ = self.jitter.advance(self.params[param::JITTER]);
+            let _ = self.post_lp_amount.advance(self.params[param::POST_LP_ENABLED]);
+            if let Some(cutoff) = self.post_lp_cutoff.advance(self.params[param::POST_LP_HZ]) {
+                self.post_lp.configure(self.sample_rate, cutoff, false);
+            }
             let mix = self.mix.value();
             let drive_db = self.drive.value();
             let drive_gain = self.drive_gain;
@@ -282,6 +304,14 @@ impl AudioEffect for BitcrushEffect {
                     self.hold[c] = q.clamp(-1.0, 1.0) as f32;
                 }
                 let wet = self.hold[c];
+                // Keeping this history warm avoids a cold filter transient when enabled.
+                let filtered = self.post_lp.process(wet, c);
+                let amount = self.post_lp_amount.value();
+                let wet = if amount == 0.0 {
+                    wet
+                } else {
+                    wet * (1.0 - amount) + filtered * amount
+                };
                 buffer[idx] = dry * (1.0 - mix) + wet * mix;
                 if c == 0 {
                     self.scope.record(dry, buffer[idx], acquired, self.clock.interval());
@@ -298,6 +328,10 @@ impl AudioEffect for BitcrushEffect {
         self.clock = Clock::default();
         self.mix.edit(self.params[param::MIX], true);
         self.jitter.edit(self.params[param::JITTER], true);
+        self.post_lp_amount.edit(self.params[param::POST_LP_ENABLED], true);
+        self.post_lp_cutoff.edit(self.params[param::POST_LP_HZ], true);
+        self.post_lp.configure(self.sample_rate, self.post_lp_cutoff.value(), false);
+        self.post_lp.reset();
         self.drive.edit(self.params[param::DRIVE_DB], true);
         self.drive_gain = 10.0_f64.powf(f64::from(self.drive.value()) / 20.0);
         self.started = false;
