@@ -185,9 +185,23 @@ fn thirty_two_sounding_retired_generations_do_not_block_note_off_or_stop_and_ui_
         commands.push(EngineCommand::SetBpm(137.0)).unwrap();
         let mut released = [0.0; 16];
         engine.process_block(AudioProcessBlock::new(&mut released, 1));
-        assert_eq!(released, [0.0; 16], "release must not wait for voice completion, stop={stop}");
         assert_eq!(engine.transport().bpm(), 137.0, "FIFO command after release must run");
         assert_eq!(engine.transport().is_playing(), !stop);
+        if stop {
+            // Stop flushes scheduled notes; external live notes retain their existing behavior.
+            assert!(released.iter().all(|sample| (*sample - 0.032).abs() < 1e-6));
+            assert!(old_generations.iter().all(|sample| sample.strong_count() == 2));
+            app.poll_engine_events();
+            assert!(old_generations.iter().all(|sample| sample.strong_count() == 2));
+            commands
+                .push(EngineCommand::ExternalNoteOff {
+                    track_id: track,
+                    pitch: 36,
+                })
+                .unwrap();
+            engine.process_block(AudioProcessBlock::new(&mut released, 1));
+        }
+        assert_eq!(released, [0.0; 16], "NoteOff must not wait for voice completion");
         assert!(old_generations.iter().all(|sample| sample.strong_count() == 1));
         app.poll_engine_events();
         assert!(old_generations.iter().all(|sample| sample.strong_count() == 0));
