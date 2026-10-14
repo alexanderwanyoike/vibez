@@ -1,3 +1,5 @@
+//! Public routing graphs preserve audible, detector and capture signal paths.
+
 use super::*;
 use vibez_core::effect::EffectType;
 use vibez_core::id::{ClipId, EffectId};
