@@ -253,3 +253,7 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "bitcrush_layout_geometry_tests.rs"]
+mod geometry_tests;
