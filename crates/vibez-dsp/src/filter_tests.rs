@@ -371,3 +371,30 @@ fn manual_modulation_source_change_preserves_the_first_frame_but_automation_is_e
         .zip(&unchanged[512..])
         .any(|(a, b)| (a - b).abs() > 0.01));
 }
+
+#[test]
+fn envelope_attack_and_release_follow_their_time_constants_and_change_audio() {
+    for sample_rate in [44100.0, 96000.0] {
+        let frames = (sample_rate * 0.02) as usize;
+        let mut outputs = Vec::new();
+        for (attack, release) in [(1.0, 20.0), (100.0, 500.0)] {
+            let mut effect = FilterEffect::new(sample_rate);
+            for (index, value) in [(param::MOD_SOURCE, 2.0), (param::DEPTH, 4.0), (param::ENV_ATTACK, attack), (param::ENV_RELEASE, release)] {
+                effect.set_param(index, value);
+            }
+            let mut signal: Vec<_> = (0..frames).flat_map(|_| [1.0, 0.5]).collect();
+            effect.process(&mut signal, 2);
+            let expected_rise = 1.0 - (-0.02_f32 * 1000.0 / attack).exp();
+            assert!((effect.envelopes[0] - expected_rise).abs() < 0.002);
+            assert!((effect.envelopes[1] - expected_rise * 0.5).abs() < 0.002);
+            let peak = effect.envelopes[0];
+            let mut silence = vec![0.0; frames * 2];
+            effect.process(&mut silence, 2);
+            let expected_fall = peak * (-0.02_f32 * 1000.0 / release).exp();
+            assert!((effect.envelopes[0] - expected_fall).abs() < 0.002);
+            signal.extend(silence);
+            outputs.push(signal);
+        }
+        assert!(outputs[0].iter().zip(&outputs[1]).any(|(a, b)| (a - b).abs() > 0.01));
+    }
+}
