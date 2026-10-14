@@ -340,6 +340,36 @@ fn prepare_populated_sampler_replacement(
     owner
 }
 
+fn fulfill_clip_insertions(
+    engine: &mut AudioEngine,
+    events: &mut rtrb::Consumer<EngineEvent>,
+) -> (usize, usize) {
+    let mut total = crate::retirement::tests::allocations(|| {
+        engine.process_block(AudioProcessBlock::new(&mut [], 2));
+    });
+    while engine.pending_clip_insertion.is_some() {
+        let waiting = crate::retirement::tests::allocations(|| {
+            engine.process_block(AudioProcessBlock::new(&mut [], 2));
+        });
+        total.0 += waiting.0;
+        total.1 += waiting.1;
+        let mut fulfilled = false;
+        while let Ok(event) = events.pop() {
+            if let EngineEvent::ClipInsertionStorageRequested(request) = event {
+                request.fulfill();
+                fulfilled = true;
+            }
+        }
+        assert!(fulfilled, "the real request must reach its off-callback consumer");
+        let completion = crate::retirement::tests::allocations(|| {
+            engine.process_block(AudioProcessBlock::new(&mut [], 2));
+        });
+        total.0 += completion.0;
+        total.1 += completion.1;
+    }
+    total
+}
+
 macro_rules! case {
     ($name:literal, $allocates:expr, $command:expr) => {
         Case {
@@ -1010,9 +1040,11 @@ fn public_add_clip_at_exhausted_capacity_preserves_content_without_callback_heap
         })
         .unwrap();
 
-    let measured = crate::retirement::tests::allocations(|| {
+    let exchange = fulfill_clip_insertions(&mut engine, &mut events);
+    let render = crate::retirement::tests::allocations(|| {
         engine.process_block(AudioProcessBlock::new(&mut output, 2));
     });
+    let measured = (exchange.0 + render.0, exchange.1 + render.1);
 
     let clips = &engine.tracks()[0].playback_source.clips;
     assert_eq!(clips.len(), capacity + 1);
