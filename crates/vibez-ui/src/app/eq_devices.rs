@@ -294,4 +294,72 @@ mod tests {
             first
         );
     }
+
+    #[test]
+    fn retargeting_analyser_retires_unfrozen_old_panel_and_preserves_frozen_frame() {
+        for frozen in [false, true] {
+            let (mut app, track, first) = app_with_eq();
+            app.state.view.detail_panel_tab = crate::state::DetailPanelTab::Devices;
+            let _ = app.update(Message::Devices(DevicesMsg::AddEffect(
+                track,
+                EffectType::Eq,
+            )));
+            let second = app.state.find_track(track).unwrap().effects[1].id;
+            let (mut producer, consumer) = rtrb::RingBuffer::new(4096);
+            app.effect_spectrum_rx = Some(consumer);
+            app.poll_eq_spectrum();
+            let generation = app.eq_spectrum.generation;
+            for sample in 0..2048 {
+                producer
+                    .push(EffectSpectrumSample {
+                        generation,
+                        value: (sample as f32 * 0.1).sin() * 0.25,
+                    })
+                    .unwrap();
+            }
+            app.poll_eq_spectrum();
+            assert!(app.eq_panel(first).spectrum.active);
+            let frozen_bins = app.eq_panel(first).spectrum.bins.clone();
+            if frozen {
+                let _ = app.update_eq_control(EqMsg::Freeze(track, first));
+            }
+            let _ = app.update_eq_control(EqMsg::SelectBand(track, second, 2));
+            app.poll_eq_spectrum();
+            assert_eq!(app.eq_spectrum.target.unwrap().effect_id, second);
+            assert_eq!(
+                app.eq_panel(first).spectrum.active,
+                frozen,
+                "old unfrozen panel retained an apparently active spectrum"
+            );
+            if frozen {
+                assert_eq!(app.eq_panel(first).spectrum.bins, frozen_bins);
+            }
+            assert_eq!(app.eq_panel(second).selected_band, 2);
+            let generation = app.eq_spectrum.generation;
+            for sample in 0..2048 {
+                producer
+                    .push(EffectSpectrumSample {
+                        generation,
+                        value: (sample as f32 * 0.2).sin() * 0.125,
+                    })
+                    .unwrap();
+            }
+            app.poll_eq_spectrum();
+            assert!(app.eq_panel(second).spectrum.active);
+            assert_eq!(app.eq_panel(first).spectrum.active, frozen);
+            assert_eq!(
+                first_native_eq(app.state.find_track(track).unwrap())
+                    .unwrap()
+                    .id,
+                first
+            );
+            app.state.view.workspace = Workspace::Mix;
+            app.poll_eq_spectrum();
+            assert_eq!(app.eq_spectrum.target.unwrap().effect_id, first);
+            assert!(!app.eq_panel(second).spectrum.active);
+            if frozen {
+                assert_eq!(app.eq_panel(first).spectrum.bins, frozen_bins);
+            }
+        }
+    }
 }
