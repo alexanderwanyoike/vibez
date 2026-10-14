@@ -77,7 +77,8 @@ pub struct DriveEffect {
     delay: [[f32; 2]; 64],
     delay_position: usize,
     dry_delay: [[f32; 2]; 64],
-    mix_output_delay: [[f32; 2]; 64],
+    control_delay: [[f32; param::COUNT]; 64],
+    audible: [f32; param::COUNT],
     oversampling: [oversampling::OversamplingPath; 3],
     sample_rate: f32,
     modern_low: [f64; 2],
@@ -105,7 +106,8 @@ impl DriveEffect {
             delay: [[0.0; 2]; 64],
             delay_position: 0,
             dry_delay: [[0.0; 2]; 64],
-            mix_output_delay: [[1.0; 2]; 64],
+            control_delay: [std::array::from_fn(|index| DRIVE_PARAMS[index].default); 64],
+            audible: std::array::from_fn(|index| DRIVE_PARAMS[index].default),
             oversampling: [2, 4, 8].map(oversampling::OversamplingPath::new),
             sample_rate,
             modern_low: [0.0; 2],
@@ -135,6 +137,10 @@ impl DriveEffect {
         } else {
             self.steps[index] = (target - self.applied[index]) / RAMP_FRAMES as f32;
             self.remaining[index] = RAMP_FRAMES;
+        }
+        if !self.started {
+            for controls in &mut self.control_delay { controls[index] = target; }
+            self.audible[index] = target;
         }
         true
     }
@@ -172,17 +178,18 @@ impl AudioEffect for DriveEffect {
             meter.input[point] = self.meter.input[position];
             meter.output[point] = self.meter.output[position];
         }
-        let gain = self.drive_gain();
+        let controls = if self.started { &self.audible } else { &self.applied };
+        let gain = 1.0 + controls[param::AMOUNT] * controls[param::AMOUNT] * 29.0;
         for (point, output) in meter.transfer.iter_mut().enumerate() {
             let input = -1.0 + point as f32 / 32.0;
             let u = (input * gain).clamp(-1.0, 1.0);
-            let shaped = match self.applied[param::CHARACTER] as usize {
+            let shaped = match controls[param::CHARACTER] as usize {
                 2 => 1.5 * u - 0.5 * u * u * u,
                 3 => u,
                 _ => (input * gain).tanh() / gain.tanh(),
             };
-            let processed = input * (1.0 - self.applied[param::AMOUNT]) + shaped * self.applied[param::AMOUNT];
-            *output = (input * (1.0 - self.applied[param::MIX]) + processed * self.applied[param::MIX]) * self.applied[param::OUTPUT];
+            let processed = input * (1.0 - controls[param::AMOUNT]) + shaped * controls[param::AMOUNT];
+            *output = (input * (1.0 - controls[param::MIX]) + processed * controls[param::MIX]) * controls[param::OUTPUT];
         }
         self.meter_count = 0;
         Some(meter)
@@ -222,7 +229,7 @@ impl AudioEffect for DriveEffect {
         let mut norm = drive.tanh();
         let mut cached_amount = self.applied[param::AMOUNT];
         let tone_beta = (-std::f64::consts::TAU * 1000.0 / self.sample_rate as f64).exp();
-        let mut cached_tone = self.applied[param::TONE];
+        let mut cached_tone = self.audible[param::TONE];
         let mut low_gain = 10.0_f64.powf(-6.0 * (cached_tone as f64 * 2.0 - 1.0) / 20.0);
         let mut high_gain = low_gain.recip();
         let mut filter_frequencies = [f32::NAN; 2];
@@ -240,20 +247,25 @@ impl AudioEffect for DriveEffect {
                 drive = self.drive_gain();
                 norm = drive.tanh();
             }
-            if cached_tone != self.applied[param::TONE] {
-                cached_tone = self.applied[param::TONE];
+            // Input-clock controls follow the audio to the FIR centers and output stage.
+            self.audible = self.control_delay[self.delay_position];
+            let interpolated_controls = self.control_delay[(self.delay_position + 32) % 64];
+            self.control_delay[self.delay_position] = self.applied;
+            let modern_gain = 1.0 + interpolated_controls[param::AMOUNT] * interpolated_controls[param::AMOUNT] * 29.0;
+            let modern_norm = modern_gain.tanh();
+            if cached_tone != self.audible[param::TONE] {
+                cached_tone = self.audible[param::TONE];
                 low_gain = 10.0_f64.powf(-6.0 * (cached_tone as f64 * 2.0 - 1.0) / 20.0);
                 high_gain = low_gain.recip();
             }
-            let frequencies = [self.applied[param::PRE_HP_FREQUENCY], self.applied[param::POST_LP_FREQUENCY]];
+            let frequencies = [self.applied[param::PRE_HP_FREQUENCY], self.audible[param::POST_LP_FREQUENCY]];
             if frequencies[0] != filter_frequencies[0] { self.pre_hp.configure(self.sample_rate, frequencies[0], true); }
             if frequencies[1] != filter_frequencies[1] { self.post_lp.configure(self.sample_rate, frequencies[1], false); }
             filter_frequencies = frequencies;
             let amount = self.applied[param::AMOUNT];
             let tilt = self.applied[param::TONE] * 2.0 - 1.0;
-            // Effect automation is scheduled at the input clock, including final-stage controls.
-            let [mix, output] = self.mix_output_delay[self.delay_position];
-            self.mix_output_delay[self.delay_position] = [self.applied[param::MIX], self.applied[param::OUTPUT]];
+            let mix = self.audible[param::MIX];
+            let output = self.audible[param::OUTPUT];
             for c in 0..ch {
                 let idx = frame * channels + c;
                 let dry = buffer[idx];
@@ -272,24 +284,24 @@ impl AudioEffect for DriveEffect {
                 self.delay[self.delay_position][c] = processed;
                 let aligned_dry = self.dry_delay[self.delay_position][c];
                 self.dry_delay[self.delay_position][c] = dry;
-                let character = self.applied[param::CHARACTER] as usize;
-                let quality = self.applied[param::QUALITY] as usize;
+                let character = self.audible[param::CHARACTER] as usize;
+                let quality = self.audible[param::QUALITY] as usize;
                 let mut modern = 0.0;
                 for (index, path) in self.oversampling.iter_mut().enumerate() {
                     let selected = if index == quality { character.checked_sub(1) } else { None };
-                    modern += path.process(shaper_input, c, drive, norm, selected);
+                    modern += path.process(shaper_input, c, modern_gain, modern_norm, selected);
                 }
                 let input = modern as f64;
                 let low = &mut self.modern_low[c];
                 *low = input * (1.0 - tone_beta) + *low * tone_beta;
-                if self.applied[param::TONE] != 0.5 { modern = (*low * low_gain + (input - *low) * high_gain) as f32; }
+                if self.audible[param::TONE] != 0.5 { modern = (*low * low_gain + (input - *low) * high_gain) as f32; }
                 let processed = if character == 0 {
                     legacy
                 } else {
-                    aligned_dry * (1.0 - amount) + modern * amount
+                    aligned_dry * (1.0 - self.audible[param::AMOUNT]) + modern * self.audible[param::AMOUNT]
                 };
                 let filtered = self.post_lp.process(processed, c);
-                let processed = processed * (1.0 - self.applied[param::POST_LP_ENABLED]) + filtered * self.applied[param::POST_LP_ENABLED];
+                let processed = processed * (1.0 - self.audible[param::POST_LP_ENABLED]) + filtered * self.audible[param::POST_LP_ENABLED];
                 buffer[idx] = (aligned_dry * (1.0 - mix) + processed * mix) * output;
                 if c == 0 {
                     let point = self.meter_samples as usize % 128;
@@ -311,7 +323,8 @@ impl AudioEffect for DriveEffect {
         self.delay = [[0.0; 2]; 64];
         self.delay_position = 0;
         self.dry_delay = [[0.0; 2]; 64];
-        self.mix_output_delay = [[self.params[param::MIX], self.params[param::OUTPUT]]; 64];
+        self.control_delay = [self.params; 64];
+        self.audible = self.params;
         self.oversampling.iter_mut().for_each(oversampling::OversamplingPath::reset);
         self.modern_low = [0.0; 2];
         self.pre_hp.reset();
