@@ -57,17 +57,18 @@ pub fn arrange(size: Size, advanced: bool) -> Arrangement {
     } else {
         (36.0, None)
     };
+    let graph = if short {
+        0.0
+    } else {
+        (size.height - TOOLBAR_H - controls).max(0.0)
+    };
     Arrangement {
-        graph: if short {
-            0.0
-        } else {
-            (size.height - TOOLBAR_H - controls).max(0.0)
-        },
+        graph,
         controls,
         knobs,
         all_bands: !advanced && size.width >= 820.0 && size.height >= 220.0,
         advanced,
-        inline_primary: advanced && short && size.width >= 820.0,
+        inline_primary: advanced && graph < 160.0 && size.width >= 820.0,
     }
 }
 
@@ -540,7 +541,7 @@ mod tests {
                     assert!(layout.graph == 0.0 || layout.graph >= 4.0 + plot_header + 32.0);
                     assert_eq!(
                         layout.inline_primary,
-                        advanced && height < 108.0 && width >= 820.0
+                        advanced && layout.graph < 160.0 && width >= 820.0
                     );
                 }
             }
