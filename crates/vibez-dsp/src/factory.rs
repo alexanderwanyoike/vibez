@@ -21,7 +21,7 @@ pub fn create_effect(effect_type: EffectType, sample_rate: f32) -> Box<dyn Audio
         EffectType::Delay => Box::new(DelayEffect::new(sample_rate)),
         EffectType::Reverb => Box::new(ReverbEffect::new(sample_rate)),
         EffectType::Drive => Box::new(DriveEffect::new()),
-        EffectType::Bitcrush => Box::new(BitcrushEffect::new()),
+        EffectType::Bitcrush => Box::new(BitcrushEffect::with_sample_rate(sample_rate)),
         EffectType::Compressor => Box::new(CompressorEffect::new(sample_rate)),
         EffectType::AutoPan => Box::new(AutoPanEffect::new(sample_rate)),
         EffectType::Gate => Box::new(GateEffect::new(sample_rate)),

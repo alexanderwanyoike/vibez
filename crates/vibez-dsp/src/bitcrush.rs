@@ -86,6 +86,7 @@ pub static BITCRUSH_PARAMS: &[ParamDescriptor] = &[
 /// Lo-fi effect: reduces bit depth and sample rate (sample-and-hold).
 pub struct BitcrushEffect {
     params: [f32; param::COUNT],
+    sample_rate: f32,
     /// Sample-and-hold state, per channel.
     hold: [f32; 2],
     /// Frame counter for SR reduce, per channel.
@@ -94,8 +95,18 @@ pub struct BitcrushEffect {
 
 impl BitcrushEffect {
     pub fn new() -> Self {
+        Self::with_sample_rate(44_100.0)
+    }
+
+    pub fn with_sample_rate(sample_rate: f32) -> Self {
+        let sample_rate = if sample_rate.is_finite() && sample_rate >= 2.0 {
+            sample_rate
+        } else {
+            48_000.0
+        };
         Self {
             params: std::array::from_fn(|index| BITCRUSH_PARAMS[index].default),
+            sample_rate,
             hold: [0.0; 2],
             counter: [0; 2],
         }
@@ -109,6 +120,10 @@ impl Default for BitcrushEffect {
 }
 
 impl AudioEffect for BitcrushEffect {
+    fn activation_sample_rate(&self) -> Option<u32> {
+        Some(self.sample_rate as u32)
+    }
+
     fn effect_type(&self) -> EffectType {
         EffectType::Bitcrush
     }
