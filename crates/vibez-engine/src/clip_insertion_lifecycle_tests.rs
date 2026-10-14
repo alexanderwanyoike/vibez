@@ -123,3 +123,65 @@ fn abandoned_native_request_returns_complete_delta_and_resumes_fifo_after_credit
         assert_eq!(fixture.resident.strong_count(), 0);
     }
 }
+
+fn on_audio_thread(mut engine: AudioEngine, sounding: bool) -> (AudioEngine, [f32; 16]) {
+    let owner_thread = std::thread::current().id();
+    std::thread::spawn(move || {
+        assert_ne!(std::thread::current().id(), owner_thread);
+        let output = callback(&mut engine, sounding);
+        (engine, output)
+    }).join().unwrap()
+}
+
+#[test]
+fn fulfilled_reply_survives_producer_drop_until_completion_or_owner_shutdown() {
+    for complete in [true, false] {
+        let mut fixture = setup();
+        let mut delta = delta(fixture.track);
+        let ring = mailbox(&delta);
+        let identity = Arc::downgrade(&delta.id.0);
+        fixture.commands.push(delta.command.take().unwrap()).unwrap();
+        let (engine, _) = on_audio_thread(fixture.engine, false);
+        fixture.engine = engine;
+        let mut received = Received::default();
+        received.drain(&mut fixture.events);
+        assert_eq!(received.requests.len(), 1);
+        let request = received.requests.pop().unwrap();
+        assert_eq!(std::ptr::from_ref(request.sender.buffer()), ring);
+        let fulfilled = crate::retirement::tests::allocations(|| request.fulfill());
+        assert!(fulfilled.0 > 0);
+        assert_eq!(fulfilled.1, 0);
+        assert_eq!(identity.strong_count(), 2);
+        assert_eq!(delta.audio.strong_count(), 1);
+        if complete {
+            let (engine, _) = on_audio_thread(fixture.engine, false);
+            fixture.engine = engine;
+            received.drain(&mut fixture.events);
+            assert_eq!(received.completed.len(), 1);
+            assert_applied(&fixture, &delta, &received.completed[0]);
+            assert_eq!(std::ptr::from_ref(received.completed[0].owner.receiver.buffer()), ring);
+            assert!(received.completed[0].owner.receiver.is_empty());
+            let (engine, output) = on_audio_thread(fixture.engine, true);
+            fixture.engine = engine;
+            assert_signal(&output, 0.3125);
+            let disposed = crate::retirement::tests::allocations(|| drop(received));
+            assert_eq!(disposed.0, 0);
+            assert!(disposed.1 > 0);
+            assert_eq!(identity.strong_count(), 1);
+            assert_eq!(delta.audio.strong_count(), 1);
+        } else {
+            // Fulfill completed before teardown, but no callback consumed its
+            // queued reply. The final consumer owns its complete ring contents.
+            assert_eq!(fixture.engine.tracks()[0].playback_source.clips.len(), 1);
+            drop(received);
+        }
+        let disposed = crate::retirement::tests::allocations(|| drop(fixture.engine));
+        assert_eq!(disposed.0, 0);
+        assert!(disposed.1 > 0);
+        assert_eq!(delta.audio.strong_count(), 0);
+        assert_eq!(fixture.resident.strong_count(), 0);
+        assert_eq!(identity.strong_count(), 1);
+        drop(delta);
+        assert_eq!(identity.strong_count(), 0);
+    }
+}
