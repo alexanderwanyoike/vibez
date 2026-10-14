@@ -121,7 +121,7 @@ impl AudioEffect for GateEffect {
         let att = Self::coef(self.params[param::ATTACK], self.sample_rate);
         let rel = Self::coef(self.params[param::RELEASE], self.sample_rate);
         let hold_frames = (self.params[param::HOLD] * 0.001 * self.sample_rate) as u32;
-        let closed_gain = if (self.params[param::RANGE_ENABLED] >= 0.5) { 10.0_f32.powf(-self.params[param::RANGE] / 20.0) } else { 0.0 };
+        let closed_gain = if self.params[param::RANGE_ENABLED] >= 0.5 { 10.0_f32.powf(-self.params[param::RANGE] / 20.0) } else { 0.0 };
 
         for frame in 0..frames {
             let mut peak = 0.0_f32;
