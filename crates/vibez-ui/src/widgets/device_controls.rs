@@ -4,7 +4,9 @@ use iced::widget::{button, canvas, column, pick_list, row, text, text_input, too
 use iced::{Color, Element, Length, Theme};
 use vibez_core::id::TrackId;
 
-use crate::domains::device_controls::{presented_value, DeviceControlMsg, DeviceControlState};
+use crate::domains::device_controls::{
+    presented_value, DeviceControlMsg, DeviceControlState, ParameterPresentation,
+};
 use crate::message::Message;
 use crate::state::UiEffect;
 use crate::theme as th;
@@ -35,13 +37,49 @@ pub fn parameter_with_heading<'a>(
     knob_size: Option<f32>,
     heading: Element<'a, Message>,
 ) -> Element<'a, Message> {
+    parameter_content(track, effect, state, index, accent, knob_size, heading, None)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn parameter_with_presentation<'a>(
+    track: TrackId,
+    effect: &'a UiEffect,
+    state: &'a DeviceControlState,
+    index: usize,
+    accent: Color,
+    knob_size: Option<f32>,
+    presentation: &ParameterPresentation,
+) -> Element<'a, Message> {
+    parameter_content(
+        track,
+        effect,
+        state,
+        index,
+        accent,
+        knob_size.filter(|_| presentation.is_editable()),
+        section_label(presentation.name),
+        Some(presentation),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn parameter_content<'a>(
+    track: TrackId,
+    effect: &'a UiEffect,
+    state: &'a DeviceControlState,
+    index: usize,
+    accent: Color,
+    knob_size: Option<f32>,
+    heading: Element<'a, Message>,
+    presentation: Option<&ParameterPresentation>,
+) -> Element<'a, Message> {
     let descriptor = &crate::domains::device_controls::presentation_descriptor(effect, index);
     let value = effect
         .params
         .get(index)
         .copied()
         .unwrap_or(descriptor.default);
-    let field = value_field(track, effect, state, index, accent);
+    let field = value_field_presented(track, effect, state, index, accent, presentation);
     let mut content = column![heading].spacing(3).align_x(iced::Alignment::Center);
     if let Some(size) = knob_size {
         let mut knob = EffectKnobWidget::new(
@@ -61,7 +99,7 @@ pub fn parameter_with_heading<'a>(
     }
     content
         .push(
-            row![field, text(descriptor.unit).size(8).color(th::text_dim())]
+            row![field, text(presentation.map_or(descriptor.unit, |value| value.unit)).size(8).color(th::text_dim())]
                 .spacing(2)
                 .align_y(iced::Alignment::Center),
         )
@@ -76,25 +114,58 @@ pub fn value_field<'a>(
     index: usize,
     accent: Color,
 ) -> Element<'a, Message> {
+    value_field_presented(track, effect, state, index, accent, None)
+}
+
+fn value_field_presented<'a>(
+    track: TrackId,
+    effect: &'a UiEffect,
+    state: &'a DeviceControlState,
+    index: usize,
+    accent: Color,
+    presentation: Option<&ParameterPresentation>,
+) -> Element<'a, Message> {
     let descriptor = &crate::domains::device_controls::presentation_descriptor(effect, index);
     let value = effect
         .params
         .get(index)
         .copied()
         .unwrap_or(descriptor.default);
-    let shown = state
-        .entries
-        .get(&index)
-        .cloned()
-        .unwrap_or_else(|| presented_value(effect, index, value));
+    let editable = presentation.is_none_or(ParameterPresentation::is_editable);
+    let shown = if editable {
+        state.entries.get(&index).cloned().unwrap_or_else(|| {
+            presentation
+                .and_then(|presentation| presentation.value.clone())
+                .unwrap_or_else(|| presented_value(effect, index, value))
+        })
+    } else {
+        "N/A".into()
+    };
+    let explanation = if let Some(presentation) = presentation {
+        presentation.range.as_ref().map_or_else(
+            || format!("{} unavailable until this native device has a valid prepared host sample rate.", presentation.name),
+            |(minimum, maximum)| format!(
+                "{}: {} to {} {}. Enter applies.",
+                presentation.name, minimum, maximum, presentation.unit
+            ),
+        )
+    } else {
+        format!(
+            "{}: {} to {} {}. Enter applies.",
+            descriptor.name,
+            presented_value(effect, index, descriptor.min),
+            presented_value(effect, index, descriptor.max),
+            descriptor.unit
+        )
+    };
     let effect_id = effect.id;
     let submit = Message::DeviceControl(DeviceControlMsg::Submit(track, effect_id, index));
     let invalid = state.errors.contains(&index);
     let input = text_input("", &shown)
-        .on_input(move |text| {
+        .on_input_maybe(editable.then_some(move |text| {
             Message::DeviceControl(DeviceControlMsg::Input(track, effect_id, index, text))
-        })
-        .on_submit(submit.clone())
+        }))
+        .on_submit_maybe(editable.then_some(submit.clone()))
         .size(10)
         .padding([1, 3])
         .width(Length::Fill)
@@ -118,15 +189,8 @@ pub fn value_field<'a>(
             selection: th::with_alpha(accent, 0.3),
         });
     tooltip(
-        on_blur(input, state.entries.contains_key(&index), submit),
-        text(format!(
-            "{}: {} to {} {}. Enter applies.",
-            descriptor.name,
-            presented_value(effect, index, descriptor.min),
-            presented_value(effect, index, descriptor.max),
-            descriptor.unit
-        ))
-        .size(9),
+        on_blur(input, editable && state.entries.contains_key(&index), submit),
+        text(explanation).size(9),
         tooltip::Position::Top,
     )
     .into()
