@@ -8,6 +8,105 @@ use vibez_core::{
 };
 
 #[test]
+fn loaded_native_gate_keeps_silent_detector_in_cached_and_presented_sources() {
+    let project: vibez_project::Project = serde_json::from_str(
+        r#"{
+            "name": "Gate medium 3",
+            "bpm": 120.0,
+            "sample_rate": 48000,
+            "tracks": [
+                {
+                    "id": 100,
+                    "name": "Reference tone",
+                    "color_index": 3,
+                    "gain": 1.0,
+                    "pan": 0.0,
+                    "mute": false,
+                    "solo": false,
+                    "effects": [
+                        {
+                            "id": 101,
+                            "effect_type": "Gate",
+                            "bypass": false,
+                            "params": [-32, 1, 120, 60, 6, 1, 60, 0, 2, 0, 80, 0, 12000, 0, 1]
+                        },
+                        {
+                            "id": 104,
+                            "effect_type": "Eq",
+                            "bypass": true,
+                            "params": [0, 80, 0, 0, 700, 0.7, 0, 2500, 0.7, 0, 8000, 0]
+                        }
+                    ]
+                },
+                {
+                    "id": 200,
+                    "name": "Detector bursts",
+                    "color_index": 2,
+                    "gain": 0.0,
+                    "pan": 0.0,
+                    "mute": false,
+                    "solo": false,
+                    "effects": []
+                }
+            ],
+            "clips": []
+        }"#,
+    )
+    .unwrap();
+    let effect_id = project.tracks[0].effects[0].id;
+    let source_id = project.tracks[1].id;
+    let path = std::path::PathBuf::from("gate-medium-3.vibez");
+    let mut app = app();
+    // Keep this routing regression from writing the user's recent-project settings.
+    app.state.project.recent_project_paths = vec![path.clone()];
+    let _ = app.update_and_refresh_clips(Message::ProjectLoaded {
+        path: path.clone(),
+        result: Box::new(Ok(ProjectLoadResult {
+            path,
+            project,
+            clips: Vec::new(),
+            unresolved_clips: Vec::new(),
+            sampler_samples: Vec::new(),
+            drum_rack_pad_samples: Vec::new(),
+            warnings: Vec::new(),
+        })),
+    });
+
+    let tracks = &app.state.project_tracks.tracks;
+    let gate = &tracks[0].effects[0];
+    assert_eq!(gate.id, effect_id);
+    assert_eq!(gate.effect_type, EffectType::Gate);
+    assert_eq!(tracks[1].gain, 0.0);
+    let routing = app.state.devices.last_routing.as_ref().unwrap();
+    RoutingGraph::prepare(routing).unwrap();
+    let cached = app
+        .state
+        .devices
+        .sidechain_choices
+        .get(&(effect_id, ExternalInputId(0)))
+        .expect("loaded Gate publishes validated detector choices");
+    let detector = cached
+        .iter()
+        .find(|choice| choice.source == source_id)
+        .expect("zero output gain does not remove a detector source");
+    assert!(detector.taps.contains(&SourceTap::BeforeEffects));
+    assert!(detector.taps.contains(&SourceTap::AfterEffects));
+    assert!(detector.taps.contains(&SourceTap::AfterFader));
+    let presentation = crate::domains::native_sidechain::presentation(
+        gate,
+        tracks,
+        &app.state.project_tracks.buses,
+        &app.state.devices,
+        ExternalInputId(0),
+    )
+    .expect("loaded Gate exposes its native sidechain input");
+    assert!(presentation
+        .sources
+        .iter()
+        .any(|choice| choice.id == Some(source_id) && choice.label == "Detector bursts"));
+}
+
+#[test]
 fn dormant_send_keeps_its_graph_connection_without_republishing_for_level_edits() {
     let mut app = app();
     let mut track = ProjectTrack::new(TrackId::new(), "Kick".into(), 0);
