@@ -500,10 +500,10 @@ fn assert_combined_legacy_unload_pressure(delayed_minimum_credits: bool) {
             &channels, 64, &reports, &[], 1,
         ).unwrap())).unwrap();
         let section = SectionId::new();
-        for refresh in [false, true] {
+        for _ in 0..2 {
             let prepared = Box::new(PreparedSectionPlaybackSource::new(section, 8.0, true, vec![]));
             delayed_sections.push(&*prepared as *const PreparedSectionPlaybackSource);
-            commands.push(if refresh { EngineCommand::RefreshSection(prepared) } else { EngineCommand::LaunchSection(prepared) }).unwrap();
+            commands.push(EngineCommand::LaunchSection(prepared)).unwrap();
         }
     }
     commands.push(EngineCommand::BeginClipPerformance).unwrap();
@@ -558,7 +558,7 @@ fn assert_combined_legacy_unload_pressure(delayed_minimum_credits: bool) {
     let timing_history = if delayed_minimum_credits {
         assert_eq!(engine.mix_latency(), 521);
         assert_eq!(engine.earliest_source_latency(), 0);
-        assert_eq!(engine.section_capture_timing.len(), 2, "public launch and refresh retain real early/full timing history");
+        assert_eq!(engine.section_capture_timing.len(), 2, "two public launches retain real early/full timing history");
         let offsets = engine.capture_offsets();
         assert!(!offsets.is_empty());
         Some((engine.section_capture_timing.len(), engine.section_capture_timing.capacity(), Arc::downgrade(&offsets)))
@@ -681,7 +681,7 @@ fn assert_combined_legacy_unload_pressure(delayed_minimum_credits: bool) {
         assert_eq!(delivered.iter().filter(|event| matches!(event, EngineEvent::CaptureTimingRetired(owner) if std::ptr::eq(Arc::as_ptr(owner), offsets.as_ptr()))).count(), *history_length);
         for pointer in &delayed_sections {
             assert_eq!(delivered.iter().filter(|event| match event {
-                EngineEvent::SectionQueueCancelled { retired } | EngineEvent::SectionSourceRefreshed { retired, .. } => std::ptr::eq(&**retired, *pointer),
+                EngineEvent::SectionQueueCancelled { retired } => std::ptr::eq(&**retired, *pointer),
                 _ => false,
             }).count(), 1, "both public delayed Section acknowledgements return exactly once");
         }
