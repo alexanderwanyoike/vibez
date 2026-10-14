@@ -235,10 +235,10 @@ impl App {
                     accent,
                     crate::widgets::filter_device::preset_bar_width(size),
                 ),
-                self.gain_devices
-                    .panels
+                self.device_meters
+                    .readings
                     .get(&effect.id)
-                    .map(|panel| panel.output)
+                    .map(|readings| readings.output)
                     .unwrap_or(vibez_engine::metering::MeterValues::SILENT),
                 self.state.transport.sample_rate as f32,
                 size,

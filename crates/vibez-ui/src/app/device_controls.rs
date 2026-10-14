@@ -1,8 +1,8 @@
-//! Routes native device field edits without storing project values in panel state.
+//! Maintains native device control state and routes edits to project parameters.
 
 use super::*;
 use crate::domains::device_controls::{DeviceControlMsg, DeviceControlState};
-use vibez_core::id::{EffectId, TrackId};
+use vibez_core::id::EffectId;
 
 impl App {
     pub(super) fn update_device_control(&mut self, message: DeviceControlMsg) -> Task<Message> {
@@ -32,6 +32,29 @@ impl App {
         }
     }
 
+    pub(super) fn prune_device_controls(&mut self) {
+        let project = &self.state.project_tracks;
+        self.device_controls.retain(|id, _| {
+            project
+                .tracks
+                .iter()
+                .chain(&project.buses)
+                .chain(std::iter::once(&project.master))
+                .any(|track| track.effects.iter().any(|effect| effect.id == *id))
+        });
+    }
+
+    pub(super) fn discard_all_device_entries(&mut self) {
+        for state in self.device_controls.values_mut() {
+            state.entries.clear();
+            state.errors.clear();
+        }
+    }
+
+    pub(super) fn reset_device_controls(&mut self) {
+        self.device_controls.clear();
+    }
+
     pub(super) fn device_control_state(&self, effect_id: EffectId) -> &DeviceControlState {
         self.device_controls
             .get(&effect_id)
@@ -45,6 +68,7 @@ mod tests {
     use crate::domains::devices::DevicesMsg;
     use crate::state::ProjectTrack;
     use vibez_core::effect::EffectType;
+    use vibez_core::id::TrackId;
     use vibez_dsp::filter::param;
     fn filter_app() -> (App, TrackId, EffectId) {
         let mut app = super::super::test_support::app();

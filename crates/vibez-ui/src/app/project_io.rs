@@ -32,9 +32,8 @@ fn plugin_instrument_for_replay(track: &TrackInfo) -> Option<vibez_core::effect:
 
 impl App {
     pub(super) fn clear_project_runtime(&mut self) {
-        self.reset_gain_devices();
+        self.reset_device_meters();
         self.reset_device_presets();
-        self.device_controls.clear();
         self.plugin_load_requests.reset();
         self.sidechain_sync_inputs = None;
         self.track_meter_peaks.clear();

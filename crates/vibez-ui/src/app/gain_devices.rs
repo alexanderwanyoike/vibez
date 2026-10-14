@@ -1,26 +1,17 @@
-//! Connects native Gain controls and meter readings to the visible device chain.
+//! Routes native Gain control edits and retains Gain panel state.
 
 use std::collections::HashMap;
-use std::time::Instant;
 
-use vibez_core::id::{EffectId, TrackId};
-use vibez_engine::metering::MeterValues;
+use vibez_core::id::EffectId;
 
 use crate::domains::gain::{is_native_gain, GainAction, GainMsg, GainPanelState};
-use crate::state::DetailPanelTab;
 
 use super::*;
 
 #[derive(Default)]
 pub(super) struct GainDevices {
-    pub channel: Option<TrackId>,
-    pub generation: u64,
     pub empty_panel: GainPanelState,
     pub panels: HashMap<EffectId, GainPanelState>,
-}
-
-fn is_metered_effect(effect: &crate::state::UiEffect) -> bool {
-    is_native_gain(effect) || crate::domains::device_controls::is_native_filter(effect)
 }
 
 impl App {
@@ -36,106 +27,8 @@ impl App {
         }
     }
 
-    pub(super) fn poll_gain_devices(&mut self) {
-        let wanted = (self.state.view.detail_panel_tab == DetailPanelTab::Devices)
-            .then(|| self.state.active_timeline_editor().selected_track)
-            .flatten()
-            .filter(|track_id| {
-                self.state
-                    .find_track(*track_id)
-                    .is_some_and(|track| track.effects.iter().any(is_metered_effect))
-            });
-        if wanted != self.gain_devices.channel {
-            self.gain_devices.channel = wanted;
-            self.restart_gain_metering();
-        }
-        let project = &self.state.project_tracks;
-        self.device_controls.retain(|id, _| {
-            project
-                .tracks
-                .iter()
-                .chain(&project.buses)
-                .chain(std::iter::once(&project.master))
-                .any(|track| track.effects.iter().any(|effect| effect.id == *id))
-        });
-        self.gain_devices.panels.retain(|id, _| {
-            project
-                .tracks
-                .iter()
-                .chain(&project.buses)
-                .chain(std::iter::once(&project.master))
-                .any(|track| track.effects.iter().any(|effect| effect.id == *id))
-        });
-        if let Some(track) = wanted.and_then(|track_id| self.state.find_track(track_id)) {
-            let now = Instant::now();
-            for effect in &track.effects {
-                if is_metered_effect(effect) {
-                    self.gain_devices
-                        .panels
-                        .entry(effect.id)
-                        .or_default()
-                        .reset_stale(now);
-                }
-            }
-        }
-    }
-
-    /// Metering restarts under a new generation after undo or redo (which
-    /// re-add every channel) and on a channel change, while each panel keeps
-    /// its open controls.
-    pub(super) fn restart_gain_metering(&mut self) {
-        for state in self.device_controls.values_mut() {
-            state.entries.clear();
-            state.errors.clear();
-        }
-        self.gain_devices.generation = self.gain_devices.generation.wrapping_add(1);
-        for panel in self.gain_devices.panels.values_mut() {
-            panel.restart_metering();
-        }
-        self.send_command(EngineCommand::SetEffectMeterChannel {
-            track_id: self.gain_devices.channel,
-            generation: self.gain_devices.generation,
-        });
-    }
-
-    pub(super) fn reset_gain_devices(&mut self) {
-        self.gain_devices.channel = None;
-        self.gain_devices.generation = self.gain_devices.generation.wrapping_add(1);
-        self.gain_devices.panels.clear();
-        self.send_command(EngineCommand::SetEffectMeterChannel {
-            track_id: None,
-            generation: self.gain_devices.generation,
-        });
-    }
-
-    pub(super) fn accept_gain_meter(
-        &mut self,
-        track_id: TrackId,
-        effect_id: EffectId,
-        generation: u64,
-        input: MeterValues,
-        output: MeterValues,
-    ) {
-        if self.gain_devices.channel != Some(track_id) || self.gain_devices.generation != generation
-        {
-            return;
-        }
-        if self.state.find_track(track_id).is_some_and(|track| {
-            track
-                .effects
-                .iter()
-                .any(|effect| effect.id == effect_id && is_metered_effect(effect))
-        }) {
-            self.gain_devices
-                .panels
-                .entry(effect_id)
-                .or_default()
-                .accept_meter(input, output, Instant::now());
-        }
-    }
-
     pub(super) fn update_gain_control(&mut self, message: GainMsg) -> Task<Message> {
-        let Some((track_id, effect_id)) = message.destination(self.gain_devices.channel) else {
+        let Some((track_id, effect_id)) = message.destination(self.device_meters.channel) else {
             return Task::none();
         };
         let Some(effect) = self
@@ -162,8 +55,10 @@ impl App {
 mod tests {
     use super::*;
     use crate::domains::devices::DevicesMsg;
-    use crate::state::ProjectTrack;
+    use crate::state::{DetailPanelTab, ProjectTrack};
     use vibez_core::effect::EffectType;
+    use vibez_core::id::TrackId;
+    use vibez_engine::metering::MeterValues;
 
     fn gain_app() -> (App, TrackId, EffectId) {
         let mut app = super::super::test_support::app();
@@ -181,7 +76,7 @@ mod tests {
         app.state.view.detail_panel_tab = DetailPanelTab::Devices;
         app.state.project.history = Default::default();
         app.state.project.dirty = false;
-        app.poll_gain_devices();
+        app.poll_device_meters();
         (app, id, effect)
     }
 
@@ -191,7 +86,7 @@ mod tests {
         let _ = app.update(Message::GainControl(GainMsg::ToggleAdvanced(effect)));
         let _ = app.update(Message::set_effect_param(track, effect, 1, 8.0));
         let _ = app.update(Message::Project(crate::domains::project::ProjectMsg::Undo));
-        app.poll_gain_devices();
+        app.poll_device_meters();
         assert_eq!(
             app.state.find_track(track).unwrap().effects[0].params[1],
             0.0
@@ -213,9 +108,9 @@ mod tests {
             EffectType::Gain,
         )));
         app.state.arrangement.selected_track = Some(other_id);
-        app.poll_gain_devices();
+        app.poll_device_meters();
         app.state.arrangement.selected_track = Some(track);
-        app.poll_gain_devices();
+        app.poll_device_meters();
         assert!(app.gain_devices.panels[&effect].advanced);
     }
 
@@ -304,27 +199,27 @@ mod tests {
     #[test]
     fn late_gain_meters_cannot_cross_selection_or_device_removal() {
         let (mut app, track, effect) = gain_app();
-        let stale_generation = app.gain_devices.generation;
+        let stale_generation = app.device_meters.generation;
         let levels = MeterValues {
             peak_l: 0.5,
             peak_r: 0.25,
             rms_l: 0.3,
             rms_r: 0.15,
         };
-        app.accept_gain_meter(track, effect, stale_generation, levels, levels);
+        app.accept_device_meter(track, effect, stale_generation, levels, levels);
         assert_eq!(app.gain_devices.panels[&effect].output, levels);
         app.state.arrangement.selected_track = None;
-        app.poll_gain_devices();
+        app.poll_device_meters();
         assert_eq!(app.gain_devices.panels[&effect].output, MeterValues::SILENT);
         app.state.arrangement.selected_track = Some(track);
-        app.poll_gain_devices();
-        app.accept_gain_meter(track, effect, stale_generation, levels, levels);
+        app.poll_device_meters();
+        app.accept_device_meter(track, effect, stale_generation, levels, levels);
         assert_eq!(app.gain_devices.panels[&effect].output, MeterValues::SILENT);
-        app.accept_gain_meter(track, effect, app.gain_devices.generation, levels, levels);
+        app.accept_device_meter(track, effect, app.device_meters.generation, levels, levels);
         assert_eq!(app.gain_devices.panels[&effect].output, levels);
         let _ = app.update(Message::Devices(DevicesMsg::RemoveEffect(track, effect)));
-        app.poll_gain_devices();
-        app.accept_gain_meter(track, effect, app.gain_devices.generation, levels, levels);
+        app.poll_device_meters();
+        app.accept_device_meter(track, effect, app.device_meters.generation, levels, levels);
         assert!(app.gain_devices.panels.is_empty());
     }
 }
