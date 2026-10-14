@@ -4,8 +4,8 @@ use vibez_core::effect::EffectType;
 use vibez_dsp::{effect::AudioEffect, factory::create_effect_with_params};
 
 fn drive_case(channels: usize) -> Box<dyn AudioEffect> {
-    let mut effect = create_effect_with_params(
-        EffectType::Bitcrush, 48_000.0, &[16.0, 1.0, 1.0, 0.0]);
+    let mut effect =
+        create_effect_with_params(EffectType::Bitcrush, 48_000.0, &[16.0, 1.0, 1.0, 0.0]);
     effect.process(&mut vec![0.0437; 9 * channels], channels);
     assert!(effect.set_param(3, 12.0));
     assert_eq!(effect.get_param(3), 12.0);
@@ -32,11 +32,16 @@ fn manual_drive_ramps_on_source_frames_and_automation_snaps_without_reviving_the
             let driven = f64::from(0.0437_f32) * 10.0_f64.powf(drive_db / 20.0);
             let expected = (driven * 32_768.0).round() as f32 / 32_768.0;
             for &sample in samples {
-                assert!((sample - expected).abs() <= quantum,
-                    "frame={frame}, expected={expected}, actual={sample}");
+                assert!(
+                    (sample - expected).abs() <= quantum,
+                    "frame={frame}, expected={expected}, actual={sample}"
+                );
             }
         }
-        assert_eq!(&whole[512 * channels..], &vec![whole[512 * channels]; 128 * channels]);
+        assert_eq!(
+            &whole[512 * channels..],
+            &vec![whole[512 * channels]; 128 * channels]
+        );
 
         let mut automated = drive_case(channels);
         automated.process(&mut vec![0.0437; 173 * channels], channels);
@@ -44,10 +49,13 @@ fn manual_drive_ramps_on_source_frames_and_automation_snaps_without_reviving_the
         assert_eq!(automated.get_param(3), 6.0);
         let mut actual = vec![0.0437; 640 * channels];
         automated.process(&mut actual, channels);
-        let mut hydrated = create_effect_with_params(
-            EffectType::Bitcrush, 48_000.0, &[16.0, 1.0, 1.0, 6.0]);
+        let mut hydrated =
+            create_effect_with_params(EffectType::Bitcrush, 48_000.0, &[16.0, 1.0, 1.0, 6.0]);
         let mut expected = vec![0.0437; 640 * channels];
         hydrated.process(&mut expected, channels);
-        assert_eq!(actual, expected, "automation must replace the active Drive ramp");
+        assert_eq!(
+            actual, expected,
+            "automation must replace the active Drive ramp"
+        );
     }
 }

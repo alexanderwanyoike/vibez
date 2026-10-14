@@ -267,10 +267,18 @@ mod tests {
         app.state.project.history = Default::default();
         app.state.project.dirty = false;
         let _ = app.update(Message::DeviceControl(DeviceControlMsg::Input(
-            track, effect, 0, "8 bit".into(),
+            track,
+            effect,
+            0,
+            "8 bit".into(),
         )));
-        let _ = app.update(Message::DeviceControl(DeviceControlMsg::Submit(track, effect, 0)));
-        assert_eq!(app.state.find_track(track).unwrap().effects[0].params, before);
+        let _ = app.update(Message::DeviceControl(DeviceControlMsg::Submit(
+            track, effect, 0,
+        )));
+        assert_eq!(
+            app.state.find_track(track).unwrap().effects[0].params,
+            before
+        );
         assert!(app.device_controls[&effect].errors.is_empty());
         assert!(!app.state.project.history.can_undo());
         assert!(!app.state.project.dirty);
