@@ -398,12 +398,12 @@ fn local_away_owner_and_resident_restart_keep_independent_gates() {
                 accepted_identity
             );
             assert_eq!(trace.retired_plans, [original_plan, local_plan_identity]);
-            for index in 0..2 {
+            for (index, expected_identity) in identities.iter().enumerate() {
                 assert_eq!(
                     reconfiguration::effect_owner_identity(
                         &*engine.tracks[index].effects[0].effect
                     ),
-                    identities[index]
+                    *expected_identity
                 );
             }
             let resumed = overlap_render(&mut engine, &mut events, tracks, &mut trace, partitions);
