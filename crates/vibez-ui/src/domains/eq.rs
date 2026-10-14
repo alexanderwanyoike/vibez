@@ -19,6 +19,7 @@ pub fn first_native_eq(track: &UiTrack) -> Option<&UiEffect> {
 
 #[derive(Debug, Clone)]
 pub enum EqMsg {
+    Focus(TrackId, EffectId),
     SelectBand(TrackId, EffectId, usize),
     Source(TrackId, EffectId, EffectSpectrumPosition),
     Freeze(TrackId, EffectId),
@@ -46,6 +47,7 @@ impl EqPanel {
 #[derive(Default)]
 pub struct EqSpectrumRuntime {
     pub target: Option<EffectSpectrumTarget>,
+    pub focus: Option<(TrackId, EffectId)>,
     pub generation: u64,
 }
 

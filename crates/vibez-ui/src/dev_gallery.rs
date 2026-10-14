@@ -426,6 +426,7 @@ impl EqGallery {
                 th::track_color(0),
                 state,
                 &self.panel,
+                false,
                 crate::widgets::device_preset_bar::view(
                     self.track,
                     effect,

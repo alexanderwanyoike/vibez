@@ -7,7 +7,8 @@ use vibez_core::id::EffectId;
 impl App {
     pub(super) fn update_eq_control(&mut self, message: EqMsg) -> Task<Message> {
         let (track, effect) = match message {
-            EqMsg::SelectBand(track, effect, _)
+            EqMsg::Focus(track, effect)
+            | EqMsg::SelectBand(track, effect, _)
             | EqMsg::Source(track, effect, _)
             | EqMsg::Freeze(track, effect) => (track, effect),
         };
@@ -19,8 +20,10 @@ impl App {
         }) {
             return Task::none();
         }
+        self.eq_spectrum.focus = Some((track, effect));
         let panel = self.eq_panels.entry(effect).or_default();
         match message {
+            EqMsg::Focus(..) => {}
             EqMsg::SelectBand(_, _, band) => panel.selected_band = band.min(3),
             EqMsg::Source(_, _, source) => {
                 panel.post =
@@ -61,7 +64,19 @@ impl App {
             .active_timeline_editor()
             .selected_track
             .and_then(|track_id| {
-                let effect = first_native_eq(self.state.find_track(track_id)?)?;
+                let track = self.state.find_track(track_id)?;
+                let focused = (self.state.view.workspace != crate::state::Workspace::Mix
+                    && self.state.view.detail_panel_tab == crate::state::DetailPanelTab::Devices)
+                    .then(|| self.eq_spectrum.focus)
+                    .flatten()
+                    .filter(|(owner, _)| *owner == track_id)
+                    .and_then(|(_, id)| {
+                        track
+                            .effects
+                            .iter()
+                            .find(|effect| effect.id == id && is_native_eq(effect))
+                    });
+                let effect = focused.or_else(|| first_native_eq(track))?;
                 Some((track_id, effect.id, self.eq_panel(effect.id).position()))
             });
         if self.eq_spectrum.retarget(wanted) {
@@ -124,6 +139,7 @@ impl App {
 
     pub(super) fn reset_eq_panels(&mut self) {
         self.eq_panels.clear();
+        self.eq_spectrum.focus = None;
         self.eq_spectrum.retarget(None);
         self.send_command(EngineCommand::SetEffectSpectrumTap(None));
     }

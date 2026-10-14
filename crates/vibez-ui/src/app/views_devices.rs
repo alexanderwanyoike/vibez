@@ -251,6 +251,9 @@ impl App {
                 accent,
                 self.device_control_state(effect.id),
                 self.eq_panel(effect.id),
+                self.eq_spectrum.target.is_some_and(|target| {
+                    target.track_id == track && target.effect_id == effect.id
+                }),
                 self.view_device_preset_bar(
                     track,
                     effect,

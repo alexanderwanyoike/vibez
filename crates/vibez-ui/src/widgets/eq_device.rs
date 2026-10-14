@@ -238,8 +238,15 @@ fn analyser_controls<'a>(
     effect: &UiEffect,
     panel: &EqPanel,
     accent: Color,
+    active: bool,
 ) -> Element<'a, Message> {
     row![
+        choice(
+            if active { "Live" } else { "Analyse" },
+            active,
+            accent,
+            Message::EqControl(EqMsg::Focus(track, effect.id))
+        ),
         choice(
             "Pre",
             !panel.post,
@@ -279,6 +286,7 @@ pub fn view<'a>(
     accent: Color,
     state: &'a DeviceControlState,
     panel: &'a EqPanel,
+    analyser_active: bool,
     preset: Element<'a, Message>,
     output: MeterValues,
     sample_rate: f32,
@@ -326,15 +334,15 @@ pub fn view<'a>(
         row![
             primary(None),
             advanced(None),
-            analyser_controls(track, effect, panel, accent)
+            analyser_controls(track, effect, panel, accent, analyser_active)
         ]
         .spacing(12)
         .align_y(iced::Alignment::Center)
         .into()
-    } else if layout.advanced && layout.graph == 0.0 {
+    } else if layout.advanced && layout.graph < 72.0 {
         row![
             advanced(None),
-            analyser_controls(track, effect, panel, accent)
+            analyser_controls(track, effect, panel, accent, analyser_active)
         ]
         .spacing(8)
         .align_y(iced::Alignment::Center)
@@ -406,7 +414,7 @@ pub fn view<'a>(
                 row![
                     section_label("Static response · manual values"),
                     horizontal_space(),
-                    analyser_controls(track, effect, panel, accent)
+                    analyser_controls(track, effect, panel, accent, analyser_active)
                 ]
                 .align_y(iced::Alignment::Center),
                 graph
