@@ -1,9 +1,28 @@
+//! Four-band console EQ with measured response, smooth controls and band audition.
+
 use vibez_core::effect::{EffectType, ParamDescriptor};
 
 use crate::effect::AudioEffect;
 
-static EQ_PARAMS: &[ParamDescriptor] = &[
-    // ── LF band ──
+#[path = "eq_response.rs"]
+mod response;
+use response::{Biquad, Complex, Pass};
+
+pub mod param {
+    pub const GAIN: [usize; 4] = [0, 3, 6, 9];
+    pub const FREQUENCY: [usize; 4] = [1, 4, 7, 10];
+    pub const SHAPE: [usize; 4] = [2, 5, 8, 11];
+    pub const ENABLE: [usize; 4] = [12, 13, 14, 15];
+    pub const AUDITION: usize = 16;
+    pub const HP_ENABLED: usize = 17;
+    pub const HP_FREQUENCY: usize = 18;
+    pub const LP_ENABLED: usize = 19;
+    pub const LP_FREQUENCY: usize = 20;
+    pub const OUTPUT: usize = 21;
+    pub const COUNT: usize = 22;
+}
+
+pub static EQ_PARAMS: &[ParamDescriptor] = &[
     ParamDescriptor {
         name: "LF Gain",
         min: -15.0,
@@ -25,7 +44,6 @@ static EQ_PARAMS: &[ParamDescriptor] = &[
         default: 0.0,
         unit: "",
     },
-    // ── LMF band ──
     ParamDescriptor {
         name: "LMF Gain",
         min: -15.0,
@@ -47,7 +65,6 @@ static EQ_PARAMS: &[ParamDescriptor] = &[
         default: 0.7,
         unit: "",
     },
-    // ── HMF band ──
     ParamDescriptor {
         name: "HMF Gain",
         min: -15.0,
@@ -69,7 +86,6 @@ static EQ_PARAMS: &[ParamDescriptor] = &[
         default: 0.7,
         unit: "",
     },
-    // ── HF band ──
     ParamDescriptor {
         name: "HF Gain",
         min: -15.0,
@@ -91,253 +107,400 @@ static EQ_PARAMS: &[ParamDescriptor] = &[
         default: 0.0,
         unit: "",
     },
+    ParamDescriptor {
+        name: "LF Enabled",
+        min: 0.0,
+        max: 1.0,
+        default: 1.0,
+        unit: "",
+    },
+    ParamDescriptor {
+        name: "LMF Enabled",
+        min: 0.0,
+        max: 1.0,
+        default: 1.0,
+        unit: "",
+    },
+    ParamDescriptor {
+        name: "HMF Enabled",
+        min: 0.0,
+        max: 1.0,
+        default: 1.0,
+        unit: "",
+    },
+    ParamDescriptor {
+        name: "HF Enabled",
+        min: 0.0,
+        max: 1.0,
+        default: 1.0,
+        unit: "",
+    },
+    ParamDescriptor {
+        name: "Audition",
+        min: 0.0,
+        max: 4.0,
+        default: 0.0,
+        unit: "",
+    },
+    ParamDescriptor {
+        name: "HP Enabled",
+        min: 0.0,
+        max: 1.0,
+        default: 0.0,
+        unit: "",
+    },
+    ParamDescriptor {
+        name: "HP Frequency",
+        min: 20.0,
+        max: 2000.0,
+        default: 20.0,
+        unit: "Hz",
+    },
+    ParamDescriptor {
+        name: "LP Enabled",
+        min: 0.0,
+        max: 1.0,
+        default: 0.0,
+        unit: "",
+    },
+    ParamDescriptor {
+        name: "LP Frequency",
+        min: 1000.0,
+        max: 20000.0,
+        default: 20000.0,
+        unit: "Hz",
+    },
+    ParamDescriptor {
+        name: "Output",
+        min: -24.0,
+        max: 24.0,
+        default: 0.0,
+        unit: "dB",
+    },
 ];
 
-/// Fixed bell width for the LF/HF bands when switched out of shelf
-/// mode, matching the console's fairly broad bell.
+const RAMP_FRAMES: u32 = 512;
 const SHELF_BELL_Q: f32 = 0.85;
+const CUT_Q: f32 = std::f32::consts::FRAC_1_SQRT_2;
 
-#[derive(Default)]
-struct Biquad {
-    b0: f64,
-    b1: f64,
-    b2: f64,
-    a1: f64,
-    a2: f64,
-    x: [f64; 2],
-    y: [f64; 2],
-    z: [[f64; 2]; 2], // [channel][delay]: (x1,x2) and (y1,y2) fused per channel
-}
-
-impl Biquad {
-    fn identity() -> Self {
-        Self {
-            b0: 1.0,
-            ..Self::default()
-        }
-    }
-
-    fn set_low_shelf(&mut self, f_hz: f32, gain_db: f32, sr: f32) {
-        let omega = 2.0 * std::f64::consts::PI * f_hz as f64 / sr as f64;
-        let a = 10.0_f64.powf(gain_db as f64 / 40.0);
-        let cos_w = omega.cos();
-        let sin_w = omega.sin();
-        let s = 1.0;
-        let alpha = sin_w / 2.0 * ((a + 1.0 / a) * (1.0 / s - 1.0) + 2.0).sqrt();
-        let two_sqrt_a_alpha = 2.0 * a.sqrt() * alpha;
-
-        let b0 = a * ((a + 1.0) - (a - 1.0) * cos_w + two_sqrt_a_alpha);
-        let b1 = 2.0 * a * ((a - 1.0) - (a + 1.0) * cos_w);
-        let b2 = a * ((a + 1.0) - (a - 1.0) * cos_w - two_sqrt_a_alpha);
-        let a0 = (a + 1.0) + (a - 1.0) * cos_w + two_sqrt_a_alpha;
-        let a1 = -2.0 * ((a - 1.0) + (a + 1.0) * cos_w);
-        let a2 = (a + 1.0) + (a - 1.0) * cos_w - two_sqrt_a_alpha;
-
-        self.b0 = b0 / a0;
-        self.b1 = b1 / a0;
-        self.b2 = b2 / a0;
-        self.a1 = a1 / a0;
-        self.a2 = a2 / a0;
-    }
-
-    fn set_high_shelf(&mut self, f_hz: f32, gain_db: f32, sr: f32) {
-        let omega = 2.0 * std::f64::consts::PI * f_hz as f64 / sr as f64;
-        let a = 10.0_f64.powf(gain_db as f64 / 40.0);
-        let cos_w = omega.cos();
-        let sin_w = omega.sin();
-        let s = 1.0;
-        let alpha = sin_w / 2.0 * ((a + 1.0 / a) * (1.0 / s - 1.0) + 2.0).sqrt();
-        let two_sqrt_a_alpha = 2.0 * a.sqrt() * alpha;
-
-        let b0 = a * ((a + 1.0) + (a - 1.0) * cos_w + two_sqrt_a_alpha);
-        let b1 = -2.0 * a * ((a - 1.0) + (a + 1.0) * cos_w);
-        let b2 = a * ((a + 1.0) + (a - 1.0) * cos_w - two_sqrt_a_alpha);
-        let a0 = (a + 1.0) - (a - 1.0) * cos_w + two_sqrt_a_alpha;
-        let a1 = 2.0 * ((a - 1.0) - (a + 1.0) * cos_w);
-        let a2 = (a + 1.0) - (a - 1.0) * cos_w - two_sqrt_a_alpha;
-
-        self.b0 = b0 / a0;
-        self.b1 = b1 / a0;
-        self.b2 = b2 / a0;
-        self.a1 = a1 / a0;
-        self.a2 = a2 / a0;
-    }
-
-    fn set_peaking(&mut self, f_hz: f32, q: f32, gain_db: f32, sr: f32) {
-        let omega = 2.0 * std::f64::consts::PI * f_hz as f64 / sr as f64;
-        let a = 10.0_f64.powf(gain_db as f64 / 40.0);
-        let cos_w = omega.cos();
-        let sin_w = omega.sin();
-        let alpha = sin_w / (2.0 * q as f64);
-
-        let b0 = 1.0 + alpha * a;
-        let b1 = -2.0 * cos_w;
-        let b2 = 1.0 - alpha * a;
-        let a0 = 1.0 + alpha / a;
-        let a1 = -2.0 * cos_w;
-        let a2 = 1.0 - alpha / a;
-
-        self.b0 = b0 / a0;
-        self.b1 = b1 / a0;
-        self.b2 = b2 / a0;
-        self.a1 = a1 / a0;
-        self.a2 = a2 / a0;
-    }
-
-    /// Magnitude of the transfer function at normalized angular
-    /// frequency `w` (radians/sample). Used for drawing the response
-    /// curve; never called on the audio thread.
-    fn magnitude_at(&self, w: f64) -> f64 {
-        let (cos_w, sin_w) = (w.cos(), w.sin());
-        let (cos_2w, sin_2w) = ((2.0 * w).cos(), (2.0 * w).sin());
-        let num_re = self.b0 + self.b1 * cos_w + self.b2 * cos_2w;
-        let num_im = -(self.b1 * sin_w + self.b2 * sin_2w);
-        let den_re = 1.0 + self.a1 * cos_w + self.a2 * cos_2w;
-        let den_im = -(self.a1 * sin_w + self.a2 * sin_2w);
-        ((num_re * num_re + num_im * num_im) / (den_re * den_re + den_im * den_im)).sqrt()
-    }
-
-    fn process(&mut self, sample: f32, channel: usize) -> f32 {
-        let x0 = sample as f64;
-        let z = &mut self.z[channel];
-        let y0 = self.b0 * x0 + self.b1 * self.x[channel] + self.b2 * z[0]
-            - self.a1 * self.y[channel]
-            - self.a2 * z[1];
-        z[0] = self.x[channel];
-        z[1] = self.y[channel];
-        self.x[channel] = x0;
-        self.y[channel] = y0;
-        y0 as f32
-    }
-
-    fn reset(&mut self) {
-        self.x = [0.0; 2];
-        self.y = [0.0; 2];
-        self.z = [[0.0; 2]; 2];
-    }
-}
-
-/// SSL E-series style four-band parametric EQ.
-///
-/// LF and HF are shelves with a bell option; LMF and HMF are fully
-/// parametric bells with sweepable Q. Parameter indices follow
-/// [`EQ_PARAMS`].
 pub struct EqEffect {
-    params: [f32; 12],
+    params: [f32; param::COUNT],
+    applied: [f32; param::COUNT],
+    steps: [f32; param::COUNT],
+    remaining: [u32; param::COUNT],
+    audition: [f32; 5],
+    audition_steps: [f32; 5],
+    audition_remaining: u32,
     sample_rate: f32,
-    lf: Biquad,
-    lmf: Biquad,
-    hmf: Biquad,
-    hf: Biquad,
+    bells: [Biquad; 4],
+    shelves: [Biquad; 2],
+    audition_bells: [Biquad; 4],
+    audition_shelves: [Biquad; 2],
+    cuts: [Biquad; 2],
+    coefficient_clock: u32,
+    started: bool,
 }
 
 impl EqEffect {
     pub fn new(sample_rate: f32) -> Self {
-        let mut params = [0.0_f32; 12];
-        for (i, d) in EQ_PARAMS.iter().enumerate() {
-            params[i] = d.default;
-        }
-        let mut fx = Self {
+        let params = std::array::from_fn(|index| EQ_PARAMS[index].default);
+        let mut effect = Self {
             params,
-            sample_rate,
-            lf: Biquad::identity(),
-            lmf: Biquad::identity(),
-            hmf: Biquad::identity(),
-            hf: Biquad::identity(),
+            applied: params,
+            steps: [0.0; param::COUNT],
+            remaining: [0; param::COUNT],
+            audition: [1.0, 0.0, 0.0, 0.0, 0.0],
+            audition_steps: [0.0; 5],
+            audition_remaining: 0,
+            sample_rate: if sample_rate.is_finite() && sample_rate >= 2.0 {
+                sample_rate
+            } else {
+                48_000.0
+            },
+            bells: [Biquad::IDENTITY; 4],
+            shelves: [Biquad::IDENTITY; 2],
+            audition_bells: [Biquad::IDENTITY; 4],
+            audition_shelves: [Biquad::IDENTITY; 2],
+            cuts: [Biquad::IDENTITY; 2],
+            coefficient_clock: 0,
+            started: false,
         };
-        fx.recompute();
-        fx
+        effect.recompute();
+        effect
     }
 
-    /// Build an EQ from a parameter vector without touching audio
-    /// state; the UI uses this to evaluate the response curve.
     pub fn from_params(sample_rate: f32, params: &[f32]) -> Self {
-        let mut fx = Self::new(sample_rate);
-        for (i, v) in params.iter().copied().enumerate().take(12) {
-            if let Some(d) = EQ_PARAMS.get(i) {
-                fx.params[i] = v.clamp(d.min, d.max);
-            }
+        let mut effect = Self::new(sample_rate);
+        for (index, value) in params.iter().copied().enumerate().take(param::COUNT) {
+            effect.set_param(index, value);
         }
-        fx.recompute();
-        fx
+        effect
     }
 
-    /// Combined magnitude response of all four bands at `freq_hz`,
-    /// in dB. Drawing-time helper; not for the audio thread.
-    pub fn response_db(&self, freq_hz: f32) -> f32 {
-        let w = 2.0 * std::f64::consts::PI * freq_hz as f64 / self.sample_rate as f64;
-        let mag = self.lf.magnitude_at(w)
-            * self.lmf.magnitude_at(w)
-            * self.hmf.magnitude_at(w)
-            * self.hf.magnitude_at(w);
-        (20.0 * mag.max(1e-9).log10()) as f32
-    }
-
-    fn recompute(&mut self) {
-        let p = &self.params;
-        let sr = self.sample_rate;
-        if p[2] >= 0.5 {
-            self.lf.set_peaking(p[1], SHELF_BELL_Q, p[0], sr);
+    fn applied_target(&self, index: usize) -> f32 {
+        if [2, 11, 12, 13, 14, 15, 17, 19].contains(&index) {
+            if self.params[index] >= 0.5 { 1.0 } else { 0.0 }
         } else {
-            self.lf.set_low_shelf(p[1], p[0], sr);
-        }
-        self.lmf.set_peaking(p[4], p[5], p[3], sr);
-        self.hmf.set_peaking(p[7], p[8], p[6], sr);
-        if p[11] >= 0.5 {
-            self.hf.set_peaking(p[10], SHELF_BELL_Q, p[9], sr);
-        } else {
-            self.hf.set_high_shelf(p[10], p[9], sr);
+            self.params[index]
         }
     }
-}
 
-impl AudioEffect for EqEffect {
-    fn activation_sample_rate(&self) -> Option<u32> {
-        Some(self.sample_rate as u32)
-    }
-
-    fn effect_type(&self) -> EffectType {
-        EffectType::Eq
-    }
-
-    fn param_descriptors(&self) -> &'static [ParamDescriptor] {
-        EQ_PARAMS
-    }
-
-    fn set_param(&mut self, index: usize, value: f32) -> bool {
-        let Some(d) = EQ_PARAMS.get(index) else {
+    fn set_target(&mut self, index: usize, value: f32, automated: bool) -> bool {
+        let Some(descriptor) = EQ_PARAMS.get(index) else {
             return false;
         };
-        self.params[index] = value.clamp(d.min, d.max);
+        if !value.is_finite() {
+            return false;
+        }
+        let value = value.clamp(descriptor.min, descriptor.max);
+        let value = if index == param::AUDITION {
+            value.round()
+        } else {
+            value
+        };
+        if self.params[index] == value && !automated {
+            return true;
+        }
+        self.params[index] = value;
+        let snap = automated || !self.started;
+        if index == param::AUDITION {
+            for choice in 0..5 {
+                let target = if choice == value as usize { 1.0 } else { 0.0 };
+                if snap {
+                    self.audition[choice] = target;
+                }
+                self.audition_steps[choice] = (target - self.audition[choice]) / RAMP_FRAMES as f32;
+            }
+            self.audition_remaining = if snap { 0 } else { RAMP_FRAMES };
+        } else {
+            let target = self.applied_target(index);
+            if snap {
+                self.applied[index] = target;
+            }
+            self.steps[index] = (target - self.applied[index]) / RAMP_FRAMES as f32;
+            self.remaining[index] = if snap { 0 } else { RAMP_FRAMES };
+        }
         self.recompute();
         true
     }
 
+    fn recompute(&mut self) {
+        let p = &self.applied;
+        let rate = self.sample_rate;
+        for band in 0..4 {
+            let frequency = p[param::FREQUENCY[band]];
+            let q = if band == 0 || band == 3 {
+                SHELF_BELL_Q
+            } else {
+                p[param::SHAPE[band]]
+            };
+            self.bells[band].coefficients =
+                response::peaking(rate, frequency, q, p[param::GAIN[band]]);
+            self.audition_bells[band].coefficients = response::pass(rate, frequency, q, Pass::Band);
+        }
+        for (shelf, band) in [0, 3].into_iter().enumerate() {
+            self.shelves[shelf].coefficients = response::shelf(
+                rate,
+                p[param::FREQUENCY[band]],
+                p[param::GAIN[band]],
+                band == 3,
+            );
+            self.audition_shelves[shelf].coefficients = response::pass(
+                rate,
+                p[param::FREQUENCY[band]],
+                CUT_Q,
+                if band == 3 { Pass::High } else { Pass::Low },
+            );
+        }
+        self.cuts[0].coefficients = response::pass(rate, p[param::HP_FREQUENCY], CUT_Q, Pass::High);
+        self.cuts[1].coefficients = response::pass(rate, p[param::LP_FREQUENCY], CUT_Q, Pass::Low);
+    }
+
+    fn advance(&mut self) {
+        let mut coefficients_changed = false;
+        let mut coefficient_ramp_ended = false;
+        for index in 0..param::COUNT {
+            if self.remaining[index] == 0 {
+                continue;
+            }
+            self.remaining[index] -= 1;
+            self.applied[index] = if self.remaining[index] == 0 {
+                self.applied_target(index)
+            } else {
+                self.applied[index] + self.steps[index]
+            };
+            if param::GAIN.contains(&index)
+                || param::FREQUENCY.contains(&index)
+                || [5, 8, param::HP_FREQUENCY, param::LP_FREQUENCY].contains(&index)
+            {
+                coefficients_changed = true;
+                coefficient_ramp_ended |= self.remaining[index] == 0;
+            }
+        }
+        if self.audition_remaining > 0 {
+            self.audition_remaining -= 1;
+            for choice in 0..5 {
+                self.audition[choice] = if self.audition_remaining == 0 {
+                    if choice == self.params[param::AUDITION] as usize {
+                        1.0
+                    } else {
+                        0.0
+                    }
+                } else {
+                    self.audition[choice] + self.audition_steps[choice]
+                };
+            }
+        }
+        // A fixed frame clock makes coefficient work independent of callback
+        // partitioning, while final and automated values still land exactly.
+        if coefficients_changed && (self.coefficient_clock == 0 || coefficient_ramp_ended) {
+            self.recompute();
+        }
+        self.coefficient_clock = (self.coefficient_clock + 1) % 8;
+    }
+
+    pub fn response_db(&self, frequency: f32) -> f32 {
+        if !frequency.is_finite() {
+            return 0.0;
+        }
+        let omega = std::f64::consts::TAU * frequency.clamp(0.0, self.sample_rate * 0.5) as f64
+            / self.sample_rate as f64;
+        let mut combined = Complex::ONE;
+        for band in 0..4 {
+            let bell = self.bells[band].coefficients.response(omega);
+            let band_response = if band == 0 || band == 3 {
+                let shelf = usize::from(band == 3);
+                self.shelves[shelf]
+                    .coefficients
+                    .response(omega)
+                    .blend(bell, self.applied[param::SHAPE[band]])
+            } else {
+                bell
+            };
+            combined = combined
+                .times(Complex::ONE.blend(band_response, self.applied[param::ENABLE[band]]));
+        }
+        for (cut, enabled) in [param::HP_ENABLED, param::LP_ENABLED]
+            .into_iter()
+            .enumerate()
+        {
+            combined = combined.times(Complex::ONE.blend(
+                self.cuts[cut].coefficients.response(omega),
+                self.applied[enabled],
+            ));
+        }
+        let mut output = combined.scaled(self.audition[0]);
+        for band in 0..4 {
+            let bell = self.audition_bells[band].coefficients.response(omega);
+            let band_response = if band == 0 || band == 3 {
+                self.audition_shelves[usize::from(band == 3)]
+                    .coefficients
+                    .response(omega)
+                    .blend(bell, self.applied[param::SHAPE[band]])
+            } else {
+                bell
+            };
+            output = output.plus(band_response.scaled(self.audition[band + 1]));
+        }
+        (20.0 * output.magnitude().max(1e-12).log10()) as f32 + self.applied[param::OUTPUT]
+    }
+
+    fn process_channel(&mut self, input: f32, channel: usize) -> f32 {
+        let mut normal = input;
+        for band in 0..4 {
+            let bell = self.bells[band].process(normal, channel);
+            let wet = if band == 0 || band == 3 {
+                let shelf = self.shelves[usize::from(band == 3)].process(normal, channel);
+                shelf + (bell - shelf) * self.applied[param::SHAPE[band]]
+            } else {
+                bell
+            };
+            normal += (wet - normal) * self.applied[param::ENABLE[band]];
+        }
+        for (cut, enabled) in [param::HP_ENABLED, param::LP_ENABLED]
+            .into_iter()
+            .enumerate()
+        {
+            let wet = self.cuts[cut].process(normal, channel);
+            normal += (wet - normal) * self.applied[enabled];
+        }
+        let mut output = normal * self.audition[0];
+        // Inactive paths keep their history warm so enabling or auditioning
+        // starts from the actual signal rather than an empty filter state.
+        for band in 0..4 {
+            let bell = self.audition_bells[band].process(input, channel);
+            let wet = if band == 0 || band == 3 {
+                let shelf = self.audition_shelves[usize::from(band == 3)].process(input, channel);
+                shelf + (bell - shelf) * self.applied[param::SHAPE[band]]
+            } else {
+                bell
+            };
+            output += wet * self.audition[band + 1];
+        }
+        output * vibez_core::level::db_to_amplitude(self.applied[param::OUTPUT])
+    }
+}
+
+impl AudioEffect for EqEffect {
+    fn supports_level_meter(&self) -> bool {
+        true
+    }
+    fn activation_sample_rate(&self) -> Option<u32> {
+        Some(self.sample_rate as u32)
+    }
+    fn effect_type(&self) -> EffectType {
+        EffectType::Eq
+    }
+    fn param_descriptors(&self) -> &'static [ParamDescriptor] {
+        EQ_PARAMS
+    }
+    fn set_param(&mut self, index: usize, value: f32) -> bool {
+        self.set_target(index, value, false)
+    }
+    fn set_automated_param(&mut self, index: usize, value: f32) -> bool {
+        self.set_target(index, value, true)
+    }
     fn get_param(&self, index: usize) -> f32 {
         self.params.get(index).copied().unwrap_or(0.0)
     }
 
     fn process(&mut self, buffer: &mut [f32], channels: usize) {
-        let ch = channels.clamp(1, 2);
-        let frames = buffer.len() / ch;
-        for frame in 0..frames {
-            for c in 0..ch {
-                let idx = frame * ch + c;
-                let mut s = buffer[idx];
-                s = self.lf.process(s, c);
-                s = self.lmf.process(s, c);
-                s = self.hmf.process(s, c);
-                s = self.hf.process(s, c);
-                buffer[idx] = s;
+        if channels == 0 {
+            return;
+        }
+        for frame in buffer.chunks_exact_mut(channels) {
+            self.started = true;
+            self.advance();
+            for (channel, sample) in frame.iter_mut().take(2).enumerate() {
+                *sample = self.process_channel(*sample, channel);
             }
         }
     }
 
     fn reset(&mut self) {
-        self.lf.reset();
-        self.lmf.reset();
-        self.hmf.reset();
-        self.hf.reset();
+        for filter in self
+            .bells
+            .iter_mut()
+            .chain(&mut self.shelves)
+            .chain(&mut self.audition_bells)
+            .chain(&mut self.audition_shelves)
+            .chain(&mut self.cuts)
+        {
+            filter.reset();
+        }
+        self.applied = std::array::from_fn(|index| self.applied_target(index));
+        self.remaining = [0; param::COUNT];
+        self.audition = std::array::from_fn(|choice| {
+            if choice == self.params[param::AUDITION] as usize {
+                1.0
+            } else {
+                0.0
+            }
+        });
+        self.audition_remaining = 0;
+        self.coefficient_clock = 0;
+        self.started = false;
+        self.recompute();
     }
 }
 
