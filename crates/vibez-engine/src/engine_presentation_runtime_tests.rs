@@ -1,6 +1,7 @@
 //! Clock namespace changes and cancellation preserve applied audible state.
 
 use super::*;
+use graph_test_support::{graph_engine, routing_channel};
 use vibez_core::perform::NoteRepeatRate;
 use vibez_core::{
     id::EffectId,
@@ -245,15 +246,17 @@ fn repeated_source_and_heard_events_share_zero_delay_backpressure() {
 }
 
 #[test]
-fn legacy_repeat_overflow_closes_capture_in_both_render_paths() {
+fn graph_repeat_overflow_closes_capture_during_playback_and_idle() {
     use crate::note_repeat::NoteRepeatClock;
     use vibez_core::midi::InstrumentKind;
     use vibez_core::perform::NoteRepeatRate;
     for idle in [false, true] {
-        let (mut engine, _, _) = AudioEngine::new();
+        let track_id = TrackId::new();
+        let (mut engine, _, _) =
+            graph_engine(&[routing_channel(track_id), routing_channel(TrackId::MASTER)]);
         engine.sample_rate = 100;
         engine.transport.set_bpm(60.0);
-        let mut track = EngineTrack::new(TrackId::new());
+        let mut track = EngineTrack::new(track_id);
         track.instrument = Some(create_instrument(InstrumentKind::SubtractiveSynth, 100.0));
         engine.tracks.push(Box::new(track));
         engine.render_idle_instruments(&mut [0.0; 16], 8, 2, 0, None, None);
