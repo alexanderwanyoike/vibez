@@ -106,9 +106,10 @@ pub trait Instrument: Send {
     fn load_drum_pad_sample(
         &mut self,
         _pad_index: usize,
-        _sample: Arc<DecodedAudio>,
-        _name: String,
-    ) {
+        sample: Arc<DecodedAudio>,
+        name: String,
+    ) -> InstrumentMediaOwners {
+        InstrumentMediaOwners::incoming(sample, name)
     }
 
     /// Clear a drum-rack pad. No-op for non-drum-rack instruments.

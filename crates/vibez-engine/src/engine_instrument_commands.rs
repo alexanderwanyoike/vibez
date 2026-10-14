@@ -211,11 +211,12 @@ impl AudioEngine {
         sample: std::sync::Arc<vibez_core::audio_buffer::DecodedAudio>,
         sample_name: String,
     ) {
-        if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
-            if let Some(ref mut instrument) = track.instrument {
-                instrument.load_drum_pad_sample(pad_index, sample, sample_name);
-            }
-        }
+        let retired = match self.tracks.iter_mut().find(|track| track.id == track_id)
+            .and_then(|track| track.instrument.as_mut()) {
+            Some(instrument) => instrument.load_drum_pad_sample(pad_index, sample, sample_name),
+            None => vibez_instruments::InstrumentMediaOwners::incoming(sample, sample_name),
+        };
+        self.retire_instrument_media(retired);
     }
 
     pub(super) fn command_clear_drum_rack_pad(
