@@ -79,14 +79,26 @@ fn a_rate_change_keeps_old_native_scope_unavailable_until_same_id_complete_recre
     assert_eq!(old.scopes.len(), 1);
     assert_eq!((old.scopes[0].3.count, old.scopes[0].3.sample_rate), (128, 48_000.0));
     assert!(fixture.engine.transport.is_playing());
+    let retained = [active[active.len() - 2], active[active.len() - 1]];
     let saved_id = serde_json::to_string(&fixture.effect).unwrap();
     fixture.commands.push(EngineCommand::SetSampleRate(96_000)).unwrap();
-    for _ in 0..2 {
-        assert!(rate_window(&mut fixture).iter().all(|&value| value == 0.0));
+    let unavailable = rate_window(&mut fixture);
+    for (frame, stereo) in unavailable.chunks_exact(2).enumerate() {
+        for channel in 0..2 {
+            let expected = if frame < 64 {
+                retained[channel] * ((64 - frame) as f32 / 64.0)
+            } else {
+                0.0
+            };
+            assert_eq!(stereo[channel], expected,
+                "rate invalidation loss ramp at frame {frame}, channel {channel}");
+        }
     }
+    assert!(rate_window(&mut fixture).iter().all(|&value| value == 0.0));
     unavailable_rate_events(&mut fixture);
     fixture.publish_routing(Some(fixture.effect));
     fixture.commands.push(EngineCommand::Play).unwrap();
+    // Play preserves the already-muted gate, so it cannot rearm the completed loss ramp.
     for _ in 0..2 {
         assert!(rate_window(&mut fixture).iter().all(|&value| value == 0.0));
     }
