@@ -682,16 +682,26 @@ mod tests {
                 sample_rate: 48_000,
             });
             let owner = Arc::downgrade(&audio);
-            producer.push(EngineEvent::RetiredAudioBuffer(audio)).unwrap();
+            producer
+                .push(EngineEvent::RetiredAudioBuffer(audio))
+                .unwrap();
             if after_project_reset {
                 app.reset_to_new_project();
             }
-            assert_eq!(owner.strong_count(), 1, "the pending return is the sole audio owner");
+            assert_eq!(
+                owner.strong_count(),
+                1,
+                "the pending return is the sole audio owner"
+            );
             assert!(app.state.project_tracks.tracks.is_empty());
             assert!(app.state.browser.waveform_audio.is_none());
             let status = app.state.status_text.clone();
             app.poll_engine_events();
-            assert_eq!(owner.strong_count(), 0, "return disposal does not depend on current project media");
+            assert_eq!(
+                owner.strong_count(),
+                0,
+                "return disposal does not depend on current project media"
+            );
             assert_eq!(app.state.status_text, status);
             assert!(app.event_rx.as_ref().unwrap().is_empty());
             app.poll_engine_events();

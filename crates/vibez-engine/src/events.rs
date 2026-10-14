@@ -496,7 +496,7 @@ impl PartialEq for EngineEvent {
             (Self::PerformancePosition(left), Self::PerformancePosition(right)) => left == right,
             (Self::RetiredAudioBuffer(left), Self::RetiredAudioBuffer(right)) => {
                 Arc::ptr_eq(left, right)
-            },
+            }
             (
                 Self::Metering {
                     peak_l: left_peak_l,

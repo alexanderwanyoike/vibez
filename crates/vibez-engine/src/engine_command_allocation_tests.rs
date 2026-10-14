@@ -354,12 +354,22 @@ fn cases() -> Vec<Case> {
         case!("StopPerformanceCapture", false, |_| {
             C::StopPerformanceCapture
         }),
-        case!("LoadAudio", false, |commands, _| {
-            commands.push(C::LoadAudio(audio(4096))).unwrap();
-        }, |_| C::LoadAudio(audio(8192))),
-        case!("UnloadAudio", false, |commands, _| {
-            commands.push(C::LoadAudio(audio(4096))).unwrap();
-        }, |_| C::UnloadAudio),
+        case!(
+            "LoadAudio",
+            false,
+            |commands, _| {
+                commands.push(C::LoadAudio(audio(4096))).unwrap();
+            },
+            |_| C::LoadAudio(audio(8192))
+        ),
+        case!(
+            "UnloadAudio",
+            false,
+            |commands, _| {
+                commands.push(C::LoadAudio(audio(4096))).unwrap();
+            },
+            |_| C::UnloadAudio
+        ),
         case!("AddTrack", false, |_| C::add_track(TrackId::new())),
         case!("RemoveTrack", false, |f| C::RemoveTrack(f.audio)),
         case!("ReorderTracks", true, |f| C::ReorderTracks(vec![
