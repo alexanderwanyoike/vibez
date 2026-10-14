@@ -7,7 +7,8 @@ use crate::state::{ProjectTrack, UiDrumPad};
 use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::id::TrackId;
 use vibez_core::midi::InstrumentKind;
-use vibez_core::track::{DrumPadState, MediaProvenance, MediaSourceRef, TrackKind};
+use vibez_core::midi::TrackKind;
+use vibez_core::track::{DrumPadState, MediaProvenance, MediaSourceRef};
 use vibez_engine::engine::AudioProcessBlock;
 use vibez_instruments::PreparedDrumPadState;
 
