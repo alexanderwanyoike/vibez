@@ -11,6 +11,10 @@ use crate::state::{DetailPanelTab, UiEffect};
 
 use super::*;
 
+#[cfg(test)]
+#[path = "bitcrush_meter_flow_tests.rs"]
+mod bitcrush_flow_tests;
+
 #[derive(Default)]
 pub(super) struct DeviceMeters {
     pub channel: Option<TrackId>,
@@ -163,6 +167,10 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+#[cfg(test)]
+#[path = "bitcrush_meter_flow_tests.rs"]
+mod bitcrush_flow_tests;
 
     #[test]
     fn readings_expire_at_the_meter_timeout() {
