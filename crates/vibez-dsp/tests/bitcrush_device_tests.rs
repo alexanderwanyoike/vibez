@@ -1,4 +1,4 @@
-//! Bitcrush respects the host's actual interleaved channel layout.
+//! Bitcrush host-buffer and parameter boundaries preserve audio and state.
 
 use vibez_core::effect::EffectType;
 use vibez_dsp::factory::create_effect_with_params;
