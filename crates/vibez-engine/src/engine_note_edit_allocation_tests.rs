@@ -288,3 +288,124 @@ fn editing_pitch_start_and_length_preserves_note_indices_and_allocation_free_not
         );
     }
 }
+
+type PublicNoteFixture = (
+    AudioEngine,
+    rtrb::Producer<EngineCommand>,
+    rtrb::Consumer<crate::events::EngineEvent>,
+    TrackId,
+    ClipId,
+);
+
+fn held_note(start_beat: f64, duration_beats: f64) -> MidiNote {
+    MidiNote { pitch: 60, velocity: 100, start_beat, duration_beats }
+}
+
+fn public_note_fixture(notes: &[MidiNote], duration_beats: f64) -> PublicNoteFixture {
+    let (mut engine, mut commands, events) = AudioEngine::new();
+    let track = TrackId::new();
+    let clip = ClipId::new();
+    for command in [
+        EngineCommand::SetSampleRate(96),
+        EngineCommand::SetBpm(60.0),
+        EngineCommand::add_track(track),
+        EngineCommand::SetInstrument {
+            track_id: track,
+            instrument: Box::new(PitchProbe { active: [false; 256] }),
+        },
+        EngineCommand::AddNoteClip {
+            track_id: track,
+            clip_id: clip,
+            position_beats: 0.0,
+            duration_beats,
+            start_marker_beats: 0.0,
+            loop_enabled: false,
+            loop_start_beats: 0.0,
+            loop_end_beats: duration_beats,
+            groove_grid: GrooveGrid::Sixteenth,
+        },
+    ] {
+        commands.push(command).unwrap();
+    }
+    for &note in notes {
+        commands.push(EngineCommand::AddNote { track_id: track, clip_id: clip, note }).unwrap();
+    }
+    engine.process_block(AudioProcessBlock::new(&mut [], 2));
+    (engine, commands, events, track, clip)
+}
+
+fn begin_note_replay(engine: &mut AudioEngine, commands: &mut rtrb::Producer<EngineCommand>) {
+    commands.push(EngineCommand::Seek(0)).unwrap();
+    commands.push(EngineCommand::Play).unwrap();
+    engine.process_block(AudioProcessBlock::new(&mut [], 2));
+    assert!(engine.transport().is_playing());
+}
+
+fn render_note_blocks(engine: &mut AudioEngine, output: &mut [f32], frames: usize) {
+    for block in output.chunks_mut(frames * 2) {
+        engine.process_block(AudioProcessBlock::new(block, 2));
+    }
+}
+
+fn assert_note_intervals(stage: &str, output: &[f32], unit: f32, intervals: &[(usize, usize)]) {
+    for (frame, pair) in output.as_chunks::<2>().0.iter().enumerate() {
+        let expected = if intervals.iter().any(|&(start, end)| (start..end).contains(&frame)) { unit } else { 0.0 };
+        assert!(pair.iter().all(|sample| (*sample - expected).abs() < 1e-7),
+            "{stage}, frame {frame}: {pair:?} != {expected}");
+    }
+}
+
+#[test]
+fn public_note_growth_keeps_edited_and_removed_clamps_correct_without_callback_allocation() {
+    for count in [1, 2, 20, 21, 128] {
+        let notes = (0..count).rev().map(|start| held_note(start as f64, 1.5)).collect::<Vec<_>>();
+        let duration = (count + 3) as f64;
+        let (mut engine, mut commands, mut events, track, clip) = public_note_fixture(&notes, duration);
+        begin_note_replay(&mut engine, &mut commands);
+        let mut sounding = [0.0; 24 * 2];
+        render_note_blocks(&mut engine, &mut sounding, 96);
+        let unit = sounding[0];
+        assert!(unit > 0.01);
+        assert_note_intervals("growth probe", &sounding, unit, &[(0, 24)]);
+        let mut output = vec![0.0; (count + 3) * 96 * 2];
+        render_note_blocks(&mut engine, &mut output, 96);
+        assert!(!engine.transport().is_playing());
+        while events.pop().is_ok() {}
+
+        let note_index = count / 2;
+        let original_start = count - 1 - note_index;
+        commands.push(EngineCommand::EditNote {
+            track_id: track,
+            clip_id: clip,
+            note_index,
+            note: held_note(original_start as f64 + 0.25, 1.0),
+        }).unwrap();
+        assert_eq!(crate::retirement::tests::allocations(|| {
+            engine.process_block(AudioProcessBlock::new(&mut [], 2));
+        }), (0, 0), "EditNote after {count} public additions");
+        begin_note_replay(&mut engine, &mut commands);
+        assert_eq!(crate::retirement::tests::allocations(|| {
+            render_note_blocks(&mut engine, &mut output, 96);
+        }), (0, 0), "render edited {count}-note clip");
+        let edited_end = if count == 1 { 120 } else { count * 96 + 48 };
+        let edited_start = if original_start == 0 { 24 } else { 0 };
+        assert_note_intervals(&format!("edit after {count} additions"), &output, unit, &[(edited_start, edited_end)]);
+        assert!(!engine.transport().is_playing());
+        while events.pop().is_ok() {}
+
+        commands.push(EngineCommand::RemoveNote { track_id: track, clip_id: clip, note_index }).unwrap();
+        assert_eq!(crate::retirement::tests::allocations(|| {
+            engine.process_block(AudioProcessBlock::new(&mut [], 2));
+        }), (0, 0), "RemoveNote after {count} public additions");
+        begin_note_replay(&mut engine, &mut commands);
+        assert_eq!(crate::retirement::tests::allocations(|| {
+            render_note_blocks(&mut engine, &mut output, 96);
+        }), (0, 0), "render removed {count}-note clip");
+        let intervals = if count == 1 { vec![] } else if original_start == 0 {
+            vec![(96, count * 96 + 48)]
+        } else {
+            vec![(0, original_start * 96 + 48), ((original_start + 1) * 96, count * 96 + 48)]
+        };
+        assert_note_intervals(&format!("remove after {count} additions"), &output, unit, &intervals);
+    }
+}
