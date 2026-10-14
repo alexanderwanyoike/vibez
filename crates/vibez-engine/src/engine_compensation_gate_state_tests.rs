@@ -294,9 +294,8 @@ fn rejected_structural_plan_survives_play_and_automation_until_full_acceptance()
         let capture_stop = fixture.engine.compensation_callback_heard_start;
         assert_eq!(capture_stop, 64);
         let original_plan = std::ptr::from_ref(fixture.engine.routing.as_ref());
-        let effect_identity = reconfiguration::effect_owner_identity(
-            &*fixture.engine.tracks[0].effects[0].effect,
-        );
+        let effect_identity =
+            reconfiguration::effect_owner_identity(&*fixture.engine.tracks[0].effects[0].effect);
         let running = Readiness {
             valid: true,
             awaiting_plan: false,
@@ -320,7 +319,10 @@ fn rejected_structural_plan_survives_play_and_automation_until_full_acceptance()
         };
         let observed_waiting = Readiness::observe(&fixture.engine);
         assert_eq!(observed_waiting, waiting);
-        assert_eq!(std::ptr::from_ref(fixture.engine.routing.as_ref()), original_plan);
+        assert_eq!(
+            std::ptr::from_ref(fixture.engine.routing.as_ref()),
+            original_plan
+        );
         let reason = String::from("plan overlap retains a rejected structural expectation");
         let reason_identity = reason.as_ptr();
         fixture.drain_command(EngineCommand::RejectRoutingUpdate { reason });
@@ -331,29 +333,48 @@ fn rejected_structural_plan_survives_play_and_automation_until_full_acceptance()
         };
         let observed_invalid = Readiness::observe(&fixture.engine);
         assert_eq!(observed_invalid, invalid);
-        assert_eq!(std::ptr::from_ref(fixture.engine.routing.as_ref()), original_plan);
+        assert_eq!(
+            std::ptr::from_ref(fixture.engine.routing.as_ref()),
+            original_plan
+        );
         let mut order = Vec::new();
         for event in fixture.drain_events() {
             match event {
                 EngineEvent::DisposeEffect(owner) => {
                     let effect = owner.take();
-                    assert_eq!(reconfiguration::effect_owner_identity(&*effect), effect_identity);
+                    assert_eq!(
+                        reconfiguration::effect_owner_identity(&*effect),
+                        effect_identity
+                    );
                     order.push("effect-return");
                 }
-                EngineEvent::PerformanceCaptureStopped { effective_at_samples } => {
+                EngineEvent::PerformanceCaptureStopped {
+                    effective_at_samples,
+                } => {
                     assert_eq!(effective_at_samples, capture_stop);
                     order.push("capture-stop");
                 }
                 EngineEvent::PlaybackStopped => order.push("playback-stop"),
                 EngineEvent::CompensationFailed { reason } => {
-                    assert_eq!(reason, "plan overlap retains a rejected structural expectation");
+                    assert_eq!(
+                        reason,
+                        "plan overlap retains a rejected structural expectation"
+                    );
                     assert_eq!(reason.as_ptr(), reason_identity);
                     order.push("rejection");
                 }
                 event => panic!("unexpected rejection event: {event:?}"),
             }
         }
-        assert_eq!(order, ["effect-return", "capture-stop", "playback-stop", "rejection"]);
+        assert_eq!(
+            order,
+            [
+                "effect-return",
+                "capture-stop",
+                "playback-stop",
+                "rejection"
+            ]
+        );
         let loss = render(&mut fixture, partitions);
         for (frame, pair) in loss.as_chunks::<2>().0.iter().enumerate() {
             for channel in 0..2 {
@@ -365,10 +386,16 @@ fn rejected_structural_plan_survives_play_and_automation_until_full_acceptance()
         assert_eq!(fixture.engine.output_gate.remaining_loss_frames(), 0);
         assert_eq!(fixture.engine.output_gate.remaining_resume_frames(), 64);
         fixture.drain_command(EngineCommand::Play);
-        let invalid_playing = Readiness { playing: true, ..invalid };
+        let invalid_playing = Readiness {
+            playing: true,
+            ..invalid
+        };
         let observed_play = Readiness::observe(&fixture.engine);
         assert_eq!(observed_play, invalid_playing);
-        assert_eq!(std::ptr::from_ref(fixture.engine.routing.as_ref()), original_plan);
+        assert_eq!(
+            std::ptr::from_ref(fixture.engine.routing.as_ref()),
+            original_plan
+        );
         let events = fixture.drain_events();
         assert_eq!(events.len(), 1);
         assert!(matches!(events[0], EngineEvent::PlaybackStarted));
@@ -380,7 +407,10 @@ fn rejected_structural_plan_survives_play_and_automation_until_full_acceptance()
         fixture.drain_command(EngineCommand::UpdateAutomationRouting(automation));
         let observed_automation = Readiness::observe(&fixture.engine);
         assert_eq!(observed_automation, invalid_playing);
-        assert_eq!(std::ptr::from_ref(fixture.engine.routing.as_ref()), automation_identity);
+        assert_eq!(
+            std::ptr::from_ref(fixture.engine.routing.as_ref()),
+            automation_identity
+        );
         let events = fixture.drain_events();
         assert_eq!(events.len(), 1);
         assert!(matches!(
@@ -397,7 +427,10 @@ fn rejected_structural_plan_survives_play_and_automation_until_full_acceptance()
         fixture.drain_command(EngineCommand::SetRouting(accepted));
         let observed_accepted = Readiness::observe(&fixture.engine);
         assert_eq!(observed_accepted, running);
-        assert_eq!(std::ptr::from_ref(fixture.engine.routing.as_ref()), accepted_identity);
+        assert_eq!(
+            std::ptr::from_ref(fixture.engine.routing.as_ref()),
+            accepted_identity
+        );
         let events = fixture.drain_events();
         assert_eq!(events.len(), 1);
         assert!(matches!(
@@ -419,7 +452,15 @@ fn rejected_structural_plan_survives_play_and_automation_until_full_acceptance()
         assert_eq!(fixture.engine.output_gate.remaining_resume_frames(), 0);
         assert_eq!(
             order,
-            ["effect-return", "capture-stop", "playback-stop", "rejection", "playback-start", "original-plan-return", "automation-plan-return"]
+            [
+                "effect-return",
+                "capture-stop",
+                "playback-stop",
+                "rejection",
+                "playback-start",
+                "original-plan-return",
+                "automation-plan-return"
+            ]
         );
         assert!(fixture.drain_events().is_empty());
         let readiness = [
@@ -430,16 +471,18 @@ fn rejected_structural_plan_survives_play_and_automation_until_full_acceptance()
             observed_automation,
             observed_accepted,
         ]
-        .map(|state| [
-            u8::from(state.valid),
-            u8::from(state.awaiting_plan),
-            u8::from(state.suspended),
-            u8::from(state.handoff),
-            u8::from(state.restart_requested),
-            u8::from(state.presentation_fault),
-            u8::from(state.playing),
-            u8::from(state.muted),
-        ]);
+        .map(|state| {
+            [
+                u8::from(state.valid),
+                u8::from(state.awaiting_plan),
+                u8::from(state.suspended),
+                u8::from(state.handoff),
+                u8::from(state.restart_requested),
+                u8::from(state.presentation_fault),
+                u8::from(state.playing),
+                u8::from(state.muted),
+            ]
+        });
         eprintln!(
             "compensation-plan-overlap baseline: partitions={partitions:?}; capture_stop={capture_stop}; readiness={readiness:?}; order={order:?}; loss_bits={:?}; play_muted_bits={:?}; automation_muted_bits={:?}; resumed_bits={:?}",
             loss.iter().copied().map(f32::to_bits).collect::<Vec<_>>(),
