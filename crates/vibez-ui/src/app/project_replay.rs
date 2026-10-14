@@ -297,11 +297,7 @@ impl App {
                 }
                 InstrumentKind::DrumRack => {
                     for (pad_index, pad) in track.drum_rack_pads.iter().enumerate() {
-                        self.send_command(EngineCommand::SetDrumRackPadState {
-                            track_id: track.id,
-                            pad_index,
-                            state: pad.to_state(),
-                        });
+                        self.send_command(EngineCommand::set_drum_rack_pad_state(track.id, pad_index, pad.to_state()));
                         if let Some(audio) = &pad.audio {
                             self.send_command(EngineCommand::LoadDrumRackPadSample {
                                 track_id: track.id,

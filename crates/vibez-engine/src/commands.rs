@@ -352,7 +352,7 @@ pub enum EngineCommand {
     SetDrumRackPadState {
         track_id: TrackId,
         pad_index: usize,
-        state: DrumPadState,
+        state: vibez_instruments::PreparedDrumPadState,
     },
 
     // -- Arrangement recording / loop --
@@ -466,6 +466,11 @@ pub enum EngineCommand {
 }
 
 impl EngineCommand {
+    /// Resolve names and destroy unused media metadata on the sending thread.
+    pub fn set_drum_rack_pad_state(track_id: TrackId, pad_index: usize, state: DrumPadState) -> Self {
+        Self::SetDrumRackPadState { track_id, pad_index, state: state.into() }
+    }
+
     /// Constructs the device on the caller's thread: building one allocates,
     /// which the audio callback must never do.
     pub fn insert_built_in_effect(

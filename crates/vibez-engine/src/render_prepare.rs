@@ -63,7 +63,7 @@ pub(super) fn channel(
                 }
                 InstrumentStateInfo::DrumRack { pads } => {
                     for (index, pad) in pads.iter().enumerate() {
-                        instrument.set_drum_pad_state(index, pad.clone());
+                        drop(instrument.set_drum_pad_state(index, pad.clone().into()));
                         if let Some((audio, name)) = req.drum_pad_audio.get(&(info.id, index)) {
                             drop(instrument.load_drum_pad_sample(
                                 index,
