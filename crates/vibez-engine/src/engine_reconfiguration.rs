@@ -2,6 +2,9 @@
 
 use super::*;
 use super::device_validation::DeviceValidationDecision;
+use super::handoff_observation::{
+    observe_handoff_request, observe_transferred_recovery, HandoffRequestFacts,
+};
 use vibez_core::id::EffectId;
 
 pub struct RetiredEffectStorage(pub(super) Vec<EffectSlot>);
@@ -254,35 +257,30 @@ impl AudioEngine {
             .chain(self.buses.iter_mut())
             .chain(std::iter::once(&mut self.master))
         {
-            if let Some(position) = track
-                .effects
-                .iter()
-                .position(|slot| slot.effect.reconfiguration_requested())
-            {
-                let mut slot = track.effects.remove(position);
-                slot.effect.stop_for_reconfiguration();
-                requested = Some(DeviceReconfiguration::Effect {
-                    handoff_id,
-                    reserved_effects: Vec::new(),
-                    track_id: track.id,
-                    position,
-                    slot,
-                });
-                break;
-            }
-            if track
-                .instrument
-                .as_ref()
-                .is_some_and(|instrument| instrument.reconfiguration_requested())
-            {
-                let mut instrument = track.instrument.take().unwrap();
-                instrument.stop_for_reconfiguration();
-                requested = Some(DeviceReconfiguration::Instrument {
-                    handoff_id,
-                    track_id: track.id,
-                    instrument,
-                });
-                break;
+            match observe_handoff_request(track) {
+                HandoffRequestFacts::Effect { position } => {
+                    let mut slot = track.effects.remove(position);
+                    slot.effect.stop_for_reconfiguration();
+                    requested = Some(DeviceReconfiguration::Effect {
+                        handoff_id,
+                        reserved_effects: Vec::new(),
+                        track_id: track.id,
+                        position,
+                        slot,
+                    });
+                    break;
+                }
+                HandoffRequestFacts::Instrument => {
+                    let mut instrument = track.instrument.take().unwrap();
+                    instrument.stop_for_reconfiguration();
+                    requested = Some(DeviceReconfiguration::Instrument {
+                        handoff_id,
+                        track_id: track.id,
+                        instrument,
+                    });
+                    break;
+                }
+                HandoffRequestFacts::None => {}
             }
         }
         if let Some(device) = requested {
@@ -291,9 +289,7 @@ impl AudioEngine {
                 DeviceReconfiguration::Effect { position, slot, .. } => (*position, slot.bypass),
                 _ => (0, false),
             };
-            let scope = device_handoff::RecoveryScope::from_recovery_request(
-                device.processing_recovery_requested(),
-            );
+            let scope = observe_transferred_recovery(&device).scope();
             self.device_handoff
                 .track_transfer(device_handoff::PendingDeviceReconfiguration {
                     handoff_id,
