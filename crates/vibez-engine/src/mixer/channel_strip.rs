@@ -108,7 +108,7 @@ impl EngineTrack {
                             Some(d) => d.min + value * (d.max - d.min),
                             None => value,
                         };
-                        slot.effect.set_param(param_index, native);
+                        slot.effect.set_automated_param(param_index, native);
                     }
                 }
                 AutomationTarget::InstrumentParam { param_index } => {
@@ -195,7 +195,7 @@ impl EngineTrack {
                             .map_or(value, |descriptor| {
                                 descriptor.min + value * (descriptor.max - descriptor.min)
                             });
-                        slot.effect.set_param(param_index, native);
+                        slot.effect.set_automated_param(param_index, native);
                     }
                 }
                 AutomationTarget::InstrumentParam { param_index } => {

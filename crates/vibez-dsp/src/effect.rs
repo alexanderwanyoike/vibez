@@ -56,6 +56,11 @@ pub trait AudioEffect: Send {
     fn effect_type(&self) -> EffectType;
     fn param_descriptors(&self) -> &'static [ParamDescriptor];
     fn set_param(&mut self, index: usize, value: f32) -> bool;
+    /// Automation arrives already divided into control intervals by the
+    /// engine, so a device that smooths manual changes applies it directly.
+    fn set_automated_param(&mut self, index: usize, value: f32) -> bool {
+        self.set_param(index, value)
+    }
     fn get_param(&self, index: usize) -> f32;
     fn process(&mut self, buffer: &mut [f32], channels: usize);
     fn reset(&mut self);
