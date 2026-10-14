@@ -43,3 +43,43 @@ fn modern_tone_matches_the_one_kilohertz_complementary_tilt_at_each_host_rate() 
         }
     }
 }
+
+fn butterworth_amplitude(rate: f64, cutoff: f64, bin: usize, period: usize, high: bool) -> f64 {
+    let k = (std::f64::consts::PI * cutoff / rate).tan();
+    let divisor = 1.0 + std::f64::consts::SQRT_2 * k + k * k;
+    let b = if high { [1.0, -2.0, 1.0] } else { [k * k, 2.0 * k * k, k * k] }.map(|value| value / divisor);
+    let a = [1.0, 2.0 * (k * k - 1.0) / divisor, (1.0 - std::f64::consts::SQRT_2 * k + k * k) / divisor];
+    let angle = std::f64::consts::TAU * bin as f64 / period as f64;
+    let evaluate = |coefficients: [f64; 3]| {
+        let real = coefficients[0] + coefficients[1] * angle.cos() + coefficients[2] * (angle * 2.0).cos();
+        let imaginary = -coefficients[1] * angle.sin() - coefficients[2] * (angle * 2.0).sin();
+        real.hypot(imaginary)
+    };
+    evaluate(b) / evaluate(a)
+}
+
+#[test]
+fn pre_high_pass_filters_the_actual_shaper_input_at_its_stored_frequency() {
+    let period = 2048;
+    for rate in [44_100.0_f32, 48_000.0, 96_000.0] {
+        let input: Vec<_> = (0..period * 3).map(|sample| {
+            let phase = std::f64::consts::TAU * sample as f64 / period as f64;
+            (1e-6 * ((phase * 3.0).sin() + (phase * 501.0).sin())) as f32
+        }).collect();
+        let render = |enabled, cutoff| {
+            let mut effect = create_effect_with_params(EffectType::Drive, rate, &[1.0, 0.5, 1.0, 1.0, 0.0, 2.0, enabled, cutoff]);
+            let mut result = input.clone();
+            effect.process(&mut result, 1);
+            result
+        };
+        let dry = render(0.0, 80.0);
+        for cutoff in [80.0, 700.0] {
+            let filtered = render(1.0, cutoff);
+            for bin in [3, 501] {
+                let expected = butterworth_amplitude(rate as f64, cutoff as f64, bin, period, true);
+                let actual = amplitude(&filtered[period * 2..period * 3], bin) / amplitude(&dry[period * 2..period * 3], bin);
+                assert!((actual - expected).abs() < 5e-5, "rate={rate}, cutoff={cutoff}, bin={bin}: {actual} != {expected}");
+            }
+        }
+    }
+}
