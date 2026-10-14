@@ -111,15 +111,17 @@ fn graph_callbacks_render_each_clock_domain_without_memory_operations_at_hardwar
                     } else {
                         std::f32::consts::FRAC_1_SQRT_2
                     };
-                    for (mixed, selected) in output
+                    for (frame, (mixed, selected)) in output
                         .chunks_exact(channels)
                         .zip(capture.chunks_exact(channels))
+                        .enumerate()
                     {
                         for channel in 0..channels {
                             let dry = if channel < 2 { 0.25 * pan } else { 0.0 };
                             assert!((mixed[channel] - dry * 1.5).abs() < 1e-6,
                                 "{mode:?}, channels={channels}, frames={frames}, callback={callback}, channel={channel}: {}", mixed[channel]);
-                            assert!((selected[channel] - dry).abs() < 1e-6);
+                            assert!((selected[channel] - dry).abs() < 1e-6,
+                                "{mode:?}, channels={channels}, frames={frames}, callback={callback}, frame={frame}, channel={channel}: selected={}, expected={dry}", selected[channel]);
                         }
                     }
                     while events.pop().is_ok() {}
