@@ -63,6 +63,27 @@ pub fn value_field<'a>(
     index: usize,
     accent: Color,
 ) -> Element<'a, Message> {
+    field(track, effect, state, index, accent, false)
+}
+
+pub fn compact_value_field<'a>(
+    track: TrackId,
+    effect: &'a UiEffect,
+    state: &'a DeviceControlState,
+    index: usize,
+    accent: Color,
+) -> Element<'a, Message> {
+    field(track, effect, state, index, accent, true)
+}
+
+fn field<'a>(
+    track: TrackId,
+    effect: &'a UiEffect,
+    state: &'a DeviceControlState,
+    index: usize,
+    accent: Color,
+    compact: bool,
+) -> Element<'a, Message> {
     let descriptor = &effect.descriptors[index];
     let value = effect
         .params
@@ -82,8 +103,8 @@ pub fn value_field<'a>(
             Message::DeviceControl(DeviceControlMsg::Input(track, effect_id, index, text))
         })
         .on_submit(submit.clone())
-        .size(10)
-        .padding([1, 3])
+        .size(if compact { 9 } else { 10 })
+        .padding([if compact { 0 } else { 1 }, 3])
         .width(Length::Fill)
         .font(crate::typography::PERFORM_TECH)
         .style(move |_, status| text_input::Style {
