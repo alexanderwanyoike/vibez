@@ -24,7 +24,11 @@ impl App {
             state.update_with_parser(message, &descriptors, &effect.params, |index, text| {
                 if index == vibez_dsp::bitcrush::param::SR_REDUCE {
                     let rate = sample_rate.filter(|_| !effect.reconfiguration_failed)?;
-                    crate::domains::bitcrush_values::parse_rate(text, rate, *effect.params.get(index)?)
+                    crate::domains::bitcrush_values::parse_rate(
+                        text,
+                        rate,
+                        *effect.params.get(index)?,
+                    )
                 } else {
                     crate::domains::device_controls::parse_value(text, descriptors.get(index)?)
                 }
@@ -153,8 +157,13 @@ mod tests {
         app.send_command(EngineCommand::SetSampleRate(48_000));
         let channel = ProjectTrack::new(TrackId::new(), "Bitcrush".into(), 3);
         let track = channel.id;
-        Arc::make_mut(&mut app.state.project_tracks).tracks.push(channel);
-        let _ = app.update(Message::Devices(DevicesMsg::AddEffect(track, EffectType::Bitcrush)));
+        Arc::make_mut(&mut app.state.project_tracks)
+            .tracks
+            .push(channel);
+        let _ = app.update(Message::Devices(DevicesMsg::AddEffect(
+            track,
+            EffectType::Bitcrush,
+        )));
         let target = &mut app.state.find_track_mut(track).unwrap().effects[0];
         let effect = target.id;
         target.params[1] = 4.49;
@@ -170,9 +179,14 @@ mod tests {
         app.state.project.history = Default::default();
         app.state.project.dirty = false;
         let _ = app.update(Message::DeviceControl(DeviceControlMsg::Input(
-            track, effect, 1, "19.8 kHz".into(),
+            track,
+            effect,
+            1,
+            "19.8 kHz".into(),
         )));
-        let _ = app.update(Message::DeviceControl(DeviceControlMsg::Submit(track, effect, 1)));
+        let _ = app.update(Message::DeviceControl(DeviceControlMsg::Submit(
+            track, effect, 1,
+        )));
         assert_eq!(
             app.state.find_track(track).unwrap().effects[0].params[1],
             3.0,
@@ -183,7 +197,10 @@ mod tests {
         let snapshot = app.state.project.history.pop_undo().expect("one rate edit");
         assert!(!app.state.project.history.can_undo());
         app.apply_snapshot(snapshot);
-        assert_eq!(app.state.find_track(track).unwrap().effects[0].params, before);
+        assert_eq!(
+            app.state.find_track(track).unwrap().effects[0].params,
+            before
+        );
     }
 
     #[test]
@@ -197,10 +214,18 @@ mod tests {
         app.send_command(EngineCommand::SetSampleRate(96_000));
         assert!(!app.state.find_track(track).unwrap().effects[0].reconfiguration_failed);
         let _ = app.update(Message::DeviceControl(DeviceControlMsg::Input(
-            track, effect, 1, "24 kHz".into(),
+            track,
+            effect,
+            1,
+            "24 kHz".into(),
         )));
-        let _ = app.update(Message::DeviceControl(DeviceControlMsg::Submit(track, effect, 1)));
-        assert_eq!(app.state.find_track(track).unwrap().effects[0].params, before);
+        let _ = app.update(Message::DeviceControl(DeviceControlMsg::Submit(
+            track, effect, 1,
+        )));
+        assert_eq!(
+            app.state.find_track(track).unwrap().effects[0].params,
+            before
+        );
         assert!(app.device_controls[&effect].errors.contains(&1));
         assert!(!app.state.project.history.can_undo());
         assert!(!app.state.project.dirty);
@@ -214,10 +239,18 @@ mod tests {
         app.state.project.history = Default::default();
         app.state.project.dirty = false;
         let _ = app.update(Message::DeviceControl(DeviceControlMsg::Input(
-            track, effect, 1, "12 kHz".into(),
+            track,
+            effect,
+            1,
+            "12 kHz".into(),
         )));
-        let _ = app.update(Message::DeviceControl(DeviceControlMsg::Submit(track, effect, 1)));
-        assert_eq!(app.state.find_track(track).unwrap().effects[0].params, before);
+        let _ = app.update(Message::DeviceControl(DeviceControlMsg::Submit(
+            track, effect, 1,
+        )));
+        assert_eq!(
+            app.state.find_track(track).unwrap().effects[0].params,
+            before
+        );
         assert!(app.device_controls[&effect].errors.is_empty());
         assert!(!app.state.project.history.can_undo());
         assert!(!app.state.project.dirty);

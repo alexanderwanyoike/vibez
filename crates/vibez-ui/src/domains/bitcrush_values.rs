@@ -17,14 +17,15 @@ pub fn parse_rate(text: &str, sample_rate: u32, current: f32) -> Option<f32> {
     }
     let divider = (1..32)
         .find(|divider| {
-            let boundary =
-                (rate / f64::from(*divider) + rate / f64::from(*divider + 1)) * 0.5;
+            let boundary = (rate / f64::from(*divider) + rate / f64::from(*divider + 1)) * 0.5;
             requested > boundary
         })
         .unwrap_or(32) as f32;
-    Some(if (1.0..=32.0).contains(&current) && current.round() == divider {
-        current
-    } else {
-        divider
-    })
+    Some(
+        if (1.0..=32.0).contains(&current) && current.round() == divider {
+            current
+        } else {
+            divider
+        },
+    )
 }
