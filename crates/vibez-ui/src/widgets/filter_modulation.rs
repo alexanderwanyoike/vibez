@@ -122,12 +122,16 @@ pub fn view<'a>(
     if region.height < 52.0 {
         return controls.into();
     }
+    let amount = value(effect, param::DEPTH);
+    let depth_readout = match source {
+        1 => format!("±{amount:.2}oct"),
+        2 => format!("+{amount:.2}oct"),
+        _ => "0oct".into(),
+    };
     let preview = column![
-        section_label(match source {
-            1 => "LFO shape · 2 cycles",
-            2 => "Unit step response",
-            _ => "Modulation off",
-        }),
+        row![section_label(match source {
+            1 => "Model LFO", 2 => "Model step", _ => "Model off",
+        }), text(depth_readout).size(8).color(th::text_dim())].spacing(4),
         canvas(Preview { effect, accent })
             .width(Length::Fill)
             .height(Length::Fill)
@@ -202,6 +206,11 @@ impl canvas::Program<Message> for Preview<'_> {
             &canvas::Path::line(Point::new(0.0, center), Point::new(bounds.width, center)),
             canvas::Stroke::default().with_color(th::divider()),
         );
+        frame.fill_text(canvas::Text {
+            content: if source == 2 { "0..6 oct" } else { "±6 oct" }.into(),
+            position: Point::new(2.0, 2.0), color: th::text_dim(), size: 7.0.into(),
+            ..Default::default()
+        });
         for channel in [1, 0] {
             let path = canvas::Path::new(|builder| {
                 for index in 0..128 {
