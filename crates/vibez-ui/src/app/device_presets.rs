@@ -12,6 +12,9 @@ pub enum DevicePresetMsg {
     Saved(PresetSaveRequest, Result<Option<DevicePreset>, String>),
 }
 
+#[cfg(test)]
+#[path = "device_preset_flow_tests.rs"]
+mod flow_tests;
 
 #[derive(Debug, Clone)]
 pub struct PresetSaveRequest {

@@ -74,3 +74,30 @@ pub(in crate::app) async fn save_device_preset_at(
     .await?
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use vibez_core::effect::EffectType;
+
+    #[tokio::test]
+    async fn saving_without_an_extension_uses_the_file_name_as_preset_name() {
+        let directory = tempfile::Builder::new()
+            .prefix("vibez-device-preset-")
+            .tempdir_in(std::env::current_dir().unwrap())
+            .unwrap();
+        let preset = crate::domains::device_presets::factory_presets(EffectType::Gain)[1].clone();
+
+        let saved = save_device_preset_at(directory.path().join("Quiet bass"), preset.clone())
+            .await
+            .unwrap();
+        let loaded = vibez_project::device_preset::load_device_preset(
+            &directory.path().join("Quiet bass.vzpreset"),
+        )
+        .unwrap();
+
+        assert_eq!(loaded, saved);
+        assert_eq!(loaded.name(), "Quiet bass");
+        assert_eq!(loaded.kind(), preset.kind());
+        assert_eq!(loaded.parameters(), preset.parameters());
+    }
+}
