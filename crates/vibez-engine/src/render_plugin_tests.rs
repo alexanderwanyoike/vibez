@@ -1,3 +1,5 @@
+//! Offline plugin rendering matches the equivalent prepared live-engine signal.
+
 use super::*;
 
 struct EchoPluginEffect {

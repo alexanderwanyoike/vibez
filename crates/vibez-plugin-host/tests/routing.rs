@@ -1,3 +1,5 @@
+//! Hosted plugin inputs preserve public routing and detector signal semantics.
+
 mod support;
 #[global_allocator]
 static ALLOCATOR: support::allocation::AllocationCounter = support::allocation::AllocationCounter;
