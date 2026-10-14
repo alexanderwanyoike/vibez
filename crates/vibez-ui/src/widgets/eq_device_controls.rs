@@ -183,7 +183,7 @@ impl<'a> Controls<'a> {
     fn console_parameter(&self, index: usize, label: &'static str) -> Element<'a, Message> {
         column![
             section_label(label),
-            self.field(index),
+            value_field(self.track, self.effect, self.state, index, self.accent),
             self.knob(index, 30.0)
         ]
         .spacing(3)
@@ -216,8 +216,8 @@ impl<'a> Controls<'a> {
         column![
             heading,
             row![
-                self.console_parameter(param::FREQUENCY[band], "Freq"),
-                self.console_parameter(param::GAIN[band], "Gain"),
+                self.console_parameter(param::FREQUENCY[band], "Freq Hz"),
+                self.console_parameter(param::GAIN[band], "Gain dB"),
                 shape
             ]
             .spacing(5)
