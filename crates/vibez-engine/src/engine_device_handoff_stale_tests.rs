@@ -137,11 +137,11 @@ fn stale_old_reply_preserves_new_token_metadata_parameters_and_applied_graph() {
                 commands.push(parameter_command(tracks[0], effect_id, index, value)).unwrap();
             }
             assert_eq!(crate::retirement::tests::allocations(|| engine.drain_commands()), (0, 0));
-            assert_eq!(engine.pending_device_parameters, [(0, 0.9), (1, 0.8)]);
+            assert_eq!(engine.device_handoff.retained_parameters(), [(0, 0.9), (1, 0.8)]);
             commands.push(EngineCommand::RemoveEffect(tracks[0], effect_id)).unwrap();
             assert_eq!(crate::retirement::tests::allocations(|| engine.drain_commands()), (0, 0));
-            assert!(engine.pending_device_reconfiguration.is_none());
-            assert!(engine.pending_device_parameters.is_empty());
+            assert!(engine.device_handoff.pending().is_none());
+            assert!(engine.device_handoff.retained_parameters().is_empty());
             assert!(!engine.compensation_suspended);
             assert!(engine.compensation_plan.awaiting_structural_plan());
             let new_requested = Arc::new(AtomicBool::new(true));
@@ -194,12 +194,12 @@ fn stale_old_reply_preserves_new_token_metadata_parameters_and_applied_graph() {
             }
             commands.push(EngineCommand::SetEffectBypass { track_id: tracks[0], effect_id, bypass: true }).unwrap();
             assert_eq!(crate::retirement::tests::allocations(|| engine.drain_commands()), (0, 0));
-            let current = engine.pending_device_reconfiguration.unwrap();
+            let current = engine.device_handoff.pending().unwrap();
             assert_eq!((current.handoff_id, current.track_id, current.effect_id, current.position, current.bypass, current.local_recovery), (new_id, tracks[0], Some(effect_id), 0, true, false));
-            assert_eq!(engine.pending_device_parameters, [(0, 0.75), (1, 0.375)]);
-            let parameter_storage = engine.pending_device_parameters.as_ptr();
-            let parameter_capacity = engine.pending_device_parameters.capacity();
-            let parameters_before: Vec<_> = engine.pending_device_parameters.iter().map(|(index, value)| (*index, value.to_bits())).collect();
+            assert_eq!(engine.device_handoff.retained_parameters(), [(0, 0.75), (1, 0.375)]);
+            let parameter_storage = engine.device_handoff.retained_parameters().as_ptr();
+            let parameter_capacity = engine.device_handoff.retained_parameter_capacity();
+            let parameters_before: Vec<_> = engine.device_handoff.retained_parameters().iter().map(|(index, value)| (*index, value.to_bits())).collect();
             readiness.push(Readiness::observe(&engine));
             assert_eq!(readiness[3], away);
             let mut filled = 0;
@@ -225,11 +225,11 @@ fn stale_old_reply_preserves_new_token_metadata_parameters_and_applied_graph() {
             assert_eq!(crate::retirement::tests::allocations(|| engine.drain_commands()), (0, 0));
             readiness.push(Readiness::observe(&engine));
             assert_eq!(readiness[4], away);
-            let after_stale = engine.pending_device_reconfiguration.unwrap();
+            let after_stale = engine.device_handoff.pending().unwrap();
             assert_eq!((after_stale.handoff_id, after_stale.track_id, after_stale.effect_id, after_stale.position, after_stale.bypass, after_stale.local_recovery), (current.handoff_id, current.track_id, current.effect_id, current.position, current.bypass, current.local_recovery));
-            assert_eq!(engine.pending_device_parameters.iter().map(|(index, value)| (*index, value.to_bits())).collect::<Vec<_>>(), parameters_before);
-            assert_eq!(engine.pending_device_parameters.as_ptr(), parameter_storage);
-            assert_eq!(engine.pending_device_parameters.capacity(), parameter_capacity);
+            assert_eq!(engine.device_handoff.retained_parameters().iter().map(|(index, value)| (*index, value.to_bits())).collect::<Vec<_>>(), parameters_before);
+            assert_eq!(engine.device_handoff.retained_parameters().as_ptr(), parameter_storage);
+            assert_eq!(engine.device_handoff.retained_parameter_capacity(), parameter_capacity);
             assert_eq!(std::ptr::from_ref(engine.routing.as_ref()) as usize, current_plan_identity);
             assert_eq!(old_drops.load(Ordering::Relaxed), 0);
             assert_eq!(new_drops.load(Ordering::Relaxed), 0);
@@ -278,9 +278,9 @@ fn stale_old_reply_preserves_new_token_metadata_parameters_and_applied_graph() {
             drop(retired_old);
             assert_eq!(old_drops.load(Ordering::Relaxed), 1);
             assert_eq!(new_drops.load(Ordering::Relaxed), 0);
-            let after_delivery = engine.pending_device_reconfiguration.unwrap();
+            let after_delivery = engine.device_handoff.pending().unwrap();
             assert_eq!((after_delivery.handoff_id, after_delivery.track_id, after_delivery.effect_id, after_delivery.position, after_delivery.bypass, after_delivery.local_recovery), (current.handoff_id, current.track_id, current.effect_id, current.position, current.bypass, current.local_recovery));
-            assert_eq!(engine.pending_device_parameters.iter().map(|(index, value)| (*index, value.to_bits())).collect::<Vec<_>>(), parameters_before);
+            assert_eq!(engine.device_handoff.retained_parameters().iter().map(|(index, value)| (*index, value.to_bits())).collect::<Vec<_>>(), parameters_before);
             assert_eq!(std::ptr::from_ref(engine.routing.as_ref()) as usize, current_plan_identity);
             readiness.push(Readiness::observe(&engine));
             assert_eq!(readiness[5], away);
@@ -315,9 +315,9 @@ fn stale_old_reply_preserves_new_token_metadata_parameters_and_applied_graph() {
             assert!(owner_roundtrip);
             let applied_bits = [restored.effect.get_param(0).to_bits(), restored.effect.get_param(1).to_bits()];
             assert_eq!(applied_bits, [0.75_f32.to_bits(), 0.375_f32.to_bits()]);
-            assert!(engine.pending_device_parameters.is_empty());
-            assert_eq!(engine.pending_device_parameters.as_ptr(), parameter_storage);
-            assert_eq!(engine.pending_device_parameters.capacity(), parameter_capacity);
+            assert!(engine.device_handoff.retained_parameters().is_empty());
+            assert_eq!(engine.device_handoff.retained_parameters().as_ptr(), parameter_storage);
+            assert_eq!(engine.device_handoff.retained_parameter_capacity(), parameter_capacity);
             let mut resumed = [0.0; 256];
             assert_eq!(crate::retirement::tests::allocations(|| engine.process(&mut resumed, 2)), (0, 0));
             for (frame, pair) in resumed.as_chunks::<2>().0.iter().enumerate() {

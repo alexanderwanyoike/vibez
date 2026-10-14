@@ -134,8 +134,7 @@ fn invalid_configuration_and_rejected_updates_close_capture_at_the_heard_stop_bo
             }
             _ => {
                 let slot = engine.tracks[0].effects.remove(0);
-                engine.pending_device_reconfiguration =
-                    Some(reconfiguration::PendingDeviceReconfiguration {
+                engine.device_handoff.track_transfer(device_handoff::PendingDeviceReconfiguration {
                         local_recovery: false,
                         handoff_id: 1,
                         track_id: track,
