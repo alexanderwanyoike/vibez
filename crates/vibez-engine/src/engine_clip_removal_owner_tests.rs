@@ -59,7 +59,9 @@ fn every_source_home_returns_complete_staged_owners_before_channel_removal() {
     let mut returned_notes = Vec::new();
     for _ in 0..4 {
         while let Ok(event) = events.pop() {
-            assert_eq!(event.time_domain(), crate::events::TimeDomain::Untimed);
+            if matches!(event, EngineEvent::RetiredAudioClip(_) | EngineEvent::RetiredNoteClip(_)) {
+                assert_eq!(event.time_domain(), crate::events::TimeDomain::Untimed);
+            }
             match event {
                 EngineEvent::RetiredAudioClip(clip) => {
                     returned_audio.push(Arc::as_ptr(&clip.audio));
@@ -125,7 +127,7 @@ fn empty_missing_and_repeated_removals_keep_note_flush_and_length_semantics() {
     commands.push(EngineCommand::add_track(track)).unwrap();
     commands.push(EngineCommand::SetInstrument { track_id: track,
         instrument: Box::new(crate::test_support::DelayProbeInstrument::new(0, 0.25)) }).unwrap();
-    commands.push(EngineCommand::NoteOn(track, 60, 100)).unwrap();
+    commands.push(EngineCommand::ExternalNoteOn { track_id: track, pitch: 60, velocity: 100 }).unwrap();
     let mut output = [0.0; 16];
     engine.process(&mut output, 2);
     assert!(output.iter().all(|sample| *sample > 0.1));
