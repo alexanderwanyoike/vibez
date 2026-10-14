@@ -682,22 +682,40 @@ fn full_event_ring_retains_thirty_two_media_owners_and_resumes_later_commands_in
         if let Some(sample) = &sample {
             audio_owners.push(Arc::downgrade(sample));
         }
-        expected.push((name.clone(), name.as_ptr(), sample.as_ref().map(Arc::as_ptr)));
+        expected.push((
+            name.clone(),
+            name.as_ptr(),
+            sample.as_ref().map(Arc::as_ptr),
+        ));
         (sample, name)
     };
     commands.push(EngineCommand::add_track(sampler)).unwrap();
     commands.push(EngineCommand::add_track(drums)).unwrap();
-    for (track, kind) in [(sampler, InstrumentKind::Sampler), (drums, InstrumentKind::DrumRack)] {
-        commands.push(EngineCommand::set_built_in_instrument(track, kind, 1000)).unwrap();
+    for (track, kind) in [
+        (sampler, InstrumentKind::Sampler),
+        (drums, InstrumentKind::DrumRack),
+    ] {
+        commands
+            .push(EngineCommand::set_built_in_instrument(track, kind, 1000))
+            .unwrap();
     }
     let (sample, name) = record(Some(audio(0.25)), "sampler-0".into());
-    commands.push(EngineCommand::LoadSamplerSample {
-        track_id: sampler, sample: sample.unwrap(), sample_name: name,
-    }).unwrap();
+    commands
+        .push(EngineCommand::LoadSamplerSample {
+            track_id: sampler,
+            sample: sample.unwrap(),
+            sample_name: name,
+        })
+        .unwrap();
     let (sample, name) = record(Some(audio(0.5)), "drum-original".into());
-    commands.push(EngineCommand::LoadDrumRackPadSample {
-        track_id: drums, pad_index: 0, sample: sample.unwrap(), sample_name: name,
-    }).unwrap();
+    commands
+        .push(EngineCommand::LoadDrumRackPadSample {
+            track_id: drums,
+            pad_index: 0,
+            sample: sample.unwrap(),
+            sample_name: name,
+        })
+        .unwrap();
     engine.process(&mut [], 1);
     while events.pop().is_ok() {}
     while engine.event_tx.push(EngineEvent::PlaybackStarted).is_ok() {}
@@ -710,44 +728,96 @@ fn full_event_ring_retains_thirty_two_media_owners_and_resumes_later_commands_in
         } else {
             (Some(sample), name)
         };
-        commands.push(EngineCommand::LoadSamplerSample {
-            track_id: sampler, sample: sample.unwrap(), sample_name: name,
-        }).unwrap();
+        commands
+            .push(EngineCommand::LoadSamplerSample {
+                track_id: sampler,
+                sample: sample.unwrap(),
+                sample_name: name,
+            })
+            .unwrap();
     }
     let (sample, clear_name) = record(Some(audio(0.75)), "state-after-32".into());
     let (_, name) = record(None, "drum-new".into());
-    commands.push(EngineCommand::LoadDrumRackPadSample {
-        track_id: drums, pad_index: 0, sample: sample.unwrap(), sample_name: name,
-    }).unwrap();
-    commands.push(EngineCommand::set_drum_rack_pad_state(drums, 0, vibez_core::track::DrumPadState {
-        name: Some(clear_name), ..Default::default()
-    })).unwrap();
-    commands.push(EngineCommand::ClearDrumRackPad { track_id: drums, pad_index: 0 }).unwrap();
+    commands
+        .push(EngineCommand::LoadDrumRackPadSample {
+            track_id: drums,
+            pad_index: 0,
+            sample: sample.unwrap(),
+            sample_name: name,
+        })
+        .unwrap();
+    commands
+        .push(EngineCommand::set_drum_rack_pad_state(
+            drums,
+            0,
+            vibez_core::track::DrumPadState {
+                name: Some(clear_name),
+                ..Default::default()
+            },
+        ))
+        .unwrap();
+    commands
+        .push(EngineCommand::ClearDrumRackPad {
+            track_id: drums,
+            pad_index: 0,
+        })
+        .unwrap();
     let (sample, name) = record(Some(audio(1.0)), "rejected-after-clear".into());
-    commands.push(EngineCommand::LoadDrumRackPadSample {
-        track_id: drums, pad_index: usize::MAX, sample: sample.unwrap(), sample_name: name,
-    }).unwrap();
+    commands
+        .push(EngineCommand::LoadDrumRackPadSample {
+            track_id: drums,
+            pad_index: usize::MAX,
+            sample: sample.unwrap(),
+            sample_name: name,
+        })
+        .unwrap();
     commands.push(EngineCommand::SetBpm(137.0)).unwrap();
     drop(record);
 
-    assert_eq!(crate::retirement::tests::allocations(|| engine.process(&mut [], 1)), (0, 0));
+    assert_eq!(
+        crate::retirement::tests::allocations(|| engine.process(&mut [], 1)),
+        (0, 0)
+    );
     assert_eq!(engine.pending_retirements.len(), 32);
-    assert!(matches!(engine.cmd_rx.peek(), Ok(EngineCommand::ClearDrumRackPad { .. })));
+    assert!(matches!(
+        engine.cmd_rx.peek(),
+        Ok(EngineCommand::ClearDrumRackPad { .. })
+    ));
     assert_ne!(engine.transport().bpm(), 137.0);
     assert!(audio_owners.iter().all(|owner| owner.strong_count() == 1));
     // A second blocked callback cannot partially execute the queued clear.
-    assert_eq!(crate::retirement::tests::allocations(|| engine.process(&mut [], 1)), (0, 0));
+    assert_eq!(
+        crate::retirement::tests::allocations(|| engine.process(&mut [], 1)),
+        (0, 0)
+    );
     assert_eq!(engine.pending_retirements.len(), 32);
-    assert!(matches!(engine.cmd_rx.peek(), Ok(EngineCommand::ClearDrumRackPad { .. })));
+    assert!(matches!(
+        engine.cmd_rx.peek(),
+        Ok(EngineCommand::ClearDrumRackPad { .. })
+    ));
     while let Ok(event) = events.pop() {
         assert!(!matches!(event, EngineEvent::RetiredInstrumentMedia(_)));
     }
 
-    assert_eq!(crate::retirement::tests::allocations(|| engine.process(&mut [], 1)), (0, 0));
+    assert_eq!(
+        crate::retirement::tests::allocations(|| engine.process(&mut [], 1)),
+        (0, 0)
+    );
     assert!(engine.cmd_rx.peek().is_err());
     assert!(engine.pending_retirements.is_empty());
     assert_eq!(engine.transport().bpm(), 137.0);
-    assert_eq!(engine.tracks().iter().find(|track| track.id == sampler).unwrap().instrument.as_ref().unwrap().sample_name(), Some("sampler-30"));
+    assert_eq!(
+        engine
+            .tracks()
+            .iter()
+            .find(|track| track.id == sampler)
+            .unwrap()
+            .instrument
+            .as_ref()
+            .unwrap()
+            .sample_name(),
+        Some("sampler-30")
+    );
     let mut returned = Vec::new();
     while let Ok(event) = events.pop() {
         if let EngineEvent::RetiredInstrumentMedia(owners) = event {
@@ -756,7 +826,10 @@ fn full_event_ring_retains_thirty_two_media_owners_and_resumes_later_commands_in
     }
     assert_eq!(returned.len(), 34);
     for (name, name_pointer, sample_pointer) in expected {
-        let matching: Vec<_> = returned.iter().filter(|owners| owners.name.as_deref() == Some(name.as_str())).collect();
+        let matching: Vec<_> = returned
+            .iter()
+            .filter(|owners| owners.name.as_deref() == Some(name.as_str()))
+            .collect();
         assert_eq!(matching.len(), 1, "owner {name} returns exactly once");
         assert_eq!(matching[0].name.as_ref().unwrap().as_ptr(), name_pointer);
         assert_eq!(matching[0].sample.as_ref().map(Arc::as_ptr), sample_pointer);
