@@ -646,4 +646,33 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn every_visible_compact_plot_keeps_transfer_and_history_selectable() {
+        for width in [430.0, 472.0, 739.0] {
+            for height in 64..305 {
+                for advanced in [false, true] {
+                    let layout = arrange(Size::new(width, height as f32), advanced);
+                    if layout.plot > 0.0 {
+                        assert!(layout.tabs >= 24.0,
+                            "Transfer/History inaccessible at {width}x{height}, Advanced={advanced}");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn expanded_details_keep_a_sidechain_route_or_the_page_selector_at_every_height() {
+        for width in [872.0, 892.0, 900.0] {
+            for height in 112..305 {
+                let layout = arrange(Size::new(width, height as f32), true);
+                let sidechain_visible = layout.sidechain_column || layout.routing > 0.0;
+                let details_pages = !layout.expanded;
+                assert!(sidechain_visible || details_pages,
+                    "source/tap/disconnect unreachable at {width}x{height}");
+            }
+        }
+    }
+
 }
