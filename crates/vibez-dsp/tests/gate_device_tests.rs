@@ -22,8 +22,10 @@ fn four_channel_gate_preserves_extra_channels_and_matches_stereo_processing() {
         reference.process(&mut stereo, 2);
         gate.process(&mut wider, 4);
         for (frame, (actual, expected)) in wider
-            .chunks_exact(4)
-            .zip(stereo.chunks_exact(2))
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .zip(stereo.as_chunks::<2>().0)
             .enumerate()
         {
             assert_eq!(
