@@ -112,6 +112,38 @@ fn snapshots(
 }
 
 #[test]
+fn drive_full_ring_drops_snapshots_without_callback_allocation_or_retry_backlog() {
+    let (mut engine, _commands, mut events, track, effect) = fixture();
+    render_window(&mut engine, track, 0.5);
+    assert_eq!(snapshots(&mut events).len(), 1);
+    let mut occupied = 0;
+    while engine.event_tx.push(EngineEvent::PlaybackPosition(0)).is_ok() {
+        occupied += 1;
+    }
+    assert_eq!(occupied, 1024, "telemetry must keep the bounded event ring");
+    let measured = crate::retirement::tests::allocations(|| {
+        render_window(&mut engine, track, 0.8);
+        for _ in 0..4 {
+            render_window(&mut engine, track, 0.0);
+        }
+    });
+    assert_eq!(measured, (0, 0));
+    assert!(snapshots(&mut events).is_empty());
+
+    let measured = crate::retirement::tests::allocations(|| {
+        render_window(&mut engine, track, 0.03);
+    });
+    assert_eq!(measured, (0, 0));
+    let fresh = snapshots(&mut events);
+    assert_eq!(fresh.len(), 1, "dropped windows cannot queue a retry backlog");
+    assert_eq!((fresh[0].0, fresh[0].1, fresh[0].2), (track, effect, 7));
+    assert_eq!(fresh[0].3.count, 128);
+    assert_eq!(fresh[0].3.latency_samples, 64);
+    assert!(fresh[0].3.input.iter().all(|sample| (*sample - 0.03).abs() < 1e-6));
+    assert!(fresh[0].3.output.iter().all(|sample| (*sample - 0.03).abs() < 1e-6));
+}
+
+#[test]
 fn drive_snapshots_clear_on_bypass_and_resume_with_fresh_selection_generation() {
     let (mut engine, mut commands, mut events, track, effect) = fixture();
     render_window(&mut engine, track, 0.5);
