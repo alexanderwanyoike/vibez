@@ -21,19 +21,41 @@ pub fn parse_bits(text: &str, current: f32) -> Option<f32> {
     })
 }
 
-pub fn parse_rate(text: &str, sample_rate: u32, current: f32) -> Option<f32> {
-    if sample_rate < 2 {
+pub fn display_rate(sample_rate: u32, current: f32) -> Option<String> {
+    if sample_rate < 2 || !(1.0..=32.0).contains(&current) {
         return None;
     }
+    let rate = f64::from(sample_rate) / f64::from(current.round());
+    Some(if rate >= 1000.0 {
+        format!("{:.3}k", rate / 1000.0)
+    } else {
+        format!("{rate:.3}")
+    })
+}
+
+fn requested_hertz(text: &str) -> Option<f64> {
     let text = text.trim().to_ascii_lowercase();
     let text = text.strip_suffix("hz").unwrap_or(&text).trim();
     let (number, multiplier) = match text.strip_suffix('k') {
         Some(number) => (number, 1000.0),
         None => (text, 1.0),
     };
-    let requested = number.trim().parse::<f64>().ok()? * multiplier;
+    Some(number.trim().parse::<f64>().ok()? * multiplier)
+}
+
+pub fn parse_rate(text: &str, sample_rate: u32, current: f32) -> Option<f32> {
+    if sample_rate < 2 {
+        return None;
+    }
+    let requested = requested_hertz(text)?;
     let rate = f64::from(sample_rate);
-    if !requested.is_finite() || !(rate / 32.0..=rate).contains(&requested) {
+    if !requested.is_finite() {
+        return None;
+    }
+    if display_rate(sample_rate, current).and_then(|shown| requested_hertz(&shown)) == Some(requested) {
+        return Some(current);
+    }
+    if !(rate / 32.0..=rate).contains(&requested) {
         return None;
     }
     let divider = (1..32)
