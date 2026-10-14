@@ -265,7 +265,7 @@ impl AudioEngine {
                     let events = &mut self.event_tx;
                     let scheduled = &mut self.scheduled_presentation;
                     let presentation = &prepared.presentation;
-                    let performing = self.clock_domain == ClockDomain::Perform;
+                    let performing = self.clock_domain == ClockDomain::Perform || idle;
                     let mut presentation_overflow = false;
                     let mut repeated = |trigger: crate::note_repeat::NoteRepeatTrigger| {
                         if presentation_overflow {
@@ -741,9 +741,10 @@ impl AudioEngine {
                 generation: prepared.compensation.generation,
             };
             prepared.presentation_start.get_or_insert(first);
+            // Stopped Note Repeat still advances Perform while Arrange stays fixed.
             prepared
                 .presentation
-                .record_clocks(first, frames, !performing && !idle, !idle);
+                .record_clocks(first, frames, !performing && !idle, true);
         }
         self.rendered_callback_frames += frames;
         self.routing = Some(prepared);
