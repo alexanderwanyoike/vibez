@@ -836,6 +836,9 @@ mod device_observation;
 #[path = "engine_device_validation.rs"]
 mod device_validation;
 
+#[path = "engine_handoff_observation.rs"]
+mod handoff_observation;
+
 #[path = "engine_capture_commands.rs"]
 mod capture_commands;
 
