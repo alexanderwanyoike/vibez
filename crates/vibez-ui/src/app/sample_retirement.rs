@@ -14,12 +14,15 @@ impl SampleRetirement {
     pub(super) fn retire(&mut self, owners: InstrumentMediaOwners) {
         if let Some(sample) = owners.sample {
             // Deduplicate before counting: two guards would keep each other alive.
-            self.guards.entry(Arc::as_ptr(&sample) as usize).or_insert(sample);
+            self.guards
+                .entry(Arc::as_ptr(&sample) as usize)
+                .or_insert(sample);
         }
     }
 
     pub(super) fn reap(&mut self) {
         // Callback sources clone existing strong pad/voice owners, never Weak refs.
-        self.guards.retain(|_, sample| Arc::strong_count(sample) > 1);
+        self.guards
+            .retain(|_, sample| Arc::strong_count(sample) > 1);
     }
 }

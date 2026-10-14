@@ -190,8 +190,12 @@ impl AudioEngine {
         sample: std::sync::Arc<vibez_core::audio_buffer::DecodedAudio>,
         sample_name: String,
     ) {
-        let retired = match self.tracks.iter_mut().find(|track| track.id == track_id)
-            .and_then(|track| track.instrument.as_mut()) {
+        let retired = match self
+            .tracks
+            .iter_mut()
+            .find(|track| track.id == track_id)
+            .and_then(|track| track.instrument.as_mut())
+        {
             Some(instrument) => instrument.load_sample(sample, sample_name),
             None => vibez_instruments::InstrumentMediaOwners::incoming(sample, sample_name),
         };
@@ -211,8 +215,12 @@ impl AudioEngine {
         sample: std::sync::Arc<vibez_core::audio_buffer::DecodedAudio>,
         sample_name: String,
     ) {
-        let retired = match self.tracks.iter_mut().find(|track| track.id == track_id)
-            .and_then(|track| track.instrument.as_mut()) {
+        let retired = match self
+            .tracks
+            .iter_mut()
+            .find(|track| track.id == track_id)
+            .and_then(|track| track.instrument.as_mut())
+        {
             Some(instrument) => instrument.load_drum_pad_sample(pad_index, sample, sample_name),
             None => vibez_instruments::InstrumentMediaOwners::incoming(sample, sample_name),
         };

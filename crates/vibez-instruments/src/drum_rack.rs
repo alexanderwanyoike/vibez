@@ -317,7 +317,10 @@ impl Instrument for DrumRack {
                     continue;
                 }
 
-                let sample = voice.sample.as_ref().expect("active drum voice owns its sample");
+                let sample = voice
+                    .sample
+                    .as_ref()
+                    .expect("active drum voice owns its sample");
                 let envelope = boundary_fade_gain(voice) * release_fade_gain(voice);
                 let mono = read_sample(sample, voice.position, 0)
                     * voice.gain
@@ -360,9 +363,17 @@ impl Instrument for DrumRack {
         }
     }
 
-    fn load_drum_pad_sample(&mut self, pad_index: usize, sample: Arc<DecodedAudio>, name: String) -> InstrumentMediaOwners {
+    fn load_drum_pad_sample(
+        &mut self,
+        pad_index: usize,
+        sample: Arc<DecodedAudio>,
+        name: String,
+    ) -> InstrumentMediaOwners {
         match self.pads.get_mut(pad_index) {
-            Some(pad) => InstrumentMediaOwners { sample: pad.sample.replace(sample), name: pad.sample_name.replace(name) },
+            Some(pad) => InstrumentMediaOwners {
+                sample: pad.sample.replace(sample),
+                name: pad.sample_name.replace(name),
+            },
             None => InstrumentMediaOwners::incoming(sample, name),
         }
     }

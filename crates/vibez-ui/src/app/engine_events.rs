@@ -240,7 +240,9 @@ impl App {
                     EngineEvent::RetiredNoteClip(clip) => drop(clip),
                     EngineEvent::RetiredWarpMarkers(markers) => drop(markers),
                     EngineEvent::RetiredTrackOrder(order) => drop(order),
-                    EngineEvent::RetiredInstrumentMedia(owners) => self.sample_retirement.retire(owners),
+                    EngineEvent::RetiredInstrumentMedia(owners) => {
+                        self.sample_retirement.retire(owners)
+                    }
                     EngineEvent::RetiredChannel(channel) => {
                         drop(channel);
                     }

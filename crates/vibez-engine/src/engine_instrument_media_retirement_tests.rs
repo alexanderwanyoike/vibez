@@ -4,7 +4,10 @@ use super::*;
 use vibez_core::midi::InstrumentKind;
 
 fn audio(value: f32) -> Arc<DecodedAudio> {
-    Arc::new(DecodedAudio { channels: vec![vec![value; 4096]], sample_rate: 1000 })
+    Arc::new(DecodedAudio {
+        channels: vec![vec![value; 4096]],
+        sample_rate: 1000,
+    })
 }
 
 #[test]
@@ -16,23 +19,58 @@ fn actual_sampler_replacement_preserves_reset_params_and_returns_unique_media_of
         let owner = Arc::downgrade(&original);
         commands.push(EngineCommand::SetSampleRate(1000)).unwrap();
         commands.push(EngineCommand::add_track(track)).unwrap();
-        commands.push(EngineCommand::set_built_in_instrument(track, InstrumentKind::Sampler, 1000)).unwrap();
-        commands.push(EngineCommand::SetInstrumentParam { track_id: track, param_index: 9, value: 0.5 }).unwrap();
-        commands.push(EngineCommand::LoadSamplerSample { track_id: track, sample: original, sample_name: "original-owned-sample.wav".into() }).unwrap();
-        commands.push(EngineCommand::ExternalNoteOn { track_id: track, pitch: 60, velocity: 127 }).unwrap();
+        commands
+            .push(EngineCommand::set_built_in_instrument(
+                track,
+                InstrumentKind::Sampler,
+                1000,
+            ))
+            .unwrap();
+        commands
+            .push(EngineCommand::SetInstrumentParam {
+                track_id: track,
+                param_index: 9,
+                value: 0.5,
+            })
+            .unwrap();
+        commands
+            .push(EngineCommand::LoadSamplerSample {
+                track_id: track,
+                sample: original,
+                sample_name: "original-owned-sample.wav".into(),
+            })
+            .unwrap();
+        commands
+            .push(EngineCommand::ExternalNoteOn {
+                track_id: track,
+                pitch: 60,
+                velocity: 127,
+            })
+            .unwrap();
         let mut output = [0.0; 32];
         engine.process(&mut output, 2);
         let expected = 0.25 * std::f32::consts::FRAC_1_SQRT_2;
-        assert!(output.iter().all(|sample| (*sample - expected).abs() < 1e-6));
+        assert!(output
+            .iter()
+            .all(|sample| (*sample - expected).abs() < 1e-6));
         while events.pop().is_ok() {}
         if full_ring {
             while engine.event_tx.push(EngineEvent::PlaybackStarted).is_ok() {}
         }
-        commands.push(EngineCommand::LoadSamplerSample { track_id: track, sample: audio(0.25), sample_name: "replacement-owned-sample.wav".into() }).unwrap();
+        commands
+            .push(EngineCommand::LoadSamplerSample {
+                track_id: track,
+                sample: audio(0.25),
+                sample_name: "replacement-owned-sample.wav".into(),
+            })
+            .unwrap();
         let measured = crate::retirement::tests::allocations(|| engine.process(&mut output, 2));
         assert_eq!(output, [0.0; 32]);
         let instrument = engine.tracks()[0].instrument.as_ref().unwrap();
-        assert_eq!(instrument.sample_name(), Some("replacement-owned-sample.wav"));
+        assert_eq!(
+            instrument.sample_name(),
+            Some("replacement-owned-sample.wav")
+        );
         assert_eq!(instrument.get_param(9), 0.5);
         assert_eq!(measured, (0, 0), "full_ring={full_ring}");
         assert_eq!(owner.strong_count(), 1);
@@ -40,23 +78,40 @@ fn actual_sampler_replacement_preserves_reset_params_and_returns_unique_media_of
         engine.process(&mut [], 2);
         while events.pop().is_ok() {}
         assert_eq!(owner.strong_count(), 0);
-        commands.push(EngineCommand::ExternalNoteOn { track_id: track, pitch: 60, velocity: 127 }).unwrap();
-        assert_eq!(crate::retirement::tests::allocations(|| engine.process(&mut output, 2)), (0, 0));
+        commands
+            .push(EngineCommand::ExternalNoteOn {
+                track_id: track,
+                pitch: 60,
+                velocity: 127,
+            })
+            .unwrap();
+        assert_eq!(
+            crate::retirement::tests::allocations(|| engine.process(&mut output, 2)),
+            (0, 0)
+        );
         let expected = 0.125 * std::f32::consts::FRAC_1_SQRT_2;
-        assert!(output.iter().all(|sample| (*sample - expected).abs() < 1e-6));
+        assert!(output
+            .iter()
+            .all(|sample| (*sample - expected).abs() < 1e-6));
     }
 }
 
 #[test]
 fn unsupported_and_missing_sampler_targets_return_exact_incoming_owners() {
-    for kind in [None, Some(InstrumentKind::SubtractiveSynth), Some(InstrumentKind::DrumRack)] {
+    for kind in [
+        None,
+        Some(InstrumentKind::SubtractiveSynth),
+        Some(InstrumentKind::DrumRack),
+    ] {
         for missing_track in [false, true] {
             for full_ring in [false, true] {
                 let (mut engine, mut commands, mut events) = AudioEngine::new();
                 let track = TrackId::new();
                 commands.push(EngineCommand::add_track(track)).unwrap();
                 if let Some(kind) = kind {
-                    commands.push(EngineCommand::set_built_in_instrument(track, kind, 44_100)).unwrap();
+                    commands
+                        .push(EngineCommand::set_built_in_instrument(track, kind, 44_100))
+                        .unwrap();
                 }
                 engine.process(&mut [], 2);
                 while events.pop().is_ok() {}
@@ -67,23 +122,38 @@ fn unsupported_and_missing_sampler_targets_return_exact_incoming_owners() {
                 let owner = Arc::downgrade(&sample);
                 let name = String::from("unsupported-unique-owned-name.wav");
                 let name_pointer = name.as_ptr();
-                commands.push(EngineCommand::LoadSamplerSample {
-                    track_id: if missing_track { TrackId::new() } else { track },
-                    sample, sample_name: name,
-                }).unwrap();
-                assert_eq!(crate::retirement::tests::allocations(|| engine.process(&mut [0.0; 16], 2)), (0, 0));
+                commands
+                    .push(EngineCommand::LoadSamplerSample {
+                        track_id: if missing_track { TrackId::new() } else { track },
+                        sample,
+                        sample_name: name,
+                    })
+                    .unwrap();
+                assert_eq!(
+                    crate::retirement::tests::allocations(|| engine.process(&mut [0.0; 16], 2)),
+                    (0, 0)
+                );
                 assert_eq!(owner.strong_count(), 1);
                 let mut returned = None;
                 for _ in 0..2 {
                     while let Ok(event) = events.pop() {
                         if let EngineEvent::RetiredInstrumentMedia(owners) = event {
                             assert!(returned.is_none());
-                            assert_eq!(owners.sample.as_ref().map(Arc::as_ptr), Some(owner.as_ptr()));
-                            assert_eq!(owners.name.as_ref().map(|name| name.as_ptr()), Some(name_pointer));
+                            assert_eq!(
+                                owners.sample.as_ref().map(Arc::as_ptr),
+                                Some(owner.as_ptr())
+                            );
+                            assert_eq!(
+                                owners.name.as_ref().map(|name| name.as_ptr()),
+                                Some(name_pointer)
+                            );
                             returned = Some(owners);
                         }
                     }
-                    assert_eq!(crate::retirement::tests::allocations(|| engine.process(&mut [], 2)), (0, 0));
+                    assert_eq!(
+                        crate::retirement::tests::allocations(|| engine.process(&mut [], 2)),
+                        (0, 0)
+                    );
                 }
                 drop(returned.expect("complete rejected owners return to UI"));
                 assert_eq!(owner.strong_count(), 0);
@@ -101,17 +171,50 @@ fn drum_sample_replacement_returns_old_owners_and_keeps_sounding_pad_voices() {
         let owner = Arc::downgrade(&original);
         commands.push(EngineCommand::SetSampleRate(1000)).unwrap();
         commands.push(EngineCommand::add_track(track)).unwrap();
-        commands.push(EngineCommand::set_built_in_instrument(track, InstrumentKind::DrumRack, 1000)).unwrap();
+        commands
+            .push(EngineCommand::set_built_in_instrument(
+                track,
+                InstrumentKind::DrumRack,
+                1000,
+            ))
+            .unwrap();
         for pad in [0, 1] {
-            commands.push(EngineCommand::SetDrumRackPadState { track_id: track, pad_index: pad,
-                state: vibez_core::track::DrumPadState { fade_in_ms: 0.0, fade_out_ms: 0.0, ..Default::default() } }).unwrap();
+            commands
+                .push(EngineCommand::SetDrumRackPadState {
+                    track_id: track,
+                    pad_index: pad,
+                    state: vibez_core::track::DrumPadState {
+                        fade_in_ms: 0.0,
+                        fade_out_ms: 0.0,
+                        ..Default::default()
+                    },
+                })
+                .unwrap();
         }
-        commands.push(EngineCommand::LoadDrumRackPadSample { track_id: track, pad_index: 0,
-            sample: original, sample_name: "sounding-original-pad.wav".into() }).unwrap();
-        commands.push(EngineCommand::LoadDrumRackPadSample { track_id: track, pad_index: 1,
-            sample: audio(0.125), sample_name: "unrelated-pad.wav".into() }).unwrap();
+        commands
+            .push(EngineCommand::LoadDrumRackPadSample {
+                track_id: track,
+                pad_index: 0,
+                sample: original,
+                sample_name: "sounding-original-pad.wav".into(),
+            })
+            .unwrap();
+        commands
+            .push(EngineCommand::LoadDrumRackPadSample {
+                track_id: track,
+                pad_index: 1,
+                sample: audio(0.125),
+                sample_name: "unrelated-pad.wav".into(),
+            })
+            .unwrap();
         for pitch in [36, 37] {
-            commands.push(EngineCommand::ExternalNoteOn { track_id: track, pitch, velocity: 127 }).unwrap();
+            commands
+                .push(EngineCommand::ExternalNoteOn {
+                    track_id: track,
+                    pitch,
+                    velocity: 127,
+                })
+                .unwrap();
         }
         let mut output = [0.0; 16];
         engine.process(&mut output, 1);
@@ -120,8 +223,14 @@ fn drum_sample_replacement_returns_old_owners_and_keeps_sounding_pad_voices() {
         if full_ring {
             while engine.event_tx.push(EngineEvent::PlaybackStarted).is_ok() {}
         }
-        commands.push(EngineCommand::LoadDrumRackPadSample { track_id: track, pad_index: 0,
-            sample: audio(0.25), sample_name: "replacement-pad.wav".into() }).unwrap();
+        commands
+            .push(EngineCommand::LoadDrumRackPadSample {
+                track_id: track,
+                pad_index: 0,
+                sample: audio(0.25),
+                sample_name: "replacement-pad.wav".into(),
+            })
+            .unwrap();
         let measured = crate::retirement::tests::allocations(|| engine.process(&mut output, 1));
         assert_eq!(output, [0.625; 16]);
         assert_eq!(measured, (0, 0), "full_ring={full_ring}");
@@ -131,7 +240,10 @@ fn drum_sample_replacement_returns_old_owners_and_keeps_sounding_pad_voices() {
             while let Ok(event) = events.pop() {
                 if let EngineEvent::RetiredInstrumentMedia(owners) = event {
                     assert!(returned.is_none());
-                    assert_eq!(owners.sample.as_ref().map(Arc::as_ptr), Some(owner.as_ptr()));
+                    assert_eq!(
+                        owners.sample.as_ref().map(Arc::as_ptr),
+                        Some(owner.as_ptr())
+                    );
                     assert_eq!(owners.name.as_deref(), Some("sounding-original-pad.wav"));
                     returned = Some(owners);
                 }
@@ -140,7 +252,13 @@ fn drum_sample_replacement_returns_old_owners_and_keeps_sounding_pad_voices() {
         }
         drop(returned.expect("displaced pad owners returned"));
         assert_eq!(owner.strong_count(), 1);
-        commands.push(EngineCommand::ExternalNoteOn { track_id: track, pitch: 36, velocity: 127 }).unwrap();
+        commands
+            .push(EngineCommand::ExternalNoteOn {
+                track_id: track,
+                pitch: 36,
+                velocity: 127,
+            })
+            .unwrap();
         engine.process(&mut output, 1);
         assert_eq!(output, [0.875; 16]);
     }
@@ -153,15 +271,42 @@ fn first_drum_notes_do_not_destroy_dummy_voice_allocations_in_callback() {
         let track = TrackId::new();
         commands.push(EngineCommand::SetSampleRate(1000)).unwrap();
         commands.push(EngineCommand::add_track(track)).unwrap();
-        commands.push(EngineCommand::set_built_in_instrument(track, InstrumentKind::DrumRack, 1000)).unwrap();
-        commands.push(EngineCommand::SetDrumRackPadState { track_id: track, pad_index: 0,
-            state: vibez_core::track::DrumPadState { fade_in_ms: 0.0, fade_out_ms: 0.0, ..Default::default() } }).unwrap();
-        commands.push(EngineCommand::LoadDrumRackPadSample { track_id: track, pad_index: 0,
-            sample: audio(0.125), sample_name: "first-note-pad.wav".into() }).unwrap();
+        commands
+            .push(EngineCommand::set_built_in_instrument(
+                track,
+                InstrumentKind::DrumRack,
+                1000,
+            ))
+            .unwrap();
+        commands
+            .push(EngineCommand::SetDrumRackPadState {
+                track_id: track,
+                pad_index: 0,
+                state: vibez_core::track::DrumPadState {
+                    fade_in_ms: 0.0,
+                    fade_out_ms: 0.0,
+                    ..Default::default()
+                },
+            })
+            .unwrap();
+        commands
+            .push(EngineCommand::LoadDrumRackPadSample {
+                track_id: track,
+                pad_index: 0,
+                sample: audio(0.125),
+                sample_name: "first-note-pad.wav".into(),
+            })
+            .unwrap();
         engine.process(&mut [0.0; 16], 1);
         while events.pop().is_ok() {}
         for _ in 0..count {
-            commands.push(EngineCommand::ExternalNoteOn { track_id: track, pitch: 36, velocity: 127 }).unwrap();
+            commands
+                .push(EngineCommand::ExternalNoteOn {
+                    track_id: track,
+                    pitch: 36,
+                    velocity: 127,
+                })
+                .unwrap();
         }
         let mut output = [0.0; 16];
         let measured = crate::retirement::tests::allocations(|| engine.process(&mut output, 1));

@@ -15,7 +15,10 @@ pub struct InstrumentMediaOwners {
 
 impl InstrumentMediaOwners {
     pub fn incoming(sample: Arc<DecodedAudio>, name: String) -> Self {
-        Self { sample: Some(sample), name: Some(name) }
+        Self {
+            sample: Some(sample),
+            name: Some(name),
+        }
     }
 
     pub fn is_empty(&self) -> bool {
@@ -36,8 +39,13 @@ impl PartialEq for InstrumentMediaOwners {
 
 impl std::fmt::Debug for InstrumentMediaOwners {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.debug_struct("InstrumentMediaOwners")
-            .field("sample", &self.sample.as_ref().map(|sample| Arc::as_ptr(sample)))
-            .field("name", &self.name).finish()
+        formatter
+            .debug_struct("InstrumentMediaOwners")
+            .field(
+                "sample",
+                &self.sample.as_ref().map(|sample| Arc::as_ptr(sample)),
+            )
+            .field("name", &self.name)
+            .finish()
     }
 }
