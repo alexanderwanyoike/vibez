@@ -140,4 +140,57 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn every_measured_region_fits_without_overlap_at_supported_panel_sizes() {
+        for width in [430.0, 464.0, 619.0, 620.0, 660.0, 819.0, 820.0, 900.0] {
+            for height in (64..=400).step_by(2).map(|height| height as f32) {
+                for advanced in [false, true] {
+                    let layout = arrange(width, height, advanced);
+                    let regions = [Some(layout.toolbar), layout.tabs, layout.response,
+                        layout.meter, layout.modes, Some(layout.primary), layout.modulation,
+                        layout.disclosure].into_iter().flatten().collect::<Vec<_>>();
+                    for region in &regions {
+                        assert!(region.x >= 0.0 && region.y >= 0.0);
+                        assert!(region.width > 0.0 && region.height > 0.0);
+                        assert!(region.x + region.width <= width + 0.01,
+                            "horizontal overflow {width}x{height} Advanced={advanced}: {region:?}");
+                        assert!(region.y + region.height <= height + 0.01,
+                            "vertical overflow {width}x{height} Advanced={advanced}: {region:?}");
+                    }
+                    for (index, left) in regions.iter().enumerate() {
+                        for right in &regions[index + 1..] {
+                            let overlap_x = left.x < right.x + right.width && right.x < left.x + left.width;
+                            let overlap_y = left.y < right.y + right.height && right.y < left.y + left.height;
+                            assert!(!(overlap_x && overlap_y),
+                                "overlap {width}x{height} Advanced={advanced}: {left:?}, {right:?}");
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn tier_hierarchy_keeps_modulation_beside_expanded_controls_and_medium_tabs() {
+        let expanded = arrange(900.0, 304.0, true);
+        assert!(expanded.vertical_modes);
+        assert!(expanded.response.unwrap().width > expanded.primary.width * 2.0);
+        let modulation = expanded.modulation.unwrap();
+        assert_eq!(modulation.y, expanded.primary.y);
+        assert!(modulation.x >= expanded.primary.x + expanded.primary.width);
+        for advanced in [false, true] {
+            let medium = arrange(660.0, 304.0, advanced);
+            assert!(medium.tabs.is_some());
+            assert!(medium.response.is_some() && medium.meter.is_some());
+            let compact = arrange(430.0, 304.0, advanced);
+            let modes = compact.modes.unwrap();
+            assert!(modes.width > modes.height * 8.0);
+            assert!(compact.primary.height >= 60.0);
+        }
+        let minimum = arrange(430.0, 64.0, true);
+        assert!(minimum.modulation.unwrap().height >= 14.0);
+        assert!(minimum.primary.height >= 28.0);
+    }
+
 }
