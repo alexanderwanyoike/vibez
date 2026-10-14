@@ -1,8 +1,27 @@
+//! Legacy-compatible drive with a stable native character and quality parameter contract.
+
 use vibez_core::effect::{EffectType, ParamDescriptor};
 
 use crate::effect::AudioEffect;
 
-static DRIVE_PARAMS: &[ParamDescriptor] = &[
+pub mod param {
+    pub const AMOUNT: usize = 0;
+    pub const TONE: usize = 1;
+    pub const OUTPUT: usize = 2;
+    pub const MIX: usize = 3;
+    pub const CHARACTER: usize = 4;
+    pub const QUALITY: usize = 5;
+    pub const PRE_HP_ENABLED: usize = 6;
+    pub const PRE_HP_FREQUENCY: usize = 7;
+    pub const POST_LP_ENABLED: usize = 8;
+    pub const POST_LP_FREQUENCY: usize = 9;
+    pub const COUNT: usize = 10;
+}
+
+pub const LATENCY_SAMPLES: u32 = 64;
+pub const RAMP_FRAMES: u32 = 512;
+
+pub static DRIVE_PARAMS: &[ParamDescriptor] = &[
     ParamDescriptor {
         name: "Amount",
         min: 0.0,
@@ -31,6 +50,12 @@ static DRIVE_PARAMS: &[ParamDescriptor] = &[
         default: 1.0,
         unit: "",
     },
+    ParamDescriptor { name: "Character", min: 0.0, max: 3.0, default: 0.0, unit: "" },
+    ParamDescriptor { name: "Quality", min: 0.0, max: 2.0, default: 2.0, unit: "" },
+    ParamDescriptor { name: "Pre HP Enabled", min: 0.0, max: 1.0, default: 0.0, unit: "" },
+    ParamDescriptor { name: "Pre HP Frequency", min: 20.0, max: 1000.0, default: 80.0, unit: "Hz" },
+    ParamDescriptor { name: "Post LP Enabled", min: 0.0, max: 1.0, default: 0.0, unit: "" },
+    ParamDescriptor { name: "Post LP Frequency", min: 1000.0, max: 20000.0, default: 12000.0, unit: "Hz" },
 ];
 
 /// Musical soft-saturation drive.
@@ -45,6 +70,7 @@ pub struct DriveEffect {
     mix: f32,
     /// One-pole high-shelf-ish state, per channel.
     z: [f32; 2],
+    extra: [f32; 6],
     delay: [[f32; 2]; 64],
     delay_position: usize,
 }
@@ -57,6 +83,7 @@ impl DriveEffect {
             output: 1.0,
             mix: 1.0,
             z: [0.0; 2],
+            extra: [0.0, 2.0, 0.0, 80.0, 0.0, 12000.0],
             delay: [[0.0; 2]; 64],
             delay_position: 0,
         }
@@ -77,7 +104,7 @@ impl Default for DriveEffect {
 
 impl AudioEffect for DriveEffect {
     fn latency_samples(&self) -> u32 {
-        64
+        LATENCY_SAMPLES
     }
 
     fn effect_type(&self) -> EffectType {
@@ -106,6 +133,17 @@ impl AudioEffect for DriveEffect {
                 self.mix = value.clamp(0.0, 1.0);
                 true
             }
+            4..=9 => {
+                if !value.is_finite() { return false; }
+                let descriptor = &DRIVE_PARAMS[index];
+                let value = value.clamp(descriptor.min, descriptor.max);
+                self.extra[index - 4] = match index {
+                    param::CHARACTER | param::QUALITY => value.round(),
+                    param::PRE_HP_ENABLED | param::POST_LP_ENABLED => f32::from(value >= 0.5),
+                    _ => value,
+                };
+                true
+            }
             _ => false,
         }
     }
@@ -116,6 +154,7 @@ impl AudioEffect for DriveEffect {
             1 => self.tone,
             2 => self.output,
             3 => self.mix,
+            4..=9 => self.extra[index - 4],
             _ => 0.0,
         }
     }
