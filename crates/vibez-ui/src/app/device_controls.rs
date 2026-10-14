@@ -134,4 +134,35 @@ mod tests {
         );
         assert!(app.device_controls[&effect].advanced);
     }
+    #[test]
+    fn bitcrush_rate_entry_selects_the_nearest_actual_hertz_and_undo_restores_legacy_storage() {
+        let mut app = super::super::test_support::app();
+        app.state.transport.sample_rate = 48_000;
+        let channel = ProjectTrack::new(TrackId::new(), "Bitcrush".into(), 3);
+        let track = channel.id;
+        Arc::make_mut(&mut app.state.project_tracks).tracks.push(channel);
+        let _ = app.update(Message::Devices(DevicesMsg::AddEffect(track, EffectType::Bitcrush)));
+        let target = &mut app.state.find_track_mut(track).unwrap().effects[0];
+        let effect = target.id;
+        target.params[1] = 4.49;
+        let before = target.params.clone();
+        assert_eq!(target.descriptors[1].unit, "x");
+        app.state.project.history = Default::default();
+        app.state.project.dirty = false;
+        let _ = app.update(Message::DeviceControl(DeviceControlMsg::Input(
+            track, effect, 1, "19.8 kHz".into(),
+        )));
+        let _ = app.update(Message::DeviceControl(DeviceControlMsg::Submit(track, effect, 1)));
+        assert_eq!(
+            app.state.find_track(track).unwrap().effects[0].params[1],
+            3.0,
+            "16 kHz is closer to 19.8 kHz than 24 kHz"
+        );
+        assert!(app.device_controls[&effect].errors.is_empty());
+        assert!(app.state.project.dirty);
+        let snapshot = app.state.project.history.pop_undo().expect("one rate edit");
+        assert!(!app.state.project.history.can_undo());
+        app.apply_snapshot(snapshot);
+        assert_eq!(app.state.find_track(track).unwrap().effects[0].params, before);
+    }
 }
