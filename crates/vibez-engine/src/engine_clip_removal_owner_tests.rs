@@ -146,3 +146,65 @@ fn empty_missing_and_repeated_removals_keep_note_flush_and_length_semantics() {
     assert!(std::iter::from_fn(|| events.pop().ok()).all(|event| !matches!(event,
         EngineEvent::RetiredAudioClip(_) | EngineEvent::RetiredNoteClip(_))));
 }
+
+#[test]
+fn public_audio_and_note_insertion_growth_keeps_later_removal_allocation_free() {
+    for count in [1, 2, 20, 21, 128] {
+        let (mut engine, mut commands, mut events) = AudioEngine::new();
+        let track = TrackId::new();
+        let ids: Vec<_> = (0..count).map(|_| ClipId::new()).collect();
+        commands.push(EngineCommand::add_track(track)).unwrap();
+        for id in &ids {
+            let clip = audio_clip(*id, Arc::new(DecodedAudio {
+                channels: vec![vec![0.001; 128]], sample_rate: 44_100,
+            }));
+            commands.push(EngineCommand::AddClip {
+                track_id: track, clip_id: clip.id, audio: clip.audio, position: clip.position,
+                source_offset: clip.source_offset, start_marker: clip.start_marker,
+                duration: clip.duration, loop_enabled: clip.loop_enabled, loop_start: clip.loop_start,
+                loop_end: clip.loop_end, linear_gain: clip.linear_gain, fades: clip.fades,
+                playback_direction: clip.playback_direction, warp_markers: clip.warp_markers,
+            }).unwrap();
+            commands.push(EngineCommand::AddNoteClip { track_id: track, clip_id: *id,
+                position_beats: 0.0, duration_beats: 4.0, start_marker_beats: 0.0,
+                loop_enabled: false, loop_start_beats: 0.0, loop_end_beats: 4.0,
+                groove_grid: GrooveGrid::Off }).unwrap();
+            commands.push(EngineCommand::AddNote { track_id: track, clip_id: *id,
+                note: MidiNote { pitch: 60, velocity: 100, start_beat: 0.0, duration_beats: 3.0 } }).unwrap();
+        }
+        engine.process(&mut [], 2);
+        while events.pop().is_ok() {}
+        let middle = ids[count / 2];
+        commands.push(EngineCommand::RemoveClip(track, middle)).unwrap();
+        commands.push(EngineCommand::RemoveNoteClip(track, middle)).unwrap();
+        assert_eq!(crate::retirement::tests::allocations(|| engine.process(&mut [0.0; 16], 2)), (0, 0), "count={count}");
+        let expected: Vec<_> = ids.iter().copied().filter(|id| *id != middle).collect();
+        assert_eq!(engine.tracks()[0].playback_source.clips.iter().map(|clip| clip.id).collect::<Vec<_>>(), expected);
+        assert_eq!(engine.tracks()[0].playback_source.note_clips.iter().map(|clip| clip.id).collect::<Vec<_>>(), expected);
+        for id in ids {
+            commands.push(EngineCommand::RemoveClip(track, id)).unwrap();
+            commands.push(EngineCommand::RemoveNoteClip(track, id)).unwrap();
+        }
+        assert_eq!(crate::retirement::tests::allocations(|| engine.process(&mut [0.0; 16], 2)), (0, 0));
+        assert!(engine.tracks()[0].playback_source.clips.is_empty());
+        assert!(engine.tracks()[0].playback_source.note_clips.is_empty());
+        assert_eq!(engine.transport().audio_length(), None);
+    }
+}
+
+#[test]
+fn returned_clip_event_equality_distinguishes_storage_and_untimed_owner_variants() {
+    let id = ClipId::new();
+    let shared_audio = Arc::new(DecodedAudio { channels: vec![vec![0.25; 128]], sample_rate: 44_100 });
+    let a = EngineEvent::RetiredAudioClip(audio_clip(id, Arc::clone(&shared_audio)));
+    let b = EngineEvent::RetiredAudioClip(audio_clip(id, shared_audio));
+    let c = EngineEvent::RetiredNoteClip(note_clip(id));
+    let d = EngineEvent::RetiredNoteClip(note_clip(id));
+    for event in [&a, &b, &c, &d] {
+        assert_eq!(event, event);
+        assert_eq!(event.time_domain(), crate::events::TimeDomain::Untimed);
+    }
+    assert_ne!(a, b);
+    assert_ne!(c, d);
+    assert_ne!(a, c);
+}
