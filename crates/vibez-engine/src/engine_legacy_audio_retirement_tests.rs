@@ -204,22 +204,34 @@ fn returned_legacy_audio(events: &mut rtrb::Consumer<EngineEvent>) -> Vec<Arc<De
         .collect()
 }
 
-#[test]
-fn legacy_load_pressure_retains_thirty_two_owners_and_blocks_next_replacement_in_fifo_order() {
+struct LegacyPressureFixture {
+    engine: AudioEngine,
+    commands: rtrb::Producer<EngineCommand>,
+    events: rtrb::Consumer<EngineEvent>,
+    owners: Vec<std::sync::Weak<DecodedAudio>>,
+    ring_capacity: usize,
+}
+
+fn legacy_pressure_fixture() -> LegacyPressureFixture {
     let (mut engine, mut commands, mut events) = AudioEngine::new();
     let original = stereo_ramp(512, 0.0, 0.0, 1000);
-    let mut owners = vec![Arc::downgrade(&original)];
+    let owners = vec![Arc::downgrade(&original)];
     commands.push(EngineCommand::SetSampleRate(1000)).unwrap();
     commands.push(EngineCommand::LoadAudio(original)).unwrap();
     commands.push(EngineCommand::Seek(17)).unwrap();
     commands.push(EngineCommand::Play).unwrap();
-    let mut output = [0.0; 16];
-    engine.process_block(AudioProcessBlock::new(&mut output, 2));
+    engine.process_block(AudioProcessBlock::new(&mut [0.0; 16], 2));
     while events.pop().is_ok() {}
     let ring_capacity = fill_ui_ring(&mut engine);
-    let retirement_capacity = engine.pending_retirements.capacity();
-    assert_eq!(retirement_capacity, 32);
-    for generation in 1..=33 {
+    LegacyPressureFixture { engine, commands, events, owners, ring_capacity }
+}
+
+fn queue_legacy_replacements(
+    commands: &mut rtrb::Producer<EngineCommand>,
+    owners: &mut Vec<std::sync::Weak<DecodedAudio>>,
+    count: usize,
+) {
+    for generation in 1..=count {
         let audio = stereo_ramp(
             512,
             generation as f32 / 128.0,
@@ -229,6 +241,15 @@ fn legacy_load_pressure_retains_thirty_two_owners_and_blocks_next_replacement_in
         owners.push(Arc::downgrade(&audio));
         commands.push(EngineCommand::LoadAudio(audio)).unwrap();
     }
+}
+
+#[test]
+fn legacy_load_pressure_retains_thirty_two_owners_and_blocks_next_replacement_in_fifo_order() {
+    let LegacyPressureFixture { mut engine, mut commands, mut events, mut owners, ring_capacity } = legacy_pressure_fixture();
+    let mut output = [0.0; 16];
+    let retirement_capacity = engine.pending_retirements.capacity();
+    assert_eq!(retirement_capacity, 32);
+    queue_legacy_replacements(&mut commands, &mut owners, 33);
     commands.push(EngineCommand::SetBpm(137.0)).unwrap();
     for position in [25, 33] {
         assert_eq!(
@@ -287,29 +308,11 @@ fn legacy_load_pressure_retains_thirty_two_owners_and_blocks_next_replacement_in
 #[test]
 fn legacy_unload_pressure_requires_two_free_credits_before_clearing_audio_and_stopping() {
     for free_credits in [1, 2] {
-        let (mut engine, mut commands, mut events) = AudioEngine::new();
-        let original = stereo_ramp(512, 0.0, 0.0, 1000);
-        let mut owners = vec![Arc::downgrade(&original)];
-        commands.push(EngineCommand::SetSampleRate(1000)).unwrap();
-        commands.push(EngineCommand::LoadAudio(original)).unwrap();
-        commands.push(EngineCommand::Seek(17)).unwrap();
-        commands.push(EngineCommand::Play).unwrap();
+        let LegacyPressureFixture { mut engine, mut commands, mut events, mut owners, ring_capacity } = legacy_pressure_fixture();
         let mut output = [0.0; 16];
-        engine.process_block(AudioProcessBlock::new(&mut output, 2));
-        while events.pop().is_ok() {}
-        let ring_capacity = fill_ui_ring(&mut engine);
         let retirement_capacity = engine.pending_retirements.capacity();
         let replacements = retirement_capacity - free_credits;
-        for generation in 1..=replacements {
-            let audio = stereo_ramp(
-                512,
-                generation as f32 / 128.0,
-                -(generation as f32) / 256.0,
-                1000,
-            );
-            owners.push(Arc::downgrade(&audio));
-            commands.push(EngineCommand::LoadAudio(audio)).unwrap();
-        }
+        queue_legacy_replacements(&mut commands, &mut owners, replacements);
         assert_eq!(
             crate::retirement::tests::allocations(
                 || engine.process_block(AudioProcessBlock::new(&mut [], 2))
