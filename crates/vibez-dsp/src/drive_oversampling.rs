@@ -127,9 +127,9 @@ fn symmetric_dot(samples: &[f32], coefficients: &[f32]) -> f32 {
     let midpoint = coefficients.len() / 2;
     let mut sums = [0.0; 4];
     for group in 0..midpoint / 4 {
-        for lane in 0..4 {
+        for (lane, sum) in sums.iter_mut().enumerate() {
             let index = group * 4 + lane;
-            sums[lane] +=
+            *sum +=
                 (samples[index] + samples[samples.len() - 1 - index]) * coefficients[index];
         }
     }
@@ -158,9 +158,9 @@ fn symmetric_dot(samples: &[f32], coefficients: &[f32]) -> f32 {
 fn reversed_dot(samples: &[f32], coefficients: &[f32]) -> f32 {
     let mut sums = [0.0; 4];
     for group in 0..coefficients.len() / 4 {
-        for lane in 0..4 {
+        for (lane, sum) in sums.iter_mut().enumerate() {
             let index = group * 4 + lane;
-            sums[lane] += samples[samples.len() - 1 - index] * coefficients[index];
+            *sum += samples[samples.len() - 1 - index] * coefficients[index];
         }
     }
     let mut result: f32 = sums.into_iter().sum();
