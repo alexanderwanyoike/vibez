@@ -72,14 +72,16 @@ fn reject_worst_case_retirement_is_reserved_before_command_ownership_is_popped()
         });
     }
     engine.tracks.push(Box::new(channel));
-    engine.device_handoff.track_transfer(device_handoff::PendingDeviceReconfiguration {
-        local_recovery: false,
-        handoff_id: 7,
-        track_id: track,
-        effect_id: Some(effect),
-        position: 0,
-        bypass: false,
-    });
+    engine
+        .device_handoff
+        .track_transfer(device_handoff::PendingDeviceReconfiguration {
+            local_recovery: false,
+            handoff_id: 7,
+            track_id: track,
+            effect_id: Some(effect),
+            position: 0,
+            bypass: false,
+        });
     let reserved_effects = Vec::with_capacity(1);
     let device = reconfiguration::DeviceReconfiguration::Effect {
         handoff_id: 7,
@@ -182,7 +184,10 @@ fn parameter_edits_while_main_holds_the_owner_are_coalesced_and_restored_without
         crate::retirement::tests::allocations(|| engine.drain_commands()),
         (0, 0)
     );
-    assert_eq!(engine.device_handoff.retained_parameters(), [(0, 0.75), (1, 0.5)]);
+    assert_eq!(
+        engine.device_handoff.retained_parameters(),
+        [(0, 0.75), (1, 0.5)]
+    );
     device.reconfigure_on_main_thread().unwrap();
     commands
         .push(EngineCommand::ResumeDeviceReconfiguration {

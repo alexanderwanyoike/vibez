@@ -132,7 +132,8 @@ impl AudioEngine {
         track: TrackId,
         effect: EffectId,
     ) -> Option<bool> {
-        self.device_handoff.pending()
+        self.device_handoff
+            .pending()
             .filter(|pending| {
                 pending.local_recovery
                     && pending.track_id == track
@@ -142,7 +143,8 @@ impl AudioEngine {
     }
 
     pub(super) fn local_device_failure_pending(&self) -> bool {
-        self.device_handoff.pending()
+        self.device_handoff
+            .pending()
             .is_some_and(|pending| pending.local_recovery)
             || self
                 .tracks
@@ -368,14 +370,15 @@ impl AudioEngine {
                 _ => (0, false),
             };
             let local_recovery = device.processing_recovery_requested();
-            self.device_handoff.track_transfer(device_handoff::PendingDeviceReconfiguration {
-                handoff_id,
-                track_id: device.track_id(),
-                effect_id: device.effect_id(),
-                position,
-                bypass,
-                local_recovery,
-            });
+            self.device_handoff
+                .track_transfer(device_handoff::PendingDeviceReconfiguration {
+                    handoff_id,
+                    track_id: device.track_id(),
+                    effect_id: device.effect_id(),
+                    position,
+                    bypass,
+                    local_recovery,
+                });
             match self
                 .event_tx
                 .push(EngineEvent::DeviceReconfiguration(device))
