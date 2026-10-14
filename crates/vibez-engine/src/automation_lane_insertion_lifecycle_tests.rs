@@ -75,12 +75,12 @@ fn publish_request(with_stop: bool) -> (Fixture, Delta, ClipInsertionStorageRequ
                 assert_eq!(value, fixture.engine.transport().position());
                 positions += 1;
             }
-            EngineEvent::Metering {
+            EngineEvent::Metering(crate::events::MeteringEvent {
                 peak_l,
                 peak_r,
                 rms_l,
                 rms_r,
-            } => {
+            }) => {
                 assert_eq!((peak_l, peak_r, rms_l, rms_r), (0.0, 0.0, 0.0, 0.0));
                 meters += 1;
             }
@@ -98,20 +98,20 @@ fn publish_request(with_stop: bool) -> (Fixture, Delta, ClipInsertionStorageRequ
                 assert_eq!(value, fixture.engine.transport().position());
                 positions += 1;
             }
-            EngineEvent::TrackMeter {
+            EngineEvent::TrackMeter(crate::events::TrackMeterEvent {
                 track_id,
                 peak_l,
                 peak_r,
-            } => {
+            }) => {
                 assert!([fixture.track, TrackId::MASTER].contains(&track_id));
                 assert_eq!((peak_l, peak_r), (0.25, 0.0));
             }
-            EngineEvent::Metering {
+            EngineEvent::Metering(crate::events::MeteringEvent {
                 peak_l,
                 peak_r,
                 rms_l,
                 rms_r,
-            } => {
+            }) => {
                 assert_eq!((peak_l, peak_r, rms_l, rms_r), (0.25, 0.0, 0.25, 0.0));
                 meters += 1;
             }

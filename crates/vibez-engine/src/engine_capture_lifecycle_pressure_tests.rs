@@ -59,12 +59,12 @@ fn collect(
     while let Ok(event) = fixture.events.pop() {
         match event {
             EngineEvent::PlaybackPosition(u64::MAX) => delivered.fillers += 1,
-            EngineEvent::PerformanceCaptureStarted {
+            EngineEvent::PerformanceCaptureStarted(crate::events::PerformanceCaptureStartedEvent {
                 offsets,
                 effective_at_samples,
                 section_id,
                 section_position_samples,
-            } => {
+            }) => {
                 assert!(Arc::ptr_eq(
                     &offsets,
                     &fixture.engine.routing.capture_offsets
@@ -110,8 +110,8 @@ fn collect(
                 delivered.order.push("owner");
             }
             EngineEvent::PlaybackStarted => delivered.order.push("playback-start"),
-            EngineEvent::TrackMeter { .. }
-            | EngineEvent::Metering { .. }
+            EngineEvent::TrackMeter(_)
+            | EngineEvent::Metering(_)
             | EngineEvent::PlaybackPosition(_) => {}
             event => panic!("unexpected Capture pressure event: {event:?}"),
         }

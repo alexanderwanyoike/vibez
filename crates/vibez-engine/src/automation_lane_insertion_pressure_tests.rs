@@ -201,20 +201,20 @@ impl Fixture {
                     assert_eq!(value, self.engine.transport().position());
                     position += 1;
                 }
-                EngineEvent::TrackMeter {
+                EngineEvent::TrackMeter(crate::events::TrackMeterEvent {
                     track_id,
                     peak_l,
                     peak_r,
-                } => {
+                }) => {
                     assert!([self.track, TrackId::MASTER].contains(&track_id));
                     assert_eq!((peak_l, peak_r), (0.0, 0.0));
                 }
-                EngineEvent::Metering {
+                EngineEvent::Metering(crate::events::MeteringEvent {
                     peak_l,
                     peak_r,
                     rms_l,
                     rms_r,
-                } => {
+                }) => {
                     assert_eq!((peak_l, peak_r, rms_l, rms_r), (0.0, 0.0, 0.0, 0.0));
                     meters += 1;
                 }
@@ -500,12 +500,12 @@ fn pending_ready_or_abandoned_lane_uses_one_current_credit_and_keeps_stop_waitin
                 EngineEvent::PlaybackPosition(value) => {
                     assert_eq!(value, fixture.engine.transport().position())
                 }
-                EngineEvent::Metering {
+                EngineEvent::Metering(crate::events::MeteringEvent {
                     peak_l,
                     peak_r,
                     rms_l,
                     rms_r,
-                } => assert_eq!((peak_l, peak_r, rms_l, rms_r), (0.0, 0.0, 0.0, 0.0)),
+                }) => assert_eq!((peak_l, peak_r, rms_l, rms_r), (0.0, 0.0, 0.0, 0.0)),
                 event => panic!("unexpected request-boundary event: {event:?}"),
             }
         }

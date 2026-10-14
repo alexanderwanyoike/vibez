@@ -282,12 +282,12 @@ fn appending_a_lane_at_full_capacity_preserves_audio_and_owners_without_callback
     assert!(
         matches!(events.pop().unwrap(), EngineEvent::PlaybackPosition(position) if position == before)
     );
-    let EngineEvent::Metering {
+    let EngineEvent::Metering(crate::events::MeteringEvent {
         peak_l,
         peak_r,
         rms_l,
         rms_r,
-    } = events.pop().unwrap()
+    }) = events.pop().unwrap()
     else {
         panic!("zero-frame admission must report its silent master meters");
     };

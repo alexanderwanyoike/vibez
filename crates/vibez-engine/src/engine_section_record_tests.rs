@@ -2,6 +2,10 @@
 
 use super::*;
 use graph_test_support::{graph_engine, routing_channel};
+use crate::events::{
+    InstrumentNoteInputEvent, NoteRepeatedEvent, SectionRecordArmedEvent,
+    SectionRecordStartedEvent, SectionRecordStoppedEvent,
+};
 
 use crate::playback_source::{
     EngineClip, EngineNoteClip, PreparedPlaybackSource, PreparedSectionPlaybackSource,
@@ -85,16 +89,16 @@ fn source(
 fn record_events(events: &mut rtrb::Consumer<EngineEvent>) -> Vec<(bool, u64, u64)> {
     std::iter::from_fn(|| events.pop().ok())
         .filter_map(|event| match event {
-            EngineEvent::SectionRecordArmed {
+            EngineEvent::SectionRecordArmed(SectionRecordArmedEvent {
                 effective_at_samples,
                 section_position_samples,
                 ..
-            } => Some((false, effective_at_samples, section_position_samples)),
-            EngineEvent::SectionRecordStarted {
+            }) => Some((false, effective_at_samples, section_position_samples)),
+            EngineEvent::SectionRecordStarted(SectionRecordStartedEvent {
                 effective_at_samples,
                 section_position_samples,
                 ..
-            } => Some((true, effective_at_samples, section_position_samples)),
+            }) => Some((true, effective_at_samples, section_position_samples)),
             _ => None,
         })
         .collect()
@@ -396,16 +400,16 @@ fn note_at_block_start_boundary_is_reported_after_recording_starts() {
 
     let boundary_events: Vec<_> = std::iter::from_fn(|| events.pop().ok())
         .filter_map(|event| match event {
-            EngineEvent::SectionRecordStarted {
+            EngineEvent::SectionRecordStarted(SectionRecordStartedEvent {
                 effective_at_samples,
                 ..
-            } => Some(("record-started", effective_at_samples)),
-            EngineEvent::InstrumentNoteInput {
+            }) => Some(("record-started", effective_at_samples)),
+            EngineEvent::InstrumentNoteInput(InstrumentNoteInputEvent {
                 pitch: 42,
                 on: true,
                 effective_at_samples,
                 ..
-            } => Some(("note-on", effective_at_samples)),
+            }) => Some(("note-on", effective_at_samples)),
             _ => None,
         })
         .collect();
@@ -440,12 +444,12 @@ fn stop_reports_the_engine_timestamp_and_local_playhead() {
     engine.process(&mut [0.0], 1);
 
     let stopped = std::iter::from_fn(|| events.pop().ok()).find_map(|event| match event {
-        EngineEvent::SectionRecordStopped {
+        EngineEvent::SectionRecordStopped(SectionRecordStoppedEvent {
             effective_at_samples,
             section_position_samples,
             started,
             ..
-        } => Some((effective_at_samples, section_position_samples, started)),
+        }) => Some((effective_at_samples, section_position_samples, started)),
         _ => None,
     });
     assert_eq!(stopped, Some((5, 5, true)));
@@ -491,14 +495,14 @@ fn repeated_note_reports_swung_truth_and_straight_canonical_position() {
     engine.process(&mut vec![0.0; 40 * 2], 2);
 
     let repeated = std::iter::from_fn(|| events.pop().ok()).find_map(|event| match event {
-        EngineEvent::NoteRepeated {
+        EngineEvent::NoteRepeated(NoteRepeatedEvent {
             effective_at_samples,
             canonical_at_samples,
             section_position_samples,
             canonical_section_position_samples,
             rate,
             ..
-        } if effective_at_samples > 0 => Some((
+        }) if effective_at_samples > 0 => Some((
             effective_at_samples,
             canonical_at_samples,
             section_position_samples,

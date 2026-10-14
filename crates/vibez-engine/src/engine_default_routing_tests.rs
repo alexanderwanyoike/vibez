@@ -38,7 +38,7 @@ fn first_project_plan_is_silent_in_the_event_protocol_and_has_no_initial_morph()
             .filter_map(|event| match event {
                 EngineEvent::PlaybackStarted => Some("started"),
                 EngineEvent::PlaybackPosition(16) => Some("position"),
-                EngineEvent::Metering { .. } => Some("metering"),
+                EngineEvent::Metering(_) => Some("metering"),
                 EngineEvent::RoutingRetired(_) => Some("retired"),
                 _ => None,
             })

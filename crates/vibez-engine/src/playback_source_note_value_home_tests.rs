@@ -113,11 +113,11 @@ fn pending_note_value_growth_keeps_all_source_homes_and_perform_clocks_distinct(
             let mut heard_perform = None;
             while let Ok(event) = events.pop() {
                 match event {
-                    EngineEvent::SectionTransitioned {
+                    EngineEvent::SectionTransitioned(crate::events::SectionTransitionedEvent {
                         section_id,
                         effective_at_samples,
                         retired,
-                    } => {
+                    }) => {
                         assert!(matches!(home, PendingHome::Section));
                         assert_eq!(section_id, next_section);
                         assert_eq!(effective_at_samples, 32);

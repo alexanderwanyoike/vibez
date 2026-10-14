@@ -1,6 +1,9 @@
 //! Retained state remains ordered and owned across cancellation and overflow.
 
 use super::*;
+use crate::events::{
+    MeteringEvent, SectionTransitionedEvent, SourceNoteInputEvent, TrackMuteChangedEvent,
+};
 use crate::mixer::QueuedTrackMute;
 use crate::playback_source::{PreparedClipPlayback, PreparedSectionPlaybackSource};
 use vibez_core::id::ClipId;
@@ -8,12 +11,12 @@ use vibez_core::id::ClipId;
 fn full_ring(engine: &mut AudioEngine) {
     while engine
         .event_tx
-        .push(EngineEvent::Metering {
+        .push(EngineEvent::Metering(MeteringEvent {
             peak_l: 0.0,
             peak_r: 0.0,
             rms_l: 0.0,
             rms_r: 0.0,
-        })
+        }))
         .is_ok()
     {}
 }
@@ -55,12 +58,12 @@ fn rejected_capture_during_recovery_preserves_applied_section_acknowledgement_an
     let mut recording_note = false;
     while let Ok(event) = events.pop() {
         started |= matches!(event, EngineEvent::PlaybackStarted);
-        recording_note |= matches!(event, EngineEvent::SourceNoteInput { position, track_id, .. } if position.section_id == Some(id) && track_id == note_track);
-        if let EngineEvent::SectionTransitioned {
+        recording_note |= matches!(event, EngineEvent::SourceNoteInput(SourceNoteInputEvent { position, track_id, .. }) if position.section_id == Some(id) && track_id == note_track);
+        if let EngineEvent::SectionTransitioned(SectionTransitionedEvent {
             section_id,
             retired,
             ..
-        } = event
+        }) = event
         {
             assert_eq!(section_id, id);
             assert_eq!(&*retired as *const _, identity);
@@ -83,7 +86,7 @@ fn perform_seek_preserves_applied_section_acknowledgements() {
     engine.flush_presentation();
     assert!(
         std::iter::from_fn(|| events.pop().ok()).any(|event| matches!(event,
-        EngineEvent::SectionTransitioned { section_id, .. } if section_id == id))
+        EngineEvent::SectionTransitioned(SectionTransitionedEvent { section_id, .. }) if section_id == id))
     );
     assert!(engine.transport.is_playing());
 }
@@ -150,21 +153,21 @@ fn an_earlier_due_mute_cannot_be_overtaken_after_ring_drain() {
     let (mut engine, _, mut events) = AudioEngine::new();
     let id = TrackId::new();
     full_ring(&mut engine);
-    engine.present_event(EngineEvent::TrackMuteChanged {
+    engine.present_event(EngineEvent::TrackMuteChanged(TrackMuteChangedEvent {
         track_id: id,
         muted: true,
         effective_at_samples: 0,
-    });
+    }));
     while events.pop().is_ok() {}
-    engine.present_event(EngineEvent::TrackMuteChanged {
+    engine.present_event(EngineEvent::TrackMuteChanged(TrackMuteChangedEvent {
         track_id: id,
         muted: false,
         effective_at_samples: 0,
-    });
+    }));
     engine.flush_presentation();
     let values: Vec<_> = std::iter::from_fn(|| events.pop().ok())
         .filter_map(|event| match event {
-            EngineEvent::TrackMuteChanged { muted, .. } => Some(muted),
+            EngineEvent::TrackMuteChanged(TrackMuteChangedEvent { muted, .. }) => Some(muted),
             _ => None,
         })
         .collect();
@@ -309,7 +312,7 @@ fn normal_stop_does_not_overtake_a_retained_applied_mute() {
     engine.flush_presentation();
     let state: Vec<_> = std::iter::from_fn(|| events.pop().ok())
         .filter_map(|event| match event {
-            EngineEvent::TrackMuteChanged { .. } => Some("mute"),
+            EngineEvent::TrackMuteChanged(_) => Some("mute"),
             EngineEvent::PlaybackStopped => Some("stop"),
             _ => None,
         })
@@ -360,11 +363,11 @@ fn accepted_capture_start_and_notes_survive_a_stalled_ui_until_capture_closes() 
         let mut order = Vec::new();
         while let Ok(event) = events.pop() {
             match event {
-                EngineEvent::PerformanceCaptureStarted { .. } => {
+                EngineEvent::PerformanceCaptureStarted(_) => {
                     phase = "Recording";
                     order.push("start");
                 }
-                EngineEvent::InstrumentNoteInput { .. } => {
+                EngineEvent::InstrumentNoteInput(_) => {
                     if phase == "Recording" {
                         captured += 1;
                     }

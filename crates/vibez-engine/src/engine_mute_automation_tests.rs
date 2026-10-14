@@ -1,5 +1,6 @@
 //! Manual and automated Track Mute preserve engine-timed playback and Capture.
 
+use crate::events::AutomationGestureChangedEvent;
 use std::sync::Arc;
 
 use vibez_core::audio_buffer::DecodedAudio;
@@ -174,11 +175,11 @@ fn live_pan_gesture_overrides_arrange_baseline_then_yields_back() {
 
     let gestures: Vec<_> = std::iter::from_fn(|| events.pop().ok())
         .filter_map(|event| match event {
-            EngineEvent::AutomationGestureChanged {
+            EngineEvent::AutomationGestureChanged(AutomationGestureChangedEvent {
                 phase,
                 normalized_value,
                 ..
-            } => Some((phase, normalized_value)),
+            }) => Some((phase, normalized_value)),
             _ => None,
         })
         .collect();

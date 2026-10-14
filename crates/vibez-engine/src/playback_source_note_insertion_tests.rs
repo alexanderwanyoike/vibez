@@ -528,8 +528,8 @@ fn pending_note_clip_growth_preserves_current_duplicate_edits_and_voice_release_
                 event,
                 EngineEvent::ClipInsertionCompleted(_)
                     | EngineEvent::ClipInsertionStorageRequested(_)
-                    | EngineEvent::SourceNoteInput { on: false, .. }
-                    | EngineEvent::InstrumentNoteInput { on: false, .. }
+                    | EngineEvent::SourceNoteInput(crate::events::SourceNoteInputEvent { on: false, .. })
+                    | EngineEvent::InstrumentNoteInput(crate::events::InstrumentNoteInputEvent { on: false, .. })
             ));
         }
     }
@@ -554,13 +554,13 @@ fn pending_note_clip_growth_preserves_current_duplicate_edits_and_voice_release_
             EngineEvent::ClipInsertionStorageRequested(_) => {
                 panic!("the shared grown capacity must hold both deltas")
             }
-            EngineEvent::SourceNoteInput {
+            EngineEvent::SourceNoteInput(crate::events::SourceNoteInputEvent {
                 track_id,
                 pitch,
                 on: false,
                 position,
                 ..
-            } => {
+            }) => {
                 assert_eq!((track_id, pitch), (live, 72));
                 assert_eq!(
                     (position.effective_at_samples, position.canonical_at_samples),
@@ -571,13 +571,13 @@ fn pending_note_clip_growth_preserves_current_duplicate_edits_and_voice_release_
                 assert_eq!(position.canonical_section_position_samples, None);
                 order.push("source-off");
             }
-            EngineEvent::InstrumentNoteInput {
+            EngineEvent::InstrumentNoteInput(crate::events::InstrumentNoteInputEvent {
                 track_id,
                 pitch,
                 on: false,
                 effective_at_samples,
                 ..
-            } => {
+            }) => {
                 assert_eq!((track_id, pitch, effective_at_samples), (live, 72, 160));
                 order.push("heard-off");
             }
@@ -1025,7 +1025,7 @@ fn prepare_pending_home(home: PendingHome) -> PendingHomeFixture {
     assert_sounding(&output);
     let mut initial_section_returns = 0;
     while let Ok(event) = events.pop() {
-        if let crate::events::EngineEvent::SectionTransitioned { retired, .. } = event {
+        if let crate::events::EngineEvent::SectionTransitioned(crate::events::SectionTransitionedEvent { retired, .. }) = event {
             assert!(matches!(home, PendingHome::Section));
             initial_section.assert_unchanged(&retired.tracks()[0].source);
             initial_section_returns += 1;
@@ -1169,11 +1169,11 @@ fn pending_note_storage_keeps_arrange_distinct_through_reachable_section_and_lau
             );
             while let Ok(event) = events.pop() {
                 match event {
-                    EngineEvent::SectionTransitioned {
+                    EngineEvent::SectionTransitioned(crate::events::SectionTransitionedEvent {
                         section_id,
                         effective_at_samples,
                         retired,
-                    } => {
+                    }) => {
                         assert!(matches!(home, PendingHome::Section));
                         assert_eq!(section_id, next_section);
                         assert_eq!(effective_at_samples, 32);

@@ -59,12 +59,12 @@ fn assert_stopped_zero_frame_telemetry(events: &mut Consumer<EngineEvent>) {
         events.pop().unwrap(),
         EngineEvent::PlaybackPosition(0)
     ));
-    let EngineEvent::Metering {
+    let EngineEvent::Metering(crate::events::MeteringEvent {
         peak_l,
         peak_r,
         rms_l,
         rms_r,
-    } = events.pop().unwrap()
+    }) = events.pop().unwrap()
     else {
         panic!("the stopped zero-frame callback must publish silent master meters");
     };

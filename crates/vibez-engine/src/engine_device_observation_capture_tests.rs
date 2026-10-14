@@ -273,12 +273,12 @@ fn collect(fixture: &mut Fixture) -> Events {
     };
     while let Ok(event) = fixture.events.pop() {
         match event {
-            EngineEvent::PerformanceCaptureStarted {
+            EngineEvent::PerformanceCaptureStarted(crate::events::PerformanceCaptureStartedEvent {
                 offsets,
                 effective_at_samples,
                 section_id,
                 section_position_samples,
-            } => {
+            }) => {
                 assert!(Arc::ptr_eq(
                     &offsets,
                     &fixture.engine.routing.capture_offsets

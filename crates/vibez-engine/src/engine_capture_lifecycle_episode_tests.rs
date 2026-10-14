@@ -33,12 +33,12 @@ fn collect(fixture: &mut Fixture, boundary: u64) -> Events {
     let mut observed = Events::default();
     while let Ok(event) = fixture.events.pop() {
         match event {
-            EngineEvent::PerformanceCaptureStarted {
+            EngineEvent::PerformanceCaptureStarted(crate::events::PerformanceCaptureStartedEvent {
                 offsets,
                 effective_at_samples,
                 section_id,
                 section_position_samples,
-            } => {
+            }) => {
                 assert!(Arc::ptr_eq(
                     &offsets,
                     &fixture.engine.routing.capture_offsets
@@ -87,8 +87,8 @@ fn collect(fixture: &mut Fixture, boundary: u64) -> Events {
                 observed.order.push("invalid");
             }
             EngineEvent::PlaybackStopped => observed.order.push("playback-stop"),
-            EngineEvent::TrackMeter { .. }
-            | EngineEvent::Metering { .. }
+            EngineEvent::TrackMeter(_)
+            | EngineEvent::Metering(_)
             | EngineEvent::PlaybackPosition(_) => {}
             event => panic!("unexpected Capture episode event: {event:?}"),
         }

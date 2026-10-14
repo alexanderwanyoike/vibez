@@ -6,6 +6,7 @@ use crate::domains::perform::{
 };
 use vibez_core::id::{ClipId, SectionId, TrackId};
 use vibez_engine::events::SourceRecordingPosition;
+use vibez_engine::events::{InstrumentNoteInputEvent, SourceNoteInputEvent};
 
 #[test]
 fn source_take_first_note_survives_count_in_while_capture_uses_the_heard_coordinate() {
@@ -49,7 +50,7 @@ fn source_take_first_note_survives_count_in_while_capture_uses_the_heard_coordin
     for (on, raw, local) in [(true, 1024, 0), (false, 1040, 16)] {
         apply_performed_note(
             &mut state.perform,
-            EngineEvent::SourceNoteInput {
+            EngineEvent::SourceNoteInput(SourceNoteInputEvent {
                 track_id: track,
                 pitch: 60,
                 velocity: if on { 100 } else { 0 },
@@ -61,7 +62,7 @@ fn source_take_first_note_survives_count_in_while_capture_uses_the_heard_coordin
                     section_position_samples: Some(local),
                     canonical_section_position_samples: Some(local),
                 },
-            },
+            }),
         );
     }
     let clip_take = state
@@ -83,7 +84,7 @@ fn source_take_first_note_survives_count_in_while_capture_uses_the_heard_coordin
     for (on, _raw, heard, local) in [(true, 1024, 640, 128), (false, 1040, 656, 144)] {
         apply_performed_note(
             &mut state.perform,
-            EngineEvent::InstrumentNoteInput {
+            EngineEvent::InstrumentNoteInput(InstrumentNoteInputEvent {
                 track_id: track,
                 pitch: 60,
                 velocity: if on { 100 } else { 0 },
@@ -91,7 +92,7 @@ fn source_take_first_note_survives_count_in_while_capture_uses_the_heard_coordin
                 effective_at_samples: heard,
                 section_id: Some(heard_section),
                 section_position_samples: Some(local),
-            },
+            }),
         );
     }
     let result = state.perform.capture.finish(700).unwrap().materialize();

@@ -254,13 +254,13 @@ fn repeated_small_hints_keep_current_duplicate_lanes_and_live_controls_ahead_of_
                     );
                     assert!(pending.replace(request).is_none());
                 }
-                EngineEvent::AutomationGestureChanged {
+                EngineEvent::AutomationGestureChanged(crate::events::AutomationGestureChangedEvent {
                     track_id: id,
                     target,
                     normalized_value,
                     phase,
                     effective_at_samples,
-                } => {
+                }) => {
                     assert_eq!(
                         (id, target, normalized_value, phase, effective_at_samples),
                         (
@@ -279,20 +279,20 @@ fn repeated_small_hints_keep_current_duplicate_lanes_and_live_controls_ahead_of_
                     public_order.push("stop");
                 }
                 EngineEvent::PlaybackPosition(position) => assert_eq!(position, clocks.0),
-                EngineEvent::TrackMeter {
+                EngineEvent::TrackMeter(crate::events::TrackMeterEvent {
                     track_id: id,
                     peak_l,
                     peak_r,
-                } => {
+                }) => {
                     assert!([track_id, TrackId::MASTER].contains(&id));
                     assert_eq!((peak_l, peak_r), (0.0, 0.0));
                 }
-                EngineEvent::Metering {
+                EngineEvent::Metering(crate::events::MeteringEvent {
                     peak_l,
                     peak_r,
                     rms_l,
                     rms_r,
-                } => assert_eq!((peak_l, peak_r, rms_l, rms_r), (0.0, 0.0, 0.0, 0.0)),
+                }) => assert_eq!((peak_l, peak_r, rms_l, rms_r), (0.0, 0.0, 0.0, 0.0)),
                 event => panic!("unexpected live lane FIFO event: {event:?}"),
             }
         }
@@ -335,20 +335,20 @@ fn repeated_small_hints_keep_current_duplicate_lanes_and_live_controls_ahead_of_
         while let Ok(event) = events.pop() {
             match event {
                 EngineEvent::PlaybackPosition(position) => assert_eq!(position, clocks.0 + 64),
-                EngineEvent::TrackMeter {
+                EngineEvent::TrackMeter(crate::events::TrackMeterEvent {
                     track_id: id,
                     peak_l,
                     peak_r,
-                } => {
+                }) => {
                     assert!([track_id, TrackId::MASTER].contains(&id));
                     assert_eq!((peak_l, peak_r), (0.125, 0.0));
                 }
-                EngineEvent::Metering {
+                EngineEvent::Metering(crate::events::MeteringEvent {
                     peak_l,
                     peak_r,
                     rms_l,
                     rms_r,
-                } => assert_eq!((peak_l, peak_r, rms_l, rms_r), (0.125, 0.0, 0.125, 0.0)),
+                }) => assert_eq!((peak_l, peak_r, rms_l, rms_r), (0.125, 0.0, 0.125, 0.0)),
                 event => panic!(
                     "a blocked lane edit must not admit a later FIFO command or owner: {event:?}"
                 ),
@@ -468,20 +468,20 @@ fn lane_growth_and_empty_first_id_replacement_resolve_master_first_track_then_bu
             while let Ok(event) = events.pop() {
                 match event {
                     EngineEvent::PlaybackPosition(0) => {}
-                    EngineEvent::TrackMeter {
+                    EngineEvent::TrackMeter(crate::events::TrackMeterEvent {
                         track_id: id,
                         peak_l,
                         peak_r,
-                    } => {
+                    }) => {
                         assert!([track, TrackId::MASTER, bus].contains(&id));
                         assert_eq!((peak_l, peak_r), (0.0, 0.0));
                     }
-                    EngineEvent::Metering {
+                    EngineEvent::Metering(crate::events::MeteringEvent {
                         peak_l,
                         peak_r,
                         rms_l,
                         rms_r,
-                    } => assert_eq!((peak_l, peak_r, rms_l, rms_r), (0.0, 0.0, 0.0, 0.0)),
+                    }) => assert_eq!((peak_l, peak_r, rms_l, rms_r), (0.0, 0.0, 0.0, 0.0)),
                     event => panic!("unexpected additional channel edit or owner: {event:?}"),
                 }
             }

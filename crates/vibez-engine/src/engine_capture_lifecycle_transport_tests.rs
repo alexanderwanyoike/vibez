@@ -141,38 +141,38 @@ fn collect(fixture: &mut Fixture, sections: &[(SectionId, usize)]) -> Events {
                 ));
                 observed.order.push("offsets-retired");
             }
-            EngineEvent::SectionTransitioned {
+            EngineEvent::SectionTransitioned(crate::events::SectionTransitionedEvent {
                 section_id,
                 effective_at_samples,
                 retired,
-            } => {
+            }) => {
                 let index = sections
                     .iter()
                     .position(|(id, _)| *id == section_id)
                     .unwrap();
                 assert_eq!(
-                    std::ptr::from_ref(retired.as_ref()) as usize,
+                    std::ptr::from_ref(&*retired) as usize,
                     sections[index].1
                 );
                 observed.owners.push(index as u32 + 1);
                 observed.order.push("section");
                 observed.times.push(effective_at_samples);
             }
-            EngineEvent::SectionQueued {
+            EngineEvent::SectionQueued(crate::events::SectionQueuedEvent {
                 section_id,
                 effective_at_samples,
                 retired,
-            } => {
+            }) => {
                 assert_eq!(section_id, sections[1].0);
                 assert_eq!(effective_at_samples, 8);
                 assert!(retired.is_none());
                 observed.order.push("queued");
             }
-            EngineEvent::TrackMeter { .. }
-            | EngineEvent::Metering { .. }
+            EngineEvent::TrackMeter(_)
+            | EngineEvent::Metering(_)
             | EngineEvent::PlaybackPosition(_)
             | EngineEvent::PerformancePosition(_)
-            | EngineEvent::SectionPlaybackPosition { .. } => {}
+            | EngineEvent::SectionPlaybackPosition(_) => {}
             event => panic!("unexpected Capture transport event: {event:?}"),
         }
     }

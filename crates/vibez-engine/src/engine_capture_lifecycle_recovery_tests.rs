@@ -95,12 +95,12 @@ fn record(fixture: &mut Fixture, case: &str, original_owner: usize, expected: Ex
                 order.push("stop");
                 times.push(effective_at_samples);
             }
-            EngineEvent::PerformanceCaptureStarted {
+            EngineEvent::PerformanceCaptureStarted(crate::events::PerformanceCaptureStartedEvent {
                 offsets,
                 effective_at_samples,
                 section_id,
                 section_position_samples,
-            } => {
+            }) => {
                 assert!(Arc::ptr_eq(
                     &offsets,
                     &fixture.engine.routing.capture_offsets
@@ -124,8 +124,8 @@ fn record(fixture: &mut Fixture, case: &str, original_owner: usize, expected: Ex
                 retired = Some(std::ptr::from_ref(routing.as_ref()) as usize);
                 order.push("routing-retired");
             }
-            EngineEvent::TrackMeter { .. }
-            | EngineEvent::Metering { .. }
+            EngineEvent::TrackMeter(_)
+            | EngineEvent::Metering(_)
             | EngineEvent::PlaybackPosition(_) => {}
             event => panic!("unexpected Capture recovery event: {event:?}"),
         }

@@ -155,7 +155,7 @@ fn invalid_configuration_cannot_start_a_new_silent_capture() {
     let events: Vec<_> = std::iter::from_fn(|| events.pop().ok()).collect();
     assert!(!events
         .iter()
-        .any(|event| matches!(event, EngineEvent::PerformanceCaptureStarted { .. })));
+        .any(|event| matches!(event, EngineEvent::PerformanceCaptureStarted(_))));
     assert!(events.iter().any(|event| matches!(
         event,
         EngineEvent::CompensationInvalid {

@@ -3,6 +3,7 @@
 
 use super::*;
 use vibez_core::id::ClipId;
+use crate::events::SectionSourceRefreshedEvent;
 
 impl AudioEngine {
     /// Drain all pending commands from the ring buffer without blocking.
@@ -211,7 +212,7 @@ impl AudioEngine {
                             true,
                         );
                     }
-                    let event = EngineEvent::SectionSourceRefreshed {
+                    let event = EngineEvent::SectionSourceRefreshed(SectionSourceRefreshedEvent {
                         section_id,
                         applied,
                         effective_at_samples: self.effective_position(),
@@ -220,8 +221,8 @@ impl AudioEngine {
                                 .map(|active| active.position_samples)
                                 .unwrap_or(0)
                         }),
-                        retired: prepared,
-                    };
+                        retired: crate::events::DisposalCell::new(prepared),
+                    });
                     self.present_event(event);
                 }
                 EngineCommand::ArmSectionRecord {

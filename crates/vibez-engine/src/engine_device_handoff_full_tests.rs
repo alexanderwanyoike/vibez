@@ -112,8 +112,8 @@ fn full_publication_restores_same_box_and_consumes_identity_before_retry() {
         while let Ok(event) = events.pop() {
             match event {
                 EngineEvent::PlaybackStarted => started += 1,
-                EngineEvent::TrackMeter { .. }
-                | EngineEvent::Metering { .. }
+                EngineEvent::TrackMeter(_)
+                | EngineEvent::Metering(_)
                 | EngineEvent::PlaybackPosition(_) => {}
                 event => panic!("unexpected Full setup event: {event:?}"),
             }
@@ -265,7 +265,7 @@ fn full_publication_restores_same_box_and_consumes_identity_before_retry() {
                     owner = Some(device);
                     order.push("handoff");
                 }
-                EngineEvent::PlaybackPosition(_) | EngineEvent::Metering { .. } => {}
+                EngineEvent::PlaybackPosition(_) | EngineEvent::Metering(_) => {}
                 event => panic!("unexpected retry event: {event:?}"),
             }
         }
@@ -340,8 +340,8 @@ fn full_publication_restores_same_box_and_consumes_identity_before_retry() {
         while let Ok(event) = events.pop() {
             assert!(matches!(
                 event,
-                EngineEvent::TrackMeter { .. }
-                    | EngineEvent::Metering { .. }
+                EngineEvent::TrackMeter(_)
+                    | EngineEvent::Metering(_)
                     | EngineEvent::PlaybackPosition(_)
             ));
         }

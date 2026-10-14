@@ -148,7 +148,8 @@ fn autonomous_section_and_clip_boundaries_transfer_staged_owners_once_under_full
             while let Ok(event) = events.pop() {
                 match event {
                     EngineEvent::RetiredAudioClip(clip) => returned.push(Arc::as_ptr(&clip.audio)),
-                    EngineEvent::SectionTransitioned { mut retired, .. } => {
+                    EngineEvent::SectionTransitioned(crate::events::SectionTransitionedEvent { retired, .. }) => {
+                        let mut retired = retired.take();
                         let before = returned.len();
                         for source in retired.tracks_mut() {
                             collect_staged(&mut source.source, &mut returned);
@@ -242,11 +243,12 @@ fn rejected_prepared_sources_and_offline_teardown_keep_staged_audio_ownership_co
                             source_events += 1;
                             collect_staged(&mut owner.source, &mut returned);
                         }
-                        EngineEvent::SectionSourceRefreshed {
+                        EngineEvent::SectionSourceRefreshed(crate::events::SectionSourceRefreshedEvent {
                             applied,
-                            mut retired,
+                            retired,
                             ..
-                        } => {
+                        }) => {
+                            let mut retired = retired.take();
                             assert!(!applied);
                             source_events += 1;
                             for source in retired.tracks_mut() {

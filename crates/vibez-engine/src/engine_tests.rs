@@ -2,6 +2,7 @@
 
 use super::*;
 use graph_test_support::{graph_engine, routing_channel, routing_effect, routing_plan};
+use crate::events::{TrackMeterEvent, TrackNoteActivityEvent};
 use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::id::{ClipId, EffectId, TrackId};
 use vibez_core::routing::RoutingChannel;
@@ -311,7 +312,7 @@ fn metering_events_are_sent() {
 
     let mut found_metering = false;
     while let Ok(event) = event_rx.pop() {
-        if let EngineEvent::Metering { .. } = event {
+        if let EngineEvent::Metering(_) = event {
             found_metering = true;
         }
     }
@@ -902,11 +903,11 @@ fn per_track_metering_events() {
 
     let mut found_track_meter = false;
     while let Ok(event) = event_rx.pop() {
-        if let EngineEvent::TrackMeter {
+        if let EngineEvent::TrackMeter(TrackMeterEvent {
             track_id,
             peak_l,
             peak_r,
-        } = event
+        }) = event
         {
             if track_id == tid {
                 found_track_meter = true;
@@ -1648,10 +1649,10 @@ fn note_clip_reports_triggered_pitches_for_device_feedback() {
     assert!(std::iter::from_fn(|| event_rx.pop().ok()).any(|event| {
         matches!(
             event,
-            EngineEvent::TrackNoteActivity {
+            EngineEvent::TrackNoteActivity(TrackNoteActivityEvent {
                 track_id: event_track_id,
                 triggered_notes,
-            } if event_track_id == track_id && triggered_notes == 1u128 << 36
+            }) if event_track_id == track_id && triggered_notes == 1u128 << 36
         )
     }));
 }
@@ -1708,10 +1709,10 @@ fn synth_note_clip_does_not_report_drum_pad_activity() {
     assert!(!std::iter::from_fn(|| event_rx.pop().ok()).any(|event| {
         matches!(
             event,
-            EngineEvent::TrackNoteActivity {
+            EngineEvent::TrackNoteActivity(TrackNoteActivityEvent {
                 track_id: event_track_id,
                 ..
-            } if event_track_id == track_id
+            }) if event_track_id == track_id
         )
     }));
 }
@@ -1774,10 +1775,10 @@ fn drum_pad_activity_dropped_by_a_full_event_ring_is_not_replayed_late() {
     assert!(!std::iter::from_fn(|| event_rx.pop().ok()).any(|event| {
         matches!(
             event,
-            EngineEvent::TrackNoteActivity {
+            EngineEvent::TrackNoteActivity(TrackNoteActivityEvent {
                 track_id: event_track_id,
                 ..
-            } if event_track_id == track_id
+            }) if event_track_id == track_id
         )
     }));
 }

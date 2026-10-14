@@ -2,6 +2,9 @@
 
 use super::*;
 use crate::events::SourceRecordingPosition;
+use crate::events::{
+    InstrumentNoteInputEvent, NoteRepeatedEvent, SourceNoteInputEvent, SourceNoteRepeatedEvent,
+};
 use crate::playback_source::PreparedSectionPlaybackSource;
 use graph_test_support::{graph_engine, routing_channel};
 use vibez_core::{midi::InstrumentKind, perform::NoteRepeatRate};
@@ -46,14 +49,14 @@ fn external_input_observations_keep_the_applied_section_coordinate() {
             .filter(|event| {
                 matches!(
                     event,
-                    EngineEvent::SourceNoteInput { .. } | EngineEvent::InstrumentNoteInput { .. }
+                    EngineEvent::SourceNoteInput(_) | EngineEvent::InstrumentNoteInput(_)
                 )
             })
             .collect();
         assert_eq!(
             observed,
             [
-                EngineEvent::SourceNoteInput {
+                EngineEvent::SourceNoteInput(SourceNoteInputEvent {
                     track_id: track,
                     pitch: 42,
                     velocity: if on { 100 } else { 0 },
@@ -65,8 +68,8 @@ fn external_input_observations_keep_the_applied_section_coordinate() {
                         section_position_samples: Some(local),
                         canonical_section_position_samples: Some(local)
                     }
-                },
-                EngineEvent::InstrumentNoteInput {
+                }),
+                EngineEvent::InstrumentNoteInput(InstrumentNoteInputEvent {
                     track_id: track,
                     pitch: 42,
                     velocity: if on { 100 } else { 0 },
@@ -74,7 +77,7 @@ fn external_input_observations_keep_the_applied_section_coordinate() {
                     effective_at_samples: position,
                     section_id: Some(section),
                     section_position_samples: Some(local)
-                }
+                })
             ]
         );
     }
@@ -112,15 +115,17 @@ fn repeats_observe_the_same_coordinates_during_graph_playback_and_idle() {
         let mut notices = Vec::new();
         while let Ok(event) = events.pop() {
             match event {
-                EngineEvent::SourceNoteRepeated { position, .. } => source.push(position),
-                EngineEvent::NoteRepeated {
+                EngineEvent::SourceNoteRepeated(SourceNoteRepeatedEvent { position, .. }) => {
+                    source.push(position)
+                }
+                EngineEvent::NoteRepeated(NoteRepeatedEvent {
                     effective_at_samples,
                     canonical_at_samples,
                     section_id,
                     section_position_samples,
                     canonical_section_position_samples,
                     ..
-                } => notices.push(SourceRecordingPosition {
+                }) => notices.push(SourceRecordingPosition {
                     effective_at_samples,
                     canonical_at_samples,
                     section_id,
@@ -174,17 +179,17 @@ fn shared_repeat_constructor_wraps_source_coordinates_without_changing_notice_co
     let (raw, presented) = pair.unwrap();
     assert_eq!(
         raw,
-        EngineEvent::SourceNoteRepeated {
+        EngineEvent::SourceNoteRepeated(SourceNoteRepeatedEvent {
             track_id: track,
             pitch: 42,
             velocity: 100,
             rate: NoteRepeatRate::Eighth,
             position: source
-        }
+        })
     );
     assert_eq!(
         presented,
-        EngineEvent::NoteRepeated {
+        EngineEvent::NoteRepeated(NoteRepeatedEvent {
             track_id: track,
             pitch: 42,
             velocity: 100,
@@ -194,7 +199,7 @@ fn shared_repeat_constructor_wraps_source_coordinates_without_changing_notice_co
             section_id: Some(notice_section),
             section_position_samples: Some(4),
             canonical_section_position_samples: Some(0)
-        }
+        })
     );
     let empty = SourceRecordingPosition::from_trigger(
         trigger,

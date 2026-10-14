@@ -101,8 +101,8 @@ impl OverlapTrace {
                             "local-plan-return"
                         });
                     }
-                    EngineEvent::Metering { .. }
-                    | EngineEvent::TrackMeter { .. }
+                    EngineEvent::Metering(_)
+                    | EngineEvent::TrackMeter(_)
                     | EngineEvent::PlaybackPosition(_)
                     | EngineEvent::PerformancePosition(_) => {}
                     event => panic!("unexpected overlap event: {event:?}"),
@@ -196,10 +196,10 @@ fn local_away_owner_and_resident_restart_keep_independent_gates() {
             let mut playing = 0;
             while let Ok(event) = events.pop() {
                 match event {
-                    EngineEvent::PerformanceCaptureStarted {
+                    EngineEvent::PerformanceCaptureStarted(crate::events::PerformanceCaptureStartedEvent {
                         effective_at_samples,
                         ..
-                    } => {
+                    }) => {
                         assert_eq!(effective_at_samples, 0);
                         starts += 1;
                     }
@@ -212,8 +212,8 @@ fn local_away_owner_and_resident_restart_keep_independent_gates() {
                         sources.push(track_id);
                     }
                     EngineEvent::PlaybackStarted => playing += 1,
-                    EngineEvent::Metering { .. }
-                    | EngineEvent::TrackMeter { .. }
+                    EngineEvent::Metering(_)
+                    | EngineEvent::TrackMeter(_)
                     | EngineEvent::PlaybackPosition(_)
                     | EngineEvent::PerformancePosition(_) => {}
                     event => panic!("unexpected overlap setup event: {event:?}"),

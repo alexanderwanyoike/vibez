@@ -2,6 +2,7 @@
 
 use super::*;
 use graph_test_support::{graph_engine, routing_channel};
+use crate::events::{NoteRepeatedEvent, SourceNoteRepeatedEvent, TrackMuteChangedEvent};
 use vibez_core::perform::NoteRepeatRate;
 use vibez_core::{
     id::EffectId,
@@ -69,11 +70,11 @@ fn cancellation_delivers_applied_mute_and_stop_state_immediately() {
     let (mut engine, _, mut events) = AudioEngine::new();
     let track_id = TrackId::new();
     engine.present_event_at(
-        EngineEvent::TrackMuteChanged {
+        EngineEvent::TrackMuteChanged(TrackMuteChangedEvent {
             track_id,
             muted: true,
             effective_at_samples: 1000,
-        },
+        }),
         engine.output_position.saturating_add(521_u64),
     );
     engine.present_event_at(
@@ -83,7 +84,7 @@ fn cancellation_delivers_applied_mute_and_stop_state_immediately() {
     engine.cancel_presentation();
     engine.flush_presentation();
     let events: Vec<_> = std::iter::from_fn(|| events.pop().ok()).collect();
-    assert!(events.iter().any(|event| matches!(event, EngineEvent::TrackMuteChanged { track_id: id, muted: true, .. } if *id == track_id)));
+    assert!(events.iter().any(|event| matches!(event, EngineEvent::TrackMuteChanged(TrackMuteChangedEvent { track_id: id, muted: true, .. }) if *id == track_id)));
     assert!(events
         .iter()
         .any(|event| matches!(event, EngineEvent::PlaybackStopped)));
@@ -95,11 +96,11 @@ fn local_device_failure_closes_capture_without_canceling_public_state() {
     engine.compensation_callback_heard_start = 500;
     let track_id = TrackId::new();
     engine.present_event_after(
-        EngineEvent::TrackMuteChanged {
+        EngineEvent::TrackMuteChanged(TrackMuteChangedEvent {
             track_id,
             muted: true,
             effective_at_samples: 1000,
-        },
+        }),
         521,
     );
     engine.close_capture_for_device_failure();
@@ -111,7 +112,7 @@ fn local_device_failure_closes_capture_without_canceling_public_state() {
     ));
     engine.output_position = 521;
     engine.flush_presentation();
-    assert!(std::iter::from_fn(|| events.pop().ok()).any(|event| matches!(event, EngineEvent::TrackMuteChanged { track_id: id, muted: true, .. } if id == track_id)));
+    assert!(std::iter::from_fn(|| events.pop().ok()).any(|event| matches!(event, EngineEvent::TrackMuteChanged(TrackMuteChangedEvent { track_id: id, muted: true, .. }) if id == track_id)));
 }
 
 #[test]
@@ -204,14 +205,14 @@ fn repeated_source_and_heard_events_share_zero_delay_backpressure() {
         effective_at_samples: 521,
         ..Default::default()
     };
-    let source = EngineEvent::SourceNoteRepeated {
+    let source = EngineEvent::SourceNoteRepeated(SourceNoteRepeatedEvent {
         track_id,
         pitch: 60,
         velocity: 100,
         rate: NoteRepeatRate::Sixteenth,
         position: raw,
-    };
-    let heard = EngineEvent::NoteRepeated {
+    });
+    let heard = EngineEvent::NoteRepeated(NoteRepeatedEvent {
         track_id,
         pitch: 60,
         velocity: 100,
@@ -221,7 +222,7 @@ fn repeated_source_and_heard_events_share_zero_delay_backpressure() {
         section_id: None,
         section_position_samples: None,
         canonical_section_position_samples: None,
-    };
+    });
     assert!(presentation_queue::emit_repeated(
         source,
         heard,
@@ -235,14 +236,14 @@ fn repeated_source_and_heard_events_share_zero_delay_backpressure() {
     while events.pop().is_ok() {}
     engine.flush_presentation();
     assert!(
-        matches!(events.pop(),Ok(EngineEvent::SourceNoteRepeated { position,.. }) if position==raw)
+        matches!(events.pop(),Ok(EngineEvent::SourceNoteRepeated(SourceNoteRepeatedEvent { position,.. })) if position==raw)
     );
     assert!(matches!(
         events.pop(),
-        Ok(EngineEvent::NoteRepeated {
+        Ok(EngineEvent::NoteRepeated(NoteRepeatedEvent {
             effective_at_samples: 0,
             ..
-        })
+        }))
     ));
 }
 

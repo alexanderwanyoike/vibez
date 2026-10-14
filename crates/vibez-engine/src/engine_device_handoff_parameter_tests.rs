@@ -193,9 +193,9 @@ fn transfer_publicly(
                 owner = Some(device);
                 order.push(label);
             }
-            EngineEvent::TrackMeter { .. }
-            | EngineEvent::Metering { .. }
-            | EngineEvent::TrackNoteActivity { .. }
+            EngineEvent::TrackMeter(_)
+            | EngineEvent::Metering(_)
+            | EngineEvent::TrackNoteActivity(_)
             | EngineEvent::PlaybackPosition(_) => {}
             event => panic!("unexpected parameter handoff event: {event:?}"),
         }
@@ -259,9 +259,9 @@ fn retained_parameter_capacity_coalesces_and_replays_every_entry() {
         while let Ok(event) = events.pop() {
             match event {
                 EngineEvent::PlaybackStarted => started += 1,
-                EngineEvent::TrackMeter { .. }
-                | EngineEvent::Metering { .. }
-                | EngineEvent::TrackNoteActivity { .. }
+                EngineEvent::TrackMeter(_)
+                | EngineEvent::Metering(_)
+                | EngineEvent::TrackNoteActivity(_)
                 | EngineEvent::PlaybackPosition(_) => {}
                 event => panic!("unexpected parameter setup event: {event:?}"),
             }

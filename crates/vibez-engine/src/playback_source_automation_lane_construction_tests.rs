@@ -41,12 +41,12 @@ fn telemetry(events: &mut rtrb::Consumer<EngineEvent>) {
         events.pop().unwrap(),
         EngineEvent::PlaybackPosition(0)
     ));
-    let EngineEvent::Metering {
+    let EngineEvent::Metering(crate::events::MeteringEvent {
         peak_l,
         peak_r,
         rms_l,
         rms_r,
-    } = events.pop().unwrap()
+    }) = events.pop().unwrap()
     else {
         panic!("zero-frame constructor work must publish silent meters")
     };

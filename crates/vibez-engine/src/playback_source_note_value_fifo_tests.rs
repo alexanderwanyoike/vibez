@@ -292,8 +292,8 @@ fn pending_notes_keep_current_first_match_edits_and_clamps_until_fifo_release() 
                 );
                 assert!(request.replace(value).is_none());
             }
-            EngineEvent::SourceNoteInput { on: false, .. }
-            | EngineEvent::InstrumentNoteInput { on: false, .. } => {
+            EngineEvent::SourceNoteInput(crate::events::SourceNoteInputEvent { on: false, .. })
+            | EngineEvent::InstrumentNoteInput(crate::events::InstrumentNoteInputEvent { on: false, .. }) => {
                 panic!("later note-off cannot overtake the final pending note");
             }
             _ => {}
@@ -328,8 +328,8 @@ fn pending_notes_keep_current_first_match_edits_and_clamps_until_fifo_release() 
                 event,
                 EngineEvent::ClipInsertionCompleted(_)
                     | EngineEvent::ClipInsertionStorageRequested(_)
-                    | EngineEvent::SourceNoteInput { on: false, .. }
-                    | EngineEvent::InstrumentNoteInput { on: false, .. }
+                    | EngineEvent::SourceNoteInput(crate::events::SourceNoteInputEvent { on: false, .. })
+                    | EngineEvent::InstrumentNoteInput(crate::events::InstrumentNoteInputEvent { on: false, .. })
             ));
         }
     }
@@ -351,13 +351,13 @@ fn pending_notes_keep_current_first_match_edits_and_clamps_until_fifo_release() 
                 applied.push(value.id());
                 order.push("complete");
             }
-            EngineEvent::SourceNoteInput {
+            EngineEvent::SourceNoteInput(crate::events::SourceNoteInputEvent {
                 track_id,
                 pitch,
                 on: false,
                 position,
                 ..
-            } => {
+            }) => {
                 assert_eq!((track_id, pitch), (unrelated, 72));
                 assert_eq!(
                     (position.effective_at_samples, position.canonical_at_samples),
@@ -368,13 +368,13 @@ fn pending_notes_keep_current_first_match_edits_and_clamps_until_fifo_release() 
                 assert_eq!(position.canonical_section_position_samples, None);
                 order.push("source-off");
             }
-            EngineEvent::InstrumentNoteInput {
+            EngineEvent::InstrumentNoteInput(crate::events::InstrumentNoteInputEvent {
                 track_id,
                 pitch,
                 on: false,
                 effective_at_samples,
                 ..
-            } => {
+            }) => {
                 assert_eq!(
                     (track_id, pitch, effective_at_samples),
                     (unrelated, 72, 168)

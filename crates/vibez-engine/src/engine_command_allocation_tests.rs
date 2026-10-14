@@ -1404,11 +1404,11 @@ fn populated_refresh_section_ratchet_fixture_replaces_unique_sounding_source_and
     let returned: Vec<_> = notifications
         .iter()
         .filter_map(|event| match event {
-            EngineEvent::SectionSourceRefreshed {
+            EngineEvent::SectionSourceRefreshed(crate::events::SectionSourceRefreshedEvent {
                 applied: true,
                 retired,
                 ..
-            } => Some(retired),
+            }) => Some(retired),
             _ => None,
         })
         .collect();

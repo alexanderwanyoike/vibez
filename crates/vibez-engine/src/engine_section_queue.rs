@@ -1,6 +1,7 @@
 //! Resident Section queue ownership and sample-accurate callback switching.
 
 use super::*;
+use crate::events::{SectionQueuedEvent, SectionTransitionedEvent};
 use vibez_core::perform::SectionLaunchQuantization;
 
 impl AudioEngine {
@@ -44,11 +45,11 @@ impl AudioEngine {
         self.stopped_note_repeat_anchor = None;
         self.reanchor_note_repeats(effective_at_samples, effective_at_samples);
         self.section_capture_source(section_id, effective_at_samples, 0, false);
-        let event = EngineEvent::SectionTransitioned {
+        let event = EngineEvent::SectionTransitioned(SectionTransitionedEvent {
             section_id,
             effective_at_samples,
-            retired: prepared,
-        };
+            retired: crate::events::DisposalCell::new(prepared),
+        });
         self.present_event_after(event, self.mix_latency());
     }
 
@@ -100,11 +101,11 @@ impl AudioEngine {
             prepared,
             effective_at_samples,
         });
-        let event = EngineEvent::SectionQueued {
+        let event = EngineEvent::SectionQueued(SectionQueuedEvent {
             section_id,
             effective_at_samples,
-            retired: retired.map(|queued| queued.prepared),
-        };
+            retired: retired.map(|queued| crate::events::DisposalCell::new(queued.prepared)),
+        });
         self.present_event(event);
     }
 

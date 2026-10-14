@@ -2,6 +2,9 @@
 
 use super::*;
 use graph_test_support::{graph_engine, routing_channel};
+use crate::events::{
+    NoteRepeatedEvent, SectionQueuedEvent, SectionTransitionedEvent, TrackMuteChangedEvent,
+};
 
 use std::sync::Arc;
 
@@ -97,11 +100,11 @@ fn playing_engine(
 
 fn transition_event(events: &mut rtrb::Consumer<EngineEvent>) -> Option<(SectionId, u64)> {
     std::iter::from_fn(|| events.pop().ok()).find_map(|event| match event {
-        EngineEvent::SectionTransitioned {
+        EngineEvent::SectionTransitioned(SectionTransitionedEvent {
             section_id,
             effective_at_samples,
             ..
-        } => Some((section_id, effective_at_samples)),
+        }) => Some((section_id, effective_at_samples)),
         _ => None,
     })
 }
@@ -148,10 +151,10 @@ fn immediate_section_launch_reanchors_held_repeat_to_the_section_downbeat() {
 
     let repeated: Vec<u64> = std::iter::from_fn(|| events.pop().ok())
         .filter_map(|event| match event {
-            EngineEvent::NoteRepeated {
+            EngineEvent::NoteRepeated(NoteRepeatedEvent {
                 effective_at_samples,
                 ..
-            } => Some(effective_at_samples),
+            }) => Some(effective_at_samples),
             _ => None,
         })
         .collect();
@@ -199,10 +202,10 @@ fn first_section_launch_reanchors_stopped_held_repeat_to_the_perform_downbeat() 
 
     let repeated: Vec<u64> = std::iter::from_fn(|| events.pop().ok())
         .filter_map(|event| match event {
-            EngineEvent::NoteRepeated {
+            EngineEvent::NoteRepeated(NoteRepeatedEvent {
                 effective_at_samples,
                 ..
-            } => Some(effective_at_samples),
+            }) => Some(effective_at_samples),
             _ => None,
         })
         .collect();
@@ -297,11 +300,11 @@ fn end_of_section_track_mute_uses_the_active_section_wrap() {
     assert!(
         std::iter::from_fn(|| events.pop().ok()).any(|event| matches!(
             event,
-            EngineEvent::TrackMuteChanged {
+            EngineEvent::TrackMuteChanged(TrackMuteChangedEvent {
                 track_id: event_track,
                 muted: true,
                 effective_at_samples: 8,
-            } if event_track == track_id
+            }) if event_track == track_id
         ))
     );
     assert!(engine.tracks()[0].mute);
@@ -339,11 +342,11 @@ fn end_of_section_track_mute_applies_when_a_one_shot_section_stops() {
     assert!(
         std::iter::from_fn(|| events.pop().ok()).any(|event| matches!(
             event,
-            EngineEvent::TrackMuteChanged {
+            EngineEvent::TrackMuteChanged(TrackMuteChangedEvent {
                 track_id: event_track,
                 muted: true,
                 effective_at_samples: 8,
-            } if event_track == track_id
+            }) if event_track == track_id
         ))
     );
     assert!(engine.tracks()[0].mute);
@@ -372,11 +375,11 @@ fn end_of_section_track_mute_follows_an_earlier_section_transition() {
     assert!(
         std::iter::from_fn(|| events.pop().ok()).any(|event| matches!(
             event,
-            EngineEvent::TrackMuteChanged {
+            EngineEvent::TrackMuteChanged(TrackMuteChangedEvent {
                 track_id: event_track,
                 muted: true,
                 effective_at_samples: 4,
-            } if event_track == track_id
+            }) if event_track == track_id
         ))
     );
     assert!(engine.tracks()[0].mute);
@@ -406,20 +409,20 @@ fn requeue_returns_stale_residency_and_only_latest_section_transitions() {
 
     let queued: Vec<_> = std::iter::from_fn(|| events.pop().ok())
         .filter_map(|event| match event {
-            EngineEvent::SectionQueued {
+            EngineEvent::SectionQueued(SectionQueuedEvent {
                 section_id,
                 effective_at_samples,
                 retired,
-            } => Some((
+            }) => Some((
                 section_id,
                 effective_at_samples,
                 retired.map(|item| item.section_id),
             )),
-            EngineEvent::SectionTransitioned {
+            EngineEvent::SectionTransitioned(SectionTransitionedEvent {
                 section_id,
                 effective_at_samples,
                 ..
-            } => Some((section_id, effective_at_samples, None)),
+            }) => Some((section_id, effective_at_samples, None)),
             _ => None,
         })
         .collect();
@@ -488,19 +491,19 @@ fn queued_track_mute_survives_a_section_transition_until_its_own_boundary() {
     let events: Vec<_> = std::iter::from_fn(|| events.pop().ok()).collect();
     assert!(events.iter().any(|event| matches!(
         event,
-        EngineEvent::SectionTransitioned {
+        EngineEvent::SectionTransitioned(SectionTransitionedEvent {
             section_id,
             effective_at_samples: 4,
             ..
-        } if *section_id == next_section
+        }) if *section_id == next_section
     )));
     assert!(events.iter().any(|event| matches!(
         event,
-        EngineEvent::TrackMuteChanged {
+        EngineEvent::TrackMuteChanged(TrackMuteChangedEvent {
             track_id: event_track,
             muted: true,
             effective_at_samples: 16,
-        } if *event_track == track_id
+        }) if *event_track == track_id
     )));
     assert!(engine.tracks()[0].mute);
 }
@@ -567,11 +570,11 @@ fn section_queued_at_a_one_shot_end_starts_when_the_block_ends_on_that_sample() 
         .any(|event| matches!(event, EngineEvent::PlaybackStopped)));
     assert!(drained.iter().any(|event| matches!(
         event,
-        EngineEvent::SectionTransitioned {
+        EngineEvent::SectionTransitioned(SectionTransitionedEvent {
             section_id,
             effective_at_samples: 8,
             ..
-        } if *section_id == next
+        }) if *section_id == next
     )));
 }
 

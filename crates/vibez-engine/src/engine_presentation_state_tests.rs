@@ -21,7 +21,7 @@ fn overflowing_capture_delivers_accepted_start_then_stop_cause_and_discovering_o
     assert_eq!(accepted_before_filler, 3);
     assert!(matches!(
         fixture.engine.scheduled_presentation[0].event,
-        EngineEvent::PerformanceCaptureStarted { .. }
+        EngineEvent::PerformanceCaptureStarted(_)
     ));
     let accepted_sources: Vec<_> = fixture.engine.scheduled_presentation[1..]
         .iter()
@@ -117,10 +117,10 @@ fn overflowing_capture_delivers_accepted_start_then_stop_cause_and_discovering_o
     let order: Vec<_> = events
         .iter()
         .map(|event| match event {
-            EngineEvent::PerformanceCaptureStarted {
+            EngineEvent::PerformanceCaptureStarted(crate::events::PerformanceCaptureStartedEvent {
                 effective_at_samples,
                 ..
-            } => {
+            }) => {
                 assert_eq!(*effective_at_samples, capture_start);
                 "capture-start"
             }
@@ -355,10 +355,10 @@ fn play_with_full_ui_ring_retains_capture_terminals_and_owner_but_cancels_inline
     for event in &events {
         match event {
             EngineEvent::PlaybackPosition(0) => {}
-            EngineEvent::PerformanceCaptureStarted {
+            EngineEvent::PerformanceCaptureStarted(crate::events::PerformanceCaptureStartedEvent {
                 effective_at_samples,
                 ..
-            } => {
+            }) => {
                 assert_eq!(*effective_at_samples, capture_start);
                 order.push("capture-start");
             }

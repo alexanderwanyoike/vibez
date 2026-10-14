@@ -106,7 +106,7 @@ fn queued_section_with_colliding_lane_id_keeps_arrange_growth_and_perform_owners
     assert_sounding(&output);
     let mut initial_owners = Vec::new();
     while let Ok(event) = events.pop() {
-        if let EngineEvent::SectionTransitioned { retired, .. } = event {
+        if let EngineEvent::SectionTransitioned(crate::events::SectionTransitionedEvent { retired, .. }) = event {
             initial_section.assert_unchanged(&retired.tracks()[0].source);
             initial_owners.push(retired);
         }
@@ -150,26 +150,26 @@ fn queued_section_with_colliding_lane_id_keeps_arrange_growth_and_perform_owners
                 );
                 assert!(request.replace(value).is_none());
             }
-            EngineEvent::SectionQueued {
+            EngineEvent::SectionQueued(crate::events::SectionQueuedEvent {
                 section_id,
                 effective_at_samples,
                 retired,
-            } => {
+            }) => {
                 assert_eq!((section_id, effective_at_samples), (next_section_id, 32));
                 assert!(retired.is_none());
                 queued += 1;
             }
             EngineEvent::PlaybackPosition(0) | EngineEvent::PerformancePosition(8) => {}
-            EngineEvent::SectionPlaybackPosition {
+            EngineEvent::SectionPlaybackPosition(crate::events::SectionPlaybackPositionEvent {
                 section_id,
                 position_samples,
-            } => assert_eq!((section_id, position_samples), (old_section_id, 8)),
-            EngineEvent::Metering {
+            }) => assert_eq!((section_id, position_samples), (old_section_id, 8)),
+            EngineEvent::Metering(crate::events::MeteringEvent {
                 peak_l,
                 peak_r,
                 rms_l,
                 rms_r,
-            } => assert_eq!((peak_l, peak_r, rms_l, rms_r), (0.0, 0.0, 0.0, 0.0)),
+            }) => assert_eq!((peak_l, peak_r, rms_l, rms_r), (0.0, 0.0, 0.0, 0.0)),
             event => panic!("unexpected source-boundary admission event: {event:?}"),
         }
     }
@@ -205,11 +205,11 @@ fn queued_section_with_colliding_lane_id_keeps_arrange_growth_and_perform_owners
         let mut heard_section = None;
         while let Ok(event) = events.pop() {
             match event {
-                EngineEvent::SectionTransitioned {
+                EngineEvent::SectionTransitioned(crate::events::SectionTransitionedEvent {
                     section_id,
                     effective_at_samples,
                     retired,
-                } => {
+                }) => {
                     assert_eq!((section_id, effective_at_samples), (next_section_id, 32));
                     old_home.assert_unchanged(&retired.tracks()[0].source);
                     assert_eq!(
@@ -245,26 +245,26 @@ fn queued_section_with_colliding_lane_id_keeps_arrange_growth_and_perform_owners
                 EngineEvent::PerformancePosition(value) => {
                     assert!(heard_perform.replace(value).is_none())
                 }
-                EngineEvent::SectionPlaybackPosition {
+                EngineEvent::SectionPlaybackPosition(crate::events::SectionPlaybackPositionEvent {
                     section_id,
                     position_samples,
-                } => assert!(heard_section
+                }) => assert!(heard_section
                     .replace((section_id, position_samples))
                     .is_none()),
-                EngineEvent::TrackMeter {
+                EngineEvent::TrackMeter(crate::events::TrackMeterEvent {
                     track_id: id,
                     peak_l,
                     peak_r,
-                } => {
+                }) => {
                     assert!([track_id, TrackId::MASTER].contains(&id));
                     assert_eq!((peak_l, peak_r), (0.25, 0.0));
                 }
-                EngineEvent::Metering {
+                EngineEvent::Metering(crate::events::MeteringEvent {
                     peak_l,
                     peak_r,
                     rms_l,
                     rms_r,
-                } => assert_eq!((peak_l, peak_r, rms_l, rms_r), (0.25, 0.0, 0.25, 0.0)),
+                }) => assert_eq!((peak_l, peak_r, rms_l, rms_r), (0.25, 0.0, 0.25, 0.0)),
                 event => {
                     panic!("pending Arrange lane must not redirect or duplicate owners: {event:?}")
                 }

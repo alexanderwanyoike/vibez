@@ -670,12 +670,12 @@ fn capture_admission_uses_applied_plan_validity_instead_of_global_processing_gat
         let mut source_count = 0;
         for event in fixture.drain_events() {
             match event {
-                EngineEvent::PerformanceCaptureStarted {
+                EngineEvent::PerformanceCaptureStarted(crate::events::PerformanceCaptureStartedEvent {
                     offsets,
                     effective_at_samples,
                     section_id,
                     section_position_samples,
-                } => {
+                }) => {
                     assert!(allowed, "{start:?}");
                     assert_eq!(effective_at_samples, capture_start);
                     assert_eq!(section_id, None);

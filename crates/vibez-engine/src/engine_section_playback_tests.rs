@@ -4,6 +4,10 @@
 use super::*;
 use graph_test_support::{graph_engine, routing_channel, routing_effect, routing_plan};
 use vibez_core::routing::RoutingChannel;
+use crate::events::{
+    PerformanceCaptureStartedEvent, SectionPlaybackPositionEvent, SectionSourceRefreshedEvent,
+    SectionTransitionedEvent,
+};
 
 use std::sync::{Arc, Mutex};
 
@@ -138,11 +142,11 @@ fn resident_section_switches_immediately_and_returns_the_displaced_source() {
     assert!(output.iter().all(|sample| *sample > 0.0));
 
     let transition = std::iter::from_fn(|| events.pop().ok()).find_map(|event| match event {
-        EngineEvent::SectionTransitioned {
+        EngineEvent::SectionTransitioned(SectionTransitionedEvent {
             section_id: actual,
             effective_at_samples,
             retired,
-        } => Some((actual, effective_at_samples, retired)),
+        }) => Some((actual, effective_at_samples, retired)),
         _ => None,
     });
     let (actual, effective_at_samples, retired) = transition.expect("transition event");
@@ -211,12 +215,12 @@ fn refreshing_the_active_section_changes_content_without_restarting_its_playhead
         .position_samples;
     assert_eq!(position, 8, "refresh preserves the four elapsed samples");
     let refresh = std::iter::from_fn(|| events.pop().ok()).find_map(|event| match event {
-        EngineEvent::SectionSourceRefreshed {
+        EngineEvent::SectionSourceRefreshed(SectionSourceRefreshedEvent {
             applied,
             effective_at_samples,
             section_position_samples,
             ..
-        } => Some((applied, effective_at_samples, section_position_samples)),
+        }) => Some((applied, effective_at_samples, section_position_samples)),
         _ => None,
     });
     assert_eq!(refresh, Some((true, 4, Some(4))));
@@ -309,10 +313,10 @@ fn arrangement_loop_does_not_wrap_section_engine_time() {
         .any(|event| matches!(event, EngineEvent::PerformancePosition(3))));
     assert!(events.iter().any(|event| matches!(
         event,
-        EngineEvent::SectionPlaybackPosition {
+        EngineEvent::SectionPlaybackPosition(SectionPlaybackPositionEvent {
             section_id: actual,
             position_samples: 3,
-        } if *actual == section_id
+        }) if *actual == section_id
     )));
 }
 
@@ -789,16 +793,16 @@ fn delayed_section_refresh_acknowledges_consumption_before_heard_capture_and_pre
             "Capture still waits for the original 64-frame deadline"
         );
         assert!(
-            !matches!(event, EngineEvent::SectionTransitioned { .. }),
+            !matches!(event, EngineEvent::SectionTransitioned(SectionTransitionedEvent { .. })),
             "refresh does not relaunch the Section"
         );
-        if let EngineEvent::SectionSourceRefreshed {
+        if let EngineEvent::SectionSourceRefreshed(SectionSourceRefreshedEvent {
             section_id: actual_section,
             applied,
             effective_at_samples,
             section_position_samples,
             retired,
-        } = event
+        }) = event
         {
             assert!(returned.is_none(), "consumption is acknowledged once");
             assert_eq!(actual_section, section_id);
@@ -840,7 +844,7 @@ fn delayed_section_refresh_acknowledges_consumption_before_heard_capture_and_pre
     let notifications: Vec<_> = std::iter::from_fn(|| events.pop().ok()).collect();
     assert!(!notifications
         .iter()
-        .any(|event| matches!(event, EngineEvent::SectionSourceRefreshed { .. })));
+        .any(|event| matches!(event, EngineEvent::SectionSourceRefreshed(SectionSourceRefreshedEvent { .. }))));
     let capture: Vec<_> = notifications
         .iter()
         .filter_map(|event| match event {
@@ -886,7 +890,7 @@ fn delayed_section_refresh_acknowledges_consumption_before_heard_capture_and_pre
     while let Ok(event) = events.pop() {
         assert!(!matches!(
             event,
-            EngineEvent::SectionSourceRefreshed { .. }
+            EngineEvent::SectionSourceRefreshed(SectionSourceRefreshedEvent { .. })
                 | EngineEvent::SectionCaptureSource {
                     refreshed: true,
                     ..
@@ -957,13 +961,13 @@ fn section_refresh_acknowledgement_state_matrix_returns_displaced_or_rejected_ow
             let returned: Vec<_> = notifications
                 .iter()
                 .filter_map(|event| match event {
-                    EngineEvent::SectionSourceRefreshed {
+                    EngineEvent::SectionSourceRefreshed(SectionSourceRefreshedEvent {
                         section_id,
                         applied: actual_applied,
                         effective_at_samples,
                         section_position_samples,
                         retired,
-                    } => {
+                    }) => {
                         assert_eq!(event.time_domain(), crate::events::TimeDomain::Untimed);
                         assert_eq!(*section_id, requested);
                         assert_eq!(*actual_applied, applied, "delay {delay}, target {target:?}");
@@ -1068,7 +1072,7 @@ fn section_refresh_full_ui_ring_retains_unique_owner_and_allows_fifo_command_pro
         Arc::as_ptr(&fixture.engine.tracks()[0].section_playback_source.clips[0].audio),
         incoming_owner.as_ptr()
     );
-    assert_eq!(fixture.engine.scheduled_presentation.iter().filter(|pending| matches!(&pending.event, EngineEvent::SectionSourceRefreshed { retired, .. } if std::ptr::eq(&**retired, pointer))).count(), 1);
+    assert_eq!(fixture.engine.scheduled_presentation.iter().filter(|pending| matches!(&pending.event, EngineEvent::SectionSourceRefreshed(SectionSourceRefreshedEvent { retired, .. }) if std::ptr::eq(&**retired, pointer))).count(), 1);
     assert_eq!(
         fixture.engine.scheduled_presentation.capacity(),
         presentation_capacity
@@ -1093,13 +1097,13 @@ fn section_refresh_full_ui_ring_retains_unique_owner_and_allows_fifo_command_pro
     let acknowledgements: Vec<_> = notifications
         .iter()
         .filter_map(|event| match event {
-            EngineEvent::SectionSourceRefreshed {
+            EngineEvent::SectionSourceRefreshed(SectionSourceRefreshedEvent {
                 applied: true,
                 effective_at_samples: 96,
                 section_position_samples: Some(96),
                 retired,
                 ..
-            } => Some(retired),
+            }) => Some(retired),
             _ => None,
         })
         .collect();
@@ -1144,7 +1148,7 @@ fn section_refresh_full_ui_ring_retains_unique_owner_and_allows_fifo_command_pro
     while let Ok(event) = fixture.events.pop() {
         assert!(!matches!(
             event,
-            EngineEvent::SectionSourceRefreshed { .. }
+            EngineEvent::SectionSourceRefreshed(SectionSourceRefreshedEvent { .. })
                 | EngineEvent::SectionCaptureSource {
                     refreshed: true,
                     ..
@@ -1221,7 +1225,7 @@ fn section_refresh_then_public_capture_stop_preserves_owner_and_original_late_fe
         (0, 0)
     );
     let notifications: Vec<_> = std::iter::from_fn(|| fixture.events.pop().ok()).collect();
-    assert_eq!(notifications.iter().filter(|event| matches!(event, EngineEvent::SectionSourceRefreshed { applied: true, retired, .. } if std::ptr::eq(&**retired, pointer))).count(), 1);
+    assert_eq!(notifications.iter().filter(|event| matches!(event, EngineEvent::SectionSourceRefreshed(SectionSourceRefreshedEvent { applied: true, retired, .. }) if std::ptr::eq(&**retired, pointer))).count(), 1);
     let stops: Vec<_> = notifications
         .iter()
         .filter_map(|event| match event {
@@ -1261,7 +1265,7 @@ fn section_refresh_then_public_capture_stop_preserves_owner_and_original_late_fe
     );
     assert!(!notifications.iter().any(|event| matches!(
         event,
-        EngineEvent::PerformanceCaptureStarted { .. } | EngineEvent::SectionSourceRefreshed { .. }
+        EngineEvent::PerformanceCaptureStarted(PerformanceCaptureStartedEvent { .. }) | EngineEvent::SectionSourceRefreshed(SectionSourceRefreshedEvent { .. })
     )));
     process_refresh_block(&mut fixture.engine, &mut output);
     assert_refresh_left_audio(&output, 0.75);

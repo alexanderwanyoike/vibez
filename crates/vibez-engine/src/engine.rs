@@ -1,5 +1,6 @@
 //! Real-time project playback, prepared ownership and callback clock coordination.
 
+use crate::events::{MeteringEvent, SectionPlaybackPositionEvent};
 use std::sync::Arc;
 
 use rtrb::{Consumer, Producer, RingBuffer};
@@ -456,10 +457,12 @@ impl AudioEngine {
                             })
                     })
                     .unwrap_or((section.section_id, section.position_samples));
-                let _ = self.event_tx.push(EngineEvent::SectionPlaybackPosition {
-                    section_id,
-                    position_samples,
-                });
+                let _ = self.event_tx.push(EngineEvent::SectionPlaybackPosition(
+                    SectionPlaybackPositionEvent {
+                        section_id,
+                        position_samples,
+                    },
+                ));
             }
         }
         if section_ended {
@@ -555,10 +558,12 @@ impl AudioEngine {
         if self.active_section.is_none() {
             if let Some(position) = self.routing.presentation.audible() {
                 if let Some((section_id, local)) = position.section_id.zip(position.section) {
-                    let _ = self.event_tx.push(EngineEvent::SectionPlaybackPosition {
-                        section_id,
-                        position_samples: local.saturating_add(1).min(position.section_length),
-                    });
+                    let _ = self.event_tx.push(EngineEvent::SectionPlaybackPosition(
+                        SectionPlaybackPositionEvent {
+                            section_id,
+                            position_samples: local.saturating_add(1).min(position.section_length),
+                        },
+                    ));
                     let _ = self.event_tx.push(EngineEvent::PerformancePosition(
                         position.perform.saturating_add(1),
                     ));
@@ -574,12 +579,12 @@ impl AudioEngine {
 
         // Master metering event.
         let meters = metering::calculate_meters(output, channels);
-        let _ = self.event_tx.push(EngineEvent::Metering {
+        let _ = self.event_tx.push(EngineEvent::Metering(MeteringEvent {
             peak_l: meters.peak_l,
             peak_r: meters.peak_r,
             rms_l: meters.rms_l,
             rms_r: meters.rms_r,
-        });
+        }));
     }
 
     /// Read the current transport (for inspection / testing).

@@ -131,8 +131,8 @@ fn stale_old_reply_preserves_new_token_metadata_parameters_and_applied_graph() {
             while let Ok(event) = events.pop() {
                 match event {
                     EngineEvent::PlaybackStarted => started += 1,
-                    EngineEvent::TrackMeter { .. }
-                    | EngineEvent::Metering { .. }
+                    EngineEvent::TrackMeter(_)
+                    | EngineEvent::Metering(_)
                     | EngineEvent::PlaybackPosition(_) => {}
                     event => panic!("unexpected stale setup event: {event:?}"),
                 }
@@ -170,7 +170,7 @@ fn stale_old_reply_preserves_new_token_metadata_parameters_and_applied_graph() {
                         old_owner = Some(device);
                         order.push("old-handoff");
                     }
-                    EngineEvent::Metering { .. } | EngineEvent::PlaybackPosition(_) => {}
+                    EngineEvent::Metering(_) | EngineEvent::PlaybackPosition(_) => {}
                     event => panic!("unexpected old handoff event: {event:?}"),
                 }
             }
@@ -276,7 +276,7 @@ fn stale_old_reply_preserves_new_token_metadata_parameters_and_applied_graph() {
                         new_owner = Some(device);
                         order.push("new-handoff");
                     }
-                    EngineEvent::Metering { .. } | EngineEvent::PlaybackPosition(_) => {}
+                    EngineEvent::Metering(_) | EngineEvent::PlaybackPosition(_) => {}
                     event => panic!("unexpected new handoff event: {event:?}"),
                 }
             }
@@ -572,8 +572,8 @@ fn stale_old_reply_preserves_new_token_metadata_parameters_and_applied_graph() {
             while let Ok(event) = events.pop() {
                 assert!(matches!(
                     event,
-                    EngineEvent::TrackMeter { .. }
-                        | EngineEvent::Metering { .. }
+                    EngineEvent::TrackMeter(_)
+                        | EngineEvent::Metering(_)
                         | EngineEvent::PlaybackPosition(_)
                 ));
             }
