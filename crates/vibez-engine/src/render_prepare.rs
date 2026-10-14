@@ -60,7 +60,7 @@ pub(super) fn channel(
                         instrument.set_param(index, *value);
                     }
                     if let Some((audio, name)) = req.sampler_audio.get(&info.id) {
-                        instrument.load_sample(Arc::clone(audio), name.clone());
+                        drop(instrument.load_sample(Arc::clone(audio), name.clone()));
                     }
                 }
                 InstrumentStateInfo::DrumRack { pads } => {
