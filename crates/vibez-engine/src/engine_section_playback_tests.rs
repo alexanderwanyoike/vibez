@@ -585,43 +585,17 @@ fn absent_track_stops_source_content_without_resetting_effect_tail() {
     assert!(silence_with_tail[1] < silence_with_tail[0]);
 }
 
-#[test]
-fn delayed_section_refresh_acknowledges_consumption_before_heard_capture_and_preserves_audio_history() {
-    use vibez_core::routing::{NodeStage, RoutingChannel, RoutingEffect, RoutingNode};
+struct SectionRefreshFixture {
+    engine: AudioEngine,
+    commands: Producer<EngineCommand>,
+    events: Consumer<EngineEvent>,
+    track_id: TrackId,
+    section_id: SectionId,
+    old_owner: std::sync::Weak<DecodedAudio>,
+}
 
-    let (mut engine, mut commands, mut events) = AudioEngine::new();
-    let track_id = TrackId::new();
-    let effect_id = EffectId::new();
-    let section_id = SectionId::new();
-    commands.push(EngineCommand::SetSampleRate(1000)).unwrap();
-    commands.push(EngineCommand::SetBpm(60.0)).unwrap();
-    commands.push(EngineCommand::add_track(track_id)).unwrap();
-    commands.push(EngineCommand::SetTrackPan(track_id, 0.0)).unwrap();
-    commands.push(EngineCommand::InsertEffect {
-        track_id,
-        effect_id,
-        effect: Box::new(crate::test_support::DelayProbe::new(64)),
-        position: None,
-    }).unwrap();
-    let channels = [
-        RoutingChannel {
-            id: track_id,
-            is_bus: false,
-            sends: vec![],
-            effects: vec![RoutingEffect {
-                id: effect_id,
-                inputs: vec![],
-                assignments: vec![],
-                inactive_inputs: vec![],
-            }],
-        },
-        RoutingChannel { id: TrackId::MASTER, is_bus: true, effects: vec![], sends: vec![] },
-    ];
-    let reports = [(RoutingNode { channel: track_id, stage: NodeStage::Effect(effect_id) }, 64)];
-    commands.push(EngineCommand::SetRouting(crate::routing::PreparedRouting::prepare_compensated(
-        &channels, 32, &reports, &[], 1,
-    ).unwrap())).unwrap();
-    let source = |audio| Box::new(PreparedSectionPlaybackSource::new(
+fn section_refresh_source(track_id: TrackId, section_id: SectionId, audio: Arc<DecodedAudio>) -> Box<PreparedSectionPlaybackSource> {
+    Box::new(PreparedSectionPlaybackSource::new(
         section_id,
         32.0,
         true,
@@ -644,10 +618,75 @@ fn delayed_section_refresh_acknowledges_consumption_before_heard_capture_and_pre
             Vec::new(),
             Vec::new(),
         ))],
-    ));
+    ))
+}
+
+fn section_refresh_fixture(delay: u32) -> SectionRefreshFixture {
+    use vibez_core::routing::{NodeStage, RoutingChannel, RoutingEffect, RoutingNode};
+
+    let (engine, mut commands, events) = AudioEngine::new();
+    let track_id = TrackId::new();
+    let effect_id = EffectId::new();
+    let section_id = SectionId::new();
+    commands.push(EngineCommand::SetSampleRate(1000)).unwrap();
+    commands.push(EngineCommand::SetBpm(60.0)).unwrap();
+    commands.push(EngineCommand::add_track(track_id)).unwrap();
+    commands.push(EngineCommand::SetTrackPan(track_id, 0.0)).unwrap();
+    commands.push(EngineCommand::InsertEffect {
+        track_id,
+        effect_id,
+        effect: Box::new(crate::test_support::DelayProbe::new(delay)),
+        position: None,
+    }).unwrap();
+    let channels = [
+        RoutingChannel {
+            id: track_id,
+            is_bus: false,
+            sends: vec![],
+            effects: vec![RoutingEffect {
+                id: effect_id,
+                inputs: vec![],
+                assignments: vec![],
+                inactive_inputs: vec![],
+            }],
+        },
+        RoutingChannel { id: TrackId::MASTER, is_bus: true, effects: vec![], sends: vec![] },
+    ];
+    let reports = [(RoutingNode { channel: track_id, stage: NodeStage::Effect(effect_id) }, delay)];
+    commands.push(EngineCommand::SetRouting(crate::routing::PreparedRouting::prepare_compensated(
+        &channels, 32, &reports, &[], 1,
+    ).unwrap())).unwrap();
     let old = constant_audio(4096, 0.25);
     let old_owner = Arc::downgrade(&old);
-    commands.push(EngineCommand::LaunchSection(source(old))).unwrap();
+    commands.push(EngineCommand::LaunchSection(section_refresh_source(track_id, section_id, old))).unwrap();
+    SectionRefreshFixture { engine, commands, events, track_id, section_id, old_owner }
+}
+
+fn assert_refresh_left_audio(output: &[f32; 64], expected: f32) {
+    for [left, right] in output.as_chunks::<2>().0 {
+        assert_eq!(*left, expected);
+        assert_eq!(*right, 0.0);
+    }
+}
+
+fn process_refresh_block(engine: &mut AudioEngine, output: &mut [f32; 64]) {
+    assert_eq!(crate::retirement::tests::allocations(|| engine.process_block(AudioProcessBlock::new(output, 2))), (0, 0));
+}
+
+fn warm_section_refresh(fixture: &mut SectionRefreshFixture) {
+    let mut output = [0.0; 64];
+    for _ in 0..3 {
+        fixture.engine.process_block(AudioProcessBlock::new(&mut output, 2));
+        while fixture.events.pop().is_ok() {}
+    }
+    assert_refresh_left_audio(&output, 0.25);
+    assert_eq!(fixture.engine.active_section.unwrap().position_samples, 96);
+    assert_eq!(fixture.old_owner.strong_count(), 1);
+}
+
+#[test]
+fn delayed_section_refresh_acknowledges_consumption_before_heard_capture_and_preserves_audio_history() {
+    let SectionRefreshFixture { mut engine, mut commands, mut events, track_id, section_id, old_owner } = section_refresh_fixture(64);
     let mut output = [0.0; 64];
     for block in 0..3 {
         engine.process_block(AudioProcessBlock::new(&mut output, 2));
@@ -661,7 +700,7 @@ fn delayed_section_refresh_acknowledges_consumption_before_heard_capture_and_pre
     assert_eq!(old_owner.strong_count(), 1);
     let incoming = constant_audio(4096, 0.75);
     let incoming_owner = Arc::downgrade(&incoming);
-    let replacement = source(incoming);
+    let replacement = section_refresh_source(track_id, section_id, incoming);
     let replacement_pointer = &*replacement as *const PreparedSectionPlaybackSource;
     commands.push(EngineCommand::RefreshSection(replacement)).unwrap();
     assert_eq!(crate::retirement::tests::allocations(|| engine.process_block(AudioProcessBlock::new(&mut output, 2))), (0, 0));
