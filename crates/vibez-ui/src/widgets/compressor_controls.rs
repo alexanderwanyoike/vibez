@@ -15,7 +15,7 @@ use crate::{
     },
 };
 use iced::{
-    widget::{button, column, container, pick_list, row, text},
+    widget::{button, column, container, pick_list, row, text, tooltip},
     Color, Element, Length,
 };
 use vibez_core::id::TrackId;
@@ -162,13 +162,17 @@ pub fn advanced<'a>(
                 &["Peak", "RMS"],
                 accent
             ),
-            selector(
-                track,
-                effect,
-                param::AUTO_RELEASE,
-                "Release",
-                &["Manual", "Adaptive"],
-                accent
+            tooltip(
+                selector(
+                    track,
+                    effect,
+                    param::AUTO_RELEASE,
+                    "Release",
+                    &["Manual", "Adaptive"],
+                    accent
+                ),
+                text("Adaptive follows signal activity. Release sets its base time.").size(9),
+                tooltip::Position::Top
             ),
             selector(
                 track,
