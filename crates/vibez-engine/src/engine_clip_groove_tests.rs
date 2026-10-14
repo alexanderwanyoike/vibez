@@ -1,6 +1,7 @@
 //! Deterministic render-read fixtures for opt-in MIDI clip Groove.
 
 use super::*;
+use graph_test_support::{graph_engine, routing_channel};
 use std::sync::{Arc, Mutex};
 use vibez_core::automation::{AutomationLane, AutomationPoint, AutomationTarget};
 use vibez_core::id::{ClipId, TrackId};
@@ -77,8 +78,9 @@ fn render_events(
     notes: &[MidiNote],
     frames: usize,
 ) -> Vec<TimedEvent> {
-    let (mut engine, mut commands, _events) = AudioEngine::new();
     let track_id = TrackId::new();
+    let (mut engine, mut commands, _events) =
+        graph_engine(&[routing_channel(track_id), routing_channel(TrackId::MASTER)]);
     let clip_id = ClipId::new();
     let events = Arc::new(Mutex::new(Vec::new()));
     commands.push(EngineCommand::SetSampleRate(96)).unwrap();
@@ -150,8 +152,9 @@ fn midpoint_note(start_beat: f64) -> MidiNote {
 
 #[test]
 fn midi_start_plays_once_then_returns_to_loop_start() {
-    let (mut engine, mut commands, _events) = AudioEngine::new();
     let track_id = TrackId::new();
+    let (mut engine, mut commands, _events) =
+        graph_engine(&[routing_channel(track_id), routing_channel(TrackId::MASTER)]);
     let clip_id = ClipId::new();
     let events = Arc::new(Mutex::new(Vec::new()));
     commands.push(EngineCommand::SetSampleRate(96)).unwrap();
@@ -203,8 +206,9 @@ fn midi_start_plays_once_then_returns_to_loop_start() {
 
 #[test]
 fn dense_recorded_groove_schedules_each_note_once_per_audio_block() {
-    let (mut engine, mut commands, _events) = AudioEngine::new();
     let track_id = TrackId::new();
+    let (mut engine, mut commands, _events) =
+        graph_engine(&[routing_channel(track_id), routing_channel(TrackId::MASTER)]);
     let clip_id = ClipId::new();
     commands.push(EngineCommand::SetSampleRate(44_100)).unwrap();
     commands.push(EngineCommand::SetBpm(128.0)).unwrap();
