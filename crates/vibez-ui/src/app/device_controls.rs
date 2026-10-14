@@ -5,6 +5,25 @@ use crate::domains::device_controls::{DeviceControlMsg, DeviceControlState};
 use vibez_core::id::EffectId;
 
 impl App {
+    pub(super) fn device_parameter_presentation(
+        &self,
+        track_id: vibez_core::id::TrackId,
+        effect_id: EffectId,
+        index: usize,
+    ) -> Option<crate::domains::device_controls::ParameterPresentation> {
+        let effect = self
+            .state
+            .find_track(track_id)?
+            .effects
+            .iter()
+            .find(|effect| effect.id == effect_id)?;
+        crate::domains::device_controls::parameter_presentation(
+            effect,
+            index,
+            self.cmd_tx.prepared_effect_sample_rate(track_id, effect_id),
+        )
+    }
+
     pub(super) fn update_device_control(&mut self, message: DeviceControlMsg) -> Task<Message> {
         let (track_id, effect_id) = message.destination();
         let Some(effect) = self

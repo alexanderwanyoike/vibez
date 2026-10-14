@@ -4,6 +4,64 @@ use std::collections::{BTreeMap, BTreeSet};
 use vibez_core::effect::ParamDescriptor;
 use vibez_core::id::{EffectId, TrackId};
 
+pub struct ParameterPresentation {
+    pub name: &'static str,
+    pub unit: &'static str,
+    pub value: Option<String>,
+    pub range: Option<(String, String)>,
+}
+
+impl ParameterPresentation {
+    pub fn is_editable(&self) -> bool {
+        self.value.is_some()
+    }
+}
+
+pub fn parameter_presentation(
+    effect: &crate::state::UiEffect,
+    index: usize,
+    prepared_rate: Option<u32>,
+) -> Option<ParameterPresentation> {
+    if effect.plugin_ref.is_some() || effect.plugin_name.is_some() {
+        return None;
+    }
+    let stored = effect.descriptors.get(index)?;
+    let value = effect.params.get(index).copied().unwrap_or(stored.default);
+    if effect.effect_type == vibez_core::effect::EffectType::Bitcrush
+        && index == vibez_dsp::bitcrush::param::SR_REDUCE
+    {
+        let hertz = prepared_rate
+            .filter(|_| !effect.reconfiguration_failed)
+            .and_then(|rate| {
+                Some((
+                    crate::domains::bitcrush_values::display_rate(rate, value)?,
+                    crate::domains::bitcrush_values::display_rate(rate, stored.max)?,
+                    crate::domains::bitcrush_values::display_rate(rate, stored.min)?,
+                ))
+            });
+        let (value, range) = match hertz {
+            Some((value, minimum, maximum)) => (Some(value), Some((minimum, maximum))),
+            None => (None, None),
+        };
+        return Some(ParameterPresentation {
+            name: "Rate",
+            unit: "Hz",
+            value,
+            range,
+        });
+    }
+    let descriptor = presentation_descriptor(effect, index);
+    Some(ParameterPresentation {
+        name: descriptor.name,
+        unit: descriptor.unit,
+        value: Some(presented_value(effect, index, value)),
+        range: Some((
+            presented_value(effect, index, stored.min),
+            presented_value(effect, index, stored.max),
+        )),
+    })
+}
+
 pub fn presentation_descriptor(effect: &crate::state::UiEffect, index: usize) -> ParamDescriptor {
     let mut descriptor = effect.descriptors[index];
     if effect.effect_type == vibez_core::effect::EffectType::Bitcrush
