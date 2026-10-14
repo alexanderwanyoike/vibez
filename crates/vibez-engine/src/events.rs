@@ -202,6 +202,13 @@ pub enum EngineEvent {
         output: crate::metering::MeterValues,
     },
 
+    EffectWaveshaper {
+        track_id: TrackId,
+        effect_id: vibez_core::id::EffectId,
+        generation: u64,
+        meter: vibez_core::effect::WaveShaperMeter,
+    },
+
     /// Drum Rack pitches triggered by resident MIDI clips during the latest
     /// audio block. One bit per MIDI pitch keeps device feedback bounded to
     /// one event per track and block, even when several notes land together.
@@ -465,6 +472,7 @@ impl EngineEvent {
             | Self::Metering { .. }
             | Self::TrackMeter { .. }
             | Self::EffectMeter { .. }
+            | Self::EffectWaveshaper { .. }
             | Self::TrackNoteActivity { .. }
             | Self::ClipQueued { .. }
             | Self::ClipEventsDropped { .. }
