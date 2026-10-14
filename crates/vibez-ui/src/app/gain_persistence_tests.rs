@@ -1,7 +1,11 @@
 //! Verifies legacy Gain documents restore editable neutral stereo controls.
 
 use super::*;
-use vibez_core::{effect::{EffectInfo, EffectType}, id::EffectId, track::TrackInfo};
+use vibez_core::{
+    effect::{EffectInfo, EffectType},
+    id::EffectId,
+    track::TrackInfo,
+};
 
 #[tokio::test]
 async fn legacy_gain_project_keeps_its_level_and_accepts_new_stereo_controls() {
@@ -53,4 +57,3 @@ async fn legacy_gain_project_keeps_its_level_and_accepts_new_stereo_controls() {
         assert_eq!(effect.params[1], -6.0);
     }
 }
-
