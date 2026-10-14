@@ -273,7 +273,7 @@ fn clip_app_idle_stream_shutdown_disposes_undrained_request_reply_and_completion
                 EngineEvent::ClipInsertionCompleted(completed) if completed.id() == fixture.operation));
         }
         assert!(fixture.audio.strong_count() > 0);
-        fixture.app._stream = Some(vibez_audio_io::AudioOutputStream::idle(fixture.engine));
+        fixture.app._stream = Some(vibez_audio_io::audio_stream::AudioOutputStream::idle(fixture.engine));
         drop(fixture.app);
         assert_eq!(fixture.audio.strong_count(), 0, "{stage:?}");
     }
