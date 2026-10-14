@@ -856,9 +856,19 @@ fn drum_media_commands_return_rejected_owners_without_touching_sounding_audio() 
         ApplyState,
         Clear,
     }
-    for target_case in [RejectedTarget::MissingTrack, RejectedTarget::MissingInstrument,
-        RejectedTarget::Synth, RejectedTarget::Sampler, RejectedTarget::FirstInvalidPad, RejectedTarget::MaximumIndex] {
-        for command_case in [MediaEdit::LoadSample, MediaEdit::ApplyState, MediaEdit::Clear] {
+    for target_case in [
+        RejectedTarget::MissingTrack,
+        RejectedTarget::MissingInstrument,
+        RejectedTarget::Synth,
+        RejectedTarget::Sampler,
+        RejectedTarget::FirstInvalidPad,
+        RejectedTarget::MaximumIndex,
+    ] {
+        for command_case in [
+            MediaEdit::LoadSample,
+            MediaEdit::ApplyState,
+            MediaEdit::Clear,
+        ] {
             for full_ring in [false, true] {
                 let (mut engine, mut commands, mut events) = AudioEngine::new();
                 let sounding = TrackId::new();
@@ -906,9 +916,16 @@ fn drum_media_commands_return_rejected_owners_without_touching_sounding_audio() 
                 let (create_track, wrong_kind, track_id, pad_index) = match target_case {
                     RejectedTarget::MissingTrack => (false, None, other, 0),
                     RejectedTarget::MissingInstrument => (true, None, other, 0),
-                    RejectedTarget::Synth => (true, Some(InstrumentKind::SubtractiveSynth), other, 0),
+                    RejectedTarget::Synth => {
+                        (true, Some(InstrumentKind::SubtractiveSynth), other, 0)
+                    }
                     RejectedTarget::Sampler => (true, Some(InstrumentKind::Sampler), other, 0),
-                    RejectedTarget::FirstInvalidPad => (false, None, sounding, vibez_core::track::DRUM_RACK_PAD_COUNT),
+                    RejectedTarget::FirstInvalidPad => (
+                        false,
+                        None,
+                        sounding,
+                        vibez_core::track::DRUM_RACK_PAD_COUNT,
+                    ),
                     RejectedTarget::MaximumIndex => (false, None, sounding, usize::MAX),
                 };
                 if create_track {
