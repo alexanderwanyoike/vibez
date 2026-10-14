@@ -128,7 +128,7 @@ pub fn view<'a>(
         ));
     }
     if let Some(region) = layout.modulation {
-        let inline_disclosure = layout.tier == Tier::Expanded && size.height >= 220.0;
+        let inline_disclosure = layout.tier == Tier::Expanded && size.height >= 114.0;
         body = body.push(place(
             modulation::view(track, effect, state, accent, region, inline_disclosure),
             region,

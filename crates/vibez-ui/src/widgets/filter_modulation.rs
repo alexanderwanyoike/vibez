@@ -102,11 +102,11 @@ pub fn view<'a>(
         });
     }
     if dense {
-        return row![container(sources).width(132.0), settings]
-            .spacing(6)
-            .height(Length::Fill)
-            .align_y(Alignment::Center)
-            .into();
+        let mut controls = row![].spacing(6).height(Length::Fill).align_y(Alignment::Center);
+        if inline_disclosure {
+            controls = controls.push(container(disclosure(track, effect, true)).width(82.0));
+        }
+        return controls.push(container(sources).width(132.0)).push(settings).into();
     }
     let header: Element<'a, Message> = if inline_disclosure {
         row![
@@ -135,7 +135,7 @@ pub fn view<'a>(
     .spacing(3)
     .width(if inline_disclosure { 128.0 } else { 96.0 })
     .height(Length::Fill);
-    let mut content = row![]
+    let mut content = row![controls]
         .spacing(12)
         .align_y(Alignment::Center)
         .height(Length::Fill);
@@ -152,7 +152,7 @@ pub fn view<'a>(
             .width(66.0),
         );
     }
-    content.push(controls).push(preview).into()
+    content.push(preview).into()
 }
 
 fn model_value(

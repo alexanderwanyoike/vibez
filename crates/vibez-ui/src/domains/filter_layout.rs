@@ -52,7 +52,7 @@ pub fn arrange(width: f32, height: f32, advanced: bool) -> Arrangement {
     let inner = (width - 16.0).max(0.0);
     let short = height < 114.0;
     let toolbar_h = if short { 22.0 } else { 26.0 };
-    let primary_h = if short {
+    let primary_h = if short || (advanced && height < 180.0 && tier != Tier::Expanded) {
         28.0
     } else if height >= 260.0 {
         72.0
@@ -110,17 +110,26 @@ pub fn arrange(width: f32, height: f32, advanced: bool) -> Arrangement {
         }
         return layout;
     }
-    if tier == Tier::Expanded && height >= 220.0 {
-        let plot_h = primary_y - toolbar_h - 8.0;
-        layout.modes = Some(Region::new(8.0, toolbar_h + 4.0, 88.0, plot_h));
-        layout.vertical_modes = plot_h >= 124.0;
-        layout.response = Some(Region::new(108.0, toolbar_h + 4.0, width - 170.0, plot_h));
-        layout.meter = Some(Region::new(width - 54.0, toolbar_h + 4.0, 46.0, plot_h));
+    if tier == Tier::Expanded {
+        let top = toolbar_h + 4.0;
+        let available = primary_y - top - 4.0;
+        if available >= 148.8 {
+            layout.modes = Some(Region::new(8.0, top, 88.0, available));
+            layout.vertical_modes = true;
+            layout.response = Some(Region::new(108.0, top, width - 170.0, available));
+            layout.meter = Some(Region::new(width - 54.0, top, 46.0, available));
+        } else {
+            let plot_h = (available - 28.0).max(0.0);
+            if plot_h >= 16.0 {
+                layout.response = Some(Region::new(8.0, top, width - 70.0, plot_h));
+                layout.meter = Some(Region::new(width - 54.0, top, 46.0, plot_h));
+            }
+            layout.modes = Some(Region::new(8.0, top + plot_h + 4.0, inner, 24.0));
+        }
         layout.primary.width = 328.0;
         if advanced {
             layout.modulation = Some(Region::new(352.0, primary_y, width - 360.0, primary_h));
-        }
-        if !advanced {
+        } else {
             layout.disclosure = Some(Region::new(352.0, primary_y + 20.0, 82.0, 20.0));
         }
         return layout;
@@ -135,40 +144,39 @@ pub fn arrange(width: f32, height: f32, advanced: bool) -> Arrangement {
     } else {
         layout.disclosure = Some(Region::new(width - 90.0, height - 20.0, 82.0, 20.0));
     }
-    let modulation_h = if !advanced {
+    let mut modulation_h = if !advanced {
         0.0
     } else if height >= 260.0 {
         70.0
     } else if height >= 180.0 {
         54.0
     } else {
-        32.0
-    };
-    let mode_h = if tier != Tier::Medium && (!advanced || height >= 260.0) {
-        24.0
-    } else {
-        0.0
+        14.0
     };
     let mut y = toolbar_h + tabs_h + 4.0;
-    let gap_count = 1.0 + if mode_h > 0.0 { 1.0 } else { 0.0 } + if advanced { 1.0 } else { 0.0 };
-    let plot_h = (primary_y - y - mode_h - modulation_h - 4.0 * gap_count).max(0.0);
+    let response_space = |modulation_h| {
+        let available = primary_y - y - modulation_h - if advanced { 8.0 } else { 4.0 };
+        let side_modes = tier == Tier::Medium && available >= 74.0;
+        let plot_h = (available - if side_modes { 0.0 } else { 28.0 }).max(0.0);
+        (plot_h, side_modes)
+    };
+    let (mut plot_h, mut side_modes) = response_space(modulation_h);
+    if advanced && modulation_h > 14.0 && plot_h < 48.0 {
+        modulation_h = 14.0;
+        (plot_h, side_modes) = response_space(modulation_h);
+    }
     if plot_h >= 16.0 {
-        let side_modes = tier == Tier::Medium && plot_h >= 74.0;
-        let right = if side_modes {
-            width - 198.0
-        } else {
-            width - 8.0
-        };
+        let right = if side_modes { width - 198.0 } else { width - 8.0 };
         layout.response = Some(Region::new(8.0, y, right - 66.0, plot_h));
         layout.meter = Some(Region::new(right - 46.0, y, 46.0, plot_h));
-        if side_modes {
-            layout.modes = Some(Region::new(width - 186.0, y, 178.0, plot_h));
-        }
+    }
+    if side_modes {
+        layout.modes = Some(Region::new(width - 186.0, y, 178.0, plot_h));
     }
     y += plot_h + 4.0;
-    if mode_h > 0.0 {
-        layout.modes = Some(Region::new(8.0, y, inner, mode_h));
-        y += mode_h + 4.0;
+    if !side_modes {
+        layout.modes = Some(Region::new(8.0, y, inner, 24.0));
+        y += 28.0;
     }
     if advanced {
         layout.modulation = Some(Region::new(8.0, y, inner, modulation_h));
