@@ -20,6 +20,20 @@ pub fn parameter<'a>(
     accent: Color,
     knob_size: Option<f32>,
 ) -> Element<'a, Message> {
+    let heading = section_label(crate::domains::device_controls::presentation_descriptor(effect, index).name);
+    parameter_with_heading(track, effect, state, index, accent, knob_size, heading)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn parameter_with_heading<'a>(
+    track: TrackId,
+    effect: &'a UiEffect,
+    state: &'a DeviceControlState,
+    index: usize,
+    accent: Color,
+    knob_size: Option<f32>,
+    heading: Element<'a, Message>,
+) -> Element<'a, Message> {
     let descriptor = &crate::domains::device_controls::presentation_descriptor(effect, index);
     let value = effect
         .params
@@ -27,7 +41,7 @@ pub fn parameter<'a>(
         .copied()
         .unwrap_or(descriptor.default);
     let field = value_field(track, effect, state, index, accent);
-    let mut content = column![section_label(descriptor.name)]
+    let mut content = column![heading]
         .spacing(3)
         .align_x(iced::Alignment::Center);
     if let Some(size) = knob_size {
