@@ -108,3 +108,17 @@ fn legacy_values_append_only_the_six_neutral_bitcrush_controls() {
     assert_eq!(effect.get_param(2), 0.37);
     assert!(!effect.set_param(9, 1.0));
 }
+
+#[test]
+fn constructed_bitcrush_reports_its_real_rate_without_inventing_fixed_hold_latency() {
+    for rate in [44_100.0, 48_000.0, 96_000.0] {
+        let effect = create_effect_with_params(EffectType::Bitcrush, rate, &[10.25, 4.49, 0.37]);
+        assert_eq!(effect.activation_sample_rate(), Some(rate as u32));
+        assert_eq!(effect.latency_samples(), 0);
+        assert_eq!(effect.get_param(1), 4.49);
+    }
+    for rate in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY, 0.0, -1.0] {
+        let effect = create_effect_with_params(EffectType::Bitcrush, rate, &[]);
+        assert_eq!(effect.activation_sample_rate(), Some(48_000));
+    }
+}
