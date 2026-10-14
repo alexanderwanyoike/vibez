@@ -43,7 +43,7 @@ impl std::fmt::Debug for InstrumentMediaOwners {
             .debug_struct("InstrumentMediaOwners")
             .field(
                 "sample",
-                &self.sample.as_ref().map(|sample| Arc::as_ptr(sample)),
+                &self.sample.as_ref().map(Arc::as_ptr),
             )
             .field("name", &self.name)
             .finish()
