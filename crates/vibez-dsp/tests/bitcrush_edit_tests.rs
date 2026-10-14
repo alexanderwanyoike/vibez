@@ -5,7 +5,7 @@ use vibez_dsp::{effect::AudioEffect, factory::create_effect_with_params};
 
 fn drive_case(channels: usize) -> Box<dyn AudioEffect> {
     let mut effect = create_effect_with_params(
-        EffectType::Bitcrush, 48_000.0, &[10.0, 1.0, 1.0, 0.0]);
+        EffectType::Bitcrush, 48_000.0, &[16.0, 1.0, 1.0, 0.0]);
     effect.process(&mut vec![0.0437; 9 * channels], channels);
     assert!(effect.set_param(3, 12.0));
     assert_eq!(effect.get_param(3), 12.0);
@@ -14,7 +14,7 @@ fn drive_case(channels: usize) -> Box<dyn AudioEffect> {
 
 #[test]
 fn manual_drive_ramps_on_source_frames_and_automation_snaps_without_reviving_the_ramp() {
-    let quantum = 1.0 / 512.0;
+    let quantum = 1.0 / 32_768.0;
     for channels in [1, 2] {
         let mut whole = vec![0.0437; 640 * channels];
         drive_case(channels).process(&mut whole, channels);
@@ -30,7 +30,7 @@ fn manual_drive_ramps_on_source_frames_and_automation_snaps_without_reviving_the
         for (frame, samples) in whole.chunks_exact(channels).enumerate() {
             let drive_db = 12.0 * ((frame + 1).min(512) as f64 / 512.0);
             let driven = f64::from(0.0437_f32) * 10.0_f64.powf(drive_db / 20.0);
-            let expected = (driven * 512.0).round() as f32 / 512.0;
+            let expected = (driven * 32_768.0).round() as f32 / 32_768.0;
             for &sample in samples {
                 assert!((sample - expected).abs() <= quantum,
                     "frame={frame}, expected={expected}, actual={sample}");
@@ -45,7 +45,7 @@ fn manual_drive_ramps_on_source_frames_and_automation_snaps_without_reviving_the
         let mut actual = vec![0.0437; 640 * channels];
         automated.process(&mut actual, channels);
         let mut hydrated = create_effect_with_params(
-            EffectType::Bitcrush, 48_000.0, &[10.0, 1.0, 1.0, 6.0]);
+            EffectType::Bitcrush, 48_000.0, &[16.0, 1.0, 1.0, 6.0]);
         let mut expected = vec![0.0437; 640 * channels];
         hydrated.process(&mut expected, channels);
         assert_eq!(actual, expected, "automation must replace the active Drive ramp");
