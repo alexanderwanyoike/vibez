@@ -13,6 +13,7 @@ use crate::icons;
 use crate::message::Message;
 use crate::state::UiTrack;
 use crate::theme as th;
+use crate::widgets::device_chrome::section_label;
 use crate::widgets::effect_slot::{view_effect_slot, view_sidechain, DeviceBody};
 
 use super::*;
@@ -407,7 +408,7 @@ impl App {
         label: &'static str,
         content: Element<'a, Message>,
     ) -> Element<'a, Message> {
-        column![text(label).size(8).color(th::text_muted()), content]
+        column![section_label(label), content]
             .spacing(6)
             .align_x(iced::Alignment::Start)
             .into()
