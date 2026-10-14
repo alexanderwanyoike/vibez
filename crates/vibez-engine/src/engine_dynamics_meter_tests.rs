@@ -230,11 +230,9 @@ fn detector_windows_drain_and_resubscription_does_not_report_old_peaks() {
         render(&mut engine, track, 0.1);
         let windows = readings(&mut events);
         assert_eq!(windows.len(), 2);
-        assert!(
-            windows
-                .iter()
-                .all(|window| window.2 == 9 && window.3.detector_peak == [0.1, 0.025])
-        );
+        assert!(windows
+            .iter()
+            .all(|window| window.2 == 9 && window.3.detector_peak == [0.1, 0.025]));
     }
 }
 
@@ -246,10 +244,10 @@ fn return_and_master_dynamics_are_selected_by_channel_identity() {
             render(&mut engine, source, 0.8);
             let windows = readings(&mut events);
             assert_eq!(windows.len(), 2);
-            assert!(
-                windows.iter().all(|window| window.0.is_master() == master
-                    && window.3.current_reduction_db[0] > 1.0)
-            );
+            assert!(windows
+                .iter()
+                .all(|window| window.0.is_master() == master
+                    && window.3.current_reduction_db[0] > 1.0));
         }
     }
 }

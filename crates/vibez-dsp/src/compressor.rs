@@ -199,8 +199,8 @@ pub fn static_transfer_db(input_db: f32, params: &[f32]) -> f32 {
     } else {
         reduction
     };
-    let gain = (1.0 - p[param::MIX])
-        + p[param::MIX] * db_to_amplitude(p[param::MAKEUP] - reduction);
+    let gain =
+        (1.0 - p[param::MIX]) + p[param::MIX] * db_to_amplitude(p[param::MAKEUP] - reduction);
     input_db + amplitude_to_db(gain.max(1e-10))
 }
 
@@ -281,7 +281,11 @@ impl CompressorEffect {
         ]
         .contains(&index)
         {
-            if self.params[index] >= 0.5 { 1.0 } else { 0.0 }
+            if self.params[index] >= 0.5 {
+                1.0
+            } else {
+                0.0
+            }
         } else {
             self.params[index]
         }
