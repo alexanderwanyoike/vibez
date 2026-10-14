@@ -289,3 +289,32 @@ fn external_detector_layouts_distinguish_connected_silence_from_safe_fallback() 
         assert_eq!(no_channels, [0.3, -0.7]);
     }
 }
+
+#[test]
+fn parallel_mix_preserves_the_dry_signal_without_falsifying_wet_attenuation() {
+    use vibez_core::routing::{ExternalInputBlock, ExternalInputId};
+    let frames = 4800;
+    let source: Vec<f32> = (0..frames).flat_map(|_| [0.01, -0.02]).collect();
+    let detector: Vec<f32> = (0..frames).map(|frame| if frame < 96 { 0.5 } else { 0.0 }).collect();
+    let render = |mix| {
+        let mut gate = GateEffect::new(48_000.0);
+        for (index, value) in [(0, -20.0), (1, 0.1), (2, 5.0), (3, 0.0), (14, mix)] {
+            assert!(gate.set_param(index, value));
+        }
+        let mut audio = source.clone();
+        gate.process_with_inputs(&mut audio, 2, &[ExternalInputBlock {
+            id: ExternalInputId(0), channels: 1, samples: &detector, connected: true,
+        }]);
+        (audio, gate.take_dynamics_meter().unwrap())
+    };
+    let (wet, reference_meter) = render(1.0);
+    for mix in [0.0, 0.25, 0.75] {
+        let (audio, meter) = render(mix);
+        for ((sample, dry), wet) in audio.iter().zip(&source).zip(&wet) {
+            let expected = dry * (1.0 - mix) + wet * mix;
+            assert!((*sample - expected).abs() < 2e-8,
+                "Mix{mix} output {sample} differs from actual parallel sum {expected}");
+        }
+        assert_eq!(meter, reference_meter, "Mix changed genuine wet dynamics diagnostics");
+    }
+}
