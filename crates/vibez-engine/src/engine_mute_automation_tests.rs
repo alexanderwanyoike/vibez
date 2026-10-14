@@ -17,9 +17,7 @@ fn constant_audio(frames: usize) -> Arc<DecodedAudio> {
 fn add_constant_track(commands: &mut rtrb::Producer<EngineCommand>, track_id: TrackId) {
     commands.push(EngineCommand::SetSampleRate(100)).unwrap();
     commands.push(EngineCommand::SetBpm(60.0)).unwrap();
-    commands
-        .push(EngineCommand::AddTrack(track_id, "Mute automation".into()))
-        .unwrap();
+    commands.push(EngineCommand::add_track(track_id)).unwrap();
     commands
         .push(EngineCommand::AddClip {
             track_id,
@@ -183,9 +181,7 @@ fn perform_gesture_uses_the_active_section_lane_not_arrange_automation() {
     let track_id = TrackId::new();
     commands.push(EngineCommand::SetSampleRate(100)).unwrap();
     commands.push(EngineCommand::SetBpm(60.0)).unwrap();
-    commands
-        .push(EngineCommand::AddTrack(track_id, "Section pan".into()))
-        .unwrap();
+    commands.push(EngineCommand::add_track(track_id)).unwrap();
     let mut section_pan = AutomationLane::new(AutomationTarget::TrackPan);
     section_pan.insert_point(AutomationPoint {
         beat: 0.0,

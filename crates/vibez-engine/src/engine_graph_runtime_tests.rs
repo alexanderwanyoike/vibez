@@ -101,7 +101,7 @@ fn setup(
         routing.configure_automation(&[(id, target)]).unwrap();
         engine.transport.play();
     }
-    engine.tracks.push(track);
+    engine.tracks.push(Box::new(track));
     engine.routing = Some(routing);
     (engine, calls, parameters)
 }

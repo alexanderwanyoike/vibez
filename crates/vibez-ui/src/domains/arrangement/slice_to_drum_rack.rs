@@ -99,7 +99,11 @@ impl TimelineEditorState {
         }
 
         let mut no_engine = crate::domains::DiscardingEngine;
-        let track_id = project_tracks.add_numbered_track("Slices", TrackKind::Midi, &mut no_engine);
+        let Some(track_id) =
+            project_tracks.add_numbered_track("Slices", TrackKind::Midi, &mut no_engine)
+        else {
+            return failure(super::PROJECT_TRACKS_FULL);
+        };
         let track = project_tracks
             .find_mut(track_id)
             .expect("new Project Track");

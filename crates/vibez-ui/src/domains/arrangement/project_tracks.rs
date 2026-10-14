@@ -76,13 +76,21 @@ impl ArrangementState {
         let mut action = ArrangementAction::default();
         match msg {
             ArrangementMsg::AddTrack => {
-                let id = project_tracks.add_numbered_track("Track", TrackKind::Audio, engine);
+                let Some(id) = project_tracks.add_numbered_track("Track", TrackKind::Audio, engine)
+                else {
+                    action.status = Some(super::PROJECT_TRACKS_FULL.to_string());
+                    return action;
+                };
                 Arc::make_mut(&mut self.timeline).ensure(id);
                 self.selected_track = Some(id);
                 action.status = Some(format!("{} tracks", project_tracks.tracks.len()));
             }
             ArrangementMsg::AddMidiTrack | ArrangementMsg::AddInstrumentTrack => {
-                let id = project_tracks.add_numbered_track("MIDI", TrackKind::Midi, engine);
+                let Some(id) = project_tracks.add_numbered_track("MIDI", TrackKind::Midi, engine)
+                else {
+                    action.status = Some(super::PROJECT_TRACKS_FULL.to_string());
+                    return action;
+                };
                 project_tracks
                     .find_mut(id)
                     .expect("new Project Track")
@@ -162,10 +170,14 @@ impl ArrangementState {
                 }
             }
             ArrangementMsg::AddBus => {
+                if project_tracks.buses.len() >= vibez_engine::mixer::CHANNEL_CAPACITY {
+                    action.status = Some(super::PROJECT_BUSES_FULL.to_string());
+                    return action;
+                }
                 let letter = (b'A' + (project_tracks.buses.len() % 26) as u8) as char;
                 let id = TrackId::new();
                 let name = format!("{letter} Return");
-                engine.send(EngineCommand::AddBus(id, name.clone()));
+                engine.send(EngineCommand::add_bus(id));
                 let color_index = ((project_tracks.buses.len() + 4) % 8) as u8;
                 let mut bus = ProjectTrack::new(id, name.clone(), color_index);
                 attach_channel_eq(engine, &mut bus);

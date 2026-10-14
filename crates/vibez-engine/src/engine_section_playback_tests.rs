@@ -95,9 +95,7 @@ fn resident_section_switches_immediately_and_returns_the_displaced_source() {
     let (mut engine, mut commands, mut events) = AudioEngine::new();
     let track_id = TrackId::new();
     let section_id = SectionId::new();
-    commands
-        .push(EngineCommand::AddTrack(track_id, "Audio".into()))
-        .unwrap();
+    commands.push(EngineCommand::add_track(track_id)).unwrap();
     commands
         .push(EngineCommand::LaunchSection(Box::new(
             PreparedSectionPlaybackSource::new(
@@ -157,9 +155,7 @@ fn refreshing_the_active_section_changes_content_without_restarting_its_playhead
     let track_id = TrackId::new();
     let section_id = SectionId::new();
     commands.push(EngineCommand::SetSampleRate(8)).unwrap();
-    commands
-        .push(EngineCommand::AddTrack(track_id, "Audio".into()))
-        .unwrap();
+    commands.push(EngineCommand::add_track(track_id)).unwrap();
 
     let source = |value| {
         Box::new(PreparedSectionPlaybackSource::new(
@@ -227,9 +223,7 @@ fn section_wraps_at_its_shortened_boundary_inside_one_callback() {
     let (mut engine, mut commands, _events) = AudioEngine::new();
     let track_id = TrackId::new();
     commands.push(EngineCommand::SetSampleRate(8)).unwrap();
-    commands
-        .push(EngineCommand::AddTrack(track_id, "Audio".into()))
-        .unwrap();
+    commands.push(EngineCommand::add_track(track_id)).unwrap();
     let audio = Arc::new(DecodedAudio {
         channels: vec![vec![0.1, 0.2, 0.3, 0.4, 0.9, 0.9]],
         sample_rate: 8,
@@ -282,9 +276,7 @@ fn arrangement_loop_does_not_wrap_section_engine_time() {
     let track_id = TrackId::new();
     let section_id = SectionId::new();
     commands.push(EngineCommand::SetSampleRate(8)).unwrap();
-    commands
-        .push(EngineCommand::AddTrack(track_id, "Audio".into()))
-        .unwrap();
+    commands.push(EngineCommand::add_track(track_id)).unwrap();
     commands
         .push(EngineCommand::SetArrangementLoopRegion { start: 0, end: 2 })
         .unwrap();
@@ -323,9 +315,7 @@ fn non_looping_section_returns_to_arrangement_source_after_ending() {
     let (mut engine, mut commands, _events) = AudioEngine::new();
     let track_id = TrackId::new();
     commands.push(EngineCommand::SetSampleRate(8)).unwrap();
-    commands
-        .push(EngineCommand::AddTrack(track_id, "Audio".into()))
-        .unwrap();
+    commands.push(EngineCommand::add_track(track_id)).unwrap();
     engine.process(&mut [], 1);
     *engine.tracks[0].playback_source = PreparedPlaybackSource::new(
         vec![EngineClip {
@@ -397,9 +387,7 @@ fn switching_sections_releases_notes_from_the_previous_source() {
     let track_id = TrackId::new();
     let note_events = Arc::new(Mutex::new(Vec::new()));
     commands.push(EngineCommand::SetSampleRate(8)).unwrap();
-    commands
-        .push(EngineCommand::AddMidiTrack(track_id, "MIDI".into()))
-        .unwrap();
+    commands.push(EngineCommand::add_track(track_id)).unwrap();
     commands
         .push(EngineCommand::SetInstrument {
             track_id,
@@ -462,9 +450,7 @@ fn live_instrument_note_releases_after_a_section_transition() {
     let (mut engine, mut commands, _events) = AudioEngine::new();
     let track_id = TrackId::new();
     let note_events = Arc::new(Mutex::new(Vec::new()));
-    commands
-        .push(EngineCommand::AddMidiTrack(track_id, "MIDI".into()))
-        .unwrap();
+    commands.push(EngineCommand::add_track(track_id)).unwrap();
     commands
         .push(EngineCommand::SetInstrument {
             track_id,
@@ -517,9 +503,7 @@ fn live_instrument_note_releases_after_a_section_transition() {
 fn absent_track_stops_source_content_without_resetting_effect_tail() {
     let (mut engine, mut commands, _events) = AudioEngine::new();
     let track_id = TrackId::new();
-    commands
-        .push(EngineCommand::AddTrack(track_id, "Audio".into()))
-        .unwrap();
+    commands.push(EngineCommand::add_track(track_id)).unwrap();
     commands
         .push(EngineCommand::InsertEffect {
             track_id,

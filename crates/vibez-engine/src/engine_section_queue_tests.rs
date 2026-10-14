@@ -78,9 +78,7 @@ fn playing_engine(
     let track_id = TrackId::new();
     commands.push(EngineCommand::SetSampleRate(8)).unwrap();
     commands.push(EngineCommand::SetBpm(120.0)).unwrap();
-    commands
-        .push(EngineCommand::AddTrack(track_id, "Audio".into()))
-        .unwrap();
+    commands.push(EngineCommand::add_track(track_id)).unwrap();
     commands
         .push(EngineCommand::LaunchSection(source(
             SectionId::new(),
@@ -115,9 +113,7 @@ fn immediate_section_launch_reanchors_held_repeat_to_the_section_downbeat() {
     commands
         .push(EngineCommand::SetProjectSwing(SwingAmount::new(0.62)))
         .unwrap();
-    commands
-        .push(EngineCommand::AddMidiTrack(track_id, "Hats".into()))
-        .unwrap();
+    commands.push(EngineCommand::add_track(track_id)).unwrap();
     commands
         .push(EngineCommand::set_built_in_instrument(
             track_id,
@@ -168,9 +164,7 @@ fn first_section_launch_reanchors_stopped_held_repeat_to_the_perform_downbeat() 
     commands
         .push(EngineCommand::SetProjectSwing(SwingAmount::new(0.62)))
         .unwrap();
-    commands
-        .push(EngineCommand::AddMidiTrack(track_id, "Hats".into()))
-        .unwrap();
+    commands.push(EngineCommand::add_track(track_id)).unwrap();
     commands
         .push(EngineCommand::set_built_in_instrument(
             track_id,
@@ -315,9 +309,7 @@ fn end_of_section_track_mute_applies_when_a_one_shot_section_stops() {
     let track_id = TrackId::new();
     commands.push(EngineCommand::SetSampleRate(8)).unwrap();
     commands.push(EngineCommand::SetBpm(120.0)).unwrap();
-    commands
-        .push(EngineCommand::AddTrack(track_id, "Audio".into()))
-        .unwrap();
+    commands.push(EngineCommand::add_track(track_id)).unwrap();
     commands
         .push(EngineCommand::LaunchSection(source_with_looping(
             SectionId::new(),
@@ -521,9 +513,7 @@ fn playing_one_shot(
     let track_id = TrackId::new();
     commands.push(EngineCommand::SetSampleRate(8)).unwrap();
     commands.push(EngineCommand::SetBpm(120.0)).unwrap();
-    commands
-        .push(EngineCommand::AddTrack(track_id, "Audio".into()))
-        .unwrap();
+    commands.push(EngineCommand::add_track(track_id)).unwrap();
     commands
         .push(EngineCommand::LaunchSection(source_with_looping(
             SectionId::new(),

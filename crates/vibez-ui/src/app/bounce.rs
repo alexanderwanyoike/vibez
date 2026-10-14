@@ -121,13 +121,21 @@ impl App {
     }
 
     pub(super) fn finalize_bounce(&mut self, outcome: crate::message::BounceOutcome) {
-        let track_id = {
+        let Some(track_id) = ({
             let mut engine = crate::domains::EngineTx(&mut self.cmd_tx);
             Arc::make_mut(&mut self.state.project_tracks).add_numbered_track(
                 "Bounce",
                 TrackKind::Audio,
                 &mut engine,
             )
+        }) else {
+            self.state.status_text = format!(
+                "Bounced '{}' to {}. {}",
+                outcome.clip_name,
+                outcome.path.display(),
+                crate::domains::arrangement::PROJECT_TRACKS_FULL
+            );
+            return;
         };
 
         let clip_id = ClipId::new();

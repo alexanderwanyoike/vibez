@@ -83,7 +83,7 @@ fn mixed_loadable_effects_cancel_after_exact_parallel_compensation() {
             commands.push(EngineCommand::SetSampleRate(48000)).unwrap();
             for index in 0..2 {
                 commands
-                    .push(EngineCommand::AddTrack(tracks[index], "Pulse".into()))
+                    .push(EngineCommand::add_track(tracks[index]))
                     .unwrap();
                 commands
                     .push(pulses(tracks[index], if index == 0 { 1.0 } else { -1.0 }))
@@ -166,9 +166,7 @@ fn loaded_instrument_latency_joins_the_same_compensated_mix() {
             instrument.reconfigure_on_main_thread().unwrap();
             commands.push(EngineCommand::SetSampleRate(48000)).unwrap();
             for id in [audio_track, instrument_track] {
-                commands
-                    .push(EngineCommand::AddTrack(id, "Controlled".into()))
-                    .unwrap();
+                commands.push(EngineCommand::add_track(id)).unwrap();
             }
             commands
                 .push(EngineCommand::SetInstrument {
@@ -270,9 +268,7 @@ fn delayed_loadable_one_shot_notes_release_at_an_exact_callback_boundary_and_dra
             instrument.load_state(&state);
             instrument.reconfigure_on_main_thread().unwrap();
             commands.push(EngineCommand::SetSampleRate(48000)).unwrap();
-            commands
-                .push(EngineCommand::AddMidiTrack(track, "One shot".into()))
-                .unwrap();
+            commands.push(EngineCommand::add_track(track)).unwrap();
             commands
                 .push(EngineCommand::SetInstrument {
                     track_id: track,

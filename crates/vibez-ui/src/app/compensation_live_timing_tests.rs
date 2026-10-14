@@ -19,7 +19,7 @@ fn midi_connection_selection_and_monitoring_changes_keep_running_audio_continuou
         Arc::make_mut(&mut app.state.project_tracks)
             .tracks
             .push(track);
-        app.send_command(EngineCommand::AddMidiTrack(id, "Instrument".into()));
+        app.send_command(EngineCommand::add_track(id));
         app.send_command(EngineCommand::SetInstrument {
             track_id: id,
             instrument: Box::new(DelayProbeInstrument::new(latency, 0.25)),

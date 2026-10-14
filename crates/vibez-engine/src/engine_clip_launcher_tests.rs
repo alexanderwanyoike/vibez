@@ -63,8 +63,8 @@ fn setup() -> (
     for command in [
         EngineCommand::SetSampleRate(8),
         EngineCommand::SetBpm(120.0),
-        EngineCommand::AddTrack(a, "A".into()),
-        EngineCommand::AddTrack(b, "B".into()),
+        EngineCommand::add_track(a),
+        EngineCommand::add_track(b),
     ] {
         commands.push(command).unwrap();
     }

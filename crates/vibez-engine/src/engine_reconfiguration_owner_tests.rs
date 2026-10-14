@@ -132,7 +132,7 @@ fn assert_handoff_failure_cause(backpressured: bool) {
         effect: Box::new(EffectProbe(true)),
         bypass: false,
     });
-    engine.tracks.push(track);
+    engine.tracks.push(Box::new(track));
     engine.next_device_handoff = u64::MAX;
     commands
         .push(EngineCommand::SetRouting(plan(id, &[effect], 1)))
@@ -188,12 +188,10 @@ fn delayed_effect_return_cannot_resurrect_owner_into_reopened_same_id_channel() 
         effect: Box::new(EffectProbe(true)),
         bypass: false,
     });
-    engine.tracks.push(track);
+    engine.tracks.push(Box::new(track));
     let device = handed_off(&mut engine, &mut events);
     commands.push(EngineCommand::RemoveTrack(id)).unwrap();
-    commands
-        .push(EngineCommand::AddTrack(id, "Reopened".into()))
-        .unwrap();
+    commands.push(EngineCommand::add_track(id)).unwrap();
     let ids = [effect, EffectId::new(), EffectId::new(), EffectId::new()];
     for &effect_id in &ids {
         commands
@@ -242,7 +240,7 @@ fn delayed_instrument_return_keeps_replacement_and_does_not_drop_it_in_callback(
         requested: true,
         drops: old_drops,
     }));
-    engine.tracks.push(track);
+    engine.tracks.push(Box::new(track));
     let device = handed_off(&mut engine, &mut events);
     commands
         .push(EngineCommand::SetInstrument {
@@ -291,7 +289,7 @@ fn stopped_effect_retains_bypass_and_reorder_edits_when_owner_returns() {
             bypass: false,
         });
     }
-    engine.tracks.push(track);
+    engine.tracks.push(Box::new(track));
     let device = handed_off(&mut engine, &mut events);
     commands
         .push(EngineCommand::SetEffectBypass {
@@ -338,7 +336,7 @@ fn stale_reject_with_full_event_ring_retains_device_reason_and_current_plan() {
         effect: Box::new(EffectProbe(true)),
         bypass: false,
     });
-    engine.tracks.push(track);
+    engine.tracks.push(Box::new(track));
     let device = handed_off(&mut engine, &mut events);
     commands
         .push(EngineCommand::RemoveEffect(id, effect))
@@ -390,7 +388,7 @@ fn additions_around_held_slot_use_logical_order_and_main_reserved_capacity() {
                 bypass: false,
             });
         }
-        engine.tracks.push(track);
+        engine.tracks.push(Box::new(track));
         let mut device = handed_off(&mut engine, &mut events);
         let added = EffectId::new();
         let mut expected = ids.to_vec();

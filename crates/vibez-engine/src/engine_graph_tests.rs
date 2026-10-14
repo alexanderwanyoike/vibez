@@ -46,9 +46,7 @@ fn full_ring_retains_the_first_processing_failure_and_prioritizes_it_next_callba
     let (mut engine, mut commands, mut events) = AudioEngine::new();
     let track = TrackId::new();
     let effect = EffectId::new();
-    commands
-        .push(EngineCommand::AddTrack(track, "Failure".into()))
-        .unwrap();
+    commands.push(EngineCommand::add_track(track)).unwrap();
     commands
         .push(EngineCommand::insert_built_in_effect(
             track,
@@ -115,14 +113,10 @@ fn hardware_first_pair_live_capture_and_populated_graph_are_allocation_free() {
     let bus = TrackId::new();
     let effect = EffectId::new();
     for id in [source, receiver] {
-        commands
-            .push(EngineCommand::AddTrack(id, "Track".into()))
-            .unwrap();
+        commands.push(EngineCommand::add_track(id)).unwrap();
         commands.push(clip(id, 0.1)).unwrap();
     }
-    commands
-        .push(EngineCommand::AddBus(bus, "Bus".into()))
-        .unwrap();
+    commands.push(EngineCommand::add_bus(bus)).unwrap();
     commands
         .push(EngineCommand::insert_built_in_effect(
             receiver,
@@ -235,16 +229,12 @@ fn clip_bus_and_master_automation_advance_on_perform_clock() {
         let track = TrackId::new();
         commands.push(EngineCommand::SetSampleRate(8)).unwrap();
         commands.push(EngineCommand::SetBpm(120.0)).unwrap();
-        commands
-            .push(EngineCommand::AddTrack(track, "Clip".into()))
-            .unwrap();
+        commands.push(EngineCommand::add_track(track)).unwrap();
         commands.push(clip(track, 1.0)).unwrap();
         let mut track_model = channel(track);
         let mut channels = vec![];
         if !target.is_master() {
-            commands
-                .push(EngineCommand::AddBus(target, "Return".into()))
-                .unwrap();
+            commands.push(EngineCommand::add_bus(target)).unwrap();
             commands
                 .push(EngineCommand::SetSend {
                     track_id: track,
@@ -368,9 +358,7 @@ fn routed_gate_preserves_muted_source_and_solo_without_trigger_leakage() {
         let receiver = TrackId::new();
         let effect = EffectId::new();
         for id in [receiver, source] {
-            commands
-                .push(EngineCommand::AddTrack(id, "Track".into()))
-                .unwrap();
+            commands.push(EngineCommand::add_track(id)).unwrap();
         }
         commands.push(clip(receiver, 0.01)).unwrap();
         commands.push(clip(source, 1.0)).unwrap();
@@ -434,9 +422,7 @@ fn live_route_swap_retains_effect_state_and_missing_sources_supply_silence() {
     let receiver = TrackId::new();
     let effect = EffectId::new();
     for id in [receiver, source] {
-        commands
-            .push(EngineCommand::AddTrack(id, "Track".into()))
-            .unwrap();
+        commands.push(EngineCommand::add_track(id)).unwrap();
     }
     commands.push(clip(receiver, 0.01)).unwrap();
     commands.push(clip(source, 1.0)).unwrap();
@@ -492,13 +478,9 @@ fn soloed_receiver_keeps_bus_detector_source_inaudible() {
     let bus = TrackId::new();
     let effect = EffectId::new();
     for track in [bass, ghost] {
-        commands
-            .push(EngineCommand::AddTrack(track, "Track".into()))
-            .unwrap();
+        commands.push(EngineCommand::add_track(track)).unwrap();
     }
-    commands
-        .push(EngineCommand::AddBus(bus, "Detector bus".into()))
-        .unwrap();
+    commands.push(EngineCommand::add_bus(bus)).unwrap();
     commands.push(clip(bass, 0.01)).unwrap();
     commands.push(clip(ghost, 1.0)).unwrap();
     commands
@@ -595,9 +577,7 @@ fn master_receives_a_muted_prefader_source() {
     let bass = TrackId::new();
     let effect = EffectId::new();
     for track in [bass, ghost] {
-        commands
-            .push(EngineCommand::AddTrack(track, "Track".into()))
-            .unwrap();
+        commands.push(EngineCommand::add_track(track)).unwrap();
     }
     commands.push(clip(bass, 0.01)).unwrap();
     commands.push(clip(ghost, 1.0)).unwrap();
@@ -696,12 +676,8 @@ fn prepared_send_edges_follow_automation_without_mutating_manual_sends() {
     let (mut engine, mut commands, _events) = AudioEngine::new();
     let source = TrackId::new();
     let bus = TrackId::new();
-    commands
-        .push(EngineCommand::AddTrack(source, "Source".into()))
-        .unwrap();
-    commands
-        .push(EngineCommand::AddBus(bus, "Return".into()))
-        .unwrap();
+    commands.push(EngineCommand::add_track(source)).unwrap();
+    commands.push(EngineCommand::add_bus(bus)).unwrap();
     commands.push(clip(source, 1.0)).unwrap();
     let mut lane = AutomationLane::new(AutomationTarget::Send { bus_id: bus });
     lane.points.push(AutomationPoint {
@@ -778,7 +754,7 @@ fn clip_mute_points_follow_nonzero_clip_position_inside_a_render_block() {
     for command in [
         EngineCommand::SetSampleRate(8),
         EngineCommand::SetBpm(120.0),
-        EngineCommand::AddTrack(track, "Clip".into()),
+        EngineCommand::add_track(track),
         EngineCommand::SetRouting(
             crate::routing::PreparedRouting::prepare(
                 &[channel(track), channel(TrackId::MASTER)],
@@ -818,9 +794,7 @@ fn live_selected_output_capture_remains_silent_when_solo_excludes_its_source() {
     let bass = TrackId::new();
     let effect = EffectId::new();
     for id in [bass, ghost] {
-        commands
-            .push(EngineCommand::AddTrack(id, "Track".into()))
-            .unwrap();
+        commands.push(EngineCommand::add_track(id)).unwrap();
     }
     commands.push(clip(bass, 0.01)).unwrap();
     commands.push(clip(ghost, 1.0)).unwrap();

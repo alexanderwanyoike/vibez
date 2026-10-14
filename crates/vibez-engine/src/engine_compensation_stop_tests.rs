@@ -18,9 +18,7 @@ fn setup() -> (
     let report = Arc::new(AtomicU32::new(521));
     commands.push(EngineCommand::SetSampleRate(128)).unwrap();
     commands.push(EngineCommand::SetBpm(60.0)).unwrap();
-    commands
-        .push(EngineCommand::AddTrack(track, "Stop".into()))
-        .unwrap();
+    commands.push(EngineCommand::add_track(track)).unwrap();
     commands
         .push(EngineCommand::InsertEffect {
             track_id: track,

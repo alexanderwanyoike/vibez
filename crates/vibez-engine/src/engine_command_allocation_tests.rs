@@ -93,7 +93,6 @@ fn coverage(command: &EngineCommand) -> Coverage {
         | C::SetEffectParam { .. }
         | C::SetEffectBypass { .. }
         | C::MoveEffect { .. }
-        | C::AddMidiTrack(..)
         | C::RemoveTrackInstrument(_)
         | C::SetNoteClipDuration { .. }
         | C::SetNoteClipGrooveGrid { .. }
@@ -233,14 +232,14 @@ fn playing(
     lane.id = f.lane;
     for command in [
         EngineCommand::SetSampleRate(48_000),
-        EngineCommand::AddMidiTrack(f.synth, "Synth".into()),
+        EngineCommand::add_track(f.synth),
         EngineCommand::set_built_in_instrument(f.synth, InstrumentKind::SubtractiveSynth, 48_000),
-        EngineCommand::AddMidiTrack(f.drums, "Drums".into()),
+        EngineCommand::add_track(f.drums),
         EngineCommand::set_built_in_instrument(f.drums, InstrumentKind::DrumRack, 48_000),
-        EngineCommand::AddTrack(f.audio, "Audio".into()),
-        EngineCommand::AddMidiTrack(f.empty, "Empty".into()),
-        EngineCommand::AddTrack(f.empty_audio, "Empty audio".into()),
-        EngineCommand::AddBus(f.bus, "Bus".into()),
+        EngineCommand::add_track(f.audio),
+        EngineCommand::add_track(f.empty),
+        EngineCommand::add_track(f.empty_audio),
+        EngineCommand::add_bus(f.bus),
         EngineCommand::insert_built_in_effect(
             f.synth,
             f.effect,
@@ -358,10 +357,7 @@ fn cases() -> Vec<Case> {
         }),
         case!("LoadAudio", false, |_| C::LoadAudio(audio(4096))),
         case!("UnloadAudio", false, |_| C::UnloadAudio),
-        case!("AddTrack", true, |_| C::AddTrack(
-            TrackId::new(),
-            "New".into()
-        )),
+        case!("AddTrack", false, |_| C::add_track(TrackId::new())),
         case!("RemoveTrack", false, |f| C::RemoveTrack(f.audio)),
         case!("ReorderTracks", true, |f| C::ReorderTracks(vec![
             f.audio,
@@ -462,10 +458,7 @@ fn cases() -> Vec<Case> {
         case!("SetTrackSwingOffset", false, |f| C::SetTrackSwingOffset(
             f.synth, None
         )),
-        case!("AddBus", true, |_| C::AddBus(
-            TrackId::new(),
-            "New bus".into()
-        )),
+        case!("AddBus", false, |_| C::add_bus(TrackId::new())),
         case!("RemoveBus", false, |f| C::RemoveBus(f.bus)),
         case!("SetSend", true, |f| C::SetSend {
             track_id: f.empty,
@@ -501,10 +494,6 @@ fn cases() -> Vec<Case> {
             effect_id: f.effect,
             new_index: 0,
         }),
-        case!("AddMidiTrack", true, |_| C::AddMidiTrack(
-            TrackId::new(),
-            "New".into()
-        )),
         case!(
             "RemoveTrackInstrument",
             false,
@@ -714,9 +703,7 @@ fn every_table_command_drains_without_allocating_unless_named_as_card_04_work() 
 fn a_device_past_the_reserved_chain_is_a_ui_contract_violation() {
     let (mut engine, mut commands, _events) = AudioEngine::new();
     let track_id = TrackId::new();
-    assert!(commands
-        .push(EngineCommand::AddTrack(track_id, "Full".into()))
-        .is_ok());
+    assert!(commands.push(EngineCommand::add_track(track_id)).is_ok());
     engine.process(&mut [0.0; 2], 2);
     for _ in 0..=crate::mixer::DEVICE_CHAIN_CAPACITY {
         assert!(commands
@@ -726,6 +713,19 @@ fn a_device_past_the_reserved_chain_is_a_ui_contract_violation() {
                 vibez_core::effect::EffectType::Gain,
                 crate::engine::DEFAULT_SAMPLE_RATE,
             ))
+            .is_ok());
+        engine.process(&mut [0.0; 2], 2);
+    }
+}
+
+#[cfg(debug_assertions)]
+#[test]
+#[should_panic(expected = "the UI keeps channels within CHANNEL_CAPACITY")]
+fn a_channel_past_the_reserved_list_is_a_ui_contract_violation() {
+    let (mut engine, mut commands, _events) = AudioEngine::new();
+    for _ in 0..=crate::mixer::CHANNEL_CAPACITY {
+        assert!(commands
+            .push(EngineCommand::add_track(TrackId::new()))
             .is_ok());
         engine.process(&mut [0.0; 2], 2);
     }

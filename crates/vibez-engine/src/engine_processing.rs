@@ -3,13 +3,14 @@
 use super::*;
 
 pub(super) fn processing_errors<'a>(
-    tracks: &'a mut [EngineTrack],
-    buses: &'a mut [EngineTrack],
+    tracks: &'a mut [Box<EngineTrack>],
+    buses: &'a mut [Box<EngineTrack>],
     master: &'a mut EngineTrack,
 ) -> impl Iterator<Item = (TrackId, Option<vibez_core::id::EffectId>, &'static str)> + 'a {
     tracks
         .iter_mut()
         .chain(buses.iter_mut())
+        .map(|channel| &mut **channel)
         .chain(std::iter::once(master))
         .flat_map(|track| {
             let id = track.id;

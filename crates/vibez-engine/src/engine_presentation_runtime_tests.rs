@@ -255,7 +255,7 @@ fn legacy_repeat_overflow_closes_capture_in_both_render_paths() {
         engine.transport.set_bpm(60.0);
         let mut track = EngineTrack::new(TrackId::new());
         track.instrument = Some(create_instrument(InstrumentKind::SubtractiveSynth, 100.0));
-        engine.tracks.push(track);
+        engine.tracks.push(Box::new(track));
         engine.render_idle_instruments(&mut [0.0; 16], 8, 2, 0, None, None);
         engine.tracks[0].start_note_repeat(
             NoteRepeatStart {

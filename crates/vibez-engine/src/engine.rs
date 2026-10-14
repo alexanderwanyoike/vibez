@@ -81,14 +81,14 @@ pub struct AudioEngine {
     /// Legacy single-audio field for backward compatibility.
     audio: Option<Arc<DecodedAudio>>,
     /// Multi-track state.
-    tracks: Vec<EngineTrack>,
+    tracks: crate::mixer::ChannelList,
     /// The master bus: a track-shaped channel (gain + effect chain,
     /// no clips or instrument) applied to the summed mix. Addressed
     /// by commands via [`TrackId::MASTER`].
-    master: EngineTrack,
+    master: Box<EngineTrack>,
     /// Return channels: track-shaped, fed by per-track post-fader
     /// sends, summed into the mix before the master chain.
-    buses: Vec<EngineTrack>,
+    buses: crate::mixer::ChannelList,
     /// Which track streams samples to the UI spectrum analyser.
     spectrum_track: Option<TrackId>,
     effect_meter_channel: Option<TrackId>,
@@ -278,9 +278,9 @@ impl AudioEngine {
             channel_retirement: crate::retirement::ChannelRetirementPool::new(),
             transport: Transport::new(),
             audio: None,
-            tracks: Vec::new(),
-            master: EngineTrack::new(TrackId::MASTER),
-            buses: Vec::new(),
+            tracks: Vec::with_capacity(crate::mixer::CHANNEL_CAPACITY),
+            master: Box::new(EngineTrack::new(TrackId::MASTER)),
+            buses: Vec::with_capacity(crate::mixer::CHANNEL_CAPACITY),
             spectrum_track: None,
             effect_meter_channel: None,
             effect_meter_generation: 0,
@@ -735,11 +735,11 @@ impl AudioEngine {
         self.sample_rate
     }
 
-    pub(super) fn tracks_mut_for_retirement(&mut self) -> &mut [EngineTrack] {
+    pub(super) fn tracks_mut_for_retirement(&mut self) -> &mut [Box<EngineTrack>] {
         &mut self.tracks
     }
 
-    pub fn tracks(&self) -> &[EngineTrack] {
+    pub fn tracks(&self) -> &[Box<EngineTrack>] {
         &self.tracks
     }
 
@@ -754,7 +754,9 @@ impl AudioEngine {
     }
 
     fn has_active_note_repeats(&self) -> bool {
-        self.tracks.iter().any(EngineTrack::has_active_note_repeats)
+        self.tracks
+            .iter()
+            .any(|track| track.has_active_note_repeats())
     }
 
     fn playing_note_repeat_anchor(&self) -> u64 {
@@ -796,7 +798,10 @@ impl AudioEngine {
         if let Some(track) = self.tracks.iter_mut().find(|t| t.id == id) {
             return Some(track);
         }
-        self.buses.iter_mut().find(|b| b.id == id)
+        self.buses
+            .iter_mut()
+            .find(|b| b.id == id)
+            .map(|bus| &mut **bus)
     }
 }
 

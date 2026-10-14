@@ -4,8 +4,8 @@ pub(crate) struct OfflineRoutingSetup {
     pub sample_rate: u32,
     pub bpm: f64,
     pub swing: SwingAmount,
-    pub tracks: Vec<EngineTrack>,
-    pub buses: Vec<EngineTrack>,
+    pub tracks: crate::mixer::ChannelList,
+    pub buses: crate::mixer::ChannelList,
     pub master: EngineTrack,
     pub routing: Box<crate::routing::PreparedRouting>,
 }
@@ -18,7 +18,7 @@ impl AudioEngine {
         engine.project_swing = setup.swing;
         engine.tracks = setup.tracks;
         engine.buses = setup.buses;
-        engine.master = setup.master;
+        engine.master = Box::new(setup.master);
         for channel in engine
             .tracks
             .iter_mut()
@@ -123,11 +123,18 @@ impl AudioEngine {
 
     pub(crate) fn take_offline_channels(
         &mut self,
-    ) -> (Vec<EngineTrack>, Vec<EngineTrack>, EngineTrack) {
+    ) -> (
+        crate::mixer::ChannelList,
+        crate::mixer::ChannelList,
+        EngineTrack,
+    ) {
         (
             std::mem::take(&mut self.tracks),
             std::mem::take(&mut self.buses),
-            std::mem::replace(&mut self.master, EngineTrack::new(TrackId::MASTER)),
+            *std::mem::replace(
+                &mut self.master,
+                Box::new(EngineTrack::new(TrackId::MASTER)),
+            ),
         )
     }
 }
