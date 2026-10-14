@@ -460,3 +460,7 @@ impl canvas::Program<Message> for EqDisplayWidget {
         (canvas::event::Status::Ignored, None)
     }
 }
+
+#[cfg(test)]
+#[path = "eq_display_tests.rs"]
+mod tests;
