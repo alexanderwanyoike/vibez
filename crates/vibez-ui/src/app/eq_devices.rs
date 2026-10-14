@@ -6,12 +6,7 @@ use vibez_core::id::EffectId;
 
 impl App {
     pub(super) fn update_eq_control(&mut self, message: EqMsg) -> Task<Message> {
-        let (track, effect) = match message {
-            EqMsg::Focus(track, effect)
-            | EqMsg::SelectBand(track, effect, _)
-            | EqMsg::Source(track, effect, _)
-            | EqMsg::Freeze(track, effect) => (track, effect),
-        };
+        let (track, effect) = message.destination();
         if !self.state.find_track(track).is_some_and(|track| {
             track
                 .effects
@@ -21,22 +16,7 @@ impl App {
             return Task::none();
         }
         self.eq_spectrum.focus = Some((track, effect));
-        let panel = self.eq_panels.entry(effect).or_default();
-        match message {
-            EqMsg::Focus(..) => {}
-            EqMsg::SelectBand(_, _, band) => panel.selected_band = band.min(3),
-            EqMsg::Source(_, _, source) => {
-                panel.post =
-                    source == vibez_engine::effect_spectrum::EffectSpectrumPosition::Output;
-                panel.spectrum.reset();
-            }
-            EqMsg::Freeze(..) => {
-                panel.frozen = !panel.frozen;
-                if !panel.frozen {
-                    panel.spectrum.reset();
-                }
-            }
-        }
+        self.eq_panels.entry(effect).or_default().update(message);
         Task::none()
     }
 

@@ -25,6 +25,17 @@ pub enum EqMsg {
     Freeze(TrackId, EffectId),
 }
 
+impl EqMsg {
+    pub fn destination(&self) -> (TrackId, EffectId) {
+        match self {
+            Self::Focus(track, effect)
+            | Self::SelectBand(track, effect, _)
+            | Self::Source(track, effect, _)
+            | Self::Freeze(track, effect) => (*track, *effect),
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct EqPanel {
     pub selected_band: usize,
@@ -35,6 +46,23 @@ pub struct EqPanel {
 }
 
 impl EqPanel {
+    pub fn update(&mut self, message: EqMsg) {
+        match message {
+            EqMsg::Focus(..) => {}
+            EqMsg::SelectBand(_, _, band) => self.selected_band = band.min(3),
+            EqMsg::Source(_, _, source) => {
+                self.post = source == EffectSpectrumPosition::Output;
+                self.spectrum.reset();
+            }
+            EqMsg::Freeze(..) => {
+                self.frozen = !self.frozen;
+                if !self.frozen {
+                    self.spectrum.reset();
+                }
+            }
+        }
+    }
+
     pub fn position(&self) -> EffectSpectrumPosition {
         if self.post {
             EffectSpectrumPosition::Output
