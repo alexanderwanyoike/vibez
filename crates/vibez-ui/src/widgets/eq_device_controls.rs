@@ -304,44 +304,53 @@ impl<'a> Controls<'a> {
             .into()
         }
     }
+    fn focus_analyser(&self, compact: bool) -> Element<'a, Message> {
+        let caption = if self.analyser_active {
+            if compact {
+                "On"
+            } else {
+                "Tapped"
+            }
+        } else {
+            "Analyse"
+        };
+        choice(
+            caption,
+            self.analyser_active,
+            self.accent,
+            Message::EqControl(EqMsg::Focus(self.track, self.effect.id)),
+        )
+    }
+    fn source(&self, post: bool) -> Element<'a, Message> {
+        choice(
+            if post { "Post" } else { "Pre" },
+            self.panel.post == post,
+            self.accent,
+            Message::EqControl(EqMsg::Source(
+                self.track,
+                self.effect.id,
+                if post {
+                    EffectSpectrumPosition::Output
+                } else {
+                    EffectSpectrumPosition::Input
+                },
+            )),
+        )
+    }
+    fn freeze(&self) -> Element<'a, Message> {
+        choice(
+            "Freeze",
+            self.panel.frozen,
+            self.accent,
+            Message::EqControl(EqMsg::Freeze(self.track, self.effect.id)),
+        )
+    }
     pub fn analyser(&self) -> Element<'a, Message> {
         row![
-            choice(
-                if self.analyser_active {
-                    "Tapped"
-                } else {
-                    "Analyse"
-                },
-                self.analyser_active,
-                self.accent,
-                Message::EqControl(EqMsg::Focus(self.track, self.effect.id))
-            ),
-            choice(
-                "Pre",
-                !self.panel.post,
-                self.accent,
-                Message::EqControl(EqMsg::Source(
-                    self.track,
-                    self.effect.id,
-                    EffectSpectrumPosition::Input
-                ))
-            ),
-            choice(
-                "Post",
-                self.panel.post,
-                self.accent,
-                Message::EqControl(EqMsg::Source(
-                    self.track,
-                    self.effect.id,
-                    EffectSpectrumPosition::Output
-                ))
-            ),
-            choice(
-                "Freeze",
-                self.panel.frozen,
-                self.accent,
-                Message::EqControl(EqMsg::Freeze(self.track, self.effect.id))
-            )
+            self.focus_analyser(false),
+            self.source(false),
+            self.source(true),
+            self.freeze()
         ]
         .spacing(3)
         .align_y(iced::Alignment::Center)
@@ -362,48 +371,8 @@ impl<'a> Controls<'a> {
     }
     fn spectrum(&self) -> Element<'a, Message> {
         column![
-            row![
-                choice(
-                    "Pre",
-                    !self.panel.post,
-                    self.accent,
-                    Message::EqControl(EqMsg::Source(
-                        self.track,
-                        self.effect.id,
-                        EffectSpectrumPosition::Input
-                    ))
-                ),
-                choice(
-                    "Post",
-                    self.panel.post,
-                    self.accent,
-                    Message::EqControl(EqMsg::Source(
-                        self.track,
-                        self.effect.id,
-                        EffectSpectrumPosition::Output
-                    ))
-                )
-            ]
-            .spacing(3),
-            row![
-                choice(
-                    if self.analyser_active {
-                        "On"
-                    } else {
-                        "Analyse"
-                    },
-                    self.analyser_active,
-                    self.accent,
-                    Message::EqControl(EqMsg::Focus(self.track, self.effect.id))
-                ),
-                choice(
-                    "Freeze",
-                    self.panel.frozen,
-                    self.accent,
-                    Message::EqControl(EqMsg::Freeze(self.track, self.effect.id))
-                )
-            ]
-            .spacing(3)
+            row![self.source(false), self.source(true)].spacing(3),
+            row![self.focus_analyser(true), self.freeze()].spacing(3)
         ]
         .spacing(4)
         .into()
