@@ -74,8 +74,8 @@ fn stopped_repeat_engine_at(
     TrackId,
 ) {
     let track_id = TrackId::new();
-    let (mut engine, mut commands, mut events) =
-        graph_engine(&[routing_channel(track_id), routing_channel(TrackId::MASTER)]);
+    // PR #277 fixes stopped graph notice timestamps; keep that prerequisite out of this test-only change.
+    let (mut engine, mut commands, mut events) = AudioEngine::new();
     commands.push(EngineCommand::SetSampleRate(96)).unwrap();
     commands.push(EngineCommand::SetBpm(60.0)).unwrap();
     commands
