@@ -445,26 +445,50 @@ fn full_ui_routing_admission_retains_rejected_plan_until_retired_graph_returns()
         match event {
             EngineEvent::DisposeEffect(owner) => {
                 let effect = owner.take();
-                assert_eq!(reconfiguration::effect_owner_identity(&*effect), effect_identity);
+                assert_eq!(
+                    reconfiguration::effect_owner_identity(&*effect),
+                    effect_identity
+                );
                 removed += 1;
             }
             event => panic!("unexpected effect retirement: {event:?}"),
         }
     }
     assert_eq!(removed, 1);
-    while fixture.engine.event_tx.push(EngineEvent::PlaybackPosition(0)).is_ok() {}
+    while fixture
+        .engine
+        .event_tx
+        .push(EngineEvent::PlaybackPosition(0))
+        .is_ok()
+    {}
     let reason = String::from("full UI retains the rejected structural plan reason");
     let reason_identity = reason.as_ptr();
     fixture.drain_command(EngineCommand::RejectRoutingUpdate { reason });
-    let invalid_waiting = Readiness { awaiting_plan: true, ..INVALID };
+    let invalid_waiting = Readiness {
+        awaiting_plan: true,
+        ..INVALID
+    };
     assert_eq!(Readiness::observe(&fixture.engine), invalid_waiting);
-    assert_eq!(std::ptr::from_ref(fixture.engine.routing.as_ref()), original);
+    assert_eq!(
+        std::ptr::from_ref(fixture.engine.routing.as_ref()),
+        original
+    );
     let automation = fixture.plan(0);
     let automation_identity = std::ptr::from_ref(automation.as_ref());
     fixture.drain_command(EngineCommand::UpdateAutomationRouting(automation));
     assert_eq!(Readiness::observe(&fixture.engine), invalid_waiting);
-    assert_eq!(std::ptr::from_ref(fixture.engine.routing.as_ref()), automation_identity);
-    assert_eq!(fixture.engine.retired_routing.as_ref().map(|plan| std::ptr::from_ref(plan.as_ref())), Some(original));
+    assert_eq!(
+        std::ptr::from_ref(fixture.engine.routing.as_ref()),
+        automation_identity
+    );
+    assert_eq!(
+        fixture
+            .engine
+            .retired_routing
+            .as_ref()
+            .map(|plan| std::ptr::from_ref(plan.as_ref())),
+        Some(original)
+    );
     assert_eq!(fixture.engine.pending_retirements.len(), 1);
     assert!(matches!(
         &fixture.engine.pending_retirements[0],
@@ -472,11 +496,17 @@ fn full_ui_routing_admission_retains_rejected_plan_until_retired_graph_returns()
     ));
     let accepted = fixture.plan(0);
     let accepted_identity = std::ptr::from_ref(accepted.as_ref());
-    fixture.commands.push(EngineCommand::SetRouting(accepted)).unwrap();
+    fixture
+        .commands
+        .push(EngineCommand::SetRouting(accepted))
+        .unwrap();
     let mut readiness = Vec::new();
     for released in 0..=3 {
         if released != 0 {
-            assert!(matches!(fixture.events.pop().unwrap(), EngineEvent::PlaybackPosition(0)));
+            assert!(matches!(
+                fixture.events.pop().unwrap(),
+                EngineEvent::PlaybackPosition(0)
+            ));
         }
         assert_eq!(
             crate::retirement::tests::allocations(|| fixture.engine.drain_commands()),
@@ -501,20 +531,48 @@ fn full_ui_routing_admission_retains_rejected_plan_until_retired_graph_returns()
                 fixture.engine.cmd_rx.peek(),
                 Ok(EngineCommand::SetRouting(plan)) if std::ptr::from_ref(plan.as_ref()) == accepted_identity
             ));
-            assert_eq!(std::ptr::from_ref(fixture.engine.routing.as_ref()), automation_identity);
-            assert_eq!(fixture.engine.retired_routing.as_ref().map(|plan| std::ptr::from_ref(plan.as_ref())), Some(original));
+            assert_eq!(
+                std::ptr::from_ref(fixture.engine.routing.as_ref()),
+                automation_identity
+            );
+            assert_eq!(
+                fixture
+                    .engine
+                    .retired_routing
+                    .as_ref()
+                    .map(|plan| std::ptr::from_ref(plan.as_ref())),
+                Some(original)
+            );
         } else {
-            assert_eq!(observed, Readiness { playing: false, ..RUNNING });
+            assert_eq!(
+                observed,
+                Readiness {
+                    playing: false,
+                    ..RUNNING
+                }
+            );
             assert!(fixture.engine.cmd_rx.peek().is_err());
-            assert_eq!(std::ptr::from_ref(fixture.engine.routing.as_ref()), accepted_identity);
-            assert_eq!(fixture.engine.retired_routing.as_ref().map(|plan| std::ptr::from_ref(plan.as_ref())), Some(automation_identity));
+            assert_eq!(
+                std::ptr::from_ref(fixture.engine.routing.as_ref()),
+                accepted_identity
+            );
+            assert_eq!(
+                fixture
+                    .engine
+                    .retired_routing
+                    .as_ref()
+                    .map(|plan| std::ptr::from_ref(plan.as_ref())),
+                Some(automation_identity)
+            );
         }
     }
     let mut order = Vec::new();
     for event in std::iter::from_fn(|| fixture.events.pop().ok()) {
         match event {
             EngineEvent::PlaybackPosition(0) => {}
-            EngineEvent::PerformanceCaptureStopped { effective_at_samples } => {
+            EngineEvent::PerformanceCaptureStopped {
+                effective_at_samples,
+            } => {
                 assert_eq!(effective_at_samples, capture_stop);
                 order.push("capture-stop");
             }
@@ -526,7 +584,10 @@ fn full_ui_routing_admission_retains_rejected_plan_until_retired_graph_returns()
             event => panic!("unexpected first released event: {event:?}"),
         }
     }
-    assert_eq!(order, ["capture-stop", "playback-stop", "original-plan-return"]);
+    assert_eq!(
+        order,
+        ["capture-stop", "playback-stop", "original-plan-return"]
+    );
     assert_eq!(
         crate::retirement::tests::allocations(|| fixture.engine.drain_commands()),
         (0, 0)
@@ -538,7 +599,10 @@ fn full_ui_routing_admission_retains_rejected_plan_until_retired_graph_returns()
                 order.push("automation-plan-return");
             }
             EngineEvent::CompensationFailed { reason } => {
-                assert_eq!(reason, "full UI retains the rejected structural plan reason");
+                assert_eq!(
+                    reason,
+                    "full UI retains the rejected structural plan reason"
+                );
                 assert_eq!(reason.as_ptr(), reason_identity);
                 order.push("rejection");
             }
@@ -547,12 +611,27 @@ fn full_ui_routing_admission_retains_rejected_plan_until_retired_graph_returns()
     }
     assert_eq!(
         order,
-        ["capture-stop", "playback-stop", "original-plan-return", "automation-plan-return", "rejection"]
+        [
+            "capture-stop",
+            "playback-stop",
+            "original-plan-return",
+            "automation-plan-return",
+            "rejection"
+        ]
     );
     assert!(fixture.engine.retired_routing.is_none());
     assert!(fixture.engine.pending_retirements.is_empty());
-    assert_eq!(std::ptr::from_ref(fixture.engine.routing.as_ref()), accepted_identity);
-    assert_eq!(Readiness::observe(&fixture.engine), Readiness { playing: false, ..RUNNING });
+    assert_eq!(
+        std::ptr::from_ref(fixture.engine.routing.as_ref()),
+        accepted_identity
+    );
+    assert_eq!(
+        Readiness::observe(&fixture.engine),
+        Readiness {
+            playing: false,
+            ..RUNNING
+        }
+    );
     assert_eq!(
         crate::retirement::tests::allocations(|| fixture.engine.drain_commands()),
         (0, 0)
@@ -607,7 +686,10 @@ fn capture_admission_uses_applied_plan_validity_instead_of_global_processing_gat
                     assert_eq!(effective_at_samples, capture_start);
                     assert_eq!(section_id, None);
                     assert_eq!(section_position_samples, None);
-                    assert!(Arc::ptr_eq(&offsets, &fixture.engine.routing.capture_offsets));
+                    assert!(Arc::ptr_eq(
+                        &offsets,
+                        &fixture.engine.routing.capture_offsets
+                    ));
                     order.push("capture-start");
                 }
                 EngineEvent::ClipCaptureSource {
@@ -622,16 +704,25 @@ fn capture_admission_uses_applied_plan_validity_instead_of_global_processing_gat
                     source_count += 1;
                     order.push("capture-source");
                 }
-                EngineEvent::PerformanceCaptureStopped { effective_at_samples } => {
+                EngineEvent::PerformanceCaptureStopped {
+                    effective_at_samples,
+                } => {
                     assert!(!allowed, "{start:?}");
                     assert_eq!(effective_at_samples, capture_start);
                     order.push("capture-stop");
                 }
-                EngineEvent::CompensationInvalid { track_id, effect_id, reason } => {
+                EngineEvent::CompensationInvalid {
+                    track_id,
+                    effect_id,
+                    reason,
+                } => {
                     assert!(!allowed, "{start:?}");
                     assert_eq!(track_id, TrackId::MASTER);
                     assert_eq!(effect_id, None);
-                    assert_eq!(reason, "Capture requires a valid applied audio configuration");
+                    assert_eq!(
+                        reason,
+                        "Capture requires a valid applied audio configuration"
+                    );
                     order.push("invalid-plan-cause");
                 }
                 event => panic!("unexpected {start:?} Capture event: {event:?}"),
@@ -657,16 +748,18 @@ fn capture_admission_uses_applied_plan_validity_instead_of_global_processing_gat
         assert_eq!(std::ptr::from_ref(fixture.engine.routing.as_ref()), plan);
         assert!(!fixture.engine.capture_active);
         assert!(fixture.drain_events().is_empty());
-        let columns = |state: Readiness| [
-            u8::from(state.valid),
-            u8::from(state.awaiting_plan),
-            u8::from(state.suspended),
-            u8::from(state.handoff),
-            u8::from(state.restart_requested),
-            u8::from(state.presentation_fault),
-            u8::from(state.playing),
-            u8::from(state.muted),
-        ];
+        let columns = |state: Readiness| {
+            [
+                u8::from(state.valid),
+                u8::from(state.awaiting_plan),
+                u8::from(state.suspended),
+                u8::from(state.handoff),
+                u8::from(state.restart_requested),
+                u8::from(state.presentation_fault),
+                u8::from(state.playing),
+                u8::from(state.muted),
+            ]
+        };
         eprintln!(
             "compensation-capture-validity baseline: case={start:?}; allowed={}; capture_start={capture_start}; before={:?}; after={:?}; source_count={source_count}; order={order:?}; allocations=(0,0)",
             u8::from(allowed), columns(before), columns(after),
