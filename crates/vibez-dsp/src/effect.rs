@@ -5,6 +5,10 @@ use vibez_core::effect::{EffectType, ParamDescriptor};
 use vibez_core::routing::{ExternalInputBlock, ExternalInputDescriptor};
 
 pub trait AudioEffect: Send {
+    fn take_sample_hold_meter(&mut self) -> Option<vibez_core::effect::SampleHoldMeter> {
+        None
+    }
+
     /// Native devices opt in so hosted adapters cannot be mistaken for a
     /// built-in merely because they share its fallback effect type.
     fn supports_level_meter(&self) -> bool {

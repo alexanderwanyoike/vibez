@@ -51,6 +51,48 @@ impl EffectType {
     }
 }
 
+/// Actual sanitized left input and final output share the device-local source clock.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SampleHoldMeter {
+    pub input: [f32; 128],
+    pub output: [f32; 128],
+    /// Zero means unavailable; nonzero all-zero samples are genuine silence.
+    pub count: u16,
+    pub sample_rate: f32,
+    /// Absolute source-frame position survives observation drains.
+    pub first_source_frame: u64,
+    pub latency_samples: u32,
+    /// Most recently latched interval at packet end, not a description of every point.
+    pub primary_interval_frames: u32,
+    /// Most recently latched interval at packet end; zero only while inactive.
+    pub secondary_interval_frames: u32,
+    /// Current lane transition at packet end, independent of historical blend bits.
+    pub transition_active: bool,
+    /// Bit n describes an acquisition at first_source_frame + n.
+    pub primary_acquisitions: [u64; 2],
+    pub secondary_acquisitions: [u64; 2],
+    pub blending: [u64; 2],
+}
+
+impl Default for SampleHoldMeter {
+    fn default() -> Self {
+        Self {
+            input: [0.0; 128],
+            output: [0.0; 128],
+            count: 0,
+            sample_rate: 0.0,
+            first_source_frame: 0,
+            latency_samples: 0,
+            primary_interval_frames: 0,
+            secondary_interval_frames: 0,
+            transition_active: false,
+            primary_acquisitions: [0; 2],
+            secondary_acquisitions: [0; 2],
+            blending: [0; 2],
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct ParamDescriptor {
     pub name: &'static str,

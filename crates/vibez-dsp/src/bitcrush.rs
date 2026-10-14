@@ -6,7 +6,10 @@ use crate::effect::AudioEffect;
 
 #[path = "bitcrush_ramp.rs"]
 mod ramp;
+#[path = "bitcrush_scope.rs"]
+mod scope;
 use ramp::Ramp;
+use scope::Scope;
 
 pub mod param {
     pub const BITS: usize = 0;
@@ -95,6 +98,7 @@ pub struct BitcrushEffect {
     mix: Ramp,
     drive_gain: f64,
     started: bool,
+    scope: Scope,
     /// Sample-and-hold state, per channel.
     hold: [f32; 2],
     /// Frame counter for SR reduce, per channel.
@@ -119,6 +123,7 @@ impl BitcrushEffect {
             mix: Ramp::new(1.0),
             drive_gain: 1.0,
             started: false,
+            scope: Scope::default(),
             hold: [0.0; 2],
             counter: [0; 2],
         }
@@ -163,6 +168,14 @@ impl Default for BitcrushEffect {
 }
 
 impl AudioEffect for BitcrushEffect {
+    fn supports_level_meter(&self) -> bool {
+        true
+    }
+
+    fn take_sample_hold_meter(&mut self) -> Option<vibez_core::effect::SampleHoldMeter> {
+        Some(self.scope.take(self.sample_rate))
+    }
+
     fn activation_sample_rate(&self) -> Option<u32> {
         Some(self.sample_rate as u32)
     }
@@ -217,7 +230,8 @@ impl AudioEffect for BitcrushEffect {
                     0.0
                 };
 
-                if self.counter[c] == 0 {
+                let acquired = self.counter[c] == 0;
+                if acquired {
                     // Zero drive retains the original f32 quantizer division for saved projects.
                     let scaled = if drive_db == 0.0 {
                         f64::from(dry / step)
@@ -236,11 +250,15 @@ impl AudioEffect for BitcrushEffect {
 
                 let wet = self.hold[c];
                 buffer[idx] = dry * (1.0 - mix) + wet * mix;
+                if c == 0 {
+                    self.scope.record(dry, buffer[idx], acquired, divider);
+                }
             }
         }
     }
 
     fn reset(&mut self) {
+        self.scope = Scope::default();
         self.hold = [0.0; 2];
         self.counter = [0; 2];
         self.mix.edit(self.params[param::MIX], true);
