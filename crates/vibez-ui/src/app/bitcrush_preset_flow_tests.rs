@@ -60,3 +60,25 @@ async fn bitcrush_user_file_roundtrips_exact_sound_and_load_is_one_undoable_edit
     app.apply_snapshot(snapshot);
     assert_eq!(app.state.find_track(track).unwrap().effects[0].params, before_load);
 }
+
+#[test]
+fn bitcrush_preset_rejects_fractional_choices_before_any_sound_or_history_change() {
+    use vibez_core::device_preset::DevicePresetKind;
+    let (mut app, track, effect) = bitcrush_app();
+    let before = app.state.find_track(track).unwrap().effects[0].params.clone();
+    let factory = crate::domains::device_presets::factory_presets(EffectType::Bitcrush)
+        .into_iter().find(|preset| preset.name() == "Crunchy 12").unwrap();
+    for key in ["rounding", "dither", "post_lp_enabled"] {
+        let mut parameters = factory.parameters().clone();
+        parameters.insert(key.into(), 0.5);
+        let invalid = DevicePreset::new(
+            DevicePresetKind::Effect(EffectType::Bitcrush), "Invalid", parameters,
+        ).unwrap();
+        let request = app.begin_device_preset_load(track, effect).unwrap();
+        let _ = app.finish_device_preset_load(request, Ok(invalid));
+        assert_eq!(app.state.find_track(track).unwrap().effects[0].params, before,
+            "fractional {key} changed the sound before complete validation");
+        assert!(!app.state.project.history.can_undo());
+        assert!(!app.state.project.dirty);
+    }
+}
