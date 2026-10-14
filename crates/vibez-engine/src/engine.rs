@@ -1029,3 +1029,7 @@ mod automation_retirement_tests;
 #[cfg(test)]
 #[path = "engine_sample_hold_meter_tests.rs"]
 mod sample_hold_meter_tests;
+
+#[cfg(test)]
+#[path = "engine_sample_hold_lifecycle_tests.rs"]
+mod sample_hold_lifecycle_tests;
