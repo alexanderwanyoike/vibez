@@ -160,22 +160,6 @@ impl AudioEngine {
                 })
     }
 
-    pub(super) fn reconfiguration_pending(&self) -> bool {
-        self.tracks
-            .iter()
-            .chain(&self.buses)
-            .chain(std::iter::once(&self.master))
-            .any(|track| {
-                track.effects.iter().any(|slot| {
-                    slot.effect.reconfiguration_requested()
-                        && !slot.effect.processing_recovery_requested()
-                }) || track.instrument.as_ref().is_some_and(|instrument| {
-                    instrument.reconfiguration_requested()
-                        && !instrument.processing_recovery_requested()
-                })
-            })
-    }
-
     pub(super) fn validate_compensation(&mut self) {
         if self.device_handoff.is_suspended() || self.compensation_plan.blocks_processing() {
             return;
