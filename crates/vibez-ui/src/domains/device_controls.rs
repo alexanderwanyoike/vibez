@@ -5,7 +5,11 @@ use vibez_core::effect::ParamDescriptor;
 use vibez_core::id::{EffectId, TrackId};
 
 pub fn presentation_descriptor(effect: &crate::state::UiEffect, index: usize) -> ParamDescriptor {
-    effect.descriptors[index]
+    let mut descriptor = effect.descriptors[index];
+    if crate::domains::gate::is_native_gate(effect) && index == vibez_dsp::gate::param::MIX {
+        descriptor.unit = "%";
+    }
+    descriptor
 }
 
 #[derive(Debug, Clone)]
