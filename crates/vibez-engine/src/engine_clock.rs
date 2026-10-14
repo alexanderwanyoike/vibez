@@ -18,11 +18,9 @@ impl AudioEngine {
         if ending_capture {
             self.stop_heard_capture();
         }
-        if let Some(routing) = self.routing.as_mut() {
-            routing.presentation.rebase_performance();
-            if let Some(first) = routing.presentation_start.as_mut() {
-                first.perform = 0;
-            }
+        self.routing.presentation.rebase_performance();
+        if let Some(first) = self.routing.presentation_start.as_mut() {
+            first.perform = 0;
         }
         self.clock_domain = ClockDomain::Perform;
         self.performance_position = 0;
@@ -66,13 +64,12 @@ impl AudioEngine {
         target: vibez_core::automation::AutomationTarget,
     ) -> u32 {
         let stage = crate::compensation_controls::automation_stage(target);
-        self.routing.as_ref().map_or(0, |routing| {
-            let input = routing
-                .graph
-                .index(track_id, stage)
-                .map_or(0, |node| routing.compensation.node_input_latency[node]);
-            self.live_path_latency(track_id).saturating_sub(input)
-        })
+        let input = self
+            .routing
+            .graph
+            .index(track_id, stage)
+            .map_or(0, |node| self.routing.compensation.node_input_latency[node]);
+        self.live_path_latency(track_id).saturating_sub(input)
     }
 
     pub(super) fn target_automation_position(
@@ -82,9 +79,7 @@ impl AudioEngine {
     ) -> u64 {
         let stage = crate::compensation_controls::automation_stage(target);
         let position = self.effective_position();
-        let Some(routing) = self.routing.as_ref() else {
-            return position;
-        };
+        let routing = &self.routing;
         let Some(node) = routing.graph.index(track_id, stage) else {
             return position;
         };

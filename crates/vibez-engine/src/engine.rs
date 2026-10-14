@@ -50,7 +50,6 @@ pub const DEFAULT_SAMPLE_RATE: u32 = 44_100;
 /// ```
 pub struct AudioEngine {
     scheduled_presentation: Vec<presentation_queue::ScheduledPresentation>,
-    empty_capture_offsets: Arc<[(TrackId, u32)]>,
     section_capture_timing: Vec<presentation::SectionCaptureTiming>,
     capture_replay: Option<presentation::CaptureReplay>,
     pending_capture_stop: Option<u64>,
@@ -74,7 +73,11 @@ pub struct AudioEngine {
     compensation_plan_fade: u32,
     last_mix_frame: [f32; 2],
     was_project_muted: bool,
-    routing: Option<Box<crate::routing::PreparedRouting>>,
+    routing: Box<crate::routing::PreparedRouting>,
+    project_routing_published: bool,
+    // The first publication has no public retirement event. Keep its bounded
+    // bootstrap owner until the engine returns to the caller for teardown.
+    bootstrap_routing: Option<Box<crate::routing::PreparedRouting>>,
     retired_routing: Option<Box<crate::routing::PreparedRouting>>,
     pub(super) pending_retirements: Vec<EngineEvent>,
     pub(super) pending_bus_cleanup: Option<(TrackId, usize)>,
@@ -237,11 +240,21 @@ impl AudioEngine {
         let (spectrum_tx, spectrum_rx) = RingBuffer::<f32>::new(SPECTRUM_RING_CAPACITY);
 
         let engine = Self {
-            routing: None,
+            routing: crate::routing::PreparedRouting::prepare(
+                &[vibez_core::routing::RoutingChannel {
+                    id: TrackId::MASTER,
+                    is_bus: true,
+                    effects: vec![],
+                    sends: vec![],
+                }],
+                crate::routing::MAX_BLOCK_FRAMES,
+            )
+            .expect("static master routing is valid"),
+            project_routing_published: false,
+            bootstrap_routing: None,
             scheduled_presentation: Vec::with_capacity(
                 presentation_queue::PRESENTATION_EVENT_CAPACITY,
             ),
-            empty_capture_offsets: Arc::from([]),
             section_capture_timing: Vec::with_capacity(
                 presentation_queue::PRESENTATION_EVENT_CAPACITY,
             ),
@@ -374,14 +387,6 @@ impl AudioEngine {
             capture.samples.fill(0.0);
         }
 
-        // Bus mixes accumulate from track sends during rendering;
-        // start each block from silence.
-        if self.routing.is_none() {
-            for bus in &mut self.buses {
-                bus.clear_buffer(frames, channels);
-            }
-        }
-
         self.process_multitrack(
             output,
             frames,
@@ -390,101 +395,6 @@ impl AudioEngine {
             track_output_capture.as_mut(),
         );
 
-        if self.routing.is_none() {
-            // ---- 4.3 Buses: each return processes its send mix through
-            // its chain (always, so queued plugin params deliver and
-            // tails ring out) and sums into the mix ahead of the master.
-            let block_beat = if self.transport.is_playing() {
-                let bpm = self.transport.bpm();
-                if bpm > 0.0 {
-                    Some(self.effective_position() as f64 * bpm / (self.sample_rate as f64 * 60.0))
-                } else {
-                    None
-                }
-            } else {
-                None
-            };
-            let has_bus_solo = any_solo(&self.buses);
-            for bus_idx in 0..self.buses.len() {
-                let bus = &mut self.buses[bus_idx];
-                let (bus_auto_gain, bus_auto_pan) = match block_beat {
-                    Some(beat) => bus.apply_automation(beat),
-                    None => (None, None),
-                };
-                let buf_size = frames * channels;
-                if bus.mix_buffer.len() < buf_size {
-                    bus.clear_buffer(frames, channels);
-                }
-                for slot in &mut bus.effects {
-                    if !slot.bypass {
-                        slot.effect
-                            .process(&mut bus.mix_buffer[..buf_size], channels);
-                    }
-                }
-                if self.spectrum_track == Some(bus.id) {
-                    push_spectrum(&mut self.spectrum_tx, &bus.mix_buffer[..buf_size], channels);
-                }
-
-                let mut peak_l = 0.0f32;
-                let mut peak_r = 0.0f32;
-                if !bus.mute && (!has_bus_solo || bus.solo) {
-                    let gain = bus_auto_gain.unwrap_or(bus.gain);
-                    // Balance, not equal-power: the send mix is already
-                    // panned stereo, center must pass at unity.
-                    let (pan_l, pan_r) = crate::mixer::balance_pan(bus_auto_pan.unwrap_or(bus.pan));
-                    for frame in 0..frames {
-                        for ch in 0..channels {
-                            let idx = frame * channels + ch;
-                            let sample = bus.mix_buffer[idx] * gain;
-                            let panned = if channels >= 2 {
-                                if ch == 0 {
-                                    sample * pan_l
-                                } else if ch == 1 {
-                                    sample * pan_r
-                                } else {
-                                    sample
-                                }
-                            } else {
-                                sample
-                            };
-                            output[idx] += panned;
-                            if ch == 0 {
-                                peak_l = peak_l.max(panned.abs());
-                            } else if ch == 1 {
-                                peak_r = peak_r.max(panned.abs());
-                            }
-                        }
-                    }
-                }
-                let bus_id = bus.id;
-                let _ = self.event_tx.push(EngineEvent::TrackMeter {
-                    track_id: bus_id,
-                    peak_l,
-                    peak_r,
-                });
-            }
-
-            // ---- 4.4 Master bus: effect chain + gain over the summed mix.
-            // Runs whether or not the transport is playing so queued
-            // plugin params are delivered and tails ring out, matching
-            // the per-track idle behavior.
-            let (master_auto_gain, _) = match block_beat {
-                Some(beat) => self.master.apply_automation(beat),
-                None => (None, None),
-            };
-            for slot in &mut self.master.effects {
-                if !slot.bypass {
-                    slot.effect.process(output, channels);
-                }
-            }
-            let master_gain = master_auto_gain.unwrap_or(self.master.gain);
-            if (master_gain - 1.0).abs() > f32::EPSILON {
-                output.iter_mut().for_each(|s| *s *= master_gain);
-            }
-            if self.spectrum_track == Some(self.master.id) {
-                push_spectrum(&mut self.spectrum_tx, output, channels);
-            }
-        }
         self.validate_compensation();
         let project_muted = self.project_processing_muted();
         if project_muted {
@@ -545,16 +455,14 @@ impl AudioEngine {
                             .saturating_sub(advanced.saturating_sub(section.length_samples));
                     }
                 }
-                let presented = self
-                    .routing
-                    .as_ref()
-                    .filter(|routing| routing.compensation.output_latency > 0)
-                    .and_then(|routing| {
-                        routing
+                let presented = (self.routing.compensation.output_latency > 0)
+                    .then(|| {
+                        self.routing
                             .presentation
                             .audible()
-                            .or(routing.presentation_start)
-                    });
+                            .or(self.routing.presentation_start)
+                    })
+                    .flatten();
                 let (section_id, position_samples) = presented
                     .and_then(|position| {
                         position
@@ -634,17 +542,19 @@ impl AudioEngine {
         self.split_wrap_handled = false;
 
         // Position event.
-        let audible = self
-            .routing
-            .as_ref()
-            .filter(|routing| routing.compensation.output_latency > 0)
-            .and_then(|routing| {
-                routing
+        let audible = (self.routing.compensation.output_latency > 0)
+            .then(|| {
+                self.routing
                     .presentation
                     .audible()
                     .map(|position| (position, true))
-                    .or_else(|| routing.presentation_start.map(|position| (position, false)))
-            });
+                    .or_else(|| {
+                        self.routing
+                            .presentation_start
+                            .map(|position| (position, false))
+                    })
+            })
+            .flatten();
         let audible_arrange = audible.map_or(new_pos, |(position, advanced)| {
             position
                 .arrange
@@ -667,11 +577,7 @@ impl AudioEngine {
         }
 
         if self.active_section.is_none() {
-            if let Some(position) = self
-                .routing
-                .as_ref()
-                .and_then(|routing| routing.presentation.audible())
-            {
+            if let Some(position) = self.routing.presentation.audible() {
                 if let Some((section_id, local)) = position.section_id.zip(position.section) {
                     let _ = self.event_tx.push(EngineEvent::SectionPlaybackPosition {
                         section_id,
