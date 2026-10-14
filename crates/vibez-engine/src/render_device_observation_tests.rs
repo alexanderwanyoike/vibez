@@ -267,3 +267,64 @@ fn isolated_offline_segments_sample_validation_entry_and_post_process_at_distinc
             second_selected.iter().map(|sample| sample.to_bits()).collect::<Vec<_>>());
     }
 }
+
+fn request() -> (BounceRequest, EffectId) {
+    let mut first = bare_track("Source"); first.pan = 0.0;
+    let mut second = bare_track("Other"); second.pan = 0.0;
+    let mut master = bare_track("Master"); master.id = TrackId::MASTER; master.gain = 0.5;
+    let effect = EffectId::new();
+    first.effects.push(EffectInfo { id: effect, effect_type: EffectType::Gain, bypass: false, params: Vec::new(),
+        plugin: Some(plugin_device("Observer")), sidechains: Vec::new(), inactive_sidechains: Default::default() });
+    let mut clips = Vec::new(); let mut clip_audio = HashMap::new();
+    for (index, track) in [&first, &second].into_iter().enumerate() {
+        let id = ClipId::new();
+        let signal: Vec<_> = (0..1024).map(|frame| if index == 0 { (frame % 11) as f32 / 32.0 - 5.0 / 32.0 } else { 0.125 }).collect();
+        clip_audio.insert(id, Arc::new(DecodedAudio { channels: vec![signal.clone(), signal], sample_rate: 44_100 }));
+        clips.push(ClipInfo { id, track_id: track.id, name: "source".into(), position: 0, source_offset: 0, start_marker: None,
+            duration: 1024, source: None, file_path: None, loop_enabled: false, loop_start: 0, loop_end: 0,
+            gain_db: Default::default(), fades: Default::default(), playback_direction: Default::default(),
+            transient_markers: Default::default(), warp_markers: Default::default(), transpose: Default::default(),
+            original_bpm: None, warped: false, warped_to_bpm: None });
+    }
+    (BounceRequest { tracks: vec![first, second], master: Some(master), buses: Vec::new(), audio_clips: clips,
+        note_clips: Vec::new(), clip_audio, sampler_audio: HashMap::new(), drum_pad_audio: HashMap::new(),
+        mode: BounceMode::Master, range_samples: (0, 900), bpm: 120.0, sample_rate: 44_100,
+        swing: vibez_core::perform::SwingAmount::STRAIGHT }, effect)
+}
+
+#[test]
+fn public_offline_full_and_cropped_master_and_track_outputs_keep_origin_warmed_history() {
+    let (mut request, effect) = request(); let track = request.tracks[0].id;
+    let reference = reference((0..900).map(|frame| (frame % 11) as f32 / 32.0 - 5.0 / 32.0));
+    for selected in [false, true] {
+        let mut full = None;
+        for (start, end) in [(0, 900), (521, 777)] {
+            request.mode = if selected { BounceMode::Track(track) } else { BounceMode::Master };
+            request.range_samples = (start, end);
+            let trace = Arc::new(Trace::new()); let facts = Arc::new(Facts::new());
+            let mut plugins = OfflinePlugins::default(); plugins.effects.insert(effect, Box::new(Probe::new(2, Mode::Healthy, &facts, &trace)));
+            let owner = crate::engine::reconfiguration::effect_owner_identity(&**plugins.effects.get(&effect).unwrap());
+            let result = render_offline_with_plugins(&request, &mut plugins, |_| {}).unwrap();
+            assert!(result.warnings.is_empty()); assert_eq!(result.audio.sample_rate, 44_100);
+            assert_eq!(crate::engine::reconfiguration::effect_owner_identity(&**plugins.effects.get(&effect).unwrap()), owner);
+            for (offset, sample) in result.audio.channels[0].iter().enumerate() {
+                let wet = reference[start as usize + offset];
+                assert_eq!(*sample, if selected { wet } else { (wet + 0.125) * 0.5 });
+            }
+            assert!(result.audio.channels[1].iter().all(|sample| *sample == 0.0));
+            assert_eq!(result.audio.frames(), (end - start) as usize);
+            assert_eq!(facts.processes.load(Ordering::Relaxed), 2);
+            assert_eq!(facts.frames.load(Ordering::Relaxed), end as usize);
+            if let Some(previous) = &full {
+                let previous: &Vec<Vec<f32>> = previous;
+                for channel in 0..2 { assert_eq!(result.audio.channels[channel], previous[channel][start as usize..end as usize]); }
+            } else { full = Some(result.audio.channels.clone()); }
+            let calls = trace.observed();
+            assert_eq!(calls.first(), Some(&(2, LATENCY, 0)), "caller-thread latency reporting precedes construction");
+            eprintln!("device-observation-d-healthy: selected={selected}; start={start}; end={end}; calls={calls:?}; processes={}; frames={}; same_owner=true; left_bits={:?}; right_bits={:?}",
+                facts.processes.load(Ordering::Relaxed), facts.frames.load(Ordering::Relaxed),
+                result.audio.channels[0].iter().map(|sample| sample.to_bits()).collect::<Vec<_>>(),
+                result.audio.channels[1].iter().map(|sample| sample.to_bits()).collect::<Vec<_>>());
+        }
+    }
+}
