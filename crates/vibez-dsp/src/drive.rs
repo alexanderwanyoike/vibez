@@ -90,11 +90,8 @@ impl<const N: usize> ChoiceFade<N> {
     }
 }
 
-/// Musical soft-saturation drive.
-///
-/// `Amount` maps to drive gain via an exponential curve so the knob is
-/// useful across its whole range. `Tone` is a one-pole tilt filter applied
-/// after the nonlinearity: low values favor low end, high values brighten.
+/// Legacy project values retain their original curve and two-tap tone response;
+/// appended character and quality controls opt into the modern signal path.
 pub struct DriveEffect {
     params: [f32; param::COUNT],
     applied: [f32; param::COUNT],
@@ -107,7 +104,6 @@ pub struct DriveEffect {
     audible_quality: [f32; 3],
     character_delay: [[f32; 4]; 64],
     audible_character: [f32; 4],
-    /// One-pole high-shelf-ish state, per channel.
     z: [f32; 2],
     delay: [[f32; 2]; 64],
     delay_position: usize,
@@ -195,7 +191,6 @@ impl DriveEffect {
     }
 
     fn drive_gain(&self) -> f32 {
-        // Amount 0 → 1x, Amount 1 → ~30x
         let a = self.applied[param::AMOUNT].clamp(0.0, 1.0);
         1.0 + a * a * 29.0
     }
@@ -329,13 +324,9 @@ impl AudioEffect for DriveEffect {
                 let filtered = finite_sample(self.pre_hp.process(dry, c) as f64);
                 let shaper_input = dry * (1.0 - self.applied[param::PRE_HP_ENABLED]) + filtered * self.applied[param::PRE_HP_ENABLED];
                 let sat = (shaper_input * drive).tanh() / norm;
-                // One-pole tilt: mixes current with previous sample.
-                // tilt > 0 emphasises difference (bright); < 0 smooths.
                 let shelved = sat + tilt * (sat - self.z[c]);
                 self.z[c] = sat;
 
-                // `Amount` blends between dry and saturated so amount=0 is
-                // true passthrough; `Mix` then wet/dries the result.
                 let processed = dry * (1.0 - amount) + shelved * amount;
                 let legacy = self.delay[self.delay_position][c];
                 self.delay[self.delay_position][c] = processed;
