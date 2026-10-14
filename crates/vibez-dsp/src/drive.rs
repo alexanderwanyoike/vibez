@@ -67,13 +67,9 @@ pub static DRIVE_PARAMS: &[ParamDescriptor] = &[
 /// useful across its whole range. `Tone` is a one-pole tilt filter applied
 /// after the nonlinearity: low values favor low end, high values brighten.
 pub struct DriveEffect {
-    amount: f32,
-    tone: f32,
-    output: f32,
-    mix: f32,
+    params: [f32; param::COUNT],
     /// One-pole high-shelf-ish state, per channel.
     z: [f32; 2],
-    extra: [f32; 6],
     delay: [[f32; 2]; 64],
     delay_position: usize,
     dry_delay: [[f32; 2]; 64],
@@ -93,12 +89,8 @@ impl DriveEffect {
     pub fn with_sample_rate(sample_rate: f32) -> Self {
         let sample_rate = if sample_rate.is_finite() && sample_rate >= 2.0 { sample_rate } else { 48_000.0 };
         Self {
-            amount: 0.35,
-            tone: 0.5,
-            output: 1.0,
-            mix: 1.0,
+            params: std::array::from_fn(|index| DRIVE_PARAMS[index].default),
             z: [0.0; 2],
-            extra: [0.0, 2.0, 0.0, 80.0, 0.0, 12000.0],
             delay: [[0.0; 2]; 64],
             delay_position: 0,
             dry_delay: [[0.0; 2]; 64],
@@ -113,7 +105,7 @@ impl DriveEffect {
 
     fn drive_gain(&self) -> f32 {
         // Amount 0 → 1x, Amount 1 → ~30x
-        let a = self.amount.clamp(0.0, 1.0);
+        let a = self.params[param::AMOUNT].clamp(0.0, 1.0);
         1.0 + a * a * 29.0
     }
 }
@@ -148,13 +140,13 @@ impl AudioEffect for DriveEffect {
         for (point, output) in meter.transfer.iter_mut().enumerate() {
             let input = -1.0 + point as f32 / 32.0;
             let u = (input * gain).clamp(-1.0, 1.0);
-            let shaped = match self.extra[0] as usize {
+            let shaped = match self.params[param::CHARACTER] as usize {
                 2 => 1.5 * u - 0.5 * u * u * u,
                 3 => u,
                 _ => (input * gain).tanh() / gain.tanh(),
             };
-            let processed = input * (1.0 - self.amount) + shaped * self.amount;
-            *output = (input * (1.0 - self.mix) + processed * self.mix) * self.output;
+            let processed = input * (1.0 - self.params[param::AMOUNT]) + shaped * self.params[param::AMOUNT];
+            *output = (input * (1.0 - self.params[param::MIX]) + processed * self.params[param::MIX]) * self.params[param::OUTPUT];
         }
         self.meter_count = 0;
         Some(meter)
@@ -173,47 +165,19 @@ impl AudioEffect for DriveEffect {
     }
 
     fn set_param(&mut self, index: usize, value: f32) -> bool {
-        match index {
-            0 => {
-                self.amount = value.clamp(0.0, 1.0);
-                true
-            }
-            1 => {
-                self.tone = value.clamp(0.0, 1.0);
-                true
-            }
-            2 => {
-                self.output = value.clamp(0.0, 2.0);
-                true
-            }
-            3 => {
-                self.mix = value.clamp(0.0, 1.0);
-                true
-            }
-            4..=9 => {
-                if !value.is_finite() { return false; }
-                let descriptor = &DRIVE_PARAMS[index];
-                let value = value.clamp(descriptor.min, descriptor.max);
-                self.extra[index - 4] = match index {
-                    param::CHARACTER | param::QUALITY => value.round(),
-                    param::PRE_HP_ENABLED | param::POST_LP_ENABLED => f32::from(value >= 0.5),
-                    _ => value,
-                };
-                true
-            }
-            _ => false,
-        }
+        let Some(descriptor) = DRIVE_PARAMS.get(index) else { return false; };
+        if index >= param::CHARACTER && !value.is_finite() { return false; }
+        let value = value.clamp(descriptor.min, descriptor.max);
+        self.params[index] = match index {
+            param::CHARACTER | param::QUALITY => value.round(),
+            param::PRE_HP_ENABLED | param::POST_LP_ENABLED => f32::from(value >= 0.5),
+            _ => value,
+        };
+        true
     }
 
     fn get_param(&self, index: usize) -> f32 {
-        match index {
-            0 => self.amount,
-            1 => self.tone,
-            2 => self.output,
-            3 => self.mix,
-            4..=9 => self.extra[index - 4],
-            _ => 0.0,
-        }
+        self.params.get(index).copied().unwrap_or(0.0)
     }
 
     fn process(&mut self, buffer: &mut [f32], channels: usize) {
@@ -224,11 +188,11 @@ impl AudioEffect for DriveEffect {
         let frames = buffer.len() / channels;
         let drive = self.drive_gain();
         let norm = drive.tanh();
-        let amount = self.amount.clamp(0.0, 1.0);
+        let amount = self.params[param::AMOUNT].clamp(0.0, 1.0);
         let tone_beta = (-std::f64::consts::TAU * 1000.0 / self.sample_rate as f64).exp();
-        let low_gain = 10.0_f64.powf(-6.0 * (self.tone as f64 * 2.0 - 1.0) / 20.0);
+        let low_gain = 10.0_f64.powf(-6.0 * (self.params[param::TONE] as f64 * 2.0 - 1.0) / 20.0);
         let high_gain = low_gain.recip();
-        let tilt = self.tone * 2.0 - 1.0; // -1 darker, +1 brighter
+        let tilt = self.params[param::TONE] * 2.0 - 1.0; // -1 darker, +1 brighter
 
         for frame in 0..frames {
             for c in 0..ch {
@@ -247,8 +211,8 @@ impl AudioEffect for DriveEffect {
                 self.delay[self.delay_position][c] = processed;
                 let aligned_dry = self.dry_delay[self.delay_position][c];
                 self.dry_delay[self.delay_position][c] = dry;
-                let character = self.extra[0] as usize;
-                let quality = self.extra[1] as usize;
+                let character = self.params[param::CHARACTER] as usize;
+                let quality = self.params[param::QUALITY] as usize;
                 let mut modern = [0.0; 3];
                 for (index, path) in self.oversampling.iter_mut().enumerate() {
                     let audible = index == quality;
@@ -259,14 +223,14 @@ impl AudioEffect for DriveEffect {
                     let input = *sample as f64;
                     let low = &mut self.modern_low[index][c];
                     *low = input * (1.0 - tone_beta) + *low * tone_beta;
-                    if self.tone != 0.5 { *sample = (*low * low_gain + (input - *low) * high_gain) as f32; }
+                    if self.params[param::TONE] != 0.5 { *sample = (*low * low_gain + (input - *low) * high_gain) as f32; }
                 }
                 let processed = if character == 0 {
                     legacy
                 } else {
                     aligned_dry * (1.0 - amount) + modern[character - 1] * amount
                 };
-                buffer[idx] = (aligned_dry * (1.0 - self.mix) + processed * self.mix) * self.output;
+                buffer[idx] = (aligned_dry * (1.0 - self.params[param::MIX]) + processed * self.params[param::MIX]) * self.params[param::OUTPUT];
                 if c == 0 {
                     let point = self.meter_samples as usize % 128;
                     self.meter.input[point] = aligned_dry;
