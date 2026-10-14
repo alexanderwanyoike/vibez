@@ -154,17 +154,17 @@ impl AudioEngine {
                 || event.time_domain() == crate::events::TimeDomain::Heard,
             "only heard-time events wait for output latency: {event:?}"
         );
-        if self.presentation_fault {
+        if self.presentation_state.is_faulted() {
             match event {
                 EngineEvent::PlaybackStopped => {
-                    self.terminal_notifications.request_playback_stop();
+                    self.presentation_state.terminals.request_playback_stop();
                     self.flush_presentation();
                     return;
                 }
                 EngineEvent::PerformanceCaptureStopped {
                     effective_at_samples,
                 } => {
-                    self.terminal_notifications
+                    self.presentation_state.terminals
                         .request_capture_stop(effective_at_samples);
                     self.flush_presentation();
                     return;
@@ -186,14 +186,14 @@ impl AudioEngine {
             // Ownership producers reserve before handoff. Retain the discovering
             // event separately while the full UI ring holds the scheduled owners.
             let event = cancelled_event(event);
-            if let Some(event) = self.terminal_notifications.retain_overflow_owner(event) {
+            if let Some(event) = self.presentation_state.terminals.retain_overflow_owner(event) {
                 self.retire_event(event);
             }
         }
     }
 
     pub(super) fn flush_presentation(&mut self) {
-        if self.terminal_notifications.capture_stop().is_some() {
+        if self.presentation_state.terminals.capture_stop().is_some() {
             flush_ready(
                 &mut self.event_tx,
                 &mut self.scheduled_presentation,
@@ -207,7 +207,7 @@ impl AudioEngine {
                 return;
             }
         }
-        if !self.terminal_notifications.publish(&mut self.event_tx) {
+        if !self.presentation_state.terminals.publish(&mut self.event_tx) {
             return;
         }
         let source_now = self.output_position + self.rendered_callback_frames as u64;
@@ -219,10 +219,9 @@ impl AudioEngine {
     }
 
     pub(super) fn fail_presentation(&mut self) {
-        if self.presentation_fault {
+        if !self.presentation_state.enter_fault() {
             return;
         }
-        self.presentation_fault = true;
         self.capture_active = false;
         self.transport.stop();
         for track in &mut self.tracks {
@@ -231,10 +230,10 @@ impl AudioEngine {
         }
         self.clip_resync_track = Some(0);
         self.cancel_presentation();
-        self.terminal_notifications
+        self.presentation_state.terminals
             .request_capture_stop(self.compensation_callback_heard_start);
-        self.terminal_notifications.request_playback_stop();
-        self.terminal_notifications.request_failure(
+        self.presentation_state.terminals.request_playback_stop();
+        self.presentation_state.terminals.request_failure(
             TrackId::MASTER,
             None,
             "Audio presentation event history is full",
@@ -243,7 +242,7 @@ impl AudioEngine {
     }
 
     pub(super) fn presentation_room(&mut self, events: usize) -> bool {
-        if self.presentation_fault {
+        if self.presentation_state.is_faulted() {
             return false;
         }
         if self.scheduled_presentation.capacity() - self.scheduled_presentation.len() < events {

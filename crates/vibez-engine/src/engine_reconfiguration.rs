@@ -128,7 +128,7 @@ impl AudioEngine {
         self.compensation_suspended
             || self.graph_edit_pending
             || !self.compensation_valid
-            || self.presentation_fault
+            || self.presentation_state.is_faulted()
             || self.reconfiguration_pending()
     }
 
@@ -308,7 +308,7 @@ impl AudioEngine {
             self.compensation_valid = false;
             self.transport.stop();
             self.report_compensation_failure(track_id, effect_id, reason);
-            self.terminal_notifications.request_playback_stop();
+            self.presentation_state.terminals.request_playback_stop();
             self.flush_presentation();
         }
     }
@@ -324,7 +324,7 @@ impl AudioEngine {
         let Some(handoff_id) = self.next_device_handoff.checked_add(1) else {
             self.close_capture_on_failure();
             self.transport.stop();
-            self.terminal_notifications.request_playback_stop();
+            self.presentation_state.terminals.request_playback_stop();
             self.flush_presentation();
             self.report_compensation_failure(
                 TrackId::MASTER,
