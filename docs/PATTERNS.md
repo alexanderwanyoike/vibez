@@ -141,6 +141,24 @@ full routing publication or a successful current device resume accepts both.
 Prepared graph retirement and device handoff owners keep their existing,
 separate lifetimes, including when a full UI ring blocks command admission.
 
+`DeviceHandoffState` separately owns the one pending metadata token, issued
+identity, typed recovery scope, typed project suspension and retained parameter
+storage. The stopped device Box stays in the event/main-thread/command protocol.
+An identity candidate is checked before device discovery; only a found, stopped
+device consumes it. Metadata is recorded before publication. A successful
+project-restart transfer suspends processing; local recovery leaves that
+suspension clear. Full publication restores the same stopped Box and consumes
+the issued identity, so its later retry uses the next identity.
+
+Taking restoration metadata does not resume processing. Retained parameters
+apply before target insertion and suspension clears at the existing caller
+boundary. All 2048 parameter slots share one engine-lifetime allocation:
+duplicates replace values in first-seen order, overflow is reported and consumed,
+and replay still attempts later setters after a rejection. Invalidation clears
+intent without freeing storage. A stale reply retires its exact old owners and
+leaves a newer token, queued intent and applied graph unchanged. Prepared effect
+storage and plan retirement retain their separate bounded ownership paths.
+
 The global processing gate still combines these plan facts with suspension,
 presentation health and live hosted-device requests. It is not a pure state
 query. Capture admission checks local failure first and applied-plan validity
