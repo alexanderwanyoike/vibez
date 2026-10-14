@@ -20,7 +20,7 @@ pub fn parameter<'a>(
     accent: Color,
     knob_size: Option<f32>,
 ) -> Element<'a, Message> {
-    let descriptor = &effect.descriptors[index];
+    let descriptor = &crate::domains::device_controls::presentation_descriptor(effect, index);
     let value = effect
         .params
         .get(index)

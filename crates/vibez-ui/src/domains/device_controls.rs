@@ -4,6 +4,16 @@ use std::collections::{BTreeMap, BTreeSet};
 use vibez_core::effect::ParamDescriptor;
 use vibez_core::id::{EffectId, TrackId};
 
+pub fn presentation_descriptor(effect: &crate::state::UiEffect, index: usize) -> ParamDescriptor {
+    let mut descriptor = effect.descriptors[index];
+    if crate::domains::compressor::is_native_compressor(effect)
+        && index == vibez_dsp::compressor::param::MIX
+    {
+        descriptor.unit = "%";
+    }
+    descriptor
+}
+
 #[derive(Debug, Clone)]
 pub enum DeviceControlMsg {
     ToggleAdvanced(TrackId, EffectId),
