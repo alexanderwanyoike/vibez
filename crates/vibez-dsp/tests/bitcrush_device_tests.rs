@@ -38,3 +38,28 @@ fn zero_channels_do_not_advance_and_wider_buses_preserve_extra_and_partial_frame
         }
     }
 }
+
+#[test]
+fn nonfinite_parameter_edits_leave_targets_and_acquired_audio_unchanged() {
+    let parameters = [4.5, 5.49, 0.37];
+    let build = || create_effect_with_params(EffectType::Bitcrush, 48_000.0, &parameters);
+    let mut effect = build();
+    let mut control = build();
+    let warm: Vec<_> = (0..34).map(|sample| sample as f32 / 47.0 - 0.31).collect();
+    effect.process(&mut warm.clone(), 2);
+    control.process(&mut warm.clone(), 2);
+    for index in 0..parameters.len() {
+        for value in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            assert!(!effect.set_param(index, value), "index={index}, value={value}");
+            for (index, expected) in parameters.into_iter().enumerate() {
+                assert_eq!(effect.get_param(index), expected);
+            }
+        }
+    }
+    assert!(!effect.set_param(99, 0.5));
+    let mut actual: Vec<_> = (0..90).map(|sample| 0.63 - sample as f32 / 73.0).collect();
+    let mut expected = actual.clone();
+    effect.process(&mut actual, 2);
+    control.process(&mut expected, 2);
+    assert_eq!(actual, expected);
+}
