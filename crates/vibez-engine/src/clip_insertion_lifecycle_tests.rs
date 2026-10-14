@@ -7,7 +7,10 @@ fn mailbox(delta: &Delta) -> *const rtrb::RingBuffer<ClipInsertionStorage> {
         unreachable!();
     };
     let pointer = std::ptr::from_ref(insertion.receiver.buffer());
-    assert_eq!(std::ptr::from_ref(insertion.sender.as_ref().unwrap().buffer()), pointer);
+    assert_eq!(
+        std::ptr::from_ref(insertion.sender.as_ref().unwrap().buffer()),
+        pointer
+    );
     pointer
 }
 
@@ -18,7 +21,10 @@ fn assert_abandoned(
     ring: *const rtrb::RingBuffer<ClipInsertionStorage>,
 ) {
     assert_eq!(returned.id(), delta.id);
-    assert_eq!((returned.track_id, returned.clip_id), (fixture.track, delta.clip));
+    assert_eq!(
+        (returned.track_id, returned.clip_id),
+        (fixture.track, delta.clip)
+    );
     assert_eq!(returned.outcome, ClipInsertionOutcome::Abandoned);
     assert_eq!(std::ptr::from_ref(returned.owner.as_ref()), delta.control);
     assert_eq!(std::ptr::from_ref(returned.owner.receiver.buffer()), ring);
@@ -27,11 +33,26 @@ fn assert_abandoned(
     assert!(returned.owner.sender.is_none());
     assert!(returned.owner.reply.is_none());
     assert_eq!(returned.owner.storage.clips.as_ptr(), delta.eager);
-    assert_eq!(returned.owner.storage.removed_audio_clips.as_ptr(), delta.eager_staging);
-    let clip = returned.owner.clip.as_ref().expect("abandonment returns the original delta");
+    assert_eq!(
+        returned.owner.storage.removed_audio_clips.as_ptr(),
+        delta.eager_staging
+    );
+    let clip = returned
+        .owner
+        .clip
+        .as_ref()
+        .expect("abandonment returns the original delta");
     assert_eq!(clip.id, delta.clip);
     assert_eq!(Arc::as_ptr(&clip.audio), delta.audio.as_ptr());
-    assert_eq!((clip.position, clip.source_offset, clip.start_marker, clip.duration), (0, 0, 0, 4096));
+    assert_eq!(
+        (
+            clip.position,
+            clip.source_offset,
+            clip.start_marker,
+            clip.duration
+        ),
+        (0, 0, 0, 4096)
+    );
     assert!(clip.loop_enabled);
     assert_eq!((clip.loop_start, clip.loop_end), (0, 128));
     assert_eq!(clip.linear_gain, 1.0);
@@ -43,8 +64,14 @@ fn assert_abandoned(
     let source = &fixture.engine.tracks()[0].playback_source;
     assert_eq!(source.clips.len(), 1);
     assert_eq!(source.clips.as_ptr(), fixture.live_allocation);
-    assert_eq!(source.removed_audio_clips.as_ptr(), fixture.staging_allocation);
-    assert_eq!(Arc::as_ptr(&source.clips[0].audio), fixture.resident.as_ptr());
+    assert_eq!(
+        source.removed_audio_clips.as_ptr(),
+        fixture.staging_allocation
+    );
+    assert_eq!(
+        Arc::as_ptr(&source.clips[0].audio),
+        fixture.resident.as_ptr()
+    );
     assert_eq!(fixture.resident.strong_count(), 1);
 }
 
@@ -55,7 +82,10 @@ fn abandoned_native_request_returns_complete_delta_and_resumes_fifo_after_credit
         let mut delta = delta(fixture.track);
         let ring = mailbox(&delta);
         let identity = Arc::downgrade(&delta.id.0);
-        fixture.commands.push(delta.command.take().unwrap()).unwrap();
+        fixture
+            .commands
+            .push(delta.command.take().unwrap())
+            .unwrap();
         fixture.commands.push(EngineCommand::SetBpm(137.0)).unwrap();
         let slots = fixture.commands.slots();
         callback(&mut fixture.engine, false);
@@ -73,8 +103,13 @@ fn abandoned_native_request_returns_complete_delta_and_resumes_fifo_after_credit
         let expected = if pressure {
             full_ui_ring(&mut fixture.engine);
             inject_full_retirement_store(&mut fixture.engine)
-        } else { Vec::new() };
-        assert_eq!(crate::retirement::tests::allocations(|| drop(request)), (0, 0));
+        } else {
+            Vec::new()
+        };
+        assert_eq!(
+            crate::retirement::tests::allocations(|| drop(request)),
+            (0, 0)
+        );
         if pressure {
             assert_signal(&callback(&mut fixture.engine, true), 0.25);
             assert_eq!(fixture.engine.transport().position(), 24);
@@ -82,13 +117,25 @@ fn abandoned_native_request_returns_complete_delta_and_resumes_fifo_after_credit
             assert_eq!(fixture.engine.tracks()[0].playback_source.clips.len(), 1);
             assert_eq!(fixture.commands.slots(), slots + 1);
             assert_eq!(delta.audio.strong_count(), 1);
-            assert!(matches!(fixture.events.pop().unwrap(), EngineEvent::PlaybackPosition(u64::MAX)));
+            assert!(matches!(
+                fixture.events.pop().unwrap(),
+                EngineEvent::PlaybackPosition(u64::MAX)
+            ));
         }
         callback(&mut fixture.engine, false);
         if pressure {
-            let completion = fixture.engine.pending_retirements.iter().find_map(|event| {
-                if let EngineEvent::ClipInsertionCompleted(owner) = event { Some(owner) } else { None }
-            }).expect("one freed credit retains the complete abandoned owner");
+            let completion = fixture
+                .engine
+                .pending_retirements
+                .iter()
+                .find_map(|event| {
+                    if let EngineEvent::ClipInsertionCompleted(owner) = event {
+                        Some(owner)
+                    } else {
+                        None
+                    }
+                })
+                .expect("one freed credit retains the complete abandoned owner");
             assert_abandoned(&fixture, &delta, completion, ring);
             assert_eq!(fixture.engine.pending_retirements.len(), 32);
             assert_eq!(fixture.engine.transport().bpm(), 120.0);
@@ -130,7 +177,9 @@ fn on_audio_thread(mut engine: AudioEngine, sounding: bool) -> (AudioEngine, [f3
         assert_ne!(std::thread::current().id(), owner_thread);
         let output = callback(&mut engine, sounding);
         (engine, output)
-    }).join().unwrap()
+    })
+    .join()
+    .unwrap()
 }
 
 #[test]
@@ -140,7 +189,10 @@ fn fulfilled_reply_survives_producer_drop_until_completion_or_owner_shutdown() {
         let mut delta = delta(fixture.track);
         let ring = mailbox(&delta);
         let identity = Arc::downgrade(&delta.id.0);
-        fixture.commands.push(delta.command.take().unwrap()).unwrap();
+        fixture
+            .commands
+            .push(delta.command.take().unwrap())
+            .unwrap();
         let (engine, _) = on_audio_thread(fixture.engine, false);
         fixture.engine = engine;
         let mut received = Received::default();
@@ -159,7 +211,10 @@ fn fulfilled_reply_survives_producer_drop_until_completion_or_owner_shutdown() {
             received.drain(&mut fixture.events);
             assert_eq!(received.completed.len(), 1);
             assert_applied(&fixture, &delta, &received.completed[0]);
-            assert_eq!(std::ptr::from_ref(received.completed[0].owner.receiver.buffer()), ring);
+            assert_eq!(
+                std::ptr::from_ref(received.completed[0].owner.receiver.buffer()),
+                ring
+            );
             assert!(received.completed[0].owner.receiver.is_empty());
             let (engine, output) = on_audio_thread(fixture.engine, true);
             fixture.engine = engine;
@@ -193,7 +248,10 @@ fn consumer_first_shutdown_releases_successful_orphaned_replies_on_the_owner_thr
         let mut delta = delta(fixture.track);
         let ring = mailbox(&delta);
         let identity = Arc::downgrade(&delta.id.0);
-        fixture.commands.push(delta.command.take().unwrap()).unwrap();
+        fixture
+            .commands
+            .push(delta.command.take().unwrap())
+            .unwrap();
         let (engine, _) = on_audio_thread(fixture.engine, false);
         fixture.engine = engine;
         let mut received = Received::default();
@@ -222,9 +280,12 @@ fn consumer_first_shutdown_releases_successful_orphaned_replies_on_the_owner_thr
             assert!(preparation.0 > 0);
             assert_eq!(preparation.1, 0);
             let mut pushed = None;
-            assert_eq!(crate::retirement::tests::allocations(|| {
-                pushed = Some(request.sender.push(storage.take().unwrap()));
-            }), (0, 0));
+            assert_eq!(
+                crate::retirement::tests::allocations(|| {
+                    pushed = Some(request.sender.push(storage.take().unwrap()));
+                }),
+                (0, 0)
+            );
             assert!(pushed.unwrap().is_ok());
             assert_eq!(request.sender.slots(), 0);
             assert_eq!(std::ptr::from_ref(request.sender.buffer()), ring);
@@ -251,17 +312,26 @@ fn undrained_requests_and_unsent_controls_release_owners_after_ui_shutdown() {
         let mut delta = delta(fixture.track);
         let identity = Arc::downgrade(&delta.id.0);
         if admitted {
-            fixture.commands.push(delta.command.take().unwrap()).unwrap();
+            fixture
+                .commands
+                .push(delta.command.take().unwrap())
+                .unwrap();
             let (engine, _) = on_audio_thread(fixture.engine, false);
             fixture.engine = engine;
             assert!(fixture.events.slots() > 0);
             assert_eq!(identity.strong_count(), 3);
-            assert_eq!(crate::retirement::tests::allocations(|| drop(fixture.events)), (0, 0));
+            assert_eq!(
+                crate::retirement::tests::allocations(|| drop(fixture.events)),
+                (0, 0)
+            );
             let (engine, output) = on_audio_thread(fixture.engine, true);
             fixture.engine = engine;
             assert_signal(&output, 0.25);
             assert_eq!(fixture.engine.tracks()[0].playback_source.clips.len(), 1);
-            assert_eq!(fixture.engine.tracks()[0].playback_source.clips.as_ptr(), fixture.live_allocation);
+            assert_eq!(
+                fixture.engine.tracks()[0].playback_source.clips.as_ptr(),
+                fixture.live_allocation
+            );
             assert_eq!(delta.audio.strong_count(), 1);
             // The request still lives inside the orphaned ordinary event ring.
             // Owner-thread engine teardown must release both connected rings.
@@ -297,13 +367,25 @@ fn immediate_and_missing_track_completions_return_both_unused_mailbox_endpoints(
             fixture.commands.push(EngineCommand::Stop).unwrap();
             let mut track = EngineTrack::new(target);
             track.pan = 0.0;
-            fixture.commands.push(EngineCommand::AddTrack(Box::new(track))).unwrap();
-            let model: Vec<_> = [fixture.track, target, TrackId::MASTER].into_iter().map(|id| RoutingChannel {
-                id, is_bus: id.is_master(), sends: Vec::new(), effects: Vec::new(),
-            }).collect();
-            fixture.commands.push(EngineCommand::SetRouting(
-                crate::routing::PreparedRouting::prepare(&model, 8).unwrap(),
-            )).unwrap();
+            fixture
+                .commands
+                .push(EngineCommand::AddTrack(Box::new(track)))
+                .unwrap();
+            let model: Vec<_> = [fixture.track, target, TrackId::MASTER]
+                .into_iter()
+                .map(|id| RoutingChannel {
+                    id,
+                    is_bus: id.is_master(),
+                    sends: Vec::new(),
+                    effects: Vec::new(),
+                })
+                .collect();
+            fixture
+                .commands
+                .push(EngineCommand::SetRouting(
+                    crate::routing::PreparedRouting::prepare(&model, 8).unwrap(),
+                ))
+                .unwrap();
             fixture.commands.push(EngineCommand::Play).unwrap();
             callback(&mut fixture.engine, false);
             while fixture.events.pop().is_ok() {}
@@ -311,7 +393,10 @@ fn immediate_and_missing_track_completions_return_both_unused_mailbox_endpoints(
         let mut delta = delta(target);
         let ring = mailbox(&delta);
         let identity = Arc::downgrade(&delta.id.0);
-        fixture.commands.push(delta.command.take().unwrap()).unwrap();
+        fixture
+            .commands
+            .push(delta.command.take().unwrap())
+            .unwrap();
         let (engine, _) = on_audio_thread(fixture.engine, false);
         fixture.engine = engine;
         let mut received = Received::default();
@@ -323,7 +408,11 @@ fn immediate_and_missing_track_completions_return_both_unused_mailbox_endpoints(
         assert_eq!((returned.track_id, returned.clip_id), (target, delta.clip));
         assert_eq!(std::ptr::from_ref(returned.owner.as_ref()), delta.control);
         assert_eq!(std::ptr::from_ref(returned.owner.receiver.buffer()), ring);
-        let sender = returned.owner.sender.as_ref().expect("the request producer was never sent");
+        let sender = returned
+            .owner
+            .sender
+            .as_ref()
+            .expect("the request producer was never sent");
         assert_eq!(std::ptr::from_ref(sender.buffer()), ring);
         assert!(!sender.is_abandoned());
         assert!(!returned.owner.receiver.is_abandoned());
@@ -332,8 +421,15 @@ fn immediate_and_missing_track_completions_return_both_unused_mailbox_endpoints(
         if missing {
             assert_eq!(returned.outcome, ClipInsertionOutcome::MissingTrack);
             assert_eq!(returned.owner.storage.clips.as_ptr(), delta.eager);
-            assert_eq!(returned.owner.storage.removed_audio_clips.as_ptr(), delta.eager_staging);
-            let clip = returned.owner.clip.as_ref().expect("the missing target returns its original owner");
+            assert_eq!(
+                returned.owner.storage.removed_audio_clips.as_ptr(),
+                delta.eager_staging
+            );
+            let clip = returned
+                .owner
+                .clip
+                .as_ref()
+                .expect("the missing target returns its original owner");
             assert_eq!(Arc::as_ptr(&clip.audio), delta.audio.as_ptr());
             assert_eq!(clip.warp_markers.as_slice().as_ptr(), delta.markers);
             assert_eq!(clip.warp_markers, delta.expected_markers);
@@ -346,7 +442,10 @@ fn immediate_and_missing_track_completions_return_both_unused_mailbox_endpoints(
             assert_eq!(source.clips.as_ptr(), delta.eager);
             assert_eq!(source.removed_audio_clips.as_ptr(), delta.eager_staging);
             assert_eq!(Arc::as_ptr(&source.clips[0].audio), delta.audio.as_ptr());
-            assert_eq!(source.clips[0].warp_markers.as_slice().as_ptr(), delta.markers);
+            assert_eq!(
+                source.clips[0].warp_markers.as_slice().as_ptr(),
+                delta.markers
+            );
         }
         assert_eq!(delta.audio.strong_count(), 1);
         let disposal = crate::retirement::tests::allocations(|| drop(received));

@@ -1,6 +1,9 @@
 //! Off-callback storage exchanges and complete owners for one pending AddClip.
 
-use std::sync::{atomic::{fence, Ordering}, Arc};
+use std::sync::{
+    atomic::{fence, Ordering},
+    Arc,
+};
 
 use rtrb::{Consumer, Producer, RingBuffer};
 use vibez_core::id::{ClipId, TrackId};
@@ -20,7 +23,9 @@ impl Eq for ClipInsertionId {}
 
 impl std::fmt::Debug for ClipInsertionId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("ClipInsertionId").field(&Arc::as_ptr(&self.0)).finish()
+        f.debug_tuple("ClipInsertionId")
+            .field(&Arc::as_ptr(&self.0))
+            .finish()
     }
 }
 
@@ -78,10 +83,16 @@ impl PreparedClipInsertion {
     }
 
     pub(crate) fn try_apply(&mut self, source: &mut PreparedPlaybackSource) -> bool {
-        let required = source.clips.len().checked_add(1).expect("clip length overflow");
+        let required = source
+            .clips
+            .len()
+            .checked_add(1)
+            .expect("clip length overflow");
         if source.clips.capacity() < required || source.removed_audio_clips.capacity() < required {
             let storage = self.reply.as_mut().unwrap_or(&mut self.storage);
-            if storage.clips.capacity() < required || storage.removed_audio_clips.capacity() < required {
+            if storage.clips.capacity() < required
+                || storage.removed_audio_clips.capacity() < required
+            {
                 return false;
             }
             // Only live engine values move. The exchanged allocations, even
@@ -89,9 +100,14 @@ impl PreparedClipInsertion {
             storage.clips.append(&mut source.clips);
             assert!(source.removed_audio_clips.is_empty());
             std::mem::swap(&mut source.clips, &mut storage.clips);
-            std::mem::swap(&mut source.removed_audio_clips, &mut storage.removed_audio_clips);
+            std::mem::swap(
+                &mut source.removed_audio_clips,
+                &mut storage.removed_audio_clips,
+            );
         }
-        source.clips.push(self.clip.take().expect("one original insertion delta"));
+        source
+            .clips
+            .push(self.clip.take().expect("one original insertion delta"));
         true
     }
 
@@ -102,7 +118,10 @@ impl PreparedClipInsertion {
             track_id,
             clip_id,
             capacity: required.checked_mul(2).unwrap_or(required),
-            sender: self.sender.take().expect("one storage request per insertion"),
+            sender: self
+                .sender
+                .take()
+                .expect("one storage request per insertion"),
         }
     }
 
@@ -157,8 +176,11 @@ impl ClipInsertionStorageRequest {
 impl std::fmt::Debug for ClipInsertionStorageRequest {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ClipInsertionStorageRequest")
-            .field("id", &self.id).field("track_id", &self.track_id)
-            .field("clip_id", &self.clip_id).field("capacity", &self.capacity).finish()
+            .field("id", &self.id)
+            .field("track_id", &self.track_id)
+            .field("clip_id", &self.clip_id)
+            .field("capacity", &self.capacity)
+            .finish()
     }
 }
 
@@ -194,8 +216,11 @@ impl CompletedClipInsertion {
 impl std::fmt::Debug for CompletedClipInsertion {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("CompletedClipInsertion")
-            .field("id", &self.owner.id).field("track_id", &self.track_id)
-            .field("clip_id", &self.clip_id).field("outcome", &self.outcome).finish()
+            .field("id", &self.owner.id)
+            .field("track_id", &self.track_id)
+            .field("clip_id", &self.clip_id)
+            .field("outcome", &self.outcome)
+            .finish()
     }
 }
 

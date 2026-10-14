@@ -63,11 +63,13 @@ impl AudioEngine {
         outcome: ClipInsertionOutcome,
     ) {
         let (track_id, clip_id) = owner.target.expect("one insertion outcome target");
-        self.retire_event(EngineEvent::ClipInsertionCompleted(CompletedClipInsertion {
-            track_id,
-            clip_id,
-            outcome,
-            owner,
-        }));
+        self.retire_event(EngineEvent::ClipInsertionCompleted(
+            CompletedClipInsertion {
+                track_id,
+                clip_id,
+                outcome,
+                owner,
+            },
+        ));
     }
 }

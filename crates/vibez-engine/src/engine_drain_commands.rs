@@ -302,7 +302,9 @@ impl AudioEngine {
                     playback_direction,
                     warp_markers,
                 } => {
-                    self.command_add_clip(track_id, EngineClip {
+                    self.command_add_clip(
+                        track_id,
+                        EngineClip {
                             id: clip_id,
                             audio,
                             position,
@@ -316,7 +318,9 @@ impl AudioEngine {
                             fades: fades.clamped_to(duration),
                             playback_direction,
                             warp_markers,
-                        }, insertion);
+                        },
+                        insertion,
+                    );
                 }
                 EngineCommand::RemoveClip(track_id, clip_id) => {
                     if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
