@@ -237,10 +237,9 @@ fn native_bitcrush_wheel_accumulates_steps_before_redraw_and_has_no_boundary_deb
 
 #[test]
 fn native_bitcrush_wheel_acknowledgement_preserves_fractional_carry_across_redraws() {
-    for (kind, current, higher, twice_higher) in [
-        (Kind::Bits, 8.75, 9.0, 10.0),
-        (Kind::Rate, 4.49, 3.0, 2.0),
-    ] {
+    for (kind, current, higher, twice_higher) in
+        [(Kind::Bits, 8.75, 9.0, 10.0), (Kind::Rate, 4.49, 3.0, 2.0)]
+    {
         for pixel_delta in [false, true] {
             for shifted in [false, true] {
                 let mut control = knob(kind, current);
@@ -258,18 +257,17 @@ fn native_bitcrush_wheel_acknowledgement_preserves_fractional_carry_across_redra
                         );
                     }
                 }
-                let units_per_step = if pixel_delta { 20.0 } else { 1.0 }
-                    * if shifted { 5.0 } else { 1.0 };
-                let scroll = |control: &EffectKnobWidget,
-                              state: &mut EffectKnobState,
-                              steps: f32| {
-                    let delta = steps * units_per_step;
-                    if pixel_delta {
-                        pixels(control, state, delta)
-                    } else {
-                        lines(control, state, delta)
-                    }
-                };
+                let units_per_step =
+                    if pixel_delta { 20.0 } else { 1.0 } * if shifted { 5.0 } else { 1.0 };
+                let scroll =
+                    |control: &EffectKnobWidget, state: &mut EffectKnobState, steps: f32| {
+                        let delta = steps * units_per_step;
+                        if pixel_delta {
+                            pixels(control, state, delta)
+                        } else {
+                            lines(control, state, delta)
+                        }
+                    };
                 let expected = scroll(&control, &mut batched, 2.0);
                 assert_eq!(expected, Some(twice_higher));
                 let emitted = scroll(&control, &mut acknowledged, 1.5);

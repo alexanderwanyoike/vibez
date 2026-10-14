@@ -172,7 +172,12 @@ struct WindowLevels {
 
 impl WindowLevels {
     fn observe(&mut self, input: &[f32], output: &[f32]) {
-        for (dry, wet) in input.as_chunks::<2>().0.iter().zip(output.as_chunks::<2>().0.iter()) {
+        for (dry, wet) in input
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .zip(output.as_chunks::<2>().0.iter())
+        {
             for (side, pair) in [dry, wet].into_iter().enumerate() {
                 for (channel, &value) in pair.iter().enumerate() {
                     self.peak[side][channel] = self.peak[side][channel].max(value.abs());

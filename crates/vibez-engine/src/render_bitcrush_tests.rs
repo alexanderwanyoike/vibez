@@ -63,7 +63,13 @@ fn request(sample_rate: u32, bypass: bool) -> BounceRequest {
         samples[1][frame] = pair[1];
     }
     let (left, right) = samples.split_at_mut(1);
-    for (frame, (left, right)) in left[0].iter_mut().zip(&mut right[0]).enumerate().take(672).skip(640) {
+    for (frame, (left, right)) in left[0]
+        .iter_mut()
+        .zip(&mut right[0])
+        .enumerate()
+        .take(672)
+        .skip(640)
+    {
         *left = (frame - 640) as f32 / 32.0 - 0.5;
         *right = 0.25 - *left * 0.5;
     }
