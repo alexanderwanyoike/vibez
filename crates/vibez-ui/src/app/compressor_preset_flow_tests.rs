@@ -14,6 +14,11 @@ fn compressor_app(channel: usize) -> (App, TrackId, EffectId) {
     Arc::make_mut(&mut app.state.project_tracks)
         .tracks
         .push(source);
+    let send_bus = ProjectTrack::new(TrackId::new(), "Parallel return".into(), 2);
+    let send_bus_id = send_bus.id;
+    Arc::make_mut(&mut app.state.project_tracks)
+        .buses
+        .push(send_bus);
     let track_id = if channel == 2 {
         app.state.project_tracks.master.id
     } else {
@@ -33,7 +38,9 @@ fn compressor_app(channel: usize) -> (App, TrackId, EffectId) {
     let track = app.state.find_track_mut(track_id).unwrap();
     track.gain = 0.7;
     track.pan = -0.2;
-    track.sends.push((source_id, 0.3));
+    if channel != 2 {
+        track.sends.push((send_bus_id, 0.3));
+    }
     let effect = track
         .effects
         .iter_mut()
