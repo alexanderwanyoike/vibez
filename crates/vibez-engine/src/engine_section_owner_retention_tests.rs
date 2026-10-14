@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::playback_source::{EngineClip, PreparedPlaybackSource, PreparedSectionPlaybackSource};
+use graph_test_support::{graph_engine, routing_channel};
 use std::sync::{Arc, Weak};
 use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::id::ClipId;
@@ -51,8 +52,9 @@ fn setup() -> (
     rtrb::Consumer<EngineEvent>,
     TrackId,
 ) {
-    let (mut engine, mut commands, mut events) = AudioEngine::new();
     let track_id = TrackId::new();
+    let (mut engine, mut commands, mut events) =
+        graph_engine(&[routing_channel(track_id), routing_channel(TrackId::MASTER)]);
     commands.push(EngineCommand::SetSampleRate(8)).unwrap();
     commands.push(EngineCommand::SetBpm(120.0)).unwrap();
     commands.push(EngineCommand::add_track(track_id)).unwrap();
