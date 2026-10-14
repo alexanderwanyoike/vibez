@@ -2468,7 +2468,7 @@ fn bus_gain_and_mute_shape_the_return() {
     cmd_tx.push(EngineCommand::SetTrackMute(bus, true)).unwrap();
     buf.fill(0.0);
     engine.process(&mut buf, 2);
-    for (frame, pair) in buf.chunks_exact(2).enumerate() {
+    for (frame, pair) in buf.as_chunks::<2>().0.iter().enumerate() {
         let remaining = 63usize.saturating_sub(frame) as f32 / 64.0;
         let expected = dry + dry * 0.5 * remaining;
         assert!(
