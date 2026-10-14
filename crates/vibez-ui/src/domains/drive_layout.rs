@@ -32,6 +32,93 @@ pub struct Arrangement {
     pub character_visible: bool,
 }
 
+pub fn arrange(width: f32, height: f32, advanced: bool) -> Arrangement {
+    let compact = width < MEDIUM_WIDTH;
+    let expanded = width >= EXPANDED_WIDTH;
+    let toolbar = 26.0;
+    let advanced_aside = advanced && expanded && height >= 280.0;
+    let inline_details = advanced && !compact && height < 112.0;
+    let details = if advanced && !advanced_aside && height >= 112.0 {
+        if height >= 280.0 { 44.0 } else { 36.0 }
+    } else {
+        0.0
+    };
+    let compact_body = (height - toolbar - 36.0 - details).max(0.0);
+    let compact_split = compact && compact_body >= 84.0;
+    let (footer, knob_size) = if compact_split {
+        let knob = [34.0, 20.0].into_iter().find(|knob| {
+            let field = 8.0 * 1.3 + 3.0 + 10.0 * 1.3 + 2.0 + knob + 3.0;
+            2.0 * field + 8.0 <= compact_body - 4.0
+        });
+        (36.0, knob)
+    } else if height >= 280.0 {
+        (84.0, Some(34.0))
+    } else if height >= 160.0 {
+        (57.0, Some(20.0))
+    } else {
+        (36.0, None)
+    };
+    let available = (height - toolbar - footer - details).max(0.0);
+    let body = if available >= 84.0 { available } else { 0.0 };
+    let both_plots = !compact && body > 0.0;
+    let input_meter = expanded && body > 0.0;
+    let output_meter = !compact && body > 0.0;
+    let (transfer_width, waveform_width) = if compact_split {
+        (width - 8.0 - 12.0 - COMPACT_BANK_WIDTH, 0.0)
+    } else if both_plots {
+        let input = if input_meter { METER_WIDTH + 8.0 } else { 0.0 };
+        let aside = if advanced_aside { ASIDE_WIDTH + 8.0 } else { 0.0 };
+        let plots = width - 8.0 - input - METER_WIDTH - 2.0 * 8.0 - aside;
+        (plots * 9.0 / 16.0, plots * 7.0 / 16.0)
+    } else {
+        (0.0, 0.0)
+    };
+    let primary_width = if compact_split {
+        COMPACT_BANK_WIDTH
+    } else if inline_details {
+        INLINE_CORE_WIDTH
+    } else if compact {
+        (width - 8.0 - 60.0 - 8.0).min(4.0 * 94.0 + 3.0 * 6.0)
+    } else {
+        4.0 * 94.0 + 3.0 * 6.0
+    };
+    Arrangement {
+        toolbar,
+        body,
+        footer,
+        details,
+        transfer_width,
+        waveform_width,
+        primary_width,
+        primary_height: if compact_split { body - 4.0 } else { footer - 5.0 },
+        details_width: if inline_details {
+            width - 8.0 - INLINE_CORE_WIDTH - 1.0 - 2.0 * 8.0
+        } else if advanced_aside {
+            ASIDE_WIDTH
+        } else {
+            width - 8.0
+        },
+        knob_size,
+        primary_rows: if compact_split { 2 } else { 1 },
+        compact_split,
+        both_plots,
+        input_meter,
+        output_meter,
+        advanced_aside,
+        inline_details,
+        primary_visible: !advanced || !compact || height >= 112.0,
+        character_visible: compact_split || !compact && !inline_details,
+    }
+}
+
+pub fn card_width(available: f32) -> f32 {
+    available.clamp(COMPACT_WIDTH, MAX_WIDTH)
+}
+
+pub fn preset_bar_width(width: f32, height: f32) -> f32 {
+    width - if height < 160.0 { 140.0 } else { 8.0 }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
