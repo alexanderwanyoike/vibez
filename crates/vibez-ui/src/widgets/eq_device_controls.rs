@@ -93,6 +93,51 @@ impl<'a> Controls<'a> {
             Message::EqControl(EqMsg::SelectBand(self.track, self.effect.id, band)),
         )
     }
+    fn band_selector(&self) -> Element<'a, Message> {
+        let track = self.track;
+        let effect = self.effect.id;
+        let accent = self.accent;
+        iced::widget::pick_list(
+            BAND_NAMES,
+            Some(BAND_NAMES[self.panel.selected_band]),
+            move |name| {
+                Message::EqControl(EqMsg::SelectBand(
+                    track,
+                    effect,
+                    BAND_NAMES
+                        .iter()
+                        .position(|band| *band == name)
+                        .unwrap_or(0),
+                ))
+            },
+        )
+        .text_size(9)
+        .padding([1, 3])
+        .width(54.0)
+        .style(move |_, _| iced::widget::pick_list::Style {
+            text_color: accent,
+            placeholder_color: th::text_dim(),
+            handle_color: th::text_dim(),
+            background: th::bg_dark().into(),
+            border: iced::Border {
+                color: th::border(),
+                width: 1.0,
+                radius: 2.0.into(),
+            },
+        })
+        .menu_style(move |_| iced::widget::overlay::menu::Style {
+            background: th::bg_surface().into(),
+            text_color: th::text(),
+            selected_text_color: accent,
+            selected_background: th::bg_hover().into(),
+            border: iced::Border {
+                color: th::border(),
+                width: 1.0,
+                radius: 2.0.into(),
+            },
+        })
+        .into()
+    }
     fn listen(&self, band: usize) -> Element<'a, Message> {
         let active = self.value(param::AUDITION).round() as usize == band + 1;
         choice(
@@ -247,7 +292,7 @@ impl<'a> Controls<'a> {
             column![bands, controls].spacing(6).into()
         } else {
             row![
-                self.band(b),
+                self.band_selector(),
                 controls,
                 self.toggle(param::ENABLE[b], "On"),
                 self.listen(b)
