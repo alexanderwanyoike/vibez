@@ -131,6 +131,12 @@ impl std::fmt::Debug for EngineNoteClip {
 }
 
 impl EngineNoteClip {
+    #[cfg(test)]
+    pub(crate) fn retirement_storage(&self) -> [usize; 3] {
+        [self.notes.as_ptr() as usize, self.next_same_pitch_start_beats.as_ptr() as usize,
+            self.note_sort_indices.as_ptr() as usize]
+    }
+
     pub(crate) fn same_retired_owner(&self, other: &Self) -> bool {
         self.id == other.id && self.position_beats == other.position_beats
             && self.duration_beats == other.duration_beats
