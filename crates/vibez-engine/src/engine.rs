@@ -738,6 +738,10 @@ mod compensation_state_tests;
 mod device_handoff_state_tests;
 
 #[cfg(test)]
+#[path = "engine_device_handoff_full_tests.rs"]
+mod device_handoff_full_tests;
+
+#[cfg(test)]
 #[path = "engine_graph_test_support.rs"]
 mod graph_test_support;
 
