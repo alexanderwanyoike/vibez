@@ -497,7 +497,7 @@ fn assert_combined_legacy_unload_pressure(delayed_minimum_credits: bool) {
         channels.push(RoutingChannel { id: TrackId::MASTER, is_bus: true, effects: vec![], sends: vec![] });
         let reports = [(RoutingNode { channel: slow, stage: NodeStage::Effect(effect) }, 521)];
         commands.push(EngineCommand::SetRouting(crate::routing::PreparedRouting::prepare_compensated(
-            &channels, 64, &reports, &[], 1,
+            &channels, 64, &reports, &[tracks[0]], 1,
         ).unwrap())).unwrap();
         let section = SectionId::new();
         for _ in 0..2 {
