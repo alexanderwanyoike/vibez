@@ -116,6 +116,19 @@ mod tests {
     use vibez_core::id::{EffectId, TrackId};
 
     #[test]
+    fn compact_signal_meters_fit_side_by_side_beside_the_graph_and_core() {
+        let meter_pair = 2.0 * crate::widgets::level_meter::WIDTH + 8.0;
+        assert!(OUTPUT_WIDTH - 8.0 >= meter_pair);
+        for width in [430.0, 464.0, 620.0] {
+            let layout = arrange(width, 304.0, false);
+            assert!(layout.output_column);
+            let core_width = width - OUTPUT_WIDTH - 8.0 - 8.0;
+            let three_fields_and_disclosure = 3.0 * 68.0 + 48.0 + 3.0 * 8.0;
+            assert!(core_width >= three_fields_and_disclosure);
+        }
+    }
+
+    #[test]
     fn measured_gate_layout_preserves_readable_core_and_usable_displays_without_scrolling() {
         for width in [430.0, 620.0, 740.0, 812.0, 900.0] {
             for height in [64.0, 80.0, 112.0, 146.0, 160.0, 240.0, 304.0] {
