@@ -47,7 +47,7 @@ pub struct Arrangement {
 }
 
 pub fn arrange(size: Size, advanced: bool) -> Arrangement {
-    let short = size.height < 108.0;
+    let short = size.height < 114.0;
     let (controls, knobs) = if short {
         (36.0, None)
     } else if size.height >= 220.0 {
@@ -410,22 +410,22 @@ pub fn view<'a>(
         })
         .width(Length::Fill)
         .height(Length::Fill);
-        let plot: Element<'a, Message> = if layout.graph >= 72.0 {
-            column![
-                row![
-                    section_label("Static response · manual values"),
-                    horizontal_space(),
-                    analyser_controls(track, effect, panel, accent, analyser_active)
-                ]
-                .align_y(iced::Alignment::Center),
-                graph
+        let caption = section_label("Static response · manual values");
+        let plot_header: Element<'a, Message> = if layout.graph >= 72.0 {
+            row![
+                caption,
+                horizontal_space(),
+                analyser_controls(track, effect, panel, accent, analyser_active)
             ]
-            .spacing(3)
-            .height(Length::Fill)
+            .align_y(iced::Alignment::Center)
             .into()
         } else {
-            graph.into()
+            caption
         };
+        let plot: Element<'a, Message> = column![plot_header, graph]
+            .spacing(3)
+            .height(Length::Fill)
+            .into();
         let meter_canvas = canvas(LevelMeter { levels: output })
             .width(METER_W)
             .height(Length::Fill);
@@ -510,7 +510,9 @@ mod tests {
     #[test]
     fn every_measured_tier_fits_actual_minimum_body_without_internal_scrolling() {
         for width in [430.0, 620.0, 900.0] {
-            for height in [64.0, 72.0, 90.0, 130.0, 160.0, 240.0, 400.0] {
+            for height in [
+                64.0, 72.0, 90.0, 108.0, 113.0, 114.0, 130.0, 160.0, 240.0, 400.0,
+            ] {
                 for advanced in [false, true] {
                     let layout = arrange(Size::new(width, height), advanced);
                     assert!(
@@ -536,7 +538,7 @@ mod tests {
                     let plot_header = if layout.graph >= 72.0 {
                         9.0 * 1.3 + 4.0 + 3.0
                     } else {
-                        0.0
+                        8.0 * 1.3 + 3.0
                     };
                     assert!(layout.graph == 0.0 || layout.graph >= 4.0 + plot_header + 32.0);
                     assert_eq!(
