@@ -271,7 +271,7 @@ fn current_device_reply_restores_the_same_owner_or_fails_the_project() {
         };
         fixture.drain_command(command);
         assert!(!fixture.engine.compensation_suspended);
-        assert!(fixture.engine.pending_device_reconfiguration.is_none());
+        assert!(fixture.engine.device_handoff.pending().is_none());
         assert_eq!(
             reconfiguration::effect_owner_identity(&*fixture.engine.tracks[0].effects[0].effect),
             identity

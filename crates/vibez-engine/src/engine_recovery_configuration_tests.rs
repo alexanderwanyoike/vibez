@@ -194,7 +194,7 @@ fn global_configuration_failure_retains_stopped_acknowledgement_under_backpressu
 #[test]
 fn exhausted_handoff_closes_source_capture_and_retains_original_cause_and_stop() {
     let (mut engine, _, mut events, _, _) = setup();
-    engine.next_device_handoff = u64::MAX;
+    engine.device_handoff.exhaust_identity_for_test();
     engine.transport.play();
     while engine.event_tx.push(EngineEvent::PlaybackStarted).is_ok() {}
     assert_eq!(
