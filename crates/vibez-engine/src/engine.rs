@@ -736,6 +736,14 @@ mod graph_callback_tests;
 mod default_routing_tests;
 
 #[cfg(test)]
+#[path = "engine_compensation_state_test_support.rs"]
+mod compensation_state_test_support;
+
+#[cfg(test)]
+#[path = "engine_compensation_state_tests.rs"]
+mod compensation_state_tests;
+
+#[cfg(test)]
 #[path = "engine_graph_test_support.rs"]
 mod graph_test_support;
 
