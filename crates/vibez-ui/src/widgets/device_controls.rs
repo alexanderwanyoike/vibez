@@ -26,6 +26,49 @@ pub fn parameter<'a>(
         .get(index)
         .copied()
         .unwrap_or(descriptor.default);
+    let field = value_field(track, effect, state, index, accent);
+    let mut content = column![section_label(descriptor.name)]
+        .spacing(3)
+        .align_x(iced::Alignment::Center);
+    if let Some(size) = knob_size {
+        let mut knob = EffectKnobWidget::new(
+            track,
+            effect.id,
+            index,
+            value,
+            descriptor.min,
+            descriptor.max,
+            descriptor.default,
+            accent,
+        );
+        if descriptor.unit == "Hz" {
+            knob.target = crate::widgets::effect_knob::KnobTarget::LogEffect(effect.id);
+        }
+        content = content.push(canvas(knob).width(size).height(size));
+    }
+    content
+        .push(
+            row![field, text(descriptor.unit).size(8).color(th::text_dim())]
+                .spacing(2)
+                .align_y(iced::Alignment::Center),
+        )
+        .width(Length::Fill)
+        .into()
+}
+
+pub fn value_field<'a>(
+    track: TrackId,
+    effect: &'a UiEffect,
+    state: &'a DeviceControlState,
+    index: usize,
+    accent: Color,
+) -> Element<'a, Message> {
+    let descriptor = &effect.descriptors[index];
+    let value = effect
+        .params
+        .get(index)
+        .copied()
+        .unwrap_or(descriptor.default);
     let shown = state
         .entries
         .get(&index)
@@ -61,7 +104,7 @@ pub fn parameter<'a>(
             value: th::text(),
             selection: th::with_alpha(accent, 0.3),
         });
-    let field = tooltip(
+    tooltip(
         on_blur(input, state.entries.contains_key(&index), submit),
         text(format!(
             "{}: {} to {} {}. Enter applies.",
@@ -72,34 +115,8 @@ pub fn parameter<'a>(
         ))
         .size(9),
         tooltip::Position::Top,
-    );
-    let mut content = column![section_label(descriptor.name)]
-        .spacing(3)
-        .align_x(iced::Alignment::Center);
-    if let Some(size) = knob_size {
-        let mut knob = EffectKnobWidget::new(
-            track,
-            effect.id,
-            index,
-            value,
-            descriptor.min,
-            descriptor.max,
-            descriptor.default,
-            accent,
-        );
-        if descriptor.unit == "Hz" {
-            knob.target = crate::widgets::effect_knob::KnobTarget::LogEffect(effect.id);
-        }
-        content = content.push(canvas(knob).width(size).height(size));
-    }
-    content
-        .push(
-            row![field, text(descriptor.unit).size(8).color(th::text_dim())]
-                .spacing(2)
-                .align_y(iced::Alignment::Center),
-        )
-        .width(Length::Fill)
-        .into()
+    )
+    .into()
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
