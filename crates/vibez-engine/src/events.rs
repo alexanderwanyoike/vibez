@@ -846,6 +846,62 @@ mod tests {
     use super::*;
 
     #[test]
+    fn retired_instrument_media_contract_preserves_identity_value_time_and_debug() {
+        use std::sync::Arc;
+        use vibez_core::audio_buffer::DecodedAudio;
+        use vibez_instruments::InstrumentMediaOwners;
+
+        let sample = Arc::new(DecodedAudio {
+            channels: vec![vec![0.12597656; 64]],
+            sample_rate: 48_000,
+        });
+        let equal_content = Arc::new((*sample).clone());
+        let cases = [
+            (None, None),
+            (None, Some("")),
+            (None, Some("same-name.wav")),
+            (Some(&sample), None),
+            (Some(&sample), Some("")),
+            (Some(&sample), Some("same-name.wav")),
+            (Some(&sample), Some("different-name.wav")),
+            (Some(&equal_content), Some("same-name.wav")),
+        ];
+        let event = |audio: Option<&Arc<DecodedAudio>>, name: Option<&str>| {
+            EngineEvent::RetiredInstrumentMedia(InstrumentMediaOwners {
+                sample: audio.map(Arc::clone),
+                name: name.map(str::to_owned),
+            })
+        };
+        for (left_index, &(left_audio, left_name)) in cases.iter().enumerate() {
+            let left = event(left_audio, left_name);
+            assert_eq!(left.time_domain(), TimeDomain::Untimed);
+            assert_ne!(left, EngineEvent::PlaybackStopped);
+            for (right_index, &(right_audio, right_name)) in cases.iter().enumerate() {
+                let right = event(right_audio, right_name);
+                assert_eq!(left == right, left_index == right_index,
+                    "left={left_index}, right={right_index}");
+                if left_index == right_index {
+                    if let (EngineEvent::RetiredInstrumentMedia(left), EngineEvent::RetiredInstrumentMedia(right)) = (&left, &right) {
+                        if let (Some(left_name), Some(right_name)) = (&left.name, &right.name) {
+                            if !left_name.is_empty() {
+                                assert_ne!(left_name.as_ptr(), right_name.as_ptr(), "equal names use independent storage");
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        let debug = format!("{:?}", event(Some(&sample), Some("debug-name.wav")));
+        assert!(debug.contains("RetiredInstrumentMedia"));
+        assert!(debug.contains("InstrumentMediaOwners"));
+        assert!(debug.contains(&format!("{:p}", Arc::as_ptr(&sample))));
+        assert!(debug.contains("debug-name.wav"));
+        assert!(!debug.contains("channels"));
+        assert!(!debug.contains("sample_rate"));
+        assert!(!debug.contains(&format!("{:?}", sample.channels[0][0])));
+    }
+
+    #[test]
     fn event_variants_are_constructible() {
         let _pos = EngineEvent::PlaybackPosition(44_100);
         let _performance_pos = EngineEvent::PerformancePosition(22_050);
