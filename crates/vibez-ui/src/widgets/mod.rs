@@ -1,4 +1,7 @@
 pub mod audio_clip_detail;
+pub mod bitcrush_controls;
+pub mod bitcrush_device;
+pub mod bitcrush_display;
 pub mod automation_lane;
 pub mod browser_drag_ghost;
 pub mod browser_waveform;

@@ -64,6 +64,11 @@ pub fn parameter_presentation(
 
 pub fn presentation_descriptor(effect: &crate::state::UiEffect, index: usize) -> ParamDescriptor {
     let mut descriptor = effect.descriptors[index];
+    if crate::domains::bitcrush::is_native_bitcrush(effect)
+        && index == vibez_dsp::bitcrush::param::POST_LP_HZ
+    {
+        descriptor.name = "Cutoff";
+    }
     if effect.effect_type == vibez_core::effect::EffectType::Bitcrush
         && effect.plugin_ref.is_none()
         && effect.plugin_name.is_none()

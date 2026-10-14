@@ -24,8 +24,9 @@ pub struct Region {
     pub height: f32,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum DetailPage {
+    #[default]
     Main,
     Color,
     Clock,
@@ -81,6 +82,19 @@ impl DetailPage {
     }
 }
 
+impl std::fmt::Display for DetailPage {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::Main => "Main",
+            Self::Color => "Color",
+            Self::Clock => "Clock",
+            Self::Filter => "Filter",
+            Self::Input => "Input",
+            Self::Output => "Output",
+        })
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DetailCell {
     Parameter(usize),
@@ -122,6 +136,10 @@ pub struct Arrangement {
     pub output_meter: Option<Region>,
     pub divider: Option<Region>,
     pub details: Option<Details>,
+}
+
+pub fn preset_bar_width(width: f32) -> f32 {
+    width - 76.0
 }
 
 pub fn card_width(available: f32) -> f32 {
@@ -219,7 +237,7 @@ pub fn arrange(width: f32, height: f32, advanced: bool, page: DetailPage) -> Arr
         height: height - TOOLBAR_BOTTOM,
     };
     let mut layout = Arrangement {
-        presets: Region { x: 4.0, y: 0.0, width: width - 76.0, height: 26.0 },
+        presets: Region { x: 4.0, y: 0.0, width: preset_bar_width(width), height: 26.0 },
         disclosure: Region { x: width - 64.0, y: 0.0, width: 60.0, height: 26.0 },
         core: Vec::new(),
         scope: None,

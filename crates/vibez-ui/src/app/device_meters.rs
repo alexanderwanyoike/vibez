@@ -31,6 +31,11 @@ pub(super) struct MeterReadings {
 }
 
 impl MeterReadings {
+    pub(super) fn measured_levels(&self) -> Option<(MeterValues, MeterValues)> {
+        self.last_meter_at?;
+        Some((self.input, self.output))
+    }
+
     fn accept(&mut self, input: MeterValues, output: MeterValues, now: Instant) {
         self.input = input;
         self.output = output;

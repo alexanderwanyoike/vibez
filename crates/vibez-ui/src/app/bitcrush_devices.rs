@@ -1,13 +1,28 @@
 //! Routes generation-checked native Bitcrush packets within the selected prepared owner lifecycle.
 
 use super::*;
-use crate::domains::bitcrush::is_native_bitcrush;
+use crate::domains::bitcrush::{is_native_bitcrush, BitcrushMsg};
+use crate::domains::bitcrush_layout::DetailPage;
 use vibez_core::{
     effect::SampleHoldMeter,
     id::{EffectId, TrackId},
 };
 
 impl App {
+    pub(super) fn update_bitcrush_control(&mut self, message: BitcrushMsg) -> Task<Message> {
+        let (track, effect) = message.destination();
+        if self.state.find_track(track).is_some_and(|track| {
+            track.effects.iter().any(|candidate| candidate.id == effect && is_native_bitcrush(candidate))
+        }) {
+            self.bitcrush_panels.entry(effect).or_default().update(message);
+        }
+        Task::none()
+    }
+
+    pub(super) fn bitcrush_page(&self, effect: EffectId) -> DetailPage {
+        self.bitcrush_panels.get(&effect).map_or(DetailPage::Main, |panel| panel.page)
+    }
+
     pub(super) fn bitcrush_sample_hold(&self, effect: EffectId) -> Option<SampleHoldMeter> {
         self.bitcrush_panels.get(&effect)?.meter
     }

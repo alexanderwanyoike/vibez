@@ -85,7 +85,7 @@ impl App {
             cards.push(Some(card));
             used += width;
         }
-        let mut gains = Vec::new();
+        let mut responsive_effects = Vec::new();
         for effect in &track.effects {
             let sidechain = view_sidechain(
                 track_id,
@@ -94,9 +94,11 @@ impl App {
                 &self.state.project_tracks.buses,
                 &self.state.devices,
             );
-            if crate::domains::gain::is_native_gain(effect) {
+            if crate::domains::gain::is_native_gain(effect)
+                || crate::domains::bitcrush::is_native_bitcrush(effect)
+            {
                 used += card_width(effect, Some(0.0), sidechain.is_some());
-                gains.push((cards.len(), effect, sidechain));
+                responsive_effects.push((cards.len(), effect, sidechain));
                 cards.push(None);
                 continue;
             }
@@ -124,16 +126,24 @@ impl App {
                 self.state.transport.sample_rate,
             )));
         }
-        if !gains.is_empty() {
+        if !responsive_effects.is_empty() {
             let spacing = CHAIN_SPACING * cards.len().saturating_sub(1) as f32;
-            let share = (available_width - used - spacing) / gains.len() as f32;
-            let width = crate::widgets::gain_device::card_width(share);
-            for (position, effect, sidechain) in gains {
+            let share = (available_width - used - spacing) / responsive_effects.len() as f32;
+            for (position, effect, sidechain) in responsive_effects {
+                let width = if crate::domains::bitcrush::is_native_bitcrush(effect) {
+                    crate::widgets::bitcrush_device::card_width(share)
+                } else {
+                    crate::widgets::gain_device::card_width(share)
+                };
                 cards[position] = Some(view_effect_slot(
                     track_id,
                     effect,
                     track_color,
-                    Some(self.gain_device_body(track_id, effect, track_color, width)),
+                    Some(if crate::domains::bitcrush::is_native_bitcrush(effect) {
+                        self.bitcrush_device_body(track_id, effect, track_color, width)
+                    } else {
+                        self.gain_device_body(track_id, effect, track_color, width)
+                    }),
                     sidechain,
                     self.state.transport.sample_rate,
                 ));
@@ -202,6 +212,40 @@ impl App {
                 .into(),
             width,
         ))
+    }
+
+    fn bitcrush_device_body<'a>(
+        &'a self,
+        track: TrackId,
+        effect: &'a crate::state::UiEffect,
+        accent: Color,
+        width: f32,
+    ) -> DeviceBody<'a> {
+        let body = iced::widget::responsive(move |size| {
+            let levels = self.device_meters.readings.get(&effect.id)
+                .and_then(device_meters::MeterReadings::measured_levels);
+            let presentations: Vec<_> = (0..effect.descriptors.len())
+                .filter_map(|index| self.device_parameter_presentation(track, effect.id, index))
+                .collect();
+            crate::widgets::bitcrush_device::view(
+                track,
+                effect,
+                accent,
+                self.device_control_state(effect.id),
+                self.bitcrush_page(effect.id),
+                self.view_device_preset_bar(
+                    track,
+                    effect,
+                    accent,
+                    crate::widgets::bitcrush_device::preset_bar_width(size),
+                ),
+                &presentations,
+                self.bitcrush_sample_hold(effect.id),
+                levels,
+                size,
+            )
+        });
+        DeviceBody { content: body.into(), width, padding: iced::Padding::ZERO }
     }
 
     fn gain_device_body<'a>(
