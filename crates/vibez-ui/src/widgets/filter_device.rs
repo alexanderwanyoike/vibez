@@ -236,6 +236,10 @@ mod tests {
                     let layout = arrange(Size::new(width, height), advanced);
                     assert!(TOOLBAR_H + layout.controls + layout.plot <= height + 0.01);
                     assert!(layout.plot >= 14.0);
+                    if advanced {
+                        let content = if layout.beside && layout.plot >= 80.0 { 64.0 } else { 28.0 };
+                        assert!(layout.plot - 4.0 >= content, "modulation contents do not fit {width}x{height}");
+                    }
                     if advanced && width < MEDIUM_W {
                         assert!(!layout.beside);
                     }
