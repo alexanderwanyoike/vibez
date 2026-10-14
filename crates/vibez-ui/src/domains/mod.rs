@@ -62,10 +62,11 @@ pub trait EngineHandle {
         effect_type: vibez_core::effect::EffectType,
         params: &[f32],
     ) {
-        let effect = vibez_dsp::factory::create_effect_with_params(
+        let effect = vibez_dsp::factory::create_effect_for_instance(
             effect_type,
             self.sample_rate() as f32,
             params,
+            effect_id,
         );
         self.send(EngineCommand::InsertEffect {
             track_id,
