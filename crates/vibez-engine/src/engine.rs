@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use rtrb::{Consumer, Producer, RingBuffer};
+#[cfg(test)]
 use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::constants::RING_BUFFER_CAPACITY;
 use vibez_core::id::{SectionId, TrackId};
