@@ -159,8 +159,12 @@ fn drive_neutral_init_renders_uncolored_audio_after_the_declared_delay() {
     use vibez_dsp::drive::{param, DRIVE_PARAMS};
     let init = device_presets::factory_presets(EffectType::Drive)
         .into_iter().find(|preset| preset.name() == "Init").unwrap();
-    let parameters: Vec<_> = crate::domains::drive_presets::KEYS.iter()
-        .map(|key| init.parameters()[*key]).collect();
+    let (app, track, _) = drive_app(0);
+    let destination = &app.state.find_track(track).unwrap().effects[1];
+    let mut parameters = destination.params.clone();
+    for (index, value) in device_presets::prepare_updates(destination, &init).unwrap() {
+        parameters[index] = value;
+    }
     assert_eq!(DRIVE_PARAMS[param::AMOUNT].default, 0.35);
     for rate in [44_100.0, 48_000.0, 96_000.0] {
         let mut effect = vibez_dsp::factory::create_effect_with_params(EffectType::Drive, rate, &parameters);
