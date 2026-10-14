@@ -236,6 +236,56 @@ fn native_bitcrush_wheel_accumulates_steps_before_redraw_and_has_no_boundary_deb
 }
 
 #[test]
+fn native_bitcrush_wheel_acknowledgement_preserves_fractional_carry_across_redraws() {
+    for (kind, current, higher, twice_higher) in [
+        (Kind::Bits, 8.75, 9.0, 10.0),
+        (Kind::Rate, 4.49, 3.0, 2.0),
+    ] {
+        for pixel_delta in [false, true] {
+            for shifted in [false, true] {
+                let mut control = knob(kind, current);
+                let mut batched = EffectKnobState::default();
+                let mut acknowledged = EffectKnobState::default();
+                if shifted {
+                    for state in [&mut batched, &mut acknowledged] {
+                        event(
+                            &control,
+                            state,
+                            canvas::Event::Keyboard(keyboard::Event::ModifiersChanged(
+                                keyboard::Modifiers::SHIFT,
+                            )),
+                            at(20.0, 20.0),
+                        );
+                    }
+                }
+                let units_per_step = if pixel_delta { 20.0 } else { 1.0 }
+                    * if shifted { 5.0 } else { 1.0 };
+                let scroll = |control: &EffectKnobWidget,
+                              state: &mut EffectKnobState,
+                              steps: f32| {
+                    let delta = steps * units_per_step;
+                    if pixel_delta {
+                        pixels(control, state, delta)
+                    } else {
+                        lines(control, state, delta)
+                    }
+                };
+                let expected = scroll(&control, &mut batched, 2.0);
+                assert_eq!(expected, Some(twice_higher));
+                let emitted = scroll(&control, &mut acknowledged, 1.5);
+                assert_eq!(emitted, Some(higher));
+                control.value = emitted.unwrap();
+                assert_eq!(
+                    scroll(&control, &mut acknowledged, 0.5),
+                    expected,
+                    "same-target redraw {kind:?}, pixels={pixel_delta}, Shift={shifted}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn native_bitcrush_fractional_wheel_carry_cannot_cross_exit_target_or_value_replacement() {
     for (kind, current, next, replacement_value) in [
         (Kind::Bits, 8.75, 9.0, 12.75),
