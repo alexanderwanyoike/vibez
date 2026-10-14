@@ -290,3 +290,4 @@ pub mod test_support {
 
 pub mod native_sidechain;
 pub mod gate_layout;
+pub mod gate_history;
