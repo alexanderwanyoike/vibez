@@ -236,7 +236,10 @@ impl AudioEngine {
         }
         self.start_section_record_if_due(timing.boundary);
         let frames_after = frames - frames_before;
-        let Some(section) = self.active_section.filter(|_| !self.presentation_state.is_faulted()) else {
+        let Some(section) = self
+            .active_section
+            .filter(|_| !self.presentation_state.is_faulted())
+        else {
             output[frames_before * channels..].fill(0.0);
             return true;
         };

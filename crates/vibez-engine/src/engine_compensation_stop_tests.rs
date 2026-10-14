@@ -182,7 +182,10 @@ fn failure_capture_stop_survives_a_full_ui_event_ring() {
         crate::retirement::tests::allocations(|| engine.process(&mut [0.0; 128], 2)),
         (0, 0)
     );
-    assert_eq!(engine.presentation_state.terminals.capture_stop(), Some(expected));
+    assert_eq!(
+        engine.presentation_state.terminals.capture_stop(),
+        Some(expected)
+    );
     while events.pop().is_ok() {}
     engine.process(&mut [0.0; 128], 2);
     let delivered: Vec<_> = std::iter::from_fn(|| events.pop().ok()).collect();

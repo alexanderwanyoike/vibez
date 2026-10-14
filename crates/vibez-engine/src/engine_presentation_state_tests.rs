@@ -47,7 +47,12 @@ fn overflowing_capture_delivers_accepted_start_then_stop_cause_and_discovering_o
     }
     let fault_before_owner = fixture.engine.presentation_state.is_faulted();
     assert!(!fault_before_owner);
-    assert!(fixture.engine.presentation_state.terminals.overflow_owner().is_none());
+    assert!(fixture
+        .engine
+        .presentation_state
+        .terminals
+        .overflow_owner()
+        .is_none());
     assert_eq!(
         fixture.engine.scheduled_presentation.len(),
         fixture.engine.scheduled_presentation.capacity()
@@ -70,10 +75,23 @@ fn overflowing_capture_delivers_accepted_start_then_stop_cause_and_discovering_o
     assert!(fixture.engine.compensation_valid);
     assert!(!fixture.engine.capture_active);
     assert!(!fixture.engine.transport.is_playing());
-    assert_eq!(fixture.engine.presentation_state.terminals.capture_stop(), Some(capture_stop));
-    assert!(fixture.engine.presentation_state.terminals.playback_stop_pending());
     assert_eq!(
-        fixture.engine.presentation_state.terminals.failure().unwrap().2,
+        fixture.engine.presentation_state.terminals.capture_stop(),
+        Some(capture_stop)
+    );
+    assert!(fixture
+        .engine
+        .presentation_state
+        .terminals
+        .playback_stop_pending());
+    assert_eq!(
+        fixture
+            .engine
+            .presentation_state
+            .terminals
+            .failure()
+            .unwrap()
+            .2,
         "Audio presentation event history is full"
     );
     assert!(matches!(
@@ -149,10 +167,29 @@ fn overflowing_capture_delivers_accepted_start_then_stop_cause_and_discovering_o
         ]
     );
     assert_eq!(source_index, 2);
-    assert!(fixture.engine.presentation_state.terminals.capture_stop().is_none());
-    assert!(fixture.engine.presentation_state.terminals.failure().is_none());
-    assert!(!fixture.engine.presentation_state.terminals.playback_stop_pending());
-    assert!(fixture.engine.presentation_state.terminals.overflow_owner().is_none());
+    assert!(fixture
+        .engine
+        .presentation_state
+        .terminals
+        .capture_stop()
+        .is_none());
+    assert!(fixture
+        .engine
+        .presentation_state
+        .terminals
+        .failure()
+        .is_none());
+    assert!(!fixture
+        .engine
+        .presentation_state
+        .terminals
+        .playback_stop_pending());
+    assert!(fixture
+        .engine
+        .presentation_state
+        .terminals
+        .overflow_owner()
+        .is_none());
     assert!(fixture.engine.scheduled_presentation.is_empty());
     drop(events);
     assert_eq!(Arc::strong_count(&offsets), 1);
@@ -254,7 +291,11 @@ fn play_with_full_ui_ring_retains_capture_terminals_and_owner_but_cancels_inline
         (0, 0)
     );
     assert!(fixture.engine.presentation_state.is_faulted());
-    assert!(fixture.engine.presentation_state.terminals.playback_stop_pending());
+    assert!(fixture
+        .engine
+        .presentation_state
+        .terminals
+        .playback_stop_pending());
     let mut loss = [0.0; 128];
     assert_eq!(
         crate::retirement::tests::allocations(|| fixture.engine.process(&mut loss, 2)),
@@ -263,12 +304,19 @@ fn play_with_full_ui_ring_retains_capture_terminals_and_owner_but_cancels_inline
     assert_eq!(fixture.engine.event_tx.slots(), 0);
     fixture.drain_command(EngineCommand::Play);
     assert!(!fixture.engine.presentation_state.is_faulted());
-    assert!(!fixture.engine.presentation_state.terminals.playback_stop_pending());
+    assert!(!fixture
+        .engine
+        .presentation_state
+        .terminals
+        .playback_stop_pending());
     assert!(fixture.engine.transport.is_playing());
     assert!(fixture.engine.compensation_valid);
     assert!(!fixture.engine.project_processing_muted());
     assert!(!fixture.engine.capture_active);
-    assert_eq!(fixture.engine.presentation_state.terminals.capture_stop(), Some(capture_stop));
+    assert_eq!(
+        fixture.engine.presentation_state.terminals.capture_stop(),
+        Some(capture_stop)
+    );
     assert_eq!(
         fixture.engine.presentation_state.terminals.failure(),
         Some((
@@ -368,10 +416,29 @@ fn play_with_full_ui_ring_retains_capture_terminals_and_owner_but_cancels_inline
         ]
     );
     assert_eq!(source_index, 2);
-    assert!(fixture.engine.presentation_state.terminals.capture_stop().is_none());
-    assert!(fixture.engine.presentation_state.terminals.failure().is_none());
-    assert!(fixture.engine.presentation_state.terminals.overflow_owner().is_none());
-    assert!(!fixture.engine.presentation_state.terminals.playback_stop_pending());
+    assert!(fixture
+        .engine
+        .presentation_state
+        .terminals
+        .capture_stop()
+        .is_none());
+    assert!(fixture
+        .engine
+        .presentation_state
+        .terminals
+        .failure()
+        .is_none());
+    assert!(fixture
+        .engine
+        .presentation_state
+        .terminals
+        .overflow_owner()
+        .is_none());
+    assert!(!fixture
+        .engine
+        .presentation_state
+        .terminals
+        .playback_stop_pending());
     assert!(fixture.engine.scheduled_presentation.is_empty());
     drop(events);
     assert_eq!(Arc::strong_count(&offsets), 1);
@@ -411,7 +478,10 @@ fn capture_terminals_keep_first_writer_after_public_backward_seek() {
         (0, 0)
     );
     assert!(fixture.engine.presentation_state.is_faulted());
-    assert_eq!(fixture.engine.presentation_state.terminals.capture_stop(), Some(first_boundary));
+    assert_eq!(
+        fixture.engine.presentation_state.terminals.capture_stop(),
+        Some(first_boundary)
+    );
     fixture.drain_command(EngineCommand::Seek(0));
     let later_boundary = fixture.engine.heard_capture_position();
     assert_eq!(later_boundary, 0);
@@ -425,7 +495,10 @@ fn capture_terminals_keep_first_writer_after_public_backward_seek() {
         )),
         (0, 0)
     );
-    assert_eq!(fixture.engine.presentation_state.terminals.capture_stop(), Some(first_boundary));
+    assert_eq!(
+        fixture.engine.presentation_state.terminals.capture_stop(),
+        Some(first_boundary)
+    );
     assert_eq!(
         fixture.engine.presentation_state.terminals.failure(),
         Some((
@@ -461,8 +534,18 @@ fn capture_terminals_keep_first_writer_after_public_backward_seek() {
         }
     }
     assert_eq!(order, ["capture-stop", "cause", "playback-stop"]);
-    assert!(fixture.engine.presentation_state.terminals.capture_stop().is_none());
-    assert!(fixture.engine.presentation_state.terminals.failure().is_none());
+    assert!(fixture
+        .engine
+        .presentation_state
+        .terminals
+        .capture_stop()
+        .is_none());
+    assert!(fixture
+        .engine
+        .presentation_state
+        .terminals
+        .failure()
+        .is_none());
     assert!(fixture.drain_events().is_empty());
     eprintln!(
         "presentation-first-writer baseline: first={first_boundary}; later={later_boundary}; order={order:?}"
