@@ -105,9 +105,9 @@ fn legacy_project_values_keep_their_units_and_append_neutral_character_controls(
     for (index, expected) in [0.73, 0.27, 1.4, 0.31].into_iter().enumerate() {
         assert_eq!(effect.get_param(index), expected);
     }
-    for index in 4..10 {
-        assert!(effect.set_param(index, descriptors[index].max));
-        assert_eq!(effect.get_param(index), descriptors[index].max);
+    for (index, descriptor) in descriptors.iter().enumerate().skip(4) {
+        assert!(effect.set_param(index, descriptor.max));
+        assert_eq!(effect.get_param(index), descriptor.max);
     }
     assert!(!effect.set_param(10, 0.5));
 }
