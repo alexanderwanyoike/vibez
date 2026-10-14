@@ -170,8 +170,11 @@ async fn compressor_save_captures_a_snapshot_without_changing_sound_or_history()
         .unwrap();
     assert_eq!(
         vibez_project::device_preset::load_device_preset(&path).unwrap(),
-        request.preset
+        saved
     );
+    assert_eq!(saved.name(), "Saved Compressor");
+    assert_eq!(saved.kind(), request.preset.kind());
+    assert_eq!(saved.parameters(), request.preset.parameters());
     app.finish_device_preset_save(request, Ok(Some(saved)));
     assert_eq!(
         app.state
