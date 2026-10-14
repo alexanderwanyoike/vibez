@@ -1,3 +1,5 @@
+//! Prepared ownership and parameter commands delivered to the real-time engine.
+
 use std::sync::Arc;
 use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::effect::EffectType;
@@ -101,9 +103,7 @@ pub enum EngineCommand {
     StartPerformanceCapture,
     /// Mark the exact engine boundary where Capture into Arrange stops.
     StopPerformanceCapture,
-    /// Load decoded audio into the engine for playback (legacy single-file).
-    LoadAudio(Arc<DecodedAudio>),
-    /// Remove any loaded audio from the engine (legacy single-file).
+    /// Stop playback and clear the active Perform and Capture lifecycle.
     UnloadAudio,
 
     // -- Multi-track commands --
@@ -516,11 +516,6 @@ mod tests {
         let _seek = EngineCommand::Seek(44_100);
         let _bpm = EngineCommand::SetBpm(140.0);
 
-        let audio = Arc::new(DecodedAudio {
-            channels: vec![vec![0.0; 100], vec![0.0; 100]],
-            sample_rate: 44_100,
-        });
-        let _load = EngineCommand::LoadAudio(audio);
         let _unload = EngineCommand::UnloadAudio;
     }
 
@@ -610,22 +605,26 @@ mod tests {
     }
 
     #[test]
-    fn load_audio_shares_arc() {
+    fn replacement_clip_buffer_shares_arc() {
         let audio = Arc::new(DecodedAudio {
             channels: vec![vec![1.0, 2.0]],
             sample_rate: 48_000,
         });
-        let cmd = EngineCommand::LoadAudio(Arc::clone(&audio));
+        let cmd = EngineCommand::ReplaceClipBuffer {
+            track_id: TrackId::new(),
+            clip_id: ClipId::new(),
+            audio: Arc::clone(&audio),
+        };
 
         // The Arc should have 2 strong references now.
         assert_eq!(Arc::strong_count(&audio), 2);
 
         match cmd {
-            EngineCommand::LoadAudio(a) => {
+            EngineCommand::ReplaceClipBuffer { audio: a, .. } => {
                 assert_eq!(a.num_frames(), 2);
                 assert_eq!(a.sample_rate, 48_000);
             }
-            _ => panic!("expected LoadAudio"),
+            _ => panic!("expected ReplaceClipBuffer"),
         }
     }
 }
