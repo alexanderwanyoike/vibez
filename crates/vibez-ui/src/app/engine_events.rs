@@ -235,7 +235,9 @@ impl App {
                         self.state.status_text = format!("{name}: {reason}");
                     }
                     EngineEvent::RetiredAutomationLane(lane) => drop(lane),
-                    EngineEvent::RetiredInstrumentMedia(owners) => self.sample_retirement.retire(owners),
+                    EngineEvent::RetiredInstrumentMedia(owners) => {
+                        self.sample_retirement.retire(owners)
+                    }
                     EngineEvent::RetiredChannel(channel) => {
                         drop(channel);
                     }

@@ -485,7 +485,9 @@ impl PartialEq for EngineEvent {
             | (Self::SourceNoteRepeated { .. }, Self::SourceNoteRepeated { .. }) => {
                 recording::source_eq(self, other)
             }
-            (Self::RetiredInstrumentMedia(left), Self::RetiredInstrumentMedia(right)) => left == right,
+            (Self::RetiredInstrumentMedia(left), Self::RetiredInstrumentMedia(right)) => {
+                left == right
+            }
             (Self::DisposeEffect(left), Self::DisposeEffect(right)) => left == right,
             (Self::DisposeInstrument(left), Self::DisposeInstrument(right)) => left == right,
             (Self::PlaybackPosition(left), Self::PlaybackPosition(right)) => left == right,
