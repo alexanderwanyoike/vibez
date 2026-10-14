@@ -1,3 +1,5 @@
+//! Offline channel content and device owners prepared before rendering begins.
+
 use super::*;
 use crate::mixer::{EngineClip, EngineNoteClip};
 use vibez_core::effect::EffectInfo;
@@ -96,7 +98,7 @@ pub(super) fn channel(
             continue;
         }
         if let Some(audio) = req.clip_audio.get(&clip.id) {
-            channel.playback_source.clips.push(EngineClip {
+            channel.playback_source.push_audio_clip(EngineClip {
                 id: clip.id,
                 audio: Arc::clone(audio),
                 position: clip.position,
