@@ -48,7 +48,7 @@ pub fn arrange(size: Size, advanced: bool) -> Arrangement {
     let full = size.height >= 220.0;
     let controls = if full { 94.0 } else { 36.0 };
     let details = if advanced && full { 24.0 } else { 0.0 };
-    let graph = if size.height < 114.0 {
+    let graph = if size.height < 120.0 {
         0.0
     } else {
         (size.height - TOOLBAR_H - controls - details).max(0.0)
