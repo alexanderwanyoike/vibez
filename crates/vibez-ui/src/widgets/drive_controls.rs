@@ -42,9 +42,9 @@ fn quality<'a>(track: TrackId, effect: &UiEffect, accent: Color) -> Element<'a, 
         tooltip::Position::Top).into()
 }
 
-fn toggle<'a>(track: TrackId, effect: &UiEffect, index: usize, label: &'static str, accent: Color) -> Element<'a, Message> {
+fn toggle<'a>(track: TrackId, effect: &UiEffect, index: usize, label: Option<&'static str>, accent: Color) -> Element<'a, Message> {
     let active = effect.params.get(index).copied().unwrap_or(effect.descriptors[index].default) >= 0.5;
-    button(text(label).size(9)).padding([2, 4])
+    button(text(label.unwrap_or(if active { "On" } else { "Off" })).size(9)).padding([2, 4])
         .on_press(Message::set_effect_param(track, effect.id, index, if active { 0.0 } else { 1.0 }))
         .style(move |_, _| button::Style {
             text_color: if active { accent } else { th::text_dim() },
@@ -56,7 +56,7 @@ fn toggle<'a>(track: TrackId, effect: &UiEffect, index: usize, label: &'static s
 
 fn frequency<'a>(track: TrackId, effect: &'a UiEffect, state: &'a DeviceControlState, accent: Color,
     enabled: usize, index: usize, label: &'static str) -> Element<'a, Message> {
-    column![section_label(label), row![toggle(track, effect, enabled, "On", accent),
+    column![section_label(label), row![toggle(track, effect, enabled, None, accent),
         container(value_field(track, effect, state, index, accent)).width(54.0), text("Hz").size(8).color(th::text_dim())]
         .spacing(4).align_y(iced::Alignment::Center)].spacing(3).width(Length::Fill).into()
 }
@@ -87,9 +87,9 @@ pub fn advanced<'a>(track: TrackId, effect: &'a UiEffect, state: &'a DeviceContr
         });
     let content: Element<'a, Message> = match panel.page {
         DrivePage::Sound => primary(track, effect, state, accent, None, 1),
-        DrivePage::Filters => row![toggle(track, effect, param::PRE_HP_ENABLED, "HP", accent),
+        DrivePage::Filters => row![toggle(track, effect, param::PRE_HP_ENABLED, Some("HP"), accent),
             parameter_with_heading(track, effect, state, param::PRE_HP_FREQUENCY, accent, None, section_label("Pre HP")),
-            toggle(track, effect, param::POST_LP_ENABLED, "LP", accent),
+            toggle(track, effect, param::POST_LP_ENABLED, Some("LP"), accent),
             parameter_with_heading(track, effect, state, param::POST_LP_FREQUENCY, accent, None, section_label("Post LP"))]
             .spacing(6).align_y(iced::Alignment::Center).into(),
         DrivePage::Quality => row![character(track, effect, accent), quality(track, effect, accent)].spacing(8).into(),

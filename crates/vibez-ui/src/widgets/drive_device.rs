@@ -18,10 +18,11 @@ pub fn preset_bar_width(size: Size) -> f32 {
 }
 
 fn signal_meter<'a>(label: &'static str, levels: MeterValues) -> Element<'a, Message> {
-    column![section_label(label), canvas(LevelMeter { levels }).width(crate::widgets::level_meter::WIDTH).height(Length::Fill),
+    tooltip(column![section_label(label), canvas(LevelMeter { levels }).width(crate::widgets::level_meter::WIDTH).height(Length::Fill),
         text(format!("L {}", db(levels.peak_l))).size(8).font(crate::typography::PERFORM_TECH).wrapping(iced::widget::text::Wrapping::None),
         text(format!("R {}", db(levels.peak_r))).size(8).font(crate::typography::PERFORM_TECH).wrapping(iced::widget::text::Wrapping::None)]
-        .spacing(2).width(METER_WIDTH).height(Length::Fill).into()
+        .spacing(2).width(METER_WIDTH).height(Length::Fill),
+        text("Stereo levels in dBFS. L/R numeric readings show channel peaks.").size(9), tooltip::Position::Top).into()
 }
 
 fn transfer<'a>(meter: Option<&'a WaveShaperMeter>, accent: Color) -> Element<'a, Message> {
@@ -63,10 +64,10 @@ pub fn view<'a>(track: TrackId, effect: &'a UiEffect, accent: Color, state: &'a 
                 .spacing(12).height(Length::Fill).into()
         } else {
             let mut plots = row![].spacing(8).height(Length::Fill);
-            if layout.input_meter { plots = plots.push(signal_meter("Input dBFS", input)); }
+            if layout.input_meter { plots = plots.push(signal_meter("Input", input)); }
             plots = plots.push(container(transfer(meter, accent)).width(layout.transfer_width))
                 .push(container(waveform(meter, accent)).width(layout.waveform_width));
-            if layout.output_meter { plots = plots.push(signal_meter("Output dBFS", output)); }
+            if layout.output_meter { plots = plots.push(signal_meter("Output", output)); }
             if layout.advanced_aside {
                 plots = plots.push(container(drive_controls::aside(track, effect, state, accent))
                     .padding([2, 4]).width(ASIDE_WIDTH));
