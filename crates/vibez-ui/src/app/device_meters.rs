@@ -11,6 +11,10 @@ use crate::state::{DetailPanelTab, UiEffect};
 
 use super::*;
 
+#[cfg(test)]
+#[path = "gate_meter_flow_tests.rs"]
+mod gate_flow_tests;
+
 #[derive(Default)]
 pub(super) struct DeviceMeters {
     pub channel: Option<TrackId>,
