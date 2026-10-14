@@ -1,4 +1,5 @@
 use super::*;
+use crate::events::NoteRepeatedEvent;
 use crate::playback_source::{
     EngineNoteClip, PreparedPlaybackSource, PreparedSectionPlaybackSource,
 };
@@ -34,10 +35,10 @@ fn repeat_engine() -> (
 fn repeat_timestamps(events: &mut rtrb::Consumer<EngineEvent>) -> Vec<u64> {
     let mut timestamps = Vec::new();
     while let Ok(event) = events.pop() {
-        if let EngineEvent::NoteRepeated {
+        if let EngineEvent::NoteRepeated(NoteRepeatedEvent {
             effective_at_samples,
             ..
-        } = event
+        }) = event
         {
             timestamps.push(effective_at_samples);
         }
@@ -48,11 +49,11 @@ fn repeat_timestamps(events: &mut rtrb::Consumer<EngineEvent>) -> Vec<u64> {
 fn repeat_events(events: &mut rtrb::Consumer<EngineEvent>) -> Vec<(u8, u64)> {
     let mut repeated = Vec::new();
     while let Ok(event) = events.pop() {
-        if let EngineEvent::NoteRepeated {
+        if let EngineEvent::NoteRepeated(NoteRepeatedEvent {
             pitch,
             effective_at_samples,
             ..
-        } = event
+        }) = event
         {
             repeated.push((pitch, effective_at_samples));
         }

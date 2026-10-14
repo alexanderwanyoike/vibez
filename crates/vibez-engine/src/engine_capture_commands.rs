@@ -1,6 +1,9 @@
 //! Typed audio-thread capture commands helpers.
 
 use super::*;
+use crate::events::{
+    InstrumentNoteInputEvent, PerformanceCaptureStartedEvent, SourceNoteInputEvent,
+};
 
 impl AudioEngine {
     pub(super) fn command_start_performance_capture(&mut self) {
@@ -29,12 +32,14 @@ impl AudioEngine {
         let section_id = context.section_id;
         let section_position_samples = context.section;
         self.capture_active = true;
-        self.present_event(EngineEvent::PerformanceCaptureStarted {
-            offsets: self.capture_offsets(),
-            effective_at_samples: self.heard_capture_position(),
-            section_id,
-            section_position_samples,
-        });
+        self.present_event(EngineEvent::PerformanceCaptureStarted(
+            PerformanceCaptureStartedEvent {
+                offsets: self.capture_offsets(),
+                effective_at_samples: self.heard_capture_position(),
+                section_id,
+                section_position_samples,
+            },
+        ));
         self.capture_clip_positions.clear();
         for index in 0..self.tracks.len() {
             {
@@ -82,15 +87,15 @@ impl AudioEngine {
             }
         }
         let context = self.live_capture_context(track_id);
-        self.present_event(EngineEvent::SourceNoteInput {
+        self.present_event(EngineEvent::SourceNoteInput(SourceNoteInputEvent {
             track_id,
             pitch,
             velocity,
             on: true,
             position: self.source_recording_position(),
-        });
+        }));
         self.present_event_after(
-            EngineEvent::InstrumentNoteInput {
+            EngineEvent::InstrumentNoteInput(InstrumentNoteInputEvent {
                 track_id,
                 pitch,
                 velocity,
@@ -98,7 +103,7 @@ impl AudioEngine {
                 effective_at_samples: context.perform,
                 section_id: context.section_id,
                 section_position_samples: context.section,
-            },
+            }),
             self.live_path_latency(track_id),
         );
     }
@@ -114,15 +119,15 @@ impl AudioEngine {
             }
         }
         let context = self.live_capture_context(track_id);
-        self.present_event(EngineEvent::SourceNoteInput {
+        self.present_event(EngineEvent::SourceNoteInput(SourceNoteInputEvent {
             track_id,
             pitch,
             velocity: 0,
             on: false,
             position: self.source_recording_position(),
-        });
+        }));
         self.present_event_after(
-            EngineEvent::InstrumentNoteInput {
+            EngineEvent::InstrumentNoteInput(InstrumentNoteInputEvent {
                 track_id,
                 pitch,
                 velocity: 0,
@@ -130,7 +135,7 @@ impl AudioEngine {
                 effective_at_samples: context.perform,
                 section_id: context.section_id,
                 section_position_samples: context.section,
-            },
+            }),
             self.live_path_latency(track_id),
         );
     }

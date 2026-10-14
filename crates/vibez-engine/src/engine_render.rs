@@ -1,6 +1,7 @@
 //! Arrange, Section, and stopped-instrument rendering paths.
 
 use super::*;
+use crate::events::{TrackMeterEvent, TrackNoteActivityEvent};
 
 #[derive(Clone, Copy)]
 pub(super) struct MultitrackRenderBlock<'a> {
@@ -263,11 +264,11 @@ impl AudioEngine {
             // sends. Without a return solo, preserve normal track
             // solo filtering.
             if has_track_solo && !track.solo && !has_bus_solo {
-                let _ = self.event_tx.push(EngineEvent::TrackMeter {
+                let _ = self.event_tx.push(EngineEvent::TrackMeter(TrackMeterEvent {
                     track_id: track.id,
                     peak_l: 0.0,
                     peak_r: 0.0,
-                });
+                }));
                 continue;
             }
 
@@ -333,10 +334,12 @@ impl AudioEngine {
                 // Pad flashes are cosmetic. Never retain them or let them
                 // compete with authoritative input and Capture events after a
                 // UI stall fills the shared ring.
-                let _ = self.event_tx.push(EngineEvent::TrackNoteActivity {
-                    track_id: track.id,
-                    triggered_notes,
-                });
+                let _ =
+                    self.event_tx
+                        .push(EngineEvent::TrackNoteActivity(TrackNoteActivityEvent {
+                            track_id: track.id,
+                            triggered_notes,
+                        }));
             }
 
             if live_input.is_some_and(|input| input.target_track_raw == track.id.raw()) {
@@ -371,11 +374,11 @@ impl AudioEngine {
             }
 
             if !rendered {
-                let _ = self.event_tx.push(EngineEvent::TrackMeter {
+                let _ = self.event_tx.push(EngineEvent::TrackMeter(TrackMeterEvent {
                     track_id: track.id,
                     peak_l: 0.0,
                     peak_r: 0.0,
-                });
+                }));
                 continue;
             }
 
@@ -463,11 +466,11 @@ impl AudioEngine {
                 }
             }
 
-            let _ = self.event_tx.push(EngineEvent::TrackMeter {
+            let _ = self.event_tx.push(EngineEvent::TrackMeter(TrackMeterEvent {
                 track_id,
                 peak_l: track_peak_l,
                 peak_r: track_peak_r,
-            });
+            }));
         }
         if presentation_overflow {
             self.fail_presentation();

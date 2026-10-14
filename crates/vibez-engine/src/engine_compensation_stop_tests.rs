@@ -98,7 +98,7 @@ fn stop_and_unload_retire_delayed_sources_without_resurrecting_playing_state() {
             .any(|event| matches!(event, EngineEvent::PlaybackStopped)));
         assert!(!notifications.iter().any(|event| matches!(
             event,
-            EngineEvent::SectionTransitioned { .. } | EngineEvent::SectionCaptureSource { .. }
+            EngineEvent::SectionTransitioned(_) | EngineEvent::SectionCaptureSource { .. }
         )));
         assert!(notifications
             .iter()

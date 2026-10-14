@@ -1,6 +1,7 @@
 //! Bounded source event ownership and delivery survive UI backpressure.
 
 use super::*;
+use crate::events::{PerformanceCaptureStartedEvent, SectionTransitionedEvent};
 
 pub(super) struct ScheduledPresentation {
     pub(super) due: u64,
@@ -14,26 +15,28 @@ pub(super) const COMMAND_PRESENTATION_RESERVE: usize = 16;
 
 fn cancelled_event(event: EngineEvent) -> EngineEvent {
     match event {
-        EngineEvent::SectionTransitioned { retired, .. } => {
-            EngineEvent::SectionQueueCancelled { retired }
+        EngineEvent::SectionTransitioned(SectionTransitionedEvent { retired, .. }) => {
+            EngineEvent::SectionQueueCancelled {
+                retired: retired.take(),
+            }
         }
         EngineEvent::ClipTransitioned {
             retired: Some(retired),
             ..
         } => EngineEvent::ClipRequestRetired(retired),
         EngineEvent::SectionCaptureSource { offsets, .. }
-        | EngineEvent::PerformanceCaptureStarted { offsets, .. } => {
-            EngineEvent::CaptureTimingRetired(offsets)
-        }
+        | EngineEvent::PerformanceCaptureStarted(PerformanceCaptureStartedEvent {
+            offsets, ..
+        }) => EngineEvent::CaptureTimingRetired(offsets),
         EngineEvent::PlaybackStarted
         | EngineEvent::ClipTransitioned { .. }
         | EngineEvent::ClipSourceRefreshed { .. }
         | EngineEvent::ClipCaptureSource { .. }
         | EngineEvent::SectionCaptureStopped { .. }
         | EngineEvent::PerformanceCaptureStopped { .. }
-        | EngineEvent::InstrumentNoteInput { .. }
-        | EngineEvent::NoteRepeated { .. }
-        | EngineEvent::AutomationGestureChanged { .. } => EngineEvent::PresentationCancelled,
+        | EngineEvent::InstrumentNoteInput(_)
+        | EngineEvent::NoteRepeated(_)
+        | EngineEvent::AutomationGestureChanged(_) => EngineEvent::PresentationCancelled,
         event => event,
     }
 }
@@ -41,19 +44,19 @@ fn cancelled_event(event: EngineEvent) -> EngineEvent {
 fn source_feed(event: &EngineEvent) -> bool {
     matches!(
         event,
-        EngineEvent::SourceNoteInput { .. } | EngineEvent::SourceNoteRepeated { .. }
+        EngineEvent::SourceNoteInput(_) | EngineEvent::SourceNoteRepeated(_)
     )
 }
 
 fn capture_feed(event: &EngineEvent) -> bool {
     matches!(
         event,
-        EngineEvent::PerformanceCaptureStarted { .. }
+        EngineEvent::PerformanceCaptureStarted(_)
             | EngineEvent::PerformanceCaptureStopped { .. }
-            | EngineEvent::InstrumentNoteInput { .. }
-            | EngineEvent::NoteRepeated { .. }
-            | EngineEvent::AutomationGestureChanged { .. }
-            | EngineEvent::TrackMuteChanged { .. }
+            | EngineEvent::InstrumentNoteInput(_)
+            | EngineEvent::NoteRepeated(_)
+            | EngineEvent::AutomationGestureChanged(_)
+            | EngineEvent::TrackMuteChanged(_)
             | EngineEvent::SectionCaptureSource { .. }
             | EngineEvent::SectionCaptureStopped { .. }
             | EngineEvent::ClipCaptureSource { .. }
@@ -318,15 +321,14 @@ impl AudioEngine {
             pending.event = match event {
                 event if pending.due <= self.output_position && capture_feed(&event) => event,
                 EngineEvent::SectionCaptureSource { offsets, .. }
-                | EngineEvent::PerformanceCaptureStarted { offsets, .. } => {
-                    EngineEvent::CaptureTimingRetired(offsets)
-                }
+                | EngineEvent::PerformanceCaptureStarted(PerformanceCaptureStartedEvent {
+                    offsets,
+                    ..
+                }) => EngineEvent::CaptureTimingRetired(offsets),
                 EngineEvent::ClipCaptureSource { .. }
                 | EngineEvent::SectionCaptureStopped { .. }
                 | EngineEvent::PerformanceCaptureStopped { .. }
-                | EngineEvent::AutomationGestureChanged { .. } => {
-                    EngineEvent::PresentationCancelled
-                }
+                | EngineEvent::AutomationGestureChanged(_) => EngineEvent::PresentationCancelled,
                 event => event,
             };
         }

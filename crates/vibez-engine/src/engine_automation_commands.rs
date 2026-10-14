@@ -1,5 +1,8 @@
 //! Audio-thread handlers for manual automation ownership and live gestures.
 
+use crate::events::{
+    AutomationGestureChangedEvent, AutomationOverrideChangedEvent, TrackMuteChangedEvent,
+};
 use vibez_core::automation::AutomationTarget;
 use vibez_core::id::{EffectId, TrackId};
 use vibez_core::perform::SwingOffset;
@@ -121,20 +124,22 @@ impl AudioEngine {
                 at_target.saturating_sub(now - effective_at_samples)
             };
             self.present_event_after(
-                EngineEvent::TrackMuteChanged {
+                EngineEvent::TrackMuteChanged(TrackMuteChangedEvent {
                     track_id: id,
                     muted,
                     effective_at_samples: mapped,
-                },
+                }),
                 self.automation_presentation_delay(id, target),
             );
         }
         if override_changed {
-            self.present_event(EngineEvent::AutomationOverrideChanged {
-                track_id: id,
-                target: AutomationTarget::TrackMute,
-                overridden: true,
-            });
+            self.present_event(EngineEvent::AutomationOverrideChanged(
+                AutomationOverrideChangedEvent {
+                    track_id: id,
+                    target: AutomationTarget::TrackMute,
+                    overridden: true,
+                },
+            ));
         }
     }
 
@@ -274,11 +279,13 @@ impl AudioEngine {
             .channel_mut(track_id)
             .is_some_and(|track| track.set_automation_override(target, overridden));
         if changed {
-            self.present_event(EngineEvent::AutomationOverrideChanged {
-                track_id,
-                target,
-                overridden,
-            });
+            self.present_event(EngineEvent::AutomationOverrideChanged(
+                AutomationOverrideChangedEvent {
+                    track_id,
+                    target,
+                    overridden,
+                },
+            ));
         }
     }
 
@@ -291,7 +298,7 @@ impl AudioEngine {
     ) {
         self.set_automation_override(track_id, target, true);
         self.present_event_after(
-            EngineEvent::AutomationGestureChanged {
+            EngineEvent::AutomationGestureChanged(AutomationGestureChangedEvent {
                 track_id,
                 target,
                 normalized_value: normalized_value.clamp(0.0, 1.0),
@@ -301,7 +308,7 @@ impl AudioEngine {
                     AutomationGesturePhase::Update
                 },
                 effective_at_samples: self.target_automation_position(track_id, target),
-            },
+            }),
             self.automation_presentation_delay(track_id, target),
         );
     }
@@ -355,13 +362,13 @@ impl AudioEngine {
         self.set_automation_override(track_id, target, false);
         if let Some(normalized_value) = normalized_value {
             self.present_event_after(
-                EngineEvent::AutomationGestureChanged {
+                EngineEvent::AutomationGestureChanged(AutomationGestureChangedEvent {
                     track_id,
                     target,
                     normalized_value,
                     phase: AutomationGesturePhase::End,
                     effective_at_samples: self.target_automation_position(track_id, target),
-                },
+                }),
                 self.automation_presentation_delay(track_id, target),
             );
         }

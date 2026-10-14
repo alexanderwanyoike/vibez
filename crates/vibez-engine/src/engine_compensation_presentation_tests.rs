@@ -2,6 +2,10 @@
 
 use super::*;
 use crate::events::SourceRecordingPosition;
+use crate::events::{
+    InstrumentNoteInputEvent, NoteRepeatedEvent, PerformanceCaptureStartedEvent,
+    SectionTransitionedEvent, SourceNoteInputEvent, SourceNoteRepeatedEvent, TrackMuteChangedEvent,
+};
 use crate::playback_source::PreparedSectionPlaybackSource;
 
 #[test]
@@ -10,10 +14,7 @@ fn in_segment_source_feed_does_not_wait_for_a_future_heard_deadline() {
     engine.present_event_after(EngineEvent::PlaybackStarted, 137);
     engine.rendered_callback_frames = 200;
     engine.command_external_note_on(TrackId::new(), 60, 100);
-    assert!(matches!(
-        events.pop(),
-        Ok(EngineEvent::SourceNoteInput { .. })
-    ));
+    assert!(matches!(events.pop(), Ok(EngineEvent::SourceNoteInput(_))));
     assert!(events.pop().is_err());
     engine.rendered_callback_frames = 0;
     engine.output_position = 137;
@@ -28,14 +29,14 @@ fn in_segment_repeat_source_is_immediate_without_advancing_its_heard_copy() {
     engine.present_event_after(EngineEvent::PlaybackStarted, 137);
     let track_id = TrackId::new();
     let rate = NoteRepeatRate::Sixteenth;
-    let source = EngineEvent::SourceNoteRepeated {
+    let source = EngineEvent::SourceNoteRepeated(SourceNoteRepeatedEvent {
         track_id,
         pitch: 60,
         velocity: 100,
         rate,
         position: SourceRecordingPosition::default(),
-    };
-    let heard = EngineEvent::NoteRepeated {
+    });
+    let heard = EngineEvent::NoteRepeated(NoteRepeatedEvent {
         track_id,
         pitch: 60,
         velocity: 100,
@@ -45,7 +46,7 @@ fn in_segment_repeat_source_is_immediate_without_advancing_its_heard_copy() {
         section_id: None,
         section_position_samples: None,
         canonical_section_position_samples: None,
-    };
+    });
     assert_eq!(
         crate::retirement::tests::allocations(|| {
             assert!(presentation_queue::emit_repeated(
@@ -62,7 +63,7 @@ fn in_segment_repeat_source_is_immediate_without_advancing_its_heard_copy() {
     );
     assert!(matches!(
         events.pop(),
-        Ok(EngineEvent::SourceNoteRepeated { .. })
+        Ok(EngineEvent::SourceNoteRepeated(_))
     ));
     assert!(events.pop().is_err());
     engine.output_position = 137;
@@ -71,7 +72,7 @@ fn in_segment_repeat_source_is_immediate_without_advancing_its_heard_copy() {
     assert!(events.pop().is_err());
     engine.output_position = 337;
     engine.flush_presentation();
-    assert!(matches!(events.pop(), Ok(EngineEvent::NoteRepeated { .. })));
+    assert!(matches!(events.pop(), Ok(EngineEvent::NoteRepeated(_))));
 }
 
 #[test]
@@ -79,14 +80,16 @@ fn due_capture_notes_precede_closure_and_continuing_pad_feedback_survives() {
     for closure in 0..3 {
         let (mut engine, _, mut events) = AudioEngine::new();
         let track_id = TrackId::new();
-        let note = |pitch| EngineEvent::InstrumentNoteInput {
-            track_id,
-            pitch,
-            velocity: 100,
-            on: true,
-            effective_at_samples: pitch as u64,
-            section_id: None,
-            section_position_samples: None,
+        let note = |pitch| {
+            EngineEvent::InstrumentNoteInput(InstrumentNoteInputEvent {
+                track_id,
+                pitch,
+                velocity: 100,
+                on: true,
+                effective_at_samples: pitch as u64,
+                section_id: None,
+                section_position_samples: None,
+            })
         };
         engine.present_event_after(note(60), 137);
         engine.present_event_after(note(61), 138);
@@ -110,9 +113,12 @@ fn due_capture_notes_precede_closure_and_continuing_pad_feedback_survives() {
         while events.pop().is_ok() {}
         engine.flush_presentation();
         let received: Vec<_> = std::iter::from_fn(|| events.pop().ok()).collect();
-        let note = received
-            .iter()
-            .position(|event| matches!(event, EngineEvent::InstrumentNoteInput { pitch: 60, .. }));
+        let note = received.iter().position(|event| {
+            matches!(
+                event,
+                EngineEvent::InstrumentNoteInput(InstrumentNoteInputEvent { pitch: 60, .. })
+            )
+        });
         let stop = received
             .iter()
             .position(|event| matches!(event, EngineEvent::PerformanceCaptureStopped { .. }));
@@ -122,8 +128,12 @@ fn due_capture_notes_precede_closure_and_continuing_pad_feedback_survives() {
         );
         engine.output_position = 138;
         engine.flush_presentation();
-        let future_feedback = std::iter::from_fn(|| events.pop().ok())
-            .any(|event| matches!(event, EngineEvent::InstrumentNoteInput { pitch: 61, .. }));
+        let future_feedback = std::iter::from_fn(|| events.pop().ok()).any(|event| {
+            matches!(
+                event,
+                EngineEvent::InstrumentNoteInput(InstrumentNoteInputEvent { pitch: 61, .. })
+            )
+        });
         assert_eq!(future_feedback, closure != 2);
     }
 }
@@ -139,14 +149,16 @@ fn accepted_due_capture_start_reaches_the_ui_before_its_note_and_closure() {
             .push(EngineEvent::PlaybackPosition(0))
             .is_ok()
         {}
-        engine.present_event(EngineEvent::PerformanceCaptureStarted {
-            effective_at_samples: 0,
-            section_id: None,
-            section_position_samples: None,
-            offsets: Arc::clone(&offsets),
-        });
+        engine.present_event(EngineEvent::PerformanceCaptureStarted(
+            PerformanceCaptureStartedEvent {
+                effective_at_samples: 0,
+                section_id: None,
+                section_position_samples: None,
+                offsets: Arc::clone(&offsets),
+            },
+        ));
         engine.present_event_after(
-            EngineEvent::InstrumentNoteInput {
+            EngineEvent::InstrumentNoteInput(InstrumentNoteInputEvent {
                 track_id,
                 pitch: 60,
                 velocity: 100,
@@ -154,7 +166,7 @@ fn accepted_due_capture_start_reaches_the_ui_before_its_note_and_closure() {
                 effective_at_samples: 100,
                 section_id: None,
                 section_position_samples: None,
-            },
+            }),
             100,
         );
         engine.capture_active = true;
@@ -177,10 +189,10 @@ fn accepted_due_capture_start_reaches_the_ui_before_its_note_and_closure() {
         let received: Vec<_> = std::iter::from_fn(|| events.pop().ok()).collect();
         let start = received
             .iter()
-            .position(|event| matches!(event, EngineEvent::PerformanceCaptureStarted { .. }));
+            .position(|event| matches!(event, EngineEvent::PerformanceCaptureStarted(_)));
         let note = received
             .iter()
-            .position(|event| matches!(event, EngineEvent::InstrumentNoteInput { .. }));
+            .position(|event| matches!(event, EngineEvent::InstrumentNoteInput(_)));
         let stop = received
             .iter()
             .position(|event| matches!(event, EngineEvent::PerformanceCaptureStopped { .. }));
@@ -258,11 +270,11 @@ fn newer_immediate_mute_cannot_overtake_a_due_delayed_mute() {
     let (mut engine, _, mut events) = AudioEngine::new();
     let track_id = TrackId::new();
     engine.present_event_after(
-        EngineEvent::TrackMuteChanged {
+        EngineEvent::TrackMuteChanged(TrackMuteChangedEvent {
             track_id,
             muted: true,
             effective_at_samples: 137,
-        },
+        }),
         137,
     );
     engine.output_position = 137;
@@ -274,23 +286,23 @@ fn newer_immediate_mute_cannot_overtake_a_due_delayed_mute() {
     events.pop().unwrap();
     assert_eq!(
         crate::retirement::tests::allocations(|| {
-            engine.present_event(EngineEvent::TrackMuteChanged {
+            engine.present_event(EngineEvent::TrackMuteChanged(TrackMuteChangedEvent {
                 track_id,
                 muted: false,
                 effective_at_samples: 137,
-            });
+            }));
         }),
         (0, 0)
     );
     let mut muted = Vec::new();
     while let Ok(event) = events.pop() {
-        if let EngineEvent::TrackMuteChanged { muted: value, .. } = event {
+        if let EngineEvent::TrackMuteChanged(TrackMuteChangedEvent { muted: value, .. }) = event {
             muted.push(value);
         }
     }
     engine.flush_presentation();
     while let Ok(event) = events.pop() {
-        if let EngineEvent::TrackMuteChanged { muted: value, .. } = event {
+        if let EngineEvent::TrackMuteChanged(TrackMuteChangedEvent { muted: value, .. }) = event {
             muted.push(value);
         }
     }
@@ -305,15 +317,15 @@ fn source_recording_feed_does_not_wait_for_future_heard_state() {
         effective_at_samples: 0,
         ..Default::default()
     };
-    engine.present_event(EngineEvent::SourceNoteInput {
+    engine.present_event(EngineEvent::SourceNoteInput(SourceNoteInputEvent {
         track_id: TrackId::new(),
         pitch: 60,
         velocity: 100,
         on: true,
         position,
-    });
+    }));
     assert!(
-        matches!(events.pop(), Ok(EngineEvent::SourceNoteInput { position: actual, .. }) if actual == position)
+        matches!(events.pop(), Ok(EngineEvent::SourceNoteInput(SourceNoteInputEvent { position: actual, .. })) if actual == position)
     );
     assert!(events.pop().is_err());
     engine.output_position = 521;
@@ -334,20 +346,20 @@ fn capture_only_cancellation_retains_offsets_and_public_section_owner() {
     ));
     let original = &*prepared as *const PreparedSectionPlaybackSource;
     engine.present_event_after(
-        EngineEvent::SectionTransitioned {
+        EngineEvent::SectionTransitioned(SectionTransitionedEvent {
             section_id,
             effective_at_samples: 521,
-            retired: prepared,
-        },
+            retired: crate::events::DisposalCell::new(prepared),
+        }),
         521,
     );
     let track_id = TrackId::new();
     engine.present_event_after(
-        EngineEvent::TrackMuteChanged {
+        EngineEvent::TrackMuteChanged(TrackMuteChangedEvent {
             track_id,
             muted: true,
             effective_at_samples: 64,
-        },
+        }),
         64,
     );
     engine.present_event_after(
@@ -369,13 +381,13 @@ fn capture_only_cancellation_retains_offsets_and_public_section_owner() {
         effective_at_samples: 0,
         ..Default::default()
     };
-    engine.present_event(EngineEvent::SourceNoteInput {
+    engine.present_event(EngineEvent::SourceNoteInput(SourceNoteInputEvent {
         track_id: TrackId::new(),
         pitch: 60,
         velocity: 100,
         on: true,
         position,
-    });
+    }));
     assert_eq!(
         crate::retirement::tests::allocations(|| engine.close_capture_for_device_failure()),
         (0, 0)
@@ -386,13 +398,15 @@ fn capture_only_cancellation_retains_offsets_and_public_section_owner() {
     let mut source_seen = false;
     while let Ok(event) = events.pop() {
         match event {
-            EngineEvent::SourceNoteInput {
+            EngineEvent::SourceNoteInput(SourceNoteInputEvent {
                 position: actual, ..
-            } => {
+            }) => {
                 assert_eq!(actual, position);
                 source_seen = true;
             }
-            EngineEvent::TrackMuteChanged { .. } => panic!("future public mute arrived early"),
+            EngineEvent::TrackMuteChanged(_) => {
+                panic!("future public mute arrived early")
+            }
             EngineEvent::CaptureTimingRetired(_) => panic!("future owner retirement arrived early"),
             _ => {}
         }
@@ -401,7 +415,7 @@ fn capture_only_cancellation_retains_offsets_and_public_section_owner() {
     engine.output_position = 64;
     engine.flush_presentation();
     assert!(
-        matches!(events.pop(), Ok(EngineEvent::TrackMuteChanged { track_id: actual, muted: true, .. }) if actual == track_id)
+        matches!(events.pop(), Ok(EngineEvent::TrackMuteChanged(TrackMuteChangedEvent { track_id: actual, muted: true, .. })) if actual == track_id)
     );
     assert!(events.pop().is_err());
     engine.output_position = 137;
@@ -416,7 +430,7 @@ fn capture_only_cancellation_retains_offsets_and_public_section_owner() {
     engine.output_position = 521;
     engine.flush_presentation();
     let retired = std::iter::from_fn(|| events.pop().ok()).find_map(|event| match event {
-        EngineEvent::SectionTransitioned { retired, .. } => Some(retired),
+        EngineEvent::SectionTransitioned(SectionTransitionedEvent { retired, .. }) => Some(retired),
         _ => None,
     });
     assert_eq!(

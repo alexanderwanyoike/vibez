@@ -1,6 +1,7 @@
 //! Running monitoring changes retain audio already waiting on direct paths.
 
 use super::*;
+use crate::events::{NoteRepeatedEvent, SourceNoteRepeatedEvent};
 use crate::test_support::DelayProbe;
 use vibez_core::id::{ClipId, EffectId};
 use vibez_core::routing::*;
@@ -186,13 +187,13 @@ fn reduced_repeat_coordinates_follow_arrange_history_across_loop_wrap() {
     let mut raw = Vec::new();
     while let Ok(event) = events.pop() {
         match event {
-            EngineEvent::SourceNoteRepeated { position, .. } => {
+            EngineEvent::SourceNoteRepeated(SourceNoteRepeatedEvent { position, .. }) => {
                 raw.push(position.effective_at_samples)
             }
-            EngineEvent::NoteRepeated {
+            EngineEvent::NoteRepeated(NoteRepeatedEvent {
                 effective_at_samples,
                 ..
-            } => heard.push(effective_at_samples),
+            }) => heard.push(effective_at_samples),
             _ => {}
         }
     }

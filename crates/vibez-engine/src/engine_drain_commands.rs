@@ -2,6 +2,7 @@
 //! Split from engine.rs. Runs in the audio callback: keep allocation-free and lock-free.
 
 use super::*;
+use crate::events::SectionSourceRefreshedEvent;
 
 impl AudioEngine {
     /// Drain all pending commands from the ring buffer without blocking.
@@ -202,7 +203,7 @@ impl AudioEngine {
                             true,
                         );
                     }
-                    let event = EngineEvent::SectionSourceRefreshed {
+                    let event = EngineEvent::SectionSourceRefreshed(SectionSourceRefreshedEvent {
                         section_id,
                         applied,
                         effective_at_samples: self.effective_position(),
@@ -211,8 +212,8 @@ impl AudioEngine {
                                 .map(|active| active.position_samples)
                                 .unwrap_or(0)
                         }),
-                        retired: prepared,
-                    };
+                        retired: crate::events::DisposalCell::new(prepared),
+                    });
                     self.present_event_after(event, if applied { self.mix_latency() } else { 0 });
                 }
                 EngineCommand::ArmSectionRecord {

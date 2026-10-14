@@ -364,7 +364,7 @@ fn play_after_one_shot_source_end_cannot_receive_the_old_heard_stop() {
             !started
                 || !matches!(
                     event,
-                    EngineEvent::PlaybackStopped | EngineEvent::SectionTransitioned { .. }
+                    EngineEvent::PlaybackStopped | EngineEvent::SectionTransitioned(_)
                 ),
             "old heard state followed Play"
         );
@@ -385,7 +385,7 @@ fn restarting_before_the_heard_section_end_closes_the_old_capture_first() {
     engine.process(&mut [0.0; 128], 2);
     let mut recording = false;
     while let Ok(event) = events.pop() {
-        if matches!(event, EngineEvent::PerformanceCaptureStarted { .. }) {
+        if matches!(event, EngineEvent::PerformanceCaptureStarted(_)) {
             recording = true;
         }
     }
@@ -414,7 +414,7 @@ fn restarting_before_the_heard_section_end_closes_the_old_capture_first() {
                 playing = true;
             }
             EngineEvent::SectionCaptureSource { .. }
-            | EngineEvent::SectionTransitioned { .. }
+            | EngineEvent::SectionTransitioned(_)
             | EngineEvent::PlaybackStopped => {
                 assert!(!playing, "old Section lifetime survived Play")
             }

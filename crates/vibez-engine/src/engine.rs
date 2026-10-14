@@ -1,3 +1,4 @@
+use crate::events::{MeteringEvent, SectionPlaybackPositionEvent, TrackMeterEvent};
 use std::sync::Arc;
 
 use rtrb::{Consumer, Producer, RingBuffer};
@@ -465,11 +466,11 @@ impl AudioEngine {
                     }
                 }
                 let bus_id = bus.id;
-                let _ = self.event_tx.push(EngineEvent::TrackMeter {
+                let _ = self.event_tx.push(EngineEvent::TrackMeter(TrackMeterEvent {
                     track_id: bus_id,
                     peak_l,
                     peak_r,
-                });
+                }));
             }
 
             // ---- 4.4 Master bus: effect chain + gain over the summed mix.
@@ -580,10 +581,12 @@ impl AudioEngine {
                             })
                     })
                     .unwrap_or((section.section_id, section.position_samples));
-                let _ = self.event_tx.push(EngineEvent::SectionPlaybackPosition {
-                    section_id,
-                    position_samples,
-                });
+                let _ = self.event_tx.push(EngineEvent::SectionPlaybackPosition(
+                    SectionPlaybackPositionEvent {
+                        section_id,
+                        position_samples,
+                    },
+                ));
             }
         }
         if section_ended {
@@ -681,10 +684,12 @@ impl AudioEngine {
                 .and_then(|routing| routing.presentation.audible())
             {
                 if let Some((section_id, local)) = position.section_id.zip(position.section) {
-                    let _ = self.event_tx.push(EngineEvent::SectionPlaybackPosition {
-                        section_id,
-                        position_samples: local.saturating_add(1).min(position.section_length),
-                    });
+                    let _ = self.event_tx.push(EngineEvent::SectionPlaybackPosition(
+                        SectionPlaybackPositionEvent {
+                            section_id,
+                            position_samples: local.saturating_add(1).min(position.section_length),
+                        },
+                    ));
                     let _ = self.event_tx.push(EngineEvent::PerformancePosition(
                         position.perform.saturating_add(1),
                     ));
@@ -700,12 +705,12 @@ impl AudioEngine {
 
         // Master metering event.
         let meters = metering::calculate_meters(output, channels);
-        let _ = self.event_tx.push(EngineEvent::Metering {
+        let _ = self.event_tx.push(EngineEvent::Metering(MeteringEvent {
             peak_l: meters.peak_l,
             peak_r: meters.peak_r,
             rms_l: meters.rms_l,
             rms_r: meters.rms_r,
-        });
+        }));
     }
 
     /// Read the current transport (for inspection / testing).

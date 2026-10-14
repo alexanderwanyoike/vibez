@@ -1,4 +1,8 @@
 use super::*;
+use crate::events::{
+    InstrumentNoteInputEvent, PerformanceCaptureStartedEvent, SectionTransitionedEvent,
+    SourceNoteInputEvent,
+};
 use crate::test_support::DelayProbe;
 use vibez_core::effect::{EffectType, ParamDescriptor};
 use vibez_core::id::{ClipId, EffectId};
@@ -530,18 +534,18 @@ fn reduced_monitoring_capture_uses_the_same_heard_section_identity_and_local_clo
         .unwrap();
     engine.process(&mut [0.0; 2], 2);
     let immediate: Vec<_> = std::iter::from_fn(|| events.pop().ok()).collect();
-    assert!(immediate.iter().any(|event|matches!(event,EngineEvent::SourceNoteInput {position,..} if position.effective_at_samples==1024 && position.section_id==Some(new) && position.section_position_samples==Some(0))));
+    assert!(immediate.iter().any(|event|matches!(event,EngineEvent::SourceNoteInput(SourceNoteInputEvent {position,..}) if position.effective_at_samples==1024 && position.section_id==Some(new) && position.section_position_samples==Some(0))));
     assert!(!immediate.iter().any(
-        |event| matches!(event,EngineEvent::SectionTransitioned{section_id,..} if *section_id==new)
+        |event| matches!(event,EngineEvent::SectionTransitioned(SectionTransitionedEvent {section_id,..}) if *section_id==new)
     ));
-    assert!(immediate.iter().any(|event| matches!(event,EngineEvent::PerformanceCaptureStarted{effective_at_samples:503,section_id:Some(id),section_position_samples:Some(503),..} if *id==old)));
+    assert!(immediate.iter().any(|event| matches!(event,EngineEvent::PerformanceCaptureStarted(PerformanceCaptureStartedEvent {effective_at_samples:503,section_id:Some(id),section_position_samples:Some(503),..}) if *id==old)));
     for _ in 0..3 {
         engine.process(&mut [0.0; 128], 2);
     }
     let notes: Vec<_> = std::iter::from_fn(|| events.pop().ok()).collect();
-    assert!(notes.iter().any(|event| matches!(event,EngineEvent::InstrumentNoteInput{effective_at_samples:640,section_id:Some(id),section_position_samples:Some(128),..} if *id==old)));
+    assert!(notes.iter().any(|event| matches!(event,EngineEvent::InstrumentNoteInput(InstrumentNoteInputEvent {effective_at_samples:640,section_id:Some(id),section_position_samples:Some(128),..}) if *id==old)));
     assert!(!notes.iter().any(
-        |event| matches!(event,EngineEvent::SectionTransitioned{section_id,..} if *section_id==new)
+        |event| matches!(event,EngineEvent::SectionTransitioned(SectionTransitionedEvent {section_id,..}) if *section_id==new)
     ));
     assert!(notes.iter().any(|event| matches!(event, EngineEvent::SectionCaptureSource {section_id,effective_at_samples:1024,offsets,..} if *section_id==new && offsets.as_ref()==[(track,384)])));
     commands
@@ -549,12 +553,12 @@ fn reduced_monitoring_capture_uses_the_same_heard_section_identity_and_local_clo
         .unwrap();
     engine.process(&mut [0.0; 2], 2);
     let restarted: Vec<_> = std::iter::from_fn(|| events.pop().ok()).collect();
-    assert!(restarted.iter().any(|event| matches!(event,EngineEvent::PerformanceCaptureStarted{effective_at_samples:696,section_id:Some(id),section_position_samples:Some(184),..} if *id==old)));
+    assert!(restarted.iter().any(|event| matches!(event,EngineEvent::PerformanceCaptureStarted(PerformanceCaptureStartedEvent {effective_at_samples:696,section_id:Some(id),section_position_samples:Some(184),..}) if *id==old)));
     assert!(restarted.iter().any(|event| matches!(event,EngineEvent::SectionCaptureSource{section_id,effective_at_samples:1024,offsets,..} if *section_id==new && offsets.as_ref()==[(track,384)])));
     for _ in 0..6 {
         engine.process(&mut [0.0; 128], 2);
     }
-    assert!(std::iter::from_fn(|| events.pop().ok()).any(|event| matches!(event,EngineEvent::SectionTransitioned{section_id,effective_at_samples:1024,..} if section_id==new)));
+    assert!(std::iter::from_fn(|| events.pop().ok()).any(|event| matches!(event,EngineEvent::SectionTransitioned(SectionTransitionedEvent {section_id,effective_at_samples:1024,..}) if section_id==new)));
 }
 
 #[test]
@@ -771,7 +775,7 @@ fn capture_replay_with_more_than_retirement_capacity_resumes_without_callback_me
         while let Ok(event) = events.pop() {
             match event {
                 EngineEvent::SectionCaptureSource { .. } => replayed += 1,
-                EngineEvent::PerformanceCaptureStarted { .. } => starts += 1,
+                EngineEvent::PerformanceCaptureStarted(_) => starts += 1,
                 _ => {}
             }
         }
@@ -858,9 +862,9 @@ fn short_one_shot_section_drains_last_content_before_its_heard_stop_notification
         rendered.extend(output);
         while let Ok(event) = events.pop() {
             match event {
-                EngineEvent::SectionTransitioned { section_id, .. } if section_id == section => {
-                    transitioned = Some((block + 1) * 64)
-                }
+                EngineEvent::SectionTransitioned(SectionTransitionedEvent {
+                    section_id, ..
+                }) if section_id == section => transitioned = Some((block + 1) * 64),
                 EngineEvent::PlaybackStopped => stopped = Some((block + 1) * 64),
                 _ => {}
             }

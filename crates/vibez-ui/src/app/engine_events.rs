@@ -1,6 +1,14 @@
 //! UI-thread consumption of audio-engine events.
 
 use vibez_engine::events::EngineEvent;
+use vibez_engine::events::{
+    AutomationGestureChangedEvent, AutomationOverrideChangedEvent, InstrumentNoteInputEvent,
+    MeteringEvent, NoteRepeatedEvent, PerformanceCaptureStartedEvent, SectionPlaybackPositionEvent,
+    SectionQueuedEvent, SectionRecordArmedEvent, SectionRecordStartedEvent,
+    SectionRecordStoppedEvent, SectionSourceRefreshedEvent, SectionTransitionedEvent,
+    SourceNoteInputEvent, SourceNoteRepeatedEvent, TrackMeterEvent, TrackMuteChangedEvent,
+    TrackNoteActivityEvent,
+};
 
 use crate::domains::perform::CapturedTimelineSource;
 use crate::state::AuditionMode;
@@ -9,13 +17,13 @@ use super::*;
 
 fn apply_performed_note(perform: &mut crate::domains::perform::PerformState, event: EngineEvent) {
     match event {
-        EngineEvent::SourceNoteRepeated {
+        EngineEvent::SourceNoteRepeated(SourceNoteRepeatedEvent {
             track_id,
             pitch,
             velocity,
             rate,
             position,
-        } => {
+        }) => {
             perform.clip_record.repeated_note(
                 track_id,
                 pitch,
@@ -34,13 +42,13 @@ fn apply_performed_note(perform: &mut crate::domains::perform::PerformState, eve
                 position.canonical_section_position_samples,
             );
         }
-        EngineEvent::SourceNoteInput {
+        EngineEvent::SourceNoteInput(SourceNoteInputEvent {
             track_id,
             pitch,
             velocity,
             on,
             position,
-        } => {
+        }) => {
             perform.clip_record.note_input(
                 track_id,
                 pitch,
@@ -60,7 +68,7 @@ fn apply_performed_note(perform: &mut crate::domains::perform::PerformState, eve
                 },
             );
         }
-        EngineEvent::NoteRepeated {
+        EngineEvent::NoteRepeated(NoteRepeatedEvent {
             track_id,
             pitch,
             velocity,
@@ -68,7 +76,7 @@ fn apply_performed_note(perform: &mut crate::domains::perform::PerformState, eve
             effective_at_samples,
             canonical_at_samples,
             ..
-        } => {
+        }) => {
             perform.capture.repeated_note(
                 track_id,
                 pitch,
@@ -78,14 +86,14 @@ fn apply_performed_note(perform: &mut crate::domains::perform::PerformState, eve
                 canonical_at_samples,
             );
         }
-        EngineEvent::InstrumentNoteInput {
+        EngineEvent::InstrumentNoteInput(InstrumentNoteInputEvent {
             track_id,
             pitch,
             velocity,
             on,
             effective_at_samples,
             ..
-        } => {
+        }) => {
             perform
                 .capture
                 .input_note(track_id, pitch, velocity, on, effective_at_samples);
@@ -125,10 +133,10 @@ fn apply_drum_pad_flash(
     now: std::time::Instant,
 ) {
     match event {
-        EngineEvent::TrackNoteActivity {
+        EngineEvent::TrackNoteActivity(TrackNoteActivityEvent {
             track_id,
             triggered_notes,
-        } => {
+        }) => {
             let mut notes = *triggered_notes;
             while notes != 0 {
                 let pitch = notes.trailing_zeros() as u8;
@@ -136,15 +144,15 @@ fn apply_drum_pad_flash(
                 notes &= notes - 1;
             }
         }
-        EngineEvent::NoteRepeated {
+        EngineEvent::NoteRepeated(NoteRepeatedEvent {
             track_id, pitch, ..
-        }
-        | EngineEvent::InstrumentNoteInput {
+        })
+        | EngineEvent::InstrumentNoteInput(InstrumentNoteInputEvent {
             track_id,
             pitch,
             on: true,
             ..
-        } => view.trigger_drum_pad_flash(*track_id, *pitch, now),
+        }) => view.trigger_drum_pad_flash(*track_id, *pitch, now),
         _ => {}
     }
 }
@@ -273,7 +281,7 @@ impl App {
                     EngineEvent::PerformancePosition(pos) => {
                         self.state.perform.performance_position_samples = pos;
                     }
-                    EngineEvent::Metering { peak_l, peak_r, .. } => {
+                    EngineEvent::Metering(MeteringEvent { peak_l, peak_r, .. }) => {
                         self.state.peak_l = peak_l.max(self.state.peak_l * 0.85);
                         self.state.peak_r = peak_r.max(self.state.peak_r * 0.85);
                         self.track_meter_peaks.insert(
@@ -425,19 +433,19 @@ impl App {
                     EngineEvent::AuditionPosition(position_frames) => {
                         self.state.browser.audition_position_frames = position_frames;
                     }
-                    EngineEvent::TrackMeter {
+                    EngineEvent::TrackMeter(TrackMeterEvent {
                         track_id,
                         peak_l,
                         peak_r,
-                    } => {
+                    }) => {
                         self.observe_track_meter(track_id, peak_l, peak_r);
                     }
-                    EngineEvent::TrackNoteActivity { .. } => {}
-                    EngineEvent::TrackMuteChanged {
+                    EngineEvent::TrackNoteActivity(_) => {}
+                    EngineEvent::TrackMuteChanged(TrackMuteChangedEvent {
                         track_id,
                         muted,
                         effective_at_samples,
-                    } => {
+                    }) => {
                         self.state.perform.capture.track_mute_changed(
                             track_id,
                             muted,
@@ -466,22 +474,22 @@ impl App {
                         self.state.perform.cancel_track_mute_ui(track_id);
                         self.state.status_text = "Pending Track Mute cleared".into();
                     }
-                    EngineEvent::AutomationOverrideChanged {
+                    EngineEvent::AutomationOverrideChanged(AutomationOverrideChangedEvent {
                         track_id,
                         target,
                         overridden,
-                    } => {
+                    }) => {
                         self.state
                             .automation_ui
                             .set_override(track_id, target, overridden);
                     }
-                    EngineEvent::AutomationGestureChanged {
+                    EngineEvent::AutomationGestureChanged(AutomationGestureChangedEvent {
                         track_id,
                         target,
                         normalized_value,
                         phase,
                         effective_at_samples,
-                    } => {
+                    }) => {
                         self.state.perform.capture.automation_changed(
                             track_id,
                             target,
@@ -490,18 +498,18 @@ impl App {
                             effective_at_samples,
                         );
                     }
-                    event @ (EngineEvent::SourceNoteInput { .. }
-                    | EngineEvent::SourceNoteRepeated { .. }
-                    | EngineEvent::NoteRepeated { .. }
-                    | EngineEvent::InstrumentNoteInput { .. }) => {
+                    event @ (EngineEvent::SourceNoteInput(_)
+                    | EngineEvent::SourceNoteRepeated(_)
+                    | EngineEvent::NoteRepeated(_)
+                    | EngineEvent::InstrumentNoteInput(_)) => {
                         apply_performed_note(&mut self.state.perform, event)
                     }
-                    EngineEvent::SectionRecordArmed {
+                    EngineEvent::SectionRecordArmed(SectionRecordArmedEvent {
                         section_id,
                         track_id,
                         effective_at_samples,
                         ..
-                    } => {
+                    }) => {
                         self.state.perform.section_record.arm(
                             section_id,
                             track_id,
@@ -510,12 +518,12 @@ impl App {
                         self.state.status_text =
                             format!("Section Record pending at sample {effective_at_samples}");
                     }
-                    EngineEvent::SectionRecordStarted {
+                    EngineEvent::SectionRecordStarted(SectionRecordStartedEvent {
                         section_id,
                         track_id,
                         effective_at_samples,
                         section_position_samples,
-                    } => {
+                    }) => {
                         self.state.perform.section_record.start(
                             section_id,
                             track_id,
@@ -524,14 +532,14 @@ impl App {
                         );
                         self.state.status_text = "Section Record running".into();
                     }
-                    EngineEvent::SectionRecordStopped {
+                    EngineEvent::SectionRecordStopped(SectionRecordStoppedEvent {
                         section_id,
                         track_id,
                         effective_at_samples,
                         section_position_samples,
                         started,
                         retired,
-                    } => {
+                    }) => {
                         let completed = self.state.perform.section_record.finish(
                             section_id,
                             track_id,
@@ -542,12 +550,12 @@ impl App {
                         drop(retired);
                         completed_section_recordings.push(completed);
                     }
-                    EngineEvent::PerformanceCaptureStarted {
+                    EngineEvent::PerformanceCaptureStarted(PerformanceCaptureStartedEvent {
                         offsets,
                         effective_at_samples,
                         section_id,
                         section_position_samples,
-                    } => {
+                    }) => {
                         let active = section_id.zip(section_position_samples).and_then(
                             |(section_id, position)| {
                                 self.state
@@ -607,11 +615,11 @@ impl App {
                     } => self.state.perform.capture.end_source(effective_at_samples),
                     EngineEvent::CaptureTimingRetired(offsets) => drop(offsets),
                     EngineEvent::PresentationCancelled => {}
-                    EngineEvent::SectionTransitioned {
+                    EngineEvent::SectionTransitioned(SectionTransitionedEvent {
                         section_id,
                         effective_at_samples,
                         retired,
-                    } => {
+                    }) => {
                         self.state.perform.playing_section = Some(section_id);
                         self.state.perform.queued_section = None;
                         self.state.perform.pending_section_boundary_samples = None;
@@ -620,11 +628,11 @@ impl App {
                             format!("Section playing at sample {effective_at_samples}");
                         drop(retired);
                     }
-                    EngineEvent::SectionQueued {
+                    EngineEvent::SectionQueued(SectionQueuedEvent {
                         section_id,
                         effective_at_samples,
                         retired,
-                    } => {
+                    }) => {
                         self.state.perform.queued_section = Some(section_id);
                         self.state.perform.pending_section_boundary_samples =
                             Some(effective_at_samples);
@@ -635,10 +643,10 @@ impl App {
                         self.state.perform.pending_section_boundary_samples = None;
                         drop(retired);
                     }
-                    EngineEvent::SectionPlaybackPosition {
+                    EngineEvent::SectionPlaybackPosition(SectionPlaybackPositionEvent {
                         section_id,
                         position_samples,
-                    } => {
+                    }) => {
                         if self.state.perform.playing_section == Some(section_id) {
                             self.state.perform.section_playhead_samples = position_samples;
                         }
@@ -647,7 +655,10 @@ impl App {
                             .section_record
                             .observe_playhead(section_id, position_samples);
                     }
-                    EngineEvent::SectionSourceRefreshed { retired, .. } => {
+                    EngineEvent::SectionSourceRefreshed(SectionSourceRefreshedEvent {
+                        retired,
+                        ..
+                    }) => {
                         drop(retired);
                     }
                 }
@@ -831,11 +842,11 @@ mod tests {
         let track_id = TrackId::new();
         let now = std::time::Instant::now();
         let mut view = crate::state::ViewState::default();
-        let clip_activity = EngineEvent::TrackNoteActivity {
+        let clip_activity = EngineEvent::TrackNoteActivity(TrackNoteActivityEvent {
             track_id,
             triggered_notes: (1u128 << 41) | (1u128 << 44),
-        };
-        let repeated = EngineEvent::NoteRepeated {
+        });
+        let repeated = EngineEvent::NoteRepeated(NoteRepeatedEvent {
             track_id,
             pitch: 42,
             velocity: 100,
@@ -845,8 +856,8 @@ mod tests {
             section_id: None,
             section_position_samples: None,
             canonical_section_position_samples: None,
-        };
-        let input = EngineEvent::InstrumentNoteInput {
+        });
+        let input = EngineEvent::InstrumentNoteInput(InstrumentNoteInputEvent {
             track_id,
             pitch: 43,
             velocity: 100,
@@ -854,8 +865,8 @@ mod tests {
             effective_at_samples: 0,
             section_id: None,
             section_position_samples: None,
-        };
-        let input_note_off = EngineEvent::InstrumentNoteInput {
+        });
+        let input_note_off = EngineEvent::InstrumentNoteInput(InstrumentNoteInputEvent {
             track_id,
             pitch: 45,
             velocity: 0,
@@ -863,7 +874,7 @@ mod tests {
             effective_at_samples: 0,
             section_id: None,
             section_position_samples: None,
-        };
+        });
 
         apply_drum_pad_flash(&mut view, &clip_activity, now);
         apply_drum_pad_flash(&mut view, &repeated, now);

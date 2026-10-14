@@ -1,6 +1,7 @@
 //! Execute prepared stage buffers without callback graph searches or allocation.
 
 use super::*;
+use crate::events::{TrackMeterEvent, TrackNoteActivityEvent};
 use vibez_core::routing::{
     adapt_channels, EdgeKind, ExternalInputBlock, ExternalInputId, NodeStage,
 };
@@ -396,10 +397,12 @@ impl AudioEngine {
                         self.fail_presentation();
                     }
                     if activity != 0 {
-                        let _ = self.event_tx.push(EngineEvent::TrackNoteActivity {
-                            track_id: id,
-                            triggered_notes: activity,
-                        });
+                        let _ = self.event_tx.push(EngineEvent::TrackNoteActivity(
+                            TrackNoteActivityEvent {
+                                track_id: id,
+                                triggered_notes: activity,
+                            },
+                        ));
                     }
                 }
                 NodeStage::Sum => {
@@ -688,11 +691,11 @@ impl AudioEngine {
                                 &prepared.nodes[index].samples[..len],
                                 channels,
                             );
-                            let _ = self.event_tx.push(EngineEvent::TrackMeter {
+                            let _ = self.event_tx.push(EngineEvent::TrackMeter(TrackMeterEvent {
                                 track_id: node.channel,
                                 peak_l: levels.peak_l,
                                 peak_r: levels.peak_r,
-                            });
+                            }));
                             if let Some(capture) = capture.as_deref_mut().filter(|capture| {
                                 capture.source_track_raw == node.channel.raw()
                                     && capture.samples.len() >= len

@@ -1,6 +1,9 @@
 //! Engine-clock ownership for Section Record arm/start/stop boundaries.
 
 use super::*;
+use crate::events::{
+    SectionRecordArmedEvent, SectionRecordStartedEvent, SectionRecordStoppedEvent,
+};
 
 pub(super) struct PendingSectionRecord {
     pub(super) section_id: SectionId,
@@ -117,12 +120,12 @@ impl AudioEngine {
             count_in_beat_samples,
             replace_existing,
         });
-        self.present_event(EngineEvent::SectionRecordArmed {
+        self.present_event(EngineEvent::SectionRecordArmed(SectionRecordArmedEvent {
             section_id,
             track_id,
             effective_at_samples,
             section_position_samples,
-        });
+        }));
         self.start_section_record_if_due(self.performance_position);
     }
 
@@ -145,14 +148,14 @@ impl AudioEngine {
             } else {
                 return;
             };
-        let event = EngineEvent::SectionRecordStopped {
+        let event = EngineEvent::SectionRecordStopped(SectionRecordStoppedEvent {
             section_id,
             track_id,
             effective_at_samples: now,
             section_position_samples: local,
             started,
-            retired,
-        };
+            retired: retired.map(crate::events::DisposalCell::new),
+        });
         self.present_event(event);
     }
 
@@ -178,12 +181,14 @@ impl AudioEngine {
             replace_first_pass: pending.replace_existing,
             replace_source_flushed: false,
         });
-        self.present_event(EngineEvent::SectionRecordStarted {
-            section_id: pending.section_id,
-            track_id: pending.track_id,
-            effective_at_samples: pending.effective_at_samples,
-            section_position_samples: pending.section_position_samples,
-        });
+        self.present_event(EngineEvent::SectionRecordStarted(
+            SectionRecordStartedEvent {
+                section_id: pending.section_id,
+                track_id: pending.track_id,
+                effective_at_samples: pending.effective_at_samples,
+                section_position_samples: pending.section_position_samples,
+            },
+        ));
     }
 
     /// A stopped-start count-in may end inside an audio callback. Render the

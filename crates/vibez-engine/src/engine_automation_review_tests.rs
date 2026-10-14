@@ -1,6 +1,7 @@
 //! Controlled Source automation clears absent values across actual timeline edits.
 
 use super::*;
+use crate::events::SourceNoteRepeatedEvent;
 use crate::playback_source::{PreparedPlaybackSource, PreparedSectionPlaybackSource};
 use vibez_core::{
     automation::{AutomationLane, AutomationPoint, AutomationTarget},
@@ -389,7 +390,8 @@ fn deleted_swing_changes_future_repeat_pairs_without_moving_the_inflight_pair() 
             (0, 0)
         );
         while let Ok(event) = events.pop() {
-            if let EngineEvent::SourceNoteRepeated { position, .. } = event {
+            if let EngineEvent::SourceNoteRepeated(SourceNoteRepeatedEvent { position, .. }) = event
+            {
                 at.push(position.effective_at_samples);
             }
         }

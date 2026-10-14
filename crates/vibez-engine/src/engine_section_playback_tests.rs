@@ -2,6 +2,9 @@
 //! boundary so the source-switch implementation remains replaceable.
 
 use super::*;
+use crate::events::{
+    SectionPlaybackPositionEvent, SectionSourceRefreshedEvent, SectionTransitionedEvent,
+};
 
 use std::sync::{Arc, Mutex};
 
@@ -135,11 +138,11 @@ fn resident_section_switches_immediately_and_returns_the_displaced_source() {
     assert!(output.iter().all(|sample| *sample > 0.0));
 
     let transition = std::iter::from_fn(|| events.pop().ok()).find_map(|event| match event {
-        EngineEvent::SectionTransitioned {
+        EngineEvent::SectionTransitioned(SectionTransitionedEvent {
             section_id: actual,
             effective_at_samples,
             retired,
-        } => Some((actual, effective_at_samples, retired)),
+        }) => Some((actual, effective_at_samples, retired)),
         _ => None,
     });
     let (actual, effective_at_samples, retired) = transition.expect("transition event");
@@ -207,12 +210,12 @@ fn refreshing_the_active_section_changes_content_without_restarting_its_playhead
         .position_samples;
     assert_eq!(position, 8, "refresh preserves the four elapsed samples");
     let refresh = std::iter::from_fn(|| events.pop().ok()).find_map(|event| match event {
-        EngineEvent::SectionSourceRefreshed {
+        EngineEvent::SectionSourceRefreshed(SectionSourceRefreshedEvent {
             applied,
             effective_at_samples,
             section_position_samples,
             ..
-        } => Some((applied, effective_at_samples, section_position_samples)),
+        }) => Some((applied, effective_at_samples, section_position_samples)),
         _ => None,
     });
     assert_eq!(refresh, Some((true, 4, Some(4))));
@@ -303,10 +306,10 @@ fn arrangement_loop_does_not_wrap_section_engine_time() {
         .any(|event| matches!(event, EngineEvent::PerformancePosition(3))));
     assert!(events.iter().any(|event| matches!(
         event,
-        EngineEvent::SectionPlaybackPosition {
+        EngineEvent::SectionPlaybackPosition(SectionPlaybackPositionEvent {
             section_id: actual,
             position_samples: 3,
-        } if *actual == section_id
+        }) if *actual == section_id
     )));
 }
 

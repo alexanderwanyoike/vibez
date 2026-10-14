@@ -1,6 +1,7 @@
 //! Capture timestamp regressions at the public engine command/event seam.
 
 use super::*;
+use crate::events::PerformanceCaptureStartedEvent;
 
 use vibez_core::id::{SectionId, TrackId};
 
@@ -20,12 +21,12 @@ fn empty_section(section_id: SectionId, track_id: TrackId) -> Box<PreparedSectio
 
 fn capture_started(events: &mut rtrb::Consumer<EngineEvent>) -> Option<(u64, SectionId, u64)> {
     std::iter::from_fn(|| events.pop().ok()).find_map(|event| match event {
-        EngineEvent::PerformanceCaptureStarted {
+        EngineEvent::PerformanceCaptureStarted(PerformanceCaptureStartedEvent {
             effective_at_samples,
             section_id: Some(section_id),
             section_position_samples: Some(section_position_samples),
             ..
-        } => Some((effective_at_samples, section_id, section_position_samples)),
+        }) => Some((effective_at_samples, section_id, section_position_samples)),
         _ => None,
     })
 }
