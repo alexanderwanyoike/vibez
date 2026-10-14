@@ -598,4 +598,21 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn primary_children_fit_after_separator_and_container_padding_at_intermediate_heights() {
+        for height in [160.0, 180.0, 219.0, 240.0, 279.0, 280.0, 304.0] {
+            for width in [430.0, 740.0, 872.0] {
+                for advanced in [false, true] {
+                    let layout = arrange(Size::new(width, height), advanced);
+                    let child = 8.0 * 1.3 + 3.0 + 10.0 * 1.3 + 2.0
+                        + layout.knobs.map_or(0.0, |knob| knob + 3.0);
+                    let available = layout.controls - 1.0 - 2.0 * 2.0;
+                    assert!(available >= child,
+                        "primary child needs {child}px but only {available}px remains at {width}x{height}");
+                }
+            }
+        }
+    }
+
 }
