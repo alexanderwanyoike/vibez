@@ -90,3 +90,57 @@ impl App {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domains::devices::DevicesMsg;
+    use crate::state::{DetailPanelTab, ProjectTrack, Workspace};
+    use vibez_core::effect::EffectType;
+
+    #[test]
+    fn sample_hold_event_receiver_keeps_packet_chronology_and_rejects_retired_generations() {
+        let mut app = super::super::test_support::app();
+        app.state.transport.sample_rate = 48_000;
+        app.send_command(EngineCommand::SetSampleRate(48_000));
+        app.state.view.workspace = Workspace::Arrange;
+        app.state.view.detail_panel_tab = DetailPanelTab::Devices;
+        let channel = ProjectTrack::new(TrackId::new(), "Bitcrush".into(), 3);
+        let track = channel.id;
+        Arc::make_mut(&mut app.state.project_tracks).tracks.push(channel);
+        let _ = app.update(Message::Devices(DevicesMsg::AddEffect(track, EffectType::Bitcrush)));
+        let effect = app.state.find_track(track).unwrap().effects[0].id;
+        app.state.arrangement.selected_track = Some(track);
+        app.poll_device_meters();
+        let generation = app.device_meters.generation;
+        let mut meter = SampleHoldMeter {
+            count: 2,
+            sample_rate: 48_000.0,
+            first_source_frame: 8192,
+            primary_interval_frames: 4,
+            primary_acquisitions: [1, 0],
+            ..Default::default()
+        };
+        meter.input[..2].copy_from_slice(&[0.125, -0.25]);
+        meter.output[..2].copy_from_slice(&[0.0, 0.0625]);
+        let (mut events, receiver) = rtrb::RingBuffer::new(4);
+        app.event_rx = Some(receiver);
+        events.push(EngineEvent::EffectSampleHold {
+            track_id: track,
+            effect_id: effect,
+            generation,
+            meter,
+        }).unwrap();
+        app.poll_engine_events();
+        assert_eq!(app.bitcrush_sample_hold(effect), Some(meter));
+        app.restart_device_metering();
+        events.push(EngineEvent::EffectSampleHold {
+            track_id: track,
+            effect_id: effect,
+            generation,
+            meter,
+        }).unwrap();
+        app.poll_engine_events();
+        assert!(app.bitcrush_sample_hold(effect).is_none());
+    }
+}
