@@ -83,3 +83,31 @@ fn pre_high_pass_filters_the_actual_shaper_input_at_its_stored_frequency() {
         }
     }
 }
+
+#[test]
+fn post_low_pass_filters_the_processed_wet_signal_and_leaves_dry_mix_aligned() {
+    let period = 2048;
+    for rate in [44_100.0_f32, 48_000.0, 96_000.0] {
+        let input: Vec<_> = (0..period * 3).map(|sample| {
+            let phase = std::f64::consts::TAU * sample as f64 / period as f64;
+            (1e-6 * ((phase * 3.0).sin() + (phase * 501.0).sin())) as f32
+        }).collect();
+        let render = |enabled, cutoff, mix| {
+            let mut effect = create_effect_with_params(EffectType::Drive, rate, &[0.4, 0.5, 1.4, mix, 0.0, 2.0, 0.0, 80.0, enabled, cutoff]);
+            let mut result = input.clone();
+            effect.process(&mut result, 1);
+            result
+        };
+        let unfiltered = render(0.0, 12000.0, 1.0);
+        for cutoff in [1000.0, 12000.0] {
+            let filtered = render(1.0, cutoff, 1.0);
+            for bin in [3, 501] {
+                let expected = butterworth_amplitude(rate as f64, cutoff as f64, bin, period, false);
+                let actual = amplitude(&filtered[period * 2..period * 3], bin) / amplitude(&unfiltered[period * 2..period * 3], bin);
+                assert!((actual - expected).abs() < 5e-5, "rate={rate}, cutoff={cutoff}, bin={bin}: {actual} != {expected}");
+            }
+            let dry = render(1.0, cutoff, 0.0);
+            for sample in 64..input.len() { assert_eq!(dry[sample], input[sample - 64] * 1.4); }
+        }
+    }
+}
