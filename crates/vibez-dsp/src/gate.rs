@@ -227,7 +227,9 @@ impl AudioEffect for GateEffect {
                 let sample = &mut buffer[frame * channels + c];
                 *sample = if self.params[param::DETECTOR_LISTEN] >= 0.5 {
                     detected[c]
-                } else { *sample * gain };
+                } else {
+                    *sample * (1.0 - self.params[param::MIX]) + *sample * gain * self.params[param::MIX]
+                };
             }
         }
     }
