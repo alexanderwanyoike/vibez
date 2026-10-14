@@ -255,3 +255,37 @@ fn gate_diagnostics_report_actual_decisions_hold_order_and_fresh_windows() {
         "a short actual opening must survive the telemetry window despite silent main audio");
     assert!(burst.peak_envelope_db > burst.envelope_db);
 }
+
+#[test]
+fn external_detector_layouts_distinguish_connected_silence_from_safe_fallback() {
+    use vibez_core::routing::{ExternalInputBlock, ExternalInputId};
+    for (id, channels, samples, connected, expected) in [
+        (0, 0, &[][..], true, [0.25, 0.25]),
+        (7, 1, &[0.0, 0.0][..], true, [0.25, 0.25]),
+        (0, 1, &[0.0, 0.0][..], false, [0.25, 0.25]),
+        (0, 1, &[0.0, 0.0][..], true, [0.0, 0.0]),
+        (0, 2, &[][..], true, [0.0, 0.0]),
+        (0, 1, &[0.5][..], true, [0.25, 0.0]),
+        (0, 2, &[0.5][..], true, [0.25, 0.0]),
+        (0, 4, &[0.0, 0.0, 0.9, 0.9, 0.0, 0.0, 0.9, 0.9][..], true, [0.0, 0.0]),
+        (0, usize::MAX, &[0.5, 0.5][..], true, [0.25, 0.0]),
+    ] {
+        let mut effect = GateEffect::new(2.0);
+        for (index, value) in [(0, -20.0), (1, 0.1), (2, 5.0), (3, 0.0)] {
+            assert!(effect.set_param(index, value));
+        }
+        let mut main = [0.25, 0.25];
+        effect.process_with_inputs(&mut main, 1, &[ExternalInputBlock {
+            id: ExternalInputId(id), channels, samples, connected,
+        }]);
+        for (actual, expected) in main.into_iter().zip(expected) {
+            assert!((actual - expected).abs() < 1e-7,
+                "external id{id}/channels{channels}/connected{connected}: {actual} vs {expected}");
+        }
+        let mut no_channels = [0.3, -0.7];
+        effect.process_with_inputs(&mut no_channels, 0, &[ExternalInputBlock {
+            id: ExternalInputId(0), channels: 0, samples: &[], connected: true,
+        }]);
+        assert_eq!(no_channels, [0.3, -0.7]);
+    }
+}
