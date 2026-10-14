@@ -82,14 +82,14 @@ impl canvas::Program<Message> for SampleHoldScope {
                 });
             }
         }
-        caption(&mut frame, "L · unavailable".into(), Point::new(5.0, 3.0), th::text_dim());
+        let label = self.meter.map_or_else(
+            || "L · unavailable".into(),
+            |meter| format!("L · {} samples @ {:.1}k", meter.count, meter.sample_rate / 1000.0),
+        );
+        caption(&mut frame, label, Point::new(5.0, 3.0), th::text_dim());
         caption(&mut frame, "Input".into(), Point::new(bounds.width - 104.0, 3.0), th::text_dim());
         caption(&mut frame, "Output".into(), Point::new(bounds.width - 55.0, 3.0), self.accent);
         if let Some(meter) = self.meter {
-            frame.fill_rectangle(Point::new(2.0, 2.0), iced::Size::new(160.0, 14.0), th::bg_dark());
-            caption(&mut frame,
-                format!("L · {} samples @ {:.1}k", meter.count, meter.sample_rate / 1000.0),
-                Point::new(5.0, 3.0), th::text_dim());
             let count = usize::from(meter.count);
             let denominator = count.saturating_sub(1).max(1) as f32;
             let x = |index: usize| area.x + index as f32 / denominator * area.width;
