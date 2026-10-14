@@ -12,6 +12,7 @@ pub mod arrangement;
 pub mod audio_recording;
 pub mod audio_settings;
 pub mod automation;
+pub mod bitcrush_layout;
 pub mod bitcrush_values;
 pub mod browser;
 pub mod compensation;
