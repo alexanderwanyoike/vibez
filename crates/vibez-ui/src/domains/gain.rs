@@ -40,7 +40,6 @@ impl GainMsg {
 pub enum GainAction {
     None,
     SetParameter(usize, f32),
-    RevealAdvanced(bool),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -65,10 +64,7 @@ pub struct GainPanelState {
 impl GainPanelState {
     pub fn update(&mut self, message: GainMsg, parameters: &[f32]) -> GainAction {
         match message {
-            GainMsg::ToggleAdvanced(_) => {
-                self.advanced = !self.advanced;
-                return GainAction::RevealAdvanced(self.advanced);
-            }
+            GainMsg::ToggleAdvanced(_) => self.advanced = !self.advanced,
             GainMsg::ClearClip(_) => self.clear_clip(),
             GainMsg::SetInput(_, _, index, value) if index < self.input_text.len() => {
                 self.input_text[index] = Some(value);

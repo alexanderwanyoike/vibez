@@ -141,13 +141,6 @@ impl App {
             GainAction::SetParameter(index, value) => {
                 self.update(Message::set_effect_param(track_id, effect_id, index, value))
             }
-            GainAction::RevealAdvanced(open) => iced::widget::scrollable::snap_to(
-                crate::widgets::gain_device::controls_scroll_id(effect_id),
-                iced::widget::scrollable::RelativeOffset {
-                    x: 0.0,
-                    y: if open { 1.0 } else { 0.0 },
-                },
-            ),
             GainAction::None => Task::none(),
         }
     }

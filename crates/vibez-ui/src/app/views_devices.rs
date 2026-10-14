@@ -73,8 +73,9 @@ impl App {
         track_id: TrackId,
         track: &'a UiTrack,
         track_color: Color,
-        _available_width: f32,
+        available_width: f32,
     ) -> Element<'a, Message> {
+        let gain_width = self.gain_card_width(track_id, track, available_width);
         let mut devices_row = row![].spacing(CHAIN_SPACING).height(Length::Fill);
 
         // Instrument device card (branched by kind)
@@ -139,7 +140,7 @@ impl App {
                     })
                 }
             } else if crate::domains::gain::is_native_gain(effect) {
-                Some(self.gain_device_body(track_id, effect, track_color))
+                Some(self.gain_device_body(track_id, effect, track_color, gain_width))
             } else {
                 None
             };
@@ -176,36 +177,81 @@ impl App {
         .into()
     }
 
+    /// Each native Gain's share of the width the rest of the chain leaves.
+    fn gain_card_width(&self, track_id: TrackId, track: &UiTrack, available: f32) -> f32 {
+        use crate::widgets::effect_slot::card_width;
+        let gains = track
+            .effects
+            .iter()
+            .filter(|effect| crate::domains::gain::is_native_gain(effect))
+            .count();
+        if gains == 0 {
+            return crate::widgets::gain_device::COMPACT_W;
+        }
+        let instrument = if track.has_instrument {
+            Some(if track.plugin_instrument_name.is_some() {
+                crate::widgets::device_chrome::PLUGIN_CARD_W
+            } else {
+                match track.instrument_kind {
+                    Some(vibez_core::midi::InstrumentKind::Sampler) => SAMPLER_CARD_W,
+                    Some(vibez_core::midi::InstrumentKind::DrumRack) => drum_rack::DRUM_RACK_CARD_W,
+                    _ => SYNTH_CARD_W,
+                }
+            })
+        } else {
+            track.kind.is_midi().then_some(PLACEHOLDER_W)
+        };
+        let mut others = instrument.unwrap_or(0.0);
+        let mut cards = usize::from(instrument.is_some()) + track.effects.len();
+        for effect in &track.effects {
+            let sidechain = view_sidechain(
+                track_id,
+                effect,
+                &self.state.project_tracks.tracks,
+                &self.state.project_tracks.buses,
+                &self.state.devices,
+            )
+            .is_some();
+            if crate::domains::gain::is_native_gain(effect) {
+                others += card_width(effect, Some(0.0), sidechain);
+                continue;
+            }
+            let custom = (effect.effect_type == vibez_core::effect::EffectType::Eq
+                && effect.plugin_ref.is_none())
+            .then_some(EQ_CARD_W);
+            others += card_width(effect, custom, sidechain);
+        }
+        cards = cards.max(1);
+        let share = (available - others - CHAIN_SPACING * (cards - 1) as f32) / gains as f32;
+        crate::widgets::gain_device::card_width(share)
+    }
+
     fn gain_device_body<'a>(
         &'a self,
         track_id: TrackId,
         effect: &'a crate::state::UiEffect,
         accent: Color,
+        width: f32,
     ) -> DeviceBody<'a> {
-        let width = (self.state.view.window_width - 36.0).clamp(320.0, 900.0);
-        let height = (self.effective_detail_height() - 100.0).max(70.0);
         let panel = self
             .gain_devices
             .panels
             .get(&effect.id)
             .unwrap_or(&self.gain_devices.empty_panel);
-        DeviceBody {
-            content: crate::widgets::gain_device::view(
+        let content = iced::widget::responsive(move |size| {
+            crate::widgets::gain_device::view(
                 track_id,
                 effect,
                 accent,
                 panel,
-                self.view_device_preset_bar(
-                    track_id,
-                    effect,
-                    accent,
-                    width - 20.0 - if height < 120.0 { 80.0 } else { 0.0 },
-                ),
-                width - 20.0,
-                height,
-            ),
+                self.view_device_preset_bar(track_id, effect, accent, size.width - 140.0),
+                size,
+            )
+        });
+        DeviceBody {
+            content: content.into(),
             width,
-            padding: iced::Padding::from([0.0, 10.0]),
+            padding: iced::Padding::ZERO,
         }
     }
 
