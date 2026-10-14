@@ -38,10 +38,14 @@ fn owner_app(owner: Owner) -> (App, TrackId, EffectId) {
     for kind in [EffectType::Gain, EffectType::Bitcrush, EffectType::Gain] {
         let _ = app.update(Message::Devices(DevicesMsg::AddEffect(track, kind)));
     }
+    app.ensure_channel_eq(track);
+    app.ensure_channel_eq(send_id);
     let target = app.state.find_track_mut(track).unwrap();
     target.gain = 0.7;
-    target.pan = 0.37;
-    if !matches!(owner, Owner::Master) { target.sends.push((send_id, 0.3)); }
+    if !matches!(owner, Owner::Master) {
+        target.pan = 0.37;
+        target.sends.push((send_id, 0.3));
+    }
     let effect = target.effects[1].id;
     target.effects[1].params = SOUND.to_vec();
     target.effects[1].bypass = true;
