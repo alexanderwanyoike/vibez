@@ -14,6 +14,7 @@ pub mod eq_display;
 pub mod fader;
 pub mod gain_device;
 pub mod knob;
+pub mod level_meter;
 pub mod local_drag;
 pub mod mini_waveform;
 pub mod mixer_strip;
