@@ -112,6 +112,50 @@ fn snapshots(
 }
 
 #[test]
+fn prepared_drive_edits_transitions_automation_and_meter_reset_never_allocate() {
+    use vibez_dsp::drive::param;
+
+    let (mut engine, _commands, mut events, track, _effect) = fixture();
+    render_window(&mut engine, track, 0.25);
+    snapshots(&mut events);
+    let effect = &mut engine.tracks[0].effects[0].effect;
+    let values: [f32; param::COUNT] = [0.8, 0.65, 0.75, 0.6, 2.0, 1.0, 1.0, 120.0, 1.0, 9000.0];
+    let mut audio = [0.0; 256];
+    let measured = crate::retirement::tests::allocations(|| {
+        for (index, value) in values.into_iter().enumerate() {
+            assert!(effect.set_param(index, value));
+        }
+        for block in 0..12 {
+            for pair in audio.as_chunks_mut::<2>().0 {
+                pair.copy_from_slice(&[0.25, -0.125]);
+            }
+            if block == 1 {
+                assert!(effect.set_automated_param(param::AMOUNT, 0.4));
+            }
+            if block == 2 {
+                assert!(effect.set_automated_param(param::MIX, 0.35));
+            }
+            if block == 3 {
+                assert!(effect.set_param(param::CHARACTER, 3.0));
+                assert!(effect.set_param(param::QUALITY, 2.0));
+            }
+            effect.process(&mut audio, 2);
+            let meter = effect.take_waveshaper_meter().unwrap();
+            assert_eq!((meter.count, meter.latency_samples), (128, 64));
+            assert!(meter.input.iter().chain(&meter.output).chain(&meter.transfer).all(|sample| sample.is_finite()));
+        }
+        effect.reset();
+        assert_eq!(effect.take_waveshaper_meter().unwrap().count, 0);
+        audio.fill(0.0);
+        effect.process(&mut audio, 2);
+        let silence = effect.take_waveshaper_meter().unwrap();
+        assert_eq!(silence.count, 128);
+        assert!(silence.input.iter().chain(&silence.output).all(|sample| *sample == 0.0));
+    });
+    assert_eq!(measured, (0, 0));
+}
+
+#[test]
 fn drive_snapshots_follow_selected_track_return_and_master_in_both_render_paths() {
     use vibez_core::routing::{NodeStage, RoutingChannel, RoutingEffect, RoutingNode};
 
