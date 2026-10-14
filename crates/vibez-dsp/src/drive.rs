@@ -68,6 +68,10 @@ pub static DRIVE_PARAMS: &[ParamDescriptor] = &[
 /// after the nonlinearity: low values favor low end, high values brighten.
 pub struct DriveEffect {
     params: [f32; param::COUNT],
+    applied: [f32; param::COUNT],
+    steps: [f32; param::COUNT],
+    remaining: [u32; param::COUNT],
+    started: bool,
     /// One-pole high-shelf-ish state, per channel.
     z: [f32; 2],
     delay: [[f32; 2]; 64],
@@ -92,6 +96,10 @@ impl DriveEffect {
         let sample_rate = if sample_rate.is_finite() && sample_rate >= 2.0 { sample_rate } else { 48_000.0 };
         Self {
             params: std::array::from_fn(|index| DRIVE_PARAMS[index].default),
+            applied: std::array::from_fn(|index| DRIVE_PARAMS[index].default),
+            steps: [0.0; param::COUNT],
+            remaining: [0; param::COUNT],
+            started: false,
             z: [0.0; 2],
             delay: [[0.0; 2]; 64],
             delay_position: 0,
@@ -107,9 +115,31 @@ impl DriveEffect {
         }
     }
 
+    fn edit_parameter(&mut self, index: usize, value: f32, automated: bool) -> bool {
+        let Some(descriptor) = DRIVE_PARAMS.get(index) else { return false; };
+        if index >= param::CHARACTER && !value.is_finite() { return false; }
+        let value = value.clamp(descriptor.min, descriptor.max);
+        let target = match index {
+            param::CHARACTER | param::QUALITY => value.round(),
+            param::PRE_HP_ENABLED | param::POST_LP_ENABLED => f32::from(value >= 0.5),
+            _ => value,
+        };
+        if !automated && self.params[index] == target { return true; }
+        self.params[index] = target;
+        let choice = matches!(index, param::CHARACTER | param::QUALITY | param::PRE_HP_ENABLED | param::POST_LP_ENABLED);
+        if automated || !self.started || choice {
+            self.applied[index] = target;
+            self.remaining[index] = 0;
+        } else {
+            self.steps[index] = (target - self.applied[index]) / RAMP_FRAMES as f32;
+            self.remaining[index] = RAMP_FRAMES;
+        }
+        true
+    }
+
     fn drive_gain(&self) -> f32 {
         // Amount 0 → 1x, Amount 1 → ~30x
-        let a = self.params[param::AMOUNT].clamp(0.0, 1.0);
+        let a = self.applied[param::AMOUNT].clamp(0.0, 1.0);
         1.0 + a * a * 29.0
     }
 }
@@ -144,13 +174,13 @@ impl AudioEffect for DriveEffect {
         for (point, output) in meter.transfer.iter_mut().enumerate() {
             let input = -1.0 + point as f32 / 32.0;
             let u = (input * gain).clamp(-1.0, 1.0);
-            let shaped = match self.params[param::CHARACTER] as usize {
+            let shaped = match self.applied[param::CHARACTER] as usize {
                 2 => 1.5 * u - 0.5 * u * u * u,
                 3 => u,
                 _ => (input * gain).tanh() / gain.tanh(),
             };
-            let processed = input * (1.0 - self.params[param::AMOUNT]) + shaped * self.params[param::AMOUNT];
-            *output = (input * (1.0 - self.params[param::MIX]) + processed * self.params[param::MIX]) * self.params[param::OUTPUT];
+            let processed = input * (1.0 - self.applied[param::AMOUNT]) + shaped * self.applied[param::AMOUNT];
+            *output = (input * (1.0 - self.applied[param::MIX]) + processed * self.applied[param::MIX]) * self.applied[param::OUTPUT];
         }
         self.meter_count = 0;
         Some(meter)
@@ -169,15 +199,11 @@ impl AudioEffect for DriveEffect {
     }
 
     fn set_param(&mut self, index: usize, value: f32) -> bool {
-        let Some(descriptor) = DRIVE_PARAMS.get(index) else { return false; };
-        if index >= param::CHARACTER && !value.is_finite() { return false; }
-        let value = value.clamp(descriptor.min, descriptor.max);
-        self.params[index] = match index {
-            param::CHARACTER | param::QUALITY => value.round(),
-            param::PRE_HP_ENABLED | param::POST_LP_ENABLED => f32::from(value >= 0.5),
-            _ => value,
-        };
-        true
+        self.edit_parameter(index, value, false)
+    }
+
+    fn set_automated_param(&mut self, index: usize, value: f32) -> bool {
+        self.edit_parameter(index, value, true)
     }
 
     fn get_param(&self, index: usize) -> f32 {
@@ -188,24 +214,46 @@ impl AudioEffect for DriveEffect {
         if channels == 0 {
             return;
         }
-        self.pre_hp.configure(self.sample_rate, self.params[param::PRE_HP_FREQUENCY], true);
-        self.post_lp.configure(self.sample_rate, self.params[param::POST_LP_FREQUENCY], false);
         let ch = channels.min(2);
         let frames = buffer.len() / channels;
-        let drive = self.drive_gain();
-        let norm = drive.tanh();
-        let amount = self.params[param::AMOUNT].clamp(0.0, 1.0);
+        let mut drive = self.drive_gain();
+        let mut norm = drive.tanh();
+        let mut cached_amount = self.applied[param::AMOUNT];
         let tone_beta = (-std::f64::consts::TAU * 1000.0 / self.sample_rate as f64).exp();
-        let low_gain = 10.0_f64.powf(-6.0 * (self.params[param::TONE] as f64 * 2.0 - 1.0) / 20.0);
-        let high_gain = low_gain.recip();
-        let tilt = self.params[param::TONE] * 2.0 - 1.0; // -1 darker, +1 brighter
+        let mut cached_tone = self.applied[param::TONE];
+        let mut low_gain = 10.0_f64.powf(-6.0 * (cached_tone as f64 * 2.0 - 1.0) / 20.0);
+        let mut high_gain = low_gain.recip();
+        let mut filter_frequencies = [f32::NAN; 2];
 
         for frame in 0..frames {
+            self.started = true;
+            for index in 0..param::COUNT {
+                if self.remaining[index] > 0 {
+                    self.remaining[index] -= 1;
+                    self.applied[index] = if self.remaining[index] == 0 { self.params[index] } else { self.applied[index] + self.steps[index] };
+                }
+            }
+            if cached_amount != self.applied[param::AMOUNT] {
+                cached_amount = self.applied[param::AMOUNT];
+                drive = self.drive_gain();
+                norm = drive.tanh();
+            }
+            if cached_tone != self.applied[param::TONE] {
+                cached_tone = self.applied[param::TONE];
+                low_gain = 10.0_f64.powf(-6.0 * (cached_tone as f64 * 2.0 - 1.0) / 20.0);
+                high_gain = low_gain.recip();
+            }
+            let frequencies = [self.applied[param::PRE_HP_FREQUENCY], self.applied[param::POST_LP_FREQUENCY]];
+            if frequencies[0] != filter_frequencies[0] { self.pre_hp.configure(self.sample_rate, frequencies[0], true); }
+            if frequencies[1] != filter_frequencies[1] { self.post_lp.configure(self.sample_rate, frequencies[1], false); }
+            filter_frequencies = frequencies;
+            let amount = self.applied[param::AMOUNT];
+            let tilt = self.applied[param::TONE] * 2.0 - 1.0;
             for c in 0..ch {
                 let idx = frame * channels + c;
                 let dry = buffer[idx];
                 let filtered = self.pre_hp.process(dry, c);
-                let shaper_input = if self.params[param::PRE_HP_ENABLED] == 0.0 { dry } else { filtered };
+                let shaper_input = if self.applied[param::PRE_HP_ENABLED] == 0.0 { dry } else { filtered };
                 let sat = (shaper_input * drive).tanh() / norm;
                 // One-pole tilt: mixes current with previous sample.
                 // tilt > 0 emphasises difference (bright); < 0 smooths.
@@ -219,8 +267,8 @@ impl AudioEffect for DriveEffect {
                 self.delay[self.delay_position][c] = processed;
                 let aligned_dry = self.dry_delay[self.delay_position][c];
                 self.dry_delay[self.delay_position][c] = dry;
-                let character = self.params[param::CHARACTER] as usize;
-                let quality = self.params[param::QUALITY] as usize;
+                let character = self.applied[param::CHARACTER] as usize;
+                let quality = self.applied[param::QUALITY] as usize;
                 let mut modern = 0.0;
                 for (index, path) in self.oversampling.iter_mut().enumerate() {
                     let selected = if index == quality { character.checked_sub(1) } else { None };
@@ -229,15 +277,15 @@ impl AudioEffect for DriveEffect {
                 let input = modern as f64;
                 let low = &mut self.modern_low[c];
                 *low = input * (1.0 - tone_beta) + *low * tone_beta;
-                if self.params[param::TONE] != 0.5 { modern = (*low * low_gain + (input - *low) * high_gain) as f32; }
+                if self.applied[param::TONE] != 0.5 { modern = (*low * low_gain + (input - *low) * high_gain) as f32; }
                 let processed = if character == 0 {
                     legacy
                 } else {
                     aligned_dry * (1.0 - amount) + modern * amount
                 };
                 let filtered = self.post_lp.process(processed, c);
-                let processed = if self.params[param::POST_LP_ENABLED] == 0.0 { processed } else { filtered };
-                buffer[idx] = (aligned_dry * (1.0 - self.params[param::MIX]) + processed * self.params[param::MIX]) * self.params[param::OUTPUT];
+                let processed = if self.applied[param::POST_LP_ENABLED] == 0.0 { processed } else { filtered };
+                buffer[idx] = (aligned_dry * (1.0 - self.applied[param::MIX]) + processed * self.applied[param::MIX]) * self.applied[param::OUTPUT];
                 if c == 0 {
                     let point = self.meter_samples as usize % 128;
                     self.meter.input[point] = aligned_dry;
@@ -251,6 +299,9 @@ impl AudioEffect for DriveEffect {
     }
 
     fn reset(&mut self) {
+        self.applied = self.params;
+        self.remaining = [0; param::COUNT];
+        self.started = false;
         self.z = [0.0; 2];
         self.delay = [[0.0; 2]; 64];
         self.delay_position = 0;
