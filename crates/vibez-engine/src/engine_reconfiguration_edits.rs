@@ -127,7 +127,7 @@ impl AudioEngine {
         }
         if invalid {
             self.device_handoff.cancel_pending();
-            self.compensation_suspended = false;
+            self.device_handoff.clear_suspension();
         } else {
             self.device_handoff.retain_edited_target(pending);
         }

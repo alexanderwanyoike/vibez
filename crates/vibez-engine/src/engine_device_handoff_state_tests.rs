@@ -243,7 +243,7 @@ fn local_away_owner_and_resident_restart_keep_independent_gates() {
             let local_audio =
                 overlap_render(&mut engine, &mut events, tracks, &mut trace, partitions);
             let local = engine.device_handoff.pending().unwrap();
-            assert!(local.local_recovery);
+            assert!(local.is_local_recovery());
             assert_eq!(
                 (
                     local.handoff_id,
@@ -294,7 +294,7 @@ fn local_away_owner_and_resident_restart_keep_independent_gates() {
                     still_local.effect_id,
                     still_local.position,
                     still_local.bypass,
-                    still_local.local_recovery
+                    still_local.is_local_recovery()
                 ),
                 (
                     local.handoff_id,
@@ -302,7 +302,7 @@ fn local_away_owner_and_resident_restart_keep_independent_gates() {
                     local.effect_id,
                     local.position,
                     local.bypass,
-                    local.local_recovery
+                    local.is_local_recovery()
                 )
             );
             assert!(trace.owners[1].is_none());
@@ -356,7 +356,7 @@ fn local_away_owner_and_resident_restart_keep_independent_gates() {
                     project.effect_id,
                     project.position,
                     project.bypass,
-                    project.local_recovery
+                    project.is_local_recovery()
                 ),
                 (2, tracks[1], Some(effects[1]), 0, false, false)
             );
@@ -435,7 +435,7 @@ fn local_away_owner_and_resident_restart_keep_independent_gates() {
             assert_eq!(owner_roundtrips, [true, true]);
             let final_position = engine.transport.position();
             let ids = [local.handoff_id, project.handoff_id];
-            let scopes = [local.local_recovery, project.local_recovery];
+            let scopes = [local.is_local_recovery(), project.is_local_recovery()];
             eprintln!("device-handoff-overlap baseline: bypass={bypass}; partitions={partitions:?}; capture_stop={capture_stop}; ids={ids:?}; scopes={scopes:?}; owner_roundtrips={owner_roundtrips:?}; final_position={final_position}; readiness={readiness:?}; order={:?}; local_bits={:?}; loss_bits={:?}; gated_bits={:?}; resumed_bits={:?}",
                 trace.order,
                 local_audio.iter().copied().map(f32::to_bits).collect::<Vec<_>>(),
