@@ -428,3 +428,51 @@ fn pad_state_name_and_source_preparation_preserves_audio_and_canonical_metadata(
         assert_eq!(names, ["from-source.wav"]);
     }
 }
+
+#[test]
+fn completed_or_released_old_voices_leave_the_returned_ui_guard_as_final_owner() {
+    for note_off in [false, true] {
+        let (mut engine, mut commands, mut events) = AudioEngine::new();
+        let track = TrackId::new();
+        let original = audio(0.5);
+        let weak = Arc::downgrade(&original);
+        commands.push(EngineCommand::SetSampleRate(1000)).unwrap();
+        commands.push(EngineCommand::add_track(track)).unwrap();
+        commands.push(EngineCommand::set_built_in_instrument(track, InstrumentKind::DrumRack, 1000)).unwrap();
+        commands.push(EngineCommand::set_drum_rack_pad_state(track, 0, vibez_core::track::DrumPadState {
+            fade_in_ms: 0.0, fade_out_ms: 0.0, one_shot: false, ..Default::default()
+        })).unwrap();
+        commands.push(EngineCommand::LoadDrumRackPadSample { track_id: track, pad_index: 0,
+            sample: original, sample_name: "old-playing-voice.wav".into() }).unwrap();
+        commands.push(EngineCommand::ExternalNoteOn { track_id: track, pitch: 36, velocity: 127 }).unwrap();
+        engine.process(&mut [0.0; 16], 1);
+        while events.pop().is_ok() {}
+        commands.push(EngineCommand::LoadDrumRackPadSample { track_id: track, pad_index: 0,
+            sample: audio(0.25), sample_name: "next-generation.wav".into() }).unwrap();
+        assert_eq!(crate::retirement::tests::allocations(|| engine.process(&mut [0.0; 16], 1)), (0, 0));
+        let guard = std::iter::from_fn(|| events.pop().ok()).find_map(|event| match event {
+            EngineEvent::RetiredInstrumentMedia(owners) => owners.sample,
+            _ => None,
+        }).expect("UI retains the returned old sample while a voice still reads it");
+        assert_eq!(Arc::as_ptr(&guard), weak.as_ptr());
+        assert_eq!(weak.strong_count(), 2);
+        if note_off {
+            commands.push(EngineCommand::ExternalNoteOff { track_id: track, pitch: 36 }).unwrap();
+        }
+        let mut output = [0.0; 4096];
+        assert_eq!(crate::retirement::tests::allocations(|| engine.process(&mut output, 1)), (0, 0));
+        if note_off {
+            assert_eq!(output, [0.0; 4096]);
+        } else {
+            assert_eq!(&output[..4064], &[0.5; 4064]);
+            assert_eq!(&output[4064..], &[0.0; 32]);
+        }
+        assert_eq!(weak.strong_count(), 1, "only the UI guard remains, note_off={note_off}");
+        drop(guard);
+        assert_eq!(weak.strong_count(), 0);
+        commands.push(EngineCommand::ExternalNoteOn { track_id: track, pitch: 36, velocity: 127 }).unwrap();
+        let mut next = [0.0; 16];
+        assert_eq!(crate::retirement::tests::allocations(|| engine.process(&mut next, 1)), (0, 0));
+        assert_eq!(next, [0.25; 16]);
+    }
+}
