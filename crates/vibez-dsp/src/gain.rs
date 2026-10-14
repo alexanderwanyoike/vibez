@@ -42,11 +42,20 @@ static GAIN_PARAMS: &[ParamDescriptor] = &[
     },
 ];
 
+/// Frames a change takes to reach its new gain, about 11 ms at 44.1 kHz: long
+/// enough that a polarity flip, which ramps through zero, does not click.
+const RAMP_FRAMES: u32 = 512;
+
 pub struct GainEffect {
     gain: f32,
     trim_db: [f32; 2],
     inverted: [bool; 2],
     channel_gains: [f32; 2],
+    applied_gains: [f32; 2],
+    ramp_steps: [f32; 2],
+    ramp_remaining: u32,
+    /// Values set before any audio, as a project loads, apply at once.
+    started: bool,
 }
 
 impl Default for GainEffect {
@@ -56,6 +65,10 @@ impl Default for GainEffect {
             trim_db: [0.0; 2],
             inverted: [false; 2],
             channel_gains: [1.0; 2],
+            applied_gains: [1.0; 2],
+            ramp_steps: [0.0; 2],
+            ramp_remaining: 0,
+            started: false,
         }
     }
 }
@@ -63,6 +76,24 @@ impl Default for GainEffect {
 impl GainEffect {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    fn set_targets(&mut self, index: usize, value: f32) -> bool {
+        if !value.is_finite() {
+            return false;
+        }
+        match index {
+            0 => self.gain = value.clamp(0.0, 2.0),
+            1 | 2 => self.trim_db[index - 1] = value.clamp(-24.0, 24.0),
+            3 | 4 => self.inverted[index - 3] = value >= 0.5,
+            _ => return false,
+        }
+        for channel in 0..2 {
+            let polarity = if self.inverted[channel] { -1.0 } else { 1.0 };
+            self.channel_gains[channel] =
+                self.gain * 10.0_f32.powf(self.trim_db[channel] / 20.0) * polarity;
+        }
+        true
     }
 }
 
@@ -80,20 +111,27 @@ impl AudioEffect for GainEffect {
     }
 
     fn set_param(&mut self, index: usize, value: f32) -> bool {
-        if !value.is_finite() {
+        if !self.set_targets(index, value) {
             return false;
         }
-        match index {
-            0 => self.gain = value.clamp(0.0, 2.0),
-            1 | 2 => self.trim_db[index - 1] = value.clamp(-24.0, 24.0),
-            3 | 4 => self.inverted[index - 3] = value >= 0.5,
-            _ => return false,
+        if self.started {
+            for channel in 0..2 {
+                self.ramp_steps[channel] = (self.channel_gains[channel]
+                    - self.applied_gains[channel])
+                    / RAMP_FRAMES as f32;
+            }
+            self.ramp_remaining = RAMP_FRAMES;
+        } else {
+            self.applied_gains = self.channel_gains;
         }
-        for channel in 0..2 {
-            let polarity = if self.inverted[channel] { -1.0 } else { 1.0 };
-            self.channel_gains[channel] =
-                self.gain * 10.0_f32.powf(self.trim_db[channel] / 20.0) * polarity;
+        true
+    }
+
+    fn set_automated_param(&mut self, index: usize, value: f32) -> bool {
+        if !self.set_targets(index, value) {
+            return false;
         }
+        self.reset();
         true
     }
 
@@ -107,10 +145,22 @@ impl AudioEffect for GainEffect {
     }
 
     fn process(&mut self, buffer: &mut [f32], channels: usize) {
+        self.started = true;
         for frame in buffer.chunks_mut(channels.max(1)) {
+            if self.ramp_remaining > 0 {
+                self.ramp_remaining -= 1;
+                self.applied_gains = if self.ramp_remaining == 0 {
+                    self.channel_gains
+                } else {
+                    [
+                        self.applied_gains[0] + self.ramp_steps[0],
+                        self.applied_gains[1] + self.ramp_steps[1],
+                    ]
+                };
+            }
             for (channel, sample) in frame.iter_mut().enumerate() {
                 *sample *= self
-                    .channel_gains
+                    .applied_gains
                     .get(channel)
                     .copied()
                     .unwrap_or(self.gain);
@@ -118,7 +168,10 @@ impl AudioEffect for GainEffect {
         }
     }
 
-    fn reset(&mut self) {}
+    fn reset(&mut self) {
+        self.applied_gains = self.channel_gains;
+        self.ramp_remaining = 0;
+    }
 }
 
 #[cfg(test)]
@@ -219,10 +272,11 @@ mod tests {
 
         assert!(fx.set_param(3, 0.0));
         assert!(fx.set_param(4, 1.0));
-        let mut buffer = [0.5, 0.5];
+        let mut buffer = [0.5; 2 * (RAMP_FRAMES as usize + 1)];
         fx.process(&mut buffer, 2);
-        assert!((buffer[0] - 0.5).abs() < 1e-6);
-        assert!((buffer[1] - (-0.125)).abs() < 1e-6);
+        let settled = &buffer[buffer.len() - 2..];
+        assert!((settled[0] - 0.5).abs() < 1e-6);
+        assert!((settled[1] - (-0.125)).abs() < 1e-6);
     }
 
     #[test]
