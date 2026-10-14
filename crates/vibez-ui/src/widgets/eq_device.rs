@@ -242,7 +242,7 @@ fn analyser_controls<'a>(
 ) -> Element<'a, Message> {
     row![
         choice(
-            if active { "Live" } else { "Analyse" },
+            if active { "Tapped" } else { "Analyse" },
             active,
             accent,
             Message::EqControl(EqMsg::Focus(track, effect.id))
