@@ -393,3 +393,51 @@ fn automated_cut_and_audition_are_exact_from_the_first_new_sample() {
         assert_eq!(a, b, "parameter {index}");
     }
 }
+
+#[test]
+fn continuous_edits_begin_near_the_unedited_signal_and_settle_to_the_requested_response() {
+    for (index, target) in [
+        (0, 15.0),
+        (1, 450.0),
+        (3, -15.0),
+        (4, 2500.0),
+        (5, 4.0),
+        (6, -15.0),
+        (7, 7000.0),
+        (8, 4.0),
+        (9, 15.0),
+        (10, 16000.0),
+    ] {
+        let mut p = settings();
+        p[0] = 6.0;
+        p[3] = 6.0;
+        p[6] = 6.0;
+        p[9] = 6.0;
+        let mut manual = EqEffect::from_params(48_000.0, &p);
+        let mut unchanged = EqEffect::from_params(48_000.0, &p);
+        let warmup = signal(1300.0, 48000.0, 48001);
+        manual.process(&mut warmup.clone(), 1);
+        unchanged.process(&mut warmup.clone(), 1);
+        manual.set_param(index, target);
+        let next = 0.2 * (std::f32::consts::TAU * 1300.0 * 48001.0 / 48000.0).sin();
+        let mut a = [next];
+        let mut b = a;
+        manual.process(&mut a, 1);
+        unchanged.process(&mut b, 1);
+        assert!(
+            (a[0] - b[0]).abs() < 0.003,
+            "parameter {index}: edited {}, reference {}",
+            a[0],
+            b[0]
+        );
+        manual.process(&mut signal(1300.0, 48000.0, 1024), 1);
+        p[index] = target;
+        let expected = EqEffect::from_params(48_000.0, &p);
+        for frequency in [60.0, 700.0, 3000.0, 18000.0] {
+            assert!(
+                (manual.response_db(frequency) - expected.response_db(frequency)).abs() < 1e-5,
+                "parameter {index}"
+            );
+        }
+    }
+}
