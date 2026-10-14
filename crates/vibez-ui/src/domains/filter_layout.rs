@@ -291,4 +291,44 @@ mod tests {
         assert!(minimum.modulation.unwrap().height >= 14.0);
         assert!(minimum.primary.height >= 28.0);
     }
+
+    #[test]
+    fn filter_mode_and_slope_choices_survive_every_resize_transition() {
+        for width in [430.0, 464.0, 619.0, 620.0, 660.0, 819.0, 820.0, 900.0] {
+            for height in (64..=400).map(|height| height as f32) {
+                for advanced in [false, true] {
+                    let layout = arrange(width, height, advanced);
+                    if advanced && height < 114.0 {
+                        assert!(arrange(width, height, false).modes.is_some());
+                    } else {
+                        assert!(layout.modes.is_some(),
+                            "mode and slope choices lost at {width}x{height}, Advanced={advanced}");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_vertical_type_bank_fits_its_native_children_or_gets_a_wide_fallback() {
+        let native_bank_height = 5.0 * 20.0 + 2.0 * 10.4 + 7.0 * 4.0;
+        for width in [820.0, 900.0] {
+            for height in 114..=400 {
+                for advanced in [false, true] {
+                    let layout = arrange(width, height as f32, advanced);
+                    if let Some(modes) = layout.modes {
+                        if layout.vertical_modes {
+                            assert!(modes.height >= native_bank_height,
+                                "vertical mode bank clips at {width}x{height}: {} < {native_bank_height}",
+                                modes.height);
+                        } else {
+                            assert!(modes.width >= 178.0,
+                                "horizontal choices cannot fit an88px vertical-bank column");
+                        }
+                    }
+                }
+            }
+        }
+    }
+
 }
