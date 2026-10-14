@@ -114,6 +114,7 @@ pub struct BitcrushEffect {
     scope: Scope,
     random: Random,
     source_frames: u64,
+    processed_channels: usize,
     lanes: Lanes,
 }
 
@@ -154,6 +155,7 @@ impl BitcrushEffect {
             scope: Scope::default(),
             random: Random::for_identity(identity),
             source_frames: 0,
+            processed_channels: 0,
             lanes: Lanes::new(Configuration::from_params(&params)),
         }
     }
@@ -252,6 +254,11 @@ impl AudioEffect for BitcrushEffect {
         if frames == 0 {
             return;
         }
+        if self.processed_channels != 0 && self.processed_channels != ch {
+            self.lanes.clear_histories();
+            self.post_lp.reset();
+        }
+        self.processed_channels = ch;
         self.started = true;
         for frame in 0..frames {
             if let Some(value) = self.drive.advance(self.params[param::DRIVE_DB]) {
@@ -302,6 +309,7 @@ impl AudioEffect for BitcrushEffect {
 
     fn reset(&mut self) {
         self.source_frames = 0;
+        self.processed_channels = 0;
         self.scope = Scope::default();
         self.lanes = Lanes::new(Configuration::from_params(&self.params));
         self.mix.edit(self.params[param::MIX], true);

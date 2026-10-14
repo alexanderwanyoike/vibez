@@ -108,6 +108,13 @@ impl Lanes {
             pending: None }
     }
 
+    pub(super) fn clear_histories(&mut self) {
+        for lane in &mut self.lanes {
+            lane.hold = [0.0; 2];
+            lane.clock = Clock::default();
+        }
+    }
+
     pub(super) fn edit(&mut self, index: usize, value: f32, immediate: bool) {
         if !matches!(index, param::BITS | param::SR_REDUCE | param::ROUNDING | param::DITHER) {
             return;
