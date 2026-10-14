@@ -188,3 +188,26 @@ fn manual_output_moves_in_512_host_frames_while_automation_is_sample_exact() {
         }
     }
 }
+
+#[test]
+fn nonfinite_edits_are_rejected_without_mutating_targets_or_active_ramps() {
+    let mut effect = create_effect_with_params(EffectType::Drive, 48_000.0, &[0.0, 0.5, 1.0, 1.0]);
+    effect.process(&mut [0.5; 128], 1);
+    assert!(effect.set_param(2, 2.0));
+    for index in 0..10 {
+        let target = effect.get_param(index);
+        for invalid in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            assert!(!effect.set_param(index, invalid), "manual index={index}, invalid={invalid}");
+            assert!(!effect.set_automated_param(index, invalid), "automation index={index}, invalid={invalid}");
+            assert_eq!(effect.get_param(index), target);
+        }
+    }
+    assert!(!effect.set_param(10, 0.0));
+    assert!(!effect.set_automated_param(usize::MAX, 0.0));
+    let mut actual = [0.5; 640];
+    effect.process(&mut actual, 1);
+    for (frame, actual) in actual.into_iter().enumerate() {
+        let expected = 0.5 * (1.0 + (frame + 1).saturating_sub(64).min(512) as f32 / 512.0);
+        assert_eq!(actual, expected, "frame={frame}");
+    }
+}
