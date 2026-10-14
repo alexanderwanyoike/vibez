@@ -563,3 +563,113 @@ fn full_ui_routing_admission_retains_rejected_plan_until_retired_graph_returns()
         "compensation-plan-full-ring baseline: capture_stop={capture_stop}; accepted_at_credit=3; readiness={readiness:?}; order={order:?}; effect_returns={removed}; original_plan_returns=1; automation_plan_returns=1; rejection_returns=1; allocations=(0,0)"
     );
 }
+
+#[test]
+fn capture_admission_uses_applied_plan_validity_instead_of_global_processing_gate() {
+    for start in [
+        StartingCondition::Running,
+        StartingCondition::AwaitingPlan,
+        StartingCondition::DeviceAway,
+        StartingCondition::PresentationFault,
+        StartingCondition::InvalidPlan,
+    ] {
+        let mut fixture = Fixture::new(start);
+        assert_eq!(
+            crate::retirement::tests::allocations(|| fixture.engine.process(&mut [], 2)),
+            (0, 0)
+        );
+        fixture.drain_events();
+        let before = Readiness::observe(&fixture.engine);
+        let allowed = !matches!(start, StartingCondition::InvalidPlan);
+        assert_eq!(before.valid, allowed);
+        assert_eq!(before.muted, !matches!(start, StartingCondition::Running));
+        assert!(!fixture.engine.local_device_failure_pending());
+        assert!(!fixture.engine.capture_active);
+        let capture_start = fixture.engine.heard_capture_position();
+        assert_eq!(capture_start, 64);
+        let plan = std::ptr::from_ref(fixture.engine.routing.as_ref());
+        fixture.drain_command(EngineCommand::StartPerformanceCapture);
+        let after = Readiness::observe(&fixture.engine);
+        assert_eq!(after, before, "{start:?}");
+        assert_eq!(fixture.engine.capture_active, allowed, "{start:?}");
+        assert_eq!(std::ptr::from_ref(fixture.engine.routing.as_ref()), plan);
+        let mut order = Vec::new();
+        let mut source_count = 0;
+        for event in fixture.drain_events() {
+            match event {
+                EngineEvent::PerformanceCaptureStarted {
+                    offsets,
+                    effective_at_samples,
+                    section_id,
+                    section_position_samples,
+                } => {
+                    assert!(allowed, "{start:?}");
+                    assert_eq!(effective_at_samples, capture_start);
+                    assert_eq!(section_id, None);
+                    assert_eq!(section_position_samples, None);
+                    assert!(Arc::ptr_eq(&offsets, &fixture.engine.routing.capture_offsets));
+                    order.push("capture-start");
+                }
+                EngineEvent::ClipCaptureSource {
+                    track_id,
+                    position,
+                    effective_at_samples,
+                } => {
+                    assert!(allowed, "{start:?}");
+                    assert_eq!(track_id, fixture.tracks[source_count]);
+                    assert_eq!(position, 0);
+                    assert_eq!(effective_at_samples, capture_start);
+                    source_count += 1;
+                    order.push("capture-source");
+                }
+                EngineEvent::PerformanceCaptureStopped { effective_at_samples } => {
+                    assert!(!allowed, "{start:?}");
+                    assert_eq!(effective_at_samples, capture_start);
+                    order.push("capture-stop");
+                }
+                EngineEvent::CompensationInvalid { track_id, effect_id, reason } => {
+                    assert!(!allowed, "{start:?}");
+                    assert_eq!(track_id, TrackId::MASTER);
+                    assert_eq!(effect_id, None);
+                    assert_eq!(reason, "Capture requires a valid applied audio configuration");
+                    order.push("invalid-plan-cause");
+                }
+                event => panic!("unexpected {start:?} Capture event: {event:?}"),
+            }
+        }
+        if allowed {
+            assert_eq!(order, ["capture-start", "capture-source", "capture-source"]);
+            assert_eq!(source_count, 2);
+            fixture.drain_command(EngineCommand::StopPerformanceCapture);
+            assert!(!fixture.engine.capture_active);
+            assert_eq!(Readiness::observe(&fixture.engine), before);
+            let stopped = fixture.drain_events();
+            assert_eq!(stopped.len(), 1);
+            assert!(matches!(
+                stopped[0],
+                EngineEvent::PerformanceCaptureStopped { effective_at_samples } if effective_at_samples == capture_start
+            ));
+            order.push("capture-stop");
+        } else {
+            assert_eq!(order, ["capture-stop", "invalid-plan-cause"]);
+            assert_eq!(source_count, 0);
+        }
+        assert_eq!(std::ptr::from_ref(fixture.engine.routing.as_ref()), plan);
+        assert!(!fixture.engine.capture_active);
+        assert!(fixture.drain_events().is_empty());
+        let columns = |state: Readiness| [
+            u8::from(state.valid),
+            u8::from(state.awaiting_plan),
+            u8::from(state.suspended),
+            u8::from(state.handoff),
+            u8::from(state.restart_requested),
+            u8::from(state.presentation_fault),
+            u8::from(state.playing),
+            u8::from(state.muted),
+        ];
+        eprintln!(
+            "compensation-capture-validity baseline: case={start:?}; allowed={}; capture_start={capture_start}; before={:?}; after={:?}; source_count={source_count}; order={order:?}; allocations=(0,0)",
+            u8::from(allowed), columns(before), columns(after),
+        );
+    }
+}
