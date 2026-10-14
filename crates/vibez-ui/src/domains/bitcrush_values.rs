@@ -72,3 +72,69 @@ pub fn parse_rate(text: &str, sample_rate: u32, current: f32) -> Option<f32> {
         },
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{display_rate, parse_rate};
+
+    #[test]
+    fn all_supported_rate_readouts_roundtrip_exact_and_fractional_storage_across_host_rates() {
+        for sample_rate in [44_100_u32, 48_000, 96_000] {
+            for divider in 1..=32 {
+                let hertz = f64::from(sample_rate) / f64::from(divider);
+                let expected = format!("{:.3}k", hertz / 1000.0);
+                let exact = divider as f32;
+                for current in [exact, (exact - 0.49).max(1.0), (exact + 0.49).min(32.0)] {
+                    let shown = display_rate(sample_rate, current).expect("valid prepared rate");
+                    assert_eq!(shown, expected, "Fs={sample_rate}, stored={current}");
+                    for text in [
+                        shown.clone(),
+                        format!(" {} kHz ", shown.trim_end_matches('k')),
+                        format!("{hertz:.3} Hz"),
+                    ] {
+                        let restored = parse_rate(&text, sample_rate, current)
+                            .unwrap_or_else(|| panic!("Fs={sample_rate}, stored={current}: {text}"));
+                        assert_eq!(
+                            restored.to_bits(),
+                            current.to_bits(),
+                            "Fs={sample_rate}, stored={current}: {text}"
+                        );
+                    }
+                }
+            }
+
+            let minimum = f64::from(sample_rate) / 32.0;
+            for text in [
+                format!("{} Hz", minimum - 1.0),
+                format!("{} Hz", sample_rate + 1),
+                "NaN".into(),
+                "inf".into(),
+                "-1 Hz".into(),
+            ] {
+                assert_eq!(parse_rate(&text, sample_rate, 32.0), None, "{text}");
+            }
+            let midpoint = sample_rate * 3 / 4;
+            assert_eq!(parse_rate(&format!("{midpoint} Hz"), sample_rate, 1.0), Some(2.0));
+        }
+
+        for (sample_rate, expected) in [
+            (44_100, "11.025k"),
+            (48_000, "12.000k"),
+            (96_000, "24.000k"),
+        ] {
+            assert_eq!(display_rate(sample_rate, 4.49).as_deref(), Some(expected));
+        }
+        assert_eq!(display_rate(44_100, 32.0).as_deref(), Some("1.378k"));
+        assert_eq!(display_rate(8_000, 32.0).as_deref(), Some("250.000"));
+        assert_eq!(parse_rate("250.000 Hz", 8_000, 31.75), Some(31.75));
+        assert_eq!(display_rate(32_000, 32.0).as_deref(), Some("1.000k"));
+        for sample_rate in [0, 1] {
+            assert_eq!(display_rate(sample_rate, 4.49), None);
+            assert_eq!(parse_rate("12.000k", sample_rate, 4.49), None);
+        }
+        for invalid in [0.0, 33.0, f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            assert_eq!(display_rate(44_100, invalid), None);
+            assert_eq!(parse_rate("1.378k", 44_100, invalid), None);
+        }
+    }
+}
