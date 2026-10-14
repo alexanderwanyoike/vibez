@@ -234,6 +234,9 @@ mod sample_retirement;
 mod instrument_media_retirement_tests;
 
 #[cfg(test)]
+mod instrument_media_shutdown_tests;
+
+#[cfg(test)]
 mod project_format_v1_tests;
 
 impl Drop for App {
