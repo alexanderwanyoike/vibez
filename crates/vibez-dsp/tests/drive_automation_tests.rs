@@ -141,3 +141,19 @@ fn quality_switches_mix_only_aligned_warm_paths_and_automation_does_not_ramp() {
         }
     }
 }
+
+#[test]
+fn exact_automation_on_other_controls_preserves_an_unfinished_manual_ramp() {
+    let mut effect = create_effect_with_params(EffectType::Drive, 48_000.0, &[0.0, 0.5, 1.0, 1.0]);
+    effect.process(&mut [0.5; 128], 1);
+    assert!(effect.set_param(2, 2.0));
+    let mut output = [0.5; 640];
+    effect.process(&mut output[..128], 1);
+    assert!(effect.set_param(2, 2.0));
+    for (index, value) in [(4, 3.0), (5, 0.0), (1, 1.0), (3, 1.0)] { assert!(effect.set_automated_param(index, value)); }
+    effect.process(&mut output[128..], 1);
+    for (frame, actual) in output.into_iter().enumerate() {
+        let expected = 0.5 * (1.0 + (frame + 1).saturating_sub(64).min(512) as f32 / 512.0);
+        assert_eq!(actual, expected, "frame={frame}");
+    }
+}
