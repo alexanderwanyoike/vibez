@@ -78,7 +78,7 @@ impl AudioEngine {
             if self.retain_device_parameter(&cmd) {
                 continue;
             }
-            if self.routing.is_some() && cmd.edits_effect_chain() {
+            if cmd.edits_effect_chain() {
                 self.graph_edit_pending = true;
             }
             match cmd {

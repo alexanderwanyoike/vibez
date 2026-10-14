@@ -37,16 +37,6 @@ fn split_track_output_capture<'a>(
     )
 }
 
-fn write_track_output_sample(
-    capture: Option<&mut TrackOutputCapture<'_>>,
-    index: usize,
-    sample: f32,
-) {
-    if let Some(destination) = capture.and_then(|capture| capture.samples.get_mut(index)) {
-        *destination = sample;
-    }
-}
-
 impl AudioEngine {
     /// Multi-track rendering: render each track, apply gain/pan, sum into output.
     ///
@@ -204,7 +194,7 @@ impl AudioEngine {
                     samples,
                 }
             });
-            self.render_multitrack_frames(
+            self.render_routing_graph(
                 &mut output[start..end],
                 MultitrackRenderBlock {
                     pos: pos.saturating_add(rendered_frames as u64),
@@ -216,266 +206,14 @@ impl AudioEngine {
                         .map(|input| input.slice(rendered_frames, segment_frames, channels)),
                 },
                 segment_capture.as_mut(),
+                false,
+                true,
             );
             rendered_frames += segment_frames;
         }
     }
 
-    fn render_multitrack_frames(
-        &mut self,
-        output: &mut [f32],
-        block: MultitrackRenderBlock<'_>,
-        mut track_output_capture: Option<&mut TrackOutputCapture<'_>>,
-    ) {
-        let MultitrackRenderBlock {
-            pos,
-            repeat_pos,
-            frames,
-            channels,
-            loop_region,
-            live_input,
-        } = block;
-        if self.routing.is_some() {
-            self.render_routing_graph(output, block, track_output_capture, false, true);
-            return;
-        }
-        let has_track_solo = any_solo(&self.tracks);
-        let has_bus_solo = any_solo(&self.buses);
-        let bpm = self.transport.bpm();
-        let samples_per_beat = if bpm > 0.0 {
-            self.sample_rate as f64 * 60.0 / bpm
-        } else {
-            0.0
-        };
-
-        let mut presentation_overflow = false;
-        for track_idx in 0..self.tracks.len() {
-            let track = &mut self.tracks[track_idx];
-            let pos = if self.clip_performance {
-                track
-                    .active_clip
-                    .map_or(0, |clip| clip.position.saturating_add(pos))
-            } else {
-                pos
-            };
-
-            // A soloed return still needs every source to render its
-            // sends. Without a return solo, preserve normal track
-            // solo filtering.
-            if has_track_solo && !track.solo && !has_bus_solo {
-                let _ = self.event_tx.push(EngineEvent::TrackMeter {
-                    track_id: track.id,
-                    peak_l: 0.0,
-                    peak_r: 0.0,
-                });
-                continue;
-            }
-
-            // Block-rate automation: evaluate every lane at the
-            // segment-start beat. Effect/instrument params apply in
-            // place; gain/pan come back as overrides for the sum
-            // stage below.
-            let beat = {
-                if bpm > 0.0 {
-                    pos as f64 * bpm / (self.sample_rate as f64 * 60.0)
-                } else {
-                    0.0
-                }
-            };
-            let (auto_gain, auto_pan) = track.apply_automation(beat);
-
-            let mut rendered = if track.instrument.is_some() {
-                let tempo_map = TempoMap::new(self.transport.bpm(), self.sample_rate);
-                let track_id = track.id;
-                let event_tx = &mut self.event_tx;
-                let scheduled = &mut self.scheduled_presentation;
-                let physical = self.output_position + self.rendered_callback_frames as u64;
-                let section = self.active_section;
-                let mut on_repeat = |trigger: crate::note_repeat::NoteRepeatTrigger| {
-                    let recording = crate::events::SourceRecordingPosition::from_trigger(
-                        trigger,
-                        section.map(|active| crate::events::SourceSectionClock {
-                            id: active.section_id,
-                            local_sample: pos,
-                            performance_sample: repeat_pos,
-                            length: active.length_samples,
-                        }),
-                    );
-                    let (source, event) =
-                        EngineEvent::repeated_pair(track_id, trigger, recording, recording.into());
-                    presentation_overflow |= !presentation_queue::emit_repeated(
-                        source,
-                        event,
-                        event_tx,
-                        scheduled,
-                        physical,
-                        physical,
-                        self.output_position,
-                    );
-                };
-                track.render_instrument(
-                    InstrumentRenderContext {
-                        pos,
-                        repeat_pos,
-                        frames,
-                        channels,
-                        tempo_map: &tempo_map,
-                        project_swing: self.project_swing,
-                    },
-                    &mut on_repeat,
-                )
-            } else {
-                track.render(pos, frames, channels, loop_region)
-            };
-
-            let triggered_notes = track.take_note_activity();
-            if triggered_notes != 0 {
-                // Pad flashes are cosmetic. Never retain them or let them
-                // compete with authoritative input and Capture events after a
-                // UI stall fills the shared ring.
-                let _ = self.event_tx.push(EngineEvent::TrackNoteActivity {
-                    track_id: track.id,
-                    triggered_notes,
-                });
-            }
-
-            if live_input.is_some_and(|input| input.target_track_raw == track.id.raw()) {
-                let input = live_input.expect("checked live input");
-                if !rendered && track.instrument.is_none() {
-                    track.clear_buffer(frames, channels);
-                }
-                for (destination, sample) in track.mix_buffer[..frames * channels]
-                    .iter_mut()
-                    .zip(input.samples.iter().copied())
-                {
-                    *destination += sample;
-                }
-                rendered = rendered || input.samples.iter().any(|sample| *sample != 0.0);
-            }
-
-            // Always run the shared device chain. A silent new Section stops
-            // source material while already-produced effect tails continue.
-            track.process_effects(frames, channels);
-            track.apply_mute_envelope(pos, frames, channels, samples_per_beat);
-            let rendered = rendered
-                || track.mix_buffer[..frames * channels]
-                    .iter()
-                    .any(|sample| *sample != 0.0);
-
-            if rendered && self.spectrum_track == Some(track.id) {
-                push_spectrum(
-                    &mut self.spectrum_tx,
-                    &track.mix_buffer[..frames * channels],
-                    channels,
-                );
-            }
-
-            if !rendered {
-                let _ = self.event_tx.push(EngineEvent::TrackMeter {
-                    track_id: track.id,
-                    peak_l: 0.0,
-                    peak_r: 0.0,
-                });
-                continue;
-            }
-
-            let gain = auto_gain.unwrap_or(track.gain);
-            let (pan_l, pan_r) = equal_power_pan(auto_pan.unwrap_or(track.pan));
-            let track_id = track.id;
-            let capture_this_track = track_output_capture
-                .as_ref()
-                .is_some_and(|capture| capture.source_track_raw == track_id.raw());
-            let buf_size = frames * channels;
-            let dry_audible = (!has_track_solo && !has_bus_solo) || track.solo;
-
-            // Apply gain and pan, sum into output
-            let mut track_peak_l: f32 = 0.0;
-            let mut track_peak_r: f32 = 0.0;
-
-            for frame in 0..frames {
-                for ch in 0..channels {
-                    let idx = frame * channels + ch;
-                    if idx >= buf_size {
-                        break;
-                    }
-                    let sample = track.mix_buffer[idx] * gain;
-                    let panned = if channels >= 2 {
-                        if ch == 0 {
-                            sample * pan_l
-                        } else if ch == 1 {
-                            sample * pan_r
-                        } else {
-                            sample
-                        }
-                    } else {
-                        sample
-                    };
-
-                    if dry_audible {
-                        output[idx] += panned;
-                    }
-                    if capture_this_track {
-                        write_track_output_sample(
-                            track_output_capture.as_deref_mut(),
-                            idx,
-                            if dry_audible { panned } else { 0.0 },
-                        );
-                    }
-
-                    // Track per-channel peaks
-                    if ch == 0 {
-                        track_peak_l = track_peak_l.max(panned.abs());
-                    } else if ch == 1 {
-                        track_peak_r = track_peak_r.max(panned.abs());
-                    }
-                }
-            }
-
-            // Post-fader sends: the same gained/panned signal feeds
-            // each bus at its send amount.
-            for send_idx in 0..track.sends.len() {
-                let (bus_id, amount) = track.sends[send_idx];
-                if amount <= vibez_core::routing::SEND_SILENCE_THRESHOLD {
-                    continue;
-                }
-                if let Some(bus) = self.buses.iter_mut().find(|b| b.id == bus_id) {
-                    for frame in 0..frames {
-                        for ch in 0..channels {
-                            let idx = frame * channels + ch;
-                            if idx >= buf_size || idx >= bus.mix_buffer.len() {
-                                break;
-                            }
-                            let sample = track.mix_buffer[idx] * gain;
-                            let panned = if channels >= 2 {
-                                if ch == 0 {
-                                    sample * pan_l
-                                } else if ch == 1 {
-                                    sample * pan_r
-                                } else {
-                                    sample
-                                }
-                            } else {
-                                sample
-                            };
-                            bus.mix_buffer[idx] += panned * amount;
-                        }
-                    }
-                }
-            }
-
-            let _ = self.event_tx.push(EngineEvent::TrackMeter {
-                track_id,
-                peak_l: track_peak_l,
-                peak_r: track_peak_r,
-            });
-        }
-        if presentation_overflow {
-            self.fail_presentation();
-        }
-    }
-
-    /// Render instruments with no clip scheduling (transport stopped)
-    /// so auditioned notes sound. Effects and gain/pan still apply.
+    /// Stopped transport still delivers live notes, queued plugin events and effect tails.
     pub(super) fn render_idle_instruments(
         &mut self,
         output: &mut [f32],
@@ -483,170 +221,21 @@ impl AudioEngine {
         channels: usize,
         repeat_pos: u64,
         live_input: Option<LiveInputBlock<'_>>,
-        mut track_output_capture: Option<&mut TrackOutputCapture<'_>>,
+        track_output_capture: Option<&mut TrackOutputCapture<'_>>,
     ) {
-        if self.routing.is_some() {
-            self.render_routing_graph(
-                output,
-                MultitrackRenderBlock {
-                    pos: self.transport.position(),
-                    repeat_pos,
-                    frames,
-                    channels,
-                    loop_region: None,
-                    live_input,
-                },
-                track_output_capture,
-                true,
-                true,
-            );
-            return;
-        }
-        let has_track_solo = any_solo(&self.tracks);
-        let has_bus_solo = any_solo(&self.buses);
-        let mut presentation_overflow = false;
-        for track in &mut self.tracks {
-            if has_track_solo && !track.solo && !has_bus_solo {
-                continue;
-            }
-            // Instruments render so auditioned notes sound; every
-            // effect chain keeps processing while stopped so delay
-            // and reverb tails ring out and queued plugin parameter
-            // changes (knob edits, automation) actually reach the
-            // plugin instead of waiting for play.
-            let beat = if self.transport.bpm() > 0.0 {
-                self.transport.position() as f64 * self.transport.bpm()
-                    / (self.sample_rate as f64 * 60.0)
-            } else {
-                0.0
-            };
-            track.apply_automation(beat);
-            if track.effective_muted() {
-                continue;
-            }
-            let mut has_signal = if track.instrument.is_some() {
-                let tempo_map = TempoMap::new(self.transport.bpm(), self.sample_rate);
-                let track_id = track.id;
-                let event_tx = &mut self.event_tx;
-                let scheduled = &mut self.scheduled_presentation;
-                let physical = self.output_position + self.rendered_callback_frames as u64;
-                let mut on_repeat = |trigger: crate::note_repeat::NoteRepeatTrigger| {
-                    let recording =
-                        crate::events::SourceRecordingPosition::from_trigger(trigger, None);
-                    let (source, event) =
-                        EngineEvent::repeated_pair(track_id, trigger, recording, recording.into());
-                    presentation_overflow |= !presentation_queue::emit_repeated(
-                        source,
-                        event,
-                        event_tx,
-                        scheduled,
-                        physical,
-                        physical,
-                        self.output_position,
-                    );
-                };
-                track.render_instrument_idle(
-                    repeat_pos,
-                    frames,
-                    channels,
-                    &tempo_map,
-                    self.project_swing,
-                    &mut on_repeat,
-                )
-            } else {
-                false
-            };
-            if !has_signal && track.instrument.is_none() {
-                track.clear_buffer(frames, channels);
-            }
-            if live_input.is_some_and(|input| input.target_track_raw == track.id.raw()) {
-                let input = live_input.expect("checked live input");
-                for (destination, sample) in track.mix_buffer[..frames * channels]
-                    .iter_mut()
-                    .zip(input.samples.iter().copied())
-                {
-                    *destination += sample;
-                }
-                has_signal = has_signal || input.samples.iter().any(|sample| *sample != 0.0);
-            }
-            if !has_signal && track.effects.is_empty() {
-                continue;
-            }
-            track.process_effects(frames, channels);
-            if self.spectrum_track == Some(track.id) {
-                push_spectrum(
-                    &mut self.spectrum_tx,
-                    &track.mix_buffer[..frames * channels],
-                    channels,
-                );
-            }
-            let gain = track.gain;
-            let (pan_l, pan_r) = equal_power_pan(track.pan);
-            let buf_size = frames * channels;
-            let dry_audible = (!has_track_solo && !has_bus_solo) || track.solo;
-            let capture_this_track = track_output_capture
-                .as_ref()
-                .is_some_and(|capture| capture.source_track_raw == track.id.raw());
-            for frame in 0..frames {
-                for ch in 0..channels {
-                    let idx = frame * channels + ch;
-                    if idx >= buf_size {
-                        break;
-                    }
-                    let sample = track.mix_buffer[idx] * gain;
-                    let panned = if channels == 2 {
-                        if ch == 0 {
-                            sample * pan_l
-                        } else {
-                            sample * pan_r
-                        }
-                    } else {
-                        sample
-                    };
-                    if dry_audible {
-                        output[idx] += panned;
-                    }
-                    if capture_this_track {
-                        write_track_output_sample(
-                            track_output_capture.as_deref_mut(),
-                            idx,
-                            if dry_audible { panned } else { 0.0 },
-                        );
-                    }
-                }
-            }
-            // Sends feed buses while stopped too, so auditioned
-            // notes reach the returns like in any DAW.
-            for send_idx in 0..track.sends.len() {
-                let (bus_id, amount) = track.sends[send_idx];
-                if amount <= vibez_core::routing::SEND_SILENCE_THRESHOLD {
-                    continue;
-                }
-                if let Some(bus) = self.buses.iter_mut().find(|b| b.id == bus_id) {
-                    for frame in 0..frames {
-                        for ch in 0..channels {
-                            let idx = frame * channels + ch;
-                            if idx >= buf_size || idx >= bus.mix_buffer.len() {
-                                break;
-                            }
-                            let sample = track.mix_buffer[idx] * gain;
-                            let panned = if channels == 2 {
-                                if ch == 0 {
-                                    sample * pan_l
-                                } else {
-                                    sample * pan_r
-                                }
-                            } else {
-                                sample
-                            };
-                            bus.mix_buffer[idx] += panned * amount;
-                        }
-                    }
-                }
-            }
-        }
-        if presentation_overflow {
-            self.fail_presentation();
-        }
+        self.render_routing_graph(
+            output,
+            MultitrackRenderBlock {
+                pos: self.transport.position(),
+                repeat_pos,
+                frames,
+                channels,
+                loop_region: None,
+                live_input,
+            },
+            track_output_capture,
+            true,
+            true,
+        );
     }
 }

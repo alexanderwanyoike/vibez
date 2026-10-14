@@ -155,7 +155,8 @@ fn partial_packet_releases_tracks_atomically_at_one_source_timestamp_and_keeps_o
             effects: vec![],
         })
         .collect();
-    engine.routing = Some(crate::routing::PreparedRouting::prepare(&channels, 8).unwrap());
+    engine.routing = crate::routing::PreparedRouting::prepare(&channels, 8).unwrap();
+    engine.project_routing_published = true;
     engine.queue_clips(vec![clip(ids[2], 7)], MusicalBoundary::Immediate);
     while events.pop().is_ok() {}
     for _ in 0..presentation_queue::PRESENTATION_EVENT_CAPACITY - 2 {
@@ -418,7 +419,8 @@ fn in_segment_release_retains_the_actual_output_clock_prefix() {
             effects: vec![],
         },
     ];
-    engine.routing = Some(crate::routing::PreparedRouting::prepare(&channels, 8).unwrap());
+    engine.routing = crate::routing::PreparedRouting::prepare(&channels, 8).unwrap();
+    engine.project_routing_published = true;
     engine.queue_clips(vec![clip(id, 1)], MusicalBoundary::Immediate);
     while events.pop().is_ok() {}
     engine.performance_position = 1;
@@ -649,10 +651,10 @@ fn delayed_engine() -> (AudioEngine, Consumer<EngineEvent>, TrackId) {
         },
         137,
     )];
-    engine.routing = Some(
+    engine.routing =
         crate::routing::PreparedRouting::prepare_compensated(&channels, 8, &reports, &[], 1)
-            .unwrap(),
-    );
+            .unwrap();
+    engine.project_routing_published = true;
     engine.sample_rate = 8;
     (engine, events, id)
 }

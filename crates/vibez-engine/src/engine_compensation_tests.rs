@@ -1,3 +1,5 @@
+//! Prepared graph ownership and playback regression coverage.
+
 use super::*;
 use crate::test_support::DelayProbe;
 use vibez_core::effect::{EffectType, ParamDescriptor};
@@ -254,10 +256,7 @@ fn coordinated_latency_changes_keep_transport_running_and_regain_alignment() {
             assert!(output.iter().all(|sample| sample.abs() < 1e-7));
             while events.pop().is_ok() {}
         }
-        assert_eq!(
-            engine.routing.as_ref().unwrap().compensation.generation,
-            generation
-        );
+        assert_eq!(engine.routing.as_ref().compensation.generation, generation);
     }
     pending.store(
         crate::compensation::MAX_DEVICE_LATENCY + 1,
@@ -734,10 +733,10 @@ fn capture_replay_with_more_than_retirement_capacity_resumes_without_callback_me
         },
         521,
     )];
-    engine.routing = Some(
+    engine.routing =
         crate::routing::PreparedRouting::prepare_compensated(&channels, 64, &reports, &[fast], 1)
-            .unwrap(),
-    );
+            .unwrap();
+    engine.project_routing_published = true;
     engine.output_position = 1000;
     for index in 0..40 {
         engine.section_capture_source(SectionId::new(), index, 0, false);

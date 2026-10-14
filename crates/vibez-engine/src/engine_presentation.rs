@@ -1,3 +1,5 @@
+//! Heard/source timing, capture replay and bounded presentation ownership.
+
 use super::*;
 
 pub(super) struct SectionCaptureTiming {
@@ -215,38 +217,31 @@ impl AudioEngine {
     }
 
     pub(super) fn capture_offsets(&self) -> Arc<[(TrackId, u32)]> {
-        self.routing.as_ref().map_or_else(
-            || Arc::clone(&self.empty_capture_offsets),
-            |routing| Arc::clone(&routing.capture_offsets),
-        )
+        Arc::clone(&self.routing.capture_offsets)
     }
+
     pub(super) fn earliest_source_latency(&self) -> u32 {
-        self.routing.as_ref().map_or(0, |routing| {
-            routing
-                .channels
-                .iter()
-                .filter(|channel| channel.source)
-                .map(|channel| channel.direct_latency)
-                .min()
-                .unwrap_or(routing.compensation.output_latency)
-        })
-    }
-    pub(super) fn mix_latency(&self) -> u32 {
         self.routing
-            .as_ref()
-            .map_or(0, |routing| routing.compensation.output_latency)
+            .channels
+            .iter()
+            .filter(|channel| channel.source)
+            .map(|channel| channel.direct_latency)
+            .min()
+            .unwrap_or(self.routing.compensation.output_latency)
+    }
+
+    pub(super) fn mix_latency(&self) -> u32 {
+        self.routing.compensation.output_latency
     }
 
     pub(super) fn live_path_latency(&self, track: TrackId) -> u32 {
-        self.routing.as_ref().map_or(0, |routing| {
-            routing
-                .channels
-                .iter()
-                .find(|channel| channel.id == track)
-                .map_or(routing.compensation.output_latency, |channel| {
-                    channel.direct_latency
-                })
-        })
+        self.routing
+            .channels
+            .iter()
+            .find(|channel| channel.id == track)
+            .map_or(self.routing.compensation.output_latency, |channel| {
+                channel.direct_latency
+            })
     }
 
     pub(super) fn presentation_context(
@@ -254,8 +249,8 @@ impl AudioEngine {
         delay: u32,
     ) -> crate::compensation_clock::PresentationPosition {
         self.routing
-            .as_ref()
-            .and_then(|routing| routing.presentation.before_block(delay))
+            .presentation
+            .before_block(delay)
             .unwrap_or_else(|| {
                 let active = self.active_section;
                 crate::compensation_clock::PresentationPosition {
@@ -265,10 +260,7 @@ impl AudioEngine {
                         .map(|section| section.position_samples.saturating_sub(delay as u64)),
                     section_id: active.map(|section| section.section_id),
                     section_length: active.map_or(0, |section| section.length_samples),
-                    generation: self
-                        .routing
-                        .as_ref()
-                        .map_or(0, |routing| routing.compensation.generation),
+                    generation: self.routing.compensation.generation,
                 }
             })
     }
