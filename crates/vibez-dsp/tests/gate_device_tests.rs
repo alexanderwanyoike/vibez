@@ -131,3 +131,61 @@ fn expander_ratio_sets_the_below_threshold_slope_with_optional_range_and_unity_a
         }
     }
 }
+
+fn butterworth_response(rate: f64, frequency: f64, cutoff: f64, high: bool) -> (f64, f64) {
+    let warped = (std::f64::consts::PI * frequency / rate).tan()
+        / (std::f64::consts::PI * cutoff / rate).tan();
+    let magnitude = if high { warped * warped } else { 1.0 } / (1.0 + warped.powi(4)).sqrt();
+    let phase = -std::f64::consts::SQRT_2.mul_add(warped, 0.0).atan2(1.0 - warped * warped)
+        + if high { std::f64::consts::PI } else { 0.0 };
+    (magnitude, phase)
+}
+
+#[test]
+fn detector_listen_auditions_the_genuine_external_butterworth_band_at_all_rates() {
+    use vibez_core::routing::{ExternalInputBlock, ExternalInputId};
+    for rate in [44_100.0_f32, 48_000.0, 96_000.0] {
+        for (hp, lp) in [(false, false), (true, false), (false, true), (true, true)] {
+            for frequency in [40.0_f64, 1000.0, 8000.0] {
+                let mut effect = GateEffect::new(rate);
+                for (index, value) in [(9, hp as u8 as f32), (10, 120.0),
+                    (11, lp as u8 as f32), (12, 4000.0), (13, 1.0)] {
+                    assert!(effect.set_param(index, value));
+                }
+                let frames = rate as usize;
+                let external: Vec<f32> = (0..frames).flat_map(|frame| {
+                    let phase = std::f64::consts::TAU * frequency * frame as f64 / rate as f64;
+                    [(0.25 * phase.sin()) as f32, (0.125 * phase.cos()) as f32]
+                }).collect();
+                let mut output: Vec<f32> = (0..frames).flat_map(|_| [0.02, -0.01]).collect();
+                effect.process_with_inputs(&mut output, 2, &[ExternalInputBlock {
+                    id: ExternalInputId(0), channels: 2, samples: &external, connected: true,
+                }]);
+                let (mut magnitude, mut response_phase) = (1.0, 0.0);
+                for (enabled, cutoff, high) in [(hp, 120.0, true), (lp, 4000.0, false)] {
+                    if enabled {
+                        let response = butterworth_response(rate as f64, frequency, cutoff, high);
+                        magnitude *= response.0;
+                        response_phase += response.1;
+                    }
+                }
+                for channel in 0..2 {
+                    let amplitude = if channel == 0 { 0.25 } else { 0.125 };
+                    let mut measured = [0.0; 2];
+                    for frame in frames * 3 / 4..frames {
+                        let phase = std::f64::consts::TAU * frequency * frame as f64 / rate as f64
+                            + if channel == 0 { 0.0 } else { std::f64::consts::FRAC_PI_2 };
+                        measured[0] += output[frame * 2 + channel] as f64 * phase.sin();
+                        measured[1] += output[frame * 2 + channel] as f64 * phase.cos();
+                    }
+                    let scale = 2.0 / ((frames / 4) as f64 * amplitude);
+                    for (actual, expected) in measured.into_iter().map(|v| v * scale)
+                        .zip([magnitude * response_phase.cos(), magnitude * response_phase.sin()]) {
+                        assert!((actual - expected).abs() < 3e-6,
+                            "{rate}Hz/{frequency}Hz HP={hp} LP={lp} channel{channel}: actual{actual}, expected{expected}");
+                    }
+                }
+            }
+        }
+    }
+}
