@@ -1,5 +1,84 @@
 //! Native Drive presentation preserves the original stored nonlinear amount and linear gain.
 
+pub fn amount_db(amount: f32) -> f32 {
+    20.0 * (1.0 + 29.0 * amount * amount).log10()
+}
+
+pub fn amount_from_db(db: f32) -> Option<f32> {
+    (db.is_finite() && (0.0..=amount_db(1.0)).contains(&db))
+        .then(|| ((10.0_f32.powf(db / 20.0) - 1.0) / 29.0).max(0.0).sqrt())
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum DriveValue {
+    Amount,
+    Output,
+    Percent,
+}
+
+impl DriveValue {
+    pub fn display(self, value: f32) -> String {
+        match self {
+            Self::Amount => format!("{:.2}", amount_db(value)),
+            Self::Output if value == 0.0 => "-inf".into(),
+            Self::Output => format!("{:.2}", 20.0 * value.log10()),
+            Self::Percent => format!("{:.0}", 100.0 * value),
+        }
+    }
+
+    pub fn parse(self, text: &str, current: f32) -> Option<f32> {
+        let text = text.trim().to_ascii_lowercase();
+        let text = text.trim_end_matches(if matches!(self, Self::Percent) { "%" } else { "db" }).trim();
+        if matches!(self, Self::Output) && matches!(text, "-inf" | "-∞" | "mute") {
+            return Some(0.0);
+        }
+        let number = text.parse::<f32>().ok()?;
+        if !number.is_finite() {
+            return None;
+        }
+        // A rounded readout describes its exact current sound until the user changes it.
+        if self.display(current).parse::<f32>().ok() == Some(number) {
+            return Some(current);
+        }
+        match self {
+            Self::Amount if text == self.display(1.0) => Some(1.0),
+            Self::Amount => amount_from_db(number),
+            Self::Output if text == self.display(2.0) => Some(2.0),
+            Self::Output => {
+                let amplitude = 10.0_f32.powf(number / 20.0);
+                (amplitude > 0.0 && amplitude <= 2.0).then_some(amplitude)
+            }
+            Self::Percent => (0.0..=100.0).contains(&number).then_some(number / 100.0),
+        }
+    }
+
+    pub fn position(self, value: f32) -> f32 {
+        match self {
+            Self::Amount => (amount_db(value) / amount_db(1.0)).clamp(0.0, 1.0),
+            Self::Percent => value.clamp(0.0, 1.0),
+            Self::Output => {
+                let db = if value > 0.0 { 20.0 * value.log10() } else { -60.0 };
+                if db <= 0.0 {
+                    ((db + 60.0) / 120.0).clamp(0.0, 0.5)
+                } else {
+                    (0.5 + db / (40.0 * 2.0_f32.log10())).clamp(0.5, 1.0)
+                }
+            }
+        }
+    }
+
+    pub fn value(self, position: f32) -> f32 {
+        let position = position.clamp(0.0, 1.0);
+        match self {
+            Self::Amount => amount_from_db(position * amount_db(1.0)).unwrap_or(1.0),
+            Self::Percent => position,
+            Self::Output if position == 0.0 => 0.0,
+            Self::Output if position <= 0.5 => 10.0_f32.powf(-3.0 * (1.0 - 2.0 * position)),
+            Self::Output => 2.0_f32.powf(2.0 * position - 1.0),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -41,7 +120,7 @@ mod tests {
     }
 
     #[test]
-    fn amount_knob_moves_in_pre_gain_decibels_and_output_in_linear_gain() {
+    fn amount_knob_moves_in_pre_gain_decibels_and_output_keeps_unity_centered() {
         for position in [0.0, 0.1, 0.25, 0.5, 0.75, 1.0] {
             let amount = DriveValue::Amount.value(position);
             assert!((DriveValue::Amount.position(amount) - position).abs() < 1e-6);
