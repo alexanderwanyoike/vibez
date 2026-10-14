@@ -453,16 +453,20 @@ fn responsive_regions_preserve_real_children_and_concept_order_at_every_supporte
 
 #[test]
 fn card_width_uses_the_chain_remainder_with_native_minimum_and_maximum() {
-    for available in [
-        0.0, 80.0, 429.0, 430.0, 431.0, 739.0, 740.0, 871.0, 872.0, 899.0, 900.0, 1800.0,
+    for (available, expected) in [
+        (0.0, 430.0),
+        (80.0, 430.0),
+        (429.0, 430.0),
+        (430.0, 430.0),
+        (431.0, 431.0),
+        (739.0, 739.0),
+        (740.0, 740.0),
+        (871.0, 871.0),
+        (872.0, 872.0),
+        (899.0, 899.0),
+        (900.0, 900.0),
+        (1800.0, 900.0),
     ] {
-        let expected = if available < 430.0 {
-            430.0
-        } else if available > 900.0 {
-            900.0
-        } else {
-            available
-        };
         assert_eq!(
             card_width(available),
             expected,
