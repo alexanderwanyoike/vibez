@@ -112,13 +112,12 @@ impl AudioEngine {
                 return;
             }
             let path = self.live_path_latency(track.id);
-            let heard_local = self.routing.as_ref().and_then(|routing| {
-                routing
-                    .channel_clocks
-                    .iter()
-                    .find(|clock| clock.track == track.id)
-                    .and_then(|clock| clock.before_block(path))
-            });
+            let heard_local = self
+                .routing
+                .channel_clocks
+                .iter()
+                .find(|clock| clock.track == track.id)
+                .and_then(|clock| clock.before_block(path));
             let state = ClipTrackState {
                 track_id: track.id,
                 playing: track.active_clip.map(|active| ClipPlayingState {

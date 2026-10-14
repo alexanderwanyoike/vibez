@@ -165,10 +165,10 @@ fn reduced_repeat_coordinates_follow_arrange_history_across_loop_wrap() {
         },
         137,
     )];
-    engine.routing = Some(
+    engine.routing =
         crate::routing::PreparedRouting::prepare_compensated(&channels, 512, &reports, &[dry], 1)
-            .unwrap(),
-    );
+            .unwrap();
+    engine.project_routing_published = true;
     engine.transport.play();
     engine.process(&mut [0.0; 1000], 2);
     while events.pop().is_ok() {}

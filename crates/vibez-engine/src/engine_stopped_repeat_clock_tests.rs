@@ -86,7 +86,6 @@ fn stopped_graph_history_advances_perform_without_moving_arrange() {
     let presented = engine
         .routing
         .as_ref()
-        .unwrap()
         .presentation
         .audible()
         .expect("last processed sample");

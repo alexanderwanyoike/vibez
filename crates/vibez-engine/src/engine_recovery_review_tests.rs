@@ -162,7 +162,8 @@ fn parameter_edits_while_main_holds_the_owner_are_coalesced_and_restored_without
         }),
     });
     engine.tracks.push(Box::new(channel));
-    engine.routing = Some(routing(track, Some(effect)));
+    engine.routing = routing(track, Some(effect));
+    engine.project_routing_published = true;
     engine.begin_device_reconfiguration();
     let EngineEvent::DeviceReconfiguration(mut device) = events.pop().unwrap() else {
         panic!("owner");

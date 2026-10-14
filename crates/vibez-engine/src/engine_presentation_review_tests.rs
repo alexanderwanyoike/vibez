@@ -188,7 +188,8 @@ fn faulted_packet_publication_and_snapshots_cannot_resurrect_playing_clips() {
             effects: vec![],
         },
     ];
-    engine.routing = Some(crate::routing::PreparedRouting::prepare(&model, 8).unwrap());
+    engine.routing = crate::routing::PreparedRouting::prepare(&model, 8).unwrap();
+    engine.project_routing_published = true;
     engine.begin_clip_performance();
     while events.pop().is_ok() {}
     engine.performance_position = 1;

@@ -274,7 +274,7 @@ impl AudioEngine {
             }
         }
 
-        if rendered_frames < frames && self.routing.is_some() {
+        if rendered_frames < frames {
             for track in &mut self.tracks {
                 track.flush_notes();
             }
