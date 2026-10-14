@@ -59,7 +59,7 @@ fn owner_app(owner: Owner) -> (App, TrackId, EffectId) {
     let mut lane = AutomationLane::new(AutomationTarget::EffectParam {
         effect_id: effect, param_index: param::SR_REDUCE,
     });
-    lane.insert_point(AutomationPoint { beat: 0.0, value: 6.25, curve: 0.0 });
+    lane.insert_point(AutomationPoint { beat: 0.0, value: (6.25 - 1.0) / 31.0, curve: 0.0 });
     app.state.arrange_content_mut(track).automation.push(lane);
     app.state.project.history = Default::default();
     app.state.project.dirty = false;
