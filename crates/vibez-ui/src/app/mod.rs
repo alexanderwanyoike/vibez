@@ -47,6 +47,7 @@ struct App {
     /// it when the selection moves.
     spectrum_tap: Option<vibez_core::id::TrackId>,
     _stream: Option<AudioOutputStream>,
+    sample_retirement: sample_retirement::SampleRetirement,
     input_bridge: Arc<vibez_audio_io::audio_input::AudioInputBridge>,
     /// Open only while one Audio Track is armed or explicitly monitors input.
     _input_stream: Option<vibez_audio_io::audio_input::AudioInputStream>,
@@ -227,6 +228,8 @@ mod views_transient_analysis;
 mod views_transport;
 mod window_policy;
 
+mod sample_retirement;
+
 #[cfg(test)]
 mod instrument_media_retirement_tests;
 
@@ -240,6 +243,8 @@ impl Drop for App {
         if let Some(manager) = self.plugin_window_manager.as_mut() {
             manager.close_all();
         }
+        // Guards must outlive every callback and the engine's last voice owners.
+        drop(self._stream.take());
     }
 }
 
@@ -427,6 +432,7 @@ impl App {
             spectrum_rx,
             spectrum_tap: None,
             _stream: Some(output_stream),
+            sample_retirement: Default::default(),
             input_bridge,
             _input_stream: None,
             plugin_effect_rx,

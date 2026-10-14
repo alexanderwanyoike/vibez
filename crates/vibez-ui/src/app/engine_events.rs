@@ -240,7 +240,7 @@ impl App {
                     EngineEvent::RetiredNoteClip(clip) => drop(clip),
                     EngineEvent::RetiredWarpMarkers(markers) => drop(markers),
                     EngineEvent::RetiredTrackOrder(order) => drop(order),
-                    EngineEvent::RetiredInstrumentMedia(owners) => drop(owners),
+                    EngineEvent::RetiredInstrumentMedia(owners) => self.sample_retirement.retire(owners),
                     EngineEvent::RetiredChannel(channel) => {
                         drop(channel);
                     }
@@ -666,6 +666,7 @@ impl App {
         for completed in completed_captures {
             self.finish_performance_capture(completed);
         }
+        self.sample_retirement.reap();
     }
 }
 
