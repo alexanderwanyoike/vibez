@@ -493,6 +493,7 @@ fn add_audio_clip_command(
     clip: &crate::state::UiClip,
 ) -> EngineCommand {
     EngineCommand::AddClip {
+        insertion: vibez_engine::clip_insertion::PreparedClipInsertion::new(),
         track_id,
         clip_id: clip.id,
         audio: Arc::clone(&clip.audio),
