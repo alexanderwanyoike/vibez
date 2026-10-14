@@ -92,6 +92,7 @@ pub struct BitcrushEffect {
     params: [f32; param::COUNT],
     sample_rate: f32,
     drive: Ramp,
+    mix: Ramp,
     drive_gain: f64,
     started: bool,
     /// Sample-and-hold state, per channel.
@@ -115,6 +116,7 @@ impl BitcrushEffect {
             params: std::array::from_fn(|index| BITCRUSH_PARAMS[index].default),
             sample_rate,
             drive: Ramp::new(0.0),
+            mix: Ramp::new(1.0),
             drive_gain: 1.0,
             started: false,
             hold: [0.0; 2],
@@ -145,6 +147,9 @@ impl BitcrushEffect {
             if immediate {
                 self.drive_gain = 10.0_f64.powf(f64::from(value) / 20.0);
             }
+        }
+        if index == param::MIX && (value != *target || automated) {
+            self.mix.edit(value, automated || !self.started);
         }
         *target = value;
         true
@@ -200,6 +205,8 @@ impl AudioEffect for BitcrushEffect {
             if let Some(value) = self.drive.advance(self.params[param::DRIVE_DB]) {
                 self.drive_gain = 10.0_f64.powf(f64::from(value) / 20.0);
             }
+            let _ = self.mix.advance(self.params[param::MIX]);
+            let mix = self.mix.value();
             let drive_db = self.drive.value();
             let drive_gain = self.drive_gain;
             for c in 0..ch {
@@ -228,7 +235,7 @@ impl AudioEffect for BitcrushEffect {
                 self.counter[c] = (self.counter[c] + 1) % divider;
 
                 let wet = self.hold[c];
-                buffer[idx] = dry * (1.0 - self.params[param::MIX]) + wet * self.params[param::MIX];
+                buffer[idx] = dry * (1.0 - mix) + wet * mix;
             }
         }
     }
@@ -236,6 +243,7 @@ impl AudioEffect for BitcrushEffect {
     fn reset(&mut self) {
         self.hold = [0.0; 2];
         self.counter = [0; 2];
+        self.mix.edit(self.params[param::MIX], true);
         self.drive.edit(self.params[param::DRIVE_DB], true);
         self.drive_gain = 10.0_f64.powf(f64::from(self.drive.value()) / 20.0);
         self.started = false;
