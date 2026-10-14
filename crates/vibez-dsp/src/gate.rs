@@ -1,6 +1,6 @@
 //! Legacy-compatible linked gating with an explicit, stable native parameter contract.
 
-use vibez_core::effect::{EffectType, ParamDescriptor};
+use vibez_core::effect::{DynamicsMeter, EffectType, GateMeter, GatePhase, ParamDescriptor};
 
 use crate::{detector_filter::DetectorFilter, effect::AudioEffect};
 
@@ -52,6 +52,8 @@ pub struct GateEffect {
     gain: f32,
     expander_gain: f64,
     hold_counter: u32,
+    meter: DynamicsMeter,
+    window_started: bool,
 }
 
 impl GateEffect {
@@ -70,6 +72,8 @@ impl GateEffect {
             gain: 0.0,
             expander_gain: 1.0,
             hold_counter: 0,
+            meter: DynamicsMeter { gate: Some(GateMeter::default()), ..Default::default() },
+            window_started: false,
         };
         effect.configure_filters();
         effect
@@ -87,6 +91,20 @@ impl GateEffect {
 }
 
 impl AudioEffect for GateEffect {
+    fn supports_level_meter(&self) -> bool { true }
+
+    fn take_dynamics_meter(&mut self) -> Option<DynamicsMeter> {
+        let meter = self.meter;
+        self.meter.peak_reduction_db = [0.0; 2];
+        self.meter.detector_peak = [0.0; 2];
+        if let Some(gate) = &mut self.meter.gate {
+            gate.phases_seen = 0;
+            gate.peak_envelope_db = gate.envelope_db;
+        }
+        self.window_started = false;
+        Some(meter)
+    }
+
     fn activation_sample_rate(&self) -> Option<u32> {
         Some(self.sample_rate as u32)
     }
@@ -180,6 +198,24 @@ impl AudioEffect for GateEffect {
             self.expander_gain = expansion_target + coefficient * (self.expander_gain - expansion_target);
             let gain = if self.params[param::MODE] >= 0.5 { self.expander_gain as f32 } else { self.gain };
 
+            let phase = if self.open { GatePhase::Open }
+                else if self.hold_counter > 0 { GatePhase::Hold } else { GatePhase::Closed };
+            let reduction_db = -20.0 * gain.max(1e-10).log10();
+            self.meter.current_reduction_db = [reduction_db; 2];
+            for (channel, sample) in detected.into_iter().enumerate() {
+                self.meter.peak_reduction_db[channel] = self.meter.peak_reduction_db[channel].max(reduction_db);
+                self.meter.detector_peak[channel] = self.meter.detector_peak[channel].max(sample.abs());
+            }
+            let previous = self.meter.gate.unwrap_or_default();
+            self.meter.gate = Some(GateMeter {
+                phase, envelope_db: self.env_db,
+                peak_envelope_db: if self.window_started { previous.peak_envelope_db.max(self.env_db) } else { self.env_db },
+                open_threshold_db: self.params[param::THRESHOLD],
+                close_threshold_db: self.params[param::THRESHOLD] - self.params[param::HYSTERESIS],
+                hold_remaining_ms: (if self.open { hold_frames } else { self.hold_counter }) as f32 * 1000.0 / self.sample_rate,
+                phases_seen: previous.phases_seen | phase as u8,
+            });
+            self.window_started = true;
             if self.open {
                 self.hold_counter = hold_frames;
             } else if self.hold_counter > 0 {
@@ -201,6 +237,14 @@ impl AudioEffect for GateEffect {
         self.gain = 0.0;
         self.expander_gain = 1.0;
         self.hold_counter = 0;
+        self.meter = DynamicsMeter {
+            gate: Some(GateMeter {
+                open_threshold_db: self.params[param::THRESHOLD],
+                close_threshold_db: self.params[param::THRESHOLD] - self.params[param::HYSTERESIS],
+                ..Default::default()
+            }), ..Default::default()
+        };
+        self.window_started = false;
         for filter in &mut self.filters { filter.reset(); }
     }
 }
