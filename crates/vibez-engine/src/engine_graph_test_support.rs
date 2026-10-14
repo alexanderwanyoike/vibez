@@ -8,7 +8,8 @@ pub(super) fn graph_engine(
     channels: &[RoutingChannel],
 ) -> (AudioEngine, Producer<EngineCommand>, Consumer<EngineEvent>) {
     let (mut engine, commands, events) = AudioEngine::new();
-    engine.command_set_routing(routing_plan(channels));
+    engine.routing = routing_plan(channels);
+    engine.project_routing_published = true;
     (engine, commands, events)
 }
 

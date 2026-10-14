@@ -7,7 +7,14 @@ impl AudioEngine {
         &mut self,
         mut prepared: Box<crate::routing::PreparedRouting>,
     ) {
-        if let Some(mut previous) = self.routing.take() {
+        if !self.project_routing_published {
+            debug_assert!(self.bootstrap_routing.is_none());
+            self.bootstrap_routing = Some(std::mem::replace(&mut self.routing, prepared));
+            self.project_routing_published = true;
+            return;
+        }
+        {
+            let previous = &mut self.routing;
             let signal_path_changed = previous.graph.nodes != prepared.graph.nodes
                 || previous.graph.edges != prepared.graph.edges
                 || previous.device_latencies != prepared.device_latencies;
@@ -40,7 +47,8 @@ impl AudioEngine {
                     next.retain_from(&mut previous.automation_controls[old]);
                 }
             }
-            self.retired_routing = Some(previous);
+            std::mem::swap(&mut self.routing, &mut prepared);
+            self.retired_routing = Some(prepared);
             self.return_retired_routing();
             if signal_path_changed && self.transport.is_playing() && !self.was_project_muted {
                 // Unchanged paths keep their own history. A short blend covers
@@ -48,7 +56,6 @@ impl AudioEngine {
                 self.compensation_plan_fade = 64;
             }
         }
-        self.routing = Some(prepared);
     }
 
     pub(super) fn apply_compensation_transition(

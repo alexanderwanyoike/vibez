@@ -1,3 +1,5 @@
+//! Caller-thread construction and graph rendering for isolated offline projects.
+
 use super::*;
 
 pub(crate) struct OfflineRoutingSetup {
@@ -27,7 +29,8 @@ impl AudioEngine {
         {
             channel.set_manual_mute(channel.mute, true);
         }
-        engine.routing = Some(setup.routing);
+        engine.routing = setup.routing;
+        engine.project_routing_published = true;
         engine
     }
 
