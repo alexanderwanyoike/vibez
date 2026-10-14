@@ -50,3 +50,7 @@ objc2-foundation = { version = "0.3", default-features = false, features = ["std
 [[test]]
 name = "native_plugin_gui"
 harness = false
+
+[[example]]
+name = "gain_device"
+required-features = ["dev-gallery"]
