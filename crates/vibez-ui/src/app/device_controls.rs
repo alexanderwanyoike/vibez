@@ -266,6 +266,92 @@ mod tests {
     }
 
     #[test]
+    fn rate_field_presentation_tracks_prepared_owners_without_changing_native_storage() {
+        use crate::domains::EngineHandle;
+        use vibez_dsp::bitcrush::param;
+
+        let (mut app, track, effect) = legacy_bitcrush_app();
+        let before = app.state.find_track(track).unwrap().effects[0].params.clone();
+        app.state.project.history = Default::default();
+        app.state.project.dirty = false;
+        let assert_known = |app: &App, value: &str, minimum: &str, maximum: &str| {
+            let presentation = app
+                .device_parameter_presentation(track, effect, param::SR_REDUCE)
+                .expect("native parameter presentation");
+            assert_eq!(presentation.name, "Rate");
+            assert_eq!(presentation.unit, "Hz");
+            assert_eq!(presentation.value.as_deref(), Some(value));
+            assert_eq!(
+                presentation.range.as_ref().map(|(low, high)| (low.as_str(), high.as_str())),
+                Some((minimum, maximum))
+            );
+            assert!(presentation.is_editable());
+        };
+        let assert_unavailable = |app: &App| {
+            let presentation = app
+                .device_parameter_presentation(track, effect, param::SR_REDUCE)
+                .expect("unknown context does not remove the native control");
+            assert_eq!(presentation.name, "Rate");
+            assert_eq!(presentation.unit, "Hz");
+            assert!(presentation.value.is_none());
+            assert!(presentation.range.is_none());
+            assert!(!presentation.is_editable());
+        };
+
+        assert_eq!(app.cmd_tx.prepared_effect_sample_rate(track, effect), Some(48_000));
+        assert_known(&app, "12.000k", "1.500k", "48.000k");
+
+        app.send_command(EngineCommand::RemoveEffect(track, effect));
+        assert_eq!(app.cmd_tx.prepared_effect_sample_rate(track, effect), None);
+        assert_unavailable(&app);
+        app.cmd_tx.insert_built_in_effect_with_params(
+            track,
+            effect,
+            EffectType::Bitcrush,
+            &before,
+        );
+        assert_known(&app, "12.000k", "1.500k", "48.000k");
+
+        app.state.transport.sample_rate = 96_000;
+        app.send_command(EngineCommand::SetSampleRate(96_000));
+        assert_eq!(app.cmd_tx.prepared_effect_sample_rate(track, effect), None);
+        assert_unavailable(&app);
+        app.cmd_tx.insert_built_in_effect_with_params(
+            track,
+            effect,
+            EffectType::Bitcrush,
+            &before,
+        );
+        assert_eq!(app.cmd_tx.prepared_effect_sample_rate(track, effect), Some(96_000));
+        assert_known(&app, "24.000k", "3.000k", "96.000k");
+
+        app.state.find_track_mut(track).unwrap().effects[0].reconfiguration_failed = true;
+        assert_unavailable(&app);
+        app.state.find_track_mut(track).unwrap().effects[0].reconfiguration_failed = false;
+        assert_known(&app, "24.000k", "3.000k", "96.000k");
+
+        let target = &app.state.find_track(track).unwrap().effects[0];
+        assert_eq!(target.params, before);
+        let stored = target.descriptors[param::SR_REDUCE];
+        assert_eq!((stored.unit, stored.min, stored.max), ("x", 1.0, 32.0));
+        assert!(!app.state.project.history.can_undo());
+        assert!(!app.state.project.dirty);
+
+        app.state.find_track_mut(track).unwrap().effects[0].plugin_name = Some("Hosted".into());
+        assert!(app.device_parameter_presentation(track, effect, param::SR_REDUCE).is_none());
+        let target = &mut app.state.find_track_mut(track).unwrap().effects[0];
+        target.plugin_name = None;
+        target.plugin_ref = Some(vibez_core::effect::PluginDeviceInfo {
+            format: "clap".into(),
+            uid: "hosted-bitcrush-fallback".into(),
+            path: std::path::PathBuf::new(),
+            name: "Hosted".into(),
+            state_b64: None,
+        });
+        assert!(app.device_parameter_presentation(track, effect, param::SR_REDUCE).is_none());
+    }
+
+    #[test]
     fn bitcrush_minimum_rate_readout_reenters_without_relaxing_the_prepared_rate_range() {
         use vibez_dsp::bitcrush::param;
 
