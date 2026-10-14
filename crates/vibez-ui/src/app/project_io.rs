@@ -927,11 +927,19 @@ fn first_remote_provenance_label(project: &Project) -> Option<String> {
         })
 }
 
-fn restored_effect_params(saved: &[f32], descriptors: &[vibez_core::effect::ParamDescriptor]) -> Vec<f32> {
+fn restored_effect_params(
+    saved: &[f32],
+    descriptors: &[vibez_core::effect::ParamDescriptor],
+) -> Vec<f32> {
     let mut params = saved.to_vec();
     // Older projects lack appended controls; keep their existing values and
     // make the same neutral defaults editable that the DSP already restored.
-    params.extend(descriptors.iter().skip(saved.len()).map(|descriptor| descriptor.default));
+    params.extend(
+        descriptors
+            .iter()
+            .skip(saved.len())
+            .map(|descriptor| descriptor.default),
+    );
     params
 }
 

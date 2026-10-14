@@ -29,17 +29,30 @@ pub fn capture(effect: &UiEffect, name: &str) -> Result<DevicePreset, String> {
         .iter()
         .enumerate()
         .map(|(index, key)| {
-            let descriptor = effect.descriptors.get(index)
+            let descriptor = effect
+                .descriptors
+                .get(index)
                 .ok_or_else(|| "The device's parameters are unavailable".to_string())?;
-            let value = effect.params.get(index).copied().unwrap_or(descriptor.default);
+            let value = effect
+                .params
+                .get(index)
+                .copied()
+                .unwrap_or(descriptor.default);
             Ok(((*key).to_owned(), value))
         })
         .collect::<Result<_, String>>()?;
-    DevicePreset::new(DevicePresetKind::Effect(effect.effect_type), name, parameters)
-        .map_err(|error| error.to_string())
+    DevicePreset::new(
+        DevicePresetKind::Effect(effect.effect_type),
+        name,
+        parameters,
+    )
+    .map_err(|error| error.to_string())
 }
 
-pub fn prepare_updates(effect: &UiEffect, preset: &DevicePreset) -> Result<Vec<(usize, f32)>, String> {
+pub fn prepare_updates(
+    effect: &UiEffect,
+    preset: &DevicePreset,
+) -> Result<Vec<(usize, f32)>, String> {
     let keys = parameter_keys(effect)?;
     if preset.kind() != DevicePresetKind::Effect(effect.effect_type) {
         return Err("This preset belongs to a different device".into());
@@ -49,16 +62,29 @@ pub fn prepare_updates(effect: &UiEffect, preset: &DevicePreset) -> Result<Vec<(
     }
     let mut updates = Vec::new();
     for (index, key) in keys.iter().enumerate() {
-        let value = *preset.parameters().get(*key)
+        let value = *preset
+            .parameters()
+            .get(*key)
             .ok_or_else(|| format!("The preset is missing parameter {key}"))?;
-        let descriptor = effect.descriptors.get(index)
+        let descriptor = effect
+            .descriptors
+            .get(index)
             .ok_or_else(|| "The device's parameters are unavailable".to_string())?;
-        if !value.is_finite() || !(descriptor.min..=descriptor.max).contains(&value)
+        if !value.is_finite()
+            || !(descriptor.min..=descriptor.max).contains(&value)
             || (index >= 3 && value != 0.0 && value != 1.0)
         {
-            return Err(format!("Preset parameter {key} is outside its supported range"));
+            return Err(format!(
+                "Preset parameter {key} is outside its supported range"
+            ));
         }
-        if effect.params.get(index).copied().unwrap_or(descriptor.default) != value {
+        if effect
+            .params
+            .get(index)
+            .copied()
+            .unwrap_or(descriptor.default)
+            != value
+        {
             updates.push((index, value));
         }
     }
@@ -71,8 +97,14 @@ pub fn factory_presets(effect_type: EffectType) -> Vec<DevicePreset> {
     }
     [
         ("Unity", [1.0, 0.0, 0.0, 0.0, 0.0]),
-        ("Minus 6 dB", [10.0_f32.powf(-6.0 / 20.0), 0.0, 0.0, 0.0, 0.0]),
-        ("Minus 12 dB", [10.0_f32.powf(-12.0 / 20.0), 0.0, 0.0, 0.0, 0.0]),
+        (
+            "Minus 6 dB",
+            [10.0_f32.powf(-6.0 / 20.0), 0.0, 0.0, 0.0, 0.0],
+        ),
+        (
+            "Minus 12 dB",
+            [10.0_f32.powf(-12.0 / 20.0), 0.0, 0.0, 0.0, 0.0],
+        ),
         ("Invert stereo", [1.0, 0.0, 0.0, 1.0, 1.0]),
     ]
     .into_iter()
@@ -80,8 +112,13 @@ pub fn factory_presets(effect_type: EffectType) -> Vec<DevicePreset> {
         DevicePreset::new(
             DevicePresetKind::Effect(effect_type),
             name,
-            GAIN_KEYS.iter().zip(values).map(|(key, value)| ((*key).into(), value)).collect(),
-        ).expect("Factory preset values are valid")
+            GAIN_KEYS
+                .iter()
+                .zip(values)
+                .map(|(key, value)| ((*key).into(), value))
+                .collect(),
+        )
+        .expect("Factory preset values are valid")
     })
     .collect()
 }

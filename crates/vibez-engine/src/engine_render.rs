@@ -358,7 +358,8 @@ impl AudioEngine {
             track.process_effects(
                 frames,
                 channels,
-                (self.effect_meter_channel == Some(track.id)).then_some(self.effect_meter_generation),
+                (self.effect_meter_channel == Some(track.id))
+                    .then_some(self.effect_meter_generation),
             );
             track.apply_mute_envelope(pos, frames, channels, samples_per_beat);
             let rendered = rendered
@@ -607,7 +608,8 @@ impl AudioEngine {
             track.process_effects(
                 frames,
                 channels,
-                (self.effect_meter_channel == Some(track.id)).then_some(self.effect_meter_generation),
+                (self.effect_meter_channel == Some(track.id))
+                    .then_some(self.effect_meter_generation),
             );
             if self.spectrum_track == Some(track.id) {
                 push_spectrum(

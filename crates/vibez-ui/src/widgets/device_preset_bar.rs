@@ -133,7 +133,9 @@ pub(crate) fn view<'a>(
         tooltip(selector, text(hint).size(11), tooltip::Position::Top),
         preset_button("‹", previous, accent),
         preset_button("›", next, accent),
-    ].spacing(3).align_y(iced::Alignment::Center);
+    ]
+    .spacing(3)
+    .align_y(iced::Alignment::Center);
     let files = row![
         preset_button(
             "Load",
@@ -154,9 +156,14 @@ pub(crate) fn view<'a>(
     .align_y(iced::Alignment::Center);
     if available_width < 370.0 {
         column![selection, container(files).padding([0, 33])]
-            .spacing(3).width(Length::Fill).into()
+            .spacing(3)
+            .width(Length::Fill)
+            .into()
     } else {
-        row![selection, files].spacing(6).align_y(iced::Alignment::Center).into()
+        row![selection, files]
+            .spacing(6)
+            .align_y(iced::Alignment::Center)
+            .into()
     }
 }
 

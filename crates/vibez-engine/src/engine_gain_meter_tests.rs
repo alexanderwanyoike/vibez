@@ -64,9 +64,7 @@ fn monitored_gain_chain_reports_each_inserts_stereo_input_and_output() {
         128,
     )
     .unwrap();
-    commands
-        .push(EngineCommand::SetRouting(routing))
-        .unwrap();
+    commands.push(EngineCommand::SetRouting(routing)).unwrap();
     commands
         .push(EngineCommand::SetEffectMeterChannel {
             track_id: Some(track_id),
@@ -142,10 +140,9 @@ fn return_and_master_gain_meters_observe_insert_levels_in_both_render_paths() {
                     amount: 0.25,
                 })
                 .unwrap();
-            for (track_id, effect_id) in [
-                (return_id, return_effect),
-                (TrackId::MASTER, master_effect),
-            ] {
+            for (track_id, effect_id) in
+                [(return_id, return_effect), (TrackId::MASTER, master_effect)]
+            {
                 commands
                     .push(EngineCommand::insert_built_in_effect(
                         track_id,
@@ -207,9 +204,7 @@ fn return_and_master_gain_meters_observe_insert_levels_in_both_render_paths() {
                     128,
                 )
                 .unwrap();
-                commands
-                    .push(EngineCommand::SetRouting(routing))
-                    .unwrap();
+                commands.push(EngineCommand::SetRouting(routing)).unwrap();
             }
             let (monitored_channel, monitored_effect) = if monitor_master {
                 (TrackId::MASTER, master_effect)
@@ -227,8 +222,7 @@ fn return_and_master_gain_meters_observe_insert_levels_in_both_render_paths() {
             let mut reading = None;
             for _ in 0..12 {
                 engine.process_block(
-                    AudioProcessBlock::new(&mut output, 2)
-                        .with_live_input(source_id.raw(), &input),
+                    AudioProcessBlock::new(&mut output, 2).with_live_input(source_id.raw(), &input),
                 );
                 while let Ok(event) = events.pop() {
                     if let EngineEvent::EffectMeter {
@@ -276,7 +270,8 @@ fn return_and_master_gain_meters_observe_insert_levels_in_both_render_paths() {
 #[test]
 fn gain_meter_backpressure_drops_old_windows_without_callback_allocation() {
     for use_graph in [false, true] {
-        let (mut engine, _commands, mut events, track_id, effect_id) = gain_meter_fixture(use_graph);
+        let (mut engine, _commands, mut events, track_id, effect_id) =
+            gain_meter_fixture(use_graph);
         let loud_input = [0.8, -0.4].repeat(960);
         let quiet_input = [0.2, -0.1].repeat(960);
         let mut output = vec![0.0; loud_input.len()];
@@ -361,7 +356,8 @@ fn gain_meter_backpressure_drops_old_windows_without_callback_allocation() {
 #[test]
 fn gain_meter_reports_bypass_and_audible_reenable_fade() {
     for use_graph in [false, true] {
-        let (mut engine, mut commands, mut events, track_id, effect_id) = gain_meter_fixture(use_graph);
+        let (mut engine, mut commands, mut events, track_id, effect_id) =
+            gain_meter_fixture(use_graph);
         let input = [0.8, -0.4].repeat(960);
         let mut output = vec![0.0; input.len()];
         engine.process_block(
@@ -387,7 +383,8 @@ fn gain_meter_reports_bypass_and_audible_reenable_fade() {
                     reading = Some((input, output));
                 }
             }
-            let (input_levels, output_levels) = reading.expect("bypassed Gains still need readings");
+            let (input_levels, output_levels) =
+                reading.expect("bypassed Gains still need readings");
             assert!((input_levels.peak_l - 0.8).abs() < 1e-5);
             assert!((input_levels.peak_r - 0.4).abs() < 1e-5);
             assert!((input_levels.rms_l - 0.8).abs() < 1e-5);
@@ -407,8 +404,14 @@ fn gain_meter_reports_bypass_and_audible_reenable_fade() {
             for (actual, expected) in [
                 (output_levels.peak_l, heard_peak[0]),
                 (output_levels.peak_r, heard_peak[1]),
-                (output_levels.rms_l, (heard_squares[0] / 960.0).sqrt() as f32),
-                (output_levels.rms_r, (heard_squares[1] / 960.0).sqrt() as f32),
+                (
+                    output_levels.rms_l,
+                    (heard_squares[0] / 960.0).sqrt() as f32,
+                ),
+                (
+                    output_levels.rms_r,
+                    (heard_squares[1] / 960.0).sqrt() as f32,
+                ),
             ] {
                 assert!(
                     (actual - expected).abs() < 1e-5,
@@ -434,7 +437,8 @@ fn skipped_gain_processing_counts_as_silence_and_clears_old_peaks() {
     let input = [0.8, -0.4].repeat(960);
     let mut output = vec![0.0; input.len()];
     engine.process_block(
-        AudioProcessBlock::new(&mut output[..960], 2).with_live_input(track_id.raw(), &input[..960]),
+        AudioProcessBlock::new(&mut output[..960], 2)
+            .with_live_input(track_id.raw(), &input[..960]),
     );
     while let Ok(event) = events.pop() {
         assert!(
@@ -449,7 +453,8 @@ fn skipped_gain_processing_counts_as_silence_and_clears_old_peaks() {
         .push(EngineCommand::SetTrackMute(track_id, true))
         .unwrap();
     engine.process_block(
-        AudioProcessBlock::new(&mut output[..960], 2).with_live_input(track_id.raw(), &input[..960]),
+        AudioProcessBlock::new(&mut output[..960], 2)
+            .with_live_input(track_id.raw(), &input[..960]),
     );
     assert!(output[..960].iter().all(|sample| *sample == 0.0));
     let mut reading = None;
@@ -459,7 +464,8 @@ fn skipped_gain_processing_counts_as_silence_and_clears_old_peaks() {
             reading = Some((input, output));
         }
     }
-    let (input_levels, output_levels) = reading.expect("a skipped chain still publishes its window");
+    let (input_levels, output_levels) =
+        reading.expect("a skipped chain still publishes its window");
     let half_window = std::f32::consts::FRAC_1_SQRT_2;
     for (actual, expected) in [
         (input_levels.peak_l, 0.8),
@@ -497,7 +503,10 @@ fn skipped_gain_processing_counts_as_silence_and_clears_old_peaks() {
             assert_eq!(output, metering::MeterValues::SILENT);
         }
     }
-    assert_eq!(readings, 1, "a fully skipped window clears the visible meter");
+    assert_eq!(
+        readings, 1,
+        "a fully skipped window clears the visible meter"
+    );
 }
 
 #[test]
@@ -505,7 +514,8 @@ fn legacy_gain_automation_keeps_linear_mapping_with_neutral_new_controls() {
     use vibez_core::automation::{AutomationLane, AutomationPoint, AutomationTarget};
 
     for use_graph in [false, true] {
-        let (mut engine, mut commands, _events, track_id, effect_id) = gain_meter_fixture(use_graph);
+        let (mut engine, mut commands, _events, track_id, effect_id) =
+            gain_meter_fixture(use_graph);
         commands
             .push(EngineCommand::SetEffectParam {
                 track_id,

@@ -29,14 +29,21 @@ impl App {
                 single = [(*index, *value)];
                 (*track, *effect, single.as_slice())
             }
-            Message::Devices(DevicesMsg::SetEffectParams(track, effect, updates)) =>
-                (*track, *effect, updates.as_slice()),
+            Message::Devices(DevicesMsg::SetEffectParams(track, effect, updates)) => {
+                (*track, *effect, updates.as_slice())
+            }
             _ => return false,
         };
-        let Some(effect) = self.state.find_track(track_id)
+        let Some(effect) = self
+            .state
+            .find_track(track_id)
             .and_then(|track| track.effects.iter().find(|effect| effect.id == effect_id))
-            .filter(|effect| effect.effect_type == EffectType::Gain
-                && effect.plugin_ref.is_none() && effect.plugin_name.is_none()) else {
+            .filter(|effect| {
+                effect.effect_type == EffectType::Gain
+                    && effect.plugin_ref.is_none()
+                    && effect.plugin_name.is_none()
+            })
+        else {
             return false;
         };
         if let Some(panel) = self.gain_devices.panels.get_mut(&effect_id) {
@@ -47,16 +54,24 @@ impl App {
                 }
             }
         }
-        updates.iter().all(|&(index, value)| effect.params.get(index) == Some(&value))
+        updates
+            .iter()
+            .all(|&(index, value)| effect.params.get(index) == Some(&value))
     }
 
     pub(super) fn poll_gain_devices(&mut self) {
         let wanted = (self.state.view.detail_panel_tab == DetailPanelTab::Devices)
-            .then(|| self.state.active_timeline_editor().selected_track).flatten()
-            .filter(|track_id| self.state.find_track(*track_id).is_some_and(|track| {
-                track.effects.iter().any(|effect| effect.effect_type == EffectType::Gain
-                    && effect.plugin_ref.is_none() && effect.plugin_name.is_none())
-            }));
+            .then(|| self.state.active_timeline_editor().selected_track)
+            .flatten()
+            .filter(|track_id| {
+                self.state.find_track(*track_id).is_some_and(|track| {
+                    track.effects.iter().any(|effect| {
+                        effect.effect_type == EffectType::Gain
+                            && effect.plugin_ref.is_none()
+                            && effect.plugin_name.is_none()
+                    })
+                })
+            });
         if wanted != self.gain_devices.channel {
             self.gain_devices.channel = wanted;
             self.gain_devices.generation = self.gain_devices.generation.wrapping_add(1);
@@ -67,13 +82,20 @@ impl App {
             });
         }
         if let Some(track) = wanted.and_then(|track_id| self.state.find_track(track_id)) {
-            self.gain_devices.panels.retain(|id, _| track.effects.iter().any(|effect| effect.id == *id));
+            self.gain_devices
+                .panels
+                .retain(|id, _| track.effects.iter().any(|effect| effect.id == *id));
             let now = Instant::now();
             for effect in &track.effects {
-                if effect.effect_type == EffectType::Gain && effect.plugin_ref.is_none()
+                if effect.effect_type == EffectType::Gain
+                    && effect.plugin_ref.is_none()
                     && effect.plugin_name.is_none()
                 {
-                    self.gain_devices.panels.entry(effect.id).or_default().reset_stale(now);
+                    self.gain_devices
+                        .panels
+                        .entry(effect.id)
+                        .or_default()
+                        .reset_stale(now);
                 }
             }
         }
@@ -97,16 +119,22 @@ impl App {
         input: MeterValues,
         output: MeterValues,
     ) {
-        if self.gain_devices.channel != Some(track_id)
-            || self.gain_devices.generation != generation
+        if self.gain_devices.channel != Some(track_id) || self.gain_devices.generation != generation
         {
             return;
         }
-        if self.state.find_track(track_id).is_some_and(|track| track.effects.iter().any(|effect| {
-            effect.id == effect_id && effect.effect_type == EffectType::Gain
-                && effect.plugin_ref.is_none() && effect.plugin_name.is_none()
-        })) {
-            self.gain_devices.panels.entry(effect_id).or_default()
+        if self.state.find_track(track_id).is_some_and(|track| {
+            track.effects.iter().any(|effect| {
+                effect.id == effect_id
+                    && effect.effect_type == EffectType::Gain
+                    && effect.plugin_ref.is_none()
+                    && effect.plugin_name.is_none()
+            })
+        }) {
+            self.gain_devices
+                .panels
+                .entry(effect_id)
+                .or_default()
                 .accept_meter(input, output, Instant::now());
         }
     }
@@ -144,12 +172,18 @@ impl App {
                 };
                 panel.input_text[index] = None;
                 panel.input_error[index] = false;
-                let current = self.state.find_track(track_id)
+                let current = self
+                    .state
+                    .find_track(track_id)
                     .and_then(|track| track.effects.iter().find(|effect| effect.id == effect_id))
-                    .filter(|effect| effect.effect_type == EffectType::Gain && effect.plugin_ref.is_none())
-                    .and_then(|effect| effect.params.get(index)).copied();
+                    .filter(|effect| {
+                        effect.effect_type == EffectType::Gain && effect.plugin_ref.is_none()
+                    })
+                    .and_then(|effect| effect.params.get(index))
+                    .copied();
                 if current.is_some_and(|current| current != value) {
-                    return self.update(Message::set_effect_param(track_id, effect_id, index, value));
+                    return self
+                        .update(Message::set_effect_param(track_id, effect_id, index, value));
                 }
             }
             _ => {}
@@ -168,8 +202,13 @@ mod tests {
         let mut app = super::super::test_support::app();
         let track = ProjectTrack::new(TrackId::new(), "Metered".into(), 3);
         let id = track.id;
-        Arc::make_mut(&mut app.state.project_tracks).tracks.push(track);
-        let _ = app.update(Message::Devices(DevicesMsg::AddEffect(id, EffectType::Gain)));
+        Arc::make_mut(&mut app.state.project_tracks)
+            .tracks
+            .push(track);
+        let _ = app.update(Message::Devices(DevicesMsg::AddEffect(
+            id,
+            EffectType::Gain,
+        )));
         let effect = app.state.find_track(id).unwrap().effects[0].id;
         app.state.arrangement.selected_track = Some(id);
         app.state.view.detail_panel_tab = DetailPanelTab::Devices;
@@ -197,15 +236,27 @@ mod tests {
     fn numeric_gain_entry_rejects_invalid_values_and_commits_once() {
         let (mut app, track, effect) = gain_app();
         for input in ["NaN", "oops", "100"] {
-            let _ = app.update(Message::GainControl(GainMsg::SetInput(track, effect, 0, input.into())));
+            let _ = app.update(Message::GainControl(GainMsg::SetInput(
+                track,
+                effect,
+                0,
+                input.into(),
+            )));
             let _ = app.update(Message::GainControl(GainMsg::SubmitInput(track, effect, 0)));
             assert!(app.gain_devices.panels[&effect].input_error[0]);
             assert!(!app.state.project.dirty);
             assert!(!app.state.project.history.can_undo());
         }
-        let _ = app.update(Message::GainControl(GainMsg::SetInput(track, effect, 0, "-6".into())));
+        let _ = app.update(Message::GainControl(GainMsg::SetInput(
+            track,
+            effect,
+            0,
+            "-6".into(),
+        )));
         let _ = app.update(Message::GainControl(GainMsg::SubmitInput(track, effect, 0)));
-        assert!((app.state.find_track(track).unwrap().effects[0].params[0] - 0.501_187_2).abs() < 1e-6);
+        assert!(
+            (app.state.find_track(track).unwrap().effects[0].params[0] - 0.501_187_2).abs() < 1e-6
+        );
         assert!(app.state.project.dirty);
         assert!(app.state.project.history.pop_undo().is_some());
         assert!(!app.state.project.history.can_undo());
@@ -216,7 +267,12 @@ mod tests {
     fn late_gain_meters_cannot_cross_selection_or_device_removal() {
         let (mut app, track, effect) = gain_app();
         let stale_generation = app.gain_devices.generation;
-        let levels = MeterValues { peak_l: 0.5, peak_r: 0.25, rms_l: 0.3, rms_r: 0.15 };
+        let levels = MeterValues {
+            peak_l: 0.5,
+            peak_r: 0.25,
+            rms_l: 0.3,
+            rms_r: 0.15,
+        };
         app.accept_gain_meter(track, effect, stale_generation, levels, levels);
         assert_eq!(app.gain_devices.panels[&effect].output, levels);
         app.state.arrangement.selected_track = None;
@@ -233,5 +289,4 @@ mod tests {
         app.accept_gain_meter(track, effect, app.gain_devices.generation, levels, levels);
         assert!(app.gain_devices.panels.is_empty());
     }
-
 }

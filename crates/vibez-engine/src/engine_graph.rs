@@ -495,7 +495,11 @@ impl AudioEngine {
                             if let Some(slot) =
                                 track.effects.iter_mut().find(|slot| slot.id == effect_id)
                             {
-                                slot.observe_input(&destination.samples[..len], channels, meter_generation);
+                                slot.observe_input(
+                                    &destination.samples[..len],
+                                    channels,
+                                    meter_generation,
+                                );
                             }
                         }
                         prepared.bypass_samples[index][..len]
@@ -513,7 +517,11 @@ impl AudioEngine {
                                 if let Some(slot) =
                                     track.effects.iter_mut().find(|slot| slot.id == effect_id)
                                 {
-                                    slot.observe_output(&destination.samples[..len], channels, meter_generation);
+                                    slot.observe_output(
+                                        &destination.samples[..len],
+                                        channels,
+                                        meter_generation,
+                                    );
                                 }
                             }
                             continue;
@@ -615,7 +623,11 @@ impl AudioEngine {
                             if let Some(slot) =
                                 track.effects.iter_mut().find(|slot| slot.id == effect_id)
                             {
-                                slot.observe_output(&destination.samples[..len], channels, meter_generation);
+                                slot.observe_output(
+                                    &destination.samples[..len],
+                                    channels,
+                                    meter_generation,
+                                );
                             }
                         }
                     }

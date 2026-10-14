@@ -171,7 +171,10 @@ fn a_late_save_does_not_replace_a_newly_selected_preset_name() {
         Ok(Some(saved)),
     )));
 
-    assert_eq!(app.device_preset_selection[&(track_id, effect_id)], selected);
+    assert_eq!(
+        app.device_preset_selection[&(track_id, effect_id)],
+        selected
+    );
     assert_eq!(
         app.capture_device_preset(track_id, effect_id)
             .unwrap()

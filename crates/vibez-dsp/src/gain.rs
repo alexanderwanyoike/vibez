@@ -115,7 +115,11 @@ impl AudioEffect for GainEffect {
     fn process(&mut self, buffer: &mut [f32], channels: usize) {
         for frame in buffer.chunks_mut(channels.max(1)) {
             for (channel, sample) in frame.iter_mut().enumerate() {
-                *sample *= self.channel_gains.get(channel).copied().unwrap_or(self.gain);
+                *sample *= self
+                    .channel_gains
+                    .get(channel)
+                    .copied()
+                    .unwrap_or(self.gain);
             }
         }
     }

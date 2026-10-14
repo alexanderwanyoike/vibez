@@ -527,7 +527,12 @@ impl EngineTrack {
         )
     }
 
-    pub fn process_effects(&mut self, frames: usize, channels: usize, meter_generation: Option<u64>) {
+    pub fn process_effects(
+        &mut self,
+        frames: usize,
+        channels: usize,
+        meter_generation: Option<u64>,
+    ) {
         let buf_size = frames * channels;
         if buf_size == 0 {
             return;

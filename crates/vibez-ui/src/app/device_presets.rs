@@ -62,8 +62,12 @@ impl App {
                 }
                 Task::none()
             }
-            DevicePresetMsg::Loaded(request, Ok(Some(preset))) => self.finish_device_preset_load(request, Ok(preset)),
-            DevicePresetMsg::Loaded(request, Err(error)) => self.finish_device_preset_load(request, Err(error)),
+            DevicePresetMsg::Loaded(request, Ok(Some(preset))) => {
+                self.finish_device_preset_load(request, Ok(preset))
+            }
+            DevicePresetMsg::Loaded(request, Err(error)) => {
+                self.finish_device_preset_load(request, Err(error))
+            }
             DevicePresetMsg::Saved(request, result) => {
                 self.finish_device_preset_save(request, result);
                 Task::none()

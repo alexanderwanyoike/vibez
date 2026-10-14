@@ -90,10 +90,15 @@ impl App {
             {
                 {
                     let (content, width) = self.eq_device_body(track_id, effect);
-                    Some(DeviceBody { content, width, height: th::DEVICE_BODY_H })
+                    Some(DeviceBody {
+                        content,
+                        width,
+                        height: th::DEVICE_BODY_H,
+                    })
                 }
             } else if effect.effect_type == vibez_core::effect::EffectType::Gain
-                && effect.plugin_ref.is_none() && effect.plugin_name.is_none()
+                && effect.plugin_ref.is_none()
+                && effect.plugin_name.is_none()
             {
                 Some(self.gain_device_body(track_id, effect, track_color))
             } else {
@@ -150,13 +155,20 @@ impl App {
     ) -> DeviceBody<'a> {
         let width = (self.state.view.window_width - 36.0).clamp(320.0, 900.0);
         let height = (self.effective_detail_height() - 100.0).max(70.0);
-        let panel = self.gain_devices.panels.get(&effect.id)
+        let panel = self
+            .gain_devices
+            .panels
+            .get(&effect.id)
             .unwrap_or(&self.gain_devices.empty_panel);
         DeviceBody {
             content: crate::widgets::gain_device::view(
-                track_id, effect, accent, panel,
+                track_id,
+                effect,
+                accent,
+                panel,
                 self.view_device_preset_bar(track_id, effect, accent, width - 20.0),
-                width - 20.0, height - 16.0,
+                width - 20.0,
+                height - 16.0,
             ),
             width,
             height,
