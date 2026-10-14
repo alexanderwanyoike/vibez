@@ -174,6 +174,20 @@ mod tests {
     }
 
     #[test]
+    fn undo_restores_values_without_closing_the_open_advanced_controls() {
+        let (mut app, track, effect) = gain_app();
+        let _ = app.update(Message::GainControl(GainMsg::ToggleAdvanced(effect)));
+        let _ = app.update(Message::set_effect_param(track, effect, 1, 8.0));
+        let _ = app.update(Message::Project(crate::domains::project::ProjectMsg::Undo));
+        app.poll_gain_devices();
+        assert_eq!(
+            app.state.find_track(track).unwrap().effects[0].params[1],
+            0.0
+        );
+        assert!(app.gain_devices.panels[&effect].advanced);
+    }
+
+    #[test]
     fn gain_unity_clears_a_stale_input_without_dirtying_an_unchanged_device() {
         let (mut app, track, effect) = gain_app();
         let panel = app.gain_devices.panels.get_mut(&effect).unwrap();
