@@ -287,6 +287,25 @@ struct Case {
 
 fn no_setup(_: &mut rtrb::Producer<EngineCommand>, _: &Fixture) {}
 
+fn prepare_populated_sampler_replacement(
+    commands: &mut rtrb::Producer<EngineCommand>,
+    fixture: &Fixture,
+) -> std::sync::Weak<DecodedAudio> {
+    let sample = audio(8192);
+    let owner = Arc::downgrade(&sample);
+    for command in [
+        EngineCommand::set_built_in_instrument(fixture.empty, InstrumentKind::Sampler, 48_000),
+        EngineCommand::SetInstrumentParam { track_id: fixture.empty, param_index: 9, value: 0.5 },
+        EngineCommand::LoadSamplerSample {
+            track_id: fixture.empty, sample, sample_name: "Populated original sample".into(),
+        },
+        EngineCommand::ExternalNoteOn { track_id: fixture.empty, pitch: 60, velocity: 127 },
+    ] {
+        commands.push(command).unwrap();
+    }
+    owner
+}
+
 macro_rules! case {
     ($name:literal, $allocates:expr, $command:expr) => {
         Case {
@@ -538,8 +557,10 @@ fn cases() -> Vec<Case> {
             param_index: 0,
             value: 0.5,
         }),
-        case!("LoadSamplerSample", true, |f| C::LoadSamplerSample {
-            track_id: f.synth,
+        case!("LoadSamplerSample", true, |commands, f| {
+            prepare_populated_sampler_replacement(commands, f);
+        }, |f| C::LoadSamplerSample {
+            track_id: f.empty,
             sample: audio(1024),
             sample_name: "Hit".into(),
         }),
@@ -666,6 +687,51 @@ fn cases() -> Vec<Case> {
             ),
         }),
     ]
+}
+
+#[test]
+fn populated_sampler_ratchet_fixture_proves_reset_owner_return_and_allocation_free_drain() {
+    let (mut engine, mut commands, mut events, fixture) = playing(no_setup);
+    let owner = prepare_populated_sampler_replacement(&mut commands, &fixture);
+    for track in [fixture.synth, fixture.audio] {
+        commands.push(EngineCommand::SetTrackMute(track, true)).unwrap();
+    }
+    let mut output = [0.0; 32];
+    engine.process(&mut output, 2);
+    let expected = 0.125 * std::f32::consts::FRAC_1_SQRT_2;
+    assert!(output.iter().all(|sample| (*sample - expected).abs() < 1e-6));
+    while events.pop().is_ok() {}
+    let instrument = engine.tracks().iter().find(|track| track.id == fixture.empty).unwrap().instrument.as_ref().unwrap();
+    assert_eq!(instrument.instrument_kind(), InstrumentKind::Sampler);
+    assert_eq!(instrument.sample_name(), Some("Populated original sample"));
+    assert_eq!(instrument.get_param(9), 0.5);
+    let old_name_pointer = instrument.sample_name().unwrap().as_ptr();
+    assert_eq!(owner.strong_count(), 1, "installed sample is uniquely owned");
+    let case = cases().into_iter().find(|case| case.name == "LoadSamplerSample").unwrap();
+    let command = (case.command)(&fixture);
+    assert!(matches!(command, EngineCommand::LoadSamplerSample { track_id, .. } if track_id == fixture.empty));
+    commands.push(command).unwrap();
+    assert_eq!(crate::retirement::tests::allocations(|| engine.process(&mut output, 2)), (0, 0));
+    assert_eq!(output, [0.0; 32], "replacement resets sounding sampler voices");
+    let instrument = engine.tracks().iter().find(|track| track.id == fixture.empty).unwrap().instrument.as_ref().unwrap();
+    assert_eq!(instrument.sample_name(), Some("Hit"));
+    assert_eq!(instrument.get_param(9), 0.5);
+    let mut retired = None;
+    while let Ok(event) = events.pop() {
+        if let EngineEvent::RetiredInstrumentMedia(owners) = event {
+            assert!(retired.is_none());
+            retired = Some(owners);
+        }
+    }
+    let retired = retired.expect("exact complete displaced owners return from the table command");
+    assert_eq!(retired.sample.as_ref().map(Arc::as_ptr), Some(owner.as_ptr()));
+    assert_eq!(retired.name.as_ref().unwrap().as_ptr(), old_name_pointer);
+    assert_eq!(owner.strong_count(), 1);
+    drop(retired);
+    assert_eq!(owner.strong_count(), 0);
+    commands.push(EngineCommand::ExternalNoteOn { track_id: fixture.empty, pitch: 60, velocity: 127 }).unwrap();
+    assert_eq!(crate::retirement::tests::allocations(|| engine.process(&mut output, 2)), (0, 0));
+    assert!(output.iter().all(|sample| (*sample - expected).abs() < 1e-6));
 }
 
 #[test]
