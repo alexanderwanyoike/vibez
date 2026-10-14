@@ -20,7 +20,7 @@ impl App {
     }
 
     pub(super) fn bitcrush_page(&self, effect: EffectId) -> DetailPage {
-        self.bitcrush_panels.get(&effect).map_or(DetailPage::Main, |panel| panel.page)
+        self.bitcrush_panels.get(&effect).map_or(DetailPage::default(), |panel| panel.page)
     }
 
     pub(super) fn bitcrush_sample_hold(&self, effect: EffectId) -> Option<SampleHoldMeter> {

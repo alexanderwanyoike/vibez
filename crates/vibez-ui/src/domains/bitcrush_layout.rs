@@ -26,8 +26,8 @@ pub struct Region {
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum DetailPage {
-    #[default]
     Main,
+    #[default]
     Color,
     Clock,
     Filter,
