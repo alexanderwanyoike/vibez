@@ -196,6 +196,40 @@ exists there. Files are named for the domain they serve; mechanism names
 file opens with a `//!` stating its single responsibility in one sentence;
 when the sentence no longer covers the file, the file splits.
 
+## 9. Native device targets, instances and measurements
+
+A native control's display is a projection of its persisted target. Keep
+existing descriptor indices, stored units and normalized automation mappings
+stable when appending controls. Domain value policies own parsing, snapping
+and knob position; numeric fields and canvas knobs use the same policy.
+`ParameterPresentation` carries availability and explanatory text without
+rewriting the stored value. Reentering an unchanged effective readout must
+preserve a legacy fractional target and produce no dirty or Undo step.
+
+Construct instance-dependent native state before parameters or audio, on the
+sender's thread. `create_effect_for_instance` uses the persisted `EffectId`
+for Bitcrush's deterministic random streams; command insertion, UI preparation
+and Bounce share that construction home. Reset preserves immutable identity
+and rewinds processing history. Do not add a callback identity setter or a
+preset seed field. Standalone construction has a deterministic default.
+
+Hydration before first audio snaps to the complete target. Manual smoothing
+belongs to the processor, while `set_automated_param` applies its own field
+exactly and preserves unrelated manual edits. Bitcrush's discrete edits use
+two inline lanes plus one latest pending tuple, so repeated edits have a
+bounded transition and cannot grow a callback backlog. Its scope can show
+an ongoing transition even after target controls have changed.
+
+Native graphs and gauges describe actual processing. Bitcrush's fixed Copy
+`SampleHoldMeter` pairs sanitized LEFT input with final output on one local
+source clock, including actual acquisition masks and transition frames.
+Observation drains preserve that clock. Zero count means unavailable;
+nonzero zero-valued samples mean measured silence. Publish selected-owner
+windows at the existing 50 Hz cadence with lossy cosmetic delivery, then
+accept them only for the current owner, subscription generation and prepared
+rate. Clear bypassed, removed, invalid-rate and stale observations. A drawing
+must not invent a staircase, anti-alias claim or applied value from a target.
+
 ---
 
 ## Trace 1: a fade drag, from pixel to speaker
