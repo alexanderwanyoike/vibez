@@ -2,6 +2,7 @@
 
 use super::random::Random;
 
+#[derive(Clone, Copy)]
 pub(super) struct Clock {
     counter: u32,
     divider: u32,

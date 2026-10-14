@@ -71,6 +71,7 @@ pub struct SampleHoldMeter {
     /// Bit n describes an acquisition at first_source_frame + n.
     pub primary_acquisitions: [u64; 2],
     pub secondary_acquisitions: [u64; 2],
+    /// Scheduled transition frames, including the endpoint with zero outgoing weight.
     pub blending: [u64; 2],
 }
 

@@ -7,13 +7,15 @@ use crate::{butterworth_filter::ButterworthFilter, effect::AudioEffect};
 
 #[path = "bitcrush_clock.rs"]
 mod clock;
+#[path = "bitcrush_lanes.rs"]
+mod lanes;
 #[path = "bitcrush_random.rs"]
 mod random;
 #[path = "bitcrush_ramp.rs"]
 mod ramp;
 #[path = "bitcrush_scope.rs"]
 mod scope;
-use clock::Clock;
+use lanes::{Configuration, Lanes, Source};
 use random::Random;
 use ramp::Ramp;
 use scope::Scope;
@@ -112,8 +114,7 @@ pub struct BitcrushEffect {
     scope: Scope,
     random: Random,
     source_frames: u64,
-    hold: [f32; 2],
-    clock: Clock,
+    lanes: Lanes,
 }
 
 impl BitcrushEffect {
@@ -138,8 +139,9 @@ impl BitcrushEffect {
         };
         let mut post_lp = ButterworthFilter::EMPTY;
         post_lp.configure(sample_rate, BITCRUSH_PARAMS[param::POST_LP_HZ].default, false);
+        let params = std::array::from_fn(|index| BITCRUSH_PARAMS[index].default);
         Self {
-            params: std::array::from_fn(|index| BITCRUSH_PARAMS[index].default),
+            params,
             sample_rate,
             drive: Ramp::new(0.0),
             mix: Ramp::new(1.0),
@@ -152,8 +154,7 @@ impl BitcrushEffect {
             scope: Scope::default(),
             random: Random::for_identity(identity),
             source_frames: 0,
-            hold: [0.0; 2],
-            clock: Clock::default(),
+            lanes: Lanes::new(Configuration::from_params(&params)),
         }
     }
 
@@ -197,6 +198,7 @@ impl BitcrushEffect {
                 self.post_lp.configure(self.sample_rate, value, false);
             }
         }
+        self.lanes.edit(index, value, automated || !self.started);
         *target = value;
         true
     }
@@ -251,11 +253,6 @@ impl AudioEffect for BitcrushEffect {
             return;
         }
         self.started = true;
-        let levels = 2u32.pow(self.params[param::BITS] as u32) as f32;
-        let step = 2.0 / levels;
-        let divider = self.params[param::SR_REDUCE].round().max(1.0) as u32;
-        let dither = self.params[param::DITHER] != 0.0;
-
         for frame in 0..frames {
             if let Some(value) = self.drive.advance(self.params[param::DRIVE_DB]) {
                 self.drive_gain = 10.0_f64.powf(f64::from(value) / 20.0);
@@ -267,43 +264,25 @@ impl AudioEffect for BitcrushEffect {
                 self.post_lp.configure(self.sample_rate, cutoff, false);
             }
             let mix = self.mix.value();
-            let drive_db = self.drive.value();
-            let drive_gain = self.drive_gain;
-            let acquired = self.clock.advance(
-                divider,
-                self.jitter.value(),
-                self.source_frames,
-                &self.random,
-            );
-            for c in 0..ch {
-                let idx = frame * channels + c;
-                let dry = if buffer[idx].is_finite() {
-                    buffer[idx]
+            let dry = std::array::from_fn(|channel| {
+                if channel < ch && buffer[frame * channels + channel].is_finite() {
+                    buffer[frame * channels + channel]
                 } else {
                     0.0
-                };
-
-                if acquired {
-                    // Neutral drive/dither retain the original f32 division for saved projects.
-                    let scaled = if drive_db == 0.0 && !dither {
-                        f64::from(dry / step)
-                    } else {
-                        f64::from(dry) * drive_gain / f64::from(step)
-                    };
-                    let scaled = if dither {
-                        scaled + self.random.tpdf(self.source_frames, c)
-                    } else {
-                        scaled
-                    };
-                    let quantized = match self.params[param::ROUNDING] as u32 {
-                        1 => scaled.floor(),
-                        2 => scaled.trunc(),
-                        _ => scaled.round(),
-                    };
-                    let q = quantized * f64::from(step);
-                    self.hold[c] = q.clamp(-1.0, 1.0) as f32;
                 }
-                let wet = self.hold[c];
+            });
+            let lane_frame = self.lanes.process(&Source {
+                dry,
+                channels: ch,
+                drive_db: self.drive.value(),
+                drive_gain: self.drive_gain,
+                jitter: self.jitter.value(),
+                frame: self.source_frames,
+                random: &self.random,
+            });
+            for (c, &dry) in dry.iter().enumerate().take(ch) {
+                let idx = frame * channels + c;
+                let wet = lane_frame.wet[c];
                 // Keeping this history warm avoids a cold filter transient when enabled.
                 let filtered = self.post_lp.process(wet, c);
                 let amount = self.post_lp_amount.value();
@@ -314,7 +293,7 @@ impl AudioEffect for BitcrushEffect {
                 };
                 buffer[idx] = dry * (1.0 - mix) + wet * mix;
                 if c == 0 {
-                    self.scope.record(dry, buffer[idx], acquired, self.clock.interval());
+                    self.scope.record(dry, buffer[idx], &lane_frame);
                 }
             }
             self.source_frames = self.source_frames.wrapping_add(1);
@@ -324,8 +303,7 @@ impl AudioEffect for BitcrushEffect {
     fn reset(&mut self) {
         self.source_frames = 0;
         self.scope = Scope::default();
-        self.hold = [0.0; 2];
-        self.clock = Clock::default();
+        self.lanes = Lanes::new(Configuration::from_params(&self.params));
         self.mix.edit(self.params[param::MIX], true);
         self.jitter.edit(self.params[param::JITTER], true);
         self.post_lp_amount.edit(self.params[param::POST_LP_ENABLED], true);
