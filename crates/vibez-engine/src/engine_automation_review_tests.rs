@@ -271,7 +271,7 @@ fn prepared_and_new_send_automation_keep_sample_exact_ramps() {
         let bus = TrackId::new();
         let mut source = EngineTrack::new(track);
         source.sends.push((bus, 0.5));
-        source.playback_source.clips.push(EngineClip {
+        source.playback_source.push_audio_clip(EngineClip {
             id: ClipId::new(),
             audio: Arc::new(DecodedAudio {
                 channels: vec![vec![1.0; 128]; 2],
