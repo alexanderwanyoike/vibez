@@ -7,6 +7,7 @@ use vibez_core::id::{EffectId, TrackId};
 use vibez_engine::metering::MeterValues;
 
 use crate::domains::gain::is_native_gain;
+use crate::domains::gate::is_native_gate;
 use crate::state::{DetailPanelTab, UiEffect};
 
 use super::*;
@@ -47,7 +48,7 @@ impl MeterReadings {
 }
 
 fn is_metered_effect(effect: &UiEffect) -> bool {
-    is_native_gain(effect)
+    is_native_gain(effect) || is_native_filter(effect) || is_native_compressor(effect) || is_native_gate(effect)
 }
 
 impl App {
@@ -65,6 +66,7 @@ impl App {
             self.restart_device_metering();
         }
         self.prune_device_controls();
+        self.poll_gate_panels(wanted, Instant::now());
         let project = &self.state.project_tracks;
         let effect_exists = |id: &EffectId| {
             project
@@ -87,7 +89,7 @@ impl App {
                         .entry(effect.id)
                         .or_default()
                         .reset_stale(now);
-                } else if is_metered_effect(effect) {
+                } else if is_native_filter(effect) || is_native_compressor(effect) || is_native_gate(effect) {
                     self.device_meters
                         .readings
                         .entry(effect.id)
@@ -102,6 +104,9 @@ impl App {
     /// while disclosure state belongs to the device rather than the subscription.
     pub(super) fn restart_device_metering(&mut self) {
         self.discard_all_device_entries();
+        for panel in self.gate_panels.values_mut() {
+            panel.history.reset();
+        }
         self.device_meters.generation = self.device_meters.generation.wrapping_add(1);
         for readings in self.device_meters.readings.values_mut() {
             *readings = MeterReadings::default();
@@ -120,6 +125,7 @@ impl App {
         self.device_meters.generation = self.device_meters.generation.wrapping_add(1);
         self.device_meters.readings.clear();
         self.gain_devices.panels.clear();
+        self.gate_panels.clear();
         self.reset_device_controls();
         self.send_command(EngineCommand::SetEffectMeterChannel {
             track_id: None,
@@ -154,7 +160,7 @@ impl App {
                 .entry(effect_id)
                 .or_default()
                 .accept_meter(input, output, now);
-        } else if is_metered_effect(effect) {
+        } else if is_native_filter(effect) || is_native_compressor(effect) || is_native_gate(effect) {
             self.device_meters
                 .readings
                 .entry(effect_id)
