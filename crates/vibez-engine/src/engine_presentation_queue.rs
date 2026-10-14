@@ -157,15 +157,15 @@ impl AudioEngine {
         if self.presentation_fault {
             match event {
                 EngineEvent::PlaybackStopped => {
-                    self.pending_playback_stop = true;
+                    self.terminal_notifications.request_playback_stop();
                     self.flush_presentation();
                     return;
                 }
                 EngineEvent::PerformanceCaptureStopped {
                     effective_at_samples,
                 } => {
-                    self.pending_capture_stop
-                        .get_or_insert(effective_at_samples);
+                    self.terminal_notifications
+                        .request_capture_stop(effective_at_samples);
                     self.flush_presentation();
                     return;
                 }
@@ -186,16 +186,14 @@ impl AudioEngine {
             // Ownership producers reserve before handoff. Retain the discovering
             // event separately while the full UI ring holds the scheduled owners.
             let event = cancelled_event(event);
-            if self.presentation_overflow_owner.is_none() {
-                self.presentation_overflow_owner = Some(event);
-            } else {
+            if let Some(event) = self.terminal_notifications.retain_overflow_owner(event) {
                 self.retire_event(event);
             }
         }
     }
 
     pub(super) fn flush_presentation(&mut self) {
-        if let Some(effective_at_samples) = self.pending_capture_stop {
+        if self.terminal_notifications.capture_stop().is_some() {
             flush_ready(
                 &mut self.event_tx,
                 &mut self.scheduled_presentation,
@@ -208,45 +206,9 @@ impl AudioEngine {
             {
                 return;
             }
-
-            if self
-                .event_tx
-                .push(EngineEvent::PerformanceCaptureStopped {
-                    effective_at_samples,
-                })
-                .is_ok()
-            {
-                self.pending_capture_stop = None;
-            } else {
-                return;
-            }
         }
-        if let Some((track_id, effect_id, reason)) = self.pending_compensation_failure {
-            if self
-                .event_tx
-                .push(EngineEvent::CompensationInvalid {
-                    track_id,
-                    effect_id,
-                    reason,
-                })
-                .is_ok()
-            {
-                self.pending_compensation_failure = None;
-            } else {
-                return;
-            }
-        }
-        if self.pending_playback_stop {
-            if self.event_tx.push(EngineEvent::PlaybackStopped).is_err() {
-                return;
-            }
-            self.pending_playback_stop = false;
-        }
-        if let Some(event) = self.presentation_overflow_owner.take() {
-            if let Err(rtrb::PushError::Full(event)) = self.event_tx.push(event) {
-                self.presentation_overflow_owner = Some(event);
-                return;
-            }
+        if !self.terminal_notifications.publish(&mut self.event_tx) {
+            return;
         }
         let source_now = self.output_position + self.rendered_callback_frames as u64;
         flush_ready(
@@ -269,14 +231,14 @@ impl AudioEngine {
         }
         self.clip_resync_track = Some(0);
         self.cancel_presentation();
-        self.pending_capture_stop
-            .get_or_insert(self.compensation_callback_heard_start);
-        self.pending_playback_stop = true;
-        self.pending_compensation_failure.get_or_insert((
+        self.terminal_notifications
+            .request_capture_stop(self.compensation_callback_heard_start);
+        self.terminal_notifications.request_playback_stop();
+        self.terminal_notifications.request_failure(
             TrackId::MASTER,
             None,
             "Audio presentation event history is full",
-        ));
+        );
         self.flush_presentation();
     }
 
