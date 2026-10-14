@@ -34,7 +34,7 @@ pub struct Arrangement {
 }
 
 pub fn arrange(size: Size, advanced: bool) -> Arrangement {
-    let (controls, knobs) = if advanced && size.height < 100.0 {
+    let (controls, knobs) = if size.height < 100.0 {
         (0.0, None)
     } else if size.height >= 220.0 {
         (74.0, Some(38.0))
@@ -99,32 +99,45 @@ pub fn view<'a>(
         .spacing(8)
         .align_y(iced::Alignment::Center)
     };
-    let response_canvas = canvas(FilterResponse {
-        track,
-        effect,
-        sample_rate,
-        accent,
-    })
-    .width(Length::Fill)
-    .height(Length::Fill);
-    let plot: Element<'a, Message> = if layout.plot < 42.0 {
-        iced::widget::tooltip(
-            response_canvas,
-            text("Linear response · drive and modulation excluded").size(9),
-            iced::widget::tooltip::Position::Top,
-        )
-        .into()
-    } else {
-        column![
-            section_label("Linear response · drive and modulation excluded"),
-            response_canvas,
-        ]
-        .spacing(3)
+    let plot = || -> Element<'a, Message> {
+        let response_canvas = canvas(FilterResponse {
+            track,
+            effect,
+            sample_rate,
+            accent,
+        })
         .width(Length::Fill)
-        .height(Length::Fill)
-        .into()
+        .height(Length::Fill);
+        if layout.plot < 42.0 {
+            iced::widget::tooltip(
+                response_canvas,
+                text("Linear response · drive and modulation excluded").size(9),
+                iced::widget::tooltip::Position::Top,
+            )
+            .into()
+        } else {
+            column![
+                section_label("Linear response · drive and modulation excluded"),
+                response_canvas,
+            ]
+            .spacing(3)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
+        }
     };
-    let visual: Element<'a, Message> = if layout.inline_primary {
+    let short_controls: Element<'a, Message> = if size.width >= MEDIUM_W {
+        row![primary(), container(plot()).width(180.0)]
+            .spacing(12)
+            .align_y(iced::Alignment::Center)
+            .height(Length::Fill)
+            .into()
+    } else {
+        container(primary()).center_y(Length::Fill).into()
+    };
+    let visual: Element<'a, Message> = if size.height < 100.0 && !state.advanced {
+        short_controls
+    } else if layout.inline_primary {
         row![
             primary(),
             container(modulation(track, effect, state, accent, false)).width(360.0)
@@ -180,7 +193,7 @@ pub fn view<'a>(
         } else {
             meter.into()
         };
-        let response = row![plot, meter]
+        let response = row![plot(), meter]
             .spacing(8)
             .align_y(iced::Alignment::Center)
             .height(Length::Fill);
