@@ -440,4 +440,31 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn advanced_preserves_primary_controls_at_the_actual_maximum_body_in_every_tier() {
+        for width in [430.0, 472.0, 740.0, 804.0, 872.0, 892.0] {
+            let layout = arrange(Size::new(width, 304.0), true);
+            assert!(
+                layout.primary_beside,
+                "Advanced replaces the core controls at width {width}"
+            );
+            let child_height = 8.0 * 1.3 + 3.0 + 34.0 + 3.0 + 10.0 * 1.3 + 2.0;
+            assert!(
+                layout.controls >= child_height + 4.0,
+                "core knobs and values clip at width {width}"
+            );
+            assert!(layout.plot >= 100.0, "the defining visual disappears at {width}");
+        }
+    }
+
+    #[test]
+    fn medium_keeps_sidechain_source_visible_before_opening_details() {
+        for width in [740.0, 804.0, 820.0, 871.0] {
+            let layout = arrange(Size::new(width, 304.0), false);
+            assert!(layout.sidechain_column, "sidechain hidden at medium width {width}");
+            assert!(layout.plot >= 150.0, "sidechain has no real vertical budget");
+        }
+    }
+
 }
