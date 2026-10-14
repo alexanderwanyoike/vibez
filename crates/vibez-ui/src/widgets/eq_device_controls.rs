@@ -34,12 +34,12 @@ pub(super) struct Controls<'a> {
     pub analyser_active: bool,
 }
 
-fn choice<'a>(
+fn choice_button<'a>(
     label: &'static str,
     active: bool,
     accent: Color,
     message: Message,
-) -> Element<'a, Message> {
+) -> iced::widget::Button<'a, Message> {
     button(text(label).size(9))
         .on_press(message)
         .padding([2, 4])
@@ -60,7 +60,15 @@ fn choice<'a>(
             },
             ..Default::default()
         })
-        .into()
+}
+
+fn choice<'a>(
+    label: &'static str,
+    active: bool,
+    accent: Color,
+    message: Message,
+) -> Element<'a, Message> {
+    choice_button(label, active, accent, message).into()
 }
 
 impl<'a> Controls<'a> {
