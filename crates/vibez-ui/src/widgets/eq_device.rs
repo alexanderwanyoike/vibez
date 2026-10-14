@@ -552,4 +552,14 @@ mod tests {
         assert_eq!(card_width(710.0), 710.0);
         assert_eq!(card_width(1800.0), 900.0);
     }
+
+    #[test]
+    fn wide_advanced_keeps_main_readouts_when_the_plot_cannot_fit_a_side_editor() {
+        for height in [130.0, 160.0, 240.0] {
+            assert!(
+                arrange(Size::new(900.0, height), true).inline_primary,
+                "main readouts hidden at height {height}"
+            );
+        }
+    }
 }
