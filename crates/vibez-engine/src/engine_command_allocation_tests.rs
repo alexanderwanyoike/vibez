@@ -88,6 +88,7 @@ fn coverage(command: &EngineCommand) -> Coverage {
         | C::SetSend { .. }
         | C::SetSampleRate(_)
         | C::SetSpectrumTap(_)
+        | C::SetEffectSpectrumTap(_)
         | C::SetEffectMeterChannel { .. }
         | C::RemoveEffect(..)
         | C::SetEffectParam { .. }
@@ -469,6 +470,14 @@ fn cases() -> Vec<Case> {
         case!("SetSpectrumTap", false, |f| C::SetSpectrumTap(Some(
             f.synth
         ))),
+        case!("SetEffectSpectrumTap", false, |f| {
+            C::SetEffectSpectrumTap(Some(crate::effect_spectrum::EffectSpectrumTarget {
+                track_id: f.synth,
+                effect_id: f.effect,
+                position: crate::effect_spectrum::EffectSpectrumPosition::Output,
+                generation: 1,
+            }))
+        }),
         case!("SetEffectMeterChannel", false, |f| {
             C::SetEffectMeterChannel {
                 track_id: Some(f.synth),

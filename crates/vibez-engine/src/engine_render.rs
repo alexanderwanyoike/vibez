@@ -355,7 +355,12 @@ impl AudioEngine {
 
             // Always run the shared device chain. A silent new Section stops
             // source material while already-produced effect tails continue.
-            track.process_effects(frames, channels, self.effect_meter.generation_for(track.id));
+            track.process_effects_observed(
+                frames,
+                channels,
+                self.effect_meter.generation_for(track.id),
+                &mut self.effect_spectrum,
+            );
             track.apply_mute_envelope(pos, frames, channels, samples_per_beat);
             let rendered = rendered
                 || track.mix_buffer[..frames * channels]
@@ -600,7 +605,12 @@ impl AudioEngine {
             if !has_signal && track.effects.is_empty() {
                 continue;
             }
-            track.process_effects(frames, channels, self.effect_meter.generation_for(track.id));
+            track.process_effects_observed(
+                frames,
+                channels,
+                self.effect_meter.generation_for(track.id),
+                &mut self.effect_spectrum,
+            );
             if self.spectrum_track == Some(track.id) {
                 push_spectrum(
                     &mut self.spectrum_tx,

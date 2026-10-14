@@ -2,6 +2,7 @@ pub mod commands;
 pub mod compensation;
 pub mod compensation_clock;
 pub mod compensation_controls;
+pub mod effect_spectrum;
 pub mod engine;
 mod engine_audition;
 pub mod events;

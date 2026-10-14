@@ -490,6 +490,13 @@ impl AudioEngine {
                     let track =
                         binding.get_mut(&mut self.tracks, &mut self.buses, &mut self.master);
                     if let Some(track) = track {
+                        self.effect_spectrum.observe(
+                            node.channel,
+                            effect_id,
+                            crate::effect_spectrum::EffectSpectrumPosition::Input,
+                            &destination.samples[..len],
+                            channels,
+                        );
                         track.observe_effect(
                             effect_id,
                             crate::mixer::MeterSide::Input,
@@ -508,6 +515,13 @@ impl AudioEngine {
                             } else {
                                 destination.samples[..len].fill(0.0);
                             }
+                            self.effect_spectrum.observe(
+                                node.channel,
+                                effect_id,
+                                crate::effect_spectrum::EffectSpectrumPosition::Output,
+                                &destination.samples[..len],
+                                channels,
+                            );
                             track.observe_effect(
                                 effect_id,
                                 crate::mixer::MeterSide::Output,
@@ -610,6 +624,13 @@ impl AudioEngine {
                             }
                             offset = end;
                         }
+                        self.effect_spectrum.observe(
+                            node.channel,
+                            effect_id,
+                            crate::effect_spectrum::EffectSpectrumPosition::Output,
+                            &destination.samples[..len],
+                            channels,
+                        );
                         track.observe_effect(
                             effect_id,
                             crate::mixer::MeterSide::Output,
