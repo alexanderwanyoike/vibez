@@ -35,7 +35,7 @@ pub struct Arrangement {
     pub plot: f32,
     pub controls: f32,
     pub knobs: Option<f32>,
-    pub primary_beside: bool,
+    pub primary_visible_with_details: bool,
     pub sidechain_column: bool,
     pub both_plots: bool,
     pub compact: bool,
@@ -82,7 +82,7 @@ pub fn arrange(size: Size, advanced: bool) -> Arrangement {
         plot,
         controls,
         knobs,
-        primary_beside: advanced && details > 0.0,
+        primary_visible_with_details: advanced && details > 0.0,
         sidechain_column,
         both_plots: !compact && plot > 0.0,
         compact,
@@ -141,19 +141,16 @@ fn details_button<'a>(
         .into()
 }
 
+fn db_reading(value: f32) -> String {
+    let db = vibez_core::level::amplitude_to_db(value);
+    if db.is_finite() { format!("{db:.1}") } else { "-inf".into() }
+}
+
 fn signal_meter<'a>(
     label: &'static str,
     levels: MeterValues,
     numbers: bool,
 ) -> Element<'a, Message> {
-    let reading = |value| {
-        let db = vibez_core::level::amplitude_to_db(value);
-        if db.is_finite() {
-            format!("{db:.1}")
-        } else {
-            "-inf".into()
-        }
-    };
     let mut content = column![
         section_label(label),
         canvas(LevelMeter { levels })
@@ -166,7 +163,7 @@ fn signal_meter<'a>(
     if numbers {
         for (channel, peak) in [("L", levels.peak_l), ("R", levels.peak_r)] {
             content = content.push(
-                text(format!("{channel} {}", reading(peak)))
+                text(format!("{channel} {}", db_reading(peak)))
                     .size(8)
                     .font(crate::typography::PERFORM_TECH)
                     .wrapping(iced::widget::text::Wrapping::None),
@@ -177,13 +174,9 @@ fn signal_meter<'a>(
 }
 
 fn signal_readouts<'a>(input: MeterValues, output: MeterValues) -> Element<'a, Message> {
-    let reading = |value| {
-        let db = vibez_core::level::amplitude_to_db(value);
-        if db.is_finite() { format!("{db:.1}") } else { "-inf".into() }
-    };
     let mut content = column![].spacing(2);
     for (label, levels) in [("In", input), ("Out", output)] {
-        content = content.push(text(format!("{label} L {} R {}", reading(levels.peak_l), reading(levels.peak_r)))
+        content = content.push(text(format!("{label} L {} R {}", db_reading(levels.peak_l), db_reading(levels.peak_r)))
             .size(8).font(crate::typography::PERFORM_TECH).color(th::text_dim())
             .wrapping(iced::widget::text::Wrapping::None));
     }
@@ -274,7 +267,7 @@ pub fn view<'a>(
                 .font(crate::typography::PERFORM_TECH)
                 .wrapping(iced::widget::text::Wrapping::None),
         );
-        if state.advanced && !layout.primary_beside {
+        if state.advanced && !layout.primary_visible_with_details {
             toolbar = toolbar.push(details_button(track, effect, true, layout.compact, accent));
         }
     }
@@ -406,7 +399,7 @@ pub fn view<'a>(
     } else {
         PrimaryControls::Full
     };
-    let controls: Element<'a, Message> = if state.advanced && !layout.primary_beside {
+    let controls: Element<'a, Message> = if state.advanced && !layout.primary_visible_with_details {
         advanced()
     } else {
         row![
@@ -475,7 +468,7 @@ mod tests {
                         layout.plot == 0.0 || layout.plot >= 4.0 + caption + 32.0,
                         "no miniature plots"
                     );
-                    assert_eq!(layout.primary_beside, advanced && height >= 112.0);
+                    assert_eq!(layout.primary_visible_with_details, advanced && height >= 112.0);
                     assert!(!layout.sidechain_column || width >= MEDIUM_W && layout.plot >= 150.0);
                     assert!(!layout.both_plots || width >= MEDIUM_W);
                     if layout.plot > 0.0 {
@@ -562,7 +555,7 @@ mod tests {
         for width in [430.0, 472.0, 740.0, 804.0, 872.0, 892.0] {
             let layout = arrange(Size::new(width, 304.0), true);
             assert!(
-                layout.primary_beside,
+                layout.primary_visible_with_details,
                 "Advanced replaces the core controls at width {width}"
             );
             let child_height = 8.0 * 1.3 + 3.0 + 34.0 + 3.0 + 10.0 * 1.3 + 2.0;
