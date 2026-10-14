@@ -120,6 +120,19 @@ impl GainPanelState {
         self.clip_latched = false;
     }
 
+    /// Drops readings and unsubmitted entries that describe the replaced
+    /// values, keeping what the user has opened.
+    pub fn restart_metering(&mut self) {
+        self.input = MeterValues::SILENT;
+        self.output = MeterValues::SILENT;
+        self.clip_latched = false;
+        self.history.clear();
+        self.last_meter_at = None;
+        for index in 0..self.input_text.len() {
+            self.discard_input(index);
+        }
+    }
+
     pub fn reset_stale(&mut self, now: Instant) {
         if self
             .last_meter_at

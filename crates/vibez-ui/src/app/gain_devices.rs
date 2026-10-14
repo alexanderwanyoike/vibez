@@ -86,6 +86,19 @@ impl App {
         }
     }
 
+    /// Undo and redo re-add every channel to the engine: metering restarts
+    /// under a new generation while each panel keeps its open controls.
+    pub(super) fn restart_gain_metering(&mut self) {
+        self.gain_devices.generation = self.gain_devices.generation.wrapping_add(1);
+        for panel in self.gain_devices.panels.values_mut() {
+            panel.restart_metering();
+        }
+        self.send_command(EngineCommand::SetEffectMeterChannel {
+            track_id: self.gain_devices.channel,
+            generation: self.gain_devices.generation,
+        });
+    }
+
     pub(super) fn reset_gain_devices(&mut self) {
         self.gain_devices.channel = None;
         self.gain_devices.generation = self.gain_devices.generation.wrapping_add(1);
