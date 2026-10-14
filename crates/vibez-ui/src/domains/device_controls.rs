@@ -5,7 +5,15 @@ use vibez_core::effect::ParamDescriptor;
 use vibez_core::id::{EffectId, TrackId};
 
 pub fn presentation_descriptor(effect: &crate::state::UiEffect, index: usize) -> ParamDescriptor {
-    effect.descriptors[index]
+    let mut descriptor = effect.descriptors[index];
+    if effect.effect_type == vibez_core::effect::EffectType::Bitcrush
+        && effect.plugin_ref.is_none()
+        && effect.plugin_name.is_none()
+        && [vibez_dsp::bitcrush::param::MIX, vibez_dsp::bitcrush::param::JITTER].contains(&index)
+    {
+        descriptor.unit = "%";
+    }
+    descriptor
 }
 
 pub fn presented_value(effect: &crate::state::UiEffect, index: usize, value: f32) -> String {
@@ -103,9 +111,24 @@ pub fn parse_value(text: &str, descriptor: &ParamDescriptor) -> Option<f32> {
     (value.is_finite() && (descriptor.min..=descriptor.max).contains(&value)).then_some(value)
 }
 
+pub fn parse_percent(text: &str, current: f32) -> Option<f32> {
+    let number = text.trim().trim_end_matches('%').trim().parse::<f32>().ok()?;
+    if !number.is_finite() || !(0.0..=100.0).contains(&number) {
+        return None;
+    }
+    if (0.0..=1.0).contains(&current) && display_percent(current).parse::<f32>().ok() == Some(number) {
+        return Some(current);
+    }
+    Some(number / 100.0)
+}
+
+pub fn display_percent(value: f32) -> String {
+    format!("{:.0}", value * 100.0)
+}
+
 pub fn display_value(value: f32, descriptor: &ParamDescriptor) -> String {
     if descriptor.unit == "%" {
-        format!("{:.0}", value * 100.0)
+        display_percent(value)
     } else if descriptor.unit == "Hz" {
         if value >= 1000.0 {
             format!("{:.2}k", value / 1000.0)

@@ -31,6 +31,8 @@ impl App {
                         rate,
                         *effect.params.get(index)?,
                     )
+                } else if [vibez_dsp::bitcrush::param::MIX, vibez_dsp::bitcrush::param::JITTER].contains(&index) {
+                    crate::domains::device_controls::parse_percent(text, *effect.params.get(index)?)
                 } else {
                     crate::domains::device_controls::parse_value(text, descriptors.get(index)?)
                 }
