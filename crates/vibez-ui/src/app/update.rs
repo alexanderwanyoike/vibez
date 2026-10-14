@@ -191,6 +191,7 @@ impl App {
             return Task::none();
         }
         let owns_project_transaction = self.begin_project_track_deletion_transaction(&message);
+        self.invalidate_device_preset_load(&message);
         let deferred_arrangement_project_edit = matches!(
             &message,
             Message::Arrangement(msg) if msg.defers_project_edit()
@@ -241,6 +242,7 @@ impl App {
 
         match message {
             Message::GainControl(message) => return self.update_gain_control(message),
+            Message::DevicePreset(message) => return self.update_device_preset(message),
             Message::ApplyDevicePreset(track_id, effect_id, preset) => {
                 return self.apply_device_preset(track_id, effect_id, preset);
             }

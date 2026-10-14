@@ -91,7 +91,7 @@ impl App {
 
     pub(super) fn apply_snapshot(&mut self, mut snapshot: crate::state::ProjectSnapshot) {
         self.reset_gain_devices();
-        self.device_preset_load_request.cancel();
+        self.reset_device_presets();
         if clip_only_snapshot(&self.state, &snapshot) {
             self.state.perform.clips = snapshot.launcher_clips;
             self.state

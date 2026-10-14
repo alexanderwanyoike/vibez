@@ -58,6 +58,12 @@ struct App {
     plugin_load_requests: plugin_load_requests::PluginLoadRequests,
     gain_devices: gain_devices::GainDevices,
     device_preset_load_request: tracked_request::TrackedRequest,
+    device_preset_save_request: tracked_request::TrackedRequest,
+    device_preset_load_target: Option<(vibez_core::id::TrackId, vibez_core::id::EffectId)>,
+    device_preset_selection: std::collections::HashMap<
+        (vibez_core::id::TrackId, vibez_core::id::EffectId),
+        vibez_core::device_preset::DevicePreset,
+    >,
     // Plugin GUI support
     plugin_window_manager: Option<PluginWindowManager>,
     plugin_gui_raw_ptrs: std::collections::HashMap<PluginGuiKey, PluginRawPtr>,
@@ -160,10 +166,10 @@ mod audio_tasks;
 mod bounce;
 mod capture;
 mod compensation;
-mod device_presets;
-mod gain_devices;
+pub(crate) mod device_presets;
 mod drum_rack_preparation;
 mod engine_events;
+mod gain_devices;
 mod keyboard;
 mod local_watcher;
 mod menu_lifecycle;
@@ -435,6 +441,9 @@ impl App {
             plugin_load_requests: Default::default(),
             gain_devices: Default::default(),
             device_preset_load_request: Default::default(),
+            device_preset_save_request: Default::default(),
+            device_preset_load_target: None,
+            device_preset_selection: Default::default(),
             sidechain_sync_inputs: None,
             track_meter_peaks: Default::default(),
             plugin_instrument_rx,

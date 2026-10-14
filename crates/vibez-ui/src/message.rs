@@ -94,6 +94,7 @@ pub enum Message {
     Devices(crate::domains::devices::DevicesMsg),
     GainControl(crate::domains::gain::GainMsg),
     ApplyDevicePreset(TrackId, EffectId, vibez_core::device_preset::DevicePreset),
+    DevicePreset(crate::app::device_presets::DevicePresetMsg),
     /// Arrangement domain (tracks, selection; clips arriving next).
     Arrangement(crate::domains::arrangement::ArrangementMsg),
     SetDrumRackSliceMarkers(crate::domains::arrangement::AudioSliceMarkers),

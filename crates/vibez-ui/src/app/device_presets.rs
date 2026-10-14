@@ -5,7 +5,24 @@ use vibez_core::device_preset::DevicePreset;
 use vibez_core::id::{EffectId, TrackId};
 
 #[derive(Debug, Clone)]
-pub(crate) struct PresetLoadRequest {
+pub enum DevicePresetMsg {
+    Load(TrackId, EffectId),
+    Save(TrackId, EffectId),
+    Loaded(PresetLoadRequest, Result<Option<DevicePreset>, String>),
+    Saved(PresetSaveRequest, Result<Option<DevicePreset>, String>),
+}
+
+
+#[derive(Debug, Clone)]
+pub struct PresetSaveRequest {
+    pub token: u64,
+    pub track_id: TrackId,
+    pub effect_id: EffectId,
+    pub preset: DevicePreset,
+}
+
+#[derive(Debug, Clone)]
+pub struct PresetLoadRequest {
     pub token: u64,
     pub track_id: TrackId,
     pub effect_id: EffectId,
@@ -13,6 +30,166 @@ pub(crate) struct PresetLoadRequest {
 }
 
 impl App {
+    pub(super) fn update_device_preset(&mut self, message: DevicePresetMsg) -> Task<Message> {
+        match message {
+            DevicePresetMsg::Load(track_id, effect_id) => {
+                let Some(request) = self.begin_device_preset_load(track_id, effect_id) else {
+                    return Task::none();
+                };
+                let task = Task::perform(tasks::load_device_preset_dialog(), move |result| {
+                    Message::DevicePreset(DevicePresetMsg::Loaded(request.clone(), result))
+                });
+                self.device_preset_load_request.attach(task)
+            }
+            DevicePresetMsg::Save(track_id, effect_id) => {
+                let Some(request) = self.begin_device_preset_save(track_id, effect_id) else {
+                    return Task::none();
+                };
+                let task = Task::perform(
+                    tasks::save_device_preset_dialog(request.preset.clone()),
+                    move |result| {
+                        Message::DevicePreset(DevicePresetMsg::Saved(request.clone(), result))
+                    },
+                );
+                self.device_preset_save_request.attach(task)
+            }
+            DevicePresetMsg::Loaded(request, Ok(None)) => {
+                if self.device_preset_load_request.finish(request.token) {
+                    self.device_preset_load_target = None;
+                }
+                Task::none()
+            }
+            DevicePresetMsg::Loaded(request, Ok(Some(preset))) => self.finish_device_preset_load(request, Ok(preset)),
+            DevicePresetMsg::Loaded(request, Err(error)) => self.finish_device_preset_load(request, Err(error)),
+            DevicePresetMsg::Saved(request, result) => {
+                self.finish_device_preset_save(request, result);
+                Task::none()
+            }
+        }
+    }
+
+    fn capture_device_preset(
+        &self,
+        track_id: TrackId,
+        effect_id: EffectId,
+    ) -> Option<DevicePreset> {
+        let effect = self
+            .state
+            .find_track(track_id)?
+            .effects
+            .iter()
+            .find(|effect| effect.id == effect_id)?;
+        let name = self
+            .device_preset_selection
+            .get(&(track_id, effect_id))
+            .map_or("Custom", DevicePreset::name);
+        crate::domains::device_presets::capture(effect, name).ok()
+    }
+
+    fn begin_device_preset_load(
+        &mut self,
+        track_id: TrackId,
+        effect_id: EffectId,
+    ) -> Option<PresetLoadRequest> {
+        let expected = self.capture_device_preset(track_id, effect_id)?;
+        self.device_preset_load_target = Some((track_id, effect_id));
+        Some(PresetLoadRequest {
+            token: self.device_preset_load_request.begin(),
+            track_id,
+            effect_id,
+            expected,
+        })
+    }
+
+    fn begin_device_preset_save(
+        &mut self,
+        track_id: TrackId,
+        effect_id: EffectId,
+    ) -> Option<PresetSaveRequest> {
+        let preset = self.capture_device_preset(track_id, effect_id)?;
+        Some(PresetSaveRequest {
+            token: self.device_preset_save_request.begin(),
+            track_id,
+            effect_id,
+            preset,
+        })
+    }
+
+    fn finish_device_preset_save(
+        &mut self,
+        request: PresetSaveRequest,
+        result: Result<Option<DevicePreset>, String>,
+    ) {
+        if !self.device_preset_save_request.finish(request.token) {
+            return;
+        }
+        match result {
+            Ok(Some(saved)) => {
+                if self
+                    .capture_device_preset(request.track_id, request.effect_id)
+                    .is_some_and(|current| current.kind() == saved.kind())
+                {
+                    self.device_preset_selection
+                        .insert((request.track_id, request.effect_id), saved.clone());
+                }
+                self.state.status_text = format!("Saved preset: {}", saved.name());
+            }
+            Ok(None) => {}
+            Err(error) => self.state.status_text = format!("Preset save failed: {error}"),
+        }
+    }
+
+    pub(super) fn reset_device_presets(&mut self) {
+        self.device_preset_load_request.cancel();
+        self.device_preset_save_request.cancel();
+        self.device_preset_load_target = None;
+        self.device_preset_selection.clear();
+    }
+
+    pub(super) fn invalidate_device_preset_load(&mut self, message: &Message) {
+        use crate::domains::arrangement::ArrangementMsg;
+        use crate::domains::devices::DevicesMsg;
+        let Some((pending_track, pending_effect)) = self.device_preset_load_target else {
+            return;
+        };
+        let invalidated = match message {
+            Message::Devices(
+                DevicesMsg::SetEffectParam(track, effect, ..)
+                | DevicesMsg::SetEffectParams(track, effect, ..)
+                | DevicesMsg::RemoveEffect(track, effect),
+            )
+            | Message::ApplyDevicePreset(track, effect, _) => {
+                (*track, *effect) == (pending_track, pending_effect)
+            }
+            Message::Arrangement(
+                ArrangementMsg::RemoveTrack(track)
+                | ArrangementMsg::ConfirmRemoveTrack(track)
+                | ArrangementMsg::RemoveBus(track),
+            ) => *track == pending_track,
+            _ => false,
+        };
+        if invalidated {
+            self.device_preset_load_request.cancel();
+            self.device_preset_load_target = None;
+        }
+    }
+
+    pub(super) fn view_device_preset_bar<'a>(
+        &'a self,
+        track_id: TrackId,
+        effect: &'a crate::state::UiEffect,
+        accent: iced::Color,
+        available_width: f32,
+    ) -> iced::Element<'a, Message> {
+        crate::widgets::device_preset_bar::view(
+            track_id,
+            effect,
+            self.device_preset_selection.get(&(track_id, effect.id)),
+            accent,
+            available_width,
+        )
+    }
+
     pub(super) fn finish_device_preset_load(
         &mut self,
         request: PresetLoadRequest,
@@ -21,6 +198,7 @@ impl App {
         if !self.device_preset_load_request.finish(request.token) {
             return Task::none();
         }
+        self.device_preset_load_target = None;
         let expected_is_current = self
             .state
             .find_track(request.track_id)
@@ -66,6 +244,8 @@ impl App {
                 return Task::none();
             }
         };
+        self.device_preset_selection
+            .insert((track_id, effect_id), preset);
         if updates.is_empty() {
             return Task::none();
         }
