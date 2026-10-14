@@ -32,7 +32,9 @@ fn rendered_db(params: &[f32], frequency: f32, rate: f32) -> f32 {
 fn appended_defaults_are_neutral_and_legacy_values_keep_their_units() {
     let effect = EqEffect::new(48_000.0);
     assert_eq!(effect.param_descriptors().len(), 22);
-    let legacy = [4.0, 120.0, 0.49, -3.0, 900.0, 1.2, 5.0, 3000.0, 2.0, -6.0, 9000.0, 0.51];
+    let legacy = [
+        4.0, 120.0, 0.49, -3.0, 900.0, 1.2, 5.0, 3000.0, 2.0, -6.0, 9000.0, 0.51,
+    ];
     let effect = EqEffect::from_params(48_000.0, &legacy);
     for (index, value) in legacy.into_iter().enumerate() {
         assert_eq!(effect.get_param(index), value);
@@ -76,8 +78,11 @@ fn cuts_and_output_trim_match_measured_audio() {
     let effect = EqEffect::from_params(48_000.0, &p);
     for frequency in [40.0, 150.0, 800.0, 5000.0, 15000.0] {
         let measured = rendered_db(&p, frequency, 48_000.0);
-        assert!((effect.response_db(frequency) - measured).abs() < 0.03,
-            "{frequency}: displayed {} measured {measured}", effect.response_db(frequency));
+        assert!(
+            (effect.response_db(frequency) - measured).abs() < 0.03,
+            "{frequency}: displayed {} measured {measured}",
+            effect.response_db(frequency)
+        );
     }
     assert!(effect.response_db(40.0) < -25.0);
     assert!(effect.response_db(15000.0) < -25.0);
@@ -93,12 +98,26 @@ fn audition_is_a_band_limited_signal_even_when_gain_is_flat_or_disabled() {
         p[12 + band] = 0.0;
         let effect = EqEffect::from_params(48_000.0, &p);
         let center = p[3 * band + 1];
-        let pass = if band == 0 { 20.0 } else if band == 3 { 18_000.0 } else { center };
-        let stop = if band == 0 { 8000.0 } else if band == 3 { 100.0 } else { 30.0 };
+        let pass = if band == 0 {
+            20.0
+        } else if band == 3 {
+            18_000.0
+        } else {
+            center
+        };
+        let stop = if band == 0 {
+            8000.0
+        } else if band == 3 {
+            100.0
+        } else {
+            30.0
+        };
         assert!(effect.response_db(pass) > -1.0);
         assert!(effect.response_db(stop) < -18.0);
         for frequency in [pass, stop] {
-            assert!((effect.response_db(frequency) - rendered_db(&p, frequency, 48_000.0)).abs() < 0.08);
+            assert!(
+                (effect.response_db(frequency) - rendered_db(&p, frequency, 48_000.0)).abs() < 0.08
+            );
         }
         p[12 + band] = 1.0;
     }
@@ -119,11 +138,16 @@ fn display_matches_rendered_bells_and_shelves_at_multiple_sample_rates() {
             let mut p = settings();
             p[band * 3] = if band % 2 == 0 { 9.0 } else { -9.0 };
             for shape in [0.0, 1.0] {
-                if band == 0 || band == 3 { p[band * 3 + 2] = shape; }
+                if band == 0 || band == 3 {
+                    p[band * 3 + 2] = shape;
+                }
                 let effect = EqEffect::from_params(rate, &p);
                 for frequency in [60.0, 700.0, 3000.0, rate * 0.4] {
-                    assert!((effect.response_db(frequency) - rendered_db(&p, frequency, rate)).abs() < 0.05,
-                        "rate {rate}, band {band}, shape {shape}, frequency {frequency}");
+                    assert!(
+                        (effect.response_db(frequency) - rendered_db(&p, frequency, rate)).abs()
+                            < 0.05,
+                        "rate {rate}, band {band}, shape {shape}, frequency {frequency}"
+                    );
                 }
             }
         }
@@ -152,9 +176,14 @@ fn multichannel_frames_preserve_extra_channels_and_zero_channels_is_a_noop() {
     let mut effect = EqEffect::new(48_000.0);
     effect.set_param(0, 12.0);
     let mut samples = vec![0.2; 4 * 1000];
-    for frame in samples.chunks_exact_mut(4) { frame[2] = 0.37; frame[3] = -0.63; }
+    for frame in samples.chunks_exact_mut(4) {
+        frame[2] = 0.37;
+        frame[3] = -0.63;
+    }
     effect.process(&mut samples, 4);
-    for frame in samples.chunks_exact(4) { assert_eq!(frame[2..], [0.37, -0.63]); }
+    for frame in samples.chunks_exact(4) {
+        assert_eq!(frame[2..], [0.37, -0.63]);
+    }
     let original = samples.clone();
     effect.process(&mut samples, 0);
     assert_eq!(samples, original);
@@ -180,10 +209,20 @@ fn output_manual_edit_ramps_and_automation_takes_effect_on_the_first_sample() {
 
 #[test]
 fn enabling_and_auditioning_while_playing_do_not_step() {
-    for (parameter, target) in [(12, 0.0), (16, 2.0), (17, 1.0), (19, 1.0), (2, 1.0), (11, 1.0)] {
+    for (parameter, target) in [
+        (12, 0.0),
+        (16, 2.0),
+        (17, 1.0),
+        (19, 1.0),
+        (2, 1.0),
+        (11, 1.0),
+    ] {
         let mut p = settings();
         assert_eq!(p.len(), 22);
-        p[0] = 12.0; p[9] = 12.0; p[18] = 1000.0; p[20] = 500.0;
+        p[0] = 12.0;
+        p[9] = 12.0;
+        p[18] = 1000.0;
+        p[20] = 500.0;
         let mut effect = EqEffect::from_params(48_000.0, &p);
         let mut warmup = [0.1; 48_000];
         effect.process(&mut warmup, 1);
@@ -191,8 +230,16 @@ fn enabling_and_auditioning_while_playing_do_not_step() {
         effect.set_param(parameter, target);
         let mut samples = [0.1; 2048];
         effect.process(&mut samples, 1);
-        assert!((samples[0] - previous).abs() < 0.005, "parameter {parameter}");
-        assert!(samples.windows(2).all(|pair| (pair[1] - pair[0]).abs() < 0.005), "parameter {parameter}");
+        assert!(
+            (samples[0] - previous).abs() < 0.005,
+            "parameter {parameter}"
+        );
+        assert!(
+            samples
+                .windows(2)
+                .all(|pair| (pair[1] - pair[0]).abs() < 0.005),
+            "parameter {parameter}"
+        );
     }
 }
 
@@ -200,14 +247,23 @@ fn enabling_and_auditioning_while_playing_do_not_step() {
 fn impulse_and_sweep_are_finite_at_low_rates_and_extreme_settings() {
     for rate in [2.0, 8000.0, 44100.0, 192000.0, f32::NAN] {
         let mut effect = EqEffect::new(rate);
-        for index in [0, 3, 6, 9] { effect.set_param(index, 15.0); }
-        for index in [5, 8] { effect.set_param(index, 4.0); }
-        effect.set_param(17, 1.0); effect.set_param(18, 1000.0);
-        effect.set_param(19, 1.0); effect.set_param(20, 20000.0);
-        let mut samples = vec![0.0; 8192]; samples[0] = 0.5;
+        for index in [0, 3, 6, 9] {
+            effect.set_param(index, 15.0);
+        }
+        for index in [5, 8] {
+            effect.set_param(index, 4.0);
+        }
+        effect.set_param(17, 1.0);
+        effect.set_param(18, 1000.0);
+        effect.set_param(19, 1.0);
+        effect.set_param(20, 20000.0);
+        let mut samples = vec![0.0; 8192];
+        samples[0] = 0.5;
         effect.process(&mut samples, 2);
         assert!(samples.iter().all(|v| v.is_finite()));
-        let mut samples: Vec<f32> = (0..8192).map(|n| ((n * n) as f32 * 0.0001).sin() * 0.1).collect();
+        let mut samples: Vec<f32> = (0..8192)
+            .map(|n| ((n * n) as f32 * 0.0001).sin() * 0.1)
+            .collect();
         effect.process(&mut samples, 2);
         assert!(samples.iter().all(|v| v.is_finite()));
     }
@@ -217,9 +273,11 @@ fn impulse_and_sweep_are_finite_at_low_rates_and_extreme_settings() {
 fn processing_is_block_partition_independent_including_manual_ramps() {
     let mut whole = EqEffect::new(48_000.0);
     let mut split = EqEffect::new(48_000.0);
-    whole.process(&mut [0.0; 32], 2); split.process(&mut [0.0; 32], 2);
+    whole.process(&mut [0.0; 32], 2);
+    split.process(&mut [0.0; 32], 2);
     for (index, value) in [(0, 12.0), (1, 350.0), (5, 3.0), (16, 3.0), (21, -3.0)] {
-        whole.set_param(index, value); split.set_param(index, value);
+        whole.set_param(index, value);
+        split.set_param(index, value);
     }
     let mut a = signal(700.0, 48000.0, 8192);
     let mut b = a.clone();
@@ -227,8 +285,111 @@ fn processing_is_block_partition_independent_including_manual_ramps() {
     let mut offset = 0;
     for frames in [1, 7, 63, 512, 3, 1024, 249] {
         let end = offset + frames * 2;
-        split.process(&mut b[offset..end], 2); offset = end;
+        split.process(&mut b[offset..end], 2);
+        offset = end;
     }
     split.process(&mut b[offset..], 2);
     assert_eq!(a, b);
+}
+
+#[test]
+fn silence_remains_silent_and_reset_replays_an_identical_impulse() {
+    let mut p = settings();
+    assert_eq!(p.len(), 22);
+    p[0] = 12.0;
+    p[6] = -9.0;
+    p[8] = 4.0;
+    p[17] = 1.0;
+    let mut effect = EqEffect::from_params(48_000.0, &p);
+    let mut silence = [0.0; 1024];
+    effect.process(&mut silence, 2);
+    assert_eq!(silence, [0.0; 1024]);
+    let mut first = [0.0; 1024];
+    first[0] = 0.2;
+    first[1] = -0.1;
+    let mut replay = first;
+    effect.process(&mut first, 2);
+    effect.reset();
+    effect.process(&mut replay, 2);
+    assert_eq!(first, replay);
+}
+
+#[test]
+fn fractional_legacy_shape_keeps_the_half_threshold() {
+    for index in [2, 11] {
+        let mut p = settings();
+        p[if index == 2 { 0 } else { 9 }] = 12.0;
+        p[index] = 0.0;
+        let shelf = EqEffect::from_params(48_000.0, &p);
+        p[index] = 1.0;
+        let bell = EqEffect::from_params(48_000.0, &p);
+        for (shape, expected) in [(0.49, &shelf), (0.5, &bell), (0.51, &bell)] {
+            p[index] = shape;
+            let actual = EqEffect::from_params(48_000.0, &p);
+            for frequency in [40.0, 500.0, 8000.0, 18000.0] {
+                assert_eq!(
+                    actual.response_db(frequency),
+                    expected.response_db(frequency)
+                );
+            }
+            assert_eq!(actual.get_param(index), shape);
+        }
+    }
+}
+
+#[test]
+fn automation_snaps_an_in_flight_same_target_without_cancelling_an_unrelated_ramp() {
+    let mut automated = EqEffect::new(48_000.0);
+    let mut control = EqEffect::new(48_000.0);
+    for effect in [&mut automated, &mut control] {
+        effect.process(&mut [0.2; 128], 1);
+        effect.set_param(21, -12.0);
+        effect.set_param(3, 9.0);
+        effect.process(&mut [0.2; 64], 1);
+    }
+    automated.set_automated_param(21, -12.0);
+    let mut a = [0.2; 256];
+    let mut b = a;
+    automated.process(&mut a, 1);
+    control.process(&mut b, 1);
+    assert!(a[0] < b[0] * 0.4);
+    let flat = EqEffect::from_params(48_000.0, &[0.0, 80.0, 0.0, 9.0, 700.0, 0.7]);
+    assert!(automated.response_db(700.0) < flat.response_db(700.0) - 12.0 + 0.1);
+    let mut tail_a = [0.2; 1024];
+    let mut tail_b = tail_a;
+    automated.process(&mut tail_a, 1);
+    control.process(&mut tail_b, 1);
+    assert!((tail_a[1023] - tail_b[1023]).abs() < 1e-6);
+}
+
+#[test]
+fn automated_cut_and_audition_are_exact_from_the_first_new_sample() {
+    for (index, value) in [
+        (12, 0.0),
+        (16, 3.0),
+        (17, 1.0),
+        (19, 1.0),
+        (2, 1.0),
+        (11, 1.0),
+        (4, 1800.0),
+        (5, 3.0),
+    ] {
+        let mut initial = settings();
+        assert_eq!(initial.len(), 22);
+        initial[0] = 12.0;
+        initial[9] = 9.0;
+        initial[18] = 1200.0;
+        initial[20] = 2500.0;
+        let mut effect = EqEffect::from_params(48_000.0, &initial);
+        effect.process(&mut [0.0; 2048], 1);
+        effect.set_automated_param(index, value);
+        initial[index] = value;
+        let mut expected = EqEffect::from_params(48_000.0, &initial);
+        let mut a = [0.0; 64];
+        a[0] = 0.2;
+        let mut b = a;
+        effect.process(&mut a, 1);
+        expected.process(&mut b, 1);
+        assert_eq!(a, b, "parameter {index}");
+    }
 }
