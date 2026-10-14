@@ -114,13 +114,6 @@ pub fn instrument_owner_identity(instrument: &dyn vibez_instruments::Instrument)
 }
 
 impl AudioEngine {
-    pub(super) fn project_processing_muted(&self) -> bool {
-        self.device_handoff.is_suspended()
-            || self.compensation_plan.blocks_processing()
-            || self.presentation_state.is_faulted()
-            || self.reconfiguration_pending()
-    }
-
     pub(super) fn is_device_recovering(&self, track: TrackId, effect: Option<EffectId>) -> bool {
         self.device_handoff.pending().is_some_and(|pending| {
             pending.is_local_recovery() && pending.track_id == track && pending.effect_id == effect

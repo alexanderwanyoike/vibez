@@ -830,6 +830,9 @@ mod reconfiguration_edits;
 #[path = "engine_reconfiguration.rs"]
 pub mod reconfiguration;
 
+#[path = "engine_device_observation.rs"]
+mod device_observation;
+
 #[path = "engine_capture_commands.rs"]
 mod capture_commands;
 
