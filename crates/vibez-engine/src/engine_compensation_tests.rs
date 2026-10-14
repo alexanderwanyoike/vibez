@@ -328,7 +328,7 @@ fn structural_effect_edit_can_wait_for_plan_in_a_later_callback() {
         .unwrap();
     engine.process(&mut block, 2);
     assert!(engine.transport.is_playing());
-    assert!(engine.graph_edit_pending);
+    assert!(engine.compensation_plan.awaiting_structural_plan());
     assert!(block.iter().all(|&value| value == 0.0));
     assert!(
         !std::iter::from_fn(|| events.pop().ok()).any(|event| matches!(
@@ -345,8 +345,8 @@ fn structural_effect_edit_can_wait_for_plan_in_a_later_callback() {
         .unwrap();
     engine.process(&mut block, 2);
     assert!(engine.transport.is_playing());
-    assert!(!engine.graph_edit_pending);
-    assert!(engine.compensation_valid);
+    assert!(!engine.compensation_plan.awaiting_structural_plan());
+    assert!(engine.compensation_plan.applied_plan_is_valid());
 }
 
 #[test]
@@ -702,7 +702,7 @@ fn changed_rate_keeps_native_owners_but_rejects_their_old_configuration_even_aft
         commands.push(EngineCommand::SetSampleRate(48000)).unwrap();
         engine.process(&mut [0.0; 128], 2);
         assert!(!engine.transport.is_playing());
-        assert!(!engine.compensation_valid);
+        assert!(!engine.compensation_plan.applied_plan_is_valid());
         assert!(std::iter::from_fn(||events.pop().ok()).any(|event|matches!(event,EngineEvent::CompensationInvalid{track_id,reason,..} if track_id==track && reason.contains("sample rate"))));
         let channel = engine
             .tracks
@@ -717,7 +717,7 @@ fn changed_rate_keeps_native_owners_but_rejects_their_old_configuration_even_aft
         commands.push(EngineCommand::SetRouting(make())).unwrap();
         commands.push(EngineCommand::Play).unwrap();
         engine.process(&mut [0.0; 128], 2);
-        assert!(!engine.compensation_valid);
+        assert!(!engine.compensation_plan.applied_plan_is_valid());
         assert!(!engine.transport.is_playing());
     }
 }

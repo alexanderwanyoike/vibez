@@ -145,7 +145,7 @@ fn assert_handoff_failure_cause(backpressured: bool) {
         crate::retirement::tests::allocations(|| engine.process(&mut output, 2)),
         (0, 0),
     );
-    assert!(!engine.compensation_valid);
+    assert!(!engine.compensation_plan.applied_plan_is_valid());
     assert!(engine.pending_device_reconfiguration.is_none());
     let mut causes = Vec::new();
     let mut drain = |events: &mut Consumer<EngineEvent>| {
@@ -353,7 +353,7 @@ fn stale_reject_with_full_event_ring_retains_device_reason_and_current_plan() {
         (0, 0)
     );
     assert_eq!(engine.routing.as_ref().compensation.generation, 22);
-    assert!(engine.compensation_valid);
+    assert!(engine.compensation_plan.applied_plan_is_valid());
     assert!(matches!(
         engine.pending_retirements.last(),
         Some(EngineEvent::DeviceReconfigurationRetired {
@@ -415,7 +415,7 @@ fn additions_around_held_slot_use_logical_order_and_main_reserved_capacity() {
                 .collect::<Vec<_>>(),
             expected
         );
-        assert!(engine.compensation_valid);
+        assert!(engine.compensation_plan.applied_plan_is_valid());
         assert!(!engine.compensation_suspended);
         assert!(std::iter::from_fn(|| events.pop().ok())
             .any(|event| matches!(event, EngineEvent::RetiredEffectStorage(_))));

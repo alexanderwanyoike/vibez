@@ -34,8 +34,8 @@ pub(super) struct Readiness {
 impl Readiness {
     pub fn observe(engine: &AudioEngine) -> Self {
         Self {
-            valid: engine.compensation_valid,
-            awaiting_plan: engine.graph_edit_pending,
+            valid: engine.compensation_plan.applied_plan_is_valid(),
+            awaiting_plan: engine.compensation_plan.awaiting_structural_plan(),
             suspended: engine.compensation_suspended,
             handoff: engine.pending_device_reconfiguration.is_some(),
             restart_requested: engine.reconfiguration_pending(),
