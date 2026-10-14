@@ -19,6 +19,10 @@ pub(super) struct GainDevices {
     pub panels: HashMap<EffectId, GainPanelState>,
 }
 
+fn is_metered_effect(effect: &crate::state::UiEffect) -> bool {
+    is_native_gain(effect) || crate::domains::device_controls::is_native_filter(effect)
+}
+
 impl App {
     /// A parameter edit supersedes whatever was typed into that Gain field.
     pub(super) fn discard_gain_entries(&mut self, message: &crate::domains::devices::DevicesMsg) {
@@ -39,13 +43,21 @@ impl App {
             .filter(|track_id| {
                 self.state
                     .find_track(*track_id)
-                    .is_some_and(|track| track.effects.iter().any(is_native_gain))
+                    .is_some_and(|track| track.effects.iter().any(is_metered_effect))
             });
         if wanted != self.gain_devices.channel {
             self.gain_devices.channel = wanted;
             self.restart_gain_metering();
         }
         let project = &self.state.project_tracks;
+        self.device_controls.retain(|id, _| {
+            project
+                .tracks
+                .iter()
+                .chain(&project.buses)
+                .chain(std::iter::once(&project.master))
+                .any(|track| track.effects.iter().any(|effect| effect.id == *id))
+        });
         self.gain_devices.panels.retain(|id, _| {
             project
                 .tracks
@@ -57,7 +69,7 @@ impl App {
         if let Some(track) = wanted.and_then(|track_id| self.state.find_track(track_id)) {
             let now = Instant::now();
             for effect in &track.effects {
-                if is_native_gain(effect) {
+                if is_metered_effect(effect) {
                     self.gain_devices
                         .panels
                         .entry(effect.id)
@@ -72,6 +84,10 @@ impl App {
     /// re-add every channel) and on a channel change, while each panel keeps
     /// its open controls.
     pub(super) fn restart_gain_metering(&mut self) {
+        for state in self.device_controls.values_mut() {
+            state.entries.clear();
+            state.errors.clear();
+        }
         self.gain_devices.generation = self.gain_devices.generation.wrapping_add(1);
         for panel in self.gain_devices.panels.values_mut() {
             panel.restart_metering();
@@ -108,7 +124,7 @@ impl App {
             track
                 .effects
                 .iter()
-                .any(|effect| effect.id == effect_id && is_native_gain(effect))
+                .any(|effect| effect.id == effect_id && is_metered_effect(effect))
         }) {
             self.gain_devices
                 .panels

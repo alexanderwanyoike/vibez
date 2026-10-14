@@ -77,7 +77,7 @@ impl App {
         available_width: f32,
     ) -> Element<'a, Message> {
         use crate::widgets::effect_slot::card_width;
-        // Every other card is built first and measured, so each Gain can take
+        // Every other card is built first and measured, so each responsive effect can take
         // its share of whatever width the section has left.
         let mut cards: Vec<Option<Element<'a, Message>>> = Vec::new();
         let mut used = 0.0;
@@ -85,7 +85,7 @@ impl App {
             cards.push(Some(card));
             used += width;
         }
-        let mut gains = Vec::new();
+        let mut responsive_effects = Vec::new();
         for effect in &track.effects {
             let sidechain = view_sidechain(
                 track_id,
@@ -94,9 +94,11 @@ impl App {
                 &self.state.project_tracks.buses,
                 &self.state.devices,
             );
-            if crate::domains::gain::is_native_gain(effect) {
+            if crate::domains::gain::is_native_gain(effect)
+                || crate::domains::device_controls::is_native_filter(effect)
+            {
                 used += card_width(effect, Some(0.0), sidechain.is_some());
-                gains.push((cards.len(), effect, sidechain));
+                responsive_effects.push((cards.len(), effect, sidechain));
                 cards.push(None);
                 continue;
             }
@@ -124,16 +126,26 @@ impl App {
                 self.state.transport.sample_rate,
             )));
         }
-        if !gains.is_empty() {
+        if !responsive_effects.is_empty() {
             let spacing = CHAIN_SPACING * cards.len().saturating_sub(1) as f32;
-            let share = (available_width - used - spacing) / gains.len() as f32;
-            let width = crate::widgets::gain_device::card_width(share);
-            for (position, effect, sidechain) in gains {
+            let share = (available_width - used - spacing) / responsive_effects.len() as f32;
+
+            for (position, effect, sidechain) in responsive_effects {
+                let filter = effect.effect_type == vibez_core::effect::EffectType::Filter;
+                let width = if filter {
+                    crate::widgets::filter_device::card_width(share)
+                } else {
+                    crate::widgets::gain_device::card_width(share)
+                };
                 cards[position] = Some(view_effect_slot(
                     track_id,
                     effect,
                     track_color,
-                    Some(self.gain_device_body(track_id, effect, track_color, width)),
+                    Some(if filter {
+                        self.filter_device_body(track_id, effect, track_color, width)
+                    } else {
+                        self.gain_device_body(track_id, effect, track_color, width)
+                    }),
                     sidechain,
                     self.state.transport.sample_rate,
                 ));
@@ -202,6 +214,41 @@ impl App {
                 .into(),
             width,
         ))
+    }
+
+    fn filter_device_body<'a>(
+        &'a self,
+        track: TrackId,
+        effect: &'a crate::state::UiEffect,
+        accent: Color,
+        width: f32,
+    ) -> DeviceBody<'a> {
+        let body = iced::widget::responsive(move |size| {
+            crate::widgets::filter_device::view(
+                track,
+                effect,
+                accent,
+                self.device_control_state(effect.id),
+                self.view_device_preset_bar(
+                    track,
+                    effect,
+                    accent,
+                    crate::widgets::filter_device::preset_bar_width(size),
+                ),
+                self.gain_devices
+                    .panels
+                    .get(&effect.id)
+                    .map(|panel| panel.output)
+                    .unwrap_or(vibez_engine::metering::MeterValues::SILENT),
+                self.state.transport.sample_rate as f32,
+                size,
+            )
+        });
+        DeviceBody {
+            content: body.into(),
+            width,
+            padding: iced::Padding::ZERO,
+        }
     }
 
     fn gain_device_body<'a>(
