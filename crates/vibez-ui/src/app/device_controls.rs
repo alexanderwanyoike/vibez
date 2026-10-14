@@ -24,7 +24,7 @@ impl App {
             state.update_with_parser(message, &descriptors, &effect.params, |index, text| {
                 if index == vibez_dsp::bitcrush::param::SR_REDUCE {
                     let rate = sample_rate.filter(|_| !effect.reconfiguration_failed)?;
-                    crate::domains::bitcrush_values::parse_rate(text, rate)
+                    crate::domains::bitcrush_values::parse_rate(text, rate, *effect.params.get(index)?)
                 } else {
                     crate::domains::device_controls::parse_value(text, descriptors.get(index)?)
                 }
