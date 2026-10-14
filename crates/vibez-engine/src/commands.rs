@@ -483,7 +483,12 @@ impl EngineCommand {
         Self::InsertEffect {
             track_id,
             effect_id,
-            effect: vibez_dsp::factory::create_effect(effect_type, sample_rate as f32),
+            effect: vibez_dsp::factory::create_effect_for_instance(
+                effect_type,
+                sample_rate as f32,
+                &[],
+                effect_id,
+            ),
             position: None,
         }
     }

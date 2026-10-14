@@ -162,10 +162,11 @@ fn effects(
                     }
                 }
             } else {
-                vibez_dsp::factory::create_effect_with_params(
+                vibez_dsp::factory::create_effect_for_instance(
                     info.effect_type,
                     sample_rate as f32,
                     &info.params,
+                    info.id,
                 )
             };
             Some(EffectSlot {
