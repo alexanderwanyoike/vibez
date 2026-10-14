@@ -75,7 +75,16 @@ hears, so every event names the clock its consumer follows
 
 Only heard events wait for output latency (`present_event_after`, or a future
 deadline for `present_event_at`); debug builds assert it there and in the Note
-Repeat pair. Cancelling the queue (Stop, Play, a presentation fault) keeps
+Repeat pair.
+
+`SectionSourceRefreshed` acknowledges engine consumption and returns displaced
+or rejected source ownership. It stays Untimed and enters `present_event`
+without an output-latency delay; UI disposal does not change playback or Capture.
+The separate Heard `SectionCaptureSource` retains its path timing and source
+coordinates. `ClipSourceRefreshed` stays Heard because its consumers update
+launcher state and Capture at the audible edit boundary.
+
+Cancelling the queue (Stop, Play, a presentation fault) keeps
 Capture events that are already due, replaces pending transitions with their
 ownership returns, and drops other pending heard feedback.
 
