@@ -40,15 +40,16 @@ fn assert_pad_load_fifo(commands: &[EngineCommand], track: TrackId, canonical: &
 }
 
 fn assert_level(engine: &mut AudioEngine, expected: f32) {
-    let mut output = [0.0; 16];
-    engine.process_block(AudioProcessBlock::new(&mut output, 1));
-    assert!(output.iter().all(|sample| (*sample - expected).abs() < 1e-6),
+    let mut output = [0.0; 32];
+    engine.process_block(AudioProcessBlock::new(&mut output, 2));
+    assert!(output.chunks_exact(2).all(|frame| (frame[0] - expected).abs() < 1e-6 && frame[1].abs() < 1e-6),
         "expected={expected}, actual={output:?}");
 }
 
 #[test]
 fn actual_drum_ui_clear_load_and_undo_preserve_fifo_media_audio_and_retired_guards() {
     let mut app = test_support::app();
+    app.state.transport.sample_rate = 1000;
     let (commands, mut observed) = rtrb::RingBuffer::new(2048);
     app.cmd_tx = crate::domains::EngineCommandQueue::new(commands);
     let (mut engine, mut engine_commands, events) = AudioEngine::new();
@@ -58,6 +59,7 @@ fn actual_drum_ui_clear_load_and_undo_preserve_fifo_media_audio_and_retired_guar
     let old_owner = Arc::downgrade(&old);
     app.state.browser.waveform_audio = Some(Arc::clone(&old));
     let mut track = ProjectTrack::new_instrument(track_id, "Undo drums".into(), TrackKind::Instrument(InstrumentKind::DrumRack), 0);
+    track.pan = 0.0;
     track.drum_rack_pads[0] = UiDrumPad {
         name: Some("original.wav".into()), source: Some(MediaSourceRef::LocalFile { path: "/original/drum.wav".into() }),
         audio: Some(old), gain: 0.5, pan: 0.0, start: 0.125, end: 0.875,
@@ -129,7 +131,7 @@ fn actual_drum_ui_clear_load_and_undo_preserve_fifo_media_audio_and_retired_guar
     assert_level(&mut engine, 0.0);
     app.poll_engine_events();
     assert_eq!(old_owner.strong_count(), 3, "Undo cannot clear an old engine's retained UI guard");
-    engine.process_block(AudioProcessBlock::new(&mut [0.0; 128], 1));
+    engine.process_block(AudioProcessBlock::new(&mut [0.0; 256], 2));
     app.poll_engine_events();
     app.send_command(EngineCommand::ExternalNoteOn { track_id, pitch: 36, velocity: 127 });
     forward_ui_commands(&mut app, &mut observed, &mut engine_commands, |_| {});
