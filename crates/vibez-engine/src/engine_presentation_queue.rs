@@ -164,7 +164,8 @@ impl AudioEngine {
                 EngineEvent::PerformanceCaptureStopped {
                     effective_at_samples,
                 } => {
-                    self.presentation_state.terminals
+                    self.presentation_state
+                        .terminals
                         .request_capture_stop(effective_at_samples);
                     self.flush_presentation();
                     return;
@@ -186,7 +187,11 @@ impl AudioEngine {
             // Ownership producers reserve before handoff. Retain the discovering
             // event separately while the full UI ring holds the scheduled owners.
             let event = cancelled_event(event);
-            if let Some(event) = self.presentation_state.terminals.retain_overflow_owner(event) {
+            if let Some(event) = self
+                .presentation_state
+                .terminals
+                .retain_overflow_owner(event)
+            {
                 self.retire_event(event);
             }
         }
@@ -207,7 +212,11 @@ impl AudioEngine {
                 return;
             }
         }
-        if !self.presentation_state.terminals.publish(&mut self.event_tx) {
+        if !self
+            .presentation_state
+            .terminals
+            .publish(&mut self.event_tx)
+        {
             return;
         }
         let source_now = self.output_position + self.rendered_callback_frames as u64;
@@ -230,7 +239,8 @@ impl AudioEngine {
         }
         self.clip_resync_track = Some(0);
         self.cancel_presentation();
-        self.presentation_state.terminals
+        self.presentation_state
+            .terminals
             .request_capture_stop(self.compensation_callback_heard_start);
         self.presentation_state.terminals.request_playback_stop();
         self.presentation_state.terminals.request_failure(
