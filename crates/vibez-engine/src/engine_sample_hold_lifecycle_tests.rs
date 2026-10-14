@@ -80,6 +80,7 @@ impl Fixture {
         let mut output = [0.0; 1920];
         self.engine.process_block(AudioProcessBlock::new(&mut output[..frames * 2], 2)
             .with_live_input(self.source.raw(), &input[..frames * 2]));
+        assert!(output[..frames * 2].iter().all(|sample| sample.is_finite()));
     }
 
     fn observe(&mut self) -> Observed {
@@ -254,4 +255,139 @@ fn sample_hold_event_equality_observes_every_field_and_stays_untimed() {
         assert_ne!(event(track, effect, 11, meter), event(track, effect, 11, changed), "field{field}");
     }
     assert_eq!(event(track, effect, 11, meter).time_domain(), crate::events::TimeDomain::Untimed);
+}
+
+fn fill_actual_event_ring(fixture: &mut Fixture) -> usize {
+    let capacity = fixture.engine.event_tx.slots();
+    assert_eq!(capacity, vibez_core::constants::RING_BUFFER_CAPACITY);
+    let mut accepted = 0;
+    while fixture.engine.event_tx.push(EngineEvent::PlaybackPosition(0)).is_ok() {
+        accepted += 1;
+    }
+    assert_eq!(accepted, capacity);
+    assert_eq!(fixture.engine.event_tx.slots(), 0);
+    accepted
+}
+
+#[test]
+fn full_actual_event_ring_drops_scope_windows_without_callback_heap_traffic_or_replay() {
+    for graph in [false, true] {
+        let mut fixture = Fixture::new(graph, Owner::Track);
+        fixture.select(true, 21);
+        fixture.render(960, [0.3, -0.19]);
+        let warm = fixture.observe();
+        assert_static(&fixture, &warm, 21);
+        let occupied = fill_actual_event_ring(&mut fixture);
+        println!("graph={graph}, actual event ring accepted={occupied}");
+        let traffic = crate::retirement::tests::allocations(|| {
+            for value in [[0.8, -0.6], [0.0, 0.0], [-0.7, 0.9], [0.0, 0.0]] {
+                fixture.render(960, value);
+            }
+        });
+        assert_eq!(traffic, (0, 0));
+        let dropped = fixture.observe();
+        assert!(dropped.scopes.is_empty() && dropped.levels.is_empty());
+        assert_eq!(fixture.engine.event_tx.slots(), occupied);
+        let traffic = crate::retirement::tests::allocations(|| {
+            fixture.render(960, [0.3, -0.19]);
+        });
+        assert_eq!(traffic, (0, 0));
+        let fresh = fixture.observe();
+        assert_static(&fixture, &fresh, 21);
+        assert_eq!(fresh.scopes[0].3.first_source_frame, 5_632);
+        let traffic = crate::retirement::tests::allocations(|| {
+            fixture.render(1, [0.41, -0.27]);
+        });
+        assert_eq!(traffic, (0, 0));
+        let subdeadline = fixture.observe();
+        assert!(subdeadline.scopes.is_empty() && subdeadline.levels.is_empty(),
+            "free ring space cannot replay a previously dropped window");
+    }
+}
+
+#[test]
+fn full_actual_command_and_event_rings_keep_all_nine_latest_scalar_targets_without_replay() {
+    let values = [
+        [4.75, 5.49, 0.37, 6.0, 1.0, 1.0, 0.75, 1.0, 700.0],
+        [12.25, 9.1, 0.65, 3.0, 2.0, 0.0, 0.25, 0.0, 4_000.0],
+    ];
+    for graph in [false, true] {
+        let mut fixture = Fixture::new(graph, Owner::Track);
+        fixture.select(true, 31);
+        fixture.render(960, [0.3, -0.19]);
+        assert_eq!(fixture.observe().scopes.len(), 1);
+        let capacity = fixture.commands.slots();
+        assert_eq!(capacity, vibez_core::constants::RING_BUFFER_CAPACITY);
+        let mut expected = [4.0, 3.0, 0.25, 0.0, 0.0, 0.0, 0.0, 0.0, 12_000.0];
+        let mut accepted = 0;
+        let mut per_parameter = [0; 9];
+        let rejected = loop {
+            let index = accepted % expected.len();
+            let value = values[(accepted / expected.len()) % 2][index];
+            let command = EngineCommand::SetEffectParam { track_id: fixture.selected,
+                effect_id: fixture.effect, param_index: index, value };
+            match fixture.commands.push(command) {
+                Ok(()) => {
+                    expected[index] = value;
+                    per_parameter[index] += 1;
+                    accepted += 1;
+                }
+                Err(rtrb::PushError::Full(command)) => break command,
+            }
+        };
+        assert_eq!(accepted, capacity);
+        assert_eq!(fixture.commands.slots(), 0);
+        for (index, &count) in per_parameter.iter().enumerate() {
+            assert_eq!(count, accepted / 9 + usize::from(index < accepted % 9));
+            assert!(count > 0);
+        }
+        let EngineCommand::SetEffectParam { param_index: rejected_index, value: rejected_value, .. } = rejected
+            else { panic!("scalar command must be returned to its caller when full"); };
+        assert_ne!(rejected_value, expected[rejected_index]);
+        let occupied = fill_actual_event_ring(&mut fixture);
+        println!("graph={graph}, actual command ring accepted={accepted}, per_parameter={per_parameter:?}, actual event ring accepted={occupied}");
+        let traffic = crate::retirement::tests::allocations(|| {
+            fixture.render(960, [0.8, -0.6]);
+            fixture.render(960, [-0.4, 0.7]);
+        });
+        assert_eq!(traffic, (0, 0));
+        assert_eq!(fixture.commands.slots(), capacity, "the accepted scalar batch was consumed");
+        {
+            let effect = &fixture.engine.tracks[0].effects[0].effect;
+            for (index, value) in expected.into_iter().enumerate() {
+                assert_eq!(effect.get_param(index), value, "accepted target{index}");
+            }
+            assert_ne!(effect.get_param(rejected_index), rejected_value);
+        }
+        let dropped = fixture.observe();
+        assert!(dropped.scopes.is_empty() && dropped.levels.is_empty());
+        fixture.commands.push(EngineCommand::SetEffectParam { track_id: fixture.selected,
+            effect_id: fixture.effect, param_index: 2, value: 0.0 }).unwrap();
+        let traffic = crate::retirement::tests::allocations(|| {
+            fixture.render(960, [0.423, -0.219]);
+        });
+        assert_eq!(traffic, (0, 0));
+        let fresh = fixture.observe();
+        assert_eq!(fresh.scopes.len(), 1);
+        assert_eq!(fresh.levels.len(), 1);
+        let (track, effect, generation, meter) = fresh.scopes[0];
+        assert_eq!((track, effect, generation), (fixture.selected, fixture.effect, 31));
+        assert_eq!((meter.count, meter.first_source_frame), (128, 3_712));
+        assert!(!meter.transition_active);
+        assert!(meter.input.iter().all(|&value| value == 0.423));
+        assert!(meter.output.iter().all(|&value| value == 0.423),
+            "a newly accepted dry target wins after all queued ramps settle");
+        expected[2] = 0.0;
+        for (index, value) in expected.into_iter().enumerate() {
+            assert_eq!(fixture.engine.tracks[0].effects[0].effect.get_param(index), value);
+        }
+        let traffic = crate::retirement::tests::allocations(|| {
+            fixture.render(1, [-0.123, 0.456]);
+        });
+        assert_eq!(traffic, (0, 0));
+        let subdeadline = fixture.observe();
+        assert!(subdeadline.scopes.is_empty() && subdeadline.levels.is_empty());
+        assert_eq!(fixture.engine.tracks[0].effects[0].effect.get_param(2), 0.0,
+            "an old accepted or rejected scalar target cannot revive after the drain");
+    }
 }
