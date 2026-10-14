@@ -550,3 +550,33 @@ fn modern_sweep_impulse_and_noise_bursts_are_invariant_to_callback_partition() {
         }
     }
 }
+
+#[test]
+fn reopening_during_hold_reloads_the_full_interval_in_gate_and_expander_modes() {
+    use vibez_core::{effect::GatePhase, routing::{ExternalInputBlock, ExternalInputId}};
+    for mode in [0.0, 1.0] {
+        let mut effect = GateEffect::new(1000.0);
+        for (index, value) in [(0, -20.0), (1, 0.1), (2, 5.0), (3, 3.0), (4, 6.0), (7, mode)] {
+            assert!(effect.set_param(index, value));
+        }
+        for (detector, expected_phase, remaining) in [
+            (0.5, GatePhase::Open, 3.0), (0.0, GatePhase::Hold, 3.0),
+            (0.5, GatePhase::Open, 3.0), (0.0, GatePhase::Hold, 3.0),
+            (0.0, GatePhase::Hold, 2.0), (0.0, GatePhase::Hold, 1.0),
+            (0.0, GatePhase::Closed, 0.0),
+        ] {
+            let mut frame = [0.1_f32];
+            effect.process_with_inputs(&mut frame, 1, &[ExternalInputBlock {
+                id: ExternalInputId(0), channels: 1, samples: &[detector], connected: true,
+            }]);
+            let gate = effect.take_dynamics_meter().unwrap().gate.unwrap();
+            assert_eq!(gate.phase, expected_phase);
+            assert_eq!(gate.hold_remaining_ms, remaining);
+            if remaining > 0.0 {
+                assert!(frame[0] > 0.0999, "Hold stopped requesting unity in mode{mode}");
+            } else {
+                assert!(frame[0] < 0.099, "the release did not begin after the full reloaded Hold");
+            }
+        }
+    }
+}
