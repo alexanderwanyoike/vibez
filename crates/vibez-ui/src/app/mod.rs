@@ -1,3 +1,5 @@
+//! Application service ownership and topic-module coordination for the UI router.
+
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
