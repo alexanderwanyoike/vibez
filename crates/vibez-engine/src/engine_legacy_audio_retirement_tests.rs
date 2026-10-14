@@ -453,18 +453,58 @@ fn unique_clip_request(
 
 #[test]
 fn legacy_unload_combined_source_capture_and_presentation_pressure_returns_all_unique_owners() {
+    assert_combined_legacy_unload_pressure(false);
+}
+
+#[test]
+fn legacy_unload_minimum_credits_defers_real_delayed_capture_history_without_destroying_owners() {
+    assert_combined_legacy_unload_pressure(true);
+}
+
+fn assert_combined_legacy_unload_pressure(delayed_minimum_credits: bool) {
     use crate::playback_source::PreparedSectionPlaybackSource;
     use vibez_core::perform::MusicalBoundary;
 
     let (mut engine, mut commands, mut events) = AudioEngine::new();
     let legacy = stereo_ramp(512, 0.5, -0.25, 8);
-    let legacy_owner = Arc::downgrade(&legacy);
+    let mut legacy_owner = Arc::downgrade(&legacy);
     let tracks: Vec<_> = (0..40).map(|_| TrackId::new()).collect();
     commands.push(EngineCommand::SetSampleRate(8)).unwrap();
     commands.push(EngineCommand::SetBpm(120.0)).unwrap();
     commands.push(EngineCommand::LoadAudio(legacy)).unwrap();
     for track in &tracks {
         commands.push(EngineCommand::add_track(*track)).unwrap();
+    }
+    let mut delayed_sections = Vec::new();
+    if delayed_minimum_credits {
+        use vibez_core::routing::{NodeStage, RoutingChannel, RoutingEffect, RoutingNode};
+        let effect = vibez_core::id::EffectId::new();
+        let slow = tracks[1];
+        commands.push(EngineCommand::InsertEffect {
+            track_id: slow,
+            effect_id: effect,
+            effect: Box::new(crate::test_support::DelayProbe::new(521)),
+            position: None,
+        }).unwrap();
+        let mut channels: Vec<_> = tracks.iter().map(|track| RoutingChannel {
+            id: *track,
+            is_bus: false,
+            sends: vec![],
+            effects: if *track == slow { vec![RoutingEffect {
+                id: effect, inputs: vec![], assignments: vec![], inactive_inputs: vec![],
+            }] } else { vec![] },
+        }).collect();
+        channels.push(RoutingChannel { id: TrackId::MASTER, is_bus: true, effects: vec![], sends: vec![] });
+        let reports = [(RoutingNode { channel: slow, stage: NodeStage::Effect(effect) }, 521)];
+        commands.push(EngineCommand::SetRouting(crate::routing::PreparedRouting::prepare_compensated(
+            &channels, 64, &reports, &[], 1,
+        ).unwrap())).unwrap();
+        let section = SectionId::new();
+        for refresh in [false, true] {
+            let prepared = Box::new(PreparedSectionPlaybackSource::new(section, 8.0, true, vec![]));
+            delayed_sections.push(&*prepared as *const PreparedSectionPlaybackSource);
+            commands.push(if refresh { EngineCommand::RefreshSection(prepared) } else { EngineCommand::LaunchSection(prepared) }).unwrap();
+        }
     }
     commands.push(EngineCommand::BeginClipPerformance).unwrap();
     engine.process_block(AudioProcessBlock::new(&mut [0.0; 1], 1));
@@ -515,18 +555,39 @@ fn legacy_unload_combined_source_capture_and_presentation_pressure_returns_all_u
         .iter()
         .all(|owner| owner.audio.strong_count() == 1));
     while events.pop().is_ok() {}
-    assert!(engine.scheduled_presentation.is_empty());
+    let timing_history = if delayed_minimum_credits {
+        assert_eq!(engine.mix_latency(), 521);
+        assert_eq!(engine.earliest_source_latency(), 0);
+        assert_eq!(engine.section_capture_timing.len(), 2, "public launch and refresh retain real early/full timing history");
+        let offsets = engine.capture_offsets();
+        assert!(!offsets.is_empty());
+        Some((engine.section_capture_timing.len(), engine.section_capture_timing.capacity(), Arc::downgrade(&offsets)))
+    } else {
+        assert!(engine.scheduled_presentation.is_empty());
+        None
+    };
     let ring_capacity = fill_ui_ring(&mut engine);
     let presentation_capacity = engine.scheduled_presentation.capacity();
     let retirement_capacity = engine.pending_retirements.capacity();
-    let retained_owners = presentation_capacity - presentation_queue::COMMAND_PRESENTATION_RESERVE;
+    let mut displaced_legacy = Vec::new();
+    if delayed_minimum_credits {
+        displaced_legacy.push(legacy_owner.clone());
+        queue_legacy_replacements(&mut commands, &mut displaced_legacy, retirement_capacity - 2);
+        legacy_owner = displaced_legacy.pop().unwrap();
+        assert_eq!(crate::retirement::tests::allocations(|| engine.process_block(AudioProcessBlock::new(&mut [], 1))), (0, 0));
+        assert_eq!(engine.pending_retirements.len(), retirement_capacity - 2);
+        assert_eq!(engine.pending_retirements.capacity() - engine.pending_retirements.len(), 2);
+        assert_eq!(engine.section_capture_timing.len(), timing_history.as_ref().unwrap().0);
+        assert_eq!(engine.audio().map(Arc::as_ptr), Some(legacy_owner.as_ptr()));
+    }
+    let retained_owners = presentation_capacity - engine.scheduled_presentation.len() - presentation_queue::COMMAND_PRESENTATION_RESERVE;
     // Existing owner-bearing acknowledgements cannot be discarded to make cleanup room.
     for index in 0..retained_owners {
         let (prepared, owner) = unique_clip_request(tracks[0], 10000 + index as u64);
         expected_clips.push(owner);
         engine.present_event(EngineEvent::ClipRequestRetired(prepared));
     }
-    assert_eq!(engine.scheduled_presentation.len(), retained_owners);
+    assert_eq!(engine.scheduled_presentation.len(), presentation_capacity - presentation_queue::COMMAND_PRESENTATION_RESERVE);
     let capture_boundary = engine.heard_capture_position();
     let arrange_cursor = engine.transport().position();
     commands.push(EngineCommand::UnloadAudio).unwrap();
@@ -560,6 +621,12 @@ fn legacy_unload_combined_source_capture_and_presentation_pressure_returns_all_u
         assert!(
             matches!(engine.cmd_rx.peek(), Ok(EngineCommand::SetBpm(value)) if *value == 137.0)
         );
+        if let Some((history_length, history_capacity, _)) = &timing_history {
+            assert_eq!(engine.pending_retirements.len(), retirement_capacity);
+            assert_eq!(engine.section_capture_timing.len(), history_length - 1, "one history owner remains deferred after legacy retirement consumes its credit");
+            assert_eq!(engine.section_capture_timing.capacity(), *history_capacity);
+            assert!(displaced_legacy.iter().all(|owner| owner.strong_count() == 1));
+        }
         assert_eq!(legacy_owner.strong_count(), 1);
         assert_eq!(recording_audio.audio.strong_count(), 1);
         assert!(expected_clips
@@ -608,6 +675,20 @@ fn legacy_unload_combined_source_capture_and_presentation_pressure_returns_all_u
         engine.scheduled_presentation.capacity(),
         presentation_capacity
     );
+    if let Some((history_length, history_capacity, offsets)) = &timing_history {
+        assert!(engine.section_capture_timing.is_empty());
+        assert_eq!(engine.section_capture_timing.capacity(), *history_capacity);
+        assert_eq!(delivered.iter().filter(|event| matches!(event, EngineEvent::CaptureTimingRetired(owner) if std::ptr::eq(Arc::as_ptr(owner), offsets.as_ptr()))).count(), *history_length);
+        for pointer in &delayed_sections {
+            assert_eq!(delivered.iter().filter(|event| match event {
+                EngineEvent::SectionQueueCancelled { retired } | EngineEvent::SectionSourceRefreshed { retired, .. } => std::ptr::eq(&**retired, *pointer),
+                _ => false,
+            }).count(), 1, "both public delayed Section acknowledgements return exactly once");
+        }
+        for owner in &displaced_legacy {
+            assert_eq!(delivered.iter().filter(|event| matches!(event, EngineEvent::RetiredAudioBuffer(audio) if std::ptr::eq(Arc::as_ptr(audio), owner.as_ptr()))).count(), 1);
+        }
+    }
     for owner in &expected_clips {
         let matching: Vec<_> = delivered
             .iter()
@@ -666,6 +747,10 @@ fn legacy_unload_combined_source_capture_and_presentation_pressure_returns_all_u
     drop(stopped_recording);
     drop(delivered);
     assert_eq!(legacy_owner.strong_count(), 0);
+    assert!(displaced_legacy.iter().all(|owner| owner.strong_count() == 0));
+    if let Some((_, _, offsets)) = timing_history {
+        assert_eq!(offsets.strong_count(), 1, "only the current routing plan retains its capture offsets");
+    }
     assert_eq!(recording_audio.audio.strong_count(), 0);
     assert!(expected_clips
         .iter()
