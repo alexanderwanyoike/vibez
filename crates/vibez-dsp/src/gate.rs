@@ -129,11 +129,14 @@ impl AudioEffect for GateEffect {
         channels: usize,
         inputs: &[vibez_core::routing::ExternalInputBlock<'_>],
     ) {
+        if channels == 0 {
+            return;
+        }
         let detector = inputs
             .iter()
             .find(|input| input.id == vibez_core::routing::ExternalInputId(0) && input.connected);
-        let ch = channels.clamp(1, 2);
-        let frames = buffer.len() / ch;
+        let ch = channels.min(2);
+        let frames = buffer.len() / channels;
         let att = Self::coef(self.attack_ms, self.sample_rate);
         let rel = Self::coef(self.release_ms, self.sample_rate);
         let hold_frames = (self.hold_ms * 0.001 * self.sample_rate) as u32;
@@ -147,7 +150,7 @@ impl AudioEffect for GateEffect {
                         .get(frame * input.channels + c.min(input.channels - 1))
                         .copied()
                         .unwrap_or(0.0),
-                    None => buffer[frame * ch + c],
+                    None => buffer[frame * channels + c],
                 };
                 peak = peak.max(sample.abs());
             }
@@ -171,7 +174,7 @@ impl AudioEffect for GateEffect {
             }
 
             for c in 0..ch {
-                buffer[frame * ch + c] *= self.gain;
+                buffer[frame * channels + c] *= self.gain;
             }
         }
     }
