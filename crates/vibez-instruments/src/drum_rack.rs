@@ -52,7 +52,7 @@ struct Voice {
     active: bool,
     pad_index: usize,
     pitch: u8,
-    sample: Arc<DecodedAudio>,
+    sample: Option<Arc<DecodedAudio>>,
     position: f64,
     end_frame: usize,
     rendered_frames: usize,
@@ -74,10 +74,7 @@ impl Voice {
             active: false,
             pad_index: 0,
             pitch: 0,
-            sample: Arc::new(DecodedAudio {
-                channels: Vec::new(),
-                sample_rate: 44_100,
-            }),
+            sample: None,
             position: 0.0,
             end_frame: 0,
             rendered_frames: 0,
@@ -271,7 +268,7 @@ impl Instrument for DrumRack {
             active: true,
             pad_index,
             pitch,
-            sample,
+            sample: Some(sample),
             position: start_frame as f64,
             end_frame,
             rendered_frames: 0,
@@ -320,15 +317,16 @@ impl Instrument for DrumRack {
                     continue;
                 }
 
+                let sample = voice.sample.as_ref().expect("active drum voice owns its sample");
                 let envelope = boundary_fade_gain(voice) * release_fade_gain(voice);
-                let mono = read_sample(&voice.sample, voice.position, 0)
+                let mono = read_sample(sample, voice.position, 0)
                     * voice.gain
                     * voice.velocity_gain
                     * envelope;
                 let (pan_l, pan_r) = equal_power_pan(voice.pan);
 
                 if channels >= 2 {
-                    let right = read_sample(&voice.sample, voice.position, 1)
+                    let right = read_sample(sample, voice.position, 1)
                         * voice.gain
                         * voice.velocity_gain
                         * envelope;
