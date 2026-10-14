@@ -50,7 +50,12 @@ impl FilterResponse<'_> {
         log_value((x - 26.0) / (width - 34.0).max(1.0), CUTOFF_MIN, CUTOFF_MAX)
     }
     fn db_y(db: f32, height: f32) -> f32 {
-        4.0 + (12.0 - db.clamp(-48.0, 12.0)) / 60.0 * (height - 18.0).max(1.0)
+        let (top, span) = if height < 48.0 {
+            (2.0, (height - 4.0).max(1.0))
+        } else {
+            (4.0, (height - 18.0).max(1.0))
+        };
+        top + (12.0 - db.clamp(-48.0, 12.0)) / 60.0 * span
     }
 }
 
@@ -102,7 +107,7 @@ impl canvas::Program<Message> for FilterResponse<'_> {
                 ),
                 canvas::Stroke::default().with_color(th::divider()),
             );
-            if bounds.height >= 90.0 || db == 0.0 || db == -48.0 {
+            if bounds.height >= 90.0 || (bounds.height >= 48.0 && (db == 0.0 || db == -48.0)) {
                 frame.fill_text(canvas::Text {
                     content: format!("{db:.0}"),
                     position: Point::new(23.0, y(db)),

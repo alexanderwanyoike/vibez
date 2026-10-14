@@ -99,21 +99,31 @@ pub fn view<'a>(
         .spacing(8)
         .align_y(iced::Alignment::Center)
     };
-    let plot: Element<'a, Message> = column![
-        section_label("Linear response · drive and modulation excluded"),
-        canvas(FilterResponse {
-            track,
-            effect,
-            sample_rate,
-            accent
-        })
-        .width(Length::Fill)
-        .height(Length::Fill),
-    ]
-    .spacing(3)
+    let response_canvas = canvas(FilterResponse {
+        track,
+        effect,
+        sample_rate,
+        accent,
+    })
     .width(Length::Fill)
-    .height(Length::Fill)
-    .into();
+    .height(Length::Fill);
+    let plot: Element<'a, Message> = if layout.plot < 42.0 {
+        iced::widget::tooltip(
+            response_canvas,
+            text("Linear response · drive and modulation excluded").size(9),
+            iced::widget::tooltip::Position::Top,
+        )
+        .into()
+    } else {
+        column![
+            section_label("Linear response · drive and modulation excluded"),
+            response_canvas,
+        ]
+        .spacing(3)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into()
+    };
     let visual: Element<'a, Message> = if layout.inline_primary {
         row![
             primary(),
@@ -149,7 +159,31 @@ pub fn view<'a>(
                 );
             }
         }
-        let response = row![plot, meter].spacing(8).height(Length::Fill);
+        let meter: Element<'a, Message> = if layout.plot < 42.0 {
+            let reading = |peak| {
+                let db = vibez_core::level::amplitude_to_db(peak);
+                if db.is_finite() {
+                    format!("{db:.1}")
+                } else {
+                    "-inf".into()
+                }
+            };
+            text(format!(
+                "L {}  R {} dBFS",
+                reading(output.peak_l),
+                reading(output.peak_r)
+            ))
+            .size(8)
+            .wrapping(iced::widget::text::Wrapping::None)
+            .color(crate::theme::text())
+            .into()
+        } else {
+            meter.into()
+        };
+        let response = row![plot, meter]
+            .spacing(8)
+            .align_y(iced::Alignment::Center)
+            .height(Length::Fill);
         if layout.beside {
             row![
                 response.width(Length::Fill),
