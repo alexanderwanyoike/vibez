@@ -41,10 +41,7 @@ impl std::fmt::Debug for InstrumentMediaOwners {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
             .debug_struct("InstrumentMediaOwners")
-            .field(
-                "sample",
-                &self.sample.as_ref().map(Arc::as_ptr),
-            )
+            .field("sample", &self.sample.as_ref().map(Arc::as_ptr))
             .field("name", &self.name)
             .finish()
     }
