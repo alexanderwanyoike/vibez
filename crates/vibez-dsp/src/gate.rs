@@ -39,6 +39,8 @@ pub struct GateEffect {
     attack_ms: f32,
     release_ms: f32,
     hold_ms: f32,
+    range_enabled: bool,
+    range_db: f32,
     sample_rate: f32,
     env_db: f32,
     inputs: [vibez_core::routing::ExternalInputDescriptor; 1],
@@ -53,6 +55,8 @@ impl GateEffect {
             attack_ms: 1.0,
             release_ms: 50.0,
             hold_ms: 10.0,
+            range_enabled: false,
+            range_db: 60.0,
             sample_rate,
             env_db: -120.0,
             inputs: [vibez_core::routing::ExternalInputDescriptor {
@@ -102,6 +106,14 @@ impl AudioEffect for GateEffect {
                 self.hold_ms = value.clamp(0.0, 200.0);
                 true
             }
+            5 => {
+                self.range_enabled = value >= 0.5;
+                true
+            }
+            6 => {
+                self.range_db = value.clamp(0.0, 120.0);
+                true
+            }
             _ => false,
         }
     }
@@ -112,6 +124,8 @@ impl AudioEffect for GateEffect {
             1 => self.attack_ms,
             2 => self.release_ms,
             3 => self.hold_ms,
+            5 => self.range_enabled as u8 as f32,
+            6 => self.range_db,
             _ => 0.0,
         }
     }
@@ -140,6 +154,7 @@ impl AudioEffect for GateEffect {
         let att = Self::coef(self.attack_ms, self.sample_rate);
         let rel = Self::coef(self.release_ms, self.sample_rate);
         let hold_frames = (self.hold_ms * 0.001 * self.sample_rate) as u32;
+        let closed_gain = if self.range_enabled { 10.0_f32.powf(-self.range_db / 20.0) } else { 0.0 };
 
         for frame in 0..frames {
             let mut peak = 0.0_f32;
@@ -162,7 +177,7 @@ impl AudioEffect for GateEffect {
             let target = if open || self.hold_counter > 0 {
                 1.0
             } else {
-                0.0
+                closed_gain
             };
             let g_coef = if target > self.gain { att } else { rel };
             self.gain = target + g_coef * (self.gain - target);
