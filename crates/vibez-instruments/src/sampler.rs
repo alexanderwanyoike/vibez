@@ -5,7 +5,7 @@ use vibez_core::effect::ParamDescriptor;
 use vibez_core::midi::InstrumentKind;
 
 use crate::envelope::{Envelope, EnvelopeStage};
-use crate::Instrument;
+use crate::{Instrument, InstrumentMediaOwners};
 
 /// Sampler parameter descriptors.
 pub static SAMPLER_PARAMS: &[ParamDescriptor] = &[
@@ -398,10 +398,13 @@ impl Instrument for Sampler {
         }
     }
 
-    fn load_sample(&mut self, sample: Arc<DecodedAudio>, name: String) {
-        self.sample = Some(sample);
-        self.sample_name = Some(name);
+    fn load_sample(&mut self, sample: Arc<DecodedAudio>, name: String) -> InstrumentMediaOwners {
+        let retired = InstrumentMediaOwners {
+            sample: self.sample.replace(sample),
+            name: self.sample_name.replace(name),
+        };
         self.reset();
+        retired
     }
 
     fn sample_name(&self) -> Option<&str> {
@@ -447,7 +450,7 @@ mod tests {
     fn produces_sound_with_sample() {
         let mut sampler = Sampler::new(44100.0);
         let sample = make_test_sample(44100, 0.5);
-        sampler.load_sample(sample, "test.wav".into());
+        drop(sampler.load_sample(sample, "test.wav".into()));
         sampler.note_on(60, 100);
 
         let mut buf = vec![0.0_f32; 512];
@@ -463,7 +466,7 @@ mod tests {
     fn pitch_shift_octave_up() {
         let mut sampler = Sampler::new(44100.0);
         let sample = make_sine_sample(44100, 440.0, 44100);
-        sampler.load_sample(sample, "sine.wav".into());
+        drop(sampler.load_sample(sample, "sine.wav".into()));
         sampler.set_param(P_ROOT_NOTE, 60.0);
 
         // Play at pitch 72 (one octave up from root 60) → speed should be 2x
@@ -483,7 +486,7 @@ mod tests {
     fn original_pitch_at_root() {
         let mut sampler = Sampler::new(44100.0);
         let sample = make_test_sample(44100, 0.5);
-        sampler.load_sample(sample, "test.wav".into());
+        drop(sampler.load_sample(sample, "test.wav".into()));
         sampler.set_param(P_ROOT_NOTE, 60.0);
 
         sampler.note_on(60, 100);
@@ -501,7 +504,7 @@ mod tests {
     fn one_shot_ignores_note_off() {
         let mut sampler = Sampler::new(44100.0);
         let sample = make_test_sample(44100, 0.5);
-        sampler.load_sample(sample, "test.wav".into());
+        drop(sampler.load_sample(sample, "test.wav".into()));
         sampler.set_param(P_ONE_SHOT, 1.0);
 
         sampler.note_on(60, 100);
@@ -528,7 +531,7 @@ mod tests {
     fn sustain_mode_releases_on_note_off() {
         let mut sampler = Sampler::new(44100.0);
         let sample = make_test_sample(44100, 0.5);
-        sampler.load_sample(sample, "test.wav".into());
+        drop(sampler.load_sample(sample, "test.wav".into()));
         sampler.set_param(P_RELEASE, 0.001); // very short release
 
         sampler.note_on(60, 100);
@@ -554,7 +557,7 @@ mod tests {
         let mut sampler = Sampler::new(44100.0);
         // Short sample: 100 frames
         let sample = make_test_sample(100, 0.5);
-        sampler.load_sample(sample, "short.wav".into());
+        drop(sampler.load_sample(sample, "short.wav".into()));
         sampler.set_param(P_LOOP, 1.0);
 
         sampler.note_on(60, 100);
@@ -584,7 +587,7 @@ mod tests {
             channels: vec![data.clone(), data],
             sample_rate: 44100,
         });
-        sampler.load_sample(sample, "ramp.wav".into());
+        drop(sampler.load_sample(sample, "ramp.wav".into()));
 
         // Set start=0.5, end=0.8 → frames 500..800
         sampler.set_param(P_START, 0.5);
@@ -605,7 +608,7 @@ mod tests {
     fn polyphony() {
         let mut sampler = Sampler::new(44100.0);
         let sample = make_test_sample(44100, 0.5);
-        sampler.load_sample(sample, "test.wav".into());
+        drop(sampler.load_sample(sample, "test.wav".into()));
 
         sampler.note_on(60, 100);
         sampler.note_on(64, 100);
@@ -649,7 +652,7 @@ mod tests {
     fn reset_clears_voices() {
         let mut sampler = Sampler::new(44100.0);
         let sample = make_test_sample(44100, 0.5);
-        sampler.load_sample(sample, "test.wav".into());
+        drop(sampler.load_sample(sample, "test.wav".into()));
         sampler.note_on(60, 100);
         sampler.reset();
         for voice in &sampler.voices {
@@ -662,8 +665,8 @@ mod tests {
         let mut sampler_loud = Sampler::new(44100.0);
         let mut sampler_soft = Sampler::new(44100.0);
         let sample = make_test_sample(44100, 0.5);
-        sampler_loud.load_sample(sample.clone(), "test.wav".into());
-        sampler_soft.load_sample(sample, "test.wav".into());
+        drop(sampler_loud.load_sample(sample.clone(), "test.wav".into()));
+        drop(sampler_soft.load_sample(sample, "test.wav".into()));
 
         sampler_loud.note_on(60, 127);
         sampler_soft.note_on(60, 32);
@@ -687,7 +690,7 @@ mod tests {
         assert!(sampler.sample_name().is_none());
 
         let sample = make_test_sample(100, 0.5);
-        sampler.load_sample(sample, "kick.wav".into());
+        drop(sampler.load_sample(sample, "kick.wav".into()));
         assert_eq!(sampler.sample_name(), Some("kick.wav"));
     }
 

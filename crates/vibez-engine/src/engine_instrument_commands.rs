@@ -190,10 +190,17 @@ impl AudioEngine {
         sample: std::sync::Arc<vibez_core::audio_buffer::DecodedAudio>,
         sample_name: String,
     ) {
-        if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
-            if let Some(ref mut instrument) = track.instrument {
-                instrument.load_sample(sample, sample_name);
-            }
+        let retired = match self.tracks.iter_mut().find(|track| track.id == track_id)
+            .and_then(|track| track.instrument.as_mut()) {
+            Some(instrument) => instrument.load_sample(sample, sample_name),
+            None => vibez_instruments::InstrumentMediaOwners::incoming(sample, sample_name),
+        };
+        self.retire_instrument_media(retired);
+    }
+
+    fn retire_instrument_media(&mut self, retired: vibez_instruments::InstrumentMediaOwners) {
+        if !retired.is_empty() {
+            self.retire_event(EngineEvent::RetiredInstrumentMedia(retired));
         }
     }
 

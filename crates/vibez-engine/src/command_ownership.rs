@@ -56,6 +56,7 @@ impl EngineCommand {
             // and the owned rejection cause in the same command.
             Self::RejectDeviceReconfiguration { .. } => 3,
             Self::ResumeDeviceReconfiguration { .. } => 2,
+            Self::LoadSamplerSample { .. } => 1,
             _ => 2,
         }
     }

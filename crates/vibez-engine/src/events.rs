@@ -119,6 +119,7 @@ pub enum EngineEvent {
     RetiredEffectStorage(crate::engine::reconfiguration::RetiredEffectStorage),
     RetiredChannel(crate::retirement::RetiredChannel),
     RetiredAutomationLane(vibez_core::automation::AutomationLane),
+    RetiredInstrumentMedia(vibez_instruments::InstrumentMediaOwners),
     RoutingRetired(Box<crate::routing::PreparedRouting>),
     SidechainInputMeter {
         effect_id: vibez_core::id::EffectId,
@@ -449,6 +450,7 @@ impl EngineEvent {
             | Self::RetiredEffectStorage(_)
             | Self::RetiredChannel(_)
             | Self::RetiredAutomationLane(_)
+            | Self::RetiredInstrumentMedia(_)
             | Self::RoutingRetired(_)
             | Self::DisposeEffect(_)
             | Self::DisposeInstrument(_)
@@ -483,6 +485,7 @@ impl PartialEq for EngineEvent {
             | (Self::SourceNoteRepeated { .. }, Self::SourceNoteRepeated { .. }) => {
                 recording::source_eq(self, other)
             }
+            (Self::RetiredInstrumentMedia(left), Self::RetiredInstrumentMedia(right)) => left == right,
             (Self::DisposeEffect(left), Self::DisposeEffect(right)) => left == right,
             (Self::DisposeInstrument(left), Self::DisposeInstrument(right)) => left == right,
             (Self::PlaybackPosition(left), Self::PlaybackPosition(right)) => left == right,

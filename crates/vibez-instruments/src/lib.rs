@@ -1,6 +1,8 @@
 //! Instrument rendering and native ownership configuration.
 
 pub mod drum_rack;
+mod media_owners;
+pub use media_owners::InstrumentMediaOwners;
 pub(crate) mod envelope;
 pub mod sampler;
 pub mod synth;
@@ -95,7 +97,10 @@ pub trait Instrument: Send {
     }
 
     /// Load a sample into the instrument. No-op for non-sample instruments.
-    fn load_sample(&mut self, _sample: Arc<DecodedAudio>, _name: String) {}
+    #[must_use]
+    fn load_sample(&mut self, sample: Arc<DecodedAudio>, name: String) -> InstrumentMediaOwners {
+        InstrumentMediaOwners::incoming(sample, name)
+    }
 
     /// Load a sample into a drum-rack pad. No-op for non-drum-rack instruments.
     fn load_drum_pad_sample(
