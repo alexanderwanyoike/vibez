@@ -839,6 +839,9 @@ mod device_validation;
 #[path = "engine_capture_commands.rs"]
 mod capture_commands;
 
+#[path = "engine_capture_admission.rs"]
+mod capture_admission;
+
 #[path = "engine_compensation_commands.rs"]
 mod compensation_commands;
 
