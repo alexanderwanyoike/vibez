@@ -550,6 +550,17 @@ mod tests {
         }
     }
     #[test]
+    fn medium_and_expanded_keep_the_four_band_console_when_advanced_opens() {
+        for width in [804.0, 892.0] {
+            for advanced in [false, true] {
+                let layout = arrange(Size::new(width, 304.0), advanced);
+                assert!(layout.all_bands, "missing band console at {width}, advanced={advanced}");
+                assert!(layout.graph >= 160.0, "response and side editor lost their space");
+            }
+        }
+    }
+
+    #[test]
     fn width_uses_chain_remainder_and_is_bounded() {
         assert_eq!(card_width(80.0), 430.0);
         assert_eq!(card_width(710.0), 710.0);
