@@ -21,6 +21,13 @@ pub fn presentation_descriptor(effect: &crate::state::UiEffect, index: usize) ->
 }
 
 pub fn presented_value(effect: &crate::state::UiEffect, index: usize, value: f32) -> String {
+    if effect.effect_type == vibez_core::effect::EffectType::Bitcrush
+        && effect.plugin_ref.is_none()
+        && effect.plugin_name.is_none()
+        && index == vibez_dsp::bitcrush::param::BITS
+    {
+        return format!("{:.0}", value.trunc());
+    }
     display_value(value, &presentation_descriptor(effect, index))
 }
 
