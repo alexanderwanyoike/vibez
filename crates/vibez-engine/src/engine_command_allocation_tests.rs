@@ -853,6 +853,111 @@ fn public_add_clip_at_exhausted_capacity_preserves_content_without_callback_heap
 }
 
 #[test]
+fn public_add_clip_to_missing_track_returns_unique_payload_without_callback_heap_work() {
+    use vibez_core::routing::RoutingChannel;
+    use vibez_core::track::{ClipFades, ClipPlaybackDirection};
+    use vibez_core::warp_marker::WarpMarkers;
+
+    let (mut engine, mut commands, mut events) = AudioEngine::new();
+    let track_id = TrackId::new();
+    let resident_id = ClipId::new();
+    let resident = add_clip(track_id, resident_id);
+    let EngineCommand::AddClip {
+        audio: resident_audio,
+        ..
+    } = &resident
+    else {
+        unreachable!();
+    };
+    let resident_owner = Arc::downgrade(resident_audio);
+    commands.push(EngineCommand::add_track(track_id)).unwrap();
+    commands.push(resident).unwrap();
+    commands
+        .push(EngineCommand::SetTrackPan(track_id, 0.0))
+        .unwrap();
+    let channels: Vec<_> = [track_id, TrackId::MASTER]
+        .into_iter()
+        .map(|id| RoutingChannel {
+            id,
+            is_bus: id.is_master(),
+            sends: Vec::new(),
+            effects: Vec::new(),
+        })
+        .collect();
+    commands
+        .push(EngineCommand::SetRouting(
+            crate::routing::PreparedRouting::prepare(&channels, 8).unwrap(),
+        ))
+        .unwrap();
+    commands.push(EngineCommand::Play).unwrap();
+    let mut output = [0.0; 16];
+    engine.process_block(AudioProcessBlock::new(&mut output, 2));
+    for &[left, right] in output.as_chunks::<2>().0 {
+        assert!((left - 0.25).abs() < 1e-7);
+        assert_eq!(right, 0.0);
+    }
+    assert_eq!(engine.transport().position(), 8);
+    assert_eq!(engine.transport().audio_length(), Some(4096));
+    while events.pop().is_ok() {}
+
+    let missing_track = TrackId::new();
+    assert!(engine.tracks().iter().all(|track| track.id != missing_track));
+    let incoming_audio = audio(256);
+    let incoming_owner = Arc::downgrade(&incoming_audio);
+    assert_eq!(incoming_owner.strong_count(), 1);
+    let mut markers = WarpMarkers::default();
+    assert!(markers.add(39, 64, 7, 135, 128));
+    assert_eq!(markers.as_slice().len(), 3);
+    commands
+        .push(EngineCommand::AddClip {
+            track_id: missing_track,
+            clip_id: ClipId::new(),
+            audio: incoming_audio,
+            position: 8192,
+            source_offset: 7,
+            start_marker: 15,
+            duration: 128,
+            loop_enabled: true,
+            loop_start: 11,
+            loop_end: 43,
+            linear_gain: 0.5,
+            fades: ClipFades::new(2, 3, 128),
+            playback_direction: ClipPlaybackDirection::Reverse,
+            warp_markers: markers,
+        })
+        .unwrap();
+
+    let measured = crate::retirement::tests::allocations(|| {
+        engine.process_block(AudioProcessBlock::new(&mut output, 2));
+    });
+    let retained_after_callback = incoming_owner.strong_count();
+    let mut returned_events = Vec::new();
+    while let Ok(event) = events.pop() {
+        returned_events.push(event);
+    }
+    assert_eq!(engine.tracks().len(), 1);
+    let clips = &engine.tracks()[0].playback_source.clips;
+    assert_eq!(clips.len(), 1);
+    assert_eq!(clips[0].id, resident_id);
+    assert_eq!(Arc::as_ptr(&clips[0].audio), resident_owner.as_ptr());
+    assert_eq!(resident_owner.strong_count(), 1);
+    assert_eq!(engine.transport().audio_length(), Some(4096));
+    assert_eq!(engine.transport().position(), 16);
+    assert!(engine.transport().is_playing());
+    for &[left, right] in output.as_chunks::<2>().0 {
+        assert!((left - 0.25).abs() < 1e-7);
+        assert_eq!(right, 0.0);
+    }
+    drop(returned_events);
+    assert_eq!(incoming_owner.strong_count(), 0);
+    assert_eq!(
+        (measured, retained_after_callback),
+        ((0, 0), 1),
+        "missing-track AddClip must retain the complete payload for UI destruction"
+    );
+}
+
+#[test]
 fn every_table_command_drains_without_allocating_unless_named_as_card_04_work() {
     let mut mismatches = Vec::new();
     for case in cases() {
