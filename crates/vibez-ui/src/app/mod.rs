@@ -175,6 +175,8 @@ mod drum_rack_preparation;
 mod engine_events;
 mod gain_devices;
 mod drive_devices;
+#[cfg(test)]
+mod drive_hydration_tests;
 mod keyboard;
 mod local_watcher;
 mod menu_lifecycle;

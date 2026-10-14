@@ -1013,3 +1013,32 @@ mod tests {
         .marks_dirty());
     }
 }
+
+#[cfg(test)]
+mod drive_preparation_tests {
+    use super::*;
+    use super::super::test_support::RecordingEngine;
+    use vibez_dsp::drive::{param, DRIVE_PARAMS, LATENCY_SAMPLES};
+
+    #[test]
+    fn fresh_drive_is_prepared_in_modern_sound_before_its_single_insert_command() {
+        let track = ProjectTrack::new(TrackId::new(), "Drive".into(), 3);
+        let track_id = track.id;
+        let mut tracks = vec![track];
+        let mut devices = DevicesState::default();
+        let mut engine = RecordingEngine::default();
+        devices.update(DevicesMsg::AddEffect(track_id, EffectType::Drive), &mut engine, &mut tracks,
+            &mut crate::state::new_master_track(), &mut [], DevicesCtx { sample_rate: 44_100, ..Default::default() });
+        let effect = &tracks[0].effects[0];
+        assert_eq!(effect.latency_samples, Some(LATENCY_SAMPLES));
+        assert_eq!(effect.params[param::CHARACTER], 1.0);
+        assert_eq!(effect.params[param::QUALITY], 2.0);
+        assert_eq!(DRIVE_PARAMS[param::CHARACTER].default, 0.0);
+        assert_eq!(engine.0.len(), 1, "fresh sound must be carried by the prepared owner");
+        let EngineCommand::InsertEffect { effect: prepared, .. } = &engine.0[0] else { panic!("expected prepared insertion") };
+        assert_eq!(prepared.latency_samples(), LATENCY_SAMPLES);
+        for (index, expected) in effect.params.iter().enumerate() {
+            assert_eq!(prepared.get_param(index), *expected, "prepared parameter {index}");
+        }
+    }
+}
