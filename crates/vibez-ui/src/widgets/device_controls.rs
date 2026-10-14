@@ -104,7 +104,16 @@ fn parameter_content<'a>(
                 _ => knob.target,
             };
         }
-        content = content.push(canvas(knob).width(size).height(size));
+        let knob: Element<'a, Message> = canvas(knob).width(size).height(size).into();
+        let knob = match presentation.and_then(|value| value.explanation.as_ref()) {
+            Some(explanation) => tooltip(
+                knob,
+                text(explanation.clone()).size(9).width(300.0),
+                tooltip::Position::Top,
+            ).into(),
+            None => knob,
+        };
+        content = content.push(knob);
     }
     content
         .push(
@@ -150,7 +159,7 @@ fn value_field_presented<'a>(
     } else {
         "N/A".into()
     };
-    let explanation = if let Some(presentation) = presentation {
+    let mut explanation = if let Some(presentation) = presentation {
         presentation.range.as_ref().map_or_else(
             || format!("{} unavailable until this native device has a valid prepared host sample rate.", presentation.name),
             |(minimum, maximum)| format!(
@@ -166,6 +175,16 @@ fn value_field_presented<'a>(
             presented_value(effect, index, descriptor.max),
             descriptor.unit
         )
+    };
+    if let Some(detail) = presentation.and_then(|value| value.explanation.as_ref()) {
+        explanation.push(' ');
+        explanation.push_str(detail);
+    }
+    let explanation = text(explanation).size(9);
+    let explanation = if presentation.is_some_and(|value| value.explanation.is_some()) {
+        explanation.width(300.0)
+    } else {
+        explanation
     };
     let effect_id = effect.id;
     let submit = Message::DeviceControl(DeviceControlMsg::Submit(track, effect_id, index));
@@ -199,7 +218,7 @@ fn value_field_presented<'a>(
         });
     tooltip(
         on_blur(input, editable && state.entries.contains_key(&index), submit),
-        text(explanation).size(9),
+        explanation,
         tooltip::Position::Top,
     )
     .into()

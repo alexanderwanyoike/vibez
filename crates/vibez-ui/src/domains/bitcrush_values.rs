@@ -1,4 +1,4 @@
-//! Native Bitcrush value edits preserve legacy storage with stepped bits and host-rate hertz.
+//! Native Bitcrush value presentation and edits preserve stored targets and prepared-rate context.
 
 pub fn parse_bits(text: &str, current: f32) -> Option<f32> {
     let text = text.trim().to_ascii_lowercase();
@@ -26,11 +26,43 @@ pub fn display_rate(sample_rate: u32, current: f32) -> Option<String> {
         return None;
     }
     let rate = f64::from(sample_rate) / f64::from(current.round());
-    Some(if rate >= 1000.0 {
+    Some(display_hertz(rate))
+}
+
+fn display_hertz(rate: f64) -> String {
+    if rate >= 1000.0 {
         format!("{:.3}k", rate / 1000.0)
     } else {
         format!("{rate:.3}")
-    })
+    }
+}
+
+pub fn parameter_explanation(index: usize, values: &[f32], prepared_rate: Option<u32>) -> Option<String> {
+    use vibez_dsp::bitcrush::{param, BITCRUSH_PARAMS};
+
+    match index {
+        param::SR_REDUCE => Some("Nominal Rate is the prepared host sample rate divided by the target interval N1..32. Edits snap to supported rates. Jitter and clock transitions can vary actual intervals; Clock reports the most recently acquired interval at packet end.".into()),
+        param::JITTER => {
+            let divider = values.get(param::SR_REDUCE).copied()
+                .unwrap_or(BITCRUSH_PARAMS[param::SR_REDUCE].default);
+            Some(if (1.0..1.5).contains(&divider) {
+                "Jitter is inactive at the N1 target: its whole-frame acquisition interval is one source frame. An ongoing clock transition can still contain previous intervals.".into()
+            } else {
+                "Varies each stereo acquisition interval by up to half this percentage, rounded to whole source frames. Nominal Rate is the requested clock; Clock reports the most recently acquired interval.".into()
+            })
+        }
+        param::POST_LP_HZ => {
+            let target = values.get(index).copied().unwrap_or(BITCRUSH_PARAMS[index].default);
+            Some(match prepared_rate.filter(|rate| *rate >= 2 && target.is_finite()) {
+                Some(rate) => {
+                    let effective = f64::from(target).min(0.49 * f64::from(rate));
+                    format!("Effective prepared target: {} Hz, capped at 0.49 x the prepared host sample rate. Your cutoff setting is preserved. This is the target when Post LP is enabled; the applied cutoff may still be ramping.", display_hertz(effective))
+                }
+                None => "Effective prepared target unavailable until this native device has a valid prepared host sample rate. Your cutoff setting remains editable; actual applied cutoff can still be ramping.".into(),
+            })
+        }
+        _ => None,
+    }
 }
 
 fn requested_hertz(text: &str) -> Option<f64> {

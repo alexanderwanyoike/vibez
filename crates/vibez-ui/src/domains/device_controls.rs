@@ -9,6 +9,7 @@ pub struct ParameterPresentation {
     pub unit: &'static str,
     pub value: Option<String>,
     pub range: Option<(String, String)>,
+    pub explanation: Option<String>,
 }
 
 impl ParameterPresentation {
@@ -27,11 +28,16 @@ pub fn parameter_presentation(
     }
     let stored = effect.descriptors.get(index)?;
     let value = effect.params.get(index).copied().unwrap_or(stored.default);
+    let prepared_rate = prepared_rate.filter(|_| !effect.reconfiguration_failed);
+    let explanation = if crate::domains::bitcrush::is_native_bitcrush(effect) {
+        crate::domains::bitcrush_values::parameter_explanation(index, &effect.params, prepared_rate)
+    } else {
+        None
+    };
     if effect.effect_type == vibez_core::effect::EffectType::Bitcrush
         && index == vibez_dsp::bitcrush::param::SR_REDUCE
     {
         let hertz = prepared_rate
-            .filter(|_| !effect.reconfiguration_failed)
             .and_then(|rate| {
                 Some((
                     crate::domains::bitcrush_values::display_rate(rate, value)?,
@@ -44,10 +50,11 @@ pub fn parameter_presentation(
             None => (None, None),
         };
         return Some(ParameterPresentation {
-            name: "Rate",
+            name: "Nominal Rate",
             unit: "Hz",
             value,
             range,
+            explanation,
         });
     }
     let descriptor = presentation_descriptor(effect, index);
@@ -59,6 +66,7 @@ pub fn parameter_presentation(
             presented_value(effect, index, stored.min),
             presented_value(effect, index, stored.max),
         )),
+        explanation,
     })
 }
 
