@@ -145,6 +145,10 @@ impl GateEffect {
         }
     }
 
+    fn wet_gain(&self) -> f32 {
+        self.gain + (self.expander_gain as f32 - self.gain) * self.applied[param::MODE]
+    }
+
     fn coef(time_ms: f32, sr: f32) -> f32 {
         let t = (time_ms * 0.001).max(1e-5);
         (-1.0 / (t * sr)).exp()
@@ -156,7 +160,7 @@ impl AudioEffect for GateEffect {
 
     fn take_dynamics_meter(&mut self) -> Option<DynamicsMeter> {
         if !self.started {
-            let gain = self.gain + (self.expander_gain as f32 - self.gain) * self.applied[param::MODE];
+            let gain = self.wet_gain();
             self.meter.current_reduction_db = [-20.0 * gain.max(1e-10).log10(); 2];
             if let Some(gate) = &mut self.meter.gate {
                 gate.open_threshold_db = self.applied[param::THRESHOLD];
@@ -265,7 +269,7 @@ impl AudioEffect for GateEffect {
             let expansion_target = expansion_target as f64;
             let coefficient = if expansion_target > self.expander_gain { att } else { rel } as f64;
             self.expander_gain = expansion_target + coefficient * (self.expander_gain - expansion_target);
-            let gain = self.gain + (self.expander_gain as f32 - self.gain) * self.applied[param::MODE];
+            let gain = self.wet_gain();
 
             let phase = if self.open { GatePhase::Open }
                 else if self.hold_counter > 0 { GatePhase::Hold } else { GatePhase::Closed };
