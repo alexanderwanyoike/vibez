@@ -122,3 +122,33 @@ fn constructed_bitcrush_reports_its_real_rate_without_inventing_fixed_hold_laten
         assert_eq!(effect.activation_sample_rate(), Some(48_000));
     }
 }
+
+#[test]
+fn nonfinite_audio_is_silence_without_poisoning_acquisition_or_finite_headroom() {
+    for channels in [1, 2] {
+        for reduction in [1.0, 5.0] {
+            for mix in [0.0, 0.37, 1.0] {
+                let parameters = [6.0, reduction, mix];
+                let build = || {
+                    create_effect_with_params(EffectType::Bitcrush, 48_000.0, &parameters)
+                };
+                let mut effect = build();
+                let mut reference = build();
+                let mut actual = [
+                    f32::NAN, 0.2, f32::INFINITY, -0.4, f32::NEG_INFINITY, 0.7,
+                    1.75, -2.0, f32::MAX, f32::MIN, 0.3, -0.6,
+                ];
+                let mut expected = actual.map(|sample| if sample.is_finite() { sample } else { 0.0 });
+                reference.process(&mut expected, channels);
+                effect.process(&mut actual, channels);
+                assert!(actual.iter().all(|sample| sample.is_finite()));
+                assert_eq!(actual, expected, "channels={channels}, N={reduction}, Mix={mix}");
+                let mut tail = [0.4, -0.9, 0.1, -0.1, 0.7, -0.2];
+                let mut expected_tail = tail;
+                reference.process(&mut expected_tail, channels);
+                effect.process(&mut tail, channels);
+                assert_eq!(tail, expected_tail);
+            }
+        }
+    }
+}
