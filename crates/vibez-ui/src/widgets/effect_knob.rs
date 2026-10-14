@@ -367,10 +367,8 @@ impl SteppedKnobState {
         let replaced = self.target != Some(target)
             || (self.observed_value != value.to_bits()
                 && self.last_emitted.to_bits() != value.to_bits());
-        if self.target != Some(target) || self.observed_value != value.to_bits() {
-            self.wheel_lines = 0.0;
-        }
         if replaced {
+            self.wheel_lines = 0.0;
             self.last_emitted = value;
         }
         self.target = Some(target);
