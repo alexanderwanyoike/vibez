@@ -2,6 +2,8 @@
 //! boundary so the source-switch implementation remains replaceable.
 
 use super::*;
+use graph_test_support::{graph_engine, routing_channel, routing_effect, routing_plan};
+use vibez_core::routing::RoutingChannel;
 
 use std::sync::{Arc, Mutex};
 
@@ -92,8 +94,9 @@ fn constant_audio(frames: usize, value: f32) -> Arc<DecodedAudio> {
 
 #[test]
 fn resident_section_switches_immediately_and_returns_the_displaced_source() {
-    let (mut engine, mut commands, mut events) = AudioEngine::new();
     let track_id = TrackId::new();
+    let (mut engine, mut commands, mut events) =
+        graph_engine(&[routing_channel(track_id), routing_channel(TrackId::MASTER)]);
     let section_id = SectionId::new();
     commands.push(EngineCommand::add_track(track_id)).unwrap();
     commands
@@ -151,8 +154,9 @@ fn resident_section_switches_immediately_and_returns_the_displaced_source() {
 
 #[test]
 fn refreshing_the_active_section_changes_content_without_restarting_its_playhead() {
-    let (mut engine, mut commands, mut events) = AudioEngine::new();
     let track_id = TrackId::new();
+    let (mut engine, mut commands, mut events) =
+        graph_engine(&[routing_channel(track_id), routing_channel(TrackId::MASTER)]);
     let section_id = SectionId::new();
     commands.push(EngineCommand::SetSampleRate(8)).unwrap();
     commands.push(EngineCommand::add_track(track_id)).unwrap();
@@ -220,8 +224,9 @@ fn refreshing_the_active_section_changes_content_without_restarting_its_playhead
 
 #[test]
 fn section_wraps_at_its_shortened_boundary_inside_one_callback() {
-    let (mut engine, mut commands, _events) = AudioEngine::new();
     let track_id = TrackId::new();
+    let (mut engine, mut commands, _events) =
+        graph_engine(&[routing_channel(track_id), routing_channel(TrackId::MASTER)]);
     commands.push(EngineCommand::SetSampleRate(8)).unwrap();
     commands.push(EngineCommand::add_track(track_id)).unwrap();
     let audio = Arc::new(DecodedAudio {
@@ -272,8 +277,9 @@ fn section_wraps_at_its_shortened_boundary_inside_one_callback() {
 
 #[test]
 fn arrangement_loop_does_not_wrap_section_engine_time() {
-    let (mut engine, mut commands, mut events) = AudioEngine::new();
     let track_id = TrackId::new();
+    let (mut engine, mut commands, mut events) =
+        graph_engine(&[routing_channel(track_id), routing_channel(TrackId::MASTER)]);
     let section_id = SectionId::new();
     commands.push(EngineCommand::SetSampleRate(8)).unwrap();
     commands.push(EngineCommand::add_track(track_id)).unwrap();
@@ -312,8 +318,9 @@ fn arrangement_loop_does_not_wrap_section_engine_time() {
 
 #[test]
 fn non_looping_section_returns_to_arrangement_source_after_ending() {
-    let (mut engine, mut commands, _events) = AudioEngine::new();
     let track_id = TrackId::new();
+    let (mut engine, mut commands, _events) =
+        graph_engine(&[routing_channel(track_id), routing_channel(TrackId::MASTER)]);
     commands.push(EngineCommand::SetSampleRate(8)).unwrap();
     commands.push(EngineCommand::add_track(track_id)).unwrap();
     engine.process(&mut [], 1);
@@ -383,8 +390,9 @@ fn non_looping_section_returns_to_arrangement_source_after_ending() {
 
 #[test]
 fn switching_sections_releases_notes_from_the_previous_source() {
-    let (mut engine, mut commands, _events) = AudioEngine::new();
     let track_id = TrackId::new();
+    let (mut engine, mut commands, _events) =
+        graph_engine(&[routing_channel(track_id), routing_channel(TrackId::MASTER)]);
     let note_events = Arc::new(Mutex::new(Vec::new()));
     commands.push(EngineCommand::SetSampleRate(8)).unwrap();
     commands.push(EngineCommand::add_track(track_id)).unwrap();
@@ -447,8 +455,9 @@ fn switching_sections_releases_notes_from_the_previous_source() {
 
 #[test]
 fn live_instrument_note_releases_after_a_section_transition() {
-    let (mut engine, mut commands, _events) = AudioEngine::new();
     let track_id = TrackId::new();
+    let (mut engine, mut commands, _events) =
+        graph_engine(&[routing_channel(track_id), routing_channel(TrackId::MASTER)]);
     let note_events = Arc::new(Mutex::new(Vec::new()));
     commands.push(EngineCommand::add_track(track_id)).unwrap();
     commands
@@ -501,16 +510,27 @@ fn live_instrument_note_releases_after_a_section_transition() {
 
 #[test]
 fn absent_track_stops_source_content_without_resetting_effect_tail() {
-    let (mut engine, mut commands, _events) = AudioEngine::new();
     let track_id = TrackId::new();
+    let (mut engine, mut commands, _events) =
+        graph_engine(&[routing_channel(track_id), routing_channel(TrackId::MASTER)]);
     commands.push(EngineCommand::add_track(track_id)).unwrap();
+    let effect_id = EffectId::new();
     commands
         .push(EngineCommand::InsertEffect {
             track_id,
-            effect_id: EffectId::new(),
+            effect_id,
             effect: Box::new(TailEffect { memory: 0.0 }),
             position: None,
         })
+        .unwrap();
+    commands
+        .push(EngineCommand::SetRouting(routing_plan(&[
+            RoutingChannel {
+                effects: vec![routing_effect(effect_id)],
+                ..routing_channel(track_id)
+            },
+            routing_channel(TrackId::MASTER),
+        ])))
         .unwrap();
     commands
         .push(EngineCommand::LaunchSection(Box::new(

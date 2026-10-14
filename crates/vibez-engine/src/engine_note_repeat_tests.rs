@@ -1,7 +1,10 @@
+//! Note Repeat and Groove scheduling through prepared routing fixtures.
+
 use super::*;
 use crate::playback_source::{
     EngineNoteClip, PreparedPlaybackSource, PreparedSectionPlaybackSource,
 };
+use graph_test_support::{graph_engine, routing_channel};
 use vibez_core::automation::{AutomationLane, AutomationPoint, AutomationTarget};
 use vibez_core::id::{ClipId, SectionId, TrackId};
 use vibez_core::midi::{InstrumentKind, MidiNote};
@@ -13,8 +16,9 @@ fn repeat_engine() -> (
     rtrb::Consumer<EngineEvent>,
     TrackId,
 ) {
-    let (mut engine, mut commands, events) = AudioEngine::new();
     let track_id = TrackId::new();
+    let (mut engine, mut commands, events) =
+        graph_engine(&[routing_channel(track_id), routing_channel(TrackId::MASTER)]);
     commands.push(EngineCommand::SetSampleRate(100)).unwrap();
     commands.push(EngineCommand::SetBpm(60.0)).unwrap();
     commands.push(EngineCommand::add_track(track_id)).unwrap();
@@ -69,8 +73,9 @@ fn stopped_repeat_engine_at(
     rtrb::Consumer<EngineEvent>,
     TrackId,
 ) {
-    let (mut engine, mut commands, mut events) = AudioEngine::new();
     let track_id = TrackId::new();
+    let (mut engine, mut commands, mut events) =
+        graph_engine(&[routing_channel(track_id), routing_channel(TrackId::MASTER)]);
     commands.push(EngineCommand::SetSampleRate(96)).unwrap();
     commands.push(EngineCommand::SetBpm(60.0)).unwrap();
     commands
@@ -423,8 +428,9 @@ fn clip_engine(
     swing: SwingAmount,
     groove_grid: GrooveGrid,
 ) -> (AudioEngine, rtrb::Producer<EngineCommand>) {
-    let (engine, mut commands, _events) = AudioEngine::new();
     let track_id = TrackId::new();
+    let (engine, mut commands, _events) =
+        graph_engine(&[routing_channel(track_id), routing_channel(TrackId::MASTER)]);
     let clip_id = ClipId::new();
     commands.push(EngineCommand::SetSampleRate(8_000)).unwrap();
     commands.push(EngineCommand::SetBpm(120.0)).unwrap();
@@ -492,8 +498,9 @@ fn swing_changes_opted_in_clip_playback_without_rewriting_notes() {
 }
 
 fn render_prepared_section_with_swing(swing: SwingAmount) -> Vec<f32> {
-    let (mut engine, mut commands, _events) = AudioEngine::new();
     let track_id = TrackId::new();
+    let (mut engine, mut commands, _events) =
+        graph_engine(&[routing_channel(track_id), routing_channel(TrackId::MASTER)]);
     let prepared = PreparedSectionPlaybackSource::new(
         SectionId::new(),
         1.0,

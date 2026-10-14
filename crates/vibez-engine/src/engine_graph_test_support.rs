@@ -1,7 +1,8 @@
 //! Prepare explicit routing fixtures outside the callback while preserving command-driven test setup.
 
 use super::*;
-use vibez_core::routing::RoutingChannel;
+use vibez_core::id::EffectId;
+use vibez_core::routing::{RoutingChannel, RoutingEffect};
 
 pub(super) fn graph_engine(
     channels: &[RoutingChannel],
@@ -22,5 +23,14 @@ pub(super) fn routing_channel(id: TrackId) -> RoutingChannel {
         is_bus: id.is_master(),
         effects: vec![],
         sends: vec![],
+    }
+}
+
+pub(super) fn routing_effect(id: EffectId) -> RoutingEffect {
+    RoutingEffect {
+        id,
+        inputs: vec![],
+        assignments: vec![],
+        inactive_inputs: vec![],
     }
 }
