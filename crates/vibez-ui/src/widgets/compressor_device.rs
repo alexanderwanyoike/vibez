@@ -176,6 +176,20 @@ fn signal_meter<'a>(
     content.into()
 }
 
+fn signal_readouts<'a>(input: MeterValues, output: MeterValues) -> Element<'a, Message> {
+    let reading = |value| {
+        let db = vibez_core::level::amplitude_to_db(value);
+        if db.is_finite() { format!("{db:.1}") } else { "-inf".into() }
+    };
+    let mut content = column![].spacing(2);
+    for (label, levels) in [("In", input), ("Out", output)] {
+        content = content.push(text(format!("{label} L {} R {}", reading(levels.peak_l), reading(levels.peak_r)))
+            .size(8).font(crate::typography::PERFORM_TECH).color(th::text_dim())
+            .wrapping(iced::widget::text::Wrapping::None));
+    }
+    content.into()
+}
+
 fn visual_switch<'a>(
     track: TrackId,
     effect: &UiEffect,
@@ -338,12 +352,16 @@ pub fn view<'a>(
             let source = crate::widgets::native_sidechain::view(
                 track, effect, sources, buses, devices, panel, accent, true,
             );
-            let meters = row![
-                signal_meter("Input dBFS", input, layout.plot >= 180.0),
-                signal_meter("Output dBFS", output, layout.plot >= 180.0)
-            ]
-            .spacing(8)
-            .height(Length::Fill);
+            let meters: Element<'a, Message> = if layout.plot >= 180.0
+                || effect.sidechains.is_empty() && effect.inactive_sidechains.is_empty()
+            {
+                row![
+                    signal_meter("Input dBFS", input, layout.plot >= 180.0),
+                    signal_meter("Output dBFS", output, layout.plot >= 180.0)
+                ].spacing(8).height(Length::Fill).into()
+            } else {
+                signal_readouts(input, output)
+            };
             visual = visual.push(
                 container(column![source, meters].spacing(6).height(Length::Fill))
                     .width(SIDECHAIN_W),
