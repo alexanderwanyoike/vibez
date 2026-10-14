@@ -11,6 +11,9 @@ use crate::metering::MeterValues;
 #[path = "engine_sample_hold_automation_tests.rs"]
 mod automation;
 
+#[path = "engine_sample_hold_rate_tests.rs"]
+mod rate;
+
 #[derive(Clone, Copy, Debug)]
 enum Owner { Track, Return, Master }
 
