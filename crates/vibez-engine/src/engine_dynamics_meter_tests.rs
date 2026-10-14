@@ -162,7 +162,16 @@ fn gate_windows_respect_generation_bypass_and_transport_reset_without_old_peaks_
         assert_eq!(resumed.len(), 1);
         assert_eq!(resumed[0].2, 11);
         assert_eq!(resumed[0].3.detector_peak, [0.002; 2]);
-        assert_eq!(resumed[0].3.gate.unwrap().phases_seen, GatePhase::Hold as u8);
+        let resumed_gate = resumed[0].3.gate.unwrap();
+        // Prepared graphs reset stopped wet DSP on re-entry; direct slots retain it.
+        let expected = if graph { GatePhase::Closed } else { GatePhase::Hold };
+        assert_eq!(resumed_gate.phase, expected);
+        assert_eq!(resumed_gate.phases_seen, expected as u8);
+        if graph {
+            assert_eq!(resumed_gate.hold_remaining_ms, 0.0);
+        } else {
+            assert!(resumed_gate.hold_remaining_ms > 0.0);
+        }
 
         commands.push(EngineCommand::Play).unwrap();
         commands.push(EngineCommand::SetEffectMeterChannel { track_id: Some(track), generation: 12 }).unwrap();
