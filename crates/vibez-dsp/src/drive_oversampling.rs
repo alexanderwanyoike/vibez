@@ -49,7 +49,13 @@ impl OversamplingPath {
         let history = &self.input[channel][head + 1..head + HOST_TAPS + 1];
         let mut output = [0.0; 3];
         for phase in 0..self.factor {
-            let interpolated: f32 = history.iter().rev().zip(&self.phases[phase]).map(|(sample, coefficient)| sample * coefficient).sum();
+            let interpolated: f32 = if phase == 0 {
+                symmetric_dot(history, &self.phases[phase])
+            } else if phase * 2 == self.factor {
+                symmetric_dot(&history[1..], &self.phases[phase][..HOST_TAPS - 1])
+            } else {
+                history.iter().rev().zip(&self.phases[phase]).map(|(sample, coefficient)| sample * coefficient).sum()
+            };
             let driven = interpolated * gain;
             let limited = driven.clamp(-1.0, 1.0);
             let curves = [driven.tanh() / normalizer, 1.5 * limited - 0.5 * limited * limited * limited, limited];
@@ -61,7 +67,7 @@ impl OversamplingPath {
                 // Decimation at phase zero preserves the exact 64-host-frame
                 // combined group delay; taking the last phase advances it.
                 if phase == 0 && audible {
-                    output[character] = samples[position + 1..position + self.kernel.len() + 1].iter().rev().zip(&self.kernel).map(|(sample, coefficient)| sample * coefficient).sum();
+                    output[character] = symmetric_dot(&samples[position + 1..position + self.kernel.len() + 1], &self.kernel);
                 }
             }
             self.shaped_position[channel] = (position + 1) % self.kernel.len();
@@ -87,4 +93,21 @@ fn bessel_zero(value: f64) -> f64 {
         if term <= sum * f64::EPSILON { break; }
     }
     sum
+}
+
+fn symmetric_dot(samples: &[f32], coefficients: &[f32]) -> f32 {
+    let midpoint = coefficients.len() / 2;
+    let mut sums = [0.0; 4];
+    for group in 0..midpoint / 4 {
+        for lane in 0..4 {
+            let index = group * 4 + lane;
+            sums[lane] += (samples[index] + samples[samples.len() - 1 - index]) * coefficients[index];
+        }
+    }
+    let mut result: f32 = sums.into_iter().sum();
+    for index in midpoint / 4 * 4..midpoint {
+        result += (samples[index] + samples[samples.len() - 1 - index]) * coefficients[index];
+    }
+    if coefficients.len() % 2 == 1 { result += samples[midpoint] * coefficients[midpoint]; }
+    result
 }
