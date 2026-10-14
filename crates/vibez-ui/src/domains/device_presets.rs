@@ -242,7 +242,10 @@ mod presentation_tests {
         ];
         let mut names = std::collections::BTreeSet::new();
         for preset in &presets {
-            assert_eq!(preset.kind(), DevicePresetKind::Effect(EffectType::Bitcrush));
+            assert_eq!(
+                preset.kind(),
+                DevicePresetKind::Effect(EffectType::Bitcrush)
+            );
             assert!(names.insert(preset.name()), "duplicate preset name");
             assert_eq!(preset.parameters().len(), keys.len());
             for key in keys {
