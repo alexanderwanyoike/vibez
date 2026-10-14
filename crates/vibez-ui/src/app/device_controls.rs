@@ -297,7 +297,7 @@ mod tests {
             let presentation = app
                 .device_parameter_presentation(track, effect, param::SR_REDUCE)
                 .expect("native parameter presentation");
-            assert_eq!(presentation.name, "Rate");
+            assert_eq!(presentation.name, "Nominal Rate");
             assert_eq!(presentation.unit, "Hz");
             assert_eq!(presentation.value.as_deref(), Some(value));
             assert_eq!(
@@ -310,7 +310,7 @@ mod tests {
             let presentation = app
                 .device_parameter_presentation(track, effect, param::SR_REDUCE)
                 .expect("unknown context does not remove the native control");
-            assert_eq!(presentation.name, "Rate");
+            assert_eq!(presentation.name, "Nominal Rate");
             assert_eq!(presentation.unit, "Hz");
             assert!(presentation.value.is_none());
             assert!(presentation.range.is_none());
@@ -537,5 +537,93 @@ mod tests {
                 before
             );
         }
+    }
+
+    #[test]
+    fn bitcrush_nominal_rate_label_never_claims_the_target_is_the_actual_clock() {
+        use vibez_dsp::bitcrush::param;
+
+        let (mut app, track, effect) = legacy_bitcrush_app();
+        for jitter in [0.0, 0.35, 1.0, 0.0] {
+            app.state.find_track_mut(track).unwrap().effects[0].params[param::JITTER] = jitter;
+            let presentation = app.device_parameter_presentation(track, effect, param::SR_REDUCE).unwrap();
+            assert_eq!(presentation.name, "Nominal Rate");
+            assert_eq!(presentation.value.as_deref(), Some("12.000k"));
+            assert_eq!(presentation.unit, "Hz");
+        }
+        app.send_command(EngineCommand::SetSampleRate(96_000));
+        let unavailable = app.device_parameter_presentation(track, effect, param::SR_REDUCE).unwrap();
+        assert_eq!(unavailable.name, "Nominal Rate");
+        assert!(!unavailable.is_editable());
+    }
+
+    #[test]
+    fn bitcrush_jitter_discloses_effective_n1_inactivity_without_changing_the_stored_target() {
+        use vibez_dsp::bitcrush::param;
+
+        let (mut app, track, effect) = legacy_bitcrush_app();
+        for divider in [1.0, 1.49, 1.5, 4.49] {
+            let target = &mut app.state.find_track_mut(track).unwrap().effects[0];
+            target.params[param::SR_REDUCE] = divider;
+            target.params[param::JITTER] = 0.35;
+            let before = target.params.clone();
+            let presentation = app.device_parameter_presentation(track, effect, param::JITTER).unwrap();
+            assert_eq!(presentation.name, "Jitter");
+            assert_eq!(presentation.value.as_deref(), Some("35"));
+            assert_eq!(presentation.unit, "%");
+            assert!(presentation.is_editable());
+            let explanation = presentation.explanation.as_deref().expect("native jitter explanation");
+            if divider < 1.5 {
+                assert!(explanation.contains("N1"), "{explanation}");
+                assert!(explanation.contains("inactive"), "{explanation}");
+            } else {
+                assert!(!explanation.contains("inactive"), "{explanation}");
+            }
+            assert_eq!(app.state.find_track(track).unwrap().effects[0].params, before);
+        }
+    }
+
+    #[test]
+    fn bitcrush_cutoff_discloses_prepared_effective_target_cap_without_rewriting_hertz() {
+        use crate::domains::EngineHandle;
+        use vibez_dsp::bitcrush::param;
+
+        let (mut app, track, effect) = legacy_bitcrush_app();
+        app.state.find_track_mut(track).unwrap().effects[0].params[param::POST_LP_HZ] = 20_000.0;
+        app.state.project.history = Default::default();
+        app.state.project.dirty = false;
+        let before = app.state.find_track(track).unwrap().effects[0].params.clone();
+        let stored = app.state.find_track(track).unwrap().effects[0].descriptors[param::POST_LP_HZ];
+        let disclosure = |app: &App| {
+            let presentation = app.device_parameter_presentation(track, effect, param::POST_LP_HZ).unwrap();
+            assert_eq!(presentation.name, "Cutoff");
+            assert_eq!(presentation.value.as_deref(), Some("20.00k"));
+            assert_eq!(presentation.unit, "Hz");
+            assert!(presentation.is_editable(), "target Hz does not require prepared clock context");
+            presentation.explanation.expect("native cutoff explanation")
+        };
+        for (sample_rate, effective) in [(8_000, "3.920k Hz"), (16_000, "7.840k Hz"), (44_100, "20.000k Hz")] {
+            app.send_command(EngineCommand::SetSampleRate(sample_rate));
+            app.cmd_tx.insert_built_in_effect_with_params(track, effect, EffectType::Bitcrush, &before);
+            assert_eq!(app.cmd_tx.prepared_effect_sample_rate(track, effect), Some(sample_rate));
+            let explanation = disclosure(&app);
+            assert!(explanation.contains(effective), "{explanation}");
+            assert!(explanation.contains("prepared target"), "{explanation}");
+            assert!(explanation.contains("0.49"), "{explanation}");
+        }
+        app.send_command(EngineCommand::SetSampleRate(96_000));
+        assert_eq!(app.cmd_tx.prepared_effect_sample_rate(track, effect), None);
+        assert!(disclosure(&app).contains("unavailable"));
+        app.cmd_tx.insert_built_in_effect_with_params(track, effect, EffectType::Bitcrush, &before);
+        assert!(disclosure(&app).contains("20.000k Hz"));
+        app.state.find_track_mut(track).unwrap().effects[0].reconfiguration_failed = true;
+        assert!(disclosure(&app).contains("unavailable"));
+        let target = &app.state.find_track(track).unwrap().effects[0];
+        assert_eq!(target.params, before);
+        let descriptor = target.descriptors[param::POST_LP_HZ];
+        assert_eq!((descriptor.name, descriptor.unit, descriptor.min, descriptor.max),
+            (stored.name, stored.unit, stored.min, stored.max));
+        assert!(!app.state.project.history.can_undo());
+        assert!(!app.state.project.dirty);
     }
 }
