@@ -16,6 +16,10 @@ use crate::theme as th;
 use crate::widgets::effect_knob::{EffectKnobWidget, KnobTarget};
 use crate::widgets::on_blur::on_blur;
 
+pub fn controls_scroll_id(effect_id: EffectId) -> scrollable::Id {
+    scrollable::Id::new(format!("gain-controls-{}", effect_id.raw()))
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn view<'a>(
     track_id: TrackId,
@@ -26,8 +30,11 @@ pub fn view<'a>(
     width: f32,
     height: f32,
 ) -> Element<'a, Message> {
+    let very_short = height < 120.0;
     let compact = width < 480.0 || height < 240.0;
-    let primary_height = if state.advanced {
+    let primary_height = if very_short {
+        100.0
+    } else if state.advanced {
         let advanced_space = if width >= 410.0 { 178.0 } else { 268.0 };
         (height - advanced_space).clamp(128.0, 170.0)
     } else if compact {
@@ -35,7 +42,13 @@ pub fn view<'a>(
     } else {
         170.0
     };
-    let knob_size = if primary_height < 150.0 { 56.0 } else { 80.0 };
+    let knob_size = if very_short {
+        30.0
+    } else if primary_height < 150.0 {
+        56.0
+    } else {
+        80.0
+    };
     let control_accent = if effect.bypass {
         th::text_muted()
     } else {
@@ -106,26 +119,38 @@ pub fn view<'a>(
     } else {
         "▸ Advanced"
     };
-    let disclosure = button(text(advanced_label).size(12))
+    let disclosure = button(text(advanced_label).size(if very_short { 11 } else { 12 }))
         .on_press(Message::GainControl(GainMsg::ToggleAdvanced(effect.id)))
-        .padding([3, 4])
+        .padding([if very_short { 1 } else { 3 }, 4])
         .style(|_theme: &Theme, status| button::Style {
             background: matches!(status, button::Status::Hovered | button::Status::Pressed)
                 .then(|| th::bg_hover().into()),
             text_color: th::text(),
             ..Default::default()
         });
-    let mut content = column![
-        container(main).padding([8, 10]),
-        horizontal_rule(),
-        container(disclosure).padding([4, 8]),
-    ]
-    .width(Length::Fill);
+    let mut content =
+        column![container(main).padding([if very_short { 4 } else { 8 }, 10])].width(Length::Fill);
 
     if state.advanced {
         let trims = row![
-            trim_control(track_id, effect, state, 1, "L Trim", control_accent),
-            trim_control(track_id, effect, state, 2, "R Trim", control_accent),
+            trim_control(
+                track_id,
+                effect,
+                state,
+                1,
+                "L Trim",
+                control_accent,
+                very_short
+            ),
+            trim_control(
+                track_id,
+                effect,
+                state,
+                2,
+                "R Trim",
+                control_accent,
+                very_short
+            ),
         ]
         .spacing(14);
         let polarity = row![
@@ -141,13 +166,25 @@ pub fn view<'a>(
         } else {
             column![trims, polarity].spacing(10).into()
         };
-        content = content.push(container(advanced).padding([4, 14]));
+        content = content
+            .push(horizontal_rule())
+            .push(container(advanced).padding([4, 14]));
     }
 
     column![
         preset_bar,
         horizontal_rule(),
-        scrollable(content).height(Length::Fill),
+        scrollable(content)
+            .id(controls_scroll_id(effect.id))
+            .height(Length::Fill),
+        horizontal_rule(),
+        container(disclosure)
+            .padding([if very_short { 1 } else { 4 }, 8])
+            .height(if very_short {
+                Length::Fixed(20.0)
+            } else {
+                Length::Shrink
+            }),
     ]
     .height(Length::Fixed(height.max(1.0)))
     .width(Length::Fixed(width.max(1.0)))
@@ -233,6 +270,7 @@ fn trim_control<'a>(
     index: usize,
     label: &'static str,
     accent: Color,
+    very_short: bool,
 ) -> Element<'a, Message> {
     let knob = EffectKnobWidget::new(
         track_id,
@@ -246,7 +284,9 @@ fn trim_control<'a>(
     );
     column![
         text(label).size(11).color(th::text_dim()),
-        canvas(knob).width(38.0).height(38.0),
+        canvas(knob)
+            .width(if very_short { 30.0 } else { 38.0 })
+            .height(if very_short { 30.0 } else { 38.0 }),
         value_input(track_id, effect, state, index, accent),
     ]
     .spacing(3)
@@ -369,6 +409,14 @@ fn level_fraction(amplitude: f32) -> f32 {
     ((gain_to_db(amplitude).max(-48.0) + 48.0) / 48.0).clamp(0.0, 1.0)
 }
 
+fn level_ticks(height: f32) -> &'static [i32] {
+    if height < 112.0 {
+        &[0, -24, -48]
+    } else {
+        &[0, -12, -24, -36, -48]
+    }
+}
+
 struct StereoLevelMeter {
     levels: MeterValues,
 }
@@ -435,7 +483,7 @@ impl canvas::Program<Message> for StereoLevelMeter {
                 );
             }
         }
-        for db in [0, -12, -24, -36, -48] {
+        for &db in level_ticks(meter_height) {
             let y = 1.0 + meter_height * (-db as f32 / 48.0);
             frame.fill_text(canvas::Text {
                 content: db.to_string(),
@@ -506,7 +554,7 @@ impl canvas::Program<Message> for LevelHistory<'_> {
             Size::new(width, height),
             th::display_bg(),
         );
-        for db in [0, -12, -24, -36, -48] {
+        for &db in level_ticks(height) {
             let y = 1.0 + height * (-db as f32 / 48.0);
             frame.stroke(
                 &canvas::Path::line(Point::new(left, y), Point::new(left + width, y)),

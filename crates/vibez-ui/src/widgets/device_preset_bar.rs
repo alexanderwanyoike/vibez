@@ -1,6 +1,6 @@
 //! Shared preset selection and file actions for native device panels.
 
-use iced::widget::{button, column, container, pick_list, row, text, tooltip};
+use iced::widget::{button, pick_list, row, text, tooltip};
 use iced::{Color, Element, Length, Theme};
 use vibez_core::device_preset::DevicePreset;
 use vibez_core::id::TrackId;
@@ -42,6 +42,7 @@ pub(crate) fn view<'a>(
     accent: Color,
     available_width: f32,
 ) -> Element<'a, Message> {
+    let compact = available_width < 370.0;
     let presentation = presentation(effect, remembered);
     let previous = presentation
         .previous
@@ -76,7 +77,9 @@ pub(crate) fn view<'a>(
         Message::ApplyDevicePreset(track_id, effect_id, choice.preset)
     })
     .placeholder("Custom")
-    .width(Length::Fixed((available_width - 95.0).clamp(72.0, 200.0)))
+    .width(Length::Fixed(
+        (available_width - if compact { 130.0 } else { 95.0 }).clamp(72.0, 200.0),
+    ))
     .padding([3, 5])
     .text_size(12)
     .style(move |_theme: &Theme, status| pick_list::Style {
@@ -108,14 +111,17 @@ pub(crate) fn view<'a>(
         selected_text_color: accent,
         selected_background: th::bg_hover().into(),
     });
-    let selection = row![
+    let mut selection = row![
         text("Preset").size(12).color(th::text_dim()),
         tooltip(selector, text(hint).size(11), tooltip::Position::Top),
-        preset_button("‹", previous, accent),
-        preset_button("›", next, accent),
     ]
     .spacing(3)
     .align_y(iced::Alignment::Center);
+    if !compact {
+        selection = selection
+            .push(preset_button("‹", previous, accent))
+            .push(preset_button("›", next, accent));
+    }
     let files = row![
         preset_button(
             "Load",
@@ -134,17 +140,10 @@ pub(crate) fn view<'a>(
     ]
     .spacing(3)
     .align_y(iced::Alignment::Center);
-    if available_width < 370.0 {
-        column![selection, container(files).padding([0, 33])]
-            .spacing(3)
-            .width(Length::Fill)
-            .into()
-    } else {
-        row![selection, files]
-            .spacing(6)
-            .align_y(iced::Alignment::Center)
-            .into()
-    }
+    row![selection, files]
+        .spacing(6)
+        .align_y(iced::Alignment::Center)
+        .into()
 }
 
 fn preset_button<'a>(

@@ -19,6 +19,7 @@ pub struct DeviceBody<'a> {
     pub content: Element<'a, Message>,
     pub width: f32,
     pub height: f32,
+    pub vertical_padding: f32,
 }
 
 pub fn view_effect_slot<'a>(
@@ -165,7 +166,7 @@ pub fn view_effect_slot<'a>(
     // ── Body ─────────────────────────────────────────────────
     let body: Element<'a, Message> = if let Some(custom) = custom_body {
         container(custom.content)
-            .padding([8, 10])
+            .padding([custom.vertical_padding, 10.0])
             .height(Length::Fixed(custom.height))
             .into()
     } else if has_params && !has_gui {

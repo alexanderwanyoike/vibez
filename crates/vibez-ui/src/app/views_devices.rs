@@ -94,6 +94,7 @@ impl App {
                         content,
                         width,
                         height: th::DEVICE_BODY_H,
+                        vertical_padding: 8.0,
                     })
                 }
             } else if crate::domains::gain::is_native_gain(effect) {
@@ -165,10 +166,11 @@ impl App {
                 panel,
                 self.view_device_preset_bar(track_id, effect, accent, width - 20.0),
                 width - 20.0,
-                height - 16.0,
+                height,
             ),
             width,
             height,
+            vertical_padding: 0.0,
         }
     }
 
