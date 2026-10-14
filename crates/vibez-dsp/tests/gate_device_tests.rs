@@ -460,3 +460,50 @@ fn initial_and_reset_diagnostics_match_the_actual_wet_state_and_hydrated_thresho
         }
     }
 }
+
+#[test]
+fn detector_enable_ramps_match_warm_responses_and_ignore_callback_partitions() {
+    for rate in [44_100.0_f32, 48_000.0, 96_000.0] {
+        for enabled_index in [9, 11] {
+            let source: Vec<f32> = (0..6144).flat_map(|frame| {
+                let phase = std::f32::consts::TAU * frame as f32 / rate;
+                let left = 0.1 * (40.0 * phase).sin() + 0.1 * (1000.0 * phase).sin() + 0.1 * (8000.0 * phase).sin();
+                [left, -left * 0.7]
+            }).collect();
+            let make_gate = |enabled| {
+                let mut gate = GateEffect::new(rate);
+                for (index, value) in [(10, 120.0), (12, 4000.0), (13, 1.0), (enabled_index, enabled)] {
+                    assert!(gate.set_param(index, value));
+                }
+                gate.process(&mut source[..8192].to_vec(), 2);
+                gate
+            };
+            let tail = &source[8192..];
+            let mut reference = make_gate(1.0);
+            let mut filtered = tail.to_vec();
+            reference.process(&mut filtered, 2);
+            let mut rendered = Vec::new();
+            for partitions in [&[2048][..], &[1, 7, 32, 251][..]] {
+                let mut gate = make_gate(0.0);
+                assert!(gate.set_param(enabled_index, 1.0));
+                let mut audio = tail.to_vec();
+                let mut offset = 0;
+                let mut block = 0;
+                while offset < audio.len() {
+                    let end = (offset + partitions[block % partitions.len()] * 2).min(audio.len());
+                    gate.process(&mut audio[offset..end], 2);
+                    offset = end;
+                    block += 1;
+                }
+                for (sample, ((actual, dry), filtered)) in audio.iter().zip(tail).zip(&filtered).enumerate() {
+                    let weight = ((sample / 2 + 1).min(512) as f32) / 512.0;
+                    let expected = dry + (filtered - dry) * weight;
+                    assert!((*actual - expected).abs() < 2e-6,
+                        "filter{enabled_index} at{rate}Hz/sample{sample}: {actual} vs {expected}");
+                }
+                rendered.push(audio);
+            }
+            assert_eq!(rendered[0], rendered[1], "callback partition changed a detector ramp");
+        }
+    }
+}
