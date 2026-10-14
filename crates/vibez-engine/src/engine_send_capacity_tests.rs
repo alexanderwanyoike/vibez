@@ -37,7 +37,12 @@ fn fixture(
 
 #[test]
 fn sends_insert_and_update_without_callback_allocation_at_bus_boundaries() {
-    for count in [0, 1, crate::mixer::CHANNEL_CAPACITY - 1, crate::mixer::CHANNEL_CAPACITY] {
+    for count in [
+        0,
+        1,
+        crate::mixer::CHANNEL_CAPACITY - 1,
+        crate::mixer::CHANNEL_CAPACITY,
+    ] {
         let (mut engine, mut commands, mut events, track, buses) = fixture(count);
         let target = buses[count % buses.len()];
         let storage = engine.tracks()[0].sends.as_ptr();
@@ -57,7 +62,10 @@ fn sends_insert_and_update_without_callback_allocation_at_bus_boundaries() {
             let sends = &engine.tracks()[0].sends;
             assert_eq!(sends.as_ptr(), storage);
             assert_eq!(sends.len(), (count + 1).min(buses.len()));
-            assert_eq!(sends.iter().find(|(id, _)| *id == target).unwrap().1, amount.clamp(0.0, 1.0));
+            assert_eq!(
+                sends.iter().find(|(id, _)| *id == target).unwrap().1,
+                amount.clamp(0.0, 1.0)
+            );
             while events.pop().is_ok() {}
         }
     }
@@ -105,7 +113,8 @@ fn sends_accept_unknown_targets_with_room_and_ignore_non_track_sources() {
 
 #[test]
 fn sends_reuse_storage_after_bus_removal_with_full_ui_event_ring() {
-    let (mut engine, mut commands, mut events, track, buses) = fixture(crate::mixer::CHANNEL_CAPACITY);
+    let (mut engine, mut commands, mut events, track, buses) =
+        fixture(crate::mixer::CHANNEL_CAPACITY);
     let storage = engine.tracks()[0].sends.as_ptr();
     while engine.event_tx.push(EngineEvent::PlaybackStarted).is_ok() {}
     commands.push(EngineCommand::RemoveBus(buses[0])).unwrap();
@@ -126,22 +135,35 @@ fn sends_reuse_storage_after_bus_removal_with_full_ui_event_ring() {
     assert_eq!(engine.tracks()[0].sends.len(), buses.len());
     assert_eq!(engine.tracks()[0].sends.as_ptr(), storage);
     assert!(engine.tracks()[0].sends.contains(&(replacement, 0.5)));
-    assert!(!engine.tracks()[0].sends.iter().any(|(id, _)| *id == buses[0]));
+    assert!(!engine.tracks()[0]
+        .sends
+        .iter()
+        .any(|(id, _)| *id == buses[0]));
     while events.pop().is_ok() {}
     engine.flush_retirements();
-    assert!(matches!(events.pop().unwrap(), EngineEvent::RetiredChannel(_)));
+    assert!(matches!(
+        events.pop().unwrap(),
+        EngineEvent::RetiredChannel(_)
+    ));
 }
 
 #[test]
 fn sends_first_automation_value_uses_prepared_channel_storage() {
     let bus = TrackId::new();
     let mut lane = AutomationLane::new(AutomationTarget::Send { bus_id: bus });
-    lane.insert_point(AutomationPoint { beat: 0.0, value: 0.75, curve: 0.0 });
-    let source = crate::playback_source::PreparedPlaybackSource::new(Vec::new(), Vec::new(), vec![lane]);
+    lane.insert_point(AutomationPoint {
+        beat: 0.0,
+        value: 0.75,
+        curve: 0.0,
+    });
+    let source =
+        crate::playback_source::PreparedPlaybackSource::new(Vec::new(), Vec::new(), vec![lane]);
     let mut channel = EngineTrack::with_playback_source(TrackId::new(), source);
     let storage = channel.sends.as_ptr();
     assert_eq!(
-        crate::retirement::tests::allocations(|| { channel.apply_automation(0.0); }),
+        crate::retirement::tests::allocations(|| {
+            channel.apply_automation(0.0);
+        }),
         (0, 0)
     );
     assert_eq!(channel.sends.as_ptr(), storage);
