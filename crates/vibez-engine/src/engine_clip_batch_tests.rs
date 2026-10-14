@@ -733,6 +733,7 @@ fn public_packet_preserves_last_credit_for_all_retained_terminals_and_returns_ea
     fixture.drain_command(EngineCommand::SetRouting(fixture.plan(0)));
     fixture.drain_events();
     fixture.engine.process(&mut [], 2);
+    fixture.drain_events();
     let capture_stop = fixture.engine.compensation_callback_heard_start;
     while fixture.engine.event_tx.push(EngineEvent::PlaybackPosition(0)).is_ok() {}
     for _ in 0..fixture.engine.scheduled_presentation.capacity() {
@@ -818,6 +819,15 @@ fn public_packet_preserves_last_credit_for_all_retained_terminals_and_returns_ea
         assert_eq!(fixture.engine.presentation_state.terminals.occupied_slots(), 4);
         assert!(!fixture.engine.presentation_state.is_faulted());
     }
+    assert!(matches!(fixture.events.pop().unwrap(), EngineEvent::PlaybackPosition(0)));
+    assert_eq!(fixture.engine.event_tx.slots(), 6);
+    assert_eq!(
+        crate::retirement::tests::allocations(|| fixture.engine.continue_clip_batch(expected_timestamp)),
+        (0, 0)
+    );
+    assert_eq!(fixture.engine.pending_clip_batch.as_ref().unwrap().clips.len(), retained - 1);
+    assert_eq!(fixture.engine.presentation_state.terminals.occupied_slots(), 0);
+    assert!(!fixture.engine.presentation_state.is_faulted());
     let mut owners = Vec::new();
     let mut transitions = 0;
     let mut overflow_returns = 0;
