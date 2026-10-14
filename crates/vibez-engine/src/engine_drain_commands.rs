@@ -2,6 +2,7 @@
 //! Split from engine.rs. Runs in the audio callback: keep allocation-free and lock-free.
 
 use super::*;
+use vibez_core::id::ClipId;
 
 impl AudioEngine {
     /// Drain all pending commands from the ring buffer without blocking.
@@ -332,21 +333,14 @@ impl AudioEngine {
                     loop_start,
                     loop_end,
                 } => {
-                    if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
-                        if let Some(clip) = track
-                            .playback_source
-                            .clips
-                            .iter_mut()
-                            .find(|c| c.id == clip_id)
-                        {
-                            clip.audio = audio;
-                            clip.duration = duration;
-                            clip.fades = clip.fades.clamped_to(duration);
-                            clip.source_offset = source_offset;
-                            clip.start_marker = start_marker;
-                            clip.loop_start = loop_start;
-                            clip.loop_end = loop_end;
-                        }
+                    if let Some(clip) = self.arrangement_clip_mut(track_id, clip_id) {
+                        clip.audio = audio;
+                        clip.duration = duration;
+                        clip.fades = clip.fades.clamped_to(duration);
+                        clip.source_offset = source_offset;
+                        clip.start_marker = start_marker;
+                        clip.loop_start = loop_start;
+                        clip.loop_end = loop_end;
                     }
                     self.recalculate_audio_length();
                 }
@@ -355,18 +349,7 @@ impl AudioEngine {
                     clip_id,
                     audio,
                 } => {
-                    if let Some(clip) = self
-                        .tracks
-                        .iter_mut()
-                        .find(|track| track.id == track_id)
-                        .and_then(|track| {
-                            track
-                                .playback_source
-                                .clips
-                                .iter_mut()
-                                .find(|clip| clip.id == clip_id)
-                        })
-                    {
+                    if let Some(clip) = self.arrangement_clip_mut(track_id, clip_id) {
                         clip.audio = audio;
                     }
                 }
@@ -927,6 +910,19 @@ impl AudioEngine {
                 } => self.command_set_instrument(track_id, instrument),
             }
         }
+    }
+
+    fn arrangement_clip_mut(&mut self, track_id: TrackId, clip_id: ClipId) -> Option<&mut EngineClip> {
+        self.tracks
+            .iter_mut()
+            .find(|track| track.id == track_id)
+            .and_then(|track| {
+                track
+                    .playback_source
+                    .clips
+                    .iter_mut()
+                    .find(|clip| clip.id == clip_id)
+            })
     }
 
     pub(super) fn recalculate_audio_length(&mut self) {
