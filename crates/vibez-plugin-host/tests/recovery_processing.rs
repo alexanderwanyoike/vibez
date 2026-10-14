@@ -58,6 +58,25 @@ fn clip(track: TrackId, value: f32) -> EngineCommand {
     }
 }
 
+fn continuing_recovery_events(
+    engine: &AudioEngine,
+    events: impl Iterator<Item = EngineEvent>,
+    capture_stops: &mut usize,
+) {
+    assert!(engine.transport().is_playing());
+    for event in events {
+        match event {
+            EngineEvent::PerformanceCaptureStopped { .. } => *capture_stops += 1,
+            EngineEvent::PlaybackStopped
+            | EngineEvent::CompensationInvalid { .. }
+            | EngineEvent::DeviceReconfiguration(_) => {
+                panic!("local recovery changed global readiness: {event:?}")
+            }
+            _ => {}
+        }
+    }
+}
+
 #[test]
 fn main_thread_recovery_keeps_other_delayed_branch_audible_and_silences_the_absent_insert() {
     let fixture = support::Fixture::new();
@@ -129,6 +148,10 @@ fn main_thread_recovery_keeps_other_delayed_branch_audible_and_silences_the_abse
                     ),
                     (0, 0)
                 );
+                assert!(
+                    engine.transport().is_playing(),
+                    "{format} local failure must keep transport running"
+                );
                 while let Ok(event) = events.pop() {
                     match event {
                         EngineEvent::DeviceReconfiguration(device) => {
@@ -187,7 +210,11 @@ fn main_thread_recovery_keeps_other_delayed_branch_audible_and_silences_the_abse
                         (0, 0)
                     );
                     bypassed.extend_from_slice(&output);
-                    while events.pop().is_ok() {}
+                    continuing_recovery_events(
+                        &engine,
+                        std::iter::from_fn(|| events.pop().ok()),
+                        &mut capture_stops,
+                    );
                 }
                 for (frame, pair) in bypassed.as_chunks::<2>().0.iter().enumerate() {
                     for channel in 0..2 {
@@ -218,8 +245,13 @@ fn main_thread_recovery_keeps_other_delayed_branch_audible_and_silences_the_abse
                     (0, 0)
                 );
                 recovered.extend_from_slice(&output);
-                while events.pop().is_ok() {}
+                continuing_recovery_events(
+                    &engine,
+                    std::iter::from_fn(|| events.pop().ok()),
+                    &mut capture_stops,
+                );
             }
+            assert_eq!(capture_stops, 1, "one local failure closes Capture once");
             for (frame, pair) in recovered.as_chunks::<2>().0.iter().enumerate() {
                 for channel in 0..2 {
                     let expected = healthy[channel]
