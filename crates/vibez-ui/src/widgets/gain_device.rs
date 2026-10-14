@@ -633,21 +633,7 @@ impl canvas::Program<Message> for LevelHistory<'_> {
                     .with_color(th::divider())
                     .with_width(1.0),
             );
-            frame.fill_text(canvas::Text {
-                content: format!("{db:.0}"),
-                position: Point::new(left - 4.0, y),
-                color: th::text_dim(),
-                size: 8.0.into(),
-                horizontal_alignment: iced::alignment::Horizontal::Right,
-                vertical_alignment: if db == level_meter::SCALE_DB[0] {
-                    iced::alignment::Vertical::Top
-                } else if db == level_meter::FLOOR_DB {
-                    iced::alignment::Vertical::Bottom
-                } else {
-                    iced::alignment::Vertical::Center
-                },
-                ..canvas::Text::default()
-            });
+            level_meter::draw_scale_label(&mut frame, db, Point::new(left - 4.0, y));
         }
         for second in (2..10).step_by(2) {
             let x = left + second as f32 / HISTORY_SECONDS * width;

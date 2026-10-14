@@ -48,6 +48,26 @@ pub fn scale_marks(height: f32) -> &'static [f32] {
     }
 }
 
+/// One scale number, right-aligned to `anchor`. The end marks sit inside the
+/// scale so neither is clipped by the plot edges.
+pub fn draw_scale_label(frame: &mut canvas::Frame, db: f32, anchor: Point) {
+    frame.fill_text(canvas::Text {
+        content: format!("{db:.0}"),
+        position: anchor,
+        color: th::text_dim(),
+        size: 8.0.into(),
+        horizontal_alignment: iced::alignment::Horizontal::Right,
+        vertical_alignment: if db == SCALE_DB[0] {
+            iced::alignment::Vertical::Top
+        } else if db == FLOOR_DB {
+            iced::alignment::Vertical::Bottom
+        } else {
+            iced::alignment::Vertical::Center
+        },
+        ..canvas::Text::default()
+    });
+}
+
 pub struct LevelMeter {
     pub levels: MeterValues,
 }
@@ -104,22 +124,7 @@ impl canvas::Program<Message> for LevelMeter {
             }
         }
         for &db in scale_marks(height) {
-            let y = y_of(db);
-            frame.fill_text(canvas::Text {
-                content: format!("{db:.0}"),
-                position: Point::new(bounds.width, y),
-                color: th::text_dim(),
-                size: 8.0.into(),
-                horizontal_alignment: iced::alignment::Horizontal::Right,
-                vertical_alignment: if db == SCALE_DB[0] {
-                    iced::alignment::Vertical::Top
-                } else if db == FLOOR_DB {
-                    iced::alignment::Vertical::Bottom
-                } else {
-                    iced::alignment::Vertical::Center
-                },
-                ..canvas::Text::default()
-            });
+            draw_scale_label(&mut frame, db, Point::new(bounds.width, y_of(db)));
         }
         vec![frame.into_geometry()]
     }

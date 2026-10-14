@@ -127,11 +127,8 @@ impl GainPanelState {
     /// Drops readings and unsubmitted entries that describe the replaced
     /// values, keeping what the user has opened.
     pub fn restart_metering(&mut self) {
-        self.input = MeterValues::SILENT;
-        self.output = MeterValues::SILENT;
+        self.clear_readings();
         self.clip_latched = false;
-        self.history.clear();
-        self.last_meter_at = None;
         for index in 0..self.input_text.len() {
             self.discard_input(index);
         }
@@ -142,11 +139,15 @@ impl GainPanelState {
             .last_meter_at
             .is_some_and(|last| now.saturating_duration_since(last) >= Duration::from_millis(250))
         {
-            self.input = MeterValues::SILENT;
-            self.output = MeterValues::SILENT;
-            self.history.clear();
-            self.last_meter_at = None;
+            self.clear_readings();
         }
+    }
+
+    fn clear_readings(&mut self) {
+        self.input = MeterValues::SILENT;
+        self.output = MeterValues::SILENT;
+        self.history.clear();
+        self.last_meter_at = None;
     }
 }
 
