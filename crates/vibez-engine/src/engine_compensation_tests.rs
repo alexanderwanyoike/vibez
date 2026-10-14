@@ -172,6 +172,17 @@ impl AudioEffect for ChangingDelay {
     }
 }
 
+pub(super) fn changing_delay(
+    initial: u32,
+    pending: Arc<std::sync::atomic::AtomicU32>,
+) -> Box<dyn AudioEffect> {
+    Box::new(ChangingDelay {
+        inner: DelayProbe::with_report(initial, initial),
+        pending,
+        stopped: false,
+    })
+}
+
 #[test]
 fn coordinated_latency_changes_keep_transport_running_and_regain_alignment() {
     use std::sync::atomic::{AtomicU32, Ordering};
@@ -195,11 +206,7 @@ fn coordinated_latency_changes_keep_transport_running_and_regain_alignment() {
         .push(EngineCommand::InsertEffect {
             track_id: delayed,
             effect_id: effect,
-            effect: Box::new(ChangingDelay {
-                inner: DelayProbe::with_report(137, 137),
-                pending: pending.clone(),
-                stopped: false,
-            }),
+            effect: changing_delay(137, Arc::clone(&pending)),
             position: None,
         })
         .unwrap();

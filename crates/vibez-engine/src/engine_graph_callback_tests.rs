@@ -1,9 +1,8 @@
 //! First and steady callbacks keep Arrange, Perform and monitoring within prepared stereo storage.
 
 use super::*;
-use crate::playback_source::{EngineClip, PreparedPlaybackSource, PreparedSectionPlaybackSource};
-use graph_test_support::{graph_engine, routing_channel};
-use vibez_core::id::ClipId;
+use crate::playback_source::{PreparedPlaybackSource, PreparedSectionPlaybackSource};
+use graph_test_support::{constant_clip, graph_engine, routing_channel};
 use vibez_core::routing::RoutingChannel;
 
 #[derive(Debug, Clone, Copy)]
@@ -11,27 +10,6 @@ enum SourceMode {
     Arrange,
     Section,
     Monitor,
-}
-
-fn source_clip() -> EngineClip {
-    EngineClip {
-        id: ClipId::new(),
-        audio: Arc::new(DecodedAudio {
-            channels: vec![vec![0.25; 16_384]; 2],
-            sample_rate: DEFAULT_SAMPLE_RATE,
-        }),
-        position: 0,
-        source_offset: 0,
-        start_marker: 0,
-        duration: 16_384,
-        loop_enabled: false,
-        loop_start: 0,
-        loop_end: 0,
-        linear_gain: 1.0,
-        fades: Default::default(),
-        playback_direction: Default::default(),
-        warp_markers: Default::default(),
-    }
 }
 
 #[test]
@@ -60,7 +38,10 @@ fn graph_callbacks_render_each_clock_domain_without_memory_operations_at_hardwar
                 let mut source = EngineTrack::new(track);
                 source.sends.push((bus, 1.0));
                 if matches!(mode, SourceMode::Arrange) {
-                    source.playback_source.clips.push(source_clip());
+                    source
+                        .playback_source
+                        .clips
+                        .push(constant_clip(16_384, 0.25));
                 }
                 commands
                     .push(EngineCommand::AddTrack(Box::new(source)))
@@ -80,7 +61,7 @@ fn graph_callbacks_render_each_clock_domain_without_memory_operations_at_hardwar
                                 vec![(
                                     track,
                                     PreparedPlaybackSource::new(
-                                        vec![source_clip()],
+                                        vec![constant_clip(16_384, 0.25)],
                                         vec![],
                                         vec![],
                                     ),
