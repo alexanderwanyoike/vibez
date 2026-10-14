@@ -85,3 +85,26 @@ fn canonical_gate_parameters_round_trip_and_legacy_projects_get_neutral_appended
         }
     }
 }
+
+#[test]
+fn hysteresis_retains_the_open_band_including_its_closing_boundary_and_resets_closed() {
+    for (hysteresis, states) in [(20.0, [true, true, true, false, false, true]),
+                                 (0.0, [true, false, false, false, false, true])] {
+        let mut gate = GateEffect::new(2.0);
+        for (index, value) in [(0, -20.0), (1, 0.1), (2, 5.0), (3, 0.0), (4, hysteresis)] {
+            assert!(gate.set_param(index, value));
+        }
+        // This valid low rate makes both envelopes settle in one frame, isolating threshold equality.
+        for (sample, open) in [0.1_f32, 0.05, 0.01, 0.005, 0.05, 0.1].into_iter().zip(states) {
+            let mut frame = [sample];
+            gate.process(&mut frame, 1);
+            let expected = if open { sample } else { 0.0 };
+            assert!((frame[0] - expected).abs() <= 1e-7,
+                "H={hysteresis}dB at input {sample}: actual {}, expected {expected}", frame[0]);
+        }
+        gate.reset();
+        let mut below_open_threshold = [0.05];
+        gate.process(&mut below_open_threshold, 1);
+        assert!(below_open_threshold[0].abs() < 1e-7, "reset retained an open latch");
+    }
+}
