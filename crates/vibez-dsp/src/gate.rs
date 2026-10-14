@@ -1,46 +1,49 @@
+//! Legacy-compatible linked gating with an explicit, stable native parameter contract.
+
 use vibez_core::effect::{EffectType, ParamDescriptor};
 
 use crate::effect::AudioEffect;
 
-static GATE_PARAMS: &[ParamDescriptor] = &[
-    ParamDescriptor {
-        name: "Threshold",
-        min: -80.0,
-        max: 0.0,
-        default: -40.0,
-        unit: "dB",
-    },
-    ParamDescriptor {
-        name: "Attack",
-        min: 0.1,
-        max: 50.0,
-        default: 1.0,
-        unit: "ms",
-    },
-    ParamDescriptor {
-        name: "Release",
-        min: 5.0,
-        max: 500.0,
-        default: 50.0,
-        unit: "ms",
-    },
-    ParamDescriptor {
-        name: "Hold",
-        min: 0.0,
-        max: 200.0,
-        default: 10.0,
-        unit: "ms",
-    },
+pub mod param {
+    pub const THRESHOLD: usize = 0;
+    pub const ATTACK: usize = 1;
+    pub const RELEASE: usize = 2;
+    pub const HOLD: usize = 3;
+    pub const HYSTERESIS: usize = 4;
+    pub const RANGE_ENABLED: usize = 5;
+    pub const RANGE: usize = 6;
+    pub const MODE: usize = 7;
+    pub const EXPANSION_RATIO: usize = 8;
+    pub const HP_ENABLED: usize = 9;
+    pub const HP_FREQUENCY: usize = 10;
+    pub const LP_ENABLED: usize = 11;
+    pub const LP_FREQUENCY: usize = 12;
+    pub const DETECTOR_LISTEN: usize = 13;
+    pub const MIX: usize = 14;
+    pub const COUNT: usize = 15;
+}
+
+pub static GATE_PARAMS: &[ParamDescriptor] = &[
+    ParamDescriptor { name: "Threshold", min: -80.0, max: 0.0, default: -40.0, unit: "dB" },
+    ParamDescriptor { name: "Attack", min: 0.1, max: 50.0, default: 1.0, unit: "ms" },
+    ParamDescriptor { name: "Release", min: 5.0, max: 500.0, default: 50.0, unit: "ms" },
+    ParamDescriptor { name: "Hold", min: 0.0, max: 200.0, default: 10.0, unit: "ms" },
+    ParamDescriptor { name: "Hysteresis", min: 0.0, max: 24.0, default: 0.0, unit: "dB" },
+    ParamDescriptor { name: "Range Enabled", min: 0.0, max: 1.0, default: 0.0, unit: "" },
+    ParamDescriptor { name: "Range", min: 0.0, max: 120.0, default: 60.0, unit: "dB" },
+    ParamDescriptor { name: "Mode", min: 0.0, max: 1.0, default: 0.0, unit: "" },
+    ParamDescriptor { name: "Expansion Ratio", min: 1.0, max: 20.0, default: 2.0, unit: ":1" },
+    ParamDescriptor { name: "Detector HP", min: 0.0, max: 1.0, default: 0.0, unit: "" },
+    ParamDescriptor { name: "HP Frequency", min: 20.0, max: 2000.0, default: 80.0, unit: "Hz" },
+    ParamDescriptor { name: "Detector LP", min: 0.0, max: 1.0, default: 0.0, unit: "" },
+    ParamDescriptor { name: "LP Frequency", min: 1000.0, max: 20000.0, default: 12000.0, unit: "Hz" },
+    ParamDescriptor { name: "Detector Listen", min: 0.0, max: 1.0, default: 0.0, unit: "" },
+    ParamDescriptor { name: "Mix", min: 0.0, max: 1.0, default: 1.0, unit: "" },
 ];
 
 /// Simple noise gate with attack / release / hold.
 pub struct GateEffect {
-    threshold_db: f32,
-    attack_ms: f32,
-    release_ms: f32,
-    hold_ms: f32,
-    range_enabled: bool,
-    range_db: f32,
+    params: [f32; param::COUNT],
     sample_rate: f32,
     env_db: f32,
     inputs: [vibez_core::routing::ExternalInputDescriptor; 1],
@@ -51,12 +54,7 @@ pub struct GateEffect {
 impl GateEffect {
     pub fn new(sample_rate: f32) -> Self {
         Self {
-            threshold_db: -40.0,
-            attack_ms: 1.0,
-            release_ms: 50.0,
-            hold_ms: 10.0,
-            range_enabled: false,
-            range_db: 60.0,
+            params: std::array::from_fn(|index| GATE_PARAMS[index].default),
             sample_rate,
             env_db: -120.0,
             inputs: [vibez_core::routing::ExternalInputDescriptor {
@@ -89,45 +87,14 @@ impl AudioEffect for GateEffect {
     }
 
     fn set_param(&mut self, index: usize, value: f32) -> bool {
-        match index {
-            0 => {
-                self.threshold_db = value.clamp(-80.0, 0.0);
-                true
-            }
-            1 => {
-                self.attack_ms = value.clamp(0.1, 50.0);
-                true
-            }
-            2 => {
-                self.release_ms = value.clamp(5.0, 500.0);
-                true
-            }
-            3 => {
-                self.hold_ms = value.clamp(0.0, 200.0);
-                true
-            }
-            5 => {
-                self.range_enabled = value >= 0.5;
-                true
-            }
-            6 => {
-                self.range_db = value.clamp(0.0, 120.0);
-                true
-            }
-            _ => false,
-        }
+        let Some(descriptor) = GATE_PARAMS.get(index) else { return false; };
+        if !value.is_finite() { return false; }
+        self.params[index] = value.clamp(descriptor.min, descriptor.max);
+        true
     }
 
     fn get_param(&self, index: usize) -> f32 {
-        match index {
-            0 => self.threshold_db,
-            1 => self.attack_ms,
-            2 => self.release_ms,
-            3 => self.hold_ms,
-            5 => self.range_enabled as u8 as f32,
-            6 => self.range_db,
-            _ => 0.0,
-        }
+        self.params.get(index).copied().unwrap_or(0.0)
     }
 
     fn external_inputs(&self) -> &[vibez_core::routing::ExternalInputDescriptor] {
@@ -151,10 +118,10 @@ impl AudioEffect for GateEffect {
             .find(|input| input.id == vibez_core::routing::ExternalInputId(0) && input.connected);
         let ch = channels.min(2);
         let frames = buffer.len() / channels;
-        let att = Self::coef(self.attack_ms, self.sample_rate);
-        let rel = Self::coef(self.release_ms, self.sample_rate);
-        let hold_frames = (self.hold_ms * 0.001 * self.sample_rate) as u32;
-        let closed_gain = if self.range_enabled { 10.0_f32.powf(-self.range_db / 20.0) } else { 0.0 };
+        let att = Self::coef(self.params[param::ATTACK], self.sample_rate);
+        let rel = Self::coef(self.params[param::RELEASE], self.sample_rate);
+        let hold_frames = (self.params[param::HOLD] * 0.001 * self.sample_rate) as u32;
+        let closed_gain = if (self.params[param::RANGE_ENABLED] >= 0.5) { 10.0_f32.powf(-self.params[param::RANGE] / 20.0) } else { 0.0 };
 
         for frame in 0..frames {
             let mut peak = 0.0_f32;
@@ -173,7 +140,7 @@ impl AudioEffect for GateEffect {
             let env_coef = if peak_db > self.env_db { att } else { rel };
             self.env_db = peak_db + env_coef * (self.env_db - peak_db);
 
-            let open = self.env_db >= self.threshold_db;
+            let open = self.env_db >= self.params[param::THRESHOLD];
             let target = if open || self.hold_counter > 0 {
                 1.0
             } else {
