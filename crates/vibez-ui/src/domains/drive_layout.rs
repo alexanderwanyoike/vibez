@@ -286,6 +286,7 @@ mod tests {
 
     #[test]
     fn expanded_places_advanced_beside_paired_plots_and_keeps_character_beside_core() {
+        const { assert!(ASIDE_WIDTH - 8.0 >= 22.0 + 54.0 + 12.0 + 2.0 * 4.0) };
         for width in [872.0, 900.0] {
             for advanced in [false, true] {
                 let layout = arrange(width, 304.0, advanced);
@@ -308,7 +309,6 @@ mod tests {
                     let heading = 9.0 * 1.3 + 6.0;
                     let filters_and_quality = 3.0 * FIELD_HEIGHT + 2.0 * 8.0;
                     assert!(layout.body - 8.0 >= heading + 6.0 + filters_and_quality);
-                    assert!(ASIDE_WIDTH - 8.0 >= 22.0 + 54.0 + 12.0 + 2.0 * 4.0);
                 }
             }
         }
