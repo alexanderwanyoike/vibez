@@ -745,3 +745,70 @@ fn delayed_section_refresh_acknowledges_consumption_before_heard_capture_and_pre
         assert!(!matches!(event, EngineEvent::SectionSourceRefreshed { .. } | EngineEvent::SectionCaptureSource { refreshed: true, .. }));
     }
 }
+
+#[derive(Clone, Copy, Debug)]
+enum SectionRefreshTarget {
+    Active,
+    DifferentSection,
+    Stopped,
+}
+
+#[test]
+fn section_refresh_acknowledgement_state_matrix_returns_displaced_or_rejected_owners_without_latency() {
+    for delay in [0, 64] {
+        for target in [SectionRefreshTarget::Active, SectionRefreshTarget::DifferentSection, SectionRefreshTarget::Stopped] {
+            let mut fixture = section_refresh_fixture(delay);
+            warm_section_refresh(&mut fixture);
+            if matches!(target, SectionRefreshTarget::Stopped) {
+                fixture.commands.push(EngineCommand::Stop).unwrap();
+                fixture.engine.process_block(AudioProcessBlock::new(&mut [], 2));
+                while fixture.events.pop().is_ok() {}
+            }
+            let requested = if matches!(target, SectionRefreshTarget::DifferentSection) { SectionId::new() } else { fixture.section_id };
+            let expected_effective = fixture.engine.effective_position();
+            let expected_local = fixture.engine.active_section.map(|active| active.position_samples);
+            let applied = matches!(target, SectionRefreshTarget::Active);
+            let incoming = constant_audio(4096, 0.75);
+            let incoming_owner = Arc::downgrade(&incoming);
+            let prepared = section_refresh_source(fixture.track_id, requested, incoming);
+            let pointer = &*prepared as *const PreparedSectionPlaybackSource;
+            fixture.commands.push(EngineCommand::RefreshSection(prepared)).unwrap();
+            let mut output = [0.0; 64];
+            process_refresh_block(&mut fixture.engine, &mut output);
+            if !matches!(target, SectionRefreshTarget::Stopped) {
+                assert_refresh_left_audio(&output, if applied && delay == 0 { 0.75 } else { 0.25 });
+                assert_eq!(fixture.engine.active_section.unwrap().section_id, fixture.section_id);
+                assert_eq!(fixture.engine.active_section.unwrap().position_samples, 128);
+                assert!(fixture.engine.transport().is_playing());
+            } else {
+                assert!(fixture.engine.active_section.is_none());
+                assert!(!fixture.engine.transport().is_playing());
+            }
+            let notifications: Vec<_> = std::iter::from_fn(|| fixture.events.pop().ok()).collect();
+            let returned: Vec<_> = notifications.iter().filter_map(|event| match event {
+                EngineEvent::SectionSourceRefreshed { section_id, applied: actual_applied, effective_at_samples, section_position_samples, retired } => {
+                    assert_eq!(event.time_domain(), crate::events::TimeDomain::Untimed);
+                    assert_eq!(*section_id, requested);
+                    assert_eq!(*actual_applied, applied, "delay {delay}, target {target:?}");
+                    assert_eq!(*effective_at_samples, expected_effective);
+                    assert_eq!(*section_position_samples, if applied { expected_local } else { None });
+                    assert!(std::ptr::eq(&**retired, pointer));
+                    Some(retired)
+                }
+                _ => None,
+            }).collect();
+            assert_eq!(returned.len(), 1, "same-callback ack for delay {delay}, target {target:?}");
+            let returned_audio = Arc::as_ptr(&returned[0].tracks()[0].source.clips[0].audio);
+            assert_eq!(returned_audio, if applied { fixture.old_owner.as_ptr() } else { incoming_owner.as_ptr() });
+            let resident_audio = Arc::as_ptr(&fixture.engine.tracks()[0].section_playback_source.clips[0].audio);
+            assert_eq!(resident_audio, if applied { incoming_owner.as_ptr() } else { fixture.old_owner.as_ptr() });
+            assert_eq!(notifications.iter().filter(|event| matches!(event, EngineEvent::SectionCaptureSource { refreshed: true, .. })).count(), usize::from(applied && delay == 0));
+            assert_eq!(fixture.old_owner.strong_count(), 1);
+            assert_eq!(incoming_owner.strong_count(), 1);
+            drop(returned);
+            drop(notifications);
+            assert_eq!(fixture.old_owner.strong_count(), usize::from(!applied));
+            assert_eq!(incoming_owner.strong_count(), usize::from(applied));
+        }
+    }
+}
