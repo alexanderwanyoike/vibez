@@ -904,6 +904,10 @@ mod presentation_runtime_tests;
 mod time_domain_tests;
 
 #[cfg(test)]
+#[path = "engine_instrument_media_retirement_tests.rs"]
+mod instrument_media_retirement_tests;
+
+#[cfg(test)]
 #[path = "engine_command_allocation_tests.rs"]
 mod command_allocation_tests;
 
