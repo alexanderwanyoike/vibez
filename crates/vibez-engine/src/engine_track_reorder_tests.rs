@@ -82,7 +82,7 @@ fn reorder_tracks_preserves_missing_tracks_and_ignores_duplicate_or_unknown_ids(
 fn reorder_tracks_keeps_order_storage_until_full_event_ring_can_deliver_it() {
     let (mut engine, mut commands, mut events, ids) = fixture(24);
     while engine.event_tx.push(EngineEvent::PlaybackStarted).is_ok() {}
-    for _ in 0..crate::retirement::RETIREMENT_CAPACITY {
+    for _ in 0..=crate::retirement::RETIREMENT_CAPACITY {
         let mut order = ids.clone();
         order.reverse();
         commands.push(EngineCommand::ReorderTracks(order)).unwrap();
@@ -93,7 +93,7 @@ fn reorder_tracks_keeps_order_storage_until_full_event_ring_can_deliver_it() {
     );
     assert_eq!(
         engine.pending_retirements.len(),
-        crate::retirement::RETIREMENT_CAPACITY - 1
+        crate::retirement::RETIREMENT_CAPACITY
     );
     assert_eq!(engine.cmd_rx.slots(), 1);
     while events.pop().is_ok() {}
@@ -104,4 +104,41 @@ fn reorder_tracks_keeps_order_storage_until_full_event_ring_can_deliver_it() {
     assert_eq!(engine.cmd_rx.slots(), 0);
     assert!(engine.pending_retirements.is_empty());
     assert_eq!(tracks(&engine), ids.iter().rev().copied().collect::<Vec<_>>());
+}
+
+#[test]
+fn reorder_tracks_returns_the_original_vector_owner_with_or_without_ui_backpressure() {
+    for full_ring in [false, true] {
+        let (mut engine, mut commands, mut events, ids) = fixture(24);
+        if full_ring {
+            while engine.event_tx.push(EngineEvent::PlaybackStarted).is_ok() {}
+        }
+        let mut order = ids.clone();
+        order.reverse();
+        let pointer = order.as_ptr();
+        let capacity = order.capacity();
+        commands.push(EngineCommand::ReorderTracks(order)).unwrap();
+        assert_eq!(
+            crate::retirement::tests::allocations(|| engine.process(&mut [0.0; 32], 2)),
+            (0, 0)
+        );
+        if full_ring {
+            assert_eq!(engine.pending_retirements.len(), 1);
+            while events.pop().is_ok() {}
+            assert_eq!(
+                crate::retirement::tests::allocations(|| engine.flush_retirements()),
+                (0, 0)
+            );
+        }
+        let returned = std::iter::from_fn(|| events.pop().ok())
+            .find(|event| matches!(event, EngineEvent::RetiredTrackOrder(_)))
+            .expect("the incoming order storage returns to the UI");
+        assert_eq!(returned.time_domain(), crate::events::TimeDomain::Untimed);
+        let EngineEvent::RetiredTrackOrder(owner) = returned else {
+            unreachable!()
+        };
+        assert_eq!(owner.as_ptr(), pointer);
+        assert_eq!(owner.capacity(), capacity);
+        assert_eq!(owner, ids.iter().rev().copied().collect::<Vec<_>>());
+    }
 }

@@ -263,12 +263,19 @@ impl AudioEngine {
                     self.recalculate_audio_length();
                 }
                 EngineCommand::ReorderTracks(order) => {
-                    self.tracks.sort_by_key(|t| {
-                        order
+                    let mut destination = 0;
+                    for id in &order {
+                        while let Some(offset) = self.tracks[destination..]
                             .iter()
-                            .position(|id| *id == t.id)
-                            .unwrap_or(usize::MAX)
-                    });
+                            .position(|track| track.id == *id)
+                        {
+                            // A stable prefix move keeps unspecified channels in
+                            // order without the stable sort's scratch allocation.
+                            self.tracks[destination..=destination + offset].rotate_right(1);
+                            destination += 1;
+                        }
+                    }
+                    self.retire_event(EngineEvent::RetiredTrackOrder(order));
                 }
                 EngineCommand::AddClip {
                     track_id,
