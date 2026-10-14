@@ -66,6 +66,7 @@ pub struct GateEffect {
 
 impl GateEffect {
     pub fn new(sample_rate: f32) -> Self {
+        let sample_rate = if sample_rate.is_finite() && sample_rate >= 2.0 { sample_rate } else { 48_000.0 };
         let params = std::array::from_fn(|index| GATE_PARAMS[index].default);
         let mut effect = Self {
             params, applied: params, steps: [0.0; param::COUNT], remaining: [0; param::COUNT],
@@ -225,6 +226,7 @@ impl AudioEffect for GateEffect {
                         .copied().unwrap_or(0.0),
                     None => buffer[frame * channels + channel.min(ch - 1)],
                 };
+                let raw = if raw.is_finite() { raw.clamp(-1e12, 1e12) } else { 0.0 };
                 let high = self.filters[0].process(raw, channel);
                 let high = raw + (high - raw) * self.applied[param::HP_ENABLED];
                 let low = self.filters[1].process(high, channel);
@@ -283,7 +285,8 @@ impl AudioEffect for GateEffect {
 
             for c in 0..ch {
                 let sample = &mut buffer[frame * channels + c];
-                let normal = *sample * (1.0 - self.applied[param::MIX]) + *sample * gain * self.applied[param::MIX];
+                let dry = if sample.is_finite() { *sample } else { 0.0 };
+                let normal = dry * (1.0 - self.applied[param::MIX]) + dry * gain * self.applied[param::MIX];
                 *sample = normal + (detected[c] - normal) * self.applied[param::DETECTOR_LISTEN];
             }
         }
