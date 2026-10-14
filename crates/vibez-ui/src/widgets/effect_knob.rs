@@ -645,3 +645,7 @@ mod tests {
         ));
     }
 }
+
+#[cfg(test)]
+#[path = "effect_knob_bitcrush_tests.rs"]
+mod bitcrush_tests;
