@@ -146,8 +146,8 @@ mod tests {
         );
         assert!(app.device_controls[&effect].advanced);
     }
-    #[test]
-    fn bitcrush_rate_entry_selects_the_nearest_actual_hertz_and_undo_restores_legacy_storage() {
+
+    fn legacy_bitcrush_app() -> (App, TrackId, EffectId) {
         let mut app = super::super::test_support::app();
         app.state.transport.sample_rate = 48_000;
         app.send_command(EngineCommand::SetSampleRate(48_000));
@@ -158,6 +158,13 @@ mod tests {
         let target = &mut app.state.find_track_mut(track).unwrap().effects[0];
         let effect = target.id;
         target.params[1] = 4.49;
+        (app, track, effect)
+    }
+
+    #[test]
+    fn bitcrush_rate_entry_selects_the_nearest_actual_hertz_and_undo_restores_legacy_storage() {
+        let (mut app, track, effect) = legacy_bitcrush_app();
+        let target = &app.state.find_track(track).unwrap().effects[0];
         let before = target.params.clone();
         assert_eq!(target.descriptors[1].unit, "x");
         app.state.project.history = Default::default();
@@ -181,16 +188,8 @@ mod tests {
 
     #[test]
     fn bitcrush_rate_entry_waits_for_a_processor_prepared_at_the_new_host_rate() {
-        let mut app = super::super::test_support::app();
-        app.state.transport.sample_rate = 48_000;
-        app.send_command(EngineCommand::SetSampleRate(48_000));
-        let channel = ProjectTrack::new(TrackId::new(), "Bitcrush".into(), 3);
-        let track = channel.id;
-        Arc::make_mut(&mut app.state.project_tracks).tracks.push(channel);
-        let _ = app.update(Message::Devices(DevicesMsg::AddEffect(track, EffectType::Bitcrush)));
-        let target = &mut app.state.find_track_mut(track).unwrap().effects[0];
-        let effect = target.id;
-        target.params[1] = 4.49;
+        let (mut app, track, effect) = legacy_bitcrush_app();
+        let target = &app.state.find_track(track).unwrap().effects[0];
         let before = target.params.clone();
         app.state.project.history = Default::default();
         app.state.project.dirty = false;
@@ -209,16 +208,8 @@ mod tests {
 
     #[test]
     fn bitcrush_reentering_the_effective_rate_keeps_exact_fractional_legacy_storage() {
-        let mut app = super::super::test_support::app();
-        app.state.transport.sample_rate = 48_000;
-        app.send_command(EngineCommand::SetSampleRate(48_000));
-        let channel = ProjectTrack::new(TrackId::new(), "Bitcrush".into(), 3);
-        let track = channel.id;
-        Arc::make_mut(&mut app.state.project_tracks).tracks.push(channel);
-        let _ = app.update(Message::Devices(DevicesMsg::AddEffect(track, EffectType::Bitcrush)));
-        let target = &mut app.state.find_track_mut(track).unwrap().effects[0];
-        let effect = target.id;
-        target.params[1] = 4.49;
+        let (mut app, track, effect) = legacy_bitcrush_app();
+        let target = &app.state.find_track(track).unwrap().effects[0];
         let before = target.params.clone();
         app.state.project.history = Default::default();
         app.state.project.dirty = false;
