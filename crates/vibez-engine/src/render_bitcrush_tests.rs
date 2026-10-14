@@ -472,7 +472,7 @@ fn jitter_drive_and_common_filter_history_match_full_and_warmed_bounce_at_a_nona
         fresh.process(&mut late[2..], 2);
         let mut largest_difference = 0.0_f32;
         let mut first_window_squared = 0.0_f64;
-        for (point, pair) in late.chunks_exact(2).enumerate() {
+        for (point, pair) in late.as_chunks::<2>().0.iter().enumerate() {
             for channel in 0..2 {
                 let cold = pair[channel] * std::f32::consts::FRAC_1_SQRT_2 * MASTER_GAIN;
                 assert!(cold.is_finite());

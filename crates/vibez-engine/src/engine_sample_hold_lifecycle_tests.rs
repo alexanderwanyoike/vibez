@@ -168,7 +168,7 @@ impl Fixture {
 
     fn render(&mut self, frames: usize, value: [f32; 2]) {
         let mut input = [0.0; 1920];
-        for frame in input.chunks_exact_mut(2).take(frames) {
+        for frame in input.as_chunks_mut::<2>().0.iter_mut().take(frames) {
             frame.copy_from_slice(&value);
         }
         let mut output = [0.0; 1920];

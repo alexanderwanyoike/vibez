@@ -9,7 +9,7 @@ const PARAMS: [f32; 9] = [8.25, 5.49, 0.65, 6.0, 1.0, 1.0, 0.75, 1.0, 700.0];
 
 fn rate_window(fixture: &mut Fixture) -> [f32; 1920] {
     let mut input = [0.0; 1920];
-    for frame in input.chunks_exact_mut(2) {
+    for frame in input.as_chunks_mut::<2>().0.iter_mut() {
         frame.copy_from_slice(&[0.3, -0.19]);
     }
     let mut output = [0.0; 1920];
@@ -149,7 +149,7 @@ fn a_rate_change_keeps_old_native_scope_unavailable_until_same_id_complete_recre
         .push(EngineCommand::SetSampleRate(96_000))
         .unwrap();
     let unavailable = rate_window(&mut fixture);
-    for (frame, stereo) in unavailable.chunks_exact(2).enumerate() {
+    for (frame, stereo) in unavailable.as_chunks::<2>().0.iter().enumerate() {
         for channel in 0..2 {
             let expected = if frame < 64 {
                 retained[channel] * ((64 - frame) as f32 / 64.0)
@@ -230,7 +230,7 @@ fn a_rate_change_keeps_old_native_scope_unavailable_until_same_id_complete_recre
         create_effect_for_instance(EffectType::Bitcrush, 96_000.0, &PARAMS, restored);
     for _ in 0..2 {
         let mut input = [0.0; 1920];
-        for frame in input.chunks_exact_mut(2) {
+        for frame in input.as_chunks_mut::<2>().0.iter_mut() {
             frame.copy_from_slice(&[0.3, -0.19]);
         }
         reference.process(&mut input, 2);

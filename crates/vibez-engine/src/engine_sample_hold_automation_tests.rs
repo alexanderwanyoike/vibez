@@ -172,7 +172,7 @@ struct WindowLevels {
 
 impl WindowLevels {
     fn observe(&mut self, input: &[f32], output: &[f32]) {
-        for (dry, wet) in input.chunks_exact(2).zip(output.chunks_exact(2)) {
+        for (dry, wet) in input.as_chunks::<2>().0.iter().zip(output.as_chunks::<2>().0.iter()) {
             for (side, pair) in [dry, wet].into_iter().enumerate() {
                 for (channel, &value) in pair.iter().enumerate() {
                     self.peak[side][channel] = self.peak[side][channel].max(value.abs());
@@ -215,7 +215,7 @@ fn check_callback(
     levels: &mut WindowLevels,
 ) -> Observed {
     let mut input = [0.0; 256];
-    for (frame, pair) in input.chunks_exact_mut(2).enumerate() {
+    for (frame, pair) in input.as_chunks_mut::<2>().0.iter_mut().enumerate() {
         let value = if analytical {
             [0.3, -0.19]
         } else {
@@ -283,7 +283,7 @@ fn check_callback(
     }
     if analytical {
         let boundary = if fixture.graph { 960 } else { 1024 };
-        for (point, pair) in captured.chunks_exact(2).enumerate() {
+        for (point, pair) in captured.as_chunks::<2>().0.iter().enumerate() {
             let wet = if position + point < boundary {
                 [0.3, -0.19]
             } else {
