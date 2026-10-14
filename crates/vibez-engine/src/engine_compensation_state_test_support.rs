@@ -33,15 +33,25 @@ pub(super) struct Readiness {
 
 impl Readiness {
     pub fn observe(engine: &AudioEngine) -> Self {
+        let valid = engine.compensation_plan.applied_plan_is_valid();
+        let awaiting_plan = engine.compensation_plan.awaiting_structural_plan();
+        let suspended = engine.device_handoff.is_suspended();
+        let handoff = engine.device_handoff.pending().is_some();
+        let resident = engine.observe_resident_restart();
+        let presentation_fault = engine.presentation_state.is_faulted();
+        let playing = engine.transport.is_playing();
+        // This quiescent diagnostic keeps its original scan before the gate's
+        // owned checks, but its pure result reuses that answer instead of rescanning.
+        let muted = engine.quiescent_project_processing_muted(resident);
         Self {
-            valid: engine.compensation_plan.applied_plan_is_valid(),
-            awaiting_plan: engine.compensation_plan.awaiting_structural_plan(),
-            suspended: engine.device_handoff.is_suspended(),
-            handoff: engine.device_handoff.pending().is_some(),
-            restart_requested: engine.reconfiguration_pending(),
-            presentation_fault: engine.presentation_state.is_faulted(),
-            playing: engine.transport.is_playing(),
-            muted: engine.project_processing_muted(),
+            valid,
+            awaiting_plan,
+            suspended,
+            handoff,
+            restart_requested: resident.is_pending(),
+            presentation_fault,
+            playing,
+            muted,
         }
     }
 }
