@@ -165,6 +165,8 @@ impl AudioEffect for BitcrushEffect {
         let levels = 2u32.pow(self.params[param::BITS] as u32) as f32;
         let step = 2.0 / levels;
         let divider = self.params[param::SR_REDUCE].round().max(1.0) as u32;
+        let drive_db = self.params[param::DRIVE_DB];
+        let drive_gain = 10.0_f64.powf(f64::from(drive_db) / 20.0);
 
         for frame in 0..frames {
             for c in 0..ch {
@@ -176,14 +178,19 @@ impl AudioEffect for BitcrushEffect {
                 };
 
                 if self.counter[c] == 0 {
-                    let scaled = dry / step;
+                    // Zero drive retains the original f32 quantizer division for saved projects.
+                    let scaled = if drive_db == 0.0 {
+                        f64::from(dry / step)
+                    } else {
+                        f64::from(dry) * drive_gain / f64::from(step)
+                    };
                     let quantized = match self.params[param::ROUNDING] as u32 {
                         1 => scaled.floor(),
                         2 => scaled.trunc(),
                         _ => scaled.round(),
                     };
-                    let q = quantized * step;
-                    self.hold[c] = q.clamp(-1.0, 1.0);
+                    let q = quantized * f64::from(step);
+                    self.hold[c] = q.clamp(-1.0, 1.0) as f32;
                 }
                 self.counter[c] = (self.counter[c] + 1) % divider;
 
