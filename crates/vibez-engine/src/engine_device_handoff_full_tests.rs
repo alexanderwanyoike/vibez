@@ -74,9 +74,9 @@ fn full_publication_restores_same_box_and_consumes_identity_before_retry() {
         });
         let identity = reconfiguration::effect_owner_identity(&*held);
         track.effects = vec![
-            EffectSlot { id: effects[0], effect: create_effect(EffectType::Gain, DEFAULT_SAMPLE_RATE), bypass: false },
+            EffectSlot { id: effects[0], effect: create_effect(EffectType::Gain, DEFAULT_SAMPLE_RATE as f32), bypass: false },
             EffectSlot { id: effects[1], effect: held, bypass },
-            EffectSlot { id: effects[2], effect: create_effect(EffectType::Gain, DEFAULT_SAMPLE_RATE), bypass: false },
+            EffectSlot { id: effects[2], effect: create_effect(EffectType::Gain, DEFAULT_SAMPLE_RATE as f32), bypass: false },
         ];
         commands.push(EngineCommand::AddTrack(Box::new(track))).unwrap();
         commands.push(EngineCommand::Play).unwrap();
