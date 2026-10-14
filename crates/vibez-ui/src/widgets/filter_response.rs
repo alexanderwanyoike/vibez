@@ -171,9 +171,12 @@ impl canvas::Program<Message> for FilterResponse<'_> {
             let node_y = y(vibez_core::level::amplitude_to_db(self.magnitude(cutoff)));
             frame.fill_text(canvas::Text {
                 content: shown,
-                position: Point::new(x(cutoff).clamp(56.0, bounds.width - 38.0),
-                    (node_y - 12.0).clamp(8.0, bounds.height - 26.0)),
-                color: th::text(), size: 9.0.into(),
+                position: Point::new(
+                    x(cutoff).clamp(56.0, bounds.width - 38.0),
+                    (node_y - 12.0).clamp(8.0, bounds.height - 26.0),
+                ),
+                color: th::text(),
+                size: 9.0.into(),
                 horizontal_alignment: iced::alignment::Horizontal::Center,
                 vertical_alignment: iced::alignment::Vertical::Center,
                 ..Default::default()
