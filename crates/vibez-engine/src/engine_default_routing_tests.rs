@@ -62,7 +62,7 @@ fn first_plan_is_retained_without_callback_destruction_when_the_ui_ring_is_full(
         crate::retirement::tests::allocations(|| engine.process(&mut [0.0; 2], 2)),
         (0, 0)
     );
-    assert!(std::ptr::eq(engine.routing.as_deref().unwrap(), expected));
+    assert!(std::ptr::eq(engine.routing.as_ref(), expected));
     assert!(engine.retired_routing.is_none());
     while events.pop().is_ok() {}
     assert_eq!(
@@ -101,7 +101,7 @@ fn later_project_plans_still_return_the_previous_project_owner() {
 #[test]
 fn constructor_prepares_a_master_only_graph_before_audio_thread_handoff() {
     let (mut engine, _commands, _events) = AudioEngine::new();
-    let routing = engine.routing.as_ref().expect("constructor master graph");
+    let routing = engine.routing.as_ref();
     assert_eq!(routing.channels.len(), 1);
     assert!(routing
         .graph

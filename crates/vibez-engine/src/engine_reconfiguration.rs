@@ -192,9 +192,7 @@ impl AudioEngine {
         if self.compensation_suspended || self.graph_edit_pending || !self.compensation_valid {
             return;
         }
-        let Some(routing) = self.routing.as_ref() else {
-            return;
-        };
+        let routing = &self.routing;
         let mut invalid = None;
         let mut local_failure = false;
         for (index, node) in routing.graph.nodes.iter().enumerate() {

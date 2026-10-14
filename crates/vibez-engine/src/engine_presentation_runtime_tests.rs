@@ -57,7 +57,8 @@ fn entering_perform_rebases_the_heard_clock_before_launch_or_capture() {
         },
         512,
     );
-    engine.routing = Some(routing);
+    engine.routing = routing;
+    engine.project_routing_published = true;
     engine.begin_performance_clock();
     assert_eq!(engine.heard_capture_position(), 0);
     assert_eq!(engine.next_achievable_boundary(64, 4.0), 96000);

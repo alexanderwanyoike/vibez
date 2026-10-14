@@ -219,7 +219,7 @@ fn delayed_effect_return_cannot_resurrect_owner_into_reopened_same_id_channel() 
         "old owner was inserted into the reopened channel"
     );
     assert_eq!(engine.tracks[0].effects[0].effect.get_param(0), 2.0);
-    assert_eq!(engine.routing.as_ref().unwrap().compensation.generation, 22);
+    assert_eq!(engine.routing.as_ref().compensation.generation, 22);
     assert_eq!(
         allocation_counts,
         (0, 0),
@@ -269,7 +269,7 @@ fn delayed_instrument_return_keeps_replacement_and_does_not_drop_it_in_callback(
         engine.tracks[0].instrument.as_ref().unwrap().get_param(0),
         2.0
     );
-    assert_eq!(engine.routing.as_ref().unwrap().compensation.generation, 22);
+    assert_eq!(engine.routing.as_ref().compensation.generation, 22);
     assert_eq!(allocation_counts, (0, 0));
 }
 
@@ -352,7 +352,7 @@ fn stale_reject_with_full_event_ring_retains_device_reason_and_current_plan() {
         crate::retirement::tests::allocations(|| engine.drain_commands()),
         (0, 0)
     );
-    assert_eq!(engine.routing.as_ref().unwrap().compensation.generation, 22);
+    assert_eq!(engine.routing.as_ref().compensation.generation, 22);
     assert!(engine.compensation_valid);
     assert!(matches!(
         engine.pending_retirements.last(),

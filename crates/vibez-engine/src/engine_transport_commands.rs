@@ -53,9 +53,7 @@ impl AudioEngine {
                 }
             }
         }
-        if let Some(routing) = self.routing.as_mut() {
-            routing.clear_history();
-        }
+        self.routing.clear_history();
         let was_clip_performance = self.clip_performance;
         self.clear_clip_performance();
         self.clock_domain = ClockDomain::Arrange;

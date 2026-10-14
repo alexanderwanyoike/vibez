@@ -7,7 +7,7 @@ use vibez_core::routing::RoutingChannel;
 #[test]
 fn graph_fixture_publishes_a_master_plan_before_the_first_callback() {
     let (mut engine, _commands, _events) = graph_engine(&[routing_channel(TrackId::MASTER)]);
-    let routing = engine.routing.as_ref().expect("published graph");
+    let routing = engine.routing.as_ref();
     assert_eq!(routing.channels.len(), 1);
     assert_eq!(routing.graph.nodes.last().unwrap().channel, TrackId::MASTER);
     let mut output = [1.0; 32];

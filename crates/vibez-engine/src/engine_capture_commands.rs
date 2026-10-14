@@ -45,13 +45,9 @@ impl AudioEngine {
                     .map_or(0, |active| active.position);
                 let position = self
                     .routing
-                    .as_ref()
-                    .and_then(|routing| {
-                        routing
-                            .channel_clocks
-                            .iter()
-                            .find(|clock| clock.track == id)
-                    })
+                    .channel_clocks
+                    .iter()
+                    .find(|clock| clock.track == id)
                     .and_then(|clock| clock.before_block(delay))
                     .unwrap_or(current.saturating_sub(delay as u64));
                 if self.capture_clip_positions.len() < self.capture_clip_positions.capacity() {
