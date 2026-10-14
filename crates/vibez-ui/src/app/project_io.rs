@@ -1,4 +1,4 @@
-//! Split out of app.rs; inherent methods on [`super::App`].
+//! Project persistence and loaded project runtime preparation.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
