@@ -188,7 +188,8 @@ fn interleaved(audio: &DecodedAudio) -> Vec<f32> {
 #[test]
 fn command_and_bounce_owners_keep_persisted_streams_from_origin_through_a_warmed_crop() {
     // Independent sparse windows distinguish origin0 from the later warmed random phase.
-    let cases: [(&str, [[i8; 2]; 32], [[i8; 2]; 32]); 2] = [
+    type StereoLsbWindow = [[i8; 2]; 32];
+    let cases: [(&str, StereoLsbWindow, StereoLsbWindow); 2] = [
         (
             "17",
             [
