@@ -46,3 +46,48 @@ fn actual_sampler_replacement_preserves_reset_params_and_returns_unique_media_of
         assert!(output.iter().all(|sample| (*sample - expected).abs() < 1e-6));
     }
 }
+
+#[test]
+fn unsupported_and_missing_sampler_targets_return_exact_incoming_owners() {
+    for kind in [None, Some(InstrumentKind::SubtractiveSynth), Some(InstrumentKind::DrumRack)] {
+        for missing_track in [false, true] {
+            for full_ring in [false, true] {
+                let (mut engine, mut commands, mut events) = AudioEngine::new();
+                let track = TrackId::new();
+                commands.push(EngineCommand::add_track(track)).unwrap();
+                if let Some(kind) = kind {
+                    commands.push(EngineCommand::set_built_in_instrument(track, kind, 44_100)).unwrap();
+                }
+                engine.process(&mut [], 2);
+                while events.pop().is_ok() {}
+                if full_ring {
+                    while engine.event_tx.push(EngineEvent::PlaybackStarted).is_ok() {}
+                }
+                let sample = audio(0.75);
+                let owner = Arc::downgrade(&sample);
+                let name = String::from("unsupported-unique-owned-name.wav");
+                let name_pointer = name.as_ptr();
+                commands.push(EngineCommand::LoadSamplerSample {
+                    track_id: if missing_track { TrackId::new() } else { track },
+                    sample, sample_name: name,
+                }).unwrap();
+                assert_eq!(crate::retirement::tests::allocations(|| engine.process(&mut [0.0; 16], 2)), (0, 0));
+                assert_eq!(owner.strong_count(), 1);
+                let mut returned = None;
+                for _ in 0..2 {
+                    while let Ok(event) = events.pop() {
+                        if let EngineEvent::RetiredInstrumentMedia(owners) = event {
+                            assert!(returned.is_none());
+                            assert_eq!(owners.sample.as_ref().map(Arc::as_ptr), Some(owner.as_ptr()));
+                            assert_eq!(owners.name.as_ref().map(|name| name.as_ptr()), Some(name_pointer));
+                            returned = Some(owners);
+                        }
+                    }
+                    assert_eq!(crate::retirement::tests::allocations(|| engine.process(&mut [], 2)), (0, 0));
+                }
+                drop(returned.expect("complete rejected owners return to UI"));
+                assert_eq!(owner.strong_count(), 0);
+            }
+        }
+    }
+}
