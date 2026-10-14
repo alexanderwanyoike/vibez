@@ -849,26 +849,44 @@ fn drum_media_commands_return_rejected_owners_without_touching_sounding_audio() 
                 let other = TrackId::new();
                 commands.push(EngineCommand::SetSampleRate(1000)).unwrap();
                 commands.push(EngineCommand::add_track(sounding)).unwrap();
-                commands.push(EngineCommand::set_built_in_instrument(
-                    sounding, InstrumentKind::DrumRack, 1000,
-                )).unwrap();
-                commands.push(EngineCommand::set_drum_rack_pad_state(
-                    sounding, 0, vibez_core::track::DrumPadState {
-                        fade_in_ms: 0.0, fade_out_ms: 0.0, ..Default::default()
-                    },
-                )).unwrap();
-                commands.push(EngineCommand::LoadDrumRackPadSample {
-                    track_id: sounding,
-                    pad_index: 0,
-                    sample: Arc::new(DecodedAudio {
-                        channels: vec![(0..4096).map(|frame| 0.1 + frame as f32 * 0.00001).collect()],
-                        sample_rate: 1000,
-                    }),
-                    sample_name: "unrelated-playing-ramp.wav".into(),
-                }).unwrap();
-                commands.push(EngineCommand::ExternalNoteOn {
-                    track_id: sounding, pitch: 36, velocity: 127,
-                }).unwrap();
+                commands
+                    .push(EngineCommand::set_built_in_instrument(
+                        sounding,
+                        InstrumentKind::DrumRack,
+                        1000,
+                    ))
+                    .unwrap();
+                commands
+                    .push(EngineCommand::set_drum_rack_pad_state(
+                        sounding,
+                        0,
+                        vibez_core::track::DrumPadState {
+                            fade_in_ms: 0.0,
+                            fade_out_ms: 0.0,
+                            ..Default::default()
+                        },
+                    ))
+                    .unwrap();
+                commands
+                    .push(EngineCommand::LoadDrumRackPadSample {
+                        track_id: sounding,
+                        pad_index: 0,
+                        sample: Arc::new(DecodedAudio {
+                            channels: vec![(0..4096)
+                                .map(|frame| 0.1 + frame as f32 * 0.00001)
+                                .collect()],
+                            sample_rate: 1000,
+                        }),
+                        sample_name: "unrelated-playing-ramp.wav".into(),
+                    })
+                    .unwrap();
+                commands
+                    .push(EngineCommand::ExternalNoteOn {
+                        track_id: sounding,
+                        pitch: 36,
+                        velocity: 127,
+                    })
+                    .unwrap();
                 if (1..=3).contains(&target_case) {
                     commands.push(EngineCommand::add_track(other)).unwrap();
                 }
@@ -878,7 +896,9 @@ fn drum_media_commands_return_rejected_owners_without_touching_sounding_audio() 
                     _ => None,
                 };
                 if let Some(kind) = wrong_kind {
-                    commands.push(EngineCommand::set_built_in_instrument(other, kind, 1000)).unwrap();
+                    commands
+                        .push(EngineCommand::set_built_in_instrument(other, kind, 1000))
+                        .unwrap();
                 }
                 let mut output = [0.0; 16];
                 engine.process(&mut output, 1);
@@ -903,16 +923,32 @@ fn drum_media_commands_return_rejected_owners_without_touching_sounding_audio() 
                         let sample = audio(0.75);
                         sample_owner = Some(Arc::downgrade(&sample));
                         EngineCommand::LoadDrumRackPadSample {
-                            track_id, pad_index, sample, sample_name: name,
+                            track_id,
+                            pad_index,
+                            sample,
+                            sample_name: name,
                         }
                     }
-                    1 => EngineCommand::set_drum_rack_pad_state(track_id, pad_index, vibez_core::track::DrumPadState {
-                        name: Some(name), gain: 0.25, ..Default::default()
-                    }),
-                    _ => EngineCommand::ClearDrumRackPad { track_id, pad_index },
+                    1 => EngineCommand::set_drum_rack_pad_state(
+                        track_id,
+                        pad_index,
+                        vibez_core::track::DrumPadState {
+                            name: Some(name),
+                            gain: 0.25,
+                            ..Default::default()
+                        },
+                    ),
+                    _ => EngineCommand::ClearDrumRackPad {
+                        track_id,
+                        pad_index,
+                    },
                 };
                 commands.push(command).unwrap();
-                assert_eq!(crate::retirement::tests::allocations(|| engine.process(&mut output, 1)), (0, 0), "target={target_case}, command={command_case}, full={full_ring}");
+                assert_eq!(
+                    crate::retirement::tests::allocations(|| engine.process(&mut output, 1)),
+                    (0, 0),
+                    "target={target_case}, command={command_case}, full={full_ring}"
+                );
                 for (frame, actual) in output.iter().enumerate() {
                     assert!((*actual - (0.1 + (frame + 16) as f32 * 0.00001)).abs() < 1e-6);
                 }
@@ -924,14 +960,20 @@ fn drum_media_commands_return_rejected_owners_without_touching_sounding_audio() 
                             returned = Some(owners);
                         }
                     }
-                    assert_eq!(crate::retirement::tests::allocations(|| engine.process(&mut [], 1)), (0, 0));
+                    assert_eq!(
+                        crate::retirement::tests::allocations(|| engine.process(&mut [], 1)),
+                        (0, 0)
+                    );
                 }
                 if command_case == 2 {
                     assert!(returned.is_none(), "a rejected clear has no owned input");
                 } else {
                     let returned = returned.expect("rejected owned arguments return intact");
                     assert_eq!(returned.name.as_ref().unwrap().as_ptr(), name_pointer);
-                    assert_eq!(returned.sample.as_ref().map(Arc::as_ptr), sample_owner.as_ref().map(|owner| owner.as_ptr()));
+                    assert_eq!(
+                        returned.sample.as_ref().map(Arc::as_ptr),
+                        sample_owner.as_ref().map(|owner| owner.as_ptr())
+                    );
                     drop(returned);
                 }
                 if let Some(owner) = sample_owner {
