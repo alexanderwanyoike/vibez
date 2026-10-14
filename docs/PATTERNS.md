@@ -104,8 +104,15 @@ Clip and transport acknowledgements, and immediate recording feeds.
 Cancelled Capture offset owners retain their original physical deadlines so
 retirement cannot advance another still-delayed public state.
 
-Once a prepared routing plan is installed, structural channel/effect changes
-must be followed by a new plan prepared outside the callback. Send topology
+Every engine starts with a caller-prepared master-only routing plan and keeps
+one non-optional active plan. The first project publication parks that bootstrap
+owner in one fixed engine slot until non-audio engine teardown; it emits no
+retirement event and starts no plan morph. Subsequent publications return the
+displaced project plan through the existing bounded retirement path. This
+preserves startup event order without destroying the bootstrap in the callback.
+
+Structural channel/effect changes must be followed by a new plan prepared
+outside the callback. Send topology
 includes every configured Send target, including zero-level sends and empty
 Send automation lanes. Gains are read at render time; a silent connection still
 participates in feedback validation.
