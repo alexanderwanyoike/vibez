@@ -44,11 +44,18 @@ fn owner_app(owner: Owner) -> (App, TrackId, EffectId) {
     target.gain = 0.7;
     if !matches!(owner, Owner::Master) {
         target.pan = 0.37;
-        target.sends.push((send_id, 0.3));
     }
     let effect = target.effects[1].id;
     target.effects[1].params = SOUND.to_vec();
     target.effects[1].bypass = true;
+    if matches!(owner, Owner::Track) {
+        let _ = app.update(Message::Arrangement(crate::domains::arrangement::ArrangementMsg::SetSend {
+            track_id: track,
+            bus_id: send_id,
+            amount: 0.3,
+        }));
+        assert_eq!(app.state.find_track(track).unwrap().sends, [(send_id, 0.3)]);
+    }
     let mut lane = AutomationLane::new(AutomationTarget::EffectParam {
         effect_id: effect, param_index: param::SR_REDUCE,
     });
@@ -150,7 +157,8 @@ async fn fractional_user_sound_survives_files_project_reopen_and_replay_on_every
                 before.effects.iter().map(|effect| effect.id).collect::<Vec<_>>());
             assert_eq!(channel.effects[1].params, SOUND, "{owner:?} .{extension}");
             assert_eq!(channel.effects[1].bypass, before.effects[1].bypass);
-            assert_eq!((channel.gain, channel.pan, &channel.sends), (before.gain, before.pan, &before.sends));
+            assert_eq!((channel.gain, channel.pan, &channel.sends), (before.gain, before.pan, &before.sends),
+                "{owner:?} .{extension}: mixer state");
             assert_eq!(channel.effects[1].sidechains, before.effects[1].sidechains);
             assert_eq!(channel.effects[1].inactive_sidechains, before.effects[1].inactive_sidechains);
             assert_eq!(channel.effects[1].latency_samples, Some(0));
