@@ -328,3 +328,32 @@ fn public_offline_full_and_cropped_master_and_track_outputs_keep_origin_warmed_h
         }
     }
 }
+
+#[test]
+fn public_offline_failures_keep_processing_error_precedence_and_original_stop_block() {
+    for mode in [Mode::AtEntry, Mode::Requested, Mode::Invalid, Mode::Rate, Mode::Latency, Mode::Local, Mode::Error] {
+        let (request, effect) = request(); let track = request.tracks[0].id;
+        let trace = Arc::new(Trace::new()); let facts = Arc::new(Facts::new());
+        let mut plugins = OfflinePlugins::default(); plugins.effects.insert(effect, Box::new(Probe::new(2, mode, &facts, &trace)));
+        let owner = crate::engine::reconfiguration::effect_owner_identity(&**plugins.effects.get(&effect).unwrap());
+        let error = match render_offline_with_plugins(&request, &mut plugins, |_| {}) { Ok(_) => panic!("{mode:?} unexpectedly succeeded"), Err(error) => normalize(Some(error), track, effect).unwrap() };
+        assert_eq!(crate::engine::reconfiguration::effect_owner_identity(&**plugins.effects.get(&effect).unwrap()), owner);
+        let expected_error = if mode == Mode::Error { "Observer on channel 'Source' failed: scripted offline process failure" }
+            else if mode == Mode::Latency { "Applied audio configuration became invalid during Bounce" }
+            else { expected_error(mode).unwrap() };
+        assert_eq!(error, expected_error, "{mode:?}");
+        let mut expected = vec![(2, LATENCY, 0)]; expected.extend(valid_calls(2));
+        if mode == Mode::AtEntry { expected.extend([(2, REQUEST, 1), (2, RECOVERY, 0), (2, ERROR, 0)]); }
+        else { expected.extend([(2, REQUEST, 0), (2, PROCESS, 512), (2, ERROR, u32::from(mode == Mode::Error))]); }
+        if mode != Mode::Error { expected.extend(post_effect_calls(mode)); }
+        if mode == Mode::Latency {
+            expected.extend([(2, RATE, 0), (2, VALID, 1), (2, LOCAL, 0), (2, LATENCY, 1), (2, ERROR, 0)]);
+            expected.extend(offline_calls(2));
+        }
+        let calls = trace.observed(); assert_eq!(calls, expected, "{mode:?}");
+        assert_eq!(facts.processes.load(Ordering::Relaxed), usize::from(mode != Mode::AtEntry));
+        assert_eq!(facts.frames.load(Ordering::Relaxed), if mode == Mode::AtEntry { 0 } else { 512 });
+        eprintln!("device-observation-d-failure: mode={mode:?}; calls={calls:?}; error={error:?}; processes={}; frames={}; same_owner=true",
+            facts.processes.load(Ordering::Relaxed), facts.frames.load(Ordering::Relaxed));
+    }
+}
