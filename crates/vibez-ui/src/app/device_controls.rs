@@ -138,6 +138,7 @@ mod tests {
     fn bitcrush_rate_entry_selects_the_nearest_actual_hertz_and_undo_restores_legacy_storage() {
         let mut app = super::super::test_support::app();
         app.state.transport.sample_rate = 48_000;
+        app.send_command(EngineCommand::SetSampleRate(48_000));
         let channel = ProjectTrack::new(TrackId::new(), "Bitcrush".into(), 3);
         let track = channel.id;
         Arc::make_mut(&mut app.state.project_tracks).tracks.push(channel);
