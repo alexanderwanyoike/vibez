@@ -18,13 +18,40 @@ fn overflowing_capture_delivers_accepted_start_then_stop_cause_and_discovering_o
     {}
     fixture.drain_command(EngineCommand::StartPerformanceCapture);
     let accepted_before_filler = fixture.engine.scheduled_presentation.len();
-    for _ in 1..presentation_queue::PRESENTATION_EVENT_CAPACITY {
+    assert_eq!(accepted_before_filler, 3);
+    assert!(matches!(
+        fixture.engine.scheduled_presentation[0].event,
+        EngineEvent::PerformanceCaptureStarted { .. }
+    ));
+    let accepted_sources: Vec<_> = fixture.engine.scheduled_presentation[1..]
+        .iter()
+        .map(|pending| match pending.event {
+            EngineEvent::ClipCaptureSource {
+                track_id,
+                position,
+                effective_at_samples,
+            } => (track_id, position, effective_at_samples),
+            ref event => panic!("unexpected accepted Capture source: {event:?}"),
+        })
+        .collect();
+    for (source, track) in accepted_sources.iter().zip(fixture.tracks) {
+        assert_eq!(source.0, track);
+        assert_eq!(source.2, capture_start);
+    }
+    let remaining = fixture.engine.scheduled_presentation.capacity() - accepted_before_filler;
+    for _ in 0..remaining {
         fixture.engine.present_event_at(
             EngineEvent::PlaybackStarted,
             fixture.engine.output_position + 521,
         );
     }
     let fault_before_owner = fixture.engine.presentation_fault;
+    assert!(!fault_before_owner);
+    assert!(fixture.engine.presentation_overflow_owner.is_none());
+    assert_eq!(
+        fixture.engine.scheduled_presentation.len(),
+        fixture.engine.scheduled_presentation.capacity()
+    );
     let offsets: Arc<[(TrackId, u32)]> = vec![(fixture.tracks[0], 17)].into();
     let discovering = EngineEvent::SectionCaptureSource {
         section_id: SectionId::new(),
@@ -68,6 +95,7 @@ fn overflowing_capture_delivers_accepted_start_then_stop_cause_and_discovering_o
         (0, 0)
     );
     let events: Vec<_> = std::iter::from_fn(|| fixture.events.pop().ok()).collect();
+    let mut source_index = 0;
     let order: Vec<_> = events
         .iter()
         .map(|event| match event {
@@ -77,6 +105,18 @@ fn overflowing_capture_delivers_accepted_start_then_stop_cause_and_discovering_o
             } => {
                 assert_eq!(*effective_at_samples, capture_start);
                 "capture-start"
+            }
+            EngineEvent::ClipCaptureSource {
+                track_id,
+                position,
+                effective_at_samples,
+            } => {
+                assert_eq!(
+                    (*track_id, *position, *effective_at_samples),
+                    accepted_sources[source_index]
+                );
+                source_index += 1;
+                "capture-source"
             }
             EngineEvent::PerformanceCaptureStopped {
                 effective_at_samples,
@@ -100,12 +140,15 @@ fn overflowing_capture_delivers_accepted_start_then_stop_cause_and_discovering_o
         order,
         [
             "capture-start",
+            "capture-source",
+            "capture-source",
             "capture-stop",
             "cause",
             "playback-stop",
             "owner"
         ]
     );
+    assert_eq!(source_index, 2);
     assert!(fixture.engine.pending_capture_stop.is_none());
     assert!(fixture.engine.pending_compensation_failure.is_none());
     assert!(!fixture.engine.pending_playback_stop);
