@@ -11,7 +11,7 @@ use vibez_core::routing::{ExternalInputId, SidechainAssignment, SourceTap};
 async fn gate_factory_files_preserve_identity_routing_and_automation_with_one_undo() {
     let presets = device_presets::factory_presets(EffectType::Gate);
     assert!(presets.len() >= 6, "Gate needs useful factory presets");
-    let mut app = super::test_support::app();
+    let mut app = super::super::test_support::app();
     let source = ProjectTrack::new(TrackId::new(), "Detector".into(), 6);
     let source_id = source.id;
     let target = ProjectTrack::new(TrackId::new(), "Gated".into(), 3);
