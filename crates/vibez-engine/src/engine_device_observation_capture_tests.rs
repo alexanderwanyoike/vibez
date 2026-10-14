@@ -262,3 +262,33 @@ fn a_play_reset_between_capture_commands_is_observed_in_the_same_drain() {
     assert!(fixture.engine.transport.is_playing());
     report("play-reset", false, true, &calls, &events, &fixture);
 }
+
+#[test]
+fn same_drain_capture_admission_observes_removed_and_replaced_device_owners() {
+    for instrument in [false, true] {
+        let mut fixture = fixture(true);
+        let target = usize::from(!instrument);
+        fixture.controls[target].local.store(true, Ordering::Release);
+        let replacement = Arc::new(Control::new());
+        fixture.commands.push(EngineCommand::StartPerformanceCapture).unwrap();
+        fixture.commands.push(if instrument {
+            EngineCommand::SetInstrument { track_id: fixture.track, instrument: Box::new(Probe { owner: 3, control: Arc::clone(&replacement), calls: Arc::clone(&fixture.calls) }) }
+        } else {
+            EngineCommand::RemoveEffect(fixture.track, fixture.effect)
+        }).unwrap();
+        fixture.commands.push(EngineCommand::StartPerformanceCapture).unwrap();
+        drain(&mut fixture);
+        assert_eq!(fixture.controls[target].drops.load(Ordering::Relaxed), 0, "the callback returns the previous owner");
+        let calls = fixture.calls.observed();
+        assert_eq!(calls, if instrument { vec![111, 310, 210] } else { vec![110, 211, 110] });
+        let events = collect(&mut fixture);
+        assert_eq!(events.order, ["stop", "refused", if instrument { "retire-instrument" } else { "retire-effect" }, "start", "source"]);
+        assert_eq!(events.reasons, [LOCAL_REASON]);
+        assert_eq!(fixture.controls[target].drops.load(Ordering::Relaxed), 1);
+        assert_eq!(replacement.drops.load(Ordering::Relaxed), 0);
+        assert!(fixture.engine.capture_active);
+        assert!(fixture.engine.compensation_plan.applied_plan_is_valid());
+        assert_eq!(fixture.engine.compensation_plan.awaiting_structural_plan(), !instrument);
+        report("owner-edit", instrument, true, &calls, &events, &fixture);
+    }
+}
