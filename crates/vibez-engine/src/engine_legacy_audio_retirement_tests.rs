@@ -53,3 +53,52 @@ fn replacing_unique_legacy_audio_preserves_playing_cursor_and_returns_old_owner_
     while events.pop().is_ok() {}
     assert_eq!(old_owner.strong_count(), 0, "owner-thread event consumption releases old audio");
 }
+
+#[test]
+fn unloading_unique_legacy_audio_preserves_cursor_and_stop_notifications_without_callback_destruction() {
+    let (mut engine, mut commands, mut events) = AudioEngine::new();
+    let old = stereo_ramp(256, 0.125, -0.25, 1000);
+    let old_owner = Arc::downgrade(&old);
+    commands.push(EngineCommand::SetSampleRate(1000)).unwrap();
+    commands.push(EngineCommand::LoadAudio(old)).unwrap();
+    commands.push(EngineCommand::Seek(23)).unwrap();
+    commands.push(EngineCommand::Play).unwrap();
+    let mut output = [0.0; 16];
+    engine.process_block(AudioProcessBlock::new(&mut output, 2));
+    for (frame, actual) in output.chunks_exact(2).enumerate() {
+        let position = (frame + 23) as f32;
+        assert_eq!(actual, [0.125 + position / 1024.0, -0.25 + position / 2048.0]);
+    }
+    assert_eq!(engine.transport().position(), 31);
+    assert_eq!(old_owner.strong_count(), 1, "Unload receives a uniquely owned resident buffer");
+    while events.pop().is_ok() {}
+    let expected_capture_boundary = engine.heard_capture_position();
+    commands.push(EngineCommand::UnloadAudio).unwrap();
+    let measured = crate::retirement::tests::allocations(|| {
+        engine.process_block(AudioProcessBlock::new(&mut output, 2));
+    });
+    assert_eq!(output, [0.0; 16]);
+    assert!(engine.audio().is_none());
+    assert!(!engine.transport().is_playing());
+    assert_eq!(engine.transport().position(), 31, "Unload does not seek");
+    assert_eq!(engine.transport().audio_length(), None);
+    assert_eq!(engine.sample_rate(), 1000);
+    let notifications: Vec<_> = std::iter::from_fn(|| events.pop().ok()).collect();
+    assert_eq!(notifications.iter().filter(|event| matches!(event, EngineEvent::PlaybackStopped)).count(), 1);
+    let capture_stops: Vec<_> = notifications.iter().filter_map(|event| match event {
+        EngineEvent::PerformanceCaptureStopped { effective_at_samples } => Some(*effective_at_samples),
+        _ => None,
+    }).collect();
+    assert_eq!(capture_stops, [expected_capture_boundary], "existing heard Capture closure remains exact");
+    assert_eq!(measured, (0, 0), "Unload must return its unique legacy owner instead of destroying it");
+    let retired: Vec<_> = notifications.iter().filter_map(|event| match event {
+        EngineEvent::RetiredAudioBuffer(audio) => Some(audio),
+        _ => None,
+    }).collect();
+    assert_eq!(retired.len(), 1);
+    assert_eq!(Arc::as_ptr(retired[0]), old_owner.as_ptr());
+    assert_eq!(old_owner.strong_count(), 1);
+    drop(retired);
+    drop(notifications);
+    assert_eq!(old_owner.strong_count(), 0, "ordinary owner-thread receipt releases old audio");
+}
