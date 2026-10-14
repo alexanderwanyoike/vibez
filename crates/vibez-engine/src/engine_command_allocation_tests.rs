@@ -845,7 +845,7 @@ fn populated_sampler_ratchet_fixture_proves_reset_owner_return_and_allocation_fr
         crate::retirement::tests::allocations(|| engine.process(&mut output, 2)),
         (0, 0)
     );
-    for (frame, channels) in output.chunks_exact(2).enumerate() {
+    for (frame, channels) in output.as_chunks::<2>().0.iter().enumerate() {
         let attack_level = expected * (frame + 1) as f32 / 48.0;
         assert!(
             channels
