@@ -279,6 +279,20 @@ mod tests {
     }
 
     #[test]
+    fn visible_response_keeps_a_usable_canvas_and_meter_child_budget() {
+        for width in [430.0, 620.0, 820.0, 900.0] {
+            for height in 64..=400 {
+                for advanced in [false,true] {
+                    let layout = arrange(width, height as f32, advanced);
+                    for region in [layout.response,layout.meter].into_iter().flatten() {
+                        assert!(region.height >= 32.0, "response or meter only {}px at {width}x{height}, Advanced={advanced}", region.height);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
     fn tier_hierarchy_keeps_modulation_beside_expanded_controls_and_medium_tabs() {
         let expanded = arrange(900.0, 304.0, true);
         assert!(expanded.vertical_modes);
