@@ -960,6 +960,10 @@ mod time_domain_tests;
 mod command_allocation_tests;
 
 #[cfg(test)]
+#[path = "engine_legacy_audio_retirement_tests.rs"]
+mod legacy_audio_retirement_tests;
+
+#[cfg(test)]
 #[path = "engine_compensation_presentation_tests.rs"]
 mod compensation_presentation_tests;
 
