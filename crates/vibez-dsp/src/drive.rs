@@ -201,6 +201,10 @@ impl DriveEffect {
     }
 }
 
+fn finite_sample(value: f64) -> f32 {
+    if value.is_nan() { 0.0 } else { value.clamp(-(f32::MAX as f64), f32::MAX as f64) as f32 }
+}
+
 impl Default for DriveEffect {
     fn default() -> Self {
         Self::new()
@@ -321,8 +325,8 @@ impl AudioEffect for DriveEffect {
             let output = self.audible[param::OUTPUT];
             for c in 0..ch {
                 let idx = frame * channels + c;
-                let dry = buffer[idx];
-                let filtered = self.pre_hp.process(dry, c);
+                let dry = if buffer[idx].is_finite() { buffer[idx] } else { 0.0 };
+                let filtered = finite_sample(self.pre_hp.process(dry, c) as f64);
                 let shaper_input = dry * (1.0 - self.applied[param::PRE_HP_ENABLED]) + filtered * self.applied[param::PRE_HP_ENABLED];
                 let sat = (shaper_input * drive).tanh() / norm;
                 // One-pole tilt: mixes current with previous sample.
@@ -349,9 +353,13 @@ impl AudioEffect for DriveEffect {
                 if self.audible[param::TONE] != 0.5 { modern = (*low * low_gain + (input - *low) * high_gain) as f32; }
                 let modern_weight = weights[1] + weights[2] + weights[3];
                 let processed = weights[0] * legacy + modern_weight * aligned_dry * (1.0 - self.audible[param::AMOUNT]) + modern * self.audible[param::AMOUNT];
-                let filtered = self.post_lp.process(processed, c);
+                let processed = finite_sample(processed as f64);
+                let filtered = finite_sample(self.post_lp.process(processed, c) as f64);
                 let processed = processed * (1.0 - self.audible[param::POST_LP_ENABLED]) + filtered * self.audible[param::POST_LP_ENABLED];
-                buffer[idx] = (aligned_dry * (1.0 - mix) + processed * mix) * output;
+                let result = (aligned_dry * (1.0 - mix) + processed * mix) * output;
+                buffer[idx] = if result.is_finite() { result } else {
+                    finite_sample((aligned_dry as f64 * (1.0 - mix as f64) + processed as f64 * mix as f64) * output as f64)
+                };
                 if c == 0 {
                     let point = self.meter_samples as usize % 128;
                     self.meter.input[point] = aligned_dry;
