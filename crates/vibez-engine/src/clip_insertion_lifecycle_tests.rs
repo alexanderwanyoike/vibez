@@ -243,3 +243,45 @@ fn consumer_first_shutdown_releases_successful_orphaned_replies_on_the_owner_thr
         assert_eq!(identity.strong_count(), 0);
     }
 }
+
+#[test]
+fn undrained_requests_and_unsent_controls_release_owners_after_ui_shutdown() {
+    for admitted in [true, false] {
+        let mut fixture = setup();
+        let mut delta = delta(fixture.track);
+        let identity = Arc::downgrade(&delta.id.0);
+        if admitted {
+            fixture.commands.push(delta.command.take().unwrap()).unwrap();
+            let (engine, _) = on_audio_thread(fixture.engine, false);
+            fixture.engine = engine;
+            assert!(fixture.events.slots() > 0);
+            assert_eq!(identity.strong_count(), 3);
+            assert_eq!(crate::retirement::tests::allocations(|| drop(fixture.events)), (0, 0));
+            let (engine, output) = on_audio_thread(fixture.engine, true);
+            fixture.engine = engine;
+            assert_signal(&output, 0.25);
+            assert_eq!(fixture.engine.tracks()[0].playback_source.clips.len(), 1);
+            assert_eq!(fixture.engine.tracks()[0].playback_source.clips.as_ptr(), fixture.live_allocation);
+            assert_eq!(delta.audio.strong_count(), 1);
+            // The request still lives inside the orphaned ordinary event ring.
+            // Owner-thread engine teardown must release both connected rings.
+            assert_eq!(identity.strong_count(), 3);
+            let disposal = crate::retirement::tests::allocations(|| drop(fixture.engine));
+            assert_eq!(disposal.0, 0);
+            assert!(disposal.1 > 0);
+        } else {
+            drop(fixture.events);
+            drop(fixture.engine);
+            assert_eq!(identity.strong_count(), 2);
+            assert_eq!(delta.audio.strong_count(), 1);
+            let disposal = crate::retirement::tests::allocations(|| drop(delta.command.take()));
+            assert_eq!(disposal.0, 0);
+            assert!(disposal.1 > 0);
+        }
+        assert_eq!(delta.audio.strong_count(), 0);
+        assert_eq!(fixture.resident.strong_count(), 0);
+        assert_eq!(identity.strong_count(), 1);
+        drop(delta);
+        assert_eq!(identity.strong_count(), 0);
+    }
+}
