@@ -126,7 +126,7 @@ fn the_single_modern_tone_stage_retains_its_history_across_exact_character_chang
         let mut output = [0.02; 32];
         effect.process(&mut output, 1);
         for (frame, actual) in output.into_iter().enumerate() {
-            let hard = 0.6;
+            let hard = if frame < 64 { (0.6_f64).tanh() } else { 0.6 };
             low = hard * (1.0 - beta) + low * beta;
             let expected = low * low_gain + (hard - low) * high_gain;
             assert!((actual as f64 - expected).abs() < 5e-5, "rate={rate}, frame={frame}, actual={actual}, expected={expected}");
@@ -154,7 +154,7 @@ fn manual_filter_switches_crossfade_warm_signals_without_touching_the_dry_branch
     low.process(&mut output, 1);
     for (frame, actual) in output.into_iter().enumerate() {
         let raw: f32 = if frame % 2 == 0 { 0.02 } else { -0.02 };
-        let weight = (frame + 1).min(512) as f32 / 512.0;
+        let weight = (frame + 1).saturating_sub(64).min(512) as f32 / 512.0;
         let expected = 1.4 * (0.63 * raw + 0.37 * (1.0 - weight) * (raw * 30.0).tanh());
         assert!((actual - expected).abs() < 2e-6, "LP frame={frame}: {actual} != {expected}");
     }
