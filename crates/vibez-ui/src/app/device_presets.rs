@@ -146,6 +146,13 @@ impl App {
         }
     }
 
+    /// Undo and redo change values in place: only a pending load, which would
+    /// apply over them, is stale. Remembered presets and saves still hold.
+    pub(super) fn cancel_device_preset_load(&mut self) {
+        self.device_preset_load_request.cancel();
+        self.device_preset_load_target = None;
+    }
+
     pub(super) fn reset_device_presets(&mut self) {
         self.device_preset_load_request.cancel();
         self.device_preset_save_request.cancel();
