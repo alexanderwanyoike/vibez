@@ -499,8 +499,12 @@ impl PartialEq for EngineEvent {
             (Self::DisposeInstrument(left), Self::DisposeInstrument(right)) => left == right,
             (Self::PlaybackPosition(left), Self::PlaybackPosition(right)) => left == right,
             (Self::PerformancePosition(left), Self::PerformancePosition(right)) => left == right,
-            (Self::RetiredNoteClip(left), Self::RetiredNoteClip(right)) => left.same_retired_owner(right),
-            (Self::RetiredAudioClip(left), Self::RetiredAudioClip(right)) => left.same_retired_owner(right),
+            (Self::RetiredNoteClip(left), Self::RetiredNoteClip(right)) => {
+                left.same_retired_owner(right)
+            }
+            (Self::RetiredAudioClip(left), Self::RetiredAudioClip(right)) => {
+                left.same_retired_owner(right)
+            }
             (Self::RetiredAudioBuffer(left), Self::RetiredAudioBuffer(right)) => {
                 Arc::ptr_eq(left, right)
             }
