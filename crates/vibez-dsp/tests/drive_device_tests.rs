@@ -70,3 +70,14 @@ fn legacy_project_values_keep_their_units_and_append_neutral_character_controls(
     }
     assert!(!effect.set_param(10, 0.5));
 }
+
+#[test]
+fn waveshaper_diagnostics_default_to_unavailable_instead_of_invented_silence() {
+    use vibez_core::effect::WaveShaperMeter;
+    let empty = WaveShaperMeter::default();
+    assert_eq!(empty.count, 0);
+    assert_eq!(empty.input, [0.0; 128]);
+    assert_eq!(empty.output, [0.0; 128]);
+    assert_eq!(empty.transfer, [0.0; 65]);
+    assert!(create_effect_with_params(EffectType::Gain, 48_000.0, &[]).take_waveshaper_meter().is_none());
+}
