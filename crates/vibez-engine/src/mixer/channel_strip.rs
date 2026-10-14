@@ -37,7 +37,7 @@ impl EngineTrack {
             automation_swing_offset: None,
             mix_buffer: Vec::with_capacity(crate::routing::MAX_BLOCK_FRAMES * 2),
             effects: Vec::with_capacity(super::DEVICE_CHAIN_CAPACITY),
-            sends: Vec::new(),
+            sends: Vec::with_capacity(super::CHANNEL_CAPACITY),
             instrument: None,
             timed_note_ons: Vec::with_capacity(SCHEDULED_NOTES_PER_BLOCK),
             timed_note_offs: Vec::with_capacity(SCHEDULED_NOTES_PER_BLOCK),
@@ -51,7 +51,14 @@ impl EngineTrack {
     pub(crate) fn set_send(&mut self, bus_id: TrackId, amount: f32) {
         match self.sends.iter_mut().find(|(id, _)| *id == bus_id) {
             Some(send) => send.1 = amount,
-            None => self.sends.push((bus_id, amount)),
+            // Each admitted return channel needs at most one slot. Invalid
+            // target lists cannot grow callback-owned storage beyond that bound.
+            None if self.sends.len() < super::CHANNEL_CAPACITY
+                && self.sends.len() < self.sends.capacity() =>
+            {
+                self.sends.push((bus_id, amount));
+            }
+            None => {}
         }
     }
 
