@@ -141,7 +141,10 @@ impl AudioEffect for BitcrushEffect {
         };
         let descriptor = &BITCRUSH_PARAMS[index];
         let value = value.clamp(descriptor.min, descriptor.max);
-        *target = if matches!(index, param::ROUNDING | param::DITHER | param::POST_LP_ENABLED) {
+        *target = if matches!(
+            index,
+            param::ROUNDING | param::DITHER | param::POST_LP_ENABLED
+        ) {
             value.round()
         } else {
             value
