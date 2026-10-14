@@ -46,6 +46,10 @@ impl Random {
         let first = channel * 2 + 1;
         self.uniform(frame, first) - self.uniform(frame, first + 1)
     }
+
+    pub(super) fn clock(&self, frame: u64) -> f64 {
+        2.0 * self.uniform(frame, 0) - 1.0
+    }
 }
 
 fn scramble(mut value: u64) -> u64 {

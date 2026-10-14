@@ -5,12 +5,15 @@ use vibez_core::id::EffectId;
 
 use crate::effect::AudioEffect;
 
+#[path = "bitcrush_clock.rs"]
+mod clock;
 #[path = "bitcrush_random.rs"]
 mod random;
 #[path = "bitcrush_ramp.rs"]
 mod ramp;
 #[path = "bitcrush_scope.rs"]
 mod scope;
+use clock::Clock;
 use random::Random;
 use ramp::Ramp;
 use scope::Scope;
@@ -100,15 +103,14 @@ pub struct BitcrushEffect {
     sample_rate: f32,
     drive: Ramp,
     mix: Ramp,
+    jitter: Ramp,
     drive_gain: f64,
     started: bool,
     scope: Scope,
     random: Random,
     source_frames: u64,
-    /// Sample-and-hold state, per channel.
     hold: [f32; 2],
-    /// Frame counter for SR reduce, per channel.
-    counter: [u32; 2],
+    clock: Clock,
 }
 
 impl BitcrushEffect {
@@ -136,13 +138,14 @@ impl BitcrushEffect {
             sample_rate,
             drive: Ramp::new(0.0),
             mix: Ramp::new(1.0),
+            jitter: Ramp::new(0.0),
             drive_gain: 1.0,
             started: false,
             scope: Scope::default(),
             random: Random::for_identity(identity),
             source_frames: 0,
             hold: [0.0; 2],
-            counter: [0; 2],
+            clock: Clock::default(),
         }
     }
 
@@ -172,6 +175,9 @@ impl BitcrushEffect {
         }
         if index == param::MIX && (value != *target || automated) {
             self.mix.edit(value, automated || !self.started);
+        }
+        if index == param::JITTER && (value != *target || automated) {
+            self.jitter.edit(value, automated || !self.started);
         }
         *target = value;
         true
@@ -237,9 +243,16 @@ impl AudioEffect for BitcrushEffect {
                 self.drive_gain = 10.0_f64.powf(f64::from(value) / 20.0);
             }
             let _ = self.mix.advance(self.params[param::MIX]);
+            let _ = self.jitter.advance(self.params[param::JITTER]);
             let mix = self.mix.value();
             let drive_db = self.drive.value();
             let drive_gain = self.drive_gain;
+            let acquired = self.clock.advance(
+                divider,
+                self.jitter.value(),
+                self.source_frames,
+                &self.random,
+            );
             for c in 0..ch {
                 let idx = frame * channels + c;
                 let dry = if buffer[idx].is_finite() {
@@ -248,7 +261,6 @@ impl AudioEffect for BitcrushEffect {
                     0.0
                 };
 
-                let acquired = self.counter[c] == 0;
                 if acquired {
                     // Neutral drive/dither retain the original f32 division for saved projects.
                     let scaled = if drive_db == 0.0 && !dither {
@@ -269,12 +281,10 @@ impl AudioEffect for BitcrushEffect {
                     let q = quantized * f64::from(step);
                     self.hold[c] = q.clamp(-1.0, 1.0) as f32;
                 }
-                self.counter[c] = (self.counter[c] + 1) % divider;
-
                 let wet = self.hold[c];
                 buffer[idx] = dry * (1.0 - mix) + wet * mix;
                 if c == 0 {
-                    self.scope.record(dry, buffer[idx], acquired, divider);
+                    self.scope.record(dry, buffer[idx], acquired, self.clock.interval());
                 }
             }
             self.source_frames = self.source_frames.wrapping_add(1);
@@ -285,8 +295,9 @@ impl AudioEffect for BitcrushEffect {
         self.source_frames = 0;
         self.scope = Scope::default();
         self.hold = [0.0; 2];
-        self.counter = [0; 2];
+        self.clock = Clock::default();
         self.mix.edit(self.params[param::MIX], true);
+        self.jitter.edit(self.params[param::JITTER], true);
         self.drive.edit(self.params[param::DRIVE_DB], true);
         self.drive_gain = 10.0_f64.powf(f64::from(self.drive.value()) / 20.0);
         self.started = false;
