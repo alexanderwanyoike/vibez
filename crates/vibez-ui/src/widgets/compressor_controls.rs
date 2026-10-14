@@ -32,10 +32,20 @@ pub enum PrimaryControls {
 impl PrimaryControls {
     pub fn indices(self) -> &'static [usize] {
         match self {
-            Self::Core => &[param::THRESHOLD, param::RATIO, param::ATTACK, param::RELEASE],
+            Self::Core => &[
+                param::THRESHOLD,
+                param::RATIO,
+                param::ATTACK,
+                param::RELEASE,
+            ],
             Self::Full | Self::Expanded => &[
-                param::THRESHOLD, param::RATIO, param::ATTACK, param::RELEASE,
-                param::KNEE, param::MAKEUP, param::MIX,
+                param::THRESHOLD,
+                param::RATIO,
+                param::ATTACK,
+                param::RELEASE,
+                param::KNEE,
+                param::MAKEUP,
+                param::MIX,
             ],
         }
     }
@@ -74,13 +84,25 @@ pub fn strip<'a>(
                 toggle(track, effect, enabled, "On", accent),
                 container(value_field(track, effect, state, index, accent)).width(54.0),
                 text("Hz").size(8).color(th::text_dim())
-            ].spacing(4).align_y(iced::Alignment::Center)
-        ].spacing(3).into()
+            ]
+            .spacing(4)
+            .align_y(iced::Alignment::Center)
+        ]
+        .spacing(3)
+        .into()
     };
     row![
         frequency(param::HP_ENABLED, param::HP_FREQUENCY, "Detector HP"),
         frequency(param::LP_ENABLED, param::LP_FREQUENCY, "Detector LP"),
-        container(selector(track, effect, param::DETECTOR_MODE, "Detector", &["Peak", "RMS"], accent)).width(82.0),
+        container(selector(
+            track,
+            effect,
+            param::DETECTOR_MODE,
+            "Detector",
+            &["Peak", "RMS"],
+            accent
+        ))
+        .width(82.0),
         toggle(track, effect, param::STEREO_LINK, "Stereo Link", accent),
         toggle(track, effect, param::DETECTOR_LISTEN, "Listen", accent),
         column![
@@ -89,8 +111,11 @@ pub fn strip<'a>(
                 toggle(track, effect, param::RANGE_ENABLED, "On", accent),
                 container(value_field(track, effect, state, param::RANGE, accent)).width(50.0),
                 text("dB").size(8).color(th::text_dim())
-            ].spacing(4).align_y(iced::Alignment::Center)
-        ].spacing(3)
+            ]
+            .spacing(4)
+            .align_y(iced::Alignment::Center)
+        ]
+        .spacing(3)
     ]
     .spacing(14)
     .align_y(iced::Alignment::Center)
