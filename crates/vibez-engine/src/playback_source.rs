@@ -381,7 +381,7 @@ pub struct PreparedPlaybackSource {
     pub clips: Vec<EngineClip>,
     pub note_clips: Vec<EngineNoteClip>,
     pub automation: Vec<AutomationLane>,
-    removed_audio_clips: Vec<EngineClip>,
+    pub(crate) removed_audio_clips: Vec<EngineClip>,
     removed_note_clips: Vec<EngineNoteClip>,
 }
 
@@ -463,7 +463,7 @@ impl PreparedPlaybackSource {
     }
 
     pub(crate) fn push_audio_clip(&mut self, clip: EngineClip) {
-        // Insertion still allocates; future removal must never grow its owner staging.
+        // Off-callback construction prepares the matching future removal owner.
         let required = self.clips.len() + 1;
         if self.removed_audio_clips.capacity() < required {
             self.removed_audio_clips
