@@ -506,6 +506,25 @@ impl PartialEq for EngineEvent {
             (Self::PlaybackPosition(left), Self::PlaybackPosition(right)) => left == right,
             (Self::PerformancePosition(left), Self::PerformancePosition(right)) => left == right,
             (
+                Self::EffectWaveshaper {
+                    track_id: left_track,
+                    effect_id: left_effect,
+                    generation: left_generation,
+                    meter: left_meter,
+                },
+                Self::EffectWaveshaper {
+                    track_id: right_track,
+                    effect_id: right_effect,
+                    generation: right_generation,
+                    meter: right_meter,
+                },
+            ) => {
+                left_track == right_track
+                    && left_effect == right_effect
+                    && left_generation == right_generation
+                    && left_meter == right_meter
+            }
+            (
                 Self::EffectMeter {
                     track_id: left_track,
                     effect_id: left_effect,
