@@ -392,3 +392,40 @@ fn manual_choice_changes_crossfade_warm_paths_without_switching_halfway() {
         assert!(frame[0].abs() < 1e-7, "choice automation was smoothed at index{index}");
     }
 }
+
+#[test]
+fn invalid_rates_parameters_and_nonfinite_audio_cannot_poison_gate_state() {
+    use vibez_core::routing::{ExternalInputBlock, ExternalInputId};
+    for rate in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY, -1.0, 0.0, 1.0, 2.0, 10.0, 48_000.0] {
+        let mut effect = GateEffect::new(rate);
+        let expected_rate = if rate.is_finite() && rate >= 2.0 { rate as u32 } else { 48_000 };
+        assert_eq!(effect.activation_sample_rate(), Some(expected_rate));
+        for index in 0..15 {
+            let original = effect.get_param(index);
+            for invalid in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+                assert!(!effect.set_param(index, invalid));
+                assert!(!effect.set_automated_param(index, invalid));
+                assert_eq!(effect.get_param(index), original);
+            }
+        }
+        assert!(!effect.set_param(usize::MAX, 1.0));
+        assert_eq!(effect.get_param(usize::MAX), 0.0);
+        for (index, value) in [(9, 1.0), (11, 1.0), (13, 1.0)] {
+            assert!(effect.set_param(index, value));
+        }
+        let mut audio = [f32::NAN, f32::INFINITY, f32::NEG_INFINITY, f32::MAX, 0.2, -0.1];
+        effect.process(&mut audio, 2);
+        assert!(audio.iter().all(|sample| sample.is_finite()), "nonfinite internal audio at{rate}Hz");
+        let mut clean_main = [0.1; 6];
+        effect.process_with_inputs(&mut clean_main, 2, &[ExternalInputBlock {
+            id: ExternalInputId(0), channels: 2, samples: &[f32::NAN, f32::INFINITY, f32::NEG_INFINITY, f32::MAX], connected: true,
+        }]);
+        assert!(clean_main.iter().all(|sample| sample.is_finite()), "nonfinite external audio at{rate}Hz");
+        let meter = effect.take_dynamics_meter().unwrap();
+        assert!(meter.current_reduction_db.into_iter().chain(meter.peak_reduction_db)
+            .chain(meter.detector_peak).all(f32::is_finite));
+        let gate = meter.gate.unwrap();
+        assert!([gate.envelope_db, gate.peak_envelope_db, gate.open_threshold_db,
+            gate.close_threshold_db, gate.hold_remaining_ms].into_iter().all(f32::is_finite));
+    }
+}
