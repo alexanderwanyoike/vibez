@@ -145,3 +145,27 @@ fn drum_sample_replacement_returns_old_owners_and_keeps_sounding_pad_voices() {
         assert_eq!(output, [0.875; 16]);
     }
 }
+
+#[test]
+fn first_drum_notes_do_not_destroy_dummy_voice_allocations_in_callback() {
+    for count in [1, 32] {
+        let (mut engine, mut commands, mut events) = AudioEngine::new();
+        let track = TrackId::new();
+        commands.push(EngineCommand::SetSampleRate(1000)).unwrap();
+        commands.push(EngineCommand::add_track(track)).unwrap();
+        commands.push(EngineCommand::set_built_in_instrument(track, InstrumentKind::DrumRack, 1000)).unwrap();
+        commands.push(EngineCommand::SetDrumRackPadState { track_id: track, pad_index: 0,
+            state: vibez_core::track::DrumPadState { fade_in_ms: 0.0, fade_out_ms: 0.0, ..Default::default() } }).unwrap();
+        commands.push(EngineCommand::LoadDrumRackPadSample { track_id: track, pad_index: 0,
+            sample: audio(0.125), sample_name: "first-note-pad.wav".into() }).unwrap();
+        engine.process(&mut [0.0; 16], 1);
+        while events.pop().is_ok() {}
+        for _ in 0..count {
+            commands.push(EngineCommand::ExternalNoteOn { track_id: track, pitch: 36, velocity: 127 }).unwrap();
+        }
+        let mut output = [0.0; 16];
+        let measured = crate::retirement::tests::allocations(|| engine.process(&mut output, 1));
+        assert_eq!(output, [0.125 * count as f32; 16]);
+        assert_eq!(measured, (0, 0), "first voices={count}");
+    }
+}
