@@ -746,6 +746,10 @@ mod device_handoff_full_tests;
 mod device_handoff_stale_tests;
 
 #[cfg(test)]
+#[path = "engine_device_handoff_parameter_tests.rs"]
+mod device_handoff_parameter_tests;
+
+#[cfg(test)]
 #[path = "engine_graph_test_support.rs"]
 mod graph_test_support;
 
