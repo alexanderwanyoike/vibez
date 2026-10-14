@@ -132,7 +132,7 @@ fn assert_handoff_failure_cause(backpressured: bool) {
         bypass: false,
     });
     engine.tracks.push(Box::new(track));
-    engine.next_device_handoff = u64::MAX;
+    engine.device_handoff.exhaust_identity_for_test();
     commands
         .push(EngineCommand::SetRouting(plan(id, &[effect], 1)))
         .unwrap();
@@ -146,7 +146,7 @@ fn assert_handoff_failure_cause(backpressured: bool) {
         (0, 0),
     );
     assert!(!engine.compensation_plan.applied_plan_is_valid());
-    assert!(engine.pending_device_reconfiguration.is_none());
+    assert!(engine.device_handoff.pending().is_none());
     let mut causes = Vec::new();
     let mut drain = |events: &mut Consumer<EngineEvent>| {
         while let Ok(event) = events.pop() {

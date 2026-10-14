@@ -194,17 +194,17 @@ fn retained_parameter_capacity_coalesces_and_replays_every_entry() {
         assert_eq!(owner.owner_identity(), identity);
         readiness.push(Readiness::observe(&engine));
         assert_eq!(readiness[1], away);
-        let storage = engine.pending_device_parameters.as_ptr();
-        let capacity = engine.pending_device_parameters.capacity();
+        let storage = engine.device_handoff.retained_parameters().as_ptr();
+        let capacity = engine.device_handoff.retained_parameter_capacity();
         assert_eq!(capacity, PARAMETER_CAPACITY);
         for start in (0..PARAMETER_CAPACITY).step_by(256) {
             for index in start..start + 256 {
                 commands.push(parameter_edit(track_id, effect_id, instrument, index, (index + 1) as f32 / 4096.0)).unwrap();
             }
             assert_eq!(crate::retirement::tests::allocations(|| engine.drain_commands()), (0, 0));
-            assert_eq!(engine.pending_device_parameters.len(), start + 256);
-            assert_eq!(engine.pending_device_parameters.as_ptr(), storage);
-            assert_eq!(engine.pending_device_parameters.capacity(), capacity);
+            assert_eq!(engine.device_handoff.retained_parameters().len(), start + 256);
+            assert_eq!(engine.device_handoff.retained_parameters().as_ptr(), storage);
+            assert_eq!(engine.device_handoff.retained_parameter_capacity(), capacity);
             assert_eq!(audit.calls.load(Ordering::Relaxed), 0);
             assert_eq!(Readiness::observe(&engine), away);
             assert!(events.is_empty());
@@ -213,8 +213,8 @@ fn retained_parameter_capacity_coalesces_and_replays_every_entry() {
             commands.push(parameter_edit(track_id, effect_id, instrument, index, offered_value(index))).unwrap();
         }
         assert_eq!(crate::retirement::tests::allocations(|| engine.drain_commands()), (0, 0));
-        assert_eq!(engine.pending_device_parameters.len(), PARAMETER_CAPACITY);
-        for (expected, &(index, value)) in engine.pending_device_parameters.iter().enumerate() {
+        assert_eq!(engine.device_handoff.retained_parameters().len(), PARAMETER_CAPACITY);
+        for (expected, &(index, value)) in engine.device_handoff.retained_parameters().iter().enumerate() {
             assert_eq!(index, expected);
             assert_eq!(value.to_bits(), offered_value(index).to_bits());
         }
@@ -225,9 +225,9 @@ fn retained_parameter_capacity_coalesces_and_replays_every_entry() {
         assert_eq!(crate::retirement::tests::allocations(|| engine.drain_commands()), (0, 0));
         let overflow_consumed = engine.cmd_rx.peek().is_err() && engine.tracks[0].solo;
         assert!(overflow_consumed);
-        assert_eq!(engine.pending_device_parameters.len(), PARAMETER_CAPACITY);
-        assert_eq!(engine.pending_device_parameters.as_ptr(), storage);
-        assert_eq!(engine.pending_device_parameters.capacity(), capacity);
+        assert_eq!(engine.device_handoff.retained_parameters().len(), PARAMETER_CAPACITY);
+        assert_eq!(engine.device_handoff.retained_parameters().as_ptr(), storage);
+        assert_eq!(engine.device_handoff.retained_parameter_capacity(), capacity);
         assert_eq!(audit.calls.load(Ordering::Relaxed), 0);
         let EngineEvent::CompensationInvalid { track_id: failed_track, effect_id: failed_effect, reason } = events.pop().unwrap() else { panic!("overflow cause") };
         assert_eq!(failed_track, track_id);
@@ -276,9 +276,9 @@ fn retained_parameter_capacity_coalesces_and_replays_every_entry() {
         }
         let first_owner_roundtrip = resident_identity(&engine, instrument) == identity;
         assert!(first_owner_roundtrip);
-        assert!(engine.pending_device_parameters.is_empty());
-        assert_eq!(engine.pending_device_parameters.as_ptr(), storage);
-        assert_eq!(engine.pending_device_parameters.capacity(), capacity);
+        assert!(engine.device_handoff.retained_parameters().is_empty());
+        assert_eq!(engine.device_handoff.retained_parameters().as_ptr(), storage);
+        assert_eq!(engine.device_handoff.retained_parameter_capacity(), capacity);
         readiness.push(Readiness::observe(&engine));
         assert_eq!(readiness[4], running);
         requested.store(true, Ordering::Release);
@@ -288,7 +288,7 @@ fn retained_parameter_capacity_coalesces_and_replays_every_entry() {
         assert_eq!(invalidated_owner.owner_identity(), identity);
         commands.push(parameter_edit(track_id, effect_id, instrument, 0, 0.125)).unwrap();
         assert_eq!(crate::retirement::tests::allocations(|| engine.drain_commands()), (0, 0));
-        assert_eq!(engine.pending_device_parameters, [(0, 0.125)]);
+        assert_eq!(engine.device_handoff.retained_parameters(), [(0, 0.125)]);
         assert_eq!(audit.calls.load(Ordering::Relaxed), PARAMETER_CAPACITY);
         readiness.push(Readiness::observe(&engine));
         assert_eq!(readiness[5], away);
@@ -323,9 +323,9 @@ fn retained_parameter_capacity_coalesces_and_replays_every_entry() {
             }
         }
         assert_eq!(displaced, 1);
-        assert!(engine.pending_device_parameters.is_empty());
-        assert_eq!(engine.pending_device_parameters.as_ptr(), storage);
-        assert_eq!(engine.pending_device_parameters.capacity(), capacity);
+        assert!(engine.device_handoff.retained_parameters().is_empty());
+        assert_eq!(engine.device_handoff.retained_parameters().as_ptr(), storage);
+        assert_eq!(engine.device_handoff.retained_parameter_capacity(), capacity);
         readiness.push(Readiness::observe(&engine));
         assert_eq!(readiness[6], running);
         invalidated_owner.reconfigure_on_main_thread().unwrap();
@@ -365,9 +365,9 @@ fn retained_parameter_capacity_coalesces_and_replays_every_entry() {
         let replacement_intact = resident_identity(&engine, instrument) == replacement_identity;
         assert!(replacement_intact);
         assert_eq!(std::ptr::from_ref(engine.routing.as_ref()) as usize, replacement_plan_identity);
-        let backing_survived = engine.pending_device_parameters.as_ptr() == storage && engine.pending_device_parameters.capacity() == capacity;
+        let backing_survived = engine.device_handoff.retained_parameters().as_ptr() == storage && engine.device_handoff.retained_parameter_capacity() == capacity;
         assert!(backing_survived);
-        assert!(engine.pending_device_parameters.is_empty());
+        assert!(engine.device_handoff.retained_parameters().is_empty());
         readiness.push(Readiness::observe(&engine));
         assert_eq!(readiness[7], running);
         assert_eq!(order, ["handoff", "overflow-cause", "replay-cause", "original-plan-return", "second-handoff", "accepted-plan-return", "stale-plan-return", "old-owner-retired"]);

@@ -72,7 +72,7 @@ fn reject_worst_case_retirement_is_reserved_before_command_ownership_is_popped()
         });
     }
     engine.tracks.push(Box::new(channel));
-    engine.pending_device_reconfiguration = Some(reconfiguration::PendingDeviceReconfiguration {
+    engine.device_handoff.track_transfer(device_handoff::PendingDeviceReconfiguration {
         local_recovery: false,
         handoff_id: 7,
         track_id: track,
@@ -182,7 +182,7 @@ fn parameter_edits_while_main_holds_the_owner_are_coalesced_and_restored_without
         crate::retirement::tests::allocations(|| engine.drain_commands()),
         (0, 0)
     );
-    assert_eq!(engine.pending_device_parameters, [(0, 0.75), (1, 0.5)]);
+    assert_eq!(engine.device_handoff.retained_parameters(), [(0, 0.75), (1, 0.5)]);
     device.reconfigure_on_main_thread().unwrap();
     commands
         .push(EngineCommand::ResumeDeviceReconfiguration {
@@ -196,7 +196,7 @@ fn parameter_edits_while_main_holds_the_owner_are_coalesced_and_restored_without
     );
     assert_eq!(engine.tracks[0].effects[0].effect.get_param(0), 0.75);
     assert_eq!(engine.tracks[0].effects[0].effect.get_param(1), 0.5);
-    assert!(engine.pending_device_parameters.is_empty());
+    assert!(engine.device_handoff.retained_parameters().is_empty());
 }
 
 #[test]
@@ -241,7 +241,7 @@ fn parameter_intents_do_not_cross_a_replaced_device_lifetime() {
         })
         .unwrap();
     engine.drain_commands();
-    assert!(engine.pending_device_parameters.is_empty());
+    assert!(engine.device_handoff.retained_parameters().is_empty());
     commands
         .push(EngineCommand::ResumeDeviceReconfiguration {
             device,

@@ -38,16 +38,6 @@ impl std::fmt::Debug for DeviceReconfiguration {
     }
 }
 
-#[derive(Clone, Copy)]
-pub(super) struct PendingDeviceReconfiguration {
-    pub handoff_id: u64,
-    pub track_id: TrackId,
-    pub effect_id: Option<EffectId>,
-    pub position: usize,
-    pub bypass: bool,
-    pub local_recovery: bool,
-}
-
 impl DeviceReconfiguration {
     pub fn prepare_effect_storage(&mut self, slots: usize) {
         if let Self::Effect {
@@ -132,7 +122,7 @@ impl AudioEngine {
     }
 
     pub(super) fn is_device_recovering(&self, track: TrackId, effect: Option<EffectId>) -> bool {
-        self.pending_device_reconfiguration.is_some_and(|pending| {
+        self.device_handoff.pending().is_some_and(|pending| {
             pending.local_recovery && pending.track_id == track && pending.effect_id == effect
         })
     }
@@ -142,7 +132,7 @@ impl AudioEngine {
         track: TrackId,
         effect: EffectId,
     ) -> Option<bool> {
-        self.pending_device_reconfiguration
+        self.device_handoff.pending()
             .filter(|pending| {
                 pending.local_recovery
                     && pending.track_id == track
@@ -152,7 +142,7 @@ impl AudioEngine {
     }
 
     pub(super) fn local_device_failure_pending(&self) -> bool {
-        self.pending_device_reconfiguration
+        self.device_handoff.pending()
             .is_some_and(|pending| pending.local_recovery)
             || self
                 .tracks
@@ -314,13 +304,13 @@ impl AudioEngine {
 
     pub(super) fn begin_device_reconfiguration(&mut self) {
         if !self.compensation_plan.applied_plan_is_valid()
-            || self.pending_device_reconfiguration.is_some()
+            || self.device_handoff.pending().is_some()
             || self.compensation_suspended
             || self.compensation_plan.awaiting_structural_plan()
         {
             return;
         }
-        let Some(handoff_id) = self.next_device_handoff.checked_add(1) else {
+        let Some(handoff_id) = self.device_handoff.candidate_identity() else {
             self.close_capture_on_failure();
             self.transport.stop();
             self.presentation_state.terminals.request_playback_stop();
@@ -372,13 +362,13 @@ impl AudioEngine {
             }
         }
         if let Some(device) = requested {
-            self.next_device_handoff = handoff_id;
+            self.device_handoff.record_issued_identity(handoff_id);
             let (position, bypass) = match &device {
                 DeviceReconfiguration::Effect { position, slot, .. } => (*position, slot.bypass),
                 _ => (0, false),
             };
             let local_recovery = device.processing_recovery_requested();
-            self.pending_device_reconfiguration = Some(PendingDeviceReconfiguration {
+            self.device_handoff.track_transfer(device_handoff::PendingDeviceReconfiguration {
                 handoff_id,
                 track_id: device.track_id(),
                 effect_id: device.effect_id(),
@@ -400,7 +390,7 @@ impl AudioEngine {
     }
 
     pub(super) fn handoff_is_current(&self, device: &DeviceReconfiguration) -> bool {
-        self.pending_device_reconfiguration.is_some_and(|pending| {
+        self.device_handoff.pending().is_some_and(|pending| {
             pending.handoff_id == device.handoff_id()
                 && pending.track_id == device.track_id()
                 && pending.effect_id == device.effect_id()
@@ -408,10 +398,7 @@ impl AudioEngine {
     }
 
     pub(super) fn restore_reconfigured_device(&mut self, device: DeviceReconfiguration) -> bool {
-        let pending = self
-            .pending_device_reconfiguration
-            .take()
-            .expect("validated device handoff");
+        let pending = self.device_handoff.take_for_restoration();
         match device {
             DeviceReconfiguration::Effect {
                 track_id,

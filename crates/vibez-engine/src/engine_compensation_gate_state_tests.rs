@@ -190,7 +190,7 @@ fn rejected_plan_and_accepted_recovery_keep_audio_envelopes_across_callback_part
         assert!(!fixture.engine.compensation_plan.applied_plan_is_valid());
         assert!(fixture.engine.compensation_plan.awaiting_structural_plan());
         assert!(!fixture.engine.compensation_suspended);
-        assert!(fixture.engine.pending_device_reconfiguration.is_none());
+        assert!(fixture.engine.device_handoff.pending().is_none());
         assert!(!fixture.engine.presentation_state.is_faulted());
         assert!(!fixture.engine.transport.is_playing());
         assert!(fixture.engine.project_processing_muted());
