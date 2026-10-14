@@ -44,3 +44,29 @@ fn wider_buses_keep_their_real_stride_and_zero_channels_do_not_consume_audio() {
     effect.process(&mut impulse, 2);
     assert_eq!(impulse[128], 0.7);
 }
+
+#[test]
+fn legacy_project_values_keep_their_units_and_append_neutral_character_controls() {
+    let mut effect = create_effect_with_params(EffectType::Drive, 48_000.0, &[0.73, 0.27, 1.4, 0.31]);
+    let descriptors = effect.param_descriptors();
+    assert_eq!(descriptors.len(), 10);
+    for (index, (name, min, max, default, unit)) in [
+        ("Amount", 0.0, 1.0, 0.35, ""), ("Tone", 0.0, 1.0, 0.5, ""),
+        ("Output", 0.0, 2.0, 1.0, "x"), ("Mix", 0.0, 1.0, 1.0, ""),
+        ("Character", 0.0, 3.0, 0.0, ""), ("Quality", 0.0, 2.0, 2.0, ""),
+        ("Pre HP Enabled", 0.0, 1.0, 0.0, ""), ("Pre HP Frequency", 20.0, 1000.0, 80.0, "Hz"),
+        ("Post LP Enabled", 0.0, 1.0, 0.0, ""), ("Post LP Frequency", 1000.0, 20000.0, 12000.0, "Hz"),
+    ].into_iter().enumerate() {
+        let actual = &descriptors[index];
+        assert_eq!((actual.name, actual.min, actual.max, actual.default, actual.unit), (name, min, max, default, unit));
+        if index >= 4 { assert_eq!(effect.get_param(index), default); }
+    }
+    for (index, expected) in [0.73, 0.27, 1.4, 0.31].into_iter().enumerate() {
+        assert_eq!(effect.get_param(index), expected);
+    }
+    for index in 4..10 {
+        assert!(effect.set_param(index, descriptors[index].max));
+        assert_eq!(effect.get_param(index), descriptors[index].max);
+    }
+    assert!(!effect.set_param(10, 0.5));
+}
