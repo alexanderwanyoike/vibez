@@ -27,7 +27,7 @@ fn replacing_unique_legacy_audio_preserves_playing_cursor_and_returns_old_owner_
     commands.push(EngineCommand::Play).unwrap();
     let mut output = [0.0; 16];
     engine.process_block(AudioProcessBlock::new(&mut output, 2));
-    for (frame, actual) in output.as_chunks::<2>().0.iter().enumerate() {
+    for (frame, &actual) in output.as_chunks::<2>().0.iter().enumerate() {
         let position = (frame + 17) as f32;
         assert_eq!(
             actual,
@@ -52,7 +52,7 @@ fn replacing_unique_legacy_audio_preserves_playing_cursor_and_returns_old_owner_
     let measured = crate::retirement::tests::allocations(|| {
         engine.process_block(AudioProcessBlock::new(&mut output, 2));
     });
-    for (frame, actual) in output.as_chunks::<2>().0.iter().enumerate() {
+    for (frame, &actual) in output.as_chunks::<2>().0.iter().enumerate() {
         let position = (frame + 25) as f32;
         assert_eq!(actual, [0.5 + position / 1024.0, -0.75 + position / 2048.0]);
     }
@@ -95,7 +95,7 @@ fn unloading_unique_legacy_audio_preserves_cursor_and_stop_notifications_without
     commands.push(EngineCommand::Play).unwrap();
     let mut output = [0.0; 16];
     engine.process_block(AudioProcessBlock::new(&mut output, 2));
-    for (frame, actual) in output.as_chunks::<2>().0.iter().enumerate() {
+    for (frame, &actual) in output.as_chunks::<2>().0.iter().enumerate() {
         let position = (frame + 23) as f32;
         assert_eq!(
             actual,
@@ -167,7 +167,7 @@ fn unloading_unique_legacy_audio_preserves_cursor_and_stop_notifications_without
 }
 
 fn assert_ramp_block(output: &[f32], position: usize, left: f32, right: f32) {
-    for (frame, actual) in output.as_chunks::<2>().0.iter().enumerate() {
+    for (frame, &actual) in output.as_chunks::<2>().0.iter().enumerate() {
         let position = (position + frame) as f32;
         assert_eq!(
             actual,
