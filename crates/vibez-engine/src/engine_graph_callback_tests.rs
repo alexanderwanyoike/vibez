@@ -57,41 +57,20 @@ fn graph_callbacks_render_each_clock_domain_without_memory_operations_at_hardwar
                     routing_channel(TrackId::MASTER),
                 ];
                 let (mut engine, mut commands, mut events) = graph_engine(&model);
-                commands.push(EngineCommand::add_track(track)).unwrap();
-                commands.push(EngineCommand::add_bus(bus)).unwrap();
+                let mut source = EngineTrack::new(track);
+                source.sends.push((bus, 1.0));
+                if matches!(mode, SourceMode::Arrange) {
+                    source.playback_source.clips.push(source_clip());
+                }
                 commands
-                    .push(EngineCommand::SetSend {
-                        track_id: track,
-                        bus_id: bus,
-                        amount: 1.0,
-                    })
+                    .push(EngineCommand::AddTrack(Box::new(source)))
                     .unwrap();
+                commands.push(EngineCommand::add_bus(bus)).unwrap();
                 commands
                     .push(EngineCommand::SetTrackGain(bus, 0.5))
                     .unwrap();
                 match mode {
-                    SourceMode::Arrange => {
-                        let clip = source_clip();
-                        commands
-                            .push(EngineCommand::AddClip {
-                                track_id: track,
-                                clip_id: clip.id,
-                                audio: clip.audio,
-                                position: clip.position,
-                                source_offset: clip.source_offset,
-                                start_marker: clip.start_marker,
-                                duration: clip.duration,
-                                loop_enabled: clip.loop_enabled,
-                                loop_start: clip.loop_start,
-                                loop_end: clip.loop_end,
-                                linear_gain: clip.linear_gain,
-                                fades: clip.fades,
-                                playback_direction: clip.playback_direction,
-                                warp_markers: clip.warp_markers,
-                            })
-                            .unwrap();
-                        commands.push(EngineCommand::Play).unwrap();
-                    }
+                    SourceMode::Arrange => commands.push(EngineCommand::Play).unwrap(),
                     SourceMode::Section => commands
                         .push(EngineCommand::LaunchSection(Box::new(
                             PreparedSectionPlaybackSource::new(
