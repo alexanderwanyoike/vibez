@@ -176,6 +176,17 @@ impl canvas::Program<Message> for TransferCurve<'_> {
             &canvas::Path::circle(Point::new(x(threshold), y(response(threshold))), 4.0),
             self.accent,
         );
+        frame.fill_text(canvas::Text {
+            content: format!("{threshold:.1} dB"),
+            position: Point::new(
+                (x(threshold) + 8.0).min(area.x + area.width - 72.0).max(area.x + 2.0),
+                (y(response(threshold)) - 8.0).max(area.y + 12.0),
+            ),
+            color: self.accent,
+            size: 9.0.into(),
+            vertical_alignment: iced::alignment::Vertical::Bottom,
+            ..canvas::Text::default()
+        });
         vec![frame.into_geometry()]
     }
     fn update(
