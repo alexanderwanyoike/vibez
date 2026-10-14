@@ -669,6 +669,190 @@ fn cases() -> Vec<Case> {
 }
 
 #[test]
+fn public_add_clip_at_exhausted_capacity_preserves_content_without_callback_heap_work() {
+    use vibez_core::routing::RoutingChannel;
+    use vibez_core::track::{ClipFades, ClipPlaybackDirection};
+    use vibez_core::warp_marker::WarpMarkers;
+
+    let (mut engine, mut commands, mut events) = AudioEngine::new();
+    let track_id = TrackId::new();
+    let resident_id = ClipId::new();
+    let mut resident = add_clip(track_id, resident_id);
+    let EngineCommand::AddClip {
+        audio: resident_audio,
+        duration,
+        linear_gain,
+        ..
+    } = &mut resident
+    else {
+        unreachable!();
+    };
+    let resident_owner = Arc::downgrade(resident_audio);
+    assert_eq!(resident_owner.strong_count(), 1);
+    *duration = 512;
+    *linear_gain = 0.5;
+    commands.push(EngineCommand::add_track(track_id)).unwrap();
+    commands.push(resident).unwrap();
+    commands
+        .push(EngineCommand::SetTrackPan(track_id, 0.0))
+        .unwrap();
+    let channels: Vec<_> = [track_id, TrackId::MASTER]
+        .into_iter()
+        .map(|id| RoutingChannel {
+            id,
+            is_bus: id.is_master(),
+            sends: Vec::new(),
+            effects: Vec::new(),
+        })
+        .collect();
+    commands
+        .push(EngineCommand::SetRouting(
+            crate::routing::PreparedRouting::prepare(&channels, 8).unwrap(),
+        ))
+        .unwrap();
+    engine.process_block(AudioProcessBlock::new(&mut [], 2));
+    while events.pop().is_ok() {}
+
+    let capacity = engine.tracks()[0].playback_source.clips.capacity();
+    assert!(capacity > 0);
+    // Vec growth is not part of the contract. Fill the actual allocation so
+    // the measured insertion must cross its boundary on every allocator.
+    while engine.tracks()[0].playback_source.clips.len() < capacity {
+        let index = engine.tracks()[0].playback_source.clips.len();
+        let mut filler = add_clip(track_id, ClipId::new());
+        let EngineCommand::AddClip {
+            position, duration, ..
+        } = &mut filler
+        else {
+            unreachable!();
+        };
+        *position = 1024 + index as u64 * 64;
+        *duration = 32;
+        commands.push(filler).unwrap();
+        engine.process_block(AudioProcessBlock::new(&mut [], 2));
+        while events.pop().is_ok() {}
+        assert_eq!(engine.tracks()[0].playback_source.clips.capacity(), capacity);
+    }
+    assert_eq!(engine.tracks()[0].playback_source.clips.len(), capacity);
+    let snapshot = |clip: &crate::playback_source::EngineClip| {
+        (
+            clip.id,
+            Arc::as_ptr(&clip.audio),
+            [
+                clip.position,
+                clip.source_offset,
+                clip.start_marker,
+                clip.duration,
+                clip.loop_start,
+                clip.loop_end,
+            ],
+            clip.loop_enabled,
+            clip.linear_gain,
+            clip.fades,
+            clip.playback_direction,
+            clip.warp_markers.as_slice().as_ptr(),
+            clip.warp_markers.clone(),
+        )
+    };
+    let survivors: Vec<_> = engine.tracks()[0]
+        .playback_source
+        .clips
+        .iter()
+        .map(snapshot)
+        .collect();
+    let old_length = survivors
+        .iter()
+        .map(|clip| clip.2[0] + clip.2[3])
+        .max()
+        .unwrap();
+    assert_eq!(engine.transport().audio_length(), Some(old_length));
+    commands.push(EngineCommand::Play).unwrap();
+    let mut output = [0.0; 16];
+    engine.process_block(AudioProcessBlock::new(&mut output, 2));
+    for &[left, right] in output.as_chunks::<2>().0 {
+        assert!((left - 0.125).abs() < 1e-7, "pre-insertion left: {left}");
+        assert_eq!(right, 0.0);
+    }
+    assert_eq!(engine.transport().position(), 8);
+    assert_eq!(engine.transport().audio_length(), Some(old_length));
+    while events.pop().is_ok() {}
+
+    let incoming_id = ClipId::new();
+    let incoming_audio = Arc::new(DecodedAudio {
+        channels: vec![(0..256).map(|frame| frame as f32 / 256.0).collect()],
+        sample_rate: DEFAULT_SAMPLE_RATE,
+    });
+    let incoming_owner = Arc::downgrade(&incoming_audio);
+    assert_eq!(incoming_owner.strong_count(), 1);
+    let mut markers = WarpMarkers::default();
+    assert!(markers.add(39, 64, 7, 135, 128));
+    let marker_allocation = markers.as_slice().as_ptr();
+    let expected_markers = markers.clone();
+    let duration = old_length + 128;
+    let fades = ClipFades::new(2, 3, duration);
+    commands
+        .push(EngineCommand::AddClip {
+            track_id,
+            clip_id: incoming_id,
+            audio: incoming_audio,
+            position: 4,
+            source_offset: 7,
+            start_marker: 15,
+            duration,
+            loop_enabled: true,
+            loop_start: 11,
+            loop_end: 43,
+            linear_gain: 0.5,
+            fades,
+            playback_direction: ClipPlaybackDirection::Forward,
+            warp_markers: markers,
+        })
+        .unwrap();
+
+    let measured = crate::retirement::tests::allocations(|| {
+        engine.process_block(AudioProcessBlock::new(&mut output, 2));
+    });
+
+    let clips = &engine.tracks()[0].playback_source.clips;
+    assert_eq!(clips.len(), capacity + 1);
+    assert_eq!(
+        clips[..capacity].iter().map(snapshot).collect::<Vec<_>>(),
+        survivors
+    );
+    assert_eq!(resident_owner.strong_count(), 1);
+    assert_eq!(Arc::as_ptr(&clips[0].audio), resident_owner.as_ptr());
+    let incoming = &clips[capacity];
+    assert_eq!(incoming.id, incoming_id);
+    assert_eq!(Arc::as_ptr(&incoming.audio), incoming_owner.as_ptr());
+    assert_eq!(incoming_owner.strong_count(), 1);
+    assert_eq!(incoming.position, 4);
+    assert_eq!(incoming.source_offset, 7);
+    assert_eq!(incoming.start_marker, 15);
+    assert_eq!(incoming.duration, duration);
+    assert!(incoming.loop_enabled);
+    assert_eq!((incoming.loop_start, incoming.loop_end), (11, 43));
+    assert_eq!(incoming.linear_gain, 0.5);
+    assert_eq!(incoming.fades, fades);
+    assert_eq!(incoming.playback_direction, ClipPlaybackDirection::Forward);
+    assert_eq!(incoming.warp_markers.as_slice().as_ptr(), marker_allocation);
+    assert_eq!(incoming.warp_markers, expected_markers);
+    for (frame, &[left, right]) in output.as_chunks::<2>().0.iter().enumerate() {
+        // At cursor 8 the Clip-local frame is 4. The first Warp segment maps
+        // source 7 + (start 15 + local 4 - offset 7) / 2 to source 13.
+        let expected = 0.125 + (13.0 + frame as f32 * 0.5) / 256.0 * 0.5;
+        assert!(
+            (left - expected).abs() < 1e-7,
+            "post-insertion frame {frame}: expected {expected}, actual {left}"
+        );
+        assert_eq!(right, 0.0);
+    }
+    assert_eq!(engine.transport().position(), 16);
+    assert!(engine.transport().is_playing());
+    assert_eq!(engine.transport().audio_length(), Some(4 + duration));
+    assert_eq!(measured, (0, 0), "exhausted-capacity AddClip: {measured:?}");
+}
+
+#[test]
 fn every_table_command_drains_without_allocating_unless_named_as_card_04_work() {
     let mut mismatches = Vec::new();
     for case in cases() {
