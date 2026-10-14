@@ -324,3 +324,27 @@ fn current_local_resume_changes_capture_admission_at_its_original_same_drain_bou
     assert_eq!(reconfiguration::effect_owner_identity(&*fixture.engine.tracks[0].effects[0].effect), original);
     report("current-resume", false, true, &calls, &events, &fixture);
 }
+
+#[test]
+fn local_failure_keeps_refusal_priority_then_same_drain_clear_reveals_invalid_plan() {
+    let mut fixture = fixture(true);
+    fixture.commands.push(EngineCommand::insert_built_in_effect(fixture.track, EffectId::new(), EffectType::Gain, DEFAULT_SAMPLE_RATE)).unwrap();
+    fixture.commands.push(EngineCommand::RejectRoutingUpdate { reason: "Capture admission baseline".into() }).unwrap();
+    fixture.engine.drain_commands();
+    while fixture.events.pop().is_ok() {}
+    fixture.controls[0].local.store(true, Ordering::Release);
+    fixture.calls.clear();
+    fixture.commands.push(EngineCommand::StartPerformanceCapture).unwrap();
+    fixture.commands.push(set_local(&fixture, true, false)).unwrap();
+    fixture.commands.push(EngineCommand::StartPerformanceCapture).unwrap();
+    drain(&mut fixture);
+    let calls = fixture.calls.observed();
+    assert_eq!(calls, [111, 120, 110, 210]);
+    let events = collect(&mut fixture);
+    assert_eq!(events.order, ["stop", "refused", "stop", "refused"]);
+    assert_eq!(events.reasons, [LOCAL_REASON, "Capture requires a valid applied audio configuration"]);
+    assert!(!fixture.engine.capture_active);
+    assert!(!fixture.engine.compensation_plan.applied_plan_is_valid());
+    assert!(fixture.engine.compensation_plan.awaiting_structural_plan());
+    report("local-before-invalid", true, true, &calls, &events, &fixture);
+}
