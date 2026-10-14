@@ -101,13 +101,7 @@ impl AudioEffect for GainEffect {
         match index {
             0 => self.gain,
             1 | 2 => self.trim_db[index - 1],
-            3 | 4 => {
-                if self.inverted[index - 3] {
-                    1.0
-                } else {
-                    0.0
-                }
-            }
+            3 | 4 if self.inverted[index - 3] => 1.0,
             _ => 0.0,
         }
     }
