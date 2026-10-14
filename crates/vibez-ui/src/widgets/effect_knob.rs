@@ -33,6 +33,7 @@ const DOUBLE_CLICK_MS: u64 = 300;
 pub enum KnobTarget {
     Effect(EffectId),
     GainDb(EffectId),
+    DriveDb(EffectId),
     LogEffect(EffectId),
     Instrument,
     DrumPad {
@@ -176,6 +177,7 @@ impl EffectKnobWidget {
         match self.target {
             KnobTarget::Effect(effect_id)
             | KnobTarget::GainDb(effect_id)
+            | KnobTarget::DriveDb(effect_id)
             | KnobTarget::LogEffect(effect_id) => {
                 Message::set_effect_param(self.track_id, effect_id, self.param_index, value)
             }
@@ -253,6 +255,9 @@ impl EffectKnobWidget {
 
     /// Normalize value to 0.0..1.0 range.
     fn normalized(&self) -> f32 {
+        if matches!(self.target, KnobTarget::DriveDb(_)) {
+            return crate::domains::drive_values::DriveValue::Amount.position(self.value);
+        }
         if matches!(self.target, KnobTarget::GainDb(_)) {
             return crate::domains::gain::knob_position(self.value);
         }
@@ -269,6 +274,9 @@ impl EffectKnobWidget {
 
     /// Denormalize from 0.0..1.0 to actual value range.
     fn denormalize(&self, n: f32) -> f32 {
+        if matches!(self.target, KnobTarget::DriveDb(_)) {
+            return crate::domains::drive_values::DriveValue::Amount.value(n);
+        }
         if matches!(self.target, KnobTarget::GainDb(_)) {
             return crate::domains::gain::knob_amplitude(n).clamp(self.min, self.max);
         }

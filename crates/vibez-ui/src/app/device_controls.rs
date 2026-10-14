@@ -15,8 +15,22 @@ impl App {
         else {
             return Task::none();
         };
+        let descriptors: Vec<_> = (0..effect.descriptors.len())
+            .map(|index| crate::domains::device_controls::presentation_descriptor(effect, index))
+            .collect();
         let state = self.device_controls.entry(effect_id).or_default();
-        if let Some((index, value)) = state.update(message, effect.descriptors, &effect.params) {
+        let edit = if crate::domains::drive::is_native_drive(effect) {
+            state.update_with_parser(message, &descriptors, &effect.params, |index, text| {
+                if let Some(presentation) = crate::domains::drive::value_presentation(index) {
+                    presentation.parse(text, *effect.params.get(index)?)
+                } else {
+                    crate::domains::device_controls::parse_value(text, descriptors.get(index)?)
+                }
+            })
+        } else {
+            state.update(message, &descriptors, &effect.params)
+        };
+        if let Some((index, value)) = edit {
             return self.update(Message::set_effect_param(track_id, effect_id, index, value));
         }
         Task::none()
