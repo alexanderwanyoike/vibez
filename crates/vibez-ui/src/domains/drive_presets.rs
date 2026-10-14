@@ -14,7 +14,7 @@ pub fn factory_presets() -> Vec<DevicePreset> {
     let gain = crate::domains::drive_values::amount_from_db;
     let amplitude = vibez_core::level::db_to_amplitude;
     let settings: [(&str, Vec<(usize, f32)>); 9] = [
-        ("Init", vec![]),
+        ("Init", vec![(AMOUNT, 0.0)]),
         ("Soft Init", vec![]),
         ("Warm Edge", vec![(AMOUNT, gain(6.0).unwrap()), (TONE, 0.55), (OUTPUT, amplitude(-3.0)), (MIX, 0.8)]),
         ("Drum Bite", vec![(CHARACTER, 2.0), (AMOUNT, gain(16.0).unwrap()), (TONE, 0.6), (OUTPUT, amplitude(-6.0)), (MIX, 0.7), (PRE_HP_ENABLED, 1.0), (PRE_HP_FREQUENCY, 40.0), (POST_LP_ENABLED, 1.0), (POST_LP_FREQUENCY, 16_000.0)]),
