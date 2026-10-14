@@ -53,6 +53,7 @@ impl App {
 
     pub(super) fn reset_device_controls(&mut self) {
         self.device_controls.clear();
+        self.reset_eq_panels();
     }
 
     pub(super) fn device_control_state(&self, effect_id: EffectId) -> &DeviceControlState {

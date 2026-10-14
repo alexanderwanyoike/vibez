@@ -43,6 +43,10 @@ struct App {
     /// Post-effects mono samples from the engine's spectrum tap,
     /// feeding the EQ analyser.
     spectrum_rx: Option<Consumer<f32>>,
+    effect_spectrum_rx: Option<Consumer<vibez_engine::effect_spectrum::EffectSpectrumSample>>,
+    eq_spectrum: crate::domains::eq::EqSpectrumRuntime,
+    eq_panels: std::collections::HashMap<vibez_core::id::EffectId, crate::domains::eq::EqPanel>,
+    empty_eq_panel: crate::domains::eq::EqPanel,
     /// Track the engine tap currently points at, so tick can retarget
     /// it when the selection moves.
     spectrum_tap: Option<vibez_core::id::TrackId>,
@@ -171,6 +175,7 @@ mod device_meters;
 pub(crate) mod device_presets;
 mod drum_rack_preparation;
 mod engine_events;
+mod eq_devices;
 mod gain_devices;
 mod keyboard;
 mod local_watcher;
@@ -256,6 +261,7 @@ impl App {
     fn new() -> (Self, Task<Message>) {
         let (mut engine, cmd_tx, event_rx) = AudioEngine::new();
         let spectrum_rx = engine.take_spectrum_consumer();
+        let effect_spectrum_rx = engine.take_effect_spectrum_consumer();
         let ui_settings = UiSettings::load();
         // Read before the settings are picked apart below, and clamped
         // here rather than at the render site so a hand-edited ui.json
@@ -434,6 +440,10 @@ impl App {
             cmd_tx: crate::domains::EngineCommandQueue::new(cmd_tx),
             event_rx: Some(event_rx),
             spectrum_rx,
+            effect_spectrum_rx,
+            eq_spectrum: Default::default(),
+            eq_panels: Default::default(),
+            empty_eq_panel: Default::default(),
             spectrum_tap: None,
             _stream: Some(output_stream),
             input_bridge,

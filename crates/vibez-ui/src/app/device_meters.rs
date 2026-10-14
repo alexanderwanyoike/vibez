@@ -41,7 +41,7 @@ impl MeterReadings {
 }
 
 fn is_metered_effect(effect: &UiEffect) -> bool {
-    is_native_gain(effect)
+    is_native_gain(effect) || crate::domains::eq::is_native_eq(effect)
 }
 
 impl App {
@@ -96,6 +96,7 @@ impl App {
     /// while disclosure state belongs to the device rather than the subscription.
     pub(super) fn restart_device_metering(&mut self) {
         self.discard_all_device_entries();
+        self.restart_eq_spectrum();
         self.device_meters.generation = self.device_meters.generation.wrapping_add(1);
         for readings in self.device_meters.readings.values_mut() {
             *readings = MeterReadings::default();

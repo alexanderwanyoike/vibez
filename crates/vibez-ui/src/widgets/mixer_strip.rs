@@ -385,10 +385,7 @@ fn effective_send_amount(
 /// outer bands and an IN (bypass) button. The EQ is an ordinary
 /// device on the chain, so automation and persistence come free.
 fn view_strip_eq(track: &ProjectTrack) -> Element<'_, Message> {
-    let eq = track
-        .effects
-        .iter()
-        .find(|e| e.effect_type == EffectType::Eq && e.plugin_ref.is_none());
+    let eq = crate::domains::eq::first_native_eq(track);
 
     let Some(eq) = eq else {
         return container(

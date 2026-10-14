@@ -544,6 +544,7 @@ impl App {
     /// Keep the engine's spectrum tap on the selected track and pump
     /// drained samples through the analyser.
     fn poll_spectrum(&mut self) {
+        self.poll_eq_spectrum();
         let wanted = self.state.arrangement.selected_track;
         if wanted != self.spectrum_tap {
             self.send_command(EngineCommand::SetSpectrumTap(wanted));

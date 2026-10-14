@@ -247,6 +247,7 @@ impl App {
         match message {
             Message::GainControl(message) => return self.update_gain_control(message),
             Message::DeviceControl(message) => return self.update_device_control(message),
+            Message::EqControl(message) => return self.update_eq_control(message),
             Message::DevicePreset(message) => return self.update_device_preset(message),
             Message::ApplyDevicePreset(track_id, effect_id, preset) => {
                 return self.apply_device_preset(track_id, effect_id, preset);
