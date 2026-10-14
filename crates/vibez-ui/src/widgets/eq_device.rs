@@ -6,7 +6,8 @@ use crate::{
     state::UiEffect,
     theme as th,
     widgets::{
-        device_controls::disclosure, eq_device_controls::Controls, eq_display::EqDisplayWidget,
+        device_chrome::section_label, device_controls::disclosure, eq_device_controls::Controls,
+        eq_display::EqDisplayWidget,
     },
 };
 use iced::{
@@ -116,7 +117,10 @@ pub fn view<'a>(
         })
         .width(Length::Fill)
         .height(Length::Fill);
-        let mut plot = row![graph].height(Length::Fill);
+        let response = column![section_label("Response · manual values"), graph]
+            .spacing(3)
+            .height(Length::Fill);
+        let mut plot = row![response].height(Length::Fill);
         if a.side_editor {
             plot = plot
                 .push(iced::widget::vertical_rule(1))
