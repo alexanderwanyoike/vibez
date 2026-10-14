@@ -954,3 +954,7 @@ mod device_observation_tests;
 #[cfg(test)]
 #[path = "engine_device_observation_scan_tests.rs"]
 mod device_observation_scan_tests;
+
+#[cfg(test)]
+#[path = "engine_device_observation_validation_tests.rs"]
+mod device_observation_validation_tests;
