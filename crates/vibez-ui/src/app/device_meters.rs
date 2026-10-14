@@ -179,4 +179,72 @@ mod tests {
         readings.reset_stale(now + Duration::from_millis(250));
         assert_eq!(readings.output, MeterValues::SILENT);
     }
+
+    #[test]
+    fn eq_retains_distinct_input_output_and_clears_both_across_its_lifecycle() {
+        let (mut app, track, _gain, _filter) = metered_app();
+        let _ = app.update(Message::Devices(DevicesMsg::AddEffect(
+            track,
+            EffectType::Eq,
+        )));
+        let eq = app
+            .state
+            .find_track(track)
+            .unwrap()
+            .effects
+            .iter()
+            .find(|effect| crate::domains::eq::is_native_eq(effect))
+            .unwrap()
+            .id;
+        app.poll_device_meters();
+        let input = levels();
+        let output = MeterValues {
+            peak_l: 0.2,
+            peak_r: 0.15,
+            rms_l: 0.1,
+            rms_r: 0.05,
+        };
+        assert_ne!(input, output);
+        let generation = app.device_meters.generation;
+        app.accept_device_meter(track, eq, generation, input, output);
+        let readings = &app.device_meters.readings[&eq];
+        assert_eq!(readings.input, input);
+        assert_eq!(readings.output, output);
+
+        app.restart_device_metering();
+        let readings = &app.device_meters.readings[&eq];
+        assert_eq!(readings.input, MeterValues::SILENT);
+        assert_eq!(readings.output, MeterValues::SILENT);
+        app.accept_device_meter(track, eq, generation, input, output);
+        let readings = &app.device_meters.readings[&eq];
+        assert_eq!(readings.input, MeterValues::SILENT);
+        assert_eq!(readings.output, MeterValues::SILENT);
+
+        let generation = app.device_meters.generation;
+        app.accept_device_meter(track, eq, generation, input, output);
+        app.state.arrangement.selected_track = None;
+        app.poll_device_meters();
+        app.accept_device_meter(track, eq, generation, input, output);
+        let readings = &app.device_meters.readings[&eq];
+        assert_eq!(readings.input, MeterValues::SILENT);
+        assert_eq!(readings.output, MeterValues::SILENT);
+
+        app.state.arrangement.selected_track = Some(track);
+        app.poll_device_meters();
+        app.accept_device_meter(track, eq, generation, input, output);
+        let readings = &app.device_meters.readings[&eq];
+        assert_eq!(readings.input, MeterValues::SILENT);
+        assert_eq!(readings.output, MeterValues::SILENT);
+        let generation = app.device_meters.generation;
+        app.accept_device_meter(track, eq, generation, input, output);
+        let readings = app.device_meters.readings.get_mut(&eq).unwrap();
+        let received_at = readings.last_meter_at.unwrap();
+        readings.reset_stale(received_at + Duration::from_millis(249));
+        assert_eq!(readings.input, input);
+        assert_eq!(readings.output, output);
+        readings.reset_stale(received_at + Duration::from_millis(250));
+        assert_eq!(readings.input, MeterValues::SILENT);
+        assert_eq!(readings.output, MeterValues::SILENT);
+        assert!(readings.last_meter_at.is_none());
+    }
 }
