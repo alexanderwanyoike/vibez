@@ -832,3 +832,114 @@ fn section_refresh_acknowledgement_state_matrix_returns_displaced_or_rejected_ow
         }
     }
 }
+
+#[test]
+fn section_refresh_full_ui_ring_retains_unique_owner_and_allows_fifo_command_progress() {
+    let mut fixture = section_refresh_fixture(64);
+    warm_section_refresh(&mut fixture);
+    let ring_capacity = fixture.engine.event_tx.slots();
+    for _ in 0..ring_capacity {
+        fixture.engine.event_tx.push(EngineEvent::PlaybackStarted).unwrap();
+    }
+    assert!(fixture.engine.event_tx.is_full());
+    let presentation_capacity = fixture.engine.scheduled_presentation.capacity();
+    let retirement_capacity = fixture.engine.pending_retirements.capacity();
+    let incoming = constant_audio(4096, 0.75);
+    let incoming_owner = Arc::downgrade(&incoming);
+    let prepared = section_refresh_source(fixture.track_id, fixture.section_id, incoming);
+    let pointer = &*prepared as *const PreparedSectionPlaybackSource;
+    fixture.commands.push(EngineCommand::RefreshSection(prepared)).unwrap();
+    fixture.commands.push(EngineCommand::SetBpm(137.0)).unwrap();
+    let mut output = [0.0; 64];
+    process_refresh_block(&mut fixture.engine, &mut output);
+    assert_refresh_left_audio(&output, 0.25);
+    assert_eq!(fixture.engine.transport().bpm(), 137.0);
+    assert!(fixture.engine.cmd_rx.peek().is_err(), "a held owner return cannot retain command admission credits");
+    assert_eq!(fixture.engine.active_section.unwrap().position_samples, 128);
+    assert_eq!(fixture.old_owner.strong_count(), 1);
+    assert_eq!(incoming_owner.strong_count(), 1);
+    assert_eq!(Arc::as_ptr(&fixture.engine.tracks()[0].section_playback_source.clips[0].audio), incoming_owner.as_ptr());
+    assert_eq!(fixture.engine.scheduled_presentation.iter().filter(|pending| matches!(&pending.event, EngineEvent::SectionSourceRefreshed { retired, .. } if std::ptr::eq(&**retired, pointer))).count(), 1);
+    assert_eq!(fixture.engine.scheduled_presentation.capacity(), presentation_capacity);
+    assert_eq!(fixture.engine.pending_retirements.capacity(), retirement_capacity);
+    let mut markers = 0;
+    while let Ok(event) = fixture.events.pop() {
+        assert!(matches!(event, EngineEvent::PlaybackStarted));
+        markers += 1;
+    }
+    assert_eq!(markers, ring_capacity);
+    assert_eq!(crate::retirement::tests::allocations(|| fixture.engine.process_block(AudioProcessBlock::new(&mut [], 2))), (0, 0));
+    let notifications: Vec<_> = std::iter::from_fn(|| fixture.events.pop().ok()).collect();
+    let acknowledgements: Vec<_> = notifications.iter().filter_map(|event| match event {
+        EngineEvent::SectionSourceRefreshed { applied: true, effective_at_samples: 96, section_position_samples: Some(96), retired, .. } => Some(retired),
+        _ => None,
+    }).collect();
+    assert_eq!(acknowledgements.len(), 1);
+    assert!(std::ptr::eq(&**acknowledgements[0], pointer));
+    assert!(!notifications.iter().any(|event| matches!(event, EngineEvent::SectionCaptureSource { refreshed: true, .. })));
+    drop(acknowledgements);
+    drop(notifications);
+    assert_eq!(fixture.old_owner.strong_count(), 0);
+    process_refresh_block(&mut fixture.engine, &mut output);
+    assert_refresh_left_audio(&output, 0.25);
+    let capture: Vec<_> = std::iter::from_fn(|| fixture.events.pop().ok()).filter(|event| matches!(event, EngineEvent::SectionCaptureSource { refreshed: true, effective_at_samples: 96, section_position_samples: 96, .. })).collect();
+    assert_eq!(capture.len(), 1);
+    process_refresh_block(&mut fixture.engine, &mut output);
+    assert_refresh_left_audio(&output, 0.75);
+    assert_eq!(fixture.engine.scheduled_presentation.capacity(), presentation_capacity);
+    assert_eq!(fixture.engine.pending_retirements.capacity(), retirement_capacity);
+    while let Ok(event) = fixture.events.pop() {
+        assert!(!matches!(event, EngineEvent::SectionSourceRefreshed { .. } | EngineEvent::SectionCaptureSource { refreshed: true, .. }));
+    }
+}
+
+#[test]
+fn section_refresh_then_public_capture_stop_preserves_owner_and_original_late_feed_deadline() {
+    let mut fixture = section_refresh_fixture(64);
+    warm_section_refresh(&mut fixture);
+    fixture.commands.push(EngineCommand::StartPerformanceCapture).unwrap();
+    let mut output = [0.0; 64];
+    process_refresh_block(&mut fixture.engine, &mut output);
+    assert!(fixture.engine.capture_active);
+    while fixture.events.pop().is_ok() {}
+    let ring_capacity = fixture.engine.event_tx.slots();
+    for _ in 0..ring_capacity {
+        fixture.engine.event_tx.push(EngineEvent::PlaybackStarted).unwrap();
+    }
+    let incoming = constant_audio(4096, 0.75);
+    let prepared = section_refresh_source(fixture.track_id, fixture.section_id, incoming);
+    let pointer = &*prepared as *const PreparedSectionPlaybackSource;
+    let stop_boundary = fixture.engine.heard_capture_position();
+    fixture.commands.push(EngineCommand::RefreshSection(prepared)).unwrap();
+    fixture.commands.push(EngineCommand::StopPerformanceCapture).unwrap();
+    process_refresh_block(&mut fixture.engine, &mut output);
+    assert_refresh_left_audio(&output, 0.25);
+    assert!(!fixture.engine.capture_active);
+    assert!(fixture.engine.transport().is_playing());
+    assert_eq!(fixture.engine.active_section.unwrap().position_samples, 160);
+    assert_eq!(fixture.old_owner.strong_count(), 1);
+    assert!(fixture.engine.scheduled_presentation.iter().any(|pending| pending.due == 192 && matches!(pending.event, EngineEvent::SectionCaptureSource { refreshed: true, effective_at_samples: 128, section_position_samples: 128, .. })), "public Capture stop preserves the already accepted timed feed");
+    let mut markers = 0;
+    while let Ok(event) = fixture.events.pop() {
+        assert!(matches!(event, EngineEvent::PlaybackStarted));
+        markers += 1;
+    }
+    assert_eq!(markers, ring_capacity);
+    assert_eq!(crate::retirement::tests::allocations(|| fixture.engine.process_block(AudioProcessBlock::new(&mut [], 2))), (0, 0));
+    let notifications: Vec<_> = std::iter::from_fn(|| fixture.events.pop().ok()).collect();
+    assert_eq!(notifications.iter().filter(|event| matches!(event, EngineEvent::SectionSourceRefreshed { applied: true, retired, .. } if std::ptr::eq(&**retired, pointer))).count(), 1);
+    let stops: Vec<_> = notifications.iter().filter_map(|event| match event { EngineEvent::PerformanceCaptureStopped { effective_at_samples } => Some(*effective_at_samples), _ => None }).collect();
+    assert_eq!(stops, [stop_boundary]);
+    assert!(!notifications.iter().any(|event| matches!(event, EngineEvent::SectionCaptureSource { refreshed: true, .. })));
+    drop(notifications);
+    assert_eq!(fixture.old_owner.strong_count(), 0);
+    process_refresh_block(&mut fixture.engine, &mut output);
+    assert_refresh_left_audio(&output, 0.25);
+    let notifications: Vec<_> = std::iter::from_fn(|| fixture.events.pop().ok()).collect();
+    assert_eq!(notifications.iter().filter(|event| matches!(event, EngineEvent::SectionCaptureSource { refreshed: true, effective_at_samples: 128, section_position_samples: 128, .. })).count(), 1);
+    assert!(!notifications.iter().any(|event| matches!(event, EngineEvent::PerformanceCaptureStarted { .. } | EngineEvent::SectionSourceRefreshed { .. })));
+    process_refresh_block(&mut fixture.engine, &mut output);
+    assert_refresh_left_audio(&output, 0.75);
+    assert!(!fixture.engine.capture_active);
+    assert_eq!(fixture.engine.active_section.unwrap().position_samples, 224);
+}
