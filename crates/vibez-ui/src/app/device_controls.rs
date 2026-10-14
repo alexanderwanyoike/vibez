@@ -179,4 +179,32 @@ mod tests {
         app.apply_snapshot(snapshot);
         assert_eq!(app.state.find_track(track).unwrap().effects[0].params, before);
     }
+
+    #[test]
+    fn bitcrush_rate_entry_waits_for_a_processor_prepared_at_the_new_host_rate() {
+        let mut app = super::super::test_support::app();
+        app.state.transport.sample_rate = 48_000;
+        app.send_command(EngineCommand::SetSampleRate(48_000));
+        let channel = ProjectTrack::new(TrackId::new(), "Bitcrush".into(), 3);
+        let track = channel.id;
+        Arc::make_mut(&mut app.state.project_tracks).tracks.push(channel);
+        let _ = app.update(Message::Devices(DevicesMsg::AddEffect(track, EffectType::Bitcrush)));
+        let target = &mut app.state.find_track_mut(track).unwrap().effects[0];
+        let effect = target.id;
+        target.params[1] = 4.49;
+        let before = target.params.clone();
+        app.state.project.history = Default::default();
+        app.state.project.dirty = false;
+        app.state.transport.sample_rate = 96_000;
+        app.send_command(EngineCommand::SetSampleRate(96_000));
+        assert!(!app.state.find_track(track).unwrap().effects[0].reconfiguration_failed);
+        let _ = app.update(Message::DeviceControl(DeviceControlMsg::Input(
+            track, effect, 1, "24 kHz".into(),
+        )));
+        let _ = app.update(Message::DeviceControl(DeviceControlMsg::Submit(track, effect, 1)));
+        assert_eq!(app.state.find_track(track).unwrap().effects[0].params, before);
+        assert!(app.device_controls[&effect].errors.contains(&1));
+        assert!(!app.state.project.history.can_undo());
+        assert!(!app.state.project.dirty);
+    }
 }
