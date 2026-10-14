@@ -155,6 +155,14 @@ impl AudioEffect for GateEffect {
     fn supports_level_meter(&self) -> bool { true }
 
     fn take_dynamics_meter(&mut self) -> Option<DynamicsMeter> {
+        if !self.started {
+            let gain = self.gain + (self.expander_gain as f32 - self.gain) * self.applied[param::MODE];
+            self.meter.current_reduction_db = [-20.0 * gain.max(1e-10).log10(); 2];
+            if let Some(gate) = &mut self.meter.gate {
+                gate.open_threshold_db = self.applied[param::THRESHOLD];
+                gate.close_threshold_db = self.applied[param::THRESHOLD] - self.applied[param::HYSTERESIS];
+            }
+        }
         let meter = self.meter;
         self.meter.peak_reduction_db = [0.0; 2];
         self.meter.detector_peak = [0.0; 2];
