@@ -149,7 +149,6 @@ impl BitcrushEffect {
         *target = value;
         true
     }
-
 }
 
 impl Default for BitcrushEffect {

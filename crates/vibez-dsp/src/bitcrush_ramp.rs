@@ -10,10 +10,16 @@ pub(super) struct Ramp {
 
 impl Ramp {
     pub(super) fn new(value: f32) -> Self {
-        Self { value, step: 0.0, remaining: 0 }
+        Self {
+            value,
+            step: 0.0,
+            remaining: 0,
+        }
     }
 
-    pub(super) fn value(&self) -> f32 { self.value }
+    pub(super) fn value(&self) -> f32 {
+        self.value
+    }
 
     pub(super) fn edit(&mut self, target: f32, immediate: bool) {
         if immediate {
@@ -25,9 +31,15 @@ impl Ramp {
     }
 
     pub(super) fn advance(&mut self, target: f32) -> Option<f32> {
-        if self.remaining == 0 { return None; }
+        if self.remaining == 0 {
+            return None;
+        }
         self.remaining -= 1;
-        self.value = if self.remaining == 0 { target } else { self.value + self.step };
+        self.value = if self.remaining == 0 {
+            target
+        } else {
+            self.value + self.step
+        };
         Some(self.value)
     }
 }
