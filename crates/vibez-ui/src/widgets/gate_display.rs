@@ -87,9 +87,9 @@ impl canvas::Program<Message> for EnvelopeHistory<'_> {
             );
             frame.fill_text(canvas::Text {
                 content: if index == 4 {
-                    "0 s".into()
+                    "Latest".into()
                 } else {
-                    format!("-{} s", 4 - index)
+                    format!("-{}", HISTORY_WINDOWS - index * (HISTORY_WINDOWS / 4))
                 },
                 position: Point::new(x, bounds.height - 2.0),
                 color: th::text_dim(),

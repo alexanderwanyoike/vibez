@@ -195,7 +195,7 @@ pub fn view<'a>(
     if layout.plot > 0.0 {
         let short_state = layout.compact || layout.plot < 150.0;
         let mut header =
-            row![section_label("Detector peak · 20 ms windows")].align_y(iced::Alignment::Center);
+            row![section_label("Detector peak · snapshots")].align_y(iced::Alignment::Center);
         if short_state {
             header = header.push(horizontal_space()).push(
                 text(format!(
@@ -214,7 +214,7 @@ pub fn view<'a>(
             panel.history.windows().collect()
         };
         let graph = tooltip(canvas(EnvelopeHistory { track, effect, windows, accent }).width(Length::Fill).height(Length::Fill),
-            text("Detector envelope peak and effective open/close thresholds per 20 ms window. Shading and the lower trace show peak wet attenuation. The three bands mark Open, Hold and Closed presence within each window. Drag vertically to edit Threshold.").size(9),
+            text("Received detector snapshots, nominally 50 Hz. Window durations follow audio buffers; dropped snapshots are omitted. The horizontal axis counts received snapshots. Shading and the lower trace show peak wet attenuation. The three bands mark Open, Hold and Closed presence within each snapshot. Drag vertically to edit Threshold.").size(9),
             tooltip::Position::Top);
         let mut history = row![column![header, graph]
             .spacing(3)
