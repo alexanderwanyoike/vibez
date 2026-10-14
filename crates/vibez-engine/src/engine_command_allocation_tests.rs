@@ -557,7 +557,7 @@ fn cases() -> Vec<Case> {
             param_index: 0,
             value: 0.5,
         }),
-        case!("LoadSamplerSample", true, |commands, f| {
+        case!("LoadSamplerSample", false, |commands, f| {
             prepare_populated_sampler_replacement(commands, f);
         }, |f| C::LoadSamplerSample {
             track_id: f.empty,
