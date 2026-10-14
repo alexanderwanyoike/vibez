@@ -430,11 +430,13 @@ fn cases() -> Vec<Case> {
             "SetClipWarpMarkers",
             false,
             |commands, f| {
-                commands.push(C::SetClipWarpMarkers {
-                    track_id: f.audio,
-                    clip_id: f.clip,
-                    warp_markers: nonempty_warp_markers(),
-                }).unwrap();
+                commands
+                    .push(C::SetClipWarpMarkers {
+                        track_id: f.audio,
+                        clip_id: f.clip,
+                        warp_markers: nonempty_warp_markers(),
+                    })
+                    .unwrap();
             },
             |f| C::SetClipWarpMarkers {
                 track_id: f.audio,
@@ -442,15 +444,19 @@ fn cases() -> Vec<Case> {
                 warp_markers: nonempty_warp_markers(),
             }
         ),
-        case!("SetClipWarpMarkersMissingTrack", false, |f| C::SetClipWarpMarkers {
-            track_id: TrackId::new(),
-            clip_id: f.clip,
-            warp_markers: nonempty_warp_markers(),
+        case!("SetClipWarpMarkersMissingTrack", false, |f| {
+            C::SetClipWarpMarkers {
+                track_id: TrackId::new(),
+                clip_id: f.clip,
+                warp_markers: nonempty_warp_markers(),
+            }
         }),
-        case!("SetClipWarpMarkersMissingClip", false, |f| C::SetClipWarpMarkers {
-            track_id: f.empty_audio,
-            clip_id: f.clip,
-            warp_markers: nonempty_warp_markers(),
+        case!("SetClipWarpMarkersMissingClip", false, |f| {
+            C::SetClipWarpMarkers {
+                track_id: f.empty_audio,
+                clip_id: f.clip,
+                warp_markers: nonempty_warp_markers(),
+            }
         }),
         case!("SetClipBounds", false, |f| C::SetClipBounds {
             track_id: f.audio,

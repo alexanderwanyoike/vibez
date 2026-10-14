@@ -402,7 +402,11 @@ impl PreparedPlaybackSource {
     }
 
     #[must_use = "retire the displaced or rejected marker owner outside the audio callback"]
-    pub fn set_clip_warp_markers(&mut self, clip_id: ClipId, mut warp_markers: WarpMarkers) -> WarpMarkers {
+    pub fn set_clip_warp_markers(
+        &mut self,
+        clip_id: ClipId,
+        mut warp_markers: WarpMarkers,
+    ) -> WarpMarkers {
         if let Some(clip) = self.clips.iter_mut().find(|clip| clip.id == clip_id) {
             std::mem::swap(&mut clip.warp_markers, &mut warp_markers);
         }
