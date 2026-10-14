@@ -149,7 +149,7 @@ impl AudioEffect for GateEffect {
         }
         let detector = inputs
             .iter()
-            .find(|input| input.id == vibez_core::routing::ExternalInputId(0) && input.connected);
+            .find(|input| input.id == vibez_core::routing::ExternalInputId(0) && input.connected && input.channels > 0);
         let ch = channels.min(2);
         let frames = buffer.len() / channels;
         let att = Self::coef(self.params[param::ATTACK], self.sample_rate);
@@ -160,8 +160,9 @@ impl AudioEffect for GateEffect {
         for frame in 0..frames {
             let detected: [f32; 2] = std::array::from_fn(|channel| {
                 let raw = match detector {
-                    Some(input) => input.samples
-                        .get(frame * input.channels + channel.min(input.channels - 1))
+                    Some(input) => frame.checked_mul(input.channels)
+                        .and_then(|offset| offset.checked_add(channel.min(input.channels - 1)))
+                        .and_then(|offset| input.samples.get(offset))
                         .copied().unwrap_or(0.0),
                     None => buffer[frame * channels + channel.min(ch - 1)],
                 };
