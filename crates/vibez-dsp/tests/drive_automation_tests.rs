@@ -79,3 +79,39 @@ fn modern_amount_automation_matches_independent_center_aligned_fir_convolution()
         }
     }
 }
+
+#[test]
+fn manual_character_changes_crossfade_only_the_requested_warm_characters() {
+    let signal: Vec<_> = (0..1280).map(|frame| (0.13 * (frame as f32 * 0.17).sin()) + 0.01).collect();
+    for (from, to) in [(0, 3), (3, 1), (1, 2), (2, 0)] {
+        let build = |character| create_effect_with_params(EffectType::Drive, 48_000.0, &[0.7, 0.5, 1.0, 1.0, character as f32]);
+        let mut moving = build(from);
+        let mut first = build(from);
+        let mut last = build(to);
+        for effect in [&mut moving, &mut first, &mut last] { effect.process(&mut signal[..640].to_vec(), 1); }
+        assert!(moving.set_param(4, to as f32));
+        let mut actual = signal[640..].to_vec();
+        let mut before = actual.clone();
+        let mut after = actual.clone();
+        first.process(&mut before, 1);
+        last.process(&mut after, 1);
+        moving.process(&mut actual[..128], 1);
+        let meter = moving.take_waveshaper_meter().unwrap();
+        let x = 1.0_f32 / 32.0;
+        let gain = 1.0_f32 + 0.7 * 0.7 * 29.0;
+        let shape = |character| {
+            let u = (gain * x).clamp(-1.0, 1.0);
+            let saturated = match character { 2 => 1.5 * u - 0.5 * u * u * u, 3 => u, _ => (gain * x).tanh() / gain.tanh() };
+            0.3 * x + 0.7 * saturated
+        };
+        let weight = 64.0 / 512.0;
+        assert!((meter.transfer[33] - ((1.0 - weight) * shape(from) + weight * shape(to))).abs() < 2e-6, "curve from={from}, to={to}");
+        assert!(moving.set_param(4, to as f32));
+        moving.process(&mut actual[128..], 1);
+        for (frame, actual) in actual.into_iter().enumerate() {
+            let weight = (frame + 1).saturating_sub(64).min(512) as f32 / 512.0;
+            let expected = before[frame] * (1.0 - weight) + after[frame] * weight;
+            assert!((actual - expected).abs() < 3e-6, "from={from}, to={to}, frame={frame}: {actual} != {expected}");
+        }
+    }
+}
