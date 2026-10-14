@@ -199,3 +199,7 @@ impl PartialEq for CompletedClipInsertion {
         self.owner.id == other.owner.id && self.outcome == other.outcome
     }
 }
+
+#[cfg(test)]
+#[path = "clip_insertion_pressure_tests.rs"]
+mod pressure_tests;
