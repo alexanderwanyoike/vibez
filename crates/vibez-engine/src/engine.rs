@@ -834,6 +834,10 @@ pub(crate) mod section_record;
 mod clip_record;
 
 #[cfg(test)]
+#[path = "engine_default_routing_tests.rs"]
+mod default_routing_tests;
+
+#[cfg(test)]
 #[path = "engine_graph_test_support.rs"]
 mod graph_test_support;
 
