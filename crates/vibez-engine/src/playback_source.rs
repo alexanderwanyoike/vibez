@@ -102,6 +102,7 @@ pub struct EngineNoteClip {
     pub loop_end_beats: f64,
     pub groove_grid: GrooveGrid,
     next_same_pitch_start_beats: Vec<Option<f64>>,
+    note_sort_indices: Vec<usize>,
     groove_latch: Cell<Option<(i64, vibez_core::perform::SwingAmount)>>,
 }
 
@@ -139,7 +140,13 @@ impl EngineNoteClip {
         loop_end_beats: f64,
         groove_grid: GrooveGrid,
     ) -> Self {
-        let next_same_pitch_start_beats = build_next_same_pitch_start_beats(&notes);
+        let mut next_same_pitch_start_beats = Vec::with_capacity(notes.len());
+        let mut note_sort_indices = Vec::with_capacity(notes.len());
+        rebuild_next_same_pitch_start_beats(
+            &notes,
+            &mut note_sort_indices,
+            &mut next_same_pitch_start_beats,
+        );
         Self {
             id,
             position_beats,
@@ -151,6 +158,7 @@ impl EngineNoteClip {
             loop_end_beats,
             groove_grid,
             next_same_pitch_start_beats,
+            note_sort_indices,
             groove_latch: Cell::new(None),
         }
     }
@@ -194,6 +202,7 @@ impl EngineNoteClip {
         }
         self.notes.push(note);
         self.next_same_pitch_start_beats.push(next_same_pitch_start);
+        self.note_sort_indices.push(self.notes.len() - 1);
     }
 
     pub(crate) fn remove_note(&mut self, note_index: usize) -> bool {
@@ -215,7 +224,11 @@ impl EngineNoteClip {
     }
 
     fn rebuild_note_end_clamps(&mut self) {
-        self.next_same_pitch_start_beats = build_next_same_pitch_start_beats(&self.notes);
+        rebuild_next_same_pitch_start_beats(
+            &self.notes,
+            &mut self.note_sort_indices,
+            &mut self.next_same_pitch_start_beats,
+        );
     }
 
     pub fn reset_groove_latch(&self) {
@@ -244,13 +257,18 @@ impl EngineNoteClip {
     }
 }
 
-/// Precompute note-off clamps away from the realtime render loop. Notes retain
-/// their caller-visible order; only the temporary index list is sorted.
-fn build_next_same_pitch_start_beats(notes: &[MidiNote]) -> Vec<Option<f64>> {
-    let mut by_descending_start: Vec<_> = (0..notes.len()).collect();
+fn rebuild_next_same_pitch_start_beats(
+    notes: &[MidiNote],
+    by_descending_start: &mut Vec<usize>,
+    result: &mut Vec<Option<f64>>,
+) {
+    by_descending_start.clear();
+    by_descending_start.extend(0..notes.len());
+    // Equal-start notes share one group, so its internal order cannot affect
+    // clamps. Unstable sorting avoids allocating stable-sort scratch.
     by_descending_start
-        .sort_by(|left, right| notes[*right].start_beat.total_cmp(&notes[*left].start_beat));
-    let mut result = vec![None; notes.len()];
+        .sort_unstable_by(|left, right| notes[*right].start_beat.total_cmp(&notes[*left].start_beat));
+    result.resize(notes.len(), None);
     let mut next_by_pitch = [None; 256];
     let mut group_start = 0;
     while group_start < by_descending_start.len() {
@@ -272,7 +290,6 @@ fn build_next_same_pitch_start_beats(notes: &[MidiNote]) -> Vec<Option<f64>> {
         }
         group_start = group_end;
     }
-    result
 }
 
 /// Map a raw timeline frame through the active Arrange loop.
