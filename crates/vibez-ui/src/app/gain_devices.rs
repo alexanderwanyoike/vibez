@@ -62,17 +62,18 @@ impl App {
             });
         if wanted != self.gain_devices.channel {
             self.gain_devices.channel = wanted;
-            self.gain_devices.generation = self.gain_devices.generation.wrapping_add(1);
-            self.gain_devices.panels.clear();
-            self.send_command(EngineCommand::SetEffectMeterChannel {
-                track_id: wanted,
-                generation: self.gain_devices.generation,
-            });
+            self.restart_gain_metering();
         }
+        let project = &self.state.project_tracks;
+        self.gain_devices.panels.retain(|id, _| {
+            project
+                .tracks
+                .iter()
+                .chain(&project.buses)
+                .chain(std::iter::once(&project.master))
+                .any(|track| track.effects.iter().any(|effect| effect.id == *id))
+        });
         if let Some(track) = wanted.and_then(|track_id| self.state.find_track(track_id)) {
-            self.gain_devices
-                .panels
-                .retain(|id, _| track.effects.iter().any(|effect| effect.id == *id));
             let now = Instant::now();
             for effect in &track.effects {
                 if is_native_gain(effect) {
@@ -86,8 +87,9 @@ impl App {
         }
     }
 
-    /// Undo and redo re-add every channel to the engine: metering restarts
-    /// under a new generation while each panel keeps its open controls.
+    /// Metering restarts under a new generation after undo or redo (which
+    /// re-add every channel) and on a channel change, while each panel keeps
+    /// its open controls.
     pub(super) fn restart_gain_metering(&mut self) {
         self.gain_devices.generation = self.gain_devices.generation.wrapping_add(1);
         for panel in self.gain_devices.panels.values_mut() {
@@ -201,6 +203,26 @@ mod tests {
     }
 
     #[test]
+    fn switching_tracks_and_back_keeps_the_open_advanced_controls() {
+        let (mut app, track, effect) = gain_app();
+        let _ = app.update(Message::GainControl(GainMsg::ToggleAdvanced(effect)));
+        let other = ProjectTrack::new(TrackId::new(), "Other".into(), 1);
+        let other_id = other.id;
+        Arc::make_mut(&mut app.state.project_tracks)
+            .tracks
+            .push(other);
+        let _ = app.update(Message::Devices(DevicesMsg::AddEffect(
+            other_id,
+            EffectType::Gain,
+        )));
+        app.state.arrangement.selected_track = Some(other_id);
+        app.poll_gain_devices();
+        app.state.arrangement.selected_track = Some(track);
+        app.poll_gain_devices();
+        assert!(app.gain_devices.panels[&effect].advanced);
+    }
+
+    #[test]
     fn gain_unity_clears_a_stale_input_without_dirtying_an_unchanged_device() {
         let (mut app, track, effect) = gain_app();
         let panel = app.gain_devices.panels.get_mut(&effect).unwrap();
@@ -259,7 +281,7 @@ mod tests {
         assert_eq!(app.gain_devices.panels[&effect].output, levels);
         app.state.arrangement.selected_track = None;
         app.poll_gain_devices();
-        assert!(app.gain_devices.panels.is_empty());
+        assert_eq!(app.gain_devices.panels[&effect].output, MeterValues::SILENT);
         app.state.arrangement.selected_track = Some(track);
         app.poll_gain_devices();
         app.accept_gain_meter(track, effect, stale_generation, levels, levels);
