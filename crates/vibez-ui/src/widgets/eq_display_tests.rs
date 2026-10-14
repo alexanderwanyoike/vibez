@@ -15,6 +15,8 @@ fn wheel_edits_only_mid_band_q_and_preserves_shelf_bell_modes() {
         params: descriptors.iter().map(|d| d.default).collect(),
         descriptors,
         bypass: false,
+        accent: Color::WHITE,
+        selected_band: 0,
         sample_rate: 48_000.0,
         spectrum: Vec::new(),
         spectrum_active: false,

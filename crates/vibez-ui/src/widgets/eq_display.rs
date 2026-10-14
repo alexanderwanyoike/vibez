@@ -57,22 +57,14 @@ const BANDS: [Band; 4] = [
     },
 ];
 
-/// Band color from the current theme, by BANDS index (LF..HF).
-fn band_color(idx: usize) -> Color {
-    match idx {
-        0 => th::eq_lf(),
-        1 => th::eq_lmf(),
-        2 => th::eq_hmf(),
-        _ => th::eq_hf(),
-    }
-}
-
 pub struct EqDisplayWidget {
     pub track_id: TrackId,
     pub effect_id: EffectId,
     pub params: Vec<f32>,
     pub descriptors: &'static [ParamDescriptor],
     pub bypass: bool,
+    pub accent: Color,
+    pub selected_band: usize,
     pub sample_rate: f32,
     /// Smoothed analyser bins in dB (FLOOR_DB..0), log-spaced.
     pub spectrum: Vec<f32>,
@@ -199,6 +191,18 @@ impl canvas::Program<Message> for EqDisplayWidget {
                 canvas::Stroke::default().with_color(grid).with_width(1.0),
             );
         }
+        if h >= 64.0 {
+            for db in [-12.0_f32, 0.0, 12.0] {
+                frame.fill_text(canvas::Text {
+                    content: format!("{db:+.0}"),
+                    position: Point::new(3.0, self.db_to_y(db, h)),
+                    color: th::text_dim(),
+                    size: 8.0.into(),
+                    vertical_alignment: iced::alignment::Vertical::Center,
+                    ..canvas::Text::default()
+                });
+            }
+        }
         // Unity line, slightly brighter.
         let y0 = self.db_to_y(0.0, h);
         frame.stroke(
@@ -246,7 +250,11 @@ impl canvas::Program<Message> for EqDisplayWidget {
         let curve_pts: Vec<Point> = (0..CURVE_POINTS)
             .map(|i| {
                 let pos = i as f32 / (CURVE_POINTS - 1) as f32;
-                let db = eq.response_db(norm_to_freq(pos));
+                let db = if self.bypass {
+                    0.0
+                } else {
+                    eq.response_db(norm_to_freq(pos))
+                };
                 Point::new(pos * w, self.db_to_y(db, h))
             })
             .collect();
@@ -265,7 +273,7 @@ impl canvas::Program<Message> for EqDisplayWidget {
                 &fill,
                 Color {
                     a: 0.10,
-                    ..th::accent()
+                    ..self.accent
                 },
             );
         }
@@ -279,7 +287,7 @@ impl canvas::Program<Message> for EqDisplayWidget {
         let (curve_color, curve_w) = if self.bypass {
             (th::text_muted(), 1.5)
         } else {
-            (th::text(), 2.0)
+            (self.accent, 2.0)
         };
         frame.stroke(
             &curve,
@@ -295,13 +303,29 @@ impl canvas::Program<Message> for EqDisplayWidget {
         for (i, band) in BANDS.iter().enumerate() {
             let p = self.handle_pos(band, bounds);
             let engaged = state.drag == Some(i) || (state.drag.is_none() && state.hover == Some(i));
-            let color = if self.bypass {
+            let color = if self.bypass || self.param(12 + i) < 0.5 {
                 th::text_muted()
             } else {
-                band_color(i)
+                self.accent
             };
             frame.fill(&canvas::Path::circle(p, HANDLE_R), color);
             frame.fill(&canvas::Path::circle(p, HANDLE_R - 2.5), th::bg_dark());
+            frame.fill_text(canvas::Text {
+                content: ["LF", "LMF", "HMF", "HF"][i].into(),
+                position: Point::new(p.x, (p.y - 11.0).max(9.0)),
+                color,
+                size: 8.0.into(),
+                horizontal_alignment: iced::alignment::Horizontal::Center,
+                ..canvas::Text::default()
+            });
+            if self.selected_band == i {
+                frame.stroke(
+                    &canvas::Path::circle(p, HANDLE_R + 2.0),
+                    canvas::Stroke::default()
+                        .with_color(self.accent)
+                        .with_width(1.0),
+                );
+            }
             if engaged {
                 frame.stroke(
                     &canvas::Path::circle(p, HANDLE_R + 2.0),
@@ -402,7 +426,14 @@ impl canvas::Program<Message> for EqDisplayWidget {
                         }
                         state.drag = Some(band_idx);
                         state.undo_gesture = Some(UndoGestureId::new());
-                        return (canvas::event::Status::Captured, None);
+                        return (
+                            canvas::event::Status::Captured,
+                            Some(Message::EqControl(crate::domains::eq::EqMsg::SelectBand(
+                                self.track_id,
+                                self.effect_id,
+                                band_idx,
+                            ))),
+                        );
                     }
                 }
             }
