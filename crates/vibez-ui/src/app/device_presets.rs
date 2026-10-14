@@ -10,6 +10,10 @@ use crate::domains::device_presets::{DevicePresetMsg, PresetLoadRequest, PresetS
 #[path = "device_preset_flow_tests.rs"]
 mod flow_tests;
 
+#[cfg(test)]
+#[path = "drive_preset_flow_tests.rs"]
+mod drive_flow_tests;
+
 /// Preset state for every device: the remembered selection and the file
 /// dialogs in flight, whose late completions must not touch a changed device.
 #[derive(Default)]

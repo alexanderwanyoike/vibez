@@ -1,0 +1,90 @@
+//! Verifies Drive sound files preserve destination identity and undo through the shared preset flow.
+
+use super::*;
+use crate::domains::{device_presets, devices::DevicesMsg};
+use crate::state::ProjectTrack;
+use vibez_core::{automation::{AutomationLane, AutomationTarget}, effect::EffectType};
+
+fn drive_app(channel: usize) -> (App, TrackId, EffectId) {
+    let mut app = super::super::test_support::app();
+    let send_bus = ProjectTrack::new(TrackId::new(), "Parallel return".into(), 2);
+    let send_bus_id = send_bus.id;
+    Arc::make_mut(&mut app.state.project_tracks).buses.push(send_bus);
+    let track_id = if channel == 2 {
+        app.state.project_tracks.master.id
+    } else {
+        let track = ProjectTrack::new(TrackId::new(), "Driven".into(), 3);
+        let id = track.id;
+        let project = Arc::make_mut(&mut app.state.project_tracks);
+        if channel == 0 { project.tracks.push(track); } else { project.buses.push(track); }
+        id
+    };
+    for kind in [EffectType::Gain, EffectType::Drive, EffectType::Gain] {
+        let _ = app.update(Message::Devices(DevicesMsg::AddEffect(track_id, kind)));
+    }
+    let track = app.state.find_track_mut(track_id).unwrap();
+    track.gain = 0.7;
+    track.pan = -0.2;
+    if channel != 2 { track.sends.push((send_bus_id, 0.3)); }
+    let effect = &mut track.effects[1];
+    effect.params[0] = 0.731_273;
+    effect.bypass = true;
+    let effect_id = effect.id;
+    app.state.arrange_content_mut(track_id).automation.push(AutomationLane::new(AutomationTarget::EffectParam { effect_id, param_index: 0 }));
+    app.state.project.history = Default::default();
+    app.state.project.dirty = false;
+    (app, track_id, effect_id)
+}
+
+#[tokio::test]
+async fn drive_factory_files_preserve_each_channel_owner_and_undo_as_one_sound_edit() {
+    let factories = device_presets::factory_presets(EffectType::Drive);
+    assert_eq!(factories.len(), 9);
+    let folder = tempfile::tempdir().unwrap();
+    for channel in 0..3 {
+        let (mut app, track, effect) = drive_app(channel);
+        for factory in &factories {
+            app.state.project.history = Default::default();
+            let before = app.state.find_track(track).unwrap().clone();
+            let automation = app.state.arrange_content(track).unwrap().automation.clone();
+            let path = folder.path().join("Drive.vzpreset");
+            let saved = tasks::save_device_preset_at(path.clone(), factory.clone()).await.unwrap();
+            let loaded = vibez_project::device_preset::load_device_preset(&path).unwrap();
+            assert_eq!(saved, loaded);
+            let request = app.begin_device_preset_load(track, effect).unwrap();
+            let _ = app.finish_device_preset_load(request, Ok(loaded.clone()));
+            let after = app.state.find_track(track).unwrap();
+            assert_eq!(after.effects.iter().map(|effect| effect.id).collect::<Vec<_>>(), before.effects.iter().map(|effect| effect.id).collect::<Vec<_>>());
+            assert_eq!((after.gain, after.pan, &after.sends), (before.gain, before.pan, &before.sends));
+            assert_eq!(after.effects[1].bypass, before.effects[1].bypass);
+            assert_eq!(after.effects[1].sidechains, before.effects[1].sidechains);
+            assert_eq!(after.effects[1].external_inputs, before.effects[1].external_inputs);
+            assert_eq!(after.effects[1].latency_samples, Some(64));
+            assert_eq!(app.state.arrange_content(track).unwrap().automation, automation);
+            assert_eq!(device_presets::capture(&after.effects[1], loaded.name()).unwrap(), loaded);
+            let request = app.begin_device_preset_load(track, effect).unwrap();
+            let _ = app.finish_device_preset_load(request, Ok(loaded));
+            let snapshot = app.state.project.history.pop_undo().expect("one sound edit");
+            assert!(!app.state.project.history.can_undo(), "same sound added history");
+            app.apply_snapshot(snapshot);
+            assert_eq!(app.state.find_track(track).unwrap().effects[1].params, before.effects[1].params);
+        }
+    }
+}
+
+#[test]
+fn drive_factory_catalogue_has_neutral_legacy_init_explicit_modern_init_and_concept_values() {
+    let presets = device_presets::factory_presets(EffectType::Drive);
+    let preset = |name: &str| presets.iter().find(|preset| preset.name() == name).unwrap();
+    assert_eq!(presets.len(), 9);
+    let mut names: Vec<_> = presets.iter().map(|preset| preset.name()).collect();
+    names.sort_unstable(); names.dedup(); assert_eq!(names.len(), presets.len());
+    assert_eq!(preset("Init").parameters()["character"], 0.0);
+    assert_eq!(preset("Soft Init").parameters()["character"], 1.0);
+    for modern in presets.iter().filter(|preset| preset.name() != "Init") { assert_eq!(modern.parameters()["quality"], 2.0); }
+    let warm = preset("Warm Edge").parameters();
+    assert!((crate::domains::drive_values::amount_db(warm["amount"]) - 6.0).abs() < 1e-5);
+    assert_eq!(warm["tone"], 0.55);
+    assert_eq!(warm["mix"], 0.8);
+    assert!((20.0 * warm["output"].log10() + 3.0).abs() < 1e-5);
+}
