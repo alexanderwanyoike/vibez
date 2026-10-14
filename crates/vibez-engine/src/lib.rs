@@ -1,3 +1,6 @@
+//! Public real-time engine commands, rendering and prepared ownership protocols.
+
+pub mod clip_insertion;
 pub mod commands;
 pub mod compensation;
 pub mod compensation_clock;
