@@ -245,3 +245,95 @@ async fn real_bitcrush_file_failures_and_stale_completions_never_partially_apply
     assert!(!app.state.project.history.can_undo());
     assert!(!app.state.project.dirty);
 }
+
+#[tokio::test]
+async fn legacy_three_value_projects_hydrate_edit_and_undo_appended_controls_on_every_owner() {
+    use crate::domains::device_controls::DeviceControlMsg;
+
+    const LEGACY: [f32; 3] = [8.75, 4.49, 0.37];
+    const HYDRATED: [f32; 9] = [8.75, 4.49, 0.37, 0.0, 0.0, 0.0, 0.0, 0.0, 12_000.0];
+    let folder = tempfile::Builder::new().prefix(".bitcrush-legacy-project-")
+        .tempdir_in(std::env::current_dir().unwrap()).unwrap();
+    for owner in [Owner::Track, Owner::Return, Owner::Master] {
+        let (mut app, track, effect) = owner_app(owner);
+        app.state.find_track_mut(track).unwrap().effects[1].params = LEGACY.to_vec();
+        for extension in ["vibez", "vzp"] {
+            let path = folder.path().join(format!("Legacy-{owner:?}.{extension}"));
+            super::super::super::save_project_async(path.clone(), None, app.project_for_save()).await.unwrap();
+            let loaded = super::super::super::load_project_async(path, None).await.unwrap();
+            let saved_channel = loaded.project.tracks.iter().chain(&loaded.project.buses)
+                .chain(loaded.project.master.iter()).find(|channel| channel.id == track).unwrap();
+            assert_eq!(saved_channel.effects.iter().find(|slot| slot.id == effect).unwrap().params,
+                LEGACY, "{owner:?} .{extension}: the file really contains only three values");
+            let mut restored = super::super::super::test_support::app();
+            restored.state.transport.sample_rate = 96_000;
+            restored.send_command(EngineCommand::SetSampleRate(96_000));
+            restored.rebuild_from_loaded_project(loaded);
+            let target = &restored.state.find_track(track).unwrap().effects[1];
+            assert_eq!(target.id, effect);
+            assert_eq!(target.params, HYDRATED, "{owner:?} .{extension}: frozen neutral defaults");
+            assert!(target.bypass);
+            assert_eq!(target.latency_samples, Some(0));
+            assert_eq!(restored.cmd_tx.prepared_effect_sample_rate(track, effect), Some(96_000));
+            assert!(!restored.state.project.dirty, "merely opening an old sound is not an edit");
+            assert!(!restored.state.project.history.can_undo());
+            assert!(restored.state.project.history.redo.is_empty());
+            for index in 3..9 {
+                let presentation = restored.device_parameter_presentation(track, effect, index).unwrap();
+                assert!(presentation.is_editable(), "{owner:?} .{extension}: appended index{index}");
+                assert!(presentation.range.is_some());
+            }
+            for (index, shown, unit) in [
+                (param::DRIVE_DB, "0.00", "dB"),
+                (param::JITTER, "0", "%"),
+                (param::POST_LP_HZ, "12.00k", "Hz"),
+            ] {
+                let presentation = restored.device_parameter_presentation(track, effect, index).unwrap();
+                assert_eq!(presentation.value.as_deref(), Some(shown));
+                assert_eq!(presentation.unit, unit);
+            }
+            assert!(!restored.state.project.dirty);
+            assert!(!restored.state.project.history.can_undo());
+            for (index, value, numeric) in [
+                (param::DRIVE_DB, 6.0, Some("6 dB")),
+                (param::ROUNDING, 2.0, None),
+                (param::DITHER, 1.0, None),
+                (param::JITTER, 0.35, Some("35 %")),
+                (param::POST_LP_ENABLED, 1.0, None),
+                (param::POST_LP_HZ, 3500.0, Some("3.5 kHz")),
+            ] {
+                if let Some(text) = numeric {
+                    let _ = restored.update(Message::DeviceControl(DeviceControlMsg::Input(
+                        track, effect, index, text.into(),
+                    )));
+                    let _ = restored.update(Message::DeviceControl(DeviceControlMsg::Submit(track, effect, index)));
+                    assert!(restored.device_controls[&effect].errors.is_empty());
+                } else {
+                    let _ = restored.update(Message::set_effect_param(track, effect, index, value));
+                }
+                let mut edited = HYDRATED;
+                edited[index] = value;
+                assert_eq!(restored.state.find_track(track).unwrap().effects[1].params, edited,
+                    "{owner:?} .{extension}: appended index{index} must be editable");
+                assert_eq!(restored.state.project.history.undo.len(), 1);
+                let _ = restored.update(Message::Project(ProjectMsg::Undo));
+                assert_eq!(restored.state.find_track(track).unwrap().effects[1].params, HYDRATED);
+                assert!(!restored.state.project.history.can_undo());
+            }
+            let factory = device_presets::factory_presets(EffectType::Bitcrush).remove(5);
+            let expected: Vec<_> = KEYS.iter().map(|key| factory.parameters()[*key]).collect();
+            let request = restored.begin_device_preset_load(track, effect).unwrap();
+            let _ = restored.update(Message::DevicePreset(DevicePresetMsg::Loaded(request, Ok(Some(factory)))));
+            assert_eq!(restored.state.find_track(track).unwrap().effects[1].params, expected);
+            assert_eq!(restored.state.project.history.undo.len(), 1);
+            assert!(restored.state.project.history.redo.is_empty());
+            let _ = restored.update(Message::Project(ProjectMsg::Undo));
+            let target = &restored.state.find_track(track).unwrap().effects[1];
+            assert_eq!(target.id, effect);
+            assert_eq!(target.params, HYDRATED, "{owner:?} .{extension}: preset Undo restores old sound and defaults");
+            assert!(target.bypass);
+            assert_eq!(restored.cmd_tx.prepared_effect_sample_rate(track, effect), Some(96_000));
+            assert!(!restored.state.project.history.can_undo());
+        }
+    }
+}
