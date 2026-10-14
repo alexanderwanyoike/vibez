@@ -14,19 +14,43 @@ pub(super) fn coefficients(
     resonance: f32,
     mode: f32,
 ) -> Coefficients {
+    let mode = mode.round().clamp(0.0, 3.0) as usize;
+    coefficients_for_weights(
+        sample_rate,
+        cutoff,
+        resonance,
+        std::array::from_fn(|index| if index == mode { 1.0 } else { 0.0 }),
+    )
+}
+
+pub(super) fn coefficients_for_weights(
+    sample_rate: f32,
+    cutoff: f32,
+    resonance: f32,
+    weights: [f32; 4],
+) -> Coefficients {
     let omega = TAU * cutoff.clamp((sample_rate * 0.001).min(1.0), sample_rate * 0.49) as f64
         / sample_rate as f64;
     let (sin, cos) = omega.sin_cos();
     let alpha = sin / (2.0 * resonance as f64);
-    let b = match mode.round().clamp(0.0, 3.0) as u8 {
-        1 => [(1.0 + cos) * 0.5, -(1.0 + cos), (1.0 + cos) * 0.5],
-        2 => [alpha, 0.0, -alpha],
-        3 => [1.0, -2.0 * cos, 1.0],
-        _ => [(1.0 - cos) * 0.5, 1.0 - cos, (1.0 - cos) * 0.5],
-    };
+    // These four topologies share poles, so numerator weights can morph them
+    // without maintaining extra signal paths or passing through another mode.
+    let numerators = [
+        [(1.0 - cos) * 0.5, 1.0 - cos, (1.0 - cos) * 0.5],
+        [(1.0 + cos) * 0.5, -(1.0 + cos), (1.0 + cos) * 0.5],
+        [alpha, 0.0, -alpha],
+        [1.0, -2.0 * cos, 1.0],
+    ];
     let a0 = 1.0 + alpha;
     Coefficients {
-        b: b.map(|value| value / a0),
+        b: std::array::from_fn(|coefficient| {
+            numerators
+                .iter()
+                .zip(weights)
+                .map(|(b, weight)| b[coefficient] * weight as f64)
+                .sum::<f64>()
+                / a0
+        }),
         a: [-2.0 * cos / a0, (1.0 - alpha) / a0],
     }
 }

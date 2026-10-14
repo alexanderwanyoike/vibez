@@ -156,11 +156,65 @@ impl BiquadState {
     }
 }
 
+struct ChoiceRamp<const N: usize> {
+    weights: [f32; N],
+    steps: [f32; N],
+    target: usize,
+    remaining: u32,
+}
+
+impl<const N: usize> ChoiceRamp<N> {
+    fn new() -> Self {
+        Self {
+            weights: std::array::from_fn(|index| if index == 0 { 1.0 } else { 0.0 }),
+            steps: [0.0; N],
+            target: 0,
+            remaining: 0,
+        }
+    }
+
+    fn set_target(&mut self, target: usize, smooth: bool) {
+        self.target = target;
+        let target_weights =
+            std::array::from_fn::<_, N, _>(|index| if index == target { 1.0 } else { 0.0 });
+        if smooth {
+            self.steps = std::array::from_fn(|index| {
+                (target_weights[index] - self.weights[index]) / RAMP_FRAMES as f32
+            });
+            self.remaining = RAMP_FRAMES;
+        } else {
+            self.weights = target_weights;
+            self.remaining = 0;
+        }
+    }
+
+    fn advance(&mut self) -> bool {
+        if self.remaining == 0 {
+            return false;
+        }
+        self.remaining -= 1;
+        for index in 0..N {
+            self.weights[index] = if self.remaining == 0 {
+                if index == self.target {
+                    1.0
+                } else {
+                    0.0
+                }
+            } else {
+                self.weights[index] + self.steps[index]
+            };
+        }
+        true
+    }
+}
+
 pub struct FilterEffect {
     targets: [f32; param::COUNT],
     applied: [f32; param::COUNT],
     steps: [f32; param::COUNT],
     ramp_remaining: u32,
+    mode: ChoiceRamp<4>,
+    source: ChoiceRamp<3>,
     sample_rate: f32,
     coefficients: [Coefficients; 2],
     state: [[BiquadState; 2]; 2],
@@ -194,6 +248,8 @@ impl FilterEffect {
             applied: targets,
             steps: [0.0; param::COUNT],
             ramp_remaining: 0,
+            mode: ChoiceRamp::new(),
+            source: ChoiceRamp::new(),
             sample_rate,
             coefficients: [coefficients; 2],
             state: [[BiquadState::default(); 2]; 2],
@@ -230,22 +286,22 @@ impl FilterEffect {
 
     fn update_coefficients(&mut self) {
         for channel in 0..2 {
-            let modulation = match self.applied[param::MOD_SOURCE].round() as u8 {
-                1 => {
-                    let phase = self.phase
-                        + channel as f64 * self.applied[param::STEREO_PHASE] as f64 / 360.0;
-                    (std::f64::consts::TAU * phase).sin() as f32
-                }
-                2 => self.envelopes[channel].min(1.0),
-                _ => 0.0,
+            let phase =
+                self.phase + channel as f64 * self.applied[param::STEREO_PHASE] as f64 / 360.0;
+            let lfo = if self.source.weights[1] > 0.0 {
+                (std::f64::consts::TAU * phase).sin() as f32
+            } else {
+                0.0
             };
+            let modulation = self.source.weights[1] * lfo
+                + self.source.weights[2] * self.envelopes[channel].min(1.0);
             let cutoff =
                 self.applied[param::CUTOFF] * (modulation * self.applied[param::DEPTH]).exp2();
-            self.coefficients[channel] = response::coefficients(
+            self.coefficients[channel] = response::coefficients_for_weights(
                 self.sample_rate,
                 cutoff,
                 self.applied[param::RESONANCE],
-                self.applied[param::MODE],
+                self.mode.weights,
             );
         }
         self.coefficient_countdown = COEFFICIENT_INTERVAL;
@@ -253,6 +309,12 @@ impl FilterEffect {
     }
 
     fn advance_controls(&mut self, input: &[f32]) {
+        let mode_changed = self.mode.advance();
+        let source_changed = self.source.advance();
+        if mode_changed || source_changed {
+            self.coefficients_dirty = true;
+            self.coefficient_countdown = 0;
+        }
         if self.ramp_remaining > 0 {
             self.coefficients_dirty = true;
             self.ramp_remaining -= 1;
@@ -264,7 +326,7 @@ impl FilterEffect {
                 };
             }
         }
-        if self.applied[param::MOD_SOURCE] == 2.0 {
+        if self.source.weights[2] > 0.0 {
             for (channel, envelope) in self.envelopes.iter_mut().enumerate() {
                 let amplitude = input.get(channel).copied().unwrap_or(0.0).abs();
                 let time = if amplitude > *envelope {
@@ -276,7 +338,8 @@ impl FilterEffect {
                 *envelope = amplitude + coefficient * (*envelope - amplitude);
             }
         }
-        let modulated = self.applied[param::MOD_SOURCE] > 0.0 && self.applied[param::DEPTH] > 0.0;
+        let modulated = (self.source.weights[1] > 0.0 || self.source.weights[2] > 0.0)
+            && self.applied[param::DEPTH] > 0.0;
         if self.coefficient_countdown == 0 && (self.coefficients_dirty || modulated) {
             self.update_coefficients();
         }
@@ -309,12 +372,20 @@ impl AudioEffect for FilterEffect {
         if !self.set_target(index, value) {
             return false;
         }
+        if index == param::MODE {
+            self.mode
+                .set_target(self.targets[index] as usize, self.started);
+        }
+        if index == param::MOD_SOURCE {
+            self.source
+                .set_target(self.targets[index] as usize, self.started);
+        }
         if self.started {
             for parameter in 0..param::COUNT {
                 self.steps[parameter] =
                     (self.targets[parameter] - self.applied[parameter]) / RAMP_FRAMES as f32;
             }
-            // Discrete choices retain stable coefficient topologies during the ramp.
+            // Choice weights morph directly between endpoints; enum indices never interpolate.
             for parameter in [param::MODE, param::MOD_SOURCE, param::SYNC] {
                 self.applied[parameter] = self.targets[parameter];
                 self.steps[parameter] = 0.0;
@@ -331,6 +402,12 @@ impl AudioEffect for FilterEffect {
     fn set_automated_param(&mut self, index: usize, value: f32) -> bool {
         if !self.set_target(index, value) {
             return false;
+        }
+        if index == param::MODE {
+            self.mode.set_target(self.targets[index] as usize, false);
+        }
+        if index == param::MOD_SOURCE {
+            self.source.set_target(self.targets[index] as usize, false);
         }
         self.applied[index] = self.targets[index];
         self.steps[index] = 0.0;
@@ -386,6 +463,10 @@ impl AudioEffect for FilterEffect {
         self.envelopes = [0.0; 2];
         self.phase = 0.0;
         self.applied = self.targets;
+        self.mode
+            .set_target(self.targets[param::MODE] as usize, false);
+        self.source
+            .set_target(self.targets[param::MOD_SOURCE] as usize, false);
         self.ramp_remaining = 0;
         self.coefficient_countdown = 0;
         self.coefficients_dirty = true;
