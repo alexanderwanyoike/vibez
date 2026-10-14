@@ -560,7 +560,12 @@ fn partial_terminal_publication_preserves_each_full_boundary_and_exact_overflow_
         fixture.drain_events();
         let capture_stop = fixture.engine.compensation_callback_heard_start;
         let plan = std::ptr::from_ref(fixture.engine.routing.as_ref());
-        while fixture.engine.event_tx.push(EngineEvent::PlaybackPosition(0)).is_ok() {}
+        while fixture
+            .engine
+            .event_tx
+            .push(EngineEvent::PlaybackPosition(0))
+            .is_ok()
+        {}
         for _ in 0..fixture.engine.scheduled_presentation.capacity() {
             fixture.engine.present_event_at(
                 EngineEvent::PlaybackStarted,
@@ -576,17 +581,22 @@ fn partial_terminal_publication_preserves_each_full_boundary_and_exact_overflow_
             offsets: Arc::clone(&offsets),
         };
         assert_eq!(
-            crate::retirement::tests::allocations(|| fixture.engine.present_event_at(
-                discovering,
-                fixture.engine.output_position + 521,
-            )),
+            crate::retirement::tests::allocations(|| fixture
+                .engine
+                .present_event_at(discovering, fixture.engine.output_position + 521,)),
             (0, 0)
         );
-        assert_eq!(fixture.engine.presentation_state.terminals.occupied_slots(), 4);
+        assert_eq!(
+            fixture.engine.presentation_state.terminals.occupied_slots(),
+            4
+        );
         assert!(fixture.engine.presentation_state.is_faulted());
         assert_eq!(Arc::strong_count(&offsets), 2);
         for _ in 0..credits {
-            assert!(matches!(fixture.events.pop().unwrap(), EngineEvent::PlaybackPosition(0)));
+            assert!(matches!(
+                fixture.events.pop().unwrap(),
+                EngineEvent::PlaybackPosition(0)
+            ));
         }
         assert_eq!(fixture.engine.event_tx.slots(), credits);
         assert_eq!(
@@ -594,10 +604,31 @@ fn partial_terminal_publication_preserves_each_full_boundary_and_exact_overflow_
             (0, 0)
         );
         assert_eq!(fixture.engine.event_tx.slots(), 0);
-        assert_eq!(fixture.engine.presentation_state.terminals.occupied_slots(), 4 - credits);
-        assert_eq!(fixture.engine.presentation_state.terminals.capture_stop(), (credits == 0).then_some(capture_stop));
-        assert_eq!(fixture.engine.presentation_state.terminals.failure().is_some(), credits < 2);
-        assert_eq!(fixture.engine.presentation_state.terminals.playback_stop_pending(), credits < 3);
+        assert_eq!(
+            fixture.engine.presentation_state.terminals.occupied_slots(),
+            4 - credits
+        );
+        assert_eq!(
+            fixture.engine.presentation_state.terminals.capture_stop(),
+            (credits == 0).then_some(capture_stop)
+        );
+        assert_eq!(
+            fixture
+                .engine
+                .presentation_state
+                .terminals
+                .failure()
+                .is_some(),
+            credits < 2
+        );
+        assert_eq!(
+            fixture
+                .engine
+                .presentation_state
+                .terminals
+                .playback_stop_pending(),
+            credits < 3
+        );
         match fixture.engine.presentation_state.terminals.overflow_owner() {
             Some(EngineEvent::CaptureTimingRetired(owner)) => {
                 assert!(credits < 4);
@@ -611,7 +642,10 @@ fn partial_terminal_publication_preserves_each_full_boundary_and_exact_overflow_
             crate::retirement::tests::allocations(|| fixture.engine.flush_presentation()),
             (0, 0)
         );
-        assert_eq!(fixture.engine.presentation_state.terminals.occupied_slots(), 4 - credits);
+        assert_eq!(
+            fixture.engine.presentation_state.terminals.occupied_slots(),
+            4 - credits
+        );
         assert_eq!(Arc::strong_count(&offsets), 2);
         let mut delivered: Vec<_> = std::iter::from_fn(|| fixture.events.pop().ok())
             .filter(|event| !matches!(event, EngineEvent::PlaybackPosition(0)))
@@ -622,24 +656,43 @@ fn partial_terminal_publication_preserves_each_full_boundary_and_exact_overflow_
             (0, 0)
         );
         delivered.extend(std::iter::from_fn(|| fixture.events.pop().ok()));
-        let order: Vec<_> = delivered.iter().map(|event| match event {
-            EngineEvent::PerformanceCaptureStopped { effective_at_samples } => {
-                assert_eq!(*effective_at_samples, capture_stop);
-                "capture-stop"
-            }
-            EngineEvent::CompensationInvalid { track_id, effect_id, reason } => {
-                assert_eq!((*track_id, *effect_id, *reason), (TrackId::MASTER, None, "Audio presentation event history is full"));
-                "cause"
-            }
-            EngineEvent::PlaybackStopped => "playback-stop",
-            EngineEvent::CaptureTimingRetired(owner) => {
-                assert!(Arc::ptr_eq(owner, &offsets));
-                "owner"
-            }
-            event => panic!("unexpected partial terminal: {event:?}"),
-        }).collect();
+        let order: Vec<_> = delivered
+            .iter()
+            .map(|event| match event {
+                EngineEvent::PerformanceCaptureStopped {
+                    effective_at_samples,
+                } => {
+                    assert_eq!(*effective_at_samples, capture_stop);
+                    "capture-stop"
+                }
+                EngineEvent::CompensationInvalid {
+                    track_id,
+                    effect_id,
+                    reason,
+                } => {
+                    assert_eq!(
+                        (*track_id, *effect_id, *reason),
+                        (
+                            TrackId::MASTER,
+                            None,
+                            "Audio presentation event history is full"
+                        )
+                    );
+                    "cause"
+                }
+                EngineEvent::PlaybackStopped => "playback-stop",
+                EngineEvent::CaptureTimingRetired(owner) => {
+                    assert!(Arc::ptr_eq(owner, &offsets));
+                    "owner"
+                }
+                event => panic!("unexpected partial terminal: {event:?}"),
+            })
+            .collect();
         assert_eq!(order, ["capture-stop", "cause", "playback-stop", "owner"]);
-        assert_eq!(fixture.engine.presentation_state.terminals.occupied_slots(), 0);
+        assert_eq!(
+            fixture.engine.presentation_state.terminals.occupied_slots(),
+            0
+        );
         assert!(fixture.engine.scheduled_presentation.is_empty());
         assert_eq!(std::ptr::from_ref(fixture.engine.routing.as_ref()), plan);
         assert!(fixture.engine.compensation_valid);
