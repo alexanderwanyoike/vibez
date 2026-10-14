@@ -60,7 +60,11 @@ impl AudioEngine {
                     track_id,
                     effect_id: slot.id,
                     generation: self.effect_meter.generation,
-                    meter: if slot.bypass { Default::default() } else { meter },
+                    meter: if slot.bypass {
+                        Default::default()
+                    } else {
+                        meter
+                    },
                 });
             }
             if !slot.effect.supports_level_meter() {

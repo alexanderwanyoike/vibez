@@ -290,7 +290,9 @@ mod tests {
         use vibez_dsp::bitcrush::param;
 
         let (mut app, track, effect) = legacy_bitcrush_app();
-        let before = app.state.find_track(track).unwrap().effects[0].params.clone();
+        let before = app.state.find_track(track).unwrap().effects[0]
+            .params
+            .clone();
         app.state.project.history = Default::default();
         app.state.project.dirty = false;
         let assert_known = |app: &App, value: &str, minimum: &str, maximum: &str| {
@@ -301,7 +303,10 @@ mod tests {
             assert_eq!(presentation.unit, "Hz");
             assert_eq!(presentation.value.as_deref(), Some(value));
             assert_eq!(
-                presentation.range.as_ref().map(|(low, high)| (low.as_str(), high.as_str())),
+                presentation
+                    .range
+                    .as_ref()
+                    .map(|(low, high)| (low.as_str(), high.as_str())),
                 Some((minimum, maximum))
             );
             assert!(presentation.is_editable());
@@ -317,31 +322,29 @@ mod tests {
             assert!(!presentation.is_editable());
         };
 
-        assert_eq!(app.cmd_tx.prepared_effect_sample_rate(track, effect), Some(48_000));
+        assert_eq!(
+            app.cmd_tx.prepared_effect_sample_rate(track, effect),
+            Some(48_000)
+        );
         assert_known(&app, "12.000k", "1.500k", "48.000k");
 
         app.send_command(EngineCommand::RemoveEffect(track, effect));
         assert_eq!(app.cmd_tx.prepared_effect_sample_rate(track, effect), None);
         assert_unavailable(&app);
-        app.cmd_tx.insert_built_in_effect_with_params(
-            track,
-            effect,
-            EffectType::Bitcrush,
-            &before,
-        );
+        app.cmd_tx
+            .insert_built_in_effect_with_params(track, effect, EffectType::Bitcrush, &before);
         assert_known(&app, "12.000k", "1.500k", "48.000k");
 
         app.state.transport.sample_rate = 96_000;
         app.send_command(EngineCommand::SetSampleRate(96_000));
         assert_eq!(app.cmd_tx.prepared_effect_sample_rate(track, effect), None);
         assert_unavailable(&app);
-        app.cmd_tx.insert_built_in_effect_with_params(
-            track,
-            effect,
-            EffectType::Bitcrush,
-            &before,
+        app.cmd_tx
+            .insert_built_in_effect_with_params(track, effect, EffectType::Bitcrush, &before);
+        assert_eq!(
+            app.cmd_tx.prepared_effect_sample_rate(track, effect),
+            Some(96_000)
         );
-        assert_eq!(app.cmd_tx.prepared_effect_sample_rate(track, effect), Some(96_000));
         assert_known(&app, "24.000k", "3.000k", "96.000k");
 
         app.state.find_track_mut(track).unwrap().effects[0].reconfiguration_failed = true;
@@ -357,7 +360,9 @@ mod tests {
         assert!(!app.state.project.dirty);
 
         app.state.find_track_mut(track).unwrap().effects[0].plugin_name = Some("Hosted".into());
-        assert!(app.device_parameter_presentation(track, effect, param::SR_REDUCE).is_none());
+        assert!(app
+            .device_parameter_presentation(track, effect, param::SR_REDUCE)
+            .is_none());
         let target = &mut app.state.find_track_mut(track).unwrap().effects[0];
         target.plugin_name = None;
         target.plugin_ref = Some(vibez_core::effect::PluginDeviceInfo {
@@ -367,7 +372,9 @@ mod tests {
             name: "Hosted".into(),
             state_b64: None,
         });
-        assert!(app.device_parameter_presentation(track, effect, param::SR_REDUCE).is_none());
+        assert!(app
+            .device_parameter_presentation(track, effect, param::SR_REDUCE)
+            .is_none());
     }
 
     #[test]
@@ -400,7 +407,9 @@ mod tests {
         assert_eq!(prepared_rate, 44_100);
         let shown = format!("{:.3}k", f64::from(prepared_rate) / 32.0 / 1000.0);
         assert_eq!(shown, "1.378k");
-        let before = app.state.find_track(track).unwrap().effects[0].params.clone();
+        let before = app.state.find_track(track).unwrap().effects[0]
+            .params
+            .clone();
         app.state.project.history = Default::default();
         app.state.project.dirty = false;
 
@@ -438,7 +447,9 @@ mod tests {
                 effect,
                 param::SR_REDUCE,
             )));
-            assert!(app.device_controls[&effect].errors.contains(&param::SR_REDUCE));
+            assert!(app.device_controls[&effect]
+                .errors
+                .contains(&param::SR_REDUCE));
             assert_eq!(
                 app.state.find_track(track).unwrap().effects[0].params,
                 before,
@@ -546,13 +557,17 @@ mod tests {
         let (mut app, track, effect) = legacy_bitcrush_app();
         for jitter in [0.0, 0.35, 1.0, 0.0] {
             app.state.find_track_mut(track).unwrap().effects[0].params[param::JITTER] = jitter;
-            let presentation = app.device_parameter_presentation(track, effect, param::SR_REDUCE).unwrap();
+            let presentation = app
+                .device_parameter_presentation(track, effect, param::SR_REDUCE)
+                .unwrap();
             assert_eq!(presentation.name, "Nominal Rate");
             assert_eq!(presentation.value.as_deref(), Some("12.000k"));
             assert_eq!(presentation.unit, "Hz");
         }
         app.send_command(EngineCommand::SetSampleRate(96_000));
-        let unavailable = app.device_parameter_presentation(track, effect, param::SR_REDUCE).unwrap();
+        let unavailable = app
+            .device_parameter_presentation(track, effect, param::SR_REDUCE)
+            .unwrap();
         assert_eq!(unavailable.name, "Nominal Rate");
         assert!(!unavailable.is_editable());
     }
@@ -567,19 +582,27 @@ mod tests {
             target.params[param::SR_REDUCE] = divider;
             target.params[param::JITTER] = 0.35;
             let before = target.params.clone();
-            let presentation = app.device_parameter_presentation(track, effect, param::JITTER).unwrap();
+            let presentation = app
+                .device_parameter_presentation(track, effect, param::JITTER)
+                .unwrap();
             assert_eq!(presentation.name, "Jitter");
             assert_eq!(presentation.value.as_deref(), Some("35"));
             assert_eq!(presentation.unit, "%");
             assert!(presentation.is_editable());
-            let explanation = presentation.explanation.as_deref().expect("native jitter explanation");
+            let explanation = presentation
+                .explanation
+                .as_deref()
+                .expect("native jitter explanation");
             if divider < 1.5 {
                 assert!(explanation.contains("N1"), "{explanation}");
                 assert!(explanation.contains("inactive"), "{explanation}");
             } else {
                 assert!(!explanation.contains("inactive"), "{explanation}");
             }
-            assert_eq!(app.state.find_track(track).unwrap().effects[0].params, before);
+            assert_eq!(
+                app.state.find_track(track).unwrap().effects[0].params,
+                before
+            );
         }
     }
 
@@ -592,20 +615,39 @@ mod tests {
         app.state.find_track_mut(track).unwrap().effects[0].params[param::POST_LP_HZ] = 20_000.0;
         app.state.project.history = Default::default();
         app.state.project.dirty = false;
-        let before = app.state.find_track(track).unwrap().effects[0].params.clone();
+        let before = app.state.find_track(track).unwrap().effects[0]
+            .params
+            .clone();
         let stored = app.state.find_track(track).unwrap().effects[0].descriptors[param::POST_LP_HZ];
         let disclosure = |app: &App| {
-            let presentation = app.device_parameter_presentation(track, effect, param::POST_LP_HZ).unwrap();
+            let presentation = app
+                .device_parameter_presentation(track, effect, param::POST_LP_HZ)
+                .unwrap();
             assert_eq!(presentation.name, "Cutoff");
             assert_eq!(presentation.value.as_deref(), Some("20.00k"));
             assert_eq!(presentation.unit, "Hz");
-            assert!(presentation.is_editable(), "target Hz does not require prepared clock context");
+            assert!(
+                presentation.is_editable(),
+                "target Hz does not require prepared clock context"
+            );
             presentation.explanation.expect("native cutoff explanation")
         };
-        for (sample_rate, effective) in [(8_000, "3.920k Hz"), (16_000, "7.840k Hz"), (44_100, "20.000k Hz")] {
+        for (sample_rate, effective) in [
+            (8_000, "3.920k Hz"),
+            (16_000, "7.840k Hz"),
+            (44_100, "20.000k Hz"),
+        ] {
             app.send_command(EngineCommand::SetSampleRate(sample_rate));
-            app.cmd_tx.insert_built_in_effect_with_params(track, effect, EffectType::Bitcrush, &before);
-            assert_eq!(app.cmd_tx.prepared_effect_sample_rate(track, effect), Some(sample_rate));
+            app.cmd_tx.insert_built_in_effect_with_params(
+                track,
+                effect,
+                EffectType::Bitcrush,
+                &before,
+            );
+            assert_eq!(
+                app.cmd_tx.prepared_effect_sample_rate(track, effect),
+                Some(sample_rate)
+            );
             let explanation = disclosure(&app);
             assert!(explanation.contains(effective), "{explanation}");
             assert!(explanation.contains("prepared target"), "{explanation}");
@@ -614,15 +656,23 @@ mod tests {
         app.send_command(EngineCommand::SetSampleRate(96_000));
         assert_eq!(app.cmd_tx.prepared_effect_sample_rate(track, effect), None);
         assert!(disclosure(&app).contains("unavailable"));
-        app.cmd_tx.insert_built_in_effect_with_params(track, effect, EffectType::Bitcrush, &before);
+        app.cmd_tx
+            .insert_built_in_effect_with_params(track, effect, EffectType::Bitcrush, &before);
         assert!(disclosure(&app).contains("20.000k Hz"));
         app.state.find_track_mut(track).unwrap().effects[0].reconfiguration_failed = true;
         assert!(disclosure(&app).contains("unavailable"));
         let target = &app.state.find_track(track).unwrap().effects[0];
         assert_eq!(target.params, before);
         let descriptor = target.descriptors[param::POST_LP_HZ];
-        assert_eq!((descriptor.name, descriptor.unit, descriptor.min, descriptor.max),
-            (stored.name, stored.unit, stored.min, stored.max));
+        assert_eq!(
+            (
+                descriptor.name,
+                descriptor.unit,
+                descriptor.min,
+                descriptor.max
+            ),
+            (stored.name, stored.unit, stored.min, stored.max)
+        );
         assert!(!app.state.project.history.can_undo());
         assert!(!app.state.project.dirty);
     }

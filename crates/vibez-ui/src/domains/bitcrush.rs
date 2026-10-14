@@ -1,8 +1,11 @@
 //! Owns native Bitcrush detail selection and availability of genuine sample-hold packets.
 
-use std::time::{Duration, Instant};
-use vibez_core::{effect::{EffectType, SampleHoldMeter}, id::{EffectId, TrackId}};
 use super::bitcrush_layout::DetailPage;
+use std::time::{Duration, Instant};
+use vibez_core::{
+    effect::{EffectType, SampleHoldMeter},
+    id::{EffectId, TrackId},
+};
 
 pub fn is_native_bitcrush(effect: &crate::state::UiEffect) -> bool {
     effect.effect_type == EffectType::Bitcrush
@@ -17,7 +20,9 @@ pub enum BitcrushMsg {
 
 impl BitcrushMsg {
     pub fn destination(&self) -> (TrackId, EffectId) {
-        match self { Self::Page(track, effect, _) => (*track, *effect) }
+        match self {
+            Self::Page(track, effect, _) => (*track, *effect),
+        }
     }
 }
 
@@ -30,7 +35,9 @@ pub struct BitcrushPanel {
 
 impl BitcrushPanel {
     pub fn update(&mut self, message: BitcrushMsg) {
-        match message { BitcrushMsg::Page(_, _, page) => self.page = page }
+        match message {
+            BitcrushMsg::Page(_, _, page) => self.page = page,
+        }
     }
 
     pub fn accept_meter(&mut self, meter: SampleHoldMeter, now: Instant) {

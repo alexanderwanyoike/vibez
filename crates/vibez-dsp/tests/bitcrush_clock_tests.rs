@@ -38,24 +38,40 @@ fn check_clock(case: &ClockCase) {
             let mut effect = create_effect_for_instance(
                 EffectType::Bitcrush,
                 48_000.0,
-                &[16.0, case.divider, 1.0, 0.0, 0.0, dither, case.jitter, 0.0, 12_000.0],
+                &[
+                    16.0,
+                    case.divider,
+                    1.0,
+                    0.0,
+                    0.0,
+                    dither,
+                    case.jitter,
+                    0.0,
+                    12_000.0,
+                ],
                 serde_json::from_str::<EffectId>("17").unwrap(),
             );
             let mut rendered = Vec::with_capacity(case.frames * 2);
             let mut position = 0;
             let mut callback = 0;
             while position < case.frames {
-                for &(_, parameter, value, automated) in case.edits.iter().filter(|edit| edit.0 == position) {
+                for &(_, parameter, value, automated) in
+                    case.edits.iter().filter(|edit| edit.0 == position)
+                {
                     assert!(if automated {
                         effect.set_automated_param(parameter, value)
                     } else {
                         effect.set_param(parameter, value)
                     });
                 }
-                let next_edit = case.edits.iter().find(|edit| edit.0 > position)
+                let next_edit = case
+                    .edits
+                    .iter()
+                    .find(|edit| edit.0 > position)
                     .map_or(case.frames, |edit| edit.0);
                 let end = (position + partitions[callback % partitions.len()])
-                    .min(next_edit).min(case.frames);
+                    .min(next_edit)
+                    .min(case.frames);
                 let mut audio: Vec<_> = (position..end).flat_map(input).collect();
                 effect.process(&mut audio, 2);
                 let meter = effect.take_sample_hold_meter().unwrap();
@@ -69,14 +85,22 @@ fn check_clock(case: &ClockCase) {
                 assert_eq!(meter.secondary_acquisitions, [0; 2]);
                 assert_eq!(meter.blending, [0; 2]);
                 for (point, frame) in (position..end).enumerate() {
-                    let acquired = meter.primary_acquisitions[point / 64] & (1_u64 << (point % 64)) != 0;
-                    assert_eq!(acquired, expected[frame].1,
-                        "{}: acquisition frame{frame}, Dither={dither}, partitions={partitions:?}", case.name);
+                    let acquired =
+                        meter.primary_acquisitions[point / 64] & (1_u64 << (point % 64)) != 0;
+                    assert_eq!(
+                        acquired, expected[frame].1,
+                        "{}: acquisition frame{frame}, Dither={dither}, partitions={partitions:?}",
+                        case.name
+                    );
                     assert_eq!(meter.input[point], input(frame)[0]);
                     assert_eq!(meter.output[point], audio[point * 2]);
                     if dither == 0.0 {
-                        assert_eq!(&audio[point * 2..point * 2 + 2], &expected[frame].0,
-                            "{}: held stereo samples at frame{frame}, partitions={partitions:?}", case.name);
+                        assert_eq!(
+                            &audio[point * 2..point * 2 + 2],
+                            &expected[frame].0,
+                            "{}: held stereo samples at frame{frame}, partitions={partitions:?}",
+                            case.name
+                        );
                     }
                 }
                 rendered.extend(audio);
@@ -85,7 +109,11 @@ fn check_clock(case: &ClockCase) {
             }
             if dither == 0.0 {
                 if let Some(baseline) = &baseline {
-                    assert_eq!(&rendered, baseline, "{}: callback partition invariance", case.name);
+                    assert_eq!(
+                        &rendered, baseline,
+                        "{}: callback partition invariance",
+                        case.name
+                    );
                 } else {
                     baseline = Some(rendered);
                 }

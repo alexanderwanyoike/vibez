@@ -1,7 +1,7 @@
 //! Observation drains retain real sample chronology without advancing the acquisition clock.
 
-use vibez_core::effect::SampleHoldMeter;
 use super::lanes::Frame;
+use vibez_core::effect::SampleHoldMeter;
 
 #[derive(Default)]
 pub(super) struct Scope {
@@ -17,8 +17,14 @@ impl Scope {
         self.samples.output[position] = output;
         let bit = 1_u64 << (position % 64);
         for (mask, present) in [
-            (&mut self.samples.primary_acquisitions, frame.primary_acquired),
-            (&mut self.samples.secondary_acquisitions, frame.secondary_acquired),
+            (
+                &mut self.samples.primary_acquisitions,
+                frame.primary_acquired,
+            ),
+            (
+                &mut self.samples.secondary_acquisitions,
+                frame.secondary_acquired,
+            ),
             (&mut self.samples.blending, frame.transition),
         ] {
             mask[position / 64] = (mask[position / 64] & !bit) | if present { bit } else { 0 };
@@ -46,8 +52,14 @@ impl Scope {
             meter.input[point] = self.samples.input[position];
             meter.output[point] = self.samples.output[position];
             for (source, destination) in [
-                (&self.samples.primary_acquisitions, &mut meter.primary_acquisitions),
-                (&self.samples.secondary_acquisitions, &mut meter.secondary_acquisitions),
+                (
+                    &self.samples.primary_acquisitions,
+                    &mut meter.primary_acquisitions,
+                ),
+                (
+                    &self.samples.secondary_acquisitions,
+                    &mut meter.secondary_acquisitions,
+                ),
                 (&self.samples.blending, &mut meter.blending),
             ] {
                 if source[position / 64] & (1_u64 << (position % 64)) != 0 {

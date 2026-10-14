@@ -262,7 +262,12 @@ impl EffectKnobWidget {
             KnobTarget::BitcrushRate(effect) => (effect, BitcrushValue::Rate),
             _ => return None,
         };
-        Some(SteppedTarget { track: self.track_id, effect, index: self.param_index, kind })
+        Some(SteppedTarget {
+            track: self.track_id,
+            effect,
+            index: self.param_index,
+            kind,
+        })
     }
 
     /// Normalize value to 0.0..1.0 range.
@@ -365,20 +370,26 @@ impl SteppedKnobState {
         if self.target != Some(target) || self.observed_value != value.to_bits() {
             self.wheel_lines = 0.0;
         }
-        if replaced { self.last_emitted = value; }
+        if replaced {
+            self.last_emitted = value;
+        }
         self.target = Some(target);
         self.observed_value = value.to_bits();
         replaced
     }
 
     fn emit(&mut self, value: f32) -> bool {
-        if self.last_emitted.to_bits() == value.to_bits() { return false; }
+        if self.last_emitted.to_bits() == value.to_bits() {
+            return false;
+        }
         self.last_emitted = value;
         true
     }
 
     fn scroll(&mut self, kind: BitcrushValue, lines: f64, original: f32) -> Option<f32> {
-        if !lines.is_finite() || lines == 0.0 { return None; }
+        if !lines.is_finite() || lines == 0.0 {
+            return None;
+        }
         let direction = if lines > 0.0 { 1 } else { -1 };
         if kind.step(self.last_emitted, direction, self.last_emitted) == self.last_emitted {
             self.wheel_lines = 0.0;
@@ -386,10 +397,14 @@ impl SteppedKnobState {
         }
         self.wheel_lines += lines;
         let whole = self.wheel_lines.trunc();
-        if whole == 0.0 { return None; }
+        if whole == 0.0 {
+            return None;
+        }
         self.wheel_lines -= whole;
         let value = kind.step(self.last_emitted, whole.clamp(-32.0, 32.0) as i32, original);
-        if kind.step(value, direction, value) == value { self.wheel_lines = 0.0; }
+        if kind.step(value, direction, value) == value {
+            self.wheel_lines = 0.0;
+        }
         self.emit(value).then_some(value)
     }
 }
@@ -600,12 +615,9 @@ impl canvas::Program<Message> for EffectKnobWidget {
                     }
                     return (
                         canvas::event::Status::Captured,
-                        Some(
-                            self.drag_value_message(value)
-                                .in_undo_gesture(
-                                    *state.undo_gesture.get_or_insert_with(UndoGestureId::new),
-                                ),
-                        ),
+                        Some(self.drag_value_message(value).in_undo_gesture(
+                            *state.undo_gesture.get_or_insert_with(UndoGestureId::new),
+                        )),
                     );
                 }
             }
@@ -618,8 +630,14 @@ impl canvas::Program<Message> for EffectKnobWidget {
                     let lines = match delta {
                         mouse::ScrollDelta::Lines { y, .. } => f64::from(y),
                         mouse::ScrollDelta::Pixels { y, .. } => f64::from(y) / 20.0,
-                    } / if state.shift_held { f64::from(FINE_DIVISOR) } else { 1.0 };
-                    let message = state.stepped.scroll(target.kind, lines, self.value)
+                    } / if state.shift_held {
+                        f64::from(FINE_DIVISOR)
+                    } else {
+                        1.0
+                    };
+                    let message = state
+                        .stepped
+                        .scroll(target.kind, lines, self.value)
                         .map(|value| self.wheel_value_message(value));
                     return (canvas::event::Status::Captured, message);
                 }

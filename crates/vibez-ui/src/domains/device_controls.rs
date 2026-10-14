@@ -37,14 +37,13 @@ pub fn parameter_presentation(
     if effect.effect_type == vibez_core::effect::EffectType::Bitcrush
         && index == vibez_dsp::bitcrush::param::SR_REDUCE
     {
-        let hertz = prepared_rate
-            .and_then(|rate| {
-                Some((
-                    crate::domains::bitcrush_values::display_rate(rate, value)?,
-                    crate::domains::bitcrush_values::display_rate(rate, stored.max)?,
-                    crate::domains::bitcrush_values::display_rate(rate, stored.min)?,
-                ))
-            });
+        let hertz = prepared_rate.and_then(|rate| {
+            Some((
+                crate::domains::bitcrush_values::display_rate(rate, value)?,
+                crate::domains::bitcrush_values::display_rate(rate, stored.max)?,
+                crate::domains::bitcrush_values::display_rate(rate, stored.min)?,
+            ))
+        });
         let (value, range) = match hertz {
             Some((value, minimum, maximum)) => (Some(value), Some((minimum, maximum))),
             None => (None, None),

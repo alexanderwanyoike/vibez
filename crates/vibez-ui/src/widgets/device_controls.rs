@@ -37,7 +37,9 @@ pub fn parameter_with_heading<'a>(
     knob_size: Option<f32>,
     heading: Element<'a, Message>,
 ) -> Element<'a, Message> {
-    parameter_content(track, effect, state, index, accent, knob_size, heading, None)
+    parameter_content(
+        track, effect, state, index, accent, knob_size, heading, None,
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -110,16 +112,22 @@ fn parameter_content<'a>(
                 knob,
                 text(explanation.clone()).size(9).width(300.0),
                 tooltip::Position::Top,
-            ).into(),
+            )
+            .into(),
             None => knob,
         };
         content = content.push(knob);
     }
     content
         .push(
-            row![field, text(presentation.map_or(descriptor.unit, |value| value.unit)).size(8).color(th::text_dim())]
-                .spacing(2)
-                .align_y(iced::Alignment::Center),
+            row![
+                field,
+                text(presentation.map_or(descriptor.unit, |value| value.unit))
+                    .size(8)
+                    .color(th::text_dim())
+            ]
+            .spacing(2)
+            .align_y(iced::Alignment::Center),
         )
         .width(Length::Fill)
         .into()
@@ -217,7 +225,11 @@ fn value_field_presented<'a>(
             selection: th::with_alpha(accent, 0.3),
         });
     tooltip(
-        on_blur(input, editable && state.entries.contains_key(&index), submit),
+        on_blur(
+            input,
+            editable && state.entries.contains_key(&index),
+            submit,
+        ),
         explanation,
         tooltip::Position::Top,
     )

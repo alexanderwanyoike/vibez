@@ -53,10 +53,7 @@ impl DetailPage {
                 Parameter(param::SR_REDUCE),
                 Parameter(param::MIX),
             ],
-            Self::Color if drive_in_core => &[
-                Parameter(param::ROUNDING),
-                Parameter(param::DITHER),
-            ],
+            Self::Color if drive_in_core => &[Parameter(param::ROUNDING), Parameter(param::DITHER)],
             Self::Color => &[
                 Parameter(param::DRIVE_DB),
                 Parameter(param::ROUNDING),
@@ -190,14 +187,17 @@ fn details(bounds: Region, page: DetailPage, drive_in_core: bool, stacked: bool)
     };
     let content = Region {
         x: bounds.x + if stacked { 0.0 } else { 96.0 },
-        y: if stacked { bounds.y + FIELD_HEIGHT + GAP } else { field_y },
+        y: if stacked {
+            bounds.y + FIELD_HEIGHT + GAP
+        } else {
+            field_y
+        },
         width: bounds.width - if stacked { 0.0 } else { 96.0 },
         height: FIELD_HEIGHT,
     };
     let cells = page.cells(drive_in_core);
-    let cell_width = ((content.width - (cells.len() - 1) as f32 * GAP)
-        / cells.len() as f32)
-        .min(94.0);
+    let cell_width =
+        ((content.width - (cells.len() - 1) as f32 * GAP) / cells.len() as f32).min(94.0);
     let cell_bounds = (0..cells.len())
         .map(|index| Region {
             x: content.x + index as f32 * (cell_width + GAP),
@@ -206,12 +206,22 @@ fn details(bounds: Region, page: DetailPage, drive_in_core: bool, stacked: bool)
             height: FIELD_HEIGHT,
         })
         .collect();
-    Details { bounds, selector, content, page, cells, cell_bounds }
+    Details {
+        bounds,
+        selector,
+        content,
+        page,
+        cells,
+        cell_bounds,
+    }
 }
 
 fn plots(layout: &mut Arrangement, bounds: Region, meters: bool) {
     if meters {
-        layout.input_meter = Some(Region { width: METER_WIDTH, ..bounds });
+        layout.input_meter = Some(Region {
+            width: METER_WIDTH,
+            ..bounds
+        });
         layout.output_meter = Some(Region {
             x: bounds.x + bounds.width - METER_WIDTH,
             width: METER_WIDTH,
@@ -237,8 +247,18 @@ pub fn arrange(width: f32, height: f32, advanced: bool, page: DetailPage) -> Arr
         height: height - TOOLBAR_BOTTOM,
     };
     let mut layout = Arrangement {
-        presets: Region { x: 4.0, y: 0.0, width: preset_bar_width(width), height: 26.0 },
-        disclosure: Region { x: width - 64.0, y: 0.0, width: 60.0, height: 26.0 },
+        presets: Region {
+            x: 4.0,
+            y: 0.0,
+            width: preset_bar_width(width),
+            height: 26.0,
+        },
+        disclosure: Region {
+            x: width - 64.0,
+            y: 0.0,
+            width: 60.0,
+            height: 26.0,
+        },
         core: Vec::new(),
         scope: None,
         input_meter: None,
@@ -247,7 +267,11 @@ pub fn arrange(width: f32, height: f32, advanced: bool, page: DetailPage) -> Arr
         details: None,
     };
     let detail_reserve = if advanced { FIELD_HEIGHT + GAP } else { 0.0 };
-    let side_reserve = if advanced { STACKED_DETAILS_HEIGHT + GAP } else { 0.0 };
+    let side_reserve = if advanced {
+        STACKED_DETAILS_HEIGHT + GAP
+    } else {
+        0.0
+    };
     let plotted_core_room = if expanded {
         body.height - side_reserve
     } else {
@@ -264,9 +288,20 @@ pub fn arrange(width: f32, height: f32, advanced: bool, page: DetailPage) -> Arr
         let side_x = width - 4.0 - ASIDE_WIDTH;
         let core_y = body.y + (body.height - side_height) * 0.5;
         layout.core = core_bank(FULL_CORE, side_x, core_y, 68.0, 8.0, knob);
-        let divider = Region { x: side_x - 9.0, width: 1.0, ..body };
+        let divider = Region {
+            x: side_x - 9.0,
+            width: 1.0,
+            ..body
+        };
         layout.divider = Some(divider);
-        plots(&mut layout, Region { width: divider.x - 8.0 - body.x, ..body }, true);
+        plots(
+            &mut layout,
+            Region {
+                width: divider.x - 8.0 - body.x,
+                ..body
+            },
+            true,
+        );
         if advanced {
             layout.details = Some(details(
                 Region {
@@ -283,7 +318,14 @@ pub fn arrange(width: f32, height: f32, advanced: bool, page: DetailPage) -> Arr
     } else if plot_fits {
         let knob = fit_knob(plotted_core_room);
         let scope_height = body.height - control_height(knob) - GAP - detail_reserve;
-        plots(&mut layout, Region { height: scope_height, ..body }, !compact);
+        plots(
+            &mut layout,
+            Region {
+                height: scope_height,
+                ..body
+            },
+            !compact,
+        );
         let core_y = body.y + scope_height + GAP;
         layout.core = core_bank(
             if compact { COMPACT_CORE } else { FULL_CORE },
@@ -309,7 +351,11 @@ pub fn arrange(width: f32, height: f32, advanced: bool, page: DetailPage) -> Arr
         let knob = fit_knob(body.height);
         let core_y = body.y + (body.height - control_height(knob)) * 0.5;
         layout.core = core_bank(FULL_CORE, body.x, core_y, 68.0, GAP, knob);
-        let divider = Region { x: body.x + 290.0 + 8.0, width: 1.0, ..body };
+        let divider = Region {
+            x: body.x + 290.0 + 8.0,
+            width: 1.0,
+            ..body
+        };
         layout.divider = Some(divider);
         layout.details = Some(details(
             Region {

@@ -12,15 +12,23 @@ impl App {
     pub(super) fn update_bitcrush_control(&mut self, message: BitcrushMsg) -> Task<Message> {
         let (track, effect) = message.destination();
         if self.state.find_track(track).is_some_and(|track| {
-            track.effects.iter().any(|candidate| candidate.id == effect && is_native_bitcrush(candidate))
+            track
+                .effects
+                .iter()
+                .any(|candidate| candidate.id == effect && is_native_bitcrush(candidate))
         }) {
-            self.bitcrush_panels.entry(effect).or_default().update(message);
+            self.bitcrush_panels
+                .entry(effect)
+                .or_default()
+                .update(message);
         }
         Task::none()
     }
 
     pub(super) fn bitcrush_page(&self, effect: EffectId) -> DetailPage {
-        self.bitcrush_panels.get(&effect).map_or(DetailPage::default(), |panel| panel.page)
+        self.bitcrush_panels
+            .get(&effect)
+            .map_or(DetailPage::default(), |panel| panel.page)
     }
 
     pub(super) fn bitcrush_sample_hold(&self, effect: EffectId) -> Option<SampleHoldMeter> {
@@ -52,7 +60,11 @@ impl App {
             .chain(&project.buses)
             .chain(std::iter::once(&project.master))
         {
-            for effect in track.effects.iter().filter(|effect| is_native_bitcrush(effect)) {
+            for effect in track
+                .effects
+                .iter()
+                .filter(|effect| is_native_bitcrush(effect))
+            {
                 let Some(panel) = self.bitcrush_panels.get_mut(&effect.id) else {
                     continue;
                 };
@@ -122,8 +134,13 @@ mod tests {
         app.state.view.detail_panel_tab = DetailPanelTab::Devices;
         let channel = ProjectTrack::new(TrackId::new(), "Bitcrush".into(), 3);
         let track = channel.id;
-        Arc::make_mut(&mut app.state.project_tracks).tracks.push(channel);
-        let _ = app.update(Message::Devices(DevicesMsg::AddEffect(track, EffectType::Bitcrush)));
+        Arc::make_mut(&mut app.state.project_tracks)
+            .tracks
+            .push(channel);
+        let _ = app.update(Message::Devices(DevicesMsg::AddEffect(
+            track,
+            EffectType::Bitcrush,
+        )));
         let effect = app.state.find_track(track).unwrap().effects[0].id;
         app.state.arrangement.selected_track = Some(track);
         app.poll_device_meters();
@@ -140,21 +157,25 @@ mod tests {
         meter.output[..2].copy_from_slice(&[0.0, 0.0625]);
         let (mut events, receiver) = rtrb::RingBuffer::new(4);
         app.event_rx = Some(receiver);
-        events.push(EngineEvent::EffectSampleHold {
-            track_id: track,
-            effect_id: effect,
-            generation,
-            meter,
-        }).unwrap();
+        events
+            .push(EngineEvent::EffectSampleHold {
+                track_id: track,
+                effect_id: effect,
+                generation,
+                meter,
+            })
+            .unwrap();
         app.poll_engine_events();
         assert_eq!(app.bitcrush_sample_hold(effect), Some(meter));
         app.restart_device_metering();
-        events.push(EngineEvent::EffectSampleHold {
-            track_id: track,
-            effect_id: effect,
-            generation,
-            meter,
-        }).unwrap();
+        events
+            .push(EngineEvent::EffectSampleHold {
+                track_id: track,
+                effect_id: effect,
+                generation,
+                meter,
+            })
+            .unwrap();
         app.poll_engine_events();
         assert!(app.bitcrush_sample_hold(effect).is_none());
     }

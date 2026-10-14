@@ -41,7 +41,9 @@ fn correlation(first: &[f64], second: &[f64]) -> f64 {
 #[test]
 fn nearest_tpdf_meets_frozen_eighteen_case_moment_and_correlation_budgets() {
     // These phases and limits were frozen against an independent finite-grid reference.
-    let phases = [20.0, 20.125, 20.25, 20.375, 20.5, 20.625, 20.75, 20.875, -20.5];
+    let phases = [
+        20.0, 20.125, 20.25, 20.375, 20.5, 20.625, 20.75, 20.875, -20.5,
+    ];
     let mut cases = 0;
     for raw_id in [17, 9999] {
         for phase in phases {
@@ -58,35 +60,51 @@ fn nearest_tpdf_meets_frozen_eighteen_case_moment_and_correlation_budgets() {
             for block in audio.chunks_mut(512 * 2) {
                 effect.process(block, 2);
             }
-            let mut errors = [Vec::with_capacity(ACQUISITIONS), Vec::with_capacity(ACQUISITIONS)];
+            let mut errors = [
+                Vec::with_capacity(ACQUISITIONS),
+                Vec::with_capacity(ACQUISITIONS),
+            ];
             for frame in audio.chunks_exact(2) {
                 for (channel, &output) in frame.iter().enumerate() {
                     assert!(output.is_finite() && output.abs() < 1.0);
                     let code = f64::from(output) / DELTA;
-                    assert_eq!(code.fract(), 0.0, "quantizer grid: ID={raw_id}, phase={phase}");
+                    assert_eq!(
+                        code.fract(),
+                        0.0,
+                        "quantizer grid: ID={raw_id}, phase={phase}"
+                    );
                     errors[channel].push((f64::from(output) - f64::from(input)) / DELTA);
                 }
             }
-            let moments = errors.each_ref().map(|values| mean_and_second_moment(values));
+            let moments = errors
+                .each_ref()
+                .map(|values| mean_and_second_moment(values));
             let channel_correlation = correlation(&errors[0], &errors[1]);
-            let lags = [1, 2, 7, 31].map(|lag| {
-                correlation(&errors[0][..ACQUISITIONS - lag], &errors[0][lag..])
-            });
+            let lags = [1, 2, 7, 31]
+                .map(|lag| correlation(&errors[0][..ACQUISITIONS - lag], &errors[0][lag..]));
             println!(
                 "ID={raw_id}, phase_lsb={phase}, input={input}, acquisitions={ACQUISITIONS}, mean_second_lsb={moments:?}, channel_rho={channel_correlation}, left_lag_rho={lags:?}"
             );
             for (channel, &(mean, second)) in moments.iter().enumerate() {
-                assert!(mean.abs() <= MOMENT_LIMIT,
-                    "ID={raw_id}, phase={phase}, channel={channel}, mean={mean}");
+                assert!(
+                    mean.abs() <= MOMENT_LIMIT,
+                    "ID={raw_id}, phase={phase}, channel={channel}, mean={mean}"
+                );
                 // This is total nonsubtractive error, whose second moment is Delta^2/4.
-                assert!((second - 0.25).abs() <= MOMENT_LIMIT,
-                    "ID={raw_id}, phase={phase}, channel={channel}, second={second}");
+                assert!(
+                    (second - 0.25).abs() <= MOMENT_LIMIT,
+                    "ID={raw_id}, phase={phase}, channel={channel}, second={second}"
+                );
             }
-            assert!(channel_correlation.abs() <= CORRELATION_LIMIT,
-                "ID={raw_id}, phase={phase}, channel_rho={channel_correlation}");
+            assert!(
+                channel_correlation.abs() <= CORRELATION_LIMIT,
+                "ID={raw_id}, phase={phase}, channel_rho={channel_correlation}"
+            );
             for (lag, rho) in [1, 2, 7, 31].into_iter().zip(lags) {
-                assert!(rho.abs() <= CORRELATION_LIMIT,
-                    "ID={raw_id}, phase={phase}, lag={lag}, rho={rho}");
+                assert!(
+                    rho.abs() <= CORRELATION_LIMIT,
+                    "ID={raw_id}, phase={phase}, lag={lag}, rho={rho}"
+                );
             }
             cases += 1;
         }
@@ -117,7 +135,10 @@ fn off_is_exactly_silent_and_rounding_ties_keep_their_distinct_biases() {
             .flat_map(|code| [(code * DELTA) as f32; 2])
             .collect();
         effect.process(&mut actual, 2);
-        let expected: Vec<_> = codes.into_iter().flat_map(|code| [(code * DELTA) as f32; 2]).collect();
+        let expected: Vec<_> = codes
+            .into_iter()
+            .flat_map(|code| [(code * DELTA) as f32; 2])
+            .collect();
         assert_eq!(actual, expected, "Dither Off rounding={rounding}");
     }
 }
@@ -136,8 +157,10 @@ fn saturated_wet_rails_are_bounded_for_all_rounding_and_dither_modes() {
                 );
                 let mut actual: Vec<_> = (0..1024).flat_map(|_| [1.25, -1.25]).collect();
                 effect.process(&mut actual, 2);
-                assert!(actual.chunks_exact(2).all(|frame| frame == [1.0, -1.0]),
-                    "ID={raw_id}, rounding={rounding}, dither={dither}");
+                assert!(
+                    actual.chunks_exact(2).all(|frame| frame == [1.0, -1.0]),
+                    "ID={raw_id}, rounding={rounding}, dither={dither}"
+                );
             }
         }
     }

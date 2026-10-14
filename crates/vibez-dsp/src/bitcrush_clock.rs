@@ -48,6 +48,8 @@ impl Clock {
     }
 
     fn update_interval(&mut self) {
-        self.interval = (f64::from(self.divider) * (1.0 + self.offset)).round().max(1.0) as u32;
+        self.interval = (f64::from(self.divider) * (1.0 + self.offset))
+            .round()
+            .max(1.0) as u32;
     }
 }

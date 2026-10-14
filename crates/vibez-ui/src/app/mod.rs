@@ -60,8 +60,10 @@ struct App {
     plugin_load_requests: plugin_load_requests::PluginLoadRequests,
     gain_devices: gain_devices::GainDevices,
     device_meters: device_meters::DeviceMeters,
-    bitcrush_panels:
-        std::collections::HashMap<vibez_core::id::EffectId, crate::domains::bitcrush::BitcrushPanel>,
+    bitcrush_panels: std::collections::HashMap<
+        vibez_core::id::EffectId,
+        crate::domains::bitcrush::BitcrushPanel,
+    >,
     device_controls: std::collections::HashMap<
         vibez_core::id::EffectId,
         crate::domains::device_controls::DeviceControlState,

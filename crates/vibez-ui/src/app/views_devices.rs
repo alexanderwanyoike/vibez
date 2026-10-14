@@ -222,7 +222,10 @@ impl App {
         width: f32,
     ) -> DeviceBody<'a> {
         let body = iced::widget::responsive(move |size| {
-            let levels = self.device_meters.readings.get(&effect.id)
+            let levels = self
+                .device_meters
+                .readings
+                .get(&effect.id)
                 .and_then(device_meters::MeterReadings::measured_levels);
             let presentations: Vec<_> = (0..effect.descriptors.len())
                 .filter_map(|index| self.device_parameter_presentation(track, effect.id, index))
@@ -245,7 +248,11 @@ impl App {
                 size,
             )
         });
-        DeviceBody { content: body.into(), width, padding: iced::Padding::ZERO }
+        DeviceBody {
+            content: body.into(),
+            width,
+            padding: iced::Padding::ZERO,
+        }
     }
 
     fn gain_device_body<'a>(

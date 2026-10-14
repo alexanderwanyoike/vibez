@@ -9,15 +9,15 @@ use crate::{butterworth_filter::ButterworthFilter, effect::AudioEffect};
 mod clock;
 #[path = "bitcrush_lanes.rs"]
 mod lanes;
-#[path = "bitcrush_random.rs"]
-mod random;
 #[path = "bitcrush_ramp.rs"]
 mod ramp;
+#[path = "bitcrush_random.rs"]
+mod random;
 #[path = "bitcrush_scope.rs"]
 mod scope;
 use lanes::{Configuration, Lanes, Source};
-use random::Random;
 use ramp::Ramp;
+use random::Random;
 use scope::Scope;
 
 pub mod param {
@@ -139,7 +139,11 @@ impl BitcrushEffect {
             48_000.0
         };
         let mut post_lp = ButterworthFilter::EMPTY;
-        post_lp.configure(sample_rate, BITCRUSH_PARAMS[param::POST_LP_HZ].default, false);
+        post_lp.configure(
+            sample_rate,
+            BITCRUSH_PARAMS[param::POST_LP_HZ].default,
+            false,
+        );
         let params = std::array::from_fn(|index| BITCRUSH_PARAMS[index].default);
         Self {
             params,
@@ -266,7 +270,9 @@ impl AudioEffect for BitcrushEffect {
             }
             let _ = self.mix.advance(self.params[param::MIX]);
             let _ = self.jitter.advance(self.params[param::JITTER]);
-            let _ = self.post_lp_amount.advance(self.params[param::POST_LP_ENABLED]);
+            let _ = self
+                .post_lp_amount
+                .advance(self.params[param::POST_LP_ENABLED]);
             if let Some(cutoff) = self.post_lp_cutoff.advance(self.params[param::POST_LP_HZ]) {
                 self.post_lp.configure(self.sample_rate, cutoff, false);
             }
@@ -314,9 +320,12 @@ impl AudioEffect for BitcrushEffect {
         self.lanes = Lanes::new(Configuration::from_params(&self.params));
         self.mix.edit(self.params[param::MIX], true);
         self.jitter.edit(self.params[param::JITTER], true);
-        self.post_lp_amount.edit(self.params[param::POST_LP_ENABLED], true);
-        self.post_lp_cutoff.edit(self.params[param::POST_LP_HZ], true);
-        self.post_lp.configure(self.sample_rate, self.post_lp_cutoff.value(), false);
+        self.post_lp_amount
+            .edit(self.params[param::POST_LP_ENABLED], true);
+        self.post_lp_cutoff
+            .edit(self.params[param::POST_LP_HZ], true);
+        self.post_lp
+            .configure(self.sample_rate, self.post_lp_cutoff.value(), false);
         self.post_lp.reset();
         self.drive.edit(self.params[param::DRIVE_DB], true);
         self.drive_gain = 10.0_f64.powf(f64::from(self.drive.value()) / 20.0);

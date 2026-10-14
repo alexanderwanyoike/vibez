@@ -48,8 +48,11 @@ impl canvas::Program<Message> for SampleHoldScope {
         };
         let limit = self.meter.map_or(1.0, |meter| {
             let count = usize::from(meter.count);
-            meter.input[..count].iter().chain(&meter.output[..count])
-                .map(|value| value.abs()).fold(1.0_f32, f32::max)
+            meter.input[..count]
+                .iter()
+                .chain(&meter.output[..count])
+                .map(|value| value.abs())
+                .fold(1.0_f32, f32::max)
         });
         for index in 0..=4 {
             let fraction = index as f32 / 4.0;
@@ -59,13 +62,20 @@ impl canvas::Program<Message> for SampleHoldScope {
                 (Point::new(x, area.y), Point::new(x, area.y + area.height)),
                 (Point::new(area.x, y), Point::new(area.x + area.width, y)),
             ] {
-                frame.stroke(&canvas::Path::line(from, to), canvas::Stroke::default().with_color(th::divider()));
+                frame.stroke(
+                    &canvas::Path::line(from, to),
+                    canvas::Stroke::default().with_color(th::divider()),
+                );
             }
             if index % 2 == 0 {
                 frame.fill_text(canvas::Text {
                     content: {
                         let amplitude = limit * (1.0 - 2.0 * fraction);
-                        if amplitude.abs() >= 1000.0 { format!("{amplitude:.1e}") } else { format!("{amplitude:.1}") }
+                        if amplitude.abs() >= 1000.0 {
+                            format!("{amplitude:.1e}")
+                        } else {
+                            format!("{amplitude:.1}")
+                        }
                     },
                     position: Point::new(area.x - 4.0, y),
                     color: th::text_dim(),
@@ -84,11 +94,27 @@ impl canvas::Program<Message> for SampleHoldScope {
         }
         let label = self.meter.map_or_else(
             || "L · unavailable".into(),
-            |meter| format!("L · {} samples @ {:.1}k", meter.count, meter.sample_rate / 1000.0),
+            |meter| {
+                format!(
+                    "L · {} samples @ {:.1}k",
+                    meter.count,
+                    meter.sample_rate / 1000.0
+                )
+            },
         );
         caption(&mut frame, label, Point::new(5.0, 3.0), th::text_dim());
-        caption(&mut frame, "Input".into(), Point::new(bounds.width - 104.0, 3.0), th::text_dim());
-        caption(&mut frame, "Output".into(), Point::new(bounds.width - 55.0, 3.0), self.accent);
+        caption(
+            &mut frame,
+            "Input".into(),
+            Point::new(bounds.width - 104.0, 3.0),
+            th::text_dim(),
+        );
+        caption(
+            &mut frame,
+            "Output".into(),
+            Point::new(bounds.width - 55.0, 3.0),
+            self.accent,
+        );
         if let Some(meter) = self.meter {
             let count = usize::from(meter.count);
             let denominator = count.saturating_sub(1).max(1) as f32;
@@ -99,18 +125,24 @@ impl canvas::Program<Message> for SampleHoldScope {
                     let half_sample = area.width / denominator * 0.5;
                     let left = (x(index) - half_sample).max(area.x);
                     let right = (x(index) + half_sample).min(area.x + area.width);
-                    frame.fill_rectangle(Point::new(left, area.y),
-                        iced::Size::new(right - left, area.height), th::with_alpha(self.accent, 0.08));
+                    frame.fill_rectangle(
+                        Point::new(left, area.y),
+                        iced::Size::new(right - left, area.height),
+                        th::with_alpha(self.accent, 0.08),
+                    );
                 }
                 for (mask, offset, color) in [
                     (meter.primary_acquisitions, 0.0, th::text_dim()),
                     (meter.secondary_acquisitions, 4.0, self.accent),
                 ] {
                     if marked(mask, index) {
-                        frame.stroke(&canvas::Path::line(
-                            Point::new(x(index), area.y + area.height - offset - 3.0),
-                            Point::new(x(index), area.y + area.height - offset)),
-                            canvas::Stroke::default().with_color(color));
+                        frame.stroke(
+                            &canvas::Path::line(
+                                Point::new(x(index), area.y + area.height - offset - 3.0),
+                                Point::new(x(index), area.y + area.height - offset),
+                            ),
+                            canvas::Stroke::default().with_color(color),
+                        );
                     }
                 }
             }
@@ -119,32 +151,64 @@ impl canvas::Program<Message> for SampleHoldScope {
                 (&meter.output, self.accent, 1.5),
             ] {
                 if count == 1 {
-                    frame.fill(&canvas::Path::circle(Point::new(x(0), y(values[0])), 1.5), color);
+                    frame.fill(
+                        &canvas::Path::circle(Point::new(x(0), y(values[0])), 1.5),
+                        color,
+                    );
                 } else {
                     let trace = canvas::Path::new(|path| {
                         for (index, value) in values[..count].iter().enumerate() {
                             let point = Point::new(x(index), y(*value));
-                            if index == 0 { path.move_to(point); } else { path.line_to(point); }
+                            if index == 0 {
+                                path.move_to(point);
+                            } else {
+                                path.line_to(point);
+                            }
                         }
                     });
-                    frame.stroke(&trace, canvas::Stroke::default().with_color(color).with_width(width));
+                    frame.stroke(
+                        &trace,
+                        canvas::Stroke::default()
+                            .with_color(color)
+                            .with_width(width),
+                    );
                 }
             }
-            caption(&mut frame, "0 ms".into(), Point::new(area.x, bounds.height - 20.0), th::text_dim());
+            caption(
+                &mut frame,
+                "0 ms".into(),
+                Point::new(area.x, bounds.height - 20.0),
+                th::text_dim(),
+            );
             frame.fill_text(canvas::Text {
-                content: format!("{:.3} ms", count.saturating_sub(1) as f64 / f64::from(meter.sample_rate) * 1000.0),
+                content: format!(
+                    "{:.3} ms",
+                    count.saturating_sub(1) as f64 / f64::from(meter.sample_rate) * 1000.0
+                ),
                 position: Point::new(area.x + area.width, bounds.height - 20.0),
-                color: th::text_dim(), size: 8.0.into(),
+                color: th::text_dim(),
+                size: 8.0.into(),
                 horizontal_alignment: iced::alignment::Horizontal::Right,
                 ..Default::default()
             });
-            caption(&mut frame, format!("f{} · ticks 1/2 · tint: transition", meter.first_source_frame),
-                Point::new(area.x, bounds.height - 10.0), th::text_dim());
+            caption(
+                &mut frame,
+                format!(
+                    "f{} · ticks 1/2 · tint: transition",
+                    meter.first_source_frame
+                ),
+                Point::new(area.x, bounds.height - 10.0),
+                th::text_dim(),
+            );
         } else {
             frame.fill_text(canvas::Text {
-                content: "Unavailable".into(), position: area.center(), color: th::text_dim(),
-                size: 9.0.into(), horizontal_alignment: iced::alignment::Horizontal::Center,
-                vertical_alignment: iced::alignment::Vertical::Center, ..Default::default()
+                content: "Unavailable".into(),
+                position: area.center(),
+                color: th::text_dim(),
+                size: 9.0.into(),
+                horizontal_alignment: iced::alignment::Horizontal::Center,
+                vertical_alignment: iced::alignment::Vertical::Center,
+                ..Default::default()
             });
         }
         vec![frame.into_geometry()]

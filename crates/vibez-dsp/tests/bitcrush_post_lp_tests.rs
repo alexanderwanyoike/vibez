@@ -35,8 +35,10 @@ fn build(rate: f32, divider: f32, mix: f32, enabled: f32, cutoff: f32) -> Box<dy
 
 fn close(actual: f32, expected: f32, context: &str, frame: usize) {
     assert!(actual.is_finite());
-    assert!((actual - expected).abs() < 3e-6,
-        "{context}: frame={frame}, actual={actual}, expected={expected}");
+    assert!(
+        (actual - expected).abs() < 3e-6,
+        "{context}: frame={frame}, actual={actual}, expected={expected}"
+    );
 }
 
 #[test]
@@ -54,10 +56,18 @@ fn impulse_matches_butterworth_response_and_actual_cap_even_below_twenty_hertz()
             let mut reference = ReferenceFilter::default();
             for frame in 0..4096 {
                 for channel in 0..2 {
-                    let input = if frame == 0 { [0.5, -0.25][channel] } else { 0.0 };
+                    let input = if frame == 0 {
+                        [0.5, -0.25][channel]
+                    } else {
+                        0.0
+                    };
                     let expected = reference.process(input, channel, rate, cutoff);
-                    close(actual[frame * 2 + channel], expected,
-                        &format!("rate={rate}, stored_cutoff={cutoff}, channel={channel}"), frame);
+                    close(
+                        actual[frame * 2 + channel],
+                        expected,
+                        &format!("rate={rate}, stored_cutoff={cutoff}, channel={channel}"),
+                        frame,
+                    );
                 }
             }
             assert_eq!(effect.get_param(8), cutoff);
@@ -67,7 +77,11 @@ fn impulse_matches_butterworth_response_and_actual_cap_even_below_twenty_hertz()
 
 fn input(frame: usize, channel: usize) -> f32 {
     let left = ((frame % 97) as f32 - 48.0) / 32.0;
-    if channel == 0 { left } else { 0.125 - left * 0.5 }
+    if channel == 0 {
+        left
+    } else {
+        0.125 - left * 0.5
+    }
 }
 
 fn quantize(value: f32) -> f32 {
@@ -95,8 +109,12 @@ fn bypass_keeps_the_filter_warm_and_filtering_stays_before_the_untouched_dry_mix
                     let filtered = reference.process(held[channel], channel, rate, 700.0);
                     let wet = if frame < 128 { held[channel] } else { filtered };
                     let expected = dry[channel] * (1.0 - mix) + wet * mix;
-                    close(actual[channel], expected,
-                        &format!("warm bypass rate={rate}, mix={mix}, channel={channel}"), frame);
+                    close(
+                        actual[channel],
+                        expected,
+                        &format!("warm bypass rate={rate}, mix={mix}, channel={channel}"),
+                        frame,
+                    );
                     if mix == 0.0 {
                         assert_eq!(actual[channel], dry[channel]);
                     }
@@ -112,18 +130,26 @@ fn edits(effect: &mut dyn AudioEffect, frame: usize) {
             assert!(effect.set_param(8, 1_000.0));
             assert!(effect.set_param(7, 1.0));
         }
-        192 => { assert!(effect.set_automated_param(2, 0.37)); }
+        192 => {
+            assert!(effect.set_automated_param(2, 0.37));
+        }
         256 => {
             assert!(effect.set_param(8, 1_000.0));
             assert!(effect.set_param(7, 1.0));
         }
-        320 => { assert!(effect.set_automated_param(8, 4_000.0)); }
+        320 => {
+            assert!(effect.set_automated_param(8, 4_000.0));
+        }
         640 => {
             assert!(effect.set_param(8, 1_000.0));
             assert!(effect.set_param(7, 0.0));
         }
-        768 => { assert!(effect.set_automated_param(7, 1.0)); }
-        800 => { assert!(effect.set_param(8, 1_000.0)); }
+        768 => {
+            assert!(effect.set_automated_param(7, 1.0));
+        }
+        800 => {
+            assert!(effect.set_param(8, 1_000.0));
+        }
         _ => {}
     }
 }
@@ -153,7 +179,8 @@ fn cutoff_and_enable_ramp_on_source_frames_with_independent_exact_automation_and
             for partitions in [&[1280][..], &[1, 7, 31, 113, 5][..]] {
                 let mut effect = build(rate, 3.0, 0.65, 0.0, 20_000.0);
                 let mut actual: Vec<_> = (0..1280)
-                    .flat_map(|frame| (0..channels).map(move |channel| input(frame, channel))).collect();
+                    .flat_map(|frame| (0..channels).map(move |channel| input(frame, channel)))
+                    .collect();
                 let mut frame = 0;
                 let mut callback = 0;
                 while frame < 1280 {
@@ -176,8 +203,12 @@ fn cutoff_and_enable_ramp_on_source_frames_with_independent_exact_automation_and
                         let filtered = reference.process(held[channel], channel, rate, cutoff);
                         let wet = held[channel] * (1.0 - enabled) + filtered * enabled;
                         let expected = dry * (1.0 - mix) + wet * mix;
-                        close(actual[frame * channels + channel], expected,
-                            &format!("ramps rate={rate}, channels={channels}"), frame);
+                        close(
+                            actual[frame * channels + channel],
+                            expected,
+                            &format!("ramps rate={rate}, channels={channels}"),
+                            frame,
+                        );
                     }
                 }
                 if let Some(baseline) = &baseline {
@@ -187,17 +218,25 @@ fn cutoff_and_enable_ramp_on_source_frames_with_independent_exact_automation_and
                 }
                 effect.reset();
                 let mut reset: Vec<_> = (0..64)
-                    .flat_map(|frame| (0..channels).map(move |channel| input(frame, channel))).collect();
+                    .flat_map(|frame| (0..channels).map(move |channel| input(frame, channel)))
+                    .collect();
                 effect.process(&mut reset, channels);
                 let mut reference = ReferenceFilter::default();
                 let mut held = [0.0; 2];
                 for frame in 0..64 {
                     for channel in 0..channels {
                         let dry = input(frame, channel);
-                        if frame % 3 == 0 { held[channel] = quantize(dry); }
+                        if frame % 3 == 0 {
+                            held[channel] = quantize(dry);
+                        }
                         let wet = reference.process(held[channel], channel, rate, 1_000.0);
                         let expected = dry * (1.0 - 0.37) + wet * 0.37;
-                        close(reset[frame * channels + channel], expected, "reset to current targets", frame);
+                        close(
+                            reset[frame * channels + channel],
+                            expected,
+                            "reset to current targets",
+                            frame,
+                        );
                     }
                 }
             }

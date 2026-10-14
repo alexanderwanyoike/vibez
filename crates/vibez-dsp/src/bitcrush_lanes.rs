@@ -62,12 +62,19 @@ struct Lane {
 
 impl Lane {
     fn new(configuration: Configuration) -> Self {
-        Self { configuration, hold: [0.0; 2], clock: Clock::default() }
+        Self {
+            configuration,
+            hold: [0.0; 2],
+            clock: Clock::default(),
+        }
     }
 
     fn process(&mut self, source: &Source<'_>) -> bool {
         let acquired = self.clock.advance(
-            self.configuration.divider, source.jitter, source.frame, source.random,
+            self.configuration.divider,
+            source.jitter,
+            source.frame,
+            source.random,
         );
         if acquired {
             let step = 2.0 / (1_u32 << self.configuration.bits) as f32;
@@ -104,8 +111,12 @@ pub(super) struct Lanes {
 
 impl Lanes {
     pub(super) fn new(configuration: Configuration) -> Self {
-        Self { lanes: [Lane::new(configuration); 2], current: 0, phase: 0,
-            pending: None }
+        Self {
+            lanes: [Lane::new(configuration); 2],
+            current: 0,
+            phase: 0,
+            pending: None,
+        }
     }
 
     pub(super) fn clear_histories(&mut self) {
@@ -116,7 +127,10 @@ impl Lanes {
     }
 
     pub(super) fn edit(&mut self, index: usize, value: f32, immediate: bool) {
-        if !matches!(index, param::BITS | param::SR_REDUCE | param::ROUNDING | param::DITHER) {
+        if !matches!(
+            index,
+            param::BITS | param::SR_REDUCE | param::ROUNDING | param::DITHER
+        ) {
             return;
         }
         if immediate {
@@ -127,8 +141,14 @@ impl Lanes {
                 pending.edit(index, value);
             }
         }
-        let destination = if self.phase == 0 { self.current } else { 1 - self.current };
-        let mut target = self.pending.unwrap_or(self.lanes[destination].configuration);
+        let destination = if self.phase == 0 {
+            self.current
+        } else {
+            1 - self.current
+        };
+        let mut target = self
+            .pending
+            .unwrap_or(self.lanes[destination].configuration);
         target.edit(index, value);
         self.pending = (target != self.lanes[destination].configuration).then_some(target);
     }
@@ -160,9 +180,18 @@ impl Lanes {
                 self.phase += 1;
             }
         }
-        Frame { wet, primary_acquired, secondary_acquired, transition,
+        Frame {
+            wet,
+            primary_acquired,
+            secondary_acquired,
+            transition,
             primary_interval: self.lanes[self.current].clock.interval(),
-            secondary_interval: if self.phase == 0 { 0 } else { self.lanes[1 - self.current].clock.interval() },
-            transition_active: self.phase != 0 }
+            secondary_interval: if self.phase == 0 {
+                0
+            } else {
+                self.lanes[1 - self.current].clock.interval()
+            },
+            transition_active: self.phase != 0,
+        }
     }
 }

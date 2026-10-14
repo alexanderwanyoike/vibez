@@ -37,7 +37,11 @@ fn display_hertz(rate: f64) -> String {
     }
 }
 
-pub fn parameter_explanation(index: usize, values: &[f32], prepared_rate: Option<u32>) -> Option<String> {
+pub fn parameter_explanation(
+    index: usize,
+    values: &[f32],
+    prepared_rate: Option<u32>,
+) -> Option<String> {
     use vibez_dsp::bitcrush::{param, BITCRUSH_PARAMS};
 
     match index {
@@ -78,15 +82,18 @@ fn requested_hertz(text: &str) -> Option<f64> {
 fn nearest_divider(sample_rate: f64, requested: f64) -> f32 {
     (1..32)
         .find(|divider| {
-            let boundary = (sample_rate / f64::from(*divider)
-                + sample_rate / f64::from(*divider + 1)) * 0.5;
+            let boundary =
+                (sample_rate / f64::from(*divider) + sample_rate / f64::from(*divider + 1)) * 0.5;
             requested > boundary
         })
         .unwrap_or(32) as f32
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum BitcrushValue { Bits, Rate }
+pub enum BitcrushValue {
+    Bits,
+    Rate,
+}
 
 impl BitcrushValue {
     fn selected(self, value: f32) -> f32 {
@@ -101,14 +108,19 @@ impl BitcrushValue {
             Self::Bits => (2.0..=16.0).contains(&original),
             Self::Rate => (1.0..=32.0).contains(&original),
         };
-        if valid && self.selected(original) == selected { original } else { selected }
+        if valid && self.selected(original) == selected {
+            original
+        } else {
+            selected
+        }
     }
 
     pub fn position(self, value: f32) -> f32 {
         match self {
             Self::Bits => (self.selected(value) - 2.0) / 14.0,
-            Self::Rate => ((32.0_f64 / f64::from(self.selected(value))).ln()
-                / 32.0_f64.ln()) as f32,
+            Self::Rate => {
+                ((32.0_f64 / f64::from(self.selected(value))).ln() / 32.0_f64.ln()) as f32
+            }
         }
     }
 
@@ -140,7 +152,9 @@ pub fn parse_rate(text: &str, sample_rate: u32, current: f32) -> Option<f32> {
     if !requested.is_finite() {
         return None;
     }
-    if display_rate(sample_rate, current).and_then(|shown| requested_hertz(&shown)) == Some(requested) {
+    if display_rate(sample_rate, current).and_then(|shown| requested_hertz(&shown))
+        == Some(requested)
+    {
         return Some(current);
     }
     if !(rate / 32.0..=rate).contains(&requested) {
@@ -175,8 +189,10 @@ mod tests {
                         format!(" {} kHz ", shown.trim_end_matches('k')),
                         format!("{hertz:.3} Hz"),
                     ] {
-                        let restored = parse_rate(&text, sample_rate, current)
-                            .unwrap_or_else(|| panic!("Fs={sample_rate}, stored={current}: {text}"));
+                        let restored =
+                            parse_rate(&text, sample_rate, current).unwrap_or_else(|| {
+                                panic!("Fs={sample_rate}, stored={current}: {text}")
+                            });
                         assert_eq!(
                             restored.to_bits(),
                             current.to_bits(),
@@ -197,7 +213,10 @@ mod tests {
                 assert_eq!(parse_rate(&text, sample_rate, 32.0), None, "{text}");
             }
             let midpoint = sample_rate * 3 / 4;
-            assert_eq!(parse_rate(&format!("{midpoint} Hz"), sample_rate, 1.0), Some(2.0));
+            assert_eq!(
+                parse_rate(&format!("{midpoint} Hz"), sample_rate, 1.0),
+                Some(2.0)
+            );
         }
 
         for (sample_rate, expected) in [

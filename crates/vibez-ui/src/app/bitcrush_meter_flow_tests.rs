@@ -74,7 +74,9 @@ fn sample_hold_cache_requires_current_native_selection_and_prepared_context() {
     };
     packet.input[..8].copy_from_slice(&[0.0, 0.25, 0.5, 0.75, 0.5, 0.25, 0.0, -0.25]);
     packet.output[..8].copy_from_slice(&[0.0, 0.0, 0.25, 0.25, 0.5, 0.5, 0.25, 0.25]);
-    let before = app.state.find_track(track).unwrap().effects[0].params.clone();
+    let before = app.state.find_track(track).unwrap().effects[0]
+        .params
+        .clone();
     app.state.project.history = Default::default();
     app.state.project.dirty = false;
     for (candidate_track, candidate_effect, candidate_generation) in [
@@ -167,12 +169,8 @@ fn sample_hold_cache_requires_current_native_selection_and_prepared_context() {
         .unwrap()
         .value
         .is_none());
-    app.cmd_tx.insert_built_in_effect_with_params(
-        track,
-        effect,
-        EffectType::Bitcrush,
-        &before,
-    );
+    app.cmd_tx
+        .insert_built_in_effect_with_params(track, effect, EffectType::Bitcrush, &before);
     app.accept_bitcrush_sample_hold(track, effect, generation, packet);
     assert!(app.bitcrush_sample_hold(effect).is_none());
     let replacement = SampleHoldMeter {
@@ -189,7 +187,10 @@ fn sample_hold_cache_requires_current_native_selection_and_prepared_context() {
     app.state.find_track_mut(track).unwrap().effects[0].reconfiguration_failed = false;
     app.accept_bitcrush_sample_hold(track, effect, generation, replacement);
     assert_eq!(app.bitcrush_sample_hold(effect), Some(replacement));
-    assert_eq!(app.state.find_track(track).unwrap().effects[0].params, before);
+    assert_eq!(
+        app.state.find_track(track).unwrap().effects[0].params,
+        before
+    );
     assert!(!app.state.project.history.can_undo());
     assert!(!app.state.project.dirty);
 
