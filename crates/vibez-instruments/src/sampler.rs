@@ -1,3 +1,5 @@
+//! Polyphonic pitched sample playback and its parameter state.
+
 use std::sync::Arc;
 
 use vibez_core::audio_buffer::DecodedAudio;

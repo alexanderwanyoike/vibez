@@ -1,3 +1,5 @@
+//! Offline channel and device preparation before rendering.
+
 use super::*;
 use crate::mixer::{EngineClip, EngineNoteClip};
 use vibez_core::effect::EffectInfo;

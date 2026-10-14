@@ -1,3 +1,5 @@
+//! Prepared command vocabulary for engine control and ownership transfer.
+
 use std::sync::Arc;
 use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::effect::EffectType;

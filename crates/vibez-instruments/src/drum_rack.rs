@@ -1,3 +1,5 @@
+//! Polyphonic drum pad playback with captured per-voice sample settings.
+
 use std::sync::Arc;
 
 use vibez_core::audio_buffer::DecodedAudio;
