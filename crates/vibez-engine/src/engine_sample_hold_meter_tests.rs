@@ -1,46 +1,8 @@
 //! Selected native scope publication observes the real graph without callback heap traffic.
 
-use std::alloc::{GlobalAlloc, Layout, System};
-use std::cell::Cell;
 use vibez_core::{effect::EffectType, id::{EffectId, TrackId}, routing::{RoutingChannel, RoutingEffect, RoutingNode, NodeStage}};
 use vibez_dsp::factory::create_effect_with_params;
-use vibez_engine::{commands::EngineCommand, engine::{AudioEngine, AudioProcessBlock}, events::EngineEvent, routing::PreparedRouting};
-
-thread_local! {
-    static COUNTING: Cell<bool> = const { Cell::new(false) };
-    static ALLOCATIONS: Cell<usize> = const { Cell::new(0) };
-    static DEALLOCATIONS: Cell<usize> = const { Cell::new(0) };
-}
-
-struct Allocator;
-unsafe impl GlobalAlloc for Allocator {
-    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        if COUNTING.get() { ALLOCATIONS.set(ALLOCATIONS.get() + 1); }
-        unsafe { System.alloc(layout) }
-    }
-    unsafe fn dealloc(&self, pointer: *mut u8, layout: Layout) {
-        if COUNTING.get() { DEALLOCATIONS.set(DEALLOCATIONS.get() + 1); }
-        unsafe { System.dealloc(pointer, layout) }
-    }
-    unsafe fn realloc(&self, pointer: *mut u8, layout: Layout, size: usize) -> *mut u8 {
-        if COUNTING.get() {
-            ALLOCATIONS.set(ALLOCATIONS.get() + 1);
-            DEALLOCATIONS.set(DEALLOCATIONS.get() + 1);
-        }
-        unsafe { System.realloc(pointer, layout, size) }
-    }
-}
-#[global_allocator]
-static ALLOCATOR: Allocator = Allocator;
-
-fn without_heap_traffic(action: impl FnOnce()) -> (usize, usize) {
-    ALLOCATIONS.set(0);
-    DEALLOCATIONS.set(0);
-    COUNTING.set(true);
-    action();
-    COUNTING.set(false);
-    (ALLOCATIONS.get(), DEALLOCATIONS.get())
-}
+use crate::{commands::EngineCommand, engine::{AudioEngine, AudioProcessBlock}, events::EngineEvent, routing::PreparedRouting};
 
 #[test]
 fn selected_native_sample_hold_packets_publish_actual_graph_samples_at_fifty_hertz() {
@@ -80,7 +42,7 @@ fn selected_native_sample_hold_packets_publish_actual_graph_samples_at_fifty_her
             input[frame * 2] = left[position];
             input[frame * 2 + 1] = right[position];
         }
-        let traffic = without_heap_traffic(|| {
+        let traffic = crate::retirement::tests::allocations(|| {
             engine.process_block(AudioProcessBlock::new(&mut output[..frames * 2], 2)
                 .with_live_input(track.raw(), &input[..frames * 2]));
         });
