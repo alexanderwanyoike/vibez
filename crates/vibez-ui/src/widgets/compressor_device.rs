@@ -29,6 +29,7 @@ pub const MAX_W: f32 = 900.0;
 const TOOLBAR_H: f32 = 26.0;
 const SIDECHAIN_W: f32 = 120.0;
 const GAUGE_W: f32 = 76.0;
+const ASIDE_W: f32 = 260.0;
 
 #[derive(Debug, Clone, Copy)]
 pub struct Arrangement {
@@ -47,14 +48,15 @@ pub struct Arrangement {
 
 pub fn arrange(size: Size, advanced: bool) -> Arrangement {
     let compact = size.width < MEDIUM_W;
+    let expanded = size.width >= 872.0 && size.height >= 280.0;
     let (controls, knobs) = if size.height >= 280.0 {
-        (84.0, Some(34.0))
+        (if expanded { 88.0 } else { 84.0 }, Some(34.0))
     } else if size.height >= 160.0 {
         (57.0, Some(20.0))
     } else {
         (36.0, None)
     };
-    let details = if advanced && size.height >= 112.0 {
+    let details = if advanced && !expanded && size.height >= 112.0 {
         if size.height >= 280.0 {
             44.0
         } else {
@@ -79,13 +81,11 @@ pub fn arrange(size: Size, advanced: bool) -> Arrangement {
     let plot = if compact {
         if tabs > 0.0 && available >= 60.0 { available } else { 0.0 }
     } else if available >= 84.0 { available } else { 0.0 };
-    let expanded = size.width >= 872.0
-        && (!advanced || sidechain_column || routing > 0.0);
     Arrangement {
         plot,
         controls,
         knobs,
-        primary_visible_with_details: advanced && details > 0.0,
+        primary_visible_with_details: advanced && (expanded || details > 0.0),
         sidechain_column,
         both_plots: !compact && plot > 0.0,
         compact,
@@ -412,7 +412,19 @@ pub fn view<'a>(
     } else {
         PrimaryControls::Full
     };
-    let controls: Element<'a, Message> = if state.advanced && !layout.primary_visible_with_details {
+    let controls: Element<'a, Message> = if layout.expanded {
+        row![
+            compressor_controls::primary(track, effect, state, accent, layout.knobs, primary),
+            iced::widget::vertical_rule(1),
+            container(compressor_controls::aside(
+                track, effect, state, panel, accent, input, output,
+                details_button(track, effect, state.advanced, false, accent),
+            )).width(ASIDE_W)
+        ]
+        .spacing(12)
+        .align_y(iced::Alignment::Center)
+        .into()
+    } else if state.advanced && !layout.primary_visible_with_details {
         advanced()
     } else {
         row![
@@ -430,11 +442,7 @@ pub fn view<'a>(
             .align_y(iced::alignment::Vertical::Center),
     );
     if layout.details > 0.0 {
-        let details = if layout.expanded {
-            compressor_controls::strip(track, effect, state, accent)
-        } else {
-            advanced()
-        };
+        let details = advanced();
         body = body.push(
             container(details)
                 .height(layout.details)
@@ -615,7 +623,7 @@ mod tests {
                 }
                 assert_eq!(layout.expanded, width >= 872.0);
                 let child = 8.0 * 1.3 + 3.0 + 10.0 * 1.3 + 2.0;
-                if advanced {
+                if advanced && !layout.expanded {
                     assert!(layout.details - 6.0 >= child);
                 }
             }
@@ -677,6 +685,17 @@ mod tests {
             assert_eq!(layout.details, 0.0, "Advanced became a generic row at {width}");
             assert!(layout.primary_visible_with_details);
             assert!(layout.plot >= 180.0, "the aside displaced the dominant graph");
+            let main_width = width - 8.0 - ASIDE_W - 1.0 - 2.0 * 12.0;
+            let parameter_width = (main_width - 44.0 - 7.0 * 6.0) / 7.0;
+            assert!(parameter_width >= 68.0, "the aside squeezed core values at {width}");
+            let header = 9.0 * 1.3 + 6.0;
+            let reading = 8.0 * 1.3 + 3.0 + 10.0 * 1.3;
+            let two_meter_rows = 2.0 * reading + 4.0;
+            assert!(layout.controls - 5.0 >= header + 5.0 + two_meter_rows,
+                "the aside clips its real header and metering rows");
+            let detector_frequency_width = 9.0 * 1.3 + 8.0 + 54.0 + 8.0 * 1.3 + 8.0;
+            assert!(106.0 >= detector_frequency_width);
+            assert!((ASIDE_W - 106.0 - 16.0) / 2.0 >= 68.0);
         }
     }
 

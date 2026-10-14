@@ -71,55 +71,77 @@ pub fn primary<'a>(
     parameters.width(Length::Fill).into()
 }
 
-pub fn strip<'a>(
+fn detector_frequency<'a>(
     track: TrackId,
     effect: &'a UiEffect,
     state: &'a DeviceControlState,
     accent: Color,
+    enabled: usize,
+    index: usize,
+    label: &'static str,
 ) -> Element<'a, Message> {
-    let frequency = |enabled, index, label| -> Element<'a, Message> {
-        column![
-            section_label(label),
+    column![
+        section_label(label),
+        row![
+            toggle(track, effect, enabled, "On", accent),
+            container(value_field(track, effect, state, index, accent)).width(54.0),
+            text("Hz").size(8).color(th::text_dim())
+        ].spacing(4).align_y(iced::Alignment::Center)
+    ].spacing(3).width(Length::Fill).into()
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn aside<'a>(
+    track: TrackId,
+    effect: &'a UiEffect,
+    state: &'a DeviceControlState,
+    panel: &CompressorPanel,
+    accent: Color,
+    input: MeterValues,
+    output: MeterValues,
+    disclosure: Element<'a, Message>,
+) -> Element<'a, Message> {
+    if !state.advanced {
+        return disclosure;
+    }
+    let pages = vec![
+        CompressorPage::Dynamics, CompressorPage::Detector,
+        CompressorPage::Range, CompressorPage::Metering,
+    ];
+    let selected = if pages.contains(&panel.page) { panel.page } else { CompressorPage::Dynamics };
+    let header = row![disclosure, page_selector(track, effect.id, pages, selected, accent)]
+        .spacing(6).align_y(iced::Alignment::Center);
+    let controls: Element<'a, Message> = match selected {
+        CompressorPage::Sound | CompressorPage::Dynamics | CompressorPage::Sidechain => row![
+            container(detector_frequency(track, effect, state, accent, param::HP_ENABLED, param::HP_FREQUENCY, "Detector HP")).width(106.0),
+            selector(track, effect, param::DETECTOR_MODE, "Detector", &["Peak", "RMS"], accent),
+            selector(track, effect, param::STEREO_LINK, "Stereo", &["Unlinked", "Linked"], accent),
+        ].spacing(8).align_y(iced::Alignment::Center).into(),
+        CompressorPage::Detector => column![
             row![
-                toggle(track, effect, enabled, "On", accent),
-                container(value_field(track, effect, state, index, accent)).width(54.0),
-                text("Hz").size(8).color(th::text_dim())
-            ]
-            .spacing(4)
-            .align_y(iced::Alignment::Center)
-        ]
-        .spacing(3)
-        .into()
+                detector_frequency(track, effect, state, accent, param::HP_ENABLED, param::HP_FREQUENCY, "Detector HP"),
+                detector_frequency(track, effect, state, accent, param::LP_ENABLED, param::LP_FREQUENCY, "Detector LP"),
+            ].spacing(8),
+            toggle(track, effect, param::DETECTOR_LISTEN, "Listen to detector", accent),
+        ].spacing(4).into(),
+        CompressorPage::Range => row![
+            toggle(track, effect, param::RANGE_ENABLED, "Limit GR", accent),
+            parameter(track, effect, state, param::RANGE, accent, None),
+        ].spacing(8).align_y(iced::Alignment::Center).into(),
+        CompressorPage::Metering => column![
+            row![
+                reading("In L", input.peak_l, true), reading("In R", input.peak_r, true),
+                reading("Out L", output.peak_l, true), reading("Out R", output.peak_r, true),
+            ].spacing(4),
+            row![
+                reading("GR L", panel.meter.current_reduction_db[0], false),
+                reading("GR R", panel.meter.current_reduction_db[1], false),
+                reading("Det L", panel.meter.detector_peak[0], true),
+                reading("Det R", panel.meter.detector_peak[1], true),
+            ].spacing(4),
+        ].spacing(4).into(),
     };
-    row![
-        frequency(param::HP_ENABLED, param::HP_FREQUENCY, "Detector HP"),
-        frequency(param::LP_ENABLED, param::LP_FREQUENCY, "Detector LP"),
-        container(selector(
-            track,
-            effect,
-            param::DETECTOR_MODE,
-            "Detector",
-            &["Peak", "RMS"],
-            accent
-        ))
-        .width(82.0),
-        toggle(track, effect, param::STEREO_LINK, "Stereo Link", accent),
-        toggle(track, effect, param::DETECTOR_LISTEN, "Listen", accent),
-        column![
-            section_label("Reduction cap"),
-            row![
-                toggle(track, effect, param::RANGE_ENABLED, "On", accent),
-                container(value_field(track, effect, state, param::RANGE, accent)).width(50.0),
-                text("dB").size(8).color(th::text_dim())
-            ]
-            .spacing(4)
-            .align_y(iced::Alignment::Center)
-        ]
-        .spacing(3)
-    ]
-    .spacing(14)
-    .align_y(iced::Alignment::Center)
-    .into()
+    column![header, controls].spacing(5).width(Length::Fill).into()
 }
 
 fn toggle<'a>(
