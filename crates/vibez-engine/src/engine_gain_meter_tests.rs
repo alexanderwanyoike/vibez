@@ -388,7 +388,7 @@ fn gain_meter_reports_bypass_and_audible_reenable_fade() {
             // include the graph's dry/wet recovery blend heard downstream.
             let mut heard_peak = [0.0_f32; 2];
             let mut heard_squares = [0.0_f64; 2];
-            for frame in output.chunks_exact(2) {
+            for frame in output.as_chunks::<2>().0 {
                 for channel in 0..2 {
                     let sample = frame[channel] / std::f32::consts::FRAC_1_SQRT_2;
                     heard_peak[channel] = heard_peak[channel].max(sample.abs());
@@ -541,7 +541,7 @@ fn legacy_gain_automation_keeps_linear_mapping_with_neutral_new_controls() {
         engine.process_block(
             AudioProcessBlock::new(&mut output, 2).with_live_input(track_id.raw(), &input),
         );
-        for frame in output.chunks_exact(2) {
+        for frame in output.as_chunks::<2>().0 {
             for (actual, expected) in frame
                 .iter()
                 .copied()
