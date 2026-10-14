@@ -429,3 +429,34 @@ fn invalid_rates_parameters_and_nonfinite_audio_cannot_poison_gate_state() {
             gate.close_threshold_db, gate.hold_remaining_ms].into_iter().all(f32::is_finite));
     }
 }
+
+#[test]
+fn initial_and_reset_diagnostics_match_the_actual_wet_state_and_hydrated_thresholds() {
+    use vibez_core::effect::GatePhase;
+    for (mode, attenuation) in [(0.0, 200.0), (1.0, 0.0)] {
+        let mut effect = GateEffect::new(48_000.0);
+        for (index, value) in [(0, -32.0), (4, 6.0), (7, mode), (8, 1.0)] {
+            assert!(effect.set_param(index, value));
+        }
+        assert_eq!(effect.latency_samples(), 0);
+        assert!(effect.supports_level_meter());
+        for after_reset in [false, true] {
+            if after_reset {
+                effect.process(&mut [0.3; 256], 2);
+                effect.reset();
+            }
+            let meter = effect.take_dynamics_meter().unwrap();
+            assert_eq!(meter.current_reduction_db, [attenuation; 2], "incorrect initial wet state");
+            assert_eq!(meter.peak_reduction_db, [0.0; 2]);
+            assert_eq!(meter.detector_peak, [0.0; 2]);
+            let gate = meter.gate.unwrap();
+            assert_eq!(gate.phase, GatePhase::Closed);
+            assert_eq!(gate.envelope_db, -120.0);
+            assert_eq!(gate.peak_envelope_db, -120.0);
+            assert_eq!(gate.open_threshold_db, -32.0);
+            assert_eq!(gate.close_threshold_db, -38.0);
+            assert_eq!(gate.hold_remaining_ms, 0.0);
+            assert_eq!(gate.phases_seen, 0);
+        }
+    }
+}
