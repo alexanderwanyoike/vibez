@@ -232,9 +232,13 @@ impl AudioEngine {
         track_id: vibez_core::id::TrackId,
         pad_index: usize,
     ) {
-        let retired = self.tracks.iter_mut().find(|track| track.id == track_id)
+        let retired = self
+            .tracks
+            .iter_mut()
+            .find(|track| track.id == track_id)
             .and_then(|track| track.instrument.as_mut())
-            .map(|instrument| instrument.clear_drum_pad(pad_index)).unwrap_or_default();
+            .map(|instrument| instrument.clear_drum_pad(pad_index))
+            .unwrap_or_default();
         self.retire_instrument_media(retired);
     }
 
@@ -244,10 +248,17 @@ impl AudioEngine {
         pad_index: usize,
         state: vibez_instruments::PreparedDrumPadState,
     ) {
-        let retired = match self.tracks.iter_mut().find(|track| track.id == track_id)
-            .and_then(|track| track.instrument.as_mut()) {
+        let retired = match self
+            .tracks
+            .iter_mut()
+            .find(|track| track.id == track_id)
+            .and_then(|track| track.instrument.as_mut())
+        {
             Some(instrument) => instrument.set_drum_pad_state(pad_index, state),
-            None => vibez_instruments::InstrumentMediaOwners { sample: None, name: state.name },
+            None => vibez_instruments::InstrumentMediaOwners {
+                sample: None,
+                name: state.name,
+            },
         };
         self.retire_instrument_media(retired);
     }

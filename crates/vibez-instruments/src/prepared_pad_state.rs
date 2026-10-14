@@ -20,7 +20,9 @@ pub struct PreparedDrumPadState {
 impl From<DrumPadState> for PreparedDrumPadState {
     fn from(state: DrumPadState) -> Self {
         // Source paths and provenance are unused by DSP and must drop on this sender.
-        let name = state.name.or_else(|| state.source.as_ref().map(|source| source.display_name()));
+        let name = state
+            .name
+            .or_else(|| state.source.as_ref().map(|source| source.display_name()));
         Self {
             name,
             gain: state.gain,

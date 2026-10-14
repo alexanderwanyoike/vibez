@@ -467,8 +467,16 @@ pub enum EngineCommand {
 
 impl EngineCommand {
     /// Resolve names and destroy unused media metadata on the sending thread.
-    pub fn set_drum_rack_pad_state(track_id: TrackId, pad_index: usize, state: DrumPadState) -> Self {
-        Self::SetDrumRackPadState { track_id, pad_index, state: state.into() }
+    pub fn set_drum_rack_pad_state(
+        track_id: TrackId,
+        pad_index: usize,
+        state: DrumPadState,
+    ) -> Self {
+        Self::SetDrumRackPadState {
+            track_id,
+            pad_index,
+            state: state.into(),
+        }
     }
 
     /// Constructs the device on the caller's thread: building one allocates,
