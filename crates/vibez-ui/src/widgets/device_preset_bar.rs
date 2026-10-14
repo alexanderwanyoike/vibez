@@ -98,7 +98,7 @@ pub(crate) fn view<'a>(
     .placeholder("Custom")
     .width(Length::Fixed((available_width - 95.0).clamp(72.0, 200.0)))
     .padding([3, 5])
-    .text_size(10)
+    .text_size(12)
     .style(move |_theme: &Theme, status| pick_list::Style {
         text_color: th::text(),
         placeholder_color: th::text_dim(),
@@ -129,7 +129,7 @@ pub(crate) fn view<'a>(
         selected_background: th::bg_hover().into(),
     });
     let selection = row![
-        text("Preset").size(10).color(th::text_dim()),
+        text("Preset").size(12).color(th::text_dim()),
         tooltip(selector, text(hint).size(11), tooltip::Position::Top),
         preset_button("‹", previous, accent),
         preset_button("›", next, accent),
@@ -165,7 +165,7 @@ fn preset_button<'a>(
     message: Option<Message>,
     accent: Color,
 ) -> Element<'a, Message> {
-    button(text(label).size(10))
+    button(text(label).size(12))
         .on_press_maybe(message)
         .padding([3, 5])
         .style(move |_theme: &Theme, status| button::Style {

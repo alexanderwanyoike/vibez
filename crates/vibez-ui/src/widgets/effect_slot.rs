@@ -1,3 +1,5 @@
+//! Shared native and plugin effect header, latency display and device body.
+
 use iced::widget::{button, column, container, row, text, Space};
 use iced::{Color, Element, Length, Theme};
 
@@ -13,16 +15,17 @@ use vibez_plugin_host::gui::PluginGuiKey;
 mod sidechain;
 pub use sidechain::view as view_sidechain;
 
-/// Render an Ableton-style device card for the detail panel.
-///
-/// `custom_body` swaps the generic knob-row body for a purpose-built
-/// one (the channel EQ's display panel) while keeping the shared
-/// title-bar chrome; the second element is the card width.
+pub struct DeviceBody<'a> {
+    pub content: Element<'a, Message>,
+    pub width: f32,
+    pub height: f32,
+}
+
 pub fn view_effect_slot<'a>(
     track_id: TrackId,
     effect: &'a UiEffect,
     track_color: Color,
-    custom_body: Option<(Element<'a, Message>, f32)>,
+    custom_body: Option<DeviceBody<'a>>,
     sidechain: Option<Element<'a, Message>>,
     sample_rate: u32,
 ) -> Element<'a, Message> {
@@ -74,8 +77,8 @@ pub fn view_effect_slot<'a>(
     } else {
         0
     };
-    let card_w = if let Some((_, w)) = custom_body.as_ref() {
-        *w
+    let card_w = if let Some(body) = custom_body.as_ref() {
+        body.width
     } else if is_plugin {
         crate::widgets::device_chrome::PLUGIN_CARD_W
     } else {
@@ -160,10 +163,10 @@ pub fn view_effect_slot<'a>(
     let title_bar = crate::widgets::device_chrome::title_bar(title_row);
 
     // ── Body ─────────────────────────────────────────────────
-    let body: Element<'a, Message> = if let Some((custom, _)) = custom_body {
-        container(custom)
+    let body: Element<'a, Message> = if let Some(custom) = custom_body {
+        container(custom.content)
             .padding([8, 10])
-            .height(Length::Fixed(th::DEVICE_BODY_H))
+            .height(Length::Fixed(custom.height))
             .into()
     } else if has_params && !has_gui {
         let knob_color = if is_bypassed {

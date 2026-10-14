@@ -12,6 +12,7 @@ pub mod effect_knob;
 pub mod effect_slot;
 pub mod eq_display;
 pub mod fader;
+pub mod gain_device;
 pub mod knob;
 pub mod local_drag;
 pub mod mini_waveform;

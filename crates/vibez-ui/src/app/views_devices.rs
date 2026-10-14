@@ -13,7 +13,7 @@ use crate::icons;
 use crate::message::Message;
 use crate::state::UiTrack;
 use crate::theme as th;
-use crate::widgets::effect_slot::{view_effect_slot, view_sidechain};
+use crate::widgets::effect_slot::{view_effect_slot, view_sidechain, DeviceBody};
 
 use super::*;
 
@@ -88,7 +88,14 @@ impl App {
             let custom = if effect.effect_type == vibez_core::effect::EffectType::Eq
                 && effect.plugin_ref.is_none()
             {
-                Some(self.eq_device_body(track_id, effect))
+                {
+                    let (content, width) = self.eq_device_body(track_id, effect);
+                    Some(DeviceBody { content, width, height: th::DEVICE_BODY_H })
+                }
+            } else if effect.effect_type == vibez_core::effect::EffectType::Gain
+                && effect.plugin_ref.is_none() && effect.plugin_name.is_none()
+            {
+                Some(self.gain_device_body(track_id, effect, track_color))
             } else {
                 None
             };
@@ -110,8 +117,6 @@ impl App {
             devices_row = devices_row.push(slot);
         }
 
-        // Horizontal only: the panel is now a fixed-height strip the
-        // cards fit exactly, Ableton-style.
         let scrollable_devices =
             scrollable(devices_row).direction(scrollable::Direction::Horizontal(
                 scrollable::Scrollbar::new()
@@ -135,6 +140,27 @@ impl App {
                 },
             ))
             .into()
+    }
+
+    fn gain_device_body<'a>(
+        &'a self,
+        track_id: TrackId,
+        effect: &'a crate::state::UiEffect,
+        accent: Color,
+    ) -> DeviceBody<'a> {
+        let width = (self.state.view.window_width - 36.0).clamp(320.0, 900.0);
+        let height = (self.effective_detail_height() - 100.0).max(70.0);
+        let panel = self.gain_devices.panels.get(&effect.id)
+            .unwrap_or(&self.gain_devices.empty_panel);
+        DeviceBody {
+            content: crate::widgets::gain_device::view(
+                track_id, effect, accent, panel,
+                self.view_device_preset_bar(track_id, effect, accent, width - 20.0),
+                width - 20.0, height - 16.0,
+            ),
+            width,
+            height,
+        }
     }
 
     /// Channel EQ card body: response display over the live analyser
