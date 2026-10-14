@@ -62,9 +62,10 @@ fn request(sample_rate: u32, bypass: bool) -> BounceRequest {
         samples[0][frame] = pair[0];
         samples[1][frame] = pair[1];
     }
-    for frame in 640..672 {
-        samples[0][frame] = (frame - 640) as f32 / 32.0 - 0.5;
-        samples[1][frame] = 0.25 - samples[0][frame] * 0.5;
+    let (left, right) = samples.split_at_mut(1);
+    for (frame, (left, right)) in left[0].iter_mut().zip(&mut right[0]).enumerate().take(672).skip(640) {
+        *left = (frame - 640) as f32 / 32.0 - 0.5;
+        *right = 0.25 - *left * 0.5;
     }
     let audio = Arc::new(DecodedAudio {
         channels: samples,
@@ -366,12 +367,13 @@ fn jitter_drive_and_common_filter_history_match_full_and_warmed_bounce_at_a_nona
         request.tracks[0].effects[0].id = identity;
         request.tracks[0].effects[0].params = PARAMS.to_vec();
         let mut samples = vec![vec![0.0; FRAMES]; 2];
-        for frame in 0..FRAMES {
+        let (left, right) = samples.split_at_mut(1);
+        for (frame, (left, right)) in left[0].iter_mut().zip(&mut right[0]).enumerate() {
             let time = frame as f64;
-            samples[0][frame] = (0.22 * (time * 0.037).sin()
+            *left = (0.22 * (time * 0.037).sin()
                 + 0.13 * (time * 0.013).cos()
                 + if frame % 113 == 0 { 0.5 } else { 0.0 }) as f32;
-            samples[1][frame] = (0.19 * (time * 0.021).cos() - 0.15 * (time * 0.043).sin()) as f32;
+            *right = (0.19 * (time * 0.021).cos() - 0.15 * (time * 0.043).sin()) as f32;
         }
         let source = Arc::new(DecodedAudio {
             channels: samples,
@@ -473,8 +475,8 @@ fn jitter_drive_and_common_filter_history_match_full_and_warmed_bounce_at_a_nona
         let mut largest_difference = 0.0_f32;
         let mut first_window_squared = 0.0_f64;
         for (point, pair) in late.as_chunks::<2>().0.iter().enumerate() {
-            for channel in 0..2 {
-                let cold = pair[channel] * std::f32::consts::FRAC_1_SQRT_2 * MASTER_GAIN;
+            for (channel, &sample) in pair.iter().enumerate() {
+                let cold = sample * std::f32::consts::FRAC_1_SQRT_2 * MASTER_GAIN;
                 assert!(cold.is_finite());
                 let difference = cold - crop.audio.channels[channel][point];
                 largest_difference = largest_difference.max(difference.abs());
