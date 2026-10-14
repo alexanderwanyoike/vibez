@@ -80,8 +80,8 @@ pub(crate) fn view<'a>(
     .width(Length::Fixed(
         (available_width - if compact { 130.0 } else { 95.0 }).clamp(72.0, 200.0),
     ))
-    .padding([3, 5])
-    .text_size(12)
+    .padding([2, 5])
+    .text_size(11)
     .style(move |_theme: &Theme, status| pick_list::Style {
         text_color: th::text(),
         placeholder_color: th::text_dim(),
@@ -112,26 +112,34 @@ pub(crate) fn view<'a>(
         selected_background: th::bg_hover().into(),
     });
     let mut selection = row![
-        text("Preset").size(12).color(th::text_dim()),
+        text("Preset").size(10).color(th::text_dim()),
         tooltip(selector, text(hint).size(11), tooltip::Position::Top),
     ]
     .spacing(3)
     .align_y(iced::Alignment::Center);
     if !compact {
         selection = selection
-            .push(preset_button("‹", previous, accent))
-            .push(preset_button("›", next, accent));
+            .push(preset_button(
+                PresetLabel::Icon(crate::icons::CHEVRON_LEFT),
+                previous,
+                accent,
+            ))
+            .push(preset_button(
+                PresetLabel::Icon(crate::icons::CHEVRON_RIGHT),
+                next,
+                accent,
+            ));
     }
     let files = row![
         preset_button(
-            "Load",
+            PresetLabel::Text("Load"),
             Some(Message::DevicePreset(DevicePresetMsg::Load(
                 track_id, effect_id
             ))),
             accent
         ),
         preset_button(
-            "Save",
+            PresetLabel::Text("Save"),
             Some(Message::DevicePreset(DevicePresetMsg::Save(
                 track_id, effect_id
             ))),
@@ -146,14 +154,23 @@ pub(crate) fn view<'a>(
         .into()
 }
 
+enum PresetLabel {
+    Text(&'static str),
+    Icon(char),
+}
+
 fn preset_button<'a>(
-    label: &'static str,
+    label: PresetLabel,
     message: Option<Message>,
     accent: Color,
 ) -> Element<'a, Message> {
-    button(text(label).size(12))
+    let content = match label {
+        PresetLabel::Text(label) => text(label).size(10),
+        PresetLabel::Icon(icon) => crate::icons::icon(icon).size(11),
+    };
+    button(content)
         .on_press_maybe(message)
-        .padding([3, 5])
+        .padding([3, 6])
         .style(move |_theme: &Theme, status| button::Style {
             background: Some(th::bg_surface().into()),
             text_color: if matches!(status, button::Status::Hovered | button::Status::Pressed) {
