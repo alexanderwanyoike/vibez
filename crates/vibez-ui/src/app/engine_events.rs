@@ -211,6 +211,12 @@ impl App {
                     } => {
                         self.accept_device_meter(track_id, effect_id, generation, input, output);
                     }
+                    EngineEvent::EffectDynamics {
+                        track_id,
+                        effect_id,
+                        generation,
+                        meter,
+                    } => self.accept_compressor_dynamics(track_id, effect_id, generation, meter),
                     EngineEvent::RetiredEffectStorage(storage) => drop(storage),
                     EngineEvent::DeviceReconfigurationRetired { device, reason } => {
                         drop((device, reason));

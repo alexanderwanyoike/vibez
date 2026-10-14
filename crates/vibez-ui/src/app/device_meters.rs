@@ -6,6 +6,7 @@ use std::time::{Duration, Instant};
 use vibez_core::id::{EffectId, TrackId};
 use vibez_engine::metering::MeterValues;
 
+use crate::domains::compressor::is_native_compressor;
 use crate::domains::gain::is_native_gain;
 use crate::state::{DetailPanelTab, UiEffect};
 
@@ -20,12 +21,14 @@ pub(super) struct DeviceMeters {
 
 #[derive(Default)]
 pub(super) struct MeterReadings {
+    pub input: MeterValues,
     pub output: MeterValues,
     last_meter_at: Option<Instant>,
 }
 
 impl MeterReadings {
-    fn accept(&mut self, output: MeterValues, now: Instant) {
+    fn accept(&mut self, input: MeterValues, output: MeterValues, now: Instant) {
+        self.input = input;
         self.output = output;
         self.last_meter_at = Some(now);
     }
@@ -41,7 +44,7 @@ impl MeterReadings {
 }
 
 fn is_metered_effect(effect: &UiEffect) -> bool {
-    is_native_gain(effect)
+    is_native_gain(effect) || is_native_compressor(effect)
 }
 
 impl App {
@@ -59,6 +62,7 @@ impl App {
             self.restart_device_metering();
         }
         self.prune_device_controls();
+        self.poll_compressor_panels(wanted, Instant::now());
         let project = &self.state.project_tracks;
         let effect_exists = |id: &EffectId| {
             project
@@ -81,7 +85,7 @@ impl App {
                         .entry(effect.id)
                         .or_default()
                         .reset_stale(now);
-                } else if is_metered_effect(effect) {
+                } else if is_native_compressor(effect) {
                     self.device_meters
                         .readings
                         .entry(effect.id)
@@ -96,6 +100,9 @@ impl App {
     /// while disclosure state belongs to the device rather than the subscription.
     pub(super) fn restart_device_metering(&mut self) {
         self.discard_all_device_entries();
+        for panel in self.compressor_panels.values_mut() {
+            panel.reset_metering();
+        }
         self.device_meters.generation = self.device_meters.generation.wrapping_add(1);
         for readings in self.device_meters.readings.values_mut() {
             *readings = MeterReadings::default();
@@ -114,6 +121,7 @@ impl App {
         self.device_meters.generation = self.device_meters.generation.wrapping_add(1);
         self.device_meters.readings.clear();
         self.gain_devices.panels.clear();
+        self.compressor_panels.clear();
         self.reset_device_controls();
         self.send_command(EngineCommand::SetEffectMeterChannel {
             track_id: None,
@@ -148,12 +156,12 @@ impl App {
                 .entry(effect_id)
                 .or_default()
                 .accept_meter(input, output, now);
-        } else if is_metered_effect(effect) {
+        } else if is_native_compressor(effect) {
             self.device_meters
                 .readings
                 .entry(effect_id)
                 .or_default()
-                .accept(output, now);
+                .accept(input, output, now);
         }
     }
 }
@@ -172,7 +180,7 @@ mod tests {
             rms_r: 0.3,
         };
         let mut readings = MeterReadings::default();
-        readings.accept(levels, now);
+        readings.accept(levels, levels, now);
         readings.reset_stale(now + Duration::from_millis(249));
         assert_eq!(readings.output, levels);
         readings.reset_stale(now + Duration::from_millis(250));
