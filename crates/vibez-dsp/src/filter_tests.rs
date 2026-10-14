@@ -328,7 +328,11 @@ fn manual_mode_changes_crossfade_without_clicks_and_automation_is_immediate() {
         previous = sample;
     }
     assert!(manual_output[2047].abs() < 1e-5);
-    assert!((automated_output[0] - 0.25).abs() > 0.005);
+    let omega = std::f64::consts::TAU * 1000.0 / 48000.0;
+    let alpha = omega.sin() / (2.0 * 0.707_f32 as f64);
+    let expected_first = 0.25 * (2.0 * omega.cos() - 1.0 + alpha) / (1.0 + alpha);
+    assert!((automated_output[0] as f64 - expected_first).abs() < 1e-6);
+    assert!((automated_output[0] - 0.25).abs() > 0.002);
     assert_eq!(manual.get_param(param::MODE), 1.0);
 }
 
