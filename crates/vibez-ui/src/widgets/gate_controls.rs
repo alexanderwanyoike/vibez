@@ -371,13 +371,7 @@ pub fn aside<'a>(
     let selected = aside_page(panel.page);
     let header = row![
         disclosure,
-        page(
-            track,
-            effect,
-            selected,
-            ASIDE_PAGES.to_vec(),
-            accent
-        )
+        page(track, effect, selected, ASIDE_PAGES.to_vec(), accent)
     ]
     .spacing(6)
     .align_y(iced::Alignment::Center);

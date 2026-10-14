@@ -48,7 +48,10 @@ impl MeterReadings {
 }
 
 fn is_metered_effect(effect: &UiEffect) -> bool {
-    is_native_gain(effect) || is_native_filter(effect) || is_native_compressor(effect) || is_native_gate(effect)
+    is_native_gain(effect)
+        || is_native_filter(effect)
+        || is_native_compressor(effect)
+        || is_native_gate(effect)
 }
 
 impl App {
@@ -89,7 +92,10 @@ impl App {
                         .entry(effect.id)
                         .or_default()
                         .reset_stale(now);
-                } else if is_native_filter(effect) || is_native_compressor(effect) || is_native_gate(effect) {
+                } else if is_native_filter(effect)
+                    || is_native_compressor(effect)
+                    || is_native_gate(effect)
+                {
                     self.device_meters
                         .readings
                         .entry(effect.id)
@@ -160,7 +166,8 @@ impl App {
                 .entry(effect_id)
                 .or_default()
                 .accept_meter(input, output, now);
-        } else if is_native_filter(effect) || is_native_compressor(effect) || is_native_gate(effect) {
+        } else if is_native_filter(effect) || is_native_compressor(effect) || is_native_gate(effect)
+        {
             self.device_meters
                 .readings
                 .entry(effect_id)
