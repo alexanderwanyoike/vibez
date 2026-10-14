@@ -186,7 +186,8 @@ impl AudioEngine {
         effect_id: Option<vibez_core::id::EffectId>,
         reason: &'static str,
     ) {
-        self.presentation_state.terminals
+        self.presentation_state
+            .terminals
             .request_failure(track_id, effect_id, reason);
         self.flush_presentation();
     }
@@ -194,7 +195,8 @@ impl AudioEngine {
     pub(super) fn close_capture_for_device_failure(&mut self) {
         self.capture_active = false;
         self.cancel_capture_presentation();
-        self.presentation_state.terminals
+        self.presentation_state
+            .terminals
             .request_capture_stop(self.compensation_callback_heard_start);
         self.flush_presentation();
     }
@@ -202,7 +204,8 @@ impl AudioEngine {
     pub(super) fn close_capture_on_failure(&mut self) {
         self.capture_active = false;
         self.cancel_presentation();
-        self.presentation_state.terminals
+        self.presentation_state
+            .terminals
             .request_capture_stop(self.compensation_callback_heard_start);
         self.flush_presentation();
     }
