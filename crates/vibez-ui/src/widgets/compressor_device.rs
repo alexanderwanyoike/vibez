@@ -56,7 +56,7 @@ pub fn arrange(size: Size, advanced: bool) -> Arrangement {
         controls,
         knobs,
         primary_beside: advanced && size.width >= 820.0,
-        sidechain_column: size.width >= 820.0 && plot >= 150.0,
+        sidechain_column: size.width >= 820.0 && plot >= 160.0,
         both_plots: size.width >= MEDIUM_W,
     }
 }
