@@ -249,7 +249,9 @@ impl AudioEngine {
                     self.clear_clip_performance();
                     self.stop_section_record();
                     self.stop_heard_capture();
-                    self.audio = None;
+                    if let Some(retired) = self.audio.take() {
+                        self.retire_event(EngineEvent::RetiredAudioBuffer(retired));
+                    }
                     self.arrangement_audio_length = None;
                     self.arrangement_recording = false;
                     self.active_section = None;
