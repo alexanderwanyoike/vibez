@@ -22,6 +22,35 @@ use vibez_core::id::TrackId;
 use vibez_dsp::gate::param;
 use vibez_engine::metering::MeterValues;
 
+const ASIDE_PAGES: [GatePage; 4] = [
+    GatePage::Sound,
+    GatePage::Dynamics,
+    GatePage::Detector,
+    GatePage::Metering,
+];
+
+fn aside_page(selected: GatePage) -> GatePage {
+    if ASIDE_PAGES.contains(&selected) {
+        selected
+    } else {
+        GatePage::Dynamics
+    }
+}
+
+fn primary_indices(count: usize) -> &'static [usize] {
+    if count == 3 {
+        &[param::THRESHOLD, param::HOLD, param::RELEASE]
+    } else {
+        &[
+            param::THRESHOLD,
+            param::ATTACK,
+            param::HOLD,
+            param::RELEASE,
+            param::RANGE,
+        ]
+    }
+}
+
 fn value(effect: &UiEffect, index: usize) -> f32 {
     effect
         .params
@@ -126,17 +155,7 @@ pub fn primary<'a>(
     knobs: Option<f32>,
     count: usize,
 ) -> Element<'a, Message> {
-    let indices: &[usize] = if count == 3 {
-        &[param::THRESHOLD, param::HOLD, param::RELEASE]
-    } else {
-        &[
-            param::THRESHOLD,
-            param::ATTACK,
-            param::HOLD,
-            param::RELEASE,
-            param::RANGE,
-        ]
-    };
+    let indices = primary_indices(count);
     let mut controls = row![].spacing(6).align_y(iced::Alignment::Center);
     for &index in indices {
         let control = if index == param::RANGE {
@@ -378,23 +397,14 @@ pub fn aside<'a>(
     if !state.advanced {
         return disclosure;
     }
-    let selected = if panel.page == GatePage::Sidechain {
-        GatePage::Dynamics
-    } else {
-        panel.page
-    };
+    let selected = aside_page(panel.page);
     let header = row![
         disclosure,
         page(
             track,
             effect,
             selected,
-            vec![
-                GatePage::Sound,
-                GatePage::Dynamics,
-                GatePage::Detector,
-                GatePage::Metering
-            ],
+            ASIDE_PAGES.to_vec(),
             accent
         )
     ]
