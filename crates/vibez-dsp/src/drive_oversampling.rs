@@ -129,8 +129,7 @@ fn symmetric_dot(samples: &[f32], coefficients: &[f32]) -> f32 {
     for group in 0..midpoint / 4 {
         for (lane, sum) in sums.iter_mut().enumerate() {
             let index = group * 4 + lane;
-            *sum +=
-                (samples[index] + samples[samples.len() - 1 - index]) * coefficients[index];
+            *sum += (samples[index] + samples[samples.len() - 1 - index]) * coefficients[index];
         }
     }
     let mut result: f32 = sums.into_iter().sum();
