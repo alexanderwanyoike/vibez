@@ -189,31 +189,39 @@ fn editing_pitch_start_and_length_preserves_note_indices_and_allocation_free_not
     let unit = sounding[0];
     assert!(unit > 0.01);
     assert!(sounding.iter().all(|sample| (*sample - unit).abs() < 1e-7));
+    assert!(engine.transport().is_playing());
 
-    let assert_audio = |audio: &[f32], intervals: &[(usize, usize, f32)]| {
+    let assert_audio = |stage: &str, audio: &[f32], intervals: &[(usize, usize, f32)]| {
         for (frame, pair) in audio.as_chunks::<2>().0.iter().enumerate() {
             let weight = intervals.iter().find(|&&(start, end, _)| (start..end).contains(&frame))
                 .map_or(0.0, |&(_, _, weight)| weight);
             let expected = unit * weight;
             assert!(pair.iter().all(|sample| (*sample - expected).abs() < 1e-7),
-                "frame {frame}: {pair:?} != {expected}");
+                "{stage}, frame {frame}: {pair:?} != {expected}");
         }
     };
     let mut rendered = [0.0; 480 * 2];
     engine.process_block(AudioProcessBlock::new(&mut rendered, 2));
+    assert!(!engine.transport().is_playing(), "initial voices finished");
     commands.push(EngineCommand::Seek(0)).unwrap();
+    commands.push(EngineCommand::Play).unwrap();
+    engine.process_block(AudioProcessBlock::new(&mut [], 2));
+    assert!(engine.transport().is_playing(), "baseline replay started");
     engine.process_block(AudioProcessBlock::new(&mut rendered, 2));
-    assert_audio(&rendered, &[(0, 96, 1.0), (96, 240, 3.0), (240, 288, 2.0), (288, 336, 3.0), (336, 384, 1.0)]);
+    assert_audio("baseline", &rendered, &[(0, 96, 1.0), (96, 240, 3.0), (240, 288, 2.0), (288, 336, 3.0), (336, 384, 1.0)]);
 
     // Equal-start notes must not clamp one another; their distinct lengths
     // make a zero-length clamp audible after editing the original index 0.
-    for (note_index, replacement, intervals) in [
-        (2, note(60, 1.0, 2.5), &[(0, 240, 1.0), (288, 384, 1.0)][..]),
-        (3, note(60, 0.5, 0.5), &[(0, 384, 1.0)][..]),
-        (0, note(60, 3.0, 0.25), &[(0, 312, 1.0)][..]),
+    for (stage, note_index, replacement, intervals) in [
+        ("pitch edit", 2, note(60, 1.0, 2.5), &[(0, 240, 1.0), (288, 384, 1.0)][..]),
+        ("start edit", 3, note(60, 0.5, 0.5), &[(0, 384, 1.0)][..]),
+        ("length edit", 0, note(60, 3.0, 0.25), &[(0, 312, 1.0)][..]),
     ] {
         commands.push(EngineCommand::Seek(0)).unwrap();
+        commands.push(EngineCommand::Play).unwrap();
         engine.process_block(AudioProcessBlock::new(&mut sounding, 2));
+        assert!(engine.transport().is_playing(), "{stage}: active voice probe");
+        assert!(sounding.iter().all(|sample| (*sample - unit).abs() < 1e-7), "{stage}: active voice probe");
         while events.pop().is_ok() {}
         commands.push(EngineCommand::EditNote {
             track_id: track,
@@ -224,15 +232,19 @@ fn editing_pitch_start_and_length_preserves_note_indices_and_allocation_free_not
         let edit_allocations = crate::retirement::tests::allocations(|| {
             engine.process_block(AudioProcessBlock::new(&mut [], 2));
         });
-        assert_eq!(edit_allocations, (0, 0), "editing original note {note_index}");
-        // Seeking while an edited voice is active queues its note-off at the
-        // replay onset. Finish the clip before measuring the independent replay.
+        assert_eq!(edit_allocations, (0, 0), "{stage}: editing original note {note_index}");
+        // Finish all note-offs before seeking, so a discontinuity flush cannot
+        // affect the independently asserted replay timeline.
         engine.process_block(AudioProcessBlock::new(&mut rendered, 2));
+        assert!(!engine.transport().is_playing(), "{stage}: edited voices finished");
         commands.push(EngineCommand::Seek(0)).unwrap();
+        commands.push(EngineCommand::Play).unwrap();
+        engine.process_block(AudioProcessBlock::new(&mut [], 2));
+        assert!(engine.transport().is_playing(), "{stage}: replay started");
         let render_allocations = crate::retirement::tests::allocations(|| {
             engine.process_block(AudioProcessBlock::new(&mut rendered, 2));
         });
-        assert_audio(&rendered, intervals);
-        assert_eq!(render_allocations, (0, 0), "replaying edit of note {note_index}");
+        assert_audio(stage, &rendered, intervals);
+        assert_eq!(render_allocations, (0, 0), "{stage}: replaying original note {note_index}");
     }
 }
