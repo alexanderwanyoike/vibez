@@ -224,12 +224,8 @@ fn independently_installed_instruments_feed_engine_sidechain_inputs() {
         };
         let (mut engine, mut commands, mut events) = AudioEngine::new();
         commands.push(EngineCommand::SetSampleRate(48000)).unwrap();
-        commands
-            .push(EngineCommand::AddMidiTrack(source, "Surge".into()))
-            .unwrap();
-        commands
-            .push(EngineCommand::AddTrack(receiver, "Receiver".into()))
-            .unwrap();
+        commands.push(EngineCommand::add_track(source)).unwrap();
+        commands.push(EngineCommand::add_track(receiver)).unwrap();
         commands
             .push(EngineCommand::SetInstrument {
                 track_id: source,

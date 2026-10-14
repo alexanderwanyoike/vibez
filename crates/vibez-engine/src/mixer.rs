@@ -109,6 +109,16 @@ impl AutomationOverrides {
     }
 }
 
+/// Boxed so a channel prepared off the audio thread enters and leaves the
+/// list by pointer: the callback never allocates or frees a channel.
+#[allow(clippy::vec_box)]
+pub type ChannelList = Vec<Box<EngineTrack>>;
+
+/// Tracks, and separately buses, a project holds. Both lists are reserved at
+/// this size so adding a channel never grows them in the callback; the UI
+/// refuses more.
+pub const CHANNEL_CAPACITY: usize = 256;
+
 /// Devices one channel holds. The chain is reserved at this size so an
 /// insertion never grows it in the callback; the UI refuses more.
 pub const DEVICE_CHAIN_CAPACITY: usize = 32;
@@ -533,8 +543,8 @@ mod tests {
     #[test]
     fn any_solo_detection() {
         let mut tracks = vec![
-            EngineTrack::new(TrackId::new()),
-            EngineTrack::new(TrackId::new()),
+            Box::new(EngineTrack::new(TrackId::new())),
+            Box::new(EngineTrack::new(TrackId::new())),
         ];
         assert!(!any_solo(&tracks));
 

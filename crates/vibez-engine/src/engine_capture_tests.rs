@@ -38,9 +38,7 @@ fn section_rehearsal_advances_capture_time_without_moving_arrange_cursor() {
     commands.push(EngineCommand::SetSampleRate(8)).unwrap();
     commands.push(EngineCommand::SetBpm(120.0)).unwrap();
     commands.push(EngineCommand::Seek(40)).unwrap();
-    commands
-        .push(EngineCommand::AddTrack(track_id, "Audio".into()))
-        .unwrap();
+    commands.push(EngineCommand::add_track(track_id)).unwrap();
     commands
         .push(EngineCommand::LaunchSection(empty_section(
             section_id, track_id,
@@ -90,9 +88,7 @@ fn transport_stop_ends_capture_and_section_playback_at_one_boundary() {
     let track_id = TrackId::new();
     let section_id = SectionId::new();
     commands.push(EngineCommand::SetSampleRate(8)).unwrap();
-    commands
-        .push(EngineCommand::AddTrack(track_id, "Audio".into()))
-        .unwrap();
+    commands.push(EngineCommand::add_track(track_id)).unwrap();
     commands
         .push(EngineCommand::LaunchSection(empty_section(
             section_id, track_id,
@@ -128,9 +124,7 @@ fn stopping_perform_returns_to_the_exact_arrange_cursor_without_repair() {
     let section_id = SectionId::new();
     commands.push(EngineCommand::SetSampleRate(8)).unwrap();
     commands.push(EngineCommand::Seek(40)).unwrap();
-    commands
-        .push(EngineCommand::AddTrack(track_id, "Audio".into()))
-        .unwrap();
+    commands.push(EngineCommand::add_track(track_id)).unwrap();
     commands
         .push(EngineCommand::LaunchSection(empty_section(
             section_id, track_id,
@@ -150,9 +144,7 @@ fn moving_the_arrange_cursor_during_perform_does_not_retime_performance_events()
     let track_id = TrackId::new();
     let section_id = SectionId::new();
     commands.push(EngineCommand::SetSampleRate(8)).unwrap();
-    commands
-        .push(EngineCommand::AddTrack(track_id, "Audio".into()))
-        .unwrap();
+    commands.push(EngineCommand::add_track(track_id)).unwrap();
     commands
         .push(EngineCommand::LaunchSection(empty_section(
             section_id, track_id,

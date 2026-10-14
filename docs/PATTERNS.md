@@ -39,8 +39,10 @@ audio thread never allocates or frees large buffers it uniquely owns.
 Commands carry or reserve their storage, and the callback never grows a
 collection: devices are built on the sender's thread
 (`EngineCommand::insert_built_in_effect`, `set_built_in_instrument`) at the
-rate `EngineHandle::sample_rate` last forwarded, and device chains are
-reserved at `DEVICE_CHAIN_CAPACITY`, which the UI refuses to exceed.
+rate `EngineHandle::sample_rate` last forwarded, channels are prepared there
+too (`EngineCommand::add_track`, `add_bus`) and move by pointer, and device
+chains and channel lists are reserved at `DEVICE_CHAIN_CAPACITY` and
+`CHANNEL_CAPACITY`, which the UI refuses to exceed.
 `engine_command_allocation_tests` measures every command; its list of commands
 that still allocate may only shrink.
 Events come in two classes, and the class determines the push policy:

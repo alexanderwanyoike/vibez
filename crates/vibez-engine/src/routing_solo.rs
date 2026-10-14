@@ -6,8 +6,8 @@ use vibez_core::routing::{EdgeKind, NodeStage};
 impl PreparedRouting {
     pub(crate) fn select_audible_returns(
         &mut self,
-        tracks: &[crate::mixer::EngineTrack],
-        buses: &[crate::mixer::EngineTrack],
+        tracks: &[Box<crate::mixer::EngineTrack>],
+        buses: &[Box<crate::mixer::EngineTrack>],
         master: &crate::mixer::EngineTrack,
         track_solo: bool,
         bus_solo: bool,

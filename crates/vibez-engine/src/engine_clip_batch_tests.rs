@@ -98,7 +98,7 @@ fn oversized_missing_target_packet_never_grows_retirement_storage_in_the_callbac
 fn repeated_target_packet_keeps_reverse_pop_order_and_retires_all_displaced_sources() {
     let (mut engine, mut commands, mut events) = AudioEngine::new();
     let target = TrackId::new();
-    engine.tracks.push(EngineTrack::new(target));
+    engine.tracks.push(Box::new(EngineTrack::new(target)));
     let clips = (0..2400).map(|request| clip(target, request)).collect();
     queue(
         &mut engine,
@@ -143,7 +143,7 @@ fn partial_packet_releases_tracks_atomically_at_one_source_timestamp_and_keeps_o
     let ids = [TrackId::new(), TrackId::new(), TrackId::new()];
     engine.sample_rate = 8;
     for id in ids {
-        engine.tracks.push(EngineTrack::new(id));
+        engine.tracks.push(Box::new(EngineTrack::new(id)));
     }
     let channels: Vec<_> = ids
         .into_iter()
@@ -230,7 +230,7 @@ fn larger_than_event_capacity_row_swaps_all_sources_before_resumable_publication
     let ids: Vec<_> = (0..count).map(|_| TrackId::new()).collect();
     engine
         .tracks
-        .extend(ids.iter().map(|&id| EngineTrack::new(id)));
+        .extend(ids.iter().map(|&id| Box::new(EngineTrack::new(id))));
     let clips = ids
         .iter()
         .enumerate()
@@ -287,7 +287,9 @@ fn newer_quantized_packet_supersedes_only_its_targets_and_keeps_unrelated_deadli
     let (mut engine, _, mut events) = AudioEngine::new();
     let ids = [TrackId::new(), TrackId::new()];
     engine.sample_rate = 8;
-    engine.tracks.extend(ids.map(EngineTrack::new));
+    engine
+        .tracks
+        .extend(ids.map(|id| Box::new(EngineTrack::new(id))));
     engine.begin_clip_performance();
     engine.performance_position = 1;
     engine.queue_clips(
@@ -324,7 +326,7 @@ fn stalled_quantized_packet_moves_only_the_missed_boundary_to_the_next_achievabl
     let (mut engine, _, mut events) = AudioEngine::new();
     let id = TrackId::new();
     engine.sample_rate = 8;
-    engine.tracks.push(EngineTrack::new(id));
+    engine.tracks.push(Box::new(EngineTrack::new(id)));
     engine.begin_clip_performance();
     engine.performance_position = 1;
     while engine.event_tx.push(EngineEvent::PlaybackStarted).is_ok() {}
@@ -352,7 +354,7 @@ fn stalled_quantized_packet_moves_only_the_missed_boundary_to_the_next_achievabl
 fn late_publication_keeps_the_original_source_timestamp_and_physical_release() {
     let (mut engine, _, mut events) = AudioEngine::new();
     let id = TrackId::new();
-    engine.tracks.push(EngineTrack::new(id));
+    engine.tracks.push(Box::new(EngineTrack::new(id)));
     engine.sample_rate = 8;
     engine.begin_clip_performance();
     engine.performance_position = 1;
@@ -401,7 +403,7 @@ fn in_segment_release_retains_the_actual_output_clock_prefix() {
     let (mut engine, _, mut events) = AudioEngine::new();
     let id = TrackId::new();
     engine.sample_rate = 8;
-    engine.tracks.push(EngineTrack::new(id));
+    engine.tracks.push(Box::new(EngineTrack::new(id)));
     let channels = [
         vibez_core::routing::RoutingChannel {
             id,
@@ -620,7 +622,7 @@ fn delayed_engine() -> (AudioEngine, Consumer<EngineEvent>, TrackId) {
         effect: Box::new(crate::test_support::DelayProbe::new(137)),
         bypass: false,
     });
-    engine.tracks.push(track);
+    engine.tracks.push(Box::new(track));
     let channels = [
         RoutingChannel {
             id,
@@ -659,7 +661,7 @@ fn delayed_engine() -> (AudioEngine, Consumer<EngineEvent>, TrackId) {
 fn inline_capture_stop_does_not_consume_packet_owner_admission_capacity() {
     let (mut engine, _, mut events) = AudioEngine::new();
     let id = TrackId::new();
-    engine.tracks.push(EngineTrack::new(id));
+    engine.tracks.push(Box::new(EngineTrack::new(id)));
     engine.begin_clip_performance();
     engine.performance_position = 1;
     engine.queue_clips(vec![clip(id, 92)], MusicalBoundary::OneBar);

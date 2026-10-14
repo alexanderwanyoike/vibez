@@ -46,9 +46,7 @@ fn setup() -> (
     let effect = EffectId::new();
     let valid = Arc::new(AtomicBool::new(true));
     commands.push(EngineCommand::SetSampleRate(48000)).unwrap();
-    commands
-        .push(EngineCommand::AddTrack(track, "Probe".into()))
-        .unwrap();
+    commands.push(EngineCommand::add_track(track)).unwrap();
     commands
         .push(EngineCommand::InsertEffect {
             track_id: track,

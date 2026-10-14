@@ -20,6 +20,6 @@ pub fn balance_pan(pan: f32) -> (f32, f32) {
 }
 
 /// Returns `true` if any track in the slice has solo enabled.
-pub fn any_solo(tracks: &[EngineTrack]) -> bool {
+pub fn any_solo(tracks: &[Box<EngineTrack>]) -> bool {
     tracks.iter().any(|track| track.solo)
 }

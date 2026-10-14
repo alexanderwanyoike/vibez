@@ -191,8 +191,8 @@ fn clip_included(id: ClipId, mode: BounceMode, note: bool) -> bool {
 pub(super) fn return_plugins(
     req: &BounceRequest,
     plugins: &mut OfflinePlugins,
-    tracks: &mut [EngineTrack],
-    buses: &mut [EngineTrack],
+    tracks: &mut [Box<EngineTrack>],
+    buses: &mut [Box<EngineTrack>],
     master: &mut EngineTrack,
 ) {
     let ids: HashSet<_> = dependencies::all_channels(req)
@@ -203,6 +203,7 @@ pub(super) fn return_plugins(
     for channel in tracks
         .iter_mut()
         .chain(buses.iter_mut())
+        .map(|channel| &mut **channel)
         .chain(std::iter::once(master))
     {
         if dependencies::all_channels(req)

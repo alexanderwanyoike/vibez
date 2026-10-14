@@ -96,7 +96,7 @@ fn queued_quantized_mutes_never_overflow_retirement_after_presentation_fault() {
             effective_at_samples: 8,
             end_of_section: false,
         });
-        engine.tracks.push(track);
+        engine.tracks.push(Box::new(track));
     }
     engine.transport.play();
     full_ring(&mut engine);
@@ -173,7 +173,7 @@ fn an_earlier_due_mute_cannot_be_overtaken_after_ring_drain() {
 fn faulted_packet_publication_and_snapshots_cannot_resurrect_playing_clips() {
     let (mut engine, _, mut events) = AudioEngine::new();
     let track = TrackId::new();
-    engine.tracks.push(EngineTrack::new(track));
+    engine.tracks.push(Box::new(EngineTrack::new(track)));
     let model = [
         vibez_core::routing::RoutingChannel {
             id: track,
@@ -251,7 +251,7 @@ fn large_projects_accept_ordinary_commands_and_resumably_cancel_mutes() {
     let (mut engine, mut commands, mut events) = AudioEngine::new();
     engine
         .tracks
-        .extend((0..2058).map(|_| EngineTrack::new(TrackId::new())));
+        .extend((0..2058).map(|_| Box::new(EngineTrack::new(TrackId::new()))));
     commands.push(EngineCommand::Play).unwrap();
     assert_eq!(
         crate::retirement::tests::allocations(|| engine.drain_commands()),
@@ -297,7 +297,7 @@ fn large_projects_accept_ordinary_commands_and_resumably_cancel_mutes() {
 fn normal_stop_does_not_overtake_a_retained_applied_mute() {
     let (mut engine, _, mut events) = AudioEngine::new();
     let id = TrackId::new();
-    engine.tracks.push(EngineTrack::new(id));
+    engine.tracks.push(Box::new(EngineTrack::new(id)));
     engine.transport.play();
     full_ring(&mut engine);
     engine.set_track_mute(id, true);
@@ -319,7 +319,7 @@ fn accepted_capture_start_and_notes_survive_a_stalled_ui_until_capture_closes() 
     for global_stop in [false, true] {
         let (mut engine, mut commands, mut events) = AudioEngine::new();
         let id = TrackId::new();
-        engine.tracks.push(EngineTrack::new(id));
+        engine.tracks.push(Box::new(EngineTrack::new(id)));
         engine.begin_clip_performance();
         engine.process(&mut [0.0; 16], 1);
         while events.pop().is_ok() {}

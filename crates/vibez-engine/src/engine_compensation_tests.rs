@@ -58,9 +58,7 @@ fn cancellation_run(reported: u32, bypass: bool, order_reversed: bool) -> Vec<f3
     } else {
         [delayed, dry]
     } {
-        commands
-            .push(EngineCommand::AddTrack(id, "Pulse".into()))
-            .unwrap();
+        commands.push(EngineCommand::add_track(id)).unwrap();
     }
     commands.push(pulse_clip(delayed, 1.0)).unwrap();
     commands.push(pulse_clip(dry, -1.0)).unwrap();
@@ -181,9 +179,7 @@ fn coordinated_latency_changes_keep_transport_running_and_regain_alignment() {
     let effect = EffectId::new();
     let pending = Arc::new(AtomicU32::new(137));
     for (id, amplitude) in [(delayed, 1.0), (dry, -1.0)] {
-        commands
-            .push(EngineCommand::AddTrack(id, "Constant".into()))
-            .unwrap();
+        commands.push(EngineCommand::add_track(id)).unwrap();
         let mut clip = pulse_clip(id, amplitude);
         if let EngineCommand::AddClip { audio, .. } = &mut clip {
             *audio = Arc::new(DecodedAudio {
@@ -291,9 +287,7 @@ fn structural_effect_edit_can_wait_for_plan_in_a_later_callback() {
     let (mut engine, mut commands, mut events) = AudioEngine::new();
     let track = TrackId::new();
     let effect = EffectId::new();
-    commands
-        .push(EngineCommand::AddTrack(track, "Pulse".into()))
-        .unwrap();
+    commands.push(EngineCommand::add_track(track)).unwrap();
     commands.push(pulse_clip(track, 1.0)).unwrap();
     commands
         .push(EngineCommand::InsertEffect {
@@ -355,9 +349,7 @@ fn automation_target_addition_and_point_edit_preserve_running_delay_history() {
     let (mut engine, mut commands, mut events) = AudioEngine::new();
     let track = TrackId::new();
     let effect = EffectId::new();
-    commands
-        .push(EngineCommand::AddTrack(track, "Constant".into()))
-        .unwrap();
+    commands.push(EngineCommand::add_track(track)).unwrap();
     let mut clip = pulse_clip(track, 1.0);
     if let EngineCommand::AddClip { audio, .. } = &mut clip {
         *audio = Arc::new(DecodedAudio {
@@ -464,9 +456,7 @@ fn reduced_monitoring_capture_uses_the_same_heard_section_identity_and_local_clo
     commands.push(EngineCommand::SetSampleRate(128)).unwrap();
     commands.push(EngineCommand::SetBpm(60.0)).unwrap();
     for (id, fx, delay) in [(track, fast_fx, 137), (slow, slow_fx, 521)] {
-        commands
-            .push(EngineCommand::AddTrack(id, "Input".into()))
-            .unwrap();
+        commands.push(EngineCommand::add_track(id)).unwrap();
         commands
             .push(EngineCommand::InsertEffect {
                 track_id: id,
@@ -575,9 +565,7 @@ fn cold_reduced_monitoring_keeps_the_first_clip_sample_on_its_actual_path() {
     let fast_fx = EffectId::new();
     let slow_fx = EffectId::new();
     for (track, effect, delay) in [(fast, fast_fx, 137), (slow, slow_fx, 521)] {
-        commands
-            .push(EngineCommand::AddTrack(track, "Pulse".into()))
-            .unwrap();
+        commands.push(EngineCommand::add_track(track)).unwrap();
         commands
             .push(pulse_clip(track, if track == fast { 1.0 } else { 0.0 }))
             .unwrap();
@@ -667,9 +655,7 @@ fn changed_rate_keeps_native_owners_but_rejects_their_old_configuration_even_aft
         let (mut engine, mut commands, mut events) = AudioEngine::new();
         let track = TrackId::new();
         let effect = EffectId::new();
-        commands
-            .push(EngineCommand::AddTrack(track, "Rate".into()))
-            .unwrap();
+        commands.push(EngineCommand::add_track(track)).unwrap();
         if instrument {
             commands
                 .push(EngineCommand::set_built_in_instrument(
@@ -809,9 +795,7 @@ fn short_one_shot_section_drains_last_content_before_its_heard_stop_notification
     let section = SectionId::new();
     commands.push(EngineCommand::SetSampleRate(128)).unwrap();
     commands.push(EngineCommand::SetBpm(60.0)).unwrap();
-    commands
-        .push(EngineCommand::AddTrack(track, "One shot".into()))
-        .unwrap();
+    commands.push(EngineCommand::add_track(track)).unwrap();
     commands
         .push(EngineCommand::InsertEffect {
             track_id: track,

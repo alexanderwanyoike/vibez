@@ -19,7 +19,7 @@ fn replacing_and_removing_lanes_retains_point_storage_without_callback_destructi
         source.automation.push(lane.clone());
         engine
             .tracks
-            .push(EngineTrack::with_playback_source(id, source));
+            .push(Box::new(EngineTrack::with_playback_source(id, source)));
         // The actual resident owner, not the incoming replacement, is returned.
         let points = engine.tracks[0].playback_source.automation[0]
             .points

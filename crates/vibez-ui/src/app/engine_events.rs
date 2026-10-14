@@ -678,9 +678,7 @@ mod tests {
         use vibez_engine::commands::EngineCommand;
         let (mut engine, mut commands, mut events) = vibez_engine::engine::AudioEngine::new();
         let track = TrackId::new();
-        commands
-            .push(EngineCommand::AddTrack(track, "Bass".into()))
-            .unwrap();
+        commands.push(EngineCommand::add_track(track)).unwrap();
         commands.push(EngineCommand::SetSampleRate(8)).unwrap();
         commands.push(EngineCommand::SetBpm(120.0)).unwrap();
         for _ in 0..vibez_core::constants::RING_BUFFER_CAPACITY {

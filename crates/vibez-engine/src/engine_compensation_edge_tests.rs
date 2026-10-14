@@ -64,12 +64,8 @@ fn send_run(reported: u32) -> Vec<f32> {
     let bus = TrackId::new();
     let insert = EffectId::new();
     let return_fx = EffectId::new();
-    commands
-        .push(EngineCommand::AddTrack(track, "Pulse".into()))
-        .unwrap();
-    commands
-        .push(EngineCommand::AddBus(bus, "Return".into()))
-        .unwrap();
+    commands.push(EngineCommand::add_track(track)).unwrap();
+    commands.push(EngineCommand::add_bus(bus)).unwrap();
     commands.push(pulse(track)).unwrap();
     commands
         .push(EngineCommand::InsertEffect {
@@ -178,9 +174,7 @@ fn detector_run(reported: u32) -> Vec<f32> {
         channels: 2,
     };
     for id in [source, target] {
-        commands
-            .push(EngineCommand::AddTrack(id, "Pulse".into()))
-            .unwrap();
+        commands.push(EngineCommand::add_track(id)).unwrap();
         commands.push(pulse(id)).unwrap();
     }
     commands

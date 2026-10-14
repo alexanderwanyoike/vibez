@@ -248,3 +248,27 @@ fn meter_decays_instead_of_snapping() {
     );
     assert!((a.tracks[0].peak_l - 0.85).abs() < 1e-6);
 }
+
+#[test]
+fn a_full_project_refuses_another_track_or_return_without_reaching_the_engine() {
+    let mut a = arrangement_with_tracks(vibez_engine::mixer::CHANNEL_CAPACITY);
+    let mut engine = RecordingEngine::default();
+    for _ in 0..vibez_engine::mixer::CHANNEL_CAPACITY {
+        a.update(
+            ArrangementMsg::AddBus,
+            &mut engine,
+            ArrangementCtx::default(),
+        );
+    }
+    engine.0.clear();
+    for (message, refusal) in [
+        (ArrangementMsg::AddTrack, PROJECT_TRACKS_FULL),
+        (ArrangementMsg::AddMidiTrack, PROJECT_TRACKS_FULL),
+        (ArrangementMsg::AddBus, PROJECT_BUSES_FULL),
+    ] {
+        let action = a.update(message, &mut engine, ArrangementCtx::default());
+        assert_eq!(action.status.as_deref(), Some(refusal));
+    }
+    assert!(engine.0.is_empty());
+    assert_eq!(a.tracks.len(), vibez_engine::mixer::CHANNEL_CAPACITY);
+}

@@ -107,8 +107,8 @@ pub enum EngineCommand {
     UnloadAudio,
 
     // -- Multi-track commands --
-    /// Add a new track with the given ID and name.
-    AddTrack(TrackId, String),
+    /// A project track prepared by [`EngineCommand::add_track`].
+    AddTrack(Box<crate::mixer::EngineTrack>),
     /// Remove a track by ID.
     RemoveTrack(TrackId),
     /// Reorder tracks to match the given ID order.
@@ -244,7 +244,8 @@ pub enum EngineCommand {
 
     // -- Busses (return channels) --
     /// Add a bus: a mixer-only channel fed by per-track sends.
-    AddBus(TrackId, String),
+    /// A return channel prepared by [`EngineCommand::add_bus`].
+    AddBus(Box<crate::mixer::EngineTrack>),
     /// Remove a bus and every send pointing at it.
     RemoveBus(TrackId),
     /// Set a track's post-fader send amount into a bus (0.0 = off).
@@ -281,8 +282,6 @@ pub enum EngineCommand {
     },
 
     // -- Instrument tracks --
-    /// Add a bare MIDI track (no synth attached).
-    AddMidiTrack(TrackId, String),
     /// Remove the instrument from a track.
     RemoveTrackInstrument(TrackId),
     /// Set note clip duration (for halve/double).
@@ -484,6 +483,16 @@ impl EngineCommand {
     }
 
     /// See [`EngineCommand::insert_built_in_effect`].
+    pub fn add_track(track_id: TrackId) -> Self {
+        Self::AddTrack(Box::new(crate::mixer::EngineTrack::new(track_id)))
+    }
+
+    /// See [`EngineCommand::insert_built_in_effect`].
+    pub fn add_bus(bus_id: TrackId) -> Self {
+        Self::AddBus(Box::new(crate::mixer::EngineTrack::new(bus_id)))
+    }
+
+    /// See [`EngineCommand::insert_built_in_effect`].
     pub fn set_built_in_instrument(
         track_id: TrackId,
         kind: InstrumentKind,
@@ -524,7 +533,7 @@ mod tests {
             sample_rate: 44_100,
         });
 
-        let _add_track = EngineCommand::AddTrack(tid, "Track 1".into());
+        let _add_track = EngineCommand::add_track(tid);
         let _remove_track = EngineCommand::RemoveTrack(tid);
         let _add_clip = EngineCommand::AddClip {
             track_id: tid,

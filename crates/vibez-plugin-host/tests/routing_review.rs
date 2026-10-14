@@ -200,9 +200,7 @@ fn actual_engine_delivers_the_cached_native_failure_to_its_ui_consumer() {
     };
     let (mut engine, mut commands, mut events) = AudioEngine::new();
     commands.push(EngineCommand::SetSampleRate(48000)).unwrap();
-    commands
-        .push(EngineCommand::AddTrack(track, "Failing probe".into()))
-        .unwrap();
+    commands.push(EngineCommand::add_track(track)).unwrap();
     commands
         .push(EngineCommand::InsertEffect {
             track_id: track,

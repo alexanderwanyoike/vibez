@@ -74,13 +74,9 @@ fn kick_and_bass_solo_keep_the_audible_bus_return_without_ghost_snare_leakage() 
         let gate = EffectId::new();
         let bus_fx = EffectId::new();
         for track in [kick, bass, snare] {
-            commands
-                .push(EngineCommand::AddTrack(track, "Track".into()))
-                .unwrap();
+            commands.push(EngineCommand::add_track(track)).unwrap();
         }
-        commands
-            .push(EngineCommand::AddBus(drums, "Drums".into()))
-            .unwrap();
+        commands.push(EngineCommand::add_bus(drums)).unwrap();
         for (track, value) in [(kick, 0.05), (bass, 0.2), (snare, 1.0)] {
             commands.push(clip(track, value)).unwrap();
         }
@@ -223,12 +219,8 @@ fn send_levels_cross_zero_without_replacing_the_prepared_graph() {
     let (mut engine, mut commands, mut events) = AudioEngine::new();
     let source = TrackId::new();
     let bus = TrackId::new();
-    commands
-        .push(EngineCommand::AddTrack(source, "Source".into()))
-        .unwrap();
-    commands
-        .push(EngineCommand::AddBus(bus, "Bus".into()))
-        .unwrap();
+    commands.push(EngineCommand::add_track(source)).unwrap();
+    commands.push(EngineCommand::add_bus(bus)).unwrap();
     commands.push(clip(source, 1.0)).unwrap();
     commands
         .push(EngineCommand::SetSend {
@@ -289,13 +281,9 @@ fn ordinary_bus_delay_tail_survives_solo_without_a_selected_track_send() {
     let bus = TrackId::new();
     let effect = EffectId::new();
     for track in [source, selected] {
-        commands
-            .push(EngineCommand::AddTrack(track, "Track".into()))
-            .unwrap();
+        commands.push(EngineCommand::add_track(track)).unwrap();
     }
-    commands
-        .push(EngineCommand::AddBus(bus, "Delay return".into()))
-        .unwrap();
+    commands.push(EngineCommand::add_bus(bus)).unwrap();
     let mut pulse = clip(source, 0.0);
     if let EngineCommand::AddClip { audio, .. } = &mut pulse {
         for channel in &mut Arc::get_mut(audio).unwrap().channels {
