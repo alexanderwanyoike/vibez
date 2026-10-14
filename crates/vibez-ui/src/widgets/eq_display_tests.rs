@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::domains::devices::DevicesMsg;
+use iced::widget::canvas::Program;
 use vibez_dsp::effect::AudioEffect;
 
 #[test]
@@ -31,8 +32,13 @@ fn wheel_edits_only_mid_band_q_and_preserves_shelf_bell_modes() {
         );
         assert_eq!(status, canvas::event::Status::Captured);
         match index {
-            1 | 2 => assert!(matches!(message, Some(Message::Devices(DevicesMsg::SetEffectParam(_, _, param, value))) if param == [5, 8][index - 1] && value > 0.7)),
-            _ => assert!(message.is_none(), "shelf/bell band {index} was treated as Q"),
+            1 | 2 => assert!(
+                matches!(message, Some(Message::Devices(DevicesMsg::SetEffectParam(_, _, param, value))) if param == [5, 8][index - 1] && value > 0.7)
+            ),
+            _ => assert!(
+                message.is_none(),
+                "shelf/bell band {index} was treated as Q"
+            ),
         }
     }
 }
