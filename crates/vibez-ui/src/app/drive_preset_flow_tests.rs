@@ -153,3 +153,29 @@ async fn drive_user_save_roundtrips_real_files_and_late_save_cannot_replace_a_ch
     app.finish_device_preset_save(request, Err("write failed".into()));
     assert_eq!(app.state.find_track(track).unwrap().effects[1].params, before);
 }
+
+#[test]
+fn drive_neutral_init_renders_uncolored_audio_after_the_declared_delay() {
+    use vibez_dsp::drive::{param, DRIVE_PARAMS};
+    let init = device_presets::factory_presets(EffectType::Drive)
+        .into_iter().find(|preset| preset.name() == "Init").unwrap();
+    let parameters: Vec<_> = crate::domains::drive_presets::KEYS.iter()
+        .map(|key| init.parameters()[*key]).collect();
+    assert_eq!(DRIVE_PARAMS[param::AMOUNT].default, 0.35);
+    for rate in [44_100.0, 48_000.0, 96_000.0] {
+        let mut effect = vibez_dsp::factory::create_effect_with_params(EffectType::Drive, rate, &parameters);
+        let latency = effect.latency_samples() as usize;
+        assert_eq!(latency, 64);
+        let input: Vec<_> = (0..2048).map(|frame| {
+            let phase = std::f32::consts::TAU * frame as f32 / 127.0;
+            [0.7 * phase.sin(), 0.4 * (3.0 * phase).cos()]
+        }).flatten().collect();
+        let mut output = input.clone();
+        output.resize(input.len() + latency * 2, 0.0);
+        for block in output.chunks_mut(74) { effect.process(block, 2); }
+        assert!(output[..latency * 2].iter().all(|sample| *sample == 0.0));
+        for (actual, expected) in output[latency * 2..].iter().zip(&input) {
+            assert!((actual - expected).abs() < 1e-6, "rate={rate}, {actual} != {expected}");
+        }
+    }
+}
