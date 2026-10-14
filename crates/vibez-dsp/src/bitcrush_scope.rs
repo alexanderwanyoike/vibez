@@ -35,8 +35,8 @@ impl Scope {
             let position = first.wrapping_add(point as u64) as usize % 128;
             meter.input[point] = self.samples.input[position];
             meter.output[point] = self.samples.output[position];
-            let acquired = self.samples.primary_acquisitions[position / 64]
-                & (1_u64 << (position % 64)) != 0;
+            let acquired =
+                self.samples.primary_acquisitions[position / 64] & (1_u64 << (position % 64)) != 0;
             if acquired {
                 meter.primary_acquisitions[point / 64] |= 1_u64 << (point % 64);
             }
