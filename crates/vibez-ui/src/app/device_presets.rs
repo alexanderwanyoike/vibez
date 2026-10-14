@@ -130,7 +130,7 @@ impl App {
             Ok(Some(saved)) => {
                 if self
                     .capture_device_preset(request.track_id, request.effect_id)
-                    .is_some_and(|current| current.kind() == saved.kind())
+                    .is_some_and(|current| current == request.preset)
                 {
                     self.device_preset_selection
                         .insert((request.track_id, request.effect_id), saved.clone());
