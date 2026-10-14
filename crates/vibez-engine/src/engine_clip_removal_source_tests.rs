@@ -110,3 +110,62 @@ fn autonomous_section_and_clip_boundaries_transfer_staged_owners_once_under_full
         }
     }
 }
+
+#[test]
+fn rejected_prepared_sources_and_offline_teardown_keep_staged_audio_ownership_complete() {
+    for clip_mode in [false, true] {
+        for full_ring in [false, true] {
+            let (mut engine, mut commands, mut events) = AudioEngine::new();
+            let id = ClipId::new();
+            let track = TrackId::new();
+            let (mut staged, owners) = source(id, 35, 0.001);
+            staged.remove_audio_clips(id);
+            if clip_mode {
+                commands.push(EngineCommand::RefreshClip(Box::new(PreparedClipPlayback {
+                    track_id: track, clip_id: Some(id), request_id: 1, length_samples: 128,
+                    looping: true, source: Box::new(staged),
+                }))).unwrap();
+            } else {
+                commands.push(EngineCommand::RefreshSection(Box::new(PreparedSectionPlaybackSource::new(
+                    SectionId::new(), 8.0, true, vec![(track, staged)])))).unwrap();
+            }
+            if full_ring {
+                while engine.event_tx.push(EngineEvent::PlaybackStarted).is_ok() {}
+            }
+            assert_eq!(crate::retirement::tests::allocations(|| engine.process(&mut [], 1)), (0, 0));
+            assert!(owners.iter().all(|owner| owner.strong_count() == 1));
+            let mut returned = Vec::new();
+            let mut source_events = 0;
+            for _ in 0..3 {
+                while let Ok(event) = events.pop() {
+                    match event {
+                        EngineEvent::ClipRequestRetired(mut owner) => {
+                            source_events += 1;
+                            collect_staged(&mut owner.source, &mut returned);
+                        }
+                        EngineEvent::SectionSourceRefreshed { applied, mut retired, .. } => {
+                            assert!(!applied);
+                            source_events += 1;
+                            for source in retired.tracks_mut() { collect_staged(&mut source.source, &mut returned); }
+                        }
+                        EngineEvent::RetiredAudioClip(_) => panic!("rejected source keeps its entire staged owner"),
+                        _ => {}
+                    }
+                }
+                assert_eq!(crate::retirement::tests::allocations(|| engine.process(&mut [], 1)), (0, 0));
+            }
+            assert_eq!(source_events, 1);
+            assert_eq!(returned.len(), 35);
+            for owner in owners {
+                assert_eq!(owner.strong_count(), 0);
+                assert_eq!(returned.iter().filter(|pointer| **pointer == owner.as_ptr()).count(), 1);
+            }
+        }
+    }
+    let id = ClipId::new();
+    let (mut staged, owners) = source(id, 35, 0.001);
+    staged.remove_audio_clips(id);
+    assert!(owners.iter().all(|owner| owner.strong_count() == 1));
+    drop(staged);
+    assert!(owners.iter().all(|owner| owner.strong_count() == 0));
+}
