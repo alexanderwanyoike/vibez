@@ -1,5 +1,37 @@
 //! Fits Gate history, core controls and progressive detail into measured device bounds.
 
+use super::gate::GatePage;
+use vibez_dsp::gate::param;
+
+pub const ASIDE_PAGES: [GatePage; 4] = [
+    GatePage::Sound,
+    GatePage::Dynamics,
+    GatePage::Detector,
+    GatePage::Metering,
+];
+
+pub fn aside_page(selected: GatePage) -> GatePage {
+    if ASIDE_PAGES.contains(&selected) {
+        selected
+    } else {
+        GatePage::Dynamics
+    }
+}
+
+fn primary_indices(count: usize) -> &'static [usize] {
+    if count == 3 {
+        &[param::THRESHOLD, param::HOLD, param::RELEASE]
+    } else {
+        &[
+            param::THRESHOLD,
+            param::ATTACK,
+            param::HOLD,
+            param::RELEASE,
+            param::RANGE,
+        ]
+    }
+}
+
 pub const COMPACT_WIDTH: f32 = 430.0;
 pub const WIDE_WIDTH: f32 = 740.0;
 pub const MAX_WIDTH: f32 = 900.0;
@@ -22,6 +54,12 @@ pub struct Arrangement {
     pub inline_details: bool,
     pub primary_visible: bool,
     pub primary_count: usize,
+}
+
+impl Arrangement {
+    pub fn primary_indices(self) -> &'static [usize] {
+        primary_indices(self.primary_count)
+    }
 }
 
 pub fn arrange(width: f32, height: f32, advanced: bool) -> Arrangement {
@@ -74,6 +112,8 @@ pub fn preset_bar_width(width: f32, height: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domains::gate::{GateMsg, GatePanel};
+    use vibez_core::id::{EffectId, TrackId};
 
     #[test]
     fn measured_gate_layout_preserves_readable_core_and_usable_displays_without_scrolling() {
@@ -113,5 +153,57 @@ mod tests {
         let minimum = arrange(740.0, 64.0, true);
         assert!(minimum.inline_details && minimum.primary_visible);
         assert_eq!(minimum.primary_count, 3);
+    }
+
+    #[test]
+    fn primary_banks_preserve_gate_priorities_across_measured_tiers() {
+        let core = &[param::THRESHOLD, param::HOLD, param::RELEASE];
+        let full = &[
+            param::THRESHOLD,
+            param::ATTACK,
+            param::HOLD,
+            param::RELEASE,
+            param::RANGE,
+        ];
+        for (width, height, advanced, expected) in [
+            (430.0, 304.0, false, core.as_slice()),
+            (430.0, 304.0, true, core.as_slice()),
+            (740.0, 64.0, true, core.as_slice()),
+            (740.0, 64.0, false, full.as_slice()),
+            (812.0, 304.0, true, full.as_slice()),
+            (900.0, 304.0, true, full.as_slice()),
+        ] {
+            let layout = arrange(width, height, advanced);
+            assert_eq!(layout.primary_indices(), expected);
+        }
+    }
+
+    #[test]
+    fn aside_pages_preserve_available_categories_and_replace_only_routing() {
+        assert_eq!(ASIDE_PAGES, [GatePage::Sound, GatePage::Dynamics, GatePage::Detector, GatePage::Metering]);
+        for selected in GatePage::ALL {
+            let presented = aside_page(selected);
+            assert!(ASIDE_PAGES.contains(&presented));
+            assert_eq!(presented, if selected == GatePage::Sidechain { GatePage::Dynamics } else { selected });
+        }
+    }
+
+    #[test]
+    fn remembering_sidechain_survives_expanded_aside_and_short_details_transitions() {
+        let mut panel = GatePanel::default();
+        panel.update(GateMsg::Page(TrackId::new(), EffectId::new(), GatePage::Sidechain));
+        for (width, height, expected) in [
+            (430.0, 304.0, GatePage::Sidechain),
+            (900.0, 304.0, GatePage::Dynamics),
+            (812.0, 304.0, GatePage::Sidechain),
+            (740.0, 64.0, GatePage::Sidechain),
+            (900.0, 304.0, GatePage::Dynamics),
+            (430.0, 64.0, GatePage::Sidechain),
+        ] {
+            let layout = arrange(width, height, true);
+            let presented = if layout.advanced_aside { aside_page(panel.page) } else { panel.page };
+            assert_eq!(presented, expected);
+            assert_eq!(panel.page, GatePage::Sidechain);
+        }
     }
 }

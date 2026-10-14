@@ -234,7 +234,7 @@ pub fn view<'a>(
             state,
             accent,
             layout.knob_size,
-            layout.primary_count,
+            layout.primary_indices(),
         )
     };
     let controls: Element<'a, Message> = if layout.advanced_aside {

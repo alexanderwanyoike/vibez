@@ -5,6 +5,7 @@ use crate::{
         device_controls::{DeviceControlMsg, DeviceControlState},
         devices::DevicesState,
         gate::{GateMsg, GatePage, GatePanel},
+        gate_layout::{aside_page, ASIDE_PAGES},
     },
     message::Message,
     state::{ProjectTrack, UiEffect},
@@ -21,35 +22,6 @@ use iced::{
 use vibez_core::id::TrackId;
 use vibez_dsp::gate::param;
 use vibez_engine::metering::MeterValues;
-
-const ASIDE_PAGES: [GatePage; 4] = [
-    GatePage::Sound,
-    GatePage::Dynamics,
-    GatePage::Detector,
-    GatePage::Metering,
-];
-
-fn aside_page(selected: GatePage) -> GatePage {
-    if ASIDE_PAGES.contains(&selected) {
-        selected
-    } else {
-        GatePage::Dynamics
-    }
-}
-
-fn primary_indices(count: usize) -> &'static [usize] {
-    if count == 3 {
-        &[param::THRESHOLD, param::HOLD, param::RELEASE]
-    } else {
-        &[
-            param::THRESHOLD,
-            param::ATTACK,
-            param::HOLD,
-            param::RELEASE,
-            param::RANGE,
-        ]
-    }
-}
 
 fn value(effect: &UiEffect, index: usize) -> f32 {
     effect
@@ -153,9 +125,8 @@ pub fn primary<'a>(
     state: &'a DeviceControlState,
     accent: Color,
     knobs: Option<f32>,
-    count: usize,
+    indices: &[usize],
 ) -> Element<'a, Message> {
-    let indices = primary_indices(count);
     let mut controls = row![].spacing(6).align_y(iced::Alignment::Center);
     for &index in indices {
         let control = if index == param::RANGE {
@@ -514,63 +485,4 @@ pub fn aside<'a>(
         .spacing(3)
         .width(Length::Fill)
         .into()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::domains::gate_layout;
-    use vibez_core::id::EffectId;
-
-    #[test]
-    fn primary_banks_preserve_gate_priorities_across_measured_tiers() {
-        let core = &[param::THRESHOLD, param::HOLD, param::RELEASE];
-        let full = &[
-            param::THRESHOLD,
-            param::ATTACK,
-            param::HOLD,
-            param::RELEASE,
-            param::RANGE,
-        ];
-        for (width, height, advanced, expected) in [
-            (430.0, 304.0, false, core.as_slice()),
-            (430.0, 304.0, true, core.as_slice()),
-            (740.0, 64.0, true, core.as_slice()),
-            (740.0, 64.0, false, full.as_slice()),
-            (812.0, 304.0, true, full.as_slice()),
-            (900.0, 304.0, true, full.as_slice()),
-        ] {
-            let layout = gate_layout::arrange(width, height, advanced);
-            assert_eq!(primary_indices(layout.primary_count), expected);
-        }
-    }
-
-    #[test]
-    fn aside_pages_preserve_available_categories_and_replace_only_routing() {
-        assert_eq!(ASIDE_PAGES, [GatePage::Sound, GatePage::Dynamics, GatePage::Detector, GatePage::Metering]);
-        for selected in GatePage::ALL {
-            let presented = aside_page(selected);
-            assert!(ASIDE_PAGES.contains(&presented));
-            assert_eq!(presented, if selected == GatePage::Sidechain { GatePage::Dynamics } else { selected });
-        }
-    }
-
-    #[test]
-    fn remembering_sidechain_survives_expanded_aside_and_short_details_transitions() {
-        let mut panel = GatePanel::default();
-        panel.update(GateMsg::Page(TrackId::new(), EffectId::new(), GatePage::Sidechain));
-        for (width, height, expected) in [
-            (430.0, 304.0, GatePage::Sidechain),
-            (900.0, 304.0, GatePage::Dynamics),
-            (812.0, 304.0, GatePage::Sidechain),
-            (740.0, 64.0, GatePage::Sidechain),
-            (900.0, 304.0, GatePage::Dynamics),
-            (430.0, 64.0, GatePage::Sidechain),
-        ] {
-            let layout = gate_layout::arrange(width, height, true);
-            let presented = if layout.advanced_aside { aside_page(panel.page) } else { panel.page };
-            assert_eq!(presented, expected);
-            assert_eq!(panel.page, GatePage::Sidechain);
-        }
-    }
 }
