@@ -2,7 +2,7 @@
 
 use vibez_core::effect::{EffectType, ParamDescriptor, WaveShaperMeter};
 
-use crate::effect::AudioEffect;
+use crate::{butterworth_filter::ButterworthFilter, effect::AudioEffect};
 
 #[path = "drive_oversampling.rs"]
 mod oversampling;
@@ -76,6 +76,7 @@ pub struct DriveEffect {
     oversampling: [oversampling::OversamplingPath; 3],
     sample_rate: f32,
     modern_low: [[f64; 2]; 3],
+    pre_hp: ButterworthFilter,
     meter: WaveShaperMeter,
     meter_samples: u64,
     meter_count: u16,
@@ -97,6 +98,7 @@ impl DriveEffect {
             oversampling: [2, 4, 8].map(oversampling::OversamplingPath::new),
             sample_rate,
             modern_low: [[0.0; 2]; 3],
+            pre_hp: ButterworthFilter::EMPTY,
             meter: WaveShaperMeter::default(),
             meter_samples: 0,
             meter_count: 0,
@@ -184,6 +186,7 @@ impl AudioEffect for DriveEffect {
         if channels == 0 {
             return;
         }
+        self.pre_hp.configure(self.sample_rate, self.params[param::PRE_HP_FREQUENCY], true);
         let ch = channels.min(2);
         let frames = buffer.len() / channels;
         let drive = self.drive_gain();
@@ -198,7 +201,9 @@ impl AudioEffect for DriveEffect {
             for c in 0..ch {
                 let idx = frame * channels + c;
                 let dry = buffer[idx];
-                let sat = (dry * drive).tanh() / norm;
+                let filtered = self.pre_hp.process(dry, c);
+                let shaper_input = if self.params[param::PRE_HP_ENABLED] == 0.0 { dry } else { filtered };
+                let sat = (shaper_input * drive).tanh() / norm;
                 // One-pole tilt: mixes current with previous sample.
                 // tilt > 0 emphasises difference (bright); < 0 smooths.
                 let shelved = sat + tilt * (sat - self.z[c]);
@@ -216,7 +221,7 @@ impl AudioEffect for DriveEffect {
                 let mut modern = [0.0; 3];
                 for (index, path) in self.oversampling.iter_mut().enumerate() {
                     let audible = index == quality;
-                    let output = path.process(dry, c, drive, audible);
+                    let output = path.process(shaper_input, c, drive, audible);
                     if audible { modern = output; }
                 }
                 for (index, sample) in modern.iter_mut().enumerate() {
@@ -250,6 +255,7 @@ impl AudioEffect for DriveEffect {
         self.dry_delay = [[0.0; 2]; 64];
         self.oversampling.iter_mut().for_each(oversampling::OversamplingPath::reset);
         self.modern_low = [[0.0; 2]; 3];
+        self.pre_hp.reset();
         self.meter = WaveShaperMeter::default();
         self.meter_samples = 0;
         self.meter_count = 0;
