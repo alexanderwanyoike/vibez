@@ -92,6 +92,7 @@ fn parameter_keys(effect: &UiEffect) -> Result<&'static [&'static str], String> 
     }
     match effect.effect_type {
         EffectType::Gain => Ok(&GAIN_KEYS),
+        EffectType::Bitcrush => Ok(&bitcrush::KEYS),
         _ => Err("Presets are not yet supported by this built-in device".into()),
     }
 }
