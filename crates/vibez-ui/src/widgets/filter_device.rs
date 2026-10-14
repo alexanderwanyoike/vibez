@@ -30,10 +30,13 @@ pub struct Arrangement {
     pub knobs: Option<f32>,
     pub plot: f32,
     pub beside: bool,
+    pub inline_primary: bool,
 }
 
 pub fn arrange(size: Size, advanced: bool) -> Arrangement {
-    let (controls, knobs) = if size.height >= 220.0 {
+    let (controls, knobs) = if advanced && size.height < 100.0 {
+        (0.0, None)
+    } else if size.height >= 220.0 {
         (74.0, Some(38.0))
     } else if size.height >= 140.0 {
         (54.0, Some(22.0))
@@ -44,7 +47,8 @@ pub fn arrange(size: Size, advanced: bool) -> Arrangement {
         controls,
         knobs,
         plot: (size.height - TOOLBAR_H - controls).max(0.0),
-        beside: advanced && size.width >= MEDIUM_W && size.height >= 140.0,
+        beside: advanced && size.width >= MEDIUM_W,
+        inline_primary: advanced && size.height < 100.0 && size.width >= 820.0,
     }
 }
 
@@ -69,30 +73,32 @@ pub fn view<'a>(
     } else {
         accent
     };
-    let primary = row![
-        selector(
-            track,
-            effect,
-            param::MODE,
-            "Type",
-            &["LP", "HP", "BP", "Notch"],
-            accent
-        ),
-        selector(
-            track,
-            effect,
-            param::SLOPE,
-            "Slope",
-            &["12 dB", "24 dB"],
-            accent
-        ),
-        parameter(track, effect, state, param::CUTOFF, accent, layout.knobs),
-        parameter(track, effect, state, param::RESONANCE, accent, layout.knobs),
-        parameter(track, effect, state, param::DRIVE, accent, layout.knobs),
-        parameter(track, effect, state, param::MIX, accent, layout.knobs),
-    ]
-    .spacing(8)
-    .align_y(iced::Alignment::Center);
+    let primary = || {
+        row![
+            selector(
+                track,
+                effect,
+                param::MODE,
+                "Type",
+                &["LP", "HP", "BP", "Notch"],
+                accent
+            ),
+            selector(
+                track,
+                effect,
+                param::SLOPE,
+                "Slope",
+                &["12 dB", "24 dB"],
+                accent
+            ),
+            parameter(track, effect, state, param::CUTOFF, accent, layout.knobs),
+            parameter(track, effect, state, param::RESONANCE, accent, layout.knobs),
+            parameter(track, effect, state, param::DRIVE, accent, layout.knobs),
+            parameter(track, effect, state, param::MIX, accent, layout.knobs),
+        ]
+        .spacing(8)
+        .align_y(iced::Alignment::Center)
+    };
     let plot: Element<'a, Message> = column![
         section_label("Linear response · drive and modulation excluded"),
         canvas(FilterResponse {
@@ -108,7 +114,15 @@ pub fn view<'a>(
     .width(Length::Fill)
     .height(Length::Fill)
     .into();
-    let visual: Element<'a, Message> = if state.advanced && !layout.beside {
+    let visual: Element<'a, Message> = if layout.inline_primary {
+        row![
+            primary(),
+            container(modulation(track, effect, state, accent, false)).width(360.0)
+        ]
+        .spacing(12)
+        .align_y(iced::Alignment::Center)
+        .into()
+    } else if state.advanced && !layout.beside {
         modulation(track, effect, state, accent, false)
     } else {
         let mut meter = column![
@@ -139,7 +153,14 @@ pub fn view<'a>(
         if layout.beside {
             row![
                 response.width(Length::Fill),
-                container(modulation(track, effect, state, accent, true)).width(260.0)
+                container(modulation(
+                    track,
+                    effect,
+                    state,
+                    accent,
+                    layout.plot >= 80.0
+                ))
+                .width(if layout.plot >= 80.0 { 260.0 } else { 360.0 })
             ]
             .spacing(12)
             .into()
@@ -147,7 +168,7 @@ pub fn view<'a>(
             response.into()
         }
     };
-    column![
+    let mut body = column![
         container(
             row![
                 preset,
@@ -159,11 +180,11 @@ pub fn view<'a>(
         .padding([0, 8])
         .height(TOOLBAR_H),
         container(visual).padding([2, 8]).height(layout.plot),
-        container(primary).padding([2, 8]).height(layout.controls),
-    ]
-    .height(Length::Fill)
-    .width(Length::Fill)
-    .into()
+    ];
+    if layout.controls > 0.0 {
+        body = body.push(container(primary()).padding([2, 8]).height(layout.controls));
+    }
+    body.height(Length::Fill).width(Length::Fill).into()
 }
 
 fn modulation<'a>(
@@ -237,8 +258,15 @@ mod tests {
                     assert!(TOOLBAR_H + layout.controls + layout.plot <= height + 0.01);
                     assert!(layout.plot >= 14.0);
                     if advanced {
-                        let content = if layout.beside && layout.plot >= 80.0 { 64.0 } else { 28.0 };
-                        assert!(layout.plot - 4.0 >= content, "modulation contents do not fit {width}x{height}");
+                        let content = if layout.beside && layout.plot >= 80.0 {
+                            64.0
+                        } else {
+                            28.0
+                        };
+                        assert!(
+                            layout.plot - 4.0 >= content,
+                            "modulation contents do not fit {width}x{height}"
+                        );
                     }
                     if advanced && width < MEDIUM_W {
                         assert!(!layout.beside);
