@@ -302,7 +302,7 @@ fn gain_column<'a>(
         1.0,
         accent,
     );
-    knob.target = KnobTarget::EffectDb(effect.id);
+    knob.target = KnobTarget::GainDb(effect.id);
     let unity = small_button(
         "Unity",
         Message::set_effect_param(track_id, effect.id, param::GAIN, 1.0),

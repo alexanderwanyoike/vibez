@@ -150,6 +150,31 @@ impl GainPanelState {
     }
 }
 
+/// Knob travel for a linear gain: unity sits at the centre, with the cut range
+/// in the left half and the boost range in the right.
+pub fn knob_position(amplitude: f32) -> f32 {
+    let db = vibez_core::level::amplitude_to_db(amplitude).clamp(MIN_GAIN_DB, MAX_GAIN_DB);
+    if db <= 0.0 {
+        (db - MIN_GAIN_DB) / (-2.0 * MIN_GAIN_DB)
+    } else {
+        0.5 + db / (2.0 * MAX_GAIN_DB)
+    }
+}
+
+/// Inverse of [`knob_position`]; the bottom of the travel is silence.
+pub fn knob_amplitude(position: f32) -> f32 {
+    let position = position.clamp(0.0, 1.0);
+    if position == 0.0 {
+        return 0.0;
+    }
+    let db = if position <= 0.5 {
+        MIN_GAIN_DB * (1.0 - 2.0 * position)
+    } else {
+        MAX_GAIN_DB * (2.0 * position - 1.0)
+    };
+    vibez_core::level::db_to_amplitude(db)
+}
+
 pub fn parse_input(index: usize, text: &str) -> Option<f32> {
     let text = text.trim();
     if index == vibez_dsp::gain::param::GAIN && (text.eq_ignore_ascii_case("-inf") || text == "-∞")

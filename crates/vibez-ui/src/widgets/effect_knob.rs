@@ -7,14 +7,12 @@ use iced::mouse;
 use iced::widget::{canvas, column, text};
 use iced::{Color, Element, Length, Rectangle, Renderer, Theme};
 
-use crate::domains::gain::{MAX_GAIN_DB, MIN_GAIN_DB};
 use crate::message::{DrumPadParam, Message};
 use crate::state::{AudioClipInspectorField, AudioClipRotaryField, UndoGestureId};
 use crate::theme;
 use crate::widgets::double_click::DoubleClick;
 use crate::widgets::drag::ValueDrag;
 use vibez_core::id::{ClipId, EffectId, TrackId};
-use vibez_core::level::{amplitude_to_db, db_to_amplitude};
 
 /// 270-degree arc sweep matching DAW standards.
 const ARC_START: f32 = std::f32::consts::FRAC_PI_4 * 3.0; // 135 degrees
@@ -34,7 +32,7 @@ const DOUBLE_CLICK_MS: u64 = 300;
 #[derive(Clone, Copy)]
 pub enum KnobTarget {
     Effect(EffectId),
-    EffectDb(EffectId),
+    GainDb(EffectId),
     Instrument,
     DrumPad {
         pad_index: usize,
@@ -175,7 +173,7 @@ impl EffectKnobWidget {
 
     fn immediate_value_message(&self, value: f32) -> Message {
         match self.target {
-            KnobTarget::Effect(effect_id) | KnobTarget::EffectDb(effect_id) => {
+            KnobTarget::Effect(effect_id) | KnobTarget::GainDb(effect_id) => {
                 Message::set_effect_param(self.track_id, effect_id, self.param_index, value)
             }
             KnobTarget::Instrument => {
@@ -252,13 +250,8 @@ impl EffectKnobWidget {
 
     /// Normalize value to 0.0..1.0 range.
     fn normalized(&self) -> f32 {
-        if matches!(self.target, KnobTarget::EffectDb(_)) {
-            let db = amplitude_to_db(self.value).clamp(MIN_GAIN_DB, MAX_GAIN_DB);
-            return if db <= 0.0 {
-                (db - MIN_GAIN_DB) / (-2.0 * MIN_GAIN_DB)
-            } else {
-                0.5 + db / (2.0 * MAX_GAIN_DB)
-            };
+        if matches!(self.target, KnobTarget::GainDb(_)) {
+            return crate::domains::gain::knob_position(self.value);
         }
         let range = self.max - self.min;
         if range <= 0.0 {
@@ -270,17 +263,8 @@ impl EffectKnobWidget {
 
     /// Denormalize from 0.0..1.0 to actual value range.
     fn denormalize(&self, n: f32) -> f32 {
-        if matches!(self.target, KnobTarget::EffectDb(_)) {
-            let n = n.clamp(0.0, 1.0);
-            if n == 0.0 {
-                return 0.0;
-            }
-            let db = if n <= 0.5 {
-                MIN_GAIN_DB * (1.0 - 2.0 * n)
-            } else {
-                MAX_GAIN_DB * (2.0 * n - 1.0)
-            };
-            return db_to_amplitude(db).clamp(self.min, self.max);
+        if matches!(self.target, KnobTarget::GainDb(_)) {
+            return crate::domains::gain::knob_amplitude(n).clamp(self.min, self.max);
         }
         self.min + n.clamp(0.0, 1.0) * (self.max - self.min)
     }
@@ -569,7 +553,7 @@ mod tests {
         let effect_id = EffectId::new();
         let mut knob =
             EffectKnobWidget::new(track_id, effect_id, 0, 1.0, 0.0, 2.0, 1.0, Color::WHITE);
-        knob.target = KnobTarget::EffectDb(effect_id);
+        knob.target = KnobTarget::GainDb(effect_id);
         assert_eq!(knob.normalized(), 0.5);
         assert!((knob.denormalize(0.25) - 0.031_622_775).abs() < 1e-6);
         assert!((knob.denormalize(0.75) - 2.0_f32.sqrt()).abs() < 1e-6);
