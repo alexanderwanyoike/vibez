@@ -43,7 +43,7 @@ fn assert_pad_load_fifo(commands: &[EngineCommand], track: TrackId, canonical: &
 fn assert_level(engine: &mut AudioEngine, expected: f32) {
     let mut output = [0.0; 32];
     engine.process_block(AudioProcessBlock::new(&mut output, 2));
-    assert!(output.chunks_exact(2).all(|frame| (frame[0] - expected).abs() < 1e-6 && frame[1].abs() < 1e-6),
+    assert!(output.as_chunks::<2>().0.iter().all(|frame| (frame[0] - expected).abs() < 1e-6 && frame[1].abs() < 1e-6),
         "expected={expected}, actual={output:?}");
 }
 
