@@ -106,7 +106,11 @@ fn offline_channels_keep_prepared_send_capacity_for_automation() {
     use vibez_core::automation::{AutomationLane, AutomationPoint, AutomationTarget};
     let bus = TrackId::new();
     let mut lane = AutomationLane::new(AutomationTarget::Send { bus_id: bus });
-    lane.insert_point(AutomationPoint { beat: 0.0, value: 0.75, curve: 0.0 });
+    lane.insert_point(AutomationPoint {
+        beat: 0.0,
+        value: 0.75,
+        curve: 0.0,
+    });
     let mut track = bare_track("Send automation");
     track.automation.push(lane);
     let request = BounceRequest {
@@ -132,7 +136,9 @@ fn offline_channels_keep_prepared_send_capacity_for_automation() {
         &mut Vec::new(),
     );
     assert_eq!(
-        crate::retirement::tests::allocations(|| { channel.apply_automation(0.0); }),
+        crate::retirement::tests::allocations(|| {
+            channel.apply_automation(0.0);
+        }),
         (0, 0)
     );
     assert_eq!(channel.sends, [(bus, 0.75)]);
