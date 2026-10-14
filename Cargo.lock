@@ -5247,6 +5247,7 @@ name = "vibez-engine"
 version = "0.4.1"
 dependencies = [
  "rtrb",
+ "serde_json",
  "vibez-core",
  "vibez-dsp",
  "vibez-instruments",

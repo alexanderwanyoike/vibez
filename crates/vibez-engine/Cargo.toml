@@ -12,3 +12,6 @@ vibez-core = { workspace = true }
 vibez-dsp = { workspace = true }
 vibez-instruments = { workspace = true }
 rtrb = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
