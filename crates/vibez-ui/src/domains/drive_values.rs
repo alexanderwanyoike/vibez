@@ -52,31 +52,15 @@ impl DriveValue {
         }
     }
 
-    pub fn position(self, value: f32) -> f32 {
-        match self {
-            Self::Amount => (amount_db(value) / amount_db(1.0)).clamp(0.0, 1.0),
-            Self::Percent => value.clamp(0.0, 1.0),
-            Self::Output => {
-                let db = if value > 0.0 { 20.0 * value.log10() } else { -60.0 };
-                if db <= 0.0 {
-                    ((db + 60.0) / 120.0).clamp(0.0, 0.5)
-                } else {
-                    (0.5 + db / (40.0 * 2.0_f32.log10())).clamp(0.5, 1.0)
-                }
-            }
-        }
-    }
 
-    pub fn value(self, position: f32) -> f32 {
-        let position = position.clamp(0.0, 1.0);
-        match self {
-            Self::Amount => amount_from_db(position * amount_db(1.0)).unwrap_or(1.0),
-            Self::Percent => position,
-            Self::Output if position == 0.0 => 0.0,
-            Self::Output if position <= 0.5 => 10.0_f32.powf(-3.0 * (1.0 - 2.0 * position)),
-            Self::Output => 2.0_f32.powf(2.0 * position - 1.0),
-        }
-    }
+}
+
+pub fn knob_position(amount: f32) -> f32 {
+    (amount_db(amount) / amount_db(1.0)).clamp(0.0, 1.0)
+}
+
+pub fn knob_value(position: f32) -> f32 {
+    amount_from_db(position.clamp(0.0, 1.0) * amount_db(1.0)).unwrap_or(1.0)
 }
 
 #[cfg(test)]
@@ -120,16 +104,12 @@ mod tests {
     }
 
     #[test]
-    fn amount_knob_moves_in_pre_gain_decibels_and_output_keeps_unity_centered() {
+    fn amount_knob_moves_in_pre_gain_decibels() {
         for position in [0.0, 0.1, 0.25, 0.5, 0.75, 1.0] {
-            let amount = DriveValue::Amount.value(position);
-            assert!((DriveValue::Amount.position(amount) - position).abs() < 1e-6);
+            let amount = knob_value(position);
+            assert!((knob_position(amount) - position).abs() < 1e-6);
             assert!((amount_db(amount) - position * amount_db(1.0)).abs() < 1e-5);
-            let output = DriveValue::Output.value(position);
-            assert!((DriveValue::Output.position(output) - position).abs() < 1e-6);
+
         }
-        assert_eq!(DriveValue::Output.value(0.0), 0.0);
-        assert_eq!(DriveValue::Output.value(0.5), 1.0);
-        assert_eq!(DriveValue::Output.value(1.0), 2.0);
     }
 }

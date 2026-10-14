@@ -256,7 +256,7 @@ impl EffectKnobWidget {
     /// Normalize value to 0.0..1.0 range.
     fn normalized(&self) -> f32 {
         if matches!(self.target, KnobTarget::DriveDb(_)) {
-            return crate::domains::drive_values::DriveValue::Amount.position(self.value);
+            return crate::domains::drive_values::knob_position(self.value);
         }
         if matches!(self.target, KnobTarget::GainDb(_)) {
             return crate::domains::gain::knob_position(self.value);
@@ -275,7 +275,7 @@ impl EffectKnobWidget {
     /// Denormalize from 0.0..1.0 to actual value range.
     fn denormalize(&self, n: f32) -> f32 {
         if matches!(self.target, KnobTarget::DriveDb(_)) {
-            return crate::domains::drive_values::DriveValue::Amount.value(n);
+            return crate::domains::drive_values::knob_value(n);
         }
         if matches!(self.target, KnobTarget::GainDb(_)) {
             return crate::domains::gain::knob_amplitude(n).clamp(self.min, self.max);
