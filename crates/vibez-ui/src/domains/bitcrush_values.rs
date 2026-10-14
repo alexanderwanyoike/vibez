@@ -1,5 +1,26 @@
 //! Bitcrush clock edits express actual host-rate divisions without changing stored units.
 
+pub fn parse_bits(text: &str, current: f32) -> Option<f32> {
+    let text = text.trim().to_ascii_lowercase();
+    let number = text
+        .strip_suffix("bits")
+        .or_else(|| text.strip_suffix("bit"))
+        .unwrap_or(&text)
+        .trim()
+        .parse::<f32>()
+        .ok()?;
+    let descriptor = &vibez_dsp::bitcrush::BITCRUSH_PARAMS[vibez_dsp::bitcrush::param::BITS];
+    let range = descriptor.min..=descriptor.max;
+    if !range.contains(&number) || number.fract() != 0.0 {
+        return None;
+    }
+    Some(if range.contains(&current) && current.trunc() == number {
+        current
+    } else {
+        number
+    })
+}
+
 pub fn parse_rate(text: &str, sample_rate: u32, current: f32) -> Option<f32> {
     if sample_rate < 2 {
         return None;

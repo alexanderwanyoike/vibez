@@ -22,7 +22,9 @@ impl App {
         let state = self.device_controls.entry(effect_id).or_default();
         let edit = if effect.effect_type == vibez_core::effect::EffectType::Bitcrush {
             state.update_with_parser(message, &descriptors, &effect.params, |index, text| {
-                if index == vibez_dsp::bitcrush::param::SR_REDUCE {
+                if index == vibez_dsp::bitcrush::param::BITS {
+                    crate::domains::bitcrush_values::parse_bits(text, *effect.params.get(index)?)
+                } else if index == vibez_dsp::bitcrush::param::SR_REDUCE {
                     let rate = sample_rate.filter(|_| !effect.reconfiguration_failed)?;
                     crate::domains::bitcrush_values::parse_rate(
                         text,
