@@ -8,6 +8,9 @@ use vibez_core::{
 };
 use crate::metering::MeterValues;
 
+#[path = "engine_sample_hold_automation_tests.rs"]
+mod automation;
+
 #[derive(Clone, Copy, Debug)]
 enum Owner { Track, Return, Master }
 
