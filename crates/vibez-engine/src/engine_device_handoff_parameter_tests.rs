@@ -467,19 +467,19 @@ fn retained_parameter_capacity_coalesces_and_replays_every_entry() {
             .map(|value| value.load(Ordering::Relaxed))
             .collect();
         assert_eq!(indices, (0..PARAMETER_CAPACITY).collect::<Vec<_>>());
-        for index in 0..PARAMETER_CAPACITY {
-            assert_eq!(offered_bits[index], offered_value(index).to_bits());
+        for (index, offered) in offered_bits.iter().enumerate() {
+            assert_eq!(*offered, offered_value(index).to_bits());
         }
         let applied_bits: Vec<_> = (0..=PARAMETER_CAPACITY)
             .map(|index| resident_value(&engine, instrument, index).to_bits())
             .collect();
-        for index in 0..=PARAMETER_CAPACITY {
+        for (index, applied) in applied_bits.iter().enumerate() {
             let expected = if index == REJECTED_INDEX || index == PARAMETER_CAPACITY {
                 0.0
             } else {
                 offered_value(index)
             };
-            assert_eq!(applied_bits[index], expected.to_bits());
+            assert_eq!(*applied, expected.to_bits());
         }
         let first_owner_roundtrip = resident_identity(&engine, instrument) == identity;
         assert!(first_owner_roundtrip);
