@@ -36,7 +36,7 @@ pub const COMPACT_WIDTH: f32 = 430.0;
 pub const WIDE_WIDTH: f32 = 740.0;
 pub const MAX_WIDTH: f32 = 900.0;
 pub const SOURCE_WIDTH: f32 = 120.0;
-pub const OUTPUT_WIDTH: f32 = 64.0;
+pub const OUTPUT_WIDTH: f32 = 104.0;
 pub const ASIDE_WIDTH: f32 = 300.0;
 pub const INLINE_CORE_WIDTH: f32 = 224.0;
 

@@ -196,7 +196,7 @@ pub fn view<'a>(
         let short_state = layout.compact || layout.plot < 150.0;
         let mut header =
             row![section_label("Detector peak · snapshots")].align_y(iced::Alignment::Center);
-        if short_state {
+        if short_state && !layout.output_column {
             header = header.push(horizontal_space()).push(
                 text(format!(
                     "{} · GR {} dB",
@@ -321,8 +321,8 @@ pub fn view<'a>(
             .into()
         } else {
             row![
-                signal_meter("Input dBFS", input, true),
-                signal_meter("Output dBFS", output, true)
+                signal_meter("Input", input, true),
+                signal_meter("Output", output, true)
             ]
             .spacing(8)
             .height(Length::Fill)
@@ -339,10 +339,23 @@ pub fn view<'a>(
         content = content.push(
             container(
                 column![
-                    signal_meter("Input dBFS", input, true),
-                    signal_meter("Output dBFS", output, true)
+                    column![
+                        section_label("State"),
+                        text(state_label(effect, panel)).size(11).color(accent),
+                        section_label("Wet GR dB"),
+                        text(reduction(effect, panel))
+                            .size(10)
+                            .font(crate::typography::PERFORM_TECH)
+                    ]
+                    .spacing(3),
+                    row![
+                        signal_meter("Input", input, true),
+                        signal_meter("Output", output, true)
+                    ]
+                    .spacing(8)
+                    .height(Length::Fill)
                 ]
-                .spacing(6)
+                .spacing(8)
                 .height(Length::Fill),
             )
             .width(OUTPUT_WIDTH)
