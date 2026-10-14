@@ -369,6 +369,7 @@ impl App {
                 let duration = outcome.audio.num_frames() as u64;
                 let quality_warning = outcome.quality_warning.clone();
                 self.send_command(EngineCommand::AddClip {
+                    insertion: vibez_engine::clip_insertion::PreparedClipInsertion::new(),
                     track_id: outcome.track_id,
                     clip_id,
                     audio: Arc::clone(&outcome.audio),

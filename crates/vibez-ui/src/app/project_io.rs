@@ -730,6 +730,7 @@ impl App {
                     .info
                     .resolved_start_marker(clip.audio.num_frames() as u64);
                 self.send_command(EngineCommand::AddClip {
+                    insertion: vibez_engine::clip_insertion::PreparedClipInsertion::new(),
                     track_id: clip.info.track_id,
                     clip_id: clip.info.id,
                     audio: Arc::clone(&clip.audio),

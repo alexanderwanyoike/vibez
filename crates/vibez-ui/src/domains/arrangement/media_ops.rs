@@ -272,6 +272,7 @@ impl TimelineEditorState {
         {
             engine.send(EngineCommand::RemoveClip(track_id, clip_id));
             engine.send(EngineCommand::AddClip {
+                insertion: vibez_engine::clip_insertion::PreparedClipInsertion::new(),
                 track_id,
                 clip_id,
                 audio,
@@ -324,6 +325,7 @@ impl TimelineEditorState {
         self.discard_audio_clip_inspector_edits_for(old_clip_id);
 
         engine.send(EngineCommand::AddClip {
+            insertion: vibez_engine::clip_insertion::PreparedClipInsertion::new(),
             track_id,
             clip_id: success.new_clip_id,
             audio: Arc::clone(&success.new_audio),
@@ -505,6 +507,7 @@ impl TimelineEditorState {
         // Add joined clip
         let new_id = ClipId::new();
         engine.send(EngineCommand::AddClip {
+            insertion: vibez_engine::clip_insertion::PreparedClipInsertion::new(),
             track_id,
             clip_id: new_id,
             audio: Arc::clone(&joined_audio),
@@ -685,6 +688,7 @@ impl TimelineEditorState {
         }
         for clip in &fragments {
             engine.send(EngineCommand::AddClip {
+                insertion: vibez_engine::clip_insertion::PreparedClipInsertion::new(),
                 track_id,
                 clip_id: clip.id,
                 audio: Arc::clone(&clip.audio),

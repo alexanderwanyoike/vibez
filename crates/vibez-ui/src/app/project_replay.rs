@@ -335,6 +335,7 @@ impl App {
 
         for clip in &content.clips {
             self.send_command(EngineCommand::AddClip {
+                insertion: vibez_engine::clip_insertion::PreparedClipInsertion::new(),
                 track_id: track.id,
                 clip_id: clip.id,
                 audio: Arc::clone(&clip.audio),
