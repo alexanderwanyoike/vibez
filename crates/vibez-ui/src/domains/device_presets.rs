@@ -6,6 +6,9 @@ use vibez_core::id::{EffectId, TrackId};
 
 use crate::state::UiEffect;
 
+#[path = "filter_presets.rs"]
+mod filter;
+
 #[derive(Debug, Clone)]
 pub enum DevicePresetMsg {
     Load(TrackId, EffectId),
@@ -89,6 +92,7 @@ fn parameter_keys(effect: &UiEffect) -> Result<&'static [&'static str], String> 
     }
     match effect.effect_type {
         EffectType::Gain => Ok(&GAIN_KEYS),
+        EffectType::Filter => Ok(&filter::KEYS),
         _ => Err("Presets are not yet supported by this built-in device".into()),
     }
 }
@@ -142,7 +146,13 @@ pub fn prepare_updates(
             .ok_or_else(|| "The device's parameters are unavailable".to_string())?;
         if !value.is_finite()
             || !(descriptor.min..=descriptor.max).contains(&value)
-            || (vibez_dsp::gain::param::POLARITY.contains(&index) && value != 0.0 && value != 1.0)
+            || (effect.effect_type == EffectType::Gain
+                && vibez_dsp::gain::param::POLARITY.contains(&index)
+                && value != 0.0
+                && value != 1.0)
+            || (effect.effect_type == EffectType::Filter
+                && filter::DISCRETE.contains(&index)
+                && value.fract() != 0.0)
         {
             return Err(format!(
                 "Preset parameter {key} is outside its supported range"
@@ -162,6 +172,9 @@ pub fn prepare_updates(
 }
 
 pub fn factory_presets(effect_type: EffectType) -> Vec<DevicePreset> {
+    if effect_type == EffectType::Filter {
+        return filter::factory_presets();
+    }
     if effect_type != EffectType::Gain {
         return Vec::new();
     }
