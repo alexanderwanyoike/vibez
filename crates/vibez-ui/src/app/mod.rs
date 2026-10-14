@@ -737,6 +737,8 @@ mod clip_project_tests;
 
 #[cfg(test)]
 mod compensation_persistence_tests;
+#[cfg(test)]
+mod gain_persistence_tests;
 
 #[cfg(test)]
 mod plugin_load_tests;
