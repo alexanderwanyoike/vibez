@@ -31,14 +31,13 @@ fn drive_changes_only_the_wet_signal_before_quantization_and_acquisition() {
                         let gain = 10.0_f64.powf(f64::from(drive_db) / 20.0);
                         let mut held = [0.0_f32; 2];
                         for frame in 0..35 {
-                            for channel in 0..channels {
+                            for (channel, held) in held.iter_mut().enumerate().take(channels) {
                                 let index = frame * channels + channel;
                                 if frame % divider == 0 {
                                     let grid_position = f64::from(input[index]) * gain * 32.0;
-                                    held[channel] =
-                                        (grid_position.round() / 32.0).clamp(-1.0, 1.0) as f32;
+                                    *held = (grid_position.round() / 32.0).clamp(-1.0, 1.0) as f32;
                                 }
-                                expected[index] = input[index] * (1.0 - mix) + held[channel] * mix;
+                                expected[index] = input[index] * (1.0 - mix) + *held * mix;
                             }
                         }
                         let parameters = [6.0, divider as f32, mix, drive_db];
