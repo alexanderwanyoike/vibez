@@ -22,7 +22,7 @@ fn render(fixture: &mut Fixture, partitions: &[usize]) -> Vec<f32> {
 fn structural_wait_and_resume_keep_the_64_frame_envelopes_across_callback_partitions() {
     for partitions in [&[128][..], &[1, 7, 56, 64][..], &[16, 16, 16, 16, 64][..]] {
         let mut fixture = Fixture::new(StartingCondition::AwaitingPlan);
-        let level = fixture.engine.last_mix_frame;
+        let level = fixture.engine.output_gate.last_frame();
         let paused = render(&mut fixture, partitions);
         for (frame, pair) in paused.as_chunks::<2>().0.iter().enumerate() {
             for channel in 0..2 {
@@ -35,11 +35,11 @@ fn structural_wait_and_resume_keep_the_64_frame_envelopes_across_callback_partit
             }
         }
         assert!(fixture.engine.transport.is_playing());
-        assert_eq!(fixture.engine.compensation_fade_out, 0);
-        assert_eq!(fixture.engine.compensation_fade_in, 64);
+        assert_eq!(fixture.engine.output_gate.remaining_loss_frames(), 0);
+        assert_eq!(fixture.engine.output_gate.remaining_resume_frames(), 64);
         let plan = fixture.plan(0);
         fixture.drain_command(EngineCommand::SetRouting(plan));
-        assert_eq!(fixture.engine.compensation_plan_fade, 0);
+        assert_eq!(fixture.engine.output_gate.remaining_morph_frames(), 0);
         let resumed = render(&mut fixture, partitions);
         for (frame, pair) in resumed.as_chunks::<2>().0.iter().enumerate() {
             for channel in 0..2 {
@@ -51,14 +51,14 @@ fn structural_wait_and_resume_keep_the_64_frame_envelopes_across_callback_partit
                 );
             }
         }
-        assert_eq!(fixture.engine.compensation_fade_in, 0);
+        assert_eq!(fixture.engine.output_gate.remaining_resume_frames(), 0);
     }
 }
 
 #[test]
 fn latency_restart_gates_the_healthy_branch_until_main_returns_the_owner() {
     let mut fixture = Fixture::new(StartingCondition::Running);
-    let level = fixture.engine.last_mix_frame;
+    let level = fixture.engine.output_gate.last_frame();
     fixture.requested.store(1, Ordering::Release);
     let mut output = [0.0; 128];
     assert_eq!(
@@ -107,10 +107,10 @@ fn latency_restart_gates_the_healthy_branch_until_main_returns_the_owner() {
 #[test]
 fn unchanged_publication_keeps_audio_and_does_not_start_an_output_morph() {
     let mut fixture = Fixture::new(StartingCondition::Running);
-    let level = fixture.engine.last_mix_frame;
+    let level = fixture.engine.output_gate.last_frame();
     let plan = fixture.plan(0);
     fixture.drain_command(EngineCommand::SetRouting(plan));
-    assert_eq!(fixture.engine.compensation_plan_fade, 0);
+    assert_eq!(fixture.engine.output_gate.remaining_morph_frames(), 0);
     for pair in render(&mut fixture, &[1, 7, 56, 64]).as_chunks::<2>().0 {
         assert_eq!(*pair, level);
     }
@@ -119,7 +119,7 @@ fn unchanged_publication_keeps_audio_and_does_not_start_an_output_morph() {
 #[test]
 fn changed_plan_morph_uses_the_last_frame_without_a_global_processing_gate() {
     let mut fixture = Fixture::new(StartingCondition::Running);
-    let old = fixture.engine.last_mix_frame;
+    let old = fixture.engine.output_gate.last_frame();
     let command = EngineCommand::insert_built_in_effect(
         fixture.tracks[1],
         vibez_core::id::EffectId::new(),
@@ -131,7 +131,7 @@ fn changed_plan_morph_uses_the_last_frame_without_a_global_processing_gate() {
     let plan = fixture.plan(0);
     fixture.drain_command(EngineCommand::SetRouting(plan));
     assert!(!fixture.engine.project_processing_muted());
-    assert_eq!(fixture.engine.compensation_plan_fade, 64);
+    assert_eq!(fixture.engine.output_gate.remaining_morph_frames(), 64);
     let output = render(&mut fixture, &[1, 7, 56, 64]);
     for (frame, pair) in output.as_chunks::<2>().0.iter().enumerate() {
         let blend = frame.min(64) as f32 / 64.0;
@@ -144,20 +144,20 @@ fn changed_plan_morph_uses_the_last_frame_without_a_global_processing_gate() {
             );
         }
     }
-    assert_eq!(fixture.engine.compensation_plan_fade, 0);
+    assert_eq!(fixture.engine.output_gate.remaining_morph_frames(), 0);
 }
 
 #[test]
 fn play_during_an_unfinished_loss_preserves_the_remaining_loss_and_resume_envelopes() {
     let mut fixture = Fixture::new(StartingCondition::AwaitingPlan);
-    let level = fixture.engine.last_mix_frame;
+    let level = fixture.engine.output_gate.last_frame();
     render(&mut fixture, &[8]);
-    assert_eq!(fixture.engine.compensation_fade_out, 56);
+    assert_eq!(fixture.engine.output_gate.remaining_loss_frames(), 56);
     let plan = fixture.plan(0);
     fixture.drain_command(EngineCommand::SetRouting(plan));
     fixture.drain_command(EngineCommand::Play);
-    assert_eq!(fixture.engine.compensation_fade_out, 56);
-    assert_eq!(fixture.engine.compensation_fade_in, 64);
+    assert_eq!(fixture.engine.output_gate.remaining_loss_frames(), 56);
+    assert_eq!(fixture.engine.output_gate.remaining_resume_frames(), 64);
     let output = render(&mut fixture, &[32, 32, 64]);
     for (frame, pair) in output.as_chunks::<2>().0.iter().enumerate() {
         let gain = if frame < 56 {
@@ -180,7 +180,7 @@ fn play_during_an_unfinished_loss_preserves_the_remaining_loss_and_resume_envelo
 fn rejected_plan_and_accepted_recovery_keep_audio_envelopes_across_callback_partitions() {
     for partitions in [&[128][..], &[1, 7, 56, 64][..], &[16, 16, 16, 16, 64][..]] {
         let mut fixture = Fixture::new(StartingCondition::AwaitingPlan);
-        let level = fixture.engine.last_mix_frame;
+        let level = fixture.engine.output_gate.last_frame();
         assert!(level.into_iter().all(|sample| sample > 0.1));
         let previous_plan = std::ptr::from_ref(fixture.engine.routing.as_ref());
         let stopped_at = fixture.engine.transport.position();
@@ -226,15 +226,15 @@ fn rejected_plan_and_accepted_recovery_keep_audio_envelopes_across_callback_part
             }
         }
         assert_eq!(fixture.engine.transport.position(), stopped_at);
-        assert_eq!(fixture.engine.compensation_fade_out, 0);
-        assert_eq!(fixture.engine.compensation_fade_in, 64);
+        assert_eq!(fixture.engine.output_gate.remaining_loss_frames(), 0);
+        assert_eq!(fixture.engine.output_gate.remaining_resume_frames(), 64);
         let plan = fixture.plan(0);
         let accepted_plan = std::ptr::from_ref(plan.as_ref());
         fixture.drain_command(EngineCommand::SetRouting(plan));
         assert!(fixture.engine.compensation_valid);
         assert!(!fixture.engine.graph_edit_pending);
         assert!(!fixture.engine.transport.is_playing());
-        assert_eq!(fixture.engine.compensation_plan_fade, 0);
+        assert_eq!(fixture.engine.output_gate.remaining_morph_frames(), 0);
         let events = fixture.drain_events();
         let retired = events
             .iter()
@@ -275,7 +275,7 @@ fn rejected_plan_and_accepted_recovery_keep_audio_envelopes_across_callback_part
             }
         }
         assert_eq!(fixture.engine.transport.position(), stopped_at + 128);
-        assert_eq!(fixture.engine.compensation_fade_in, 0);
+        assert_eq!(fixture.engine.output_gate.remaining_resume_frames(), 0);
         assert!(fixture.engine.compensation_valid);
         assert!(!fixture.engine.graph_edit_pending);
         assert!(!fixture.engine.presentation_fault);
