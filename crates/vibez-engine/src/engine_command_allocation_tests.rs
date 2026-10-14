@@ -58,7 +58,6 @@ fn coverage(command: &EngineCommand) -> Coverage {
         | C::StopSectionRecord
         | C::StartPerformanceCapture
         | C::StopPerformanceCapture
-        | C::LoadAudio(_)
         | C::UnloadAudio
         | C::AddTrack(..)
         | C::RemoveTrack(_)
@@ -372,7 +371,6 @@ fn cases() -> Vec<Case> {
         case!("StopPerformanceCapture", false, |_| {
             C::StopPerformanceCapture
         }),
-        case!("LoadAudio", false, |_| C::LoadAudio(audio(4096))),
         case!("UnloadAudio", false, |_| C::UnloadAudio),
         case!("AddTrack", false, |_| C::add_track(TrackId::new())),
         case!("RemoveTrack", false, |f| C::RemoveTrack(f.audio)),
