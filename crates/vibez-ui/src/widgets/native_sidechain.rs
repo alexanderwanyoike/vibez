@@ -119,7 +119,7 @@ pub fn view<'a>(
             .map_or(String::new(), |warning| format!(" · {warning}"))
     );
     fields.push(field(
-        "Sidechain",
+        if vertical { "Sidechain" } else { model.warning.unwrap_or("Sidechain") },
         tooltip(source, text(explanation).size(9), tooltip::Position::Top).into(),
     ));
     if model.assigned {
@@ -192,15 +192,6 @@ pub fn view<'a>(
         }
         controls.into()
     } else {
-        if let Some(warning) = model.warning {
-            fields.push(
-                text(warning)
-                    .size(8)
-                    .color(th::text_dim())
-                    .wrapping(iced::widget::text::Wrapping::None)
-                    .into(),
-            );
-        }
         row(fields)
             .spacing(6)
             .align_y(iced::Alignment::Center)
