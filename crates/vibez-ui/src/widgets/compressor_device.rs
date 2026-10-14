@@ -294,16 +294,29 @@ pub fn view<'a>(
         if layout.plot >= 100.0 {
             gauge = gauge.push(section_label("Reduction"));
         }
-        gauge = gauge.push(
-            text(format!("GR {gr:.1} dB"))
-                .size(if layout.plot >= 100.0 { 11 } else { 9 })
-                .font(crate::typography::PERFORM_TECH)
-                .wrapping(iced::widget::text::Wrapping::None),
-        ).push(canvas(ReductionGauge { current, peak, accent }).width(50.0).height(Length::Fill));
+        gauge = gauge
+            .push(
+                text(format!("GR {gr:.1} dB"))
+                    .size(if layout.plot >= 100.0 { 11 } else { 9 })
+                    .font(crate::typography::PERFORM_TECH)
+                    .wrapping(iced::widget::text::Wrapping::None),
+            )
+            .push(
+                canvas(ReductionGauge {
+                    current,
+                    peak,
+                    accent,
+                })
+                .width(50.0)
+                .height(Length::Fill),
+            );
         if layout.plot >= 100.0 {
-            gauge = gauge.push(text(format!("L {:.1}  R {:.1}", current[0], current[1]))
-                .size(8).font(crate::typography::PERFORM_TECH)
-                .wrapping(iced::widget::text::Wrapping::None));
+            gauge = gauge.push(
+                text(format!("L {:.1}  R {:.1}", current[0], current[1]))
+                    .size(8)
+                    .font(crate::typography::PERFORM_TECH)
+                    .wrapping(iced::widget::text::Wrapping::None),
+            );
         }
         body = body.push(
             container(visual.push(plots).push(gauge))
@@ -322,9 +335,16 @@ pub fn view<'a>(
             compressor_controls::primary(track, effect, state, accent, layout.knobs, primary),
             iced::widget::vertical_rule(1),
             container(compressor_controls::aside(
-                track, effect, state, panel, accent, input, output,
+                track,
+                effect,
+                state,
+                panel,
+                accent,
+                input,
+                output,
                 details_button(track, effect, state.advanced, false, accent),
-            )).width(ASIDE_W)
+            ))
+            .width(ASIDE_W)
         ]
         .spacing(12)
         .align_y(iced::Alignment::Center)
@@ -365,7 +385,8 @@ mod tests {
     fn transfer_axes_keep_a_real_plot_after_compact_axis_qualification() {
         for width in [430.0, 620.0, 900.0] {
             for height in [
-                64.0, 114.0, 116.0, 120.0, 130.0, 138.0, 140.0, 146.0, 160.0, 182.0, 203.0, 240.0, 304.0,
+                64.0, 114.0, 116.0, 120.0, 130.0, 138.0, 140.0, 146.0, 160.0, 182.0, 203.0, 240.0,
+                304.0,
             ] {
                 let layout = compressor_layout::arrange(width, height, false);
                 if layout.plot == 0.0 {
@@ -385,5 +406,4 @@ mod tests {
             }
         }
     }
-
 }

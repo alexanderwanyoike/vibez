@@ -3,7 +3,7 @@
 use crate::{
     domains::{
         compressor::{CompressorMsg, CompressorPage, CompressorPanel},
-        compressor_layout::{aside_page, ASIDE_PAGES, PrimaryControls},
+        compressor_layout::{aside_page, PrimaryControls, ASIDE_PAGES},
         device_controls::DeviceControlState,
         devices::DevicesState,
     },
@@ -22,7 +22,6 @@ use iced::{
 use vibez_core::id::{EffectId, TrackId};
 use vibez_dsp::compressor::param;
 use vibez_engine::metering::MeterValues;
-
 
 pub fn primary<'a>(
     track: TrackId,
@@ -59,8 +58,13 @@ fn detector_frequency<'a>(
             toggle(track, effect, enabled, "On", accent),
             container(value_field(track, effect, state, index, accent)).width(54.0),
             text("Hz").size(8).color(th::text_dim())
-        ].spacing(4).align_y(iced::Alignment::Center)
-    ].spacing(3).width(Length::Fill).into()
+        ]
+        .spacing(4)
+        .align_y(iced::Alignment::Center)
+    ]
+    .spacing(3)
+    .width(Length::Fill)
+    .into()
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -78,39 +82,106 @@ pub fn aside<'a>(
         return disclosure;
     }
     let selected = aside_page(panel.page);
-    let header = row![disclosure, page_selector(track, effect.id, ASIDE_PAGES.to_vec(), selected, accent)]
-        .spacing(6).align_y(iced::Alignment::Center);
+    let header = row![
+        disclosure,
+        page_selector(track, effect.id, ASIDE_PAGES.to_vec(), selected, accent)
+    ]
+    .spacing(6)
+    .align_y(iced::Alignment::Center);
     let controls: Element<'a, Message> = match selected {
         CompressorPage::Sound | CompressorPage::Dynamics | CompressorPage::Sidechain => row![
-            container(detector_frequency(track, effect, state, accent, param::HP_ENABLED, param::HP_FREQUENCY, "Detector HP")).width(106.0),
-            selector(track, effect, param::DETECTOR_MODE, "Detector", &["Peak", "RMS"], accent),
-            selector(track, effect, param::STEREO_LINK, "Stereo", &["Unlinked", "Linked"], accent),
-        ].spacing(8).align_y(iced::Alignment::Center).into(),
+            container(detector_frequency(
+                track,
+                effect,
+                state,
+                accent,
+                param::HP_ENABLED,
+                param::HP_FREQUENCY,
+                "Detector HP"
+            ))
+            .width(106.0),
+            selector(
+                track,
+                effect,
+                param::DETECTOR_MODE,
+                "Detector",
+                &["Peak", "RMS"],
+                accent
+            ),
+            selector(
+                track,
+                effect,
+                param::STEREO_LINK,
+                "Stereo",
+                &["Unlinked", "Linked"],
+                accent
+            ),
+        ]
+        .spacing(8)
+        .align_y(iced::Alignment::Center)
+        .into(),
         CompressorPage::Detector => column![
             row![
-                detector_frequency(track, effect, state, accent, param::HP_ENABLED, param::HP_FREQUENCY, "Detector HP"),
-                detector_frequency(track, effect, state, accent, param::LP_ENABLED, param::LP_FREQUENCY, "Detector LP"),
-            ].spacing(8),
-            toggle(track, effect, param::DETECTOR_LISTEN, "Listen to detector", accent),
-        ].spacing(4).into(),
+                detector_frequency(
+                    track,
+                    effect,
+                    state,
+                    accent,
+                    param::HP_ENABLED,
+                    param::HP_FREQUENCY,
+                    "Detector HP"
+                ),
+                detector_frequency(
+                    track,
+                    effect,
+                    state,
+                    accent,
+                    param::LP_ENABLED,
+                    param::LP_FREQUENCY,
+                    "Detector LP"
+                ),
+            ]
+            .spacing(8),
+            toggle(
+                track,
+                effect,
+                param::DETECTOR_LISTEN,
+                "Listen to detector",
+                accent
+            ),
+        ]
+        .spacing(4)
+        .into(),
         CompressorPage::Range => row![
             toggle(track, effect, param::RANGE_ENABLED, "Limit GR", accent),
             parameter(track, effect, state, param::RANGE, accent, None),
-        ].spacing(8).align_y(iced::Alignment::Center).into(),
+        ]
+        .spacing(8)
+        .align_y(iced::Alignment::Center)
+        .into(),
         CompressorPage::Metering => column![
             row![
-                reading("In L", input.peak_l, true), reading("In R", input.peak_r, true),
-                reading("Out L", output.peak_l, true), reading("Out R", output.peak_r, true),
-            ].spacing(4),
+                reading("In L", input.peak_l, true),
+                reading("In R", input.peak_r, true),
+                reading("Out L", output.peak_l, true),
+                reading("Out R", output.peak_r, true),
+            ]
+            .spacing(4),
             row![
                 reading("GR L", panel.meter.current_reduction_db[0], false),
                 reading("GR R", panel.meter.current_reduction_db[1], false),
                 reading("Det L", panel.meter.detector_peak[0], true),
                 reading("Det R", panel.meter.detector_peak[1], true),
-            ].spacing(4),
-        ].spacing(4).into(),
+            ]
+            .spacing(4),
+        ]
+        .spacing(4)
+        .into(),
     };
-    column![header, controls].spacing(5).width(Length::Fill).into()
+    column![header, controls]
+        .spacing(5)
+        .width(Length::Fill)
+        .into()
 }
 
 fn toggle<'a>(
@@ -226,7 +297,13 @@ pub fn advanced<'a>(
     input: MeterValues,
     output: MeterValues,
 ) -> Element<'a, Message> {
-    let page = page_selector(track, effect.id, CompressorPage::ALL.to_vec(), panel.page, accent);
+    let page = page_selector(
+        track,
+        effect.id,
+        CompressorPage::ALL.to_vec(),
+        panel.page,
+        accent,
+    );
     let page = column![section_label("Details"), page]
         .spacing(3)
         .width(88.0);

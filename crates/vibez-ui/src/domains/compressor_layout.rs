@@ -32,7 +32,6 @@ impl PrimaryControls {
     }
 }
 
-
 pub const COMPACT_W: f32 = 430.0;
 pub const MEDIUM_W: f32 = 740.0;
 pub const MAX_W: f32 = 900.0;
@@ -89,8 +88,16 @@ pub fn arrange(width: f32, height: f32, advanced: bool) -> Arrangement {
     };
     let available = available - tabs - routing;
     let plot = if compact {
-        if tabs > 0.0 && available >= 60.0 { available } else { 0.0 }
-    } else if available >= 84.0 { available } else { 0.0 };
+        if tabs > 0.0 && available >= 60.0 {
+            available
+        } else {
+            0.0
+        }
+    } else if available >= 84.0 {
+        available
+    } else {
+        0.0
+    };
     Arrangement {
         plot,
         controls,
@@ -131,19 +138,29 @@ pub fn plot_widths(width: f32, layout: Arrangement) -> (f32, f32) {
 
 impl Arrangement {
     pub fn primary_controls(self) -> PrimaryControls {
-        if self.compact { PrimaryControls::Core }
-        else if self.expanded { PrimaryControls::Expanded }
-        else { PrimaryControls::Full }
+        if self.compact {
+            PrimaryControls::Core
+        } else if self.expanded {
+            PrimaryControls::Expanded
+        } else {
+            PrimaryControls::Full
+        }
     }
 }
 
 pub const ASIDE_PAGES: [CompressorPage; 4] = [
-    CompressorPage::Dynamics, CompressorPage::Detector,
-    CompressorPage::Range, CompressorPage::Metering,
+    CompressorPage::Dynamics,
+    CompressorPage::Detector,
+    CompressorPage::Range,
+    CompressorPage::Metering,
 ];
 
 pub fn aside_page(selected: CompressorPage) -> CompressorPage {
-    if ASIDE_PAGES.contains(&selected) { selected } else { CompressorPage::Dynamics }
+    if ASIDE_PAGES.contains(&selected) {
+        selected
+    } else {
+        CompressorPage::Dynamics
+    }
 }
 
 #[cfg(test)]
@@ -339,32 +356,43 @@ mod tests {
                 let layout = arrange(width, height as f32, true);
                 let sidechain_visible = layout.sidechain_column || layout.routing > 0.0;
                 let details_pages = !layout.expanded;
-                assert!(sidechain_visible || details_pages,
-                    "source/tap/disconnect unreachable at {width}x{height}");
+                assert!(
+                    sidechain_visible || details_pages,
+                    "source/tap/disconnect unreachable at {width}x{height}"
+                );
             }
         }
     }
-
 
     #[test]
     fn expanded_advanced_shares_the_primary_strip_instead_of_adding_a_generic_row() {
         for width in [872.0, 892.0, 900.0] {
             let layout = arrange(width, 304.0, true);
-            assert_eq!(layout.details, 0.0, "Advanced became a generic row at {width}");
+            assert_eq!(
+                layout.details, 0.0,
+                "Advanced became a generic row at {width}"
+            );
             assert!(layout.primary_visible_with_details);
-            assert!(layout.plot >= 180.0, "the aside displaced the dominant graph");
+            assert!(
+                layout.plot >= 180.0,
+                "the aside displaced the dominant graph"
+            );
             let main_width = width - 8.0 - ASIDE_W - 1.0 - 2.0 * 12.0;
             let parameter_width = (main_width - 44.0 - 7.0 * 6.0) / 7.0;
-            assert!(parameter_width >= 68.0, "the aside squeezed core values at {width}");
+            assert!(
+                parameter_width >= 68.0,
+                "the aside squeezed core values at {width}"
+            );
             let header = 9.0 * 1.3 + 6.0;
             let reading = 8.0 * 1.3 + 3.0 + 10.0 * 1.3;
             let two_meter_rows = 2.0 * reading + 4.0;
-            assert!(layout.controls - 5.0 >= header + 5.0 + two_meter_rows,
-                "the aside clips its real header and metering rows");
+            assert!(
+                layout.controls - 5.0 >= header + 5.0 + two_meter_rows,
+                "the aside clips its real header and metering rows"
+            );
             let detector_frequency_width = 9.0 * 1.3 + 8.0 + 54.0 + 8.0 * 1.3 + 8.0;
             assert!(106.0 >= detector_frequency_width);
             assert!((ASIDE_W - 106.0 - 16.0) / 2.0 >= 68.0);
         }
     }
-
 }
