@@ -120,7 +120,7 @@ pub fn arrange(width: f32, height: f32, advanced: bool) -> Arrangement {
             layout.meter = Some(Region::new(width - 54.0, top, 46.0, available));
         } else {
             let plot_h = (available - 28.0).max(0.0);
-            if plot_h >= 16.0 {
+            if plot_h >= 32.0 {
                 layout.response = Some(Region::new(8.0, top, width - 70.0, plot_h));
                 layout.meter = Some(Region::new(width - 54.0, top, 46.0, plot_h));
             }
@@ -165,7 +165,7 @@ pub fn arrange(width: f32, height: f32, advanced: bool) -> Arrangement {
         modulation_h = 14.0;
         (plot_h, side_modes) = response_space(modulation_h);
     }
-    if plot_h >= 16.0 {
+    if plot_h >= 32.0 {
         let right = if side_modes { width - 198.0 } else { width - 8.0 };
         layout.response = Some(Region::new(8.0, y, right - 66.0, plot_h));
         layout.meter = Some(Region::new(right - 46.0, y, 46.0, plot_h));
