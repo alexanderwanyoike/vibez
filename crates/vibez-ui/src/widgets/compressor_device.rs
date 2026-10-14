@@ -378,4 +378,21 @@ mod tests {
         assert_eq!(card_width(710.0), 710.0);
         assert_eq!(card_width(1800.0), MAX_W);
     }
+
+    #[test]
+    fn sidechain_column_reserves_source_tap_input_disconnect_warning_and_raw_peak() {
+        let field = 8.0 * 1.3 + 3.0 + 10.0 * 1.3 + 2.0;
+        let disconnect = 9.0 * 1.3 + 4.0;
+        let warnings_and_raw_peak = 2.0 * 8.0 * 1.3;
+        let five_gaps = 5.0 * 5.0;
+        let child_content = 3.0 * field + disconnect + warnings_and_raw_peak + five_gaps;
+        for height in [251.0, 252.0, 253.0, 254.0, 260.0, 262.0] {
+            let layout = arrange(Size::new(900.0, height), true);
+            assert!(
+                !layout.sidechain_column || layout.plot - 4.0 >= child_content,
+                "sidechain fields clip at body height {height}: {} available for {child_content}",
+                layout.plot - 4.0
+            );
+        }
+    }
 }
