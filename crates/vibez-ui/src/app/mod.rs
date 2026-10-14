@@ -58,6 +58,8 @@ struct App {
     plugin_load_requests: plugin_load_requests::PluginLoadRequests,
     gain_devices: gain_devices::GainDevices,
     device_meters: device_meters::DeviceMeters,
+    gate_panels: std::collections::HashMap<vibez_core::id::EffectId, crate::domains::gate::GatePanel>,
+    empty_gate_panel: crate::domains::gate::GatePanel,
     device_controls: std::collections::HashMap<
         vibez_core::id::EffectId,
         crate::domains::device_controls::DeviceControlState,
@@ -166,6 +168,7 @@ mod audio_tasks;
 mod bounce;
 mod capture;
 mod compensation;
+mod gate_devices;
 mod device_controls;
 mod device_meters;
 pub(crate) mod device_presets;
@@ -443,6 +446,8 @@ impl App {
             plugin_load_requests: Default::default(),
             gain_devices: Default::default(),
             device_meters: Default::default(),
+            gate_panels: Default::default(),
+            empty_gate_panel: Default::default(),
             device_controls: Default::default(),
             empty_device_controls: Default::default(),
             device_presets: Default::default(),
