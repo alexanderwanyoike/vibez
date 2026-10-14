@@ -1,5 +1,8 @@
+//! Clip launcher phase and ownership through prepared routing.
+
 use super::*;
 use crate::playback_source::{EngineClip, PreparedClipPlayback, PreparedPlaybackSource};
+use graph_test_support::{graph_engine, routing_channel};
 use vibez_core::id::ClipId;
 use vibez_core::perform::MusicalBoundary;
 
@@ -57,9 +60,13 @@ fn setup() -> (
     TrackId,
     TrackId,
 ) {
-    let (mut engine, mut commands, events) = AudioEngine::new();
     let a = TrackId::new();
     let b = TrackId::new();
+    let (mut engine, mut commands, events) = graph_engine(&[
+        routing_channel(a),
+        routing_channel(b),
+        routing_channel(TrackId::MASTER),
+    ]);
     for command in [
         EngineCommand::SetSampleRate(8),
         EngineCommand::SetBpm(120.0),

@@ -2,6 +2,7 @@
 //! note-off across clip/loop/transport boundaries.
 
 use super::*;
+use graph_test_support::{graph_engine, routing_channel};
 use std::sync::{Arc, Mutex};
 use vibez_core::id::{ClipId, TrackId};
 use vibez_core::midi::{InstrumentKind, MidiNote};
@@ -49,9 +50,10 @@ fn engine_with_held_note() -> (
     NoteEventLog,
     TrackId,
 ) {
-    let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
-    let events = Arc::new(Mutex::new(Vec::new()));
     let tid = TrackId::new();
+    let (mut engine, mut cmd_tx, _event_rx) =
+        graph_engine(&[routing_channel(tid), routing_channel(TrackId::MASTER)]);
+    let events = Arc::new(Mutex::new(Vec::new()));
     let cid = ClipId::new();
     cmd_tx.push(EngineCommand::add_track(tid)).unwrap();
     cmd_tx
@@ -122,9 +124,10 @@ fn run_scenario(
     note_dur: f64,
     blocks: usize,
 ) -> Vec<(bool, u8)> {
-    let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
-    let events = Arc::new(Mutex::new(Vec::new()));
     let tid = TrackId::new();
+    let (mut engine, mut cmd_tx, _event_rx) =
+        graph_engine(&[routing_channel(tid), routing_channel(TrackId::MASTER)]);
+    let events = Arc::new(Mutex::new(Vec::new()));
     let cid = ClipId::new();
     cmd_tx.push(EngineCommand::add_track(tid)).unwrap();
     cmd_tx
@@ -192,9 +195,10 @@ fn dogfood_clip_loop_one_bar_in_two_bar_clip() {
 }
 
 fn looped_note_ons_per_bar(batch_render: bool) -> Vec<usize> {
-    let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
-    let events = Arc::new(Mutex::new(Vec::new()));
     let track_id = TrackId::new();
+    let (mut engine, mut cmd_tx, _event_rx) =
+        graph_engine(&[routing_channel(track_id), routing_channel(TrackId::MASTER)]);
+    let events = Arc::new(Mutex::new(Vec::new()));
     let clip_id = ClipId::new();
     cmd_tx.push(EngineCommand::SetSampleRate(44_100)).unwrap();
     cmd_tx.push(EngineCommand::add_track(track_id)).unwrap();
@@ -290,8 +294,9 @@ fn dogfood_note_spanning_clip_loop_boundary() {
 
 #[test]
 fn instrument_params_change_the_sound() {
-    let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
     let tid = TrackId::new();
+    let (mut engine, mut cmd_tx, _event_rx) =
+        graph_engine(&[routing_channel(tid), routing_channel(TrackId::MASTER)]);
     cmd_tx.push(EngineCommand::add_track(tid)).unwrap();
     cmd_tx
         .push(EngineCommand::set_built_in_instrument(
@@ -336,8 +341,9 @@ fn instrument_params_change_the_sound() {
 
 #[test]
 fn audition_sounds_while_transport_stopped() {
-    let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
     let tid = TrackId::new();
+    let (mut engine, mut cmd_tx, _event_rx) =
+        graph_engine(&[routing_channel(tid), routing_channel(TrackId::MASTER)]);
     cmd_tx.push(EngineCommand::add_track(tid)).unwrap();
     cmd_tx
         .push(EngineCommand::set_built_in_instrument(
@@ -466,9 +472,10 @@ fn seek_kills_sounding_notes() {
 fn editing_a_launcher_pattern_releases_removed_notes_and_preserves_other_voices() {
     use crate::playback_source::{EngineNoteClip, PreparedClipPlayback, PreparedPlaybackSource};
     use vibez_core::perform::MusicalBoundary;
-    let (mut engine, mut commands, _events) = AudioEngine::new();
-    let log = Arc::new(Mutex::new(Vec::new()));
     let track = TrackId::new();
+    let (mut engine, mut commands, _events) =
+        graph_engine(&[routing_channel(track), routing_channel(TrackId::MASTER)]);
+    let log = Arc::new(Mutex::new(Vec::new()));
     let id = ClipId::new();
     for command in [
         EngineCommand::SetSampleRate(8),
