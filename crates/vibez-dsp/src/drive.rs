@@ -75,7 +75,7 @@ pub struct DriveEffect {
     dry_delay: [[f32; 2]; 64],
     oversampling: [oversampling::OversamplingPath; 3],
     sample_rate: f32,
-    modern_low: [[f64; 2]; 3],
+    modern_low: [f64; 2],
     pre_hp: ButterworthFilter,
     post_lp: ButterworthFilter,
     meter: WaveShaperMeter,
@@ -98,7 +98,7 @@ impl DriveEffect {
             dry_delay: [[0.0; 2]; 64],
             oversampling: [2, 4, 8].map(oversampling::OversamplingPath::new),
             sample_rate,
-            modern_low: [[0.0; 2]; 3],
+            modern_low: [0.0; 2],
             pre_hp: ButterworthFilter::EMPTY,
             post_lp: ButterworthFilter::EMPTY,
             meter: WaveShaperMeter::default(),
@@ -221,22 +221,19 @@ impl AudioEffect for DriveEffect {
                 self.dry_delay[self.delay_position][c] = dry;
                 let character = self.params[param::CHARACTER] as usize;
                 let quality = self.params[param::QUALITY] as usize;
-                let mut modern = [0.0; 3];
+                let mut modern = 0.0;
                 for (index, path) in self.oversampling.iter_mut().enumerate() {
-                    let audible = index == quality;
-                    let output = path.process(shaper_input, c, drive, norm, audible);
-                    if audible { modern = output; }
+                    let selected = if index == quality { character.checked_sub(1) } else { None };
+                    modern += path.process(shaper_input, c, drive, norm, selected);
                 }
-                for (index, sample) in modern.iter_mut().enumerate() {
-                    let input = *sample as f64;
-                    let low = &mut self.modern_low[index][c];
-                    *low = input * (1.0 - tone_beta) + *low * tone_beta;
-                    if self.params[param::TONE] != 0.5 { *sample = (*low * low_gain + (input - *low) * high_gain) as f32; }
-                }
+                let input = modern as f64;
+                let low = &mut self.modern_low[c];
+                *low = input * (1.0 - tone_beta) + *low * tone_beta;
+                if self.params[param::TONE] != 0.5 { modern = (*low * low_gain + (input - *low) * high_gain) as f32; }
                 let processed = if character == 0 {
                     legacy
                 } else {
-                    aligned_dry * (1.0 - amount) + modern[character - 1] * amount
+                    aligned_dry * (1.0 - amount) + modern * amount
                 };
                 let filtered = self.post_lp.process(processed, c);
                 let processed = if self.params[param::POST_LP_ENABLED] == 0.0 { processed } else { filtered };
@@ -259,7 +256,7 @@ impl AudioEffect for DriveEffect {
         self.delay_position = 0;
         self.dry_delay = [[0.0; 2]; 64];
         self.oversampling.iter_mut().for_each(oversampling::OversamplingPath::reset);
-        self.modern_low = [[0.0; 2]; 3];
+        self.modern_low = [0.0; 2];
         self.pre_hp.reset();
         self.post_lp.reset();
         self.meter = WaveShaperMeter::default();

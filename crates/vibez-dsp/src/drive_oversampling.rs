@@ -42,12 +42,12 @@ impl OversamplingPath {
         }
     }
 
-    pub(super) fn process(&mut self, input: f32, channel: usize, gain: f32, normalizer: f32, audible: bool) -> [f32; 3] {
+    pub(super) fn process(&mut self, input: f32, channel: usize, gain: f32, normalizer: f32, character: Option<usize>) -> f32 {
         let head = self.input_position[channel];
         self.input[channel][head] = input;
         self.input[channel][head + HOST_TAPS] = input;
         let history = &self.input[channel][head + 1..head + HOST_TAPS + 1];
-        let mut output = [0.0; 3];
+        let mut output = 0.0;
         for phase in 0..self.factor {
             let interpolated: f32 = if phase == 0 {
                 symmetric_dot(history, &self.phases[phase])
@@ -60,14 +60,14 @@ impl OversamplingPath {
             let limited = driven.clamp(-1.0, 1.0);
             let curves = [driven.tanh() / normalizer, 1.5 * limited - 0.5 * limited * limited * limited, limited];
             let position = self.shaped_position[channel];
-            for character in 0..3 {
-                let samples = &mut self.shaped[channel][character];
-                samples[position] = curves[character];
-                samples[position + self.kernel.len()] = curves[character];
+            for curve in 0..3 {
+                let samples = &mut self.shaped[channel][curve];
+                samples[position] = curves[curve];
+                samples[position + self.kernel.len()] = curves[curve];
                 // Decimation at phase zero preserves the exact 64-host-frame
                 // combined group delay; taking the last phase advances it.
-                if phase == 0 && audible {
-                    output[character] = symmetric_dot(&samples[position + 1..position + self.kernel.len() + 1], &self.kernel);
+                if phase == 0 && character == Some(curve) {
+                    output = symmetric_dot(&samples[position + 1..position + self.kernel.len() + 1], &self.kernel);
                 }
             }
             self.shaped_position[channel] = (position + 1) % self.kernel.len();
