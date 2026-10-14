@@ -190,8 +190,7 @@ fn project_reset_ignores_a_late_save_completion_even_when_ids_remain() {
     let (mut app, track_id, effect_id) = gain_app();
     let request = app.begin_device_preset_save(track_id, effect_id).unwrap();
     let saved = request.preset.clone();
-    let snapshot = app.take_snapshot();
-    app.apply_snapshot(snapshot);
+    app.clear_project_runtime();
     let status = app.state.status_text.clone();
 
     let _ = app.update(Message::DevicePreset(DevicePresetMsg::Saved(
