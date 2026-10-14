@@ -292,3 +292,35 @@ fn same_drain_capture_admission_observes_removed_and_replaced_device_owners() {
         report("owner-edit", instrument, true, &calls, &events, &fixture);
     }
 }
+
+#[test]
+fn current_local_resume_changes_capture_admission_at_its_original_same_drain_boundary() {
+    let mut fixture = fixture(true);
+    fixture.controls[1].local.store(true, Ordering::Release);
+    fixture.controls[1].offer_handoff.store(true, Ordering::Release);
+    let original = reconfiguration::effect_owner_identity(&*fixture.engine.tracks[0].effects[0].effect);
+    assert_eq!(crate::retirement::tests::allocations(|| fixture.engine.begin_device_reconfiguration()), (0, 0));
+    let mut owner = match fixture.events.pop().unwrap() {
+        EngineEvent::DeviceReconfiguration(device) => device,
+        event => panic!("expected actual local handoff, got{event:?}"),
+    };
+    assert!(fixture.events.is_empty());
+    assert!(fixture.engine.device_handoff.pending().unwrap().is_local_recovery());
+    assert_eq!(owner.owner_identity(), original);
+    owner.reconfigure_on_main_thread().unwrap();
+    fixture.calls.clear();
+    fixture.commands.push(EngineCommand::StartPerformanceCapture).unwrap();
+    fixture.commands.push(EngineCommand::ResumeDeviceReconfiguration { device: owner, routing: crate::routing::PreparedRouting::prepare(&fixture.model, 64).unwrap() }).unwrap();
+    fixture.commands.push(EngineCommand::StartPerformanceCapture).unwrap();
+    drain(&mut fixture);
+    let calls = fixture.calls.observed();
+    assert_eq!(calls, [110, 210], "the first local token refuses without querying residents");
+    let events = collect(&mut fixture);
+    assert_eq!(events.order, ["stop", "refused", "routing-retired", "start", "source"]);
+    assert_eq!(events.reasons, [LOCAL_REASON]);
+    assert!(fixture.engine.capture_active);
+    assert!(fixture.engine.device_handoff.pending().is_none());
+    assert_eq!(fixture.engine.device_handoff.last_issued_identity(), 1);
+    assert_eq!(reconfiguration::effect_owner_identity(&*fixture.engine.tracks[0].effects[0].effect), original);
+    report("current-resume", false, true, &calls, &events, &fixture);
+}
