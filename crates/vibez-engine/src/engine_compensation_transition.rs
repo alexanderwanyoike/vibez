@@ -50,10 +50,8 @@ impl AudioEngine {
             std::mem::swap(&mut self.routing, &mut prepared);
             self.retired_routing = Some(prepared);
             self.return_retired_routing();
-            if signal_path_changed && self.transport.is_playing() && !self.was_project_muted {
-                // Unchanged paths keep their own history. A short blend covers
-                // newly prepared paths without gating the unrelated mix.
-                self.compensation_plan_fade = 64;
+            if signal_path_changed && self.transport.is_playing() {
+                self.output_gate.morph_after_plan_change();
             }
         }
     }
@@ -64,36 +62,11 @@ impl AudioEngine {
         channels: usize,
         project_muted: bool,
     ) {
-        if project_muted && !self.was_project_muted {
-            self.compensation_fade_out = 64;
-            self.compensation_fade_in = 64;
-        }
-        self.was_project_muted = project_muted;
-        if project_muted {
-            self.compensation_plan_fade = 0;
-        }
-        for frame in output.chunks_exact_mut(channels) {
-            if self.compensation_fade_out > 0 {
-                let gain = self.compensation_fade_out as f32 / 64.0;
-                for (channel, sample) in frame.iter_mut().enumerate() {
-                    *sample = self.last_mix_frame[channel.min(1)] * gain;
-                }
-                self.compensation_fade_out -= 1;
-            } else if !project_muted && self.compensation_fade_in > 0 {
-                let gain = 1.0 - self.compensation_fade_in as f32 / 64.0;
-                frame.iter_mut().for_each(|sample| *sample *= gain);
-                self.compensation_fade_in -= 1;
-            }
-            if !project_muted && self.compensation_plan_fade > 0 {
-                let blend = 1.0 - self.compensation_plan_fade as f32 / 64.0;
-                for (channel, sample) in frame.iter_mut().enumerate() {
-                    *sample = self.last_mix_frame[channel.min(1)] * (1.0 - blend) + *sample * blend;
-                }
-                self.compensation_plan_fade -= 1;
-            }
-            if self.compensation_fade_out == 0 && self.compensation_plan_fade == 0 {
-                self.last_mix_frame = [frame[0], frame[channels.min(2) - 1]];
-            }
-        }
+        let permit = if project_muted {
+            output_gate::OutputPermit::Muted
+        } else {
+            output_gate::OutputPermit::Audible
+        };
+        self.output_gate.apply(output, channels, permit);
     }
 }
