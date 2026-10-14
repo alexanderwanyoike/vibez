@@ -59,13 +59,18 @@ impl App {
                 let effect = focused.or_else(|| first_native_eq(track))?;
                 Some((track_id, effect.id, self.eq_panel(effect.id).position()))
             });
+        let previous = self.eq_spectrum.target;
         if self.eq_spectrum.retarget(wanted) {
+            if let Some(target) = previous {
+                if let Some(panel) = self.eq_panels.get_mut(&target.effect_id) {
+                    panel.retire_tap();
+                }
+            }
             if let Some(target) = self.eq_spectrum.target {
                 self.eq_panels
                     .entry(target.effect_id)
                     .or_default()
-                    .spectrum
-                    .reset();
+                    .retire_tap();
             }
             self.send_command(EngineCommand::SetEffectSpectrumTap(self.eq_spectrum.target));
         }

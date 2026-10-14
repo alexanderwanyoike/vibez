@@ -46,6 +46,13 @@ pub struct EqPanel {
 }
 
 impl EqPanel {
+    pub fn retire_tap(&mut self) {
+        self.last_sample_at = None;
+        if !self.frozen {
+            self.spectrum.reset();
+        }
+    }
+
     pub fn update(&mut self, message: EqMsg) {
         match message {
             EqMsg::Focus(..) => {}
@@ -266,5 +273,28 @@ mod tests {
             panel.spectrum.active,
             "focus discarded the stored audio window"
         );
+    }
+
+    #[test]
+    fn retiring_a_tap_clears_unfrozen_history_but_keeps_an_explicitly_frozen_frame() {
+        for frozen in [false, true] {
+            let mut panel = sounding_panel();
+            panel.selected_band = 2;
+            panel.post = true;
+            panel.frozen = frozen;
+            panel.last_sample_at = Some(std::time::Instant::now());
+            let bins = panel.spectrum.bins.clone();
+            panel.retire_tap();
+            assert!(panel.last_sample_at.is_none());
+            assert_eq!(panel.selected_band, 2);
+            assert!(panel.post);
+            assert_eq!(panel.frozen, frozen);
+            if frozen {
+                assert!(panel.spectrum.active);
+                assert_eq!(panel.spectrum.bins, bins);
+            } else {
+                assert_empty_analysis(&mut panel);
+            }
+        }
     }
 }
