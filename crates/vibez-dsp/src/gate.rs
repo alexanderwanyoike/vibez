@@ -2,7 +2,7 @@
 
 use vibez_core::effect::{EffectType, ParamDescriptor};
 
-use crate::effect::AudioEffect;
+use crate::{detector_filter::DetectorFilter, effect::AudioEffect};
 
 pub mod param {
     pub const THRESHOLD: usize = 0;
@@ -45,6 +45,7 @@ pub static GATE_PARAMS: &[ParamDescriptor] = &[
 pub struct GateEffect {
     params: [f32; param::COUNT],
     sample_rate: f32,
+    filters: [DetectorFilter; 2],
     env_db: f32,
     open: bool,
     inputs: [vibez_core::routing::ExternalInputDescriptor; 1],
@@ -55,9 +56,10 @@ pub struct GateEffect {
 
 impl GateEffect {
     pub fn new(sample_rate: f32) -> Self {
-        Self {
+        let mut effect = Self {
             params: std::array::from_fn(|index| GATE_PARAMS[index].default),
             sample_rate,
+            filters: [DetectorFilter::EMPTY; 2],
             env_db: -120.0,
             open: false,
             inputs: [vibez_core::routing::ExternalInputDescriptor {
@@ -68,7 +70,14 @@ impl GateEffect {
             gain: 0.0,
             expander_gain: 1.0,
             hold_counter: 0,
-        }
+        };
+        effect.configure_filters();
+        effect
+    }
+
+    fn configure_filters(&mut self) {
+        self.filters[0].configure(self.sample_rate, self.params[param::HP_FREQUENCY], true);
+        self.filters[1].configure(self.sample_rate, self.params[param::LP_FREQUENCY], false);
     }
 
     fn coef(time_ms: f32, sr: f32) -> f32 {
@@ -94,6 +103,9 @@ impl AudioEffect for GateEffect {
         let Some(descriptor) = GATE_PARAMS.get(index) else { return false; };
         if !value.is_finite() { return false; }
         self.params[index] = value.clamp(descriptor.min, descriptor.max);
+        if index == param::HP_FREQUENCY || index == param::LP_FREQUENCY {
+            self.configure_filters();
+        }
         true
     }
 
@@ -128,18 +140,19 @@ impl AudioEffect for GateEffect {
         let closed_gain = if self.params[param::RANGE_ENABLED] >= 0.5 { 10.0_f32.powf(-self.params[param::RANGE] / 20.0) } else { 0.0 };
 
         for frame in 0..frames {
-            let mut peak = 0.0_f32;
-            for c in 0..ch {
-                let sample = match detector {
-                    Some(input) => input
-                        .samples
-                        .get(frame * input.channels + c.min(input.channels - 1))
-                        .copied()
-                        .unwrap_or(0.0),
-                    None => buffer[frame * channels + c],
+            let detected: [f32; 2] = std::array::from_fn(|channel| {
+                let raw = match detector {
+                    Some(input) => input.samples
+                        .get(frame * input.channels + channel.min(input.channels - 1))
+                        .copied().unwrap_or(0.0),
+                    None => buffer[frame * channels + channel.min(ch - 1)],
                 };
-                peak = peak.max(sample.abs());
-            }
+                let high = self.filters[0].process(raw, channel);
+                let high = if self.params[param::HP_ENABLED] >= 0.5 { high } else { raw };
+                let low = self.filters[1].process(high, channel);
+                if self.params[param::LP_ENABLED] >= 0.5 { low } else { high }
+            });
+            let peak = detected[0].abs().max(detected[1].abs());
             let peak_db = 20.0 * (peak.max(1e-10)).log10();
             let env_coef = if peak_db > self.env_db { att } else { rel };
             self.env_db = peak_db + env_coef * (self.env_db - peak_db);
@@ -174,7 +187,10 @@ impl AudioEffect for GateEffect {
             }
 
             for c in 0..ch {
-                buffer[frame * channels + c] *= gain;
+                let sample = &mut buffer[frame * channels + c];
+                *sample = if self.params[param::DETECTOR_LISTEN] >= 0.5 {
+                    detected[c]
+                } else { *sample * gain };
             }
         }
     }
@@ -185,6 +201,7 @@ impl AudioEffect for GateEffect {
         self.gain = 0.0;
         self.expander_gain = 1.0;
         self.hold_counter = 0;
+        for filter in &mut self.filters { filter.reset(); }
     }
 }
 
