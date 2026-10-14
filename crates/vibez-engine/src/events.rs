@@ -1,3 +1,5 @@
+//! Engine feedback and returned ownership with explicit consumer time domains.
+
 use vibez_core::id::{ClipId, SectionId, TrackId};
 use vibez_core::perform::NoteRepeatRate;
 

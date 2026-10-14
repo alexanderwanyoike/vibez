@@ -1,3 +1,5 @@
+//! Application event vocabulary for UI intents and background completions.
+
 use std::path::PathBuf;
 use std::sync::Arc;
 

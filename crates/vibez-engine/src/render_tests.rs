@@ -1,3 +1,5 @@
+//! Rendering contract tests and isolated engine fixtures.
+
 use super::*;
 use crate::commands::EngineCommand as Command;
 use crate::engine::{AudioEngine, AudioProcessBlock};

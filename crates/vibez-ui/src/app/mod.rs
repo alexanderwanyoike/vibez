@@ -1,3 +1,5 @@
+//! Application runtime coordination and resource lifetime.
+
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 

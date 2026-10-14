@@ -1,3 +1,5 @@
+//! Audio engine state and callback coordination.
+
 use std::sync::Arc;
 
 use rtrb::{Consumer, Producer, RingBuffer};

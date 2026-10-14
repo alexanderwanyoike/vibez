@@ -1,3 +1,5 @@
+//! Native widget modules for application views and device panels.
+
 pub mod audio_clip_detail;
 pub mod bitcrush_controls;
 pub mod bitcrush_device;
