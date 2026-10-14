@@ -907,7 +907,11 @@ impl AudioEngine {
         }
     }
 
-    fn arrangement_clip_mut(&mut self, track_id: TrackId, clip_id: ClipId) -> Option<&mut EngineClip> {
+    fn arrangement_clip_mut(
+        &mut self,
+        track_id: TrackId,
+        clip_id: ClipId,
+    ) -> Option<&mut EngineClip> {
         self.tracks
             .iter_mut()
             .find(|track| track.id == track_id)
