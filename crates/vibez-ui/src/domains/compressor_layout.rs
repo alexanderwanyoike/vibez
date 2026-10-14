@@ -39,6 +39,7 @@ pub const TOOLBAR_H: f32 = 26.0;
 pub const SIDECHAIN_W: f32 = 120.0;
 pub const GAUGE_W: f32 = 76.0;
 pub const ASIDE_W: f32 = 260.0;
+pub const INLINE_CORE_W: f32 = 276.0;
 
 #[derive(Debug, Clone, Copy)]
 pub struct Arrangement {
@@ -102,7 +103,7 @@ pub fn arrange(width: f32, height: f32, advanced: bool) -> Arrangement {
         plot,
         controls,
         knobs,
-        primary_visible_with_details: advanced && (expanded || details > 0.0),
+        primary_visible_with_details: advanced && (!compact || details > 0.0),
         sidechain_column,
         both_plots: !compact && plot > 0.0,
         compact,
@@ -137,8 +138,12 @@ pub fn plot_widths(width: f32, layout: Arrangement) -> (f32, f32) {
 }
 
 impl Arrangement {
+    pub fn inline_details(self) -> bool {
+        self.primary_visible_with_details && !self.expanded && self.details == 0.0
+    }
+
     pub fn primary_controls(self) -> PrimaryControls {
-        if self.compact {
+        if self.compact || self.inline_details() {
             PrimaryControls::Core
         } else if self.expanded {
             PrimaryControls::Expanded
@@ -201,7 +206,7 @@ mod tests {
                     );
                     assert_eq!(
                         layout.primary_visible_with_details,
-                        advanced && height >= 112.0
+                        advanced && (height >= 112.0 || width >= MEDIUM_W)
                     );
                     assert!(!layout.sidechain_column || width >= MEDIUM_W && layout.plot >= 150.0);
                     assert!(!layout.both_plots || width >= MEDIUM_W);
@@ -410,7 +415,7 @@ mod tests {
                 let field_height = 8.0 * 1.3 + 3.0 + 10.0 * 1.3 + 2.0;
                 let content_height = layout.controls - 5.0;
                 assert!(content_height >= field_height);
-                let core_width = 276.0;
+                let core_width = INLINE_CORE_W;
                 assert!((core_width - 3.0 * 6.0) / 4.0 >= 62.0);
                 let detail_controls_width = width - 8.0 - core_width - 17.0 - 88.0 - 8.0;
                 for page in CompressorPage::ALL {

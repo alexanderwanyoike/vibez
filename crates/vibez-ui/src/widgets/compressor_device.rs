@@ -9,7 +9,7 @@ use crate::widgets::{
 use crate::{
     domains::{
         compressor::{CompressorMsg, CompressorPanel, CompressorVisual},
-        compressor_layout::{self, plot_widths, ASIDE_W, GAUGE_W, SIDECHAIN_W, TOOLBAR_H},
+        compressor_layout::{self, plot_widths, ASIDE_W, GAUGE_W, INLINE_CORE_W, SIDECHAIN_W, TOOLBAR_H},
         device_controls::{DeviceControlMsg, DeviceControlState},
         devices::DevicesState,
     },
@@ -193,7 +193,7 @@ pub fn view<'a>(
                 .font(crate::typography::PERFORM_TECH)
                 .wrapping(iced::widget::text::Wrapping::None),
         );
-        if state.advanced && !layout.primary_visible_with_details {
+        if state.advanced && (!layout.primary_visible_with_details || layout.inline_details()) {
             toolbar = toolbar.push(details_button(track, effect, true, layout.compact, accent));
         }
     }
@@ -347,6 +347,17 @@ pub fn view<'a>(
             .width(ASIDE_W)
         ]
         .spacing(12)
+        .align_y(iced::Alignment::Center)
+        .into()
+    } else if layout.inline_details() {
+        row![
+            container(compressor_controls::primary(
+                track, effect, state, accent, None, primary,
+            )).width(INLINE_CORE_W),
+            iced::widget::vertical_rule(1),
+            advanced(),
+        ]
+        .spacing(8)
         .align_y(iced::Alignment::Center)
         .into()
     } else if state.advanced && !layout.primary_visible_with_details {
