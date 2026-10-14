@@ -79,6 +79,19 @@ Repeat pair. Cancelling the queue (Stop, Play, a presentation fault) keeps
 Capture events that are already due, replaces pending transitions with their
 ownership returns, and drops other pending heard feedback.
 
+### Output envelopes
+
+`OutputGate` owns the previous typed `OutputPermit`, the last stereo frame and
+three independent 64-frame loss, resume and plan-morph counters. Processing
+readiness remains the engine's decision; the gate consumes its result and never
+authorizes processing. Recovery may arrive before loss finishes, and a changed
+plan may start a morph while recovery is pending, so these envelopes cannot be
+exclusive states. Loss runs before resume, then morph blends the result before
+the last-frame update. A changed signal path starts a morph only when playback
+is running and the previous permit was Audible. Play clears only the morph;
+pending loss and resume progress remain intact. The owner uses fixed inline
+storage and introduces no callback allocation or ownership transfer.
+
 ## 3. Ports and adapters: EngineHandle
 
 Removed devices stop processing on the audio thread before their unique owner
