@@ -243,3 +243,7 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "compressor_device_tests.rs"]
+mod device_tests;
