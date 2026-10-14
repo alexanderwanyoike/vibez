@@ -128,7 +128,7 @@ impl DriveEffect {
         };
         if !automated && self.params[index] == target { return true; }
         self.params[index] = target;
-        let choice = matches!(index, param::CHARACTER | param::QUALITY | param::PRE_HP_ENABLED | param::POST_LP_ENABLED);
+        let choice = matches!(index, param::CHARACTER | param::QUALITY);
         if automated || !self.started || choice {
             self.applied[index] = target;
             self.remaining[index] = 0;
@@ -258,7 +258,7 @@ impl AudioEffect for DriveEffect {
                 let idx = frame * channels + c;
                 let dry = buffer[idx];
                 let filtered = self.pre_hp.process(dry, c);
-                let shaper_input = if self.applied[param::PRE_HP_ENABLED] == 0.0 { dry } else { filtered };
+                let shaper_input = dry * (1.0 - self.applied[param::PRE_HP_ENABLED]) + filtered * self.applied[param::PRE_HP_ENABLED];
                 let sat = (shaper_input * drive).tanh() / norm;
                 // One-pole tilt: mixes current with previous sample.
                 // tilt > 0 emphasises difference (bright); < 0 smooths.
@@ -289,7 +289,7 @@ impl AudioEffect for DriveEffect {
                     aligned_dry * (1.0 - amount) + modern * amount
                 };
                 let filtered = self.post_lp.process(processed, c);
-                let processed = if self.applied[param::POST_LP_ENABLED] == 0.0 { processed } else { filtered };
+                let processed = processed * (1.0 - self.applied[param::POST_LP_ENABLED]) + filtered * self.applied[param::POST_LP_ENABLED];
                 buffer[idx] = (aligned_dry * (1.0 - mix) + processed * mix) * output;
                 if c == 0 {
                     let point = self.meter_samples as usize % 128;
