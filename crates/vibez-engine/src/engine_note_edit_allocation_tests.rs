@@ -199,8 +199,9 @@ fn editing_pitch_start_and_length_preserves_note_indices_and_allocation_free_not
                 "frame {frame}: {pair:?} != {expected}");
         }
     };
-    commands.push(EngineCommand::Seek(0)).unwrap();
     let mut rendered = [0.0; 480 * 2];
+    engine.process_block(AudioProcessBlock::new(&mut rendered, 2));
+    commands.push(EngineCommand::Seek(0)).unwrap();
     engine.process_block(AudioProcessBlock::new(&mut rendered, 2));
     assert_audio(&rendered, &[(0, 96, 1.0), (96, 240, 3.0), (240, 288, 2.0), (288, 336, 3.0), (336, 384, 1.0)]);
 
@@ -224,7 +225,9 @@ fn editing_pitch_start_and_length_preserves_note_indices_and_allocation_free_not
             engine.process_block(AudioProcessBlock::new(&mut [], 2));
         });
         assert_eq!(edit_allocations, (0, 0), "editing original note {note_index}");
-
+        // Seeking while an edited voice is active queues its note-off at the
+        // replay onset. Finish the clip before measuring the independent replay.
+        engine.process_block(AudioProcessBlock::new(&mut rendered, 2));
         commands.push(EngineCommand::Seek(0)).unwrap();
         let render_allocations = crate::retirement::tests::allocations(|| {
             engine.process_block(AudioProcessBlock::new(&mut rendered, 2));
