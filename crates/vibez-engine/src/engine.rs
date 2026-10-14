@@ -60,9 +60,7 @@ pub struct AudioEngine {
     capture_clip_positions: Vec<(TrackId, u64, u64)>,
     compensation_suspended: bool,
     device_failure_capture_closed: bool,
-    next_device_handoff: u64,
-    pending_device_reconfiguration: Option<reconfiguration::PendingDeviceReconfiguration>,
-    pending_device_parameters: Vec<(usize, f32)>,
+    device_handoff: device_handoff::DeviceHandoffState,
     compensation_plan: compensation_plan::CompensationPlanState,
     output_gate: output_gate::OutputGate,
     routing: Box<crate::routing::PreparedRouting>,
@@ -260,9 +258,7 @@ impl AudioEngine {
             ),
             compensation_suspended: false,
             device_failure_capture_closed: false,
-            next_device_handoff: 0,
-            pending_device_reconfiguration: None,
-            pending_device_parameters: Vec::with_capacity(2048),
+            device_handoff: device_handoff::DeviceHandoffState::default(),
             compensation_plan: compensation_plan::CompensationPlanState::default(),
             output_gate: output_gate::OutputGate::default(),
             retired_routing: None,
@@ -826,6 +822,9 @@ mod compensation_clip_tests;
 #[cfg(test)]
 #[path = "engine_graph_tests.rs"]
 mod graph_tests;
+
+#[path = "engine_device_handoff.rs"]
+mod device_handoff;
 
 #[path = "engine_reconfiguration_edits.rs"]
 mod reconfiguration_edits;

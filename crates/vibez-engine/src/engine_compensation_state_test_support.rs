@@ -37,7 +37,7 @@ impl Readiness {
             valid: engine.compensation_plan.applied_plan_is_valid(),
             awaiting_plan: engine.compensation_plan.awaiting_structural_plan(),
             suspended: engine.compensation_suspended,
-            handoff: engine.pending_device_reconfiguration.is_some(),
+            handoff: engine.device_handoff.pending().is_some(),
             restart_requested: engine.reconfiguration_pending(),
             presentation_fault: engine.presentation_state.is_faulted(),
             playing: engine.transport.is_playing(),
@@ -161,7 +161,7 @@ impl Fixture {
             .any(|slot| slot.id == self.effect)
             || self
                 .engine
-                .pending_device_reconfiguration
+                .device_handoff.pending()
                 .is_some_and(|pending| pending.effect_id == Some(self.effect))
         {
             affected.effects.push(routing_effect(self.effect));

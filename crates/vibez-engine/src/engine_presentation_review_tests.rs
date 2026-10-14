@@ -21,7 +21,7 @@ fn section(id: SectionId) -> Box<PreparedSectionPlaybackSource> {
     Box::new(PreparedSectionPlaybackSource::new(id, 8.0, true, vec![]))
 }
 fn local_recovery(engine: &mut AudioEngine) {
-    engine.pending_device_reconfiguration = Some(reconfiguration::PendingDeviceReconfiguration {
+    engine.device_handoff.track_transfer(device_handoff::PendingDeviceReconfiguration {
         handoff_id: 1,
         track_id: TrackId::new(),
         effect_id: None,
