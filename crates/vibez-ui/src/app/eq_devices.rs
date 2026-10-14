@@ -261,4 +261,41 @@ mod tests {
             effect
         );
     }
+
+    #[test]
+    fn devices_can_analyse_second_eq_while_mix_keeps_console_identity() {
+        let (mut app, track, first) = app_with_eq();
+        app.state.view.detail_panel_tab = crate::state::DetailPanelTab::Devices;
+        let _ = app.update(Message::Devices(DevicesMsg::AddEffect(
+            track,
+            EffectType::Eq,
+        )));
+        let second = app.state.find_track(track).unwrap().effects[1].id;
+        let _ = app.update_eq_control(EqMsg::Source(track, second, EffectSpectrumPosition::Output));
+        app.poll_eq_spectrum();
+        assert_eq!(app.eq_spectrum.target.unwrap().effect_id, second);
+        assert_eq!(
+            app.eq_spectrum.target.unwrap().position,
+            EffectSpectrumPosition::Output
+        );
+        app.state.view.workspace = Workspace::Mix;
+        app.poll_eq_spectrum();
+        assert_eq!(app.eq_spectrum.target.unwrap().effect_id, first);
+        app.state.view.workspace = Workspace::Arrange;
+        app.poll_eq_spectrum();
+        assert_eq!(app.eq_spectrum.target.unwrap().effect_id, second);
+        app.state
+            .find_track_mut(track)
+            .unwrap()
+            .effects
+            .retain(|effect| effect.id != second);
+        app.poll_eq_spectrum();
+        assert_eq!(app.eq_spectrum.target.unwrap().effect_id, first);
+        assert_eq!(
+            first_native_eq(app.state.find_track(track).unwrap())
+                .unwrap()
+                .id,
+            first
+        );
+    }
 }
