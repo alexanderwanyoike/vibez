@@ -203,3 +203,35 @@ fn project_reset_ignores_a_late_save_completion_even_when_ids_remain() {
     assert!(!app.state.project.dirty);
     assert!(!app.state.project.history.can_undo());
 }
+
+#[test]
+fn undo_keeps_the_remembered_preset_and_lets_a_save_finish() {
+    let (mut app, track_id, effect_id) = gain_app();
+    let selected = crate::domains::device_presets::factory_presets(EffectType::Gain)[1].clone();
+    let _ = app.update(Message::ApplyDevicePreset(
+        track_id,
+        effect_id,
+        selected.clone(),
+    ));
+    let request = app.begin_device_preset_save(track_id, effect_id).unwrap();
+    let _ = app.update(Message::Devices(DevicesMsg::SetEffectParam(
+        track_id, effect_id, 1, 3.0,
+    )));
+    let _ = app.update(Message::Project(crate::domains::project::ProjectMsg::Undo));
+    assert_eq!(
+        app.device_preset_selection[&(track_id, effect_id)],
+        selected
+    );
+
+    let saved = DevicePreset::new(
+        request.preset.kind(),
+        "Saved after undo",
+        request.preset.parameters().clone(),
+    )
+    .unwrap();
+    let _ = app.update(Message::DevicePreset(DevicePresetMsg::Saved(
+        request,
+        Ok(Some(saved.clone())),
+    )));
+    assert_eq!(app.state.status_text, "Saved preset: Saved after undo");
+}
