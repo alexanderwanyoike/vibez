@@ -1,6 +1,7 @@
 //! Exclusive device handoff and applied-plan validation.
 
 use super::*;
+use super::device_validation::DeviceValidationDecision;
 use vibez_core::id::EffectId;
 
 pub struct RetiredEffectStorage(pub(super) Vec<EffectSlot>);
@@ -193,94 +194,22 @@ impl AudioEngine {
                 // receiving paths keep their valid prepared alignment.
                 continue;
             };
-            let activation_rate = match node.stage {
-                vibez_core::routing::NodeStage::Source => track
-                    .instrument
-                    .as_ref()
-                    .and_then(|instrument| instrument.activation_sample_rate()),
-                vibez_core::routing::NodeStage::Effect(id) => track
-                    .effects
-                    .iter()
-                    .find(|slot| slot.id == id)
-                    .and_then(|slot| slot.effect.activation_sample_rate()),
-                _ => None,
-            };
-            if activation_rate.is_some_and(|rate| rate != self.sample_rate) {
-                invalid = Some((node.channel, match node.stage {vibez_core::routing::NodeStage::Effect(id) => Some(id), _ => None}, "Device was activated at a different sample rate; recreate the device or reopen the project"));
-                break;
-            }
-            let valid = match node.stage {
-                vibez_core::routing::NodeStage::Source => track
-                    .instrument
-                    .as_ref()
-                    .is_none_or(|instrument| instrument.processing_configuration_valid()),
-                vibez_core::routing::NodeStage::Effect(id) => track
-                    .effects
-                    .iter()
-                    .find(|slot| slot.id == id)
-                    .is_some_and(|slot| slot.effect.processing_configuration_valid()),
-                _ => true,
-            };
-            let recovering = match node.stage {
-                vibez_core::routing::NodeStage::Source => {
-                    self.is_device_recovering(node.channel, None)
-                        || track
-                            .instrument
-                            .as_ref()
-                            .is_some_and(|instrument| instrument.processing_failure_is_local())
+            match self.observe_device_validation(track, *node, index).decision() {
+                DeviceValidationDecision::Current => {}
+                DeviceValidationDecision::LocalRecovery => {
+                    local_failure = true;
                 }
-                vibez_core::routing::NodeStage::Effect(id) => {
-                    self.is_device_recovering(node.channel, Some(id))
-                        || track
-                            .effects
-                            .iter()
-                            .find(|slot| slot.id == id)
-                            .is_some_and(|slot| slot.effect.processing_failure_is_local())
+                DeviceValidationDecision::Invalid(reason) => {
+                    invalid = Some((
+                        node.channel,
+                        match node.stage {
+                            vibez_core::routing::NodeStage::Effect(id) => Some(id),
+                            _ => None,
+                        },
+                        reason,
+                    ));
+                    break;
                 }
-                _ => false,
-            };
-            if recovering {
-                local_failure = true;
-                continue;
-            }
-            if !valid {
-                invalid = Some((
-                    node.channel,
-                    match node.stage {
-                        vibez_core::routing::NodeStage::Effect(id) => Some(id),
-                        _ => None,
-                    },
-                    "Device processing configuration is unavailable or failed",
-                ));
-                break;
-            }
-            let (effect_id, actual) = match node.stage {
-                vibez_core::routing::NodeStage::Source => (
-                    None,
-                    Some(
-                        track
-                            .instrument
-                            .as_ref()
-                            .map_or(0, |instrument| instrument.latency_samples()),
-                    ),
-                ),
-                vibez_core::routing::NodeStage::Effect(id) => (
-                    Some(id),
-                    track
-                        .effects
-                        .iter()
-                        .find(|slot| slot.id == id)
-                        .map(|slot| slot.effect.latency_samples()),
-                ),
-                _ => continue,
-            };
-            if actual != Some(routing.device_latencies[index]) {
-                invalid = Some((
-                    node.channel,
-                    effect_id,
-                    "Device latency no longer matches the applied compensation plan",
-                ));
-                break;
             }
         }
         if local_failure && !self.device_failure_capture_closed {
