@@ -745,10 +745,13 @@ fn populated_sampler_ratchet_fixture_proves_reset_owner_return_and_allocation_fr
     for track in [fixture.synth, fixture.audio] {
         commands.push(EngineCommand::SetTrackMute(track, true)).unwrap();
     }
+    // The existing mute ramp lasts 64 frames and sampler attack lasts 48 frames at 48kHz.
+    engine.process(&mut [0.0; 128], 2);
     let mut output = [0.0; 32];
     engine.process(&mut output, 2);
     let expected = 0.125 * std::f32::consts::FRAC_1_SQRT_2;
-    assert!(output.iter().all(|sample| (*sample - expected).abs() < 1e-6));
+    assert!(output.iter().all(|sample| (*sample - expected).abs() < 1e-6),
+        "settled original sampler expected={expected}, actual={output:?}");
     while events.pop().is_ok() {}
     let instrument = engine.tracks().iter().find(|track| track.id == fixture.empty).unwrap().instrument.as_ref().unwrap();
     assert_eq!(instrument.instrument_kind(), InstrumentKind::Sampler);
@@ -780,7 +783,15 @@ fn populated_sampler_ratchet_fixture_proves_reset_owner_return_and_allocation_fr
     assert_eq!(owner.strong_count(), 0);
     commands.push(EngineCommand::ExternalNoteOn { track_id: fixture.empty, pitch: 60, velocity: 127 }).unwrap();
     assert_eq!(crate::retirement::tests::allocations(|| engine.process(&mut output, 2)), (0, 0));
-    assert!(output.iter().all(|sample| (*sample - expected).abs() < 1e-6));
+    for (frame, channels) in output.chunks_exact(2).enumerate() {
+        let attack_level = expected * (frame + 1) as f32 / 48.0;
+        assert!(channels.iter().all(|sample| (*sample - attack_level).abs() < 1e-6),
+            "new sampler attack frame={frame}, expected={attack_level}, actual={channels:?}");
+    }
+    let mut attack_tail = [0.0; 128];
+    assert_eq!(crate::retirement::tests::allocations(|| engine.process(&mut attack_tail, 2)), (0, 0));
+    assert!(attack_tail[96..].iter().all(|sample| (*sample - expected).abs() < 1e-6),
+        "settled replacement sampler expected={expected}, actual={attack_tail:?}");
 }
 
 #[test]
