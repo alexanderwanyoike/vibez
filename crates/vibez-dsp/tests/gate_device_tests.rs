@@ -507,3 +507,46 @@ fn detector_enable_ramps_match_warm_responses_and_ignore_callback_partitions() {
         }
     }
 }
+
+#[test]
+fn modern_sweep_impulse_and_noise_bursts_are_invariant_to_callback_partition() {
+    for rate in [44_100.0_f32, 48_000.0, 96_000.0] {
+        let frames = (rate * 0.2) as usize;
+        let mut noise = 0x51a9_732d_u32;
+        let source: Vec<f32> = (0..frames).flat_map(|frame| {
+            noise = noise.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            let time = frame as f64 / rate as f64;
+            let phase = std::f64::consts::TAU * (20.0 * time + 0.5 * 89_900.0 * time * time);
+            let left = if frame == 0 { 0.9 }
+                else if (0.01..0.03).contains(&time) { (noise as f64 / u32::MAX as f64 * 0.6 - 0.3) as f32 }
+                else if time < 0.12 { (0.25 * phase.sin()) as f32 }
+                else { (0.0003 * phase.sin()) as f32 };
+            [left, -left * 0.63]
+        }).collect();
+        let render = |partitions: &[usize]| {
+            let mut effect = GateEffect::new(rate);
+            for (index, value) in [(0, -32.0), (1, 2.0), (2, 50.0), (3, 20.0), (4, 6.0),
+                (5, 1.0), (6, 60.0), (7, 1.0), (8, 3.0), (9, 1.0), (10, 120.0),
+                (11, 1.0), (12, 4000.0), (14, 0.7)] {
+                assert!(effect.set_param(index, value));
+            }
+            let mut audio = source.clone();
+            let mut offset = 0;
+            let mut block = 0;
+            while offset < audio.len() {
+                let end = (offset + partitions[block % partitions.len()] * 2).min(audio.len());
+                effect.process(&mut audio[offset..end], 2);
+                offset = end;
+                block += 1;
+            }
+            (audio, effect.take_dynamics_meter().unwrap())
+        };
+        let reference = render(&[1]);
+        assert!(reference.0.iter().all(|sample| sample.is_finite()));
+        assert!(reference.0.iter().any(|sample| sample.abs() > 0.01));
+        for partitions in [&[frames][..], &[7, 32, 251, 1024][..]] {
+            let actual = render(partitions);
+            assert_eq!(actual, reference, "modern audio or telemetry depended on callback partition at{rate}Hz");
+        }
+    }
+}
