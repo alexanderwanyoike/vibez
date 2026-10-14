@@ -162,7 +162,7 @@ impl DriveEffect {
 
     fn edit_parameter(&mut self, index: usize, value: f32, automated: bool) -> bool {
         let Some(descriptor) = DRIVE_PARAMS.get(index) else { return false; };
-        if index >= param::CHARACTER && !value.is_finite() { return false; }
+        if !value.is_finite() { return false; }
         let value = value.clamp(descriptor.min, descriptor.max);
         let target = match index {
             param::CHARACTER | param::QUALITY => value.round(),
