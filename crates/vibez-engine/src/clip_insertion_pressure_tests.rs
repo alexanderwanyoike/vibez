@@ -258,3 +258,76 @@ fn full_retirement_store_blocks_public_clip_admission_and_preserves_owner_fifo()
     assert_eq!(delta.audio.strong_count(), 0);
     assert_eq!(fixture.resident.strong_count(), 0);
 }
+
+#[test]
+fn ready_clip_reply_waits_for_one_completion_credit_and_keeps_later_fifo_queued() {
+    let mut fixture = setup();
+    let mut delta = delta(fixture.track);
+    fixture.commands.push(delta.command.take().unwrap()).unwrap();
+    fixture.commands.push(EngineCommand::SetBpm(137.0)).unwrap();
+    let slots = fixture.commands.slots();
+    callback(&mut fixture.engine, false);
+    let mut received = Received::default();
+    received.drain(&mut fixture.events);
+    assert_eq!(received.requests.len(), 1);
+    assert_eq!(fixture.commands.slots(), slots + 1);
+    let request = received.requests.pop().unwrap();
+    assert_eq!(request.id, delta.id);
+    request.fulfill();
+
+    let full_ring = full_ui_ring(&mut fixture.engine);
+    let expected = inject_full_retirement_store(&mut fixture.engine);
+    let retirement_allocation = fixture.engine.pending_retirements.as_ptr();
+    assert_signal(&callback(&mut fixture.engine, true), 0.25);
+    assert_eq!(fixture.engine.transport().position(), 16);
+    assert_eq!(fixture.engine.transport().bpm(), 120.0);
+    assert_eq!(fixture.commands.slots(), slots + 1);
+    assert_eq!(fixture.engine.tracks()[0].playback_source.clips.len(), 1);
+    assert_eq!(fixture.engine.tracks()[0].playback_source.clips.as_ptr(), fixture.live_allocation);
+    assert_eq!(fixture.engine.pending_retirements.len(), 32);
+    assert_eq!(fixture.engine.pending_retirements.as_ptr(), retirement_allocation);
+    assert_eq!(delta.audio.strong_count(), 1);
+
+    assert!(matches!(fixture.events.pop().unwrap(), EngineEvent::PlaybackPosition(u64::MAX)));
+    callback(&mut fixture.engine, false);
+    assert_eq!(fixture.engine.pending_retirements.len(), 32);
+    assert_eq!(fixture.engine.pending_retirements.as_ptr(), retirement_allocation);
+    let completions: Vec<_> = fixture.engine.pending_retirements.iter().filter_map(|event| {
+        if let EngineEvent::ClipInsertionCompleted(owner) = event { Some(owner) } else { None }
+    }).collect();
+    assert_eq!(completions.len(), 1);
+    assert_applied(&fixture, &delta, completions[0]);
+    assert_eq!(fixture.engine.transport().position(), 16);
+    assert_eq!(fixture.engine.transport().bpm(), 120.0);
+    assert_eq!(fixture.commands.slots(), slots + 1);
+    assert_signal(&callback(&mut fixture.engine, true), 0.3125);
+    assert_eq!(fixture.engine.transport().position(), 24);
+    assert_eq!(fixture.engine.transport().bpm(), 120.0);
+    assert_eq!(fixture.commands.slots(), slots + 1);
+
+    received.drain(&mut fixture.events);
+    assert_eq!(received.fillers, full_ring - 1);
+    assert_eq!(received.lanes.len(), 1);
+    assert!(received.completed.is_empty());
+    assert!(received.requests.is_empty());
+    callback(&mut fixture.engine, false);
+    received.drain(&mut fixture.events);
+    received.assert_lanes(&expected);
+    assert_eq!(received.completed.len(), 1);
+    assert_applied(&fixture, &delta, &received.completed[0]);
+    assert_eq!(fixture.engine.transport().bpm(), 137.0);
+    assert_eq!(fixture.commands.slots(), slots + 2);
+    assert!(fixture.engine.pending_retirements.is_empty());
+    assert_eq!(fixture.engine.pending_retirements.capacity(), 32);
+    assert_eq!(fixture.engine.pending_retirements.as_ptr(), retirement_allocation);
+    assert_signal(&callback(&mut fixture.engine, true), 0.3125);
+    received.drain(&mut fixture.events);
+    assert_eq!(received.completed.len(), 1);
+    assert_eq!(received.lanes.len(), 32);
+    assert_eq!(fixture.engine.transport().position(), 32);
+    drop(received);
+    assert_eq!(delta.audio.strong_count(), 1);
+    drop(fixture.engine);
+    assert_eq!(delta.audio.strong_count(), 0);
+    assert_eq!(fixture.resident.strong_count(), 0);
+}
