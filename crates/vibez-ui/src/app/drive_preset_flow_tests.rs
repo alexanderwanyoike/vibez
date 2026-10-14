@@ -88,3 +88,68 @@ fn drive_factory_catalogue_has_neutral_legacy_init_explicit_modern_init_and_conc
     assert_eq!(warm["mix"], 0.8);
     assert!((20.0 * warm["output"].log10() + 3.0).abs() < 1e-5);
 }
+
+#[test]
+fn drive_load_cancellation_errors_stale_requests_and_invalid_discrete_values_leave_sound_intact() {
+    use vibez_core::device_preset::{DevicePreset, DevicePresetKind};
+    let (mut app, track, effect) = drive_app(0);
+    let before = app.state.find_track(track).unwrap().effects[1].params.clone();
+    let factory = device_presets::factory_presets(EffectType::Drive).into_iter().find(|preset| preset.name() == "Warm Edge").unwrap();
+    let stale = app.begin_device_preset_load(track, effect).unwrap();
+    let current = app.begin_device_preset_load(track, effect).unwrap();
+    let _ = app.finish_device_preset_load(stale, Ok(factory.clone()));
+    assert_eq!(app.state.find_track(track).unwrap().effects[1].params, before);
+    let _ = app.update_device_preset(DevicePresetMsg::Loaded(current, Ok(None)));
+    let request = app.begin_device_preset_load(track, effect).unwrap();
+    let _ = app.finish_device_preset_load(request, Err("read failed".into()));
+    assert_eq!(app.state.find_track(track).unwrap().effects[1].params, before);
+    let request = app.begin_device_preset_load(track, effect).unwrap();
+    let wrong = device_presets::factory_presets(EffectType::Gain).remove(0);
+    let _ = app.finish_device_preset_load(request, Ok(wrong));
+    assert_eq!(app.state.find_track(track).unwrap().effects[1].params, before);
+    for key in ["character", "quality", "pre_hp_enabled", "post_lp_enabled"] {
+        let mut parameters = factory.parameters().clone();
+        parameters.insert(key.into(), 0.5);
+        let invalid = DevicePreset::new(DevicePresetKind::Effect(EffectType::Drive), "Invalid", parameters).unwrap();
+        let request = app.begin_device_preset_load(track, effect).unwrap();
+        let _ = app.finish_device_preset_load(request, Ok(invalid));
+        assert_eq!(app.state.find_track(track).unwrap().effects[1].params, before, "accepted fractional {key}");
+    }
+    let mut incomplete = factory.parameters().clone();
+    incomplete.remove("output");
+    let request = app.begin_device_preset_load(track, effect).unwrap();
+    let _ = app.finish_device_preset_load(request, Ok(DevicePreset::new(DevicePresetKind::Effect(EffectType::Drive), "Incomplete", incomplete).unwrap()));
+    assert_eq!(app.state.find_track(track).unwrap().effects[1].params, before);
+    assert!(!app.state.project.history.can_undo());
+    assert!(!app.state.project.dirty);
+}
+
+#[tokio::test]
+async fn drive_user_save_roundtrips_real_files_and_late_save_cannot_replace_a_changed_sound() {
+    let (mut app, track, effect) = drive_app(0);
+    let before = app.state.find_track(track).unwrap().effects[1].params.clone();
+    let request = app.begin_device_preset_save(track, effect).unwrap();
+    let folder = tempfile::tempdir().unwrap();
+    let path = folder.path().join("My Drive.vzpreset");
+    let saved = tasks::save_device_preset_at(path.clone(), request.preset.clone()).await.unwrap();
+    assert_eq!(vibez_project::device_preset::load_device_preset(&path).unwrap(), saved);
+    assert_eq!(saved.name(), "My Drive");
+    app.finish_device_preset_save(request, Ok(Some(saved)));
+    assert_eq!(app.state.find_track(track).unwrap().effects[1].params, before);
+    assert!(!app.state.project.dirty);
+    assert!(!app.state.project.history.can_undo());
+    let request = app.begin_device_preset_save(track, effect).unwrap();
+    let saved_snapshot = request.preset.clone();
+    let _ = app.update(Message::set_effect_param(track, effect, 0, 0.4));
+    app.finish_device_preset_save(request, Ok(Some(saved_snapshot)));
+    assert_eq!(app.state.find_track(track).unwrap().effects[1].params[0], 0.4);
+    let snapshot = app.state.project.history.pop_undo().unwrap();
+    assert!(!app.state.project.history.can_undo());
+    app.apply_snapshot(snapshot);
+    assert_eq!(app.state.find_track(track).unwrap().effects[1].params, before);
+    let request = app.begin_device_preset_save(track, effect).unwrap();
+    app.finish_device_preset_save(request, Ok(None));
+    let request = app.begin_device_preset_save(track, effect).unwrap();
+    app.finish_device_preset_save(request, Err("write failed".into()));
+    assert_eq!(app.state.find_track(track).unwrap().effects[1].params, before);
+}
