@@ -113,6 +113,30 @@ fn eq_files_reject_wrong_kind_invalid_choices_and_stale_completions_without_muta
         before
     );
     assert!(!app.state.project.dirty);
+    for (key, value) in [
+        ("lf_enabled", 0.5),
+        ("audition_band", 1.5),
+        ("hmf_gain_db", 40.0),
+        ("unknown_key", 1.0),
+    ] {
+        let factory = device_presets::factory_presets(EffectType::Eq).remove(0);
+        let mut parameters = factory.parameters().clone();
+        parameters.insert(key.into(), value);
+        let invalid = vibez_core::device_preset::DevicePreset::new(
+            vibez_core::device_preset::DevicePresetKind::Effect(EffectType::Eq),
+            "Invalid EQ",
+            parameters,
+        )
+        .unwrap();
+        let request = app.begin_device_preset_load(track, effect).unwrap();
+        let _ = app.finish_device_preset_load(request, Ok(invalid));
+        assert_eq!(
+            app.state.find_track(track).unwrap().effects[0].params,
+            before
+        );
+        assert!(!app.state.project.dirty);
+        assert!(!app.state.project.history.can_undo());
+    }
     let request = app.begin_device_preset_load(track, effect).unwrap();
     let _ = app.update(Message::set_effect_param(track, effect, 6, 3.0));
     let factory = device_presets::factory_presets(EffectType::Eq).remove(0);
@@ -121,4 +145,28 @@ fn eq_files_reject_wrong_kind_invalid_choices_and_stale_completions_without_muta
         app.state.find_track(track).unwrap().effects[0].params[6],
         3.0
     );
+}
+
+#[test]
+fn saved_eq_preserves_legacy_fractional_shelf_bell_parameters() {
+    let (mut app, track, effect) = eq_app(0);
+    let _ = app.update(Message::set_effect_params(
+        track,
+        effect,
+        vec![(2, 0.35), (11, 0.65)],
+    ));
+    let effect = app
+        .state
+        .find_track(track)
+        .unwrap()
+        .effects
+        .iter()
+        .find(|fx| fx.id == effect)
+        .unwrap();
+    let saved = device_presets::capture(effect, "Legacy shape").unwrap();
+    assert_eq!(saved.parameters()["lf_bell"], 0.35);
+    assert_eq!(saved.parameters()["hf_bell"], 0.65);
+    assert!(device_presets::prepare_updates(effect, &saved)
+        .unwrap()
+        .is_empty());
 }
