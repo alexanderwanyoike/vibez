@@ -86,6 +86,94 @@ fn fixture() -> Fixture {
     (engine, commands, events, track_id, effect_id)
 }
 
+fn render_window(engine: &mut AudioEngine, track: TrackId, amplitude: f32) -> [f32; 1920] {
+    let input = [amplitude; 1920];
+    let mut output = [0.0; 1920];
+    engine.process_block(
+        AudioProcessBlock::new(&mut output, 2).with_live_input(track.raw(), &input),
+    );
+    output
+}
+
+fn snapshots(
+    events: &mut Consumer<EngineEvent>,
+) -> Vec<(TrackId, EffectId, u64, vibez_core::effect::WaveShaperMeter)> {
+    std::iter::from_fn(|| events.pop().ok())
+        .filter_map(|event| match event {
+            EngineEvent::EffectWaveshaper {
+                track_id,
+                effect_id,
+                generation,
+                meter,
+            } => Some((track_id, effect_id, generation, meter)),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn drive_snapshots_clear_on_bypass_and_resume_with_fresh_selection_generation() {
+    let (mut engine, mut commands, mut events, track, effect) = fixture();
+    render_window(&mut engine, track, 0.5);
+    assert_eq!(snapshots(&mut events)[0].3.count, 128);
+    commands
+        .push(EngineCommand::SetEffectMeterChannel {
+            track_id: None,
+            generation: 8,
+        })
+        .unwrap();
+    render_window(&mut engine, track, 0.9);
+    assert!(snapshots(&mut events).is_empty());
+    commands
+        .push(EngineCommand::SetEffectMeterChannel {
+            track_id: Some(track),
+            generation: 9,
+        })
+        .unwrap();
+    render_window(&mut engine, track, 0.03);
+    let fresh = snapshots(&mut events);
+    assert_eq!(fresh.len(), 1);
+    assert_eq!((fresh[0].0, fresh[0].1, fresh[0].2), (track, effect, 9));
+    assert_eq!(fresh[0].3.count, 128);
+    assert!(fresh[0].3.input.iter().all(|sample| (*sample - 0.03).abs() < 1e-6));
+    assert!(fresh[0].3.output.iter().all(|sample| (*sample - 0.03).abs() < 1e-6));
+
+    commands
+        .push(EngineCommand::SetEffectBypass {
+            track_id: track,
+            effect_id: effect,
+            bypass: true,
+        })
+        .unwrap();
+    render_window(&mut engine, track, 0.8);
+    let bypassed = snapshots(&mut events);
+    assert_eq!(bypassed.len(), 1);
+    assert_eq!(bypassed[0].2, 9);
+    assert_eq!(bypassed[0].3.count, 0);
+
+    commands
+        .push(EngineCommand::SetEffectBypass {
+            track_id: track,
+            effect_id: effect,
+            bypass: false,
+        })
+        .unwrap();
+    render_window(&mut engine, track, 0.0);
+    let silence = snapshots(&mut events);
+    assert_eq!(silence.len(), 1);
+    assert_eq!(silence[0].3.count, 128, "real silence is available data");
+    assert!(silence[0].3.input.iter().all(|sample| *sample == 0.0));
+    assert!(silence[0].3.output.iter().all(|sample| *sample == 0.0));
+
+    commands.push(EngineCommand::Play).unwrap();
+    render_window(&mut engine, track, 0.0);
+    let reset = snapshots(&mut events);
+    assert_eq!(reset.len(), 1);
+    assert_eq!(reset[0].3.first_output_sample, 832);
+    assert!(reset[0].3.input.iter().all(|sample| *sample == 0.0));
+    assert!(reset[0].3.output.iter().all(|sample| *sample == 0.0));
+}
+
 #[test]
 fn drive_waveform_publishes_real_chronological_pairs_at_fifty_hertz() {
     let (mut engine, _commands, mut events, track_id, effect_id) = fixture();
