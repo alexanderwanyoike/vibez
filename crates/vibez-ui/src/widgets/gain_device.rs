@@ -20,11 +20,13 @@ use crate::widgets::on_blur::on_blur;
 
 const PAD: f32 = 10.0;
 const COLUMN_W: f32 = 104.0;
+/// Meters plus readouts wide enough for "-48.0" without wrapping.
+const METER_COLUMN_W: f32 = 118.0;
 const HISTORY_MIN_W: f32 = 210.0;
 /// Below this the history is too short to read and is left out.
 const HISTORY_MIN_H: f32 = 64.0;
 /// Input, Gain and Output side by side.
-pub const COMPACT_W: f32 = COLUMN_W * 3.0 + 2.0 + PAD * 2.0;
+pub const COMPACT_W: f32 = METER_COLUMN_W * 2.0 + COLUMN_W + 2.0 + PAD * 2.0;
 /// Adds the output level history.
 pub const MEDIUM_W: f32 = COMPACT_W + 1.0 + HISTORY_MIN_W;
 pub const MAX_W: f32 = 820.0;
@@ -237,7 +239,7 @@ fn meter_column<'a>(
     ]
     .spacing(4)
     .padding([0.0, 6.0])
-    .width(COLUMN_W)
+    .width(METER_COLUMN_W)
     .height(height)
     .into()
 }
@@ -248,6 +250,7 @@ fn readout<'a>(channel: &'static str, peak: f32) -> Element<'a, Message> {
         text(db_text(peak))
             .size(10)
             .font(crate::typography::PERFORM_TECH)
+            .wrapping(iced::widget::text::Wrapping::None)
             .color(th::text()),
     ]
     .spacing(4)
