@@ -244,7 +244,12 @@ impl App {
                 effect,
                 accent,
                 panel,
-                self.view_device_preset_bar(track_id, effect, accent, size.width - 140.0),
+                self.view_device_preset_bar(
+                    track_id,
+                    effect,
+                    accent,
+                    crate::widgets::gain_device::preset_bar_width(size),
+                ),
                 size,
             )
         });

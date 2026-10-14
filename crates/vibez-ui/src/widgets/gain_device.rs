@@ -94,6 +94,12 @@ fn footer_fits(height: f32) -> bool {
     height - PRESET_ROW_H - 1.0 >= MAIN_MIN_H + 1.0 + FOOTER_H
 }
 
+/// Width left for the preset bar in a body of this size.
+pub fn preset_bar_width(size: Size) -> f32 {
+    let disclosure = if footer_fits(size.height) { 0.0 } else { 86.0 };
+    size.width - PAD * 2.0 - disclosure
+}
+
 pub fn view<'a>(
     track_id: TrackId,
     effect: &'a UiEffect,

@@ -281,7 +281,7 @@ impl GainGallery {
                     effect,
                     None,
                     accent,
-                    size.width - 140.0,
+                    crate::widgets::gain_device::preset_bar_width(size),
                 ),
                 size,
             )

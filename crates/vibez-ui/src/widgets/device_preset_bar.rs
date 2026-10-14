@@ -35,6 +35,9 @@ impl std::fmt::Display for PresetChoice {
     }
 }
 
+/// The label and four icon buttons with their spacing; the selector gets the rest.
+const FIXED_W: f32 = 140.0;
+
 pub(crate) fn view<'a>(
     track_id: TrackId,
     effect: &'a UiEffect,
@@ -42,7 +45,6 @@ pub(crate) fn view<'a>(
     accent: Color,
     available_width: f32,
 ) -> Element<'a, Message> {
-    let compact = available_width < 370.0;
     let presentation = presentation(effect, remembered);
     let previous = presentation
         .previous
@@ -78,7 +80,7 @@ pub(crate) fn view<'a>(
     })
     .placeholder("Custom")
     .width(Length::Fixed(
-        (available_width - if compact { 130.0 } else { 95.0 }).clamp(72.0, 200.0),
+        (available_width - FIXED_W).clamp(72.0, 220.0),
     ))
     .padding([2, 5])
     .text_size(11)
@@ -117,29 +119,31 @@ pub(crate) fn view<'a>(
     ]
     .spacing(3)
     .align_y(iced::Alignment::Center);
-    if !compact {
-        selection = selection
-            .push(preset_button(
-                PresetLabel::Icon(crate::icons::CHEVRON_LEFT),
-                previous,
-                accent,
-            ))
-            .push(preset_button(
-                PresetLabel::Icon(crate::icons::CHEVRON_RIGHT),
-                next,
-                accent,
-            ));
-    }
+    selection = selection
+        .push(preset_button(
+            crate::icons::CHEVRON_LEFT,
+            "Previous preset",
+            previous,
+            accent,
+        ))
+        .push(preset_button(
+            crate::icons::CHEVRON_RIGHT,
+            "Next preset",
+            next,
+            accent,
+        ));
     let files = row![
         preset_button(
-            PresetLabel::Text("Load"),
+            crate::icons::FOLDER_OPEN,
+            "Load preset file",
             Some(Message::DevicePreset(DevicePresetMsg::Load(
                 track_id, effect_id
             ))),
             accent
         ),
         preset_button(
-            PresetLabel::Text("Save"),
+            crate::icons::SAVE,
+            "Save preset file",
             Some(Message::DevicePreset(DevicePresetMsg::Save(
                 track_id, effect_id
             ))),
@@ -154,21 +158,13 @@ pub(crate) fn view<'a>(
         .into()
 }
 
-enum PresetLabel {
-    Text(&'static str),
-    Icon(char),
-}
-
 fn preset_button<'a>(
-    label: PresetLabel,
+    icon: char,
+    help: &'static str,
     message: Option<Message>,
     accent: Color,
 ) -> Element<'a, Message> {
-    let content = match label {
-        PresetLabel::Text(label) => text(label).size(10),
-        PresetLabel::Icon(icon) => crate::icons::icon(icon).size(11),
-    };
-    button(content)
+    let control = button(crate::icons::icon(icon).size(11))
         .on_press_maybe(message)
         .padding([3, 6])
         .style(move |_theme: &Theme, status| button::Style {
@@ -184,6 +180,6 @@ fn preset_button<'a>(
                 radius: 3.0.into(),
             },
             ..Default::default()
-        })
-        .into()
+        });
+    tooltip(control, text(help).size(9), tooltip::Position::Top).into()
 }
