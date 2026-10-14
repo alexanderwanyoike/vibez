@@ -318,3 +318,38 @@ fn parallel_mix_preserves_the_dry_signal_without_falsifying_wet_attenuation() {
         assert_eq!(meter, reference_meter, "Mix changed genuine wet dynamics diagnostics");
     }
 }
+
+#[test]
+fn manual_mix_takes_exactly_512_frames_and_automation_snaps_only_the_edited_ramp() {
+    let make_gate = || {
+        let mut gate = GateEffect::new(48_000.0);
+        gate.set_param(0, -20.0);
+        gate.set_param(3, 0.0);
+        gate.process(&mut [0.01; 64], 1);
+        gate
+    };
+    let mut gate = make_gate();
+    assert!(gate.set_param(14, 0.0));
+    assert_eq!(gate.get_param(14), 0.0);
+    let mut signal = [0.01; 513];
+    gate.process(&mut signal, 1);
+    for (frame, output) in signal.into_iter().enumerate() {
+        let expected = 0.01 * ((frame + 1).min(512) as f32 / 512.0);
+        assert!((output - expected).abs() < 1e-8,
+            "manual frame{frame}: output{output}, expected512-frame mix{expected}");
+    }
+    let mut gate = make_gate();
+    assert!(gate.set_param(0, -10.0));
+    assert!(gate.set_param(14, 0.0));
+    gate.process(&mut [0.01; 100], 1);
+    assert!(gate.set_automated_param(14, 0.0));
+    let mut next = [0.01];
+    gate.process(&mut next, 1);
+    assert_eq!(next[0], 0.01, "same-target automation did not snap the running Mix ramp");
+    let measured = gate.take_dynamics_meter().unwrap().gate.unwrap();
+    assert!((measured.open_threshold_db - (-20.0 + 101.0 * 10.0 / 512.0)).abs() < 1e-6,
+        "snapping Mix cancelled the unrelated Threshold ramp: {}", measured.open_threshold_db);
+    assert!(gate.set_automated_param(0, -5.0));
+    gate.process(&mut [0.01], 1);
+    assert_eq!(gate.take_dynamics_meter().unwrap().gate.unwrap().open_threshold_db, -5.0);
+}
