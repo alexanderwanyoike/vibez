@@ -388,3 +388,77 @@ pub fn run_gain() -> iced::Result {
     .font(crate::typography::PLEX_MONO_SEMIBOLD_BYTES)
     .run_with(|| (GainGallery::new(), iced::Task::none()))
 }
+
+struct DriveGallery {
+    track: TrackId,
+    effect: UiEffect,
+    open: crate::domains::device_controls::DeviceControlState,
+    closed: crate::domains::device_controls::DeviceControlState,
+    panel: crate::domains::drive::DrivePanel,
+    unavailable: crate::domains::drive::DrivePanel,
+    input: vibez_engine::metering::MeterValues,
+    output: vibez_engine::metering::MeterValues,
+}
+
+impl DriveGallery {
+    fn new() -> Self {
+        let mut drive = effect(EffectType::Drive, None, false, false, None, 64);
+        drive.params = crate::domains::drive::fresh_sound();
+        let mut processor = vibez_dsp::factory::create_effect(EffectType::Drive, 48_000.0);
+        for (index, value) in drive.params.iter().enumerate() {
+            processor.set_param(index, *value);
+        }
+        let mut audio: Vec<f32> = (0..2048).flat_map(|sample| {
+            let phase = sample as f32 * std::f32::consts::TAU / 64.0;
+            let value = 0.45 * phase.sin() + 0.15 * (phase * 3.0).sin();
+            [value, value]
+        }).collect();
+        let input = vibez_engine::metering::calculate_meters(&audio, 2);
+        processor.process(&mut audio, 2);
+        let output = vibez_engine::metering::calculate_meters(&audio, 2);
+        let mut panel = crate::domains::drive::DrivePanel::default();
+        if let Some(meter) = processor.take_waveshaper_meter() {
+            panel.accept_meter(meter, std::time::Instant::now());
+        }
+        Self {
+            track: TrackId::new(), effect: drive,
+            open: crate::domains::device_controls::DeviceControlState { advanced: true, ..Default::default() },
+            closed: Default::default(), panel, unavailable: Default::default(), input, output,
+        }
+    }
+
+    fn scene(&self, width: f32, height: f32, advanced: bool, available: bool) -> Element<'_, Message> {
+        let effect = &self.effect;
+        let state = if advanced { &self.open } else { &self.closed };
+        let panel = if available { &self.panel } else { &self.unavailable };
+        let body = iced::widget::responsive(move |size| {
+            crate::widgets::drive_device::view(self.track, effect, th::track_color(0), state, panel,
+                crate::widgets::device_preset_bar::view(self.track, effect, None, th::track_color(0),
+                    crate::widgets::drive_device::preset_bar_width(size)),
+                self.input, self.output, size)
+        });
+        let card = view_effect_slot(self.track, effect, th::track_color(0),
+            Some(crate::widgets::effect_slot::DeviceBody { content: body.into(), width, padding: iced::Padding::ZERO }), None, 48_000);
+        container(card).width(width).height(height).into()
+    }
+
+    fn view(&self) -> Element<'_, Message> {
+        container(column![
+            text("Drive layout fixture: actual DSP two-tone pairs; lower right has unavailable telemetry").size(10),
+            row![self.scene(900.0, 360.0, true, true), self.scene(430.0, 360.0, false, true)].spacing(12),
+            row![self.scene(740.0, 240.0, false, true), self.scene(740.0, 240.0, true, true)].spacing(12),
+            row![self.scene(430.0, 120.0, false, true), self.scene(430.0, 200.0, true, false)].spacing(12)
+        ].spacing(12)).padding(12).into()
+    }
+}
+
+pub fn run_drive() -> iced::Result {
+    iced::application("Drive device gallery", |_: &mut DriveGallery, _: Message| {}, DriveGallery::view)
+        .theme(|_| th::vibez_theme()).antialiasing(true).window_size((1600.0, 1100.0))
+        .font(crate::icons::ICON_FONT_BYTES)
+        .font(crate::typography::PLEX_SANS_CONDENSED_MEDIUM_BYTES)
+        .font(crate::typography::PLEX_SANS_CONDENSED_SEMIBOLD_BYTES)
+        .font(crate::typography::PLEX_MONO_MEDIUM_BYTES)
+        .font(crate::typography::PLEX_MONO_SEMIBOLD_BYTES)
+        .run_with(|| (DriveGallery::new(), iced::Task::none()))
+}
