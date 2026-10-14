@@ -312,7 +312,7 @@ fn public_offline_full_and_cropped_master_and_track_outputs_keep_origin_warmed_h
                 assert_eq!(*sample, if selected { wet } else { (wet + 0.125) * 0.5 });
             }
             assert!(result.audio.channels[1].iter().all(|sample| *sample == 0.0));
-            assert_eq!(result.audio.frames(), (end - start) as usize);
+            assert_eq!(result.audio.num_frames(), (end - start) as usize);
             assert_eq!(facts.processes.load(Ordering::Relaxed), 2);
             assert_eq!(facts.frames.load(Ordering::Relaxed), end as usize);
             if let Some(previous) = &full {
