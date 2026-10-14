@@ -57,3 +57,31 @@ fn enabled_range_applies_a_closed_floor_while_disabled_range_preserves_legacy_ze
         }
     }
 }
+
+#[test]
+fn canonical_gate_parameters_round_trip_and_legacy_projects_get_neutral_appended_defaults() {
+    let expected = [
+        (-80.0, 0.0, -40.0, "dB"), (0.1, 50.0, 1.0, "ms"),
+        (5.0, 500.0, 50.0, "ms"), (0.0, 200.0, 10.0, "ms"),
+        (0.0, 24.0, 0.0, "dB"), (0.0, 1.0, 0.0, ""),
+        (0.0, 120.0, 60.0, "dB"), (0.0, 1.0, 0.0, ""),
+        (1.0, 20.0, 2.0, ":1"), (0.0, 1.0, 0.0, ""),
+        (20.0, 2000.0, 80.0, "Hz"), (0.0, 1.0, 0.0, ""),
+        (1000.0, 20000.0, 12000.0, "Hz"), (0.0, 1.0, 0.0, ""),
+        (0.0, 1.0, 1.0, ""),
+    ];
+    let legacy = [-32.0, 2.5, 120.0, 60.0];
+    let mut effect = vibez_dsp::factory::create_effect_with_params(
+        vibez_core::effect::EffectType::Gate, 48_000.0, &legacy);
+    assert_eq!(effect.param_descriptors().len(), expected.len());
+    for (index, &(min, max, default, unit)) in expected.iter().enumerate() {
+        let descriptor = &effect.param_descriptors()[index];
+        assert_eq!((descriptor.min, descriptor.max, descriptor.default, descriptor.unit),
+            (min, max, default, unit), "stored contract changed at index {index}");
+        assert_eq!(effect.get_param(index), legacy.get(index).copied().unwrap_or(default));
+        for value in [min, max, default] {
+            assert!(effect.set_param(index, value));
+            assert_eq!(effect.get_param(index), value, "parameter {index} did not round trip");
+        }
+    }
+}
