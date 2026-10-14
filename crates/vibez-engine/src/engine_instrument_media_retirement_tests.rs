@@ -314,3 +314,68 @@ fn first_drum_notes_do_not_destroy_dummy_voice_allocations_in_callback() {
         assert_eq!(measured, (0, 0), "first voices={count}");
     }
 }
+
+#[test]
+fn clearing_populated_pad_returns_owners_and_preserves_unrelated_voice_phase() {
+    for full_ring in [false, true] {
+        let (mut engine, mut commands, mut events) = AudioEngine::new();
+        let track = TrackId::new();
+        let original = audio(0.5);
+        let owner = Arc::downgrade(&original);
+        let name = String::from("cleared-selected-pad-owned-name.wav");
+        let name_pointer = name.as_ptr();
+        let unrelated = Arc::new(DecodedAudio {
+            channels: vec![(0..4096).map(|frame| (frame % 64) as f32 * 0.01).collect()],
+            sample_rate: 1000,
+        });
+        commands.push(EngineCommand::SetSampleRate(1000)).unwrap();
+        commands.push(EngineCommand::add_track(track)).unwrap();
+        commands.push(EngineCommand::set_built_in_instrument(track, InstrumentKind::DrumRack, 1000)).unwrap();
+        for pad in [0, 1] {
+            commands.push(EngineCommand::SetDrumRackPadState { track_id: track, pad_index: pad,
+                state: vibez_core::track::DrumPadState { fade_in_ms: 0.0, fade_out_ms: 0.0, ..Default::default() } }).unwrap();
+        }
+        commands.push(EngineCommand::LoadDrumRackPadSample { track_id: track, pad_index: 0,
+            sample: original, sample_name: name }).unwrap();
+        commands.push(EngineCommand::LoadDrumRackPadSample { track_id: track, pad_index: 1,
+            sample: unrelated, sample_name: "unrelated-ramp.wav".into() }).unwrap();
+        for pitch in [36, 37] {
+            commands.push(EngineCommand::ExternalNoteOn { track_id: track, pitch, velocity: 127 }).unwrap();
+        }
+        let mut output = [0.0; 16];
+        engine.process(&mut output, 1);
+        for (frame, sample) in output.iter().enumerate() {
+            assert!((*sample - (0.5 + frame as f32 * 0.01)).abs() < 1e-6);
+        }
+        while events.pop().is_ok() {}
+        if full_ring {
+            while engine.event_tx.push(EngineEvent::PlaybackStarted).is_ok() {}
+        }
+        commands.push(EngineCommand::ClearDrumRackPad { track_id: track, pad_index: 0 }).unwrap();
+        let measured = crate::retirement::tests::allocations(|| engine.process(&mut output, 1));
+        for (frame, sample) in output.iter().enumerate() {
+            assert!((*sample - (frame + 16) as f32 * 0.01).abs() < 1e-6);
+        }
+        assert_eq!(measured, (0, 0), "full_ring={full_ring}");
+        let mut returned = None;
+        for _ in 0..2 {
+            while let Ok(event) = events.pop() {
+                if let EngineEvent::RetiredInstrumentMedia(owners) = event {
+                    assert!(returned.is_none());
+                    assert_eq!(owners.sample.as_ref().map(Arc::as_ptr), Some(owner.as_ptr()));
+                    assert_eq!(owners.name.as_ref().map(|name| name.as_ptr()), Some(name_pointer));
+                    returned = Some(owners);
+                }
+            }
+            engine.process(&mut [], 1);
+        }
+        assert_eq!(owner.strong_count(), 1, "cleared voices no longer retain the sample");
+        drop(returned.expect("cleared pad owners returned"));
+        assert_eq!(owner.strong_count(), 0);
+        commands.push(EngineCommand::ExternalNoteOn { track_id: track, pitch: 36, velocity: 127 }).unwrap();
+        assert_eq!(crate::retirement::tests::allocations(|| engine.process(&mut output, 1)), (0, 0));
+        for (frame, sample) in output.iter().enumerate() {
+            assert!((*sample - (frame + 32) as f32 * 0.01).abs() < 1e-6);
+        }
+    }
+}
