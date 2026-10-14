@@ -200,19 +200,21 @@ impl<'a> Controls<'a> {
             self.accent,
         )
     }
-    fn band_group(&self, band: usize) -> Element<'a, Message> {
+    fn band_group(&self, band: usize, show_listen: bool) -> Element<'a, Message> {
         let shape = if band == 0 || band == 3 {
             self.shape(band)
         } else {
             self.console_parameter(param::SHAPE[band], "Q")
         };
+        let mut heading = row![self.band(band), horizontal_space()]
+            .spacing(3)
+            .align_y(iced::Alignment::Center);
+        if show_listen {
+            heading = heading.push(self.listen(band));
+        }
+        heading = heading.push(self.toggle(param::ENABLE[band], "On"));
         column![
-            row![
-                self.band(band),
-                horizontal_space(),
-                self.toggle(param::ENABLE[band], "On")
-            ]
-            .align_y(iced::Alignment::Center),
+            heading,
             row![
                 self.console_parameter(param::FREQUENCY[band], "Freq"),
                 self.console_parameter(param::GAIN[band], "Gain"),
@@ -411,13 +413,14 @@ impl<'a> Controls<'a> {
         input: MeterValues,
         output: MeterValues,
         expanded: bool,
+        has_editor: bool,
     ) -> Element<'a, Message> {
         let mut bands = row![].spacing(8).height(Length::Fill);
         for band in 0..4 {
             if band > 0 {
                 bands = bands.push(iced::widget::vertical_rule(1));
             }
-            bands = bands.push(self.band_group(band));
+            bands = bands.push(self.band_group(band, !has_editor));
         }
         let mut utilities = row![].spacing(8).height(Length::Fill);
         if expanded {

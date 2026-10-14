@@ -126,7 +126,7 @@ pub fn view<'a>(
         body = body.push(container(plot).height(a.graph).padding([3, 4]));
     }
     let controls = if a.all_bands {
-        c.console(input, output, a.expanded)
+        c.console(input, output, a.expanded, a.side_editor)
     } else if a.tabs {
         column![c.selected(true, true), c.utility_row()]
             .spacing(7)
