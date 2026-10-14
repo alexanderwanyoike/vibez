@@ -266,6 +266,85 @@ mod tests {
     }
 
     #[test]
+    fn bitcrush_minimum_rate_readout_reenters_without_relaxing_the_prepared_rate_range() {
+        use vibez_dsp::bitcrush::param;
+
+        let mut app = super::super::test_support::app();
+        app.state.transport.sample_rate = 44_100;
+        app.send_command(EngineCommand::SetSampleRate(44_100));
+        let channel = ProjectTrack::new(TrackId::new(), "Bitcrush".into(), 3);
+        let track = channel.id;
+        Arc::make_mut(&mut app.state.project_tracks)
+            .tracks
+            .push(channel);
+        let _ = app.update(Message::Devices(DevicesMsg::AddEffect(
+            track,
+            EffectType::Bitcrush,
+        )));
+        let effect = app.state.find_track(track).unwrap().effects[0].id;
+        let _ = app.update(Message::set_effect_param(
+            track,
+            effect,
+            param::SR_REDUCE,
+            32.0,
+        ));
+        let prepared_rate = app
+            .cmd_tx
+            .prepared_effect_sample_rate(track, effect)
+            .expect("the native owner must be prepared at the requested rate");
+        assert_eq!(prepared_rate, 44_100);
+        let shown = format!("{:.3}k", f64::from(prepared_rate) / 32.0 / 1000.0);
+        assert_eq!(shown, "1.378k");
+        let before = app.state.find_track(track).unwrap().effects[0].params.clone();
+        app.state.project.history = Default::default();
+        app.state.project.dirty = false;
+
+        let _ = app.update(Message::DeviceControl(DeviceControlMsg::Input(
+            track,
+            effect,
+            param::SR_REDUCE,
+            shown,
+        )));
+        let _ = app.update(Message::DeviceControl(DeviceControlMsg::Submit(
+            track,
+            effect,
+            param::SR_REDUCE,
+        )));
+        assert!(
+            app.device_controls[&effect].errors.is_empty(),
+            "the canonical minimum-rate readout was rejected"
+        );
+        assert_eq!(
+            app.state.find_track(track).unwrap().effects[0].params,
+            before
+        );
+        assert!(!app.state.project.history.can_undo());
+        assert!(!app.state.project.dirty);
+
+        for invalid in ["1.377k", "1378.001 Hz", "44.101k", "NaN", "inf"] {
+            let _ = app.update(Message::DeviceControl(DeviceControlMsg::Input(
+                track,
+                effect,
+                param::SR_REDUCE,
+                invalid.into(),
+            )));
+            let _ = app.update(Message::DeviceControl(DeviceControlMsg::Submit(
+                track,
+                effect,
+                param::SR_REDUCE,
+            )));
+            assert!(app.device_controls[&effect].errors.contains(&param::SR_REDUCE));
+            assert_eq!(
+                app.state.find_track(track).unwrap().effects[0].params,
+                before,
+                "{invalid} changed the sound"
+            );
+            assert!(!app.state.project.history.can_undo());
+            assert!(!app.state.project.dirty);
+        }
+    }
+
+    #[test]
     fn bitcrush_effective_bits_readout_reenters_without_changing_fractional_legacy_storage() {
         let (mut app, track, effect) = legacy_bitcrush_app();
         let target = &mut app.state.find_track_mut(track).unwrap().effects[0];
