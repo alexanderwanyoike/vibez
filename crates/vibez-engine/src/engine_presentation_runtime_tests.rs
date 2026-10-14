@@ -306,7 +306,7 @@ fn graph_repeat_overflow_closes_capture_during_playback_and_idle() {
         assert_eq!(counts, (0, 0));
         assert!(engine.presentation_fault, "idle={idle}");
         assert!(!engine.transport.is_playing());
-        assert_eq!(engine.pending_capture_stop, Some(0));
-        assert!(engine.pending_compensation_failure.is_some());
+        assert_eq!(engine.terminal_notifications.capture_stop(), Some(0));
+        assert!(engine.terminal_notifications.failure().is_some());
     }
 }
