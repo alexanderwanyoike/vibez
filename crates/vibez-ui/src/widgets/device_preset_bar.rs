@@ -56,16 +56,6 @@ pub(crate) fn view<'a>(
         modified: presentation.modified,
         preset,
     });
-    let hint = choice.as_ref().map_or_else(
-        || "Custom settings".to_string(),
-        |choice| {
-            format!(
-                "{}{}",
-                choice.preset.name(),
-                if choice.modified { " (modified)" } else { "" }
-            )
-        },
-    );
     let options = presentation
         .options
         .into_iter()
@@ -113,12 +103,9 @@ pub(crate) fn view<'a>(
         selected_text_color: accent,
         selected_background: th::bg_hover().into(),
     });
-    let mut selection = row![
-        text("Preset").size(10).color(th::text_dim()),
-        tooltip(selector, text(hint).size(11), tooltip::Position::Top),
-    ]
-    .spacing(3)
-    .align_y(iced::Alignment::Center);
+    let mut selection = row![text("Preset").size(10).color(th::text_dim()), selector,]
+        .spacing(3)
+        .align_y(iced::Alignment::Center);
     selection = selection
         .push(preset_button(
             crate::icons::CHEVRON_LEFT,
