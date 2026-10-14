@@ -191,7 +191,7 @@ fn rejected_plan_and_accepted_recovery_keep_audio_envelopes_across_callback_part
         assert!(fixture.engine.graph_edit_pending);
         assert!(!fixture.engine.compensation_suspended);
         assert!(fixture.engine.pending_device_reconfiguration.is_none());
-        assert!(!fixture.engine.presentation_fault);
+        assert!(!fixture.engine.presentation_state.is_faulted());
         assert!(!fixture.engine.transport.is_playing());
         assert!(fixture.engine.project_processing_muted());
         assert_eq!(
@@ -278,7 +278,7 @@ fn rejected_plan_and_accepted_recovery_keep_audio_envelopes_across_callback_part
         assert_eq!(fixture.engine.output_gate.remaining_resume_frames(), 0);
         assert!(fixture.engine.compensation_valid);
         assert!(!fixture.engine.graph_edit_pending);
-        assert!(!fixture.engine.presentation_fault);
+        assert!(!fixture.engine.presentation_state.is_faulted());
         assert!(!fixture.engine.project_processing_muted());
     }
 }

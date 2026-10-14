@@ -129,7 +129,7 @@ fn full_presentation_queue_stops_and_can_restart_without_replacing_valid_plan() 
         EngineEvent::PlaybackStarted,
         engine.output_position.saturating_add(521_u64),
     );
-    assert!(engine.presentation_fault);
+    assert!(engine.presentation_state.is_faulted());
     assert!(!engine.transport.is_playing());
     assert!(engine.compensation_valid);
     let mut stopped = false;
@@ -145,7 +145,7 @@ fn full_presentation_queue_stops_and_can_restart_without_replacing_valid_plan() 
     assert!(engine.scheduled_presentation.is_empty());
     commands.push(EngineCommand::Play).unwrap();
     engine.drain_commands();
-    assert!(!engine.presentation_fault);
+    assert!(!engine.presentation_state.is_faulted());
     assert!(engine.transport.is_playing());
     assert!(engine.compensation_valid);
 }
@@ -304,9 +304,9 @@ fn graph_repeat_overflow_closes_capture_during_playback_and_idle() {
             }
         });
         assert_eq!(counts, (0, 0));
-        assert!(engine.presentation_fault, "idle={idle}");
+        assert!(engine.presentation_state.is_faulted(), "idle={idle}");
         assert!(!engine.transport.is_playing());
-        assert_eq!(engine.terminal_notifications.capture_stop(), Some(0));
-        assert!(engine.terminal_notifications.failure().is_some());
+        assert_eq!(engine.presentation_state.terminals.capture_stop(), Some(0));
+        assert!(engine.presentation_state.terminals.failure().is_some());
     }
 }

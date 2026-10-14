@@ -91,7 +91,7 @@ fn oversized_missing_target_packet_never_grows_retirement_storage_in_the_callbac
     }
     assert_eq!((retired, packets), (2400, 1));
     assert!(engine.pending_clip_batch.is_none());
-    assert!(!engine.presentation_fault);
+    assert!(!engine.presentation_state.is_faulted());
 }
 
 #[test]
@@ -133,7 +133,7 @@ fn repeated_target_packet_keeps_reverse_pop_order_and_retires_all_displaced_sour
     assert_eq!(owners, 2400);
     assert_eq!(engine.tracks[0].active_clip.unwrap().request_id, 0);
     assert!(engine.pending_clip_batch.is_none());
-    assert!(!engine.presentation_fault);
+    assert!(!engine.presentation_state.is_faulted());
 }
 
 #[test]
@@ -221,7 +221,7 @@ fn partial_packet_releases_tracks_atomically_at_one_source_timestamp_and_keeps_o
     }
     assert_eq!(transitions, vec![(ids[0], 17), (ids[1], 17)]);
     assert_eq!(engine.tracks[2].active_clip.unwrap().request_id, 7);
-    assert!(!engine.presentation_fault);
+    assert!(!engine.presentation_state.is_faulted());
 }
 
 #[test]
@@ -280,7 +280,7 @@ fn larger_than_event_capacity_row_swaps_all_sources_before_resumable_publication
     assert_eq!(retired, count);
     assert!(timestamps.iter().all(|at| *at == timestamps[0]));
     assert!(engine.pending_clip_batch.is_none());
-    assert!(!engine.presentation_fault);
+    assert!(!engine.presentation_state.is_faulted());
 }
 
 #[test]
@@ -529,7 +529,7 @@ fn publishing_does_not_count_ui_slots_before_a_real_heard_deadline() {
         crate::retirement::tests::allocations(|| engine.continue_clip_batch(200)),
         (0, 0)
     );
-    assert!(!engine.presentation_fault);
+    assert!(!engine.presentation_state.is_faulted());
     assert_eq!(engine.pending_clip_batch.as_ref().unwrap().clips.len(), 1);
     engine.rendered_callback_frames = 0;
     engine.output_position = 157;
@@ -547,7 +547,7 @@ fn publishing_does_not_count_ui_slots_before_a_real_heard_deadline() {
         );
     }
     assert_eq!(&*retired.unwrap() as *const PreparedClipPlayback, original);
-    assert!(!engine.presentation_fault);
+    assert!(!engine.presentation_state.is_faulted());
 }
 
 #[test]
@@ -696,7 +696,7 @@ fn inline_capture_stop_does_not_consume_packet_owner_admission_capacity() {
         crate::retirement::tests::allocations(|| engine.continue_clip_batch(boundary)),
         (0, 0)
     );
-    assert!(!engine.presentation_fault);
+    assert!(!engine.presentation_state.is_faulted());
     assert_eq!(engine.pending_clip_batch.as_ref().unwrap().clips.len(), 1);
     let mut returned = false;
     for _ in 0..8 {
@@ -720,5 +720,5 @@ fn inline_capture_stop_does_not_consume_packet_owner_admission_capacity() {
     }
     assert!(returned);
     assert!(engine.pending_clip_batch.is_none());
-    assert!(!engine.presentation_fault);
+    assert!(!engine.presentation_state.is_faulted());
 }
