@@ -42,6 +42,8 @@ impl ClipInsertionStorage {
 ///
 /// Capacity is a hint, never a content limit or a snapshot of clip values.
 /// Native consumers must fulfill every ClipInsertionStorageRequested event.
+/// A pending exchange pauses later FIFO commands, including Stop and NoteOff;
+/// serving its request is required for progress even when its target is stale.
 #[must_use = "send the prepared control with AddClip or drop it off callback"]
 pub struct PreparedClipInsertion {
     pub(crate) id: ClipInsertionId,
@@ -142,6 +144,9 @@ pub struct ClipInsertionStorageRequest {
 }
 
 impl ClipInsertionStorageRequest {
+    /// Allocate synchronously on the UI/native consumer thread and reply through
+    /// the independent mailbox. Never call this inside an audio callback or
+    /// replace it with a command queued behind the blocked original edit.
     pub fn fulfill(mut self) {
         // A consumer may already be destroyed. Even a successful orphaned push
         // remains owned by this producer and is destroyed here off callback.
