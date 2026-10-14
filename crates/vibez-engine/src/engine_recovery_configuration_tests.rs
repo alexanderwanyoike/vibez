@@ -121,8 +121,8 @@ fn full_event_ring_retains_source_capture_stop_and_named_failure_before_metering
         crate::retirement::tests::allocations(|| engine.process(&mut [0.0; 16], 2)),
         (0, 0)
     );
-    assert_eq!(engine.terminal_notifications.capture_stop(), Some(500));
-    assert_eq!(engine.terminal_notifications.failure().unwrap().1, Some(effect));
+    assert_eq!(engine.presentation_state.terminals.capture_stop(), Some(500));
+    assert_eq!(engine.presentation_state.terminals.failure().unwrap().1, Some(effect));
     while events.pop().is_ok() {}
     engine.process(&mut [0.0; 16], 2);
     assert!(matches!(
@@ -196,12 +196,12 @@ fn exhausted_handoff_closes_source_capture_and_retains_original_cause_and_stop()
         (0, 0)
     );
     assert!(!engine.transport.is_playing());
-    assert_eq!(engine.terminal_notifications.capture_stop(), Some(500));
+    assert_eq!(engine.presentation_state.terminals.capture_stop(), Some(500));
     assert_eq!(
-        engine.terminal_notifications.failure().unwrap().2,
+        engine.presentation_state.terminals.failure().unwrap().2,
         "Device handoff identity exhausted"
     );
-    assert!(engine.terminal_notifications.playback_stop_pending());
+    assert!(engine.presentation_state.terminals.playback_stop_pending());
     while events.pop().is_ok() {}
     engine.flush_presentation();
     assert!(matches!(

@@ -10,7 +10,7 @@ impl AudioEngine {
         effective_at_samples: u64,
     ) {
         self.apply_end_of_section_track_mutes(effective_at_samples);
-        if self.presentation_fault {
+        if self.presentation_state.is_faulted() {
             self.present_event(EngineEvent::SectionQueueCancelled { retired: prepared });
             return;
         }
@@ -138,7 +138,7 @@ impl AudioEngine {
             }
             let queued = self.queued_section.take().expect("queued Section");
             self.activate_section(queued.prepared, block_start);
-            if self.presentation_fault {
+            if self.presentation_state.is_faulted() {
                 output.fill(0.0);
                 return;
             }
@@ -162,7 +162,7 @@ impl AudioEngine {
             }
             let queued = self.queued_section.take().expect("queued Section");
             self.activate_section(queued.prepared, boundary);
-            if self.presentation_fault {
+            if self.presentation_state.is_faulted() {
                 output[frames_before * channels..].fill(0.0);
                 return;
             }

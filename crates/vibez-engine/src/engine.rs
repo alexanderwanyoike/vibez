@@ -53,10 +53,9 @@ pub struct AudioEngine {
     scheduled_presentation: Vec<presentation_queue::ScheduledPresentation>,
     section_capture_timing: Vec<presentation::SectionCaptureTiming>,
     capture_replay: Option<presentation::CaptureReplay>,
-    terminal_notifications: terminal_notifications::TerminalNotifications,
+    presentation_state: presentation_state::PresentationState,
     capture_active: bool,
     pending_source_cleanup: bool,
-    presentation_fault: bool,
     compensation_callback_heard_start: u64,
     capture_clip_positions: Vec<(TrackId, u64, u64)>,
     compensation_suspended: bool,
@@ -253,10 +252,9 @@ impl AudioEngine {
                 presentation_queue::PRESENTATION_EVENT_CAPACITY,
             ),
             capture_replay: None,
-            terminal_notifications: terminal_notifications::TerminalNotifications::default(),
+            presentation_state: presentation_state::PresentationState::default(),
             capture_active: false,
             pending_source_cleanup: false,
-            presentation_fault: false,
             compensation_callback_heard_start: 0,
             capture_clip_positions: Vec::with_capacity(
                 presentation_queue::PRESENTATION_EVENT_CAPACITY,
@@ -904,6 +902,9 @@ mod presentation_queue;
 
 #[path = "engine_terminal_notifications.rs"]
 mod terminal_notifications;
+
+#[path = "engine_presentation_state.rs"]
+mod presentation_state;
 
 #[path = "engine_clip_batch.rs"]
 mod clip_batch;

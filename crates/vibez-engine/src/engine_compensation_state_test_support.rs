@@ -39,7 +39,7 @@ impl Readiness {
             suspended: engine.compensation_suspended,
             handoff: engine.pending_device_reconfiguration.is_some(),
             restart_requested: engine.reconfiguration_pending(),
-            presentation_fault: engine.presentation_fault,
+            presentation_fault: engine.presentation_state.is_faulted(),
             playing: engine.transport.is_playing(),
             muted: engine.project_processing_muted(),
         }
