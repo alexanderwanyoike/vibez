@@ -108,6 +108,17 @@ commands. Runtime boundary emitters reserve before changing state. Clip packets
 reuse their transferred Vec for resumable acknowledgements and owner return.
 Neither store grows or destroys undelivered owners in the callback.
 
+Clip removal first extracts every matching ID into prepared storage owned by
+its `PreparedPlaybackSource`, preserving survivor order and making deletion
+audible atomically even when more than 32 owners must return. Retirement
+checks its bounded credit before moving each complete audio or note clip;
+later commands wait while source storage still holds pending owners. All four
+resident source homes participate. A Section or Clip source transfer carries
+any pending storage with the whole source, so an owner is never returned twice.
+The still-allocating `AddClip` and `AddNoteClip` paths maintain this storage's
+capacity from actual collection lengths. Preparing those insertions off-thread
+remains separate Card 04 work; removal never grows either collection.
+
 Warp marker edits return the displaced or rejected marker Vec to the UI for
 destruction through an Untimed event. Command admission reserves one retirement
 slot before taking that owner; a missing target does not free incoming storage.
