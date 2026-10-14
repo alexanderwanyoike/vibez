@@ -395,4 +395,31 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn transfer_axes_keep_a_real_plot_after_compact_axis_qualification() {
+        for width in [430.0, 620.0, 900.0] {
+            for height in [64.0, 114.0, 116.0, 120.0, 130.0, 160.0, 240.0, 304.0] {
+                let layout = arrange(Size::new(width, height), false);
+                if layout.plot == 0.0 {
+                    continue;
+                }
+                let caption = if layout.both_plots {
+                    8.0 * 1.3 + 3.0
+                } else {
+                    9.0 * 1.3 + 2.0 + 3.0
+                };
+                let available = layout.plot - 4.0 - caption;
+                let actual = if available < 80.0 {
+                    available - (8.0 * 1.3 + 3.0)
+                } else {
+                    available - 48.0
+                };
+                assert!(
+                    actual >= 32.0,
+                    "named axes leave only {actual}px at {width}x{height}"
+                );
+            }
+        }
+    }
 }

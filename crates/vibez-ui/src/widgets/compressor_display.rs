@@ -35,6 +35,10 @@ fn plot(bounds: Rectangle) -> Rectangle {
         }
     }
 }
+fn transfer_plot(bounds: Rectangle) -> Rectangle {
+    plot(bounds)
+}
+
 fn backdrop(frame: &mut canvas::Frame, bounds: Rectangle) {
     frame.fill_rectangle(Point::ORIGIN, bounds.size(), th::bg_dark());
     frame.stroke(
@@ -433,5 +437,27 @@ mod tests {
             )
             .1
             .is_none());
+    }
+
+    #[test]
+    fn named_transfer_axes_reserve_separate_label_and_tick_rows() {
+        for height in [80.0, 96.0, 160.0, 240.0] {
+            let bounds = Rectangle::new(Point::ORIGIN, iced::Size::new(240.0, height));
+            let area = transfer_plot(bounds);
+            let text_line = 8.0 * 1.3;
+            assert!(
+                area.y >= text_line + 4.0,
+                "output axis label overlaps plot or tick row"
+            );
+            assert!(
+                bounds.height - (area.y + area.height) >= 2.0 * text_line + 8.0,
+                "input axis label overlaps numeric ticks"
+            );
+            assert!(
+                area.height >= 32.0,
+                "axis labels leave a miniature transfer plot"
+            );
+            assert!(area.width >= 160.0);
+        }
     }
 }
