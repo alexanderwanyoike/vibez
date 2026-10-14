@@ -161,7 +161,8 @@ impl Fixture {
             .any(|slot| slot.id == self.effect)
             || self
                 .engine
-                .device_handoff.pending()
+                .device_handoff
+                .pending()
                 .is_some_and(|pending| pending.effect_id == Some(self.effect))
         {
             affected.effects.push(routing_effect(self.effect));
