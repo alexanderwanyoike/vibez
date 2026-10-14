@@ -140,6 +140,7 @@ struct Fixture {
     clip: ClipId,
     note_clip: ClipId,
     empty_note_clip: ClipId,
+    refresh_section: SectionId,
     lane: LaneId,
 }
 
@@ -213,6 +214,22 @@ fn section(fixture: &Fixture) -> Box<PreparedSectionPlaybackSource> {
     ))
 }
 
+fn refresh_section_source(fixture: &Fixture, value: f32) -> Box<PreparedSectionPlaybackSource> {
+    Box::new(PreparedSectionPlaybackSource::new(fixture.refresh_section, 4.0, true, vec![(fixture.audio,
+        PreparedPlaybackSource::new(vec![crate::playback_source::EngineClip {
+            id: ClipId::new(),
+            audio: Arc::new(DecodedAudio { channels: vec![vec![value; 4096]], sample_rate: 48_000 }),
+            position: 0, source_offset: 0, start_marker: 0, duration: 4096,
+            loop_enabled: false, loop_start: 0, loop_end: 0, linear_gain: 1.0,
+            fades: Default::default(), playback_direction: Default::default(), warp_markers: Default::default(),
+        }], vec![], vec![]),
+    )]))
+}
+
+fn populate_refresh_section(commands: &mut rtrb::Producer<EngineCommand>, fixture: &Fixture) {
+    commands.push(EngineCommand::LaunchSection(refresh_section_source(fixture, 0.25))).unwrap();
+}
+
 fn playing(
     setup: impl FnOnce(&mut rtrb::Producer<EngineCommand>, &Fixture),
 ) -> (
@@ -232,6 +249,7 @@ fn playing(
         clip: ClipId::new(),
         note_clip: ClipId::new(),
         empty_note_clip: ClipId::new(),
+        refresh_section: SectionId::new(),
         lane: LaneId::new(),
     };
     let f = &fixture;
@@ -448,7 +466,7 @@ fn cases() -> Vec<Case> {
             prepared: section(f),
             quantization: SectionLaunchQuantization::OneBar,
         }),
-        case!("RefreshSection", false, |f| C::RefreshSection(section(f))),
+        case!("RefreshSection", false, populate_refresh_section, |f| C::RefreshSection(refresh_section_source(f, 0.75))),
         case!("ArmSectionRecord", false, |f| C::ArmSectionRecord {
             section_id: SectionId::new(),
             track_id: f.synth,
@@ -1299,4 +1317,39 @@ fn a_channel_past_the_reserved_list_is_a_ui_contract_violation() {
             .is_ok());
         engine.process(&mut [0.0; 2], 2);
     }
+}
+
+
+#[test]
+fn populated_refresh_section_ratchet_fixture_replaces_unique_sounding_source_and_returns_complete_owner() {
+    let (mut engine, mut commands, mut events, fixture) = playing(populate_refresh_section);
+    assert_eq!(engine.active_section.unwrap().section_id, fixture.refresh_section);
+    let before = engine.active_section.unwrap().position_samples;
+    let old = Arc::downgrade(&engine.tracks.iter().find(|track| track.id == fixture.audio).unwrap().section_playback_source.clips[0].audio);
+    assert_eq!(old.strong_count(), 1);
+    let replacement = refresh_section_source(&fixture, 0.75);
+    let pointer = &*replacement as *const PreparedSectionPlaybackSource;
+    let incoming = Arc::downgrade(&replacement.tracks()[0].source.clips[0].audio);
+    commands.push(EngineCommand::RefreshSection(replacement)).unwrap();
+    let mut output = [0.0; 512];
+    assert_eq!(crate::retirement::tests::allocations(|| engine.process(&mut output, 2)), (0, 0));
+    for sample in output {
+        assert!((sample - 0.75 * std::f32::consts::FRAC_1_SQRT_2).abs() < 1e-6, "replacement must sound through the existing center-pan fixture: {sample}");
+    }
+    assert_eq!(engine.active_section.unwrap().position_samples, before + 256);
+    assert_eq!(Arc::as_ptr(&engine.tracks.iter().find(|track| track.id == fixture.audio).unwrap().section_playback_source.clips[0].audio), incoming.as_ptr());
+    let notifications: Vec<_> = std::iter::from_fn(|| events.pop().ok()).collect();
+    let returned: Vec<_> = notifications.iter().filter_map(|event| match event {
+        EngineEvent::SectionSourceRefreshed { applied: true, retired, .. } => Some(retired),
+        _ => None,
+    }).collect();
+    assert_eq!(returned.len(), 1);
+    assert!(std::ptr::eq(&**returned[0], pointer));
+    assert_eq!(returned[0].tracks().len(), 1);
+    assert_eq!(Arc::as_ptr(&returned[0].tracks()[0].source.clips[0].audio), old.as_ptr());
+    assert_eq!(old.strong_count(), 1);
+    drop(returned);
+    drop(notifications);
+    assert_eq!(old.strong_count(), 0);
+    assert_eq!(incoming.strong_count(), 1);
 }
