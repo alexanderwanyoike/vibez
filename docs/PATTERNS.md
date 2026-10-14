@@ -49,6 +49,32 @@ remain editable at capacity, while another target cannot grow callback storage.
 Offline channel preparation preserves that reserved storage.
 `engine_command_allocation_tests` measures every command; its list of commands
 that still allocate may only shrink.
+
+AddClip carries a required sender-prepared `PreparedClipInsertion` control.
+Its empty Vec capacity is only a hint. If current live clip/removal storage
+cannot accept the original delta, the engine retains that delta and requests
+empty storage through `ClipInsertionStorageRequested`. One insertion waits at
+a time: current playback continues, but later FIFO commands, including Stop,
+Undo replay and NoteOff, wait for this exchange. Preparation may therefore
+move an edit to a later callback boundary.
+
+The App always consumes each request with `request.fulfill()` outside the
+callback, including when project reset or Undo has made its target stale.
+Public native/library event consumers have the same progress obligation.
+Fulfillment allocates synchronously and uses the control's separate one-slot
+reply mailbox, never an EngineCommand queued behind the waiting insertion.
+Allocation follows ordinary Vec allocation/abort policy. A native caller may
+explicitly abandon a request by dropping it unfulfilled; the engine then
+returns the complete original payload with `Abandoned`, leaves content intact
+and resumes FIFO once a completion credit is available. App target staleness
+must never deliberately choose abandonment.
+
+Every `ClipInsertionCompleted` owner is retained or destroyed off callback.
+It carries rejected content, displaced/unused Vec allocations and the final
+mailbox endpoints/control even on immediate or missing-target paths. The
+callback reserves each actual request/completion phase independently; no
+retirement credit stays held merely because the caller has not fulfilled yet.
+
 Events come in two classes, and the class determines the push policy:
 
 - **Authoritative** (Capture consumes them, state depends on them): enter
