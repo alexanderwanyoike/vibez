@@ -19,6 +19,8 @@ fn drum_pad_visual_state(selected: bool, firing: bool) -> DrumPadVisualState {
     }
 }
 
+pub(super) const DRUM_RACK_CARD_W: f32 = 780.0;
+
 impl App {
     pub(super) fn view_drum_rack_device<'a>(
         &'a self,
@@ -498,7 +500,7 @@ impl App {
         // Pads + eight full-size pad controls + chrome. Keep the card wide
         // enough that adding controls never compresses either section.
         Self::device_card(
-            column![title, Self::device_body(body.into())].width(Length::Fixed(780.0)),
+            column![title, Self::device_body(body.into())].width(Length::Fixed(DRUM_RACK_CARD_W)),
         )
     }
 }

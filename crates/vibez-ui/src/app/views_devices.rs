@@ -17,6 +17,14 @@ use crate::widgets::effect_slot::{view_effect_slot, view_sidechain, DeviceBody};
 
 use super::*;
 
+const SYNTH_CARD_W: f32 = 570.0;
+const SAMPLER_CARD_W: f32 = 560.0;
+const PLACEHOLDER_W: f32 = 120.0;
+const DISPLAY_W: f32 = 380.0;
+const BAND_COL_W: f32 = 50.0;
+/// Padding (20), display, divider, four band columns and their spacing.
+const EQ_CARD_W: f32 = DISPLAY_W + 4.0 * (BAND_COL_W + 4.0) + 48.0;
+
 impl App {
     /// Build the device chain for the detail panel.
     pub(super) fn view_device_chain<'a>(
@@ -191,9 +199,6 @@ impl App {
         use crate::widgets::effect_knob::{format_value, EffectKnobWidget};
         use crate::widgets::eq_display::EqDisplayWidget;
 
-        const DISPLAY_W: f32 = 380.0;
-        const BAND_COL_W: f32 = 50.0;
-
         let display = EqDisplayWidget {
             track_id,
             effect_id: effect.id,
@@ -316,9 +321,7 @@ impl App {
         .align_y(iced::Alignment::Center)
         .into();
 
-        // padding (20) + display + divider + bands + spacing
-        let card_w = DISPLAY_W + 4.0 * (BAND_COL_W + 4.0) + 48.0;
-        (body, card_w)
+        (body, EQ_CARD_W)
     }
 
     // ── Shared device card helpers ──────────────────────────────────
@@ -537,7 +540,7 @@ impl App {
 
         // OSC 66 + envelope 240 + filter 118 + out 56 + chrome.
         Self::device_card(
-            column![title, Self::device_body(body.into())].width(Length::Fixed(570.0)),
+            column![title, Self::device_body(body.into())].width(Length::Fixed(SYNTH_CARD_W)),
         )
     }
 
@@ -668,7 +671,7 @@ impl App {
         // background actually render (Fill inside a shrink column
         // collapses in iced).
         let card = Self::device_card(
-            column![title, Self::device_body(body.into())].width(Length::Fixed(560.0)),
+            column![title, Self::device_body(body.into())].width(Length::Fixed(SAMPLER_CARD_W)),
         );
         let drop_target = matches!(
             self.state.browser.drag_target,
@@ -703,7 +706,7 @@ impl App {
 
         Self::device_card(
             column![title, body]
-                .width(Length::Fixed(120.0))
+                .width(Length::Fixed(PLACEHOLDER_W))
                 .align_x(iced::Alignment::Center),
         )
     }

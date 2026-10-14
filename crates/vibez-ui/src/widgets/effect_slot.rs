@@ -22,6 +22,25 @@ pub struct DeviceBody<'a> {
     pub vertical_padding: f32,
 }
 
+/// Width of an effect card, including its sidechain column when present.
+/// The chain sums these to give responsive devices their share.
+pub fn card_width(effect: &UiEffect, custom_width: Option<f32>, sidechain: bool) -> f32 {
+    let body = if let Some(width) = custom_width {
+        width
+    } else if effect.plugin_name.is_some() {
+        crate::widgets::device_chrome::PLUGIN_CARD_W
+    } else if !effect.descriptors.is_empty() && !effect.has_plugin_gui {
+        (effect.descriptors.len() as f32 * 62.0 + 24.0).max(150.0)
+    } else {
+        150.0
+    };
+    body + if sidechain {
+        sidechain::WIDTH + 1.0
+    } else {
+        0.0
+    }
+}
+
 pub fn view_effect_slot<'a>(
     track_id: TrackId,
     effect: &'a UiEffect,
@@ -71,21 +90,14 @@ pub fn view_effect_slot<'a>(
         th::text()
     };
 
-    // Fixed width computed from the knob count: a Fill title strip
-    // inside a shrink column collapses the card chrome in iced.
-    let knob_count = if has_params && !has_gui {
-        effect.descriptors.len()
-    } else {
-        0
-    };
-    let card_w = if let Some(body) = custom_body.as_ref() {
-        body.width
-    } else if is_plugin {
-        crate::widgets::device_chrome::PLUGIN_CARD_W
-    } else {
-        (knob_count as f32 * 62.0 + 24.0).max(150.0)
-    };
-    let title_w = card_w + sidechain.as_ref().map_or(0.0, |_| sidechain::WIDTH + 1.0);
+    // A fixed width: a Fill title strip inside a shrink column collapses
+    // the card chrome in iced.
+    let card_w = card_width(effect, custom_body.as_ref().map(|body| body.width), false);
+    let title_w = card_width(
+        effect,
+        custom_body.as_ref().map(|body| body.width),
+        sidechain.is_some(),
+    );
     let name_section = crate::widgets::device_chrome::title_name(
         display_name,
         name_color,
@@ -229,7 +241,7 @@ pub fn view_effect_slot<'a>(
             ]
             .align_y(iced::Alignment::Center)
             .into(),
-            card_w + sidechain::WIDTH + 1.0,
+            title_w,
         ),
         None => (body, card_w),
     };
