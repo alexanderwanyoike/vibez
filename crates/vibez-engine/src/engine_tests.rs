@@ -1,8 +1,10 @@
 //! Engine unit tests (rendering, transport, looping, metering).
 
 use super::*;
+use graph_test_support::{graph_engine, routing_channel, routing_effect, routing_plan};
 use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::id::{ClipId, EffectId, TrackId};
+use vibez_core::routing::RoutingChannel;
 
 /// Helper to create a simple stereo decoded audio with a known pattern.
 fn make_test_audio(frames: usize) -> Arc<DecodedAudio> {
@@ -40,7 +42,7 @@ fn new_returns_ring_buffer_endpoints() {
 
 #[test]
 fn process_outputs_silence_when_stopped() {
-    let (mut engine, _cmd_tx, _event_rx) = AudioEngine::new();
+    let (mut engine, _cmd_tx, _event_rx) = graph_engine(&[routing_channel(TrackId::MASTER)]);
     let mut buf = vec![999.0f32; 512];
     engine.process(&mut buf, 2);
 
@@ -49,8 +51,9 @@ fn process_outputs_silence_when_stopped() {
 
 #[test]
 fn live_input_uses_the_target_track_while_transport_is_stopped() {
-    let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
     let target = TrackId::new();
+    let (mut engine, mut cmd_tx, _event_rx) =
+        graph_engine(&[routing_channel(target), routing_channel(TrackId::MASTER)]);
     cmd_tx.push(EngineCommand::add_track(target)).unwrap();
     let input = [0.5f32, -0.25, 0.25, -0.5];
     let mut output = [0.0; 4];
@@ -68,7 +71,7 @@ fn live_input_uses_the_target_track_while_transport_is_stopped() {
 
 #[test]
 fn live_input_is_silent_when_its_target_does_not_exist() {
-    let (mut engine, _cmd_tx, _event_rx) = AudioEngine::new();
+    let (mut engine, _cmd_tx, _event_rx) = graph_engine(&[routing_channel(TrackId::MASTER)]);
     let mut output = [1.0; 4];
     engine.process_block(
         AudioProcessBlock::new(&mut output, 2).with_live_input(TrackId::new().raw(), &[0.5; 4]),
@@ -78,8 +81,9 @@ fn live_input_is_silent_when_its_target_does_not_exist() {
 
 #[test]
 fn midi_clip_commands_keep_project_length_in_sync() {
-    let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
     let track_id = TrackId::new();
+    let (mut engine, mut cmd_tx, _event_rx) =
+        graph_engine(&[routing_channel(track_id), routing_channel(TrackId::MASTER)]);
     let clip_id = ClipId::new();
     cmd_tx.push(EngineCommand::add_track(track_id)).unwrap();
     cmd_tx
@@ -119,7 +123,7 @@ fn midi_clip_commands_keep_project_length_in_sync() {
 
 #[test]
 fn play_command_starts_transport() {
-    let (mut engine, mut cmd_tx, mut event_rx) = AudioEngine::new();
+    let (mut engine, mut cmd_tx, mut event_rx) = graph_engine(&[routing_channel(TrackId::MASTER)]);
 
     cmd_tx.push(EngineCommand::Play).unwrap();
 
@@ -140,7 +144,7 @@ fn play_command_starts_transport() {
 
 #[test]
 fn stop_command_stops_transport() {
-    let (mut engine, mut cmd_tx, mut event_rx) = AudioEngine::new();
+    let (mut engine, mut cmd_tx, mut event_rx) = graph_engine(&[routing_channel(TrackId::MASTER)]);
 
     cmd_tx.push(EngineCommand::Play).unwrap();
     cmd_tx.push(EngineCommand::Stop).unwrap();
@@ -244,7 +248,7 @@ fn unload_audio_stops_and_clears() {
 
 #[test]
 fn set_bpm_command() {
-    let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
+    let (mut engine, mut cmd_tx, _event_rx) = graph_engine(&[routing_channel(TrackId::MASTER)]);
     cmd_tx.push(EngineCommand::SetBpm(140.0)).unwrap();
 
     let mut buf = vec![0.0f32; 8];
@@ -275,7 +279,7 @@ fn metering_events_are_sent() {
 
 #[test]
 fn position_events_are_sent() {
-    let (mut engine, _cmd_tx, mut event_rx) = AudioEngine::new();
+    let (mut engine, _cmd_tx, mut event_rx) = graph_engine(&[routing_channel(TrackId::MASTER)]);
 
     let mut buf = vec![0.0f32; 64];
     engine.process(&mut buf, 2);
@@ -317,11 +321,17 @@ fn auto_stop_at_end_of_audio() {
 
 #[test]
 fn arrangement_recording_advances_past_the_existing_content_end() {
-    let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
-    constant_clip_track(&mut cmd_tx, 16);
+    let (mut engine, mut cmd_tx, _event_rx) = graph_engine(&[routing_channel(TrackId::MASTER)]);
+    let (tid, _) = constant_clip_track(&mut cmd_tx, 16);
     cmd_tx.push(EngineCommand::Seek(16)).unwrap();
     cmd_tx
         .push(EngineCommand::SetArrangementRecording(true))
+        .unwrap();
+    cmd_tx
+        .push(EngineCommand::SetRouting(routing_plan(&[
+            routing_channel(tid),
+            routing_channel(TrackId::MASTER),
+        ])))
         .unwrap();
     cmd_tx.push(EngineCommand::Play).unwrap();
 
@@ -377,7 +387,7 @@ fn mono_audio_to_stereo_output() {
 
 #[test]
 fn process_with_zero_length_buffer() {
-    let (mut engine, _cmd_tx, _event_rx) = AudioEngine::new();
+    let (mut engine, _cmd_tx, _event_rx) = graph_engine(&[routing_channel(TrackId::MASTER)]);
     let mut buf: Vec<f32> = vec![];
     // Should not panic.
     engine.process(&mut buf, 2);
@@ -387,9 +397,13 @@ fn process_with_zero_length_buffer() {
 
 #[test]
 fn add_and_remove_tracks() {
-    let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
     let tid1 = TrackId::new();
     let tid2 = TrackId::new();
+    let (mut engine, mut cmd_tx, _event_rx) = graph_engine(&[
+        routing_channel(tid1),
+        routing_channel(tid2),
+        routing_channel(TrackId::MASTER),
+    ]);
 
     cmd_tx.push(EngineCommand::add_track(tid1)).unwrap();
     cmd_tx.push(EngineCommand::add_track(tid2)).unwrap();
@@ -406,10 +420,15 @@ fn add_and_remove_tracks() {
 
 #[test]
 fn reorder_tracks() {
-    let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
     let tid1 = TrackId::new();
     let tid2 = TrackId::new();
     let tid3 = TrackId::new();
+    let (mut engine, mut cmd_tx, _event_rx) = graph_engine(&[
+        routing_channel(tid1),
+        routing_channel(tid2),
+        routing_channel(tid3),
+        routing_channel(TrackId::MASTER),
+    ]);
 
     cmd_tx.push(EngineCommand::add_track(tid1)).unwrap();
     cmd_tx.push(EngineCommand::add_track(tid2)).unwrap();
@@ -434,8 +453,9 @@ fn reorder_tracks() {
 
 #[test]
 fn add_clip_and_play() {
-    let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
     let tid = TrackId::new();
+    let (mut engine, mut cmd_tx, _event_rx) =
+        graph_engine(&[routing_channel(tid), routing_channel(TrackId::MASTER)]);
     let cid = ClipId::new();
     let audio = make_constant_audio(100, 0.5);
 
@@ -485,8 +505,9 @@ fn add_clip_and_play() {
 
 #[test]
 fn clip_gain_is_applied_before_the_track_channel_strip() {
-    let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
     let track_id = TrackId::new();
+    let (mut engine, mut cmd_tx, _event_rx) =
+        graph_engine(&[routing_channel(track_id), routing_channel(TrackId::MASTER)]);
     let clip_id = ClipId::new();
     cmd_tx.push(EngineCommand::add_track(track_id)).unwrap();
     cmd_tx
@@ -526,8 +547,9 @@ fn clip_gain_is_applied_before_the_track_channel_strip() {
 
 #[test]
 fn mute_silences_track() {
-    let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
     let tid = TrackId::new();
+    let (mut engine, mut cmd_tx, _event_rx) =
+        graph_engine(&[routing_channel(tid), routing_channel(TrackId::MASTER)]);
     let cid = ClipId::new();
     let audio = make_constant_audio(100, 0.8);
 
@@ -561,9 +583,13 @@ fn mute_silences_track() {
 
 #[test]
 fn solo_isolates_track() {
-    let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
     let tid1 = TrackId::new();
     let tid2 = TrackId::new();
+    let (mut engine, mut cmd_tx, _event_rx) = graph_engine(&[
+        routing_channel(tid1),
+        routing_channel(tid2),
+        routing_channel(TrackId::MASTER),
+    ]);
     let cid1 = ClipId::new();
     let cid2 = ClipId::new();
 
@@ -632,8 +658,9 @@ fn solo_isolates_track() {
 
 #[test]
 fn gain_scaling() {
-    let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
     let tid = TrackId::new();
+    let (mut engine, mut cmd_tx, _event_rx) =
+        graph_engine(&[routing_channel(tid), routing_channel(TrackId::MASTER)]);
     let cid = ClipId::new();
     let audio = make_constant_audio(100, 1.0);
 
@@ -668,8 +695,9 @@ fn gain_scaling() {
 
 #[test]
 fn pan_hard_left() {
-    let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
     let tid = TrackId::new();
+    let (mut engine, mut cmd_tx, _event_rx) =
+        graph_engine(&[routing_channel(tid), routing_channel(TrackId::MASTER)]);
     let cid = ClipId::new();
     let audio = make_constant_audio(100, 1.0);
 
@@ -705,9 +733,13 @@ fn pan_hard_left() {
 
 #[test]
 fn multi_track_summing() {
-    let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
     let tid1 = TrackId::new();
     let tid2 = TrackId::new();
+    let (mut engine, mut cmd_tx, _event_rx) = graph_engine(&[
+        routing_channel(tid1),
+        routing_channel(tid2),
+        routing_channel(TrackId::MASTER),
+    ]);
     let cid1 = ClipId::new();
     let cid2 = ClipId::new();
 
@@ -787,8 +819,9 @@ fn legacy_compat_with_tracks_present() {
 
 #[test]
 fn per_track_metering_events() {
-    let (mut engine, mut cmd_tx, mut event_rx) = AudioEngine::new();
     let tid = TrackId::new();
+    let (mut engine, mut cmd_tx, mut event_rx) =
+        graph_engine(&[routing_channel(tid), routing_channel(TrackId::MASTER)]);
     let cid = ClipId::new();
     let audio = make_constant_audio(100, 0.5);
 
@@ -836,8 +869,9 @@ fn per_track_metering_events() {
 
 #[test]
 fn transport_auto_stop_multitrack() {
-    let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
     let tid = TrackId::new();
+    let (mut engine, mut cmd_tx, _event_rx) =
+        graph_engine(&[routing_channel(tid), routing_channel(TrackId::MASTER)]);
     let cid = ClipId::new();
     let audio = make_constant_audio(16, 0.5);
 
@@ -872,8 +906,9 @@ fn transport_auto_stop_multitrack() {
 
 #[test]
 fn move_clip_changes_position() {
-    let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
     let tid = TrackId::new();
+    let (mut engine, mut cmd_tx, _event_rx) =
+        graph_engine(&[routing_channel(tid), routing_channel(TrackId::MASTER)]);
     let cid = ClipId::new();
     let audio = make_constant_audio(100, 0.5);
 
@@ -913,8 +948,9 @@ fn move_clip_changes_position() {
 
 #[test]
 fn add_clip_with_loop_plays_looped_audio() {
-    let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
     let tid = TrackId::new();
+    let (mut engine, mut cmd_tx, _event_rx) =
+        graph_engine(&[routing_channel(tid), routing_channel(TrackId::MASTER)]);
     let cid = ClipId::new();
     let audio = make_constant_audio(100, 0.5);
 
@@ -955,8 +991,9 @@ fn add_clip_with_loop_plays_looped_audio() {
 
 #[test]
 fn resize_clip_preserves_loop_state() {
-    let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
     let tid = TrackId::new();
+    let (mut engine, mut cmd_tx, _event_rx) =
+        graph_engine(&[routing_channel(tid), routing_channel(TrackId::MASTER)]);
     let cid = ClipId::new();
     let audio = make_constant_audio(100, 0.5);
 
@@ -1032,7 +1069,7 @@ fn resize_clip_preserves_loop_state() {
 
 #[test]
 fn audition_plays_even_when_transport_stopped() {
-    let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
+    let (mut engine, mut cmd_tx, _event_rx) = graph_engine(&[routing_channel(TrackId::MASTER)]);
     let audio = make_constant_audio(4_096, 0.4);
 
     cmd_tx.push(start_audition(audio)).unwrap();
@@ -1047,7 +1084,7 @@ fn audition_plays_even_when_transport_stopped() {
 
 #[test]
 fn audition_stop_uses_a_short_fade_without_stopping_transport() {
-    let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
+    let (mut engine, mut cmd_tx, _event_rx) = graph_engine(&[routing_channel(TrackId::MASTER)]);
     let audio = make_constant_audio(4_096, 0.5);
 
     cmd_tx.push(EngineCommand::Play).unwrap();
@@ -1066,7 +1103,7 @@ fn audition_stop_uses_a_short_fade_without_stopping_transport() {
 
 #[test]
 fn audition_auto_completes_at_end_of_audio() {
-    let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
+    let (mut engine, mut cmd_tx, _event_rx) = graph_engine(&[routing_channel(TrackId::MASTER)]);
     let audio = make_constant_audio(512, 0.6);
 
     cmd_tx.push(start_audition(audio)).unwrap();
@@ -1080,7 +1117,7 @@ fn audition_auto_completes_at_end_of_audio() {
 
 #[test]
 fn newer_audition_crossfades_over_the_previous_source() {
-    let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
+    let (mut engine, mut cmd_tx, _event_rx) = graph_engine(&[routing_channel(TrackId::MASTER)]);
     let a = make_constant_audio(4_096, 0.8);
     let b = make_constant_audio(4_096, 0.2);
 
@@ -1099,7 +1136,7 @@ fn newer_audition_crossfades_over_the_previous_source() {
 
 #[test]
 fn rapid_retriggers_with_tiny_buffers_keep_fading_voices_without_clicking() {
-    let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
+    let (mut engine, mut cmd_tx, _event_rx) = graph_engine(&[routing_channel(TrackId::MASTER)]);
 
     // 64-frame blocks are far shorter than the ~220-frame fade, so
     // every retrigger overlaps the previous voice's fade-out.
@@ -1128,7 +1165,7 @@ fn rapid_retriggers_with_tiny_buffers_keep_fading_voices_without_clicking() {
 
 #[test]
 fn audition_gain_is_independent_and_bypasses_project_master_gain() {
-    let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
+    let (mut engine, mut cmd_tx, _event_rx) = graph_engine(&[routing_channel(TrackId::MASTER)]);
     let audio = make_constant_audio(4_096, 0.8);
     cmd_tx
         .push(EngineCommand::SetTrackGain(TrackId::MASTER, 0.0))
@@ -1144,7 +1181,7 @@ fn audition_gain_is_independent_and_bypasses_project_master_gain() {
 
 #[test]
 fn synced_audition_starts_immediately_when_transport_is_stopped() {
-    let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
+    let (mut engine, mut cmd_tx, _event_rx) = graph_engine(&[routing_channel(TrackId::MASTER)]);
     cmd_tx
         .push(EngineCommand::StartAudition {
             audio: make_constant_audio(4_096, 0.4),
@@ -1162,7 +1199,7 @@ fn synced_audition_starts_immediately_when_transport_is_stopped() {
 
 #[test]
 fn next_bar_audition_queues_to_the_next_running_transport_boundary() {
-    let (mut engine, mut cmd_tx, mut event_rx) = AudioEngine::new();
+    let (mut engine, mut cmd_tx, mut event_rx) = graph_engine(&[routing_channel(TrackId::MASTER)]);
     cmd_tx.push(EngineCommand::SetBpm(120.0)).unwrap();
     cmd_tx.push(EngineCommand::Seek(10_000)).unwrap();
     cmd_tx.push(EngineCommand::Play).unwrap();
@@ -1198,7 +1235,7 @@ fn synced_audition_loop_keeps_every_wrap_on_the_transport_grid() {
     const BAR_FRAMES: usize = 88_200;
     const MARKER_FRAME: usize = 1_000;
 
-    let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
+    let (mut engine, mut cmd_tx, _event_rx) = graph_engine(&[routing_channel(TrackId::MASTER)]);
     let mut marker = vec![0.0; BAR_FRAMES];
     marker[MARKER_FRAME] = 1.0;
     let audio = Arc::new(DecodedAudio {
@@ -1236,7 +1273,7 @@ fn starting_transport_rephases_an_already_playing_synced_audition() {
     const BAR_FRAMES: usize = 88_200;
     const MARKER_FRAME: usize = 1_000;
 
-    let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
+    let (mut engine, mut cmd_tx, _event_rx) = graph_engine(&[routing_channel(TrackId::MASTER)]);
     let mut marker = vec![0.0; BAR_FRAMES];
     marker[MARKER_FRAME] = 1.0;
     let audio = Arc::new(DecodedAudio {
@@ -1267,7 +1304,7 @@ fn starting_transport_rephases_an_already_playing_synced_audition() {
 
 #[test]
 fn next_bar_audition_survives_arrangement_loop_wraps() {
-    let (mut engine, mut cmd_tx, mut event_rx) = AudioEngine::new();
+    let (mut engine, mut cmd_tx, mut event_rx) = graph_engine(&[routing_channel(TrackId::MASTER)]);
     cmd_tx.push(EngineCommand::SetBpm(120.0)).unwrap();
     cmd_tx
         .push(EngineCommand::SetArrangementLoopRegion {
@@ -1305,7 +1342,7 @@ fn next_bar_audition_survives_arrangement_loop_wraps() {
 
 #[test]
 fn queued_audition_starts_immediately_if_transport_stops_before_boundary() {
-    let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
+    let (mut engine, mut cmd_tx, _event_rx) = graph_engine(&[routing_channel(TrackId::MASTER)]);
     cmd_tx.push(EngineCommand::SetBpm(120.0)).unwrap();
     cmd_tx.push(EngineCommand::Seek(10_000)).unwrap();
     cmd_tx.push(EngineCommand::Play).unwrap();
@@ -1331,7 +1368,7 @@ fn queued_audition_starts_immediately_if_transport_stops_before_boundary() {
 
 #[test]
 fn stopping_a_queued_only_audition_emits_a_terminal_event() {
-    let (mut engine, mut cmd_tx, mut event_rx) = AudioEngine::new();
+    let (mut engine, mut cmd_tx, mut event_rx) = graph_engine(&[routing_channel(TrackId::MASTER)]);
     cmd_tx.push(EngineCommand::SetBpm(120.0)).unwrap();
     cmd_tx.push(EngineCommand::Seek(10_000)).unwrap();
     cmd_tx.push(EngineCommand::Play).unwrap();
@@ -1382,7 +1419,7 @@ fn beat_and_bar_boundaries_are_deterministic() {
 
 #[test]
 fn audition_loop_fades_the_source_boundary_without_silence_or_a_click() {
-    let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
+    let (mut engine, mut cmd_tx, _event_rx) = graph_engine(&[routing_channel(TrackId::MASTER)]);
     let samples: Vec<f32> = (0..4_096)
         .map(|frame| -0.5 + frame as f32 / 4_095.0)
         .collect();
@@ -1417,7 +1454,7 @@ fn audition_loop_fades_the_source_boundary_without_silence_or_a_click() {
 
 #[test]
 fn audition_reports_the_active_source_position_after_rendering() {
-    let (mut engine, mut cmd_tx, mut event_rx) = AudioEngine::new();
+    let (mut engine, mut cmd_tx, mut event_rx) = graph_engine(&[routing_channel(TrackId::MASTER)]);
     cmd_tx
         .push(EngineCommand::StartAudition {
             audio: make_constant_audio(4_096, 0.4),
@@ -1437,8 +1474,9 @@ fn audition_reports_the_active_source_position_after_rendering() {
 fn note_clip_loop_renders() {
     use vibez_core::midi::{InstrumentKind, MidiNote};
 
-    let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
     let tid = TrackId::new();
+    let (mut engine, mut cmd_tx, _event_rx) =
+        graph_engine(&[routing_channel(tid), routing_channel(TrackId::MASTER)]);
     let cid = ClipId::new();
 
     // Set sample rate first so synth is initialized properly
@@ -1504,8 +1542,9 @@ fn note_clip_loop_renders() {
 fn note_clip_reports_triggered_pitches_for_device_feedback() {
     use vibez_core::midi::{InstrumentKind, MidiNote};
 
-    let (mut engine, mut cmd_tx, mut event_rx) = AudioEngine::new();
     let track_id = TrackId::new();
+    let (mut engine, mut cmd_tx, mut event_rx) =
+        graph_engine(&[routing_channel(track_id), routing_channel(TrackId::MASTER)]);
     let clip_id = ClipId::new();
 
     cmd_tx.push(EngineCommand::add_track(track_id)).unwrap();
@@ -1561,8 +1600,9 @@ fn note_clip_reports_triggered_pitches_for_device_feedback() {
 fn synth_note_clip_does_not_report_drum_pad_activity() {
     use vibez_core::midi::{InstrumentKind, MidiNote};
 
-    let (mut engine, mut cmd_tx, mut event_rx) = AudioEngine::new();
     let track_id = TrackId::new();
+    let (mut engine, mut cmd_tx, mut event_rx) =
+        graph_engine(&[routing_channel(track_id), routing_channel(TrackId::MASTER)]);
     let clip_id = ClipId::new();
 
     cmd_tx.push(EngineCommand::add_track(track_id)).unwrap();
@@ -1618,8 +1658,9 @@ fn synth_note_clip_does_not_report_drum_pad_activity() {
 fn drum_pad_activity_dropped_by_a_full_event_ring_is_not_replayed_late() {
     use vibez_core::midi::{InstrumentKind, MidiNote};
 
-    let (mut engine, mut cmd_tx, mut event_rx) = AudioEngine::new();
     let track_id = TrackId::new();
+    let (mut engine, mut cmd_tx, mut event_rx) =
+        graph_engine(&[routing_channel(track_id), routing_channel(TrackId::MASTER)]);
     let clip_id = ClipId::new();
     cmd_tx.push(EngineCommand::add_track(track_id)).unwrap();
     cmd_tx
@@ -1713,14 +1754,21 @@ fn constant_clip_track(
 
 #[test]
 fn track_output_capture_is_post_fader_and_excludes_other_tracks() {
-    let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
+    let (mut engine, mut cmd_tx, _event_rx) = graph_engine(&[routing_channel(TrackId::MASTER)]);
     let (source, _) = constant_clip_track(&mut cmd_tx, 4096);
-    let (_other, _) = constant_clip_track(&mut cmd_tx, 4096);
+    let (other, _) = constant_clip_track(&mut cmd_tx, 4096);
     cmd_tx
         .push(EngineCommand::SetTrackGain(source, 0.5))
         .unwrap();
     cmd_tx
         .push(EngineCommand::SetTrackPan(source, 0.0))
+        .unwrap();
+    cmd_tx
+        .push(EngineCommand::SetRouting(routing_plan(&[
+            routing_channel(source),
+            routing_channel(other),
+            routing_channel(TrackId::MASTER),
+        ])))
         .unwrap();
     cmd_tx.push(EngineCommand::Play).unwrap();
 
@@ -1745,8 +1793,9 @@ fn track_output_capture_is_post_fader_and_excludes_other_tracks() {
 
 #[test]
 fn track_output_capture_stays_aligned_across_arrangement_loop_wrap() {
-    let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
     let source = TrackId::new();
+    let (mut engine, mut cmd_tx, _event_rx) =
+        graph_engine(&[routing_channel(source), routing_channel(TrackId::MASTER)]);
     cmd_tx.push(EngineCommand::add_track(source)).unwrap();
     cmd_tx
         .push(EngineCommand::AddClip {
@@ -1787,7 +1836,7 @@ fn track_output_capture_stays_aligned_across_arrangement_loop_wrap() {
 
 #[test]
 fn track_output_capture_excludes_sends_returns_master_and_inaudible_sources() {
-    let (mut engine, mut cmd_tx, source, _bus) = engine_with_send(1.0);
+    let (mut engine, mut cmd_tx, source, bus) = engine_with_send(1.0);
     cmd_tx
         .push(EngineCommand::SetTrackGain(TrackId::MASTER, 0.25))
         .unwrap();
@@ -1839,6 +1888,20 @@ fn track_output_capture_excludes_sends_returns_master_and_inaudible_sources() {
     cmd_tx
         .push(EngineCommand::SetTrackSolo(solo, true))
         .unwrap();
+    cmd_tx
+        .push(EngineCommand::SetRouting(routing_plan(&[
+            RoutingChannel {
+                sends: vec![bus],
+                ..routing_channel(source)
+            },
+            routing_channel(solo),
+            RoutingChannel {
+                is_bus: true,
+                ..routing_channel(bus)
+            },
+            routing_channel(TrackId::MASTER),
+        ])))
+        .unwrap();
     capture.fill(1.0);
     engine.process_block(
         AudioProcessBlock::new(&mut output, 2)
@@ -1851,7 +1914,7 @@ fn track_output_capture_excludes_sends_returns_master_and_inaudible_sources() {
 fn track_output_capture_follows_active_gain_and_pan_automation() {
     use vibez_core::automation::{AutomationLane, AutomationPoint, AutomationTarget};
 
-    let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
+    let (mut engine, mut cmd_tx, _event_rx) = graph_engine(&[routing_channel(TrackId::MASTER)]);
     let (source, _) = constant_clip_track(&mut cmd_tx, 4096);
     let mut gain = AutomationLane::new(AutomationTarget::TrackGain);
     gain.insert_point(AutomationPoint {
@@ -1873,6 +1936,12 @@ fn track_output_capture_follows_active_gain_and_pan_automation() {
             })
             .unwrap();
     }
+    cmd_tx
+        .push(EngineCommand::SetRouting(routing_plan(&[
+            routing_channel(source),
+            routing_channel(TrackId::MASTER),
+        ])))
+        .unwrap();
     cmd_tx.push(EngineCommand::Play).unwrap();
 
     let mut output = vec![0.0; 256];
@@ -1894,7 +1963,7 @@ fn track_output_capture_follows_active_gain_and_pan_automation() {
 fn gain_lane_ramps_track_volume_down() {
     use vibez_core::automation::{AutomationLane, AutomationPoint, AutomationTarget};
 
-    let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
+    let (mut engine, mut cmd_tx, _event_rx) = graph_engine(&[routing_channel(TrackId::MASTER)]);
     let sr = engine.sample_rate();
     let frames_total = sr as usize; // one second of audio
     let (tid, _cid) = constant_clip_track(&mut cmd_tx, frames_total);
@@ -1916,6 +1985,12 @@ fn gain_lane_ramps_track_volume_down() {
             track_id: tid,
             lane,
         })
+        .unwrap();
+    cmd_tx
+        .push(EngineCommand::SetRouting(routing_plan(&[
+            routing_channel(tid),
+            routing_channel(TrackId::MASTER),
+        ])))
         .unwrap();
     cmd_tx.push(EngineCommand::Play).unwrap();
 
@@ -1953,7 +2028,7 @@ fn gain_lane_ramps_track_volume_down() {
 fn pan_lane_moves_signal_between_channels() {
     use vibez_core::automation::{AutomationLane, AutomationPoint, AutomationTarget};
 
-    let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
+    let (mut engine, mut cmd_tx, _event_rx) = graph_engine(&[routing_channel(TrackId::MASTER)]);
     let sr = engine.sample_rate();
     let frames_total = sr as usize;
     let (tid, _cid) = constant_clip_track(&mut cmd_tx, frames_total);
@@ -1981,6 +2056,12 @@ fn pan_lane_moves_signal_between_channels() {
             lane,
         })
         .unwrap();
+    cmd_tx
+        .push(EngineCommand::SetRouting(routing_plan(&[
+            routing_channel(tid),
+            routing_channel(TrackId::MASTER),
+        ])))
+        .unwrap();
     cmd_tx.push(EngineCommand::Play).unwrap();
 
     let block = 512usize;
@@ -2006,7 +2087,7 @@ fn pan_lane_moves_signal_between_channels() {
 fn removing_a_lane_restores_the_knob_value() {
     use vibez_core::automation::{AutomationLane, AutomationPoint, AutomationTarget};
 
-    let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
+    let (mut engine, mut cmd_tx, _event_rx) = graph_engine(&[routing_channel(TrackId::MASTER)]);
     let sr = engine.sample_rate();
     let (tid, _cid) = constant_clip_track(&mut cmd_tx, sr as usize);
 
@@ -2022,6 +2103,12 @@ fn removing_a_lane_restores_the_knob_value() {
             track_id: tid,
             lane,
         })
+        .unwrap();
+    cmd_tx
+        .push(EngineCommand::SetRouting(routing_plan(&[
+            routing_channel(tid),
+            routing_channel(TrackId::MASTER),
+        ])))
         .unwrap();
     cmd_tx.push(EngineCommand::Play).unwrap();
 
@@ -2048,7 +2135,7 @@ fn effect_tails_ring_out_after_stop() {
     // A delay tail must keep sounding after the transport stops:
     // effect chains process while stopped. (This is also what
     // delivers queued plugin param changes without pressing play.)
-    let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
+    let (mut engine, mut cmd_tx, _event_rx) = graph_engine(&[routing_channel(TrackId::MASTER)]);
     let sr = engine.sample_rate() as usize;
     let (tid, _cid) = constant_clip_track(&mut cmd_tx, sr);
 
@@ -2060,6 +2147,15 @@ fn effect_tails_ring_out_after_stop() {
             vibez_core::effect::EffectType::Delay,
             crate::engine::DEFAULT_SAMPLE_RATE,
         ))
+        .unwrap();
+    cmd_tx
+        .push(EngineCommand::SetRouting(routing_plan(&[
+            RoutingChannel {
+                effects: vec![routing_effect(effect_id)],
+                ..routing_channel(tid)
+            },
+            routing_channel(TrackId::MASTER),
+        ])))
         .unwrap();
     cmd_tx.push(EngineCommand::Play).unwrap();
 
@@ -2088,8 +2184,9 @@ fn effect_tails_ring_out_after_stop() {
 
 #[test]
 fn master_gain_scales_the_summed_mix() {
-    let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
     let tid = TrackId::new();
+    let (mut engine, mut cmd_tx, _event_rx) =
+        graph_engine(&[routing_channel(tid), routing_channel(TrackId::MASTER)]);
     let cid = ClipId::new();
     cmd_tx.push(EngineCommand::add_track(tid)).unwrap();
     cmd_tx
@@ -2129,8 +2226,9 @@ fn master_gain_scales_the_summed_mix() {
 #[test]
 fn master_effect_chain_processes_the_summed_mix() {
     use vibez_core::effect::EffectType;
-    let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
     let tid = TrackId::new();
+    let (mut engine, mut cmd_tx, _event_rx) =
+        graph_engine(&[routing_channel(tid), routing_channel(TrackId::MASTER)]);
     let cid = ClipId::new();
     cmd_tx.push(EngineCommand::add_track(tid)).unwrap();
     cmd_tx
@@ -2178,6 +2276,15 @@ fn master_effect_chain_processes_the_summed_mix() {
             value: 450.0,
         })
         .unwrap();
+    cmd_tx
+        .push(EngineCommand::SetRouting(routing_plan(&[
+            routing_channel(tid),
+            RoutingChannel {
+                effects: vec![routing_effect(eq_id)],
+                ..routing_channel(TrackId::MASTER)
+            },
+        ])))
+        .unwrap();
     cmd_tx.push(EngineCommand::Play).unwrap();
 
     let mut buf = vec![0.0f32; 2_048];
@@ -2212,9 +2319,10 @@ fn master_effect_chain_processes_the_summed_mix() {
 
 #[test]
 fn spectrum_tap_streams_track_samples() {
-    let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
-    let mut spectrum_rx = engine.take_spectrum_consumer().unwrap();
     let tid = TrackId::new();
+    let (mut engine, mut cmd_tx, _event_rx) =
+        graph_engine(&[routing_channel(tid), routing_channel(TrackId::MASTER)]);
+    let mut spectrum_rx = engine.take_spectrum_consumer().unwrap();
     let cid = ClipId::new();
     cmd_tx.push(EngineCommand::add_track(tid)).unwrap();
     cmd_tx
@@ -2271,9 +2379,19 @@ fn spectrum_tap_streams_track_samples() {
 
 /// One track sending to one bus; block of constant audio.
 fn engine_with_send(send: f32) -> (AudioEngine, rtrb::Producer<EngineCommand>, TrackId, TrackId) {
-    let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
     let tid = TrackId::new();
     let bus = TrackId::new();
+    let (mut engine, mut cmd_tx, _event_rx) = graph_engine(&[
+        RoutingChannel {
+            sends: vec![bus],
+            ..routing_channel(tid)
+        },
+        RoutingChannel {
+            is_bus: true,
+            ..routing_channel(bus)
+        },
+        routing_channel(TrackId::MASTER),
+    ]);
     cmd_tx.push(EngineCommand::add_track(tid)).unwrap();
     cmd_tx
         .push(EngineCommand::AddClip {
@@ -2350,11 +2468,14 @@ fn bus_gain_and_mute_shape_the_return() {
     cmd_tx.push(EngineCommand::SetTrackMute(bus, true)).unwrap();
     buf.fill(0.0);
     engine.process(&mut buf, 2);
-    assert!(
-        (buf[0] - dry).abs() < 1e-3,
-        "muted bus contributes nothing: expected {dry} got {}",
-        buf[0]
-    );
+    for (frame, pair) in buf.chunks_exact(2).enumerate() {
+        let remaining = 63usize.saturating_sub(frame) as f32 / 64.0;
+        let expected = dry + dry * 0.5 * remaining;
+        assert!(
+            pair.iter().all(|sample| (*sample - expected).abs() < 1e-6),
+            "bus mute frame {frame}: expected {expected}, got {pair:?}"
+        );
+    }
 }
 
 #[test]
@@ -2381,7 +2502,7 @@ fn soloed_bus_keeps_its_send_input_and_suppresses_the_dry_path() {
 
 #[test]
 fn bus_effect_chain_processes_the_send_mix() {
-    let (mut engine, mut cmd_tx, _tid, bus) = engine_with_send(1.0);
+    let (mut engine, mut cmd_tx, tid, bus) = engine_with_send(1.0);
     // Slam the bus EQ's LF shelf: the return should stop doubling
     // the constant (DC-heavy) signal.
     let eq_id = EffectId::new();
@@ -2408,6 +2529,21 @@ fn bus_effect_chain_processes_the_send_mix() {
             param_index: 1,
             value: 450.0,
         })
+        .unwrap();
+
+    cmd_tx
+        .push(EngineCommand::SetRouting(routing_plan(&[
+            RoutingChannel {
+                sends: vec![bus],
+                ..routing_channel(tid)
+            },
+            RoutingChannel {
+                is_bus: true,
+                effects: vec![routing_effect(eq_id)],
+                ..routing_channel(bus)
+            },
+            routing_channel(TrackId::MASTER),
+        ])))
         .unwrap();
 
     let mut buf = vec![0.0f32; 2_048];
