@@ -292,6 +292,9 @@ fn immediate_and_missing_track_completions_return_both_unused_mailbox_endpoints(
         let mut fixture = setup();
         let target = TrackId::new();
         if !missing {
+            // The endpoint test does not depend on the separate running-plan
+            // morph: install its extra empty channel while transport is stopped.
+            fixture.commands.push(EngineCommand::Stop).unwrap();
             let mut track = EngineTrack::new(target);
             track.pan = 0.0;
             fixture.commands.push(EngineCommand::AddTrack(Box::new(track))).unwrap();
@@ -301,6 +304,7 @@ fn immediate_and_missing_track_completions_return_both_unused_mailbox_endpoints(
             fixture.commands.push(EngineCommand::SetRouting(
                 crate::routing::PreparedRouting::prepare(&model, 8).unwrap(),
             )).unwrap();
+            fixture.commands.push(EngineCommand::Play).unwrap();
             callback(&mut fixture.engine, false);
             while fixture.events.pop().is_ok() {}
         }
