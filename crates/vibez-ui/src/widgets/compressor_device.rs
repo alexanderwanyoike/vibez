@@ -47,7 +47,6 @@ pub struct Arrangement {
 
 pub fn arrange(size: Size, advanced: bool) -> Arrangement {
     let compact = size.width < MEDIUM_W;
-    let expanded = size.width >= 872.0;
     let (controls, knobs) = if size.height >= 280.0 {
         (84.0, Some(34.0))
     } else if size.height >= 160.0 {
@@ -65,7 +64,7 @@ pub fn arrange(size: Size, advanced: bool) -> Arrangement {
         0.0
     };
     let available = (size.height - TOOLBAR_H - controls - details).max(0.0);
-    let tabs = if compact && available >= 108.0 {
+    let tabs = if compact && available >= 84.0 {
         24.0
     } else {
         0.0
@@ -77,7 +76,11 @@ pub fn arrange(size: Size, advanced: bool) -> Arrangement {
         0.0
     };
     let available = available - tabs - routing;
-    let plot = if available >= 84.0 { available } else { 0.0 };
+    let plot = if compact {
+        if tabs > 0.0 && available >= 60.0 { available } else { 0.0 }
+    } else if available >= 84.0 { available } else { 0.0 };
+    let expanded = size.width >= 872.0
+        && (!advanced || sidechain_column || routing > 0.0);
     Arrangement {
         plot,
         controls,
@@ -303,13 +306,14 @@ pub fn view<'a>(
     if layout.plot > 0.0 {
         let (transfer_width, history_width) = plot_widths(size.width, layout);
         let transfer = || -> Element<'a, Message> {
-            let mut content =
-                column![section_label("Static transfer · manual internal detector")].spacing(3);
             let canvas_height = layout.plot - 4.0 - (8.0 * 1.3 + 3.0);
-            if canvas_height < 80.0 {
-                content = content.push(section_label("Output dB ↑ · Input dB →"));
-            }
-            content
+            let caption = if canvas_height < 80.0 {
+                "Manual internal · Output dB ↑ / Input dB →"
+            } else {
+                "Static transfer · manual internal detector"
+            };
+            column![section_label(caption)]
+                .spacing(3)
                 .push(
                     canvas(TransferCurve {
                         track,
@@ -375,27 +379,21 @@ pub fn view<'a>(
                     .width(SIDECHAIN_W),
             );
         }
-        let gauge = column![
-            section_label("Reduction"),
+        let mut gauge = column![].spacing(3).width(GAUGE_W).height(Length::Fill);
+        if layout.plot >= 100.0 {
+            gauge = gauge.push(section_label("Reduction"));
+        }
+        gauge = gauge.push(
             text(format!("GR {gr:.1} dB"))
-                .size(11)
+                .size(if layout.plot >= 100.0 { 11 } else { 9 })
                 .font(crate::typography::PERFORM_TECH)
                 .wrapping(iced::widget::text::Wrapping::None),
-            canvas(ReductionGauge {
-                current,
-                peak,
-                accent
-            })
-            .width(50.0)
-            .height(Length::Fill),
-            text(format!("L {:.1}  R {:.1}", current[0], current[1]))
-                .size(8)
-                .font(crate::typography::PERFORM_TECH)
-                .wrapping(iced::widget::text::Wrapping::None)
-        ]
-        .spacing(3)
-        .width(GAUGE_W)
-        .height(Length::Fill);
+        ).push(canvas(ReductionGauge { current, peak, accent }).width(50.0).height(Length::Fill));
+        if layout.plot >= 100.0 {
+            gauge = gauge.push(text(format!("L {:.1}  R {:.1}", current[0], current[1]))
+                .size(8).font(crate::typography::PERFORM_TECH)
+                .wrapping(iced::widget::text::Wrapping::None));
+        }
         body = body.push(
             container(visual.push(plots).push(gauge))
                 .height(layout.plot)
@@ -543,7 +541,7 @@ mod tests {
     fn transfer_axes_keep_a_real_plot_after_compact_axis_qualification() {
         for width in [430.0, 620.0, 900.0] {
             for height in [
-                64.0, 114.0, 116.0, 120.0, 130.0, 138.0, 140.0, 160.0, 182.0, 240.0, 304.0,
+                64.0, 114.0, 116.0, 120.0, 130.0, 138.0, 140.0, 146.0, 160.0, 182.0, 203.0, 240.0, 304.0,
             ] {
                 let layout = arrange(Size::new(width, height), false);
                 if layout.plot == 0.0 {
@@ -551,11 +549,7 @@ mod tests {
                 }
                 let caption = 8.0 * 1.3 + 3.0;
                 let available = layout.plot - 4.0 - caption;
-                let canvas_height = if available < 80.0 {
-                    available - (8.0 * 1.3 + 3.0)
-                } else {
-                    available
-                };
+                let canvas_height = available;
                 let actual = crate::widgets::compressor_display::transfer_plot(
                     iced::Rectangle::new(iced::Point::ORIGIN, Size::new(240.0, canvas_height)),
                 )
