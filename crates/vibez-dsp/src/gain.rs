@@ -125,6 +125,61 @@ impl AudioEffect for GainEffect {
 mod tests {
     use super::*;
 
+    /// Largest step between neighbouring frames of a constant input, starting
+    /// from the last frame before the change.
+    fn largest_step(before: [f32; 2], output: &[f32]) -> f32 {
+        std::iter::once(&before)
+            .chain(output.as_chunks::<2>().0)
+            .collect::<Vec<_>>()
+            .windows(2)
+            .map(|pair| {
+                (pair[1][0] - pair[0][0])
+                    .abs()
+                    .max((pair[1][1] - pair[0][1]).abs())
+            })
+            .fold(0.0, f32::max)
+    }
+
+    #[test]
+    fn a_change_while_playing_ramps_instead_of_stepping() {
+        let mut fx = GainEffect::new();
+        let mut warmup = [1.0; 64];
+        fx.process(&mut warmup, 2);
+
+        assert!(fx.set_param(0, 0.0));
+        let mut output = [1.0; 2048];
+        fx.process(&mut output, 2);
+
+        let step = largest_step([warmup[62], warmup[63]], &output);
+        assert!(step < 0.01, "{step}");
+        assert_eq!(output[output.len() - 1], 0.0, "reaches the new gain");
+    }
+
+    #[test]
+    fn a_polarity_flip_while_playing_passes_through_zero_without_a_click() {
+        let mut fx = GainEffect::new();
+        let mut warmup = [1.0; 64];
+        fx.process(&mut warmup, 2);
+
+        assert!(fx.set_param(3, 1.0));
+        let mut output = [1.0; 2048];
+        fx.process(&mut output, 2);
+
+        let step = largest_step([warmup[62], warmup[63]], &output);
+        assert!(step < 0.01, "{step}");
+        assert_eq!(output[output.len() - 2], -1.0, "left ends inverted");
+        assert_eq!(output[output.len() - 1], 1.0, "right untouched");
+    }
+
+    #[test]
+    fn values_set_before_any_audio_apply_at_once() {
+        let mut fx = GainEffect::new();
+        assert!(fx.set_param(0, 0.5));
+        let mut output = [1.0; 4];
+        fx.process(&mut output, 2);
+        assert_eq!(output, [0.5; 4]);
+    }
+
     #[test]
     fn gain_unity_passthrough() {
         let mut fx = GainEffect::new();
