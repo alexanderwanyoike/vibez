@@ -58,6 +58,7 @@ impl EngineCommand {
             Self::ResumeDeviceReconfiguration { .. } => 2,
             Self::ReplaceClipAudio { .. } | Self::ReplaceClipBuffer { .. } => 1,
             Self::SetClipWarpMarkers { .. } => 1,
+            Self::ReorderTracks(_) => 1,
             _ => 2,
         }
     }

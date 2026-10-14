@@ -364,7 +364,7 @@ fn cases() -> Vec<Case> {
         case!("UnloadAudio", false, |_| C::UnloadAudio),
         case!("AddTrack", false, |_| C::add_track(TrackId::new())),
         case!("RemoveTrack", false, |f| C::RemoveTrack(f.audio)),
-        case!("ReorderTracks", true, |f| C::ReorderTracks(vec![
+        case!("ReorderTracks", false, |f| C::ReorderTracks(vec![
             f.audio,
             f.synth,
             f.drums,
