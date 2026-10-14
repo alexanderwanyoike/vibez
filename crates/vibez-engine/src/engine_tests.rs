@@ -33,11 +33,45 @@ fn start_audition(audio: Arc<DecodedAudio>) -> EngineCommand {
     }
 }
 
+fn add_unity_clip(
+    commands: &mut Producer<EngineCommand>,
+    track_id: TrackId,
+    audio: Arc<DecodedAudio>,
+) {
+    let duration = audio.num_frames() as u64;
+    commands.push(EngineCommand::add_track(track_id)).unwrap();
+    // Isolate sample addressing from the track's equal-power centre pan.
+    commands
+        .push(EngineCommand::SetTrackGain(
+            track_id,
+            std::f32::consts::SQRT_2,
+        ))
+        .unwrap();
+    commands
+        .push(EngineCommand::AddClip {
+            track_id,
+            clip_id: ClipId::new(),
+            audio,
+            position: 0,
+            source_offset: 0,
+            start_marker: 0,
+            duration,
+            loop_enabled: false,
+            loop_start: 0,
+            loop_end: 0,
+            linear_gain: 1.0,
+            fades: Default::default(),
+            playback_direction: Default::default(),
+            warp_markers: Default::default(),
+        })
+        .unwrap();
+}
+
 #[test]
 fn new_returns_ring_buffer_endpoints() {
     let (engine, _cmd_tx, _event_rx) = AudioEngine::new();
     assert!(!engine.transport().is_playing());
-    assert!(engine.audio().is_none());
+    assert!(engine.tracks().is_empty());
 }
 
 #[test]
@@ -164,13 +198,13 @@ fn stop_command_stops_transport() {
 }
 
 #[test]
-fn load_audio_and_play() {
-    let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
+fn clip_audio_and_play() {
+    let tid = TrackId::new();
+    let (mut engine, mut cmd_tx, _event_rx) =
+        graph_engine(&[routing_channel(tid), routing_channel(TrackId::MASTER)]);
     let audio = make_test_audio(1024);
 
-    cmd_tx
-        .push(EngineCommand::LoadAudio(audio.clone()))
-        .unwrap();
+    add_unity_clip(&mut cmd_tx, tid, Arc::clone(&audio));
     cmd_tx.push(EngineCommand::Play).unwrap();
 
     let mut buf = vec![0.0f32; 16]; // 8 frames stereo
@@ -198,12 +232,12 @@ fn load_audio_and_play() {
 
 #[test]
 fn seek_then_play() {
-    let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
+    let tid = TrackId::new();
+    let (mut engine, mut cmd_tx, _event_rx) =
+        graph_engine(&[routing_channel(tid), routing_channel(TrackId::MASTER)]);
     let audio = make_test_audio(1024);
 
-    cmd_tx
-        .push(EngineCommand::LoadAudio(audio.clone()))
-        .unwrap();
+    add_unity_clip(&mut cmd_tx, tid, Arc::clone(&audio));
     cmd_tx.push(EngineCommand::Seek(100)).unwrap();
     cmd_tx.push(EngineCommand::Play).unwrap();
 
@@ -217,23 +251,26 @@ fn seek_then_play() {
 }
 
 #[test]
-fn unload_audio_stops_and_clears() {
-    let (mut engine, mut cmd_tx, mut event_rx) = AudioEngine::new();
+fn unload_audio_stops_and_clears_playback_lifecycle() {
+    let tid = TrackId::new();
+    let (mut engine, mut cmd_tx, mut event_rx) =
+        graph_engine(&[routing_channel(tid), routing_channel(TrackId::MASTER)]);
     let audio = make_test_audio(1024);
 
-    cmd_tx.push(EngineCommand::LoadAudio(audio)).unwrap();
+    add_unity_clip(&mut cmd_tx, tid, audio);
     cmd_tx.push(EngineCommand::Play).unwrap();
 
     let mut buf = vec![0.0f32; 16];
     engine.process(&mut buf, 2);
-    assert!(engine.audio().is_some());
+    assert_eq!(engine.transport.audio_length(), Some(1024));
 
     cmd_tx.push(EngineCommand::UnloadAudio).unwrap();
 
     let mut buf = vec![0.0f32; 16];
     engine.process(&mut buf, 2);
 
-    assert!(engine.audio().is_none());
+    assert_eq!(engine.transport.audio_length(), None);
+    assert!(buf.iter().all(|sample| *sample == 0.0));
     assert!(!engine.transport().is_playing());
 
     // Drain events and check for PlaybackStopped.
@@ -259,10 +296,12 @@ fn set_bpm_command() {
 
 #[test]
 fn metering_events_are_sent() {
-    let (mut engine, mut cmd_tx, mut event_rx) = AudioEngine::new();
+    let tid = TrackId::new();
+    let (mut engine, mut cmd_tx, mut event_rx) =
+        graph_engine(&[routing_channel(tid), routing_channel(TrackId::MASTER)]);
     let audio = make_test_audio(1024);
 
-    cmd_tx.push(EngineCommand::LoadAudio(audio)).unwrap();
+    add_unity_clip(&mut cmd_tx, tid, audio);
     cmd_tx.push(EngineCommand::Play).unwrap();
 
     let mut buf = vec![0.0f32; 512];
@@ -296,10 +335,12 @@ fn position_events_are_sent() {
 
 #[test]
 fn auto_stop_at_end_of_audio() {
-    let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
+    let tid = TrackId::new();
+    let (mut engine, mut cmd_tx, _event_rx) =
+        graph_engine(&[routing_channel(tid), routing_channel(TrackId::MASTER)]);
     let audio = make_test_audio(16); // only 16 frames
 
-    cmd_tx.push(EngineCommand::LoadAudio(audio)).unwrap();
+    add_unity_clip(&mut cmd_tx, tid, audio);
     cmd_tx.push(EngineCommand::Play).unwrap();
 
     // Request 32 frames (more than the 16 available).
@@ -347,10 +388,12 @@ fn arrangement_recording_advances_past_the_existing_content_end() {
 
 #[test]
 fn multiple_process_calls_advance_position() {
-    let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
+    let tid = TrackId::new();
+    let (mut engine, mut cmd_tx, _event_rx) =
+        graph_engine(&[routing_channel(tid), routing_channel(TrackId::MASTER)]);
     let audio = make_test_audio(1024);
 
-    cmd_tx.push(EngineCommand::LoadAudio(audio)).unwrap();
+    add_unity_clip(&mut cmd_tx, tid, audio);
     cmd_tx.push(EngineCommand::Play).unwrap();
 
     let mut buf = vec![0.0f32; 128]; // 64 frames
@@ -371,8 +414,10 @@ fn mono_audio_to_stereo_output() {
         sample_rate: 44_100,
     });
 
-    let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
-    cmd_tx.push(EngineCommand::LoadAudio(mono_audio)).unwrap();
+    let tid = TrackId::new();
+    let (mut engine, mut cmd_tx, _event_rx) =
+        graph_engine(&[routing_channel(tid), routing_channel(TrackId::MASTER)]);
+    add_unity_clip(&mut cmd_tx, tid, mono_audio);
     cmd_tx.push(EngineCommand::Play).unwrap();
 
     let mut buf = vec![0.0f32; 16]; // 8 frames stereo
@@ -800,21 +845,15 @@ fn multi_track_summing() {
 }
 
 #[test]
-fn legacy_compat_with_tracks_present() {
-    // When tracks exist, legacy audio is ignored (multi-track path is used)
-    let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
-    let legacy_audio = make_constant_audio(100, 0.9);
+fn empty_routed_track_is_silent_during_playback() {
     let tid = TrackId::new();
-
-    cmd_tx.push(EngineCommand::LoadAudio(legacy_audio)).unwrap();
+    let (mut engine, mut cmd_tx, _event_rx) =
+        graph_engine(&[routing_channel(tid), routing_channel(TrackId::MASTER)]);
     cmd_tx.push(EngineCommand::add_track(tid)).unwrap();
     cmd_tx.push(EngineCommand::Play).unwrap();
-
-    let mut buf = vec![0.0f32; 16];
+    let mut buf = [1.0; 16];
     engine.process(&mut buf, 2);
-
-    // Track has no clips, so output should be silent despite legacy audio being loaded
-    assert!(buf.iter().all(|&s| s == 0.0));
+    assert_eq!(buf, [0.0; 16]);
 }
 
 #[test]
