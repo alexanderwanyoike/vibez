@@ -67,7 +67,7 @@ impl App {
                 let track = self.state.find_track(track_id)?;
                 let focused = (self.state.view.workspace != crate::state::Workspace::Mix
                     && self.state.view.detail_panel_tab == crate::state::DetailPanelTab::Devices)
-                    .then(|| self.eq_spectrum.focus)
+                    .then_some(self.eq_spectrum.focus)
                     .flatten()
                     .filter(|(owner, _)| *owner == track_id)
                     .and_then(|(_, id)| {
