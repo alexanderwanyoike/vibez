@@ -235,6 +235,7 @@ impl App {
                         self.state.status_text = format!("{name}: {reason}");
                     }
                     EngineEvent::RetiredAutomationLane(lane) => drop(lane),
+                    EngineEvent::RetiredWarpMarkers(markers) => drop(markers),
                     EngineEvent::RetiredChannel(channel) => {
                         drop(channel);
                     }

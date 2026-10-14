@@ -443,11 +443,14 @@ impl AudioEngine {
                     clip_id,
                     warp_markers,
                 } => {
-                    if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
+                    let retired = if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
                         track
                             .playback_source
-                            .set_clip_warp_markers(clip_id, warp_markers);
-                    }
+                            .set_clip_warp_markers(clip_id, warp_markers)
+                    } else {
+                        warp_markers
+                    };
+                    self.retire_event(EngineEvent::RetiredWarpMarkers(retired));
                 }
                 EngineCommand::SetClipBounds {
                     track_id,
