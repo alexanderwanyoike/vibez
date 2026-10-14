@@ -184,4 +184,87 @@ mod tests {
             );
         }
     }
+
+    fn sounding_panel() -> EqPanel {
+        let mut panel = EqPanel::default();
+        let signal: Vec<_> = (0..2048)
+            .map(|sample| (sample as f32 * 0.1).sin() * 0.25)
+            .collect();
+        panel.spectrum.ingest(&signal);
+        panel.spectrum.analyse(48000.0);
+        assert!(panel.spectrum.active);
+        panel
+    }
+
+    fn assert_empty_analysis(panel: &mut EqPanel) {
+        assert!(!panel.spectrum.active);
+        assert!(panel
+            .spectrum
+            .bins
+            .iter()
+            .all(|value| *value == crate::spectrum::FLOOR_DB));
+        panel.spectrum.analyse(48000.0);
+        assert!(!panel.spectrum.active, "source history survived reset");
+    }
+
+    #[test]
+    fn panel_clamps_band_selection_to_the_four_console_bands() {
+        let (track, effect) = (TrackId::new(), EffectId::new());
+        let mut panel = EqPanel::default();
+        for (requested, expected) in [(0, 0), (2, 2), (3, 3), (4, 3), (usize::MAX, 3), (0, 0)] {
+            panel.update(EqMsg::SelectBand(track, effect, requested));
+            assert_eq!(panel.selected_band, expected);
+        }
+    }
+
+    #[test]
+    fn choosing_source_resolves_position_and_discards_previous_audio_history() {
+        let (track, effect) = (TrackId::new(), EffectId::new());
+        for source in [
+            EffectSpectrumPosition::Input,
+            EffectSpectrumPosition::Output,
+        ] {
+            let mut panel = sounding_panel();
+            panel.update(EqMsg::Source(track, effect, source));
+            assert_eq!(panel.position(), source);
+            assert_empty_analysis(&mut panel);
+        }
+    }
+
+    #[test]
+    fn freeze_preserves_display_and_unfreeze_discards_stored_audio_history() {
+        let (track, effect) = (TrackId::new(), EffectId::new());
+        let mut panel = sounding_panel();
+        let bins = panel.spectrum.bins.clone();
+        panel.update(EqMsg::Freeze(track, effect));
+        assert!(panel.frozen);
+        assert!(panel.spectrum.active);
+        assert_eq!(panel.spectrum.bins, bins);
+        panel.update(EqMsg::Freeze(track, effect));
+        assert!(!panel.frozen);
+        assert_empty_analysis(&mut panel);
+    }
+
+    #[test]
+    fn analyser_focus_does_not_change_panel_choices_or_signal_history() {
+        let (track, effect) = (TrackId::new(), EffectId::new());
+        let mut panel = sounding_panel();
+        panel.selected_band = 2;
+        panel.post = true;
+        panel.frozen = true;
+        panel.last_sample_at = Some(std::time::Instant::now());
+        let last = panel.last_sample_at;
+        let bins = panel.spectrum.bins.clone();
+        panel.update(EqMsg::Focus(track, effect));
+        assert_eq!(panel.selected_band, 2);
+        assert_eq!(panel.position(), EffectSpectrumPosition::Output);
+        assert!(panel.frozen && panel.spectrum.active);
+        assert_eq!(panel.spectrum.bins, bins);
+        assert_eq!(panel.last_sample_at, last);
+        panel.spectrum.analyse(48000.0);
+        assert!(
+            panel.spectrum.active,
+            "focus discarded the stored audio window"
+        );
+    }
 }
