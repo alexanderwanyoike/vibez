@@ -33,7 +33,12 @@ fn sample_hold_snapshot_contains_actual_left_audio_and_the_acquisition_schedule(
     let mut effect =
         create_effect_with_params(EffectType::Bitcrush, 48_000.0, &[2.0, 3.0, 0.25, 6.0]);
     effect.process(&mut audio, 2);
-    let actual_left: Vec<_> = audio.chunks_exact(2).map(|frame| frame[0]).collect();
+    let actual_left: Vec<_> = audio
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|frame| frame[0])
+        .collect();
     assert_eq!(actual_left, expected);
     let meter = effect
         .take_sample_hold_meter()
@@ -66,7 +71,7 @@ fn assert_five_frame_window(meter: SampleHoldMeter, input: &[f32], output: &[f32
         let observed = meter.primary_acquisitions[point / 64] & (1_u64 << (point % 64)) != 0;
         assert_eq!(
             observed,
-            point < count && (first + point as u64) % 5 == 0,
+            point < count && (first + point as u64).is_multiple_of(5),
             "point={point}, first={first}, count={count}"
         );
     }
