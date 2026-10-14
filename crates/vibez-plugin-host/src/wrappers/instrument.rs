@@ -1,3 +1,5 @@
+//! Hosted plugin adapter for the native instrument interface.
+
 use std::sync::Arc;
 
 use vibez_core::audio_buffer::DecodedAudio;
