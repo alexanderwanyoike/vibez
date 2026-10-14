@@ -102,6 +102,9 @@ pub struct DriveEffect {
     remaining: [u32; param::COUNT],
     started: bool,
     character: ChoiceFade<4>,
+    quality: ChoiceFade<3>,
+    quality_delay: [[f32; 3]; 64],
+    audible_quality: [f32; 3],
     character_delay: [[f32; 4]; 64],
     audible_character: [f32; 4],
     /// One-pole high-shelf-ish state, per channel.
@@ -135,6 +138,9 @@ impl DriveEffect {
             remaining: [0; param::COUNT],
             started: false,
             character: ChoiceFade::new(0),
+            quality: ChoiceFade::new(2),
+            quality_delay: [[0.0, 0.0, 1.0]; 64],
+            audible_quality: [0.0, 0.0, 1.0],
             character_delay: [[1.0, 0.0, 0.0, 0.0]; 64],
             audible_character: [1.0, 0.0, 0.0, 0.0],
             z: [0.0; 2],
@@ -168,6 +174,10 @@ impl DriveEffect {
         if index == param::CHARACTER {
             self.character.edit(target as usize, automated || !self.started);
             if !self.started { self.character_delay = [self.character.weights; 64]; self.audible_character = self.character.weights; }
+        }
+        if index == param::QUALITY {
+            self.quality.edit(target as usize, automated || !self.started);
+            if !self.started { self.quality_delay = [self.quality.weights; 64]; self.audible_quality = self.quality.weights; }
         }
         let choice = matches!(index, param::CHARACTER | param::QUALITY);
         if automated || !self.started || choice {
@@ -274,6 +284,9 @@ impl AudioEffect for DriveEffect {
         for frame in 0..frames {
             self.started = true;
             self.character.advance();
+            self.quality.advance();
+            self.audible_quality = self.quality_delay[self.delay_position];
+            self.quality_delay[self.delay_position] = self.quality.weights;
             self.audible_character = self.character_delay[self.delay_position];
             self.character_delay[self.delay_position] = self.character.weights;
             for index in 0..param::COUNT {
@@ -325,10 +338,9 @@ impl AudioEffect for DriveEffect {
                 let aligned_dry = self.dry_delay[self.delay_position][c];
                 self.dry_delay[self.delay_position][c] = dry;
                 let weights = self.audible_character;
-                let quality = self.audible[param::QUALITY] as usize;
                 let mut modern = 0.0;
                 for (index, path) in self.oversampling.iter_mut().enumerate() {
-                    let selected = if index == quality { [weights[1], weights[2], weights[3]] } else { [0.0; 3] };
+                    let selected = [weights[1], weights[2], weights[3]].map(|weight| weight * self.audible_quality[index]);
                     modern += path.process(shaper_input, c, modern_gain, modern_norm, selected);
                 }
                 let input = modern as f64;
@@ -357,6 +369,9 @@ impl AudioEffect for DriveEffect {
         self.remaining = [0; param::COUNT];
         self.started = false;
         self.character = ChoiceFade::new(self.params[param::CHARACTER] as usize);
+        self.quality = ChoiceFade::new(self.params[param::QUALITY] as usize);
+        self.quality_delay = [self.quality.weights; 64];
+        self.audible_quality = self.quality.weights;
         self.character_delay = [self.character.weights; 64];
         self.audible_character = self.character.weights;
         self.z = [0.0; 2];
