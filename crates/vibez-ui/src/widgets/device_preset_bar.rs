@@ -5,8 +5,8 @@ use iced::{Color, Element, Length, Theme};
 use vibez_core::device_preset::DevicePreset;
 use vibez_core::id::TrackId;
 
-use crate::app::device_presets::DevicePresetMsg;
 use crate::domains::device_presets::presentation;
+use crate::domains::device_presets::DevicePresetMsg;
 use crate::message::Message;
 use crate::state::UiEffect;
 use crate::theme as th;

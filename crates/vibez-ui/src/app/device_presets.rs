@@ -4,33 +4,11 @@ use super::*;
 use vibez_core::device_preset::DevicePreset;
 use vibez_core::id::{EffectId, TrackId};
 
-#[derive(Debug, Clone)]
-pub enum DevicePresetMsg {
-    Load(TrackId, EffectId),
-    Save(TrackId, EffectId),
-    Loaded(PresetLoadRequest, Result<Option<DevicePreset>, String>),
-    Saved(PresetSaveRequest, Result<Option<DevicePreset>, String>),
-}
+use crate::domains::device_presets::{DevicePresetMsg, PresetLoadRequest, PresetSaveRequest};
 
 #[cfg(test)]
 #[path = "device_preset_flow_tests.rs"]
 mod flow_tests;
-
-#[derive(Debug, Clone)]
-pub struct PresetSaveRequest {
-    pub token: u64,
-    pub track_id: TrackId,
-    pub effect_id: EffectId,
-    pub preset: DevicePreset,
-}
-
-#[derive(Debug, Clone)]
-pub struct PresetLoadRequest {
-    pub token: u64,
-    pub track_id: TrackId,
-    pub effect_id: EffectId,
-    pub expected: DevicePreset,
-}
 
 impl App {
     pub(super) fn update_device_preset(&mut self, message: DevicePresetMsg) -> Task<Message> {

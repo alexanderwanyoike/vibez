@@ -2,8 +2,33 @@
 
 use vibez_core::device_preset::{DevicePreset, DevicePresetKind};
 use vibez_core::effect::EffectType;
+use vibez_core::id::{EffectId, TrackId};
 
 use crate::state::UiEffect;
+
+#[derive(Debug, Clone)]
+pub enum DevicePresetMsg {
+    Load(TrackId, EffectId),
+    Save(TrackId, EffectId),
+    Loaded(PresetLoadRequest, Result<Option<DevicePreset>, String>),
+    Saved(PresetSaveRequest, Result<Option<DevicePreset>, String>),
+}
+
+#[derive(Debug, Clone)]
+pub struct PresetSaveRequest {
+    pub token: u64,
+    pub track_id: TrackId,
+    pub effect_id: EffectId,
+    pub preset: DevicePreset,
+}
+
+#[derive(Debug, Clone)]
+pub struct PresetLoadRequest {
+    pub token: u64,
+    pub track_id: TrackId,
+    pub effect_id: EffectId,
+    pub expected: DevicePreset,
+}
 
 const GAIN_KEYS: [&str; 5] = [
     "gain",
