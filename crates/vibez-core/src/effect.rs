@@ -51,6 +51,33 @@ impl EffectType {
     }
 }
 
+/// Consecutive left-channel samples share the effect-local output clock and reported delay.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct WaveShaperMeter {
+    pub input: [f32; 128],
+    pub output: [f32; 128],
+    pub count: u16,
+    pub sample_rate: f32,
+    pub first_output_sample: u64,
+    pub latency_samples: u32,
+    /// Signed amplitude mapping excludes memoryful tone, filters and resampling stages.
+    pub transfer: [f32; 65],
+}
+
+impl Default for WaveShaperMeter {
+    fn default() -> Self {
+        Self {
+            input: [0.0; 128],
+            output: [0.0; 128],
+            count: 0,
+            sample_rate: 0.0,
+            first_output_sample: 0,
+            latency_samples: 0,
+            transfer: [0.0; 65],
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct ParamDescriptor {
     pub name: &'static str,
