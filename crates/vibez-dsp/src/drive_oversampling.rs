@@ -54,7 +54,7 @@ impl OversamplingPath {
             } else if phase * 2 == self.factor {
                 symmetric_dot(&history[1..], &self.phases[phase][..HOST_TAPS - 1])
             } else {
-                history.iter().rev().zip(&self.phases[phase]).map(|(sample, coefficient)| sample * coefficient).sum()
+                reversed_dot(history, &self.phases[phase])
             };
             let driven = interpolated * gain;
             let limited = driven.clamp(-1.0, 1.0);
@@ -109,5 +109,20 @@ fn symmetric_dot(samples: &[f32], coefficients: &[f32]) -> f32 {
         result += (samples[index] + samples[samples.len() - 1 - index]) * coefficients[index];
     }
     if coefficients.len() % 2 == 1 { result += samples[midpoint] * coefficients[midpoint]; }
+    result
+}
+
+fn reversed_dot(samples: &[f32], coefficients: &[f32]) -> f32 {
+    let mut sums = [0.0; 4];
+    for group in 0..coefficients.len() / 4 {
+        for lane in 0..4 {
+            let index = group * 4 + lane;
+            sums[lane] += samples[samples.len() - 1 - index] * coefficients[index];
+        }
+    }
+    let mut result: f32 = sums.into_iter().sum();
+    for index in coefficients.len() / 4 * 4..coefficients.len() {
+        result += samples[samples.len() - 1 - index] * coefficients[index];
+    }
     result
 }
