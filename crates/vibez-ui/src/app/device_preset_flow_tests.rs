@@ -235,3 +235,19 @@ fn undo_keeps_the_remembered_preset_and_lets_a_save_finish() {
     )));
     assert_eq!(app.state.status_text, "Saved preset: Saved after undo");
 }
+
+#[test]
+fn a_load_cancelled_by_an_edit_says_so() {
+    let (mut app, track_id, effect_id) = gain_app();
+    let _ = app.update(Message::DevicePreset(DevicePresetMsg::Load(
+        track_id, effect_id,
+    )));
+    let _ = app.update(Message::Devices(DevicesMsg::SetEffectParam(
+        track_id, effect_id, 1, 3.0,
+    )));
+    assert!(app.device_preset_load_target.is_none());
+    assert_eq!(
+        app.state.status_text,
+        "Preset load cancelled: the device changed while choosing a file"
+    );
+}
