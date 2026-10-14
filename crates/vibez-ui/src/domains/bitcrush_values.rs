@@ -1,4 +1,4 @@
-//! Bitcrush clock edits express actual host-rate divisions without changing stored units.
+//! Native Bitcrush value edits preserve legacy storage with stepped bits and host-rate hertz.
 
 pub fn parse_bits(text: &str, current: f32) -> Option<f32> {
     let text = text.trim().to_ascii_lowercase();
