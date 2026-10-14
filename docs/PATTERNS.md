@@ -133,6 +133,21 @@ retirement event and starts no plan morph. Subsequent publications return the
 displaced project plan through the existing bounded retirement path. This
 preserves startup event order without destroying the bootstrap in the callback.
 
+`CompensationPlanState` owns applied-plan validity independently of an
+outstanding structural-plan expectation. Effect-chain command admission marks
+only the expectation; invalidating a rejected replacement preserves that wait.
+Play and automation-only graph publication repair neither fact. Only admitted
+full routing publication or a successful current device resume accepts both.
+Prepared graph retirement and device handoff owners keep their existing,
+separate lifetimes, including when a full UI ring blocks command admission.
+
+The global processing gate still combines these plan facts with suspension,
+presentation health and live hosted-device requests. It is not a pure state
+query. Capture admission checks local failure first and applied-plan validity
+second; a structural wait or another global gate does not independently refuse
+Capture. Device observation and Capture lifecycle ownership remain separate
+migration steps.
+
 Structural channel/effect changes must be followed by a new plan prepared
 outside the callback. Send topology
 includes every configured Send target, including zero-level sends and empty
