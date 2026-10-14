@@ -8,6 +8,8 @@ use vibez_core::effect::{EffectType, SampleHoldMeter};
 #[test]
 fn sample_hold_cache_requires_current_native_selection_and_prepared_context() {
     let mut app = super::super::test_support::app();
+    app.state.transport.sample_rate = 48_000;
+    app.send_command(EngineCommand::SetSampleRate(48_000));
     app.state.view.workspace = Workspace::Arrange;
     app.state.view.detail_panel_tab = DetailPanelTab::Devices;
     let channel = ProjectTrack::new(TrackId::new(), "Bitcrush".into(), 3);
