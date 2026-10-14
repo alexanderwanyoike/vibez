@@ -1,3 +1,5 @@
+//! Bitcrush quantization and source-frame sample-and-hold processing.
+
 use vibez_core::effect::{EffectType, ParamDescriptor};
 
 use crate::effect::AudioEffect;
@@ -92,15 +94,18 @@ impl AudioEffect for BitcrushEffect {
     }
 
     fn process(&mut self, buffer: &mut [f32], channels: usize) {
-        let ch = channels.clamp(1, 2);
-        let frames = buffer.len() / ch;
+        if channels == 0 {
+            return;
+        }
+        let ch = channels.min(2);
+        let frames = buffer.len() / channels;
         let levels = 2u32.pow(self.bits as u32) as f32;
         let step = 2.0 / levels;
         let divider = self.sr_divider.round().max(1.0) as u32;
 
         for frame in 0..frames {
             for c in 0..ch {
-                let idx = frame * ch + c;
+                let idx = frame * channels + c;
                 let dry = buffer[idx];
 
                 if self.counter[c] == 0 {
