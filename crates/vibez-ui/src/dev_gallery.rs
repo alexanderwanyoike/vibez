@@ -435,6 +435,7 @@ impl EqGallery {
                     crate::widgets::eq_device::preset_bar_width(size),
                 ),
                 vibez_engine::metering::MeterValues::SILENT,
+                vibez_engine::metering::MeterValues::SILENT,
                 48000.0,
                 size,
             )

@@ -11,6 +11,7 @@ pub mod drag;
 pub mod effect_knob;
 pub mod effect_slot;
 pub mod eq_device;
+mod eq_device_controls;
 pub mod eq_display;
 pub mod fader;
 pub mod gain_device;

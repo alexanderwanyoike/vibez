@@ -263,6 +263,11 @@ impl App {
                 self.device_meters
                     .readings
                     .get(&effect.id)
+                    .map(|readings| readings.input)
+                    .unwrap_or(vibez_engine::metering::MeterValues::SILENT),
+                self.device_meters
+                    .readings
+                    .get(&effect.id)
                     .map(|readings| readings.output)
                     .unwrap_or(vibez_engine::metering::MeterValues::SILENT),
                 self.state.transport.sample_rate as f32,
