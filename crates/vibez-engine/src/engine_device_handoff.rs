@@ -1,6 +1,28 @@
-//! Own the handoff token, issued identity and retained parameter allocation across transfer attempts.
+//! Own device handoff identity, scope, suspension and retained intent across transfer attempts.
 
 use vibez_core::id::{EffectId, TrackId};
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum RecoveryScope {
+    LocalRecovery,
+    ProjectRestart,
+}
+
+impl RecoveryScope {
+    pub(super) fn from_recovery_request(local_recovery: bool) -> Self {
+        if local_recovery {
+            Self::LocalRecovery
+        } else {
+            Self::ProjectRestart
+        }
+    }
+}
+
+#[derive(PartialEq, Eq)]
+enum ProjectSuspension {
+    Clear,
+    Suspended,
+}
 
 #[derive(Clone, Copy)]
 pub(super) struct PendingDeviceReconfiguration {
@@ -9,7 +31,13 @@ pub(super) struct PendingDeviceReconfiguration {
     pub(super) effect_id: Option<EffectId>,
     pub(super) position: usize,
     pub(super) bypass: bool,
-    pub(super) local_recovery: bool,
+    pub(super) scope: RecoveryScope,
+}
+
+impl PendingDeviceReconfiguration {
+    pub(super) fn is_local_recovery(&self) -> bool {
+        self.scope == RecoveryScope::LocalRecovery
+    }
 }
 
 pub(super) enum ParameterRetention {
@@ -20,6 +48,8 @@ pub(super) enum ParameterRetention {
 pub(super) struct DeviceHandoffState {
     last_issued_identity: u64,
     pending: Option<PendingDeviceReconfiguration>,
+    // Publication and restoration move metadata before project suspension changes.
+    suspension: ProjectSuspension,
     // Canceling a token clears intent; its backing allocation survives until engine teardown.
     parameters: Vec<(usize, f32)>,
 }
@@ -29,12 +59,28 @@ impl Default for DeviceHandoffState {
         Self {
             last_issued_identity: 0,
             pending: None,
+            suspension: ProjectSuspension::Clear,
             parameters: Vec::with_capacity(2048),
         }
     }
 }
 
 impl DeviceHandoffState {
+    pub(super) fn is_suspended(&self) -> bool {
+        self.suspension == ProjectSuspension::Suspended
+    }
+
+    pub(super) fn publication_succeeded(&mut self, scope: RecoveryScope) {
+        self.suspension = match scope {
+            RecoveryScope::LocalRecovery => ProjectSuspension::Clear,
+            RecoveryScope::ProjectRestart => ProjectSuspension::Suspended,
+        };
+    }
+
+    pub(super) fn clear_suspension(&mut self) {
+        self.suspension = ProjectSuspension::Clear;
+    }
+
     pub(super) fn candidate_identity(&self) -> Option<u64> {
         self.last_issued_identity.checked_add(1)
     }

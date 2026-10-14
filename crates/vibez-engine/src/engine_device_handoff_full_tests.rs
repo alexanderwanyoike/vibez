@@ -242,7 +242,7 @@ fn full_publication_restores_same_box_and_consumes_identity_before_retry() {
                 pending.effect_id,
                 pending.position,
                 pending.bypass,
-                pending.local_recovery
+                pending.is_local_recovery()
             ),
             (2, track_id, Some(effects[1]), 1, bypass, false)
         );
