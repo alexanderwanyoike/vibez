@@ -411,3 +411,152 @@ fn legacy_unload_combined_source_capture_and_presentation_pressure_returns_all_u
     assert_eq!(recording_audio.audio.strong_count(), 0);
     assert!(expected_clips.iter().all(|owner| owner.audio.strong_count() == 0));
 }
+
+#[derive(Clone, Copy, Debug)]
+enum LegacyOwnership {
+    Empty,
+    Unique,
+    Shared,
+    SameAllocation,
+}
+
+#[test]
+fn legacy_owner_state_and_format_matrix_preserves_existing_render_and_transport_rules() {
+    struct Case {
+        name: &'static str,
+        ownership: LegacyOwnership,
+        channels: usize,
+        frames: usize,
+        playing: bool,
+    }
+    let cases = [
+        Case { name: "initial empty", ownership: LegacyOwnership::Empty, channels: 2, frames: 32, playing: true },
+        Case { name: "unique stopped", ownership: LegacyOwnership::Unique, channels: 2, frames: 32, playing: false },
+        Case { name: "shared playing", ownership: LegacyOwnership::Shared, channels: 2, frames: 32, playing: true },
+        Case { name: "same allocation playing", ownership: LegacyOwnership::SameAllocation, channels: 2, frames: 128, playing: true },
+        Case { name: "mono fallback", ownership: LegacyOwnership::Unique, channels: 1, frames: 32, playing: true },
+        Case { name: "stereo fallback", ownership: LegacyOwnership::Unique, channels: 2, frames: 32, playing: true },
+        Case { name: "zero channels", ownership: LegacyOwnership::Unique, channels: 0, frames: 0, playing: true },
+        Case { name: "zero frames", ownership: LegacyOwnership::Unique, channels: 2, frames: 0, playing: true },
+        Case { name: "shorter than cursor", ownership: LegacyOwnership::Unique, channels: 2, frames: 3, playing: true },
+        Case { name: "ends within callback", ownership: LegacyOwnership::Unique, channels: 2, frames: 7, playing: true },
+    ];
+    for case in cases {
+        let (mut engine, mut commands, mut events) = AudioEngine::new();
+        let old = Arc::new(DecodedAudio { channels: vec![vec![0.125; 128]; 2], sample_rate: 1000 });
+        let old_owner = Arc::downgrade(&old);
+        let external = match case.ownership {
+            LegacyOwnership::Shared | LegacyOwnership::SameAllocation => Some(old.clone()),
+            _ => None,
+        };
+        if matches!(case.ownership, LegacyOwnership::Empty) {
+            drop(old);
+        } else {
+            commands.push(EngineCommand::LoadAudio(old)).unwrap();
+        }
+        commands.push(EngineCommand::SetSampleRate(1000)).unwrap();
+        commands.push(EngineCommand::Seek(5)).unwrap();
+        engine.process_block(AudioProcessBlock::new(&mut [0.0; 3], 3));
+        while events.pop().is_ok() {}
+        let incoming = if matches!(case.ownership, LegacyOwnership::SameAllocation) {
+            external.as_ref().unwrap().clone()
+        } else {
+            Arc::new(DecodedAudio {
+                channels: (0..case.channels).map(|channel| vec![0.25 + channel as f32 / 8.0; case.frames]).collect(),
+                sample_rate: 2000,
+            })
+        };
+        let incoming_owner = Arc::downgrade(&incoming);
+        commands.push(EngineCommand::LoadAudio(incoming)).unwrap();
+        if case.playing {
+            commands.push(EngineCommand::Play).unwrap();
+        }
+        let mut output = [9.0; 12];
+        assert_eq!(crate::retirement::tests::allocations(|| engine.process_block(AudioProcessBlock::new(&mut output, 3))), (0, 0), "{}", case.name);
+        for (frame, samples) in output.chunks_exact(3).enumerate() {
+            for (channel, sample) in samples.iter().enumerate() {
+                let expected = if !case.playing || frame + 5 >= case.frames || case.channels == 0 {
+                    0.0
+                } else if matches!(case.ownership, LegacyOwnership::SameAllocation) {
+                    0.125
+                } else {
+                    0.25 + channel.min(case.channels - 1) as f32 / 8.0
+                };
+                assert_eq!(*sample, expected, "{} frame {frame} channel {channel}", case.name);
+            }
+        }
+        assert_eq!(engine.audio().map(Arc::as_ptr), Some(incoming_owner.as_ptr()), "{}", case.name);
+        assert_eq!(engine.sample_rate(), 1000, "{}", case.name);
+        assert_eq!(engine.transport().audio_length(), Some(case.frames as u64), "{}", case.name);
+        let expected_position = if case.playing { 9.min(case.frames as u64) } else { 5 };
+        assert_eq!(engine.transport().position(), expected_position, "{}", case.name);
+        assert_eq!(engine.transport().is_playing(), case.playing && case.frames > 9, "{}", case.name);
+        let retired = returned_legacy_audio(&mut events);
+        assert_eq!(retired.len(), usize::from(!matches!(case.ownership, LegacyOwnership::Empty)), "{}", case.name);
+        if let Some(audio) = retired.first() {
+            assert_eq!(Arc::as_ptr(audio), old_owner.as_ptr(), "{}", case.name);
+        }
+        drop(retired);
+        assert_eq!(old_owner.strong_count(), match case.ownership {
+            LegacyOwnership::Empty | LegacyOwnership::Unique => 0,
+            LegacyOwnership::Shared => 1,
+            LegacyOwnership::SameAllocation => 2,
+        }, "{}", case.name);
+        commands.push(EngineCommand::UnloadAudio).unwrap();
+        assert_eq!(crate::retirement::tests::allocations(|| engine.process_block(AudioProcessBlock::new(&mut output, 3))), (0, 0), "{} unload", case.name);
+        assert_eq!(output, [0.0; 12], "{} unload", case.name);
+        assert_eq!(engine.transport().position(), expected_position, "{} unload", case.name);
+        let retired = returned_legacy_audio(&mut events);
+        assert_eq!(retired.len(), 1, "{} unload", case.name);
+        assert_eq!(Arc::as_ptr(&retired[0]), incoming_owner.as_ptr());
+        drop(retired);
+        drop(external);
+        assert_eq!(old_owner.strong_count(), 0, "{}", case.name);
+        assert_eq!(incoming_owner.strong_count(), 0, "{}", case.name);
+        commands.push(EngineCommand::UnloadAudio).unwrap();
+        assert_eq!(crate::retirement::tests::allocations(|| engine.process_block(AudioProcessBlock::new(&mut output, 3))), (0, 0), "{} repeated unload", case.name);
+        assert!(returned_legacy_audio(&mut events).is_empty());
+        assert_eq!(engine.transport().position(), expected_position);
+        assert_eq!(engine.transport().audio_length(), None);
+        assert!(!engine.transport().is_playing());
+    }
+}
+
+#[test]
+fn legacy_replacement_remains_inaudible_with_live_tracks_or_a_prepared_graph() {
+    for graph in [false, true] {
+        let (mut engine, mut commands, mut events) = AudioEngine::new();
+        if graph {
+            let master = vibez_core::routing::RoutingChannel {
+                id: TrackId::MASTER, is_bus: false, effects: vec![], sends: vec![],
+            };
+            commands.push(EngineCommand::SetRouting(crate::routing::PreparedRouting::prepare(&[master], 8).unwrap())).unwrap();
+        } else {
+            commands.push(EngineCommand::add_track(TrackId::new())).unwrap();
+        }
+        let old = stereo_ramp(128, 0.5, -0.5, 1000);
+        let old_owner = Arc::downgrade(&old);
+        commands.push(EngineCommand::LoadAudio(old)).unwrap();
+        commands.push(EngineCommand::Seek(5)).unwrap();
+        commands.push(EngineCommand::Play).unwrap();
+        let mut output = [0.0; 8];
+        engine.process_block(AudioProcessBlock::new(&mut output, 2));
+        assert_eq!(output, [0.0; 8]);
+        while events.pop().is_ok() {}
+        let incoming = stereo_ramp(256, 0.75, -0.75, 2000);
+        let incoming_pointer = Arc::as_ptr(&incoming);
+        commands.push(EngineCommand::LoadAudio(incoming)).unwrap();
+        let position = engine.transport().position();
+        assert_eq!(crate::retirement::tests::allocations(|| engine.process_block(AudioProcessBlock::new(&mut output, 2))), (0, 0));
+        assert_eq!(output, [0.0; 8], "legacy cannot bypass graph={graph}");
+        assert_eq!(engine.audio().map(Arc::as_ptr), Some(incoming_pointer));
+        assert_eq!(engine.transport().position(), position + 4);
+        assert!(engine.transport().is_playing());
+        assert_eq!(engine.transport().audio_length(), Some(256));
+        let retired = returned_legacy_audio(&mut events);
+        assert_eq!(retired.len(), 1);
+        assert_eq!(Arc::as_ptr(&retired[0]), old_owner.as_ptr());
+        drop(retired);
+        assert_eq!(old_owner.strong_count(), 0);
+    }
+}
