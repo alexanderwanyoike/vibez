@@ -560,3 +560,33 @@ fn legacy_replacement_remains_inaudible_with_live_tracks_or_a_prepared_graph() {
         assert_eq!(old_owner.strong_count(), 0);
     }
 }
+
+#[test]
+fn legacy_audio_owners_are_released_when_engine_and_undrained_queues_teardown_in_either_order() {
+    for engine_first in [false, true] {
+        let (mut engine, mut commands, events) = AudioEngine::new();
+        let retired = stereo_ramp(128, 0.125, -0.25, 1000);
+        let resident = stereo_ramp(128, 0.25, -0.5, 1000);
+        let queued = stereo_ramp(128, 0.5, -0.75, 1000);
+        let owners = [Arc::downgrade(&retired), Arc::downgrade(&resident), Arc::downgrade(&queued)];
+        commands.push(EngineCommand::LoadAudio(retired)).unwrap();
+        commands.push(EngineCommand::LoadAudio(resident)).unwrap();
+        assert_eq!(crate::retirement::tests::allocations(|| engine.process_block(AudioProcessBlock::new(&mut [0.0; 2], 2))), (0, 0));
+        commands.push(EngineCommand::LoadAudio(queued)).unwrap();
+        assert!(owners.iter().all(|owner| owner.strong_count() == 1));
+        if engine_first {
+            drop(engine);
+            assert_eq!(owners[0].strong_count(), 1, "undrained UI event owns its retired audio");
+            assert_eq!(owners[1].strong_count(), 0, "resident owner ends with the engine");
+            assert_eq!(owners[2].strong_count(), 1, "command producer retains unconsumed payload");
+            drop(events);
+            drop(commands);
+        } else {
+            drop(events);
+            drop(commands);
+            assert!(owners.iter().all(|owner| owner.strong_count() == 1), "engine-side endpoints retain undrained payloads");
+            drop(engine);
+        }
+        assert!(owners.iter().all(|owner| owner.strong_count() == 0));
+    }
+}
