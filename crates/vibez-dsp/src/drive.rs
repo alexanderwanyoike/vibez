@@ -61,16 +61,16 @@ pub static DRIVE_PARAMS: &[ParamDescriptor] = &[
     ParamDescriptor { name: "Post LP Frequency", min: 1000.0, max: 20000.0, default: 12000.0, unit: "Hz" },
 ];
 
-struct CharacterFade {
-    weights: [f32; 4],
-    steps: [f32; 4],
+struct ChoiceFade<const N: usize> {
+    weights: [f32; N],
+    steps: [f32; N],
     target: usize,
     remaining: u32,
 }
 
-impl CharacterFade {
+impl<const N: usize> ChoiceFade<N> {
     fn new(target: usize) -> Self {
-        Self { weights: std::array::from_fn(|index| f32::from(index == target)), steps: [0.0; 4], target, remaining: 0 }
+        Self { weights: std::array::from_fn(|index| f32::from(index == target)), steps: [0.0; N], target, remaining: 0 }
     }
 
     fn edit(&mut self, target: usize, immediate: bool) {
@@ -101,7 +101,7 @@ pub struct DriveEffect {
     steps: [f32; param::COUNT],
     remaining: [u32; param::COUNT],
     started: bool,
-    character: CharacterFade,
+    character: ChoiceFade<4>,
     character_delay: [[f32; 4]; 64],
     audible_character: [f32; 4],
     /// One-pole high-shelf-ish state, per channel.
@@ -134,7 +134,7 @@ impl DriveEffect {
             steps: [0.0; param::COUNT],
             remaining: [0; param::COUNT],
             started: false,
-            character: CharacterFade::new(0),
+            character: ChoiceFade::new(0),
             character_delay: [[1.0, 0.0, 0.0, 0.0]; 64],
             audible_character: [1.0, 0.0, 0.0, 0.0],
             z: [0.0; 2],
@@ -356,7 +356,7 @@ impl AudioEffect for DriveEffect {
         self.applied = self.params;
         self.remaining = [0; param::COUNT];
         self.started = false;
-        self.character = CharacterFade::new(self.params[param::CHARACTER] as usize);
+        self.character = ChoiceFade::new(self.params[param::CHARACTER] as usize);
         self.character_delay = [self.character.weights; 64];
         self.audible_character = self.character.weights;
         self.z = [0.0; 2];
