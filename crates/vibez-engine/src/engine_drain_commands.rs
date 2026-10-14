@@ -79,7 +79,7 @@ impl AudioEngine {
                 continue;
             }
             if cmd.edits_effect_chain() {
-                self.graph_edit_pending = true;
+                self.compensation_plan.expect_structural_plan();
             }
             match cmd {
                 EngineCommand::SetRouting(prepared) => self.command_set_routing(prepared),

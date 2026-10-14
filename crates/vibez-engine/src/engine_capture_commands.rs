@@ -13,7 +13,7 @@ impl AudioEngine {
             );
             return;
         }
-        if !self.compensation_valid {
+        if !self.compensation_plan.applied_plan_is_valid() {
             self.close_capture_for_device_failure();
             self.report_compensation_failure(
                 TrackId::MASTER,

@@ -50,10 +50,10 @@ fn instrument_replacement_with_unchanged_timing_does_not_wait_for_a_topology_edi
         commands.push(command).unwrap();
         engine.process(&mut [0.0; 16], 2);
         assert!(
-            !engine.graph_edit_pending,
+            !engine.compensation_plan.awaiting_structural_plan(),
             "instrument identity is not graph topology"
         );
-        assert!(engine.compensation_valid);
+        assert!(engine.compensation_plan.applied_plan_is_valid());
     }
 }
 

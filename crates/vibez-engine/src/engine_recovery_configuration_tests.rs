@@ -108,7 +108,7 @@ fn active_configuration_or_rate_failure_closes_capture_at_actual_source_time() {
             }
         )));
         assert!(collected.iter().any(|event| matches!(event, EngineEvent::CompensationInvalid {effect_id: Some(id), ..} if *id == effect)));
-        assert!(!engine.compensation_valid);
+        assert!(!engine.compensation_plan.applied_plan_is_valid());
     }
 }
 
