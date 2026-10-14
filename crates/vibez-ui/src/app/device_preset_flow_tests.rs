@@ -148,6 +148,41 @@ fn save_captures_before_the_dialog_and_never_reapplies_its_values() {
 }
 
 #[test]
+fn a_late_save_does_not_replace_a_newly_selected_preset_name() {
+    let (mut app, track_id, effect_id) = gain_app();
+    let request = app.begin_device_preset_save(track_id, effect_id).unwrap();
+    let selected = crate::domains::device_presets::factory_presets(EffectType::Gain)[1].clone();
+    let _ = app.update(Message::ApplyDevicePreset(
+        track_id,
+        effect_id,
+        selected.clone(),
+    ));
+    app.state.project.history = Default::default();
+    app.state.project.dirty = false;
+    let saved = DevicePreset::new(
+        request.preset.kind(),
+        "Saved unity",
+        request.preset.parameters().clone(),
+    )
+    .unwrap();
+
+    let _ = app.update(Message::DevicePreset(DevicePresetMsg::Saved(
+        request,
+        Ok(Some(saved)),
+    )));
+
+    assert_eq!(app.device_preset_selection[&(track_id, effect_id)], selected);
+    assert_eq!(
+        app.capture_device_preset(track_id, effect_id)
+            .unwrap()
+            .parameters(),
+        selected.parameters()
+    );
+    assert!(!app.state.project.dirty);
+    assert!(!app.state.project.history.can_undo());
+}
+
+#[test]
 fn project_reset_ignores_a_late_save_completion_even_when_ids_remain() {
     let (mut app, track_id, effect_id) = gain_app();
     let request = app.begin_device_preset_save(track_id, effect_id).unwrap();
