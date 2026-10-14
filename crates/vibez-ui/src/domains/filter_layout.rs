@@ -154,7 +154,7 @@ pub fn arrange(width: f32, height: f32, advanced: bool) -> Arrangement {
         14.0
     };
     let mut y = toolbar_h + tabs_h + 4.0;
-    let response_space = |modulation_h| {
+    let response_space = |modulation_h: f32| {
         let available = primary_y - y - modulation_h - if advanced { 8.0 } else { 4.0 };
         let side_modes = tier == Tier::Medium && available >= 74.0;
         let plot_h = (available - if side_modes { 0.0 } else { 28.0 }).max(0.0);
