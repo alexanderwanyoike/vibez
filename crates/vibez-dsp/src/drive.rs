@@ -45,6 +45,8 @@ pub struct DriveEffect {
     mix: f32,
     /// One-pole high-shelf-ish state, per channel.
     z: [f32; 2],
+    delay: [[f32; 2]; 64],
+    delay_position: usize,
 }
 
 impl DriveEffect {
@@ -55,6 +57,8 @@ impl DriveEffect {
             output: 1.0,
             mix: 1.0,
             z: [0.0; 2],
+            delay: [[0.0; 2]; 64],
+            delay_position: 0,
         }
     }
 
@@ -72,6 +76,10 @@ impl Default for DriveEffect {
 }
 
 impl AudioEffect for DriveEffect {
+    fn latency_samples(&self) -> u32 {
+        64
+    }
+
     fn effect_type(&self) -> EffectType {
         EffectType::Drive
     }
@@ -133,13 +141,18 @@ impl AudioEffect for DriveEffect {
                 // `Amount` blends between dry and saturated so amount=0 is
                 // true passthrough; `Mix` then wet/dries the result.
                 let processed = dry * (1.0 - amount) + shelved * amount;
-                buffer[idx] = (dry * (1.0 - self.mix) + processed * self.mix) * self.output;
+                let processed = (dry * (1.0 - self.mix) + processed * self.mix) * self.output;
+                buffer[idx] = self.delay[self.delay_position][c];
+                self.delay[self.delay_position][c] = processed;
             }
+            self.delay_position = (self.delay_position + 1) % 64;
         }
     }
 
     fn reset(&mut self) {
         self.z = [0.0; 2];
+        self.delay = [[0.0; 2]; 64];
+        self.delay_position = 0;
     }
 }
 
@@ -152,9 +165,9 @@ mod tests {
         let mut fx = DriveEffect::new();
         fx.set_param(0, 0.0);
         fx.set_param(3, 1.0);
-        let mut buf = vec![0.5_f32; 64];
+        let mut buf = vec![0.5_f32; 256];
         fx.process(&mut buf, 2);
-        for s in &buf {
+        for s in &buf[128..] {
             assert!((s - 0.5).abs() < 0.01);
         }
     }
@@ -165,7 +178,7 @@ mod tests {
         fx.set_param(0, 1.0);
         fx.set_param(2, 1.0);
         fx.set_param(3, 1.0);
-        let mut buf = vec![5.0_f32; 32];
+        let mut buf = vec![5.0_f32; 256];
         fx.process(&mut buf, 2);
         let peak = buf.iter().map(|s| s.abs()).fold(0.0_f32, f32::max);
         assert!(peak <= 1.05, "peak {peak}");
@@ -176,10 +189,10 @@ mod tests {
         let mut fx = DriveEffect::new();
         fx.set_param(0, 1.0);
         fx.set_param(3, 0.0);
-        let orig = vec![0.3_f32; 16];
+        let orig = vec![0.3_f32; 256];
         let mut buf = orig.clone();
         fx.process(&mut buf, 2);
-        for (a, b) in buf.iter().zip(orig.iter()) {
+        for (a, b) in buf[128..].iter().zip(orig.iter()) {
             assert!((a - b).abs() < 1e-5);
         }
     }
