@@ -115,7 +115,7 @@ pub fn instrument_owner_identity(instrument: &dyn vibez_instruments::Instrument)
 
 impl AudioEngine {
     pub(super) fn project_processing_muted(&self) -> bool {
-        self.compensation_suspended
+        self.device_handoff.is_suspended()
             || self.compensation_plan.blocks_processing()
             || self.presentation_state.is_faulted()
             || self.reconfiguration_pending()
@@ -123,7 +123,7 @@ impl AudioEngine {
 
     pub(super) fn is_device_recovering(&self, track: TrackId, effect: Option<EffectId>) -> bool {
         self.device_handoff.pending().is_some_and(|pending| {
-            pending.local_recovery && pending.track_id == track && pending.effect_id == effect
+            pending.is_local_recovery() && pending.track_id == track && pending.effect_id == effect
         })
     }
 
@@ -135,7 +135,7 @@ impl AudioEngine {
         self.device_handoff
             .pending()
             .filter(|pending| {
-                pending.local_recovery
+                pending.is_local_recovery()
                     && pending.track_id == track
                     && pending.effect_id == Some(effect)
             })
@@ -145,7 +145,7 @@ impl AudioEngine {
     pub(super) fn local_device_failure_pending(&self) -> bool {
         self.device_handoff
             .pending()
-            .is_some_and(|pending| pending.local_recovery)
+            .is_some_and(|pending| pending.is_local_recovery())
             || self
                 .tracks
                 .iter()
@@ -180,7 +180,7 @@ impl AudioEngine {
     }
 
     pub(super) fn validate_compensation(&mut self) {
-        if self.compensation_suspended || self.compensation_plan.blocks_processing() {
+        if self.device_handoff.is_suspended() || self.compensation_plan.blocks_processing() {
             return;
         }
         let routing = &self.routing;
@@ -307,7 +307,7 @@ impl AudioEngine {
     pub(super) fn begin_device_reconfiguration(&mut self) {
         if !self.compensation_plan.applied_plan_is_valid()
             || self.device_handoff.pending().is_some()
-            || self.compensation_suspended
+            || self.device_handoff.is_suspended()
             || self.compensation_plan.awaiting_structural_plan()
         {
             return;
@@ -369,7 +369,9 @@ impl AudioEngine {
                 DeviceReconfiguration::Effect { position, slot, .. } => (*position, slot.bypass),
                 _ => (0, false),
             };
-            let local_recovery = device.processing_recovery_requested();
+            let scope = device_handoff::RecoveryScope::from_recovery_request(
+                device.processing_recovery_requested(),
+            );
             self.device_handoff
                 .track_transfer(device_handoff::PendingDeviceReconfiguration {
                     handoff_id,
@@ -377,13 +379,13 @@ impl AudioEngine {
                     effect_id: device.effect_id(),
                     position,
                     bypass,
-                    local_recovery,
+                    scope,
                 });
             match self
                 .event_tx
                 .push(EngineEvent::DeviceReconfiguration(device))
             {
-                Ok(()) => self.compensation_suspended = !local_recovery,
+                Ok(()) => self.device_handoff.publication_succeeded(scope),
                 Err(rtrb::PushError::Full(EngineEvent::DeviceReconfiguration(device))) => {
                     let _ = self.restore_reconfigured_device(device);
                 }

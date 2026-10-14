@@ -36,7 +36,7 @@ impl Readiness {
         Self {
             valid: engine.compensation_plan.applied_plan_is_valid(),
             awaiting_plan: engine.compensation_plan.awaiting_structural_plan(),
-            suspended: engine.compensation_suspended,
+            suspended: engine.device_handoff.is_suspended(),
             handoff: engine.device_handoff.pending().is_some(),
             restart_requested: engine.reconfiguration_pending(),
             presentation_fault: engine.presentation_state.is_faulted(),

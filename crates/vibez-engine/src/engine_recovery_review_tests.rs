@@ -75,7 +75,7 @@ fn reject_worst_case_retirement_is_reserved_before_command_ownership_is_popped()
     engine
         .device_handoff
         .track_transfer(device_handoff::PendingDeviceReconfiguration {
-            local_recovery: false,
+            scope: device_handoff::RecoveryScope::ProjectRestart,
             handoff_id: 7,
             track_id: track,
             effect_id: Some(effect),
