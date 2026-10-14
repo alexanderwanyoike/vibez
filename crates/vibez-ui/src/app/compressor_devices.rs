@@ -89,3 +89,110 @@ impl App {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        domains::{
+            compressor::{CompressorPage, CompressorVisual},
+            device_controls::DeviceControlMsg,
+            devices::DevicesMsg,
+        },
+        state::{DetailPanelTab, ProjectTrack, Workspace},
+    };
+    use vibez_core::effect::EffectType;
+    fn compressor_app() -> (App, TrackId, EffectId) {
+        let mut app = super::super::test_support::app();
+        app.state.view.workspace = Workspace::Arrange;
+        app.state.view.detail_panel_tab = DetailPanelTab::Devices;
+        let channel = ProjectTrack::new(TrackId::new(), "Compressor".into(), 3);
+        let track = channel.id;
+        Arc::make_mut(&mut app.state.project_tracks)
+            .tracks
+            .push(channel);
+        let _ = app.update(Message::Devices(DevicesMsg::AddEffect(
+            track,
+            EffectType::Compressor,
+        )));
+        let effect = app.state.find_track(track).unwrap().effects[0].id;
+        app.state.arrangement.selected_track = Some(track);
+        app.poll_device_meters();
+        app.state.project.history = Default::default();
+        (app, track, effect)
+    }
+    #[test]
+    fn dynamics_require_current_channel_generation_and_bypass_clears_them() {
+        let (mut app, track, effect) = compressor_app();
+        let generation = app.device_meters.generation;
+        let meter = DynamicsMeter {
+            current_reduction_db: [2.0, 3.0],
+            peak_reduction_db: [4.0, 5.0],
+            detector_peak: [0.5, 0.25],
+        };
+        app.accept_compressor_dynamics(track, effect, generation.wrapping_sub(1), meter);
+        app.accept_compressor_dynamics(TrackId::new(), effect, generation, meter);
+        assert_eq!(app.compressor_panel(effect).meter, DynamicsMeter::default());
+        app.accept_compressor_dynamics(track, effect, generation, meter);
+        assert_eq!(app.compressor_panel(effect).meter, meter);
+        assert_eq!(
+            app.compressor_panel(effect).history().collect::<Vec<_>>(),
+            vec![5.0]
+        );
+        app.state.find_track_mut(track).unwrap().effects[0].bypass = true;
+        app.accept_compressor_dynamics(track, effect, generation, meter);
+        assert_eq!(app.compressor_panel(effect).meter, DynamicsMeter::default());
+        assert_eq!(app.compressor_panel(effect).history().count(), 0);
+    }
+    #[test]
+    fn advanced_pages_survive_undo_and_selection_but_removed_panels_are_pruned() {
+        let (mut app, track, effect) = compressor_app();
+        let _ = app.update_compressor_control(CompressorMsg::Page(
+            track,
+            effect,
+            CompressorPage::Detector,
+        ));
+        let _ = app.update_compressor_control(CompressorMsg::Visual(
+            track,
+            effect,
+            CompressorVisual::History,
+        ));
+        let _ = app.update(Message::DeviceControl(DeviceControlMsg::ToggleAdvanced(
+            track, effect,
+        )));
+        let _ = app.update(Message::set_effect_param(track, effect, 0, -24.0));
+        let snapshot = app.state.project.history.pop_undo().unwrap();
+        app.apply_snapshot(snapshot);
+        assert!(app.device_control_state(effect).advanced);
+        assert_eq!(app.compressor_panel(effect).page, CompressorPage::Detector);
+        assert_eq!(
+            app.compressor_panel(effect).visual,
+            CompressorVisual::History
+        );
+        app.state.arrangement.selected_track = None;
+        app.poll_device_meters();
+        assert_eq!(app.compressor_panel(effect).page, CompressorPage::Detector);
+        app.state.find_track_mut(track).unwrap().effects.clear();
+        app.poll_device_meters();
+        assert!(!app.compressor_panels.contains_key(&effect));
+    }
+    #[test]
+    fn shared_insert_readings_preserve_distinct_input_and_output() {
+        let (mut app, track, effect) = compressor_app();
+        let input = vibez_engine::metering::MeterValues {
+            peak_l: 0.5,
+            peak_r: 0.25,
+            rms_l: 0.35,
+            rms_r: 0.17,
+        };
+        let output = vibez_engine::metering::MeterValues {
+            peak_l: 0.25,
+            peak_r: 0.125,
+            rms_l: 0.17,
+            rms_r: 0.08,
+        };
+        app.accept_device_meter(track, effect, app.device_meters.generation, input, output);
+        assert_eq!(app.device_meters.readings[&effect].input, input);
+        assert_eq!(app.device_meters.readings[&effect].output, output);
+    }
+}
