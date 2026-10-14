@@ -2,8 +2,9 @@
 
 use super::{flat_button, value};
 use crate::{
-    domains::{device_controls::DeviceControlState, filter_layout::Region,
-        filter_modulation::model_value},
+    domains::{
+        device_controls::DeviceControlState, filter_layout::Region, filter_modulation::model_value,
+    },
     message::Message,
     state::UiEffect,
     theme as th,
@@ -103,11 +104,17 @@ pub fn view<'a>(
         });
     }
     if dense {
-        let mut controls = row![].spacing(6).height(Length::Fill).align_y(Alignment::Center);
+        let mut controls = row![]
+            .spacing(6)
+            .height(Length::Fill)
+            .align_y(Alignment::Center);
         if inline_disclosure {
             controls = controls.push(container(disclosure(track, effect, true)).width(82.0));
         }
-        return controls.push(container(sources).width(132.0)).push(settings).into();
+        return controls
+            .push(container(sources).width(132.0))
+            .push(settings)
+            .into();
     }
     let header: Element<'a, Message> = if inline_disclosure {
         row![
@@ -130,9 +137,15 @@ pub fn view<'a>(
         _ => "0oct".into(),
     };
     let preview = column![
-        row![section_label(match source {
-            1 => "Model LFO", 2 => "Model step", _ => "Model off",
-        }), text(depth_readout).size(8).color(th::text_dim())].spacing(4),
+        row![
+            section_label(match source {
+                1 => "Model LFO",
+                2 => "Model step",
+                _ => "Model off",
+            }),
+            text(depth_readout).size(8).color(th::text_dim())
+        ]
+        .spacing(4),
         canvas(Preview { effect, accent })
             .width(Length::Fill)
             .height(Length::Fill)
@@ -185,7 +198,9 @@ impl canvas::Program<Message> for Preview<'_> {
         );
         frame.fill_text(canvas::Text {
             content: if source == 2 { "0..6 oct" } else { "±6 oct" }.into(),
-            position: Point::new(2.0, 2.0), color: th::text_dim(), size: 7.0.into(),
+            position: Point::new(2.0, 2.0),
+            color: th::text_dim(),
+            size: 7.0.into(),
             ..Default::default()
         });
         for channel in [1, 0] {

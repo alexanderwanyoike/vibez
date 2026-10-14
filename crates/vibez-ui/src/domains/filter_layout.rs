@@ -166,7 +166,11 @@ pub fn arrange(width: f32, height: f32, advanced: bool) -> Arrangement {
         (plot_h, side_modes) = response_space(modulation_h);
     }
     if plot_h >= 32.0 {
-        let right = if side_modes { width - 198.0 } else { width - 8.0 };
+        let right = if side_modes {
+            width - 198.0
+        } else {
+            width - 8.0
+        };
         layout.response = Some(Region::new(8.0, y, right - 66.0, plot_h));
         layout.meter = Some(Region::new(right - 46.0, y, 46.0, plot_h));
     }
@@ -282,10 +286,14 @@ mod tests {
     fn visible_response_keeps_a_usable_canvas_and_meter_child_budget() {
         for width in [430.0, 620.0, 820.0, 900.0] {
             for height in 64..=400 {
-                for advanced in [false,true] {
+                for advanced in [false, true] {
                     let layout = arrange(width, height as f32, advanced);
-                    for region in [layout.response,layout.meter].into_iter().flatten() {
-                        assert!(region.height >= 32.0, "response or meter only {}px at {width}x{height}, Advanced={advanced}", region.height);
+                    for region in [layout.response, layout.meter].into_iter().flatten() {
+                        assert!(
+                            region.height >= 32.0,
+                            "response or meter only {}px at {width}x{height}, Advanced={advanced}",
+                            region.height
+                        );
                     }
                 }
             }
@@ -323,8 +331,10 @@ mod tests {
                     if advanced && height < 114.0 {
                         assert!(arrange(width, height, false).modes.is_some());
                     } else {
-                        assert!(layout.modes.is_some(),
-                            "mode and slope choices lost at {width}x{height}, Advanced={advanced}");
+                        assert!(
+                            layout.modes.is_some(),
+                            "mode and slope choices lost at {width}x{height}, Advanced={advanced}"
+                        );
                     }
                 }
             }
@@ -344,13 +354,14 @@ mod tests {
                                 "vertical mode bank clips at {width}x{height}: {} < {native_bank_height}",
                                 modes.height);
                         } else {
-                            assert!(modes.width >= 178.0,
-                                "horizontal choices cannot fit an88px vertical-bank column");
+                            assert!(
+                                modes.width >= 178.0,
+                                "horizontal choices cannot fit an88px vertical-bank column"
+                            );
                         }
                     }
                 }
             }
         }
     }
-
 }
