@@ -998,7 +998,7 @@ fn retired_voice_guards_cover_repeated_stealing_choke_release_and_reset_without_
             commands.push(EngineCommand::set_drum_rack_pad_state(track, pad, vibez_core::track::DrumPadState {
                 fade_in_ms: 0.0,
                 fade_out_ms: if boundary == "choke" && pad == 0 { 3.0 } else { 0.0 },
-                choke_group: if pad == 0 || pad == 3 { Some(7) } else { None },
+                choke_group: if boundary == "choke" && (pad == 0 || pad == 3) { Some(7) } else { None },
                 ..Default::default()
             })).unwrap();
         }
