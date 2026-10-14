@@ -511,12 +511,12 @@ fn processed_format_changes_clear_histories_without_restarting_fades_ramps_or_ra
         }
         let original = actual.clone();
         effect.process(&mut actual, channels);
-        for channel in 0..processed {
+        for (channel, &sample) in actual.iter().enumerate().take(processed) {
             let filtered = filter.process(expected.output[channel], channel, cutoff);
             let wet = expected.output[channel] * (1.0 - enabled) + filtered * enabled;
             let output = input(frame)[channel] * (1.0 - mix) + wet * mix;
-            assert!((actual[channel] - output).abs() < 3e-6,
-                "format frame={frame}, stride={channels}, channel={channel}, actual={}, expected={output}", actual[channel]);
+            assert!((sample - output).abs() < 3e-6,
+                "format frame={frame}, stride={channels}, channel={channel}, actual={sample}, expected={output}");
         }
         assert_eq!(
             &actual[processed..],
@@ -578,7 +578,7 @@ fn processed_format_changes_clear_histories_without_restarting_fades_ramps_or_ra
         let expected = reference.step_driven(frame, 6.0);
         let mut actual = input(frame);
         effect.process(&mut actual, 2);
-        for channel in 0..2 {
+        for (channel, &sample) in actual.iter().enumerate() {
             let filtered = reset_filter.process(expected.output[channel], channel, 1_000.0);
             let wet = if frame < 32 {
                 expected.output[channel]
@@ -587,7 +587,7 @@ fn processed_format_changes_clear_histories_without_restarting_fades_ramps_or_ra
             };
             let output = input(frame)[channel] * 0.5 + wet * 0.5;
             assert!(
-                (actual[channel] - output).abs() < 3e-6,
+                (sample - output).abs() < 3e-6,
                 "explicit reset frame{frame}"
             );
         }
