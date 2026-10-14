@@ -58,7 +58,8 @@ struct App {
     plugin_load_requests: plugin_load_requests::PluginLoadRequests,
     gain_devices: gain_devices::GainDevices,
     device_meters: device_meters::DeviceMeters,
-    gate_panels: std::collections::HashMap<vibez_core::id::EffectId, crate::domains::gate::GatePanel>,
+    gate_panels:
+        std::collections::HashMap<vibez_core::id::EffectId, crate::domains::gate::GatePanel>,
     empty_gate_panel: crate::domains::gate::GatePanel,
     device_controls: std::collections::HashMap<
         vibez_core::id::EffectId,
@@ -175,6 +176,7 @@ pub(crate) mod device_presets;
 mod drum_rack_preparation;
 mod engine_events;
 mod gain_devices;
+mod gate_devices;
 mod keyboard;
 mod local_watcher;
 mod menu_lifecycle;

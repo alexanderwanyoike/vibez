@@ -26,21 +26,111 @@ pub mod param {
 pub const RAMP_FRAMES: u32 = 512;
 
 pub static GATE_PARAMS: &[ParamDescriptor] = &[
-    ParamDescriptor { name: "Threshold", min: -80.0, max: 0.0, default: -40.0, unit: "dB" },
-    ParamDescriptor { name: "Attack", min: 0.1, max: 50.0, default: 1.0, unit: "ms" },
-    ParamDescriptor { name: "Release", min: 5.0, max: 500.0, default: 50.0, unit: "ms" },
-    ParamDescriptor { name: "Hold", min: 0.0, max: 200.0, default: 10.0, unit: "ms" },
-    ParamDescriptor { name: "Hysteresis", min: 0.0, max: 24.0, default: 0.0, unit: "dB" },
-    ParamDescriptor { name: "Range Enabled", min: 0.0, max: 1.0, default: 0.0, unit: "" },
-    ParamDescriptor { name: "Range", min: 0.0, max: 120.0, default: 60.0, unit: "dB" },
-    ParamDescriptor { name: "Mode", min: 0.0, max: 1.0, default: 0.0, unit: "" },
-    ParamDescriptor { name: "Expansion Ratio", min: 1.0, max: 20.0, default: 2.0, unit: ":1" },
-    ParamDescriptor { name: "Detector HP", min: 0.0, max: 1.0, default: 0.0, unit: "" },
-    ParamDescriptor { name: "HP Frequency", min: 20.0, max: 2000.0, default: 80.0, unit: "Hz" },
-    ParamDescriptor { name: "Detector LP", min: 0.0, max: 1.0, default: 0.0, unit: "" },
-    ParamDescriptor { name: "LP Frequency", min: 1000.0, max: 20000.0, default: 12000.0, unit: "Hz" },
-    ParamDescriptor { name: "Detector Listen", min: 0.0, max: 1.0, default: 0.0, unit: "" },
-    ParamDescriptor { name: "Mix", min: 0.0, max: 1.0, default: 1.0, unit: "" },
+    ParamDescriptor {
+        name: "Threshold",
+        min: -80.0,
+        max: 0.0,
+        default: -40.0,
+        unit: "dB",
+    },
+    ParamDescriptor {
+        name: "Attack",
+        min: 0.1,
+        max: 50.0,
+        default: 1.0,
+        unit: "ms",
+    },
+    ParamDescriptor {
+        name: "Release",
+        min: 5.0,
+        max: 500.0,
+        default: 50.0,
+        unit: "ms",
+    },
+    ParamDescriptor {
+        name: "Hold",
+        min: 0.0,
+        max: 200.0,
+        default: 10.0,
+        unit: "ms",
+    },
+    ParamDescriptor {
+        name: "Hysteresis",
+        min: 0.0,
+        max: 24.0,
+        default: 0.0,
+        unit: "dB",
+    },
+    ParamDescriptor {
+        name: "Range Enabled",
+        min: 0.0,
+        max: 1.0,
+        default: 0.0,
+        unit: "",
+    },
+    ParamDescriptor {
+        name: "Range",
+        min: 0.0,
+        max: 120.0,
+        default: 60.0,
+        unit: "dB",
+    },
+    ParamDescriptor {
+        name: "Mode",
+        min: 0.0,
+        max: 1.0,
+        default: 0.0,
+        unit: "",
+    },
+    ParamDescriptor {
+        name: "Expansion Ratio",
+        min: 1.0,
+        max: 20.0,
+        default: 2.0,
+        unit: ":1",
+    },
+    ParamDescriptor {
+        name: "Detector HP",
+        min: 0.0,
+        max: 1.0,
+        default: 0.0,
+        unit: "",
+    },
+    ParamDescriptor {
+        name: "HP Frequency",
+        min: 20.0,
+        max: 2000.0,
+        default: 80.0,
+        unit: "Hz",
+    },
+    ParamDescriptor {
+        name: "Detector LP",
+        min: 0.0,
+        max: 1.0,
+        default: 0.0,
+        unit: "",
+    },
+    ParamDescriptor {
+        name: "LP Frequency",
+        min: 1000.0,
+        max: 20000.0,
+        default: 12000.0,
+        unit: "Hz",
+    },
+    ParamDescriptor {
+        name: "Detector Listen",
+        min: 0.0,
+        max: 1.0,
+        default: 0.0,
+        unit: "",
+    },
+    ParamDescriptor {
+        name: "Mix",
+        min: 0.0,
+        max: 1.0,
+        default: 1.0,
+        unit: "",
+    },
 ];
 
 /// Simple noise gate with attack / release / hold.
@@ -66,10 +156,17 @@ pub struct GateEffect {
 
 impl GateEffect {
     pub fn new(sample_rate: f32) -> Self {
-        let sample_rate = if sample_rate.is_finite() && sample_rate >= 2.0 { sample_rate } else { 48_000.0 };
+        let sample_rate = if sample_rate.is_finite() && sample_rate >= 2.0 {
+            sample_rate
+        } else {
+            48_000.0
+        };
         let params = std::array::from_fn(|index| GATE_PARAMS[index].default);
         let mut effect = Self {
-            params, applied: params, steps: [0.0; param::COUNT], remaining: [0; param::COUNT],
+            params,
+            applied: params,
+            steps: [0.0; param::COUNT],
+            remaining: [0; param::COUNT],
             started: false,
             attack_coefficient: Self::coef(params[param::ATTACK], sample_rate),
             release_coefficient: Self::coef(params[param::RELEASE], sample_rate),
@@ -85,7 +182,10 @@ impl GateEffect {
             gain: 0.0,
             expander_gain: 1.0,
             hold_counter: 0,
-            meter: DynamicsMeter { gate: Some(GateMeter::default()), ..Default::default() },
+            meter: DynamicsMeter {
+                gate: Some(GateMeter::default()),
+                ..Default::default()
+            },
             window_started: false,
         };
         effect.configure_filters();
@@ -93,16 +193,36 @@ impl GateEffect {
     }
 
     fn target(&self, index: usize) -> f32 {
-        if [param::RANGE_ENABLED, param::MODE, param::HP_ENABLED, param::LP_ENABLED, param::DETECTOR_LISTEN].contains(&index) {
-            if self.params[index] >= 0.5 { 1.0 } else { 0.0 }
-        } else { self.params[index] }
+        if [
+            param::RANGE_ENABLED,
+            param::MODE,
+            param::HP_ENABLED,
+            param::LP_ENABLED,
+            param::DETECTOR_LISTEN,
+        ]
+        .contains(&index)
+        {
+            if self.params[index] >= 0.5 {
+                1.0
+            } else {
+                0.0
+            }
+        } else {
+            self.params[index]
+        }
     }
 
     fn set_target(&mut self, index: usize, value: f32, automated: bool) -> bool {
-        let Some(descriptor) = GATE_PARAMS.get(index) else { return false; };
-        if !value.is_finite() { return false; }
+        let Some(descriptor) = GATE_PARAMS.get(index) else {
+            return false;
+        };
+        if !value.is_finite() {
+            return false;
+        }
         let value = value.clamp(descriptor.min, descriptor.max);
-        if self.params[index] == value && !automated { return true; }
+        if self.params[index] == value && !automated {
+            return true;
+        }
         self.params[index] = value;
         let target = self.target(index);
         if automated || !self.started {
@@ -118,10 +238,18 @@ impl GateEffect {
 
     fn refresh_coefficient(&mut self, index: usize) {
         match index {
-            param::ATTACK => self.attack_coefficient = Self::coef(self.applied[index], self.sample_rate),
-            param::RELEASE => self.release_coefficient = Self::coef(self.applied[index], self.sample_rate),
-            param::HP_FREQUENCY => self.filters[0].configure(self.sample_rate, self.applied[index], true),
-            param::LP_FREQUENCY => self.filters[1].configure(self.sample_rate, self.applied[index], false),
+            param::ATTACK => {
+                self.attack_coefficient = Self::coef(self.applied[index], self.sample_rate)
+            }
+            param::RELEASE => {
+                self.release_coefficient = Self::coef(self.applied[index], self.sample_rate)
+            }
+            param::HP_FREQUENCY => {
+                self.filters[0].configure(self.sample_rate, self.applied[index], true)
+            }
+            param::LP_FREQUENCY => {
+                self.filters[1].configure(self.sample_rate, self.applied[index], false)
+            }
             _ => {}
         }
     }
@@ -134,14 +262,26 @@ impl GateEffect {
     fn advance(&mut self) {
         let mut changed = [false; param::COUNT];
         for (index, changed) in changed.iter_mut().enumerate() {
-            if self.remaining[index] == 0 { continue; }
+            if self.remaining[index] == 0 {
+                continue;
+            }
             self.remaining[index] -= 1;
-            self.applied[index] = if self.remaining[index] == 0 { self.target(index) }
-                else { self.applied[index] + self.steps[index] };
+            self.applied[index] = if self.remaining[index] == 0 {
+                self.target(index)
+            } else {
+                self.applied[index] + self.steps[index]
+            };
             *changed = true;
         }
-        for index in [param::ATTACK, param::RELEASE, param::HP_FREQUENCY, param::LP_FREQUENCY] {
-            if changed[index] { self.refresh_coefficient(index); }
+        for index in [
+            param::ATTACK,
+            param::RELEASE,
+            param::HP_FREQUENCY,
+            param::LP_FREQUENCY,
+        ] {
+            if changed[index] {
+                self.refresh_coefficient(index);
+            }
         }
     }
 
@@ -156,7 +296,9 @@ impl GateEffect {
 }
 
 impl AudioEffect for GateEffect {
-    fn supports_level_meter(&self) -> bool { true }
+    fn supports_level_meter(&self) -> bool {
+        true
+    }
 
     fn take_dynamics_meter(&mut self) -> Option<DynamicsMeter> {
         if !self.started {
@@ -164,7 +306,8 @@ impl AudioEffect for GateEffect {
             self.meter.current_reduction_db = [-20.0 * gain.max(1e-10).log10(); 2];
             if let Some(gate) = &mut self.meter.gate {
                 gate.open_threshold_db = self.applied[param::THRESHOLD];
-                gate.close_threshold_db = self.applied[param::THRESHOLD] - self.applied[param::HYSTERESIS];
+                gate.close_threshold_db =
+                    self.applied[param::THRESHOLD] - self.applied[param::HYSTERESIS];
             }
         }
         let meter = self.meter;
@@ -218,9 +361,11 @@ impl AudioEffect for GateEffect {
         if channels == 0 {
             return;
         }
-        let detector = inputs
-            .iter()
-            .find(|input| input.id == vibez_core::routing::ExternalInputId(0) && input.connected && input.channels > 0);
+        let detector = inputs.iter().find(|input| {
+            input.id == vibez_core::routing::ExternalInputId(0)
+                && input.connected
+                && input.channels > 0
+        });
         let ch = channels.min(2);
         let frames = buffer.len() / channels;
         for frame in 0..frames {
@@ -229,16 +374,23 @@ impl AudioEffect for GateEffect {
             let att = self.attack_coefficient;
             let rel = self.release_coefficient;
             let hold_frames = (self.applied[param::HOLD] * 0.001 * self.sample_rate) as u32;
-            let closed_gain = 10.0_f32.powf(-self.applied[param::RANGE] / 20.0) * self.applied[param::RANGE_ENABLED];
+            let closed_gain = 10.0_f32.powf(-self.applied[param::RANGE] / 20.0)
+                * self.applied[param::RANGE_ENABLED];
             let detected: [f32; 2] = std::array::from_fn(|channel| {
                 let raw = match detector {
-                    Some(input) => frame.checked_mul(input.channels)
+                    Some(input) => frame
+                        .checked_mul(input.channels)
                         .and_then(|offset| offset.checked_add(channel.min(input.channels - 1)))
                         .and_then(|offset| input.samples.get(offset))
-                        .copied().unwrap_or(0.0),
+                        .copied()
+                        .unwrap_or(0.0),
                     None => buffer[frame * channels + channel.min(ch - 1)],
                 };
-                let raw = if raw.is_finite() { raw.clamp(-1e12, 1e12) } else { 0.0 };
+                let raw = if raw.is_finite() {
+                    raw.clamp(-1e12, 1e12)
+                } else {
+                    0.0
+                };
                 let high = self.filters[0].process(raw, channel);
                 let high = raw + (high - raw) * self.applied[param::HP_ENABLED];
                 let low = self.filters[1].process(high, channel);
@@ -250,7 +402,11 @@ impl AudioEffect for GateEffect {
             self.env_db = peak_db + env_coef * (self.env_db - peak_db);
 
             let threshold = self.applied[param::THRESHOLD]
-                - if self.open { self.applied[param::HYSTERESIS] } else { 0.0 };
+                - if self.open {
+                    self.applied[param::HYSTERESIS]
+                } else {
+                    0.0
+                };
             self.open = self.env_db >= threshold;
             let target = if self.open || self.hold_counter > 0 {
                 1.0
@@ -265,27 +421,53 @@ impl AudioEffect for GateEffect {
             let limited = 10.0_f32.powf(-deficit.min(self.applied[param::RANGE]) / 20.0);
             let expansion_target = if self.open || self.hold_counter > 0 {
                 1.0
-            } else { unlimited + (limited - unlimited) * self.applied[param::RANGE_ENABLED] };
+            } else {
+                unlimited + (limited - unlimited) * self.applied[param::RANGE_ENABLED]
+            };
             let expansion_target = expansion_target as f64;
-            let coefficient = if expansion_target > self.expander_gain { att } else { rel } as f64;
-            self.expander_gain = expansion_target + coefficient * (self.expander_gain - expansion_target);
+            let coefficient = if expansion_target > self.expander_gain {
+                att
+            } else {
+                rel
+            } as f64;
+            self.expander_gain =
+                expansion_target + coefficient * (self.expander_gain - expansion_target);
             let gain = self.wet_gain();
 
-            let phase = if self.open { GatePhase::Open }
-                else if self.hold_counter > 0 { GatePhase::Hold } else { GatePhase::Closed };
+            let phase = if self.open {
+                GatePhase::Open
+            } else if self.hold_counter > 0 {
+                GatePhase::Hold
+            } else {
+                GatePhase::Closed
+            };
             let reduction_db = -20.0 * gain.max(1e-10).log10();
             self.meter.current_reduction_db = [reduction_db; 2];
             for (channel, sample) in detected.into_iter().enumerate() {
-                self.meter.peak_reduction_db[channel] = self.meter.peak_reduction_db[channel].max(reduction_db);
-                self.meter.detector_peak[channel] = self.meter.detector_peak[channel].max(sample.abs());
+                self.meter.peak_reduction_db[channel] =
+                    self.meter.peak_reduction_db[channel].max(reduction_db);
+                self.meter.detector_peak[channel] =
+                    self.meter.detector_peak[channel].max(sample.abs());
             }
             let previous = self.meter.gate.unwrap_or_default();
             self.meter.gate = Some(GateMeter {
-                phase, envelope_db: self.env_db,
-                peak_envelope_db: if self.window_started { previous.peak_envelope_db.max(self.env_db) } else { self.env_db },
+                phase,
+                envelope_db: self.env_db,
+                peak_envelope_db: if self.window_started {
+                    previous.peak_envelope_db.max(self.env_db)
+                } else {
+                    self.env_db
+                },
                 open_threshold_db: self.applied[param::THRESHOLD],
-                close_threshold_db: self.applied[param::THRESHOLD] - self.applied[param::HYSTERESIS],
-                hold_remaining_ms: (if self.open { hold_frames } else { self.hold_counter }) as f32 * 1000.0 / self.sample_rate,
+                close_threshold_db: self.applied[param::THRESHOLD]
+                    - self.applied[param::HYSTERESIS],
+                hold_remaining_ms: (if self.open {
+                    hold_frames
+                } else {
+                    self.hold_counter
+                }) as f32
+                    * 1000.0
+                    / self.sample_rate,
                 phases_seen: previous.phases_seen | phase as u8,
             });
             self.window_started = true;
@@ -298,7 +480,8 @@ impl AudioEffect for GateEffect {
             for c in 0..ch {
                 let sample = &mut buffer[frame * channels + c];
                 let dry = if sample.is_finite() { *sample } else { 0.0 };
-                let normal = dry * (1.0 - self.applied[param::MIX]) + dry * gain * self.applied[param::MIX];
+                let normal =
+                    dry * (1.0 - self.applied[param::MIX]) + dry * gain * self.applied[param::MIX];
                 *sample = normal + (detected[c] - normal) * self.applied[param::DETECTOR_LISTEN];
             }
         }
@@ -321,10 +504,13 @@ impl AudioEffect for GateEffect {
                 open_threshold_db: self.params[param::THRESHOLD],
                 close_threshold_db: self.params[param::THRESHOLD] - self.params[param::HYSTERESIS],
                 ..Default::default()
-            }), ..Default::default()
+            }),
+            ..Default::default()
         };
         self.window_started = false;
-        for filter in &mut self.filters { filter.reset(); }
+        for filter in &mut self.filters {
+            filter.reset();
+        }
     }
 }
 

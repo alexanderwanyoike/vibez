@@ -20,7 +20,8 @@ pub fn parameter<'a>(
     accent: Color,
     knob_size: Option<f32>,
 ) -> Element<'a, Message> {
-    let heading = section_label(crate::domains::device_controls::presentation_descriptor(effect, index).name);
+    let heading =
+        section_label(crate::domains::device_controls::presentation_descriptor(effect, index).name);
     parameter_with_heading(track, effect, state, index, accent, knob_size, heading)
 }
 
@@ -41,9 +42,7 @@ pub fn parameter_with_heading<'a>(
         .copied()
         .unwrap_or(descriptor.default);
     let field = value_field(track, effect, state, index, accent);
-    let mut content = column![heading]
-        .spacing(3)
-        .align_x(iced::Alignment::Center);
+    let mut content = column![heading].spacing(3).align_x(iced::Alignment::Center);
     if let Some(size) = knob_size {
         let mut knob = EffectKnobWidget::new(
             track,

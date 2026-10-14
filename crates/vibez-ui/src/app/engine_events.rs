@@ -218,7 +218,7 @@ impl App {
                         meter,
                     } => {
                         self.accept_gate_dynamics(track_id, effect_id, generation, meter);
-                    },
+                    }
                     EngineEvent::RetiredEffectStorage(storage) => drop(storage),
                     EngineEvent::DeviceReconfigurationRetired { device, reason } => {
                         drop((device, reason));

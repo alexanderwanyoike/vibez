@@ -20,13 +20,21 @@ fn signal(rate: f32, channels: usize) -> Vec<f32> {
         } else if ms < 95.0 {
             0.3 * (std::f32::consts::TAU * 431.0 * frame as f32 / rate).sin()
         } else if ms < 100.0 {
-            if frame % 2 == 0 { 0.0118 } else { 0.0125 }
+            if frame % 2 == 0 {
+                0.0118
+            } else {
+                0.0125
+            }
         } else {
             0.001
         };
         samples.push(left);
         if channels == 2 {
-            samples.push(if (65.0..95.0).contains(&ms) { -0.42 } else { -left * 0.37 });
+            samples.push(if (65.0..95.0).contains(&ms) {
+                -0.42
+            } else {
+                -left * 0.37
+            });
         }
     }
     samples
@@ -44,20 +52,37 @@ fn legacy_reference(input: &[f32], channels: usize, rate: f32, params: [f32; 4])
     for frame in input.chunks_exact(channels) {
         let peak = frame.iter().copied().map(f32::abs).fold(0.0_f32, f32::max);
         let level_db = 20.0 * peak.max(1e-10).log10();
-        let detector_coefficient = if level_db > decision_db { attack } else { release };
+        let detector_coefficient = if level_db > decision_db {
+            attack
+        } else {
+            release
+        };
         decision_db = level_db + detector_coefficient * (decision_db - level_db);
         let opens = decision_db >= threshold;
         let requested_gain = if opens || hold_left > 0 { 1.0 } else { 0.0 };
-        let gain_coefficient = if requested_gain > linear_gain { attack } else { release };
+        let gain_coefficient = if requested_gain > linear_gain {
+            attack
+        } else {
+            release
+        };
         linear_gain = requested_gain + gain_coefficient * (linear_gain - requested_gain);
         expected.extend(frame.iter().map(|sample| sample * linear_gain));
         // Decrementing before the gain decision shortens old projects by one frame.
-        hold_left = if opens { hold_frames } else { hold_left.saturating_sub(1) };
+        hold_left = if opens {
+            hold_frames
+        } else {
+            hold_left.saturating_sub(1)
+        };
     }
     expected
 }
 
-fn render(effect: &mut GateEffect, source: &[f32], channels: usize, partitions: &[usize]) -> Vec<f32> {
+fn render(
+    effect: &mut GateEffect,
+    source: &[f32],
+    channels: usize,
+    partitions: &[usize],
+) -> Vec<f32> {
     let mut rendered = source.to_vec();
     let mut offset = 0;
     let mut block = 0;
@@ -84,7 +109,11 @@ fn legacy_double_envelope_and_hold_remain_sample_accurate_across_rates_blocks_an
     for rate in [44_100.0, 48_000.0, 96_000.0] {
         for channels in [1, 2] {
             let source = signal(rate, channels);
-            for params in [[-40.0, 1.0, 50.0, 10.0], [-24.0, 0.1, 5.0, 0.0], [-32.0, 2.5, 15.0, 17.37]] {
+            for params in [
+                [-40.0, 1.0, 50.0, 10.0],
+                [-24.0, 0.1, 5.0, 0.0],
+                [-32.0, 2.5, 15.0, 17.37],
+            ] {
                 let expected = legacy_reference(&source, channels, rate, params);
                 for partitions in [&[source.len() / channels][..], &[1, 7, 32, 251, 1024][..]] {
                     let mut effect = GateEffect::new(rate);
@@ -92,9 +121,17 @@ fn legacy_double_envelope_and_hold_remain_sample_accurate_across_rates_blocks_an
                         assert!(effect.set_param(index, value));
                     }
                     let context = format!("{rate}Hz/{channels}ch/{params:?}/{partitions:?}");
-                    assert_samples(&render(&mut effect, &source, channels, partitions), &expected, &context);
+                    assert_samples(
+                        &render(&mut effect, &source, channels, partitions),
+                        &expected,
+                        &context,
+                    );
                     effect.reset();
-                    assert_samples(&render(&mut effect, &source, channels, partitions), &expected, &context);
+                    assert_samples(
+                        &render(&mut effect, &source, channels, partitions),
+                        &expected,
+                        &context,
+                    );
                 }
             }
         }

@@ -21,38 +21,69 @@ pub struct GateHistory {
 
 impl Default for GateHistory {
     fn default() -> Self {
-        Self { windows: [GateWindow::default(); HISTORY_WINDOWS], next: 0, count: 0,
-            meter: None, last_meter_at: None }
+        Self {
+            windows: [GateWindow::default(); HISTORY_WINDOWS],
+            next: 0,
+            count: 0,
+            meter: None,
+            last_meter_at: None,
+        }
     }
 }
 
 impl GateHistory {
     pub fn accept(&mut self, meter: DynamicsMeter, now: Instant) -> bool {
-        let Some(gate) = meter.gate else { return false; };
-        if meter.current_reduction_db.iter().chain(&meter.peak_reduction_db)
-            .chain(&meter.detector_peak).any(|value| !value.is_finite() || *value < 0.0)
-            || [gate.envelope_db, gate.peak_envelope_db, gate.open_threshold_db,
-                gate.close_threshold_db, gate.hold_remaining_ms].iter().any(|value| !value.is_finite())
-            || gate.hold_remaining_ms < 0.0 || gate.phases_seen & !7 != 0 {
+        let Some(gate) = meter.gate else {
+            return false;
+        };
+        if meter
+            .current_reduction_db
+            .iter()
+            .chain(&meter.peak_reduction_db)
+            .chain(&meter.detector_peak)
+            .any(|value| !value.is_finite() || *value < 0.0)
+            || [
+                gate.envelope_db,
+                gate.peak_envelope_db,
+                gate.open_threshold_db,
+                gate.close_threshold_db,
+                gate.hold_remaining_ms,
+            ]
+            .iter()
+            .any(|value| !value.is_finite())
+            || gate.hold_remaining_ms < 0.0
+            || gate.phases_seen & !7 != 0
+        {
             return false;
         }
         self.meter = Some(meter);
         self.last_meter_at = Some(now);
         if gate.phases_seen != 0 {
-            self.windows[self.next] = GateWindow { gate,
-                reduction_db: meter.peak_reduction_db[0].max(meter.peak_reduction_db[1]) };
+            self.windows[self.next] = GateWindow {
+                gate,
+                reduction_db: meter.peak_reduction_db[0].max(meter.peak_reduction_db[1]),
+            };
             self.next = (self.next + 1) % HISTORY_WINDOWS;
             self.count = (self.count + 1).min(HISTORY_WINDOWS);
         }
         true
     }
-    pub fn meter(&self) -> Option<DynamicsMeter> { self.meter }
-    pub fn windows(&self) -> impl Iterator<Item = GateWindow> + '_ {
-        (0..self.count).map(|index| self.windows[(self.next + HISTORY_WINDOWS - self.count + index) % HISTORY_WINDOWS])
+    pub fn meter(&self) -> Option<DynamicsMeter> {
+        self.meter
     }
-    pub fn reset(&mut self) { *self = Self::default(); }
+    pub fn windows(&self) -> impl Iterator<Item = GateWindow> + '_ {
+        (0..self.count).map(|index| {
+            self.windows[(self.next + HISTORY_WINDOWS - self.count + index) % HISTORY_WINDOWS]
+        })
+    }
+    pub fn reset(&mut self) {
+        *self = Self::default();
+    }
     pub fn reset_stale(&mut self, now: Instant) {
-        if self.last_meter_at.is_some_and(|last| now.saturating_duration_since(last) >= Duration::from_millis(250)) {
+        if self
+            .last_meter_at
+            .is_some_and(|last| now.saturating_duration_since(last) >= Duration::from_millis(250))
+        {
             self.reset();
         }
     }

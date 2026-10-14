@@ -220,19 +220,44 @@ impl App {
         ))
     }
 
-    fn gate_device_body<'a>(&'a self, track: TrackId, effect: &'a crate::state::UiEffect,
-        accent: Color, width: f32) -> DeviceBody<'a> {
+    fn gate_device_body<'a>(
+        &'a self,
+        track: TrackId,
+        effect: &'a crate::state::UiEffect,
+        accent: Color,
+        width: f32,
+    ) -> DeviceBody<'a> {
         let body = iced::widget::responsive(move |size| {
             let readings = self.device_meters.readings.get(&effect.id);
             crate::widgets::gate_device::view(
-                track, effect, accent, self.device_control_state(effect.id), self.gate_panel(effect.id),
-                self.view_device_preset_bar(track, effect, accent, crate::widgets::gate_device::preset_bar_width(size)),
-                readings.map(|readings| readings.input).unwrap_or(vibez_engine::metering::MeterValues::SILENT),
-                readings.map(|readings| readings.output).unwrap_or(vibez_engine::metering::MeterValues::SILENT),
-                &self.state.project_tracks.tracks, &self.state.project_tracks.buses, &self.state.devices, size,
+                track,
+                effect,
+                accent,
+                self.device_control_state(effect.id),
+                self.gate_panel(effect.id),
+                self.view_device_preset_bar(
+                    track,
+                    effect,
+                    accent,
+                    crate::widgets::gate_device::preset_bar_width(size),
+                ),
+                readings
+                    .map(|readings| readings.input)
+                    .unwrap_or(vibez_engine::metering::MeterValues::SILENT),
+                readings
+                    .map(|readings| readings.output)
+                    .unwrap_or(vibez_engine::metering::MeterValues::SILENT),
+                &self.state.project_tracks.tracks,
+                &self.state.project_tracks.buses,
+                &self.state.devices,
+                size,
             )
         });
-        DeviceBody { content: body.into(), width, padding: iced::Padding::ZERO }
+        DeviceBody {
+            content: body.into(),
+            width,
+            padding: iced::Padding::ZERO,
+        }
     }
 
     fn gain_device_body<'a>(

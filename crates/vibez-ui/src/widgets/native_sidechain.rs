@@ -76,8 +76,7 @@ pub fn view<'a>(
     accent: Color,
     vertical: bool,
 ) -> Element<'a, Message> {
-    let Some(model) =
-        native_sidechain::presentation(effect, sources, buses, state, selected_input)
+    let Some(model) = native_sidechain::presentation(effect, sources, buses, state, selected_input)
     else {
         return text("No detector input")
             .size(9)
@@ -119,7 +118,11 @@ pub fn view<'a>(
             .map_or(String::new(), |warning| format!(" · {warning}"))
     );
     fields.push(field(
-        if vertical { "Sidechain" } else { model.warning.unwrap_or("Sidechain") },
+        if vertical {
+            "Sidechain"
+        } else {
+            model.warning.unwrap_or("Sidechain")
+        },
         tooltip(source, text(explanation).size(9), tooltip::Position::Top).into(),
     ));
     if model.assigned {
