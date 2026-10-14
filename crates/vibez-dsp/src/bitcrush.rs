@@ -176,8 +176,13 @@ impl AudioEffect for BitcrushEffect {
                 };
 
                 if self.counter[c] == 0 {
-                    // Quantize to `levels` steps in [-1, 1].
-                    let q = (dry / step).round() * step;
+                    let scaled = dry / step;
+                    let quantized = match self.params[param::ROUNDING] as u32 {
+                        1 => scaled.floor(),
+                        2 => scaled.trunc(),
+                        _ => scaled.round(),
+                    };
+                    let q = quantized * step;
                     self.hold[c] = q.clamp(-1.0, 1.0);
                 }
                 self.counter[c] = (self.counter[c] + 1) % divider;
