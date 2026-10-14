@@ -286,7 +286,7 @@ mod tests {
     #[test]
     fn all_tiers_fit_the_measured_height_without_scrolling() {
         for width in [COMPACT_W, MEDIUM_W, MAX_W] {
-            for height in [72.0, 90.0, 130.0, 160.0, 240.0, 400.0] {
+            for height in [64.0, 72.0, 90.0, 130.0, 160.0, 240.0, 400.0] {
                 for advanced in [false, true] {
                     let layout = arrange(Size::new(width, height), advanced);
                     assert!(TOOLBAR_H + layout.controls + layout.plot <= height + 0.01);
