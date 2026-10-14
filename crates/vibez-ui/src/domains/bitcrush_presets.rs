@@ -4,6 +4,9 @@ use vibez_core::{
     device_preset::{DevicePreset, DevicePresetKind},
     effect::EffectType,
 };
+use vibez_dsp::bitcrush::param;
+
+pub const DISCRETE: [usize; 3] = [param::ROUNDING, param::DITHER, param::POST_LP_ENABLED];
 
 pub const KEYS: [&str; 9] = [
     "bits",

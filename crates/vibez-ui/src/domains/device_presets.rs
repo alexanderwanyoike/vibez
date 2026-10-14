@@ -150,6 +150,9 @@ pub fn prepare_updates(
                 && vibez_dsp::gain::param::POLARITY.contains(&index)
                 && value != 0.0
                 && value != 1.0)
+            || (effect.effect_type == EffectType::Bitcrush
+                && bitcrush::DISCRETE.contains(&index)
+                && value.fract() != 0.0)
         {
             return Err(format!(
                 "Preset parameter {key} is outside its supported range"
