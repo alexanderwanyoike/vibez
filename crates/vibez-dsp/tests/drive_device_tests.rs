@@ -100,3 +100,29 @@ fn each_modern_character_has_its_declared_curve_and_retains_amount_mix_output_bl
         }
     }
 }
+
+fn bin_amplitude(signal: &[f32], bin: usize) -> f64 {
+    let (mut real, mut imaginary) = (0.0, 0.0);
+    for (index, &sample) in signal.iter().enumerate() {
+        let phase = std::f64::consts::TAU * bin as f64 * index as f64 / signal.len() as f64;
+        real += sample as f64 * phase.cos();
+        imaginary += sample as f64 * phase.sin();
+    }
+    2.0 * real.hypot(imaginary) / signal.len() as f64
+}
+
+#[test]
+fn default_eight_times_quality_removes_the_folded_third_harmonic_of_hard_drive() {
+    let period = 1024;
+    let cycles = 235;
+    let input: Vec<f32> = (0..period * 3).map(|frame| (0.5 * (std::f64::consts::TAU * cycles as f64 * frame as f64 / period as f64).sin()) as f32).collect();
+    let naive: Vec<_> = input[period..period * 2].iter().map(|&sample| (sample * 30.0).clamp(-1.0, 1.0)).collect();
+    let mut effect = create_effect_with_params(EffectType::Drive, 48_000.0, &[1.0, 0.5, 1.0, 1.0, 3.0]);
+    let mut actual = input;
+    effect.process(&mut actual, 1);
+    let folded = period - 3 * cycles;
+    let baseline = bin_amplitude(&naive, folded);
+    let alias = bin_amplitude(&actual[period + 64..period * 2 + 64], folded);
+    assert!(baseline > 0.1);
+    assert!(alias <= baseline * 0.1, "folded harmonic amplitude {alias} vs naive {baseline}");
+}
