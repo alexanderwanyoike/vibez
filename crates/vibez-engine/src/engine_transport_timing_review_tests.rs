@@ -338,7 +338,7 @@ fn structural_zero_delay_insert_keeps_existing_parallel_audio_continuous() {
         output.iter().all(|&sample| (sample - steady).abs() < 1e-7),
         "structural edit gated the mix"
     );
-    assert_eq!(engine.compensation_plan_fade, 0);
+    assert_eq!(engine.output_gate.remaining_morph_frames(), 0);
 }
 
 #[test]

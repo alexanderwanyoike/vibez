@@ -430,7 +430,7 @@ fn automation_target_addition_and_point_edit_preserve_running_delay_history() {
         .unwrap();
     engine.process(&mut block, 2);
     assert!(block.iter().all(|&value| (value - before).abs() < 1e-6));
-    assert_eq!(engine.compensation_plan_fade, 0);
+    assert_eq!(engine.output_gate.remaining_morph_frames(), 0);
     lane.points[0].value = 0.25;
     commands
         .push(EngineCommand::SetAutomationLane {

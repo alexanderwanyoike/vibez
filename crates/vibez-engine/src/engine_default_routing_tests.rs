@@ -33,7 +33,7 @@ fn first_project_plan_is_silent_in_the_event_protocol_and_has_no_initial_morph()
         assert!(output
             .iter()
             .all(|sample| (*sample - expected).abs() < 1e-6));
-        assert_eq!(engine.compensation_plan_fade, 0);
+        assert_eq!(engine.output_gate.remaining_morph_frames(), 0);
         let protocol: Vec<_> = std::iter::from_fn(|| events.pop().ok())
             .filter_map(|event| match event {
                 EngineEvent::PlaybackStarted => Some("started"),
