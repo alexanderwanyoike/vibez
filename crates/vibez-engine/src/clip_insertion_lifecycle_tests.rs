@@ -185,3 +185,61 @@ fn fulfilled_reply_survives_producer_drop_until_completion_or_owner_shutdown() {
         assert_eq!(identity.strong_count(), 0);
     }
 }
+
+#[test]
+fn consumer_first_shutdown_releases_successful_orphaned_replies_on_the_owner_thread() {
+    for inspect_push in [false, true] {
+        let mut fixture = setup();
+        let mut delta = delta(fixture.track);
+        let ring = mailbox(&delta);
+        let identity = Arc::downgrade(&delta.id.0);
+        fixture.commands.push(delta.command.take().unwrap()).unwrap();
+        let (engine, _) = on_audio_thread(fixture.engine, false);
+        fixture.engine = engine;
+        let mut received = Received::default();
+        received.drain(&mut fixture.events);
+        assert_eq!(received.requests.len(), 1);
+        let mut request = received.requests.pop().unwrap();
+        assert_eq!(std::ptr::from_ref(request.sender.buffer()), ring);
+        assert!(!request.sender.is_abandoned());
+        assert_eq!(request.sender.slots(), 1);
+        let engine_disposal = crate::retirement::tests::allocations(|| drop(fixture.engine));
+        assert_eq!(engine_disposal.0, 0);
+        assert!(engine_disposal.1 > 0);
+        assert_eq!(delta.audio.strong_count(), 0);
+        assert_eq!(fixture.resident.strong_count(), 0);
+        assert_eq!(identity.strong_count(), 2);
+        assert!(request.sender.is_abandoned());
+        assert_eq!(std::ptr::from_ref(request.sender.buffer()), ring);
+        if inspect_push {
+            // The public fulfill leg below covers the production method. This
+            // separate endpoint leg observes its successful orphaned push,
+            // which cannot be justified with PushError-only disposal reasoning.
+            let mut storage = None;
+            let preparation = crate::retirement::tests::allocations(|| {
+                storage = Some(ClipInsertionStorage::new(request.capacity));
+            });
+            assert!(preparation.0 > 0);
+            assert_eq!(preparation.1, 0);
+            let mut pushed = None;
+            assert_eq!(crate::retirement::tests::allocations(|| {
+                pushed = Some(request.sender.push(storage.take().unwrap()));
+            }), (0, 0));
+            assert!(pushed.unwrap().is_ok());
+            assert_eq!(request.sender.slots(), 0);
+            assert_eq!(std::ptr::from_ref(request.sender.buffer()), ring);
+            let disposal = crate::retirement::tests::allocations(|| drop(request));
+            assert_eq!(disposal.0, 0);
+            // Pinned rtrb0.3.2 owns a slot allocation plus its Arc allocation;
+            // the occupied reply must release every measured Vec allocation too.
+            assert_eq!(disposal.1, preparation.0 + 2);
+        } else {
+            let fulfilled = crate::retirement::tests::allocations(|| request.fulfill());
+            assert!(fulfilled.0 > 0);
+            assert_eq!(fulfilled.1, fulfilled.0 + 2);
+        }
+        assert_eq!(identity.strong_count(), 1);
+        drop(delta);
+        assert_eq!(identity.strong_count(), 0);
+    }
+}
