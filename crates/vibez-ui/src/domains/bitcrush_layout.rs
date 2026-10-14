@@ -53,7 +53,12 @@ impl DetailPage {
                 Parameter(param::POST_LP_HZ),
             ],
             Self::Input => &[InputPeakLeft, InputPeakRight, InputRmsLeft, InputRmsRight],
-            Self::Output => &[OutputPeakLeft, OutputPeakRight, OutputRmsLeft, OutputRmsRight],
+            Self::Output => &[
+                OutputPeakLeft,
+                OutputPeakRight,
+                OutputRmsLeft,
+                OutputRmsRight,
+            ],
         }
     }
 }
@@ -192,7 +197,12 @@ mod tests {
             ),
             (
                 Output,
-                &[OutputPeakLeft, OutputPeakRight, OutputRmsLeft, OutputRmsRight],
+                &[
+                    OutputPeakLeft,
+                    OutputPeakRight,
+                    OutputRmsLeft,
+                    OutputRmsRight,
+                ],
             ),
         ];
         assert_eq!(DetailPage::ALL, [Main, Color, Clock, Filter, Input, Output]);
