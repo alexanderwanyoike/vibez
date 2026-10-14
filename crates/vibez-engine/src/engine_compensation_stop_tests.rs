@@ -182,11 +182,11 @@ fn failure_capture_stop_survives_a_full_ui_event_ring() {
         crate::retirement::tests::allocations(|| engine.process(&mut [0.0; 128], 2)),
         (0, 0)
     );
-    assert_eq!(engine.terminal_notifications.capture_stop(), Some(expected));
+    assert_eq!(engine.presentation_state.terminals.capture_stop(), Some(expected));
     while events.pop().is_ok() {}
     engine.process(&mut [0.0; 128], 2);
     let delivered: Vec<_> = std::iter::from_fn(|| events.pop().ok()).collect();
     assert!(delivered.iter().any(|event| matches!(event,EngineEvent::PerformanceCaptureStopped{effective_at_samples} if *effective_at_samples==expected)));
     assert!(delivered.iter().any(|event| matches!(event,EngineEvent::CompensationInvalid{reason,..} if reason.contains("latency"))));
-    assert_eq!(engine.terminal_notifications.capture_stop(), None);
+    assert_eq!(engine.presentation_state.terminals.capture_stop(), None);
 }
