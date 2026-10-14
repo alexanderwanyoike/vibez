@@ -112,6 +112,88 @@ fn snapshots(
 }
 
 #[test]
+fn drive_snapshots_follow_selected_track_return_and_master_in_both_render_paths() {
+    use vibez_core::routing::{NodeStage, RoutingChannel, RoutingEffect, RoutingNode};
+
+    for graph in [false, true] {
+        for (master, bus) in [(false, false), (false, true), (true, false)] {
+            let (mut engine, mut commands, mut events) = AudioEngine::new();
+            let source = TrackId::new();
+            let selected = if master { TrackId::MASTER } else if bus { TrackId::new() } else { source };
+            let effect = EffectId::new();
+            commands.push(EngineCommand::SetSampleRate(48_000)).unwrap();
+            commands.push(EngineCommand::add_track(source)).unwrap();
+            if bus {
+                commands.push(EngineCommand::add_bus(selected)).unwrap();
+                commands.push(EngineCommand::SetSend {
+                    track_id: source,
+                    bus_id: selected,
+                    amount: 1.0,
+                }).unwrap();
+            }
+            commands.push(EngineCommand::insert_built_in_effect(
+                selected, effect, EffectType::Drive, 48_000,
+            )).unwrap();
+            commands.push(EngineCommand::SetEffectParam {
+                track_id: selected,
+                effect_id: effect,
+                param_index: 0,
+                value: 0.0,
+            }).unwrap();
+            if graph {
+                let chain = || vec![RoutingEffect {
+                    id: effect,
+                    inputs: vec![],
+                    assignments: vec![],
+                    inactive_inputs: vec![],
+                }];
+                let mut channels = vec![RoutingChannel {
+                    id: source,
+                    is_bus: false,
+                    effects: if !master && !bus { chain() } else { vec![] },
+                    sends: if bus { vec![selected] } else { vec![] },
+                }];
+                if bus {
+                    channels.push(RoutingChannel {
+                        id: selected,
+                        is_bus: true,
+                        effects: chain(),
+                        sends: vec![],
+                    });
+                }
+                channels.push(RoutingChannel {
+                    id: TrackId::MASTER,
+                    is_bus: true,
+                    effects: if master { chain() } else { vec![] },
+                    sends: vec![],
+                });
+                let reports = [(RoutingNode { channel: selected, stage: NodeStage::Effect(effect) }, 64)];
+                commands.push(EngineCommand::SetRouting(
+                    crate::routing::PreparedRouting::prepare_compensated(
+                        &channels, 128, &reports, &[], 1,
+                    ).unwrap(),
+                )).unwrap();
+            }
+            commands.push(EngineCommand::SetEffectMeterChannel {
+                track_id: Some(selected),
+                generation: 11,
+            }).unwrap();
+            render_window(&mut engine, source, 0.25);
+            let windows = snapshots(&mut events);
+            assert_eq!(windows.len(), 1, "graph={graph}, master={master}, bus={bus}");
+            assert_eq!((windows[0].0, windows[0].1, windows[0].2), (selected, effect, 11));
+            let meter = windows[0].3;
+            assert_eq!((meter.count, meter.latency_samples), (128, 64));
+            assert_eq!(meter.sample_rate, 48_000.0);
+            let expected = 0.25 * if selected == source { 1.0 } else { std::f32::consts::FRAC_1_SQRT_2 };
+            assert!(meter.input.iter().all(|sample| (*sample - expected).abs() < 1e-6));
+            assert!(meter.output.iter().all(|sample| (*sample - expected).abs() < 1e-6));
+            assert!(engine.compensation_valid);
+        }
+    }
+}
+
+#[test]
 fn drive_full_ring_drops_snapshots_without_callback_allocation_or_retry_backlog() {
     let (mut engine, _commands, mut events, track, effect) = fixture();
     render_window(&mut engine, track, 0.5);
