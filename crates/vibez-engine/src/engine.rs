@@ -1,3 +1,5 @@
+//! Coordinate sample-clock rendering and queued edits across shared project channels.
+
 use std::sync::Arc;
 
 use rtrb::{Consumer, Producer, RingBuffer};

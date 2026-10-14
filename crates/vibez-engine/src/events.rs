@@ -1,3 +1,5 @@
+//! Engine notifications, clock domains and identity-preserving ownership returns.
+
 use std::sync::Arc;
 use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::id::{ClipId, SectionId, TrackId};
