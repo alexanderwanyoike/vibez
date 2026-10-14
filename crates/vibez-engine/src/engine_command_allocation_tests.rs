@@ -993,6 +993,205 @@ fn public_add_clip_to_missing_track_returns_unique_payload_without_callback_heap
 }
 
 #[test]
+fn public_clip_insertion_wait_preserves_fifo_duplicate_order_and_live_edits() {
+    use crate::clip_insertion::{ClipInsertionOutcome, PreparedClipInsertion};
+    use vibez_core::routing::RoutingChannel;
+    use vibez_core::warp_marker::WarpMarkers;
+
+    let (mut engine, mut commands, mut events) = AudioEngine::new();
+    let track_id = TrackId::new();
+    let duplicate_id = ClipId::new();
+    commands.push(EngineCommand::add_track(track_id)).unwrap();
+    commands.push(add_clip(track_id, duplicate_id)).unwrap();
+    commands.push(EngineCommand::SetTrackPan(track_id, 0.0)).unwrap();
+    let model: Vec<_> = [track_id, TrackId::MASTER]
+        .into_iter()
+        .map(|id| RoutingChannel {
+            id,
+            is_bus: id.is_master(),
+            sends: Vec::new(),
+            effects: Vec::new(),
+        })
+        .collect();
+    commands.push(EngineCommand::SetRouting(
+        crate::routing::PreparedRouting::prepare(&model, 8).unwrap(),
+    )).unwrap();
+    commands.push(EngineCommand::Play).unwrap();
+    let mut output = [0.0; 16];
+    engine.process_block(AudioProcessBlock::new(&mut output, 2));
+    while events.pop().is_ok() {}
+    let source = &engine.tracks()[0].playback_source;
+    assert_eq!(source.clips.len(), source.clips.capacity());
+    assert_eq!(source.clips.len(), 1);
+    let allocation = source.clips.as_ptr();
+    let original_owner = Arc::downgrade(&source.clips[0].audio);
+    let original_geometry = (
+        source.clips[0].position, source.clips[0].source_offset,
+        source.clips[0].start_marker, source.clips[0].duration,
+        source.clips[0].loop_enabled, source.clips[0].loop_start,
+        source.clips[0].loop_end, source.clips[0].fades,
+        source.clips[0].playback_direction, source.clips[0].warp_markers.clone(),
+    );
+    assert_eq!(engine.transport().position(), 8);
+    for &[left, right] in output.as_chunks::<2>().0 {
+        assert!((left - 0.25).abs() < 1e-7);
+        assert_eq!(right, 0.0);
+    }
+
+    let prepare = |value| {
+        let insertion = PreparedClipInsertion::with_capacity(1);
+        let id = insertion.id();
+        let audio = Arc::new(DecodedAudio {
+            channels: vec![vec![value; 4096]],
+            sample_rate: DEFAULT_SAMPLE_RATE,
+        });
+        let owner = Arc::downgrade(&audio);
+        let mut warp_markers = WarpMarkers::default();
+        assert!(warp_markers.add(32, 64, 0, 128, 128));
+        let marker_allocation = warp_markers.as_slice().as_ptr();
+        let markers = warp_markers.clone();
+        (EngineCommand::AddClip {
+            insertion,
+            track_id,
+            clip_id: duplicate_id,
+            audio,
+            position: 0,
+            source_offset: 0,
+            start_marker: 0,
+            duration: 4096,
+            loop_enabled: true,
+            loop_start: 0,
+            loop_end: 128,
+            linear_gain: 1.0,
+            fades: Default::default(),
+            playback_direction: Default::default(),
+            warp_markers,
+        }, id, owner, marker_allocation, markers)
+    };
+    let (first, first_id, first_owner, first_markers, expected_first_markers) = prepare(0.0625);
+    let (second, second_id, second_owner, second_markers, expected_second_markers) = prepare(0.03125);
+    assert_ne!(first_id, second_id);
+    assert_eq!(first_owner.strong_count(), 1);
+    assert_eq!(second_owner.strong_count(), 1);
+    let previous_swing = engine.project_swing;
+    let target_swing = vibez_core::perform::SwingAmount::new(0.625);
+    commands.push(first).unwrap();
+    commands.push(EngineCommand::SetClipGain {
+        track_id, clip_id: duplicate_id, linear_gain: 0.5,
+    }).unwrap();
+    commands.push(second).unwrap();
+    commands.push(EngineCommand::SetProjectSwing(target_swing)).unwrap();
+    commands.push(EngineCommand::Stop).unwrap();
+    let slots_before = commands.slots();
+    assert_eq!(crate::retirement::tests::allocations(|| {
+        engine.process_block(AudioProcessBlock::new(&mut [], 2));
+    }), (0, 0));
+    assert_eq!(commands.slots(), slots_before + 1);
+    let mut request = None;
+    while let Ok(event) = events.pop() {
+        if let EngineEvent::ClipInsertionStorageRequested(value) = event {
+            assert!(request.is_none());
+            assert_eq!(value.id, first_id);
+            assert_eq!((value.track_id, value.clip_id), (track_id, duplicate_id));
+            request = Some(value);
+        }
+    }
+    let request = request.expect("the full source publishes its real storage request");
+    for block in 0..4 {
+        assert_eq!(crate::retirement::tests::allocations(|| {
+            engine.process_block(AudioProcessBlock::new(&mut output, 2));
+        }), (0, 0));
+        let clips = &engine.tracks()[0].playback_source.clips;
+        assert_eq!(clips.as_ptr(), allocation);
+        assert_eq!(clips.len(), 1);
+        assert_eq!(clips[0].id, duplicate_id);
+        assert_eq!(Arc::as_ptr(&clips[0].audio), original_owner.as_ptr());
+        assert_eq!(clips[0].linear_gain, 1.0);
+        assert_eq!((
+            clips[0].position, clips[0].source_offset, clips[0].start_marker,
+            clips[0].duration, clips[0].loop_enabled, clips[0].loop_start,
+            clips[0].loop_end, clips[0].fades, clips[0].playback_direction,
+            clips[0].warp_markers.clone(),
+        ), original_geometry);
+        assert_eq!(engine.project_swing, previous_swing);
+        assert_eq!(commands.slots(), slots_before + 1);
+        assert!(engine.transport().is_playing());
+        assert_eq!(engine.transport().position(), 16 + block * 8);
+        for &[left, right] in output.as_chunks::<2>().0 {
+            assert!((left - 0.25).abs() < 1e-7);
+            assert_eq!(right, 0.0);
+        }
+        assert_eq!(original_owner.strong_count(), 1);
+        assert_eq!(first_owner.strong_count(), 1);
+        assert_eq!(second_owner.strong_count(), 1);
+    }
+
+    request.fulfill();
+    assert_eq!(crate::retirement::tests::allocations(|| {
+        engine.process_block(AudioProcessBlock::new(&mut [], 2));
+    }), (0, 0));
+    assert!(engine.cmd_rx.is_empty());
+    assert!(!engine.transport().is_playing());
+    assert_eq!(engine.transport().position(), 40);
+    assert_eq!(engine.transport().audio_length(), Some(4096));
+    assert_eq!(engine.project_swing, target_swing);
+    let clips = &engine.tracks()[0].playback_source.clips;
+    assert_eq!(clips.len(), 3);
+    assert_eq!((
+        clips[0].position, clips[0].source_offset, clips[0].start_marker,
+        clips[0].duration, clips[0].loop_enabled, clips[0].loop_start,
+        clips[0].loop_end, clips[0].fades, clips[0].playback_direction,
+        clips[0].warp_markers.clone(),
+    ), original_geometry);
+    for (clip, owner, gain) in [
+        (&clips[0], &original_owner, 0.5),
+        (&clips[1], &first_owner, 1.0),
+        (&clips[2], &second_owner, 1.0),
+    ] {
+        assert_eq!(clip.id, duplicate_id);
+        assert_eq!(Arc::as_ptr(&clip.audio), owner.as_ptr());
+        assert_eq!(owner.strong_count(), 1);
+        assert_eq!(clip.linear_gain, gain);
+    }
+    assert_eq!(clips[1].warp_markers.as_slice().as_ptr(), first_markers);
+    assert_eq!(clips[2].warp_markers.as_slice().as_ptr(), second_markers);
+    assert_eq!(clips[1].warp_markers, expected_first_markers);
+    assert_eq!(clips[2].warp_markers, expected_second_markers);
+    for clip in &clips[1..] {
+        assert_eq!((clip.position, clip.source_offset, clip.start_marker, clip.duration), (0, 0, 0, 4096));
+        assert!(clip.loop_enabled);
+        assert_eq!((clip.loop_start, clip.loop_end), (0, 128));
+        assert_eq!(clip.fades, Default::default());
+        assert_eq!(clip.playback_direction, Default::default());
+    }
+    let mut completed = Vec::new();
+    while let Ok(event) = events.pop() {
+        match event {
+            EngineEvent::ClipInsertionCompleted(owner) => completed.push(owner),
+            EngineEvent::ClipInsertionStorageRequested(_) => panic!("the second delta fits current capacity"),
+            _ => {}
+        }
+    }
+    assert_eq!(completed.len(), 2);
+    assert_eq!(completed[0].id(), first_id);
+    assert_eq!(completed[1].id(), second_id);
+    for owner in &completed {
+        assert_eq!((owner.track_id, owner.clip_id), (track_id, duplicate_id));
+        assert_eq!(owner.outcome, ClipInsertionOutcome::Applied);
+    }
+    drop(completed);
+    commands.push(EngineCommand::Play).unwrap();
+    assert_eq!(crate::retirement::tests::allocations(|| {
+        engine.process_block(AudioProcessBlock::new(&mut output, 2));
+    }), (0, 0));
+    for &[left, right] in output.as_chunks::<2>().0 {
+        assert!((left - 0.21875).abs() < 1e-7, "committed duplicate mix: {left}");
+        assert_eq!(right, 0.0);
+    }
+    assert_eq!(engine.transport().position(), 48);
+}
+
+#[test]
 fn every_table_command_drains_without_allocating_unless_named_as_card_04_work() {
     let mut mismatches = Vec::new();
     for case in cases() {
