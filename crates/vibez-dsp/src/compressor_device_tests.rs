@@ -53,7 +53,7 @@ fn legacy_descriptors_and_output_timing_are_preserved() {
         let mut envelope = -120.0_f32;
         let detector = db(0.5);
         let coefficient = (-1.0 / (0.005 * rate)).exp();
-        for frame in audio.chunks_exact(2) {
+        for frame in audio.as_chunks::<2>().0 {
             envelope = detector + coefficient * (envelope - detector);
             let reduction = (envelope + 18.0).max(0.0) * 0.75;
             let expected = 0.5 * 10.0_f32.powf(-reduction / 20.0) * 10.0_f32.powf(3.0 / 20.0);
@@ -96,7 +96,7 @@ fn zero_and_multichannel_layouts_preserve_audio_ownership() {
     let mut effect = configured(48000.0, &[(4, 6.0), (1, 1.0)]);
     let mut audio = [0.25, -0.25, 0.7, -0.8].repeat(1024);
     effect.process(&mut audio, 4);
-    for frame in audio.chunks_exact(4) {
+    for frame in audio.as_chunks::<4>().0 {
         assert!((frame[0] - 0.25 * 10.0_f32.powf(6.0 / 20.0)).abs() < 1e-6);
         assert_eq!(frame[2..], [0.7, -0.8]);
     }
