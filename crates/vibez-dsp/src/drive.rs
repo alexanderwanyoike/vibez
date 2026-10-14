@@ -121,8 +121,11 @@ impl AudioEffect for DriveEffect {
     }
 
     fn process(&mut self, buffer: &mut [f32], channels: usize) {
-        let ch = channels.clamp(1, 2);
-        let frames = buffer.len() / ch;
+        if channels == 0 {
+            return;
+        }
+        let ch = channels.min(2);
+        let frames = buffer.len() / channels;
         let drive = self.drive_gain();
         let norm = drive.tanh();
         let amount = self.amount.clamp(0.0, 1.0);
@@ -130,7 +133,7 @@ impl AudioEffect for DriveEffect {
 
         for frame in 0..frames {
             for c in 0..ch {
-                let idx = frame * ch + c;
+                let idx = frame * channels + c;
                 let dry = buffer[idx];
                 let sat = (dry * drive).tanh() / norm;
                 // One-pole tilt: mixes current with previous sample.
