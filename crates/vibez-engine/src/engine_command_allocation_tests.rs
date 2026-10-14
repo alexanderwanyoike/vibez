@@ -167,6 +167,7 @@ fn nonempty_warp_markers() -> vibez_core::warp_marker::WarpMarkers {
 
 fn add_clip(track_id: TrackId, clip_id: ClipId) -> EngineCommand {
     EngineCommand::AddClip {
+        insertion: crate::clip_insertion::PreparedClipInsertion::new(),
         track_id,
         clip_id,
         audio: audio(4096),
@@ -991,6 +992,7 @@ fn public_add_clip_at_exhausted_capacity_preserves_content_without_callback_heap
     let fades = ClipFades::new(2, 3, duration);
     commands
         .push(EngineCommand::AddClip {
+            insertion: crate::clip_insertion::PreparedClipInsertion::new(),
             track_id,
             clip_id: incoming_id,
             audio: incoming_audio,
@@ -1109,6 +1111,7 @@ fn public_add_clip_to_missing_track_returns_unique_payload_without_callback_heap
     assert_eq!(markers.as_slice().len(), 3);
     commands
         .push(EngineCommand::AddClip {
+            insertion: crate::clip_insertion::PreparedClipInsertion::new(),
             track_id: missing_track,
             clip_id: ClipId::new(),
             audio: incoming_audio,

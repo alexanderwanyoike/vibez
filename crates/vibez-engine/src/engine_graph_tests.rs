@@ -298,6 +298,7 @@ fn clip_bus_and_master_automation_advance_on_perform_clock() {
 
 fn clip(id: TrackId, value: f32) -> EngineCommand {
     EngineCommand::AddClip {
+        insertion: crate::clip_insertion::PreparedClipInsertion::new(),
         track_id: id,
         clip_id: ClipId::new(),
         audio: Arc::new(DecodedAudio {

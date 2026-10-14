@@ -40,6 +40,7 @@ fn running_reduced_monitoring_changes_never_refill_or_drop_constant_audio() {
         commands.push(EngineCommand::add_track(id)).unwrap();
         commands
             .push(EngineCommand::AddClip {
+                insertion: crate::clip_insertion::PreparedClipInsertion::new(),
                 track_id: id,
                 clip_id: ClipId::new(),
                 audio: Arc::new(DecodedAudio {
@@ -216,6 +217,7 @@ fn midrun_bypass_and_unbypass_keep_the_current_delayed_audio_without_stale_wet_i
     let signal: Vec<_> = (0..4096).map(|sample| sample as f32 / 4096.0).collect();
     commands
         .push(EngineCommand::AddClip {
+            insertion: crate::clip_insertion::PreparedClipInsertion::new(),
             track_id: track,
             clip_id: ClipId::new(),
             audio: Arc::new(DecodedAudio {

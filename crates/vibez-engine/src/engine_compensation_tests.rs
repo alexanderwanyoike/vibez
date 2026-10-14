@@ -30,6 +30,7 @@ fn pulse_clip(track_id: TrackId, amplitude: f32) -> EngineCommand {
         samples[onset] = amplitude;
     }
     EngineCommand::AddClip {
+        insertion: crate::clip_insertion::PreparedClipInsertion::new(),
         track_id,
         clip_id: ClipId::new(),
         audio: Arc::new(DecodedAudio {

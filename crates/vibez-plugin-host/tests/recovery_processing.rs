@@ -38,6 +38,7 @@ fn channel(id: TrackId, effect: Option<EffectId>) -> RoutingChannel {
 
 fn clip(track: TrackId, value: f32) -> EngineCommand {
     EngineCommand::AddClip {
+        insertion: vibez_engine::clip_insertion::PreparedClipInsertion::new(),
         track_id: track,
         clip_id: ClipId::new(),
         audio: Arc::new(DecodedAudio {
