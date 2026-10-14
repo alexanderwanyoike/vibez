@@ -1,3 +1,5 @@
+//! Sender-prepared commands crossing the ordered audio-engine ingress.
+
 use std::sync::Arc;
 use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::effect::EffectType;
@@ -115,6 +117,7 @@ pub enum EngineCommand {
     ReorderTracks(Vec<TrackId>),
     /// Add a clip to a track.
     AddClip {
+        insertion: Box<crate::clip_insertion::PreparedClipInsertion>,
         track_id: TrackId,
         clip_id: ClipId,
         audio: Arc<DecodedAudio>,
