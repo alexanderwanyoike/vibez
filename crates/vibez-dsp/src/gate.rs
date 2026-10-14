@@ -49,7 +49,7 @@ pub struct GateEffect {
     open: bool,
     inputs: [vibez_core::routing::ExternalInputDescriptor; 1],
     gain: f32,
-    expander_gain: f32,
+    expander_gain: f64,
     hold_counter: u32,
 }
 
@@ -162,9 +162,10 @@ impl AudioEffect for GateEffect {
             let expansion_target = if self.open || self.hold_counter > 0 {
                 1.0
             } else { 10.0_f32.powf(-reduction / 20.0) };
-            let coefficient = if expansion_target > self.expander_gain { att } else { rel };
+            let expansion_target = expansion_target as f64;
+            let coefficient = if expansion_target > self.expander_gain { att } else { rel } as f64;
             self.expander_gain = expansion_target + coefficient * (self.expander_gain - expansion_target);
-            let gain = if self.params[param::MODE] >= 0.5 { self.expander_gain } else { self.gain };
+            let gain = if self.params[param::MODE] >= 0.5 { self.expander_gain as f32 } else { self.gain };
 
             if self.open {
                 self.hold_counter = hold_frames;
