@@ -34,8 +34,8 @@ pub const MAX_W: f32 = 820.0;
 const PRESET_ROW_H: f32 = 28.0;
 const FOOTER_H: f32 = 22.0;
 const MAIN_MAX_H: f32 = 150.0;
-const MAIN_MIN_H: f32 = 96.0;
-const ADVANCED_H: f32 = 84.0;
+const MAIN_MIN_H: f32 = 92.0;
+const ADVANCED_H: f32 = 76.0;
 
 /// Card width for a share of the device section: compact until the history
 /// fits, then everything the section offers up to a readable maximum.
@@ -61,19 +61,24 @@ pub enum Arrangement {
     WithAdvanced {
         main: f32,
     },
+    /// Wide but short: Advanced takes the history's place beside the meters.
+    AdvancedBeside {
+        main: f32,
+    },
     AdvancedOnly {
         main: f32,
     },
 }
 
-pub fn arrange(height: f32, advanced: bool) -> Arrangement {
-    let below_preset = (height - PRESET_ROW_H - 1.0).max(0.0);
+pub fn arrange(size: Size, advanced: bool) -> Arrangement {
+    let below_preset = (size.height - PRESET_ROW_H - 1.0).max(0.0);
+    let beside = size.width >= MEDIUM_W;
     if below_preset < MAIN_MIN_H + 1.0 + FOOTER_H {
         let main = below_preset;
-        return if advanced {
-            Arrangement::AdvancedOnly { main }
-        } else {
-            Arrangement::Short { main }
+        return match (advanced, beside) {
+            (false, _) => Arrangement::Short { main },
+            (true, true) => Arrangement::AdvancedBeside { main },
+            (true, false) => Arrangement::AdvancedOnly { main },
         };
     }
     let main_area = below_preset - FOOTER_H - 1.0;
@@ -85,6 +90,10 @@ pub fn arrange(height: f32, advanced: bool) -> Arrangement {
     if main_area >= MAIN_MIN_H + 1.0 + ADVANCED_H {
         Arrangement::WithAdvanced {
             main: (main_area - 1.0 - ADVANCED_H).min(MAIN_MAX_H),
+        }
+    } else if beside {
+        Arrangement::AdvancedBeside {
+            main: main_area.min(MAIN_MAX_H),
         }
     } else {
         Arrangement::AdvancedOnly { main: main_area }
@@ -129,14 +138,20 @@ pub fn view<'a>(
             .align_y(Alignment::Center),
         rule(),
     ];
-    let main = |height| main_controls(track_id, effect, state, control_accent, size.width, height);
+    let main = |height, side| main_controls(track_id, effect, state, control_accent, side, height);
     let advanced = |height| advanced_controls(track_id, effect, state, control_accent, height);
-    body = match arrange(size.height, state.advanced) {
+    let history = if size.width >= MEDIUM_W {
+        Side::History
+    } else {
+        Side::Empty
+    };
+    body = match arrange(size, state.advanced) {
         Arrangement::Short { main: height } | Arrangement::Normal { main: height } => {
-            body.push(main(height))
+            body.push(main(height, history))
         }
+        Arrangement::AdvancedBeside { main: height } => body.push(main(height, Side::Advanced)),
         Arrangement::WithAdvanced { main: height } => body
-            .push(main(height))
+            .push(main(height, history))
             .push(rule())
             .push(advanced(ADVANCED_H)),
         Arrangement::AdvancedOnly { main: height } => body.push(advanced(height)),
@@ -155,12 +170,20 @@ pub fn view<'a>(
     body.width(Length::Fill).height(Length::Fill).into()
 }
 
+/// What the main row shows beside the meters when the card is wide.
+#[derive(Clone, Copy)]
+enum Side {
+    Empty,
+    History,
+    Advanced,
+}
+
 fn main_controls<'a>(
     track_id: TrackId,
     effect: &'a UiEffect,
     state: &'a GainPanelState,
     accent: Color,
-    width: f32,
+    side: Side,
     height: f32,
 ) -> Element<'a, Message> {
     let inner = (height - 12.0).max(40.0);
@@ -177,7 +200,11 @@ fn main_controls<'a>(
         ),
     ]
     .height(inner);
-    if width >= MEDIUM_W && inner >= HISTORY_MIN_H {
+    if matches!(side, Side::Advanced) {
+        main = main
+            .push(vertical_rule())
+            .push(advanced_controls(track_id, effect, state, accent, inner));
+    } else if matches!(side, Side::History) && inner >= HISTORY_MIN_H {
         main = main.push(vertical_rule()).push(
             column![
                 section_label("Output history"),
@@ -665,42 +692,58 @@ mod tests {
     use super::*;
 
     #[test]
-    fn every_supported_height_fits_its_controls_without_scrolling() {
-        for height in (60..=400).step_by(4) {
-            let height = height as f32;
-            for advanced in [false, true] {
-                let used = match arrange(height, advanced) {
-                    Arrangement::Short { main } => PRESET_ROW_H + 1.0 + main,
-                    Arrangement::Normal { main } => PRESET_ROW_H + 1.0 + main + 1.0 + FOOTER_H,
-                    Arrangement::WithAdvanced { main } => {
-                        PRESET_ROW_H + 1.0 + main + 1.0 + ADVANCED_H + 1.0 + FOOTER_H
-                    }
-                    Arrangement::AdvancedOnly { main } => {
-                        let footer = if footer_fits(height) {
-                            1.0 + FOOTER_H
-                        } else {
-                            0.0
-                        };
-                        PRESET_ROW_H + 1.0 + main + footer
-                    }
+    fn every_supported_size_fits_its_controls_without_scrolling() {
+        for width in [COMPACT_W, MEDIUM_W] {
+            for height in (60..=400).step_by(4).map(|height| height as f32) {
+                let footer = if footer_fits(height) {
+                    1.0 + FOOTER_H
+                } else {
+                    0.0
                 };
-                assert!(used <= height + 0.01, "{height} {advanced}: {used}");
+                for advanced in [false, true] {
+                    let used = match arrange(Size::new(width, height), advanced) {
+                        Arrangement::Short { main } => PRESET_ROW_H + 1.0 + main,
+                        Arrangement::Normal { main }
+                        | Arrangement::AdvancedBeside { main }
+                        | Arrangement::AdvancedOnly { main } => PRESET_ROW_H + 1.0 + main + footer,
+                        Arrangement::WithAdvanced { main } => {
+                            PRESET_ROW_H + 1.0 + main + 1.0 + ADVANCED_H + footer
+                        }
+                    };
+                    assert!(used <= height + 0.01, "{width}x{height} {advanced}: {used}");
+                }
             }
         }
     }
 
     #[test]
-    fn advanced_stacks_only_when_both_sections_fit() {
+    fn advanced_stacks_when_it_fits_and_otherwise_keeps_the_meters_in_view() {
+        let compact = |height| Size::new(COMPACT_W, height);
+        let medium = |height| Size::new(MEDIUM_W, height);
         assert!(matches!(
-            arrange(400.0, true),
+            arrange(medium(400.0), true),
             Arrangement::WithAdvanced { main } if main == MAIN_MAX_H
         ));
         assert!(matches!(
-            arrange(184.0, true),
+            arrange(medium(200.0), true),
+            Arrangement::AdvancedBeside { .. }
+        ));
+        assert!(matches!(
+            arrange(medium(100.0), true),
+            Arrangement::AdvancedBeside { .. }
+        ));
+        assert!(matches!(
+            arrange(compact(200.0), true),
             Arrangement::AdvancedOnly { .. }
         ));
-        assert!(matches!(arrange(184.0, false), Arrangement::Normal { .. }));
-        assert!(matches!(arrange(100.0, false), Arrangement::Short { .. }));
+        assert!(matches!(
+            arrange(compact(200.0), false),
+            Arrangement::Normal { .. }
+        ));
+        assert!(matches!(
+            arrange(compact(100.0), false),
+            Arrangement::Short { .. }
+        ));
     }
 
     #[test]
