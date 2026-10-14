@@ -242,12 +242,13 @@ impl AudioEngine {
         &mut self,
         track_id: vibez_core::id::TrackId,
         pad_index: usize,
-        state: vibez_core::track::DrumPadState,
+        state: vibez_instruments::PreparedDrumPadState,
     ) {
-        if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
-            if let Some(ref mut instrument) = track.instrument {
-                instrument.set_drum_pad_state(pad_index, state);
-            }
-        }
+        let retired = match self.tracks.iter_mut().find(|track| track.id == track_id)
+            .and_then(|track| track.instrument.as_mut()) {
+            Some(instrument) => instrument.set_drum_pad_state(pad_index, state),
+            None => vibez_instruments::InstrumentMediaOwners { sample: None, name: state.name },
+        };
+        self.retire_instrument_media(retired);
     }
 }

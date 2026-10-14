@@ -2,6 +2,8 @@
 
 pub mod drum_rack;
 mod media_owners;
+mod prepared_pad_state;
+pub use prepared_pad_state::PreparedDrumPadState;
 pub use media_owners::InstrumentMediaOwners;
 pub(crate) mod envelope;
 pub mod sampler;
@@ -12,7 +14,6 @@ use std::sync::Arc;
 use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::effect::ParamDescriptor;
 use vibez_core::midi::InstrumentKind;
-use vibez_core::track::DrumPadState;
 
 use drum_rack::DrumRack;
 use sampler::Sampler;
@@ -118,7 +119,9 @@ pub trait Instrument: Send {
     }
 
     /// Apply pad settings to a drum-rack pad. No-op for other instruments.
-    fn set_drum_pad_state(&mut self, _pad_index: usize, _state: DrumPadState) {}
+    fn set_drum_pad_state(&mut self, _pad_index: usize, state: PreparedDrumPadState) -> InstrumentMediaOwners {
+        InstrumentMediaOwners { sample: None, name: state.name }
+    }
 
     /// Sample name for UI display. None for non-sample instruments.
     fn sample_name(&self) -> Option<&str> {

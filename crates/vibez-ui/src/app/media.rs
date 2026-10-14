@@ -352,11 +352,7 @@ impl App {
             .and_then(|track| track.drum_rack_pads.get(pad_index))
             .map(UiDrumPad::to_state);
         if let Some(state) = state {
-            self.send_command(EngineCommand::SetDrumRackPadState {
-                track_id,
-                pad_index,
-                state,
-            });
+            self.send_command(EngineCommand::set_drum_rack_pad_state(track_id, pad_index, state));
         }
     }
 

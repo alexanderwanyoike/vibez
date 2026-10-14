@@ -180,15 +180,11 @@ fn drum_sample_replacement_returns_old_owners_and_keeps_sounding_pad_voices() {
             .unwrap();
         for pad in [0, 1] {
             commands
-                .push(EngineCommand::SetDrumRackPadState {
-                    track_id: track,
-                    pad_index: pad,
-                    state: vibez_core::track::DrumPadState {
+                .push(EngineCommand::set_drum_rack_pad_state(track, pad, vibez_core::track::DrumPadState {
                         fade_in_ms: 0.0,
                         fade_out_ms: 0.0,
                         ..Default::default()
-                    },
-                })
+                    }))
                 .unwrap();
         }
         commands
@@ -279,15 +275,11 @@ fn first_drum_notes_do_not_destroy_dummy_voice_allocations_in_callback() {
             ))
             .unwrap();
         commands
-            .push(EngineCommand::SetDrumRackPadState {
-                track_id: track,
-                pad_index: 0,
-                state: vibez_core::track::DrumPadState {
+            .push(EngineCommand::set_drum_rack_pad_state(track, 0, vibez_core::track::DrumPadState {
                     fade_in_ms: 0.0,
                     fade_out_ms: 0.0,
                     ..Default::default()
-                },
-            })
+                }))
             .unwrap();
         commands
             .push(EngineCommand::LoadDrumRackPadSample {
@@ -332,8 +324,7 @@ fn clearing_populated_pad_returns_owners_and_preserves_unrelated_voice_phase() {
         commands.push(EngineCommand::add_track(track)).unwrap();
         commands.push(EngineCommand::set_built_in_instrument(track, InstrumentKind::DrumRack, 1000)).unwrap();
         for pad in [0, 1] {
-            commands.push(EngineCommand::SetDrumRackPadState { track_id: track, pad_index: pad,
-                state: vibez_core::track::DrumPadState { fade_in_ms: 0.0, fade_out_ms: 0.0, ..Default::default() } }).unwrap();
+            commands.push(EngineCommand::set_drum_rack_pad_state(track, pad, vibez_core::track::DrumPadState { fade_in_ms: 0.0, fade_out_ms: 0.0, ..Default::default() })).unwrap();
         }
         commands.push(EngineCommand::LoadDrumRackPadSample { track_id: track, pad_index: 0,
             sample: original, sample_name: name }).unwrap();
@@ -391,8 +382,7 @@ fn pad_state_name_and_source_preparation_preserves_audio_and_canonical_metadata(
         commands.push(EngineCommand::SetSampleRate(1000)).unwrap();
         commands.push(EngineCommand::add_track(track)).unwrap();
         commands.push(EngineCommand::set_built_in_instrument(track, InstrumentKind::DrumRack, 1000)).unwrap();
-        commands.push(EngineCommand::SetDrumRackPadState { track_id: track, pad_index: 0,
-            state: DrumPadState { fade_in_ms: 0.0, fade_out_ms: 0.0, ..Default::default() } }).unwrap();
+        commands.push(EngineCommand::set_drum_rack_pad_state(track, 0, DrumPadState { fade_in_ms: 0.0, fade_out_ms: 0.0, ..Default::default() })).unwrap();
         commands.push(EngineCommand::LoadDrumRackPadSample { track_id: track, pad_index: 0,
             sample: audio(0.5), sample_name: old_name }).unwrap();
         commands.push(EngineCommand::ExternalNoteOn { track_id: track, pitch: 36, velocity: 127 }).unwrap();
@@ -405,7 +395,7 @@ fn pad_state_name_and_source_preparation_preserves_audio_and_canonical_metadata(
             fade_in_ms: 0.0, fade_out_ms: 0.0, coarse_tune: 12, fine_tune: 25.0,
             one_shot: false, choke_group: None };
         let unchanged = canonical.clone();
-        commands.push(EngineCommand::SetDrumRackPadState { track_id: track, pad_index: 0, state: canonical.clone() }).unwrap();
+        commands.push(EngineCommand::set_drum_rack_pad_state(track, 0, canonical.clone())).unwrap();
         if full_ring {
             while engine.event_tx.push(EngineEvent::PlaybackStarted).is_ok() {}
         }
@@ -429,7 +419,7 @@ fn pad_state_name_and_source_preparation_preserves_audio_and_canonical_metadata(
         commands.push(EngineCommand::ExternalNoteOn { track_id: track, pitch: 36, velocity: 127 }).unwrap();
         assert_eq!(crate::retirement::tests::allocations(|| engine.process(&mut output, 1)), (0, 0));
         assert_eq!(output, [0.625; 16], "new voice adopts prepared gain");
-        commands.push(EngineCommand::SetDrumRackPadState { track_id: track, pad_index: 0, state: DrumPadState::default() }).unwrap();
+        commands.push(EngineCommand::set_drum_rack_pad_state(track, 0, DrumPadState::default())).unwrap();
         assert_eq!(crate::retirement::tests::allocations(|| engine.process(&mut [], 1)), (0, 0));
         let names: Vec<_> = std::iter::from_fn(|| events.pop().ok()).filter_map(|event| match event {
             EngineEvent::RetiredInstrumentMedia(owners) => owners.name,
