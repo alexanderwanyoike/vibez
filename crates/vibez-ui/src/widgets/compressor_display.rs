@@ -335,3 +335,103 @@ impl canvas::Program<Message> for ReductionGauge {
         vec![frame.into_geometry()]
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domains::devices::DevicesMsg;
+    use iced::widget::canvas::Program;
+    use vibez_core::{effect::EffectType, id::EffectId};
+    use vibez_dsp::effect::AudioEffect;
+
+    #[test]
+    fn transfer_threshold_drag_clamps_and_shares_one_undo_gesture_until_release() {
+        let processor = vibez_dsp::compressor::CompressorEffect::new(48000.0);
+        let descriptors = processor.param_descriptors();
+        let effect = UiEffect {
+            reconfiguration_failed: false,
+            latency_samples: Some(0),
+            id: EffectId::new(),
+            effect_type: EffectType::Compressor,
+            bypass: false,
+            params: descriptors
+                .iter()
+                .map(|descriptor| descriptor.default)
+                .collect(),
+            descriptors,
+            plugin_name: None,
+            has_plugin_gui: false,
+            plugin_ref: None,
+            sidechains: vec![],
+            inactive_sidechains: vec![],
+            external_inputs: vec![],
+        };
+        let display = TransferCurve {
+            track: TrackId::new(),
+            effect: &effect,
+            accent: Color::WHITE,
+        };
+        let bounds = Rectangle {
+            x: 20.0,
+            y: 40.0,
+            width: 400.0,
+            height: 180.0,
+        };
+        let mut state = TransferState::default();
+        let cursor = mouse::Cursor::Available(Point::new(bounds.x + 200.0, bounds.y + 90.0));
+        let (status, message) = display.update(
+            &mut state,
+            canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)),
+            bounds,
+            cursor,
+        );
+        assert_eq!(status, canvas::event::Status::Captured);
+        assert!(message.is_none());
+        let mut gesture = None;
+        for (local_x, expected) in [(-20.0, Some(-60.0)), (200.0, None), (460.0, Some(0.0))] {
+            let point = Point::new(bounds.x + local_x, bounds.y + 60.0);
+            let (_, message) = display.update(
+                &mut state,
+                canvas::Event::Mouse(mouse::Event::CursorMoved { position: point }),
+                bounds,
+                mouse::Cursor::Available(point),
+            );
+            let Some(Message::UndoGesture { id, edit }) = message else {
+                panic!("threshold drag must retain its undo gesture");
+            };
+            assert!(gesture.is_none_or(|previous| previous == id));
+            gesture = Some(id);
+            let Message::Devices(DevicesMsg::SetEffectParam(track, id, index, value)) = *edit
+            else {
+                panic!("threshold drag must use the normal effect edit");
+            };
+            assert_eq!(track, display.track);
+            assert_eq!(id, effect.id);
+            assert_eq!(index, param::THRESHOLD);
+            assert!((-60.0..=0.0).contains(&value));
+            if let Some(expected) = expected {
+                assert_eq!(value, expected);
+            } else {
+                assert!(value > -60.0 && value < 0.0);
+            }
+        }
+        display.update(
+            &mut state,
+            canvas::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)),
+            bounds,
+            cursor,
+        );
+        assert!(state.gesture.is_none());
+        assert!(display
+            .update(
+                &mut state,
+                canvas::Event::Mouse(mouse::Event::CursorMoved {
+                    position: Point::ORIGIN
+                }),
+                bounds,
+                cursor
+            )
+            .1
+            .is_none());
+    }
+}
