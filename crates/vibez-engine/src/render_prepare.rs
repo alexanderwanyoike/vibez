@@ -1,3 +1,5 @@
+//! Prepare channel strips and resident content for offline rendering.
+
 use super::*;
 use crate::mixer::{EngineClip, EngineNoteClip};
 use vibez_core::effect::EffectInfo;
