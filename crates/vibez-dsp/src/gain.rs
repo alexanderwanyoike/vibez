@@ -105,7 +105,7 @@ impl GainEffect {
         for channel in 0..2 {
             let polarity = if self.inverted[channel] { -1.0 } else { 1.0 };
             self.channel_gains[channel] =
-                self.gain * 10.0_f32.powf(self.trim_db[channel] / 20.0) * polarity;
+                self.gain * vibez_core::level::db_to_amplitude(self.trim_db[channel]) * polarity;
         }
         true
     }

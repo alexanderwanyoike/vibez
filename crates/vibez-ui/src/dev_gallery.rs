@@ -211,19 +211,15 @@ struct GainGallery {
     open: crate::domains::gain::GainPanelState,
 }
 
-fn amplitude(db: f32) -> f32 {
-    10f32.powf(db / 20.0)
-}
-
 fn gain_panel(advanced: bool, clip: bool) -> crate::domains::gain::GainPanelState {
     use crate::domains::gain::{GainHistoryPoint, GainPanelState};
     use vibez_engine::metering::MeterValues;
     let now = std::time::Instant::now();
     let levels = |offset: f32| MeterValues {
-        peak_l: amplitude(-6.2 + offset),
-        peak_r: amplitude(-6.8 + offset),
-        rms_l: amplitude(-11.0 + offset),
-        rms_r: amplitude(-11.6 + offset),
+        peak_l: vibez_core::level::db_to_amplitude(-6.2 + offset),
+        peak_r: vibez_core::level::db_to_amplitude(-6.8 + offset),
+        rms_l: vibez_core::level::db_to_amplitude(-11.0 + offset),
+        rms_r: vibez_core::level::db_to_amplitude(-11.6 + offset),
     };
     let history = (0..200)
         .map(|step| {
@@ -231,8 +227,8 @@ fn gain_panel(advanced: bool, clip: bool) -> crate::domains::gain::GainPanelStat
             let swell = (seconds * 1.7).sin() * 1.5 + (seconds * 5.3).sin() * 0.8;
             GainHistoryPoint {
                 at: now - std::time::Duration::from_secs_f32(10.0 - seconds),
-                peak: amplitude(-7.0 + swell),
-                rms: amplitude(-12.5 + swell * 0.6),
+                peak: vibez_core::level::db_to_amplitude(-7.0 + swell),
+                rms: vibez_core::level::db_to_amplitude(-12.5 + swell * 0.6),
             }
         })
         .collect();

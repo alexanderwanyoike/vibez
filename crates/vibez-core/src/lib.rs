@@ -7,6 +7,7 @@ pub mod constants;
 pub mod device_preset;
 pub mod effect;
 pub mod id;
+pub mod level;
 pub mod midi;
 pub mod onset;
 pub mod perform;

@@ -150,18 +150,6 @@ impl GainPanelState {
     }
 }
 
-pub fn gain_to_db(gain: f32) -> f32 {
-    if gain > 0.0 {
-        20.0 * gain.log10()
-    } else {
-        f32::NEG_INFINITY
-    }
-}
-
-pub fn db_to_gain(db: f32) -> f32 {
-    10.0_f32.powf(db / 20.0)
-}
-
 pub fn parse_input(index: usize, text: &str) -> Option<f32> {
     let text = text.trim();
     if index == vibez_dsp::gain::param::GAIN && (text.eq_ignore_ascii_case("-inf") || text == "-∞")
@@ -176,7 +164,7 @@ pub fn parse_input(index: usize, text: &str) -> Option<f32> {
     if index == param::GAIN {
         (MIN_GAIN_DB..=MAX_GAIN_DB)
             .contains(&db)
-            .then(|| db_to_gain(db))
+            .then(|| vibez_core::level::db_to_amplitude(db))
     } else if param::TRIM.contains(&index) {
         (-TRIM_RANGE_DB..=TRIM_RANGE_DB).contains(&db).then_some(db)
     } else {

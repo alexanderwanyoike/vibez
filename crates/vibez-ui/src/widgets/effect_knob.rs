@@ -7,13 +7,14 @@ use iced::mouse;
 use iced::widget::{canvas, column, text};
 use iced::{Color, Element, Length, Rectangle, Renderer, Theme};
 
-use crate::domains::gain::{db_to_gain, gain_to_db, MAX_GAIN_DB, MIN_GAIN_DB};
+use crate::domains::gain::{MAX_GAIN_DB, MIN_GAIN_DB};
 use crate::message::{DrumPadParam, Message};
 use crate::state::{AudioClipInspectorField, AudioClipRotaryField, UndoGestureId};
 use crate::theme;
 use crate::widgets::double_click::DoubleClick;
 use crate::widgets::drag::ValueDrag;
 use vibez_core::id::{ClipId, EffectId, TrackId};
+use vibez_core::level::{amplitude_to_db, db_to_amplitude};
 
 /// 270-degree arc sweep matching DAW standards.
 const ARC_START: f32 = std::f32::consts::FRAC_PI_4 * 3.0; // 135 degrees
@@ -252,7 +253,7 @@ impl EffectKnobWidget {
     /// Normalize value to 0.0..1.0 range.
     fn normalized(&self) -> f32 {
         if matches!(self.target, KnobTarget::EffectDb(_)) {
-            let db = gain_to_db(self.value).clamp(MIN_GAIN_DB, MAX_GAIN_DB);
+            let db = amplitude_to_db(self.value).clamp(MIN_GAIN_DB, MAX_GAIN_DB);
             return if db <= 0.0 {
                 (db - MIN_GAIN_DB) / (-2.0 * MIN_GAIN_DB)
             } else {
@@ -279,7 +280,7 @@ impl EffectKnobWidget {
             } else {
                 MAX_GAIN_DB * (2.0 * n - 1.0)
             };
-            return db_to_gain(db).clamp(self.min, self.max);
+            return db_to_amplitude(db).clamp(self.min, self.max);
         }
         self.min + n.clamp(0.0, 1.0) * (self.max - self.min)
     }

@@ -7,6 +7,7 @@ use vibez_engine::metering::MeterValues;
 
 use crate::message::Message;
 use crate::theme as th;
+use vibez_core::level::amplitude_to_db;
 
 /// Scale marks, top to bottom. They are spaced evenly so the musically busy
 /// top of the range gets as much room as the quiet bottom.
@@ -21,14 +22,6 @@ const BAR_W: f32 = 9.0;
 const BAR_GAP: f32 = 3.0;
 const YELLOW_FROM_DB: f32 = -12.0;
 const RED_FROM_DB: f32 = -3.0;
-
-pub fn amplitude_to_db(amplitude: f32) -> f32 {
-    if amplitude > 0.0 && amplitude.is_finite() {
-        20.0 * amplitude.log10()
-    } else {
-        f32::NEG_INFINITY
-    }
-}
 
 /// Distance from the top of the scale, 0 at 0 dBFS and 1 at its floor.
 pub fn scale_position(db: f32) -> f32 {

@@ -144,11 +144,17 @@ pub fn factory_presets(effect_type: EffectType) -> Vec<DevicePreset> {
         ("Unity", [1.0, 0.0, 0.0, 0.0, 0.0]),
         (
             "Minus 6 dB",
-            [10.0_f32.powf(-6.0 / 20.0), 0.0, 0.0, 0.0, 0.0],
+            [vibez_core::level::db_to_amplitude(-6.0), 0.0, 0.0, 0.0, 0.0],
         ),
         (
             "Minus 12 dB",
-            [10.0_f32.powf(-12.0 / 20.0), 0.0, 0.0, 0.0, 0.0],
+            [
+                vibez_core::level::db_to_amplitude(-12.0),
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+            ],
         ),
         ("Invert stereo", [1.0, 0.0, 0.0, 1.0, 1.0]),
     ]

@@ -10,9 +10,7 @@ use vibez_core::id::TrackId;
 use vibez_dsp::gain::{param, MAX_GAIN, TRIM_RANGE_DB};
 use vibez_engine::metering::MeterValues;
 
-use crate::domains::gain::{
-    gain_to_db, GainHistoryPoint, GainMsg, GainPanelState, MAX_GAIN_DB, MIN_GAIN_DB,
-};
+use crate::domains::gain::{GainHistoryPoint, GainMsg, GainPanelState, MAX_GAIN_DB, MIN_GAIN_DB};
 use crate::message::Message;
 use crate::state::UiEffect;
 use crate::theme as th;
@@ -594,7 +592,7 @@ fn db_text(amplitude: f32) -> String {
     if amplitude <= 0.0 || !amplitude.is_finite() {
         "-inf".into()
     } else {
-        format!("{:.1}", gain_to_db(amplitude))
+        format!("{:.1}", vibez_core::level::amplitude_to_db(amplitude))
     }
 }
 
@@ -669,7 +667,7 @@ impl canvas::Program<Message> for LevelHistory<'_> {
                         continue;
                     }
                     let value = if peak { point.peak } else { point.rms };
-                    let db = level_meter::amplitude_to_db(value);
+                    let db = vibez_core::level::amplitude_to_db(value);
                     // Silence is the absence of a line, not a line on the floor.
                     if db <= level_meter::FLOOR_DB {
                         started = false;
