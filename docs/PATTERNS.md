@@ -92,6 +92,18 @@ commands. Runtime boundary emitters reserve before changing state. Clip packets
 reuse their transferred Vec for resumable acknowledgements and owner return.
 Neither store grows or destroys undelivered owners in the callback.
 
+Native sampler and drum pad media edits reserve one device-retirement slot
+before command admission. A single `RetiredInstrumentMedia` event returns both
+the displaced decoded audio and its name; rejected edits return incoming owners
+through the same path. Drum pad state resolves its display name on the sender,
+so source paths and provenance never enter the callback.
+
+Sounding drum voices can retain older audio after a pad replacement. The UI
+deduplicates returned sample guards by allocation identity and reaps a guard
+only when it is the last strong owner. Callback sources use strong references,
+never Weak upgrades. App shutdown closes plugin editors and destroys the audio
+stream before releasing these guards and sample caches.
+
 Presentation exhaustion stops playback and Capture, retains their terminal state
 and named cause in inline pending slots, and converts canceled Section/Clip
 notifications into owner retirement. One inline overflow holder protects the
