@@ -133,3 +133,29 @@ fn the_single_modern_tone_stage_retains_its_history_across_exact_character_chang
         }
     }
 }
+
+#[test]
+fn manual_filter_switches_crossfade_warm_signals_without_touching_the_dry_branch() {
+    let mut high = create_effect_with_params(EffectType::Drive, 48_000.0, &[1.0, 0.5, 1.0, 1.0]);
+    high.process(&mut [0.02; 4096], 1);
+    assert!(high.set_param(6, 1.0));
+    let mut output = [0.02; 640];
+    high.process(&mut output, 1);
+    for (frame, actual) in output.into_iter().enumerate() {
+        let weight = (frame + 1).saturating_sub(64).min(512) as f32 / 512.0;
+        let expected = (0.6 * (1.0 - weight)).tanh() / 30.0_f32.tanh();
+        assert!((actual - expected).abs() < 2e-6, "HP frame={frame}: {actual} != {expected}");
+    }
+    let mut low = create_effect_with_params(EffectType::Drive, 48_000.0, &[1.0, 0.5, 1.4, 0.37, 0.0, 2.0, 0.0, 80.0, 0.0, 1000.0]);
+    let mut warm: Vec<_> = (0..4096).map(|frame| if frame % 2 == 0 { 0.02 } else { -0.02 }).collect();
+    low.process(&mut warm, 1);
+    assert!(low.set_param(8, 1.0));
+    let mut output: Vec<_> = (0..640).map(|frame| if frame % 2 == 0 { 0.02 } else { -0.02 }).collect();
+    low.process(&mut output, 1);
+    for (frame, actual) in output.into_iter().enumerate() {
+        let raw: f32 = if frame % 2 == 0 { 0.02 } else { -0.02 };
+        let weight = (frame + 1).min(512) as f32 / 512.0;
+        let expected = 1.4 * (0.63 * raw + 0.37 * (1.0 - weight) * (raw * 30.0).tanh());
+        assert!((actual - expected).abs() < 2e-6, "LP frame={frame}: {actual} != {expected}");
+    }
+}
