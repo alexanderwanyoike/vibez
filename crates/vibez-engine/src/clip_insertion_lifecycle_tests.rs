@@ -285,3 +285,78 @@ fn undrained_requests_and_unsent_controls_release_owners_after_ui_shutdown() {
         assert_eq!(identity.strong_count(), 0);
     }
 }
+
+#[test]
+fn immediate_and_missing_track_completions_return_both_unused_mailbox_endpoints() {
+    for missing in [false, true] {
+        let mut fixture = setup();
+        let target = TrackId::new();
+        if !missing {
+            let mut track = EngineTrack::new(target);
+            track.pan = 0.0;
+            fixture.commands.push(EngineCommand::AddTrack(Box::new(track))).unwrap();
+            let model: Vec<_> = [fixture.track, target, TrackId::MASTER].into_iter().map(|id| RoutingChannel {
+                id, is_bus: id.is_master(), sends: Vec::new(), effects: Vec::new(),
+            }).collect();
+            fixture.commands.push(EngineCommand::SetRouting(
+                crate::routing::PreparedRouting::prepare(&model, 8).unwrap(),
+            )).unwrap();
+            callback(&mut fixture.engine, false);
+            while fixture.events.pop().is_ok() {}
+        }
+        let mut delta = delta(target);
+        let ring = mailbox(&delta);
+        let identity = Arc::downgrade(&delta.id.0);
+        fixture.commands.push(delta.command.take().unwrap()).unwrap();
+        let (engine, _) = on_audio_thread(fixture.engine, false);
+        fixture.engine = engine;
+        let mut received = Received::default();
+        received.drain(&mut fixture.events);
+        assert!(received.requests.is_empty());
+        assert_eq!(received.completed.len(), 1);
+        let returned = &received.completed[0];
+        assert_eq!(returned.id(), delta.id);
+        assert_eq!((returned.track_id, returned.clip_id), (target, delta.clip));
+        assert_eq!(std::ptr::from_ref(returned.owner.as_ref()), delta.control);
+        assert_eq!(std::ptr::from_ref(returned.owner.receiver.buffer()), ring);
+        let sender = returned.owner.sender.as_ref().expect("the request producer was never sent");
+        assert_eq!(std::ptr::from_ref(sender.buffer()), ring);
+        assert!(!sender.is_abandoned());
+        assert!(!returned.owner.receiver.is_abandoned());
+        assert!(returned.owner.receiver.is_empty());
+        assert!(returned.owner.reply.is_none());
+        if missing {
+            assert_eq!(returned.outcome, ClipInsertionOutcome::MissingTrack);
+            assert_eq!(returned.owner.storage.clips.as_ptr(), delta.eager);
+            assert_eq!(returned.owner.storage.removed_audio_clips.as_ptr(), delta.eager_staging);
+            let clip = returned.owner.clip.as_ref().expect("the missing target returns its original owner");
+            assert_eq!(Arc::as_ptr(&clip.audio), delta.audio.as_ptr());
+            assert_eq!(clip.warp_markers.as_slice().as_ptr(), delta.markers);
+            assert_eq!(clip.warp_markers, delta.expected_markers);
+        } else {
+            assert_eq!(returned.outcome, ClipInsertionOutcome::Applied);
+            assert!(returned.owner.clip.is_none());
+            assert_eq!(returned.owner.storage.clips.capacity(), 0);
+            assert_eq!(returned.owner.storage.removed_audio_clips.capacity(), 0);
+            let source = &fixture.engine.tracks()[1].playback_source;
+            assert_eq!(source.clips.as_ptr(), delta.eager);
+            assert_eq!(source.removed_audio_clips.as_ptr(), delta.eager_staging);
+            assert_eq!(Arc::as_ptr(&source.clips[0].audio), delta.audio.as_ptr());
+            assert_eq!(source.clips[0].warp_markers.as_slice().as_ptr(), delta.markers);
+        }
+        assert_eq!(delta.audio.strong_count(), 1);
+        let disposal = crate::retirement::tests::allocations(|| drop(received));
+        assert_eq!(disposal.0, 0);
+        assert!(disposal.1 > 0);
+        assert_eq!(delta.audio.strong_count(), usize::from(!missing));
+        assert_eq!(identity.strong_count(), 1);
+        let (engine, output) = on_audio_thread(fixture.engine, true);
+        fixture.engine = engine;
+        assert_signal(&output, if missing { 0.25 } else { 0.3125 });
+        drop(fixture.engine);
+        assert_eq!(delta.audio.strong_count(), 0);
+        assert_eq!(fixture.resident.strong_count(), 0);
+        drop(delta);
+        assert_eq!(identity.strong_count(), 0);
+    }
+}
