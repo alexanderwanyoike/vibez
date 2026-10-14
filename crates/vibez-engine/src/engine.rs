@@ -53,13 +53,10 @@ pub struct AudioEngine {
     scheduled_presentation: Vec<presentation_queue::ScheduledPresentation>,
     section_capture_timing: Vec<presentation::SectionCaptureTiming>,
     capture_replay: Option<presentation::CaptureReplay>,
-    pending_capture_stop: Option<u64>,
+    terminal_notifications: terminal_notifications::TerminalNotifications,
     capture_active: bool,
-    pending_playback_stop: bool,
     pending_source_cleanup: bool,
     presentation_fault: bool,
-    presentation_overflow_owner: Option<EngineEvent>,
-    pending_compensation_failure: Option<(TrackId, Option<vibez_core::id::EffectId>, &'static str)>,
     compensation_callback_heard_start: u64,
     capture_clip_positions: Vec<(TrackId, u64, u64)>,
     compensation_suspended: bool,
@@ -256,13 +253,10 @@ impl AudioEngine {
                 presentation_queue::PRESENTATION_EVENT_CAPACITY,
             ),
             capture_replay: None,
-            pending_capture_stop: None,
+            terminal_notifications: terminal_notifications::TerminalNotifications::default(),
             capture_active: false,
-            pending_playback_stop: false,
             pending_source_cleanup: false,
             presentation_fault: false,
-            presentation_overflow_owner: None,
-            pending_compensation_failure: None,
             compensation_callback_heard_start: 0,
             capture_clip_positions: Vec::with_capacity(
                 presentation_queue::PRESENTATION_EVENT_CAPACITY,
@@ -907,6 +901,9 @@ mod transport_commands;
 
 #[path = "engine_presentation_queue.rs"]
 mod presentation_queue;
+
+#[path = "engine_terminal_notifications.rs"]
+mod terminal_notifications;
 
 #[path = "engine_clip_batch.rs"]
 mod clip_batch;
