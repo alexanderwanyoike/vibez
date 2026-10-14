@@ -179,7 +179,9 @@ impl canvas::Program<Message> for TransferCurve<'_> {
         frame.fill_text(canvas::Text {
             content: format!("{threshold:.1} dB"),
             position: Point::new(
-                (x(threshold) + 8.0).min(area.x + area.width - 72.0).max(area.x + 2.0),
+                (x(threshold) + 8.0)
+                    .min(area.x + area.width - 72.0)
+                    .max(area.x + 2.0),
                 (y(response(threshold)) - 8.0).max(area.y + 12.0),
             ),
             color: self.accent,

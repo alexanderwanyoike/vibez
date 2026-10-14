@@ -143,7 +143,11 @@ fn details_button<'a>(
 
 fn db_reading(value: f32) -> String {
     let db = vibez_core::level::amplitude_to_db(value);
-    if db.is_finite() { format!("{db:.1}") } else { "-inf".into() }
+    if db.is_finite() {
+        format!("{db:.1}")
+    } else {
+        "-inf".into()
+    }
 }
 
 fn signal_meter<'a>(
@@ -176,9 +180,17 @@ fn signal_meter<'a>(
 fn signal_readouts<'a>(input: MeterValues, output: MeterValues) -> Element<'a, Message> {
     let mut content = column![].spacing(2);
     for (label, levels) in [("In", input), ("Out", output)] {
-        content = content.push(text(format!("{label} L {} R {}", db_reading(levels.peak_l), db_reading(levels.peak_r)))
-            .size(8).font(crate::typography::PERFORM_TECH).color(th::text_dim())
-            .wrapping(iced::widget::text::Wrapping::None));
+        content = content.push(
+            text(format!(
+                "{label} L {} R {}",
+                db_reading(levels.peak_l),
+                db_reading(levels.peak_r)
+            ))
+            .size(8)
+            .font(crate::typography::PERFORM_TECH)
+            .color(th::text_dim())
+            .wrapping(iced::widget::text::Wrapping::None),
+        );
     }
     content.into()
 }
@@ -351,7 +363,10 @@ pub fn view<'a>(
                 row![
                     signal_meter("Input dBFS", input, layout.plot >= 180.0),
                     signal_meter("Output dBFS", output, layout.plot >= 180.0)
-                ].spacing(8).height(Length::Fill).into()
+                ]
+                .spacing(8)
+                .height(Length::Fill)
+                .into()
             } else {
                 signal_readouts(input, output)
             };
@@ -468,7 +483,10 @@ mod tests {
                         layout.plot == 0.0 || layout.plot >= 4.0 + caption + 32.0,
                         "no miniature plots"
                     );
-                    assert_eq!(layout.primary_visible_with_details, advanced && height >= 112.0);
+                    assert_eq!(
+                        layout.primary_visible_with_details,
+                        advanced && height >= 112.0
+                    );
                     assert!(!layout.sidechain_column || width >= MEDIUM_W && layout.plot >= 150.0);
                     assert!(!layout.both_plots || width >= MEDIUM_W);
                     if layout.plot > 0.0 {
@@ -616,7 +634,10 @@ mod tests {
             for width in [430.0, 740.0, 872.0] {
                 for advanced in [false, true] {
                     let layout = arrange(Size::new(width, height), advanced);
-                    let child = 8.0 * 1.3 + 3.0 + 10.0 * 1.3 + 2.0
+                    let child = 8.0 * 1.3
+                        + 3.0
+                        + 10.0 * 1.3
+                        + 2.0
                         + layout.knobs.map_or(0.0, |knob| knob + 3.0);
                     let available = layout.controls - 1.0 - 2.0 * 2.0;
                     assert!(available >= child,
@@ -625,5 +646,4 @@ mod tests {
             }
         }
     }
-
 }
