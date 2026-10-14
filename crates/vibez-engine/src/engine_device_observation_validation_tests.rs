@@ -372,3 +372,63 @@ fn validation_preserves_order_first_invalid_reason_and_accumulated_local_failure
     }
 }
 
+#[test]
+fn handoff_classifies_recovery_after_stop_and_full_restoration_keeps_the_same_owner() {
+    for full in [false, true] {
+        for after_local in [false, true] {
+            let mut fixture = fixture();
+            fixture.facts[1].requested.store(true, Ordering::Release);
+            fixture.facts[1].recovery.store(!after_local, Ordering::Release);
+            fixture.facts[1].local_after_stop.store(after_local, Ordering::Release);
+            let original_owner = reconfiguration::effect_owner_identity(&*fixture.engine.tracks[0].effects[0].effect);
+            let mut fillers = 0;
+            if full {
+                while fixture.engine.event_tx.push(EngineEvent::PlaybackPosition(0)).is_ok() {
+                    fillers += 1;
+                }
+            }
+            fixture.trace.clear();
+            assert_eq!(crate::retirement::tests::allocations(|| fixture.engine.begin_device_reconfiguration()), (0, 0));
+            let calls = fixture.trace.observed();
+            assert_eq!(calls, [(2, REQUEST, 1), (2, STOP, u32::from(after_local)), (2, RECOVERY, u32::from(after_local))]);
+            assert_eq!(fixture.engine.device_handoff.last_issued_identity(), 1);
+            let mut returned = None;
+            let mut observed_fillers = 0;
+            while let Ok(event) = fixture.events.pop() {
+                match event {
+                    EngineEvent::PlaybackPosition(0) => observed_fillers += 1,
+                    EngineEvent::DeviceReconfiguration(device) => {
+                        assert!(returned.is_none());
+                        assert_eq!(device.owner_identity(), original_owner);
+                        assert_eq!(device.handoff_id(), 1);
+                        assert_eq!(device.track_id(), fixture.tracks[0]);
+                        assert_eq!(device.effect_id(), Some(fixture.effects[0]));
+                        returned = Some(device);
+                    }
+                    event => panic!("unexpected handoff event: {event:?}"),
+                }
+            }
+            assert_eq!(observed_fillers, fillers);
+            assert_eq!(returned.is_some(), !full);
+            assert_eq!(fixture.engine.device_handoff.is_suspended(), !full && !after_local);
+            let pending = fixture.engine.device_handoff.pending();
+            assert_eq!(pending.is_some(), !full);
+            if let Some(pending) = pending {
+                assert_eq!(pending.handoff_id, 1);
+                assert_eq!(pending.track_id, fixture.tracks[0]);
+                assert_eq!(pending.effect_id, Some(fixture.effects[0]));
+                assert_eq!(pending.position, 0);
+                assert!(!pending.bypass);
+                assert_eq!(pending.is_local_recovery(), after_local);
+            } else {
+                assert_eq!(reconfiguration::effect_owner_identity(&*fixture.engine.tracks[0].effects[0].effect), original_owner);
+            }
+            assert!(fixture.engine.compensation_plan.applied_plan_is_valid());
+            assert!(fixture.engine.transport.is_playing());
+            assert!(fixture.engine.capture_active, "handoff alone does not run the validation Capture close");
+            eprintln!("device-observation-b-handoff: full={full}; before_local={}; after_local={after_local}; calls={calls:?}; returned={}; same_owner=true; issued={}; suspended={}; pending={}; capture={}",
+                !after_local, returned.is_some(), fixture.engine.device_handoff.last_issued_identity(),
+                fixture.engine.device_handoff.is_suspended(), pending.is_some(), fixture.engine.capture_active);
+        }
+    }
+}
