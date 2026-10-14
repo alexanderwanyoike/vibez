@@ -123,12 +123,12 @@ fn the_single_modern_tone_stage_retains_its_history_across_exact_character_chang
         let mut low = warm[1023] as f64 / low_gain;
         let beta = (-std::f64::consts::TAU * 1000.0 / rate as f64).exp();
         assert!(effect.set_automated_param(4, 3.0));
-        let mut output = [0.02; 32];
+        let mut output = [0.02; 192];
         effect.process(&mut output, 1);
         for (frame, actual) in output.into_iter().enumerate() {
-            let hard = if frame < 64 { (0.6_f64).tanh() } else { 0.6 };
-            low = hard * (1.0 - beta) + low * beta;
-            let expected = low * low_gain + (hard - low) * high_gain;
+            let shaped = if frame < 64 { (0.6_f64).tanh() } else { 0.6 };
+            low = shaped * (1.0 - beta) + low * beta;
+            let expected = low * low_gain + (shaped - low) * high_gain;
             assert!((actual as f64 - expected).abs() < 5e-5, "rate={rate}, frame={frame}, actual={actual}, expected={expected}");
         }
     }
