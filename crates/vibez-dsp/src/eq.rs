@@ -467,3 +467,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "eq_device_tests.rs"]
+mod device_tests;
