@@ -96,6 +96,10 @@ pub(crate) struct RepeatNoticePosition {
 }
 
 #[derive(Debug)]
+#[allow(
+    clippy::large_enum_variant,
+    reason = "Inline telemetry keeps the bounded event ring allocation-free on the audio thread"
+)]
 pub enum EngineEvent {
     PresentationCancelled,
     DeviceReconfigurationRetired {
