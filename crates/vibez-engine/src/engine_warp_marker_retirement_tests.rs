@@ -202,3 +202,38 @@ fn playing_audio_follows_the_replacement_warp_map_numerically() {
         assert!(samples.iter().all(|sample| (*sample - expected).abs() < 1e-6));
     }
 }
+
+#[test]
+fn untimed_retirement_returns_the_exact_displaced_or_rejected_marker_storage() {
+    for valid_target in [false, true] {
+        for full_ring in [false, true] {
+            let mut fixture = Fixture::new();
+            if full_ring { fixture.fill_event_ring(); }
+            let old = &fixture.engine.tracks()[0].playback_source.clips[0].warp_markers;
+            let incoming = markers(40, 70);
+            let expected_storage = if valid_target { old.as_slice().as_ptr() } else { incoming.as_slice().as_ptr() };
+            let expected_value = if valid_target { old.clone() } else { incoming.clone() };
+            fixture.commands.push(EngineCommand::SetClipWarpMarkers {
+                track_id: fixture.track,
+                clip_id: if valid_target { fixture.clip } else { ClipId::new() },
+                warp_markers: incoming,
+            }).unwrap();
+            assert_eq!(
+                crate::retirement::tests::allocations(|| fixture.engine.process(&mut [0.0; 32], 2)),
+                (0, 0)
+            );
+            if full_ring {
+                while fixture.events.pop().is_ok() {}
+                assert_eq!(crate::retirement::tests::allocations(|| fixture.engine.flush_retirements()), (0, 0));
+            }
+            let returned = std::iter::from_fn(|| fixture.events.pop().ok())
+                .find(|event| matches!(event, EngineEvent::RetiredWarpMarkers(_)))
+                .expect("the marker owner returns to the UI");
+            assert_eq!(returned.time_domain(), crate::events::TimeDomain::Untimed);
+            let EngineEvent::RetiredWarpMarkers(owner) = returned else { unreachable!() };
+            assert_eq!(owner.as_slice().as_ptr(), expected_storage);
+            assert_eq!(owner, expected_value);
+            assert_eq!(EngineEvent::RetiredWarpMarkers(owner), EngineEvent::RetiredWarpMarkers(expected_value));
+        }
+    }
+}

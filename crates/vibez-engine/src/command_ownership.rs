@@ -57,6 +57,7 @@ impl EngineCommand {
             Self::RejectDeviceReconfiguration { .. } => 3,
             Self::ResumeDeviceReconfiguration { .. } => 2,
             Self::ReplaceClipAudio { .. } | Self::ReplaceClipBuffer { .. } => 1,
+            Self::SetClipWarpMarkers { .. } => 1,
             _ => 2,
         }
     }
