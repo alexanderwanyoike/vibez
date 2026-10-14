@@ -401,10 +401,12 @@ impl PreparedPlaybackSource {
         }
     }
 
-    pub fn set_clip_warp_markers(&mut self, clip_id: ClipId, warp_markers: WarpMarkers) {
+    #[must_use = "retire the displaced or rejected marker owner outside the audio callback"]
+    pub fn set_clip_warp_markers(&mut self, clip_id: ClipId, mut warp_markers: WarpMarkers) -> WarpMarkers {
         if let Some(clip) = self.clips.iter_mut().find(|clip| clip.id == clip_id) {
-            clip.warp_markers = warp_markers;
+            std::mem::swap(&mut clip.warp_markers, &mut warp_markers);
         }
+        warp_markers
     }
 
     /// Render this resident source into a caller-owned channel buffer.

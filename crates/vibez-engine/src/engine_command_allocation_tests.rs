@@ -159,6 +159,12 @@ fn note() -> MidiNote {
     }
 }
 
+fn nonempty_warp_markers() -> vibez_core::warp_marker::WarpMarkers {
+    let mut markers = vibez_core::warp_marker::WarpMarkers::default();
+    assert!(markers.add(1024, 2048, 0, 4096, 4096));
+    markers
+}
+
 fn add_clip(track_id: TrackId, clip_id: ClipId) -> EngineCommand {
     EngineCommand::AddClip {
         track_id,
@@ -420,10 +426,31 @@ fn cases() -> Vec<Case> {
                 direction: Default::default(),
             }
         }),
-        case!("SetClipWarpMarkers", false, |f| C::SetClipWarpMarkers {
-            track_id: f.audio,
+        case!(
+            "SetClipWarpMarkers",
+            false,
+            |commands, f| {
+                commands.push(C::SetClipWarpMarkers {
+                    track_id: f.audio,
+                    clip_id: f.clip,
+                    warp_markers: nonempty_warp_markers(),
+                }).unwrap();
+            },
+            |f| C::SetClipWarpMarkers {
+                track_id: f.audio,
+                clip_id: f.clip,
+                warp_markers: nonempty_warp_markers(),
+            }
+        ),
+        case!("SetClipWarpMarkersMissingTrack", false, |f| C::SetClipWarpMarkers {
+            track_id: TrackId::new(),
             clip_id: f.clip,
-            warp_markers: Default::default(),
+            warp_markers: nonempty_warp_markers(),
+        }),
+        case!("SetClipWarpMarkersMissingClip", false, |f| C::SetClipWarpMarkers {
+            track_id: f.empty_audio,
+            clip_id: f.clip,
+            warp_markers: nonempty_warp_markers(),
         }),
         case!("SetClipBounds", false, |f| C::SetClipBounds {
             track_id: f.audio,

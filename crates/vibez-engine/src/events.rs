@@ -122,6 +122,7 @@ pub enum EngineEvent {
     RetiredChannel(crate::retirement::RetiredChannel),
     RetiredAutomationLane(vibez_core::automation::AutomationLane),
     RetiredAudioBuffer(Arc<DecodedAudio>),
+    RetiredWarpMarkers(vibez_core::warp_marker::WarpMarkers),
     RoutingRetired(Box<crate::routing::PreparedRouting>),
     SidechainInputMeter {
         effect_id: vibez_core::id::EffectId,
@@ -453,6 +454,7 @@ impl EngineEvent {
             | Self::RetiredChannel(_)
             | Self::RetiredAutomationLane(_)
             | Self::RetiredAudioBuffer(_)
+            | Self::RetiredWarpMarkers(_)
             | Self::RoutingRetired(_)
             | Self::DisposeEffect(_)
             | Self::DisposeInstrument(_)
@@ -494,6 +496,7 @@ impl PartialEq for EngineEvent {
             (Self::RetiredAudioBuffer(left), Self::RetiredAudioBuffer(right)) => {
                 Arc::ptr_eq(left, right)
             }
+            (Self::RetiredWarpMarkers(left), Self::RetiredWarpMarkers(right)) => left == right,
             (
                 Self::Metering {
                     peak_l: left_peak_l,

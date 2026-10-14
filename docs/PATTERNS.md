@@ -108,6 +108,10 @@ commands. Runtime boundary emitters reserve before changing state. Clip packets
 reuse their transferred Vec for resumable acknowledgements and owner return.
 Neither store grows or destroys undelivered owners in the callback.
 
+Warp marker edits return the displaced or rejected marker Vec to the UI for
+destruction through an Untimed event. Command admission reserves one retirement
+slot before taking that owner; a missing target does not free incoming storage.
+
 `PresentationState` owns Normal/Faulted health independently of its singular
 `TerminalNotifications` aggregate. The aggregate retains one Capture stop, one
 named cause, one playback-stop acknowledgement and one discovering overflow
