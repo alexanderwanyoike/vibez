@@ -39,7 +39,7 @@ impl AudioEngine {
             self.stop_heard_capture();
         }
         self.pending_playback_stop = false;
-        self.compensation_plan_fade = 0;
+        self.output_gate.clear_plan_morph();
         self.presentation_fault = false;
         if !self.transport.is_playing() {
             for track in self

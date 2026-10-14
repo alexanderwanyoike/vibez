@@ -69,11 +69,7 @@ pub struct AudioEngine {
     pending_device_parameters: Vec<(usize, f32)>,
     graph_edit_pending: bool,
     compensation_valid: bool,
-    compensation_fade_out: u32,
-    compensation_fade_in: u32,
-    compensation_plan_fade: u32,
-    last_mix_frame: [f32; 2],
-    was_project_muted: bool,
+    output_gate: output_gate::OutputGate,
     routing: Box<crate::routing::PreparedRouting>,
     project_routing_published: bool,
     // The first publication has no public retirement event. Keep its bounded
@@ -278,11 +274,7 @@ impl AudioEngine {
             pending_device_parameters: Vec::with_capacity(2048),
             graph_edit_pending: false,
             compensation_valid: true,
-            compensation_fade_out: 0,
-            compensation_fade_in: 0,
-            compensation_plan_fade: 0,
-            last_mix_frame: [0.0; 2],
-            was_project_muted: false,
+            output_gate: output_gate::OutputGate::default(),
             retired_routing: None,
             pending_bus_cleanup: None,
             pending_retirements: Vec::with_capacity(crate::retirement::RETIREMENT_CAPACITY),
@@ -893,6 +885,8 @@ mod command_allocation_tests;
 #[path = "engine_compensation_presentation_tests.rs"]
 mod compensation_presentation_tests;
 
+#[path = "engine_output_gate.rs"]
+mod output_gate;
 #[path = "engine_compensation_transition.rs"]
 mod compensation_transition;
 

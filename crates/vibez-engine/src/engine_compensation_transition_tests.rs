@@ -93,7 +93,7 @@ fn running_reduced_monitoring_changes_never_refill_or_drop_constant_audio() {
             (0, 0)
         );
         assert!(output.iter().all(|&sample| (sample - steady).abs() < 1e-7));
-        assert_eq!(engine.compensation_plan_fade, 0);
+        assert_eq!(engine.output_gate.remaining_morph_frames(), 0);
         assert!(engine.transport.is_playing());
         while events.pop().is_ok() {}
     }
@@ -102,8 +102,8 @@ fn running_reduced_monitoring_changes_never_refill_or_drop_constant_audio() {
 #[test]
 fn prepared_plan_change_blends_to_new_audio_without_a_silent_wait() {
     let (mut engine, _, _) = AudioEngine::new();
-    engine.last_mix_frame = [0.5; 2];
-    engine.compensation_plan_fade = 64;
+    engine.apply_compensation_transition(&mut [0.5; 2], 2, false);
+    engine.output_gate.morph_after_plan_change();
     let mut output = [0.25; 512];
     engine.apply_compensation_transition(&mut output, 2, false);
     assert_eq!(output[0], 0.5);
@@ -313,7 +313,7 @@ fn midrun_bypass_and_unbypass_keep_the_current_delayed_audio_without_stale_wet_i
 #[test]
 fn awaiting_main_thread_preparation_fades_out_and_retains_the_resume_fade() {
     let (mut engine, _, _) = AudioEngine::new();
-    engine.last_mix_frame = [0.5; 2];
+    engine.apply_compensation_transition(&mut [0.5; 2], 2, false);
     let mut paused = [0.0; 256];
     engine.apply_compensation_transition(&mut paused, 2, true);
     assert_eq!(paused[0], 0.5);
@@ -326,9 +326,9 @@ fn awaiting_main_thread_preparation_fades_out_and_retains_the_resume_fade() {
         .collect::<Vec<_>>()
         .windows(2)
         .all(|pair| (pair[1] - pair[0]).abs() <= 0.5 / 64.0));
-    assert_eq!(engine.compensation_fade_in, 64);
+    assert_eq!(engine.output_gate.remaining_resume_frames(), 64);
     engine.apply_compensation_transition(&mut paused, 2, true);
-    assert_eq!(engine.compensation_fade_in, 64);
+    assert_eq!(engine.output_gate.remaining_resume_frames(), 64);
     let mut resumed = [0.5; 256];
     engine.apply_compensation_transition(&mut resumed, 2, false);
     assert_eq!(resumed[0], 0.0);
