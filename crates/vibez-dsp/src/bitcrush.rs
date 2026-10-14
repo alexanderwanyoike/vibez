@@ -4,7 +4,20 @@ use vibez_core::effect::{EffectType, ParamDescriptor};
 
 use crate::effect::AudioEffect;
 
-static BITCRUSH_PARAMS: &[ParamDescriptor] = &[
+pub mod param {
+    pub const BITS: usize = 0;
+    pub const SR_REDUCE: usize = 1;
+    pub const MIX: usize = 2;
+    pub const DRIVE_DB: usize = 3;
+    pub const ROUNDING: usize = 4;
+    pub const DITHER: usize = 5;
+    pub const JITTER: usize = 6;
+    pub const POST_LP_ENABLED: usize = 7;
+    pub const POST_LP_HZ: usize = 8;
+    pub const COUNT: usize = 9;
+}
+
+pub static BITCRUSH_PARAMS: &[ParamDescriptor] = &[
     ParamDescriptor {
         name: "Bits",
         min: 2.0,
@@ -26,11 +39,53 @@ static BITCRUSH_PARAMS: &[ParamDescriptor] = &[
         default: 1.0,
         unit: "",
     },
+    ParamDescriptor {
+        name: "Drive",
+        min: 0.0,
+        max: 24.0,
+        default: 0.0,
+        unit: "dB",
+    },
+    ParamDescriptor {
+        name: "Rounding",
+        min: 0.0,
+        max: 2.0,
+        default: 0.0,
+        unit: "",
+    },
+    ParamDescriptor {
+        name: "Dither",
+        min: 0.0,
+        max: 1.0,
+        default: 0.0,
+        unit: "",
+    },
+    ParamDescriptor {
+        name: "Jitter",
+        min: 0.0,
+        max: 1.0,
+        default: 0.0,
+        unit: "",
+    },
+    ParamDescriptor {
+        name: "Post LP Enabled",
+        min: 0.0,
+        max: 1.0,
+        default: 0.0,
+        unit: "",
+    },
+    ParamDescriptor {
+        name: "Post LP Frequency",
+        min: 20.0,
+        max: 20000.0,
+        default: 12000.0,
+        unit: "Hz",
+    },
 ];
 
 /// Lo-fi effect: reduces bit depth and sample rate (sample-and-hold).
 pub struct BitcrushEffect {
-    params: [f32; 3],
+    params: [f32; param::COUNT],
     /// Sample-and-hold state, per channel.
     hold: [f32; 2],
     /// Frame counter for SR reduce, per channel.
@@ -70,7 +125,12 @@ impl AudioEffect for BitcrushEffect {
             return false;
         };
         let descriptor = &BITCRUSH_PARAMS[index];
-        *target = value.clamp(descriptor.min, descriptor.max);
+        let value = value.clamp(descriptor.min, descriptor.max);
+        *target = if matches!(index, param::ROUNDING | param::DITHER | param::POST_LP_ENABLED) {
+            value.round()
+        } else {
+            value
+        };
         true
     }
 
@@ -84,9 +144,9 @@ impl AudioEffect for BitcrushEffect {
         }
         let ch = channels.min(2);
         let frames = buffer.len() / channels;
-        let levels = 2u32.pow(self.params[0] as u32) as f32;
+        let levels = 2u32.pow(self.params[param::BITS] as u32) as f32;
         let step = 2.0 / levels;
-        let divider = self.params[1].round().max(1.0) as u32;
+        let divider = self.params[param::SR_REDUCE].round().max(1.0) as u32;
 
         for frame in 0..frames {
             for c in 0..ch {
@@ -101,7 +161,7 @@ impl AudioEffect for BitcrushEffect {
                 self.counter[c] = (self.counter[c] + 1) % divider;
 
                 let wet = self.hold[c];
-                buffer[idx] = dry * (1.0 - self.params[2]) + wet * self.params[2];
+                buffer[idx] = dry * (1.0 - self.params[param::MIX]) + wet * self.params[param::MIX];
             }
         }
     }
