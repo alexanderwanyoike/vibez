@@ -17,12 +17,14 @@ fn overflowing_capture_delivers_accepted_start_then_stop_cause_and_discovering_o
         .is_ok()
     {}
     fixture.drain_command(EngineCommand::StartPerformanceCapture);
+    let accepted_before_filler = fixture.engine.scheduled_presentation.len();
     for _ in 1..presentation_queue::PRESENTATION_EVENT_CAPACITY {
         fixture.engine.present_event_at(
             EngineEvent::PlaybackStarted,
             fixture.engine.output_position + 521,
         );
     }
+    let fault_before_owner = fixture.engine.presentation_fault;
     let offsets: Arc<[(TrackId, u32)]> = vec![(fixture.tracks[0], 17)].into();
     let discovering = EngineEvent::SectionCaptureSource {
         section_id: SectionId::new(),
@@ -50,7 +52,11 @@ fn overflowing_capture_delivers_accepted_start_then_stop_cause_and_discovering_o
     assert!(matches!(
         fixture.engine.presentation_overflow_owner,
         Some(EngineEvent::CaptureTimingRetired(_))
-    ));
+    ), "accepted_before_filler={accepted_before_filler}, fault_before_owner={fault_before_owner}, overflow_owner={:?}, owner_domain={:?}, queued={}, capacity={}",
+        fixture.engine.presentation_overflow_owner,
+        fixture.engine.presentation_overflow_owner.as_ref().map(EngineEvent::time_domain),
+        fixture.engine.scheduled_presentation.len(),
+        fixture.engine.scheduled_presentation.capacity());
     assert_eq!(Arc::strong_count(&offsets), 2);
     assert_eq!(
         crate::retirement::tests::allocations(|| fixture.engine.fail_presentation()),
