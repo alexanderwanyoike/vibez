@@ -247,17 +247,21 @@ pub fn advanced<'a>(
         ]
         .spacing(8)
         .into(),
-        DrivePage::Metering => row![
-            reading("In L", input.peak_l),
-            reading("In R", input.peak_r),
-            reading("Out L", output.peak_l),
-            reading("Out R", output.peak_r),
-            reading("InL RMS", input.rms_l),
-            reading("InR RMS", input.rms_r),
-            reading("OutL RMS", output.rms_l),
-            reading("OutR RMS", output.rms_r)
-        ]
-        .spacing(4)
+        DrivePage::Metering => tooltip(
+            row![
+                reading("In L", input.peak_l),
+                reading("In R", input.peak_r),
+                reading("Out L", output.peak_l),
+                reading("Out R", output.peak_r),
+                reading("IL RMS", input.rms_l),
+                reading("IR RMS", input.rms_r),
+                reading("OL RMS", output.rms_l),
+                reading("OR RMS", output.rms_r)
+            ]
+            .spacing(4),
+            text("Stereo readings in dBFS. In/Out show channel peaks. RMS: I is input, O is output, L/R is the channel.").size(9),
+            tooltip::Position::Top,
+        )
         .into(),
     };
     row![
