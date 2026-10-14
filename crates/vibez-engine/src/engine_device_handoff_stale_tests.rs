@@ -213,7 +213,7 @@ fn stale_old_reply_preserves_new_token_metadata_parameters_and_applied_graph() {
             );
             assert!(engine.device_handoff.pending().is_none());
             assert!(engine.device_handoff.retained_parameters().is_empty());
-            assert!(!engine.compensation_suspended);
+            assert!(!engine.device_handoff.is_suspended());
             assert!(engine.compensation_plan.awaiting_structural_plan());
             let new_requested = Arc::new(AtomicBool::new(true));
             let new: Box<dyn vibez_dsp::effect::AudioEffect> = Box::new(ParameterOwner {
@@ -306,7 +306,7 @@ fn stale_old_reply_preserves_new_token_metadata_parameters_and_applied_graph() {
                     current.effect_id,
                     current.position,
                     current.bypass,
-                    current.local_recovery
+                    current.is_local_recovery()
                 ),
                 (new_id, tracks[0], Some(effect_id), 0, true, false)
             );
@@ -368,7 +368,7 @@ fn stale_old_reply_preserves_new_token_metadata_parameters_and_applied_graph() {
                     after_stale.effect_id,
                     after_stale.position,
                     after_stale.bypass,
-                    after_stale.local_recovery
+                    after_stale.is_local_recovery()
                 ),
                 (
                     current.handoff_id,
@@ -376,7 +376,7 @@ fn stale_old_reply_preserves_new_token_metadata_parameters_and_applied_graph() {
                     current.effect_id,
                     current.position,
                     current.bypass,
-                    current.local_recovery
+                    current.is_local_recovery()
                 )
             );
             assert_eq!(
@@ -475,7 +475,7 @@ fn stale_old_reply_preserves_new_token_metadata_parameters_and_applied_graph() {
                     after_delivery.effect_id,
                     after_delivery.position,
                     after_delivery.bypass,
-                    after_delivery.local_recovery
+                    after_delivery.is_local_recovery()
                 ),
                 (
                     current.handoff_id,
@@ -483,7 +483,7 @@ fn stale_old_reply_preserves_new_token_metadata_parameters_and_applied_graph() {
                     current.effect_id,
                     current.position,
                     current.bypass,
-                    current.local_recovery
+                    current.is_local_recovery()
                 )
             );
             assert_eq!(
@@ -589,7 +589,7 @@ fn stale_old_reply_preserves_new_token_metadata_parameters_and_applied_graph() {
             let ids = [old_id, new_id];
             let final_position = engine.transport.position();
             eprintln!("device-handoff-stale baseline: rejected={rejected}; backpressured={backpressured}; filled={filled}; released={released}; ids={ids:?}; pending_position={}; pending_bypass={}; pending_local={}; parameters_before={parameters_before:?}; applied_bits={applied_bits:?}; old_parameter_bits={old_parameter_bits:?}; reason_roundtrip={reason_roundtrip}; owner_roundtrip={owner_roundtrip}; old_drops={}; new_drops={}; final_position={final_position}; readiness={readiness:?}; order={order:?}; loss_bits={:?}; resumed_bits={:?}",
-                current.position, current.bypass, current.local_recovery, old_drops.load(Ordering::Relaxed), new_drops.load(Ordering::Relaxed),
+                current.position, current.bypass, current.is_local_recovery(), old_drops.load(Ordering::Relaxed), new_drops.load(Ordering::Relaxed),
                 loss.iter().copied().map(f32::to_bits).collect::<Vec<_>>(), resumed.iter().copied().map(f32::to_bits).collect::<Vec<_>>());
         }
     }

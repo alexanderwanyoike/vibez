@@ -66,7 +66,7 @@ fn latency_restart_gates_the_healthy_branch_until_main_returns_the_owner() {
         (0, 0)
     );
     assert!(fixture.engine.project_processing_muted());
-    assert!(fixture.engine.compensation_suspended);
+    assert!(fixture.engine.device_handoff.is_suspended());
     assert!(fixture.engine.transport.is_playing());
     for (frame, pair) in output.as_chunks::<2>().0.iter().enumerate() {
         for channel in 0..2 {
@@ -189,7 +189,7 @@ fn rejected_plan_and_accepted_recovery_keep_audio_envelopes_across_callback_part
         });
         assert!(!fixture.engine.compensation_plan.applied_plan_is_valid());
         assert!(fixture.engine.compensation_plan.awaiting_structural_plan());
-        assert!(!fixture.engine.compensation_suspended);
+        assert!(!fixture.engine.device_handoff.is_suspended());
         assert!(fixture.engine.device_handoff.pending().is_none());
         assert!(!fixture.engine.presentation_state.is_faulted());
         assert!(!fixture.engine.transport.is_playing());
