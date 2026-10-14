@@ -11,9 +11,9 @@ impl AudioEngine {
     }
 
     pub(super) fn command_reject_routing_update(&mut self, reason: String) {
-        if self.graph_edit_pending {
+        if self.compensation_plan.awaiting_structural_plan() {
             self.close_capture_on_failure();
-            self.compensation_valid = false;
+            self.compensation_plan.invalidate_applied_plan();
             self.transport.stop();
             self.presentation_state.terminals.request_playback_stop();
             self.flush_presentation();
@@ -46,8 +46,7 @@ impl AudioEngine {
             return;
         }
         self.compensation_suspended = false;
-        self.graph_edit_pending = false;
-        self.compensation_valid = true;
+        self.compensation_plan.accept_full_plan();
         self.publish_compensation_plan(routing);
     }
 
@@ -66,7 +65,7 @@ impl AudioEngine {
         let _ = self.restore_reconfigured_device(device);
         self.compensation_suspended = false;
         self.close_capture_on_failure();
-        self.compensation_valid = false;
+        self.compensation_plan.invalidate_applied_plan();
         self.transport.stop();
         self.retire_event(EngineEvent::CompensationFailed { reason });
         self.presentation_state.terminals.request_playback_stop();
@@ -74,8 +73,7 @@ impl AudioEngine {
     }
 
     pub(super) fn command_set_routing(&mut self, prepared: Box<crate::routing::PreparedRouting>) {
-        self.graph_edit_pending = false;
-        self.compensation_valid = true;
+        self.compensation_plan.accept_full_plan();
         self.publish_compensation_plan(prepared);
     }
 }

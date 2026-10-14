@@ -187,8 +187,8 @@ fn rejected_plan_and_accepted_recovery_keep_audio_envelopes_across_callback_part
         fixture.drain_command(EngineCommand::RejectRoutingUpdate {
             reason: "characterized failed plan publication".into(),
         });
-        assert!(!fixture.engine.compensation_valid);
-        assert!(fixture.engine.graph_edit_pending);
+        assert!(!fixture.engine.compensation_plan.applied_plan_is_valid());
+        assert!(fixture.engine.compensation_plan.awaiting_structural_plan());
         assert!(!fixture.engine.compensation_suspended);
         assert!(fixture.engine.pending_device_reconfiguration.is_none());
         assert!(!fixture.engine.presentation_state.is_faulted());
@@ -231,8 +231,8 @@ fn rejected_plan_and_accepted_recovery_keep_audio_envelopes_across_callback_part
         let plan = fixture.plan(0);
         let accepted_plan = std::ptr::from_ref(plan.as_ref());
         fixture.drain_command(EngineCommand::SetRouting(plan));
-        assert!(fixture.engine.compensation_valid);
-        assert!(!fixture.engine.graph_edit_pending);
+        assert!(fixture.engine.compensation_plan.applied_plan_is_valid());
+        assert!(!fixture.engine.compensation_plan.awaiting_structural_plan());
         assert!(!fixture.engine.transport.is_playing());
         assert_eq!(fixture.engine.output_gate.remaining_morph_frames(), 0);
         let events = fixture.drain_events();
@@ -276,8 +276,8 @@ fn rejected_plan_and_accepted_recovery_keep_audio_envelopes_across_callback_part
         }
         assert_eq!(fixture.engine.transport.position(), stopped_at + 128);
         assert_eq!(fixture.engine.output_gate.remaining_resume_frames(), 0);
-        assert!(fixture.engine.compensation_valid);
-        assert!(!fixture.engine.graph_edit_pending);
+        assert!(fixture.engine.compensation_plan.applied_plan_is_valid());
+        assert!(!fixture.engine.compensation_plan.awaiting_structural_plan());
         assert!(!fixture.engine.presentation_state.is_faulted());
         assert!(!fixture.engine.project_processing_muted());
     }
