@@ -842,6 +842,10 @@ mod graph_test_support;
 mod graph_harness_tests;
 
 #[cfg(test)]
+#[path = "engine_stopped_repeat_clock_tests.rs"]
+mod stopped_repeat_clock_tests;
+
+#[cfg(test)]
 #[path = "engine_tests.rs"]
 mod tests;
 
