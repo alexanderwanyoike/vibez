@@ -130,4 +130,43 @@ mod tests {
         );
         assert!(app.device_controls[&effect].advanced);
     }
+
+    #[test]
+    fn compressor_mix_accepts_percentage_without_changing_legacy_storage() {
+        let mut app = super::super::test_support::app();
+        let channel = ProjectTrack::new(TrackId::new(), "Compressor".into(), 3);
+        let track = channel.id;
+        Arc::make_mut(&mut app.state.project_tracks)
+            .tracks
+            .push(channel);
+        let _ = app.update(Message::Devices(DevicesMsg::AddEffect(
+            track,
+            EffectType::Compressor,
+        )));
+        let effect = app.state.find_track(track).unwrap().effects[0].id;
+        assert_eq!(
+            app.state.find_track(track).unwrap().effects[0].descriptors[5].unit,
+            ""
+        );
+        app.state.project.history = Default::default();
+        let _ = app.update(Message::DeviceControl(DeviceControlMsg::Input(
+            track,
+            effect,
+            5,
+            "50%".into(),
+        )));
+        let _ = app.update(Message::DeviceControl(DeviceControlMsg::Submit(
+            track, effect, 5,
+        )));
+        assert_eq!(
+            app.state.find_track(track).unwrap().effects[0].params[5],
+            0.5
+        );
+        let snapshot = app.state.project.history.pop_undo().unwrap();
+        app.apply_snapshot(snapshot);
+        assert_eq!(
+            app.state.find_track(track).unwrap().effects[0].params[5],
+            1.0
+        );
+    }
 }
