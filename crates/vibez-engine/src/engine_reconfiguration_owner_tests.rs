@@ -416,7 +416,7 @@ fn additions_around_held_slot_use_logical_order_and_main_reserved_capacity() {
             expected
         );
         assert!(engine.compensation_plan.applied_plan_is_valid());
-        assert!(!engine.compensation_suspended);
+        assert!(!engine.device_handoff.is_suspended());
         assert!(std::iter::from_fn(|| events.pop().ok())
             .any(|event| matches!(event, EngineEvent::RetiredEffectStorage(_))));
     }

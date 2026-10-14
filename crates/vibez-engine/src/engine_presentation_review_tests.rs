@@ -29,7 +29,7 @@ fn local_recovery(engine: &mut AudioEngine) {
             effect_id: None,
             position: 0,
             bypass: false,
-            local_recovery: true,
+            scope: device_handoff::RecoveryScope::LocalRecovery,
         });
 }
 

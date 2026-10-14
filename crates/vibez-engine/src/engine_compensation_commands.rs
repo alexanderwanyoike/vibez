@@ -36,7 +36,7 @@ impl AudioEngine {
             return;
         }
         if !self.restore_reconfigured_device(device) {
-            self.compensation_suspended = false;
+            self.device_handoff.clear_suspension();
             self.close_capture_on_failure();
             self.transport.stop();
             self.retired_routing = Some(routing);
@@ -45,7 +45,7 @@ impl AudioEngine {
             self.flush_presentation();
             return;
         }
-        self.compensation_suspended = false;
+        self.device_handoff.clear_suspension();
         self.compensation_plan.accept_full_plan();
         self.publish_compensation_plan(routing);
     }
@@ -63,7 +63,7 @@ impl AudioEngine {
             return;
         }
         let _ = self.restore_reconfigured_device(device);
-        self.compensation_suspended = false;
+        self.device_handoff.clear_suspension();
         self.close_capture_on_failure();
         self.compensation_plan.invalidate_applied_plan();
         self.transport.stop();
