@@ -812,6 +812,10 @@ impl PartialEq for EngineEvent {
 }
 
 #[cfg(test)]
+#[path = "event_equality_tests.rs"]
+mod equality_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
