@@ -379,7 +379,12 @@ fn envelope_attack_and_release_follow_their_time_constants_and_change_audio() {
         let mut outputs = Vec::new();
         for (attack, release) in [(1.0, 20.0), (100.0, 500.0)] {
             let mut effect = FilterEffect::new(sample_rate);
-            for (index, value) in [(param::MOD_SOURCE, 2.0), (param::DEPTH, 4.0), (param::ENV_ATTACK, attack), (param::ENV_RELEASE, release)] {
+            for (index, value) in [
+                (param::MOD_SOURCE, 2.0),
+                (param::DEPTH, 4.0),
+                (param::ENV_ATTACK, attack),
+                (param::ENV_RELEASE, release),
+            ] {
                 effect.set_param(index, value);
             }
             let mut signal: Vec<_> = (0..frames).flat_map(|_| [1.0, 0.5]).collect();
@@ -395,6 +400,9 @@ fn envelope_attack_and_release_follow_their_time_constants_and_change_audio() {
             signal.extend(silence);
             outputs.push(signal);
         }
-        assert!(outputs[0].iter().zip(&outputs[1]).any(|(a, b)| (a - b).abs() > 0.01));
+        assert!(outputs[0]
+            .iter()
+            .zip(&outputs[1])
+            .any(|(a, b)| (a - b).abs() > 0.01));
     }
 }
