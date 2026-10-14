@@ -17,11 +17,30 @@ pub struct Arrangement {
     pub both_plots: bool,
 }
 
-pub fn arrange(_size: Size, _advanced: bool) -> Arrangement {
-    todo!("Measured Compressor layout is not implemented")
+pub fn arrange(size: Size, advanced: bool) -> Arrangement {
+    let (controls, knobs) = if size.height >= 240.0 {
+        (76.0, Some(34.0))
+    } else if size.height >= 160.0 {
+        (56.0, Some(20.0))
+    } else {
+        (36.0, None)
+    };
+    let plot = if size.height < 114.0 {
+        0.0
+    } else {
+        (size.height - TOOLBAR_H - controls).max(0.0)
+    };
+    Arrangement {
+        plot,
+        controls,
+        knobs,
+        primary_beside: advanced && size.width >= 820.0,
+        sidechain_column: size.width >= 820.0 && plot >= 150.0,
+        both_plots: size.width >= MEDIUM_W,
+    }
 }
-pub fn card_width(_available: f32) -> f32 {
-    todo!("Measured Compressor width is not implemented")
+pub fn card_width(available: f32) -> f32 {
+    available.clamp(COMPACT_W, MAX_W)
 }
 
 #[cfg(test)]
