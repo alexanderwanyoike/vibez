@@ -12,7 +12,9 @@ fn settings() -> Vec<f32> {
 
 fn signal(frequency: f32, rate: f32, frames: usize) -> Vec<f32> {
     (0..frames)
-        .map(|n| 0.2 * (std::f32::consts::TAU * frequency * n as f32 / rate).sin())
+        .map(|n| {
+            (0.2 * (std::f64::consts::TAU * frequency as f64 * n as f64 / rate as f64).sin()) as f32
+        })
         .collect()
 }
 
@@ -115,8 +117,11 @@ fn audition_is_a_band_limited_signal_even_when_gain_is_flat_or_disabled() {
         assert!(effect.response_db(pass) > -1.0);
         assert!(effect.response_db(stop) < -18.0);
         for frequency in [pass, stop] {
+            let displayed = effect.response_db(frequency);
+            let rendered = rendered_db(&p, frequency, 48_000.0);
             assert!(
-                (effect.response_db(frequency) - rendered_db(&p, frequency, 48_000.0)).abs() < 0.08
+                (displayed - rendered).abs() < 0.08,
+                "band {band}, frequency {frequency}: displayed {displayed}, rendered {rendered}"
             );
         }
         p[12 + band] = 1.0;
