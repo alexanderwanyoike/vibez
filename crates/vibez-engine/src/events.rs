@@ -202,6 +202,13 @@ pub enum EngineEvent {
         output: crate::metering::MeterValues,
     },
 
+    EffectSampleHold {
+        track_id: TrackId,
+        effect_id: vibez_core::id::EffectId,
+        generation: u64,
+        meter: vibez_core::effect::SampleHoldMeter,
+    },
+
     /// Drum Rack pitches triggered by resident MIDI clips during the latest
     /// audio block. One bit per MIDI pitch keeps device feedback bounded to
     /// one event per track and block, even when several notes land together.
@@ -465,6 +472,7 @@ impl EngineEvent {
             | Self::Metering { .. }
             | Self::TrackMeter { .. }
             | Self::EffectMeter { .. }
+            | Self::EffectSampleHold { .. }
             | Self::TrackNoteActivity { .. }
             | Self::ClipQueued { .. }
             | Self::ClipEventsDropped { .. }
@@ -497,6 +505,25 @@ impl PartialEq for EngineEvent {
             (Self::DisposeInstrument(left), Self::DisposeInstrument(right)) => left == right,
             (Self::PlaybackPosition(left), Self::PlaybackPosition(right)) => left == right,
             (Self::PerformancePosition(left), Self::PerformancePosition(right)) => left == right,
+            (
+                Self::EffectSampleHold {
+                    track_id: left_track,
+                    effect_id: left_effect,
+                    generation: left_generation,
+                    meter: left_meter,
+                },
+                Self::EffectSampleHold {
+                    track_id: right_track,
+                    effect_id: right_effect,
+                    generation: right_generation,
+                    meter: right_meter,
+                },
+            ) => {
+                left_track == right_track
+                    && left_effect == right_effect
+                    && left_generation == right_generation
+                    && left_meter == right_meter
+            }
             (
                 Self::EffectMeter {
                     track_id: left_track,

@@ -26,6 +26,7 @@ impl AudioEngine {
         if let Some(channel) = track_id.and_then(|id| self.channel_mut(id)) {
             for slot in &mut channel.effects {
                 slot.levels = Default::default();
+                slot.effect.take_sample_hold_meter();
             }
         }
     }
@@ -54,6 +55,14 @@ impl AudioEngine {
             return;
         };
         for slot in &mut channel.effects {
+            if let Some(meter) = slot.effect.take_sample_hold_meter() {
+                let _ = self.event_tx.push(EngineEvent::EffectSampleHold {
+                    track_id,
+                    effect_id: slot.id,
+                    generation: self.effect_meter.generation,
+                    meter: if slot.bypass { Default::default() } else { meter },
+                });
+            }
             if !slot.effect.supports_level_meter() {
                 continue;
             }
