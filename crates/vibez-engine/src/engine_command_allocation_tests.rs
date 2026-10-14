@@ -459,7 +459,7 @@ fn cases() -> Vec<Case> {
         )),
         case!("AddBus", false, |_| C::add_bus(TrackId::new())),
         case!("RemoveBus", false, |f| C::RemoveBus(f.bus)),
-        case!("SetSend", true, |f| C::SetSend {
+        case!("SetSend", false, |f| C::SetSend {
             track_id: f.empty,
             bus_id: f.bus,
             amount: 0.5,

@@ -14,7 +14,7 @@ pub(super) fn channel(
     channel.gain = info.gain;
     channel.pan = info.pan;
     channel.swing_offset = info.swing_offset;
-    channel.sends = info.sends.clone();
+    channel.sends.extend_from_slice(&info.sends);
     let selected = dependencies::selected_track(req.mode);
     channel.set_manual_mute(
         if selected == Some(info.id) {

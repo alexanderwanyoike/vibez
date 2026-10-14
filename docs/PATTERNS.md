@@ -43,6 +43,10 @@ rate `EngineHandle::sample_rate` last forwarded, channels are prepared there
 too (`EngineCommand::add_track`, `add_bus`) and move by pointer, and device
 chains and channel lists are reserved at `DEVICE_CHAIN_CAPACITY` and
 `CHANNEL_CAPACITY`, which the UI refuses to exceed.
+Send storage is prepared with `CHANNEL_CAPACITY` slots, one per possible return
+channel. Manual and automated edits share the same admission: existing targets
+remain editable at capacity, while another target cannot grow callback storage.
+Offline channel preparation preserves that reserved storage.
 `engine_command_allocation_tests` measures every command; its list of commands
 that still allocate may only shrink.
 Events come in two classes, and the class determines the push policy:
