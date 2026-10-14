@@ -912,6 +912,10 @@ mod command_allocation_tests;
 mod clip_audio_retirement_tests;
 
 #[cfg(test)]
+#[path = "engine_warp_marker_retirement_tests.rs"]
+mod warp_marker_retirement_tests;
+
+#[cfg(test)]
 #[path = "engine_compensation_presentation_tests.rs"]
 mod compensation_presentation_tests;
 
