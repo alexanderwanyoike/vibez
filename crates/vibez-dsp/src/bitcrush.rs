@@ -166,7 +166,11 @@ impl AudioEffect for BitcrushEffect {
         for frame in 0..frames {
             for c in 0..ch {
                 let idx = frame * channels + c;
-                let dry = buffer[idx];
+                let dry = if buffer[idx].is_finite() {
+                    buffer[idx]
+                } else {
+                    0.0
+                };
 
                 if self.counter[c] == 0 {
                     // Quantize to `levels` steps in [-1, 1].
