@@ -75,75 +75,17 @@ impl App {
         track_color: Color,
         available_width: f32,
     ) -> Element<'a, Message> {
-        let gain_width = self.gain_card_width(track_id, track, available_width);
-        let mut devices_row = row![].spacing(CHAIN_SPACING).height(Length::Fill);
-
-        // Instrument device card (branched by kind)
-        if track.has_instrument {
-            if track.plugin_instrument_name.is_some() {
-                // External plugin instrument - clickable card
-                let card = self.view_plugin_instrument_device(track_id, track, track_color);
-                devices_row = devices_row.push(card);
-            } else {
-                match track.instrument_kind {
-                    Some(vibez_core::midi::InstrumentKind::Sampler) => {
-                        let card = self.view_sampler_device(track_id, track, track_color);
-                        let latency = crate::domains::device_latency::latency_label(
-                            track.instrument_latency_samples,
-                            self.state.transport.sample_rate,
-                        );
-                        devices_row = devices_row.push(
-                            column![card, text(latency).size(9).color(th::text_dim())]
-                                .height(Length::Fill),
-                        );
-                    }
-                    Some(vibez_core::midi::InstrumentKind::DrumRack) => {
-                        let card = self.view_drum_rack_device(track_id, track, track_color);
-                        let latency = crate::domains::device_latency::latency_label(
-                            track.instrument_latency_samples,
-                            self.state.transport.sample_rate,
-                        );
-                        devices_row = devices_row.push(
-                            column![card, text(latency).size(9).color(th::text_dim())]
-                                .height(Length::Fill),
-                        );
-                    }
-                    _ => {
-                        let synth_card = self.view_synth_device(track_id, track, track_color);
-                        let latency = crate::domains::device_latency::latency_label(
-                            track.instrument_latency_samples,
-                            self.state.transport.sample_rate,
-                        );
-                        devices_row = devices_row.push(
-                            column![synth_card, text(latency).size(9).color(th::text_dim())]
-                                .height(Length::Fill),
-                        );
-                    }
-                }
-            }
-        } else if track.kind.is_midi() {
-            let placeholder = self.view_add_instrument_placeholder();
-            devices_row = devices_row.push(placeholder);
+        use crate::widgets::effect_slot::card_width;
+        // Every other card is built first and measured, so each Gain can take
+        // its share of whatever width the section has left.
+        let mut cards: Vec<Option<Element<'a, Message>>> = Vec::new();
+        let mut used = 0.0;
+        if let Some((card, width)) = self.instrument_card(track_id, track, track_color) {
+            cards.push(Some(card));
+            used += width;
         }
-
-        // Effect cards
+        let mut gains = Vec::new();
         for effect in &track.effects {
-            let custom = if effect.effect_type == vibez_core::effect::EffectType::Eq
-                && effect.plugin_ref.is_none()
-            {
-                {
-                    let (content, width) = self.eq_device_body(track_id, effect);
-                    Some(DeviceBody {
-                        content,
-                        width,
-                        padding: iced::Padding::from([8.0, 10.0]),
-                    })
-                }
-            } else if crate::domains::gain::is_native_gain(effect) {
-                Some(self.gain_device_body(track_id, effect, track_color, gain_width))
-            } else {
-                None
-            };
             let sidechain = view_sidechain(
                 track_id,
                 effect,
@@ -151,16 +93,54 @@ impl App {
                 &self.state.project_tracks.buses,
                 &self.state.devices,
             );
-            let slot = view_effect_slot(
+            if crate::domains::gain::is_native_gain(effect) {
+                used += card_width(effect, Some(0.0), sidechain.is_some());
+                gains.push((cards.len(), effect, sidechain));
+                cards.push(None);
+                continue;
+            }
+            let custom = (effect.effect_type == vibez_core::effect::EffectType::Eq
+                && effect.plugin_ref.is_none())
+            .then(|| {
+                let (content, width) = self.eq_device_body(track_id, effect);
+                DeviceBody {
+                    content,
+                    width,
+                    padding: iced::Padding::from([8.0, 10.0]),
+                }
+            });
+            used += card_width(
+                effect,
+                custom.as_ref().map(|body| body.width),
+                sidechain.is_some(),
+            );
+            cards.push(Some(view_effect_slot(
                 track_id,
                 effect,
                 track_color,
                 custom,
                 sidechain,
                 self.state.transport.sample_rate,
-            );
-            devices_row = devices_row.push(slot);
+            )));
         }
+        if !gains.is_empty() {
+            let spacing = CHAIN_SPACING * cards.len().saturating_sub(1) as f32;
+            let share = (available_width - used - spacing) / gains.len() as f32;
+            let width = crate::widgets::gain_device::card_width(share);
+            for (position, effect, sidechain) in gains {
+                cards[position] = Some(view_effect_slot(
+                    track_id,
+                    effect,
+                    track_color,
+                    Some(self.gain_device_body(track_id, effect, track_color, width)),
+                    sidechain,
+                    self.state.transport.sample_rate,
+                ));
+            }
+        }
+        let devices_row = row(cards.into_iter().flatten())
+            .spacing(CHAIN_SPACING)
+            .height(Length::Fill);
 
         // Only a chain wider than the section scrolls, behind a hairline that
         // appears only then: scrollbar spacing would show it permanently.
@@ -177,53 +157,50 @@ impl App {
         .into()
     }
 
-    /// Each native Gain's share of the width the rest of the chain leaves.
-    fn gain_card_width(&self, track_id: TrackId, track: &UiTrack, available: f32) -> f32 {
-        use crate::widgets::effect_slot::card_width;
-        let gains = track
-            .effects
-            .iter()
-            .filter(|effect| crate::domains::gain::is_native_gain(effect))
-            .count();
-        if gains == 0 {
-            return crate::widgets::gain_device::COMPACT_W;
+    /// The channel's instrument card and its width, or the placeholder that
+    /// offers one on a MIDI track.
+    fn instrument_card<'a>(
+        &'a self,
+        track_id: TrackId,
+        track: &'a UiTrack,
+        track_color: Color,
+    ) -> Option<(Element<'a, Message>, f32)> {
+        if !track.has_instrument {
+            return track
+                .kind
+                .is_midi()
+                .then(|| (self.view_add_instrument_placeholder(), PLACEHOLDER_W));
         }
-        let instrument = if track.has_instrument {
-            Some(if track.plugin_instrument_name.is_some() {
-                crate::widgets::device_chrome::PLUGIN_CARD_W
-            } else {
-                match track.instrument_kind {
-                    Some(vibez_core::midi::InstrumentKind::Sampler) => SAMPLER_CARD_W,
-                    Some(vibez_core::midi::InstrumentKind::DrumRack) => drum_rack::DRUM_RACK_CARD_W,
-                    _ => SYNTH_CARD_W,
-                }
-            })
-        } else {
-            track.kind.is_midi().then_some(PLACEHOLDER_W)
+        if track.plugin_instrument_name.is_some() {
+            return Some((
+                self.view_plugin_instrument_device(track_id, track, track_color),
+                crate::widgets::device_chrome::PLUGIN_CARD_W,
+            ));
+        }
+        let (card, width) = match track.instrument_kind {
+            Some(vibez_core::midi::InstrumentKind::Sampler) => (
+                self.view_sampler_device(track_id, track, track_color),
+                SAMPLER_CARD_W,
+            ),
+            Some(vibez_core::midi::InstrumentKind::DrumRack) => (
+                self.view_drum_rack_device(track_id, track, track_color),
+                drum_rack::DRUM_RACK_CARD_W,
+            ),
+            _ => (
+                self.view_synth_device(track_id, track, track_color),
+                SYNTH_CARD_W,
+            ),
         };
-        let mut others = instrument.unwrap_or(0.0);
-        let mut cards = usize::from(instrument.is_some()) + track.effects.len();
-        for effect in &track.effects {
-            let sidechain = view_sidechain(
-                track_id,
-                effect,
-                &self.state.project_tracks.tracks,
-                &self.state.project_tracks.buses,
-                &self.state.devices,
-            )
-            .is_some();
-            if crate::domains::gain::is_native_gain(effect) {
-                others += card_width(effect, Some(0.0), sidechain);
-                continue;
-            }
-            let custom = (effect.effect_type == vibez_core::effect::EffectType::Eq
-                && effect.plugin_ref.is_none())
-            .then_some(EQ_CARD_W);
-            others += card_width(effect, custom, sidechain);
-        }
-        cards = cards.max(1);
-        let share = (available - others - CHAIN_SPACING * (cards - 1) as f32) / gains as f32;
-        crate::widgets::gain_device::card_width(share)
+        let latency = crate::domains::device_latency::latency_label(
+            track.instrument_latency_samples,
+            self.state.transport.sample_rate,
+        );
+        Some((
+            column![card, text(latency).size(9).color(th::text_dim())]
+                .height(Length::Fill)
+                .into(),
+            width,
+        ))
     }
 
     fn gain_device_body<'a>(

@@ -133,6 +133,12 @@ fn meter<'a>(level: (f32, f32)) -> Element<'a, Message> {
 /// Fixed width of the sidechain section, shared with the card width math.
 pub const WIDTH: f32 = 132.0;
 
+/// Whether the device shows a sidechain column: it has a supported input, or
+/// routes that no supported input matches any more.
+pub fn shows_for(effect: &UiEffect) -> bool {
+    effect.external_inputs.iter().any(|input| input.supported()) || !effect.sidechains.is_empty()
+}
+
 pub fn view<'a>(
     receiver: TrackId,
     effect: &'a UiEffect,
@@ -140,6 +146,9 @@ pub fn view<'a>(
     buses: &'a [ProjectTrack],
     state: &DevicesState,
 ) -> Option<Element<'a, Message>> {
+    if !shows_for(effect) {
+        return None;
+    }
     let inputs: Vec<_> = effect
         .external_inputs
         .iter()
@@ -150,9 +159,6 @@ pub fn view<'a>(
         .iter()
         .filter(|route| !inputs.iter().any(|input| route.matches(input)))
         .collect();
-    if inputs.is_empty() && unavailable.is_empty() {
-        return None;
-    }
     let mut content = column![crate::widgets::device_chrome::section_label("Sidechain")].spacing(6);
     for input in &inputs {
         let id = input.id;
