@@ -160,3 +160,31 @@ fn drive_reports_actual_aligned_left_samples_and_a_memoryless_applied_transfer()
     assert_eq!(silent.input[..8], [0.0; 8]);
     assert_eq!(silent.output[..8], [0.0; 8]);
 }
+
+#[test]
+fn manual_output_moves_in_512_host_frames_while_automation_is_sample_exact() {
+    for partitions in [&[600][..], &[1, 7, 61, 128, 3][..]] {
+        let render = |automated| {
+            let mut effect = create_effect_with_params(EffectType::Drive, 48_000.0, &[0.0, 0.5, 1.0, 1.0]);
+            effect.process(&mut [0.5; 128], 1);
+            if automated { assert!(effect.set_automated_param(2, 2.0)); } else { assert!(effect.set_param(2, 2.0)); }
+            assert_eq!(effect.get_param(2), 2.0);
+            let mut output = vec![0.5; 600];
+            let (mut frame, mut part) = (0, 0);
+            while frame < output.len() {
+                let end = (frame + partitions[part % partitions.len()]).min(output.len());
+                effect.process(&mut output[frame..end], 1);
+                frame = end;
+                part += 1;
+            }
+            output
+        };
+        let manual = render(false);
+        let automated = render(true);
+        for frame in 0..600 {
+            let expected = 0.5 * (1.0 + ((frame + 1).min(512)) as f32 / 512.0);
+            assert_eq!(manual[frame], expected, "manual frame={frame}, partitions={partitions:?}");
+            assert_eq!(automated[frame], 1.0, "automation frame={frame}");
+        }
+    }
+}
