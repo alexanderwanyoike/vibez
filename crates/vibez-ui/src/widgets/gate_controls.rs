@@ -515,3 +515,62 @@ pub fn aside<'a>(
         .width(Length::Fill)
         .into()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domains::gate_layout;
+    use vibez_core::id::EffectId;
+
+    #[test]
+    fn primary_banks_preserve_gate_priorities_across_measured_tiers() {
+        let core = &[param::THRESHOLD, param::HOLD, param::RELEASE];
+        let full = &[
+            param::THRESHOLD,
+            param::ATTACK,
+            param::HOLD,
+            param::RELEASE,
+            param::RANGE,
+        ];
+        for (width, height, advanced, expected) in [
+            (430.0, 304.0, false, core.as_slice()),
+            (430.0, 304.0, true, core.as_slice()),
+            (740.0, 64.0, true, core.as_slice()),
+            (740.0, 64.0, false, full.as_slice()),
+            (812.0, 304.0, true, full.as_slice()),
+            (900.0, 304.0, true, full.as_slice()),
+        ] {
+            let layout = gate_layout::arrange(width, height, advanced);
+            assert_eq!(primary_indices(layout.primary_count), expected);
+        }
+    }
+
+    #[test]
+    fn aside_pages_preserve_available_categories_and_replace_only_routing() {
+        assert_eq!(ASIDE_PAGES, [GatePage::Sound, GatePage::Dynamics, GatePage::Detector, GatePage::Metering]);
+        for selected in GatePage::ALL {
+            let presented = aside_page(selected);
+            assert!(ASIDE_PAGES.contains(&presented));
+            assert_eq!(presented, if selected == GatePage::Sidechain { GatePage::Dynamics } else { selected });
+        }
+    }
+
+    #[test]
+    fn remembering_sidechain_survives_expanded_aside_and_short_details_transitions() {
+        let mut panel = GatePanel::default();
+        panel.update(GateMsg::Page(TrackId::new(), EffectId::new(), GatePage::Sidechain));
+        for (width, height, expected) in [
+            (430.0, 304.0, GatePage::Sidechain),
+            (900.0, 304.0, GatePage::Dynamics),
+            (812.0, 304.0, GatePage::Sidechain),
+            (740.0, 64.0, GatePage::Sidechain),
+            (900.0, 304.0, GatePage::Dynamics),
+            (430.0, 64.0, GatePage::Sidechain),
+        ] {
+            let layout = gate_layout::arrange(width, height, true);
+            let presented = if layout.advanced_aside { aside_page(panel.page) } else { panel.page };
+            assert_eq!(presented, expected);
+            assert_eq!(panel.page, GatePage::Sidechain);
+        }
+    }
+}
