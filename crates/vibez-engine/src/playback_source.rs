@@ -266,8 +266,9 @@ fn rebuild_next_same_pitch_start_beats(
     by_descending_start.extend(0..notes.len());
     // Equal-start notes share one group, so its internal order cannot affect
     // clamps. Unstable sorting avoids allocating stable-sort scratch.
-    by_descending_start
-        .sort_unstable_by(|left, right| notes[*right].start_beat.total_cmp(&notes[*left].start_beat));
+    by_descending_start.sort_unstable_by(|left, right| {
+        notes[*right].start_beat.total_cmp(&notes[*left].start_beat)
+    });
     result.resize(notes.len(), None);
     let mut next_by_pitch = [None; 256];
     let mut group_start = 0;
