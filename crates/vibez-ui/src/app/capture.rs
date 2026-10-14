@@ -852,6 +852,19 @@ mod tests {
                 instrument: Box::new(NoteLogInstrument(Arc::clone(&heard))),
             })
             .unwrap();
+        let channels = [filler_track, audible_track, TrackId::MASTER].map(|id| {
+            vibez_core::routing::RoutingChannel {
+                id,
+                is_bus: id.is_master(),
+                sends: vec![],
+                effects: vec![],
+            }
+        });
+        producer
+            .push(EngineCommand::SetRouting(
+                vibez_engine::routing::PreparedRouting::prepare(&channels, 512).unwrap(),
+            ))
+            .unwrap();
         audio_engine.process_block(AudioProcessBlock::new(&mut [0.0; 2], 2));
 
         let note_clip = |pitch, note_count| UiNoteClip {
