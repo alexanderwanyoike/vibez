@@ -213,7 +213,7 @@ impl AudioEngine {
                         }),
                         retired: prepared,
                     };
-                    self.present_event_after(event, if applied { self.mix_latency() } else { 0 });
+                    self.present_event(event);
                 }
                 EngineCommand::ArmSectionRecord {
                     section_id,
