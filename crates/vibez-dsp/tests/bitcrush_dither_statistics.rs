@@ -64,7 +64,7 @@ fn nearest_tpdf_meets_frozen_eighteen_case_moment_and_correlation_budgets() {
                 Vec::with_capacity(ACQUISITIONS),
                 Vec::with_capacity(ACQUISITIONS),
             ];
-            for frame in audio.chunks_exact(2) {
+            for frame in audio.as_chunks::<2>().0.iter() {
                 for (channel, &output) in frame.iter().enumerate() {
                     assert!(output.is_finite() && output.abs() < 1.0);
                     let code = f64::from(output) / DELTA;
@@ -158,7 +158,7 @@ fn saturated_wet_rails_are_bounded_for_all_rounding_and_dither_modes() {
                 let mut actual: Vec<_> = (0..1024).flat_map(|_| [1.25, -1.25]).collect();
                 effect.process(&mut actual, 2);
                 assert!(
-                    actual.chunks_exact(2).all(|frame| frame == [1.0, -1.0]),
+                    actual.as_chunks::<2>().0.iter().all(|frame| *frame == [1.0, -1.0]),
                     "ID={raw_id}, rounding={rounding}, dither={dither}"
                 );
             }
