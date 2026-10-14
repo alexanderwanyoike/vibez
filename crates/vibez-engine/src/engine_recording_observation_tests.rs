@@ -3,7 +3,8 @@
 use super::*;
 use crate::events::SourceRecordingPosition;
 use crate::playback_source::PreparedSectionPlaybackSource;
-use vibez_core::{midi::InstrumentKind, perform::NoteRepeatRate, routing::*};
+use graph_test_support::{graph_engine, routing_channel};
+use vibez_core::{midi::InstrumentKind, perform::NoteRepeatRate};
 use vibez_instruments::create_instrument;
 
 #[test]
@@ -80,34 +81,17 @@ fn external_input_observations_keep_the_applied_section_coordinate() {
 }
 
 #[test]
-fn repeats_observe_the_same_coordinates_in_graph_legacy_and_stopped_paths() {
-    for (graph, playing) in [(true, true), (false, true), (false, false)] {
-        let (mut engine, mut commands, mut events) = AudioEngine::new();
+fn repeats_observe_the_same_coordinates_during_graph_playback_and_idle() {
+    for playing in [true, false] {
+        let id = TrackId::new();
+        let (mut engine, mut commands, mut events) =
+            graph_engine(&[routing_channel(id), routing_channel(TrackId::MASTER)]);
         engine.sample_rate = 128;
         engine.transport.set_bpm(60.0);
-        let id = TrackId::new();
         let mut track = EngineTrack::new(id);
         track.instrument = Some(create_instrument(InstrumentKind::SubtractiveSynth, 128.0));
         engine.tracks.push(Box::new(track));
         engine.process(&mut [0.0; 256], 2);
-        if graph {
-            let channels = [
-                RoutingChannel {
-                    id,
-                    is_bus: false,
-                    sends: vec![],
-                    effects: vec![],
-                },
-                RoutingChannel {
-                    id: TrackId::MASTER,
-                    is_bus: true,
-                    sends: vec![],
-                    effects: vec![],
-                },
-            ];
-            engine.routing =
-                Some(crate::routing::PreparedRouting::prepare(&channels, 128).unwrap());
-        }
         if playing {
             commands.push(EngineCommand::Play).unwrap();
         }
@@ -146,7 +130,7 @@ fn repeats_observe_the_same_coordinates_in_graph_legacy_and_stopped_paths() {
                 _ => {}
             }
         }
-        assert!(!source.is_empty(), "graph={graph}, playing={playing}");
+        assert!(!source.is_empty(), "playing={playing}");
         assert_eq!(source, notices);
     }
 }

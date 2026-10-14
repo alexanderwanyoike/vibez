@@ -5,6 +5,7 @@ use super::*;
 use crate::playback_source::{
     PreparedClipPlayback, PreparedPlaybackSource, PreparedSectionPlaybackSource,
 };
+use graph_test_support::{graph_engine, routing_channel, routing_effect, routing_plan};
 use vibez_core::automation::{AutomationLane, AutomationTarget};
 use vibez_core::id::{ClipId, EffectId, LaneId, SectionId, TrackId};
 use vibez_core::midi::{InstrumentKind, MidiNote};
@@ -212,7 +213,6 @@ fn playing(
     rtrb::Consumer<EngineEvent>,
     Fixture,
 ) {
-    let (engine, mut commands, events) = AudioEngine::new();
     let fixture = Fixture {
         synth: TrackId::new(),
         drums: TrackId::new(),
@@ -227,6 +227,21 @@ fn playing(
         lane: LaneId::new(),
     };
     let f = &fixture;
+    let mut synth = routing_channel(f.synth);
+    synth.effects.push(routing_effect(f.effect));
+    synth.sends.push(f.bus);
+    let mut bus = routing_channel(f.bus);
+    bus.is_bus = true;
+    let channels = [
+        synth,
+        routing_channel(f.drums),
+        routing_channel(f.audio),
+        routing_channel(f.empty),
+        routing_channel(f.empty_audio),
+        bus,
+        routing_channel(TrackId::MASTER),
+    ];
+    let (engine, mut commands, events) = graph_engine(&channels);
     let mut lane = AutomationLane::new(AutomationTarget::TrackPan);
     lane.id = f.lane;
     for command in [
@@ -266,6 +281,9 @@ fn playing(
         assert!(commands.push(command).is_ok());
     }
     setup(&mut commands, f);
+    assert!(commands
+        .push(EngineCommand::SetRouting(routing_plan(&channels)))
+        .is_ok());
     assert!(commands.push(EngineCommand::Play).is_ok());
     let mut engine = engine;
     let mut events = events;
