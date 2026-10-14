@@ -474,34 +474,6 @@ impl AudioEngine {
         }
     }
 
-    /// Legacy single-audio rendering path (Phase 1 compatibility).
-    pub(super) fn process_legacy(&mut self, output: &mut [f32], frames: usize, channels: usize) {
-        if !self.transport.is_playing() {
-            return;
-        }
-
-        if let Some(ref audio) = self.audio {
-            let pos = self.transport.position();
-            let audio_channels = audio.num_channels();
-
-            for frame in 0..frames {
-                let sample_idx = pos as usize + frame;
-
-                for ch in 0..channels {
-                    let sample = if ch < audio_channels {
-                        audio.sample(ch, sample_idx)
-                    } else if audio_channels > 0 {
-                        audio.sample(audio_channels - 1, sample_idx)
-                    } else {
-                        0.0
-                    };
-                    output[frame * channels + ch] = sample;
-                }
-            }
-        }
-    }
-
-    /// Recalculate transport audio length from all track clips.
     /// Render instruments with no clip scheduling (transport stopped)
     /// so auditioned notes sound. Effects and gain/pan still apply.
     pub(super) fn render_idle_instruments(

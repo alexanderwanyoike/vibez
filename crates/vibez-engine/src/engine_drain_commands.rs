@@ -229,24 +229,12 @@ impl AudioEngine {
                     replace_existing,
                 ),
                 EngineCommand::StopSectionRecord => self.stop_section_record(),
-                EngineCommand::LoadAudio(audio) => {
-                    let len = audio.num_frames() as u64;
-                    self.audio = Some(audio);
-                    self.arrangement_audio_length = Some(len);
-                    if !self.clip_performance
-                        && self.active_section.is_none()
-                        && !self.arrangement_recording
-                    {
-                        self.transport.set_audio_length(Some(len));
-                    }
-                }
                 EngineCommand::UnloadAudio => {
                     self.cancel_presentation();
                     let was_clip_performance = self.clip_performance;
                     self.clear_clip_performance();
                     self.stop_section_record();
                     self.stop_heard_capture();
-                    self.audio = None;
                     self.arrangement_audio_length = None;
                     self.arrangement_recording = false;
                     self.active_section = None;
@@ -941,11 +929,7 @@ impl AudioEngine {
                 .map(|track| track.playback_source.as_ref()),
             samples_per_beat,
         );
-        self.arrangement_audio_length = if total > 0 {
-            Some(total)
-        } else {
-            self.audio.as_ref().map(|audio| audio.num_frames() as u64)
-        };
+        self.arrangement_audio_length = (total > 0).then_some(total);
         if !self.clip_performance && self.active_section.is_none() && !self.arrangement_recording {
             self.transport
                 .set_audio_length(self.arrangement_audio_length);
