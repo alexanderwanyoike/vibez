@@ -378,16 +378,18 @@ impl Instrument for DrumRack {
         }
     }
 
-    fn clear_drum_pad(&mut self, pad_index: usize) {
-        if let Some(pad) = self.pads.get_mut(pad_index) {
-            pad.sample = None;
-            pad.sample_name = None;
-        }
+    fn clear_drum_pad(&mut self, pad_index: usize) -> InstrumentMediaOwners {
+        let retired = self.pads.get_mut(pad_index).map(|pad| InstrumentMediaOwners {
+            sample: pad.sample.take(),
+            name: pad.sample_name.take(),
+        }).unwrap_or_default();
         for voice in &mut self.voices {
-            if voice.active && voice.pad_index == pad_index {
+            if voice.pad_index == pad_index {
                 voice.active = false;
+                voice.sample = None;
             }
         }
+        retired
     }
 
     fn set_drum_pad_state(&mut self, pad_index: usize, state: DrumPadState) {

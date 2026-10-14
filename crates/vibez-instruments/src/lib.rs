@@ -113,7 +113,9 @@ pub trait Instrument: Send {
     }
 
     /// Clear a drum-rack pad. No-op for non-drum-rack instruments.
-    fn clear_drum_pad(&mut self, _pad_index: usize) {}
+    fn clear_drum_pad(&mut self, _pad_index: usize) -> InstrumentMediaOwners {
+        InstrumentMediaOwners::default()
+    }
 
     /// Apply pad settings to a drum-rack pad. No-op for other instruments.
     fn set_drum_pad_state(&mut self, _pad_index: usize, _state: DrumPadState) {}

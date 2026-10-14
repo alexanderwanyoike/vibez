@@ -59,7 +59,7 @@ impl EngineCommand {
             Self::ReplaceClipAudio { .. } | Self::ReplaceClipBuffer { .. } => 1,
             Self::SetClipWarpMarkers { .. } => 1,
             Self::ReorderTracks(_) => 1,
-            Self::LoadSamplerSample { .. } | Self::LoadDrumRackPadSample { .. } => 1,
+            Self::LoadSamplerSample { .. } | Self::LoadDrumRackPadSample { .. } | Self::ClearDrumRackPad { .. } => 1,
             _ => 2,
         }
     }
