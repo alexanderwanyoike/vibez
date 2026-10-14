@@ -4,6 +4,10 @@ use vibez_core::effect::{EffectType, ParamDescriptor};
 
 use crate::effect::AudioEffect;
 
+#[path = "bitcrush_ramp.rs"]
+mod ramp;
+use ramp::Ramp;
+
 pub mod param {
     pub const BITS: usize = 0;
     pub const SR_REDUCE: usize = 1;
@@ -87,6 +91,9 @@ pub static BITCRUSH_PARAMS: &[ParamDescriptor] = &[
 pub struct BitcrushEffect {
     params: [f32; param::COUNT],
     sample_rate: f32,
+    drive: Ramp,
+    drive_gain: f64,
+    started: bool,
     /// Sample-and-hold state, per channel.
     hold: [f32; 2],
     /// Frame counter for SR reduce, per channel.
@@ -107,10 +114,42 @@ impl BitcrushEffect {
         Self {
             params: std::array::from_fn(|index| BITCRUSH_PARAMS[index].default),
             sample_rate,
+            drive: Ramp::new(0.0),
+            drive_gain: 1.0,
+            started: false,
             hold: [0.0; 2],
             counter: [0; 2],
         }
     }
+
+    fn edit_param(&mut self, index: usize, value: f32, automated: bool) -> bool {
+        if !value.is_finite() {
+            return false;
+        }
+        let Some(target) = self.params.get_mut(index) else {
+            return false;
+        };
+        let descriptor = &BITCRUSH_PARAMS[index];
+        let value = value.clamp(descriptor.min, descriptor.max);
+        let value = if matches!(
+            index,
+            param::ROUNDING | param::DITHER | param::POST_LP_ENABLED
+        ) {
+            value.round()
+        } else {
+            value
+        };
+        if index == param::DRIVE_DB && (value != *target || automated) {
+            let immediate = automated || !self.started;
+            self.drive.edit(value, immediate);
+            if immediate {
+                self.drive_gain = 10.0_f64.powf(f64::from(value) / 20.0);
+            }
+        }
+        *target = value;
+        true
+    }
+
 }
 
 impl Default for BitcrushEffect {
@@ -133,23 +172,11 @@ impl AudioEffect for BitcrushEffect {
     }
 
     fn set_param(&mut self, index: usize, value: f32) -> bool {
-        if !value.is_finite() {
-            return false;
-        }
-        let Some(target) = self.params.get_mut(index) else {
-            return false;
-        };
-        let descriptor = &BITCRUSH_PARAMS[index];
-        let value = value.clamp(descriptor.min, descriptor.max);
-        *target = if matches!(
-            index,
-            param::ROUNDING | param::DITHER | param::POST_LP_ENABLED
-        ) {
-            value.round()
-        } else {
-            value
-        };
-        true
+        self.edit_param(index, value, false)
+    }
+
+    fn set_automated_param(&mut self, index: usize, value: f32) -> bool {
+        self.edit_param(index, value, true)
     }
 
     fn get_param(&self, index: usize) -> f32 {
@@ -162,13 +189,20 @@ impl AudioEffect for BitcrushEffect {
         }
         let ch = channels.min(2);
         let frames = buffer.len() / channels;
+        if frames == 0 {
+            return;
+        }
+        self.started = true;
         let levels = 2u32.pow(self.params[param::BITS] as u32) as f32;
         let step = 2.0 / levels;
         let divider = self.params[param::SR_REDUCE].round().max(1.0) as u32;
-        let drive_db = self.params[param::DRIVE_DB];
-        let drive_gain = 10.0_f64.powf(f64::from(drive_db) / 20.0);
 
         for frame in 0..frames {
+            if let Some(value) = self.drive.advance(self.params[param::DRIVE_DB]) {
+                self.drive_gain = 10.0_f64.powf(f64::from(value) / 20.0);
+            }
+            let drive_db = self.drive.value();
+            let drive_gain = self.drive_gain;
             for c in 0..ch {
                 let idx = frame * channels + c;
                 let dry = if buffer[idx].is_finite() {
@@ -203,6 +237,9 @@ impl AudioEffect for BitcrushEffect {
     fn reset(&mut self) {
         self.hold = [0.0; 2];
         self.counter = [0; 2];
+        self.drive.edit(self.params[param::DRIVE_DB], true);
+        self.drive_gain = 10.0_f64.powf(f64::from(self.drive.value()) / 20.0);
+        self.started = false;
     }
 }
 
