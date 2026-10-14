@@ -103,6 +103,47 @@ impl DevicesMsg {
     }
 }
 
+impl DevicesMsg {
+    /// The effect and parameter values a parameter edit asks for.
+    pub fn param_edit(&self) -> Option<(TrackId, EffectId, Vec<(usize, f32)>)> {
+        match self {
+            DevicesMsg::SetEffectParam(track, effect, index, value) => {
+                Some((*track, *effect, vec![(*index, *value)]))
+            }
+            DevicesMsg::SetEffectParams(track, effect, updates) => {
+                Some((*track, *effect, updates.clone()))
+            }
+            _ => None,
+        }
+    }
+}
+
+/// An edit that leaves every value as it is once clamped to its range is no
+/// change (PATTERNS §7). Checked before project state is copied for writing.
+pub fn is_unchanged_param_edit(
+    project: &crate::state::ProjectTracksState,
+    message: &DevicesMsg,
+) -> bool {
+    let Some((track_id, effect_id, updates)) = message.param_edit() else {
+        return false;
+    };
+    let Some(effect) = project
+        .find(track_id)
+        .and_then(|track| track.effects.iter().find(|effect| effect.id == effect_id))
+    else {
+        return false;
+    };
+    updates.iter().all(|&(index, value)| {
+        effect
+            .descriptors
+            .get(index)
+            .zip(effect.params.get(index))
+            .is_some_and(|(descriptor, current)| {
+                value.clamp(descriptor.min, descriptor.max) == *current
+            })
+    })
+}
+
 /// Cross-domain effects requested by a devices update. A struct
 /// rather than an enum because several can occur at once.
 #[derive(Debug, Default, PartialEq)]

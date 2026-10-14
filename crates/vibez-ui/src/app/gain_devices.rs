@@ -20,35 +20,16 @@ pub(super) struct GainDevices {
 }
 
 impl App {
-    pub(super) fn prepare_gain_edit(&mut self, message: &Message) -> bool {
-        use crate::domains::devices::DevicesMsg;
-        let single;
-        let (track_id, effect_id, updates) = match message {
-            Message::Devices(DevicesMsg::SetEffectParam(track, effect, index, value)) => {
-                single = [(*index, *value)];
-                (*track, *effect, single.as_slice())
-            }
-            Message::Devices(DevicesMsg::SetEffectParams(track, effect, updates)) => {
-                (*track, *effect, updates.as_slice())
-            }
-            _ => return false,
-        };
-        let Some(effect) = self
-            .state
-            .find_track(track_id)
-            .and_then(|track| track.effects.iter().find(|effect| effect.id == effect_id))
-            .filter(|effect| is_native_gain(effect))
-        else {
-            return false;
+    /// A parameter edit supersedes whatever was typed into that Gain field.
+    pub(super) fn discard_gain_entries(&mut self, message: &crate::domains::devices::DevicesMsg) {
+        let Some((_, effect_id, updates)) = message.param_edit() else {
+            return;
         };
         if let Some(panel) = self.gain_devices.panels.get_mut(&effect_id) {
-            for &(index, _) in updates {
+            for (index, _) in updates {
                 panel.discard_input(index);
             }
         }
-        updates
-            .iter()
-            .all(|&(index, value)| effect.params.get(index) == Some(&value))
     }
 
     pub(super) fn poll_gain_devices(&mut self) {

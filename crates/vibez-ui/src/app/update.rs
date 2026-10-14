@@ -106,8 +106,11 @@ impl App {
             Message::UndoGesture { id, edit } => (*edit, Some(id)),
             message => (message, None),
         };
-        if self.prepare_gain_edit(&message) {
-            return Task::none();
+        if let Message::Devices(edit) = &message {
+            self.discard_gain_entries(edit);
+            if crate::domains::devices::is_unchanged_param_edit(&self.state.project_tracks, edit) {
+                return Task::none();
+            }
         }
         let message =
             apply_project_track_deletion_policy(message, self.state.confirm_project_track_deletion);
