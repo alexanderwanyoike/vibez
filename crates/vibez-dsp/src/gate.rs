@@ -46,6 +46,7 @@ pub struct GateEffect {
     params: [f32; param::COUNT],
     sample_rate: f32,
     env_db: f32,
+    open: bool,
     inputs: [vibez_core::routing::ExternalInputDescriptor; 1],
     gain: f32,
     hold_counter: u32,
@@ -57,6 +58,7 @@ impl GateEffect {
             params: std::array::from_fn(|index| GATE_PARAMS[index].default),
             sample_rate,
             env_db: -120.0,
+            open: false,
             inputs: [vibez_core::routing::ExternalInputDescriptor {
                 id: vibez_core::routing::ExternalInputId(0),
                 name: "Sidechain".into(),
@@ -140,8 +142,10 @@ impl AudioEffect for GateEffect {
             let env_coef = if peak_db > self.env_db { att } else { rel };
             self.env_db = peak_db + env_coef * (self.env_db - peak_db);
 
-            let open = self.env_db >= self.params[param::THRESHOLD];
-            let target = if open || self.hold_counter > 0 {
+            let threshold = self.params[param::THRESHOLD]
+                - if self.open { self.params[param::HYSTERESIS] } else { 0.0 };
+            self.open = self.env_db >= threshold;
+            let target = if self.open || self.hold_counter > 0 {
                 1.0
             } else {
                 closed_gain
@@ -149,7 +153,7 @@ impl AudioEffect for GateEffect {
             let g_coef = if target > self.gain { att } else { rel };
             self.gain = target + g_coef * (self.gain - target);
 
-            if open {
+            if self.open {
                 self.hold_counter = hold_frames;
             } else if self.hold_counter > 0 {
                 self.hold_counter -= 1;
@@ -163,6 +167,7 @@ impl AudioEffect for GateEffect {
 
     fn reset(&mut self) {
         self.env_db = -120.0;
+        self.open = false;
         self.gain = 0.0;
         self.hold_counter = 0;
     }
