@@ -192,4 +192,46 @@ mod tests {
         assert!(panel.input_text[0].is_none());
         assert!(!panel.input_error[0]);
     }
+
+    #[test]
+    fn numeric_gain_entry_rejects_invalid_values_and_commits_once() {
+        let (mut app, track, effect) = gain_app();
+        for input in ["NaN", "oops", "100"] {
+            let _ = app.update(Message::GainControl(GainMsg::SetInput(track, effect, 0, input.into())));
+            let _ = app.update(Message::GainControl(GainMsg::SubmitInput(track, effect, 0)));
+            assert!(app.gain_devices.panels[&effect].input_error[0]);
+            assert!(!app.state.project.dirty);
+            assert!(!app.state.project.history.can_undo());
+        }
+        let _ = app.update(Message::GainControl(GainMsg::SetInput(track, effect, 0, "-6".into())));
+        let _ = app.update(Message::GainControl(GainMsg::SubmitInput(track, effect, 0)));
+        assert!((app.state.find_track(track).unwrap().effects[0].params[0] - 0.501_187_2).abs() < 1e-6);
+        assert!(app.state.project.dirty);
+        assert!(app.state.project.history.pop_undo().is_some());
+        assert!(!app.state.project.history.can_undo());
+        assert!(!app.gain_devices.panels[&effect].input_error[0]);
+    }
+
+    #[test]
+    fn late_gain_meters_cannot_cross_selection_or_device_removal() {
+        let (mut app, track, effect) = gain_app();
+        let stale_generation = app.gain_devices.generation;
+        let levels = MeterValues { peak_l: 0.5, peak_r: 0.25, rms_l: 0.3, rms_r: 0.15 };
+        app.accept_gain_meter(track, effect, stale_generation, levels, levels);
+        assert_eq!(app.gain_devices.panels[&effect].output, levels);
+        app.state.arrangement.selected_track = None;
+        app.poll_gain_devices();
+        assert!(app.gain_devices.panels.is_empty());
+        app.state.arrangement.selected_track = Some(track);
+        app.poll_gain_devices();
+        app.accept_gain_meter(track, effect, stale_generation, levels, levels);
+        assert_eq!(app.gain_devices.panels[&effect].output, MeterValues::SILENT);
+        app.accept_gain_meter(track, effect, app.gain_devices.generation, levels, levels);
+        assert_eq!(app.gain_devices.panels[&effect].output, levels);
+        let _ = app.update(Message::Devices(DevicesMsg::RemoveEffect(track, effect)));
+        app.poll_gain_devices();
+        app.accept_gain_meter(track, effect, app.gain_devices.generation, levels, levels);
+        assert!(app.gain_devices.panels.is_empty());
+    }
+
 }
