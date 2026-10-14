@@ -382,3 +382,89 @@ fn play_with_full_ui_ring_retains_capture_terminals_and_owner_but_cancels_inline
         resumed.map(f32::to_bits)
     );
 }
+
+#[test]
+fn capture_terminals_keep_first_writer_after_public_backward_seek() {
+    let mut fixture = Fixture::new(StartingCondition::Running);
+    fixture.engine.process(&mut [], 2);
+    fixture.drain_events();
+    let first_boundary = fixture.engine.compensation_callback_heard_start;
+    assert!(first_boundary > 0);
+    while fixture
+        .engine
+        .event_tx
+        .push(EngineEvent::PlaybackPosition(0))
+        .is_ok()
+    {}
+    for _ in 0..fixture.engine.scheduled_presentation.capacity() {
+        fixture.engine.present_event_at(
+            EngineEvent::PlaybackStarted,
+            fixture.engine.output_position + 521,
+        );
+    }
+    assert!(!fixture.engine.presentation_fault);
+    assert_eq!(
+        crate::retirement::tests::allocations(|| fixture.engine.present_event_at(
+            EngineEvent::PlaybackStarted,
+            fixture.engine.output_position + 521,
+        )),
+        (0, 0)
+    );
+    assert!(fixture.engine.presentation_fault);
+    assert_eq!(fixture.engine.pending_capture_stop, Some(first_boundary));
+    fixture.drain_command(EngineCommand::Seek(0));
+    let later_boundary = fixture.engine.heard_capture_position();
+    assert_eq!(later_boundary, 0);
+    assert!(later_boundary < first_boundary);
+    fixture.drain_command(EngineCommand::StopPerformanceCapture);
+    assert_eq!(
+        crate::retirement::tests::allocations(|| fixture.engine.report_compensation_failure(
+            fixture.tracks[0],
+            Some(fixture.effect),
+            "Later failure must not replace the retained cause",
+        )),
+        (0, 0)
+    );
+    assert_eq!(fixture.engine.pending_capture_stop, Some(first_boundary));
+    assert_eq!(
+        fixture.engine.pending_compensation_failure,
+        Some((
+            TrackId::MASTER,
+            None,
+            "Audio presentation event history is full"
+        ))
+    );
+    assert_eq!(fixture.engine.event_tx.slots(), 0);
+    let events = fixture.drain_events();
+    let mut order = Vec::new();
+    for event in &events {
+        match event {
+            EngineEvent::PlaybackPosition(0) | EngineEvent::PresentationCancelled => {}
+            EngineEvent::PerformanceCaptureStopped {
+                effective_at_samples,
+            } => {
+                assert_eq!(*effective_at_samples, first_boundary);
+                order.push("capture-stop");
+            }
+            EngineEvent::CompensationInvalid {
+                track_id,
+                effect_id,
+                reason,
+            } => {
+                assert_eq!(*track_id, TrackId::MASTER);
+                assert_eq!(*effect_id, None);
+                assert_eq!(*reason, "Audio presentation event history is full");
+                order.push("cause");
+            }
+            EngineEvent::PlaybackStopped => order.push("playback-stop"),
+            event => panic!("unexpected retained terminal: {event:?}"),
+        }
+    }
+    assert_eq!(order, ["capture-stop", "cause", "playback-stop"]);
+    assert!(fixture.engine.pending_capture_stop.is_none());
+    assert!(fixture.engine.pending_compensation_failure.is_none());
+    assert!(fixture.drain_events().is_empty());
+    eprintln!(
+        "presentation-first-writer baseline: first={first_boundary}; later={later_boundary}; order={order:?}"
+    );
+}
