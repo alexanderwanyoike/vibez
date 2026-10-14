@@ -42,7 +42,7 @@ impl OversamplingPath {
         }
     }
 
-    pub(super) fn process(&mut self, input: f32, channel: usize, gain: f32, normalizer: f32, character: Option<usize>) -> f32 {
+    pub(super) fn process(&mut self, input: f32, channel: usize, gain: f32, normalizer: f32, weights: [f32; 3]) -> f32 {
         let head = self.input_position[channel];
         self.input[channel][head] = input;
         self.input[channel][head + HOST_TAPS] = input;
@@ -66,8 +66,8 @@ impl OversamplingPath {
                 samples[position + self.kernel.len()] = curves[curve];
                 // Decimation at phase zero preserves the exact 64-host-frame
                 // combined group delay; taking the last phase advances it.
-                if phase == 0 && character == Some(curve) {
-                    output = symmetric_dot(&samples[position + 1..position + self.kernel.len() + 1], &self.kernel);
+                if phase == 0 && weights[curve] != 0.0 {
+                    output += weights[curve] * symmetric_dot(&samples[position + 1..position + self.kernel.len() + 1], &self.kernel);
                 }
             }
             self.shaped_position[channel] = (position + 1) % self.kernel.len();

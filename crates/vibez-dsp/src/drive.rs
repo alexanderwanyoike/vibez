@@ -61,6 +61,35 @@ pub static DRIVE_PARAMS: &[ParamDescriptor] = &[
     ParamDescriptor { name: "Post LP Frequency", min: 1000.0, max: 20000.0, default: 12000.0, unit: "Hz" },
 ];
 
+struct CharacterFade {
+    weights: [f32; 4],
+    steps: [f32; 4],
+    target: usize,
+    remaining: u32,
+}
+
+impl CharacterFade {
+    fn new(target: usize) -> Self {
+        Self { weights: std::array::from_fn(|index| f32::from(index == target)), steps: [0.0; 4], target, remaining: 0 }
+    }
+
+    fn edit(&mut self, target: usize, immediate: bool) {
+        if immediate { *self = Self::new(target); } else {
+            self.target = target;
+            self.steps = std::array::from_fn(|index| (f32::from(index == target) - self.weights[index]) / RAMP_FRAMES as f32);
+            self.remaining = RAMP_FRAMES;
+        }
+    }
+
+    fn advance(&mut self) {
+        if self.remaining == 0 { return; }
+        self.remaining -= 1;
+        if self.remaining == 0 { *self = Self::new(self.target); } else {
+            for (weight, step) in self.weights.iter_mut().zip(self.steps) { *weight += step; }
+        }
+    }
+}
+
 /// Musical soft-saturation drive.
 ///
 /// `Amount` maps to drive gain via an exponential curve so the knob is
@@ -72,6 +101,9 @@ pub struct DriveEffect {
     steps: [f32; param::COUNT],
     remaining: [u32; param::COUNT],
     started: bool,
+    character: CharacterFade,
+    character_delay: [[f32; 4]; 64],
+    audible_character: [f32; 4],
     /// One-pole high-shelf-ish state, per channel.
     z: [f32; 2],
     delay: [[f32; 2]; 64],
@@ -102,6 +134,9 @@ impl DriveEffect {
             steps: [0.0; param::COUNT],
             remaining: [0; param::COUNT],
             started: false,
+            character: CharacterFade::new(0),
+            character_delay: [[1.0, 0.0, 0.0, 0.0]; 64],
+            audible_character: [1.0, 0.0, 0.0, 0.0],
             z: [0.0; 2],
             delay: [[0.0; 2]; 64],
             delay_position: 0,
@@ -130,6 +165,10 @@ impl DriveEffect {
         };
         if !automated && self.params[index] == target { return true; }
         self.params[index] = target;
+        if index == param::CHARACTER {
+            self.character.edit(target as usize, automated || !self.started);
+            if !self.started { self.character_delay = [self.character.weights; 64]; self.audible_character = self.character.weights; }
+        }
         let choice = matches!(index, param::CHARACTER | param::QUALITY);
         if automated || !self.started || choice {
             self.applied[index] = target;
@@ -183,11 +222,9 @@ impl AudioEffect for DriveEffect {
         for (point, output) in meter.transfer.iter_mut().enumerate() {
             let input = -1.0 + point as f32 / 32.0;
             let u = (input * gain).clamp(-1.0, 1.0);
-            let shaped = match controls[param::CHARACTER] as usize {
-                2 => 1.5 * u - 0.5 * u * u * u,
-                3 => u,
-                _ => (input * gain).tanh() / gain.tanh(),
-            };
+            let weights = if self.started { self.audible_character } else { self.character.weights };
+            let soft = (input * gain).tanh() / gain.tanh();
+            let shaped = (weights[0] + weights[1]) * soft + weights[2] * (1.5 * u - 0.5 * u * u * u) + weights[3] * u;
             let processed = input * (1.0 - controls[param::AMOUNT]) + shaped * controls[param::AMOUNT];
             *output = (input * (1.0 - controls[param::MIX]) + processed * controls[param::MIX]) * controls[param::OUTPUT];
         }
@@ -236,6 +273,9 @@ impl AudioEffect for DriveEffect {
 
         for frame in 0..frames {
             self.started = true;
+            self.character.advance();
+            self.audible_character = self.character_delay[self.delay_position];
+            self.character_delay[self.delay_position] = self.character.weights;
             for index in 0..param::COUNT {
                 if self.remaining[index] > 0 {
                     self.remaining[index] -= 1;
@@ -284,22 +324,19 @@ impl AudioEffect for DriveEffect {
                 self.delay[self.delay_position][c] = processed;
                 let aligned_dry = self.dry_delay[self.delay_position][c];
                 self.dry_delay[self.delay_position][c] = dry;
-                let character = self.audible[param::CHARACTER] as usize;
+                let weights = self.audible_character;
                 let quality = self.audible[param::QUALITY] as usize;
                 let mut modern = 0.0;
                 for (index, path) in self.oversampling.iter_mut().enumerate() {
-                    let selected = if index == quality { character.checked_sub(1) } else { None };
+                    let selected = if index == quality { [weights[1], weights[2], weights[3]] } else { [0.0; 3] };
                     modern += path.process(shaper_input, c, modern_gain, modern_norm, selected);
                 }
                 let input = modern as f64;
                 let low = &mut self.modern_low[c];
                 *low = input * (1.0 - tone_beta) + *low * tone_beta;
                 if self.audible[param::TONE] != 0.5 { modern = (*low * low_gain + (input - *low) * high_gain) as f32; }
-                let processed = if character == 0 {
-                    legacy
-                } else {
-                    aligned_dry * (1.0 - self.audible[param::AMOUNT]) + modern * self.audible[param::AMOUNT]
-                };
+                let modern_weight = weights[1] + weights[2] + weights[3];
+                let processed = weights[0] * legacy + modern_weight * aligned_dry * (1.0 - self.audible[param::AMOUNT]) + modern * self.audible[param::AMOUNT];
                 let filtered = self.post_lp.process(processed, c);
                 let processed = processed * (1.0 - self.audible[param::POST_LP_ENABLED]) + filtered * self.audible[param::POST_LP_ENABLED];
                 buffer[idx] = (aligned_dry * (1.0 - mix) + processed * mix) * output;
@@ -319,6 +356,9 @@ impl AudioEffect for DriveEffect {
         self.applied = self.params;
         self.remaining = [0; param::COUNT];
         self.started = false;
+        self.character = CharacterFade::new(self.params[param::CHARACTER] as usize);
+        self.character_delay = [self.character.weights; 64];
+        self.audible_character = self.character.weights;
         self.z = [0.0; 2];
         self.delay = [[0.0; 2]; 64];
         self.delay_position = 0;
