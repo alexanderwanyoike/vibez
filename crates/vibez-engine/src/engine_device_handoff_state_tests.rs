@@ -162,7 +162,7 @@ fn local_away_owner_and_resident_restart_keep_independent_gates() {
             let mut trace = OverlapTrace::default();
             requests[0].store(true, Ordering::Release);
             let local_audio = overlap_render(&mut engine, &mut events, tracks, &mut trace, partitions);
-            let local = engine.pending_device_reconfiguration.unwrap();
+            let local = engine.device_handoff.pending().unwrap();
             assert!(local.local_recovery);
             assert_eq!((local.handoff_id, local.track_id, local.effect_id, local.position, local.bypass), (1, tracks[0], Some(effects[0]), 0, bypass));
             assert_eq!(trace.owners[0].as_ref().unwrap().owner_identity(), identities[0]);
@@ -183,7 +183,7 @@ fn local_away_owner_and_resident_restart_keep_independent_gates() {
             assert_eq!(readiness[2], requested);
             let loss = overlap_render(&mut engine, &mut events, tracks, &mut trace, partitions);
             assert_eq!(Readiness::observe(&engine), requested);
-            let still_local = engine.pending_device_reconfiguration.unwrap();
+            let still_local = engine.device_handoff.pending().unwrap();
             assert_eq!((still_local.handoff_id, still_local.track_id, still_local.effect_id, still_local.position, still_local.bypass, still_local.local_recovery), (local.handoff_id, local.track_id, local.effect_id, local.position, local.bypass, local.local_recovery));
             assert!(trace.owners[1].is_none());
             for (frame, pair) in loss.as_chunks::<2>().0.iter().enumerate() {
@@ -209,7 +209,7 @@ fn local_away_owner_and_resident_restart_keep_independent_gates() {
             assert_eq!(trace.retired_plans, [original_plan]);
             let gated = overlap_render(&mut engine, &mut events, tracks, &mut trace, &[32]);
             assert_eq!(gated, [0.0; 64]);
-            let project = engine.pending_device_reconfiguration.unwrap();
+            let project = engine.device_handoff.pending().unwrap();
             assert_eq!((project.handoff_id, project.track_id, project.effect_id, project.position, project.bypass, project.local_recovery), (2, tracks[1], Some(effects[1]), 0, false, false));
             assert_eq!(trace.owners[1].as_ref().unwrap().owner_identity(), identities[1]);
             readiness.push(Readiness::observe(&engine));
@@ -239,7 +239,7 @@ fn local_away_owner_and_resident_restart_keep_independent_gates() {
             }
             assert_eq!(Readiness::observe(&engine), running);
             assert_eq!(engine.output_gate.remaining_resume_frames(), 0);
-            assert!(engine.pending_device_parameters.is_empty());
+            assert!(engine.device_handoff.retained_parameters().is_empty());
             assert!(trace.owners.iter().all(Option::is_none));
             assert_eq!(trace.capture_stops, [capture_stop]);
             assert_eq!(trace.order, ["local-handoff", "capture-stop", "original-plan-return", "project-handoff", "local-plan-return"]);

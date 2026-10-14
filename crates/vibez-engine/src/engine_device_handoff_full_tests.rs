@@ -101,8 +101,8 @@ fn full_publication_restores_same_box_and_consumes_identity_before_retry() {
         let original_plan = std::ptr::from_ref(engine.routing.as_ref()) as usize;
         let storage = engine.tracks[0].effects.as_ptr();
         let capacity = engine.tracks[0].effects.capacity();
-        let parameter_storage = engine.pending_device_parameters.as_ptr();
-        let parameter_capacity = engine.pending_device_parameters.capacity();
+        let parameter_storage = engine.device_handoff.retained_parameters().as_ptr();
+        let parameter_capacity = engine.device_handoff.retained_parameter_capacity();
         assert_eq!(parameter_capacity, 2048);
         let processed_before = counts.process.load(Ordering::Relaxed);
         let mut filled = 0;
@@ -116,7 +116,7 @@ fn full_publication_restores_same_box_and_consumes_identity_before_retry() {
         assert_eq!(crate::retirement::tests::allocations(|| engine.process(&mut loss, 2)), (0, 0));
         readiness.push(Readiness::observe(&engine));
         assert_eq!(readiness[1], Readiness { restart_requested: true, muted: true, ..running });
-        let rejected_identity = engine.next_device_handoff;
+        let rejected_identity = engine.device_handoff.last_issued_identity();
         assert_eq!(rejected_identity, 1);
         assert_eq!(counts.stops.load(Ordering::Relaxed), 1);
         assert_eq!(counts.reactivations.load(Ordering::Relaxed), 0);
@@ -127,9 +127,9 @@ fn full_publication_restores_same_box_and_consumes_identity_before_retry() {
         assert_eq!(engine.tracks[0].effects[1].bypass, bypass);
         assert_eq!(reconfiguration::effect_owner_identity(&*engine.tracks[0].effects[1].effect), identity);
         assert_eq!(std::ptr::from_ref(engine.routing.as_ref()) as usize, original_plan);
-        assert_eq!(engine.pending_device_parameters.as_ptr(), parameter_storage);
-        assert_eq!(engine.pending_device_parameters.capacity(), parameter_capacity);
-        assert!(engine.pending_device_parameters.is_empty());
+        assert_eq!(engine.device_handoff.retained_parameters().as_ptr(), parameter_storage);
+        assert_eq!(engine.device_handoff.retained_parameter_capacity(), parameter_capacity);
+        assert!(engine.device_handoff.retained_parameters().is_empty());
         assert!(engine.pending_retirements.is_empty());
         assert!(engine.scheduled_presentation.is_empty());
         assert_eq!(engine.event_tx.slots(), 0);
@@ -150,11 +150,11 @@ fn full_publication_restores_same_box_and_consumes_identity_before_retry() {
         assert_eq!(crate::retirement::tests::allocations(|| engine.process(&mut [], 2)), (0, 0));
         readiness.push(Readiness::observe(&engine));
         assert_eq!(readiness[2], Readiness { suspended: true, handoff: true, muted: true, ..running });
-        assert_eq!(engine.next_device_handoff, 2);
+        assert_eq!(engine.device_handoff.last_issued_identity(), 2);
         assert_eq!(counts.stops.load(Ordering::Relaxed), 2);
         assert_eq!(counts.reactivations.load(Ordering::Relaxed), 0);
         assert_eq!(counts.process.load(Ordering::Relaxed), processed_before);
-        let pending = engine.pending_device_reconfiguration.unwrap();
+        let pending = engine.device_handoff.pending().unwrap();
         assert_eq!((pending.handoff_id, pending.track_id, pending.effect_id, pending.position, pending.bypass, pending.local_recovery), (2, track_id, Some(effects[1]), 1, bypass, false));
         assert_eq!(engine.tracks[0].effects.iter().map(|slot| slot.id).collect::<Vec<_>>(), [effects[0], effects[2]]);
         let mut owner = None;
@@ -200,9 +200,9 @@ fn full_publication_restores_same_box_and_consumes_identity_before_retry() {
         assert_eq!(engine.tracks[0].effects[1].bypass, bypass);
         let owner_roundtrip = reconfiguration::effect_owner_identity(&*engine.tracks[0].effects[1].effect) == identity;
         assert!(owner_roundtrip);
-        assert_eq!(engine.pending_device_parameters.as_ptr(), parameter_storage);
-        assert_eq!(engine.pending_device_parameters.capacity(), parameter_capacity);
-        assert!(engine.pending_device_parameters.is_empty());
+        assert_eq!(engine.device_handoff.retained_parameters().as_ptr(), parameter_storage);
+        assert_eq!(engine.device_handoff.retained_parameter_capacity(), parameter_capacity);
+        assert!(engine.device_handoff.retained_parameters().is_empty());
         let mut resumed = [0.0; 256];
         assert_eq!(crate::retirement::tests::allocations(|| engine.process(&mut resumed, 2)), (0, 0));
         for (frame, pair) in resumed.as_chunks::<2>().0.iter().enumerate() {
@@ -215,7 +215,7 @@ fn full_publication_restores_same_box_and_consumes_identity_before_retry() {
             assert!(matches!(event, EngineEvent::TrackMeter { .. } | EngineEvent::Metering { .. } | EngineEvent::PlaybackPosition(_)));
         }
         assert_eq!(Readiness::observe(&engine), running);
-        assert_eq!(engine.next_device_handoff, 2);
+        assert_eq!(engine.device_handoff.last_issued_identity(), 2);
         assert_eq!(counts.stops.load(Ordering::Relaxed), 2);
         assert_eq!(counts.reactivations.load(Ordering::Relaxed), 1);
         assert_eq!(engine.output_gate.remaining_resume_frames(), 0);
