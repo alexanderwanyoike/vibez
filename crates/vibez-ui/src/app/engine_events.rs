@@ -235,7 +235,7 @@ impl App {
                         self.state.status_text = format!("{name}: {reason}");
                     }
                     EngineEvent::RetiredAutomationLane(lane) => drop(lane),
-                    EngineEvent::RetiredInstrumentMedia(owners) => drop(owners),
+                    EngineEvent::RetiredInstrumentMedia(owners) => self.sample_retirement.retire(owners),
                     EngineEvent::RetiredChannel(channel) => {
                         drop(channel);
                     }
@@ -661,6 +661,7 @@ impl App {
         for completed in completed_captures {
             self.finish_performance_capture(completed);
         }
+        self.sample_retirement.reap();
     }
 }
 

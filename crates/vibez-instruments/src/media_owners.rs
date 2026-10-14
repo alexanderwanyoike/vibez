@@ -3,6 +3,9 @@
 use std::sync::Arc;
 use vibez_core::audio_buffer::DecodedAudio;
 
+/// Audio can still be referenced by sounding or inactive voices. The owner
+/// thread must deduplicate returned audio guards and retain one per allocation
+/// until no other strong references remain. Names can be destroyed immediately.
 #[must_use = "return media owners to the UI before destroying them"]
 #[derive(Default)]
 pub struct InstrumentMediaOwners {
