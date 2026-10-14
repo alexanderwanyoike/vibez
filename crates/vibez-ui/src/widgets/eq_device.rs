@@ -117,9 +117,18 @@ pub fn view<'a>(
         })
         .width(Length::Fill)
         .height(Length::Fill);
-        let response = column![section_label("Response · manual values"), graph]
-            .spacing(3)
-            .height(Length::Fill);
+        let caption: Element<'a, Message> = if !a.all_bands && !a.tabs {
+            row![
+                section_label("Response · manual values"),
+                horizontal_space(),
+                c.analyser()
+            ]
+            .align_y(iced::Alignment::Center)
+            .into()
+        } else {
+            section_label("Response · manual values")
+        };
+        let response = column![caption, graph].spacing(3).height(Length::Fill);
         let mut plot = row![response].height(Length::Fill);
         if a.side_editor {
             plot = plot
