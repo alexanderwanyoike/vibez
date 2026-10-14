@@ -321,15 +321,19 @@ impl AudioEngine {
                     loop_start,
                     loop_end,
                 } => {
-                    if let Some(clip) = self.arrangement_clip_mut(track_id, clip_id) {
-                        clip.audio = audio;
+                    let retired = if let Some(clip) = self.arrangement_clip_mut(track_id, clip_id) {
+                        let retired = std::mem::replace(&mut clip.audio, audio);
                         clip.duration = duration;
                         clip.fades = clip.fades.clamped_to(duration);
                         clip.source_offset = source_offset;
                         clip.start_marker = start_marker;
                         clip.loop_start = loop_start;
                         clip.loop_end = loop_end;
-                    }
+                        retired
+                    } else {
+                        audio
+                    };
+                    self.retire_event(EngineEvent::RetiredAudioBuffer(retired));
                     self.recalculate_audio_length();
                 }
                 EngineCommand::ReplaceClipBuffer {
@@ -337,9 +341,12 @@ impl AudioEngine {
                     clip_id,
                     audio,
                 } => {
-                    if let Some(clip) = self.arrangement_clip_mut(track_id, clip_id) {
-                        clip.audio = audio;
-                    }
+                    let retired = if let Some(clip) = self.arrangement_clip_mut(track_id, clip_id) {
+                        std::mem::replace(&mut clip.audio, audio)
+                    } else {
+                        audio
+                    };
+                    self.retire_event(EngineEvent::RetiredAudioBuffer(retired));
                 }
                 EngineCommand::MoveClip {
                     track_id,
