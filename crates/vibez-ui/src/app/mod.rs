@@ -58,6 +58,8 @@ struct App {
     plugin_load_requests: plugin_load_requests::PluginLoadRequests,
     gain_devices: gain_devices::GainDevices,
     device_meters: device_meters::DeviceMeters,
+    bitcrush_panels:
+        std::collections::HashMap<vibez_core::id::EffectId, crate::domains::bitcrush::BitcrushPanel>,
     device_controls: std::collections::HashMap<
         vibez_core::id::EffectId,
         crate::domains::device_controls::DeviceControlState,
@@ -163,6 +165,7 @@ mod audio_recording;
 mod audio_settings;
 mod audio_take_finalization;
 mod audio_tasks;
+mod bitcrush_devices;
 mod bounce;
 mod capture;
 mod compensation;
@@ -443,6 +446,7 @@ impl App {
             plugin_load_requests: Default::default(),
             gain_devices: Default::default(),
             device_meters: Default::default(),
+            bitcrush_panels: Default::default(),
             device_controls: Default::default(),
             empty_device_controls: Default::default(),
             device_presets: Default::default(),

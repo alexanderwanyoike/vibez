@@ -6,6 +6,7 @@ use std::time::{Duration, Instant};
 use vibez_core::id::{EffectId, TrackId};
 use vibez_engine::metering::MeterValues;
 
+use crate::domains::bitcrush::is_native_bitcrush;
 use crate::domains::gain::is_native_gain;
 use crate::state::{DetailPanelTab, UiEffect};
 
@@ -47,7 +48,7 @@ impl MeterReadings {
 }
 
 fn is_metered_effect(effect: &UiEffect) -> bool {
-    is_native_gain(effect)
+    is_native_gain(effect) || is_native_bitcrush(effect)
 }
 
 impl App {
@@ -65,6 +66,7 @@ impl App {
             self.restart_device_metering();
         }
         self.prune_device_controls();
+        self.poll_bitcrush_panels(wanted, Instant::now());
         let project = &self.state.project_tracks;
         let effect_exists = |id: &EffectId| {
             project
@@ -102,6 +104,9 @@ impl App {
     /// while disclosure state belongs to the device rather than the subscription.
     pub(super) fn restart_device_metering(&mut self) {
         self.discard_all_device_entries();
+        for panel in self.bitcrush_panels.values_mut() {
+            panel.reset_metering();
+        }
         self.device_meters.generation = self.device_meters.generation.wrapping_add(1);
         for readings in self.device_meters.readings.values_mut() {
             *readings = MeterReadings::default();
@@ -120,6 +125,7 @@ impl App {
         self.device_meters.generation = self.device_meters.generation.wrapping_add(1);
         self.device_meters.readings.clear();
         self.gain_devices.panels.clear();
+        self.bitcrush_panels.clear();
         self.reset_device_controls();
         self.send_command(EngineCommand::SetEffectMeterChannel {
             track_id: None,
