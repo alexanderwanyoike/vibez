@@ -126,8 +126,7 @@ pub fn instrument_owner_identity(instrument: &dyn vibez_instruments::Instrument)
 impl AudioEngine {
     pub(super) fn project_processing_muted(&self) -> bool {
         self.compensation_suspended
-            || self.graph_edit_pending
-            || !self.compensation_valid
+            || self.compensation_plan.blocks_processing()
             || self.presentation_state.is_faulted()
             || self.reconfiguration_pending()
     }
@@ -189,7 +188,7 @@ impl AudioEngine {
     }
 
     pub(super) fn validate_compensation(&mut self) {
-        if self.compensation_suspended || self.graph_edit_pending || !self.compensation_valid {
+        if self.compensation_suspended || self.compensation_plan.blocks_processing() {
             return;
         }
         let routing = &self.routing;
@@ -305,7 +304,7 @@ impl AudioEngine {
         self.device_failure_capture_closed = local_failure;
         if let Some((track_id, effect_id, reason)) = invalid {
             self.close_capture_on_failure();
-            self.compensation_valid = false;
+            self.compensation_plan.invalidate_applied_plan();
             self.transport.stop();
             self.report_compensation_failure(track_id, effect_id, reason);
             self.presentation_state.terminals.request_playback_stop();
@@ -314,10 +313,10 @@ impl AudioEngine {
     }
 
     pub(super) fn begin_device_reconfiguration(&mut self) {
-        if !self.compensation_valid
+        if !self.compensation_plan.applied_plan_is_valid()
             || self.pending_device_reconfiguration.is_some()
             || self.compensation_suspended
-            || self.graph_edit_pending
+            || self.compensation_plan.awaiting_structural_plan()
         {
             return;
         }
@@ -331,7 +330,7 @@ impl AudioEngine {
                 None,
                 "Device handoff identity exhausted",
             );
-            self.compensation_valid = false;
+            self.compensation_plan.invalidate_applied_plan();
             return;
         };
         let mut requested = None;
@@ -451,7 +450,7 @@ impl AudioEngine {
                     )));
                 }
                 self.dispose_effect(slot.effect);
-                self.compensation_valid = false;
+                self.compensation_plan.invalidate_applied_plan();
                 self.report_compensation_failure(
                     track_id,
                     pending.effect_id,
@@ -473,7 +472,7 @@ impl AudioEngine {
                     }
                 }
                 self.dispose_instrument(instrument);
-                self.compensation_valid = false;
+                self.compensation_plan.invalidate_applied_plan();
                 self.report_compensation_failure(
                     track_id,
                     None,

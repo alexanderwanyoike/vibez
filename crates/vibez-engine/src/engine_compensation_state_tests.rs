@@ -277,7 +277,7 @@ fn current_device_reply_restores_the_same_owner_or_fails_the_project() {
             identity
         );
         if rejected {
-            assert!(!fixture.engine.compensation_valid);
+            assert!(!fixture.engine.compensation_plan.applied_plan_is_valid());
             assert!(!fixture.engine.transport.is_playing());
             assert!(fixture.engine.project_processing_muted());
         } else {
