@@ -65,8 +65,10 @@ pub fn view<'a>(track: TrackId, effect: &'a UiEffect, accent: Color, state: &'a 
         } else {
             let mut plots = row![].spacing(8).height(Length::Fill);
             if layout.input_meter { plots = plots.push(signal_meter("Input", input)); }
-            plots = plots.push(container(transfer(meter, accent)).width(layout.transfer_width))
-                .push(container(waveform(meter, accent)).width(layout.waveform_width));
+            plots = plots.push(container(transfer(meter, accent)).width(layout.transfer_width));
+            if layout.both_plots {
+                plots = plots.push(container(waveform(meter, accent)).width(layout.waveform_width));
+            }
             if layout.output_meter { plots = plots.push(signal_meter("Output", output)); }
             if layout.advanced_aside {
                 plots = plots.push(container(drive_controls::aside(track, effect, state, accent))
