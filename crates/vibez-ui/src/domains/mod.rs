@@ -334,3 +334,6 @@ pub mod test_support {
         }
     }
 }
+
+#[cfg(test)]
+mod bitcrush_prepared_queue_tests;
