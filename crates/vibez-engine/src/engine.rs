@@ -834,6 +834,10 @@ pub(crate) mod section_record;
 mod clip_record;
 
 #[cfg(test)]
+#[path = "engine_stopped_repeat_clock_tests.rs"]
+mod stopped_repeat_clock_tests;
+
+#[cfg(test)]
 #[path = "engine_tests.rs"]
 mod tests;
 
