@@ -185,6 +185,7 @@ fn release_fade_gain(voice: &Voice) -> f32 {
 fn begin_release(voice: &mut Voice) {
     if voice.fade_out_frames == 0 {
         voice.active = false;
+        voice.sample = None;
     } else if voice.release_remaining.is_none() {
         voice.release_remaining = Some(voice.fade_out_frames);
     }
@@ -316,6 +317,7 @@ impl Instrument for DrumRack {
 
                 if voice.position >= voice.end_frame as f64 {
                     voice.active = false;
+                    voice.sample = None;
                     continue;
                 }
 
@@ -350,10 +352,12 @@ impl Instrument for DrumRack {
                     *remaining = remaining.saturating_sub(1);
                     if *remaining == 0 {
                         voice.active = false;
+                        voice.sample = None;
                     }
                 }
                 if voice.position >= voice.end_frame as f64 {
                     voice.active = false;
+                    voice.sample = None;
                 }
             }
         }
@@ -362,6 +366,7 @@ impl Instrument for DrumRack {
     fn reset(&mut self) {
         for voice in &mut self.voices {
             voice.active = false;
+            voice.sample = None;
         }
     }
 
