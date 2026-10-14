@@ -908,6 +908,10 @@ mod time_domain_tests;
 mod command_allocation_tests;
 
 #[cfg(test)]
+#[path = "engine_clip_removal_owner_tests.rs"]
+mod clip_removal_owner_tests;
+
+#[cfg(test)]
 #[path = "engine_clip_removal_retirement_tests.rs"]
 mod clip_removal_retirement_tests;
 
