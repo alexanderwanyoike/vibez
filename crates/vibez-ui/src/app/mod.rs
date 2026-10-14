@@ -228,6 +228,9 @@ mod views_transport;
 mod window_policy;
 
 #[cfg(test)]
+mod instrument_media_retirement_tests;
+
+#[cfg(test)]
 mod project_format_v1_tests;
 
 impl Drop for App {
