@@ -41,7 +41,10 @@ fn reorder_tracks_is_allocation_free_at_channel_capacity_boundaries() {
             (0, 0),
             "channel count {count}"
         );
-        assert_eq!(tracks(&engine), ids.iter().rev().copied().collect::<Vec<_>>());
+        assert_eq!(
+            tracks(&engine),
+            ids.iter().rev().copied().collect::<Vec<_>>()
+        );
         for track in engine.tracks() {
             assert_eq!(
                 owners.iter().find(|(id, _)| *id == track.id).unwrap().1,
@@ -103,7 +106,10 @@ fn reorder_tracks_keeps_order_storage_until_full_event_ring_can_deliver_it() {
     );
     assert_eq!(engine.cmd_rx.slots(), 0);
     assert!(engine.pending_retirements.is_empty());
-    assert_eq!(tracks(&engine), ids.iter().rev().copied().collect::<Vec<_>>());
+    assert_eq!(
+        tracks(&engine),
+        ids.iter().rev().copied().collect::<Vec<_>>()
+    );
 }
 
 #[test]
