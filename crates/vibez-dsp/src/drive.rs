@@ -174,7 +174,12 @@ impl AudioEffect for DriveEffect {
             for c in 0..ch {
                 let idx = frame * channels + c;
                 let dry = buffer[idx];
-                let sat = (dry * drive).tanh() / norm;
+                let u = (dry * drive).clamp(-1.0, 1.0);
+                let sat = match self.extra[0] as usize {
+                    2 => 1.5 * u - 0.5 * u * u * u,
+                    3 => u,
+                    _ => (dry * drive).tanh() / norm,
+                };
                 // One-pole tilt: mixes current with previous sample.
                 // tilt > 0 emphasises difference (bright); < 0 smooths.
                 let shelved = sat + tilt * (sat - self.z[c]);
