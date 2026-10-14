@@ -564,3 +564,145 @@ fn absent_track_stops_source_content_without_resetting_effect_tail() {
     assert!(silence_with_tail[0] < source[0]);
     assert!(silence_with_tail[1] < silence_with_tail[0]);
 }
+
+#[test]
+fn delayed_section_refresh_acknowledges_consumption_before_heard_capture_and_preserves_audio_history() {
+    use vibez_core::routing::{NodeStage, RoutingChannel, RoutingEffect, RoutingNode};
+
+    let (mut engine, mut commands, mut events) = AudioEngine::new();
+    let track_id = TrackId::new();
+    let effect_id = EffectId::new();
+    let section_id = SectionId::new();
+    commands.push(EngineCommand::SetSampleRate(1000)).unwrap();
+    commands.push(EngineCommand::SetBpm(60.0)).unwrap();
+    commands.push(EngineCommand::add_track(track_id)).unwrap();
+    commands.push(EngineCommand::SetTrackPan(track_id, 0.0)).unwrap();
+    commands.push(EngineCommand::InsertEffect {
+        track_id,
+        effect_id,
+        effect: Box::new(crate::test_support::DelayProbe::new(64)),
+        position: None,
+    }).unwrap();
+    let channels = [
+        RoutingChannel {
+            id: track_id,
+            is_bus: false,
+            sends: vec![],
+            effects: vec![RoutingEffect {
+                id: effect_id,
+                inputs: vec![],
+                assignments: vec![],
+                inactive_inputs: vec![],
+            }],
+        },
+        RoutingChannel { id: TrackId::MASTER, is_bus: true, effects: vec![], sends: vec![] },
+    ];
+    let reports = [(RoutingNode { channel: track_id, stage: NodeStage::Effect(effect_id) }, 64)];
+    commands.push(EngineCommand::SetRouting(crate::routing::PreparedRouting::prepare_compensated(
+        &channels, 32, &reports, &[], 1,
+    ).unwrap())).unwrap();
+    let source = |audio| Box::new(PreparedSectionPlaybackSource::new(
+        section_id,
+        32.0,
+        true,
+        vec![(track_id, PreparedPlaybackSource::new(
+            vec![EngineClip {
+                id: ClipId::new(),
+                audio,
+                position: 0,
+                source_offset: 0,
+                start_marker: 0,
+                duration: 4096,
+                loop_enabled: false,
+                loop_start: 0,
+                loop_end: 0,
+                linear_gain: 1.0,
+                fades: Default::default(),
+                playback_direction: Default::default(),
+                warp_markers: Default::default(),
+            }],
+            Vec::new(),
+            Vec::new(),
+        ))],
+    ));
+    let old = constant_audio(4096, 0.25);
+    let old_owner = Arc::downgrade(&old);
+    commands.push(EngineCommand::LaunchSection(source(old))).unwrap();
+    let mut output = [0.0; 64];
+    for block in 0..3 {
+        engine.process_block(AudioProcessBlock::new(&mut output, 2));
+        for [left, right] in output.as_chunks::<2>().0 {
+            assert_eq!(*left, if block < 2 { 0.0 } else { 0.25 }, "initial delayed source, block {block}");
+            assert_eq!(*right, 0.0);
+        }
+        while events.pop().is_ok() {}
+    }
+    assert_eq!(engine.active_section.unwrap().position_samples, 96);
+    assert_eq!(old_owner.strong_count(), 1);
+    let incoming = constant_audio(4096, 0.75);
+    let incoming_owner = Arc::downgrade(&incoming);
+    let replacement = source(incoming);
+    let replacement_pointer = &*replacement as *const PreparedSectionPlaybackSource;
+    commands.push(EngineCommand::RefreshSection(replacement)).unwrap();
+    assert_eq!(crate::retirement::tests::allocations(|| engine.process_block(AudioProcessBlock::new(&mut output, 2))), (0, 0));
+    for [left, right] in output.as_chunks::<2>().0 {
+        assert_eq!(*left, 0.25, "already rendered old audio still occupies the real delay line");
+        assert_eq!(*right, 0.0);
+    }
+    assert_eq!(engine.active_section.unwrap().position_samples, 128);
+    assert_eq!(engine.active_section.unwrap().section_id, section_id);
+    assert!(engine.transport().is_playing());
+    let mut returned = None;
+    while let Ok(event) = events.pop() {
+        assert!(!matches!(event, EngineEvent::SectionCaptureSource { refreshed: true, .. }), "Capture still waits for the original 64-frame deadline");
+        assert!(!matches!(event, EngineEvent::SectionTransitioned { .. }), "refresh does not relaunch the Section");
+        if let EngineEvent::SectionSourceRefreshed {
+            section_id: actual_section,
+            applied,
+            effective_at_samples,
+            section_position_samples,
+            retired,
+        } = event {
+            assert!(returned.is_none(), "consumption is acknowledged once");
+            assert_eq!(actual_section, section_id);
+            assert!(applied);
+            assert_eq!(effective_at_samples, 96);
+            assert_eq!(section_position_samples, Some(96));
+            assert!(std::ptr::eq(&*retired, replacement_pointer));
+            assert_eq!(retired.tracks().len(), 1);
+            assert_eq!(Arc::as_ptr(&retired.tracks()[0].source.clips[0].audio), old_owner.as_ptr());
+            returned = Some(retired);
+        }
+    }
+    let returned = returned.expect("the owner acknowledgement does not wait for output latency");
+    assert_eq!(old_owner.strong_count(), 1);
+    assert_eq!(incoming_owner.strong_count(), 1);
+    drop(returned);
+    assert_eq!(old_owner.strong_count(), 0, "UI disposal may precede the old delayed samples");
+
+    assert_eq!(crate::retirement::tests::allocations(|| engine.process_block(AudioProcessBlock::new(&mut output, 2))), (0, 0));
+    for [left, right] in output.as_chunks::<2>().0 {
+        assert_eq!(*left, 0.25, "delay history survives destruction of its former source owner");
+        assert_eq!(*right, 0.0);
+    }
+    let notifications: Vec<_> = std::iter::from_fn(|| events.pop().ok()).collect();
+    assert!(!notifications.iter().any(|event| matches!(event, EngineEvent::SectionSourceRefreshed { .. })));
+    let capture: Vec<_> = notifications.iter().filter_map(|event| match event {
+        EngineEvent::SectionCaptureSource { section_id, effective_at_samples, section_position_samples, refreshed, offsets } => Some((*section_id, *effective_at_samples, *section_position_samples, *refreshed, offsets.is_empty())),
+        _ => None,
+    }).collect();
+    assert_eq!(capture, [(section_id, 96, 96, true, true)], "Capture arrives only when the original refresh becomes audible");
+    assert_eq!(engine.active_section.unwrap().position_samples, 160);
+
+    assert_eq!(crate::retirement::tests::allocations(|| engine.process_block(AudioProcessBlock::new(&mut output, 2))), (0, 0));
+    for [left, right] in output.as_chunks::<2>().0 {
+        assert_eq!(*left, 0.75, "replacement reaches the speakers after the real 64-frame delay");
+        assert_eq!(*right, 0.0);
+    }
+    assert_eq!(engine.active_section.unwrap().position_samples, 192);
+    assert_eq!(old_owner.strong_count(), 0);
+    assert_eq!(incoming_owner.strong_count(), 1);
+    while let Ok(event) = events.pop() {
+        assert!(!matches!(event, EngineEvent::SectionSourceRefreshed { .. } | EngineEvent::SectionCaptureSource { refreshed: true, .. }));
+    }
+}
