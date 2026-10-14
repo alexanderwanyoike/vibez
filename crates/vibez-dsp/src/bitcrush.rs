@@ -30,9 +30,7 @@ static BITCRUSH_PARAMS: &[ParamDescriptor] = &[
 
 /// Lo-fi effect: reduces bit depth and sample rate (sample-and-hold).
 pub struct BitcrushEffect {
-    bits: f32,
-    sr_divider: f32,
-    mix: f32,
+    params: [f32; 3],
     /// Sample-and-hold state, per channel.
     hold: [f32; 2],
     /// Frame counter for SR reduce, per channel.
@@ -42,9 +40,7 @@ pub struct BitcrushEffect {
 impl BitcrushEffect {
     pub fn new() -> Self {
         Self {
-            bits: 10.0,
-            sr_divider: 1.0,
-            mix: 1.0,
+            params: std::array::from_fn(|index| BITCRUSH_PARAMS[index].default),
             hold: [0.0; 2],
             counter: [0; 2],
         }
@@ -70,30 +66,16 @@ impl AudioEffect for BitcrushEffect {
         if !value.is_finite() {
             return false;
         }
-        match index {
-            0 => {
-                self.bits = value.clamp(2.0, 16.0);
-                true
-            }
-            1 => {
-                self.sr_divider = value.clamp(1.0, 32.0);
-                true
-            }
-            2 => {
-                self.mix = value.clamp(0.0, 1.0);
-                true
-            }
-            _ => false,
-        }
+        let Some(target) = self.params.get_mut(index) else {
+            return false;
+        };
+        let descriptor = &BITCRUSH_PARAMS[index];
+        *target = value.clamp(descriptor.min, descriptor.max);
+        true
     }
 
     fn get_param(&self, index: usize) -> f32 {
-        match index {
-            0 => self.bits,
-            1 => self.sr_divider,
-            2 => self.mix,
-            _ => 0.0,
-        }
+        self.params.get(index).copied().unwrap_or(0.0)
     }
 
     fn process(&mut self, buffer: &mut [f32], channels: usize) {
@@ -102,9 +84,9 @@ impl AudioEffect for BitcrushEffect {
         }
         let ch = channels.min(2);
         let frames = buffer.len() / channels;
-        let levels = 2u32.pow(self.bits as u32) as f32;
+        let levels = 2u32.pow(self.params[0] as u32) as f32;
         let step = 2.0 / levels;
-        let divider = self.sr_divider.round().max(1.0) as u32;
+        let divider = self.params[1].round().max(1.0) as u32;
 
         for frame in 0..frames {
             for c in 0..ch {
@@ -119,7 +101,7 @@ impl AudioEffect for BitcrushEffect {
                 self.counter[c] = (self.counter[c] + 1) % divider;
 
                 let wet = self.hold[c];
-                buffer[idx] = dry * (1.0 - self.mix) + wet * self.mix;
+                buffer[idx] = dry * (1.0 - self.params[2]) + wet * self.params[2];
             }
         }
     }
