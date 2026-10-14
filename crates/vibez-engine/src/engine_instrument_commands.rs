@@ -232,11 +232,10 @@ impl AudioEngine {
         track_id: vibez_core::id::TrackId,
         pad_index: usize,
     ) {
-        if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
-            if let Some(ref mut instrument) = track.instrument {
-                instrument.clear_drum_pad(pad_index);
-            }
-        }
+        let retired = self.tracks.iter_mut().find(|track| track.id == track_id)
+            .and_then(|track| track.instrument.as_mut())
+            .map(|instrument| instrument.clear_drum_pad(pad_index)).unwrap_or_default();
+        self.retire_instrument_media(retired);
     }
 
     pub(super) fn command_set_drum_rack_pad_state(
