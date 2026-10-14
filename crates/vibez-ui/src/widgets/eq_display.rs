@@ -184,6 +184,37 @@ impl canvas::Program<Message> for EqDisplayWidget {
                 ..canvas::Text::default()
             });
         }
+        for (label, position, alignment) in [
+            (
+                "20",
+                Point::new(3.0, h - 2.0),
+                iced::alignment::Horizontal::Left,
+            ),
+            (
+                "20k Hz",
+                Point::new(w - 3.0, h - 2.0),
+                iced::alignment::Horizontal::Right,
+            ),
+        ] {
+            frame.fill_text(canvas::Text {
+                content: label.into(),
+                position,
+                color: th::text_dim(),
+                size: 8.0.into(),
+                horizontal_alignment: alignment,
+                vertical_alignment: iced::alignment::Vertical::Bottom,
+                ..canvas::Text::default()
+            });
+        }
+        if h >= 64.0 {
+            frame.fill_text(canvas::Text {
+                content: "dB".into(),
+                position: Point::new(3.0, 3.0),
+                color: th::text_dim(),
+                size: 8.0.into(),
+                ..canvas::Text::default()
+            });
+        }
         for db in [-12.0f32, -6.0, 6.0, 12.0] {
             let y = self.db_to_y(db, h);
             frame.stroke(
