@@ -189,3 +189,69 @@ fn detector_listen_auditions_the_genuine_external_butterworth_band_at_all_rates(
         }
     }
 }
+
+#[test]
+fn gate_diagnostics_report_actual_decisions_hold_order_and_fresh_windows() {
+    use vibez_core::{effect::GatePhase, routing::{ExternalInputBlock, ExternalInputId}};
+    let mut effect = GateEffect::new(1000.0);
+    for (index, value) in [(0, -20.0), (1, 0.1), (2, 5.0), (3, 3.0)] {
+        assert!(effect.set_param(index, value));
+    }
+    let initial = effect.take_dynamics_meter().expect("Gate has real dynamics diagnostics").gate.unwrap();
+    assert_eq!(initial.phase, GatePhase::Closed);
+    assert_eq!(initial.envelope_db, -120.0);
+    assert_eq!(initial.phases_seen, 0);
+    let mut frame = [0.1_f32];
+    effect.process_with_inputs(&mut frame, 1, &[ExternalInputBlock {
+        id: ExternalInputId(0), channels: 1, samples: &[0.5], connected: true,
+    }]);
+    let snapshot = effect.take_dynamics_meter().unwrap();
+    let opened = snapshot.gate.unwrap();
+    assert_eq!(opened.phase, GatePhase::Open);
+    assert_eq!(opened.phases_seen, 4);
+    assert_eq!(opened.hold_remaining_ms, 3.0);
+    assert_eq!(opened.open_threshold_db, -20.0);
+    assert_eq!(opened.close_threshold_db, -20.0);
+    assert_eq!(opened.peak_envelope_db, opened.envelope_db);
+    assert_eq!(snapshot.detector_peak, [0.5, 0.5]);
+    let mut previous = opened.envelope_db;
+    for hold_ms in [3.0, 2.0, 1.0, 0.0] {
+        let mut frame = [0.1_f32];
+        effect.process_with_inputs(&mut frame, 1, &[ExternalInputBlock {
+            id: ExternalInputId(0), channels: 1, samples: &[0.0], connected: true,
+        }]);
+        let snapshot = effect.take_dynamics_meter().unwrap();
+        let gate = snapshot.gate.unwrap();
+        let expected_phase = if hold_ms > 0.0 { GatePhase::Hold } else { GatePhase::Closed };
+        assert_eq!(gate.phase, expected_phase);
+        assert_eq!(gate.hold_remaining_ms, hold_ms);
+        assert_eq!(gate.phases_seen, if hold_ms > 0.0 { 2 } else { 1 });
+        assert!(gate.envelope_db < previous);
+        assert_eq!(gate.peak_envelope_db, gate.envelope_db,
+            "the previous window's high envelope leaked into this falling window");
+        let measured_reduction = -20.0 * (frame[0] / 0.1).max(1e-10).log10();
+        assert!((snapshot.current_reduction_db[0] - measured_reduction).abs() < 2e-5);
+        previous = gate.envelope_db;
+    }
+    let drained = effect.take_dynamics_meter().unwrap();
+    assert_eq!(drained.peak_reduction_db, [0.0; 2]);
+    assert_eq!(drained.detector_peak, [0.0; 2]);
+    assert_eq!(drained.gate.unwrap().phases_seen, 0);
+    assert_eq!(drained.gate.unwrap().peak_envelope_db, previous);
+    effect.reset();
+    let reset = effect.take_dynamics_meter().unwrap().gate.unwrap();
+    assert_eq!(reset.phase, GatePhase::Closed);
+    assert_eq!(reset.envelope_db, -120.0);
+    assert_eq!(reset.hold_remaining_ms, 0.0);
+    assert_eq!(reset.phases_seen, 0);
+    let mut silent_main = [0.0; 6];
+    effect.process_with_inputs(&mut silent_main, 1, &[ExternalInputBlock {
+        id: ExternalInputId(0), channels: 1, samples: &[0.0, 0.5, 0.0, 0.0, 0.0, 0.0], connected: true,
+    }]);
+    assert_eq!(silent_main, [0.0; 6]);
+    let burst = effect.take_dynamics_meter().unwrap().gate.unwrap();
+    assert_eq!(burst.phase, GatePhase::Closed);
+    assert_eq!(burst.phases_seen, 1 | 2 | 4,
+        "a short actual opening must survive the telemetry window despite silent main audio");
+    assert!(burst.peak_envelope_db > burst.envelope_db);
+}
