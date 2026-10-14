@@ -29,6 +29,10 @@ impl AudioEngine {
         self.flush_retirements();
         self.clean_removed_bus_automation();
         loop {
+            self.flush_retirements();
+            if !self.flush_removed_clip_owners() {
+                break;
+            }
             if self.capture_replay.is_some() || self.clip_batch_blocks_commands() {
                 break;
             }
@@ -294,7 +298,7 @@ impl AudioEngine {
                     warp_markers,
                 } => {
                     if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
-                        track.playback_source.clips.push(EngineClip {
+                        track.playback_source.push_audio_clip(EngineClip {
                             id: clip_id,
                             audio,
                             position,
@@ -314,7 +318,7 @@ impl AudioEngine {
                 }
                 EngineCommand::RemoveClip(track_id, clip_id) => {
                     if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
-                        track.playback_source.clips.retain(|c| c.id != clip_id);
+                        track.playback_source.remove_audio_clips(clip_id);
                     }
                     self.recalculate_audio_length();
                 }
