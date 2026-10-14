@@ -119,6 +119,7 @@ pub enum EngineEvent {
     RetiredEffectStorage(crate::engine::reconfiguration::RetiredEffectStorage),
     RetiredChannel(crate::retirement::RetiredChannel),
     RetiredAutomationLane(vibez_core::automation::AutomationLane),
+    RetiredTrackOrder(Vec<TrackId>),
     RoutingRetired(Box<crate::routing::PreparedRouting>),
     SidechainInputMeter {
         effect_id: vibez_core::id::EffectId,
@@ -449,6 +450,7 @@ impl EngineEvent {
             | Self::RetiredEffectStorage(_)
             | Self::RetiredChannel(_)
             | Self::RetiredAutomationLane(_)
+            | Self::RetiredTrackOrder(_)
             | Self::RoutingRetired(_)
             | Self::DisposeEffect(_)
             | Self::DisposeInstrument(_)
@@ -487,6 +489,7 @@ impl PartialEq for EngineEvent {
             (Self::DisposeInstrument(left), Self::DisposeInstrument(right)) => left == right,
             (Self::PlaybackPosition(left), Self::PlaybackPosition(right)) => left == right,
             (Self::PerformancePosition(left), Self::PerformancePosition(right)) => left == right,
+            (Self::RetiredTrackOrder(left), Self::RetiredTrackOrder(right)) => left == right,
             (
                 Self::Metering {
                     peak_l: left_peak_l,
