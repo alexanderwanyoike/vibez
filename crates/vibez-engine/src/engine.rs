@@ -744,6 +744,10 @@ mod compensation_state_test_support;
 mod compensation_gate_state_tests;
 
 #[cfg(test)]
+#[path = "engine_presentation_state_tests.rs"]
+mod presentation_state_tests;
+
+#[cfg(test)]
 #[path = "engine_compensation_state_tests.rs"]
 mod compensation_state_tests;
 
