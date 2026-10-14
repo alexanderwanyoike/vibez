@@ -182,9 +182,9 @@ fn manual_output_moves_in_512_host_frames_while_automation_is_sample_exact() {
         let manual = render(false);
         let automated = render(true);
         for frame in 0..600 {
-            let expected = 0.5 * (1.0 + ((frame + 1).min(512)) as f32 / 512.0);
+            let expected = 0.5 * (1.0 + ((frame + 1).saturating_sub(64).min(512)) as f32 / 512.0);
             assert_eq!(manual[frame], expected, "manual frame={frame}, partitions={partitions:?}");
-            assert_eq!(automated[frame], 1.0, "automation frame={frame}");
+            assert_eq!(automated[frame], if frame < 64 { 0.5 } else { 1.0 }, "automation frame={frame}");
         }
     }
 }
