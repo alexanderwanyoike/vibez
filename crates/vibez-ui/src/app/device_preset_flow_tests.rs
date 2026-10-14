@@ -33,7 +33,7 @@ fn cancelled_and_unchanged_loads_do_not_create_project_edits() {
         Ok(None),
     )));
 
-    assert!(app.device_preset_load_target.is_none());
+    assert!(app.device_presets.load_target.is_none());
     assert!(!app.state.project.dirty);
     assert!(!app.state.project.history.can_undo());
 
@@ -52,7 +52,7 @@ fn cancelled_and_unchanged_loads_do_not_create_project_edits() {
         original.parameters()
     );
     assert_eq!(
-        app.device_preset_selection[&(track_id, effect_id)],
+        app.device_presets.selection[&(track_id, effect_id)],
         unchanged
     );
     assert!(!app.state.project.dirty);
@@ -77,7 +77,7 @@ fn editing_away_and_back_still_cancels_a_pending_load() {
         Ok(Some(preset)),
     )));
 
-    assert!(!app.device_preset_load_request.is_current(request.token));
+    assert!(!app.device_presets.load_request.is_current(request.token));
     assert_eq!(
         app.capture_device_preset(track_id, effect_id)
             .unwrap()
@@ -172,7 +172,7 @@ fn a_late_save_does_not_replace_a_newly_selected_preset_name() {
     )));
 
     assert_eq!(
-        app.device_preset_selection[&(track_id, effect_id)],
+        app.device_presets.selection[&(track_id, effect_id)],
         selected
     );
     assert_eq!(
@@ -198,7 +198,7 @@ fn project_reset_ignores_a_late_save_completion_even_when_ids_remain() {
         Ok(Some(saved)),
     )));
 
-    assert!(app.device_preset_selection.is_empty());
+    assert!(app.device_presets.selection.is_empty());
     assert_eq!(app.state.status_text, status);
     assert!(!app.state.project.dirty);
     assert!(!app.state.project.history.can_undo());
@@ -219,7 +219,7 @@ fn undo_keeps_the_remembered_preset_and_lets_a_save_finish() {
     )));
     let _ = app.update(Message::Project(crate::domains::project::ProjectMsg::Undo));
     assert_eq!(
-        app.device_preset_selection[&(track_id, effect_id)],
+        app.device_presets.selection[&(track_id, effect_id)],
         selected
     );
 
@@ -245,7 +245,7 @@ fn a_load_cancelled_by_an_edit_says_so() {
     let _ = app.update(Message::Devices(DevicesMsg::SetEffectParam(
         track_id, effect_id, 1, 3.0,
     )));
-    assert!(app.device_preset_load_target.is_none());
+    assert!(app.device_presets.load_target.is_none());
     assert_eq!(
         app.state.status_text,
         "Preset load cancelled: the device changed while choosing a file"
