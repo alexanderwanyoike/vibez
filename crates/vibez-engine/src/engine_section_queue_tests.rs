@@ -1,6 +1,7 @@
 //! Quantized Section queueing regressions at the public command/event seam.
 
 use super::*;
+use graph_test_support::{graph_engine, routing_channel};
 
 use std::sync::Arc;
 
@@ -74,8 +75,9 @@ fn playing_engine(
     rtrb::Consumer<EngineEvent>,
     TrackId,
 ) {
-    let (mut engine, mut commands, events) = AudioEngine::new();
     let track_id = TrackId::new();
+    let (mut engine, mut commands, events) =
+        graph_engine(&[routing_channel(track_id), routing_channel(TrackId::MASTER)]);
     commands.push(EngineCommand::SetSampleRate(8)).unwrap();
     commands.push(EngineCommand::SetBpm(120.0)).unwrap();
     commands.push(EngineCommand::add_track(track_id)).unwrap();
@@ -106,8 +108,9 @@ fn transition_event(events: &mut rtrb::Consumer<EngineEvent>) -> Option<(Section
 
 #[test]
 fn immediate_section_launch_reanchors_held_repeat_to_the_section_downbeat() {
-    let (mut engine, mut commands, mut events) = AudioEngine::new();
     let track_id = TrackId::new();
+    let (mut engine, mut commands, mut events) =
+        graph_engine(&[routing_channel(track_id), routing_channel(TrackId::MASTER)]);
     commands.push(EngineCommand::SetSampleRate(96)).unwrap();
     commands.push(EngineCommand::SetBpm(60.0)).unwrap();
     commands
@@ -157,8 +160,9 @@ fn immediate_section_launch_reanchors_held_repeat_to_the_section_downbeat() {
 
 #[test]
 fn first_section_launch_reanchors_stopped_held_repeat_to_the_perform_downbeat() {
-    let (mut engine, mut commands, mut events) = AudioEngine::new();
     let track_id = TrackId::new();
+    let (mut engine, mut commands, mut events) =
+        graph_engine(&[routing_channel(track_id), routing_channel(TrackId::MASTER)]);
     commands.push(EngineCommand::SetSampleRate(96)).unwrap();
     commands.push(EngineCommand::SetBpm(60.0)).unwrap();
     commands
@@ -305,8 +309,9 @@ fn end_of_section_track_mute_uses_the_active_section_wrap() {
 
 #[test]
 fn end_of_section_track_mute_applies_when_a_one_shot_section_stops() {
-    let (mut engine, mut commands, mut events) = AudioEngine::new();
     let track_id = TrackId::new();
+    let (mut engine, mut commands, mut events) =
+        graph_engine(&[routing_channel(track_id), routing_channel(TrackId::MASTER)]);
     commands.push(EngineCommand::SetSampleRate(8)).unwrap();
     commands.push(EngineCommand::SetBpm(120.0)).unwrap();
     commands.push(EngineCommand::add_track(track_id)).unwrap();
@@ -509,8 +514,9 @@ fn playing_one_shot(
     rtrb::Consumer<EngineEvent>,
     TrackId,
 ) {
-    let (mut engine, mut commands, mut events) = AudioEngine::new();
     let track_id = TrackId::new();
+    let (mut engine, mut commands, mut events) =
+        graph_engine(&[routing_channel(track_id), routing_channel(TrackId::MASTER)]);
     commands.push(EngineCommand::SetSampleRate(8)).unwrap();
     commands.push(EngineCommand::SetBpm(120.0)).unwrap();
     commands.push(EngineCommand::add_track(track_id)).unwrap();
