@@ -675,4 +675,15 @@ mod tests {
         }
     }
 
+
+    #[test]
+    fn expanded_advanced_shares_the_primary_strip_instead_of_adding_a_generic_row() {
+        for width in [872.0, 892.0, 900.0] {
+            let layout = arrange(Size::new(width, 304.0), true);
+            assert_eq!(layout.details, 0.0, "Advanced became a generic row at {width}");
+            assert!(layout.primary_visible_with_details);
+            assert!(layout.plot >= 180.0, "the aside displaced the dominant graph");
+        }
+    }
+
 }
