@@ -1,3 +1,5 @@
+//! Bounded transfer of removed engine owners to the UI for destruction.
+
 use std::cell::UnsafeCell;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -88,6 +90,27 @@ impl crate::engine::AudioEngine {
             }
         }
     }
+    pub(super) fn flush_removed_clip_owners(&mut self) -> bool {
+        for index in 0..self.tracks().len() {
+            loop {
+                let available = self.pending_retirements.len() < self.pending_retirements.capacity();
+                let track = &mut self.tracks_mut_for_retirement()[index];
+                let sources = [track.playback_source.as_mut(), track.section_playback_source.as_mut(),
+                    track.launcher_source.as_mut(), track.empty_launcher_source.as_mut()];
+                let Some(source) = sources.into_iter().find(|source| source.has_removed_audio_clips()) else {
+                    break;
+                };
+                // Take ownership only after admission, including when the UI ring stays full.
+                if !available {
+                    return false;
+                }
+                let clip = source.pop_removed_audio_clip().expect("pending clip owner");
+                self.retire_event(EngineEvent::RetiredAudioClip(clip));
+            }
+        }
+        true
+    }
+
     pub(super) fn clean_removed_bus_automation(&mut self) {
         let Some((bus, mut track_index)) = self.pending_bus_cleanup else {
             return;

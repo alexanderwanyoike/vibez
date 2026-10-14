@@ -96,7 +96,7 @@ pub(super) fn channel(
             continue;
         }
         if let Some(audio) = req.clip_audio.get(&clip.id) {
-            channel.playback_source.clips.push(EngineClip {
+            channel.playback_source.push_audio_clip(EngineClip {
                 id: clip.id,
                 audio: Arc::clone(audio),
                 position: clip.position,

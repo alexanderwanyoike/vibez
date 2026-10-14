@@ -49,7 +49,24 @@ pub struct EngineClip {
     pub warp_markers: WarpMarkers,
 }
 
+impl std::fmt::Debug for EngineClip {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.debug_struct("EngineClip").field("id", &self.id)
+            .field("position", &self.position).field("duration", &self.duration).finish()
+    }
+}
+
 impl EngineClip {
+    pub(crate) fn same_retired_owner(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.audio, &other.audio)
+            && std::ptr::eq(self.warp_markers.as_slice(), other.warp_markers.as_slice())
+            && self.id == other.id && self.position == other.position
+            && self.source_offset == other.source_offset && self.start_marker == other.start_marker
+            && self.duration == other.duration && self.loop_enabled == other.loop_enabled
+            && self.loop_start == other.loop_start && self.loop_end == other.loop_end
+            && self.linear_gain == other.linear_gain && self.fades == other.fades
+            && self.playback_direction == other.playback_direction
+    }
     pub fn timeline(&self) -> FrameClipTimeline {
         FrameClipTimeline::new(
             self.start_marker,
@@ -316,6 +333,7 @@ pub struct PreparedPlaybackSource {
     pub clips: Vec<EngineClip>,
     pub note_clips: Vec<EngineNoteClip>,
     pub automation: Vec<AutomationLane>,
+    removed_audio_clips: Vec<EngineClip>,
 }
 
 /// One Project Track's resident content for a prepared Section.
@@ -384,11 +402,38 @@ impl PreparedPlaybackSource {
         note_clips: Vec<EngineNoteClip>,
         automation: Vec<AutomationLane>,
     ) -> Self {
+        let removed_audio_clips = Vec::with_capacity(clips.len());
         Self {
             clips,
             note_clips,
             automation,
+            removed_audio_clips,
         }
+    }
+
+    pub(crate) fn push_audio_clip(&mut self, clip: EngineClip) {
+        // Insertion still allocates; future removal must never grow its owner staging.
+        let required = self.clips.len() + 1;
+        if self.removed_audio_clips.capacity() < required {
+            self.removed_audio_clips.reserve(required - self.removed_audio_clips.len());
+        }
+        self.clips.push(clip);
+    }
+
+    pub(crate) fn remove_audio_clips(&mut self, id: ClipId) {
+        assert!(self.removed_audio_clips.is_empty());
+        assert!(self.removed_audio_clips.capacity() >= self.clips.len());
+        for clip in self.clips.extract_if(.., |clip| clip.id == id) {
+            self.removed_audio_clips.push(clip);
+        }
+    }
+
+    pub(crate) fn pop_removed_audio_clip(&mut self) -> Option<EngineClip> {
+        self.removed_audio_clips.pop()
+    }
+
+    pub(crate) fn has_removed_audio_clips(&self) -> bool {
+        !self.removed_audio_clips.is_empty()
     }
 
     pub fn set_clip_playback_direction(
