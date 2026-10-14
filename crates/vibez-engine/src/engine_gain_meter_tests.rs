@@ -11,9 +11,7 @@ fn monitored_gain_chain_reports_each_inserts_stereo_input_and_output() {
     let track_id = TrackId::new();
     let effects = [EffectId::new(), EffectId::new()];
     commands.push(EngineCommand::SetSampleRate(48_000)).unwrap();
-    commands
-        .push(EngineCommand::AddTrack(track_id, "Metered".into()))
-        .unwrap();
+    commands.push(EngineCommand::add_track(track_id)).unwrap();
     for effect_id in effects {
         commands
             .push(EngineCommand::insert_built_in_effect(
@@ -127,12 +125,8 @@ fn return_and_master_gain_meters_observe_insert_levels_in_both_render_paths() {
             let return_effect = EffectId::new();
             let master_effect = EffectId::new();
             commands.push(EngineCommand::SetSampleRate(48_000)).unwrap();
-            commands
-                .push(EngineCommand::AddTrack(source_id, "Source".into()))
-                .unwrap();
-            commands
-                .push(EngineCommand::AddBus(return_id, "Return".into()))
-                .unwrap();
+            commands.push(EngineCommand::add_track(source_id)).unwrap();
+            commands.push(EngineCommand::add_bus(return_id)).unwrap();
             commands
                 .push(EngineCommand::SetSend {
                     track_id: source_id,
@@ -580,9 +574,7 @@ fn gain_meter_fixture(
     let track_id = TrackId::new();
     let effect_id = EffectId::new();
     commands.push(EngineCommand::SetSampleRate(48_000)).unwrap();
-    commands
-        .push(EngineCommand::AddTrack(track_id, "Metered".into()))
-        .unwrap();
+    commands.push(EngineCommand::add_track(track_id)).unwrap();
     commands
         .push(EngineCommand::insert_built_in_effect(
             track_id,
