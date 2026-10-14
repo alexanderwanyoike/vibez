@@ -672,6 +672,34 @@ mod tests {
     use vibez_core::id::TrackId;
 
     #[test]
+    fn retired_legacy_audio_is_disposed_by_actual_app_poll_without_a_current_media_target() {
+        let mut app = super::super::test_support::app();
+        let (mut producer, consumer) = rtrb::RingBuffer::new(16);
+        app.event_rx = Some(consumer);
+        for after_project_reset in [false, true] {
+            let audio = Arc::new(vibez_core::audio_buffer::DecodedAudio {
+                channels: vec![vec![0.25; 64], vec![-0.5; 64]],
+                sample_rate: 48_000,
+            });
+            let owner = Arc::downgrade(&audio);
+            producer.push(EngineEvent::RetiredAudioBuffer(audio)).unwrap();
+            if after_project_reset {
+                app.reset_to_new_project();
+            }
+            assert_eq!(owner.strong_count(), 1, "the pending return is the sole audio owner");
+            assert!(app.state.project_tracks.tracks.is_empty());
+            assert!(app.state.browser.waveform_audio.is_none());
+            let status = app.state.status_text.clone();
+            app.poll_engine_events();
+            assert_eq!(owner.strong_count(), 0, "return disposal does not depend on current project media");
+            assert_eq!(app.state.status_text, status);
+            assert!(app.event_rx.as_ref().unwrap().is_empty());
+            app.poll_engine_events();
+            assert_eq!(owner.strong_count(), 0);
+        }
+    }
+
+    #[test]
     fn blocked_engine_transition_returns_owner_and_recovers_the_actual_launcher_state() {
         use crate::domains::perform::clip_record::empty_midi_clip;
         use vibez_core::id::ClipId;

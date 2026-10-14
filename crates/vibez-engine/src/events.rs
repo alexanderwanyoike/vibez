@@ -824,6 +824,23 @@ mod tests {
     use super::*;
 
     #[test]
+    fn retired_legacy_audio_uses_owner_identity_and_is_untimed() {
+        let audio = Arc::new(DecodedAudio {
+            channels: vec![vec![0.25, -0.5]],
+            sample_rate: 48_000,
+        });
+        let same = EngineEvent::RetiredAudioBuffer(audio.clone());
+        let equal_content = EngineEvent::RetiredAudioBuffer(Arc::new((*audio).clone()));
+        let original = EngineEvent::RetiredAudioBuffer(audio);
+        assert_eq!(original, same);
+        assert_ne!(original, equal_content);
+        assert_eq!(original.time_domain(), TimeDomain::Untimed);
+        assert_eq!(same.time_domain(), TimeDomain::Untimed);
+        assert_eq!(equal_content.time_domain(), TimeDomain::Untimed);
+        assert_ne!(original, EngineEvent::PlaybackStopped);
+    }
+
+    #[test]
     fn event_variants_are_constructible() {
         let _pos = EngineEvent::PlaybackPosition(44_100);
         let _performance_pos = EngineEvent::PerformancePosition(22_050);
