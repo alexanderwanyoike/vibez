@@ -223,7 +223,13 @@ fn legacy_pressure_fixture() -> LegacyPressureFixture {
     engine.process_block(AudioProcessBlock::new(&mut [0.0; 16], 2));
     while events.pop().is_ok() {}
     let ring_capacity = fill_ui_ring(&mut engine);
-    LegacyPressureFixture { engine, commands, events, owners, ring_capacity }
+    LegacyPressureFixture {
+        engine,
+        commands,
+        events,
+        owners,
+        ring_capacity,
+    }
 }
 
 fn queue_legacy_replacements(
@@ -245,7 +251,13 @@ fn queue_legacy_replacements(
 
 #[test]
 fn legacy_load_pressure_retains_thirty_two_owners_and_blocks_next_replacement_in_fifo_order() {
-    let LegacyPressureFixture { mut engine, mut commands, mut events, mut owners, ring_capacity } = legacy_pressure_fixture();
+    let LegacyPressureFixture {
+        mut engine,
+        mut commands,
+        mut events,
+        mut owners,
+        ring_capacity,
+    } = legacy_pressure_fixture();
     let mut output = [0.0; 16];
     let retirement_capacity = engine.pending_retirements.capacity();
     assert_eq!(retirement_capacity, 32);
@@ -308,7 +320,13 @@ fn legacy_load_pressure_retains_thirty_two_owners_and_blocks_next_replacement_in
 #[test]
 fn legacy_unload_pressure_requires_two_free_credits_before_clearing_audio_and_stopping() {
     for free_credits in [1, 2] {
-        let LegacyPressureFixture { mut engine, mut commands, mut events, mut owners, ring_capacity } = legacy_pressure_fixture();
+        let LegacyPressureFixture {
+            mut engine,
+            mut commands,
+            mut events,
+            mut owners,
+            ring_capacity,
+        } = legacy_pressure_fixture();
         let mut output = [0.0; 16];
         let retirement_capacity = engine.pending_retirements.capacity();
         let replacements = retirement_capacity - free_credits;
@@ -480,30 +498,69 @@ fn assert_combined_legacy_unload_pressure(delayed_minimum_credits: bool) {
         use vibez_core::routing::{NodeStage, RoutingChannel, RoutingEffect, RoutingNode};
         let effect = vibez_core::id::EffectId::new();
         let slow = tracks[1];
-        commands.push(EngineCommand::InsertEffect {
-            track_id: slow,
-            effect_id: effect,
-            effect: Box::new(crate::test_support::DelayProbe::new(521)),
-            position: None,
-        }).unwrap();
-        let mut channels: Vec<_> = tracks.iter().map(|track| RoutingChannel {
-            id: *track,
-            is_bus: false,
+        commands
+            .push(EngineCommand::InsertEffect {
+                track_id: slow,
+                effect_id: effect,
+                effect: Box::new(crate::test_support::DelayProbe::new(521)),
+                position: None,
+            })
+            .unwrap();
+        let mut channels: Vec<_> = tracks
+            .iter()
+            .map(|track| RoutingChannel {
+                id: *track,
+                is_bus: false,
+                sends: vec![],
+                effects: if *track == slow {
+                    vec![RoutingEffect {
+                        id: effect,
+                        inputs: vec![],
+                        assignments: vec![],
+                        inactive_inputs: vec![],
+                    }]
+                } else {
+                    vec![]
+                },
+            })
+            .collect();
+        channels.push(RoutingChannel {
+            id: TrackId::MASTER,
+            is_bus: true,
+            effects: vec![],
             sends: vec![],
-            effects: if *track == slow { vec![RoutingEffect {
-                id: effect, inputs: vec![], assignments: vec![], inactive_inputs: vec![],
-            }] } else { vec![] },
-        }).collect();
-        channels.push(RoutingChannel { id: TrackId::MASTER, is_bus: true, effects: vec![], sends: vec![] });
-        let reports = [(RoutingNode { channel: slow, stage: NodeStage::Effect(effect) }, 521)];
-        commands.push(EngineCommand::SetRouting(crate::routing::PreparedRouting::prepare_compensated(
-            &channels, 64, &reports, &[tracks[0]], 1,
-        ).unwrap())).unwrap();
+        });
+        let reports = [(
+            RoutingNode {
+                channel: slow,
+                stage: NodeStage::Effect(effect),
+            },
+            521,
+        )];
+        commands
+            .push(EngineCommand::SetRouting(
+                crate::routing::PreparedRouting::prepare_compensated(
+                    &channels,
+                    64,
+                    &reports,
+                    &[tracks[0]],
+                    1,
+                )
+                .unwrap(),
+            ))
+            .unwrap();
         let section = SectionId::new();
         for _ in 0..2 {
-            let prepared = Box::new(PreparedSectionPlaybackSource::new(section, 8.0, true, vec![]));
+            let prepared = Box::new(PreparedSectionPlaybackSource::new(
+                section,
+                8.0,
+                true,
+                vec![],
+            ));
             delayed_sections.push(&*prepared as *const PreparedSectionPlaybackSource);
-            commands.push(EngineCommand::LaunchSection(prepared)).unwrap();
+            commands
+                .push(EngineCommand::LaunchSection(prepared))
+                .unwrap();
         }
     }
     commands.push(EngineCommand::BeginClipPerformance).unwrap();
@@ -558,10 +615,18 @@ fn assert_combined_legacy_unload_pressure(delayed_minimum_credits: bool) {
     let timing_history = if delayed_minimum_credits {
         assert_eq!(engine.mix_latency(), 521);
         assert_eq!(engine.earliest_source_latency(), 0);
-        assert_eq!(engine.section_capture_timing.len(), 2, "two public launches retain real early/full timing history");
+        assert_eq!(
+            engine.section_capture_timing.len(),
+            2,
+            "two public launches retain real early/full timing history"
+        );
         let offsets = engine.capture_offsets();
         assert!(!offsets.is_empty());
-        Some((engine.section_capture_timing.len(), engine.section_capture_timing.capacity(), Arc::downgrade(&offsets)))
+        Some((
+            engine.section_capture_timing.len(),
+            engine.section_capture_timing.capacity(),
+            Arc::downgrade(&offsets),
+        ))
     } else {
         assert!(engine.scheduled_presentation.is_empty());
         None
@@ -572,22 +637,42 @@ fn assert_combined_legacy_unload_pressure(delayed_minimum_credits: bool) {
     let mut displaced_legacy = Vec::new();
     if delayed_minimum_credits {
         displaced_legacy.push(legacy_owner.clone());
-        queue_legacy_replacements(&mut commands, &mut displaced_legacy, retirement_capacity - 2);
+        queue_legacy_replacements(
+            &mut commands,
+            &mut displaced_legacy,
+            retirement_capacity - 2,
+        );
         legacy_owner = displaced_legacy.pop().unwrap();
-        assert_eq!(crate::retirement::tests::allocations(|| engine.process_block(AudioProcessBlock::new(&mut [], 1))), (0, 0));
+        assert_eq!(
+            crate::retirement::tests::allocations(
+                || engine.process_block(AudioProcessBlock::new(&mut [], 1))
+            ),
+            (0, 0)
+        );
         assert_eq!(engine.pending_retirements.len(), retirement_capacity - 2);
-        assert_eq!(engine.pending_retirements.capacity() - engine.pending_retirements.len(), 2);
-        assert_eq!(engine.section_capture_timing.len(), timing_history.as_ref().unwrap().0);
+        assert_eq!(
+            engine.pending_retirements.capacity() - engine.pending_retirements.len(),
+            2
+        );
+        assert_eq!(
+            engine.section_capture_timing.len(),
+            timing_history.as_ref().unwrap().0
+        );
         assert_eq!(engine.audio().map(Arc::as_ptr), Some(legacy_owner.as_ptr()));
     }
-    let retained_owners = presentation_capacity - engine.scheduled_presentation.len() - presentation_queue::COMMAND_PRESENTATION_RESERVE;
+    let retained_owners = presentation_capacity
+        - engine.scheduled_presentation.len()
+        - presentation_queue::COMMAND_PRESENTATION_RESERVE;
     // Existing owner-bearing acknowledgements cannot be discarded to make cleanup room.
     for index in 0..retained_owners {
         let (prepared, owner) = unique_clip_request(tracks[0], 10000 + index as u64);
         expected_clips.push(owner);
         engine.present_event(EngineEvent::ClipRequestRetired(prepared));
     }
-    assert_eq!(engine.scheduled_presentation.len(), presentation_capacity - presentation_queue::COMMAND_PRESENTATION_RESERVE);
+    assert_eq!(
+        engine.scheduled_presentation.len(),
+        presentation_capacity - presentation_queue::COMMAND_PRESENTATION_RESERVE
+    );
     let capture_boundary = engine.heard_capture_position();
     let arrange_cursor = engine.transport().position();
     commands.push(EngineCommand::UnloadAudio).unwrap();
@@ -623,9 +708,15 @@ fn assert_combined_legacy_unload_pressure(delayed_minimum_credits: bool) {
         );
         if let Some((history_length, history_capacity, _)) = &timing_history {
             assert_eq!(engine.pending_retirements.len(), retirement_capacity);
-            assert_eq!(engine.section_capture_timing.len(), history_length - 1, "one history owner remains deferred after legacy retirement consumes its credit");
+            assert_eq!(
+                engine.section_capture_timing.len(),
+                history_length - 1,
+                "one history owner remains deferred after legacy retirement consumes its credit"
+            );
             assert_eq!(engine.section_capture_timing.capacity(), *history_capacity);
-            assert!(displaced_legacy.iter().all(|owner| owner.strong_count() == 1));
+            assert!(displaced_legacy
+                .iter()
+                .all(|owner| owner.strong_count() == 1));
         }
         assert_eq!(legacy_owner.strong_count(), 1);
         assert_eq!(recording_audio.audio.strong_count(), 1);
@@ -680,10 +771,18 @@ fn assert_combined_legacy_unload_pressure(delayed_minimum_credits: bool) {
         assert_eq!(engine.section_capture_timing.capacity(), *history_capacity);
         assert_eq!(delivered.iter().filter(|event| matches!(event, EngineEvent::CaptureTimingRetired(owner) if std::ptr::eq(Arc::as_ptr(owner), offsets.as_ptr()))).count(), *history_length);
         for pointer in &delayed_sections {
-            assert_eq!(delivered.iter().filter(|event| match event {
-                EngineEvent::SectionQueueCancelled { retired } => std::ptr::eq(&**retired, *pointer),
-                _ => false,
-            }).count(), 1, "both public delayed Section acknowledgements return exactly once");
+            assert_eq!(
+                delivered
+                    .iter()
+                    .filter(|event| match event {
+                        EngineEvent::SectionQueueCancelled { retired } =>
+                            std::ptr::eq(&**retired, *pointer),
+                        _ => false,
+                    })
+                    .count(),
+                1,
+                "both public delayed Section acknowledgements return exactly once"
+            );
         }
         for owner in &displaced_legacy {
             assert_eq!(delivered.iter().filter(|event| matches!(event, EngineEvent::RetiredAudioBuffer(audio) if std::ptr::eq(Arc::as_ptr(audio), owner.as_ptr()))).count(), 1);
@@ -747,9 +846,15 @@ fn assert_combined_legacy_unload_pressure(delayed_minimum_credits: bool) {
     drop(stopped_recording);
     drop(delivered);
     assert_eq!(legacy_owner.strong_count(), 0);
-    assert!(displaced_legacy.iter().all(|owner| owner.strong_count() == 0));
+    assert!(displaced_legacy
+        .iter()
+        .all(|owner| owner.strong_count() == 0));
     if let Some((_, _, offsets)) = timing_history {
-        assert_eq!(offsets.strong_count(), 1, "only the current routing plan retains its capture offsets");
+        assert_eq!(
+            offsets.strong_count(),
+            1,
+            "only the current routing plan retains its capture offsets"
+        );
     }
     assert_eq!(recording_audio.audio.strong_count(), 0);
     assert!(expected_clips
@@ -1110,8 +1215,12 @@ fn legacy_load_and_unload_preserve_loop_region_and_existing_short_buffer_playbac
     let old_owner = Arc::downgrade(&old);
     commands.push(EngineCommand::SetSampleRate(1000)).unwrap();
     commands.push(EngineCommand::LoadAudio(old)).unwrap();
-    commands.push(EngineCommand::SetArrangementLoopRegion { start: 2, end: 8 }).unwrap();
-    commands.push(EngineCommand::SetArrangementLoop(true)).unwrap();
+    commands
+        .push(EngineCommand::SetArrangementLoopRegion { start: 2, end: 8 })
+        .unwrap();
+    commands
+        .push(EngineCommand::SetArrangementLoop(true))
+        .unwrap();
     commands.push(EngineCommand::Seek(6)).unwrap();
     commands.push(EngineCommand::Play).unwrap();
     let mut output = [0.0; 8];
@@ -1124,12 +1233,26 @@ fn legacy_load_and_unload_preserve_loop_region_and_existing_short_buffer_playbac
     let incoming = stereo_ramp(3, 0.5, -0.75, 2000);
     let incoming_owner = Arc::downgrade(&incoming);
     commands.push(EngineCommand::LoadAudio(incoming)).unwrap();
-    assert_eq!(crate::retirement::tests::allocations(|| engine.process_block(AudioProcessBlock::new(&mut output, 2))), (0, 0));
-    assert_eq!(output, [0.0; 8], "legacy reads beyond its shorter media remain silent");
-    assert_eq!(engine.audio().map(Arc::as_ptr), Some(incoming_owner.as_ptr()));
+    assert_eq!(
+        crate::retirement::tests::allocations(
+            || engine.process_block(AudioProcessBlock::new(&mut output, 2))
+        ),
+        (0, 0)
+    );
+    assert_eq!(
+        output, [0.0; 8],
+        "legacy reads beyond its shorter media remain silent"
+    );
+    assert_eq!(
+        engine.audio().map(Arc::as_ptr),
+        Some(incoming_owner.as_ptr())
+    );
     assert_eq!(engine.transport().audio_length(), Some(3));
     assert_eq!(engine.transport().position(), 2);
-    assert!(engine.transport().is_playing(), "loop wrapping retains priority over content-end auto-stop");
+    assert!(
+        engine.transport().is_playing(),
+        "loop wrapping retains priority over content-end auto-stop"
+    );
     assert_eq!(engine.transport().active_loop_region(), Some((2, 8)));
     assert_eq!(engine.sample_rate(), 1000);
     let retired = returned_legacy_audio(&mut events);
@@ -1138,14 +1261,27 @@ fn legacy_load_and_unload_preserve_loop_region_and_existing_short_buffer_playbac
     drop(retired);
     assert_eq!(old_owner.strong_count(), 0);
 
-    assert_eq!(crate::retirement::tests::allocations(|| engine.process_block(AudioProcessBlock::new(&mut output, 2))), (0, 0));
+    assert_eq!(
+        crate::retirement::tests::allocations(
+            || engine.process_block(AudioProcessBlock::new(&mut output, 2))
+        ),
+        (0, 0)
+    );
     assert_eq!(&output[..2], &[0.5 + 2.0 / 1024.0, -0.75 + 2.0 / 2048.0]);
     assert_eq!(&output[2..], &[0.0; 6]);
     assert_eq!(engine.transport().position(), 3);
-    assert!(!engine.transport().is_playing(), "a callback that does not reach the loop end retains ordinary media-end auto-stop");
+    assert!(
+        !engine.transport().is_playing(),
+        "a callback that does not reach the loop end retains ordinary media-end auto-stop"
+    );
     assert!(returned_legacy_audio(&mut events).is_empty());
     commands.push(EngineCommand::UnloadAudio).unwrap();
-    assert_eq!(crate::retirement::tests::allocations(|| engine.process_block(AudioProcessBlock::new(&mut output, 2))), (0, 0));
+    assert_eq!(
+        crate::retirement::tests::allocations(
+            || engine.process_block(AudioProcessBlock::new(&mut output, 2))
+        ),
+        (0, 0)
+    );
     assert_eq!(output, [0.0; 8]);
     assert_eq!(engine.transport().position(), 3);
     assert_eq!(engine.transport().audio_length(), None);
