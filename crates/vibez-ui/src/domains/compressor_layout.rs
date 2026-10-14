@@ -392,7 +392,7 @@ mod tests {
             );
             let detector_frequency_width = 9.0 * 1.3 + 8.0 + 54.0 + 8.0 * 1.3 + 8.0;
             assert!(106.0 >= detector_frequency_width);
-            assert!((ASIDE_W - 106.0 - 16.0) / 2.0 >= 68.0);
+            const { assert!((ASIDE_W - 106.0 - 16.0) / 2.0 >= 68.0) };
         }
     }
 }
