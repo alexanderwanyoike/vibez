@@ -187,6 +187,19 @@ mod tests {
         }
     }
     #[test]
+    fn short_response_reserves_space_for_caption_actions_and_usable_canvas() {
+        for height in 64..220 {
+            let layout = arrange(Size::new(430.0, height as f32), false);
+            if layout.graph > 0.0 {
+                let canvas = layout.graph - 6.0 - (9.0 * 1.3 + 4.0) - 3.0;
+                assert!(
+                    canvas >= 32.0,
+                    "canvas only {canvas}px at body height {height}"
+                );
+            }
+        }
+    }
+    #[test]
     fn compact_reveals_four_tabs_and_contextual_controls_without_duplicate_side_editor() {
         let a = arrange(Size::new(472.0, 304.0), false);
         assert!(a.tabs);
