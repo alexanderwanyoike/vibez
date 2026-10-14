@@ -735,7 +735,12 @@ fn public_packet_preserves_last_credit_for_all_retained_terminals_and_returns_ea
     fixture.engine.process(&mut [], 2);
     fixture.drain_events();
     let capture_stop = fixture.engine.compensation_callback_heard_start;
-    while fixture.engine.event_tx.push(EngineEvent::PlaybackPosition(0)).is_ok() {}
+    while fixture
+        .engine
+        .event_tx
+        .push(EngineEvent::PlaybackPosition(0))
+        .is_ok()
+    {}
     for _ in 0..fixture.engine.scheduled_presentation.capacity() {
         fixture.engine.present_event_at(
             EngineEvent::PlaybackStarted,
@@ -789,8 +794,14 @@ fn public_packet_preserves_last_credit_for_all_retained_terminals_and_returns_ea
         (0, 0)
     );
     assert!(!fixture.engine.presentation_state.is_faulted());
-    assert_eq!(fixture.engine.presentation_state.terminals.occupied_slots(), 4);
-    assert_eq!(fixture.engine.presentation_state.terminals.capture_stop(), Some(capture_stop));
+    assert_eq!(
+        fixture.engine.presentation_state.terminals.occupied_slots(),
+        4
+    );
+    assert_eq!(
+        fixture.engine.presentation_state.terminals.capture_stop(),
+        Some(capture_stop)
+    );
     assert!(matches!(
         fixture.engine.presentation_state.terminals.overflow_owner(),
         Some(EngineEvent::CaptureTimingRetired(owner)) if Arc::ptr_eq(owner, &offsets)
@@ -798,35 +809,87 @@ fn public_packet_preserves_last_credit_for_all_retained_terminals_and_returns_ea
     let room = fixture.engine.scheduled_presentation.capacity()
         - fixture.engine.scheduled_presentation.len();
     for _ in 0..room {
-        fixture.engine.present_event(EngineEvent::ClipRequestRetired(
-            PreparedClipPlayback::stop(missing, 9000),
-        ));
+        fixture
+            .engine
+            .present_event(EngineEvent::ClipRequestRetired(PreparedClipPlayback::stop(
+                missing, 9000,
+            )));
     }
     assert_eq!(fixture.engine.event_tx.slots(), 0);
-    assert_eq!(fixture.engine.scheduled_presentation.len(), fixture.engine.scheduled_presentation.capacity());
-    let retained = fixture.engine.pending_clip_batch.as_ref().unwrap().clips.len();
-    assert!(fixture.engine.pending_clip_batch.as_ref().unwrap().clips.iter().any(|owner| std::ptr::eq(&**owner, identity)));
+    assert_eq!(
+        fixture.engine.scheduled_presentation.len(),
+        fixture.engine.scheduled_presentation.capacity()
+    );
+    let retained = fixture
+        .engine
+        .pending_clip_batch
+        .as_ref()
+        .unwrap()
+        .clips
+        .len();
+    assert!(fixture
+        .engine
+        .pending_clip_batch
+        .as_ref()
+        .unwrap()
+        .clips
+        .iter()
+        .any(|owner| std::ptr::eq(&**owner, identity)));
     for credits in 0..=5 {
         if credits != 0 {
-            assert!(matches!(fixture.events.pop().unwrap(), EngineEvent::PlaybackPosition(0)));
+            assert!(matches!(
+                fixture.events.pop().unwrap(),
+                EngineEvent::PlaybackPosition(0)
+            ));
         }
         assert_eq!(fixture.engine.event_tx.slots(), credits);
         assert_eq!(
-            crate::retirement::tests::allocations(|| fixture.engine.continue_clip_batch(expected_timestamp)),
+            crate::retirement::tests::allocations(|| fixture
+                .engine
+                .continue_clip_batch(expected_timestamp)),
             (0, 0)
         );
-        assert_eq!(fixture.engine.pending_clip_batch.as_ref().unwrap().clips.len(), retained);
-        assert_eq!(fixture.engine.presentation_state.terminals.occupied_slots(), 4);
+        assert_eq!(
+            fixture
+                .engine
+                .pending_clip_batch
+                .as_ref()
+                .unwrap()
+                .clips
+                .len(),
+            retained
+        );
+        assert_eq!(
+            fixture.engine.presentation_state.terminals.occupied_slots(),
+            4
+        );
         assert!(!fixture.engine.presentation_state.is_faulted());
     }
-    assert!(matches!(fixture.events.pop().unwrap(), EngineEvent::PlaybackPosition(0)));
+    assert!(matches!(
+        fixture.events.pop().unwrap(),
+        EngineEvent::PlaybackPosition(0)
+    ));
     assert_eq!(fixture.engine.event_tx.slots(), 6);
     assert_eq!(
-        crate::retirement::tests::allocations(|| fixture.engine.continue_clip_batch(expected_timestamp)),
+        crate::retirement::tests::allocations(|| fixture
+            .engine
+            .continue_clip_batch(expected_timestamp)),
         (0, 0)
     );
-    assert_eq!(fixture.engine.pending_clip_batch.as_ref().unwrap().clips.len(), retained - 1);
-    assert_eq!(fixture.engine.presentation_state.terminals.occupied_slots(), 0);
+    assert_eq!(
+        fixture
+            .engine
+            .pending_clip_batch
+            .as_ref()
+            .unwrap()
+            .clips
+            .len(),
+        retained - 1
+    );
+    assert_eq!(
+        fixture.engine.presentation_state.terminals.occupied_slots(),
+        0
+    );
     assert!(!fixture.engine.presentation_state.is_faulted());
     let mut owners = Vec::new();
     let mut transitions = 0;
@@ -838,8 +901,16 @@ fn public_packet_preserves_last_credit_for_all_retained_terminals_and_returns_ea
     for _ in 0..8 {
         while let Ok(event) = fixture.events.pop() {
             match event {
-                EngineEvent::ClipRequestRetired(owner) => owners.push((&*owner as *const _, owner.request_id)),
-                EngineEvent::ClipTransitioned { track_id, clip_id, request_id, effective_at_samples, retired: Some(owner) } => {
+                EngineEvent::ClipRequestRetired(owner) => {
+                    owners.push((&*owner as *const _, owner.request_id))
+                }
+                EngineEvent::ClipTransitioned {
+                    track_id,
+                    clip_id,
+                    request_id,
+                    effective_at_samples,
+                    retired: Some(owner),
+                } => {
                     assert_eq!(track_id, fixture.tracks[0]);
                     assert_eq!(clip_id, target_clip);
                     assert_eq!(request_id, 6000);
@@ -851,14 +922,34 @@ fn public_packet_preserves_last_credit_for_all_retained_terminals_and_returns_ea
                     assert!(Arc::ptr_eq(&owner, &offsets));
                     overflow_returns += 1;
                 }
-                EngineEvent::PerformanceCaptureStopped { effective_at_samples } => stops.push(effective_at_samples),
-                EngineEvent::CompensationInvalid { track_id, effect_id, reason } => {
-                    assert_eq!((track_id, effect_id, reason), (TrackId::MASTER, None, "Audio presentation event history is full"));
+                EngineEvent::PerformanceCaptureStopped {
+                    effective_at_samples,
+                } => stops.push(effective_at_samples),
+                EngineEvent::CompensationInvalid {
+                    track_id,
+                    effect_id,
+                    reason,
+                } => {
+                    assert_eq!(
+                        (track_id, effect_id, reason),
+                        (
+                            TrackId::MASTER,
+                            None,
+                            "Audio presentation event history is full"
+                        )
+                    );
                     causes += 1;
                 }
                 EngineEvent::PlaybackStopped => playback_stops += 1,
-                EngineEvent::ClipBatchRetired(packet) => { assert!(packet.is_empty()); batches += 1; }
-                EngineEvent::PlaybackPosition(0) | EngineEvent::ClipQueued { .. } | EngineEvent::PlaybackStarted | EngineEvent::PerformancePosition(0) | EngineEvent::PresentationCancelled => {}
+                EngineEvent::ClipBatchRetired(packet) => {
+                    assert!(packet.is_empty());
+                    batches += 1;
+                }
+                EngineEvent::PlaybackPosition(0)
+                | EngineEvent::ClipQueued { .. }
+                | EngineEvent::PlaybackStarted
+                | EngineEvent::PerformancePosition(0)
+                | EngineEvent::PresentationCancelled => {}
                 event => panic!("unexpected packet event: {event:?}"),
             }
         }
@@ -873,7 +964,10 @@ fn public_packet_preserves_last_credit_for_all_retained_terminals_and_returns_ea
     for expected in missing_owners {
         assert_eq!(owners.iter().filter(|owner| **owner == expected).count(), 1);
     }
-    assert_eq!(owners.iter().filter(|(_, request)| *request < 2100).count(), 2100);
+    assert_eq!(
+        owners.iter().filter(|(_, request)| *request < 2100).count(),
+        2100
+    );
     assert_eq!(transitions, 1);
     assert_eq!(overflow_returns, 1);
     assert_eq!(Arc::strong_count(&offsets), 1);
