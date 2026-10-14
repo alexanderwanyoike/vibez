@@ -58,7 +58,8 @@ struct App {
     plugin_load_requests: plugin_load_requests::PluginLoadRequests,
     gain_devices: gain_devices::GainDevices,
     device_meters: device_meters::DeviceMeters,
-    drive_panels: std::collections::HashMap<vibez_core::id::EffectId, crate::domains::drive::DrivePanel>,
+    drive_panels:
+        std::collections::HashMap<vibez_core::id::EffectId, crate::domains::drive::DrivePanel>,
     empty_drive_panel: crate::domains::drive::DrivePanel,
     device_controls: std::collections::HashMap<
         vibez_core::id::EffectId,
@@ -171,12 +172,12 @@ mod compensation;
 mod device_controls;
 mod device_meters;
 pub(crate) mod device_presets;
-mod drum_rack_preparation;
-mod engine_events;
-mod gain_devices;
 mod drive_devices;
 #[cfg(test)]
 mod drive_hydration_tests;
+mod drum_rack_preparation;
+mod engine_events;
+mod gain_devices;
 mod keyboard;
 mod local_watcher;
 mod menu_lifecycle;
@@ -609,7 +610,13 @@ impl App {
         effect_type: vibez_core::effect::EffectType,
         params: &[f32],
     ) {
-        crate::domains::EngineHandle::insert_built_in_effect_with_params(&mut self.cmd_tx, track_id, effect_id, effect_type, params);
+        crate::domains::EngineHandle::insert_built_in_effect_with_params(
+            &mut self.cmd_tx,
+            track_id,
+            effect_id,
+            effect_type,
+            params,
+        );
     }
 
     fn set_built_in_instrument(

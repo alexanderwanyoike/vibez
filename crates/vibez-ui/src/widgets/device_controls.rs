@@ -213,7 +213,12 @@ pub fn disclosure<'a>(track: TrackId, effect: &UiEffect, open: bool) -> Element<
     disclosure_with_label(track, effect, open, "Advanced")
 }
 
-pub fn disclosure_with_label<'a>(track: TrackId, effect: &UiEffect, open: bool, label: &str) -> Element<'a, Message> {
+pub fn disclosure_with_label<'a>(
+    track: TrackId,
+    effect: &UiEffect,
+    open: bool,
+    label: &str,
+) -> Element<'a, Message> {
     button(text(format!("{} {label}", if open { "▾" } else { "▸" })).size(10))
         .on_press(Message::DeviceControl(DeviceControlMsg::ToggleAdvanced(
             track, effect.id,

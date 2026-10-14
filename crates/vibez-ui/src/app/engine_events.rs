@@ -211,7 +211,12 @@ impl App {
                     } => {
                         self.accept_device_meter(track_id, effect_id, generation, input, output);
                     }
-                    EngineEvent::EffectWaveshaper { track_id, effect_id, generation, meter } => {
+                    EngineEvent::EffectWaveshaper {
+                        track_id,
+                        effect_id,
+                        generation,
+                        meter,
+                    } => {
                         self.accept_drive_waveshaper(track_id, effect_id, generation, meter);
                     }
                     EngineEvent::RetiredEffectStorage(storage) => drop(storage),

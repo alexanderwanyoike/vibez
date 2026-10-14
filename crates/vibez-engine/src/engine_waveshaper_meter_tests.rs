@@ -22,7 +22,10 @@ fn waveshaper_event_equality_compares_identity_generation_and_every_snapshot_fie
         generation,
         meter,
     };
-    assert_eq!(event(track, effect, 7, meter), event(track, effect, 7, meter));
+    assert_eq!(
+        event(track, effect, 7, meter),
+        event(track, effect, 7, meter)
+    );
     for changed in [
         event(TrackId::new(), effect, 7, meter),
         event(track, EffectId::new(), 7, meter),
@@ -42,9 +45,15 @@ fn waveshaper_event_equality_compares_identity_generation_and_every_snapshot_fie
             6 => changed.transfer[64] = -0.75,
             _ => unreachable!(),
         }
-        assert_ne!(event(track, effect, 7, meter), event(track, effect, 7, changed));
+        assert_ne!(
+            event(track, effect, 7, meter),
+            event(track, effect, 7, changed)
+        );
     }
-    assert_eq!(event(track, effect, 7, meter).time_domain(), crate::events::TimeDomain::Untimed);
+    assert_eq!(
+        event(track, effect, 7, meter).time_domain(),
+        crate::events::TimeDomain::Untimed
+    );
 }
 
 type Fixture = (
@@ -89,9 +98,8 @@ fn fixture() -> Fixture {
 fn render_window(engine: &mut AudioEngine, track: TrackId, amplitude: f32) -> [f32; 1920] {
     let input = [amplitude; 1920];
     let mut output = [0.0; 1920];
-    engine.process_block(
-        AudioProcessBlock::new(&mut output, 2).with_live_input(track.raw(), &input),
-    );
+    engine
+        .process_block(AudioProcessBlock::new(&mut output, 2).with_live_input(track.raw(), &input));
     output
 }
 
@@ -142,7 +150,12 @@ fn prepared_drive_edits_transitions_automation_and_meter_reset_never_allocate() 
             effect.process(&mut audio, 2);
             let meter = effect.take_waveshaper_meter().unwrap();
             assert_eq!((meter.count, meter.latency_samples), (128, 64));
-            assert!(meter.input.iter().chain(&meter.output).chain(&meter.transfer).all(|sample| sample.is_finite()));
+            assert!(meter
+                .input
+                .iter()
+                .chain(&meter.output)
+                .chain(&meter.transfer)
+                .all(|sample| sample.is_finite()));
         }
         effect.reset();
         assert_eq!(effect.take_waveshaper_meter().unwrap().count, 0);
@@ -150,7 +163,11 @@ fn prepared_drive_edits_transitions_automation_and_meter_reset_never_allocate() 
         effect.process(&mut audio, 2);
         let silence = effect.take_waveshaper_meter().unwrap();
         assert_eq!(silence.count, 128);
-        assert!(silence.input.iter().chain(&silence.output).all(|sample| *sample == 0.0));
+        assert!(silence
+            .input
+            .iter()
+            .chain(&silence.output)
+            .all(|sample| *sample == 0.0));
     });
     assert_eq!(measured, (0, 0));
 }
@@ -163,34 +180,51 @@ fn drive_snapshots_follow_selected_track_return_and_master_in_both_render_paths(
         for (master, bus) in [(false, false), (false, true), (true, false)] {
             let (mut engine, mut commands, mut events) = AudioEngine::new();
             let source = TrackId::new();
-            let selected = if master { TrackId::MASTER } else if bus { TrackId::new() } else { source };
+            let selected = if master {
+                TrackId::MASTER
+            } else if bus {
+                TrackId::new()
+            } else {
+                source
+            };
             let effect = EffectId::new();
             commands.push(EngineCommand::SetSampleRate(48_000)).unwrap();
             commands.push(EngineCommand::add_track(source)).unwrap();
             if bus {
                 commands.push(EngineCommand::add_bus(selected)).unwrap();
-                commands.push(EngineCommand::SetSend {
-                    track_id: source,
-                    bus_id: selected,
-                    amount: 1.0,
-                }).unwrap();
+                commands
+                    .push(EngineCommand::SetSend {
+                        track_id: source,
+                        bus_id: selected,
+                        amount: 1.0,
+                    })
+                    .unwrap();
             }
-            commands.push(EngineCommand::insert_built_in_effect(
-                selected, effect, EffectType::Drive, 48_000,
-            )).unwrap();
-            commands.push(EngineCommand::SetEffectParam {
-                track_id: selected,
-                effect_id: effect,
-                param_index: 0,
-                value: 0.0,
-            }).unwrap();
+            commands
+                .push(EngineCommand::insert_built_in_effect(
+                    selected,
+                    effect,
+                    EffectType::Drive,
+                    48_000,
+                ))
+                .unwrap();
+            commands
+                .push(EngineCommand::SetEffectParam {
+                    track_id: selected,
+                    effect_id: effect,
+                    param_index: 0,
+                    value: 0.0,
+                })
+                .unwrap();
             if graph {
-                let chain = || vec![RoutingEffect {
-                    id: effect,
-                    inputs: vec![],
-                    assignments: vec![],
-                    inactive_inputs: vec![],
-                }];
+                let chain = || {
+                    vec![RoutingEffect {
+                        id: effect,
+                        inputs: vec![],
+                        assignments: vec![],
+                        inactive_inputs: vec![],
+                    }]
+                };
                 let mut channels = vec![RoutingChannel {
                     id: source,
                     is_bus: false,
@@ -211,27 +245,60 @@ fn drive_snapshots_follow_selected_track_return_and_master_in_both_render_paths(
                     effects: if master { chain() } else { vec![] },
                     sends: vec![],
                 });
-                let reports = [(RoutingNode { channel: selected, stage: NodeStage::Effect(effect) }, 64)];
-                commands.push(EngineCommand::SetRouting(
-                    crate::routing::PreparedRouting::prepare_compensated(
-                        &channels, 128, &reports, &[], 1,
-                    ).unwrap(),
-                )).unwrap();
+                let reports = [(
+                    RoutingNode {
+                        channel: selected,
+                        stage: NodeStage::Effect(effect),
+                    },
+                    64,
+                )];
+                commands
+                    .push(EngineCommand::SetRouting(
+                        crate::routing::PreparedRouting::prepare_compensated(
+                            &channels,
+                            128,
+                            &reports,
+                            &[],
+                            1,
+                        )
+                        .unwrap(),
+                    ))
+                    .unwrap();
             }
-            commands.push(EngineCommand::SetEffectMeterChannel {
-                track_id: Some(selected),
-                generation: 11,
-            }).unwrap();
+            commands
+                .push(EngineCommand::SetEffectMeterChannel {
+                    track_id: Some(selected),
+                    generation: 11,
+                })
+                .unwrap();
             render_window(&mut engine, source, 0.25);
             let windows = snapshots(&mut events);
-            assert_eq!(windows.len(), 1, "graph={graph}, master={master}, bus={bus}");
-            assert_eq!((windows[0].0, windows[0].1, windows[0].2), (selected, effect, 11));
+            assert_eq!(
+                windows.len(),
+                1,
+                "graph={graph}, master={master}, bus={bus}"
+            );
+            assert_eq!(
+                (windows[0].0, windows[0].1, windows[0].2),
+                (selected, effect, 11)
+            );
             let meter = windows[0].3;
             assert_eq!((meter.count, meter.latency_samples), (128, 64));
             assert_eq!(meter.sample_rate, 48_000.0);
-            let expected = 0.25 * if selected == source { 1.0 } else { std::f32::consts::FRAC_1_SQRT_2 };
-            assert!(meter.input.iter().all(|sample| (*sample - expected).abs() < 1e-6));
-            assert!(meter.output.iter().all(|sample| (*sample - expected).abs() < 1e-6));
+            let expected = 0.25
+                * if selected == source {
+                    1.0
+                } else {
+                    std::f32::consts::FRAC_1_SQRT_2
+                };
+            assert!(meter
+                .input
+                .iter()
+                .all(|sample| (*sample - expected).abs() < 1e-6));
+            assert!(meter
+                .output
+                .iter()
+                .all(|sample| (*sample - expected).abs() < 1e-6));
             assert!(engine.compensation_valid);
         }
     }
@@ -243,7 +310,11 @@ fn drive_full_ring_drops_snapshots_without_callback_allocation_or_retry_backlog(
     render_window(&mut engine, track, 0.5);
     assert_eq!(snapshots(&mut events).len(), 1);
     let mut occupied = 0;
-    while engine.event_tx.push(EngineEvent::PlaybackPosition(0)).is_ok() {
+    while engine
+        .event_tx
+        .push(EngineEvent::PlaybackPosition(0))
+        .is_ok()
+    {
         occupied += 1;
     }
     assert_eq!(occupied, 1024, "telemetry must keep the bounded event ring");
@@ -261,12 +332,24 @@ fn drive_full_ring_drops_snapshots_without_callback_allocation_or_retry_backlog(
     });
     assert_eq!(measured, (0, 0));
     let fresh = snapshots(&mut events);
-    assert_eq!(fresh.len(), 1, "dropped windows cannot queue a retry backlog");
+    assert_eq!(
+        fresh.len(),
+        1,
+        "dropped windows cannot queue a retry backlog"
+    );
     assert_eq!((fresh[0].0, fresh[0].1, fresh[0].2), (track, effect, 7));
     assert_eq!(fresh[0].3.count, 128);
     assert_eq!(fresh[0].3.latency_samples, 64);
-    assert!(fresh[0].3.input.iter().all(|sample| (*sample - 0.03).abs() < 1e-6));
-    assert!(fresh[0].3.output.iter().all(|sample| (*sample - 0.03).abs() < 1e-6));
+    assert!(fresh[0]
+        .3
+        .input
+        .iter()
+        .all(|sample| (*sample - 0.03).abs() < 1e-6));
+    assert!(fresh[0]
+        .3
+        .output
+        .iter()
+        .all(|sample| (*sample - 0.03).abs() < 1e-6));
 }
 
 #[test]
@@ -293,8 +376,16 @@ fn drive_snapshots_clear_on_bypass_and_resume_with_fresh_selection_generation() 
     assert_eq!(fresh.len(), 1);
     assert_eq!((fresh[0].0, fresh[0].1, fresh[0].2), (track, effect, 9));
     assert_eq!(fresh[0].3.count, 128);
-    assert!(fresh[0].3.input.iter().all(|sample| (*sample - 0.03).abs() < 1e-6));
-    assert!(fresh[0].3.output.iter().all(|sample| (*sample - 0.03).abs() < 1e-6));
+    assert!(fresh[0]
+        .3
+        .input
+        .iter()
+        .all(|sample| (*sample - 0.03).abs() < 1e-6));
+    assert!(fresh[0]
+        .3
+        .output
+        .iter()
+        .all(|sample| (*sample - 0.03).abs() < 1e-6));
 
     commands
         .push(EngineCommand::SetEffectBypass {
@@ -361,13 +452,20 @@ fn drive_waveform_publishes_real_chronological_pairs_at_fifty_hertz() {
                 generation,
                 meter,
             } => {
-                assert_eq!((observed_track, observed_effect, generation), (track_id, effect_id, 7));
+                assert_eq!(
+                    (observed_track, observed_effect, generation),
+                    (track_id, effect_id, 7)
+                );
                 Some(meter)
             }
             _ => None,
         })
         .collect();
-    assert_eq!(windows.len(), 1, "the selected Drive needs a genuine window");
+    assert_eq!(
+        windows.len(),
+        1,
+        "the selected Drive needs a genuine window"
+    );
     let meter = windows[0];
     assert_eq!(meter.count, 128);
     assert_eq!(meter.sample_rate, 48_000.0);

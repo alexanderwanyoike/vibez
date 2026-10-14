@@ -60,7 +60,9 @@ fn four_value_projects_preserve_original_tanh_tilt_blends_after_reported_delay()
                 padded.extend(std::iter::repeat_n(0.0, delay * 2));
                 let actual = render(effect.as_mut(), &padded, partitions);
                 assert!(actual[..delay * 2].iter().all(|&sample| sample == 0.0));
-                for (index, (&actual, &expected)) in actual[delay * 2..].iter().zip(&expected).enumerate() {
+                for (index, (&actual, &expected)) in
+                    actual[delay * 2..].iter().zip(&expected).enumerate()
+                {
                     assert!((actual - expected).abs() < 1e-7,
                         "rate={rate}, controls={controls:?}, parts={partitions:?}, sample={index}: {actual} != {expected}");
                 }
@@ -76,23 +78,43 @@ fn four_value_projects_preserve_original_tanh_tilt_blends_after_reported_delay()
 fn automated_legacy_controls_travel_with_their_original_source_sample() {
     for rate in [44_100.0, 48_000.0, 96_000.0] {
         for partition in [1, 31, 127] {
-            let mut effect = create_effect_with_params(EffectType::Drive, rate, &[0.35, 0.5, 1.0, 1.0]);
+            let mut effect =
+                create_effect_with_params(EffectType::Drive, rate, &[0.35, 0.5, 1.0, 1.0]);
             let mut expected = vec![0.0; 64 * 2];
             let mut actual = Vec::new();
             let mut previous = [0.0_f32; 2];
             let mut controls = [0.35_f32, 0.5, 1.0, 1.0];
-            let changes = [(73, 2, 0.0), (181, 2, 1.7), (257, 3, 0.13), (399, 0, 0.91), (503, 1, 0.03), (619, 3, 0.89)];
+            let changes = [
+                (73, 2, 0.0),
+                (181, 2, 1.7),
+                (257, 3, 0.13),
+                (399, 0, 0.91),
+                (503, 1, 0.03),
+                (619, 3, 0.89),
+            ];
             let mut frame = 0;
             while frame < 832 {
                 for &(at, index, value) in &changes {
-                    if frame == at { controls[index] = value; assert!(effect.set_automated_param(index, value)); }
+                    if frame == at {
+                        controls[index] = value;
+                        assert!(effect.set_automated_param(index, value));
+                    }
                 }
-                let next = changes.iter().filter(|&&(at, _, _)| at > frame).map(|&(at, _, _)| at).min().unwrap_or(832);
+                let next = changes
+                    .iter()
+                    .filter(|&&(at, _, _)| at > frame)
+                    .map(|&(at, _, _)| at)
+                    .min()
+                    .unwrap_or(832);
                 let end = (frame + partition).min(next).min(832);
                 let mut block = Vec::new();
                 for source in frame..end {
                     for (channel, state) in previous.iter_mut().enumerate() {
-                        let input = if source < 768 { 0.23 * (source as f32 * 0.071 + channel as f32).sin() + 0.04 } else { 0.0 };
+                        let input = if source < 768 {
+                            0.23 * (source as f32 * 0.071 + channel as f32).sin() + 0.04
+                        } else {
+                            0.0
+                        };
                         let [amount, tone, output, mix] = controls;
                         let gain = 1.0 + amount * amount * 29.0;
                         let shaped = (input * gain).tanh() / gain.tanh();

@@ -28,7 +28,13 @@ impl DriveValue {
 
     pub fn parse(self, text: &str, current: f32) -> Option<f32> {
         let text = text.trim().to_ascii_lowercase();
-        let text = text.trim_end_matches(if matches!(self, Self::Percent) { "%" } else { "db" }).trim();
+        let text = text
+            .trim_end_matches(if matches!(self, Self::Percent) {
+                "%"
+            } else {
+                "db"
+            })
+            .trim();
         if matches!(self, Self::Output) && matches!(text, "-inf" | "-∞" | "mute") {
             return Some(0.0);
         }
@@ -51,8 +57,6 @@ impl DriveValue {
             Self::Percent => (0.0..=100.0).contains(&number).then_some(number / 100.0),
         }
     }
-
-
 }
 
 pub fn knob_position(amount: f32) -> f32 {
@@ -85,7 +89,11 @@ mod tests {
         for kind in [DriveValue::Amount, DriveValue::Output, DriveValue::Percent] {
             for current in [0.0, 0.001_246, 0.185_255, 0.35, 0.5, 0.973_213, 1.0] {
                 let shown = kind.display(current);
-                assert_eq!(kind.parse(&shown, current), Some(current), "{kind:?} {shown}");
+                assert_eq!(
+                    kind.parse(&shown, current),
+                    Some(current),
+                    "{kind:?} {shown}"
+                );
             }
         }
         assert_eq!(DriveValue::Output.display(0.0), "-inf");
@@ -109,7 +117,6 @@ mod tests {
             let amount = knob_value(position);
             assert!((knob_position(amount) - position).abs() < 1e-6);
             assert!((amount_db(amount) - position * amount_db(1.0)).abs() < 1e-5);
-
         }
     }
 }

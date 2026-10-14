@@ -1,14 +1,17 @@
 //! Drive's declared delay preserves source alignment through production Bounce.
 
 use super::*;
-use vibez_dsp::drive::{DRIVE_PARAMS, param};
+use vibez_dsp::drive::{param, DRIVE_PARAMS};
 
 fn request(sample_rate: u32, bypass: bool, character: f32) -> BounceRequest {
     let mut track = bare_track("Drive impulses");
     let params = if character == 0.0 {
         vec![0.0, 0.5, 1.0, 1.0]
     } else {
-        let mut values: Vec<_> = DRIVE_PARAMS.iter().map(|descriptor| descriptor.default).collect();
+        let mut values: Vec<_> = DRIVE_PARAMS
+            .iter()
+            .map(|descriptor| descriptor.default)
+            .collect();
         values[param::AMOUNT] = 0.0;
         values[param::CHARACTER] = character;
         values
@@ -78,18 +81,17 @@ fn drive_bounce_retains_leading_and_trailing_impulses_at_every_rate_and_bypass_s
                 for start in [0, 200] {
                     let mut req = request(sample_rate, bypass, character);
                     req.range_samples.0 = start;
-                    let result = render_offline_with_plugins(
-                        &req,
-                        &mut OfflinePlugins::default(),
-                        |_| {},
-                    ).unwrap();
+                    let result =
+                        render_offline_with_plugins(&req, &mut OfflinePlugins::default(), |_| {})
+                            .unwrap();
                     assert!(result.warnings.is_empty());
                     assert_eq!(result.audio.sample_rate, sample_rate);
                     assert_eq!(result.audio.channels.len(), 2);
                     for channel in &result.audio.channels {
                         assert_eq!(channel.len(), (2048 - start) as usize);
                         for (index, sample) in channel.iter().enumerate() {
-                            let expected = if [0, 199, 200, 2047].contains(&(index as u64 + start)) {
+                            let expected = if [0, 199, 200, 2047].contains(&(index as u64 + start))
+                            {
                                 0.25 * std::f32::consts::FRAC_1_SQRT_2
                             } else {
                                 0.0
@@ -110,28 +112,39 @@ fn realtime(req: &BounceRequest) -> Vec<f32> {
     use vibez_core::routing::{NodeStage, RoutingChannel, RoutingEffect, RoutingNode, SourceTap};
 
     let (mut engine, mut commands, mut events) = AudioEngine::new();
-    commands.push(Command::SetSampleRate(req.sample_rate)).unwrap();
+    commands
+        .push(Command::SetSampleRate(req.sample_rate))
+        .unwrap();
     let mut channels = Vec::new();
     let mut reports = Vec::new();
     let mut warnings = Vec::new();
     for info in &req.tracks {
-        let channel = super::super::prepare::channel(
-            req, info, SourceTap::AfterFader, None, &mut warnings,
-        );
+        let channel =
+            super::super::prepare::channel(req, info, SourceTap::AfterFader, None, &mut warnings);
         for slot in &channel.effects {
             assert_eq!(slot.effect.latency_samples(), 64);
-            reports.push((RoutingNode { channel: info.id, stage: NodeStage::Effect(slot.id) }, 64));
+            reports.push((
+                RoutingNode {
+                    channel: info.id,
+                    stage: NodeStage::Effect(slot.id),
+                },
+                64,
+            ));
         }
         channels.push(RoutingChannel {
             id: info.id,
             is_bus: false,
             sends: vec![],
-            effects: info.effects.iter().map(|effect| RoutingEffect {
-                id: effect.id,
-                inputs: vec![],
-                assignments: vec![],
-                inactive_inputs: vec![],
-            }).collect(),
+            effects: info
+                .effects
+                .iter()
+                .map(|effect| RoutingEffect {
+                    id: effect.id,
+                    inputs: vec![],
+                    assignments: vec![],
+                    inactive_inputs: vec![],
+                })
+                .collect(),
         });
         commands.push(Command::AddTrack(Box::new(channel))).unwrap();
     }
@@ -142,11 +155,12 @@ fn realtime(req: &BounceRequest) -> Vec<f32> {
         sends: vec![],
         effects: vec![],
     });
-    commands.push(Command::SetRouting(
-        crate::routing::PreparedRouting::prepare_compensated(
-            &channels, 128, &reports, &[], 1,
-        ).unwrap(),
-    )).unwrap();
+    commands
+        .push(Command::SetRouting(
+            crate::routing::PreparedRouting::prepare_compensated(&channels, 128, &reports, &[], 1)
+                .unwrap(),
+        ))
+        .unwrap();
     commands.push(Command::Play).unwrap();
     let frames = req.range_samples.1 as usize + 64;
     let mut output = Vec::with_capacity(frames * 2);
@@ -157,11 +171,15 @@ fn realtime(req: &BounceRequest) -> Vec<f32> {
         engine.process_block(AudioProcessBlock::new(&mut block[..count * 2], 2));
         output.extend_from_slice(&block[..count * 2]);
         while let Ok(event) = events.pop() {
-            assert!(!matches!(event,
-                crate::events::EngineEvent::CompensationInvalid { .. }
-                | crate::events::EngineEvent::CompensationFailed { .. }
-                | crate::events::EngineEvent::DeviceProcessingFailed { .. }
-            ), "{event:?}");
+            assert!(
+                !matches!(
+                    event,
+                    crate::events::EngineEvent::CompensationInvalid { .. }
+                        | crate::events::EngineEvent::CompensationFailed { .. }
+                        | crate::events::EngineEvent::DeviceProcessingFailed { .. }
+                ),
+                "{event:?}"
+            );
         }
     }
     output
@@ -187,9 +205,11 @@ fn drive_realtime_parallel_paths_cancel_at_declared_latency_including_bypass() {
                 let mut clip = req.audio_clips[0].clone();
                 let original = &req.clip_audio[&clip.id];
                 let inverse = Arc::new(DecodedAudio {
-                    channels: original.channels.iter().map(|channel| {
-                        channel.iter().map(|sample| -*sample).collect()
-                    }).collect(),
+                    channels: original
+                        .channels
+                        .iter()
+                        .map(|channel| channel.iter().map(|sample| -*sample).collect())
+                        .collect(),
                     sample_rate,
                 });
                 clip.id = ClipId::new();
@@ -198,11 +218,16 @@ fn drive_realtime_parallel_paths_cancel_at_declared_latency_including_bypass() {
                 req.audio_clips.push(clip);
                 req.tracks.push(dry);
                 assert!(realtime(&req).iter().all(|sample| sample.abs() < 1e-6));
-                let bounced = render_offline_with_plugins(
-                    &req, &mut OfflinePlugins::default(), |_| {},
-                ).unwrap();
+                let bounced =
+                    render_offline_with_plugins(&req, &mut OfflinePlugins::default(), |_| {})
+                        .unwrap();
                 assert!(bounced.warnings.is_empty());
-                assert!(bounced.audio.channels.iter().flatten().all(|sample| sample.abs() < 1e-6));
+                assert!(bounced
+                    .audio
+                    .channels
+                    .iter()
+                    .flatten()
+                    .all(|sample| sample.abs() < 1e-6));
             }
         }
     }

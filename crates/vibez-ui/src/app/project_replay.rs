@@ -406,7 +406,12 @@ impl App {
             if effect.plugin_ref.is_some() {
                 continue;
             }
-            self.insert_built_in_effect_with_params(track.id, effect.id, effect.effect_type, &effect.params);
+            self.insert_built_in_effect_with_params(
+                track.id,
+                effect.id,
+                effect.effect_type,
+                &effect.params,
+            );
             self.send_command(EngineCommand::SetEffectBypass {
                 track_id: track.id,
                 effect_id: effect.id,

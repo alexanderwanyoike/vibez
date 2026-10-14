@@ -61,8 +61,17 @@ pub trait EngineHandle {
         effect_type: vibez_core::effect::EffectType,
         params: &[f32],
     ) {
-        let effect = vibez_dsp::factory::create_effect_with_params(effect_type, self.sample_rate() as f32, params);
-        self.send(EngineCommand::InsertEffect { track_id, effect_id, effect, position: None });
+        let effect = vibez_dsp::factory::create_effect_with_params(
+            effect_type,
+            self.sample_rate() as f32,
+            params,
+        );
+        self.send(EngineCommand::InsertEffect {
+            track_id,
+            effect_id,
+            effect,
+            position: None,
+        });
     }
 
     fn set_built_in_instrument(
@@ -306,7 +315,10 @@ pub mod drive_layout;
 #[cfg(test)]
 mod drive_prepared_queue_tests {
     use super::*;
-    use vibez_core::{effect::EffectType, id::{TrackId, EffectId}};
+    use vibez_core::{
+        effect::EffectType,
+        id::{EffectId, TrackId},
+    };
 
     #[test]
     fn queued_drive_keeps_complete_sound_and_forwarded_rate_under_ring_pressure() {
@@ -314,14 +326,26 @@ mod drive_prepared_queue_tests {
         let mut queue = EngineCommandQueue::new(producer);
         queue.send(EngineCommand::SetSampleRate(96_000));
         let params = crate::domains::drive::fresh_sound();
-        queue.insert_built_in_effect_with_params(TrackId::new(), EffectId::new(), EffectType::Drive, &params);
+        queue.insert_built_in_effect_with_params(
+            TrackId::new(),
+            EffectId::new(),
+            EffectType::Drive,
+            &params,
+        );
         assert_eq!(queue.pending_len(), 1);
-        assert!(matches!(consumer.pop(), Ok(EngineCommand::SetSampleRate(96_000))));
+        assert!(matches!(
+            consumer.pop(),
+            Ok(EngineCommand::SetSampleRate(96_000))
+        ));
         queue.flush();
-        let Ok(EngineCommand::InsertEffect { effect, .. }) = consumer.pop() else { panic!("prepared insertion must stay atomic"); };
+        let Ok(EngineCommand::InsertEffect { effect, .. }) = consumer.pop() else {
+            panic!("prepared insertion must stay atomic");
+        };
         assert_eq!(effect.activation_sample_rate(), Some(96_000));
         assert_eq!(effect.latency_samples(), 64);
-        for (index, expected) in params.iter().enumerate() { assert_eq!(effect.get_param(index), *expected); }
+        for (index, expected) in params.iter().enumerate() {
+            assert_eq!(effect.get_param(index), *expected);
+        }
         assert_eq!(queue.pending_len(), 0);
         assert!(consumer.pop().is_err());
     }

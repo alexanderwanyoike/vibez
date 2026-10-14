@@ -6,8 +6,8 @@ use std::time::{Duration, Instant};
 use vibez_core::id::{EffectId, TrackId};
 use vibez_engine::metering::MeterValues;
 
-use crate::domains::gain::is_native_gain;
 use crate::domains::drive::is_native_drive;
+use crate::domains::gain::is_native_gain;
 use crate::state::{DetailPanelTab, UiEffect};
 
 use super::*;

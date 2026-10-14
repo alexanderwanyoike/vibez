@@ -213,7 +213,12 @@ impl App {
                 has_plugin_gui: false,
                 plugin_ref: None,
             });
-            self.insert_built_in_effect_with_params(chan_id, effect_info.id, effect_info.effect_type, &effect_info.params);
+            self.insert_built_in_effect_with_params(
+                chan_id,
+                effect_info.id,
+                effect_info.effect_type,
+                &effect_info.params,
+            );
             self.send_command(EngineCommand::SetEffectBypass {
                 track_id: chan_id,
                 effect_id: effect_info.id,
@@ -599,7 +604,12 @@ impl App {
                     has_plugin_gui: false,
                     plugin_ref: None,
                 });
-                self.insert_built_in_effect_with_params(track_info.id, effect_info.id, effect_info.effect_type, &effect_info.params);
+                self.insert_built_in_effect_with_params(
+                    track_info.id,
+                    effect_info.id,
+                    effect_info.effect_type,
+                    &effect_info.params,
+                );
                 self.send_command(EngineCommand::SetEffectBypass {
                     track_id: track_info.id,
                     effect_id: effect_info.id,

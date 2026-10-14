@@ -9,7 +9,10 @@ pub fn presentation_descriptor(effect: &crate::state::UiEffect, index: usize) ->
     if crate::domains::drive::is_native_drive(effect) {
         use vibez_dsp::drive::param;
         match index {
-            param::AMOUNT => { descriptor.name = "Drive"; descriptor.unit = "dB"; }
+            param::AMOUNT => {
+                descriptor.name = "Drive";
+                descriptor.unit = "dB";
+            }
             param::OUTPUT => descriptor.unit = "dB",
             param::TONE | param::MIX => descriptor.unit = "%",
             _ => {}
@@ -83,10 +86,7 @@ impl DeviceControlState {
             }
             DeviceControlMsg::Submit(_, _, index) => {
                 let descriptor = descriptors.get(index)?;
-                let Some(value) = self
-                    .entries
-                    .get(&index)
-                    .and_then(|text| parse(index, text))
+                let Some(value) = self.entries.get(&index).and_then(|text| parse(index, text))
                 else {
                     self.errors.insert(index);
                     return None;

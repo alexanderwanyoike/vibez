@@ -408,11 +408,13 @@ impl DriveGallery {
         for (index, value) in drive.params.iter().enumerate() {
             processor.set_param(index, *value);
         }
-        let mut audio: Vec<f32> = (0..2048).flat_map(|sample| {
-            let phase = sample as f32 * std::f32::consts::TAU / 64.0;
-            let value = 0.45 * phase.sin() + 0.15 * (phase * 3.0).sin();
-            [value, value]
-        }).collect();
+        let mut audio: Vec<f32> = (0..2048)
+            .flat_map(|sample| {
+                let phase = sample as f32 * std::f32::consts::TAU / 64.0;
+                let value = 0.45 * phase.sin() + 0.15 * (phase * 3.0).sin();
+                [value, value]
+            })
+            .collect();
         let input = vibez_engine::metering::calculate_meters(&audio, 2);
         processor.process(&mut audio, 2);
         let output = vibez_engine::metering::calculate_meters(&audio, 2);
@@ -421,24 +423,65 @@ impl DriveGallery {
             panel.accept_meter(meter, std::time::Instant::now());
         }
         Self {
-            track: TrackId::new(), effect: drive,
-            open: crate::domains::device_controls::DeviceControlState { advanced: true, ..Default::default() },
-            closed: Default::default(), panel, unavailable: Default::default(), input, output,
+            track: TrackId::new(),
+            effect: drive,
+            open: crate::domains::device_controls::DeviceControlState {
+                advanced: true,
+                ..Default::default()
+            },
+            closed: Default::default(),
+            panel,
+            unavailable: Default::default(),
+            input,
+            output,
         }
     }
 
-    fn scene(&self, width: f32, height: f32, advanced: bool, available: bool) -> Element<'_, Message> {
+    fn scene(
+        &self,
+        width: f32,
+        height: f32,
+        advanced: bool,
+        available: bool,
+    ) -> Element<'_, Message> {
         let effect = &self.effect;
         let state = if advanced { &self.open } else { &self.closed };
-        let panel = if available { &self.panel } else { &self.unavailable };
+        let panel = if available {
+            &self.panel
+        } else {
+            &self.unavailable
+        };
         let body = iced::widget::responsive(move |size| {
-            crate::widgets::drive_device::view(self.track, effect, th::track_color(0), state, panel,
-                crate::widgets::device_preset_bar::view(self.track, effect, None, th::track_color(0),
-                    crate::widgets::drive_device::preset_bar_width(size)),
-                self.input, self.output, size)
+            crate::widgets::drive_device::view(
+                self.track,
+                effect,
+                th::track_color(0),
+                state,
+                panel,
+                crate::widgets::device_preset_bar::view(
+                    self.track,
+                    effect,
+                    None,
+                    th::track_color(0),
+                    crate::widgets::drive_device::preset_bar_width(size),
+                ),
+                self.input,
+                self.output,
+                size,
+            )
         });
-        let card = view_effect_slot(self.track, effect, th::track_color(0),
-            Some(crate::widgets::effect_slot::DeviceBody { content: body.into(), width, padding: iced::Padding::ZERO }), None, 48_000);
+        let card = view_effect_slot(
+            self.track,
+            effect,
+            th::track_color(0),
+            Some(crate::widgets::effect_slot::DeviceBody {
+                content: body.into(),
+                width,
+                padding: iced::Padding::ZERO,
+            }),
+            None,
+            48_000,
+        );
         container(card).width(width).height(height).into()
     }
 
@@ -453,12 +496,18 @@ impl DriveGallery {
 }
 
 pub fn run_drive() -> iced::Result {
-    iced::application("Drive device gallery", |_: &mut DriveGallery, _: Message| {}, DriveGallery::view)
-        .theme(|_| th::vibez_theme()).antialiasing(true).window_size((1600.0, 1100.0))
-        .font(crate::icons::ICON_FONT_BYTES)
-        .font(crate::typography::PLEX_SANS_CONDENSED_MEDIUM_BYTES)
-        .font(crate::typography::PLEX_SANS_CONDENSED_SEMIBOLD_BYTES)
-        .font(crate::typography::PLEX_MONO_MEDIUM_BYTES)
-        .font(crate::typography::PLEX_MONO_SEMIBOLD_BYTES)
-        .run_with(|| (DriveGallery::new(), iced::Task::none()))
+    iced::application(
+        "Drive device gallery",
+        |_: &mut DriveGallery, _: Message| {},
+        DriveGallery::view,
+    )
+    .theme(|_| th::vibez_theme())
+    .antialiasing(true)
+    .window_size((1600.0, 1100.0))
+    .font(crate::icons::ICON_FONT_BYTES)
+    .font(crate::typography::PLEX_SANS_CONDENSED_MEDIUM_BYTES)
+    .font(crate::typography::PLEX_SANS_CONDENSED_SEMIBOLD_BYTES)
+    .font(crate::typography::PLEX_MONO_MEDIUM_BYTES)
+    .font(crate::typography::PLEX_MONO_SEMIBOLD_BYTES)
+    .run_with(|| (DriveGallery::new(), iced::Task::none()))
 }

@@ -53,12 +53,48 @@ pub static DRIVE_PARAMS: &[ParamDescriptor] = &[
         default: 1.0,
         unit: "",
     },
-    ParamDescriptor { name: "Character", min: 0.0, max: 3.0, default: 0.0, unit: "" },
-    ParamDescriptor { name: "Quality", min: 0.0, max: 2.0, default: 2.0, unit: "" },
-    ParamDescriptor { name: "Pre HP Enabled", min: 0.0, max: 1.0, default: 0.0, unit: "" },
-    ParamDescriptor { name: "Pre HP Frequency", min: 20.0, max: 1000.0, default: 80.0, unit: "Hz" },
-    ParamDescriptor { name: "Post LP Enabled", min: 0.0, max: 1.0, default: 0.0, unit: "" },
-    ParamDescriptor { name: "Post LP Frequency", min: 1000.0, max: 20000.0, default: 12000.0, unit: "Hz" },
+    ParamDescriptor {
+        name: "Character",
+        min: 0.0,
+        max: 3.0,
+        default: 0.0,
+        unit: "",
+    },
+    ParamDescriptor {
+        name: "Quality",
+        min: 0.0,
+        max: 2.0,
+        default: 2.0,
+        unit: "",
+    },
+    ParamDescriptor {
+        name: "Pre HP Enabled",
+        min: 0.0,
+        max: 1.0,
+        default: 0.0,
+        unit: "",
+    },
+    ParamDescriptor {
+        name: "Pre HP Frequency",
+        min: 20.0,
+        max: 1000.0,
+        default: 80.0,
+        unit: "Hz",
+    },
+    ParamDescriptor {
+        name: "Post LP Enabled",
+        min: 0.0,
+        max: 1.0,
+        default: 0.0,
+        unit: "",
+    },
+    ParamDescriptor {
+        name: "Post LP Frequency",
+        min: 1000.0,
+        max: 20000.0,
+        default: 12000.0,
+        unit: "Hz",
+    },
 ];
 
 struct ChoiceFade<const N: usize> {
@@ -70,22 +106,37 @@ struct ChoiceFade<const N: usize> {
 
 impl<const N: usize> ChoiceFade<N> {
     fn new(target: usize) -> Self {
-        Self { weights: std::array::from_fn(|index| f32::from(index == target)), steps: [0.0; N], target, remaining: 0 }
+        Self {
+            weights: std::array::from_fn(|index| f32::from(index == target)),
+            steps: [0.0; N],
+            target,
+            remaining: 0,
+        }
     }
 
     fn edit(&mut self, target: usize, immediate: bool) {
-        if immediate { *self = Self::new(target); } else {
+        if immediate {
+            *self = Self::new(target);
+        } else {
             self.target = target;
-            self.steps = std::array::from_fn(|index| (f32::from(index == target) - self.weights[index]) / RAMP_FRAMES as f32);
+            self.steps = std::array::from_fn(|index| {
+                (f32::from(index == target) - self.weights[index]) / RAMP_FRAMES as f32
+            });
             self.remaining = RAMP_FRAMES;
         }
     }
 
     fn advance(&mut self) {
-        if self.remaining == 0 { return; }
+        if self.remaining == 0 {
+            return;
+        }
         self.remaining -= 1;
-        if self.remaining == 0 { *self = Self::new(self.target); } else {
-            for (weight, step) in self.weights.iter_mut().zip(self.steps) { *weight += step; }
+        if self.remaining == 0 {
+            *self = Self::new(self.target);
+        } else {
+            for (weight, step) in self.weights.iter_mut().zip(self.steps) {
+                *weight += step;
+            }
         }
     }
 }
@@ -126,7 +177,11 @@ impl DriveEffect {
     }
 
     pub fn with_sample_rate(sample_rate: f32) -> Self {
-        let sample_rate = if sample_rate.is_finite() && sample_rate >= 2.0 { sample_rate } else { 48_000.0 };
+        let sample_rate = if sample_rate.is_finite() && sample_rate >= 2.0 {
+            sample_rate
+        } else {
+            48_000.0
+        };
         Self {
             params: std::array::from_fn(|index| DRIVE_PARAMS[index].default),
             applied: std::array::from_fn(|index| DRIVE_PARAMS[index].default),
@@ -157,23 +212,37 @@ impl DriveEffect {
     }
 
     fn edit_parameter(&mut self, index: usize, value: f32, automated: bool) -> bool {
-        let Some(descriptor) = DRIVE_PARAMS.get(index) else { return false; };
-        if !value.is_finite() { return false; }
+        let Some(descriptor) = DRIVE_PARAMS.get(index) else {
+            return false;
+        };
+        if !value.is_finite() {
+            return false;
+        }
         let value = value.clamp(descriptor.min, descriptor.max);
         let target = match index {
             param::CHARACTER | param::QUALITY => value.round(),
             param::PRE_HP_ENABLED | param::POST_LP_ENABLED => f32::from(value >= 0.5),
             _ => value,
         };
-        if !automated && self.params[index] == target { return true; }
+        if !automated && self.params[index] == target {
+            return true;
+        }
         self.params[index] = target;
         if index == param::CHARACTER {
-            self.character.edit(target as usize, automated || !self.started);
-            if !self.started { self.character_delay = [self.character.weights; 64]; self.audible_character = self.character.weights; }
+            self.character
+                .edit(target as usize, automated || !self.started);
+            if !self.started {
+                self.character_delay = [self.character.weights; 64];
+                self.audible_character = self.character.weights;
+            }
         }
         if index == param::QUALITY {
-            self.quality.edit(target as usize, automated || !self.started);
-            if !self.started { self.quality_delay = [self.quality.weights; 64]; self.audible_quality = self.quality.weights; }
+            self.quality
+                .edit(target as usize, automated || !self.started);
+            if !self.started {
+                self.quality_delay = [self.quality.weights; 64];
+                self.audible_quality = self.quality.weights;
+            }
         }
         let choice = matches!(index, param::CHARACTER | param::QUALITY);
         if automated || !self.started || choice {
@@ -184,7 +253,9 @@ impl DriveEffect {
             self.remaining[index] = RAMP_FRAMES;
         }
         if !self.started {
-            for controls in &mut self.control_delay { controls[index] = target; }
+            for controls in &mut self.control_delay {
+                controls[index] = target;
+            }
             self.audible[index] = target;
         }
         true
@@ -197,7 +268,11 @@ impl DriveEffect {
 }
 
 fn finite_sample(value: f64) -> f32 {
-    if value.is_nan() { 0.0 } else { value.clamp(-(f32::MAX as f64), f32::MAX as f64) as f32 }
+    if value.is_nan() {
+        0.0
+    } else {
+        value.clamp(-(f32::MAX as f64), f32::MAX as f64) as f32
+    }
 }
 
 impl Default for DriveEffect {
@@ -207,9 +282,13 @@ impl Default for DriveEffect {
 }
 
 impl AudioEffect for DriveEffect {
-    fn supports_level_meter(&self) -> bool { true }
+    fn supports_level_meter(&self) -> bool {
+        true
+    }
 
-    fn activation_sample_rate(&self) -> Option<u32> { Some(self.sample_rate as u32) }
+    fn activation_sample_rate(&self) -> Option<u32> {
+        Some(self.sample_rate as u32)
+    }
 
     fn take_waveshaper_meter(&mut self) -> Option<WaveShaperMeter> {
         let count = self.meter_count as usize;
@@ -226,16 +305,28 @@ impl AudioEffect for DriveEffect {
             meter.input[point] = self.meter.input[position];
             meter.output[point] = self.meter.output[position];
         }
-        let controls = if self.started { &self.audible } else { &self.applied };
+        let controls = if self.started {
+            &self.audible
+        } else {
+            &self.applied
+        };
         let gain = 1.0 + controls[param::AMOUNT] * controls[param::AMOUNT] * 29.0;
         for (point, output) in meter.transfer.iter_mut().enumerate() {
             let input = -1.0 + point as f32 / 32.0;
             let u = (input * gain).clamp(-1.0, 1.0);
-            let weights = if self.started { self.audible_character } else { self.character.weights };
+            let weights = if self.started {
+                self.audible_character
+            } else {
+                self.character.weights
+            };
             let soft = (input * gain).tanh() / gain.tanh();
-            let shaped = (weights[0] + weights[1]) * soft + weights[2] * (1.5 * u - 0.5 * u * u * u) + weights[3] * u;
-            let processed = input * (1.0 - controls[param::AMOUNT]) + shaped * controls[param::AMOUNT];
-            *output = (input * (1.0 - controls[param::MIX]) + processed * controls[param::MIX]) * controls[param::OUTPUT];
+            let shaped = (weights[0] + weights[1]) * soft
+                + weights[2] * (1.5 * u - 0.5 * u * u * u)
+                + weights[3] * u;
+            let processed =
+                input * (1.0 - controls[param::AMOUNT]) + shaped * controls[param::AMOUNT];
+            *output = (input * (1.0 - controls[param::MIX]) + processed * controls[param::MIX])
+                * controls[param::OUTPUT];
         }
         self.meter_count = 0;
         Some(meter)
@@ -291,7 +382,11 @@ impl AudioEffect for DriveEffect {
             for index in 0..param::COUNT {
                 if self.remaining[index] > 0 {
                     self.remaining[index] -= 1;
-                    self.applied[index] = if self.remaining[index] == 0 { self.params[index] } else { self.applied[index] + self.steps[index] };
+                    self.applied[index] = if self.remaining[index] == 0 {
+                        self.params[index]
+                    } else {
+                        self.applied[index] + self.steps[index]
+                    };
                 }
             }
             if cached_amount != self.applied[param::AMOUNT] {
@@ -303,16 +398,28 @@ impl AudioEffect for DriveEffect {
             self.audible = self.control_delay[self.delay_position];
             let interpolated_controls = self.control_delay[(self.delay_position + 32) % 64];
             self.control_delay[self.delay_position] = self.applied;
-            let modern_gain = 1.0 + interpolated_controls[param::AMOUNT] * interpolated_controls[param::AMOUNT] * 29.0;
+            let modern_gain = 1.0
+                + interpolated_controls[param::AMOUNT]
+                    * interpolated_controls[param::AMOUNT]
+                    * 29.0;
             let modern_norm = modern_gain.tanh();
             if cached_tone != self.audible[param::TONE] {
                 cached_tone = self.audible[param::TONE];
                 low_gain = 10.0_f64.powf(-6.0 * (cached_tone as f64 * 2.0 - 1.0) / 20.0);
                 high_gain = low_gain.recip();
             }
-            let frequencies = [self.applied[param::PRE_HP_FREQUENCY], self.audible[param::POST_LP_FREQUENCY]];
-            if frequencies[0] != filter_frequencies[0] { self.pre_hp.configure(self.sample_rate, frequencies[0], true); }
-            if frequencies[1] != filter_frequencies[1] { self.post_lp.configure(self.sample_rate, frequencies[1], false); }
+            let frequencies = [
+                self.applied[param::PRE_HP_FREQUENCY],
+                self.audible[param::POST_LP_FREQUENCY],
+            ];
+            if frequencies[0] != filter_frequencies[0] {
+                self.pre_hp
+                    .configure(self.sample_rate, frequencies[0], true);
+            }
+            if frequencies[1] != filter_frequencies[1] {
+                self.post_lp
+                    .configure(self.sample_rate, frequencies[1], false);
+            }
             filter_frequencies = frequencies;
             let amount = self.applied[param::AMOUNT];
             let tilt = self.applied[param::TONE] * 2.0 - 1.0;
@@ -320,9 +427,14 @@ impl AudioEffect for DriveEffect {
             let output = self.audible[param::OUTPUT];
             for c in 0..ch {
                 let idx = frame * channels + c;
-                let dry = if buffer[idx].is_finite() { buffer[idx] } else { 0.0 };
+                let dry = if buffer[idx].is_finite() {
+                    buffer[idx]
+                } else {
+                    0.0
+                };
                 let filtered = finite_sample(self.pre_hp.process(dry, c) as f64);
-                let shaper_input = dry * (1.0 - self.applied[param::PRE_HP_ENABLED]) + filtered * self.applied[param::PRE_HP_ENABLED];
+                let shaper_input = dry * (1.0 - self.applied[param::PRE_HP_ENABLED])
+                    + filtered * self.applied[param::PRE_HP_ENABLED];
                 let sat = (shaper_input * drive).tanh() / norm;
                 let shelved = sat + tilt * (sat - self.z[c]);
                 self.z[c] = sat;
@@ -335,21 +447,32 @@ impl AudioEffect for DriveEffect {
                 let weights = self.audible_character;
                 let mut modern = 0.0;
                 for (index, path) in self.oversampling.iter_mut().enumerate() {
-                    let selected = [weights[1], weights[2], weights[3]].map(|weight| weight * self.audible_quality[index]);
+                    let selected = [weights[1], weights[2], weights[3]]
+                        .map(|weight| weight * self.audible_quality[index]);
                     modern += path.process(shaper_input, c, modern_gain, modern_norm, selected);
                 }
                 let input = modern as f64;
                 let low = &mut self.modern_low[c];
                 *low = input * (1.0 - tone_beta) + *low * tone_beta;
-                if self.audible[param::TONE] != 0.5 { modern = (*low * low_gain + (input - *low) * high_gain) as f32; }
+                if self.audible[param::TONE] != 0.5 {
+                    modern = (*low * low_gain + (input - *low) * high_gain) as f32;
+                }
                 let modern_weight = weights[1] + weights[2] + weights[3];
-                let processed = weights[0] * legacy + modern_weight * aligned_dry * (1.0 - self.audible[param::AMOUNT]) + modern * self.audible[param::AMOUNT];
+                let processed = weights[0] * legacy
+                    + modern_weight * aligned_dry * (1.0 - self.audible[param::AMOUNT])
+                    + modern * self.audible[param::AMOUNT];
                 let processed = finite_sample(processed as f64);
                 let filtered = finite_sample(self.post_lp.process(processed, c) as f64);
-                let processed = processed * (1.0 - self.audible[param::POST_LP_ENABLED]) + filtered * self.audible[param::POST_LP_ENABLED];
+                let processed = processed * (1.0 - self.audible[param::POST_LP_ENABLED])
+                    + filtered * self.audible[param::POST_LP_ENABLED];
                 let result = (aligned_dry * (1.0 - mix) + processed * mix) * output;
-                buffer[idx] = if result.is_finite() { result } else {
-                    finite_sample((aligned_dry as f64 * (1.0 - mix as f64) + processed as f64 * mix as f64) * output as f64)
+                buffer[idx] = if result.is_finite() {
+                    result
+                } else {
+                    finite_sample(
+                        (aligned_dry as f64 * (1.0 - mix as f64) + processed as f64 * mix as f64)
+                            * output as f64,
+                    )
                 };
                 if c == 0 {
                     let point = self.meter_samples as usize % 128;
@@ -379,7 +502,9 @@ impl AudioEffect for DriveEffect {
         self.dry_delay = [[0.0; 2]; 64];
         self.control_delay = [self.params; 64];
         self.audible = self.params;
-        self.oversampling.iter_mut().for_each(oversampling::OversamplingPath::reset);
+        self.oversampling
+            .iter_mut()
+            .for_each(oversampling::OversamplingPath::reset);
         self.modern_low = [0.0; 2];
         self.pre_hp.reset();
         self.post_lp.reset();

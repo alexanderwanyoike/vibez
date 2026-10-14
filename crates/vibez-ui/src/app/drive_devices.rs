@@ -41,7 +41,11 @@ impl App {
                 })
         });
         if let Some(track) = selected.and_then(|track| self.state.find_track(track)) {
-            for effect in track.effects.iter().filter(|effect| is_native_drive(effect)) {
+            for effect in track
+                .effects
+                .iter()
+                .filter(|effect| is_native_drive(effect))
+            {
                 let panel = self.drive_panels.entry(effect.id).or_default();
                 if effect.bypass {
                     panel.reset_metering();
@@ -82,7 +86,9 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domains::{device_controls::DeviceControlMsg, devices::DevicesMsg, drive::DrivePage};
+    use crate::domains::{
+        device_controls::DeviceControlMsg, devices::DevicesMsg, drive::DrivePage,
+    };
     use crate::state::{DetailPanelTab, ProjectTrack, Workspace};
     use vibez_core::effect::EffectType;
 
@@ -92,8 +98,13 @@ mod tests {
         app.state.view.detail_panel_tab = DetailPanelTab::Devices;
         let channel = ProjectTrack::new(TrackId::new(), "Drive".into(), 3);
         let track = channel.id;
-        Arc::make_mut(&mut app.state.project_tracks).tracks.push(channel);
-        let _ = app.update(Message::Devices(DevicesMsg::AddEffect(track, EffectType::Drive)));
+        Arc::make_mut(&mut app.state.project_tracks)
+            .tracks
+            .push(channel);
+        let _ = app.update(Message::Devices(DevicesMsg::AddEffect(
+            track,
+            EffectType::Drive,
+        )));
         let effect = app.state.find_track(track).unwrap().effects[0].id;
         app.state.arrangement.selected_track = Some(track);
         app.poll_device_meters();
@@ -106,7 +117,13 @@ mod tests {
         let (mut app, track, effect) = drive_app();
         let generation = app.device_meters.generation;
         assert_eq!(app.device_meters.channel, Some(track));
-        let meter = WaveShaperMeter { count: 128, sample_rate: 48_000.0, latency_samples: 64, first_output_sample: 246, ..Default::default() };
+        let meter = WaveShaperMeter {
+            count: 128,
+            sample_rate: 48_000.0,
+            latency_samples: 64,
+            first_output_sample: 246,
+            ..Default::default()
+        };
         app.accept_drive_waveshaper(track, effect, generation.wrapping_sub(1), meter);
         assert!(app.drive_panel(effect).meter.is_none());
         app.accept_drive_waveshaper(track, effect, generation, meter);
@@ -135,20 +152,45 @@ mod tests {
     fn rounded_drive_readout_is_a_noop_and_decibel_edits_undo_without_closing_details() {
         let (mut app, track, effect) = drive_app();
         let initial = app.state.find_track(track).unwrap().effects[0].params[0];
-        let _ = app.update(Message::DeviceControl(DeviceControlMsg::ToggleAdvanced(track, effect)));
-        let _ = app.update(Message::DriveControl(DriveMsg::Page(track, effect, DrivePage::Quality)));
+        let _ = app.update(Message::DeviceControl(DeviceControlMsg::ToggleAdvanced(
+            track, effect,
+        )));
+        let _ = app.update(Message::DriveControl(DriveMsg::Page(
+            track,
+            effect,
+            DrivePage::Quality,
+        )));
         let shown = crate::domains::drive_values::DriveValue::Amount.display(initial);
-        let _ = app.update(Message::DeviceControl(DeviceControlMsg::Input(track, effect, 0, shown)));
-        let _ = app.update(Message::DeviceControl(DeviceControlMsg::Submit(track, effect, 0)));
+        let _ = app.update(Message::DeviceControl(DeviceControlMsg::Input(
+            track, effect, 0, shown,
+        )));
+        let _ = app.update(Message::DeviceControl(DeviceControlMsg::Submit(
+            track, effect, 0,
+        )));
         assert!(!app.state.project.history.can_undo());
-        assert_eq!(app.state.find_track(track).unwrap().effects[0].params[0], initial);
-        let _ = app.update(Message::DeviceControl(DeviceControlMsg::Input(track, effect, 0, "6 dB".into())));
-        let _ = app.update(Message::DeviceControl(DeviceControlMsg::Submit(track, effect, 0)));
-        assert!((app.state.find_track(track).unwrap().effects[0].params[0] - 0.185_254_93).abs() < 1e-6);
+        assert_eq!(
+            app.state.find_track(track).unwrap().effects[0].params[0],
+            initial
+        );
+        let _ = app.update(Message::DeviceControl(DeviceControlMsg::Input(
+            track,
+            effect,
+            0,
+            "6 dB".into(),
+        )));
+        let _ = app.update(Message::DeviceControl(DeviceControlMsg::Submit(
+            track, effect, 0,
+        )));
+        assert!(
+            (app.state.find_track(track).unwrap().effects[0].params[0] - 0.185_254_93).abs() < 1e-6
+        );
         let snapshot = app.state.project.history.pop_undo().unwrap();
         assert!(!app.state.project.history.can_undo());
         app.apply_snapshot(snapshot);
-        assert_eq!(app.state.find_track(track).unwrap().effects[0].params[0], initial);
+        assert_eq!(
+            app.state.find_track(track).unwrap().effects[0].params[0],
+            initial
+        );
         assert!(app.device_controls[&effect].advanced);
         assert_eq!(app.drive_panel(effect).page, DrivePage::Quality);
         assert!(app.drive_panel(effect).meter.is_none());
