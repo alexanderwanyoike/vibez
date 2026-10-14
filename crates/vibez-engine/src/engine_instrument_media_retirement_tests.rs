@@ -379,3 +379,62 @@ fn clearing_populated_pad_returns_owners_and_preserves_unrelated_voice_phase() {
         }
     }
 }
+
+#[test]
+fn pad_state_name_and_source_preparation_preserves_audio_and_canonical_metadata() {
+    use vibez_core::track::{DrumPadState, MediaSourceRef};
+    for full_ring in [false, true] {
+        let (mut engine, mut commands, mut events) = AudioEngine::new();
+        let track = TrackId::new();
+        let old_name = String::from("old-owned-display-name.wav");
+        let old_name_pointer = old_name.as_ptr();
+        commands.push(EngineCommand::SetSampleRate(1000)).unwrap();
+        commands.push(EngineCommand::add_track(track)).unwrap();
+        commands.push(EngineCommand::set_built_in_instrument(track, InstrumentKind::DrumRack, 1000)).unwrap();
+        commands.push(EngineCommand::SetDrumRackPadState { track_id: track, pad_index: 0,
+            state: DrumPadState { fade_in_ms: 0.0, fade_out_ms: 0.0, ..Default::default() } }).unwrap();
+        commands.push(EngineCommand::LoadDrumRackPadSample { track_id: track, pad_index: 0,
+            sample: audio(0.5), sample_name: old_name }).unwrap();
+        commands.push(EngineCommand::ExternalNoteOn { track_id: track, pitch: 36, velocity: 127 }).unwrap();
+        let mut output = [0.0; 16];
+        engine.process(&mut output, 1);
+        assert_eq!(output, [0.5; 16]);
+        while events.pop().is_ok() {}
+        let canonical = DrumPadState { source: Some(MediaSourceRef::LocalFile { path: "/sample-library/from-source.wav".into() }),
+            name: None, gain: 0.25, pan: -0.5, start: 0.25, end: 0.75,
+            fade_in_ms: 0.0, fade_out_ms: 0.0, coarse_tune: 12, fine_tune: 25.0,
+            one_shot: false, choke_group: None };
+        let unchanged = canonical.clone();
+        commands.push(EngineCommand::SetDrumRackPadState { track_id: track, pad_index: 0, state: canonical.clone() }).unwrap();
+        if full_ring {
+            while engine.event_tx.push(EngineEvent::PlaybackStarted).is_ok() {}
+        }
+        let measured = crate::retirement::tests::allocations(|| engine.process(&mut output, 1));
+        assert_eq!(output, [0.5; 16], "active voice retains captured settings");
+        assert_eq!(canonical, unchanged);
+        assert_eq!(measured, (0, 0), "full_ring={full_ring}");
+        let mut returned = None;
+        for _ in 0..2 {
+            while let Ok(event) = events.pop() {
+                if let EngineEvent::RetiredInstrumentMedia(owners) = event {
+                    assert!(returned.is_none());
+                    assert!(owners.sample.is_none());
+                    assert_eq!(owners.name.as_ref().map(|name| name.as_ptr()), Some(old_name_pointer));
+                    returned = Some(owners);
+                }
+            }
+            engine.process(&mut [], 1);
+        }
+        drop(returned.expect("displaced pad name returned"));
+        commands.push(EngineCommand::ExternalNoteOn { track_id: track, pitch: 36, velocity: 127 }).unwrap();
+        assert_eq!(crate::retirement::tests::allocations(|| engine.process(&mut output, 1)), (0, 0));
+        assert_eq!(output, [0.625; 16], "new voice adopts prepared gain");
+        commands.push(EngineCommand::SetDrumRackPadState { track_id: track, pad_index: 0, state: DrumPadState::default() }).unwrap();
+        assert_eq!(crate::retirement::tests::allocations(|| engine.process(&mut [], 1)), (0, 0));
+        let names: Vec<_> = std::iter::from_fn(|| events.pop().ok()).filter_map(|event| match event {
+            EngineEvent::RetiredInstrumentMedia(owners) => owners.name,
+            _ => None,
+        }).collect();
+        assert_eq!(names, ["from-source.wav"]);
+    }
+}
