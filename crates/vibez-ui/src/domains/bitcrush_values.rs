@@ -43,6 +43,62 @@ fn requested_hertz(text: &str) -> Option<f64> {
     Some(number.trim().parse::<f64>().ok()? * multiplier)
 }
 
+fn nearest_divider(sample_rate: f64, requested: f64) -> f32 {
+    (1..32)
+        .find(|divider| {
+            let boundary = (sample_rate / f64::from(*divider)
+                + sample_rate / f64::from(*divider + 1)) * 0.5;
+            requested > boundary
+        })
+        .unwrap_or(32) as f32
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BitcrushValue { Bits, Rate }
+
+impl BitcrushValue {
+    fn selected(self, value: f32) -> f32 {
+        match self {
+            Self::Bits => value.trunc().clamp(2.0, 16.0),
+            Self::Rate => value.round().clamp(1.0, 32.0),
+        }
+    }
+
+    fn preserve(self, selected: f32, original: f32) -> f32 {
+        let valid = match self {
+            Self::Bits => (2.0..=16.0).contains(&original),
+            Self::Rate => (1.0..=32.0).contains(&original),
+        };
+        if valid && self.selected(original) == selected { original } else { selected }
+    }
+
+    pub fn position(self, value: f32) -> f32 {
+        match self {
+            Self::Bits => (self.selected(value) - 2.0) / 14.0,
+            Self::Rate => ((32.0_f64 / f64::from(self.selected(value))).ln()
+                / 32.0_f64.ln()) as f32,
+        }
+    }
+
+    pub fn value(self, position: f32, original: f32) -> f32 {
+        let position = position.clamp(0.0, 1.0);
+        let selected = match self {
+            Self::Bits => (2.0 + position * 14.0).round(),
+            // The host rate cancels from adjacent-Hz boundaries; this is a dimensionless ratio.
+            Self::Rate => nearest_divider(1.0, 32.0_f64.powf(f64::from(position)) / 32.0),
+        };
+        self.preserve(selected, original)
+    }
+
+    pub fn step(self, value: f32, steps: i32, original: f32) -> f32 {
+        let selected = match self {
+            Self::Bits => (self.selected(value) + steps as f32).clamp(2.0, 16.0),
+            Self::Rate => (self.selected(value) - steps as f32).clamp(1.0, 32.0),
+        };
+        self.preserve(selected, original)
+    }
+}
+
 pub fn parse_rate(text: &str, sample_rate: u32, current: f32) -> Option<f32> {
     if sample_rate < 2 {
         return None;
@@ -58,12 +114,7 @@ pub fn parse_rate(text: &str, sample_rate: u32, current: f32) -> Option<f32> {
     if !(rate / 32.0..=rate).contains(&requested) {
         return None;
     }
-    let divider = (1..32)
-        .find(|divider| {
-            let boundary = (rate / f64::from(*divider) + rate / f64::from(*divider + 1)) * 0.5;
-            requested > boundary
-        })
-        .unwrap_or(32) as f32;
+    let divider = nearest_divider(rate, requested);
     Some(
         if (1.0..=32.0).contains(&current) && current.round() == divider {
             current

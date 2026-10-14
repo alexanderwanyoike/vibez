@@ -7,6 +7,7 @@ use iced::mouse;
 use iced::widget::{canvas, column, text};
 use iced::{Color, Element, Length, Rectangle, Renderer, Theme};
 
+use crate::domains::bitcrush_values::BitcrushValue;
 use crate::message::{DrumPadParam, Message};
 use crate::state::{AudioClipInspectorField, AudioClipRotaryField, UndoGestureId};
 use crate::theme;
@@ -34,6 +35,8 @@ pub enum KnobTarget {
     Effect(EffectId),
     GainDb(EffectId),
     LogEffect(EffectId),
+    BitcrushBits(EffectId),
+    BitcrushRate(EffectId),
     Instrument,
     DrumPad {
         pad_index: usize,
@@ -176,7 +179,9 @@ impl EffectKnobWidget {
         match self.target {
             KnobTarget::Effect(effect_id)
             | KnobTarget::GainDb(effect_id)
-            | KnobTarget::LogEffect(effect_id) => {
+            | KnobTarget::LogEffect(effect_id)
+            | KnobTarget::BitcrushBits(effect_id)
+            | KnobTarget::BitcrushRate(effect_id) => {
                 Message::set_effect_param(self.track_id, effect_id, self.param_index, value)
             }
             KnobTarget::Instrument => {
@@ -251,8 +256,20 @@ impl EffectKnobWidget {
         }
     }
 
+    fn stepped_target(&self) -> Option<SteppedTarget> {
+        let (effect, kind) = match self.target {
+            KnobTarget::BitcrushBits(effect) => (effect, BitcrushValue::Bits),
+            KnobTarget::BitcrushRate(effect) => (effect, BitcrushValue::Rate),
+            _ => return None,
+        };
+        Some(SteppedTarget { track: self.track_id, effect, index: self.param_index, kind })
+    }
+
     /// Normalize value to 0.0..1.0 range.
     fn normalized(&self) -> f32 {
+        if let Some(target) = self.stepped_target() {
+            return target.kind.position(self.value);
+        }
         if matches!(self.target, KnobTarget::GainDb(_)) {
             return crate::domains::gain::knob_position(self.value);
         }
@@ -269,6 +286,9 @@ impl EffectKnobWidget {
 
     /// Denormalize from 0.0..1.0 to actual value range.
     fn denormalize(&self, n: f32) -> f32 {
+        if let Some(target) = self.stepped_target() {
+            return target.kind.value(n, self.value);
+        }
         if matches!(self.target, KnobTarget::GainDb(_)) {
             return crate::domains::gain::knob_amplitude(n).clamp(self.min, self.max);
         }
@@ -321,10 +341,64 @@ pub fn format_value(value: f32, unit: &str) -> String {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct SteppedTarget {
+    track: TrackId,
+    effect: EffectId,
+    index: usize,
+    kind: BitcrushValue,
+}
+
+#[derive(Debug, Default)]
+struct SteppedKnobState {
+    target: Option<SteppedTarget>,
+    observed_value: u32,
+    last_emitted: f32,
+    wheel_lines: f64,
+}
+
+impl SteppedKnobState {
+    fn sync(&mut self, target: SteppedTarget, value: f32) -> bool {
+        let replaced = self.target != Some(target)
+            || (self.observed_value != value.to_bits()
+                && self.last_emitted.to_bits() != value.to_bits());
+        if self.target != Some(target) || self.observed_value != value.to_bits() {
+            self.wheel_lines = 0.0;
+        }
+        if replaced { self.last_emitted = value; }
+        self.target = Some(target);
+        self.observed_value = value.to_bits();
+        replaced
+    }
+
+    fn emit(&mut self, value: f32) -> bool {
+        if self.last_emitted.to_bits() == value.to_bits() { return false; }
+        self.last_emitted = value;
+        true
+    }
+
+    fn scroll(&mut self, kind: BitcrushValue, lines: f64, original: f32) -> Option<f32> {
+        if !lines.is_finite() || lines == 0.0 { return None; }
+        let direction = if lines > 0.0 { 1 } else { -1 };
+        if kind.step(self.last_emitted, direction, self.last_emitted) == self.last_emitted {
+            self.wheel_lines = 0.0;
+            return None;
+        }
+        self.wheel_lines += lines;
+        let whole = self.wheel_lines.trunc();
+        if whole == 0.0 { return None; }
+        self.wheel_lines -= whole;
+        let value = kind.step(self.last_emitted, whole.clamp(-32.0, 32.0) as i32, original);
+        if kind.step(value, direction, value) == value { self.wheel_lines = 0.0; }
+        self.emit(value).then_some(value)
+    }
+}
+
 /// State for mouse interaction.
 #[derive(Debug, Default)]
 pub struct EffectKnobState {
     drag: ValueDrag,
+    stepped: SteppedKnobState,
     undo_gesture: Option<UndoGestureId>,
     shift_held: bool,
     double_click: DoubleClick,
@@ -444,6 +518,24 @@ impl canvas::Program<Message> for EffectKnobWidget {
         bounds: Rectangle,
         cursor: mouse::Cursor,
     ) -> (canvas::event::Status, Option<Message>) {
+        let stepped = self.stepped_target();
+        if let Some(target) = stepped {
+            if state.stepped.sync(target, self.value) {
+                state.drag.release();
+                state.undo_gesture = None;
+                state.double_click.clear();
+            }
+            if !cursor.is_over(bounds)
+                || matches!(&event, canvas::Event::Mouse(mouse::Event::CursorLeft))
+            {
+                state.stepped.wheel_lines = 0.0;
+            }
+        } else if state.stepped.target.is_some() {
+            state.stepped = SteppedKnobState::default();
+            state.drag.release();
+            state.undo_gesture = None;
+            state.double_click.clear();
+        }
         match event {
             // Track modifier keys
             canvas::Event::Keyboard(keyboard::Event::ModifiersChanged(modifiers)) => {
@@ -463,6 +555,10 @@ impl canvas::Program<Message> for EffectKnobWidget {
                             None,
                         ) {
                             state.double_click.clear();
+                            if stepped.is_some() {
+                                state.stepped.wheel_lines = 0.0;
+                                state.stepped.last_emitted = self.default;
+                            }
                             return (
                                 canvas::event::Status::Captured,
                                 Some(self.immediate_value_message(self.default)),
@@ -470,7 +566,12 @@ impl canvas::Program<Message> for EffectKnobWidget {
                         }
                     }
 
-                    if state.drag.grab(cursor, bounds, self.normalized()) {
+                    let normalized = stepped.map_or_else(
+                        || self.normalized(),
+                        |target| target.kind.position(state.stepped.last_emitted),
+                    );
+                    state.stepped.wheel_lines = 0.0;
+                    if state.drag.grab(cursor, bounds, normalized) {
                         state.undo_gesture = Some(UndoGestureId::new());
                     }
                     return (canvas::event::Status::Captured, None);
@@ -493,10 +594,14 @@ impl canvas::Program<Message> for EffectKnobWidget {
                     BASE_SENSITIVITY
                 };
                 if let Some(norm) = state.drag.drag_to(cursor, 0.0, -sensitivity, 0.0..=1.0) {
+                    let value = self.denormalize(norm);
+                    if stepped.is_some() && !state.stepped.emit(value) {
+                        return (canvas::event::Status::Captured, None);
+                    }
                     return (
                         canvas::event::Status::Captured,
                         Some(
-                            self.drag_value_message(self.denormalize(norm))
+                            self.drag_value_message(value)
                                 .in_undo_gesture(
                                     *state.undo_gesture.get_or_insert_with(UndoGestureId::new),
                                 ),
@@ -509,6 +614,15 @@ impl canvas::Program<Message> for EffectKnobWidget {
             canvas::Event::Mouse(mouse::Event::WheelScrolled { delta })
                 if cursor.is_over(bounds) =>
             {
+                if let Some(target) = stepped {
+                    let lines = match delta {
+                        mouse::ScrollDelta::Lines { y, .. } => f64::from(y),
+                        mouse::ScrollDelta::Pixels { y, .. } => f64::from(y) / 20.0,
+                    } / if state.shift_held { f64::from(FINE_DIVISOR) } else { 1.0 };
+                    let message = state.stepped.scroll(target.kind, lines, self.value)
+                        .map(|value| self.wheel_value_message(value));
+                    return (canvas::event::Status::Captured, message);
+                }
                 let scroll_y = match delta {
                     mouse::ScrollDelta::Lines { y, .. } => y,
                     mouse::ScrollDelta::Pixels { y, .. } => y / 20.0,
