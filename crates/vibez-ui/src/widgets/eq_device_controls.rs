@@ -296,10 +296,10 @@ impl<'a> Controls<'a> {
         controls = controls.push(container(shape).width(Length::Fill));
         if tabs {
             let mut bands = row![].spacing(3);
-            for band in 0..4 {
+            for (band, name) in BAND_NAMES.into_iter().enumerate() {
                 bands = bands.push(
                     choice_button(
-                        BAND_NAMES[band],
+                        name,
                         self.panel.selected_band == band,
                         self.accent,
                         Message::EqControl(EqMsg::SelectBand(self.track, self.effect.id, band)),
