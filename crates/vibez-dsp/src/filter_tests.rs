@@ -266,3 +266,50 @@ fn sweeps_and_rapid_manual_edits_remain_finite_across_rates_and_block_sizes() {
         }
     }
 }
+
+#[test]
+fn manual_mode_changes_crossfade_without_clicks_and_automation_is_immediate() {
+    let mut manual = FilterEffect::new(48000.0);
+    let mut automated = FilterEffect::new(48000.0);
+    manual.process(&mut [0.25; 8192], 1);
+    automated.process(&mut [0.25; 8192], 1);
+    manual.set_param(param::MODE, 1.0);
+    automated.set_automated_param(param::MODE, 1.0);
+    let mut manual_output = [0.25; 2048];
+    let mut automated_output = manual_output;
+    manual.process(&mut manual_output, 1);
+    automated.process(&mut automated_output, 1);
+    let mut previous = 0.25;
+    for sample in manual_output {
+        assert!((sample - previous).abs() < 0.002, "mode transition stepped from {previous} to {sample}");
+        previous = sample;
+    }
+    assert!(manual_output[2047].abs() < 1e-5);
+    assert!((automated_output[0] - 0.25).abs() > 0.005);
+    assert_eq!(manual.get_param(param::MODE), 1.0);
+}
+
+#[test]
+fn manual_modulation_source_change_preserves_the_first_frame_but_automation_is_exact() {
+    let mut reference = FilterEffect::new(48000.0);
+    let mut manual = FilterEffect::new(48000.0);
+    let mut automated = FilterEffect::new(48000.0);
+    let signal = |start, len| (start..start + len).map(|frame| {
+        (0.25 * (std::f64::consts::TAU * 1000.0 * frame as f64 / 48000.0).sin()) as f32
+    }).collect::<Vec<_>>();
+    for effect in [&mut reference, &mut manual, &mut automated] {
+        effect.set_param(param::DEPTH, 6.0);
+        effect.process(&mut signal(0, 12000), 1);
+    }
+    manual.set_param(param::MOD_SOURCE, 1.0);
+    automated.set_automated_param(param::MOD_SOURCE, 1.0);
+    let mut unchanged = signal(12000, 1024);
+    let mut smoothed = unchanged.clone();
+    let mut exact = unchanged.clone();
+    reference.process(&mut unchanged, 1);
+    manual.process(&mut smoothed, 1);
+    automated.process(&mut exact, 1);
+    assert!((smoothed[0] - unchanged[0]).abs() < 0.002, "first frame changed by {}", smoothed[0] - unchanged[0]);
+    assert!((exact[0] - unchanged[0]).abs() > 0.005);
+    assert!(smoothed[512..].iter().zip(&unchanged[512..]).any(|(a, b)| (a - b).abs() > 0.01));
+}
