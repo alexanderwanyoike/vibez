@@ -123,7 +123,7 @@ pub(super) fn channel(
         if selected == Some(info.id) && !clip_included(clip.id, req.mode, true) {
             continue;
         }
-        channel.playback_source.note_clips.push(EngineNoteClip::new(
+        channel.playback_source.push_note_clip(EngineNoteClip::new(
             clip.id,
             clip.position_beats,
             clip.duration_beats,

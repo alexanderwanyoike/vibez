@@ -123,7 +123,26 @@ pub struct EngineNoteClip {
     groove_latch: Cell<Option<(i64, vibez_core::perform::SwingAmount)>>,
 }
 
+impl std::fmt::Debug for EngineNoteClip {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.debug_struct("EngineNoteClip").field("id", &self.id)
+            .field("note_count", &self.notes.len()).finish()
+    }
+}
+
 impl EngineNoteClip {
+    pub(crate) fn same_retired_owner(&self, other: &Self) -> bool {
+        self.id == other.id && self.position_beats == other.position_beats
+            && self.duration_beats == other.duration_beats
+            && std::ptr::eq(self.notes.as_slice(), other.notes.as_slice())
+            && std::ptr::eq(self.next_same_pitch_start_beats.as_slice(), other.next_same_pitch_start_beats.as_slice())
+            && std::ptr::eq(self.note_sort_indices.as_slice(), other.note_sort_indices.as_slice())
+            && self.start_marker_beats == other.start_marker_beats
+            && self.loop_enabled == other.loop_enabled
+            && self.loop_start_beats == other.loop_start_beats
+            && self.loop_end_beats == other.loop_end_beats
+            && self.groove_grid == other.groove_grid && self.groove_latch == other.groove_latch
+    }
     pub(crate) fn same_pitch_schedule(&self, other: &Self, pitch: u8) -> bool {
         self.position_beats == other.position_beats
             && self.duration_beats == other.duration_beats
@@ -334,6 +353,7 @@ pub struct PreparedPlaybackSource {
     pub note_clips: Vec<EngineNoteClip>,
     pub automation: Vec<AutomationLane>,
     removed_audio_clips: Vec<EngineClip>,
+    removed_note_clips: Vec<EngineNoteClip>,
 }
 
 /// One Project Track's resident content for a prepared Section.
@@ -403,11 +423,13 @@ impl PreparedPlaybackSource {
         automation: Vec<AutomationLane>,
     ) -> Self {
         let removed_audio_clips = Vec::with_capacity(clips.len());
+        let removed_note_clips = Vec::with_capacity(note_clips.len());
         Self {
             clips,
             note_clips,
             automation,
             removed_audio_clips,
+            removed_note_clips,
         }
     }
 
@@ -426,6 +448,30 @@ impl PreparedPlaybackSource {
         for clip in self.clips.extract_if(.., |clip| clip.id == id) {
             self.removed_audio_clips.push(clip);
         }
+    }
+
+    pub(crate) fn push_note_clip(&mut self, clip: EngineNoteClip) {
+        let required = self.note_clips.len() + 1;
+        if self.removed_note_clips.capacity() < required {
+            self.removed_note_clips.reserve(required - self.removed_note_clips.len());
+        }
+        self.note_clips.push(clip);
+    }
+
+    pub(crate) fn remove_note_clips(&mut self, id: ClipId) {
+        assert!(self.removed_note_clips.is_empty());
+        assert!(self.removed_note_clips.capacity() >= self.note_clips.len());
+        for clip in self.note_clips.extract_if(.., |clip| clip.id == id) {
+            self.removed_note_clips.push(clip);
+        }
+    }
+
+    pub(crate) fn pop_removed_note_clip(&mut self) -> Option<EngineNoteClip> {
+        self.removed_note_clips.pop()
+    }
+
+    pub(crate) fn has_removed_note_clips(&self) -> bool {
+        !self.removed_note_clips.is_empty()
     }
 
     pub(crate) fn pop_removed_audio_clip(&mut self) -> Option<EngineClip> {

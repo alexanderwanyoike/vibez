@@ -65,7 +65,7 @@ impl AudioEngine {
         groove_grid: vibez_core::perform::GrooveGrid,
     ) {
         if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
-            track.playback_source.note_clips.push(EngineNoteClip::new(
+            track.playback_source.push_note_clip(EngineNoteClip::new(
                 clip_id,
                 position_beats,
                 duration_beats,
@@ -86,7 +86,7 @@ impl AudioEngine {
         clip_id: vibez_core::id::ClipId,
     ) {
         if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
-            track.playback_source.note_clips.retain(|c| c.id != clip_id);
+            track.playback_source.remove_note_clips(clip_id);
             // Sounding notes get their note-offs from the
             // clip's schedule; without the clip they hang
             // forever.
