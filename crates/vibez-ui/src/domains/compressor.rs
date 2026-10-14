@@ -19,6 +19,7 @@ pub fn is_native_compressor(effect: &UiEffect) -> bool {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum CompressorPage {
     #[default]
+    Sound,
     Dynamics,
     Detector,
     Range,
@@ -26,7 +27,8 @@ pub enum CompressorPage {
     Metering,
 }
 impl CompressorPage {
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
+        Self::Sound,
         Self::Dynamics,
         Self::Detector,
         Self::Range,
@@ -37,6 +39,7 @@ impl CompressorPage {
 impl std::fmt::Display for CompressorPage {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
+            Self::Sound => "Sound",
             Self::Dynamics => "Dynamics",
             Self::Detector => "Detector",
             Self::Range => "Range",

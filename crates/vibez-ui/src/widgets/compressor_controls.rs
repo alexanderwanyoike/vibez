@@ -11,7 +11,7 @@ use crate::{
     theme as th,
     widgets::{
         device_chrome::section_label,
-        device_controls::{parameter, selector},
+        device_controls::{parameter, selector, value_field},
     },
 };
 use iced::{
@@ -22,28 +22,81 @@ use vibez_core::id::TrackId;
 use vibez_dsp::compressor::param;
 use vibez_engine::metering::MeterValues;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PrimaryControls {
+    Core,
+    Full,
+    Expanded,
+}
+
+impl PrimaryControls {
+    pub fn indices(self) -> &'static [usize] {
+        match self {
+            Self::Core => &[param::THRESHOLD, param::RATIO, param::ATTACK, param::RELEASE],
+            Self::Full | Self::Expanded => &[
+                param::THRESHOLD, param::RATIO, param::ATTACK, param::RELEASE,
+                param::KNEE, param::MAKEUP, param::MIX,
+            ],
+        }
+    }
+}
+
 pub fn primary<'a>(
     track: TrackId,
     effect: &'a UiEffect,
     state: &'a DeviceControlState,
     accent: Color,
     knobs: Option<f32>,
+    controls: PrimaryControls,
 ) -> Element<'a, Message> {
-    row([
-        param::THRESHOLD,
-        param::RATIO,
-        param::ATTACK,
-        param::RELEASE,
-        param::MAKEUP,
-        param::MIX,
+    let mut parameters = row![].spacing(6).align_y(iced::Alignment::Center);
+    for &index in controls.indices() {
+        parameters = parameters.push(parameter(track, effect, state, index, accent, knobs));
+        if controls == PrimaryControls::Expanded && index == param::RELEASE {
+            parameters = parameters.push(
+                container(toggle(track, effect, param::AUTO_RELEASE, "Auto", accent)).width(44.0),
+            );
+        }
+    }
+    parameters.width(Length::Fill).into()
+}
+
+pub fn strip<'a>(
+    track: TrackId,
+    effect: &'a UiEffect,
+    state: &'a DeviceControlState,
+    accent: Color,
+) -> Element<'a, Message> {
+    let frequency = |enabled, index, label| -> Element<'a, Message> {
+        column![
+            section_label(label),
+            row![
+                toggle(track, effect, enabled, "On", accent),
+                container(value_field(track, effect, state, index, accent)).width(54.0),
+                text("Hz").size(8).color(th::text_dim())
+            ].spacing(4).align_y(iced::Alignment::Center)
+        ].spacing(3).into()
+    };
+    row![
+        frequency(param::HP_ENABLED, param::HP_FREQUENCY, "Detector HP"),
+        frequency(param::LP_ENABLED, param::LP_FREQUENCY, "Detector LP"),
+        container(selector(track, effect, param::DETECTOR_MODE, "Detector", &["Peak", "RMS"], accent)).width(82.0),
+        toggle(track, effect, param::STEREO_LINK, "Stereo Link", accent),
+        toggle(track, effect, param::DETECTOR_LISTEN, "Listen", accent),
+        column![
+            section_label("Reduction cap"),
+            row![
+                toggle(track, effect, param::RANGE_ENABLED, "On", accent),
+                container(value_field(track, effect, state, param::RANGE, accent)).width(50.0),
+                text("dB").size(8).color(th::text_dim())
+            ].spacing(4).align_y(iced::Alignment::Center)
+        ].spacing(3)
     ]
-    .into_iter()
-    .map(|index| parameter(track, effect, state, index, accent, knobs)))
-    .spacing(6)
-    .width(Length::Fill)
+    .spacing(14)
     .align_y(iced::Alignment::Center)
     .into()
 }
+
 fn toggle<'a>(
     track: TrackId,
     effect: &UiEffect,
@@ -152,8 +205,15 @@ pub fn advanced<'a>(
         .spacing(3)
         .width(88.0);
     let controls: Element<'a, Message> = match panel.page {
-        CompressorPage::Dynamics => row![
+        CompressorPage::Sound => row![
             parameter(track, effect, state, param::KNEE, accent, None),
+            parameter(track, effect, state, param::MAKEUP, accent, None),
+            parameter(track, effect, state, param::MIX, accent, None)
+        ]
+        .spacing(8)
+        .align_y(iced::Alignment::Center)
+        .into(),
+        CompressorPage::Dynamics => row![
             selector(
                 track,
                 effect,

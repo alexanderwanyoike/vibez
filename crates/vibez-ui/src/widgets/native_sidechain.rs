@@ -174,7 +174,7 @@ pub fn view<'a>(
     if vertical {
         let mut controls = column(fields).spacing(5).width(Length::Fill);
         if let Some(warning) = model.warning {
-            controls = controls.push(text(warning).size(8).color(th::text_dim()));
+            controls = controls.push(text(warning).size(8).color(th::text_dim()).wrapping(iced::widget::text::Wrapping::None));
         }
         if model.assigned {
             let db = vibez_core::level::amplitude_to_db(model.raw_peak);
@@ -192,7 +192,7 @@ pub fn view<'a>(
         controls.into()
     } else {
         if let Some(warning) = model.warning {
-            fields.push(text(warning).size(8).color(th::text_dim()).into());
+            fields.push(text(warning).size(8).color(th::text_dim()).wrapping(iced::widget::text::Wrapping::None).into());
         }
         row(fields)
             .spacing(6)

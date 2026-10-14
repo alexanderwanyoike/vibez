@@ -1,15 +1,15 @@
-//! Arranges native Compressor controls and measured dynamics displays by available size.
+//! Measures Compressor composition around persistent core controls and a dominant transfer plot.
 
 use crate::widgets::{
+    compressor_controls::{self, PrimaryControls},
     compressor_display::{ReductionGauge, ReductionHistory, TransferCurve},
     device_chrome::section_label,
-    device_controls::disclosure,
     level_meter::{LevelMeter, WIDTH as METER_W},
 };
 use crate::{
     domains::{
         compressor::{CompressorMsg, CompressorPanel, CompressorVisual},
-        device_controls::DeviceControlState,
+        device_controls::{DeviceControlMsg, DeviceControlState},
         devices::DevicesState,
     },
     message::Message,
@@ -24,9 +24,11 @@ use vibez_core::id::TrackId;
 use vibez_engine::metering::MeterValues;
 
 pub const COMPACT_W: f32 = 430.0;
-pub const MEDIUM_W: f32 = 620.0;
+pub const MEDIUM_W: f32 = 740.0;
 pub const MAX_W: f32 = 900.0;
 const TOOLBAR_H: f32 = 26.0;
+const SIDECHAIN_W: f32 = 120.0;
+const GAUGE_W: f32 = 76.0;
 
 #[derive(Debug, Clone, Copy)]
 pub struct Arrangement {
@@ -36,289 +38,183 @@ pub struct Arrangement {
     pub primary_beside: bool,
     pub sidechain_column: bool,
     pub both_plots: bool,
+    pub compact: bool,
+    pub expanded: bool,
+    pub tabs: f32,
+    pub details: f32,
+    pub routing: f32,
 }
 
 pub fn arrange(size: Size, advanced: bool) -> Arrangement {
-    let (controls, knobs) = if size.height >= 240.0 {
-        (76.0, Some(34.0))
+    let compact = size.width < MEDIUM_W;
+    let expanded = size.width >= 872.0;
+    let (controls, knobs) = if size.height >= 280.0 {
+        (84.0, Some(34.0))
     } else if size.height >= 160.0 {
         (56.0, Some(20.0))
     } else {
         (36.0, None)
     };
-    let available_plot = (size.height - TOOLBAR_H - controls).max(0.0);
-    let plot = if available_plot >= 76.0 {
-        available_plot
-    } else {
-        0.0
-    };
+    let details = if advanced && size.height >= 112.0 {
+        if size.height >= 280.0 { 44.0 } else { 36.0 }
+    } else { 0.0 };
+    let available = (size.height - TOOLBAR_H - controls - details).max(0.0);
+    let tabs = if compact && available >= 108.0 { 24.0 } else { 0.0 };
+    let sidechain_column = !compact && available >= 150.0;
+    let routing = if !compact && !sidechain_column && available >= 120.0 { 36.0 } else { 0.0 };
+    let available = available - tabs - routing;
+    let plot = if available >= 84.0 { available } else { 0.0 };
     Arrangement {
-        plot,
-        controls,
-        knobs,
-        primary_beside: advanced && size.width >= 820.0,
-        sidechain_column: size.width >= 820.0 && plot >= 160.0,
-        both_plots: size.width >= MEDIUM_W,
+        plot, controls, knobs,
+        primary_beside: advanced && details > 0.0,
+        sidechain_column,
+        both_plots: !compact && plot > 0.0,
+        compact, expanded, tabs, details, routing,
     }
 }
+
 pub fn card_width(available: f32) -> f32 {
     available.clamp(COMPACT_W, MAX_W)
 }
 
 pub fn preset_bar_width(size: Size) -> f32 {
-    size.width - 190.0
+    size.width - if size.height < 160.0 { 190.0 } else { 8.0 }
 }
-fn signal_meter<'a>(label: &'static str, levels: MeterValues) -> Element<'a, Message> {
+
+fn plot_widths(width: f32, layout: Arrangement) -> (f32, f32) {
+    let source = if layout.sidechain_column { SIDECHAIN_W + 8.0 } else { 0.0 };
+    let available = (width - 8.0 - source - GAUGE_W - 8.0).max(32.0);
+    if layout.both_plots {
+        let available = available - 8.0;
+        (available * 2.0 / 3.0, available / 3.0)
+    } else { (available, 0.0) }
+}
+
+fn details_button<'a>(track: TrackId, effect: &UiEffect, open: bool, compact: bool, accent: Color) -> Element<'a, Message> {
+    button(text(if compact { "Details" } else { "Advanced" }).size(9))
+        .padding([3, 5])
+        .on_press(Message::DeviceControl(DeviceControlMsg::ToggleAdvanced(track, effect.id)))
+        .style(move |_, _| button::Style {
+            text_color: if open { accent } else { th::text_dim() },
+            background: Some(if open { th::bg_hover() } else { th::bg_dark() }.into()),
+            border: iced::Border { color: if open { accent } else { th::border() }, width: 1.0, radius: 2.0.into() },
+            ..Default::default()
+        }).into()
+}
+
+fn signal_meter<'a>(label: &'static str, levels: MeterValues, numbers: bool) -> Element<'a, Message> {
     let reading = |value| {
         let db = vibez_core::level::amplitude_to_db(value);
-        if db.is_finite() {
-            format!("{db:.1}")
-        } else {
-            "-inf".into()
-        }
+        if db.is_finite() { format!("{db:.1}") } else { "-inf".into() }
     };
-    column![
+    let mut content = column![
         section_label(label),
-        canvas(LevelMeter { levels })
-            .width(METER_W)
-            .height(Length::Fill),
-        text(format!("L {}", reading(levels.peak_l)))
-            .size(8)
-            .font(crate::typography::PERFORM_TECH)
-            .wrapping(iced::widget::text::Wrapping::None),
-        text(format!("R {}", reading(levels.peak_r)))
-            .size(8)
-            .font(crate::typography::PERFORM_TECH)
-            .wrapping(iced::widget::text::Wrapping::None)
-    ]
-    .spacing(2)
-    .width(50.0)
-    .height(Length::Fill)
-    .into()
+        canvas(LevelMeter { levels }).width(METER_W).height(Length::Fill)
+    ].spacing(2).width(50.0).height(Length::Fill);
+    if numbers {
+        for (channel, peak) in [("L", levels.peak_l), ("R", levels.peak_r)] {
+            content = content.push(text(format!("{channel} {}", reading(peak))).size(8)
+                .font(crate::typography::PERFORM_TECH).wrapping(iced::widget::text::Wrapping::None));
+        }
+    }
+    content.into()
 }
-fn visual_switch<'a>(
-    track: TrackId,
-    effect: &UiEffect,
-    panel: &CompressorPanel,
-    accent: Color,
-) -> Element<'a, Message> {
-    let selected = panel.visual;
-    row([
-        ("Transfer", CompressorVisual::Transfer),
-        ("History", CompressorVisual::History),
-    ]
-    .into_iter()
-    .map(|(label, visual)| {
-        button(text(label).size(9))
-            .padding([1, 4])
-            .on_press(Message::CompressorControl(CompressorMsg::Visual(
-                track, effect.id, visual,
-            )))
+
+fn visual_switch<'a>(track: TrackId, effect: &UiEffect, panel: &CompressorPanel, accent: Color) -> Element<'a, Message> {
+    let mut tabs = row![].spacing(3);
+    for (label, visual) in [("Transfer", CompressorVisual::Transfer), ("History", CompressorVisual::History)] {
+        let selected = panel.visual == visual;
+        tabs = tabs.push(button(text(label).size(10)).width(Length::Fill).height(24.0).padding([2, 5])
+            .on_press(Message::CompressorControl(CompressorMsg::Visual(track, effect.id, visual)))
             .style(move |_, _| button::Style {
-                text_color: if selected == visual {
-                    accent
-                } else {
-                    th::text_dim()
-                },
-                background: Some(th::bg_dark().into()),
-                border: iced::Border {
-                    color: if selected == visual {
-                        accent
-                    } else {
-                        th::border()
-                    },
-                    width: 1.0,
-                    radius: 2.0.into(),
-                },
+                text_color: if selected { accent } else { th::text_dim() },
+                background: Some(if selected { th::bg_hover() } else { th::bg_dark() }.into()),
+                border: iced::Border { color: if selected { accent } else { th::border() }, width: 1.0, radius: 2.0.into() },
                 ..Default::default()
-            })
-            .into()
-    }))
-    .spacing(3)
-    .into()
+            }));
+    }
+    tabs.width(Length::Fill).into()
 }
 
 #[allow(clippy::too_many_arguments)]
 pub fn view<'a>(
-    track: TrackId,
-    effect: &'a UiEffect,
-    accent: Color,
-    state: &'a DeviceControlState,
-    panel: &'a CompressorPanel,
-    preset: Element<'a, Message>,
-    input: MeterValues,
-    output: MeterValues,
-    sources: &[ProjectTrack],
-    buses: &[ProjectTrack],
-    devices: &DevicesState,
-    size: Size,
+    track: TrackId, effect: &'a UiEffect, accent: Color, state: &'a DeviceControlState,
+    panel: &'a CompressorPanel, preset: Element<'a, Message>, input: MeterValues, output: MeterValues,
+    sources: &[ProjectTrack], buses: &[ProjectTrack], devices: &DevicesState, size: Size,
 ) -> Element<'a, Message> {
     let layout = arrange(size, state.advanced);
-    let accent = if effect.bypass {
-        th::text_muted()
-    } else {
-        accent
-    };
-    let current = if effect.bypass {
-        [0.0; 2]
-    } else {
-        panel.meter.current_reduction_db
-    };
-    let peak = if effect.bypass {
-        [0.0; 2]
-    } else {
-        panel.meter.peak_reduction_db
-    };
+    let accent = if effect.bypass { th::text_muted() } else { accent };
+    let current = if effect.bypass { [0.0; 2] } else { panel.meter.current_reduction_db };
+    let peak = if effect.bypass { [0.0; 2] } else { panel.meter.peak_reduction_db };
     let gr = current[0].max(current[1]);
-    let toolbar = container(
-        row![
-            preset,
-            horizontal_space(),
-            text(format!("GR {gr:.1} dB"))
-                .size(9)
-                .font(crate::typography::PERFORM_TECH)
-                .wrapping(iced::widget::text::Wrapping::None),
-            disclosure(track, effect, state.advanced)
-        ]
-        .spacing(5)
-        .align_y(iced::Alignment::Center),
-    )
-    .padding([0, 4])
-    .height(TOOLBAR_H);
-    let primary =
-        || crate::widgets::compressor_controls::primary(track, effect, state, accent, layout.knobs);
-    let advanced = || {
-        crate::widgets::compressor_controls::advanced(
-            track, effect, state, panel, accent, sources, buses, devices, input, output,
-        )
-    };
-    let controls: Element<'a, Message> = if layout.primary_beside {
-        row![container(primary()).width(370.0), advanced()]
-            .spacing(12)
-            .align_y(iced::Alignment::Center)
-            .into()
-    } else if state.advanced {
-        advanced()
-    } else {
-        primary()
-    };
-    let footer = container(controls)
-        .padding([0, 4])
-        .height(layout.controls)
-        .align_y(iced::alignment::Vertical::Center);
-    let mut body = column![toolbar];
+    let mut toolbar = row![preset, horizontal_space()].spacing(5).align_y(iced::Alignment::Center);
+    if size.height < 160.0 {
+        toolbar = toolbar.push(text(format!("GR {gr:.1} dB")).size(9).font(crate::typography::PERFORM_TECH)
+            .wrapping(iced::widget::text::Wrapping::None));
+        if state.advanced && !layout.primary_beside {
+            toolbar = toolbar.push(details_button(track, effect, true, layout.compact, accent));
+        }
+    }
+    let mut body = column![container(toolbar).padding([0, 4]).height(TOOLBAR_H)];
+    if layout.tabs > 0.0 {
+        body = body.push(container(visual_switch(track, effect, panel, accent)).height(layout.tabs).padding([0, 4]));
+    }
+    if layout.routing > 0.0 {
+        body = body.push(container(crate::widgets::native_sidechain::view(
+            track, effect, sources, buses, devices, panel, accent, false,
+        )).height(layout.routing).padding([2, 4]));
+    }
     if layout.plot > 0.0 {
-        let header = |label| -> Element<'a, Message> {
-            if layout.both_plots {
-                section_label(label)
-            } else {
-                row![
-                    section_label(label),
-                    horizontal_space(),
-                    visual_switch(track, effect, panel, accent)
-                ]
-                .spacing(6)
-                .align_y(iced::Alignment::Center)
-                .into()
-            }
-        };
+        let (transfer_width, history_width) = plot_widths(size.width, layout);
         let transfer = || -> Element<'a, Message> {
-            let title = header(if layout.both_plots {
-                "Static transfer · manual internal detector"
-            } else {
-                "Manual internal transfer"
-            });
-            let title_height = if layout.both_plots {
-                8.0 * 1.3 + 3.0
-            } else {
-                9.0 * 1.3 + 2.0 + 3.0
-            };
-            let compact_axes = layout.plot - 4.0 - title_height < 80.0;
-            let mut content = column![title];
-            if compact_axes {
-                content = content.push(section_label("Output (dB) ↑ · Input (dB) →"));
-            }
-            content
-                .push(
-                    canvas(TransferCurve {
-                        track,
-                        effect,
-                        accent,
-                    })
-                    .width(Length::Fill)
-                    .height(Length::Fill),
-                )
-                .spacing(3)
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .into()
+            let mut content = column![section_label("Static transfer · manual internal detector")].spacing(3);
+            let canvas_height = layout.plot - 4.0 - (8.0 * 1.3 + 3.0);
+            if canvas_height < 80.0 { content = content.push(section_label("Output dB ↑ · Input dB →")); }
+            content.push(canvas(TransferCurve { track, effect, accent }).width(Length::Fill).height(Length::Fill))
+                .width(transfer_width).height(Length::Fill).into()
         };
         let history = || -> Element<'a, Message> {
-            column![
-                header("Window peak wet GR · dB"),
-                canvas(ReductionHistory {
-                    values: panel.history().collect(),
-                    accent
-                })
-                .width(Length::Fill)
-                .height(Length::Fill)
-            ]
-            .spacing(3)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into()
+            column![section_label("Window peak wet GR · dB"), canvas(ReductionHistory {
+                values: panel.history().collect(), accent,
+            }).width(Length::Fill).height(Length::Fill)].spacing(3)
+                .width(if layout.both_plots { history_width } else { transfer_width }).height(Length::Fill).into()
         };
         let plots: Element<'a, Message> = if layout.both_plots {
-            row![transfer(), history()]
-                .spacing(8)
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .into()
-        } else if panel.visual == CompressorVisual::Transfer {
-            transfer()
-        } else {
-            history()
-        };
+            row![transfer(), history()].spacing(8).height(Length::Fill).into()
+        } else if panel.visual == CompressorVisual::Transfer { transfer() } else { history() };
         let mut visual = row![].spacing(8).height(Length::Fill);
         if layout.sidechain_column {
-            visual = visual.push(
-                container(crate::widgets::native_sidechain::view(
-                    track, effect, sources, buses, devices, panel, accent, true,
-                ))
-                .width(128.0),
-            );
+            let source = crate::widgets::native_sidechain::view(track, effect, sources, buses, devices, panel, accent, true);
+            let meters = row![signal_meter("Input dBFS", input, layout.plot >= 180.0), signal_meter("Output dBFS", output, layout.plot >= 180.0)]
+                .spacing(8).height(Length::Fill);
+            visual = visual.push(container(column![source, meters].spacing(6).height(Length::Fill)).width(SIDECHAIN_W));
         }
-        if layout.plot >= 100.0 {
-            visual = visual.push(signal_meter("Input", input));
-        }
-        visual = visual.push(plots);
         let gauge = column![
-            section_label("Wet GR"),
-            text(format!("{gr:.1} dB"))
-                .size(9)
-                .font(crate::typography::PERFORM_TECH)
-                .wrapping(iced::widget::text::Wrapping::None),
-            canvas(ReductionGauge {
-                current,
-                peak,
-                accent
-            })
-            .width(50.0)
-            .height(Length::Fill)
-        ]
-        .spacing(3)
-        .width(54.0)
-        .height(Length::Fill);
-        visual = visual.push(gauge);
-        if layout.plot >= 100.0 {
-            visual = visual.push(signal_meter("Output", output));
-        }
-        body = body.push(container(visual).padding([2, 4]).height(layout.plot));
+            section_label("Reduction"),
+            text(format!("GR {gr:.1} dB")).size(11).font(crate::typography::PERFORM_TECH).wrapping(iced::widget::text::Wrapping::None),
+            canvas(ReductionGauge { current, peak, accent }).width(50.0).height(Length::Fill),
+            text(format!("L {:.1}  R {:.1}", current[0], current[1])).size(8).font(crate::typography::PERFORM_TECH)
+                .wrapping(iced::widget::text::Wrapping::None)
+        ].spacing(3).width(GAUGE_W).height(Length::Fill);
+        body = body.push(container(visual.push(plots).push(gauge)).height(layout.plot).padding([2, 4]));
     }
-    body.push(footer)
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .into()
+    let advanced = || compressor_controls::advanced(track, effect, state, panel, accent, sources, buses, devices, input, output);
+    let primary = if layout.compact { PrimaryControls::Core } else if layout.expanded { PrimaryControls::Expanded } else { PrimaryControls::Full };
+    let controls: Element<'a, Message> = if state.advanced && !layout.primary_beside {
+        advanced()
+    } else {
+        row![
+            compressor_controls::primary(track, effect, state, accent, layout.knobs, primary),
+            details_button(track, effect, state.advanced, layout.compact, accent)
+        ].spacing(8).align_y(iced::Alignment::Center).into()
+    };
+    body = body.push(iced::widget::horizontal_rule(1)).push(container(controls)
+        .padding([2, 4]).height(layout.controls - 1.0).align_y(iced::alignment::Vertical::Center));
+    if layout.details > 0.0 {
+        let details = if layout.expanded { compressor_controls::strip(track, effect, state, accent) } else { advanced() };
+        body = body.push(container(details).height(layout.details).padding([3, 4]).align_y(iced::alignment::Vertical::Center));
+    }
+    body.width(Length::Fill).height(Length::Fill).into()
 }
 
 #[cfg(test)]
@@ -333,7 +229,7 @@ mod tests {
                 for advanced in [false, true] {
                     let layout = arrange(Size::new(width, height), advanced);
                     assert!(
-                        TOOLBAR_H + layout.plot + layout.controls <= height + 0.001,
+                        TOOLBAR_H + layout.plot + layout.controls + layout.tabs + layout.details + layout.routing <= height + 0.001,
                         "{width}x{height} Advanced={advanced}"
                     );
                     let field = 8.0 * 1.3
@@ -346,17 +242,13 @@ mod tests {
                         "controls clip at {width}x{height}"
                     );
                     assert!(layout.controls >= 36.0);
-                    let caption = if layout.both_plots {
-                        8.0 * 1.3 + 3.0
-                    } else {
-                        9.0 * 1.3 + 2.0 + 3.0
-                    };
+                    let caption = 8.0 * 1.3 + 3.0;
                     assert!(
                         layout.plot == 0.0 || layout.plot >= 4.0 + caption + 32.0,
                         "no miniature plots"
                     );
-                    assert_eq!(layout.primary_beside, advanced && width >= 820.0);
-                    assert!(!layout.sidechain_column || width >= 820.0 && layout.plot >= 150.0);
+                    assert_eq!(layout.primary_beside, advanced && height >= 112.0);
+                    assert!(!layout.sidechain_column || width >= MEDIUM_W && layout.plot >= 150.0);
                     assert!(!layout.both_plots || width >= MEDIUM_W);
                     if layout.plot > 0.0 {
                         assert!(
@@ -373,11 +265,11 @@ mod tests {
                     if layout.sidechain_column {
                         assert!(
                             layout.plot - 4.0
-                                >= 3.0 * (8.0 * 1.3 + 3.0 + 10.0 * 1.3 + 2.0)
+                                >= 2.0 * (8.0 * 1.3 + 3.0 + 10.0 * 1.3 + 2.0)
                                     + 9.0 * 1.3
                                     + 4.0
                                     + 2.0 * 8.0 * 1.3
-                                    + 25.0
+                                    + 20.0
                         );
                     }
                 }
@@ -396,8 +288,8 @@ mod tests {
         let field = 8.0 * 1.3 + 3.0 + 10.0 * 1.3 + 2.0;
         let disconnect = 9.0 * 1.3 + 4.0;
         let warnings_and_raw_peak = 2.0 * 8.0 * 1.3;
-        let five_gaps = 5.0 * 5.0;
-        let child_content = 3.0 * field + disconnect + warnings_and_raw_peak + five_gaps;
+        let four_gaps = 4.0 * 5.0;
+        let child_content = 2.0 * field + disconnect + warnings_and_raw_peak + four_gaps;
         for height in [251.0, 252.0, 253.0, 254.0, 260.0, 262.0] {
             let layout = arrange(Size::new(900.0, height), true);
             assert!(
@@ -418,11 +310,7 @@ mod tests {
                 if layout.plot == 0.0 {
                     continue;
                 }
-                let caption = if layout.both_plots {
-                    8.0 * 1.3 + 3.0
-                } else {
-                    9.0 * 1.3 + 2.0 + 3.0
-                };
+                let caption = 8.0 * 1.3 + 3.0;
                 let available = layout.plot - 4.0 - caption;
                 let canvas_height = if available < 80.0 {
                     available - (8.0 * 1.3 + 3.0)
@@ -464,6 +352,32 @@ mod tests {
             let layout = arrange(Size::new(width, 304.0), false);
             assert!(layout.sidechain_column, "sidechain hidden at medium width {width}");
             assert!(layout.plot >= 150.0, "sidechain has no real vertical budget");
+        }
+    }
+
+
+    #[test]
+    fn composition_boundaries_keep_a_landscape_transfer_and_a_supporting_history() {
+        for width in [430.0, 472.0, 739.0, 740.0, 804.0, 871.0, 872.0, 892.0] {
+            for advanced in [false, true] {
+                let layout = arrange(Size::new(width, 304.0), advanced);
+                let (transfer, history) = plot_widths(width, layout);
+                if width < MEDIUM_W {
+                    assert_eq!(layout.tabs, 24.0);
+                    assert_eq!(history, 0.0);
+                    assert!(transfer >= 320.0);
+                } else {
+                    assert!(layout.sidechain_column);
+                    assert!(transfer >= 320.0, "transfer too narrow at {width}");
+                    assert!(history >= 150.0, "history too narrow at {width}");
+                    assert!((transfer - history * 2.0).abs() < 0.001);
+                }
+                assert_eq!(layout.expanded, width >= 872.0);
+                let child = 8.0 * 1.3 + 3.0 + 10.0 * 1.3 + 2.0;
+                if advanced {
+                    assert!(layout.details - 6.0 >= child);
+                }
+            }
         }
     }
 
