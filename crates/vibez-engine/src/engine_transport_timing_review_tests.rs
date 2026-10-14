@@ -91,6 +91,7 @@ fn stop_then_seek_preserves_a_musical_tail_with_zero_processing_latency() {
 
 fn source(track: TrackId) -> EngineCommand {
     EngineCommand::AddClip {
+        insertion: crate::clip_insertion::PreparedClipInsertion::new(),
         track_id: track,
         clip_id: ClipId::new(),
         audio: Arc::new(DecodedAudio {

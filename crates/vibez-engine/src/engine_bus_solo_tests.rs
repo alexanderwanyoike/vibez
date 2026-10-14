@@ -43,6 +43,7 @@ fn channel(id: TrackId) -> RoutingChannel {
 }
 fn clip(track: TrackId, value: f32) -> EngineCommand {
     EngineCommand::AddClip {
+        insertion: crate::clip_insertion::PreparedClipInsertion::new(),
         track_id: track,
         clip_id: ClipId::new(),
         audio: Arc::new(DecodedAudio {

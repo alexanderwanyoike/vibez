@@ -539,6 +539,7 @@ mod tests {
         let _add_track = EngineCommand::add_track(tid);
         let _remove_track = EngineCommand::RemoveTrack(tid);
         let _add_clip = EngineCommand::AddClip {
+            insertion: crate::clip_insertion::PreparedClipInsertion::new(),
             track_id: tid,
             clip_id: cid,
             audio,

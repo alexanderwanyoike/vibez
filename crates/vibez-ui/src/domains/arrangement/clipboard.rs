@@ -338,6 +338,7 @@ impl TimelineEditorState {
                     clip.id = ClipId::new();
                     clip.position = (position_beats * ctx.samples_per_beat).round().max(0.0) as u64;
                     engine.send(EngineCommand::AddClip {
+                        insertion: vibez_engine::clip_insertion::PreparedClipInsertion::new(),
                         track_id,
                         clip_id: clip.id,
                         audio: Arc::clone(&clip.audio),

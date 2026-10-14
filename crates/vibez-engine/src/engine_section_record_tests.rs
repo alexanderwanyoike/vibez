@@ -193,6 +193,7 @@ fn stopped_count_in_does_not_play_arrangement_content() {
     commands.push(EngineCommand::add_track(track_id)).unwrap();
     commands
         .push(EngineCommand::AddClip {
+            insertion: crate::clip_insertion::PreparedClipInsertion::new(),
             track_id,
             clip_id: ClipId::new(),
             audio: arrangement_audio,
