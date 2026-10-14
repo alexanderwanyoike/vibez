@@ -229,6 +229,19 @@ impl canvas::Program<Message> for FilterResponse<'_> {
 mod tests {
     use super::*;
     #[test]
+    fn short_response_uses_its_available_vertical_range() {
+        for height in [10.0, 14.0, 24.0, 40.0] {
+            let top = FilterResponse::db_y(12.0, height);
+            let bottom = FilterResponse::db_y(-48.0, height);
+            assert!(top >= 0.0 && bottom <= height);
+            assert!(
+                bottom - top >= height - 4.0,
+                "curve is compressed at {height}px"
+            );
+        }
+    }
+
+    #[test]
     fn response_scale_keeps_unity_and_floor_within_the_plot() {
         for height in [24.0, 60.0, 200.0] {
             assert!(FilterResponse::db_y(0.0, height) >= 0.0);
