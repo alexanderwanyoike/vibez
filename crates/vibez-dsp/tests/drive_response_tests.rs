@@ -111,3 +111,25 @@ fn post_low_pass_filters_the_processed_wet_signal_and_leaves_dry_mix_aligned() {
         }
     }
 }
+
+#[test]
+fn the_single_modern_tone_stage_retains_its_history_across_exact_character_changes() {
+    for rate in [44_100.0_f32, 48_000.0, 96_000.0] {
+        let mut effect = create_effect_with_params(EffectType::Drive, rate, &[1.0, 0.0, 1.0, 1.0, 1.0]);
+        let mut warm = [0.02; 1024];
+        effect.process(&mut warm, 1);
+        let low_gain = 10.0_f64.powf(6.0 / 20.0);
+        let high_gain = low_gain.recip();
+        let mut low = warm[1023] as f64 / low_gain;
+        let beta = (-std::f64::consts::TAU * 1000.0 / rate as f64).exp();
+        assert!(effect.set_automated_param(4, 3.0));
+        let mut output = [0.02; 32];
+        effect.process(&mut output, 1);
+        for (frame, actual) in output.into_iter().enumerate() {
+            let hard = 0.6;
+            low = hard * (1.0 - beta) + low * beta;
+            let expected = low * low_gain + (hard - low) * high_gain;
+            assert!((actual as f64 - expected).abs() < 5e-5, "rate={rate}, frame={frame}, actual={actual}, expected={expected}");
+        }
+    }
+}
