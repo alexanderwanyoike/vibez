@@ -425,9 +425,37 @@ pub fn view<'a>(
         } else {
             graph.into()
         };
-        let meter = canvas(LevelMeter { levels: output })
+        let meter_canvas = canvas(LevelMeter { levels: output })
             .width(METER_W)
             .height(Length::Fill);
+        let meter: Element<'a, Message> = if layout.graph >= 100.0 {
+            let reading = |peak| {
+                let db = vibez_core::level::amplitude_to_db(peak);
+                if db.is_finite() {
+                    format!("{db:.1}")
+                } else {
+                    "-inf".into()
+                }
+            };
+            column![
+                section_label("Out"),
+                meter_canvas,
+                text(format!("L {}", reading(output.peak_l)))
+                    .size(8)
+                    .font(crate::typography::PERFORM_TECH)
+                    .wrapping(iced::widget::text::Wrapping::None),
+                text(format!("R {}", reading(output.peak_r)))
+                    .size(8)
+                    .font(crate::typography::PERFORM_TECH)
+                    .wrapping(iced::widget::text::Wrapping::None),
+            ]
+            .spacing(2)
+            .width(METER_W)
+            .height(Length::Fill)
+            .into()
+        } else {
+            meter_canvas.into()
+        };
         let visual: Element<'a, Message> = if layout.graph >= 160.0 && size.width >= MEDIUM_W {
             let shape = if selected == 0 || selected == 3 {
                 selector(
@@ -461,10 +489,11 @@ pub fn view<'a>(
             ]
             .spacing(6);
             row![plot, container(editor).width(160.0), meter]
+                .height(Length::Fill)
                 .spacing(10)
                 .into()
         } else {
-            row![plot, meter].spacing(8).into()
+            row![plot, meter].height(Length::Fill).spacing(8).into()
         };
         body = body.push(container(visual).height(layout.graph).padding([2, 4]));
     }
