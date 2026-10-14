@@ -40,7 +40,6 @@ fn parameter<'a>(
             let Some(presentation) = presentations.get(index) else {
                 return text("N/A").size(10).color(th::text_dim()).into();
             };
-            let knob = if matches!(index, param::BITS | param::SR_REDUCE) { None } else { knob };
             parameter_with_presentation(track, effect, state, index, accent, knob, presentation)
         }
     }

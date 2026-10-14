@@ -95,6 +95,15 @@ fn parameter_content<'a>(
         if descriptor.unit == "Hz" {
             knob.target = crate::widgets::effect_knob::KnobTarget::LogEffect(effect.id);
         }
+        if crate::domains::bitcrush::is_native_bitcrush(effect) {
+            use crate::widgets::effect_knob::KnobTarget;
+            use vibez_dsp::bitcrush::param;
+            knob.target = match index {
+                param::BITS => KnobTarget::BitcrushBits(effect.id),
+                param::SR_REDUCE => KnobTarget::BitcrushRate(effect.id),
+                _ => knob.target,
+            };
+        }
         content = content.push(canvas(knob).width(size).height(size));
     }
     content
