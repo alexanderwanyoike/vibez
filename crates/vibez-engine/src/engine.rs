@@ -867,6 +867,9 @@ mod bus_solo_tests;
 mod offline_routing;
 pub(crate) use offline_routing::OfflineRoutingSetup;
 
+#[path = "engine_offline_observation.rs"]
+mod offline_observation;
+
 #[cfg(test)]
 #[path = "engine_compensation_stop_tests.rs"]
 mod compensation_stop_tests;
