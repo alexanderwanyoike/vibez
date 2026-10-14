@@ -985,7 +985,8 @@ fn drum_media_commands_return_rejected_owners_without_touching_sounding_audio() 
 }
 
 #[test]
-fn retired_voice_guards_cover_repeated_stealing_choke_release_and_reset_without_callback_destruction() {
+fn retired_voice_guards_cover_repeated_stealing_choke_release_and_reset_without_callback_destruction(
+) {
     for boundary in ["steal", "choke", "reset"] {
         let (mut engine, mut commands, mut events) = AudioEngine::new();
         let track = TrackId::new();
@@ -993,50 +994,105 @@ fn retired_voice_guards_cover_repeated_stealing_choke_release_and_reset_without_
         let weak = Arc::downgrade(&old);
         commands.push(EngineCommand::SetSampleRate(1000)).unwrap();
         commands.push(EngineCommand::add_track(track)).unwrap();
-        commands.push(EngineCommand::set_built_in_instrument(track, InstrumentKind::DrumRack, 1000)).unwrap();
+        commands
+            .push(EngineCommand::set_built_in_instrument(
+                track,
+                InstrumentKind::DrumRack,
+                1000,
+            ))
+            .unwrap();
         for pad in 0..4 {
-            commands.push(EngineCommand::set_drum_rack_pad_state(track, pad, vibez_core::track::DrumPadState {
-                fade_in_ms: 0.0,
-                fade_out_ms: if boundary == "choke" && pad == 0 { 3.0 } else { 0.0 },
-                choke_group: if boundary == "choke" && (pad == 0 || pad == 3) { Some(7) } else { None },
-                ..Default::default()
-            })).unwrap();
+            commands
+                .push(EngineCommand::set_drum_rack_pad_state(
+                    track,
+                    pad,
+                    vibez_core::track::DrumPadState {
+                        fade_in_ms: 0.0,
+                        fade_out_ms: if boundary == "choke" && pad == 0 {
+                            3.0
+                        } else {
+                            0.0
+                        },
+                        choke_group: if boundary == "choke" && (pad == 0 || pad == 3) {
+                            Some(7)
+                        } else {
+                            None
+                        },
+                        ..Default::default()
+                    },
+                ))
+                .unwrap();
         }
         for (pad_index, sample) in [
             (0, old),
-            (1, Arc::new(DecodedAudio {
-                channels: vec![(0..4096).map(|frame| 0.2 + frame as f32 * 0.00001).collect()],
-                sample_rate: 1000,
-            })),
+            (
+                1,
+                Arc::new(DecodedAudio {
+                    channels: vec![(0..4096)
+                        .map(|frame| 0.2 + frame as f32 * 0.00001)
+                        .collect()],
+                    sample_rate: 1000,
+                }),
+            ),
             (2, audio(0.001)),
             (3, audio(0.0)),
         ] {
-            commands.push(EngineCommand::LoadDrumRackPadSample {
-                track_id: track, pad_index, sample, sample_name: format!("pad-{pad_index}.wav"),
-            }).unwrap();
+            commands
+                .push(EngineCommand::LoadDrumRackPadSample {
+                    track_id: track,
+                    pad_index,
+                    sample,
+                    sample_name: format!("pad-{pad_index}.wav"),
+                })
+                .unwrap();
         }
         for pitch in [36, 37] {
-            commands.push(EngineCommand::ExternalNoteOn { track_id: track, pitch, velocity: 127 }).unwrap();
+            commands
+                .push(EngineCommand::ExternalNoteOn {
+                    track_id: track,
+                    pitch,
+                    velocity: 127,
+                })
+                .unwrap();
         }
         if boundary == "steal" {
             for _ in 0..30 {
-                commands.push(EngineCommand::ExternalNoteOn { track_id: track, pitch: 38, velocity: 127 }).unwrap();
+                commands
+                    .push(EngineCommand::ExternalNoteOn {
+                        track_id: track,
+                        pitch: 38,
+                        velocity: 127,
+                    })
+                    .unwrap();
             }
         }
         engine.process(&mut [0.0; 16], 1);
         while events.pop().is_ok() {}
-        commands.push(EngineCommand::LoadDrumRackPadSample {
-            track_id: track, pad_index: 0, sample: audio(0.05), sample_name: "next-generation.wav".into(),
-        }).unwrap();
-        assert_eq!(crate::retirement::tests::allocations(|| engine.process(&mut [], 1)), (0, 0));
-        let guard = std::iter::from_fn(|| events.pop().ok()).find_map(|event| match event {
-            EngineEvent::RetiredInstrumentMedia(owners) => owners.sample,
-            _ => None,
-        }).expect("ordinary UI receipt retains the returned old sample");
+        commands
+            .push(EngineCommand::LoadDrumRackPadSample {
+                track_id: track,
+                pad_index: 0,
+                sample: audio(0.05),
+                sample_name: "next-generation.wav".into(),
+            })
+            .unwrap();
+        assert_eq!(
+            crate::retirement::tests::allocations(|| engine.process(&mut [], 1)),
+            (0, 0)
+        );
+        let guard = std::iter::from_fn(|| events.pop().ok())
+            .find_map(|event| match event {
+                EngineEvent::RetiredInstrumentMedia(owners) => owners.sample,
+                _ => None,
+            })
+            .expect("ordinary UI receipt retains the returned old sample");
         assert_eq!(Arc::as_ptr(&guard), weak.as_ptr());
         assert_eq!(weak.strong_count(), 2);
         let mut output = [0.0; 16];
-        assert_eq!(crate::retirement::tests::allocations(|| engine.process(&mut output, 1)), (0, 0));
+        assert_eq!(
+            crate::retirement::tests::allocations(|| engine.process(&mut output, 1)),
+            (0, 0)
+        );
         let fillers = if boundary == "steal" { 0.03 } else { 0.0 };
         for (frame, actual) in output.iter().enumerate() {
             let expected = 0.3 + (frame + 16) as f32 * 0.00001 + fillers;
@@ -1046,20 +1102,36 @@ fn retired_voice_guards_cover_repeated_stealing_choke_release_and_reset_without_
             "steal" => {
                 // No event flush occurs between these notes; current pad and returned guard protect both generations.
                 for _ in 0..65 {
-                    commands.push(EngineCommand::ExternalNoteOn { track_id: track, pitch: 36, velocity: 127 }).unwrap();
+                    commands
+                        .push(EngineCommand::ExternalNoteOn {
+                            track_id: track,
+                            pitch: 36,
+                            velocity: 127,
+                        })
+                        .unwrap();
                 }
             }
             "choke" => {
-                commands.push(EngineCommand::ExternalNoteOn { track_id: track, pitch: 39, velocity: 127 }).unwrap();
+                commands
+                    .push(EngineCommand::ExternalNoteOn {
+                        track_id: track,
+                        pitch: 39,
+                        velocity: 127,
+                    })
+                    .unwrap();
             }
             _ => {}
         }
-        assert_eq!(crate::retirement::tests::allocations(|| {
-            if boundary == "reset" {
-                engine.tracks[0].instrument.as_mut().unwrap().reset();
-            }
-            engine.process(&mut output, 1);
-        }), (0, 0), "{boundary}");
+        assert_eq!(
+            crate::retirement::tests::allocations(|| {
+                if boundary == "reset" {
+                    engine.tracks[0].instrument.as_mut().unwrap().reset();
+                }
+                engine.process(&mut output, 1);
+            }),
+            (0, 0),
+            "{boundary}"
+        );
         for (frame, actual) in output.iter().enumerate() {
             let unrelated = 0.2 + (frame + 32) as f32 * 0.00001;
             let expected = match boundary {
@@ -1067,9 +1139,16 @@ fn retired_voice_guards_cover_repeated_stealing_choke_release_and_reset_without_
                 "choke" => unrelated + [0.1, 0.05, 0.0].get(frame).copied().unwrap_or(0.0),
                 _ => 0.0,
             };
-            assert!((*actual - expected).abs() < 1e-6, "{boundary}, frame={frame}, actual={actual}, expected={expected}");
+            assert!(
+                (*actual - expected).abs() < 1e-6,
+                "{boundary}, frame={frame}, actual={actual}, expected={expected}"
+            );
         }
-        assert_eq!(weak.strong_count(), 1, "only returned UI guard remains, {boundary}");
+        assert_eq!(
+            weak.strong_count(),
+            1,
+            "only returned UI guard remains, {boundary}"
+        );
         drop(guard);
         assert_eq!(weak.strong_count(), 0);
     }
