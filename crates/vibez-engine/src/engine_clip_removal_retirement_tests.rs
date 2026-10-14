@@ -150,3 +150,47 @@ fn duplicate_audio_removal_is_atomic_under_retirement_backpressure_and_reuses_ca
     assert_eq!(engine.tracks()[0].playback_source.clips.len(), 2);
 }
 
+#[test]
+fn removing_populated_note_clips_flushes_sound_without_callback_destruction() {
+    use crate::playback_source::PreparedPlaybackSource;
+    use crate::test_support::DelayProbeInstrument;
+    use vibez_core::midi::MidiNote;
+    use vibez_core::perform::GrooveGrid;
+    for full_ring in [false, true] {
+        let (mut engine, mut commands, mut events) = AudioEngine::new();
+        let track = TrackId::new();
+        let duplicate = ClipId::new();
+        let survivor = ClipId::new();
+        let clip = |id, duration, start| EngineNoteClip::new(id, 0.0, duration,
+            vec![MidiNote { pitch: 60, velocity: 100, start_beat: start, duration_beats: 1.5 },
+                MidiNote { pitch: 60, velocity: 90, start_beat: 2.0, duration_beats: 1.0 },
+                MidiNote { pitch: 61, velocity: 80, start_beat: 2.0, duration_beats: 1.0 }],
+            0.0, false, 0.0, duration, GrooveGrid::Off);
+        let source = PreparedPlaybackSource::new(vec![], vec![clip(duplicate, 4.0, 0.0),
+            clip(survivor, 2.0, 1.0), clip(duplicate, 6.0, 0.0)], vec![]);
+        for command in [EngineCommand::SetSampleRate(96), EngineCommand::SetBpm(60.0),
+            EngineCommand::AddTrack(Box::new(EngineTrack::with_playback_source(track, source))),
+            EngineCommand::SetInstrument { track_id: track, instrument: Box::new(DelayProbeInstrument::new(0, 0.25)) },
+            EngineCommand::Play] {
+            commands.push(command).unwrap();
+        }
+        let mut sounding = [0.0; 32];
+        engine.process(&mut sounding, 2);
+        assert!(sounding.iter().all(|sample| *sample > 0.1));
+        assert_eq!(engine.transport().audio_length(), Some(576));
+        while events.pop().is_ok() {}
+        if full_ring {
+            while engine.event_tx.push(EngineEvent::PlaybackStarted).is_ok() {}
+        }
+        commands.push(EngineCommand::RemoveNoteClip(track, duplicate)).unwrap();
+        let measured = crate::retirement::tests::allocations(|| engine.process(&mut sounding, 2));
+        assert_eq!(sounding, [0.0; 32]);
+        assert_eq!(engine.transport().audio_length(), Some(192));
+        assert_eq!(engine.tracks()[0].playback_source.note_clips.len(), 1);
+        let remaining = &engine.tracks()[0].playback_source.note_clips[0];
+        assert_eq!(remaining.id, survivor);
+        assert_eq!(remaining.notes.len(), 3);
+        assert_eq!(remaining.notes[0].start_beat, 1.0);
+        assert_eq!(measured, (0, 0), "full_ring={full_ring}");
+    }
+}
