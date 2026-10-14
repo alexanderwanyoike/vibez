@@ -63,7 +63,7 @@ fn actual_drum_ui_clear_load_and_undo_preserve_fifo_media_audio_and_retired_guar
     track.pan = 0.0;
     track.drum_rack_pads[0] = UiDrumPad {
         name: Some("original.wav".into()), source: Some(MediaSourceRef::LocalFile { path: "/original/drum.wav".into() }),
-        audio: Some(old), gain: 0.5, pan: 0.0, start: 0.125, end: 0.875,
+        audio: Some(old), gain: 0.5, pan: -1.0, start: 0.125, end: 0.875,
         fade_in_ms: 0.0, fade_out_ms: 0.0, one_shot: false, choke_group: None,
         ..UiDrumPad::default()
     };
