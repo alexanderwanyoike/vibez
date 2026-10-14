@@ -1,3 +1,5 @@
+//! Native construction restores sound and immutable instance state before audio processing.
+
 use vibez_core::effect::EffectType;
 use vibez_core::id::EffectId;
 
