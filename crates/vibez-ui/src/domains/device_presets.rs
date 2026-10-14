@@ -181,6 +181,14 @@ pub fn factory_presets(effect_type: EffectType) -> Vec<DevicePreset> {
                 0.0,
             ],
         ),
+        (
+            "Boost 6 dB",
+            [vibez_core::level::db_to_amplitude(6.0), 0.0, 0.0, 0.0, 0.0],
+        ),
+        ("Balance left 3 dB", [1.0, 0.0, -3.0, 0.0, 0.0]),
+        ("Balance right 3 dB", [1.0, -3.0, 0.0, 0.0, 0.0]),
+        ("Invert left", [1.0, 0.0, 0.0, 1.0, 0.0]),
+        ("Invert right", [1.0, 0.0, 0.0, 0.0, 1.0]),
         ("Invert stereo", [1.0, 0.0, 0.0, 1.0, 1.0]),
     ]
     .into_iter()
@@ -265,7 +273,10 @@ mod presentation_tests {
         assert_eq!(inverted.selected, Some(last));
         assert!(!inverted.modified);
         assert_eq!(inverted.next, Some(initial.options[0].clone()));
-        assert_eq!(inverted.previous, Some(initial.options[2].clone()));
+        assert_eq!(
+            inverted.previous,
+            Some(initial.options[initial.options.len() - 2].clone())
+        );
     }
 
     #[test]
