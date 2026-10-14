@@ -164,7 +164,12 @@ impl App {
                 effect,
                 accent,
                 panel,
-                self.view_device_preset_bar(track_id, effect, accent, width - 20.0),
+                self.view_device_preset_bar(
+                    track_id,
+                    effect,
+                    accent,
+                    width - 20.0 - if height < 120.0 { 80.0 } else { 0.0 },
+                ),
                 width - 20.0,
                 height,
             ),

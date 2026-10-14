@@ -171,6 +171,21 @@ pub fn view<'a>(
             .push(container(advanced).padding([4, 14]));
     }
 
+    if very_short {
+        return column![
+            row![preset_bar, disclosure]
+                .spacing(5)
+                .align_y(iced::Alignment::Center),
+            horizontal_rule(),
+            scrollable(content)
+                .id(controls_scroll_id(effect.id))
+                .height(Length::Fill),
+        ]
+        .height(Length::Fixed(height.max(1.0)))
+        .width(Length::Fixed(width.max(1.0)))
+        .into();
+    }
+
     column![
         preset_bar,
         horizontal_rule(),
@@ -178,13 +193,7 @@ pub fn view<'a>(
             .id(controls_scroll_id(effect.id))
             .height(Length::Fill),
         horizontal_rule(),
-        container(disclosure)
-            .padding([if very_short { 1 } else { 4 }, 8])
-            .height(if very_short {
-                Length::Fixed(20.0)
-            } else {
-                Length::Shrink
-            }),
+        container(disclosure).padding([4, 8]),
     ]
     .height(Length::Fixed(height.max(1.0)))
     .width(Length::Fixed(width.max(1.0)))
