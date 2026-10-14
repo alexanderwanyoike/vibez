@@ -126,3 +126,37 @@ fn default_eight_times_quality_removes_the_folded_third_harmonic_of_hard_drive()
     assert!(baseline > 0.1);
     assert!(alias <= baseline * 0.1, "folded harmonic amplitude {alias} vs naive {baseline}");
 }
+
+#[test]
+fn drive_reports_actual_aligned_left_samples_and_a_memoryless_applied_transfer() {
+    let mut effect = create_effect_with_params(EffectType::Drive, 48_000.0, &[0.0, 0.5, 1.0, 1.0]);
+    let empty = effect.take_waveshaper_meter().expect("native Drive declares its diagnostic capability");
+    assert_eq!(empty.count, 0);
+    assert_eq!(empty.sample_rate, 48_000.0);
+    assert_eq!(empty.latency_samples, 64);
+    let mut signal: Vec<_> = (0..257).flat_map(|frame| [frame as f32 / 1000.0, -0.7]).collect();
+    effect.process(&mut signal[..14], 2);
+    effect.process(&mut signal[14..], 2);
+    let meter = effect.take_waveshaper_meter().unwrap();
+    assert_eq!(meter.count, 128);
+    assert_eq!(meter.first_output_sample, 129);
+    for point in 0..128 {
+        let expected = (129 + point - 64) as f32 / 1000.0;
+        assert_eq!(meter.input[point], expected);
+        assert_eq!(meter.output[point], expected);
+        assert_eq!(meter.output[point], signal[(129 + point) * 2]);
+    }
+    for point in 0..65 { assert_eq!(meter.transfer[point], -1.0 + point as f32 / 32.0); }
+    assert!(effect.supports_level_meter());
+    assert_eq!(effect.take_waveshaper_meter().unwrap().count, 0);
+    effect.reset();
+    let reset = effect.take_waveshaper_meter().unwrap();
+    assert_eq!(reset.count, 0);
+    assert_eq!(reset.first_output_sample, 0);
+    let mut silence = [0.0; 16];
+    effect.process(&mut silence, 2);
+    let silent = effect.take_waveshaper_meter().unwrap();
+    assert_eq!(silent.count, 8);
+    assert_eq!(silent.input[..8], [0.0; 8]);
+    assert_eq!(silent.output[..8], [0.0; 8]);
+}
