@@ -20,6 +20,7 @@ fn add_constant_track(commands: &mut rtrb::Producer<EngineCommand>, track_id: Tr
     commands.push(EngineCommand::add_track(track_id)).unwrap();
     commands
         .push(EngineCommand::AddClip {
+            insertion: crate::clip_insertion::PreparedClipInsertion::new(),
             track_id,
             clip_id: ClipId::new(),
             audio: constant_audio(256),

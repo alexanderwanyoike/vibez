@@ -442,6 +442,7 @@ fn add_clip_and_play() {
     cmd_tx.push(EngineCommand::add_track(tid)).unwrap();
     cmd_tx
         .push(EngineCommand::AddClip {
+            insertion: crate::clip_insertion::PreparedClipInsertion::new(),
             track_id: tid,
             clip_id: cid,
             audio,
@@ -491,6 +492,7 @@ fn clip_gain_is_applied_before_the_track_channel_strip() {
     cmd_tx.push(EngineCommand::add_track(track_id)).unwrap();
     cmd_tx
         .push(EngineCommand::AddClip {
+            insertion: crate::clip_insertion::PreparedClipInsertion::new(),
             track_id,
             clip_id,
             audio: make_constant_audio(32, 1.0),
@@ -534,6 +536,7 @@ fn mute_silences_track() {
     cmd_tx.push(EngineCommand::add_track(tid)).unwrap();
     cmd_tx
         .push(EngineCommand::AddClip {
+            insertion: crate::clip_insertion::PreparedClipInsertion::new(),
             track_id: tid,
             clip_id: cid,
             audio,
@@ -574,6 +577,7 @@ fn solo_isolates_track() {
     cmd_tx.push(EngineCommand::add_track(tid2)).unwrap();
     cmd_tx
         .push(EngineCommand::AddClip {
+            insertion: crate::clip_insertion::PreparedClipInsertion::new(),
             track_id: tid1,
             clip_id: cid1,
             audio: audio1,
@@ -592,6 +596,7 @@ fn solo_isolates_track() {
         .unwrap();
     cmd_tx
         .push(EngineCommand::AddClip {
+            insertion: crate::clip_insertion::PreparedClipInsertion::new(),
             track_id: tid2,
             clip_id: cid2,
             audio: audio2,
@@ -640,6 +645,7 @@ fn gain_scaling() {
     cmd_tx.push(EngineCommand::add_track(tid)).unwrap();
     cmd_tx
         .push(EngineCommand::AddClip {
+            insertion: crate::clip_insertion::PreparedClipInsertion::new(),
             track_id: tid,
             clip_id: cid,
             audio,
@@ -676,6 +682,7 @@ fn pan_hard_left() {
     cmd_tx.push(EngineCommand::add_track(tid)).unwrap();
     cmd_tx
         .push(EngineCommand::AddClip {
+            insertion: crate::clip_insertion::PreparedClipInsertion::new(),
             track_id: tid,
             clip_id: cid,
             audio,
@@ -718,6 +725,7 @@ fn multi_track_summing() {
     cmd_tx.push(EngineCommand::add_track(tid2)).unwrap();
     cmd_tx
         .push(EngineCommand::AddClip {
+            insertion: crate::clip_insertion::PreparedClipInsertion::new(),
             track_id: tid1,
             clip_id: cid1,
             audio: audio1,
@@ -736,6 +744,7 @@ fn multi_track_summing() {
         .unwrap();
     cmd_tx
         .push(EngineCommand::AddClip {
+            insertion: crate::clip_insertion::PreparedClipInsertion::new(),
             track_id: tid2,
             clip_id: cid2,
             audio: audio2,
@@ -795,6 +804,7 @@ fn per_track_metering_events() {
     cmd_tx.push(EngineCommand::add_track(tid)).unwrap();
     cmd_tx
         .push(EngineCommand::AddClip {
+            insertion: crate::clip_insertion::PreparedClipInsertion::new(),
             track_id: tid,
             clip_id: cid,
             audio,
@@ -844,6 +854,7 @@ fn transport_auto_stop_multitrack() {
     cmd_tx.push(EngineCommand::add_track(tid)).unwrap();
     cmd_tx
         .push(EngineCommand::AddClip {
+            insertion: crate::clip_insertion::PreparedClipInsertion::new(),
             track_id: tid,
             clip_id: cid,
             audio,
@@ -880,6 +891,7 @@ fn move_clip_changes_position() {
     cmd_tx.push(EngineCommand::add_track(tid)).unwrap();
     cmd_tx
         .push(EngineCommand::AddClip {
+            insertion: crate::clip_insertion::PreparedClipInsertion::new(),
             track_id: tid,
             clip_id: cid,
             audio,
@@ -921,6 +933,7 @@ fn add_clip_with_loop_plays_looped_audio() {
     cmd_tx.push(EngineCommand::add_track(tid)).unwrap();
     cmd_tx
         .push(EngineCommand::AddClip {
+            insertion: crate::clip_insertion::PreparedClipInsertion::new(),
             track_id: tid,
             clip_id: cid,
             audio,
@@ -964,6 +977,7 @@ fn resize_clip_preserves_loop_state() {
     // Add clip without loop
     cmd_tx
         .push(EngineCommand::AddClip {
+            insertion: crate::clip_insertion::PreparedClipInsertion::new(),
             track_id: tid,
             clip_id: cid,
             audio: audio.clone(),
@@ -998,6 +1012,7 @@ fn resize_clip_preserves_loop_state() {
     cmd_tx.push(EngineCommand::RemoveClip(tid, cid)).unwrap();
     cmd_tx
         .push(EngineCommand::AddClip {
+            insertion: crate::clip_insertion::PreparedClipInsertion::new(),
             track_id: tid,
             clip_id: cid,
             audio,
@@ -1692,6 +1707,7 @@ fn constant_clip_track(
     cmd_tx.push(EngineCommand::add_track(tid)).unwrap();
     cmd_tx
         .push(EngineCommand::AddClip {
+            insertion: crate::clip_insertion::PreparedClipInsertion::new(),
             track_id: tid,
             clip_id: cid,
             audio: make_constant_audio(frames, 0.5),
@@ -1750,6 +1766,7 @@ fn track_output_capture_stays_aligned_across_arrangement_loop_wrap() {
     cmd_tx.push(EngineCommand::add_track(source)).unwrap();
     cmd_tx
         .push(EngineCommand::AddClip {
+            insertion: crate::clip_insertion::PreparedClipInsertion::new(),
             track_id: source,
             clip_id: ClipId::new(),
             audio: make_test_audio(32),
@@ -1820,6 +1837,7 @@ fn track_output_capture_excludes_sends_returns_master_and_inaudible_sources() {
     cmd_tx.push(EngineCommand::add_track(solo)).unwrap();
     cmd_tx
         .push(EngineCommand::AddClip {
+            insertion: crate::clip_insertion::PreparedClipInsertion::new(),
             track_id: solo,
             clip_id: ClipId::new(),
             audio: make_constant_audio(4096, 0.5),
@@ -2094,6 +2112,7 @@ fn master_gain_scales_the_summed_mix() {
     cmd_tx.push(EngineCommand::add_track(tid)).unwrap();
     cmd_tx
         .push(EngineCommand::AddClip {
+            insertion: crate::clip_insertion::PreparedClipInsertion::new(),
             track_id: tid,
             clip_id: cid,
             audio: make_constant_audio(100, 0.5),
@@ -2135,6 +2154,7 @@ fn master_effect_chain_processes_the_summed_mix() {
     cmd_tx.push(EngineCommand::add_track(tid)).unwrap();
     cmd_tx
         .push(EngineCommand::AddClip {
+            insertion: crate::clip_insertion::PreparedClipInsertion::new(),
             track_id: tid,
             clip_id: cid,
             audio: make_constant_audio(4_096, 0.5),
@@ -2219,6 +2239,7 @@ fn spectrum_tap_streams_track_samples() {
     cmd_tx.push(EngineCommand::add_track(tid)).unwrap();
     cmd_tx
         .push(EngineCommand::AddClip {
+            insertion: crate::clip_insertion::PreparedClipInsertion::new(),
             track_id: tid,
             clip_id: cid,
             audio: make_constant_audio(10_000, 0.5),
@@ -2277,6 +2298,7 @@ fn engine_with_send(send: f32) -> (AudioEngine, rtrb::Producer<EngineCommand>, T
     cmd_tx.push(EngineCommand::add_track(tid)).unwrap();
     cmd_tx
         .push(EngineCommand::AddClip {
+            insertion: crate::clip_insertion::PreparedClipInsertion::new(),
             track_id: tid,
             clip_id: ClipId::new(),
             audio: make_constant_audio(50_000, 0.5),

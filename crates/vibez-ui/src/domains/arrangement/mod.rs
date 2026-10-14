@@ -444,6 +444,7 @@ impl TimelineEditorState {
                         engine.send(EngineCommand::RemoveClip(source_track, clip_id));
                         // Add to engine target track
                         engine.send(EngineCommand::AddClip {
+                            insertion: vibez_engine::clip_insertion::PreparedClipInsertion::new(),
                             track_id: target_track,
                             clip_id,
                             audio: Arc::clone(&clip.audio),
@@ -531,6 +532,7 @@ impl TimelineEditorState {
                                 });
                                 if let Some(duplicate) = duplicate {
                                     engine.send(EngineCommand::AddClip {
+                                        insertion: vibez_engine::clip_insertion::PreparedClipInsertion::new(),
                                         track_id: *track_id,
                                         clip_id: duplicate.id,
                                         audio: Arc::clone(&duplicate.audio),

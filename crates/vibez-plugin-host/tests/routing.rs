@@ -11,6 +11,7 @@ use vibez_plugin_host::wrappers::effect::PluginEffectWrapper;
 
 fn clip(track_id: TrackId, left: f32, right: f32) -> EngineCommand {
     EngineCommand::AddClip {
+        insertion: vibez_engine::clip_insertion::PreparedClipInsertion::new(),
         track_id,
         clip_id: ClipId::new(),
         audio: std::sync::Arc::new(DecodedAudio {
