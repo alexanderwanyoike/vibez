@@ -32,3 +32,24 @@ fn native_gate_subscribes_to_real_levels_and_rejects_stale_generations() {
     app.accept_device_meter(track, effect, generation, input, output);
     assert_eq!(app.device_meters.readings[&effect].input.peak_l, 0.0);
 }
+
+#[test]
+fn gate_mix_accepts_percentages_and_keeps_normalized_storage_with_one_undo() {
+    use crate::domains::device_controls::DeviceControlMsg;
+    let mut app = super::super::test_support::app();
+    let channel = ProjectTrack::new(TrackId::new(), "Gate".into(), 3);
+    let track = channel.id;
+    Arc::make_mut(&mut app.state.project_tracks).tracks.push(channel);
+    let _ = app.update(Message::Devices(DevicesMsg::AddEffect(track, EffectType::Gate)));
+    let effect = app.state.find_track(track).unwrap().effects[0].id;
+    app.state.project.history = Default::default();
+    let _ = app.update(Message::DeviceControl(DeviceControlMsg::Input(track, effect,
+        vibez_dsp::gate::param::MIX, "50%".into())));
+    let _ = app.update(Message::DeviceControl(DeviceControlMsg::Submit(track, effect,
+        vibez_dsp::gate::param::MIX)));
+    assert_eq!(app.state.find_track(track).unwrap().effects[0].params[vibez_dsp::gate::param::MIX], 0.5);
+    let snapshot = app.state.project.history.pop_undo().expect("one mix edit");
+    assert!(!app.state.project.history.can_undo());
+    app.apply_snapshot(snapshot);
+    assert_eq!(app.state.find_track(track).unwrap().effects[0].params[vibez_dsp::gate::param::MIX], 1.0);
+}
