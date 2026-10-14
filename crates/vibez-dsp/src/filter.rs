@@ -205,3 +205,7 @@ mod tests {
         assert!(!fx.set_param(2, 1.0));
     }
 }
+
+#[cfg(test)]
+#[path = "filter_tests.rs"]
+mod refresh_tests;
