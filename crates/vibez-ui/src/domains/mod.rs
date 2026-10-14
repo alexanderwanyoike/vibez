@@ -15,6 +15,7 @@ pub mod automation;
 pub mod browser;
 pub mod compensation;
 pub mod compressor;
+pub mod compressor_layout;
 pub mod device_controls;
 pub mod device_latency;
 pub mod device_presets;

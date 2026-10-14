@@ -3,6 +3,7 @@
 use crate::{
     domains::{
         compressor::{CompressorMsg, CompressorPage, CompressorPanel},
+        compressor_layout::{aside_page, ASIDE_PAGES, PrimaryControls},
         device_controls::DeviceControlState,
         devices::DevicesState,
     },
@@ -22,34 +23,6 @@ use vibez_core::id::{EffectId, TrackId};
 use vibez_dsp::compressor::param;
 use vibez_engine::metering::MeterValues;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum PrimaryControls {
-    Core,
-    Full,
-    Expanded,
-}
-
-impl PrimaryControls {
-    pub fn indices(self) -> &'static [usize] {
-        match self {
-            Self::Core => &[
-                param::THRESHOLD,
-                param::RATIO,
-                param::ATTACK,
-                param::RELEASE,
-            ],
-            Self::Full | Self::Expanded => &[
-                param::THRESHOLD,
-                param::RATIO,
-                param::ATTACK,
-                param::RELEASE,
-                param::KNEE,
-                param::MAKEUP,
-                param::MIX,
-            ],
-        }
-    }
-}
 
 pub fn primary<'a>(
     track: TrackId,
@@ -104,12 +77,8 @@ pub fn aside<'a>(
     if !state.advanced {
         return disclosure;
     }
-    let pages = vec![
-        CompressorPage::Dynamics, CompressorPage::Detector,
-        CompressorPage::Range, CompressorPage::Metering,
-    ];
-    let selected = if pages.contains(&panel.page) { panel.page } else { CompressorPage::Dynamics };
-    let header = row![disclosure, page_selector(track, effect.id, pages, selected, accent)]
+    let selected = aside_page(panel.page);
+    let header = row![disclosure, page_selector(track, effect.id, ASIDE_PAGES.to_vec(), selected, accent)]
         .spacing(6).align_y(iced::Alignment::Center);
     let controls: Element<'a, Message> = match selected {
         CompressorPage::Sound | CompressorPage::Dynamics | CompressorPage::Sidechain => row![
