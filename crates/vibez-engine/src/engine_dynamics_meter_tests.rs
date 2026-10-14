@@ -35,7 +35,14 @@ fn gate_fixture(graph: bool) -> GateFixture {
     let effect = EffectId::new();
     commands.push(EngineCommand::SetSampleRate(48000)).unwrap();
     commands.push(EngineCommand::add_track(track)).unwrap();
-    commands.push(EngineCommand::insert_built_in_effect(track, effect, EffectType::Gate, 48000)).unwrap();
+    commands
+        .push(EngineCommand::insert_built_in_effect(
+            track,
+            effect,
+            EffectType::Gate,
+            48000,
+        ))
+        .unwrap();
     for (param_index, value) in [
         (param::THRESHOLD, -18.0),
         (param::ATTACK, 0.1),
@@ -46,22 +53,56 @@ fn gate_fixture(graph: bool) -> GateFixture {
         (param::RANGE, 60.0),
         (param::MIX, 0.0),
     ] {
-        commands.push(EngineCommand::SetEffectParam { track_id: track, effect_id: effect, param_index, value }).unwrap();
+        commands
+            .push(EngineCommand::SetEffectParam {
+                track_id: track,
+                effect_id: effect,
+                param_index,
+                value,
+            })
+            .unwrap();
     }
     if graph {
         let channels = [
-            RoutingChannel { id: track, is_bus: false, sends: vec![], effects: vec![RoutingEffect {
-                id: effect, inputs: vec![], assignments: vec![], inactive_inputs: vec![],
-            }] },
-            RoutingChannel { id: TrackId::MASTER, is_bus: true, sends: vec![], effects: vec![] },
+            RoutingChannel {
+                id: track,
+                is_bus: false,
+                sends: vec![],
+                effects: vec![RoutingEffect {
+                    id: effect,
+                    inputs: vec![],
+                    assignments: vec![],
+                    inactive_inputs: vec![],
+                }],
+            },
+            RoutingChannel {
+                id: TrackId::MASTER,
+                is_bus: true,
+                sends: vec![],
+                effects: vec![],
+            },
         ];
-        commands.push(EngineCommand::SetRouting(crate::routing::PreparedRouting::prepare(&channels, 128).unwrap())).unwrap();
+        commands
+            .push(EngineCommand::SetRouting(
+                crate::routing::PreparedRouting::prepare(&channels, 128).unwrap(),
+            ))
+            .unwrap();
     }
-    commands.push(EngineCommand::SetEffectMeterChannel { track_id: Some(track), generation: 7 }).unwrap();
+    commands
+        .push(EngineCommand::SetEffectMeterChannel {
+            track_id: Some(track),
+            generation: 7,
+        })
+        .unwrap();
     (engine, commands, events, track, effect)
 }
 
-fn render_gate_window(engine: &mut AudioEngine, track: TrackId, amplitude: f32, output: &mut [f32; 1920]) {
+fn render_gate_window(
+    engine: &mut AudioEngine,
+    track: TrackId,
+    amplitude: f32,
+    output: &mut [f32; 1920],
+) {
     let input = [amplitude; 1920];
     engine.process_block(AudioProcessBlock::new(output, 2).with_live_input(track.raw(), &input));
 }
@@ -75,10 +116,17 @@ fn gate_windows_drop_under_full_ring_pressure_without_allocating_or_retrying_old
         let dry_scale = output[1918] / 0.5;
         let initial = readings(&mut events);
         assert_eq!(initial.len(), 1);
-        assert_eq!((initial[0].0, initial[0].1, initial[0].2), (track, effect, 7));
+        assert_eq!(
+            (initial[0].0, initial[0].1, initial[0].2),
+            (track, effect, 7)
+        );
         assert_eq!(initial[0].3.gate.unwrap().phase, GatePhase::Open);
 
-        while engine.event_tx.push(EngineEvent::PlaybackPosition(0)).is_ok() {}
+        while engine
+            .event_tx
+            .push(EngineEvent::PlaybackPosition(0))
+            .is_ok()
+        {}
         let measured = crate::retirement::tests::allocations(|| {
             render_gate_window(&mut engine, track, 0.8, &mut output);
             for _ in 0..4 {
@@ -93,7 +141,11 @@ fn gate_windows_drop_under_full_ring_pressure_without_allocating_or_retrying_old
         });
         assert_eq!(measured, (0, 0));
         let fresh = readings(&mut events);
-        assert_eq!(fresh.len(), 1, "dropped Gate windows must not queue a retry backlog");
+        assert_eq!(
+            fresh.len(),
+            1,
+            "dropped Gate windows must not queue a retry backlog"
+        );
         let meter = fresh[0].3;
         let gate = meter.gate.unwrap();
         assert_eq!((fresh[0].0, fresh[0].1, fresh[0].2), (track, effect, 7));
@@ -102,8 +154,13 @@ fn gate_windows_drop_under_full_ring_pressure_without_allocating_or_retrying_old
         assert_eq!(gate.phases_seen, GatePhase::Hold as u8);
         assert!((90.0..110.0).contains(&gate.hold_remaining_ms), "{gate:?}");
         assert!((gate.peak_envelope_db + 40.0).abs() < 0.002, "{gate:?}");
-        assert_eq!((gate.open_threshold_db, gate.close_threshold_db), (-18.0, -24.0));
-        assert!(output.iter().all(|sample| (*sample - 0.01 * dry_scale).abs() < 1e-7));
+        assert_eq!(
+            (gate.open_threshold_db, gate.close_threshold_db),
+            (-18.0, -24.0)
+        );
+        assert!(output
+            .iter()
+            .all(|sample| (*sample - 0.01 * dry_scale).abs() < 1e-7));
 
         let measured = crate::retirement::tests::allocations(|| {
             for _ in 0..7 {
@@ -120,7 +177,9 @@ fn gate_windows_drop_under_full_ring_pressure_without_allocating_or_retrying_old
         assert_eq!(gate.hold_remaining_ms, 0.0);
         assert_eq!(meter.detector_peak, [0.01; 2]);
         assert!(meter.current_reduction_db[0] > 40.0, "{meter:?}");
-        assert!(output.iter().all(|sample| (*sample - 0.01 * dry_scale).abs() < 1e-7));
+        assert!(output
+            .iter()
+            .all(|sample| (*sample - 0.01 * dry_scale).abs() < 1e-7));
     }
 }
 
@@ -131,12 +190,22 @@ fn gate_windows_respect_generation_bypass_and_transport_reset_without_old_peaks_
         let mut output = [0.0; 1920];
         render_gate_window(&mut engine, track, 0.5, &mut output);
         readings(&mut events);
-        commands.push(EngineCommand::SetEffectMeterChannel { track_id: None, generation: 8 }).unwrap();
+        commands
+            .push(EngineCommand::SetEffectMeterChannel {
+                track_id: None,
+                generation: 8,
+            })
+            .unwrap();
         render_gate_window(&mut engine, track, 0.8, &mut output);
         render_gate_window(&mut engine, track, 0.01, &mut output);
         assert!(readings(&mut events).is_empty());
 
-        commands.push(EngineCommand::SetEffectMeterChannel { track_id: Some(track), generation: 9 }).unwrap();
+        commands
+            .push(EngineCommand::SetEffectMeterChannel {
+                track_id: Some(track),
+                generation: 9,
+            })
+            .unwrap();
         render_gate_window(&mut engine, track, 0.001, &mut output);
         let fresh = readings(&mut events);
         assert_eq!(fresh.len(), 1);
@@ -147,16 +216,38 @@ fn gate_windows_respect_generation_bypass_and_transport_reset_without_old_peaks_
         assert_eq!(gate.phases_seen, GatePhase::Hold as u8);
         assert!(gate.peak_envelope_db < -35.0, "{gate:?}");
 
-        commands.push(EngineCommand::SetEffectBypass { track_id: track, effect_id: effect, bypass: true }).unwrap();
-        commands.push(EngineCommand::SetEffectMeterChannel { track_id: Some(track), generation: 10 }).unwrap();
+        commands
+            .push(EngineCommand::SetEffectBypass {
+                track_id: track,
+                effect_id: effect,
+                bypass: true,
+            })
+            .unwrap();
+        commands
+            .push(EngineCommand::SetEffectMeterChannel {
+                track_id: Some(track),
+                generation: 10,
+            })
+            .unwrap();
         render_gate_window(&mut engine, track, 0.9, &mut output);
         let bypassed = readings(&mut events);
         assert_eq!(bypassed.len(), 1);
         assert_eq!(bypassed[0].2, 10);
         assert_eq!(bypassed[0].3, DynamicsMeter::default());
 
-        commands.push(EngineCommand::SetEffectBypass { track_id: track, effect_id: effect, bypass: false }).unwrap();
-        commands.push(EngineCommand::SetEffectMeterChannel { track_id: Some(track), generation: 11 }).unwrap();
+        commands
+            .push(EngineCommand::SetEffectBypass {
+                track_id: track,
+                effect_id: effect,
+                bypass: false,
+            })
+            .unwrap();
+        commands
+            .push(EngineCommand::SetEffectMeterChannel {
+                track_id: Some(track),
+                generation: 11,
+            })
+            .unwrap();
         render_gate_window(&mut engine, track, 0.002, &mut output);
         let resumed = readings(&mut events);
         assert_eq!(resumed.len(), 1);
@@ -164,7 +255,11 @@ fn gate_windows_respect_generation_bypass_and_transport_reset_without_old_peaks_
         assert_eq!(resumed[0].3.detector_peak, [0.002; 2]);
         let resumed_gate = resumed[0].3.gate.unwrap();
         // Prepared graphs reset stopped wet DSP on re-entry; direct slots retain it.
-        let expected = if graph { GatePhase::Closed } else { GatePhase::Hold };
+        let expected = if graph {
+            GatePhase::Closed
+        } else {
+            GatePhase::Hold
+        };
         assert_eq!(resumed_gate.phase, expected);
         assert_eq!(resumed_gate.phases_seen, expected as u8);
         if graph {
@@ -174,7 +269,12 @@ fn gate_windows_respect_generation_bypass_and_transport_reset_without_old_peaks_
         }
 
         commands.push(EngineCommand::Play).unwrap();
-        commands.push(EngineCommand::SetEffectMeterChannel { track_id: Some(track), generation: 12 }).unwrap();
+        commands
+            .push(EngineCommand::SetEffectMeterChannel {
+                track_id: Some(track),
+                generation: 12,
+            })
+            .unwrap();
         render_gate_window(&mut engine, track, 0.0, &mut output);
         let reset = readings(&mut events);
         assert_eq!(reset.len(), 1);
