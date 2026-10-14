@@ -4,10 +4,13 @@ use vibez_core::effect::{EffectType, ParamDescriptor};
 
 use crate::effect::AudioEffect;
 
+#[path = "bitcrush_random.rs"]
+mod random;
 #[path = "bitcrush_ramp.rs"]
 mod ramp;
 #[path = "bitcrush_scope.rs"]
 mod scope;
+use random::Random;
 use ramp::Ramp;
 use scope::Scope;
 
@@ -99,6 +102,8 @@ pub struct BitcrushEffect {
     drive_gain: f64,
     started: bool,
     scope: Scope,
+    random: Random,
+    source_frames: u64,
     /// Sample-and-hold state, per channel.
     hold: [f32; 2],
     /// Frame counter for SR reduce, per channel.
@@ -110,6 +115,7 @@ impl BitcrushEffect {
         Self::with_sample_rate(44_100.0)
     }
 
+    /// Standalone processors share the deterministic identity-zero dither stream.
     pub fn with_sample_rate(sample_rate: f32) -> Self {
         let sample_rate = if sample_rate.is_finite() && sample_rate >= 2.0 {
             sample_rate
@@ -124,6 +130,8 @@ impl BitcrushEffect {
             drive_gain: 1.0,
             started: false,
             scope: Scope::default(),
+            random: Random::new(),
+            source_frames: 0,
             hold: [0.0; 2],
             counter: [0; 2],
         }
@@ -213,6 +221,7 @@ impl AudioEffect for BitcrushEffect {
         let levels = 2u32.pow(self.params[param::BITS] as u32) as f32;
         let step = 2.0 / levels;
         let divider = self.params[param::SR_REDUCE].round().max(1.0) as u32;
+        let dither = self.params[param::DITHER] != 0.0;
 
         for frame in 0..frames {
             if let Some(value) = self.drive.advance(self.params[param::DRIVE_DB]) {
@@ -232,11 +241,16 @@ impl AudioEffect for BitcrushEffect {
 
                 let acquired = self.counter[c] == 0;
                 if acquired {
-                    // Zero drive retains the original f32 quantizer division for saved projects.
-                    let scaled = if drive_db == 0.0 {
+                    // Neutral drive/dither retain the original f32 division for saved projects.
+                    let scaled = if drive_db == 0.0 && !dither {
                         f64::from(dry / step)
                     } else {
                         f64::from(dry) * drive_gain / f64::from(step)
+                    };
+                    let scaled = if dither {
+                        scaled + self.random.tpdf(self.source_frames, c)
+                    } else {
+                        scaled
                     };
                     let quantized = match self.params[param::ROUNDING] as u32 {
                         1 => scaled.floor(),
@@ -254,10 +268,12 @@ impl AudioEffect for BitcrushEffect {
                     self.scope.record(dry, buffer[idx], acquired, divider);
                 }
             }
+            self.source_frames = self.source_frames.wrapping_add(1);
         }
     }
 
     fn reset(&mut self) {
+        self.source_frames = 0;
         self.scope = Scope::default();
         self.hold = [0.0; 2];
         self.counter = [0; 2];
