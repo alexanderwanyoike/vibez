@@ -18,6 +18,7 @@ pub(super) fn app() -> super::App {
         plugin_effect_tx,
         plugin_load_requests: Default::default(),
         device_meters: Default::default(),
+        compressor_devices: Default::default(),
         gain_devices: Default::default(),
         eq_devices: Default::default(),
         param_entry: None,

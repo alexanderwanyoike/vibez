@@ -53,6 +53,7 @@ struct App {
     device_meters: device_meters::DeviceMeters,
     gain_devices: gain_devices::GainDevices,
     eq_devices: eq_devices::EqDevices,
+    compressor_devices: compressor_devices::CompressorDevices,
     param_entry: Option<crate::domains::param_entry::ValueEntry>,
     device_presets: device_presets::DevicePresetRuntime,
     // Plugin GUI support
@@ -157,6 +158,7 @@ mod audio_tasks;
 mod bounce;
 mod capture;
 mod compensation;
+mod compressor_devices;
 mod device_meters;
 pub(crate) mod device_presets;
 mod drum_rack_preparation;
@@ -432,6 +434,7 @@ impl App {
             plugin_effect_tx,
             plugin_load_requests: Default::default(),
             device_meters: Default::default(),
+            compressor_devices: Default::default(),
             gain_devices: Default::default(),
             eq_devices: eq_devices::EqDevices {
                 spectrum_rx: eq_spectrum_rx,
