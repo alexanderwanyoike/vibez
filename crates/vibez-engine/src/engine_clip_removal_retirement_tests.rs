@@ -87,3 +87,66 @@ fn removing_a_unique_audio_clip_preserves_survivors_without_callback_destruction
         assert_eq!(removed_owner.strong_count(), 0);
     }
 }
+
+#[test]
+fn duplicate_audio_removal_is_atomic_under_retirement_backpressure_and_reuses_capacity() {
+    let (mut engine, mut commands, mut events) = AudioEngine::new();
+    let track = TrackId::new();
+    let duplicate = ClipId::new();
+    let survivors = [ClipId::new(), ClipId::new()];
+    let count = crate::retirement::RETIREMENT_CAPACITY * 2 + 3;
+    let mut identities = Vec::new();
+    commands.push(EngineCommand::add_track(track)).unwrap();
+    commands.push(add_clip(track, survivors[0], audio(0.125), 128)).unwrap();
+    for _ in 0..count {
+        let value = audio(0.001);
+        identities.push(Arc::downgrade(&value));
+        commands.push(add_clip(track, duplicate, value, 400)).unwrap();
+    }
+    commands.push(add_clip(track, survivors[1], audio(0.5), 200)).unwrap();
+    commands.push(EngineCommand::Play).unwrap();
+    engine.process(&mut [0.0; 16], 2);
+    while events.pop().is_ok() {}
+    while engine.event_tx.push(EngineEvent::PlaybackStarted).is_ok() {}
+    commands.push(EngineCommand::RemoveClip(track, duplicate)).unwrap();
+    commands.push(EngineCommand::SetTrackPan(track, -0.5)).unwrap();
+    let mut output = [0.0; 16];
+    assert_eq!(crate::retirement::tests::allocations(|| engine.process(&mut output, 2)), (0, 0));
+    assert_eq!(engine.pending_retirements.len(), crate::retirement::RETIREMENT_CAPACITY);
+    assert_eq!(engine.cmd_rx.slots(), 1);
+    assert_eq!(engine.tracks()[0].pan, 0.0);
+    assert_eq!(engine.transport().audio_length(), Some(200));
+    assert_eq!(engine.tracks()[0].playback_source.clips.iter().map(|clip| clip.id).collect::<Vec<_>>(), survivors);
+    let expected = 0.625 * 0.75 * std::f32::consts::FRAC_1_SQRT_2;
+    assert!(output.iter().all(|sample| (*sample - expected).abs() < 1e-6));
+    assert!(identities.iter().all(|owner| owner.strong_count() == 1));
+    for _ in 0..2 {
+        assert_eq!(crate::retirement::tests::allocations(|| engine.process(&mut output, 2)), (0, 0));
+        assert_eq!(engine.cmd_rx.slots(), 1);
+        assert!(output.iter().all(|sample| (*sample - expected).abs() < 1e-6));
+    }
+    let mut returned = Vec::new();
+    for _ in 0..4 {
+        while let Ok(event) = events.pop() {
+            if let EngineEvent::RetiredAudioClip(clip) = event {
+                returned.push(Arc::as_ptr(&clip.audio));
+                assert_eq!(clip.id, duplicate);
+                assert!(!clip.warp_markers.is_empty());
+            }
+        }
+        assert_eq!(crate::retirement::tests::allocations(|| engine.process(&mut [], 2)), (0, 0));
+    }
+    assert_eq!(engine.cmd_rx.slots(), 0);
+    assert_eq!(engine.tracks()[0].pan, -0.5);
+    assert_eq!(returned.len(), count);
+    for owner in &identities {
+        assert_eq!(returned.iter().filter(|pointer| **pointer == owner.as_ptr()).count(), 1);
+        assert_eq!(owner.strong_count(), 0);
+    }
+    commands.push(add_clip(track, duplicate, audio(0.001), 400)).unwrap();
+    engine.process(&mut [], 2);
+    commands.push(EngineCommand::RemoveClip(track, duplicate)).unwrap();
+    assert_eq!(crate::retirement::tests::allocations(|| engine.process(&mut [], 2)), (0, 0));
+    assert_eq!(engine.tracks()[0].playback_source.clips.len(), 2);
+}
+
