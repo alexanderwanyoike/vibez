@@ -71,7 +71,7 @@ fn offline_rate_reuse_is_rejected_before_processing_and_retains_the_owner() {
     });
     let mut output = [0.0; 16];
     engine.render_offline_routing_segment(0, &mut output, None);
-    assert!(!engine.compensation_valid);
+    assert!(!engine.compensation_plan.applied_plan_is_valid());
     let error = engine
         .offline_compensation_failure()
         .expect("invalid rate must fail Bounce");

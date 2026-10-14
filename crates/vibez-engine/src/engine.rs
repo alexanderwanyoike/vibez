@@ -63,8 +63,7 @@ pub struct AudioEngine {
     next_device_handoff: u64,
     pending_device_reconfiguration: Option<reconfiguration::PendingDeviceReconfiguration>,
     pending_device_parameters: Vec<(usize, f32)>,
-    graph_edit_pending: bool,
-    compensation_valid: bool,
+    compensation_plan: compensation_plan::CompensationPlanState,
     output_gate: output_gate::OutputGate,
     routing: Box<crate::routing::PreparedRouting>,
     project_routing_published: bool,
@@ -264,8 +263,7 @@ impl AudioEngine {
             next_device_handoff: 0,
             pending_device_reconfiguration: None,
             pending_device_parameters: Vec::with_capacity(2048),
-            graph_edit_pending: false,
-            compensation_valid: true,
+            compensation_plan: compensation_plan::CompensationPlanState::default(),
             output_gate: output_gate::OutputGate::default(),
             retired_routing: None,
             pending_bus_cleanup: None,
@@ -824,6 +822,9 @@ mod capture_commands;
 
 #[path = "engine_compensation_commands.rs"]
 mod compensation_commands;
+
+#[path = "engine_compensation_plan.rs"]
+mod compensation_plan;
 
 #[path = "engine_device_commands.rs"]
 mod device_commands;

@@ -131,7 +131,7 @@ fn full_presentation_queue_stops_and_can_restart_without_replacing_valid_plan() 
     );
     assert!(engine.presentation_state.is_faulted());
     assert!(!engine.transport.is_playing());
-    assert!(engine.compensation_valid);
+    assert!(engine.compensation_plan.applied_plan_is_valid());
     let mut stopped = false;
     let mut failure = false;
     for _ in 0..4 {
@@ -147,7 +147,7 @@ fn full_presentation_queue_stops_and_can_restart_without_replacing_valid_plan() 
     engine.drain_commands();
     assert!(!engine.presentation_state.is_faulted());
     assert!(engine.transport.is_playing());
-    assert!(engine.compensation_valid);
+    assert!(engine.compensation_plan.applied_plan_is_valid());
 }
 
 #[test]

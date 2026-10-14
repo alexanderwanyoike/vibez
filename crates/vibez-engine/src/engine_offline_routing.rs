@@ -49,7 +49,7 @@ impl AudioEngine {
                 samples,
             }
         });
-        if !self.compensation_valid {
+        if !self.compensation_plan.applied_plan_is_valid() {
             return;
         }
         self.render_routing_graph(
@@ -118,7 +118,7 @@ impl AudioEngine {
                 }
             }
         }
-        if !self.compensation_valid {
+        if !self.compensation_plan.applied_plan_is_valid() {
             return Some("Applied audio configuration became invalid during Bounce".into());
         }
         None
