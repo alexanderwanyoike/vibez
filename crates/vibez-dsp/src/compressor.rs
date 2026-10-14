@@ -1,6 +1,7 @@
 //! Feedforward compression with smooth controls, filtered detectors and real reduction diagnostics.
 
 use vibez_core::effect::{DynamicsMeter, EffectType, ParamDescriptor};
+use vibez_core::level::{amplitude_to_db, db_to_amplitude};
 use vibez_core::routing::{ExternalInputBlock, ExternalInputDescriptor, ExternalInputId};
 
 #[path = "compressor_detector.rs"]
@@ -199,8 +200,8 @@ pub fn static_transfer_db(input_db: f32, params: &[f32]) -> f32 {
         reduction
     };
     let gain = (1.0 - p[param::MIX])
-        + p[param::MIX] * 10.0_f32.powf((p[param::MAKEUP] - reduction) / 20.0);
-    input_db + 20.0 * gain.max(1e-10).log10()
+        + p[param::MIX] * db_to_amplitude(p[param::MAKEUP] - reduction);
+    input_db + amplitude_to_db(gain.max(1e-10))
 }
 
 pub struct CompressorEffect {
@@ -246,7 +247,7 @@ impl CompressorEffect {
             release_coefficient: time_coefficient(params[param::RELEASE], sample_rate),
             rms_coefficient: time_coefficient(RMS_AVERAGING_MS, sample_rate),
             memory_coefficient: time_coefficient(AUTO_MEMORY_MS, sample_rate),
-            makeup_gain: 10.0_f32.powf(params[param::MAKEUP] / 20.0),
+            makeup_gain: db_to_amplitude(params[param::MAKEUP]),
             coefficient_clock: 0,
             started: false,
             meter: DynamicsMeter::default(),
@@ -319,7 +320,7 @@ impl CompressorEffect {
         self.configure_filters();
         self.attack_coefficient = time_coefficient(self.applied[param::ATTACK], self.sample_rate);
         self.release_coefficient = time_coefficient(self.applied[param::RELEASE], self.sample_rate);
-        self.makeup_gain = 10.0_f32.powf(self.applied[param::MAKEUP] / 20.0);
+        self.makeup_gain = db_to_amplitude(self.applied[param::MAKEUP]);
     }
 
     fn advance(&mut self) {
@@ -345,7 +346,7 @@ impl CompressorEffect {
                 time_coefficient(self.applied[param::RELEASE], self.sample_rate);
         }
         if changed[param::MAKEUP] {
-            self.makeup_gain = 10.0_f32.powf(self.applied[param::MAKEUP] / 20.0);
+            self.makeup_gain = db_to_amplitude(self.applied[param::MAKEUP]);
         }
         if [param::HP_FREQUENCY, param::LP_FREQUENCY]
             .into_iter()
@@ -377,7 +378,7 @@ impl CompressorEffect {
                     } else {
                         levels[channel]
                     };
-                    let level_db = 20.0 * value.max(1e-10).log10();
+                    let level_db = amplitude_to_db(value.max(1e-10));
                     let desired = reduction_db(
                         level_db,
                         p[param::THRESHOLD],
@@ -424,8 +425,8 @@ impl CompressorEffect {
                             p[param::RATIO],
                             p[param::KNEE],
                         );
-                        let unlimited = 10.0_f32.powf(-reduction / 20.0);
-                        let limited = 10.0_f32.powf(-reduction.min(p[param::RANGE]) / 20.0);
+                        let unlimited = db_to_amplitude(-reduction);
+                        let limited = db_to_amplitude(-reduction.min(p[param::RANGE]));
                         let gain = unlimited + (limited - unlimited) * p[param::RANGE_ENABLED];
                         gains[channel] += gain * weight;
                     }
@@ -511,7 +512,7 @@ impl AudioEffect for CompressorEffect {
             });
             let gains = self.gains(detector);
             for channel in 0..2 {
-                let reduction = -20.0 * gains[channel].max(1e-10).log10();
+                let reduction = -amplitude_to_db(gains[channel].max(1e-10));
                 self.meter.current_reduction_db[channel] = reduction.max(0.0);
                 self.meter.peak_reduction_db[channel] =
                     self.meter.peak_reduction_db[channel].max(reduction);
