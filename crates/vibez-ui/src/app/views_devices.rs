@@ -17,6 +17,7 @@ use crate::widgets::effect_slot::{view_effect_slot, view_sidechain, DeviceBody};
 
 use super::*;
 
+const CHAIN_SPACING: f32 = 6.0;
 const SYNTH_CARD_W: f32 = 570.0;
 const SAMPLER_CARD_W: f32 = 560.0;
 const PLACEHOLDER_W: f32 = 120.0;
@@ -44,8 +45,37 @@ impl App {
             .spacing(8)
             .align_y(iced::Alignment::Center);
 
-        // Device cards
-        let mut devices_row = row![].spacing(6);
+        let chain = iced::widget::responsive(move |size| {
+            self.device_chain_row(track_id, track, track_color, size.width)
+        });
+
+        let content = column![header, chain]
+            .spacing(6)
+            .padding(8)
+            .width(Length::Fill)
+            .height(Length::Fill);
+
+        // Wrap in mouse_area for right-click context menu
+        mouse_area(content)
+            .on_right_press(Message::Devices(
+                crate::domains::devices::DevicesMsg::ShowContextMenu {
+                    x: self.state.view.cursor_x,
+                    y: self.state.view.cursor_y,
+                    track_id,
+                },
+            ))
+            .into()
+    }
+
+    /// The cards of one channel, laid out for the section's measured width.
+    fn device_chain_row<'a>(
+        &'a self,
+        track_id: TrackId,
+        track: &'a UiTrack,
+        track_color: Color,
+        _available_width: f32,
+    ) -> Element<'a, Message> {
+        let mut devices_row = row![].spacing(CHAIN_SPACING).height(Length::Fill);
 
         // Instrument device card (branched by kind)
         if track.has_instrument {
@@ -61,8 +91,10 @@ impl App {
                             track.instrument_latency_samples,
                             self.state.transport.sample_rate,
                         );
-                        devices_row = devices_row
-                            .push(column![card, text(latency).size(9).color(th::text_dim())]);
+                        devices_row = devices_row.push(
+                            column![card, text(latency).size(9).color(th::text_dim())]
+                                .height(Length::Fill),
+                        );
                     }
                     Some(vibez_core::midi::InstrumentKind::DrumRack) => {
                         let card = self.view_drum_rack_device(track_id, track, track_color);
@@ -70,8 +102,10 @@ impl App {
                             track.instrument_latency_samples,
                             self.state.transport.sample_rate,
                         );
-                        devices_row = devices_row
-                            .push(column![card, text(latency).size(9).color(th::text_dim())]);
+                        devices_row = devices_row.push(
+                            column![card, text(latency).size(9).color(th::text_dim())]
+                                .height(Length::Fill),
+                        );
                     }
                     _ => {
                         let synth_card = self.view_synth_device(track_id, track, track_color);
@@ -79,10 +113,10 @@ impl App {
                             track.instrument_latency_samples,
                             self.state.transport.sample_rate,
                         );
-                        devices_row = devices_row.push(column![
-                            synth_card,
-                            text(latency).size(9).color(th::text_dim())
-                        ]);
+                        devices_row = devices_row.push(
+                            column![synth_card, text(latency).size(9).color(th::text_dim())]
+                                .height(Length::Fill),
+                        );
                     }
                 }
             }
@@ -101,8 +135,7 @@ impl App {
                     Some(DeviceBody {
                         content,
                         width,
-                        height: th::DEVICE_BODY_H,
-                        vertical_padding: 8.0,
+                        padding: iced::Padding::from([8.0, 10.0]),
                     })
                 }
             } else if crate::domains::gain::is_native_gain(effect) {
@@ -128,29 +161,19 @@ impl App {
             devices_row = devices_row.push(slot);
         }
 
-        let scrollable_devices =
-            scrollable(devices_row).direction(scrollable::Direction::Horizontal(
-                scrollable::Scrollbar::new()
-                    .width(5)
-                    .scroller_width(5)
-                    .spacing(2),
-            ));
-
-        let content = column![header, scrollable_devices]
-            .spacing(6)
-            .padding(8)
-            .width(Length::Fill);
-
-        // Wrap in mouse_area for right-click context menu
-        mouse_area(content)
-            .on_right_press(Message::Devices(
-                crate::domains::devices::DevicesMsg::ShowContextMenu {
-                    x: self.state.view.cursor_x,
-                    y: self.state.view.cursor_y,
-                    track_id,
-                },
-            ))
-            .into()
+        // Only a chain wider than the section scrolls, behind a hairline that
+        // appears only then: scrollbar spacing would show it permanently.
+        // Built with its direction: the default vertical check rejects the
+        // full-height cards before a later `.direction` could apply.
+        scrollable::Scrollable::with_direction(
+            devices_row,
+            scrollable::Direction::Horizontal(
+                scrollable::Scrollbar::new().width(3).scroller_width(3),
+            ),
+        )
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into()
     }
 
     fn gain_device_body<'a>(
@@ -182,8 +205,7 @@ impl App {
                 height,
             ),
             width,
-            height,
-            vertical_padding: 0.0,
+            padding: iced::Padding::from([0.0, 10.0]),
         }
     }
 
@@ -368,12 +390,13 @@ impl App {
         crate::widgets::device_chrome::divider()
     }
 
-    /// Standard device body: fixed rack height so every card in the
-    /// chain lines up like a hardware rack, consistent padding.
+    /// Standard device body: every card takes the section's height so the
+    /// chain lines up like a hardware rack, content held at the top.
     pub(super) fn device_body(content: Element<'_, Message>) -> Element<'_, Message> {
         container(content)
             .padding([8, 10])
-            .height(Length::Fixed(th::DEVICE_BODY_H))
+            .height(Length::Fill)
+            .clip(true)
             .into()
     }
 

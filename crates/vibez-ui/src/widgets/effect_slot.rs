@@ -18,8 +18,7 @@ pub use sidechain::view as view_sidechain;
 pub struct DeviceBody<'a> {
     pub content: Element<'a, Message>,
     pub width: f32,
-    pub height: f32,
-    pub vertical_padding: f32,
+    pub padding: iced::Padding,
 }
 
 /// Width of an effect card, including its sidechain column when present.
@@ -178,8 +177,9 @@ pub fn view_effect_slot<'a>(
     // ── Body ─────────────────────────────────────────────────
     let body: Element<'a, Message> = if let Some(custom) = custom_body {
         container(custom.content)
-            .padding([custom.vertical_padding, 10.0])
-            .height(Length::Fixed(custom.height))
+            .padding(custom.padding)
+            .height(Length::Fill)
+            .clip(true)
             .into()
     } else if has_params && !has_gui {
         let knob_color = if is_bypassed {
@@ -211,7 +211,8 @@ pub fn view_effect_slot<'a>(
 
         container(knob_row)
             .padding([8, 10])
-            .height(Length::Fixed(th::DEVICE_BODY_H))
+            .height(Length::Fill)
+            .clip(true)
             .into()
     } else if is_plugin {
         crate::widgets::device_chrome::plugin_face(
@@ -226,7 +227,7 @@ pub fn view_effect_slot<'a>(
         )
     } else {
         container(Space::new(Length::Fixed(120.0), Length::Fixed(2.0)))
-            .height(Length::Fixed(th::DEVICE_BODY_H))
+            .height(Length::Fill)
             .into()
     };
 
@@ -239,7 +240,7 @@ pub fn view_effect_slot<'a>(
                 crate::widgets::device_chrome::divider(),
                 container(body).width(Length::Fixed(card_w))
             ]
-            .align_y(iced::Alignment::Center)
+            .height(Length::Fill)
             .into(),
             title_w,
         ),
@@ -252,7 +253,8 @@ pub fn view_effect_slot<'a>(
         container(text(latency).size(9).color(th::text_dim())).padding([2, 6]),
         body
     ]
-    .width(Length::Fixed(card_w));
+    .width(Length::Fixed(card_w))
+    .height(Length::Fill);
 
     crate::widgets::device_chrome::card(card)
 }

@@ -275,7 +275,7 @@ pub fn view<'a>(
         )
         .padding([8, 8])
         .width(Length::Fixed(WIDTH))
-        .height(Length::Fixed(th::DEVICE_BODY_H))
+        .height(Length::Fill)
         .into(),
     )
 }

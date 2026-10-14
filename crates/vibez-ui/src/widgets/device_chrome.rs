@@ -19,7 +19,7 @@ const TITLE_CHAR_W: f32 = 6.2;
 pub fn divider() -> Element<'static, Message> {
     container(text(""))
         .width(Length::Fixed(1.0))
-        .height(Length::Fixed(th::DEVICE_BODY_H - 12.0))
+        .height(Length::Fill)
         .style(|_theme: &Theme| container::Style {
             background: Some(th::divider().into()),
             ..Default::default()
@@ -51,6 +51,7 @@ pub fn title_bar<'a>(
 /// Raised, bordered container wrapping a whole device card.
 pub fn card<'a>(content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
     container(content)
+        .height(Length::Fill)
         .style(|_theme: &Theme| container::Style {
             background: Some(th::bg_elevated().into()),
             border: iced::Border {
@@ -129,7 +130,7 @@ pub fn plugin_face<'a>(
     )
     .padding([8, 10])
     .width(Length::Fill)
-    .height(Length::Fixed(th::DEVICE_BODY_H))
+    .height(Length::Fill)
     .into()
 }
 

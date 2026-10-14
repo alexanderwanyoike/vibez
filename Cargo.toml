@@ -42,7 +42,7 @@ midir = "0.10"
 rustfft = "6.4"
 
 # GUI
-iced = { version = "0.13", features = ["advanced", "canvas", "tokio"] }
+iced = { version = "0.13", features = ["advanced", "canvas", "lazy", "tokio"] }
 
 # Shared
 serde = { version = "1", features = ["derive"] }
