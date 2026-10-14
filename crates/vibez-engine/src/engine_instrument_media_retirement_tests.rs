@@ -841,8 +841,24 @@ fn full_event_ring_retains_thirty_two_media_owners_and_resumes_later_commands_in
 
 #[test]
 fn drum_media_commands_return_rejected_owners_without_touching_sounding_audio() {
-    for target_case in 0..6 {
-        for command_case in 0..3 {
+    #[derive(Clone, Copy, Debug)]
+    enum RejectedTarget {
+        MissingTrack,
+        MissingInstrument,
+        Synth,
+        Sampler,
+        FirstInvalidPad,
+        MaximumIndex,
+    }
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum MediaEdit {
+        LoadSample,
+        ApplyState,
+        Clear,
+    }
+    for target_case in [RejectedTarget::MissingTrack, RejectedTarget::MissingInstrument,
+        RejectedTarget::Synth, RejectedTarget::Sampler, RejectedTarget::FirstInvalidPad, RejectedTarget::MaximumIndex] {
+        for command_case in [MediaEdit::LoadSample, MediaEdit::ApplyState, MediaEdit::Clear] {
             for full_ring in [false, true] {
                 let (mut engine, mut commands, mut events) = AudioEngine::new();
                 let sounding = TrackId::new();
@@ -887,14 +903,17 @@ fn drum_media_commands_return_rejected_owners_without_touching_sounding_audio() 
                         velocity: 127,
                     })
                     .unwrap();
-                if (1..=3).contains(&target_case) {
+                let (create_track, wrong_kind, track_id, pad_index) = match target_case {
+                    RejectedTarget::MissingTrack => (false, None, other, 0),
+                    RejectedTarget::MissingInstrument => (true, None, other, 0),
+                    RejectedTarget::Synth => (true, Some(InstrumentKind::SubtractiveSynth), other, 0),
+                    RejectedTarget::Sampler => (true, Some(InstrumentKind::Sampler), other, 0),
+                    RejectedTarget::FirstInvalidPad => (false, None, sounding, vibez_core::track::DRUM_RACK_PAD_COUNT),
+                    RejectedTarget::MaximumIndex => (false, None, sounding, usize::MAX),
+                };
+                if create_track {
                     commands.push(EngineCommand::add_track(other)).unwrap();
                 }
-                let wrong_kind = match target_case {
-                    2 => Some(InstrumentKind::SubtractiveSynth),
-                    3 => Some(InstrumentKind::Sampler),
-                    _ => None,
-                };
                 if let Some(kind) = wrong_kind {
                     commands
                         .push(EngineCommand::set_built_in_instrument(other, kind, 1000))
@@ -909,17 +928,11 @@ fn drum_media_commands_return_rejected_owners_without_touching_sounding_audio() 
                 if full_ring {
                     while engine.event_tx.push(EngineEvent::PlaybackStarted).is_ok() {}
                 }
-                let track_id = if target_case >= 4 { sounding } else { other };
-                let pad_index = match target_case {
-                    4 => vibez_core::track::DRUM_RACK_PAD_COUNT,
-                    5 => usize::MAX,
-                    _ => 0,
-                };
                 let name = String::from("rejected-complete-owned-name.wav");
                 let name_pointer = name.as_ptr();
                 let mut sample_owner = None;
                 let command = match command_case {
-                    0 => {
+                    MediaEdit::LoadSample => {
                         let sample = audio(0.75);
                         sample_owner = Some(Arc::downgrade(&sample));
                         EngineCommand::LoadDrumRackPadSample {
@@ -929,7 +942,7 @@ fn drum_media_commands_return_rejected_owners_without_touching_sounding_audio() 
                             sample_name: name,
                         }
                     }
-                    1 => EngineCommand::set_drum_rack_pad_state(
+                    MediaEdit::ApplyState => EngineCommand::set_drum_rack_pad_state(
                         track_id,
                         pad_index,
                         vibez_core::track::DrumPadState {
@@ -938,7 +951,7 @@ fn drum_media_commands_return_rejected_owners_without_touching_sounding_audio() 
                             ..Default::default()
                         },
                     ),
-                    _ => EngineCommand::ClearDrumRackPad {
+                    MediaEdit::Clear => EngineCommand::ClearDrumRackPad {
                         track_id,
                         pad_index,
                     },
@@ -947,7 +960,7 @@ fn drum_media_commands_return_rejected_owners_without_touching_sounding_audio() 
                 assert_eq!(
                     crate::retirement::tests::allocations(|| engine.process(&mut output, 1)),
                     (0, 0),
-                    "target={target_case}, command={command_case}, full={full_ring}"
+                    "target={target_case:?}, command={command_case:?}, full={full_ring}"
                 );
                 for (frame, actual) in output.iter().enumerate() {
                     assert!((*actual - (0.1 + (frame + 16) as f32 * 0.00001)).abs() < 1e-6);
@@ -965,7 +978,7 @@ fn drum_media_commands_return_rejected_owners_without_touching_sounding_audio() 
                         (0, 0)
                     );
                 }
-                if command_case == 2 {
+                if command_case == MediaEdit::Clear {
                     assert!(returned.is_none(), "a rejected clear has no owned input");
                 } else {
                     let returned = returned.expect("rejected owned arguments return intact");
