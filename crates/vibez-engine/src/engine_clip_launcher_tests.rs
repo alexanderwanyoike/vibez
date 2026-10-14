@@ -276,7 +276,7 @@ fn midi_replacement_flushes_only_its_track_and_preserves_sustained_notes_elsewhe
     let note = |track, pitch, request_id| {
         let mut prepared = clip(track, request_id, &[0.0; 16], true);
         prepared.source.clips.clear();
-        prepared.source.note_clips.push(EngineNoteClip::new(
+        prepared.source.push_note_clip(EngineNoteClip::new(
             prepared.clip_id.unwrap(),
             0.0,
             4.0,
