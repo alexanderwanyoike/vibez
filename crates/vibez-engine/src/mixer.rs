@@ -14,6 +14,7 @@ mod note_repeat;
 mod pan;
 mod render_context;
 pub use effect_slot::EffectSlot;
+pub(crate) use effect_slot::MeterSide;
 use groove::collect_timed_note_events;
 pub use pan::{any_solo, balance_pan, equal_power_pan};
 use render_context::InstrumentRenderBlock;

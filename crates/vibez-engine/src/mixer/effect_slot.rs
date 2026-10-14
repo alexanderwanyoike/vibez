@@ -45,3 +45,32 @@ impl EffectSlot {
         self.observe_output(samples, channels, generation);
     }
 }
+
+#[derive(Clone, Copy)]
+pub(crate) enum MeterSide {
+    Input,
+    Output,
+}
+
+impl crate::mixer::EngineTrack {
+    /// The graph renders a slot's audio itself instead of through
+    /// [`EffectSlot::process`], so it observes that slot's meters by id.
+    pub(crate) fn observe_effect(
+        &mut self,
+        effect_id: EffectId,
+        side: MeterSide,
+        samples: &[f32],
+        channels: usize,
+        generation: Option<u64>,
+    ) {
+        if generation.is_none() {
+            return;
+        }
+        if let Some(slot) = self.effects.iter_mut().find(|slot| slot.id == effect_id) {
+            match side {
+                MeterSide::Input => slot.observe_input(samples, channels, generation),
+                MeterSide::Output => slot.observe_output(samples, channels, generation),
+            }
+        }
+    }
+}

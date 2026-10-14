@@ -91,8 +91,7 @@ pub struct AudioEngine {
     buses: crate::mixer::ChannelList,
     /// Which track streams samples to the UI spectrum analyser.
     spectrum_track: Option<TrackId>,
-    effect_meter_channel: Option<TrackId>,
-    effect_meter_generation: u64,
+    effect_meter: effect_meters::EffectMeterTarget,
     effect_meter_frames: u64,
     /// Producer side of the spectrum ring (mono samples).
     spectrum_tx: Producer<f32>,
@@ -282,8 +281,7 @@ impl AudioEngine {
             master: Box::new(EngineTrack::new(TrackId::MASTER)),
             buses: Vec::with_capacity(crate::mixer::CHANNEL_CAPACITY),
             spectrum_track: None,
-            effect_meter_channel: None,
-            effect_meter_generation: 0,
+            effect_meter: effect_meters::EffectMeterTarget::default(),
             effect_meter_frames: 0,
             spectrum_tx,
             spectrum_rx: Some(spectrum_rx),
@@ -433,8 +431,7 @@ impl AudioEngine {
                     slot.process(
                         &mut bus.mix_buffer[..buf_size],
                         channels,
-                        (self.effect_meter_channel == Some(bus.id))
-                            .then_some(self.effect_meter_generation),
+                        self.effect_meter.generation_for(bus.id),
                     );
                 }
                 if self.spectrum_track == Some(bus.id) {
@@ -492,8 +489,7 @@ impl AudioEngine {
                 slot.process(
                     output,
                     channels,
-                    (self.effect_meter_channel == Some(TrackId::MASTER))
-                        .then_some(self.effect_meter_generation),
+                    self.effect_meter.generation_for(TrackId::MASTER),
                 );
             }
             let master_gain = master_auto_gain.unwrap_or(self.master.gain);
