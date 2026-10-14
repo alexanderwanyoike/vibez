@@ -79,6 +79,7 @@ pub struct DriveEffect {
     dry_delay: [[f32; 2]; 64],
     oversampling: [oversampling::OversamplingPath; 3],
     sample_rate: f32,
+    modern_low: [[f64; 2]; 3],
     meter: WaveShaperMeter,
     meter_samples: u64,
     meter_count: u16,
@@ -103,6 +104,7 @@ impl DriveEffect {
             dry_delay: [[0.0; 2]; 64],
             oversampling: [2, 4, 8].map(oversampling::OversamplingPath::new),
             sample_rate,
+            modern_low: [[0.0; 2]; 3],
             meter: WaveShaperMeter::default(),
             meter_samples: 0,
             meter_count: 0,
@@ -223,6 +225,9 @@ impl AudioEffect for DriveEffect {
         let drive = self.drive_gain();
         let norm = drive.tanh();
         let amount = self.amount.clamp(0.0, 1.0);
+        let tone_beta = (-std::f64::consts::TAU * 1000.0 / self.sample_rate as f64).exp();
+        let low_gain = 10.0_f64.powf(-6.0 * (self.tone as f64 * 2.0 - 1.0) / 20.0);
+        let high_gain = low_gain.recip();
         let tilt = self.tone * 2.0 - 1.0; // -1 darker, +1 brighter
 
         for frame in 0..frames {
@@ -246,9 +251,15 @@ impl AudioEffect for DriveEffect {
                 let quality = self.extra[1] as usize;
                 let mut modern = [0.0; 3];
                 for (index, path) in self.oversampling.iter_mut().enumerate() {
-                    let audible = character != 0 && index == quality;
+                    let audible = index == quality;
                     let output = path.process(dry, c, drive, audible);
                     if audible { modern = output; }
+                }
+                for (index, sample) in modern.iter_mut().enumerate() {
+                    let input = *sample as f64;
+                    let low = &mut self.modern_low[index][c];
+                    *low = input * (1.0 - tone_beta) + *low * tone_beta;
+                    if self.tone != 0.5 { *sample = (*low * low_gain + (input - *low) * high_gain) as f32; }
                 }
                 let processed = if character == 0 {
                     legacy
@@ -274,6 +285,7 @@ impl AudioEffect for DriveEffect {
         self.delay_position = 0;
         self.dry_delay = [[0.0; 2]; 64];
         self.oversampling.iter_mut().for_each(oversampling::OversamplingPath::reset);
+        self.modern_low = [[0.0; 2]; 3];
         self.meter = WaveShaperMeter::default();
         self.meter_samples = 0;
         self.meter_count = 0;
