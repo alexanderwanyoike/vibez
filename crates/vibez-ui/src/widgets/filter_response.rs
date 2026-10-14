@@ -136,9 +136,20 @@ impl canvas::Program<Message> for FilterResponse<'_> {
         } else {
             self.accent
         };
+        let fill = canvas::Path::new(|builder| {
+            builder.move_to(Point::new(26.0, y(-48.0)));
+            for index in 0..180 {
+                let frequency = log_value(index as f32 / 179.0, CUTOFF_MIN, CUTOFF_MAX);
+                let db = vibez_core::level::amplitude_to_db(self.magnitude(frequency));
+                builder.line_to(Point::new(x(frequency), y(db)));
+            }
+            builder.line_to(Point::new(bounds.width - 8.0, y(-48.0)));
+            builder.close();
+        });
+        frame.fill(&fill, th::with_alpha(accent, 0.08));
         frame.stroke(
             &path,
-            canvas::Stroke::default().with_color(accent).with_width(1.5),
+            canvas::Stroke::default().with_color(accent).with_width(1.8),
         );
         let cutoff = self.value(param::CUTOFF);
         frame.fill(
@@ -151,6 +162,23 @@ impl canvas::Program<Message> for FilterResponse<'_> {
             ),
             accent,
         );
+        if bounds.height >= 54.0 && bounds.width >= 120.0 {
+            let shown = if cutoff >= 1000.0 {
+                format!("{:.2} kHz", cutoff / 1000.0)
+            } else {
+                format!("{cutoff:.0} Hz")
+            };
+            let node_y = y(vibez_core::level::amplitude_to_db(self.magnitude(cutoff)));
+            frame.fill_text(canvas::Text {
+                content: shown,
+                position: Point::new(x(cutoff).clamp(56.0, bounds.width - 38.0),
+                    (node_y - 12.0).clamp(8.0, bounds.height - 26.0)),
+                color: th::text(), size: 9.0.into(),
+                horizontal_alignment: iced::alignment::Horizontal::Center,
+                vertical_alignment: iced::alignment::Vertical::Center,
+                ..Default::default()
+            });
+        }
         vec![frame.into_geometry()]
     }
 

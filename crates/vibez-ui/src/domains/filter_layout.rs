@@ -1,5 +1,116 @@
 //! Measured regions for the native Filter body and its modulation disclosure.
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Tier {
+    Compact,
+    Medium,
+    Expanded,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct Region {
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+}
+
+impl Region {
+    fn new(x: f32, y: f32, width: f32, height: f32) -> Self {
+        Self { x, y, width: width.max(0.0), height: height.max(0.0) }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct Arrangement {
+    pub tier: Tier,
+    pub toolbar: Region,
+    pub tabs: Option<Region>,
+    pub response: Option<Region>,
+    pub meter: Option<Region>,
+    pub modes: Option<Region>,
+    pub primary: Region,
+    pub modulation: Option<Region>,
+    pub disclosure: Option<Region>,
+    pub vertical_modes: bool,
+    pub knob_size: Option<f32>,
+}
+
+pub fn arrange(width: f32, height: f32, advanced: bool) -> Arrangement {
+    let tier = if width >= 820.0 { Tier::Expanded }
+        else if width >= 620.0 { Tier::Medium } else { Tier::Compact };
+    let inner = (width - 16.0).max(0.0);
+    let short = height < 114.0;
+    let toolbar_h = if short { 22.0 } else { 26.0 };
+    let primary_h = if short { 28.0 } else if height >= 260.0 { 72.0 }
+        else if height >= 180.0 { 60.0 } else { 46.0 };
+    let knob_size = if primary_h >= 70.0 { Some(40.0) }
+        else if primary_h >= 60.0 { Some(28.0) }
+        else if primary_h >= 44.0 { Some(16.0) } else { None };
+    let primary_y = (height - primary_h).max(toolbar_h);
+    let mut layout = Arrangement {
+        tier,
+        toolbar: Region::new(8.0, 0.0, inner, toolbar_h),
+        tabs: None, response: None, meter: None, modes: None,
+        primary: Region::new(8.0, primary_y, inner, primary_h),
+        modulation: None, disclosure: None, vertical_modes: false, knob_size,
+    };
+    if short {
+        let controls_w = if width >= 620.0 { 360.0 } else { inner };
+        layout.primary.width = controls_w;
+        let options = Region::new(8.0, toolbar_h, controls_w, (primary_y - toolbar_h).max(0.0));
+        if advanced { layout.modulation = Some(options); } else { layout.modes = Some(options); }
+        if width >= 620.0 {
+            let x = 8.0 + controls_w + 12.0;
+            layout.response = Some(Region::new(x, toolbar_h, width - x - 62.0, height - toolbar_h));
+            layout.meter = Some(Region::new(width - 54.0, toolbar_h, 46.0, height - toolbar_h));
+        }
+        return layout;
+    }
+    if tier == Tier::Expanded && height >= 220.0 {
+        let plot_h = primary_y - toolbar_h - 8.0;
+        layout.modes = Some(Region::new(8.0, toolbar_h + 4.0, 88.0, plot_h));
+        layout.vertical_modes = plot_h >= 124.0;
+        layout.response = Some(Region::new(108.0, toolbar_h + 4.0, width - 170.0, plot_h));
+        layout.meter = Some(Region::new(width - 54.0, toolbar_h + 4.0, 46.0, plot_h));
+        layout.primary.width = 328.0;
+        if advanced {
+            layout.modulation = Some(Region::new(352.0, primary_y, width - 360.0, primary_h));
+        }
+        if !advanced {
+            layout.disclosure = Some(Region::new(352.0, primary_y + 20.0, 82.0, 20.0));
+        }
+        return layout;
+    }
+    let tabs_h = if tier == Tier::Medium && height >= 180.0 { 20.0 } else { 0.0 };
+    if tabs_h > 0.0 {
+        layout.tabs = Some(Region::new(8.0, toolbar_h, inner, tabs_h));
+    } else {
+        layout.disclosure = Some(Region::new(width - 90.0, height - 20.0, 82.0, 20.0));
+    }
+    let modulation_h = if !advanced { 0.0 } else if height >= 260.0 { 70.0 }
+        else if height >= 180.0 { 54.0 } else { 32.0 };
+    let mode_h = if tier != Tier::Medium && (!advanced || height >= 260.0) { 24.0 } else { 0.0 };
+    let mut y = toolbar_h + tabs_h + 4.0;
+    let gap_count = 1.0 + if mode_h > 0.0 { 1.0 } else { 0.0 } + if advanced { 1.0 } else { 0.0 };
+    let plot_h = (primary_y - y - mode_h - modulation_h - 4.0 * gap_count).max(0.0);
+    if plot_h >= 16.0 {
+        let side_modes = tier == Tier::Medium && plot_h >= 74.0;
+        let right = if side_modes { width - 198.0 } else { width - 8.0 };
+        layout.response = Some(Region::new(8.0, y, right - 66.0, plot_h));
+        layout.meter = Some(Region::new(right - 46.0, y, 46.0, plot_h));
+        if side_modes { layout.modes = Some(Region::new(width - 186.0, y, 178.0, plot_h)); }
+    }
+    y += plot_h + 4.0;
+    if mode_h > 0.0 {
+        layout.modes = Some(Region::new(8.0, y, inner, mode_h));
+        y += mode_h + 4.0;
+    }
+    if advanced { layout.modulation = Some(Region::new(8.0, y, inner, modulation_h)); }
+    layout.primary.width = inner.min(if layout.disclosure.is_some() { inner - 84.0 } else { 448.0 });
+    layout
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
