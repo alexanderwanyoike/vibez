@@ -1141,13 +1141,13 @@ fn legacy_load_and_unload_preserve_loop_region_and_existing_short_buffer_playbac
     assert_eq!(crate::retirement::tests::allocations(|| engine.process_block(AudioProcessBlock::new(&mut output, 2))), (0, 0));
     assert_eq!(&output[..2], &[0.5 + 2.0 / 1024.0, -0.75 + 2.0 / 2048.0]);
     assert_eq!(&output[2..], &[0.0; 6]);
-    assert_eq!(engine.transport().position(), 6);
-    assert!(engine.transport().is_playing());
+    assert_eq!(engine.transport().position(), 3);
+    assert!(!engine.transport().is_playing(), "a callback that does not reach the loop end retains ordinary media-end auto-stop");
     assert!(returned_legacy_audio(&mut events).is_empty());
     commands.push(EngineCommand::UnloadAudio).unwrap();
     assert_eq!(crate::retirement::tests::allocations(|| engine.process_block(AudioProcessBlock::new(&mut output, 2))), (0, 0));
     assert_eq!(output, [0.0; 8]);
-    assert_eq!(engine.transport().position(), 6);
+    assert_eq!(engine.transport().position(), 3);
     assert_eq!(engine.transport().audio_length(), None);
     assert!(!engine.transport().is_playing());
     assert_eq!(engine.transport().active_loop_region(), Some((2, 8)));
