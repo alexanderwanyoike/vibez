@@ -538,12 +538,12 @@ fn cases() -> Vec<Case> {
             clip_id: f.empty_note_clip,
             note: note(),
         }),
-        case!("RemoveNote", true, |f| C::RemoveNote {
+        case!("RemoveNote", false, |f| C::RemoveNote {
             track_id: f.synth,
             clip_id: f.note_clip,
             note_index: 0,
         }),
-        case!("EditNote", true, |f| C::EditNote {
+        case!("EditNote", false, |f| C::EditNote {
             track_id: f.synth,
             clip_id: f.note_clip,
             note_index: 0,
