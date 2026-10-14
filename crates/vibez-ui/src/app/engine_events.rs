@@ -670,6 +670,117 @@ mod tests {
     use crate::state::ProjectTrack;
     use vibez_core::id::TrackId;
 
+    fn section_refresh_return(
+        section_id: vibez_core::id::SectionId,
+        track_id: TrackId,
+        audio: Arc<vibez_core::audio_buffer::DecodedAudio>,
+    ) -> Box<vibez_engine::playback_source::PreparedSectionPlaybackSource> {
+        use vibez_engine::playback_source::{EngineClip, PreparedPlaybackSource, PreparedSectionPlaybackSource};
+        Box::new(PreparedSectionPlaybackSource::new(section_id, 32.0, true, vec![(track_id, PreparedPlaybackSource::new(vec![EngineClip {
+            id: vibez_core::id::ClipId::new(), audio, position: 0, source_offset: 0, start_marker: 0,
+            duration: 4096, loop_enabled: false, loop_start: 0, loop_end: 0, linear_gain: 1.0,
+            fades: Default::default(), playback_direction: Default::default(), warp_markers: Default::default(),
+        }], vec![], vec![]))]))
+    }
+
+    #[test]
+    fn section_refresh_stale_target_returns_are_disposed_by_actual_app_poll_after_project_reset() {
+        for after_reset in [false, true] {
+            for applied in [false, true] {
+                let mut app = super::super::test_support::app();
+                let (mut producer, consumer) = rtrb::RingBuffer::new(4);
+                app.event_rx = Some(consumer);
+                let stale_section = vibez_core::id::SectionId::new();
+                let stale_track = TrackId::new();
+                let audio = Arc::new(vibez_core::audio_buffer::DecodedAudio { channels: vec![vec![0.25; 4096]], sample_rate: 1000 });
+                let owner = Arc::downgrade(&audio);
+                producer.push(EngineEvent::SectionSourceRefreshed {
+                    section_id: stale_section, applied, effective_at_samples: 96,
+                    section_position_samples: applied.then_some(96),
+                    retired: section_refresh_return(stale_section, stale_track, audio),
+                }).unwrap();
+                if after_reset {
+                    app.reset_to_new_project();
+                }
+                assert_eq!(owner.strong_count(), 1);
+                let status = app.state.status_text.clone();
+                let playing = app.state.perform.playing_section;
+                let selected = app.state.perform.selected_section;
+                let history = app.state.project.history.undo.len();
+                let arrange = Arc::clone(&app.state.arrangement.timeline);
+                app.poll_engine_events();
+                assert_eq!(owner.strong_count(), 0, "stale IDs cannot bypass complete owner disposal");
+                assert_eq!(app.state.perform.playing_section, playing);
+                assert_eq!(app.state.perform.selected_section, selected);
+                assert_eq!(app.state.status_text, status);
+                assert_eq!(app.state.project.history.undo.len(), history);
+                assert!(Arc::ptr_eq(&app.state.arrangement.timeline, &arrange));
+                assert!(!app.state.perform.capture.is_active());
+                assert!(app.event_rx.as_ref().unwrap().is_empty());
+            }
+        }
+    }
+
+    #[test]
+    fn section_refresh_late_capture_feed_cannot_restart_actual_app_capture_or_append_content_after_stop() {
+        use crate::domains::perform::{CapturePhase, Section};
+        use vibez_core::id::ClipId;
+        let mut app = super::super::test_support::app();
+        let track = TrackId::new();
+        Arc::make_mut(&mut app.state.project_tracks).tracks.push(ProjectTrack::new_instrument(
+            track, "Capture target".into(), vibez_core::midi::TrackKind::Midi, 0,
+        ));
+        let mut section = Section::new(0);
+        let mut clip = crate::domains::perform::clip_record::empty_midi_clip(ClipId::new(), track, 0, "Held note".into(), 8.0);
+        Arc::make_mut(&mut clip.timeline).ensure(track).note_clips[0].notes.push(vibez_core::midi::MidiNote {
+            pitch: 60, velocity: 100, start_beat: 0.0, duration_beats: 8.0,
+        });
+        section.timeline = clip.timeline;
+        let section_id = section.id;
+        Arc::make_mut(&mut app.state.perform.sections).insert(section);
+        app.state.perform.playing_section = Some(section_id);
+        app.state.transport.sample_rate = 1000;
+        app.state.transport.bpm = 60.0;
+        app.state.perform.capture.phase = CapturePhase::Starting;
+        app.state.perform.capture.prepare(0, 1000, 60.0);
+        let (mut producer, consumer) = rtrb::RingBuffer::new(2);
+        app.event_rx = Some(consumer);
+        producer.push(EngineEvent::PerformanceCaptureStarted {
+            offsets: Arc::from([]), effective_at_samples: 32, section_id: Some(section_id), section_position_samples: Some(32),
+        }).unwrap();
+        app.poll_engine_events();
+        assert!(app.state.perform.capture.is_active());
+        let old = Arc::new(vibez_core::audio_buffer::DecodedAudio { channels: vec![vec![0.25; 4096]], sample_rate: 1000 });
+        let owner = Arc::downgrade(&old);
+        producer.push(EngineEvent::SectionSourceRefreshed {
+            section_id, applied: true, effective_at_samples: 128, section_position_samples: Some(128),
+            retired: section_refresh_return(section_id, track, old),
+        }).unwrap();
+        producer.push(EngineEvent::PerformanceCaptureStopped { effective_at_samples: 64 }).unwrap();
+        assert!(producer.is_full());
+        assert_eq!(owner.strong_count(), 1);
+        assert!(app.state.perform.capture.is_active(), "the App has not consumed the stop yet");
+        app.poll_engine_events();
+        assert_eq!(owner.strong_count(), 0);
+        assert!(!app.state.perform.capture.is_active());
+        assert!(app.state.perform.capture.arrange_start_samples().is_none());
+        assert!(!app.state.arrangement.timeline.get(track).expect("Capture track was materialized").note_clips.is_empty(), "the accepted interval produced real Capture content");
+        let committed = Arc::clone(&app.state.arrangement.timeline);
+        let history = app.state.project.history.undo.len();
+        let status = app.state.status_text.clone();
+        producer.push(EngineEvent::SectionCaptureSource {
+            section_id, effective_at_samples: 128, section_position_samples: 128,
+            refreshed: true, offsets: Arc::from([]),
+        }).unwrap();
+        app.poll_engine_events();
+        assert!(!app.state.perform.capture.is_active());
+        assert!(app.state.perform.capture.arrange_start_samples().is_none());
+        assert!(Arc::ptr_eq(&app.state.arrangement.timeline, &committed));
+        assert_eq!(app.state.project.history.undo.len(), history);
+        assert_eq!(app.state.status_text, status);
+        assert_eq!(app.state.perform.playing_section, Some(section_id));
+    }
+
     #[test]
     fn blocked_engine_transition_returns_owner_and_recovers_the_actual_launcher_state() {
         use crate::domains::perform::clip_record::empty_midi_clip;
