@@ -98,12 +98,13 @@ pub trait Instrument: Send {
     }
 
     /// Load a sample into the instrument. No-op for non-sample instruments.
-    #[must_use]
+    #[must_use = "return displaced or rejected media to its owner thread"]
     fn load_sample(&mut self, sample: Arc<DecodedAudio>, name: String) -> InstrumentMediaOwners {
         InstrumentMediaOwners::incoming(sample, name)
     }
 
     /// Load a sample into a drum-rack pad. No-op for non-drum-rack instruments.
+    #[must_use = "return displaced or rejected media to its owner thread"]
     fn load_drum_pad_sample(
         &mut self,
         _pad_index: usize,
@@ -114,11 +115,13 @@ pub trait Instrument: Send {
     }
 
     /// Clear a drum-rack pad. No-op for non-drum-rack instruments.
+    #[must_use = "return displaced media to its owner thread"]
     fn clear_drum_pad(&mut self, _pad_index: usize) -> InstrumentMediaOwners {
         InstrumentMediaOwners::default()
     }
 
     /// Apply pad settings to a drum-rack pad. No-op for other instruments.
+    #[must_use = "return displaced or rejected names to their owner thread"]
     fn set_drum_pad_state(
         &mut self,
         _pad_index: usize,
