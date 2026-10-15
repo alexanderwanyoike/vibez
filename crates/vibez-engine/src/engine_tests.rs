@@ -1489,12 +1489,12 @@ fn note_clip_loop_renders() {
         .push(EngineCommand::AddNote {
             track_id: tid,
             clip_id: cid,
-            note: MidiNote {
+            insertion: crate::clip_insertion::PreparedNoteInsertion::new(MidiNote {
                 pitch: 60,
                 velocity: 100,
                 start_beat: 0.0,
                 duration_beats: 1.0,
-            },
+            }),
         })
         .unwrap();
     cmd_tx.push(EngineCommand::Play).unwrap();
@@ -1554,12 +1554,12 @@ fn note_clip_reports_triggered_pitches_for_device_feedback() {
         .push(EngineCommand::AddNote {
             track_id,
             clip_id,
-            note: MidiNote {
+            insertion: crate::clip_insertion::PreparedNoteInsertion::new(MidiNote {
                 pitch: 36,
                 velocity: 100,
                 start_beat: 0.0,
                 duration_beats: 0.25,
-            },
+            }),
         })
         .unwrap();
     cmd_tx.push(EngineCommand::Play).unwrap();
@@ -1613,12 +1613,12 @@ fn synth_note_clip_does_not_report_drum_pad_activity() {
         .push(EngineCommand::AddNote {
             track_id,
             clip_id,
-            note: MidiNote {
+            insertion: crate::clip_insertion::PreparedNoteInsertion::new(MidiNote {
                 pitch: 60,
                 velocity: 100,
                 start_beat: 0.0,
                 duration_beats: 0.25,
-            },
+            }),
         })
         .unwrap();
     cmd_tx.push(EngineCommand::Play).unwrap();
@@ -1671,12 +1671,12 @@ fn drum_pad_activity_dropped_by_a_full_event_ring_is_not_replayed_late() {
         .push(EngineCommand::AddNote {
             track_id,
             clip_id,
-            note: MidiNote {
+            insertion: crate::clip_insertion::PreparedNoteInsertion::new(MidiNote {
                 pitch: 36,
                 velocity: 100,
                 start_beat: 0.0,
                 duration_beats: 0.25,
-            },
+            }),
         })
         .unwrap();
 

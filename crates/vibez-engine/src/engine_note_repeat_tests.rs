@@ -460,12 +460,12 @@ fn clip_engine(
         .push(EngineCommand::AddNote {
             track_id,
             clip_id,
-            note: MidiNote {
+            insertion: crate::clip_insertion::PreparedNoteInsertion::new(MidiNote {
                 pitch: 60,
                 velocity: 100,
                 start_beat: 0.25,
                 duration_beats: 0.25,
-            },
+            }),
         })
         .unwrap();
     commands.push(EngineCommand::Play).unwrap();

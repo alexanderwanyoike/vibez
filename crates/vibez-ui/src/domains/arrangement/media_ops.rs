@@ -638,7 +638,7 @@ impl TimelineEditorState {
             engine.send(EngineCommand::AddNote {
                 track_id,
                 clip_id: new_id,
-                note: *note,
+                insertion: vibez_engine::clip_insertion::PreparedNoteInsertion::new(*note),
             });
         }
         if let Some(track) = self.find_content_mut(track_id) {
@@ -742,7 +742,7 @@ impl TimelineEditorState {
                 engine.send(EngineCommand::AddNote {
                     track_id,
                     clip_id: clip.id,
-                    note: *note,
+                    insertion: vibez_engine::clip_insertion::PreparedNoteInsertion::new(*note),
                 });
             }
         }
