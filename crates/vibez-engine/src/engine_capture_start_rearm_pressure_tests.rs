@@ -77,12 +77,7 @@ struct Expected {
     offset_refs: usize,
 }
 
-fn record(
-    fixture: &mut Fixture,
-    phase: &str,
-    expected: Expected,
-    expected_calls: &[u32],
-) {
+fn record(fixture: &mut Fixture, phase: &str, expected: Expected, expected_calls: &[u32]) {
     let observed = state(&fixture.engine);
     assert_eq!(
         observed,
