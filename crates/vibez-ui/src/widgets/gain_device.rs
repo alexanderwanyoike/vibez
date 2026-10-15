@@ -31,6 +31,9 @@ pub const COMPACT_W: f32 = METER_COLUMN_W * 2.0 + COLUMN_W + 2.0 + PAD * 2.0;
 /// Adds the output level history.
 pub const MEDIUM_W: f32 = COMPACT_W + 1.0 + HISTORY_MIN_W;
 pub const MAX_W: f32 = 820.0;
+/// Short trims put their knob beside the value, so Advanced needs this much
+/// more width before it fits beside the meters of a short card.
+const SHORT_BESIDE_W: f32 = COMPACT_W + 1.0 + 270.0;
 
 const PRESET_ROW_H: f32 = 28.0;
 const FOOTER_H: f32 = 22.0;
@@ -76,7 +79,7 @@ pub fn arrange(size: Size, advanced: bool) -> Arrangement {
     let beside = size.width >= MEDIUM_W;
     if below_preset < MAIN_MIN_H + 1.0 + FOOTER_H {
         let main = below_preset;
-        return match (advanced, beside) {
+        return match (advanced, size.width >= SHORT_BESIDE_W) {
             (false, _) => Arrangement::Short { main },
             (true, true) => Arrangement::AdvancedBeside { main },
             (true, false) => Arrangement::AdvancedOnly { main },
@@ -689,6 +692,10 @@ mod tests {
             ),
             "short trims are too wide to sit beside the meters of a medium card"
         );
+        assert!(matches!(
+            arrange(Size::new(SHORT_BESIDE_W, 100.0), true),
+            Arrangement::AdvancedBeside { .. }
+        ));
         assert!(matches!(
             arrange(compact(200.0), true),
             Arrangement::AdvancedOnly { .. }
