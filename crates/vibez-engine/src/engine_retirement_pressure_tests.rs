@@ -116,7 +116,10 @@ fn one_shot_recording_end_preserves_owners_and_terminals_without_growing_retirem
             vec![],
         ));
         acknowledgement_owners.push(std::ptr::from_ref(owner.as_ref()) as usize);
-        engine.present_event(EngineEvent::SectionQueueCancelled { retired: owner });
+        {
+            let mut retirement_allowance = engine.pending_retirements.reserve(1).expect("fixture admits its original owner-return budget");
+            engine.present_event(EngineEvent::SectionQueueCancelled { retired: owner }, &mut retirement_allowance)
+        };
     }
     assert_eq!(engine.scheduled_presentation.len(), 2048);
     assert_eq!(engine.pending_retirements.len(), 0);
@@ -156,7 +159,7 @@ fn one_shot_recording_end_preserves_owners_and_terminals_without_growing_retirem
     );
     assert_eq!(
         engine
-            .pending_retirements
+            .pending_retirements.as_slice()
             .iter()
             .filter(|event| matches!(event, EngineEvent::RetiredAudioClip(_)))
             .count(),

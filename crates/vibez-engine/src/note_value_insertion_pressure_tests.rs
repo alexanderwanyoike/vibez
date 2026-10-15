@@ -129,7 +129,7 @@ fn full_retirement_store_blocks_note_value_before_pop_until_two_current_credits(
     // Ordinary owners are injected off callback; public AddNote and its exchange
     // still exercise the actual full event ring and bounded retirement storage.
     let expected = inject_full_retirement_store(&mut fixture.engine);
-    let retirement_allocation = fixture.engine.pending_retirements.as_ptr();
+    let retirement_allocation = fixture.engine.pending_retirements.as_slice().as_ptr();
     fixture
         .commands
         .push(delta.command.take().unwrap())
@@ -143,7 +143,7 @@ fn full_retirement_store_blocks_note_value_before_pop_until_two_current_credits(
         assert_eq!(fixture.engine.transport().bpm(), 120.0);
         assert_eq!(fixture.engine.pending_retirements.len(), 32);
         assert_eq!(
-            fixture.engine.pending_retirements.as_ptr(),
+            fixture.engine.pending_retirements.as_slice().as_ptr(),
             retirement_allocation
         );
         delta.assert_waiting(&fixture);
@@ -189,7 +189,7 @@ fn full_retirement_store_blocks_note_value_before_pop_until_two_current_credits(
     assert!(fixture.engine.pending_retirements.is_empty());
     assert_eq!(fixture.engine.pending_retirements.capacity(), 32);
     assert_eq!(
-        fixture.engine.pending_retirements.as_ptr(),
+        fixture.engine.pending_retirements.as_slice().as_ptr(),
         retirement_allocation
     );
     assert_signal(&callback(&mut fixture.engine, true));
@@ -232,7 +232,7 @@ fn ready_or_unfulfilled_note_value_waits_at_zero_then_returns_both_arrays_on_one
         }
         let full_ring = full_ui_ring(&mut fixture.engine);
         let expected = inject_full_retirement_store(&mut fixture.engine);
-        let retirement_allocation = fixture.engine.pending_retirements.as_ptr();
+        let retirement_allocation = fixture.engine.pending_retirements.as_slice().as_ptr();
         assert_signal(&callback(&mut fixture.engine, true));
         assert_eq!(fixture.engine.transport().position(), 16);
         assert_eq!(fixture.engine.transport().bpm(), 120.0);
@@ -247,12 +247,12 @@ fn ready_or_unfulfilled_note_value_waits_at_zero_then_returns_both_arrays_on_one
         callback(&mut fixture.engine, false);
         assert_eq!(fixture.engine.pending_retirements.len(), 32);
         assert_eq!(
-            fixture.engine.pending_retirements.as_ptr(),
+            fixture.engine.pending_retirements.as_slice().as_ptr(),
             retirement_allocation
         );
         let completions: Vec<_> = fixture
             .engine
-            .pending_retirements
+            .pending_retirements.as_slice()
             .iter()
             .filter_map(|event| {
                 if let EngineEvent::ClipInsertionCompleted(owner) = event {
@@ -286,7 +286,7 @@ fn ready_or_unfulfilled_note_value_waits_at_zero_then_returns_both_arrays_on_one
         assert!(fixture.engine.pending_retirements.is_empty());
         assert_eq!(fixture.engine.pending_retirements.capacity(), 32);
         assert_eq!(
-            fixture.engine.pending_retirements.as_ptr(),
+            fixture.engine.pending_retirements.as_slice().as_ptr(),
             retirement_allocation
         );
         assert_eq!(

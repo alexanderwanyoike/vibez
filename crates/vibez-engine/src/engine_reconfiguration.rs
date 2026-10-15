@@ -295,7 +295,7 @@ impl AudioEngine {
                 .event_tx
                 .push(EngineEvent::DeviceReconfiguration(device))
             {
-                let _ = self.restore_reconfigured_device(device);
+                self.restore_unpublished_device(device);
             } else {
                 self.device_handoff.publication_succeeded(scope);
             }
@@ -310,7 +310,30 @@ impl AudioEngine {
         })
     }
 
-    pub(super) fn restore_reconfigured_device(&mut self, device: DeviceReconfiguration) -> bool {
+    fn restore_unpublished_device(&mut self, device: DeviceReconfiguration) {
+        let pending = self.device_handoff.take_for_restoration();
+        // Issuance and this failed push share one callback frame. No command
+        // or UI owner can consume the exact slot just vacated above.
+        match device {
+            DeviceReconfiguration::Effect { track_id, mut slot, .. } => {
+                self.apply_pending_device_parameters(track_id, Some(slot.id), |index, value| {
+                    slot.effect.set_param(index, value)
+                });
+                let track = self.channel_mut(track_id).expect("issuing channel still resident");
+                slot.bypass = pending.bypass;
+                track.effects.insert(pending.position.min(track.effects.len()), slot);
+            }
+            DeviceReconfiguration::Instrument { track_id, mut instrument, .. } => {
+                self.apply_pending_device_parameters(track_id, None, |index, value| {
+                    instrument.set_param(index, value)
+                });
+                let track = self.channel_mut(track_id).expect("issuing channel still resident");
+                track.instrument = Some(instrument);
+            }
+        }
+    }
+
+    pub(super) fn restore_reconfigured_device(&mut self, device: DeviceReconfiguration, allowance: &mut RetirementAllowance) -> bool {
         let pending = self.device_handoff.take_for_restoration();
         match device {
             DeviceReconfiguration::Effect {
@@ -339,7 +362,7 @@ impl AudioEngine {
                         if reserved_effects.capacity() > 0 {
                             self.retire_event(EngineEvent::RetiredEffectStorage(
                                 RetiredEffectStorage(reserved_effects),
-                            ));
+                            ), allowance);
                         }
                         return true;
                     }
@@ -347,9 +370,9 @@ impl AudioEngine {
                 if reserved_effects.capacity() > 0 {
                     self.retire_event(EngineEvent::RetiredEffectStorage(RetiredEffectStorage(
                         reserved_effects,
-                    )));
+                    )), allowance);
                 }
-                self.dispose_effect(slot.effect);
+                self.dispose_effect(slot.effect, allowance);
                 self.compensation_plan.invalidate_applied_plan();
                 self.report_compensation_failure(
                     track_id,
@@ -371,7 +394,7 @@ impl AudioEngine {
                         return true;
                     }
                 }
-                self.dispose_instrument(instrument);
+                self.dispose_instrument(instrument, allowance);
                 self.compensation_plan.invalidate_applied_plan();
                 self.report_compensation_failure(
                     track_id,

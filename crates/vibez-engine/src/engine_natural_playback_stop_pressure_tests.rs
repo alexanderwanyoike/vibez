@@ -62,9 +62,15 @@ fn old_stop_fixture() -> OldStopFixture {
     for _ in 0..2008 {
         let owner = Box::new(PreparedSectionPlaybackSource::new(SectionId::new(), 1.0, false, vec![]));
         acknowledgements.push(std::ptr::from_ref(owner.as_ref()) as usize);
-        engine.present_event(EngineEvent::SectionQueueCancelled { retired: owner });
+        {
+            let mut retirement_allowance = engine.pending_retirements.reserve(1).expect("fixture admits its original owner-return budget");
+            engine.present_event(EngineEvent::SectionQueueCancelled { retired: owner }, &mut retirement_allowance)
+        };
     }
-    for _ in 0..40 { engine.present_event_at(EngineEvent::PlaybackStarted, engine.output_position + 5000); }
+    for _ in 0..40 { {
+            let mut retirement_allowance = engine.pending_retirements.reserve(1).expect("fixture admits its original owner-return budget");
+            engine.present_event_at(EngineEvent::PlaybackStarted, engine.output_position + 5000, &mut retirement_allowance)
+        }; }
     assert_eq!(engine.scheduled_presentation.len(), 2048);
     let mut ended = [0.0; 7];
     assert_eq!(crate::retirement::tests::allocations(|| {
@@ -130,7 +136,10 @@ fn natural_last_playback_stop_keeps_all_owners_without_growing_ordinary_returns(
     while fixture.engine.scheduled_presentation.len() < 2046 {
         let owner = Box::new(PreparedSectionPlaybackSource::new(SectionId::new(), 1.0, false, vec![]));
         fixture.acknowledgements.push(std::ptr::from_ref(owner.as_ref()) as usize);
-        fixture.engine.present_event(EngineEvent::SectionQueueCancelled { retired: owner });
+        {
+            let mut retirement_allowance = fixture.engine.pending_retirements.reserve(1).expect("fixture admits its original owner-return budget");
+            fixture.engine.present_event(EngineEvent::SectionQueueCancelled { retired: owner }, &mut retirement_allowance)
+        };
     }
     assert_eq!(fixture.engine.scheduled_presentation.len(), 2046);
     assert_eq!(fixture.engine.scheduled_presentation.capacity(), 2048);
@@ -161,7 +170,7 @@ fn natural_last_playback_stop_keeps_all_owners_without_growing_ordinary_returns(
     assert!(matches!(fixture.engine.presentation_state.terminals.overflow_owner(), Some(
         EngineEvent::SectionRecordStopped(SectionRecordStoppedEvent { section_id, effective_at_samples: 8, .. })
     ) if *section_id == fixture.first_section));
-    assert_eq!(fixture.engine.pending_retirements.iter().filter(|event| matches!(event, EngineEvent::RetiredAudioClip(_))).count(), 32);
+    assert_eq!(fixture.engine.pending_retirements.as_slice().iter().filter(|event| matches!(event, EngineEvent::RetiredAudioClip(_))).count(), 32);
     assert!(fixture.removed_audio.iter().all(|owner| owner.strong_count() == 1));
     assert_eq!(fixture.first_audio.strong_count(), 1);
     assert_eq!(middle_audio.strong_count(), 1);

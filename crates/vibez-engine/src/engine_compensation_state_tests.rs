@@ -491,7 +491,7 @@ fn full_ui_routing_admission_retains_rejected_plan_until_retired_graph_returns()
     );
     assert_eq!(fixture.engine.pending_retirements.len(), 1);
     assert!(matches!(
-        &fixture.engine.pending_retirements[0],
+        &fixture.engine.pending_retirements.as_slice()[0],
         EngineEvent::CompensationFailed { reason } if reason.as_ptr() == reason_identity
     ));
     let accepted = fixture.plan(0);
@@ -515,7 +515,7 @@ fn full_ui_routing_admission_retains_rejected_plan_until_retired_graph_returns()
         assert_eq!(fixture.engine.event_tx.slots(), 0);
         assert_eq!(fixture.engine.pending_retirements.len(), 1);
         assert!(matches!(
-            &fixture.engine.pending_retirements[0],
+            &fixture.engine.pending_retirements.as_slice()[0],
             EngineEvent::CompensationFailed { reason } if reason.as_ptr() == reason_identity
         ));
         if released < 3 {

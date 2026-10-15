@@ -404,7 +404,7 @@ fn stale_old_reply_preserves_new_token_metadata_parameters_and_applied_graph() {
             assert_eq!(new_drops.load(Ordering::Relaxed), 0);
             let mut released = 0;
             if backpressured {
-                assert!(engine.pending_retirements.iter().any(|event| matches!(event, EngineEvent::DeviceReconfigurationRetired { device, .. } if device.owner_identity()==old_identity)));
+                assert!(engine.pending_retirements.as_slice().iter().any(|event| matches!(event, EngineEvent::DeviceReconfigurationRetired { device, .. } if device.owner_identity()==old_identity)));
                 while let Ok(event) = events.pop() {
                     assert!(matches!(event, EngineEvent::PlaybackPosition(u64::MAX)));
                     released += 1;

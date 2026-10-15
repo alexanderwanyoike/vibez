@@ -307,9 +307,10 @@ fn owned_output_gates_suppress_live_plugin_queries_after_real_transitions() {
                     .is_ok()
                 {}
                 for _ in 0..=fixture.engine.scheduled_presentation.capacity() {
-                    fixture
-                        .engine
-                        .present_event_after(EngineEvent::PlaybackStarted, 521);
+                    {
+            let mut retirement_allowance = fixture.engine.pending_retirements.reserve(1).expect("fixture admits its original owner-return budget");
+            fixture.engine.present_event_after(EngineEvent::PlaybackStarted, 521, &mut retirement_allowance)
+        };
                 }
                 assert!(fixture.engine.presentation_state.is_faulted());
             }

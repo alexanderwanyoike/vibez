@@ -355,7 +355,7 @@ fn stale_reject_with_full_event_ring_retains_device_reason_and_current_plan() {
     assert_eq!(engine.routing.as_ref().compensation.generation, 22);
     assert!(engine.compensation_plan.applied_plan_is_valid());
     assert!(matches!(
-        engine.pending_retirements.last(),
+        engine.pending_retirements.as_slice().last(),
         Some(EngineEvent::DeviceReconfigurationRetired {
             reason: Some(_),
             ..

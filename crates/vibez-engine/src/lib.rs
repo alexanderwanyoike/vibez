@@ -19,7 +19,6 @@ pub mod bounce_timing;
 pub mod routing;
 
 mod retirement;
-#[cfg(test)]
 mod retirement_queue;
 
 mod guarded_history;

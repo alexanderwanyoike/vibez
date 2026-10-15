@@ -216,7 +216,7 @@ fn current_reject_admission_preserves_all_three_owners_with_zero_through_three_f
         } else {
             assert_eq!(engine.pending_retirements.len(), 32);
             assert_eq!(engine.cmd_rx.slots(), 1);
-            let returned = &engine.pending_retirements[29..];
+            let returned = &engine.pending_retirements.as_slice()[29..];
             assert!(
                 matches!(&returned[0], EngineEvent::RetiredEffectStorage(storage) if storage.0.as_ptr() as usize == storage_identity)
             );
@@ -456,7 +456,7 @@ fn remove_bus_nested_lane_cleanup_uses_remaining_slots_after_staged_source_owner
     assert_eq!(engine.pending_retirements.capacity(), 32);
     assert_eq!(
         engine
-            .pending_retirements
+            .pending_retirements.as_slice()
             .iter()
             .filter(|event| matches!(event, EngineEvent::RetiredTrackOrder(_)))
             .count(),
@@ -464,7 +464,7 @@ fn remove_bus_nested_lane_cleanup_uses_remaining_slots_after_staged_source_owner
     );
     assert_eq!(
         engine
-            .pending_retirements
+            .pending_retirements.as_slice()
             .iter()
             .filter(|event| matches!(event, EngineEvent::RetiredAudioClip(_)))
             .count(),
@@ -472,7 +472,7 @@ fn remove_bus_nested_lane_cleanup_uses_remaining_slots_after_staged_source_owner
     );
     assert_eq!(
         engine
-            .pending_retirements
+            .pending_retirements.as_slice()
             .iter()
             .filter(|event| matches!(event, EngineEvent::RetiredChannel(_)))
             .count(),
@@ -480,7 +480,7 @@ fn remove_bus_nested_lane_cleanup_uses_remaining_slots_after_staged_source_owner
     );
     assert_eq!(
         engine
-            .pending_retirements
+            .pending_retirements.as_slice()
             .iter()
             .filter(|event| matches!(event, EngineEvent::RetiredAutomationLane(_)))
             .count(),

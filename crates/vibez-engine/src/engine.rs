@@ -1,5 +1,6 @@
 //! Real-time project playback, prepared ownership and callback clock coordination.
 
+use crate::retirement_queue::{RetirementAllowance, RetirementQueue};
 use crate::events::{MeteringEvent, SectionPlaybackPositionEvent};
 use std::sync::Arc;
 
@@ -67,7 +68,7 @@ pub struct AudioEngine {
     // bootstrap owner until the engine returns to the caller for teardown.
     bootstrap_routing: Option<Box<crate::routing::PreparedRouting>>,
     retired_routing: Option<Box<crate::routing::PreparedRouting>>,
-    pub(super) pending_retirements: Vec<EngineEvent>,
+    pub(super) pending_retirements: RetirementQueue,
     pending_clip_insertion: Option<Box<crate::clip_insertion::PreparedClipInsertion>>,
     pub(super) pending_bus_cleanup: Option<(TrackId, usize)>,
     pub(super) channel_retirement: Arc<crate::retirement::ChannelRetirementPool>,
@@ -268,7 +269,7 @@ impl AudioEngine {
             output_gate: output_gate::OutputGate::default(),
             retired_routing: None,
             pending_bus_cleanup: None,
-            pending_retirements: Vec::with_capacity(crate::retirement::RETIREMENT_CAPACITY),
+            pending_retirements: RetirementQueue::new(),
             pending_clip_insertion: None,
             channel_retirement: crate::retirement::ChannelRetirementPool::new(),
             transport: Transport::new(),
@@ -497,8 +498,8 @@ impl AudioEngine {
             );
             self.section_capture_stopped(section_end_boundary);
             self.capture_lifecycle.end();
-            self.present_event_after(
-                EngineEvent::PerformanceCaptureStopped {
+            self.present_cancelable_stop_after(
+                presentation_queue::CancelableStop::Performance {
                     effective_at_samples: section_end_boundary,
                 },
                 self.mix_latency(),

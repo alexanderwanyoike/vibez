@@ -323,9 +323,10 @@ fn stage_pressure(fixture: &mut Fixture) -> Vec<(AutomationLane, *const Automati
         expected.push((value.clone(), value.points.as_ptr()));
         // Off-callback fixture staging supplies ordinary owners; public commands,
         // replies and the actual full UI ring still exercise admission and return.
-        fixture
-            .engine
-            .retire_event(EngineEvent::RetiredAutomationLane(value));
+        {
+            let mut retirement_allowance = fixture.engine.pending_retirements.reserve(1).expect("fixture admits its original owner-return budget");
+            fixture.engine.retire_event(EngineEvent::RetiredAutomationLane(value), &mut retirement_allowance)
+        };
     }
     assert_eq!(fixture.engine.pending_retirements.len(), 32);
     expected
@@ -373,7 +374,7 @@ fn initial_replacement_and_missing_lane_require_two_current_credits_before_pop()
         };
         let (delta, command) = Delta::prepare(incoming, target);
         let expected = stage_pressure(&mut fixture);
-        let allocation = fixture.engine.pending_retirements.as_ptr();
+        let allocation = fixture.engine.pending_retirements.as_slice().as_ptr();
         fixture.commands.push(command).unwrap();
         fixture.commands.push(EngineCommand::Stop).unwrap();
         let slots = fixture.commands.slots();
@@ -391,20 +392,20 @@ fn initial_replacement_and_missing_lane_require_two_current_credits_before_pop()
         fixture.callback(false);
         assert_eq!(fixture.commands.slots(), slots + 1);
         assert_eq!(fixture.engine.pending_retirements.len(), 32);
-        assert_eq!(fixture.engine.pending_retirements.as_ptr(), allocation);
+        assert_eq!(fixture.engine.pending_retirements.as_slice().as_ptr(), allocation);
         assert_eq!(fixture.engine.pending_retirements.capacity(), 32);
         let expected_retired = if missing {
             (delta.incoming.clone(), delta.points)
         } else {
             (fixture.resident.clone(), fixture.points)
         };
-        let EngineEvent::RetiredAutomationLane(value) = &fixture.engine.pending_retirements[30]
+        let EngineEvent::RetiredAutomationLane(value) = &fixture.engine.pending_retirements.as_slice()[30]
         else {
             panic!("lane return must precede its control")
         };
         assert_eq!(value, &expected_retired.0);
         assert_eq!(value.points.as_ptr(), expected_retired.1);
-        let EngineEvent::ClipInsertionCompleted(value) = &fixture.engine.pending_retirements[31]
+        let EngineEvent::ClipInsertionCompleted(value) = &fixture.engine.pending_retirements.as_slice()[31]
         else {
             panic!("both initial credits must retain complete owners")
         };
@@ -450,7 +451,7 @@ fn initial_replacement_and_missing_lane_require_two_current_credits_before_pop()
         assert_eq!(returned.len(), 32);
         fixture.finish_telemetry();
         assert!(fixture.engine.pending_retirements.is_empty());
-        assert_eq!(fixture.engine.pending_retirements.as_ptr(), allocation);
+        assert_eq!(fixture.engine.pending_retirements.as_slice().as_ptr(), allocation);
         assert_eq!(fixture.engine.pending_retirements.capacity(), 32);
         if missing {
             fixture.assert_original();
@@ -515,7 +516,7 @@ fn pending_ready_or_abandoned_lane_uses_one_current_credit_and_keeps_stop_waitin
             drop(request);
         }
         let expected = stage_pressure(&mut fixture);
-        let allocation = fixture.engine.pending_retirements.as_ptr();
+        let allocation = fixture.engine.pending_retirements.as_slice().as_ptr();
         fixture.callback(true);
         fixture.assert_original();
         assert_eq!(fixture.commands.slots(), slots + 1);
@@ -524,8 +525,8 @@ fn pending_ready_or_abandoned_lane_uses_one_current_credit_and_keeps_stop_waitin
         fixture.callback(false);
         assert_eq!(fixture.commands.slots(), slots + 1);
         assert_eq!(fixture.engine.pending_retirements.len(), 32);
-        assert_eq!(fixture.engine.pending_retirements.as_ptr(), allocation);
-        let EngineEvent::ClipInsertionCompleted(value) = &fixture.engine.pending_retirements[31]
+        assert_eq!(fixture.engine.pending_retirements.as_slice().as_ptr(), allocation);
+        let EngineEvent::ClipInsertionCompleted(value) = &fixture.engine.pending_retirements.as_slice()[31]
         else {
             panic!("one available credit must retain the complete control")
         };
@@ -572,7 +573,7 @@ fn pending_ready_or_abandoned_lane_uses_one_current_credit_and_keeps_stop_waitin
         assert_eq!(returned.len(), 32);
         fixture.finish_telemetry();
         assert!(fixture.engine.pending_retirements.is_empty());
-        assert_eq!(fixture.engine.pending_retirements.as_ptr(), allocation);
+        assert_eq!(fixture.engine.pending_retirements.as_slice().as_ptr(), allocation);
         assert_eq!(fixture.engine.pending_retirements.capacity(), 32);
         if outcome == ClipInsertionOutcome::Applied {
             fixture.assert_current(

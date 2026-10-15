@@ -159,7 +159,7 @@ fn full_capacity_replacement_returns_lane_before_control_and_preserves_full_ring
         let insertion = PreparedAutomationLaneInsertion::with_capacity(incoming, 0);
         let operation = insertion.id();
         let control = std::ptr::from_ref(insertion.0.as_ref());
-        let retained = engine.pending_retirements.as_ptr();
+        let retained = engine.pending_retirements.as_slice().as_ptr();
         let retained_capacity = engine.pending_retirements.capacity();
         let mut fillers = 0;
         if full {
@@ -189,15 +189,15 @@ fn full_capacity_replacement_returns_lane_before_control_and_preserves_full_ring
         assert_eq!((current.len(), current.capacity()), (2, 2));
         assert_eq!(current[0].points.as_ptr(), incoming_points);
         assert_eq!(current[1].points.as_ptr(), survivor_points);
-        assert_eq!(engine.pending_retirements.as_ptr(), retained);
+        assert_eq!(engine.pending_retirements.as_slice().as_ptr(), retained);
         assert_eq!(engine.pending_retirements.capacity(), retained_capacity);
         assert_eq!(engine.pending_retirements.len(), usize::from(full) * 2);
         if full {
             assert!(
-                matches!(&engine.pending_retirements[0], EngineEvent::RetiredAutomationLane(value) if value.points.as_ptr() == old_points)
+                matches!(&engine.pending_retirements.as_slice()[0], EngineEvent::RetiredAutomationLane(value) if value.points.as_ptr() == old_points)
             );
             assert!(
-                matches!(&engine.pending_retirements[1], EngineEvent::ClipInsertionCompleted(value) if value.id() == operation)
+                matches!(&engine.pending_retirements.as_slice()[1], EngineEvent::ClipInsertionCompleted(value) if value.id() == operation)
             );
             for _ in 0..fillers {
                 assert!(matches!(

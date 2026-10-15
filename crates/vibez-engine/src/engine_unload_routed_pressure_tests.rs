@@ -334,7 +334,10 @@ fn assert_combined_routed_unload_pressure(delayed_minimum_credits: bool) {
     for index in 0..retained_owners {
         let (prepared, owner) = unique_clip_request(tracks[0], 10000 + index as u64);
         expected_clips.push(owner);
-        engine.present_event(EngineEvent::ClipRequestRetired(prepared));
+        {
+            let mut retirement_allowance = engine.pending_retirements.reserve(1).expect("fixture admits its original owner-return budget");
+            engine.present_event(EngineEvent::ClipRequestRetired(prepared), &mut retirement_allowance)
+        };
     }
     assert_eq!(
         engine.scheduled_presentation.len(),

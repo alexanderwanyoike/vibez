@@ -152,10 +152,13 @@ impl Fixture {
                     .is_ok()
                 {}
                 for _ in 0..=presentation_queue::PRESENTATION_EVENT_CAPACITY {
-                    fixture.engine.present_event_at(
+                    {
+            let mut retirement_allowance = fixture.engine.pending_retirements.reserve(1).expect("fixture admits its original owner-return budget");
+            fixture.engine.present_event_at(
                         EngineEvent::PlaybackStarted,
                         fixture.engine.output_position + 521,
-                    );
+                     &mut retirement_allowance)
+        };
                 }
             }
         }

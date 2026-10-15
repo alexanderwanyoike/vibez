@@ -9,14 +9,14 @@ pub(super) enum ClockDomain {
 }
 
 impl AudioEngine {
-    pub(super) fn begin_performance_clock(&mut self) {
+    pub(super) fn begin_performance_clock(&mut self, allowance: &mut RetirementAllowance) {
         if self.clock_domain == ClockDomain::Perform {
             return;
         }
         let ending_capture = self.capture_stop_pending();
         self.cancel_presentation();
         if ending_capture {
-            self.stop_heard_capture();
+            self.stop_heard_capture( allowance);
         }
         self.routing.presentation.rebase_performance();
         if let Some(first) = self.routing.presentation_start.as_mut() {
@@ -35,9 +35,9 @@ impl AudioEngine {
             } else {
                 EngineEvent::AuditionStarted
             };
-            self.present_event(event);
+            self.present_event(event, allowance);
         }
-        self.present_event(EngineEvent::PerformancePosition(0));
+        self.present_event(EngineEvent::PerformancePosition(0), allowance);
     }
 
     pub(super) fn effective_position(&self) -> u64 {
@@ -63,13 +63,7 @@ impl AudioEngine {
         track_id: TrackId,
         target: vibez_core::automation::AutomationTarget,
     ) -> u32 {
-        let stage = crate::compensation_controls::automation_stage(target);
-        let input = self
-            .routing
-            .graph
-            .index(track_id, stage)
-            .map_or(0, |node| self.routing.compensation.node_input_latency[node]);
-        self.live_path_latency(track_id).saturating_sub(input)
+        automation_presentation_delay_fields(&self.routing, track_id, target)
     }
 
     pub(super) fn target_automation_position(
@@ -77,23 +71,44 @@ impl AudioEngine {
         track_id: TrackId,
         target: vibez_core::automation::AutomationTarget,
     ) -> u64 {
+        target_automation_position_fields(&self.routing, &self.transport, self.clock_domain, self.performance_position, self.active_section, track_id, target)
+    }
+}
+
+pub(super) fn automation_presentation_delay_fields(
+    routing: &crate::routing::PreparedRouting, track_id: TrackId,
+    target: vibez_core::automation::AutomationTarget,
+) -> u32 {
         let stage = crate::compensation_controls::automation_stage(target);
-        let position = self.effective_position();
-        let routing = &self.routing;
+        let input = routing
+            .graph
+            .index(track_id, stage)
+            .map_or(0, |node| routing.compensation.node_input_latency[node]);
+        super::presentation::live_path_latency_fields(routing, track_id).saturating_sub(input)
+    }
+
+pub(super) fn target_automation_position_fields(
+    routing: &crate::routing::PreparedRouting, transport: &Transport,
+    clock_domain: ClockDomain, performance_position: u64,
+    active_section: Option<ActiveSectionPlayback>, track_id: TrackId,
+    target: vibez_core::automation::AutomationTarget,
+) -> u64 {
+        let stage = crate::compensation_controls::automation_stage(target);
+        let position = match clock_domain { ClockDomain::Arrange => transport.position(), ClockDomain::Perform => performance_position };
         let Some(node) = routing.graph.index(track_id, stage) else {
             return position;
         };
         let omitted = routing
             .compensation
             .output_latency
-            .saturating_sub(self.live_path_latency(track_id));
-        let context = self.presentation_context(
+            .saturating_sub(super::presentation::live_path_latency_fields(routing, track_id));
+        let context = super::presentation::presentation_context_fields(
+            routing, transport, performance_position, active_section,
             routing.compensation.node_input_latency[node].saturating_add(omitted),
         );
-        if self.clock_domain == ClockDomain::Perform {
+        if clock_domain == ClockDomain::Perform {
             context.perform
         } else {
             context.arrange
         }
     }
-}

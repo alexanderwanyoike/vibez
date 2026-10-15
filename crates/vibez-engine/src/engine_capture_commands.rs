@@ -6,7 +6,7 @@ use crate::events::{
 };
 
 impl AudioEngine {
-    pub(super) fn command_start_performance_capture(&mut self) {
+    pub(super) fn command_start_performance_capture(&mut self, allowance: &mut RetirementAllowance) {
         if let Some(reason) = self.observe_capture_admission().refusal_reason() {
             self.close_capture_for_device_failure();
             self.report_compensation_failure(TrackId::MASTER, None, reason);
@@ -26,7 +26,7 @@ impl AudioEngine {
                 section_id,
                 section_position_samples,
             },
-        ));
+        ), allowance);
         self.capture_clip_positions.clear();
         for index in 0..self.tracks.len() {
             {
@@ -51,11 +51,11 @@ impl AudioEngine {
         self.replay_early_section_capture();
     }
 
-    pub(super) fn command_stop_performance_capture(&mut self) {
+    pub(super) fn command_stop_performance_capture(&mut self, allowance: &mut RetirementAllowance) {
         self.capture_lifecycle.end();
         self.present_event(EngineEvent::PerformanceCaptureStopped {
             effective_at_samples: self.heard_capture_position(),
-        });
+        }, allowance);
     }
 
     pub(super) fn command_external_note_on(
@@ -63,7 +63,7 @@ impl AudioEngine {
         track_id: vibez_core::id::TrackId,
         pitch: u8,
         velocity: u8,
-    ) {
+     allowance: &mut RetirementAllowance) {
         if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
             if let Some(instrument) = track.instrument.as_mut() {
                 instrument.note_on(pitch, velocity);
@@ -76,7 +76,7 @@ impl AudioEngine {
             velocity,
             on: true,
             position: self.source_recording_position(),
-        }));
+        }), allowance);
         self.present_event_after(
             EngineEvent::InstrumentNoteInput(InstrumentNoteInputEvent {
                 track_id,
@@ -88,14 +88,14 @@ impl AudioEngine {
                 section_position_samples: context.section,
             }),
             self.live_path_latency(track_id),
-        );
+         allowance);
     }
 
     pub(super) fn command_external_note_off(
         &mut self,
         track_id: vibez_core::id::TrackId,
         pitch: u8,
-    ) {
+     allowance: &mut RetirementAllowance) {
         if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
             if let Some(instrument) = track.instrument.as_mut() {
                 instrument.note_off(pitch);
@@ -108,7 +108,7 @@ impl AudioEngine {
             velocity: 0,
             on: false,
             position: self.source_recording_position(),
-        }));
+        }), allowance);
         self.present_event_after(
             EngineEvent::InstrumentNoteInput(InstrumentNoteInputEvent {
                 track_id,
@@ -120,6 +120,6 @@ impl AudioEngine {
                 section_position_samples: context.section,
             }),
             self.live_path_latency(track_id),
-        );
+         allowance);
     }
 }

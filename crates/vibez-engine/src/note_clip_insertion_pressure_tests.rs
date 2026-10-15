@@ -196,7 +196,10 @@ fn inject_full_retirement_store(
         expected.push((lane.clone(), allocation));
         // Explicit off-callback fixture injection tests the bounded store;
         // Insertion, request serving, rendering and completion remain public.
-        engine.retire_event(EngineEvent::RetiredAutomationLane(lane));
+        {
+            let mut retirement_allowance = engine.pending_retirements.reserve(1).expect("fixture admits its original owner-return budget");
+            engine.retire_event(EngineEvent::RetiredAutomationLane(lane), &mut retirement_allowance)
+        };
     }
     assert_eq!(engine.pending_retirements.len(), 32);
     expected
@@ -356,7 +359,7 @@ fn full_retirement_store_blocks_note_clip_admission_until_two_current_credits() 
     let mut delta = delta(fixture.track);
     let full_ring = full_ui_ring(&mut fixture.engine);
     let expected = inject_full_retirement_store(&mut fixture.engine);
-    let retirement_allocation = fixture.engine.pending_retirements.as_ptr();
+    let retirement_allocation = fixture.engine.pending_retirements.as_slice().as_ptr();
     fixture
         .commands
         .push(delta.command.take().unwrap())
@@ -370,7 +373,7 @@ fn full_retirement_store_blocks_note_clip_admission_until_two_current_credits() 
         assert_eq!(fixture.engine.transport().bpm(), 120.0);
         assert_eq!(fixture.engine.pending_retirements.len(), 32);
         assert_eq!(
-            fixture.engine.pending_retirements.as_ptr(),
+            fixture.engine.pending_retirements.as_slice().as_ptr(),
             retirement_allocation
         );
         assert_unchanged(&fixture);
@@ -417,7 +420,7 @@ fn full_retirement_store_blocks_note_clip_admission_until_two_current_credits() 
     assert!(fixture.engine.pending_retirements.is_empty());
     assert_eq!(fixture.engine.pending_retirements.capacity(), 32);
     assert_eq!(
-        fixture.engine.pending_retirements.as_ptr(),
+        fixture.engine.pending_retirements.as_slice().as_ptr(),
         retirement_allocation
     );
     assert_signal(&callback(&mut fixture.engine, true));
@@ -460,7 +463,7 @@ fn ready_or_abandoned_note_clip_waits_at_zero_and_uses_only_the_last_completion_
         }
         let full_ring = full_ui_ring(&mut fixture.engine);
         let expected = inject_full_retirement_store(&mut fixture.engine);
-        let retirement_allocation = fixture.engine.pending_retirements.as_ptr();
+        let retirement_allocation = fixture.engine.pending_retirements.as_slice().as_ptr();
         assert_signal(&callback(&mut fixture.engine, true));
         assert_eq!(fixture.engine.transport().position(), 16);
         assert_eq!(fixture.engine.transport().bpm(), 120.0);
@@ -475,12 +478,12 @@ fn ready_or_abandoned_note_clip_waits_at_zero_and_uses_only_the_last_completion_
         callback(&mut fixture.engine, false);
         assert_eq!(fixture.engine.pending_retirements.len(), 32);
         assert_eq!(
-            fixture.engine.pending_retirements.as_ptr(),
+            fixture.engine.pending_retirements.as_slice().as_ptr(),
             retirement_allocation
         );
         let completions: Vec<_> = fixture
             .engine
-            .pending_retirements
+            .pending_retirements.as_slice()
             .iter()
             .filter_map(|event| {
                 if let EngineEvent::ClipInsertionCompleted(owner) = event {
@@ -513,7 +516,7 @@ fn ready_or_abandoned_note_clip_waits_at_zero_and_uses_only_the_last_completion_
         assert!(fixture.engine.pending_retirements.is_empty());
         assert_eq!(fixture.engine.pending_retirements.capacity(), 32);
         assert_eq!(
-            fixture.engine.pending_retirements.as_ptr(),
+            fixture.engine.pending_retirements.as_slice().as_ptr(),
             retirement_allocation
         );
         let end = if outcome == ClipInsertionOutcome::Applied {
