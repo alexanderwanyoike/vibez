@@ -195,7 +195,11 @@ impl AudioEngine {
                 .terminals
                 .retain_overflow_owner(event)
             {
-                self.retire_event(event);
+                // Cancelled feedback owns nothing, so it must not consume the
+                // retirement space reserved for owners awaiting the UI.
+                if !matches!(event, EngineEvent::PresentationCancelled) {
+                    self.retire_event(event);
+                }
             }
         }
     }
