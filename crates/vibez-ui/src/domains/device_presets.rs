@@ -68,6 +68,30 @@ const EQ_KEYS: [(usize, &str, bool); 21] = {
     ]
 };
 
+/// Native Compressor parameters a preset stores: everything but detector
+/// listening, which is a monitoring aid rather than part of the sound.
+const COMPRESSOR_KEYS: [(usize, &str, bool); 16] = {
+    use vibez_dsp::compressor::param::*;
+    [
+        (THRESHOLD, "threshold_db", false),
+        (RATIO, "ratio", false),
+        (ATTACK, "attack_ms", false),
+        (RELEASE, "release_ms", false),
+        (MAKEUP, "makeup_db", false),
+        (MIX, "mix", false),
+        (KNEE, "knee_db", false),
+        (HP_ENABLED, "hp_enabled", true),
+        (HP_FREQUENCY, "hp_frequency_hz", false),
+        (LP_ENABLED, "lp_enabled", true),
+        (LP_FREQUENCY, "lp_frequency_hz", false),
+        (DETECTOR_MODE, "detector_mode", true),
+        (AUTO_RELEASE, "auto_release", true),
+        (STEREO_LINK, "stereo_link", true),
+        (RANGE_ENABLED, "range_enabled", true),
+        (RANGE, "range_db", false),
+    ]
+};
+
 /// One stored parameter: its index, preset key and whether it is a switch.
 type PresetParam = (usize, &'static str, bool);
 
@@ -130,6 +154,7 @@ fn parameter_keys(effect: &UiEffect) -> Result<Vec<PresetParam>, String> {
             })
             .collect()),
         EffectType::Eq => Ok(EQ_KEYS.to_vec()),
+        EffectType::Compressor => Ok(COMPRESSOR_KEYS.to_vec()),
         _ => Err("Presets are not yet supported by this built-in device".into()),
     }
 }
@@ -204,6 +229,7 @@ pub fn factory_presets(effect_type: EffectType) -> Vec<DevicePreset> {
     match effect_type {
         EffectType::Gain => gain_factory_presets(),
         EffectType::Eq => eq_factory_presets(),
+        EffectType::Compressor => compressor_factory_presets(),
         _ => Vec::new(),
     }
 }
@@ -341,6 +367,110 @@ fn eq_factory_presets() -> Vec<DevicePreset> {
         ),
     ];
     keyed_presets(EffectType::Eq, &EQ_KEYS, vibez_dsp::eq::EQ_PARAMS, &presets)
+}
+
+/// Starting points for common dynamics jobs, after Sol's tuning.
+fn compressor_factory_presets() -> Vec<DevicePreset> {
+    let presets: [(&str, &[(&str, f32)]); 8] = [
+        ("Init", &[]),
+        (
+            "Clean bus",
+            &[
+                ("threshold_db", -16.0),
+                ("ratio", 2.0),
+                ("attack_ms", 20.0),
+                ("release_ms", 150.0),
+                ("makeup_db", 1.0),
+                ("knee_db", 6.0),
+                ("hp_enabled", 1.0),
+            ],
+        ),
+        (
+            "Drum punch",
+            &[
+                ("threshold_db", -18.0),
+                ("ratio", 4.0),
+                ("attack_ms", 25.0),
+                ("release_ms", 80.0),
+                ("knee_db", 3.0),
+                ("hp_enabled", 1.0),
+                ("hp_frequency_hz", 60.0),
+            ],
+        ),
+        (
+            "Vocal level",
+            &[
+                ("threshold_db", -24.0),
+                ("ratio", 3.0),
+                ("attack_ms", 4.0),
+                ("release_ms", 120.0),
+                ("makeup_db", 5.0),
+                ("knee_db", 9.0),
+                ("detector_mode", 1.0),
+                ("auto_release", 1.0),
+                ("hp_enabled", 1.0),
+                ("hp_frequency_hz", 100.0),
+            ],
+        ),
+        (
+            "Gentle glue",
+            &[
+                ("threshold_db", -16.0),
+                ("ratio", 1.8),
+                ("attack_ms", 30.0),
+                ("release_ms", 200.0),
+                ("makeup_db", 1.0),
+                ("knee_db", 12.0),
+                ("auto_release", 1.0),
+                ("hp_enabled", 1.0),
+                ("hp_frequency_hz", 90.0),
+            ],
+        ),
+        (
+            "Parallel crush",
+            &[
+                ("threshold_db", -30.0),
+                ("ratio", 10.0),
+                ("attack_ms", 15.0),
+                ("release_ms", 140.0),
+                ("makeup_db", 12.0),
+                ("mix", 0.25),
+                ("knee_db", 3.0),
+                ("range_enabled", 1.0),
+                ("range_db", 24.0),
+            ],
+        ),
+        (
+            "Kick duck",
+            &[
+                ("threshold_db", -24.0),
+                ("ratio", 8.0),
+                ("attack_ms", 2.0),
+                ("release_ms", 140.0),
+                ("makeup_db", 0.0),
+                ("knee_db", 3.0),
+                ("lp_enabled", 1.0),
+                ("lp_frequency_hz", 1800.0),
+            ],
+        ),
+        (
+            "Smooth limit",
+            &[
+                ("threshold_db", -6.0),
+                ("ratio", 20.0),
+                ("attack_ms", 1.0),
+                ("release_ms", 60.0),
+                ("knee_db", 2.0),
+                ("auto_release", 1.0),
+            ],
+        ),
+    ];
+    keyed_presets(
+        EffectType::Compressor,
+        &COMPRESSOR_KEYS,
+        vibez_dsp::compressor::COMPRESSOR_PARAMS,
+        &presets,
+    )
 }
 
 /// Presets that start from the device's defaults and change the named keys.
