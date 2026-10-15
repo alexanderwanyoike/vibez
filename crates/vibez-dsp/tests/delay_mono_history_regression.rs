@@ -16,6 +16,7 @@ fn process_parts(effect: &mut DelayEffect, buffer: &mut [f32], channels: usize, 
 }
 
 fn expected_left(frame: usize, delay: usize, mono_input: f32) -> f32 {
+    // Empty impulse superposition is positive silence; floating Sum seeds negative zero.
     (1..=frame / delay)
         .map(|repeat| {
             let input_frame = frame - repeat * delay;
@@ -26,7 +27,7 @@ fn expected_left(frame: usize, delay: usize, mono_input: f32) -> f32 {
             };
             dry * 0.5_f64.powi((repeat - 1) as i32)
         })
-        .sum::<f64>() as f32
+        .fold(0.0_f64, |sum, value| sum + value) as f32
 }
 
 fn expected_right(frame: usize, delay: usize) -> f32 {
