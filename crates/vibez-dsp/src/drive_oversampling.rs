@@ -142,15 +142,7 @@ fn symmetric_dot(samples: &[f32], coefficients: &[f32]) -> f32 {
     if result.is_finite() {
         result
     } else {
-        // Exceptional host headroom must not overflow intermediate f32 accumulators.
-        super::finite_sample(
-            samples
-                .iter()
-                .rev()
-                .zip(coefficients)
-                .map(|(&sample, &coefficient)| sample as f64 * coefficient as f64)
-                .sum(),
-        )
+        overflow_dot(samples, coefficients)
     }
 }
 
@@ -169,14 +161,18 @@ fn reversed_dot(samples: &[f32], coefficients: &[f32]) -> f32 {
     if result.is_finite() {
         result
     } else {
-        // Exceptional host headroom must not overflow intermediate f32 accumulators.
-        super::finite_sample(
-            samples
-                .iter()
-                .rev()
-                .zip(coefficients)
-                .map(|(&sample, &coefficient)| sample as f64 * coefficient as f64)
-                .sum(),
-        )
+        overflow_dot(samples, coefficients)
     }
+}
+
+// Exceptional host headroom must not overflow intermediate f32 accumulators.
+fn overflow_dot(samples: &[f32], coefficients: &[f32]) -> f32 {
+    super::finite_sample(
+        samples
+            .iter()
+            .rev()
+            .zip(coefficients)
+            .map(|(&sample, &coefficient)| sample as f64 * coefficient as f64)
+            .sum(),
+    )
 }
