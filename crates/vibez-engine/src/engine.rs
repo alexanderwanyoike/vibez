@@ -1079,3 +1079,7 @@ mod retirement_admission_tests;
 #[cfg(test)]
 #[path = "engine_unload_routed_pressure_tests.rs"]
 mod unload_routed_pressure_tests;
+
+#[cfg(test)]
+#[path = "engine_section_activation_pressure_tests.rs"]
+mod section_activation_pressure_tests;
