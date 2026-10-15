@@ -14,6 +14,9 @@ pub mod audio_settings;
 pub mod automation;
 pub mod browser;
 pub mod compensation;
+pub mod delay_layout;
+#[cfg(test)]
+mod delay_layout_geometry_tests;
 pub mod device_controls;
 pub mod device_latency;
 pub mod device_presets;
