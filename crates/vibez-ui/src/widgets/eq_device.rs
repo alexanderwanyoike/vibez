@@ -35,6 +35,11 @@ const BAND_GROUP_W: f32 = 172.0;
 const OUTPUT_W: f32 = 340.0;
 const STRIP_KNOB: f32 = 28.0;
 const ROW_KNOB: f32 = 24.0;
+/// A single line of controls for the shortest cards.
+const LINE_H: f32 = 24.0;
+const LINE_KNOB: f32 = 18.0;
+/// A one-line Advanced has room for the output trim after both cuts.
+const LINE_OUTPUT_W: f32 = 480.0;
 
 pub const COMPACT_W: f32 = TABS_W + PAD * 2.0;
 /// The graph with the selected band beside it.
@@ -69,6 +74,8 @@ pub enum Upper {
     TabsBelow,
     /// A short, narrow card keeps every band control and drops the graph.
     TabsOnly,
+    /// The shortest cards: band tabs and the selected band's values on one line.
+    Line,
 }
 
 /// How the body divides its measured size. It never scrolls: what does not
@@ -91,12 +98,14 @@ pub struct Arrangement {
 fn upper_for(width: f32, height: f32) -> Upper {
     if width >= MEDIUM_W && height >= SIDE_H {
         Upper::Side
-    } else if width >= TABS_BESIDE_W {
+    } else if width >= TABS_BESIDE_W && height >= TABS_H {
         Upper::TabsBeside
     } else if height >= GRAPH_MIN_H + TABS_H {
         Upper::TabsBelow
-    } else {
+    } else if height >= TABS_H {
         Upper::TabsOnly
+    } else {
+        Upper::Line
     }
 }
 
@@ -187,8 +196,11 @@ impl<'a> EqView<'a> {
             rule(),
         ];
         if layout.advanced_only {
-            body =
-                body.push(self.advanced(layout.advanced.unwrap_or(0.0), layout.advanced_spectrum));
+            body = body.push(self.advanced(
+                layout.advanced.unwrap_or(0.0),
+                layout.advanced_spectrum,
+                size.width,
+            ));
             return body.width(Length::Fill).height(Length::Fill).into();
         }
         body = body.push(self.upper(layout));
@@ -196,9 +208,9 @@ impl<'a> EqView<'a> {
             body = body.push(rule()).push(self.strip(layout.output_in_strip));
         }
         if let Some(height) = layout.advanced {
-            body = body
-                .push(rule())
-                .push(self.advanced(height, layout.advanced_spectrum));
+            body =
+                body.push(rule())
+                    .push(self.advanced(height, layout.advanced_spectrum, size.width));
         }
         body.width(Length::Fill).height(Length::Fill).into()
     }
@@ -249,6 +261,7 @@ impl<'a> EqView<'a> {
                 .spacing(4)
                 .into(),
             Upper::TabsOnly => container(self.band_tabs()).center_y(Length::Fill).into(),
+            Upper::Line => container(self.band_line()).center_y(Length::Fill).into(),
         };
         container(content)
             .padding([0.0, PAD])
@@ -374,6 +387,44 @@ impl<'a> EqView<'a> {
         ]
         .spacing(4)
         .height(TABS_H)
+        .into()
+    }
+
+    /// A value and its knob with no name, for single-line layouts where the
+    /// band tab and the unit say what the value is.
+    fn value_knob(&self, index: usize, label: &'a str) -> Element<'a, Message> {
+        let param = self.param(index).label(label);
+        row![
+            param.value_entry(),
+            canvas(param.knob()).width(LINE_KNOB).height(LINE_KNOB),
+        ]
+        .spacing(2)
+        .align_y(Alignment::Center)
+        .into()
+    }
+
+    fn band_line(&self) -> Element<'a, Message> {
+        let band = self.panel.band;
+        let effect_id = self.effect.id;
+        let third = if has_q(band) {
+            self.value_knob(param::SHAPE[band], "Q")
+        } else {
+            self.bell_toggle(band)
+        };
+        row![
+            segmented(
+                &[(0, "LF"), (1, "LMF"), (2, "HMF"), (3, "HF")],
+                band,
+                move |band| Message::Eq(EqMsg::SelectBand(effect_id, band)),
+                self.accent(),
+            ),
+            self.value_knob(param::FREQUENCY[band], "Freq"),
+            self.value_knob(param::GAIN[band], "Gain"),
+            third,
+        ]
+        .spacing(6)
+        .height(LINE_H)
+        .align_y(Alignment::Center)
         .into()
     }
 
@@ -515,7 +566,14 @@ impl<'a> EqView<'a> {
         .into()
     }
 
-    fn advanced(&self, height: f32, with_spectrum: bool) -> Element<'a, Message> {
+    fn advanced(&self, height: f32, with_spectrum: bool, width: f32) -> Element<'a, Message> {
+        if height < ADVANCED_H {
+            return container(self.advanced_line(width))
+                .padding([0.0, PAD])
+                .height(height)
+                .center_y(height)
+                .into();
+        }
         let mut content = row![
             self.cut(param::HP_ENABLED, param::HP_FREQUENCY, "Low cut"),
             self.cut(param::LP_ENABLED, param::LP_FREQUENCY, "High cut"),
@@ -532,6 +590,38 @@ impl<'a> EqView<'a> {
             .height(height)
             .center_y(height)
             .into()
+    }
+
+    fn advanced_line(&self, width: f32) -> Element<'a, Message> {
+        let cut = |enabled: usize, frequency: usize, label: &'static str| {
+            let on = self.value(enabled) >= 0.5;
+            row![
+                toggle(
+                    text(label).size(LABEL_SIZE).into(),
+                    on,
+                    self.set(enabled, if on { 0.0 } else { 1.0 }),
+                    self.accent(),
+                ),
+                self.value_knob(frequency, label),
+            ]
+            .spacing(4)
+            .align_y(Alignment::Center)
+        };
+        let mut line = row![
+            cut(param::HP_ENABLED, param::HP_FREQUENCY, "Low cut"),
+            cut(param::LP_ENABLED, param::LP_FREQUENCY, "High cut"),
+        ]
+        .spacing(10)
+        .height(LINE_H)
+        .align_y(Alignment::Center);
+        if width >= LINE_OUTPUT_W {
+            line = line.push(
+                row![heading("Output"), self.value_knob(param::OUTPUT, "Output")]
+                    .spacing(4)
+                    .align_y(Alignment::Center),
+            );
+        }
+        line.into()
     }
 
     fn disclosure(&self) -> Element<'a, Message> {
@@ -603,13 +693,14 @@ mod tests {
                     let context = format!("{width}x{height} {advanced}: {layout:?}");
                     assert!(used(layout) <= height + 0.01, "{context}");
                     if layout.advanced_only {
-                        assert!(layout.advanced.unwrap() >= ADVANCED_H - 0.01, "{context}");
+                        assert!(layout.advanced.unwrap() >= LINE_H - 0.01, "{context}");
                         continue;
                     }
                     let minimum = match layout.kind {
                         Upper::Side => SIDE_H,
                         Upper::TabsBelow => GRAPH_MIN_H + TABS_H,
                         Upper::TabsBeside | Upper::TabsOnly => TABS_H,
+                        Upper::Line => LINE_H,
                     };
                     assert!(layout.upper >= minimum - 0.01, "{context}");
                 }
@@ -640,6 +731,7 @@ mod tests {
             Upper::TabsBelow
         );
         assert_eq!(arrange(Size::new(MEDIUM_W, 200.0), false).kind, Upper::Side);
+        assert_eq!(arrange(Size::new(FULL_W, 70.0), false).kind, Upper::Line);
     }
 
     #[test]
