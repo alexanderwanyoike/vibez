@@ -41,11 +41,16 @@ fn overflowing_capture_delivers_accepted_start_then_stop_cause_and_discovering_o
     let remaining = fixture.engine.scheduled_presentation.capacity() - accepted_before_filler;
     for _ in 0..remaining {
         {
-            let mut retirement_allowance = fixture.engine.pending_retirements.reserve(1).expect("fixture admits its original owner-return budget");
+            let mut retirement_allowance = fixture
+                .engine
+                .pending_retirements
+                .reserve(1)
+                .expect("fixture admits its original owner-return budget");
             fixture.engine.present_event_at(
-            EngineEvent::PlaybackStarted,
-            fixture.engine.output_position + 521,
-         &mut retirement_allowance)
+                EngineEvent::PlaybackStarted,
+                fixture.engine.output_position + 521,
+                &mut retirement_allowance,
+            )
         };
     }
     let fault_before_owner = fixture.engine.presentation_state.is_faulted();
@@ -70,8 +75,16 @@ fn overflowing_capture_delivers_accepted_start_then_stop_cause_and_discovering_o
     };
     assert_eq!(
         crate::retirement::tests::allocations(|| {
-            let mut retirement_allowance = fixture.engine.pending_retirements.reserve(1).expect("fixture admits its original owner-return budget");
-            fixture.engine.present_event_at(discovering, fixture.engine.output_position + 521, &mut retirement_allowance)
+            let mut retirement_allowance = fixture
+                .engine
+                .pending_retirements
+                .reserve(1)
+                .expect("fixture admits its original owner-return budget");
+            fixture.engine.present_event_at(
+                discovering,
+                fixture.engine.output_position + 521,
+                &mut retirement_allowance,
+            )
         }),
         (0, 0)
     );
@@ -277,11 +290,16 @@ fn play_with_full_ui_ring_retains_capture_terminals_and_owner_but_cancels_inline
         - fixture.engine.scheduled_presentation.len();
     for _ in 0..remaining {
         {
-            let mut retirement_allowance = fixture.engine.pending_retirements.reserve(1).expect("fixture admits its original owner-return budget");
+            let mut retirement_allowance = fixture
+                .engine
+                .pending_retirements
+                .reserve(1)
+                .expect("fixture admits its original owner-return budget");
             fixture.engine.present_event_at(
-            EngineEvent::PlaybackStarted,
-            fixture.engine.output_position + 521,
-         &mut retirement_allowance)
+                EngineEvent::PlaybackStarted,
+                fixture.engine.output_position + 521,
+                &mut retirement_allowance,
+            )
         };
     }
     assert!(!fixture.engine.presentation_state.is_faulted());
@@ -295,8 +313,16 @@ fn play_with_full_ui_ring_retains_capture_terminals_and_owner_but_cancels_inline
     };
     assert_eq!(
         crate::retirement::tests::allocations(|| {
-            let mut retirement_allowance = fixture.engine.pending_retirements.reserve(1).expect("fixture admits its original owner-return budget");
-            fixture.engine.present_event_at(discovering, fixture.engine.output_position + 521, &mut retirement_allowance)
+            let mut retirement_allowance = fixture
+                .engine
+                .pending_retirements
+                .reserve(1)
+                .expect("fixture admits its original owner-return budget");
+            fixture.engine.present_event_at(
+                discovering,
+                fixture.engine.output_position + 521,
+                &mut retirement_allowance,
+            )
         }),
         (0, 0)
     );
@@ -472,21 +498,31 @@ fn capture_terminals_keep_first_writer_after_public_backward_seek() {
     {}
     for _ in 0..fixture.engine.scheduled_presentation.capacity() {
         {
-            let mut retirement_allowance = fixture.engine.pending_retirements.reserve(1).expect("fixture admits its original owner-return budget");
+            let mut retirement_allowance = fixture
+                .engine
+                .pending_retirements
+                .reserve(1)
+                .expect("fixture admits its original owner-return budget");
             fixture.engine.present_event_at(
-            EngineEvent::PlaybackStarted,
-            fixture.engine.output_position + 521,
-         &mut retirement_allowance)
+                EngineEvent::PlaybackStarted,
+                fixture.engine.output_position + 521,
+                &mut retirement_allowance,
+            )
         };
     }
     assert!(!fixture.engine.presentation_state.is_faulted());
     assert_eq!(
         crate::retirement::tests::allocations(|| {
-            let mut retirement_allowance = fixture.engine.pending_retirements.reserve(1).expect("fixture admits its original owner-return budget");
+            let mut retirement_allowance = fixture
+                .engine
+                .pending_retirements
+                .reserve(1)
+                .expect("fixture admits its original owner-return budget");
             fixture.engine.present_event_at(
-            EngineEvent::PlaybackStarted,
-            fixture.engine.output_position + 521,
-         &mut retirement_allowance)
+                EngineEvent::PlaybackStarted,
+                fixture.engine.output_position + 521,
+                &mut retirement_allowance,
+            )
         }),
         (0, 0)
     );
@@ -578,12 +614,17 @@ fn partial_terminal_publication_preserves_each_full_boundary_and_exact_overflow_
         {}
         for _ in 0..fixture.engine.scheduled_presentation.capacity() {
             {
-            let mut retirement_allowance = fixture.engine.pending_retirements.reserve(1).expect("fixture admits its original owner-return budget");
-            fixture.engine.present_event_at(
-                EngineEvent::PlaybackStarted,
-                fixture.engine.output_position + 521,
-             &mut retirement_allowance)
-        };
+                let mut retirement_allowance = fixture
+                    .engine
+                    .pending_retirements
+                    .reserve(1)
+                    .expect("fixture admits its original owner-return budget");
+                fixture.engine.present_event_at(
+                    EngineEvent::PlaybackStarted,
+                    fixture.engine.output_position + 521,
+                    &mut retirement_allowance,
+                )
+            };
         }
         let offsets: Arc<[(TrackId, u32)]> = vec![(fixture.tracks[0], 17)].into();
         let discovering = EngineEvent::SectionCaptureSource {
@@ -595,9 +636,17 @@ fn partial_terminal_publication_preserves_each_full_boundary_and_exact_overflow_
         };
         assert_eq!(
             crate::retirement::tests::allocations(|| {
-            let mut retirement_allowance = fixture.engine.pending_retirements.reserve(1).expect("fixture admits its original owner-return budget");
-            fixture.engine.present_event_at(discovering, fixture.engine.output_position + 521, &mut retirement_allowance)
-        }),
+                let mut retirement_allowance = fixture
+                    .engine
+                    .pending_retirements
+                    .reserve(1)
+                    .expect("fixture admits its original owner-return budget");
+                fixture.engine.present_event_at(
+                    discovering,
+                    fixture.engine.output_position + 521,
+                    &mut retirement_allowance,
+                )
+            }),
             (0, 0)
         );
         assert_eq!(

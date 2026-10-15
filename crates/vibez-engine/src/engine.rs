@@ -1,7 +1,7 @@
 //! Real-time project playback, prepared ownership and callback clock coordination.
 
-use crate::retirement_queue::{RetirementAllowance, RetirementQueue};
 use crate::events::{MeteringEvent, SectionPlaybackPositionEvent};
+use crate::retirement_queue::{RetirementAllowance, RetirementQueue};
 use std::sync::Arc;
 
 use rtrb::{Consumer, Producer, RingBuffer};

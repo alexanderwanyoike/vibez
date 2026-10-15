@@ -13,15 +13,21 @@ use vibez_core::warp_marker::WarpMarkers;
 fn callback(engine: &mut AudioEngine, sounding: bool) -> [f32; 16] {
     let mut output = [0.0; 16];
     let length = if sounding { output.len() } else { 0 };
-    assert_eq!(crate::retirement::tests::allocations(|| {
-        engine.process_block(AudioProcessBlock::new(&mut output[..length], 2));
-    }), (0, 0));
+    assert_eq!(
+        crate::retirement::tests::allocations(|| {
+            engine.process_block(AudioProcessBlock::new(&mut output[..length], 2));
+        }),
+        (0, 0)
+    );
     output
 }
 
 fn assert_signal(output: &[f32], value: f32) {
     for &[left, right] in output.as_chunks::<2>().0 {
-        assert!((left - value).abs() < 1e-7, "expected {value}, actual {left}");
+        assert!(
+            (left - value).abs() < 1e-7,
+            "expected {value}, actual {left}"
+        );
         assert_eq!(right, 0.0);
     }
 }
@@ -39,19 +45,37 @@ fn delta(track: TrackId) -> Delta {
     let id = insertion.id();
     let clip = ClipId::new();
     let audio = Arc::new(DecodedAudio {
-        channels: vec![vec![0.0625; 4096]], sample_rate: DEFAULT_SAMPLE_RATE,
+        channels: vec![vec![0.0625; 4096]],
+        sample_rate: DEFAULT_SAMPLE_RATE,
     });
     let weak = Arc::downgrade(&audio);
     let mut warp_markers = WarpMarkers::default();
     assert!(warp_markers.add(32, 64, 0, 128, 128));
     let markers = warp_markers.as_slice().as_ptr();
     let command = EngineCommand::AddClip {
-        insertion, track_id: track, clip_id: clip, audio, position: 0,
-        source_offset: 0, start_marker: 0, duration: 4096,
-        loop_enabled: true, loop_start: 0, loop_end: 128, linear_gain: 1.0,
-        fades: Default::default(), playback_direction: Default::default(), warp_markers,
+        insertion,
+        track_id: track,
+        clip_id: clip,
+        audio,
+        position: 0,
+        source_offset: 0,
+        start_marker: 0,
+        duration: 4096,
+        loop_enabled: true,
+        loop_start: 0,
+        loop_end: 128,
+        linear_gain: 1.0,
+        fades: Default::default(),
+        playback_direction: Default::default(),
+        warp_markers,
     };
-    Delta { command: Some(command), id, clip, audio: weak, markers }
+    Delta {
+        command: Some(command),
+        id,
+        clip,
+        audio: weak,
+        markers,
+    }
 }
 
 struct Resident {
@@ -239,13 +263,23 @@ fn pending_audio() -> PendingAudio {
     let mut resident = delta(track);
     commands.push(EngineCommand::add_track(track)).unwrap();
     commands.push(resident.command.take().unwrap()).unwrap();
-    commands.push(EngineCommand::SetTrackPan(track, 0.0)).unwrap();
-    let channels: Vec<_> = [track, TrackId::MASTER].into_iter().map(|id| RoutingChannel {
-        id, is_bus: id.is_master(), sends: Vec::new(), effects: Vec::new(),
-    }).collect();
-    commands.push(EngineCommand::SetRouting(
-        crate::routing::PreparedRouting::prepare(&channels, 8).unwrap(),
-    )).unwrap();
+    commands
+        .push(EngineCommand::SetTrackPan(track, 0.0))
+        .unwrap();
+    let channels: Vec<_> = [track, TrackId::MASTER]
+        .into_iter()
+        .map(|id| RoutingChannel {
+            id,
+            is_bus: id.is_master(),
+            sends: Vec::new(),
+            effects: Vec::new(),
+        })
+        .collect();
+    commands
+        .push(EngineCommand::SetRouting(
+            crate::routing::PreparedRouting::prepare(&channels, 8).unwrap(),
+        ))
+        .unwrap();
     commands.push(EngineCommand::Play).unwrap();
     assert_signal(&callback(&mut engine, true), 0.0625);
     while events.pop().is_ok() {}
@@ -261,30 +295,57 @@ fn pending_audio() -> PendingAudio {
     assert_eq!(request.id, incoming.id);
     assert_eq!(request.target, ClipInsertionTarget::Clip(incoming.clip));
     while events.pop().is_ok() {}
-    PendingAudio { engine, commands, events, resident: resident.audio, incoming, request }
+    PendingAudio {
+        engine,
+        commands,
+        events,
+        resident: resident.audio,
+        incoming,
+        request,
+    }
 }
 
 #[test]
 fn audio_reply_or_abandonment_preserves_complete_delta_and_waiting_fifo() {
     for applied in [false, true] {
-        let PendingAudio { mut engine, commands, mut events, resident, incoming, request } = pending_audio();
+        let PendingAudio {
+            mut engine,
+            commands,
+            mut events,
+            resident,
+            incoming,
+            request,
+        } = pending_audio();
         assert_signal(&callback(&mut engine, true), 0.0625);
         assert_eq!(engine.transport().position(), 16);
         assert_eq!(engine.transport().bpm(), 120.0);
         assert_eq!(engine.tracks()[0].playback_source.clips.len(), 1);
         assert_eq!(incoming.audio.strong_count(), 1);
-        if applied { request.fulfill(); } else { drop(request); }
+        if applied {
+            request.fulfill();
+        } else {
+            drop(request);
+        }
         callback(&mut engine, false);
         assert_eq!(engine.transport().bpm(), 137.0);
         let mut returned = Vec::new();
         while let Ok(event) = events.pop() {
-            if let EngineEvent::ClipInsertionCompleted(completed) = event { returned.push(completed); }
+            if let EngineEvent::ClipInsertionCompleted(completed) = event {
+                returned.push(completed);
+            }
         }
         assert_eq!(returned.len(), 1);
         let complete = &returned[0];
         assert_eq!(complete.id(), incoming.id);
         assert_eq!(complete.target, ClipInsertionTarget::Clip(incoming.clip));
-        assert_eq!(complete.outcome, if applied { ClipInsertionOutcome::Applied } else { ClipInsertionOutcome::Abandoned });
+        assert_eq!(
+            complete.outcome,
+            if applied {
+                ClipInsertionOutcome::Applied
+            } else {
+                ClipInsertionOutcome::Abandoned
+            }
+        );
         if applied {
             assert!(complete.owner.clip.is_none());
             let clip = &engine.tracks()[0].playback_source.clips[1];
@@ -299,7 +360,10 @@ fn audio_reply_or_abandonment_preserves_complete_delta_and_waiting_fifo() {
             assert_eq!(Arc::as_ptr(&clip.audio), incoming.audio.as_ptr());
             assert_eq!(clip.warp_markers.as_slice().as_ptr(), incoming.markers);
         }
-        assert_signal(&callback(&mut engine, true), if applied { 0.125 } else { 0.0625 });
+        assert_signal(
+            &callback(&mut engine, true),
+            if applied { 0.125 } else { 0.0625 },
+        );
         assert_eq!(engine.transport().position(), 24);
         drop(returned);
         assert_eq!(incoming.audio.strong_count(), usize::from(applied));
@@ -315,16 +379,27 @@ fn audio_reply_or_abandonment_preserves_complete_delta_and_waiting_fifo() {
 fn audio_request_and_ready_reply_release_complete_owners_in_both_endpoint_orders() {
     for reply_ready in [false, true] {
         for engine_first in [false, true] {
-            let PendingAudio { engine, commands, events, resident, incoming, request } = pending_audio();
+            let PendingAudio {
+                engine,
+                commands,
+                events,
+                resident,
+                incoming,
+                request,
+            } = pending_audio();
             let mut request = Some(request);
-            if reply_ready { request.take().unwrap().fulfill(); }
+            if reply_ready {
+                request.take().unwrap().fulfill();
+            }
             assert_eq!(resident.strong_count(), 1);
             assert_eq!(incoming.audio.strong_count(), 1);
             if engine_first {
                 drop(engine);
                 assert_eq!(resident.strong_count(), 0);
                 assert_eq!(incoming.audio.strong_count(), 0);
-                if let Some(request) = request.take() { request.fulfill(); }
+                if let Some(request) = request.take() {
+                    request.fulfill();
+                }
                 drop(commands);
                 drop(events);
             } else {

@@ -315,25 +315,41 @@ impl AudioEngine {
         // Issuance and this failed push share one callback frame. No command
         // or UI owner can consume the exact slot just vacated above.
         match device {
-            DeviceReconfiguration::Effect { track_id, mut slot, .. } => {
+            DeviceReconfiguration::Effect {
+                track_id, mut slot, ..
+            } => {
                 self.apply_pending_device_parameters(track_id, Some(slot.id), |index, value| {
                     slot.effect.set_param(index, value)
                 });
-                let track = self.channel_mut(track_id).expect("issuing channel still resident");
+                let track = self
+                    .channel_mut(track_id)
+                    .expect("issuing channel still resident");
                 slot.bypass = pending.bypass;
-                track.effects.insert(pending.position.min(track.effects.len()), slot);
+                track
+                    .effects
+                    .insert(pending.position.min(track.effects.len()), slot);
             }
-            DeviceReconfiguration::Instrument { track_id, mut instrument, .. } => {
+            DeviceReconfiguration::Instrument {
+                track_id,
+                mut instrument,
+                ..
+            } => {
                 self.apply_pending_device_parameters(track_id, None, |index, value| {
                     instrument.set_param(index, value)
                 });
-                let track = self.channel_mut(track_id).expect("issuing channel still resident");
+                let track = self
+                    .channel_mut(track_id)
+                    .expect("issuing channel still resident");
                 track.instrument = Some(instrument);
             }
         }
     }
 
-    pub(super) fn restore_reconfigured_device(&mut self, device: DeviceReconfiguration, allowance: &mut RetirementAllowance) -> bool {
+    pub(super) fn restore_reconfigured_device(
+        &mut self,
+        device: DeviceReconfiguration,
+        allowance: &mut RetirementAllowance,
+    ) -> bool {
         let pending = self.device_handoff.take_for_restoration();
         match device {
             DeviceReconfiguration::Effect {
@@ -360,17 +376,21 @@ impl AudioEngine {
                             .effects
                             .insert(pending.position.min(track.effects.len()), slot);
                         if reserved_effects.capacity() > 0 {
-                            self.retire_event(EngineEvent::RetiredEffectStorage(
-                                RetiredEffectStorage(reserved_effects),
-                            ), allowance);
+                            self.retire_event(
+                                EngineEvent::RetiredEffectStorage(RetiredEffectStorage(
+                                    reserved_effects,
+                                )),
+                                allowance,
+                            );
                         }
                         return true;
                     }
                 }
                 if reserved_effects.capacity() > 0 {
-                    self.retire_event(EngineEvent::RetiredEffectStorage(RetiredEffectStorage(
-                        reserved_effects,
-                    )), allowance);
+                    self.retire_event(
+                        EngineEvent::RetiredEffectStorage(RetiredEffectStorage(reserved_effects)),
+                        allowance,
+                    );
                 }
                 self.dispose_effect(slot.effect, allowance);
                 self.compensation_plan.invalidate_applied_plan();

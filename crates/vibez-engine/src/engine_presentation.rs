@@ -1,7 +1,7 @@
 //! Heard/source timing, capture replay and bounded presentation ownership.
 
-use super::*;
 use super::presentation_queue::{PresentationAdmission, ScheduledPresentation};
+use super::*;
 
 pub(super) struct SectionCaptureTiming {
     section_id: SectionId,
@@ -42,14 +42,20 @@ impl AudioEngine {
     }
 
     pub(super) fn section_capture_source(
-        &mut self, section_id: SectionId, effective_at_samples: u64,
-        position: u64, refreshed: bool, allowance: &mut RetirementAllowance,
+        &mut self,
+        section_id: SectionId,
+        effective_at_samples: u64,
+        position: u64,
+        refreshed: bool,
+        allowance: &mut RetirementAllowance,
     ) {
         let pending = SectionCaptureContext {
-            routing: &self.routing, output_position: &self.output_position,
+            routing: &self.routing,
+            output_position: &self.output_position,
             rendered_callback_frames: &self.rendered_callback_frames,
             timing: &mut self.section_capture_timing,
-        }.source(section_id, effective_at_samples, position, refreshed);
+        }
+        .source(section_id, effective_at_samples, position, refreshed);
         self.present_event_at(pending.event, pending.due, allowance);
     }
 
@@ -98,7 +104,8 @@ impl AudioEngine {
         };
         while replay.next < replay.through {
             let Some(admission) = PresentationAdmission::<1>::new(
-                &mut self.event_tx, &mut self.scheduled_presentation,
+                &mut self.event_tx,
+                &mut self.scheduled_presentation,
                 &mut self.presentation_state.terminals,
             ) else {
                 self.capture_replay = Some(replay);
@@ -122,12 +129,17 @@ impl AudioEngine {
                     }
                 };
                 let now = self.output_position + self.rendered_callback_frames as u64;
-                admission.publish([Some(ScheduledPresentation { due: now, event })], now, self.output_position);
+                admission.publish(
+                    [Some(ScheduledPresentation { due: now, event })],
+                    now,
+                    self.output_position,
+                );
             }
         }
         while replay.clip < self.capture_clip_positions.len() {
             let Some(admission) = PresentationAdmission::<1>::new(
-                &mut self.event_tx, &mut self.scheduled_presentation,
+                &mut self.event_tx,
+                &mut self.scheduled_presentation,
                 &mut self.presentation_state.terminals,
             ) else {
                 self.capture_replay = Some(replay);
@@ -136,9 +148,17 @@ impl AudioEngine {
             let (track_id, position, effective_at_samples) =
                 self.capture_clip_positions[replay.clip];
             replay.clip += 1;
-            let event = EngineEvent::ClipCaptureSource { track_id, position, effective_at_samples };
+            let event = EngineEvent::ClipCaptureSource {
+                track_id,
+                position,
+                effective_at_samples,
+            };
             let now = self.output_position + self.rendered_callback_frames as u64;
-            admission.publish([Some(ScheduledPresentation { due: now, event })], now, self.output_position);
+            admission.publish(
+                [Some(ScheduledPresentation { due: now, event })],
+                now,
+                self.output_position,
+            );
         }
         self.capture_clip_positions.clear();
     }
@@ -156,7 +176,10 @@ impl AudioEngine {
                 break;
             };
             let timing = self.section_capture_timing.remove(index);
-            self.retire_event(EngineEvent::CaptureTimingRetired(timing.offsets), &mut allowance);
+            self.retire_event(
+                EngineEvent::CaptureTimingRetired(timing.offsets),
+                &mut allowance,
+            );
         }
     }
 
@@ -194,9 +217,12 @@ impl AudioEngine {
         self.capture_lifecycle.end();
         let boundary = self.heard_capture_position();
         self.cancel_capture_presentation();
-        self.present_event(EngineEvent::PerformanceCaptureStopped {
-            effective_at_samples: boundary,
-        }, allowance);
+        self.present_event(
+            EngineEvent::PerformanceCaptureStopped {
+                effective_at_samples: boundary,
+            },
+            allowance,
+        );
     }
 
     pub(super) fn capture_offsets(&self) -> Arc<[(TrackId, u32)]> {
@@ -225,7 +251,13 @@ impl AudioEngine {
         &self,
         delay: u32,
     ) -> crate::compensation_clock::PresentationPosition {
-        presentation_context_fields(&self.routing, &self.transport, self.performance_position, self.active_section, delay)
+        presentation_context_fields(
+            &self.routing,
+            &self.transport,
+            self.performance_position,
+            self.active_section,
+            delay,
+        )
     }
 
     pub(super) fn live_capture_context(
@@ -256,9 +288,24 @@ pub(super) struct SectionCaptureContext<'a> {
 }
 
 impl SectionCaptureContext<'_> {
-    pub(super) fn source(&mut self, section_id: SectionId, effective_at_samples: u64, position: u64, refreshed: bool) -> ScheduledPresentation {
-        let early_delay = self.routing.channels.iter().filter(|channel| channel.source).map(|channel| channel.direct_latency).min().unwrap_or(self.routing.compensation.output_latency);
-        let physical = self.output_position.saturating_add(*self.rendered_callback_frames as u64);
+    pub(super) fn source(
+        &mut self,
+        section_id: SectionId,
+        effective_at_samples: u64,
+        position: u64,
+        refreshed: bool,
+    ) -> ScheduledPresentation {
+        let early_delay = self
+            .routing
+            .channels
+            .iter()
+            .filter(|channel| channel.source)
+            .map(|channel| channel.direct_latency)
+            .min()
+            .unwrap_or(self.routing.compensation.output_latency);
+        let physical = self
+            .output_position
+            .saturating_add(*self.rendered_callback_frames as u64);
         let offsets = Arc::clone(&self.routing.capture_offsets);
         if early_delay < self.routing.compensation.output_latency
             && self.timing.len() < self.timing.capacity()
@@ -275,40 +322,49 @@ impl SectionCaptureContext<'_> {
             });
         }
         let event = EngineEvent::SectionCaptureSource {
-            section_id, effective_at_samples, section_position_samples: position, refreshed, offsets,
+            section_id,
+            effective_at_samples,
+            section_position_samples: position,
+            refreshed,
+            offsets,
         };
         let now = *self.output_position + *self.rendered_callback_frames as u64;
-        ScheduledPresentation { due: now.saturating_add(early_delay as u64), event }
+        ScheduledPresentation {
+            due: now.saturating_add(early_delay as u64),
+            event,
+        }
     }
 }
 
-pub(super) fn live_path_latency_fields(routing: &crate::routing::PreparedRouting, track: TrackId) -> u32 {
-        routing
-            .channels
-            .iter()
-            .find(|channel| channel.id == track)
-            .map_or(routing.compensation.output_latency, |channel| {
-                channel.direct_latency
-            })
-    }
+pub(super) fn live_path_latency_fields(
+    routing: &crate::routing::PreparedRouting,
+    track: TrackId,
+) -> u32 {
+    routing
+        .channels
+        .iter()
+        .find(|channel| channel.id == track)
+        .map_or(routing.compensation.output_latency, |channel| {
+            channel.direct_latency
+        })
+}
 
 pub(super) fn presentation_context_fields(
-    routing: &crate::routing::PreparedRouting, transport: &Transport,
-    performance_position: u64, active_section: Option<ActiveSectionPlayback>, delay: u32,
+    routing: &crate::routing::PreparedRouting,
+    transport: &Transport,
+    performance_position: u64,
+    active_section: Option<ActiveSectionPlayback>,
+    delay: u32,
 ) -> crate::compensation_clock::PresentationPosition {
-        routing
-            .presentation
-            .before_block(delay)
-            .unwrap_or_else(|| {
-                let active = active_section;
-                crate::compensation_clock::PresentationPosition {
-                    arrange: transport.position().saturating_sub(delay as u64),
-                    perform: performance_position.saturating_sub(delay as u64),
-                    section: active
-                        .map(|section| section.position_samples.saturating_sub(delay as u64)),
-                    section_id: active.map(|section| section.section_id),
-                    section_length: active.map_or(0, |section| section.length_samples),
-                    generation: routing.compensation.generation,
-                }
-            })
-    }
+    routing.presentation.before_block(delay).unwrap_or_else(|| {
+        let active = active_section;
+        crate::compensation_clock::PresentationPosition {
+            arrange: transport.position().saturating_sub(delay as u64),
+            perform: performance_position.saturating_sub(delay as u64),
+            section: active.map(|section| section.position_samples.saturating_sub(delay as u64)),
+            section_id: active.map(|section| section.section_id),
+            section_length: active.map_or(0, |section| section.length_samples),
+            generation: routing.compensation.generation,
+        }
+    })
+}

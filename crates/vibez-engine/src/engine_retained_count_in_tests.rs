@@ -127,14 +127,27 @@ fn pending_box_fixture() -> PendingBoxFixture {
         ));
         acknowledgements.push(std::ptr::from_ref(owner.as_ref()) as usize);
         {
-            let mut retirement_allowance = engine.pending_retirements.reserve(1).expect("fixture admits its original owner-return budget");
-            engine.present_event(EngineEvent::SectionQueueCancelled { retired: owner }, &mut retirement_allowance)
+            let mut retirement_allowance = engine
+                .pending_retirements
+                .reserve(1)
+                .expect("fixture admits its original owner-return budget");
+            engine.present_event(
+                EngineEvent::SectionQueueCancelled { retired: owner },
+                &mut retirement_allowance,
+            )
         };
     }
     for _ in 0..40 {
         {
-            let mut retirement_allowance = engine.pending_retirements.reserve(1).expect("fixture admits its original owner-return budget");
-            engine.present_event_at(EngineEvent::PlaybackStarted, engine.output_position + 5000, &mut retirement_allowance)
+            let mut retirement_allowance = engine
+                .pending_retirements
+                .reserve(1)
+                .expect("fixture admits its original owner-return budget");
+            engine.present_event_at(
+                EngineEvent::PlaybackStarted,
+                engine.output_position + 5000,
+                &mut retirement_allowance,
+            )
         };
     }
     let mut old_end = [0.0; 7];
@@ -205,8 +218,14 @@ fn pending_box_fixture() -> PendingBoxFixture {
         ));
         acknowledgements.push(std::ptr::from_ref(owner.as_ref()) as usize);
         {
-            let mut retirement_allowance = engine.pending_retirements.reserve(1).expect("fixture admits its original owner-return budget");
-            engine.present_event(EngineEvent::SectionQueueCancelled { retired: owner }, &mut retirement_allowance)
+            let mut retirement_allowance = engine
+                .pending_retirements
+                .reserve(1)
+                .expect("fixture admits its original owner-return budget");
+            engine.present_event(
+                EngineEvent::SectionQueueCancelled { retired: owner },
+                &mut retirement_allowance,
+            )
         };
     }
     assert!(!engine.presentation_state.is_faulted());

@@ -1,8 +1,8 @@
 //! Bounded source event ownership and delivery survive UI backpressure.
 
+use super::terminal_notifications::TerminalNotifications;
 use super::*;
 use crate::events::{PerformanceCaptureStartedEvent, SectionTransitionedEvent};
-use super::terminal_notifications::TerminalNotifications;
 
 pub(super) enum CancelableStop {
     Section { effective_at_samples: u64 },
@@ -147,43 +147,52 @@ pub(super) fn emit_repeated(
 }
 
 pub(super) fn flush_presentation_parts(
-    events: &mut rtrb::Producer<EngineEvent>, scheduled: &mut Vec<ScheduledPresentation>,
+    events: &mut rtrb::Producer<EngineEvent>,
+    scheduled: &mut Vec<ScheduledPresentation>,
     terminals: &mut super::terminal_notifications::TerminalNotifications,
-    source_now: u64, heard_now: u64,
+    source_now: u64,
+    heard_now: u64,
 ) {
-        if terminals.capture_stop().is_some() {
-            flush_ready(
-                events,
-                scheduled,
-                |pending| pending.due <= heard_now && capture_feed(&pending.event),
-            );
-            if scheduled
-                .iter()
-                .any(|pending| pending.due <= heard_now && capture_feed(&pending.event))
-            {
-                return;
-            }
-        }
-        if !terminals
-            .publish(events)
+    if terminals.capture_stop().is_some() {
+        flush_ready(events, scheduled, |pending| {
+            pending.due <= heard_now && capture_feed(&pending.event)
+        });
+        if scheduled
+            .iter()
+            .any(|pending| pending.due <= heard_now && capture_feed(&pending.event))
         {
             return;
         }
-        flush_ready(
-            events,
-            scheduled,
-            |pending| ready(pending, source_now, heard_now),
-        );
     }
+    if !terminals.publish(events) {
+        return;
+    }
+    flush_ready(events, scheduled, |pending| {
+        ready(pending, source_now, heard_now)
+    });
+}
 
 fn queue_admitted_event(
-    event: EngineEvent, events: &mut rtrb::Producer<EngineEvent>,
-    scheduled: &mut Vec<ScheduledPresentation>, now: u64, due: u64, heard_now: u64,
+    event: EngineEvent,
+    events: &mut rtrb::Producer<EngineEvent>,
+    scheduled: &mut Vec<ScheduledPresentation>,
+    now: u64,
+    due: u64,
+    heard_now: u64,
 ) {
     let cutoff = if source_feed(&event) { now } else { heard_now };
-    let event = if due <= cutoff && !scheduled.iter().any(|pending| ready(pending, now, heard_now)) {
-        match events.push(event) { Ok(()) => return, Err(rtrb::PushError::Full(event)) => event }
-    } else { event };
+    let event = if due <= cutoff
+        && !scheduled
+            .iter()
+            .any(|pending| ready(pending, now, heard_now))
+    {
+        match events.push(event) {
+            Ok(()) => return,
+            Err(rtrb::PushError::Full(event)) => event,
+        }
+    } else {
+        event
+    };
     let index = scheduled.partition_point(|pending| pending.due <= due);
     scheduled.insert(index, ScheduledPresentation { due, event });
 }
@@ -203,32 +212,56 @@ impl<'a, const N: usize> PresentationAdmission<'a, N> {
     ) -> Option<Self> {
         // Admission observes the original guard's queue state. Publication,
         // not admission, performs the existing terminal-priority flush.
-        if scheduled.capacity().saturating_sub(scheduled.len()) < N { return None; }
-        Some(Self { events, scheduled, terminals })
+        if scheduled.capacity().saturating_sub(scheduled.len()) < N {
+            return None;
+        }
+        Some(Self {
+            events,
+            scheduled,
+            terminals,
+        })
     }
 
     pub(super) fn new_clip_batch(
         events: &'a mut rtrb::Producer<EngineEvent>,
         scheduled: &'a mut Vec<ScheduledPresentation>,
-        terminals: &'a mut TerminalNotifications, future: bool,
+        terminals: &'a mut TerminalNotifications,
+        future: bool,
     ) -> Option<Self> {
         // Current callback acknowledgements may spend ring slots only at frame
         // zero. Heard transitions use their original frozen deadline instead.
         let room = scheduled.capacity() - scheduled.len()
-            + if future { 0 } else { events.slots().saturating_sub(terminals.occupied_slots()) };
-        if room < N { return None; }
-        Some(Self { events, scheduled, terminals })
+            + if future {
+                0
+            } else {
+                events.slots().saturating_sub(terminals.occupied_slots())
+            };
+        if room < N {
+            return None;
+        }
+        Some(Self {
+            events,
+            scheduled,
+            terminals,
+        })
     }
 
-    pub(super) fn publish(mut self, prefix: [Option<ScheduledPresentation>; N], source_now: u64, heard_now: u64) {
+    pub(super) fn publish(
+        mut self,
+        prefix: [Option<ScheduledPresentation>; N],
+        source_now: u64,
+        heard_now: u64,
+    ) {
         for pending in prefix.into_iter().flatten() {
             self.publish_one(pending, source_now, heard_now);
         }
     }
     pub(super) fn publish_clip(
-        mut self, prefix: [Option<EngineEvent>; N],
+        mut self,
+        prefix: [Option<EngineEvent>; N],
         mut context: super::clip_launcher::ClipEventContext<'_>,
-        source_now: u64, heard_now: u64,
+        source_now: u64,
+        heard_now: u64,
     ) {
         for event in prefix.into_iter().flatten() {
             // Clip drop telemetry observes each prior publication, including
@@ -239,29 +272,63 @@ impl<'a, const N: usize> PresentationAdmission<'a, N> {
     }
 
     fn publish_one(&mut self, pending: ScheduledPresentation, source_now: u64, heard_now: u64) {
-        debug_assert!(pending.due <= source_now || pending.event.time_domain() == crate::events::TimeDomain::Heard);
-        flush_presentation_parts(self.events, self.scheduled, self.terminals, source_now, heard_now);
+        debug_assert!(
+            pending.due <= source_now
+                || pending.event.time_domain() == crate::events::TimeDomain::Heard
+        );
+        flush_presentation_parts(
+            self.events,
+            self.scheduled,
+            self.terminals,
+            source_now,
+            heard_now,
+        );
         // The fixed prefix and consuming advance steps cannot spend more than
         // this exclusive borrow admitted before its source was detached.
-        queue_admitted_event(pending.event, self.events, self.scheduled, source_now, pending.due, heard_now);
+        queue_admitted_event(
+            pending.event,
+            self.events,
+            self.scheduled,
+            source_now,
+            pending.due,
+            heard_now,
+        );
     }
 }
 
 impl<'a> PresentationAdmission<'a, 3> {
-    pub(super) fn advance(mut self, pending: Option<ScheduledPresentation>, source_now: u64, heard_now: u64) -> PresentationAdmission<'a, 2> {
+    pub(super) fn advance(
+        mut self,
+        pending: Option<ScheduledPresentation>,
+        source_now: u64,
+        heard_now: u64,
+    ) -> PresentationAdmission<'a, 2> {
         if let Some(pending) = pending {
             self.publish_one(pending, source_now, heard_now);
         }
-        PresentationAdmission { events: self.events, scheduled: self.scheduled, terminals: self.terminals }
+        PresentationAdmission {
+            events: self.events,
+            scheduled: self.scheduled,
+            terminals: self.terminals,
+        }
     }
 }
 
 impl<'a> PresentationAdmission<'a, 2> {
-    pub(super) fn advance(mut self, pending: Option<ScheduledPresentation>, source_now: u64, heard_now: u64) -> PresentationAdmission<'a, 1> {
+    pub(super) fn advance(
+        mut self,
+        pending: Option<ScheduledPresentation>,
+        source_now: u64,
+        heard_now: u64,
+    ) -> PresentationAdmission<'a, 1> {
         if let Some(pending) = pending {
             self.publish_one(pending, source_now, heard_now);
         }
-        PresentationAdmission { events: self.events, scheduled: self.scheduled, terminals: self.terminals }
+        PresentationAdmission {
+            events: self.events,
+            scheduled: self.scheduled,
+            terminals: self.terminals,
+        }
     }
 }
 
@@ -269,7 +336,10 @@ impl AudioEngine {
     pub(super) fn presentation_return_has_room(&self) -> bool {
         self.event_tx.slots() > 0
             || self.scheduled_presentation.len() < self.scheduled_presentation.capacity()
-            || self.presentation_state.terminals.can_retain_overflow_owner()
+            || self
+                .presentation_state
+                .terminals
+                .can_retain_overflow_owner()
             || self.pending_retirements.available() > 0
     }
 
@@ -288,27 +358,52 @@ impl AudioEngine {
 
     pub(super) fn present_cancelable_stop_after(&mut self, stopped: CancelableStop, delay: u32) {
         let event = match stopped {
-            CancelableStop::Section { effective_at_samples } => EngineEvent::SectionCaptureStopped { effective_at_samples },
-            CancelableStop::Performance { effective_at_samples } => EngineEvent::PerformanceCaptureStopped { effective_at_samples },
+            CancelableStop::Section {
+                effective_at_samples,
+            } => EngineEvent::SectionCaptureStopped {
+                effective_at_samples,
+            },
+            CancelableStop::Performance {
+                effective_at_samples,
+            } => EngineEvent::PerformanceCaptureStopped {
+                effective_at_samples,
+            },
         };
         let now = self.output_position + self.rendered_callback_frames as u64;
         // Both literal variants cancel to a tombstone; Capture also has its
         // existing reliable fault-entry terminal route. Neither can return an owner.
         let result = self.try_present_event_at(event, now.saturating_add(delay as u64));
-        debug_assert!(result.is_ok(), "closed cancelable stop cannot return an owner");
+        debug_assert!(
+            result.is_ok(),
+            "closed cancelable stop cannot return an owner"
+        );
     }
 
-    pub(super) fn present_event(&mut self, event: EngineEvent, allowance: &mut RetirementAllowance) {
+    pub(super) fn present_event(
+        &mut self,
+        event: EngineEvent,
+        allowance: &mut RetirementAllowance,
+    ) {
         let now = self.output_position + self.rendered_callback_frames as u64;
         self.present_event_at(event, now, allowance);
     }
 
-    pub(super) fn present_event_after(&mut self, event: EngineEvent, delay: u32, allowance: &mut RetirementAllowance) {
+    pub(super) fn present_event_after(
+        &mut self,
+        event: EngineEvent,
+        delay: u32,
+        allowance: &mut RetirementAllowance,
+    ) {
         let now = self.output_position + self.rendered_callback_frames as u64;
         self.present_event_at(event, now.saturating_add(delay as u64), allowance);
     }
 
-    pub(super) fn present_event_at(&mut self, event: EngineEvent, due: u64, allowance: &mut RetirementAllowance) {
+    pub(super) fn present_event_at(
+        &mut self,
+        event: EngineEvent,
+        due: u64,
+        allowance: &mut RetirementAllowance,
+    ) {
         if let Err(event) = self.try_present_event_at(event, due) {
             self.retire_event(event, allowance);
         }
@@ -318,7 +413,11 @@ impl AudioEngine {
         clippy::result_large_err,
         reason = "Boxing a rejected owner would allocate in the audio callback"
     )]
-    pub(super) fn try_present_event_at(&mut self, event: EngineEvent, due: u64) -> Result<(), EngineEvent> {
+    pub(super) fn try_present_event_at(
+        &mut self,
+        event: EngineEvent,
+        due: u64,
+    ) -> Result<(), EngineEvent> {
         debug_assert!(
             due <= self.output_position + self.rendered_callback_frames as u64
                 || event.time_domain() == crate::events::TimeDomain::Heard,
@@ -374,9 +473,11 @@ impl AudioEngine {
 
     pub(super) fn flush_presentation(&mut self) {
         flush_presentation_parts(
-            &mut self.event_tx, &mut self.scheduled_presentation,
+            &mut self.event_tx,
+            &mut self.scheduled_presentation,
             &mut self.presentation_state.terminals,
-            self.output_position + self.rendered_callback_frames as u64, self.output_position,
+            self.output_position + self.rendered_callback_frames as u64,
+            self.output_position,
         );
     }
 

@@ -164,14 +164,27 @@ fn returning_section_fixture() -> ReturningSectionFixture {
         ));
         acknowledgements.push(std::ptr::from_ref(owner.as_ref()) as usize);
         {
-            let mut retirement_allowance = engine.pending_retirements.reserve(1).expect("fixture admits its original owner-return budget");
-            engine.present_event(EngineEvent::SectionQueueCancelled { retired: owner }, &mut retirement_allowance)
+            let mut retirement_allowance = engine
+                .pending_retirements
+                .reserve(1)
+                .expect("fixture admits its original owner-return budget");
+            engine.present_event(
+                EngineEvent::SectionQueueCancelled { retired: owner },
+                &mut retirement_allowance,
+            )
         };
     }
     for _ in 0..40 {
         {
-            let mut retirement_allowance = engine.pending_retirements.reserve(1).expect("fixture admits its original owner-return budget");
-            engine.present_event_at(EngineEvent::PlaybackStarted, engine.output_position + 5000, &mut retirement_allowance)
+            let mut retirement_allowance = engine
+                .pending_retirements
+                .reserve(1)
+                .expect("fixture admits its original owner-return budget");
+            engine.present_event_at(
+                EngineEvent::PlaybackStarted,
+                engine.output_position + 5000,
+                &mut retirement_allowance,
+            )
         };
     }
     assert_eq!(engine.scheduled_presentation.len(), 2048);
@@ -296,8 +309,14 @@ fn returning_section_fixture() -> ReturningSectionFixture {
         ));
         acknowledgements.push(std::ptr::from_ref(owner.as_ref()) as usize);
         {
-            let mut retirement_allowance = engine.pending_retirements.reserve(1).expect("fixture admits its original owner-return budget");
-            engine.present_event(EngineEvent::SectionQueueCancelled { retired: owner }, &mut retirement_allowance)
+            let mut retirement_allowance = engine
+                .pending_retirements
+                .reserve(1)
+                .expect("fixture admits its original owner-return budget");
+            engine.present_event(
+                EngineEvent::SectionQueueCancelled { retired: owner },
+                &mut retirement_allowance,
+            )
         };
     }
     assert_eq!(engine.scheduled_presentation.len(), 2044);
@@ -389,7 +408,8 @@ fn resumed_section_rejection_preserves_complete_owner_with_an_old_inline_stop() 
         std::ptr::from_ref(queued.prepared.as_ref()) as usize == incoming_pointer
     });
     let published = engine
-        .pending_retirements.as_slice()
+        .pending_retirements
+        .as_slice()
         .iter()
         .filter(|event| is_incoming(event))
         .count()
@@ -422,7 +442,8 @@ fn resumed_section_rejection_preserves_complete_owner_with_an_old_inline_stop() 
     );
     assert_eq!(
         engine
-            .pending_retirements.as_slice()
+            .pending_retirements
+            .as_slice()
             .iter()
             .filter(|event| matches!(event, EngineEvent::RetiredAudioClip(_)))
             .count(),

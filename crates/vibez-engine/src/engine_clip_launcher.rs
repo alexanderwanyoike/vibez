@@ -1,7 +1,7 @@
 //! Independent per-track clocks share the normal channel-strip renderer.
 
-use super::*;
 use super::presentation_queue::PresentationAdmission;
+use super::*;
 use crate::events::{ClipPlayingState, ClipQueuedState, ClipTrackState};
 use crate::playback_source::{ActiveClipPlayback, PreparedClipPlayback};
 
@@ -10,7 +10,8 @@ impl AudioEngine {
         &mut self,
         active: Box<PreparedClipPlayback>,
         mut queued: Box<PreparedClipPlayback>,
-     allowance: &mut RetirementAllowance) {
+        allowance: &mut RetirementAllowance,
+    ) {
         self.clip_through_request = self
             .clip_through_request
             .max(active.request_id)
@@ -39,9 +40,15 @@ impl AudioEngine {
         self.clip_event_at(event, physical, allowance);
     }
 
-    pub(super) fn clip_event_at(&mut self, event: EngineEvent, physical: u64, allowance: &mut RetirementAllowance) {
+    pub(super) fn clip_event_at(
+        &mut self,
+        event: EngineEvent,
+        physical: u64,
+        allowance: &mut RetirementAllowance,
+    ) {
         let mut context = ClipEventContext {
-            routing: &self.routing, physical,
+            routing: &self.routing,
+            physical,
             through_request: &mut self.clip_through_request,
             drops: &mut self.clip_event_drops,
             resync_track: &mut self.clip_resync_track,
@@ -125,7 +132,7 @@ impl AudioEngine {
 
     pub(super) fn begin_clip_performance(&mut self, allowance: &mut RetirementAllowance) {
         if !self.clip_performance {
-            self.begin_performance_clock( allowance);
+            self.begin_performance_clock(allowance);
             self.clip_performance = true;
             self.stopped_note_repeat_anchor = None;
             self.reanchor_note_repeats(self.performance_position, self.performance_position);
@@ -163,7 +170,8 @@ impl AudioEngine {
                     continue;
                 }
                 let Some(admission) = PresentationAdmission::<1>::new(
-                    &mut self.event_tx, &mut self.scheduled_presentation,
+                    &mut self.event_tx,
+                    &mut self.scheduled_presentation,
                     &mut self.presentation_state.terminals,
                 ) else {
                     self.pending_source_cleanup = true;
@@ -174,12 +182,18 @@ impl AudioEngine {
                     .take()
                     .expect("queued Clip owner");
                 let physical = self.output_position + self.rendered_callback_frames as u64;
-                admission.publish_clip([Some(EngineEvent::ClipRequestRetired(queued.prepared))], ClipEventContext {
-                routing: &self.routing, physical,
-                through_request: &mut self.clip_through_request,
-                drops: &mut self.clip_event_drops,
-                resync_track: &mut self.clip_resync_track,
-            }, physical, self.output_position);
+                admission.publish_clip(
+                    [Some(EngineEvent::ClipRequestRetired(queued.prepared))],
+                    ClipEventContext {
+                        routing: &self.routing,
+                        physical,
+                        through_request: &mut self.clip_through_request,
+                        drops: &mut self.clip_event_drops,
+                        resync_track: &mut self.clip_resync_track,
+                    },
+                    physical,
+                    self.output_position,
+                );
             }
         }
     }
@@ -188,45 +202,74 @@ impl AudioEngine {
         self.continue_clip_batch(now);
         for index in 0..self.tracks.len() {
             let track = &self.tracks[index];
-            let queued_due = track.queued_clip.as_ref().is_some_and(|queued| !queued.pending_batch && queued.effective_at <= now);
-            let ended = track.active_clip.is_some_and(|clip| !clip.looping && clip.position >= clip.length);
+            let queued_due = track
+                .queued_clip
+                .as_ref()
+                .is_some_and(|queued| !queued.pending_batch && queued.effective_at <= now);
+            let ended = track
+                .active_clip
+                .is_some_and(|clip| !clip.looping && clip.position >= clip.length);
             if queued_due || ended {
-                if !self.presentation_room(2) { break; }
+                if !self.presentation_room(2) {
+                    break;
+                }
                 let Some(admission) = PresentationAdmission::<2>::new(
-                    &mut self.event_tx, &mut self.scheduled_presentation,
+                    &mut self.event_tx,
+                    &mut self.scheduled_presentation,
                     &mut self.presentation_state.terminals,
-                ) else { break; };
+                ) else {
+                    break;
+                };
                 let track = &mut self.tracks[index];
                 let event = if queued_due {
                     let mut prepared = track.queued_clip.take().expect("due Clip").prepared;
                     track.flush_notes();
                     std::mem::swap(&mut track.launcher_source, &mut prepared.source);
                     track.active_clip = prepared.clip_id.map(|clip_id| ActiveClipPlayback {
-                        clip_id, request_id: prepared.request_id, position: 0,
-                        length: prepared.length_samples.max(1), looping: prepared.looping,
+                        clip_id,
+                        request_id: prepared.request_id,
+                        position: 0,
+                        length: prepared.length_samples.max(1),
+                        looping: prepared.looping,
                     });
                     EngineEvent::ClipTransitioned {
-                        track_id: prepared.track_id, clip_id: prepared.clip_id,
-                        request_id: prepared.request_id, effective_at_samples: now, retired: Some(prepared),
+                        track_id: prepared.track_id,
+                        clip_id: prepared.clip_id,
+                        request_id: prepared.request_id,
+                        effective_at_samples: now,
+                        retired: Some(prepared),
                     }
                 } else {
                     track.active_clip = None;
                     track.flush_notes();
                     EngineEvent::ClipTransitioned {
-                        track_id: track.id, clip_id: None, request_id: 0,
-                        effective_at_samples: now, retired: None,
+                        track_id: track.id,
+                        clip_id: None,
+                        request_id: 0,
+                        effective_at_samples: now,
+                        retired: None,
                     }
                 };
                 let physical = self.output_position + self.rendered_callback_frames as u64;
-                admission.publish_clip([Some(event), None], ClipEventContext {
-                routing: &self.routing, physical,
-                through_request: &mut self.clip_through_request,
-                drops: &mut self.clip_event_drops,
-                resync_track: &mut self.clip_resync_track,
-            }, physical, self.output_position);
+                admission.publish_clip(
+                    [Some(event), None],
+                    ClipEventContext {
+                        routing: &self.routing,
+                        physical,
+                        through_request: &mut self.clip_through_request,
+                        drops: &mut self.clip_event_drops,
+                        resync_track: &mut self.clip_resync_track,
+                    },
+                    physical,
+                    self.output_position,
+                );
             } else {
                 let track = &mut self.tracks[index];
-                if let Some(active) = track.active_clip.as_mut().filter(|active| active.position >= active.length) {
+                if let Some(active) = track
+                    .active_clip
+                    .as_mut()
+                    .filter(|active| active.position >= active.length)
+                {
                     active.position = 0;
                     track.flush_notes();
                 }
@@ -341,7 +384,11 @@ pub(super) struct ClipEventContext<'a> {
 }
 
 impl ClipEventContext<'_> {
-    pub(super) fn prepare(&mut self, mut event: EngineEvent, queue_full: bool) -> super::presentation_queue::ScheduledPresentation {
+    pub(super) fn prepare(
+        &mut self,
+        mut event: EngineEvent,
+        queue_full: bool,
+    ) -> super::presentation_queue::ScheduledPresentation {
         let request = match &event {
             EngineEvent::ClipQueued { request_id, .. }
             | EngineEvent::ClipTransitioned { request_id, .. }
@@ -362,8 +409,12 @@ impl ClipEventContext<'_> {
                 ..
             } => {
                 let path = super::presentation::live_path_latency_fields(self.routing, *track_id);
-                *effective_at_samples = effective_at_samples
-                    .saturating_sub(self.routing.compensation.output_latency.saturating_sub(path) as u64);
+                *effective_at_samples = effective_at_samples.saturating_sub(
+                    self.routing
+                        .compensation
+                        .output_latency
+                        .saturating_sub(path) as u64,
+                );
                 Some(path)
             }
             _ => None,
@@ -372,7 +423,9 @@ impl ClipEventContext<'_> {
             *self.drops = (*self.drops).saturating_add(1);
             *self.resync_track = Some(0);
         }
-        let due = self.physical.saturating_add(track_timing.unwrap_or(0) as u64);
+        let due = self
+            .physical
+            .saturating_add(track_timing.unwrap_or(0) as u64);
         super::presentation_queue::ScheduledPresentation { due, event }
     }
 }
@@ -391,4 +444,3 @@ mod segment_tests {
         }
     }
 }
-

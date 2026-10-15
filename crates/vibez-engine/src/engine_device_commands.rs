@@ -9,7 +9,8 @@ impl AudioEngine {
         effect_id: vibez_core::id::EffectId,
         effect: Box<dyn vibez_dsp::effect::AudioEffect>,
         position: Option<usize>,
-     allowance: &mut RetirementAllowance) {
+        allowance: &mut RetirementAllowance,
+    ) {
         let Some(track) = self
             .channel_mut(track_id)
             .filter(|track| track.effects.len() < track.effects.capacity())
@@ -54,7 +55,8 @@ impl AudioEngine {
         &mut self,
         track_id: vibez_core::id::TrackId,
         instrument: Box<dyn vibez_instruments::Instrument>,
-     allowance: &mut RetirementAllowance) {
+        allowance: &mut RetirementAllowance,
+    ) {
         if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
             if let Some(old) = track.instrument.replace(instrument) {
                 self.dispose_instrument(old, allowance);

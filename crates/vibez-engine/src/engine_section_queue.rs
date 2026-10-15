@@ -1,8 +1,8 @@
 //! Resident Section queue ownership and sample-accurate callback switching.
 
-use super::*;
-use super::presentation_queue::{PresentationAdmission, ScheduledPresentation};
 use super::presentation::SectionCaptureContext;
+use super::presentation_queue::{PresentationAdmission, ScheduledPresentation};
+use super::*;
 use crate::events::{SectionQueuedEvent, SectionTransitionedEvent};
 use vibez_core::perform::SectionLaunchQuantization;
 
@@ -27,66 +27,111 @@ impl AudioEngine {
         }
         debug_assert_eq!(self.clock_domain, ClockDomain::Perform);
         let Some(admission) = PresentationAdmission::<3>::new(
-            &mut self.event_tx, &mut self.scheduled_presentation,
+            &mut self.event_tx,
+            &mut self.scheduled_presentation,
             &mut self.presentation_state.terminals,
         ) else {
             self.queued_section = Some(QueuedSectionPlayback {
-                prepared, effective_at_samples, phase: SectionQueuePhase::Returning,
+                prepared,
+                effective_at_samples,
+                phase: SectionQueuePhase::Returning,
             });
             self.flush_returning_section();
             return;
         };
         let section_id = prepared.section_id;
         let length_samples = if self.transport.bpm() > 0.0 {
-            (prepared.length_beats * self.sample_rate as f64 * 60.0 / self.transport.bpm()).round().max(1.0) as u64
-        } else { 1 };
+            (prepared.length_beats * self.sample_rate as f64 * 60.0 / self.transport.bpm())
+                .round()
+                .max(1.0) as u64
+        } else {
+            1
+        };
         let looping = prepared.looping;
-        for track in &mut self.tracks { track.flush_notes(); }
+        for track in &mut self.tracks {
+            track.flush_notes();
+        }
         for incoming in prepared.tracks_mut() {
-            if let Some(track) = self.tracks.iter_mut().find(|track| track.id == incoming.track_id) {
+            if let Some(track) = self
+                .tracks
+                .iter_mut()
+                .find(|track| track.id == incoming.track_id)
+            {
                 std::mem::swap(&mut track.section_playback_source, &mut incoming.source);
             }
         }
-        self.active_section = Some(ActiveSectionPlayback { section_id, position_samples: 0, length_samples, looping });
+        self.active_section = Some(ActiveSectionPlayback {
+            section_id,
+            position_samples: 0,
+            length_samples,
+            looping,
+        });
         self.transport.set_audio_length(None);
         let admission = if !self.transport.is_playing() {
             self.transport.play();
             let now = self.output_position + self.rendered_callback_frames as u64;
-            admission.advance(Some(ScheduledPresentation { due: now, event: EngineEvent::PlaybackStarted }), now, self.output_position)
-        } else { admission.advance(None, 0, 0) };
+            admission.advance(
+                Some(ScheduledPresentation {
+                    due: now,
+                    event: EngineEvent::PlaybackStarted,
+                }),
+                now,
+                self.output_position,
+            )
+        } else {
+            admission.advance(None, 0, 0)
+        };
         self.stopped_note_repeat_anchor = None;
         let bpm = self.transport.bpm();
         let sample_rate = self.sample_rate;
         let project_swing = self.project_swing;
         for track in &mut self.tracks {
-            track.reanchor_note_repeats(effective_at_samples, effective_at_samples, bpm, sample_rate, project_swing);
+            track.reanchor_note_repeats(
+                effective_at_samples,
+                effective_at_samples,
+                bpm,
+                sample_rate,
+                project_swing,
+            );
         }
         let source = SectionCaptureContext {
-            routing: &self.routing, output_position: &self.output_position,
+            routing: &self.routing,
+            output_position: &self.output_position,
             rendered_callback_frames: &self.rendered_callback_frames,
             timing: &mut self.section_capture_timing,
-        }.source(section_id, effective_at_samples, 0, false);
+        }
+        .source(section_id, effective_at_samples, 0, false);
         let now = self.output_position + self.rendered_callback_frames as u64;
         let admission = admission.advance(Some(source), now, self.output_position);
         let event = EngineEvent::SectionTransitioned(SectionTransitionedEvent {
-            section_id, effective_at_samples, retired: crate::events::DisposalCell::new(prepared),
+            section_id,
+            effective_at_samples,
+            retired: crate::events::DisposalCell::new(prepared),
         });
         let delay = self.routing.compensation.output_latency;
         let now = self.output_position + self.rendered_callback_frames as u64;
-        admission.publish([Some(ScheduledPresentation { due: now.saturating_add(delay as u64), event })], now, self.output_position);
+        admission.publish(
+            [Some(ScheduledPresentation {
+                due: now.saturating_add(delay as u64),
+                event,
+            })],
+            now,
+            self.output_position,
+        );
     }
 
     pub(super) fn queue_section(
         &mut self,
         prepared: Box<PreparedSectionPlaybackSource>,
         quantization: SectionLaunchQuantization,
-     allowance: &mut RetirementAllowance) {
+        allowance: &mut RetirementAllowance,
+    ) {
         if self.pending_section_record.is_some() || self.active_section_record.is_some() {
             let event = EngineEvent::SectionQueueCancelled { retired: prepared };
             self.present_event(event, allowance);
             return;
         }
-        self.begin_performance_clock( allowance);
+        self.begin_performance_clock(allowance);
         let now = self.performance_position;
         if quantization == SectionLaunchQuantization::Immediate
             || self.active_section.is_none()
@@ -154,19 +199,27 @@ impl AudioEngine {
             return false;
         }
         let mut allowance = self.pending_retirements.reserve(1);
-        let queued = self.queued_section.take().expect("one returning Section source");
+        let queued = self
+            .queued_section
+            .take()
+            .expect("one returning Section source");
         let effective_at_samples = queued.effective_at_samples;
         let now = self.output_position + self.rendered_callback_frames as u64;
         // Cancellation preserves this literal variant and complete source. A
         // later callback may retry its same typed queue slot without credits.
-        if let Err(EngineEvent::SectionQueueCancelled { retired }) =
-            self.try_present_event_at(EngineEvent::SectionQueueCancelled { retired: queued.prepared }, now)
-        {
+        if let Err(EngineEvent::SectionQueueCancelled { retired }) = self.try_present_event_at(
+            EngineEvent::SectionQueueCancelled {
+                retired: queued.prepared,
+            },
+            now,
+        ) {
             if let Some(allowance) = allowance.as_mut() {
                 self.retire_event(EngineEvent::SectionQueueCancelled { retired }, allowance);
             } else {
                 self.queued_section = Some(QueuedSectionPlayback {
-                    prepared: retired, effective_at_samples, phase: SectionQueuePhase::Returning,
+                    prepared: retired,
+                    effective_at_samples,
+                    phase: SectionQueuePhase::Returning,
                 });
                 return false;
             }

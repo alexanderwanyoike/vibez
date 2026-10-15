@@ -3,7 +3,11 @@
 use super::*;
 
 impl AudioEngine {
-    pub(super) fn command_remove_track_instrument(&mut self, track_id: vibez_core::id::TrackId, allowance: &mut RetirementAllowance) {
+    pub(super) fn command_remove_track_instrument(
+        &mut self,
+        track_id: vibez_core::id::TrackId,
+        allowance: &mut RetirementAllowance,
+    ) {
         if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
             if let Some(instrument) = track.instrument.take() {
                 self.dispose_instrument(instrument, allowance);
@@ -141,7 +145,8 @@ impl AudioEngine {
         track_id: vibez_core::id::TrackId,
         sample: std::sync::Arc<vibez_core::audio_buffer::DecodedAudio>,
         sample_name: String,
-     allowance: &mut RetirementAllowance) {
+        allowance: &mut RetirementAllowance,
+    ) {
         let retired = match self
             .tracks
             .iter_mut()
@@ -154,7 +159,11 @@ impl AudioEngine {
         self.retire_instrument_media(retired, allowance);
     }
 
-    fn retire_instrument_media(&mut self, retired: vibez_instruments::InstrumentMediaOwners, allowance: &mut RetirementAllowance) {
+    fn retire_instrument_media(
+        &mut self,
+        retired: vibez_instruments::InstrumentMediaOwners,
+        allowance: &mut RetirementAllowance,
+    ) {
         if !retired.is_empty() {
             self.retire_event(EngineEvent::RetiredInstrumentMedia(retired), allowance);
         }
@@ -166,7 +175,8 @@ impl AudioEngine {
         pad_index: usize,
         sample: std::sync::Arc<vibez_core::audio_buffer::DecodedAudio>,
         sample_name: String,
-     allowance: &mut RetirementAllowance) {
+        allowance: &mut RetirementAllowance,
+    ) {
         let retired = match self
             .tracks
             .iter_mut()
@@ -183,7 +193,8 @@ impl AudioEngine {
         &mut self,
         track_id: vibez_core::id::TrackId,
         pad_index: usize,
-     allowance: &mut RetirementAllowance) {
+        allowance: &mut RetirementAllowance,
+    ) {
         let retired = self
             .tracks
             .iter_mut()
@@ -199,7 +210,8 @@ impl AudioEngine {
         track_id: vibez_core::id::TrackId,
         pad_index: usize,
         state: vibez_instruments::PreparedDrumPadState,
-     allowance: &mut RetirementAllowance) {
+        allowance: &mut RetirementAllowance,
+    ) {
         let retired = match self
             .tracks
             .iter_mut()

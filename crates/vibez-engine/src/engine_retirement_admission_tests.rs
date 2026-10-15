@@ -458,7 +458,8 @@ fn remove_bus_nested_lane_cleanup_uses_remaining_slots_after_staged_source_owner
     assert_eq!(engine.pending_retirements.capacity(), 32);
     assert_eq!(
         engine
-            .pending_retirements.as_slice()
+            .pending_retirements
+            .as_slice()
             .iter()
             .filter(|event| matches!(event, EngineEvent::RetiredTrackOrder(_)))
             .count(),
@@ -466,7 +467,8 @@ fn remove_bus_nested_lane_cleanup_uses_remaining_slots_after_staged_source_owner
     );
     assert_eq!(
         engine
-            .pending_retirements.as_slice()
+            .pending_retirements
+            .as_slice()
             .iter()
             .filter(|event| matches!(event, EngineEvent::RetiredAudioClip(_)))
             .count(),
@@ -474,7 +476,8 @@ fn remove_bus_nested_lane_cleanup_uses_remaining_slots_after_staged_source_owner
     );
     assert_eq!(
         engine
-            .pending_retirements.as_slice()
+            .pending_retirements
+            .as_slice()
             .iter()
             .filter(|event| matches!(event, EngineEvent::RetiredChannel(_)))
             .count(),
@@ -482,7 +485,8 @@ fn remove_bus_nested_lane_cleanup_uses_remaining_slots_after_staged_source_owner
     );
     assert_eq!(
         engine
-            .pending_retirements.as_slice()
+            .pending_retirements
+            .as_slice()
             .iter()
             .filter(|event| matches!(event, EngineEvent::RetiredAutomationLane(_)))
             .count(),

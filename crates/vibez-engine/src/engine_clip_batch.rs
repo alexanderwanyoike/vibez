@@ -1,8 +1,8 @@
 //! Clip packets reuse their transferred storage while acknowledgements wait for UI capacity.
 
-use super::*;
 use super::clip_launcher::ClipEventContext;
 use super::presentation_queue::PresentationAdmission;
+use super::*;
 use crate::playback_source::{ActiveClipPlayback, PreparedClipPlayback, QueuedClipPlayback};
 use vibez_core::perform::MusicalBoundary;
 
@@ -65,7 +65,8 @@ impl AudioEngine {
         &mut self,
         clips: Vec<Box<PreparedClipPlayback>>,
         quantization: MusicalBoundary,
-     allowance: &mut RetirementAllowance) {
+        allowance: &mut RetirementAllowance,
+    ) {
         if let Some(batch) = self.pending_clip_batch.take() {
             // Only a completed staging phase permits newer command ingress.
             // Existing unrelated requests retain their own original deadlines.
@@ -78,7 +79,7 @@ impl AudioEngine {
             self.clip_event(EngineEvent::ClipBatchRetired(batch.clips), allowance);
         }
         let starting = !self.clip_performance || !self.transport.is_playing();
-        self.begin_clip_performance( allowance);
+        self.begin_clip_performance(allowance);
         let now = self.performance_position;
         let boundary = if starting {
             now
@@ -121,33 +122,56 @@ impl AudioEngine {
                     return;
                 }
                 let Some(admission) = PresentationAdmission::<1>::new_clip_batch(
-                    &mut self.event_tx, &mut self.scheduled_presentation,
-                    &mut self.presentation_state.terminals, current_event_is_future,
-                ) else { self.pending_clip_batch = Some(batch); return; };
-                let event = EngineEvent::ClipRequestRetired(batch.clips.pop().expect("packet owner"));
+                    &mut self.event_tx,
+                    &mut self.scheduled_presentation,
+                    &mut self.presentation_state.terminals,
+                    current_event_is_future,
+                ) else {
+                    self.pending_clip_batch = Some(batch);
+                    return;
+                };
+                let event =
+                    EngineEvent::ClipRequestRetired(batch.clips.pop().expect("packet owner"));
                 let physical = self.output_position + self.rendered_callback_frames as u64;
-                admission.publish_clip([Some(event)], ClipEventContext {
-                    routing: &self.routing, physical,
-                    through_request: &mut self.clip_through_request,
-                    drops: &mut self.clip_event_drops,
-                    resync_track: &mut self.clip_resync_track,
-                }, physical, self.output_position);
+                admission.publish_clip(
+                    [Some(event)],
+                    ClipEventContext {
+                        routing: &self.routing,
+                        physical,
+                        through_request: &mut self.clip_through_request,
+                        drops: &mut self.clip_event_drops,
+                        resync_track: &mut self.clip_resync_track,
+                    },
+                    physical,
+                    self.output_position,
+                );
             }
             if self.clip_batch_event_room(current_event_is_future) == 0 {
                 self.pending_clip_batch = Some(batch);
                 return;
             }
             let Some(admission) = PresentationAdmission::<1>::new_clip_batch(
-                &mut self.event_tx, &mut self.scheduled_presentation,
-                &mut self.presentation_state.terminals, current_event_is_future,
-            ) else { self.pending_clip_batch = Some(batch); return; };
+                &mut self.event_tx,
+                &mut self.scheduled_presentation,
+                &mut self.presentation_state.terminals,
+                current_event_is_future,
+            ) else {
+                self.pending_clip_batch = Some(batch);
+                return;
+            };
             let physical = self.output_position + self.rendered_callback_frames as u64;
-            admission.publish_clip([Some(EngineEvent::ClipBatchRetired(batch.clips))], ClipEventContext {
-                    routing: &self.routing, physical,
+            admission.publish_clip(
+                [Some(EngineEvent::ClipBatchRetired(batch.clips))],
+                ClipEventContext {
+                    routing: &self.routing,
+                    physical,
                     through_request: &mut self.clip_through_request,
                     drops: &mut self.clip_event_drops,
                     resync_track: &mut self.clip_resync_track,
-                }, physical, self.output_position);
+                },
+                physical,
+                self.output_position,
+            );
             return;
         }
         if batch.phase == BatchPhase::Staging {
@@ -159,9 +183,14 @@ impl AudioEngine {
                     return;
                 }
                 let Some(admission) = PresentationAdmission::<2>::new_clip_batch(
-                    &mut self.event_tx, &mut self.scheduled_presentation,
-                    &mut self.presentation_state.terminals, current_event_is_future,
-                ) else { self.pending_clip_batch = Some(batch); return; };
+                    &mut self.event_tx,
+                    &mut self.scheduled_presentation,
+                    &mut self.presentation_state.terminals,
+                    current_event_is_future,
+                ) else {
+                    self.pending_clip_batch = Some(batch);
+                    return;
+                };
                 let prepared = batch.clips.pop().expect("nonempty packet");
                 let Some(track) = self
                     .tracks
@@ -169,12 +198,18 @@ impl AudioEngine {
                     .find(|track| track.id == prepared.track_id)
                 else {
                     let physical = self.output_position + self.rendered_callback_frames as u64;
-                    admission.publish_clip([Some(EngineEvent::ClipRequestRetired(prepared)), None], ClipEventContext {
-                    routing: &self.routing, physical,
-                    through_request: &mut self.clip_through_request,
-                    drops: &mut self.clip_event_drops,
-                    resync_track: &mut self.clip_resync_track,
-                }, physical, self.output_position);
+                    admission.publish_clip(
+                        [Some(EngineEvent::ClipRequestRetired(prepared)), None],
+                        ClipEventContext {
+                            routing: &self.routing,
+                            physical,
+                            through_request: &mut self.clip_through_request,
+                            drops: &mut self.clip_event_drops,
+                            resync_track: &mut self.clip_resync_track,
+                        },
+                        physical,
+                        self.output_position,
+                    );
                     continue;
                 };
                 let event = EngineEvent::ClipQueued {
@@ -189,12 +224,18 @@ impl AudioEngine {
                 });
                 let retired = old.map(|old| EngineEvent::ClipRequestRetired(old.prepared));
                 let physical = self.output_position + self.rendered_callback_frames as u64;
-                admission.publish_clip([retired, Some(event)], ClipEventContext {
-                    routing: &self.routing, physical,
-                    through_request: &mut self.clip_through_request,
-                    drops: &mut self.clip_event_drops,
-                    resync_track: &mut self.clip_resync_track,
-                }, physical, self.output_position);
+                admission.publish_clip(
+                    [retired, Some(event)],
+                    ClipEventContext {
+                        routing: &self.routing,
+                        physical,
+                        through_request: &mut self.clip_through_request,
+                        drops: &mut self.clip_event_drops,
+                        resync_track: &mut self.clip_resync_track,
+                    },
+                    physical,
+                    self.output_position,
+                );
             }
             if batch.boundary < now {
                 batch.boundary = if batch.starting {
@@ -261,37 +302,62 @@ impl AudioEngine {
                     return;
                 }
                 let Some(admission) = PresentationAdmission::<1>::new_clip_batch(
-                    &mut self.event_tx, &mut self.scheduled_presentation,
-                    &mut self.presentation_state.terminals, due > current,
-                ) else { self.pending_clip_batch = Some(batch); return; };
+                    &mut self.event_tx,
+                    &mut self.scheduled_presentation,
+                    &mut self.presentation_state.terminals,
+                    due > current,
+                ) else {
+                    self.pending_clip_batch = Some(batch);
+                    return;
+                };
                 let prepared = batch.clips.pop().expect("publication owner");
                 let event = EngineEvent::ClipTransitioned {
-                    track_id: prepared.track_id, clip_id: prepared.clip_id,
-                    request_id: prepared.request_id, effective_at_samples: source, retired: Some(prepared),
+                    track_id: prepared.track_id,
+                    clip_id: prepared.clip_id,
+                    request_id: prepared.request_id,
+                    effective_at_samples: source,
+                    retired: Some(prepared),
                 };
                 let source_now = self.output_position + self.rendered_callback_frames as u64;
-                admission.publish_clip([Some(event)], ClipEventContext {
-                    routing: &self.routing, physical,
-                    through_request: &mut self.clip_through_request,
-                    drops: &mut self.clip_event_drops,
-                    resync_track: &mut self.clip_resync_track,
-                }, source_now, self.output_position);
+                admission.publish_clip(
+                    [Some(event)],
+                    ClipEventContext {
+                        routing: &self.routing,
+                        physical,
+                        through_request: &mut self.clip_through_request,
+                        drops: &mut self.clip_event_drops,
+                        resync_track: &mut self.clip_resync_track,
+                    },
+                    source_now,
+                    self.output_position,
+                );
             }
             if self.clip_batch_event_room(current_event_is_future) == 0 {
                 self.pending_clip_batch = Some(batch);
                 return;
             }
             let Some(admission) = PresentationAdmission::<1>::new_clip_batch(
-                &mut self.event_tx, &mut self.scheduled_presentation,
-                &mut self.presentation_state.terminals, current_event_is_future,
-            ) else { self.pending_clip_batch = Some(batch); return; };
+                &mut self.event_tx,
+                &mut self.scheduled_presentation,
+                &mut self.presentation_state.terminals,
+                current_event_is_future,
+            ) else {
+                self.pending_clip_batch = Some(batch);
+                return;
+            };
             let physical = self.output_position + self.rendered_callback_frames as u64;
-            admission.publish_clip([Some(EngineEvent::ClipBatchRetired(batch.clips))], ClipEventContext {
-                    routing: &self.routing, physical,
+            admission.publish_clip(
+                [Some(EngineEvent::ClipBatchRetired(batch.clips))],
+                ClipEventContext {
+                    routing: &self.routing,
+                    physical,
                     through_request: &mut self.clip_through_request,
                     drops: &mut self.clip_event_drops,
                     resync_track: &mut self.clip_resync_track,
-                }, physical, self.output_position);
+                },
+                physical,
+                self.output_position,
+            );
         }
     }
 }

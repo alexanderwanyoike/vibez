@@ -8,9 +8,9 @@ impl AudioEngine {
         self.cancel_presentation();
         self.stop_section_record();
         if capture_needs_closure {
-            self.stop_heard_capture( allowance);
+            self.stop_heard_capture(allowance);
         }
-        self.clear_clip_performance( allowance);
+        self.clear_clip_performance(allowance);
         self.transport.stop();
         self.arrangement_recording = false;
         self.clock_domain = ClockDomain::Arrange;
@@ -36,7 +36,7 @@ impl AudioEngine {
         let capture_needs_closure = self.capture_needs_closure();
         self.cancel_presentation();
         if capture_needs_closure {
-            self.stop_heard_capture( allowance);
+            self.stop_heard_capture(allowance);
         }
         self.presentation_state.terminals.cancel_playback_stop();
         self.output_gate.clear_plan_morph();
@@ -55,7 +55,7 @@ impl AudioEngine {
         }
         self.routing.clear_history();
         let was_clip_performance = self.clip_performance;
-        self.clear_clip_performance( allowance);
+        self.clear_clip_performance(allowance);
         self.clock_domain = ClockDomain::Arrange;
         if !self.arrangement_recording {
             self.transport
@@ -89,7 +89,7 @@ impl AudioEngine {
 
     pub(super) fn command_seek(&mut self, pos: u64, allowance: &mut RetirementAllowance) {
         if self.clock_domain == ClockDomain::Arrange && self.capture_needs_closure() {
-            self.stop_heard_capture( allowance);
+            self.stop_heard_capture(allowance);
         }
         self.transport.seek(pos);
         for track in &mut self.tracks {

@@ -752,8 +752,17 @@ fn capture_replay_with_more_than_retirement_capacity_resumes_without_callback_me
     engine.output_position = 1000;
     for index in 0..40 {
         {
-            let mut retirement_allowance = engine.pending_retirements.reserve(2).expect("fixture admits its original owner-return budget");
-            engine.section_capture_source(SectionId::new(), index, 0, false, &mut retirement_allowance)
+            let mut retirement_allowance = engine
+                .pending_retirements
+                .reserve(2)
+                .expect("fixture admits its original owner-return budget");
+            engine.section_capture_source(
+                SectionId::new(),
+                index,
+                0,
+                false,
+                &mut retirement_allowance,
+            )
         };
     }
     while events.pop().is_ok() {}

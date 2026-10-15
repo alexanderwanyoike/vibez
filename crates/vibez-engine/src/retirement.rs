@@ -152,28 +152,41 @@ impl crate::engine::AudioEngine {
     }
 
     pub(super) fn retire_event(&mut self, event: EngineEvent, allowance: &mut RetirementAllowance) {
-        let permit = allowance.next().expect("the closed owner-return path stays within its admitted budget");
+        let permit = allowance
+            .next()
+            .expect("the closed owner-return path stays within its admitted budget");
         self.pending_retirements
             .publish(&mut self.event_tx, event, permit)
             .map_err(crate::retirement_queue::WrongQueue::into_parts)
             .expect("the engine's sole queue issued this allowance");
     }
-    pub(super) fn dispose_effect(&mut self, mut effect: Box<dyn vibez_dsp::effect::AudioEffect>, allowance: &mut RetirementAllowance) {
+    pub(super) fn dispose_effect(
+        &mut self,
+        mut effect: Box<dyn vibez_dsp::effect::AudioEffect>,
+        allowance: &mut RetirementAllowance,
+    ) {
         effect.stop_processing();
-        self.retire_event(EngineEvent::DisposeEffect(
-            crate::events::DisposalCell::new(effect),
-        ), allowance);
+        self.retire_event(
+            EngineEvent::DisposeEffect(crate::events::DisposalCell::new(effect)),
+            allowance,
+        );
     }
     pub(super) fn dispose_instrument(
         &mut self,
         mut instrument: Box<dyn vibez_instruments::Instrument>,
-     allowance: &mut RetirementAllowance) {
+        allowance: &mut RetirementAllowance,
+    ) {
         instrument.stop_processing();
-        self.retire_event(EngineEvent::DisposeInstrument(
-            crate::events::DisposalCell::new(instrument),
-        ), allowance);
+        self.retire_event(
+            EngineEvent::DisposeInstrument(crate::events::DisposalCell::new(instrument)),
+            allowance,
+        );
     }
-    pub(super) fn dispose_channel(&mut self, mut channel: Box<EngineTrack>, allowance: &mut RetirementAllowance) {
+    pub(super) fn dispose_channel(
+        &mut self,
+        mut channel: Box<EngineTrack>,
+        allowance: &mut RetirementAllowance,
+    ) {
         for slot in &mut channel.effects {
             slot.effect.stop_processing();
         }

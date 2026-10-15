@@ -1,7 +1,7 @@
 //! Engine-clock ownership for Section Record arm/start/stop boundaries.
 
-use super::*;
 use super::presentation_queue::{PresentationAdmission, ScheduledPresentation};
+use super::*;
 use crate::events::{
     SectionRecordArmedEvent, SectionRecordStartedEvent, SectionRecordStoppedEvent,
 };
@@ -55,12 +55,13 @@ impl AudioEngine {
         prepared: Option<Box<PreparedSectionPlaybackSource>>,
         count_in_bars: u8,
         replace_existing: bool,
-     allowance: &mut RetirementAllowance) {
+        allowance: &mut RetirementAllowance,
+    ) {
         if self.pending_section_record.is_some() || self.active_section_record.is_some() {
             return;
         }
         self.cancel_section_queue();
-        self.begin_performance_clock( allowance);
+        self.begin_performance_clock(allowance);
 
         let now = self.performance_position;
         let count_in_beat_samples = self.section_length_samples(1.0);
@@ -121,12 +122,15 @@ impl AudioEngine {
             count_in_beat_samples,
             replace_existing,
         });
-        self.present_event(EngineEvent::SectionRecordArmed(SectionRecordArmedEvent {
-            section_id,
-            track_id,
-            effective_at_samples,
-            section_position_samples,
-        }), allowance);
+        self.present_event(
+            EngineEvent::SectionRecordArmed(SectionRecordArmedEvent {
+                section_id,
+                track_id,
+                effective_at_samples,
+                section_position_samples,
+            }),
+            allowance,
+        );
         self.start_section_record_if_due(self.performance_position);
     }
 
@@ -178,7 +182,10 @@ impl AudioEngine {
             }
         }
         let mut allowance = self.pending_retirements.reserve(1);
-        let stopped = self.pending_section_record_stop.take().expect("one retained Section recording stop");
+        let stopped = self
+            .pending_section_record_stop
+            .take()
+            .expect("one retained Section recording stop");
         let now = self.output_position + self.rendered_callback_frames as u64;
         // This literal remains SectionRecordStopped through cancellation. The
         // typed slot survives a failed handoff without owning a waiting credit.
@@ -211,24 +218,32 @@ impl AudioEngine {
             }
         }
         let Some(admission) = PresentationAdmission::<1>::new(
-            &mut self.event_tx, &mut self.scheduled_presentation,
+            &mut self.event_tx,
+            &mut self.scheduled_presentation,
             &mut self.presentation_state.terminals,
         ) else {
             self.pending_section_record = Some(pending);
             return;
         };
         self.active_section_record = Some(ActiveSectionRecord {
-            section_id: pending.section_id, track_id: pending.track_id,
+            section_id: pending.section_id,
+            track_id: pending.track_id,
             effective_at_samples: pending.effective_at_samples,
-            replace_first_pass: pending.replace_existing, replace_source_flushed: false,
+            replace_first_pass: pending.replace_existing,
+            replace_source_flushed: false,
         });
         let event = EngineEvent::SectionRecordStarted(SectionRecordStartedEvent {
-            section_id: pending.section_id, track_id: pending.track_id,
+            section_id: pending.section_id,
+            track_id: pending.track_id,
             effective_at_samples: pending.effective_at_samples,
             section_position_samples: pending.section_position_samples,
         });
         let now = self.output_position + self.rendered_callback_frames as u64;
-        admission.publish([Some(ScheduledPresentation { due: now, event })], now, self.output_position);
+        admission.publish(
+            [Some(ScheduledPresentation { due: now, event })],
+            now,
+            self.output_position,
+        );
     }
 
     /// A stopped-start count-in may end inside an audio callback. Render the

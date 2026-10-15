@@ -99,4 +99,3 @@ fn offline_channel_prepares_matching_audio_storage_at_content_boundaries() {
         assert!(owners.iter().all(|owner| owner.strong_count() == 0));
     }
 }
-

@@ -158,17 +158,28 @@ fn partial_packet_releases_tracks_atomically_at_one_source_timestamp_and_keeps_o
     engine.routing = crate::routing::PreparedRouting::prepare(&channels, 8).unwrap();
     engine.project_routing_published = true;
     {
-            let mut retirement_allowance = engine.pending_retirements.reserve(2).expect("fixture admits its original owner-return budget");
-            engine.queue_clips(vec![clip(ids[2], 7)], MusicalBoundary::Immediate, &mut retirement_allowance)
-        };
+        let mut retirement_allowance = engine
+            .pending_retirements
+            .reserve(2)
+            .expect("fixture admits its original owner-return budget");
+        engine.queue_clips(
+            vec![clip(ids[2], 7)],
+            MusicalBoundary::Immediate,
+            &mut retirement_allowance,
+        )
+    };
     while events.pop().is_ok() {}
     for _ in 0..presentation_queue::PRESENTATION_EVENT_CAPACITY - 2 {
         {
-            let mut retirement_allowance = engine.pending_retirements.reserve(1).expect("fixture admits its original owner-return budget");
+            let mut retirement_allowance = engine
+                .pending_retirements
+                .reserve(1)
+                .expect("fixture admits its original owner-return budget");
             engine.present_event_at(
-            EngineEvent::PlaybackStarted,
-            engine.output_position.saturating_add(5000_u64),
-         &mut retirement_allowance)
+                EngineEvent::PlaybackStarted,
+                engine.output_position.saturating_add(5000_u64),
+                &mut retirement_allowance,
+            )
         };
     }
     queue(
@@ -186,9 +197,12 @@ fn partial_packet_releases_tracks_atomically_at_one_source_timestamp_and_keeps_o
         panic!("packet");
     };
     {
-            let mut retirement_allowance = engine.pending_retirements.reserve(2).expect("fixture admits its original owner-return budget");
-            engine.queue_clips(clips, quantization, &mut retirement_allowance)
-        };
+        let mut retirement_allowance = engine
+            .pending_retirements
+            .reserve(2)
+            .expect("fixture admits its original owner-return budget");
+        engine.queue_clips(clips, quantization, &mut retirement_allowance)
+    };
     assert!(engine.tracks[..2]
         .iter()
         .all(|track| track.active_clip.is_none()));
@@ -301,26 +315,40 @@ fn newer_quantized_packet_supersedes_only_its_targets_and_keeps_unrelated_deadli
         .tracks
         .extend(ids.map(|id| Box::new(EngineTrack::new(id))));
     {
-            let mut retirement_allowance = engine.pending_retirements.reserve(2).expect("fixture admits its original owner-return budget");
-            engine.begin_clip_performance( &mut retirement_allowance)
-        };
+        let mut retirement_allowance = engine
+            .pending_retirements
+            .reserve(2)
+            .expect("fixture admits its original owner-return budget");
+        engine.begin_clip_performance(&mut retirement_allowance)
+    };
     engine.performance_position = 1;
     {
-            let mut retirement_allowance = engine.pending_retirements.reserve(2).expect("fixture admits its original owner-return budget");
-            engine.queue_clips(
-        vec![clip(ids[0], 1), clip(ids[1], 2)],
-        MusicalBoundary::OneBar,
-     &mut retirement_allowance)
-        };
+        let mut retirement_allowance = engine
+            .pending_retirements
+            .reserve(2)
+            .expect("fixture admits its original owner-return budget");
+        engine.queue_clips(
+            vec![clip(ids[0], 1), clip(ids[1], 2)],
+            MusicalBoundary::OneBar,
+            &mut retirement_allowance,
+        )
+    };
     assert_eq!(
         engine.tracks[0].queued_clip.as_ref().unwrap().effective_at,
         16
     );
     engine.performance_position = 2;
     {
-            let mut retirement_allowance = engine.pending_retirements.reserve(2).expect("fixture admits its original owner-return budget");
-            engine.queue_clips(vec![clip(ids[1], 3)], MusicalBoundary::OneBeat, &mut retirement_allowance)
-        };
+        let mut retirement_allowance = engine
+            .pending_retirements
+            .reserve(2)
+            .expect("fixture admits its original owner-return budget");
+        engine.queue_clips(
+            vec![clip(ids[1], 3)],
+            MusicalBoundary::OneBeat,
+            &mut retirement_allowance,
+        )
+    };
     assert_eq!(
         engine.tracks[0].queued_clip.as_ref().unwrap().effective_at,
         16
@@ -347,24 +375,38 @@ fn stalled_quantized_packet_moves_only_the_missed_boundary_to_the_next_achievabl
     engine.sample_rate = 8;
     engine.tracks.push(Box::new(EngineTrack::new(id)));
     {
-            let mut retirement_allowance = engine.pending_retirements.reserve(2).expect("fixture admits its original owner-return budget");
-            engine.begin_clip_performance( &mut retirement_allowance)
-        };
+        let mut retirement_allowance = engine
+            .pending_retirements
+            .reserve(2)
+            .expect("fixture admits its original owner-return budget");
+        engine.begin_clip_performance(&mut retirement_allowance)
+    };
     engine.performance_position = 1;
     while engine.event_tx.push(EngineEvent::PlaybackStarted).is_ok() {}
     for _ in 0..presentation_queue::PRESENTATION_EVENT_CAPACITY - 1 {
         {
-            let mut retirement_allowance = engine.pending_retirements.reserve(1).expect("fixture admits its original owner-return budget");
+            let mut retirement_allowance = engine
+                .pending_retirements
+                .reserve(1)
+                .expect("fixture admits its original owner-return budget");
             engine.present_event_at(
-            EngineEvent::PlaybackStarted,
-            engine.output_position.saturating_add(1000_u64),
-         &mut retirement_allowance)
+                EngineEvent::PlaybackStarted,
+                engine.output_position.saturating_add(1000_u64),
+                &mut retirement_allowance,
+            )
         };
     }
     {
-            let mut retirement_allowance = engine.pending_retirements.reserve(2).expect("fixture admits its original owner-return budget");
-            engine.queue_clips(vec![clip(id, 8)], MusicalBoundary::OneBar, &mut retirement_allowance)
-        };
+        let mut retirement_allowance = engine
+            .pending_retirements
+            .reserve(2)
+            .expect("fixture admits its original owner-return budget");
+        engine.queue_clips(
+            vec![clip(id, 8)],
+            MusicalBoundary::OneBar,
+            &mut retirement_allowance,
+        )
+    };
     assert!(engine.tracks[0].queued_clip.is_none());
     while events.pop().is_ok() {}
     engine.performance_position = 17;
@@ -385,29 +427,50 @@ fn late_publication_keeps_the_original_source_timestamp_and_physical_release() {
     engine.tracks.push(Box::new(EngineTrack::new(id)));
     engine.sample_rate = 8;
     {
-            let mut retirement_allowance = engine.pending_retirements.reserve(2).expect("fixture admits its original owner-return budget");
-            engine.begin_clip_performance( &mut retirement_allowance)
-        };
+        let mut retirement_allowance = engine
+            .pending_retirements
+            .reserve(2)
+            .expect("fixture admits its original owner-return budget");
+        engine.begin_clip_performance(&mut retirement_allowance)
+    };
     engine.performance_position = 1;
     {
-            let mut retirement_allowance = engine.pending_retirements.reserve(2).expect("fixture admits its original owner-return budget");
-            engine.queue_clips(vec![clip(id, 1)], MusicalBoundary::OneBar, &mut retirement_allowance)
-        };
+        let mut retirement_allowance = engine
+            .pending_retirements
+            .reserve(2)
+            .expect("fixture admits its original owner-return budget");
+        engine.queue_clips(
+            vec![clip(id, 1)],
+            MusicalBoundary::OneBar,
+            &mut retirement_allowance,
+        )
+    };
     while events.pop().is_ok() {}
     while engine.event_tx.push(EngineEvent::PlaybackStarted).is_ok() {}
     for _ in 0..presentation_queue::PRESENTATION_EVENT_CAPACITY - 3 {
         {
-            let mut retirement_allowance = engine.pending_retirements.reserve(1).expect("fixture admits its original owner-return budget");
+            let mut retirement_allowance = engine
+                .pending_retirements
+                .reserve(1)
+                .expect("fixture admits its original owner-return budget");
             engine.present_event_at(
-            EngineEvent::PlaybackStarted,
-            engine.output_position.saturating_add(5000_u64),
-         &mut retirement_allowance)
+                EngineEvent::PlaybackStarted,
+                engine.output_position.saturating_add(5000_u64),
+                &mut retirement_allowance,
+            )
         };
     }
     {
-            let mut retirement_allowance = engine.pending_retirements.reserve(2).expect("fixture admits its original owner-return budget");
-            engine.queue_clips(vec![clip(id, 2)], MusicalBoundary::Immediate, &mut retirement_allowance)
-        };
+        let mut retirement_allowance = engine
+            .pending_retirements
+            .reserve(2)
+            .expect("fixture admits its original owner-return budget");
+        engine.queue_clips(
+            vec![clip(id, 2)],
+            MusicalBoundary::Immediate,
+            &mut retirement_allowance,
+        )
+    };
     assert_eq!(engine.tracks[0].active_clip.unwrap().request_id, 2);
     assert!(
         engine.clip_batch_blocks_commands(),
@@ -461,27 +524,45 @@ fn in_segment_release_retains_the_actual_output_clock_prefix() {
     engine.routing = crate::routing::PreparedRouting::prepare(&channels, 8).unwrap();
     engine.project_routing_published = true;
     {
-            let mut retirement_allowance = engine.pending_retirements.reserve(2).expect("fixture admits its original owner-return budget");
-            engine.queue_clips(vec![clip(id, 1)], MusicalBoundary::Immediate, &mut retirement_allowance)
-        };
+        let mut retirement_allowance = engine
+            .pending_retirements
+            .reserve(2)
+            .expect("fixture admits its original owner-return budget");
+        engine.queue_clips(
+            vec![clip(id, 1)],
+            MusicalBoundary::Immediate,
+            &mut retirement_allowance,
+        )
+    };
     while events.pop().is_ok() {}
     engine.performance_position = 1;
     engine.output_position = 100;
     let mut next = clip(id, 2);
     next.source.clips[0].linear_gain = 2.0;
     {
-            let mut retirement_allowance = engine.pending_retirements.reserve(2).expect("fixture admits its original owner-return budget");
-            engine.queue_clips(vec![next], MusicalBoundary::OneBeat, &mut retirement_allowance)
-        };
+        let mut retirement_allowance = engine
+            .pending_retirements
+            .reserve(2)
+            .expect("fixture admits its original owner-return budget");
+        engine.queue_clips(
+            vec![next],
+            MusicalBoundary::OneBeat,
+            &mut retirement_allowance,
+        )
+    };
     while events.pop().is_ok() {}
     while engine.event_tx.push(EngineEvent::PlaybackStarted).is_ok() {}
     for _ in 0..presentation_queue::PRESENTATION_EVENT_CAPACITY {
         {
-            let mut retirement_allowance = engine.pending_retirements.reserve(1).expect("fixture admits its original owner-return budget");
+            let mut retirement_allowance = engine
+                .pending_retirements
+                .reserve(1)
+                .expect("fixture admits its original owner-return budget");
             engine.present_event_at(
-            EngineEvent::PlaybackStarted,
-            engine.output_position.saturating_add(5000_u64),
-         &mut retirement_allowance)
+                EngineEvent::PlaybackStarted,
+                engine.output_position.saturating_add(5000_u64),
+                &mut retirement_allowance,
+            )
         };
     }
     let mut output = [0.0; 8];
@@ -510,26 +591,50 @@ fn publication_after_the_original_audible_due_time_does_not_add_device_latency_a
     let (mut engine, mut events, id) = delayed_engine();
     engine.sample_rate = 8;
     {
-            let mut retirement_allowance = engine.pending_retirements.reserve(2).expect("fixture admits its original owner-return budget");
-            engine.begin_clip_performance( &mut retirement_allowance)
-        };
+        let mut retirement_allowance = engine
+            .pending_retirements
+            .reserve(2)
+            .expect("fixture admits its original owner-return budget");
+        engine.begin_clip_performance(&mut retirement_allowance)
+    };
     engine.performance_position = 1;
     {
-            let mut retirement_allowance = engine.pending_retirements.reserve(2).expect("fixture admits its original owner-return budget");
-            engine.queue_clips(vec![clip(id, 1)], MusicalBoundary::OneBar, &mut retirement_allowance)
-        };
+        let mut retirement_allowance = engine
+            .pending_retirements
+            .reserve(2)
+            .expect("fixture admits its original owner-return budget");
+        engine.queue_clips(
+            vec![clip(id, 1)],
+            MusicalBoundary::OneBar,
+            &mut retirement_allowance,
+        )
+    };
     while events.pop().is_ok() {}
     while engine.event_tx.push(EngineEvent::PlaybackStarted).is_ok() {}
     for _ in 0..presentation_queue::PRESENTATION_EVENT_CAPACITY - 3 {
         {
-            let mut retirement_allowance = engine.pending_retirements.reserve(1).expect("fixture admits its original owner-return budget");
-            engine.present_event_after(EngineEvent::PlaybackStarted, 5000, &mut retirement_allowance)
+            let mut retirement_allowance = engine
+                .pending_retirements
+                .reserve(1)
+                .expect("fixture admits its original owner-return budget");
+            engine.present_event_after(
+                EngineEvent::PlaybackStarted,
+                5000,
+                &mut retirement_allowance,
+            )
         };
     }
     {
-            let mut retirement_allowance = engine.pending_retirements.reserve(2).expect("fixture admits its original owner-return budget");
-            engine.queue_clips(vec![clip(id, 2)], MusicalBoundary::Immediate, &mut retirement_allowance)
-        };
+        let mut retirement_allowance = engine
+            .pending_retirements
+            .reserve(2)
+            .expect("fixture admits its original owner-return budget");
+        engine.queue_clips(
+            vec![clip(id, 2)],
+            MusicalBoundary::Immediate,
+            &mut retirement_allowance,
+        )
+    };
     assert_eq!(engine.tracks[0].active_clip.unwrap().request_id, 2);
     assert!(
         engine.clip_batch_blocks_commands(),
@@ -570,7 +675,10 @@ fn publishing_does_not_count_ui_slots_before_a_real_heard_deadline() {
     {}
     for _ in 0..presentation_queue::PRESENTATION_EVENT_CAPACITY {
         {
-            let mut retirement_allowance = engine.pending_retirements.reserve(1).expect("fixture admits its original owner-return budget");
+            let mut retirement_allowance = engine
+                .pending_retirements
+                .reserve(1)
+                .expect("fixture admits its original owner-return budget");
             engine.present_event_after(EngineEvent::PlaybackStarted, 137, &mut retirement_allowance)
         };
     }
@@ -618,9 +726,16 @@ fn resync_does_not_announce_a_clip_before_its_reported_delay_is_heard() {
     let (mut engine, mut events, id) = delayed_engine();
     engine.sample_rate = 8;
     {
-            let mut retirement_allowance = engine.pending_retirements.reserve(2).expect("fixture admits its original owner-return budget");
-            engine.queue_clips(vec![clip(id, 1)], MusicalBoundary::Immediate, &mut retirement_allowance)
-        };
+        let mut retirement_allowance = engine
+            .pending_retirements
+            .reserve(2)
+            .expect("fixture admits its original owner-return budget");
+        engine.queue_clips(
+            vec![clip(id, 1)],
+            MusicalBoundary::Immediate,
+            &mut retirement_allowance,
+        )
+    };
     let mut output = [0.0; 16];
     engine.process(&mut output, 2);
     assert!(output.iter().all(|sample| *sample == 0.0));
@@ -731,14 +846,24 @@ fn inline_capture_stop_does_not_consume_packet_owner_admission_capacity() {
     let id = TrackId::new();
     engine.tracks.push(Box::new(EngineTrack::new(id)));
     {
-            let mut retirement_allowance = engine.pending_retirements.reserve(2).expect("fixture admits its original owner-return budget");
-            engine.begin_clip_performance( &mut retirement_allowance)
-        };
+        let mut retirement_allowance = engine
+            .pending_retirements
+            .reserve(2)
+            .expect("fixture admits its original owner-return budget");
+        engine.begin_clip_performance(&mut retirement_allowance)
+    };
     engine.performance_position = 1;
     {
-            let mut retirement_allowance = engine.pending_retirements.reserve(2).expect("fixture admits its original owner-return budget");
-            engine.queue_clips(vec![clip(id, 92)], MusicalBoundary::OneBar, &mut retirement_allowance)
-        };
+        let mut retirement_allowance = engine
+            .pending_retirements
+            .reserve(2)
+            .expect("fixture admits its original owner-return budget");
+        engine.queue_clips(
+            vec![clip(id, 92)],
+            MusicalBoundary::OneBar,
+            &mut retirement_allowance,
+        )
+    };
     let boundary = engine.pending_clip_batch.as_ref().unwrap().boundary;
     let identity = &*engine.tracks[0].queued_clip.as_ref().unwrap().prepared as *const _;
     while events.pop().is_ok() {}
@@ -752,8 +877,14 @@ fn inline_capture_stop_does_not_consume_packet_owner_admission_capacity() {
     for request in 0..presentation_queue::PRESENTATION_EVENT_CAPACITY {
         let owner = PreparedClipPlayback::stop(TrackId::new(), request as u64);
         {
-            let mut retirement_allowance = engine.pending_retirements.reserve(1).expect("fixture admits its original owner-return budget");
-            engine.present_event(EngineEvent::ClipRequestRetired(owner), &mut retirement_allowance)
+            let mut retirement_allowance = engine
+                .pending_retirements
+                .reserve(1)
+                .expect("fixture admits its original owner-return budget");
+            engine.present_event(
+                EngineEvent::ClipRequestRetired(owner),
+                &mut retirement_allowance,
+            )
         };
     }
     assert_eq!(
@@ -818,27 +949,37 @@ fn public_packet_preserves_last_credit_for_all_retained_terminals_and_returns_ea
     {}
     for _ in 0..fixture.engine.scheduled_presentation.capacity() {
         {
-            let mut retirement_allowance = fixture.engine.pending_retirements.reserve(1).expect("fixture admits its original owner-return budget");
+            let mut retirement_allowance = fixture
+                .engine
+                .pending_retirements
+                .reserve(1)
+                .expect("fixture admits its original owner-return budget");
             fixture.engine.present_event_at(
-            EngineEvent::PlaybackStarted,
-            fixture.engine.output_position + 521,
-         &mut retirement_allowance)
+                EngineEvent::PlaybackStarted,
+                fixture.engine.output_position + 521,
+                &mut retirement_allowance,
+            )
         };
     }
     let offsets: Arc<[(TrackId, u32)]> = vec![(fixture.tracks[0], 17)].into();
     {
-            let mut retirement_allowance = fixture.engine.pending_retirements.reserve(1).expect("fixture admits its original owner-return budget");
-            fixture.engine.present_event_at(
-        EngineEvent::SectionCaptureSource {
-            section_id: SectionId::new(),
-            effective_at_samples: 123,
-            section_position_samples: 45,
-            refreshed: false,
-            offsets: Arc::clone(&offsets),
-        },
-        fixture.engine.output_position + 521,
-     &mut retirement_allowance)
-        };
+        let mut retirement_allowance = fixture
+            .engine
+            .pending_retirements
+            .reserve(1)
+            .expect("fixture admits its original owner-return budget");
+        fixture.engine.present_event_at(
+            EngineEvent::SectionCaptureSource {
+                section_id: SectionId::new(),
+                effective_at_samples: 123,
+                section_position_samples: 45,
+                refreshed: false,
+                offsets: Arc::clone(&offsets),
+            },
+            fixture.engine.output_position + 521,
+            &mut retirement_allowance,
+        )
+    };
     assert!(fixture.engine.presentation_state.is_faulted());
     fixture.drain_command(EngineCommand::Play);
     fixture.drain_command(EngineCommand::QueueClips {
@@ -891,10 +1032,15 @@ fn public_packet_preserves_last_credit_for_all_retained_terminals_and_returns_ea
         - fixture.engine.scheduled_presentation.len();
     for _ in 0..room {
         {
-            let mut retirement_allowance = fixture.engine.pending_retirements.reserve(1).expect("fixture admits its original owner-return budget");
-            fixture.engine.present_event(EngineEvent::ClipRequestRetired(PreparedClipPlayback::stop(
-                missing, 9000,
-            )), &mut retirement_allowance)
+            let mut retirement_allowance = fixture
+                .engine
+                .pending_retirements
+                .reserve(1)
+                .expect("fixture admits its original owner-return budget");
+            fixture.engine.present_event(
+                EngineEvent::ClipRequestRetired(PreparedClipPlayback::stop(missing, 9000)),
+                &mut retirement_allowance,
+            )
         };
     }
     assert_eq!(fixture.engine.event_tx.slots(), 0);
@@ -1144,16 +1290,20 @@ fn staging_at_a_real_render_offset_cannot_spend_recovered_ring_slots() {
             ));
             source_owners.push(std::ptr::from_ref(owner.as_ref()) as usize);
             {
-            let mut retirement_allowance = engine.pending_retirements.reserve(1).expect("fixture admits its original owner-return budget");
-            engine.present_event_after(
-                EngineEvent::SectionTransitioned(SectionTransitionedEvent {
-                    section_id: owner.section_id,
-                    effective_at_samples: 1,
-                    retired: DisposalCell::new(owner),
-                }),
-                5000,
-             &mut retirement_allowance)
-        };
+                let mut retirement_allowance = engine
+                    .pending_retirements
+                    .reserve(1)
+                    .expect("fixture admits its original owner-return budget");
+                engine.present_event_after(
+                    EngineEvent::SectionTransitioned(SectionTransitionedEvent {
+                        section_id: owner.section_id,
+                        effective_at_samples: 1,
+                        retired: DisposalCell::new(owner),
+                    }),
+                    5000,
+                    &mut retirement_allowance,
+                )
+            };
         }
         assert_eq!(engine.scheduled_presentation.len(), 2048);
         assert!(engine

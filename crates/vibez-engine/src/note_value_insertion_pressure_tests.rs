@@ -252,7 +252,8 @@ fn ready_or_unfulfilled_note_value_waits_at_zero_then_returns_both_arrays_on_one
         );
         let completions: Vec<_> = fixture
             .engine
-            .pending_retirements.as_slice()
+            .pending_retirements
+            .as_slice()
             .iter()
             .filter_map(|event| {
                 if let EngineEvent::ClipInsertionCompleted(owner) = event {

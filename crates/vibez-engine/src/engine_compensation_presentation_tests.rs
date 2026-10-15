@@ -54,14 +54,20 @@ fn start_capture_through_command(
 fn in_segment_source_feed_does_not_wait_for_a_future_heard_deadline() {
     let (mut engine, _, mut events) = AudioEngine::new();
     {
-            let mut retirement_allowance = engine.pending_retirements.reserve(1).expect("fixture admits its original owner-return budget");
-            engine.present_event_after(EngineEvent::PlaybackStarted, 137, &mut retirement_allowance)
-        };
+        let mut retirement_allowance = engine
+            .pending_retirements
+            .reserve(1)
+            .expect("fixture admits its original owner-return budget");
+        engine.present_event_after(EngineEvent::PlaybackStarted, 137, &mut retirement_allowance)
+    };
     engine.rendered_callback_frames = 200;
     {
-            let mut retirement_allowance = engine.pending_retirements.reserve(2).expect("fixture admits its original owner-return budget");
-            engine.command_external_note_on(TrackId::new(), 60, 100, &mut retirement_allowance)
-        };
+        let mut retirement_allowance = engine
+            .pending_retirements
+            .reserve(2)
+            .expect("fixture admits its original owner-return budget");
+        engine.command_external_note_on(TrackId::new(), 60, 100, &mut retirement_allowance)
+    };
     assert!(matches!(events.pop(), Ok(EngineEvent::SourceNoteInput(_))));
     assert!(events.pop().is_err());
     engine.rendered_callback_frames = 0;
@@ -75,9 +81,12 @@ fn in_segment_repeat_source_is_immediate_without_advancing_its_heard_copy() {
     use vibez_core::perform::NoteRepeatRate;
     let (mut engine, _, mut events) = AudioEngine::new();
     {
-            let mut retirement_allowance = engine.pending_retirements.reserve(1).expect("fixture admits its original owner-return budget");
-            engine.present_event_after(EngineEvent::PlaybackStarted, 137, &mut retirement_allowance)
-        };
+        let mut retirement_allowance = engine
+            .pending_retirements
+            .reserve(1)
+            .expect("fixture admits its original owner-return budget");
+        engine.present_event_after(EngineEvent::PlaybackStarted, 137, &mut retirement_allowance)
+    };
     let track_id = TrackId::new();
     let rate = NoteRepeatRate::Sixteenth;
     let source = EngineEvent::SourceNoteRepeated(SourceNoteRepeatedEvent {
@@ -144,11 +153,17 @@ fn due_capture_notes_precede_closure_and_continuing_pad_feedback_survives() {
             })
         };
         {
-            let mut retirement_allowance = engine.pending_retirements.reserve(1).expect("fixture admits its original owner-return budget");
+            let mut retirement_allowance = engine
+                .pending_retirements
+                .reserve(1)
+                .expect("fixture admits its original owner-return budget");
             engine.present_event_after(note(60), 137, &mut retirement_allowance)
         };
         {
-            let mut retirement_allowance = engine.pending_retirements.reserve(1).expect("fixture admits its original owner-return budget");
+            let mut retirement_allowance = engine
+                .pending_retirements
+                .reserve(1)
+                .expect("fixture admits its original owner-return budget");
             engine.present_event_after(note(61), 138, &mut retirement_allowance)
         };
         engine.output_position = 137;
@@ -162,14 +177,20 @@ fn due_capture_notes_precede_closure_and_continuing_pad_feedback_survives() {
         assert_eq!(
             crate::retirement::tests::allocations(|| match closure {
                 0 => {
-            let mut retirement_allowance = engine.pending_retirements.reserve(2).expect("fixture admits its original owner-return budget");
-            engine.command_stop_performance_capture( &mut retirement_allowance)
-        },
+                    let mut retirement_allowance = engine
+                        .pending_retirements
+                        .reserve(2)
+                        .expect("fixture admits its original owner-return budget");
+                    engine.command_stop_performance_capture(&mut retirement_allowance)
+                }
                 1 => engine.close_capture_for_device_failure(),
                 _ => {
-            let mut retirement_allowance = engine.pending_retirements.reserve(2).expect("fixture admits its original owner-return budget");
-            engine.command_stop( &mut retirement_allowance)
-        },
+                    let mut retirement_allowance = engine
+                        .pending_retirements
+                        .reserve(2)
+                        .expect("fixture admits its original owner-return budget");
+                    engine.command_stop(&mut retirement_allowance)
+                }
             }),
             (0, 0)
         );
@@ -214,30 +235,38 @@ fn accepted_due_capture_start_reaches_the_ui_before_its_note_and_closure() {
             .is_ok()
         {}
         {
-            let mut retirement_allowance = engine.pending_retirements.reserve(1).expect("fixture admits its original owner-return budget");
-            engine.present_event(EngineEvent::PerformanceCaptureStarted(
-            PerformanceCaptureStartedEvent {
-                effective_at_samples: 0,
-                section_id: None,
-                section_position_samples: None,
-                offsets: Arc::clone(&offsets),
-            },
-        ), &mut retirement_allowance)
+            let mut retirement_allowance = engine
+                .pending_retirements
+                .reserve(1)
+                .expect("fixture admits its original owner-return budget");
+            engine.present_event(
+                EngineEvent::PerformanceCaptureStarted(PerformanceCaptureStartedEvent {
+                    effective_at_samples: 0,
+                    section_id: None,
+                    section_position_samples: None,
+                    offsets: Arc::clone(&offsets),
+                }),
+                &mut retirement_allowance,
+            )
         };
         {
-            let mut retirement_allowance = engine.pending_retirements.reserve(1).expect("fixture admits its original owner-return budget");
+            let mut retirement_allowance = engine
+                .pending_retirements
+                .reserve(1)
+                .expect("fixture admits its original owner-return budget");
             engine.present_event_after(
-            EngineEvent::InstrumentNoteInput(InstrumentNoteInputEvent {
-                track_id,
-                pitch: 60,
-                velocity: 100,
-                on: true,
-                effective_at_samples: 100,
-                section_id: None,
-                section_position_samples: None,
-            }),
-            100,
-         &mut retirement_allowance)
+                EngineEvent::InstrumentNoteInput(InstrumentNoteInputEvent {
+                    track_id,
+                    pitch: 60,
+                    velocity: 100,
+                    on: true,
+                    effective_at_samples: 100,
+                    section_id: None,
+                    section_position_samples: None,
+                }),
+                100,
+                &mut retirement_allowance,
+            )
         };
         engine.output_position = 137;
         engine.compensation_callback_heard_start = 137;
@@ -245,14 +274,20 @@ fn accepted_due_capture_start_reaches_the_ui_before_its_note_and_closure() {
         assert_eq!(
             crate::retirement::tests::allocations(|| match closure {
                 0 => {
-            let mut retirement_allowance = engine.pending_retirements.reserve(2).expect("fixture admits its original owner-return budget");
-            engine.command_stop_performance_capture( &mut retirement_allowance)
-        },
+                    let mut retirement_allowance = engine
+                        .pending_retirements
+                        .reserve(2)
+                        .expect("fixture admits its original owner-return budget");
+                    engine.command_stop_performance_capture(&mut retirement_allowance)
+                }
                 1 => engine.close_capture_for_device_failure(),
                 _ => {
-            let mut retirement_allowance = engine.pending_retirements.reserve(2).expect("fixture admits its original owner-return budget");
-            engine.command_stop( &mut retirement_allowance)
-        },
+                    let mut retirement_allowance = engine
+                        .pending_retirements
+                        .reserve(2)
+                        .expect("fixture admits its original owner-return budget");
+                    engine.command_stop(&mut retirement_allowance)
+                }
             }),
             (0, 0)
         );
@@ -322,9 +357,16 @@ fn state_queued_after_completed_callback_waits_only_its_real_latency() {
     engine.process(&mut [0.0; 128], 2);
     while events.pop().is_ok() {}
     {
-            let mut retirement_allowance = engine.pending_retirements.reserve(1).expect("fixture admits its original owner-return budget");
-            engine.present_event_after(EngineEvent::PlaybackStarted, engine.mix_latency(), &mut retirement_allowance)
-        };
+        let mut retirement_allowance = engine
+            .pending_retirements
+            .reserve(1)
+            .expect("fixture admits its original owner-return budget");
+        engine.present_event_after(
+            EngineEvent::PlaybackStarted,
+            engine.mix_latency(),
+            &mut retirement_allowance,
+        )
+    };
     for frames in [64, 64, 8] {
         let mut output = [0.0; 128];
         assert_eq!(
@@ -348,16 +390,20 @@ fn newer_immediate_mute_cannot_overtake_a_due_delayed_mute() {
     let (mut engine, _, mut events) = AudioEngine::new();
     let track_id = TrackId::new();
     {
-            let mut retirement_allowance = engine.pending_retirements.reserve(1).expect("fixture admits its original owner-return budget");
-            engine.present_event_after(
-        EngineEvent::TrackMuteChanged(TrackMuteChangedEvent {
-            track_id,
-            muted: true,
-            effective_at_samples: 137,
-        }),
-        137,
-     &mut retirement_allowance)
-        };
+        let mut retirement_allowance = engine
+            .pending_retirements
+            .reserve(1)
+            .expect("fixture admits its original owner-return budget");
+        engine.present_event_after(
+            EngineEvent::TrackMuteChanged(TrackMuteChangedEvent {
+                track_id,
+                muted: true,
+                effective_at_samples: 137,
+            }),
+            137,
+            &mut retirement_allowance,
+        )
+    };
     engine.output_position = 137;
     while engine
         .event_tx
@@ -368,13 +414,19 @@ fn newer_immediate_mute_cannot_overtake_a_due_delayed_mute() {
     assert_eq!(
         crate::retirement::tests::allocations(|| {
             {
-            let mut retirement_allowance = engine.pending_retirements.reserve(1).expect("fixture admits its original owner-return budget");
-            engine.present_event(EngineEvent::TrackMuteChanged(TrackMuteChangedEvent {
-                track_id,
-                muted: false,
-                effective_at_samples: 137,
-            }), &mut retirement_allowance)
-        };
+                let mut retirement_allowance = engine
+                    .pending_retirements
+                    .reserve(1)
+                    .expect("fixture admits its original owner-return budget");
+                engine.present_event(
+                    EngineEvent::TrackMuteChanged(TrackMuteChangedEvent {
+                        track_id,
+                        muted: false,
+                        effective_at_samples: 137,
+                    }),
+                    &mut retirement_allowance,
+                )
+            };
         }),
         (0, 0)
     );
@@ -397,23 +449,32 @@ fn newer_immediate_mute_cannot_overtake_a_due_delayed_mute() {
 fn source_recording_feed_does_not_wait_for_future_heard_state() {
     let (mut engine, _, mut events) = AudioEngine::new();
     {
-            let mut retirement_allowance = engine.pending_retirements.reserve(1).expect("fixture admits its original owner-return budget");
-            engine.present_event_after(EngineEvent::PlaybackStarted, 521, &mut retirement_allowance)
-        };
+        let mut retirement_allowance = engine
+            .pending_retirements
+            .reserve(1)
+            .expect("fixture admits its original owner-return budget");
+        engine.present_event_after(EngineEvent::PlaybackStarted, 521, &mut retirement_allowance)
+    };
     let position = SourceRecordingPosition {
         effective_at_samples: 0,
         ..Default::default()
     };
     {
-            let mut retirement_allowance = engine.pending_retirements.reserve(1).expect("fixture admits its original owner-return budget");
-            engine.present_event(EngineEvent::SourceNoteInput(SourceNoteInputEvent {
-        track_id: TrackId::new(),
-        pitch: 60,
-        velocity: 100,
-        on: true,
-        position,
-    }), &mut retirement_allowance)
-        };
+        let mut retirement_allowance = engine
+            .pending_retirements
+            .reserve(1)
+            .expect("fixture admits its original owner-return budget");
+        engine.present_event(
+            EngineEvent::SourceNoteInput(SourceNoteInputEvent {
+                track_id: TrackId::new(),
+                pitch: 60,
+                velocity: 100,
+                on: true,
+                position,
+            }),
+            &mut retirement_allowance,
+        )
+    };
     assert!(
         matches!(events.pop(), Ok(EngineEvent::SourceNoteInput(SourceNoteInputEvent { position: actual, .. })) if actual == position)
     );
@@ -436,41 +497,53 @@ fn capture_only_cancellation_retains_offsets_and_public_section_owner() {
     ));
     let original = &*prepared as *const PreparedSectionPlaybackSource;
     {
-            let mut retirement_allowance = engine.pending_retirements.reserve(1).expect("fixture admits its original owner-return budget");
-            engine.present_event_after(
-        EngineEvent::SectionTransitioned(SectionTransitionedEvent {
-            section_id,
-            effective_at_samples: 521,
-            retired: crate::events::DisposalCell::new(prepared),
-        }),
-        521,
-     &mut retirement_allowance)
-        };
+        let mut retirement_allowance = engine
+            .pending_retirements
+            .reserve(1)
+            .expect("fixture admits its original owner-return budget");
+        engine.present_event_after(
+            EngineEvent::SectionTransitioned(SectionTransitionedEvent {
+                section_id,
+                effective_at_samples: 521,
+                retired: crate::events::DisposalCell::new(prepared),
+            }),
+            521,
+            &mut retirement_allowance,
+        )
+    };
     let track_id = TrackId::new();
     {
-            let mut retirement_allowance = engine.pending_retirements.reserve(1).expect("fixture admits its original owner-return budget");
-            engine.present_event_after(
-        EngineEvent::TrackMuteChanged(TrackMuteChangedEvent {
-            track_id,
-            muted: true,
-            effective_at_samples: 64,
-        }),
-        64,
-     &mut retirement_allowance)
-        };
+        let mut retirement_allowance = engine
+            .pending_retirements
+            .reserve(1)
+            .expect("fixture admits its original owner-return budget");
+        engine.present_event_after(
+            EngineEvent::TrackMuteChanged(TrackMuteChangedEvent {
+                track_id,
+                muted: true,
+                effective_at_samples: 64,
+            }),
+            64,
+            &mut retirement_allowance,
+        )
+    };
     {
-            let mut retirement_allowance = engine.pending_retirements.reserve(1).expect("fixture admits its original owner-return budget");
-            engine.present_event_after(
-        EngineEvent::SectionCaptureSource {
-            section_id,
-            effective_at_samples: 521,
-            section_position_samples: 0,
-            refreshed: false,
-            offsets: Arc::clone(&offsets),
-        },
-        137,
-     &mut retirement_allowance)
-        };
+        let mut retirement_allowance = engine
+            .pending_retirements
+            .reserve(1)
+            .expect("fixture admits its original owner-return budget");
+        engine.present_event_after(
+            EngineEvent::SectionCaptureSource {
+                section_id,
+                effective_at_samples: 521,
+                section_position_samples: 0,
+                refreshed: false,
+                offsets: Arc::clone(&offsets),
+            },
+            137,
+            &mut retirement_allowance,
+        )
+    };
     while engine
         .event_tx
         .push(EngineEvent::PlaybackPosition(0))
@@ -481,15 +554,21 @@ fn capture_only_cancellation_retains_offsets_and_public_section_owner() {
         ..Default::default()
     };
     {
-            let mut retirement_allowance = engine.pending_retirements.reserve(1).expect("fixture admits its original owner-return budget");
-            engine.present_event(EngineEvent::SourceNoteInput(SourceNoteInputEvent {
-        track_id: TrackId::new(),
-        pitch: 60,
-        velocity: 100,
-        on: true,
-        position,
-    }), &mut retirement_allowance)
-        };
+        let mut retirement_allowance = engine
+            .pending_retirements
+            .reserve(1)
+            .expect("fixture admits its original owner-return budget");
+        engine.present_event(
+            EngineEvent::SourceNoteInput(SourceNoteInputEvent {
+                track_id: TrackId::new(),
+                pitch: 60,
+                velocity: 100,
+                on: true,
+                position,
+            }),
+            &mut retirement_allowance,
+        )
+    };
     assert_eq!(
         crate::retirement::tests::allocations(|| engine.close_capture_for_device_failure()),
         (0, 0)

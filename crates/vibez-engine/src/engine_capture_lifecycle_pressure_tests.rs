@@ -289,8 +289,16 @@ fn repeated_fault_and_play_preserve_the_episode_rearmed_by_accepted_start() {
     full(&mut fixture);
     for _ in 0..fixture.engine.scheduled_presentation.capacity() {
         {
-            let mut retirement_allowance = fixture.engine.pending_retirements.reserve(1).expect("fixture admits its original owner-return budget");
-            fixture.engine.present_event_after(EngineEvent::PlaybackStarted, 521, &mut retirement_allowance)
+            let mut retirement_allowance = fixture
+                .engine
+                .pending_retirements
+                .reserve(1)
+                .expect("fixture admits its original owner-return budget");
+            fixture.engine.present_event_after(
+                EngineEvent::PlaybackStarted,
+                521,
+                &mut retirement_allowance,
+            )
         };
     }
     let overflow: Arc<[(TrackId, u32)]> = vec![(fixture.tracks[0], 17)].into();
@@ -304,8 +312,14 @@ fn repeated_fault_and_play_preserve_the_episode_rearmed_by_accepted_start() {
     fixture.calls.clear();
     assert_eq!(
         crate::retirement::tests::allocations(|| {
-            let mut retirement_allowance = fixture.engine.pending_retirements.reserve(1).expect("fixture admits its original owner-return budget");
-            fixture.engine.present_event_after(discovering, 521, &mut retirement_allowance)
+            let mut retirement_allowance = fixture
+                .engine
+                .pending_retirements
+                .reserve(1)
+                .expect("fixture admits its original owner-return budget");
+            fixture
+                .engine
+                .present_event_after(discovering, 521, &mut retirement_allowance)
         }),
         (0, 0)
     );

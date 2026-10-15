@@ -169,7 +169,10 @@ fn native_consumer_fulfills_clip_growth_requests_across_capacity_boundaries() {
                             .iter()
                             .find(|item| item.operation == request.id)
                             .unwrap();
-                        assert_eq!(request.target, vibez_engine::clip_insertion::ClipInsertionTarget::Clip(item.clip));
+                        assert_eq!(
+                            request.target,
+                            vibez_engine::clip_insertion::ClipInsertionTarget::Clip(item.clip)
+                        );
                         request.fulfill();
                         requests += 1;
                     }
@@ -180,7 +183,12 @@ fn native_consumer_fulfills_clip_growth_requests_across_capacity_boundaries() {
                             .iter()
                             .position(|item| item.operation == completed.id())
                             .unwrap();
-                        assert_eq!(completed.target, vibez_engine::clip_insertion::ClipInsertionTarget::Clip(expected[index].clip));
+                        assert_eq!(
+                            completed.target,
+                            vibez_engine::clip_insertion::ClipInsertionTarget::Clip(
+                                expected[index].clip
+                            )
+                        );
                         assert!(!applied[index]);
                         applied[index] = true;
                         drop(completed);

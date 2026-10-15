@@ -197,8 +197,14 @@ fn inject_full_retirement_store(
         // Explicit off-callback fixture injection tests the bounded store;
         // Insertion, request serving, rendering and completion remain public.
         {
-            let mut retirement_allowance = engine.pending_retirements.reserve(1).expect("fixture admits its original owner-return budget");
-            engine.retire_event(EngineEvent::RetiredAutomationLane(lane), &mut retirement_allowance)
+            let mut retirement_allowance = engine
+                .pending_retirements
+                .reserve(1)
+                .expect("fixture admits its original owner-return budget");
+            engine.retire_event(
+                EngineEvent::RetiredAutomationLane(lane),
+                &mut retirement_allowance,
+            )
         };
     }
     assert_eq!(engine.pending_retirements.len(), 32);
@@ -483,7 +489,8 @@ fn ready_or_abandoned_note_clip_waits_at_zero_and_uses_only_the_last_completion_
         );
         let completions: Vec<_> = fixture
             .engine
-            .pending_retirements.as_slice()
+            .pending_retirements
+            .as_slice()
             .iter()
             .filter_map(|event| {
                 if let EngineEvent::ClipInsertionCompleted(owner) = event {
