@@ -90,8 +90,14 @@ fn prepared_source_and_live_growth_preserve_matching_storage_at_content_boundari
             panic!("full prepared source must request real growth");
         };
         assert_eq!(request.id, incoming.id);
-        // Every process_block publishes position, including this zero-frame request callback.
+        // The zero-frame callback still publishes its position and silent master meters.
         assert_eq!(events.pop().unwrap(), EngineEvent::PlaybackPosition(8));
+        assert_eq!(events.pop().unwrap(), EngineEvent::Metering {
+            peak_l: 0.0,
+            peak_r: 0.0,
+            rms_l: 0.0,
+            rms_r: 0.0,
+        });
         assert!(events.pop().is_err());
         request.fulfill();
         callback(&mut engine, false);
