@@ -101,7 +101,7 @@ async fn delay_file_roundtrip_loads_all_seventeen_parameters_as_one_undoable_edi
 
 #[test]
 fn cancelled_or_stale_delay_loads_cannot_overwrite_current_device_or_new_request() {
-    for action in ["cancel", "edit away and back", "remove and undo", "runtime reset", "superseded"] {
+    for action in ["cancel", "edit away and back", "remove and undo", "project reset and replay", "superseded"] {
         let (mut app, track, effect) = delay_app();
         let original = app.capture_device_preset(track, effect).unwrap();
         let stale = app.begin_device_preset_load(track, effect).unwrap();
@@ -123,7 +123,11 @@ fn cancelled_or_stale_delay_loads_cannot_overwrite_current_device_or_new_request
                 let _ = app.update(Message::Devices(DevicesMsg::RemoveEffect(track, effect)));
                 let _ = app.update(Message::Project(ProjectMsg::Undo));
             }
-            "runtime reset" => app.clear_project_runtime(),
+            "project reset and replay" => {
+                let snapshot = app.take_snapshot();
+                app.clear_project_runtime();
+                app.apply_snapshot(snapshot);
+            }
             "superseded" => superseding = app.begin_device_preset_load(track, effect),
             _ => unreachable!(),
         }
