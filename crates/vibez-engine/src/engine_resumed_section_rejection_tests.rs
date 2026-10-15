@@ -39,8 +39,30 @@ fn unmuted_lane() -> AutomationLane {
     lane
 }
 
-#[test]
-fn resumed_section_rejection_preserves_complete_owner_with_an_old_inline_stop() {
+struct ReturningSectionFixture {
+    engine: AudioEngine,
+    commands: Producer<EngineCommand>,
+    events: Consumer<EngineEvent>,
+    tracks: [TrackId; 2],
+    first_section: SectionId,
+    old_section: SectionId,
+    new_section: SectionId,
+    middle_pointer: usize,
+    incoming_pointer: usize,
+    original_audio: std::sync::Weak<DecodedAudio>,
+    incoming_audio: std::sync::Weak<DecodedAudio>,
+    first_audio: std::sync::Weak<DecodedAudio>,
+    arrange_audio: std::sync::Weak<DecodedAudio>,
+    removed_owners: Vec<std::sync::Weak<DecodedAudio>>,
+    acknowledgements: Vec<usize>,
+    offsets: std::sync::Weak<[(TrackId, u32)]>,
+    output: [f32; 32],
+    heap: (usize, usize),
+    after_len: usize,
+    after_capacity: usize,
+}
+
+fn returning_section_fixture() -> ReturningSectionFixture {
     let tracks = [TrackId::new(), TrackId::new()];
     let first_section = SectionId::new();
     let old_section = SectionId::new();
@@ -238,6 +260,54 @@ fn resumed_section_rejection_preserves_complete_owner_with_an_old_inline_stop() 
     });
     let after_len = engine.pending_retirements.len();
     let after_capacity = engine.pending_retirements.capacity();
+    ReturningSectionFixture {
+        engine,
+        commands,
+        events,
+        tracks,
+        first_section,
+        old_section,
+        new_section,
+        middle_pointer,
+        incoming_pointer,
+        original_audio,
+        incoming_audio,
+        first_audio,
+        arrange_audio,
+        removed_owners,
+        acknowledgements,
+        offsets,
+        output,
+        heap,
+        after_len,
+        after_capacity,
+    }
+}
+
+#[test]
+fn resumed_section_rejection_preserves_complete_owner_with_an_old_inline_stop() {
+    let ReturningSectionFixture {
+        mut engine,
+        commands: _commands,
+        mut events,
+        tracks,
+        first_section,
+        old_section,
+        new_section: _new_section,
+        middle_pointer,
+        incoming_pointer,
+        original_audio,
+        incoming_audio,
+        first_audio,
+        arrange_audio,
+        removed_owners,
+        acknowledgements,
+        offsets,
+        output,
+        heap,
+        after_len,
+        after_capacity,
+    } = returning_section_fixture();
     let active_after = engine.active_section.map(|section| section.section_id);
     eprintln!("resumed Section rejection: heap={heap:?}, ordinary={after_len}/{after_capacity}");
     let expected_fade = std::array::from_fn(|frame| 0.25 * (1.0 - frame as f32 / 64.0));
@@ -421,3 +491,4 @@ fn resumed_section_rejection_preserves_complete_owner_with_an_old_inline_stop() 
     assert_eq!(after_capacity, 32);
     assert_eq!(heap, (0, 0));
 }
+
