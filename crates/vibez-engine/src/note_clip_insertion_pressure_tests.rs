@@ -186,7 +186,7 @@ fn inject_full_retirement_store(
         let allocation = lane.points.as_ptr();
         expected.push((lane.clone(), allocation));
         // Explicit off-callback fixture injection tests the bounded store;
-        // AddNoteClip, request serving, rendering and completion remain public.
+        // Insertion, request serving, rendering and completion remain public.
         engine.retire_event(EngineEvent::RetiredAutomationLane(lane));
     }
     assert_eq!(engine.pending_retirements.len(), 32);
@@ -523,3 +523,6 @@ fn ready_or_abandoned_note_clip_waits_at_zero_and_uses_only_the_last_completion_
 
 #[path = "note_clip_insertion_lifecycle_tests.rs"]
 mod lifecycle_tests;
+
+#[path = "note_value_insertion_pressure_tests.rs"]
+mod note_value_tests;
