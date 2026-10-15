@@ -118,6 +118,8 @@ fn current_reject_admission_preserves_all_three_owners_with_zero_through_three_f
         commands.push(EngineCommand::SetProjectSwing(swing)).unwrap();
         let original_swing = engine.project_swing;
         let before = (engine.output_position_samples(), engine.transport().position());
+        let capture_boundary = engine.compensation_callback_heard_start;
+        assert_eq!(capture_boundary, 0);
         let heap = crate::retirement::tests::allocations(|| engine.drain_commands());
         assert_eq!(heap, (0, 0), "free={free}");
         assert_eq!(engine.pending_retirements.capacity(), 32);
@@ -141,7 +143,7 @@ fn current_reject_admission_preserves_all_three_owners_with_zero_through_three_f
             assert!(matches!(&returned[2], EngineEvent::CompensationFailed { reason } if reason.as_ptr() as usize == reason_identity));
             assert!(engine.device_handoff.pending().is_none());
             assert!(!engine.capture_lifecycle.is_active());
-            assert_eq!(engine.presentation_state.terminals.capture_stop(), Some(before.1));
+            assert_eq!(engine.presentation_state.terminals.capture_stop(), Some(capture_boundary));
         }
         remove_ring_markers(&mut events);
         assert_eq!(crate::retirement::tests::allocations(|| engine.drain_commands()), (0, 0));
@@ -157,7 +159,7 @@ fn current_reject_admission_preserves_all_three_owners_with_zero_through_three_f
         assert_eq!(returned.iter().filter(|event| matches!(event, EngineEvent::RetiredEffectStorage(storage) if storage.0.as_ptr() as usize == storage_identity)).count(), 1);
         assert_eq!(returned.iter().filter(|event| matches!(event, EngineEvent::DisposeEffect(owner) if reconfiguration::effect_owner_identity(&**owner) == device_identity)).count(), 1);
         assert_eq!(returned.iter().filter(|event| matches!(event, EngineEvent::CompensationFailed { reason } if reason.as_ptr() as usize == reason_identity)).count(), 1);
-        assert_eq!(returned.iter().filter(|event| matches!(event, EngineEvent::PerformanceCaptureStopped { effective_at_samples } if *effective_at_samples == before.1)).count(), 1);
+        assert_eq!(returned.iter().filter(|event| matches!(event, EngineEvent::PerformanceCaptureStopped { effective_at_samples } if *effective_at_samples == capture_boundary)).count(), 1);
         assert_eq!(drops.load(Ordering::Relaxed), 0);
         drop(returned);
         assert_eq!(drops.load(Ordering::Relaxed), 1);
@@ -250,7 +252,7 @@ fn remove_bus_nested_lane_cleanup_uses_remaining_slots_after_staged_source_owner
     }
     let lane_owners: Vec<_> = lanes.iter().map(|lane| (lane.id, lane.points.as_ptr() as usize)).collect();
     let mut unrelated = AutomationLane::new(AutomationTarget::TrackGain);
-    unrelated.points.push(AutomationPoint { beat: 0.0, value: 1.0, curve: 0.0 });
+    unrelated.points.push(AutomationPoint { beat: 0.0, value: 0.5, curve: 0.0 });
     let unrelated_identity = (unrelated.id, unrelated.points.as_ptr());
     lanes.push(unrelated);
     let mut track_route = routing_channel(track);
