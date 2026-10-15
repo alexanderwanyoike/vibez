@@ -433,15 +433,6 @@ fn local_away_owner_and_resident_restart_keep_independent_gates() {
                     == identities[index]
             });
             assert_eq!(owner_roundtrips, [true, true]);
-            let final_position = engine.transport.position();
-            let ids = [local.handoff_id, project.handoff_id];
-            let scopes = [local.is_local_recovery(), project.is_local_recovery()];
-            eprintln!("device-handoff-overlap baseline: bypass={bypass}; partitions={partitions:?}; capture_stop={capture_stop}; ids={ids:?}; scopes={scopes:?}; owner_roundtrips={owner_roundtrips:?}; final_position={final_position}; readiness={readiness:?}; order={:?}; local_bits={:?}; loss_bits={:?}; gated_bits={:?}; resumed_bits={:?}",
-                trace.order,
-                local_audio.iter().copied().map(f32::to_bits).collect::<Vec<_>>(),
-                loss.iter().copied().map(f32::to_bits).collect::<Vec<_>>(),
-                gated.iter().copied().map(f32::to_bits).collect::<Vec<_>>(),
-                resumed.iter().copied().map(f32::to_bits).collect::<Vec<_>>());
         }
     }
 }
