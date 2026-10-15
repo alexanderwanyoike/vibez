@@ -26,12 +26,17 @@ static DELAY_PARAMS: &[ParamDescriptor] = &[
     },
 ];
 
+const MAX_HISTORY_BYTES: u64 = 64 * 1024 * 1024;
+const MAX_SYNC_SECONDS: u64 = 18;
+const INTERPOLATION_GUARDS: u64 = 2;
+
 /// Stereo delay effect with feedback.
 pub struct DelayEffect {
     time_ms: f32,
     feedback: f32,
     mix: f32,
     sample_rate: f32,
+    configuration_valid: bool,
     buffer_l: Vec<f32>,
     buffer_r: Vec<f32>,
     write_pos: usize,
@@ -39,16 +44,37 @@ pub struct DelayEffect {
 
 impl DelayEffect {
     pub fn new(sample_rate: f32) -> Self {
+        let configuration_valid = Self::requested_activation_rate(sample_rate)
+            .filter(|rate| *rate >= 1000)
+            .and_then(|rate| u64::from(rate).checked_mul(MAX_SYNC_SECONDS))
+            .and_then(|frames| frames.checked_add(INTERPOLATION_GUARDS))
+            .and_then(|frames| frames.checked_mul(2))
+            .and_then(|samples| samples.checked_mul(std::mem::size_of::<f32>() as u64))
+            .is_some_and(|bytes| bytes <= MAX_HISTORY_BYTES);
         // Max delay = 2 seconds
-        let max_samples = (sample_rate * 2.0) as usize;
+        let max_samples = if configuration_valid {
+            (sample_rate * 2.0) as usize
+        } else {
+            0
+        };
         Self {
             time_ms: 500.0,
             feedback: 0.5,
             mix: 0.3,
             sample_rate,
+            configuration_valid,
             buffer_l: vec![0.0; max_samples],
             buffer_r: vec![0.0; max_samples],
             write_pos: 0,
+        }
+    }
+
+    fn requested_activation_rate(sample_rate: f32) -> Option<u32> {
+        let rate = f64::from(sample_rate);
+        if rate.is_finite() && rate.fract() == 0.0 && (0.0..=f64::from(u32::MAX)).contains(&rate) {
+            Some(rate as u32)
+        } else {
+            None
         }
     }
 
@@ -61,7 +87,11 @@ impl DelayEffect {
 
 impl AudioEffect for DelayEffect {
     fn activation_sample_rate(&self) -> Option<u32> {
-        Some(self.sample_rate as u32)
+        Self::requested_activation_rate(self.sample_rate)
+    }
+
+    fn processing_configuration_valid(&self) -> bool {
+        self.configuration_valid
     }
 
     fn effect_type(&self) -> EffectType {
