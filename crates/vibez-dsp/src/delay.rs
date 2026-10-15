@@ -164,6 +164,7 @@ pub struct DelayEffect {
     timing: DelayTime,
     mix: ScalarRamp,
     feedback: ScalarRamp,
+    routing: ScalarRamp,
 }
 
 impl DelayEffect {
@@ -175,6 +176,7 @@ impl DelayEffect {
             timing: DelayTime::new(),
             mix: ScalarRamp::new(DELAY_PARAMS[param::MIX].default),
             feedback: ScalarRamp::new(DELAY_PARAMS[param::FEEDBACK].default),
+            routing: ScalarRamp::new(DELAY_PARAMS[param::ROUTING].default),
         }
     }
 
@@ -220,6 +222,8 @@ impl DelayEffect {
             self.mix.edit(target, automated, (self.history.sample_rate() as usize).div_ceil(100));
         } else if index == param::FEEDBACK {
             self.feedback.edit(target, automated, (self.history.sample_rate() as usize).div_ceil(100));
+        } else if index == param::ROUTING {
+            self.routing.edit(target, automated, (self.history.sample_rate() as usize).div_ceil(50));
         }
         self.timing.parameter_edited(index, &self.targets, self.history.sample_rate(), automated);
         true
@@ -289,10 +293,24 @@ impl AudioEffect for DelayEffect {
             let (delayed_l, delayed_r) = self.history.read(left, right);
             let mix = self.mix.next_frame();
             let feedback = self.feedback.next_frame();
+            let routing = self.routing.next_frame();
+            // Exact endpoints retain the original channel samples without extra blend rounding.
+            let (routed_l, routed_r) = if routing == 0.0 {
+                (delayed_l, delayed_r)
+            } else if routing == 1.0 {
+                (delayed_r, delayed_l)
+            } else {
+                let cross = f64::from(routing);
+                let own = 1.0 - cross;
+                (
+                    (f64::from(delayed_l) * own + f64::from(delayed_r) * cross) as f32,
+                    (f64::from(delayed_r) * own + f64::from(delayed_l) * cross) as f32,
+                )
+            };
 
             // Left channel
             let dry_l = Self::finite_or_zero(buffer[frame * ch]);
-            let write_l = Self::finite_or_zero(dry_l + delayed_l * feedback);
+            let write_l = Self::finite_or_zero(dry_l + routed_l * feedback);
             buffer[frame * ch] = Self::finite_or_zero(dry_l * (1.0 - mix) + delayed_l * mix);
 
             // Missing mono input is zero, but its feedback continues while unobserved.
@@ -301,7 +319,7 @@ impl AudioEffect for DelayEffect {
             } else {
                 0.0
             };
-            let write_r = Self::finite_or_zero(dry_r + delayed_r * feedback);
+            let write_r = Self::finite_or_zero(dry_r + routed_r * feedback);
             if ch >= 2 {
                 buffer[frame * ch + 1] =
                     Self::finite_or_zero(dry_r * (1.0 - mix) + delayed_r * mix);
@@ -316,6 +334,7 @@ impl AudioEffect for DelayEffect {
         self.timing.reset(&self.targets, self.history.sample_rate());
         self.mix.reset(self.targets[param::MIX]);
         self.feedback.reset(self.targets[param::FEEDBACK]);
+        self.routing.reset(self.targets[param::ROUTING]);
     }
 }
 
