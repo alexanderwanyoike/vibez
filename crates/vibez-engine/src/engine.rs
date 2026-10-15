@@ -981,3 +981,7 @@ mod device_observation_capture_tests;
 #[cfg(test)]
 #[path = "engine_capture_lifecycle_admission_tests.rs"]
 mod capture_lifecycle_admission_tests;
+
+#[cfg(test)]
+#[path = "engine_capture_lifecycle_episode_tests.rs"]
+mod capture_lifecycle_episode_tests;
