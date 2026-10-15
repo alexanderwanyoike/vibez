@@ -29,3 +29,7 @@ pub mod vu_meter;
 pub mod waveform;
 
 pub mod device_controls;
+
+pub mod delay_device;
+pub mod delay_controls;
+pub mod delay_display;

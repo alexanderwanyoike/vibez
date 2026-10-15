@@ -247,6 +247,12 @@ impl App {
         match message {
             Message::GainControl(message) => return self.update_gain_control(message),
             Message::DeviceControl(message) => return self.update_device_control(message),
+            Message::DelayPage(track, effect, page) => {
+                if self.state.find_track(track).is_some_and(|track| track.effects.iter().any(|item|
+                    item.id == effect && crate::domains::delay_observation::is_native_delay(item))) {
+                    self.delay_panels.entry(effect).or_default().page = page;
+                }
+            }
             Message::DevicePreset(message) => return self.update_device_preset(message),
             Message::ApplyDevicePreset(track_id, effect_id, preset) => {
                 return self.apply_device_preset(track_id, effect_id, preset);

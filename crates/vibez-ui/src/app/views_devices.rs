@@ -77,8 +77,7 @@ impl App {
         available_width: f32,
     ) -> Element<'a, Message> {
         use crate::widgets::effect_slot::card_width;
-        // Every other card is built first and measured, so each Gain can take
-        // its share of whatever width the section has left.
+        // Measured siblings leave each flexible native card a share of the remaining width.
         let mut cards: Vec<Option<Element<'a, Message>>> = Vec::new();
         let mut used = 0.0;
         if let Some((card, width)) = self.instrument_card(track_id, track, track_color) {
@@ -94,7 +93,8 @@ impl App {
                 &self.state.project_tracks.buses,
                 &self.state.devices,
             );
-            if crate::domains::gain::is_native_gain(effect) {
+            if crate::domains::gain::is_native_gain(effect)
+                || crate::domains::delay_observation::is_native_delay(effect) {
                 used += card_width(effect, Some(0.0), sidechain.is_some());
                 gains.push((cards.len(), effect, sidechain));
                 cards.push(None);
@@ -127,13 +127,19 @@ impl App {
         if !gains.is_empty() {
             let spacing = CHAIN_SPACING * cards.len().saturating_sub(1) as f32;
             let share = (available_width - used - spacing) / gains.len() as f32;
-            let width = crate::widgets::gain_device::card_width(share);
             for (position, effect, sidechain) in gains {
+                let body = if crate::domains::delay_observation::is_native_delay(effect) {
+                    self.delay_device_body(track_id, effect, track_color,
+                        crate::widgets::delay_device::card_width(share))
+                } else {
+                    self.gain_device_body(track_id, effect, track_color,
+                        crate::widgets::gain_device::card_width(share))
+                };
                 cards[position] = Some(view_effect_slot(
                     track_id,
                     effect,
                     track_color,
-                    Some(self.gain_device_body(track_id, effect, track_color, width)),
+                    Some(body),
                     sidechain,
                     self.state.transport.sample_rate,
                 ));
@@ -202,6 +208,24 @@ impl App {
                 .into(),
             width,
         ))
+    }
+
+    fn delay_device_body<'a>(&'a self, track_id: TrackId, effect: &'a crate::state::UiEffect,
+        accent: Color, width: f32) -> DeviceBody<'a> {
+        let observation = self.delay_panels.get(&effect.id).unwrap_or(&self.empty_delay_panel);
+        let controls = self.device_control_state(effect.id);
+        let output = self.device_meters.readings.get(&effect.id).and_then(|reading| reading.available_output());
+        let content = iced::widget::responsive(move |size| {
+            crate::widgets::delay_device::view(crate::widgets::delay_device::DelayView {
+                track: track_id, effect, accent, controls, observation, response: None,
+                response_status: if observation.snapshot.is_some_and(|state| state.reference_moving) {
+                    "Moving" } else { "Calculating" }, output,
+                presets: self.view_device_preset_bar(track_id, effect, accent,
+                    crate::widgets::delay_device::preset_bar_width(size)),
+                size, on_page: Message::DelayPage,
+            })
+        });
+        DeviceBody { content: content.into(), width, padding: iced::Padding::ZERO }
     }
 
     fn gain_device_body<'a>(
