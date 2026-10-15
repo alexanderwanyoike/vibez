@@ -118,10 +118,17 @@ fn scope_fits(width: f32, height: f32, advanced: bool, knob: Option<f32>) -> boo
 
 #[test]
 fn responsive_regions_preserve_real_children_and_concept_order_at_every_supported_height() {
-    assert_eq!(DetailPage::ALL, [
-        DetailPage::Main, DetailPage::Color, DetailPage::Clock,
-        DetailPage::Filter, DetailPage::Input, DetailPage::Output,
-    ]);
+    assert_eq!(
+        DetailPage::ALL,
+        [
+            DetailPage::Main,
+            DetailPage::Color,
+            DetailPage::Clock,
+            DetailPage::Filter,
+            DetailPage::Input,
+            DetailPage::Output,
+        ]
+    );
     for width in WIDTHS {
         for height in 64..=304 {
             let height = height as f32;
@@ -245,8 +252,10 @@ fn responsive_regions_preserve_real_children_and_concept_order_at_every_supporte
                         );
                         if width == 430.0 && height == 64.0 {
                             for (child, parent) in [
-                                (layout.presets, body), (layout.disclosure, body),
-                                (details.bounds, body), (details.selector, details.bounds),
+                                (layout.presets, body),
+                                (layout.disclosure, body),
+                                (details.bounds, body),
+                                (details.selector, details.bounds),
                                 (details.content, details.bounds),
                             ] {
                                 assert!(child.x >= parent.x && child.y >= parent.y, "{context}");

@@ -204,9 +204,18 @@ mod tests {
         (app, track, effect)
     }
 
-    fn submit_bitcrush(app: &mut App, track: TrackId, effect: EffectId, index: usize, text: impl Into<String>) {
+    fn submit_bitcrush(
+        app: &mut App,
+        track: TrackId,
+        effect: EffectId,
+        index: usize,
+        text: impl Into<String>,
+    ) {
         let _ = app.update(Message::DeviceControl(DeviceControlMsg::Input(
-            track, effect, index, text.into(),
+            track,
+            effect,
+            index,
+            text.into(),
         )));
         let _ = app.update(Message::DeviceControl(DeviceControlMsg::Submit(
             track, effect, index,
