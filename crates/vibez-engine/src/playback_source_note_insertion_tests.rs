@@ -1244,3 +1244,6 @@ fn pending_note_storage_keeps_arrange_distinct_through_reachable_section_and_lau
 
 #[path = "playback_source_note_value_home_tests.rs"]
 mod note_value_home_tests;
+
+#[path = "playback_source_automation_lane_home_tests.rs"]
+mod automation_lane_home_tests;

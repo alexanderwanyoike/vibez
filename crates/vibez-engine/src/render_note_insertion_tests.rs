@@ -87,3 +87,6 @@ fn offline_note_channel_prepares_actual_content_and_grows_live_and_staging_at_bo
 
 #[path = "render_note_value_insertion_tests.rs"]
 mod note_value_tests;
+
+#[path = "render_automation_lane_insertion_tests.rs"]
+mod automation_lane_tests;

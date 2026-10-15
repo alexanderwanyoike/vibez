@@ -978,3 +978,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "playback_source_automation_lane_construction_tests.rs"]
+pub(crate) mod automation_lane_construction_tests;
