@@ -40,7 +40,9 @@ fn full_two_second_delay_arrives_at_the_endpoint_and_never_one_sample_early() {
                 let early_bits = [actual[early].to_bits(), actual[early + 1].to_bits()];
                 let endpoint_bits = [actual[endpoint].to_bits(), actual[endpoint + 1].to_bits()];
                 let nonzero_frames: Vec<_> = actual
-                    .chunks_exact(2)
+                    .as_chunks::<2>()
+                    .0
+                    .iter()
                     .enumerate()
                     .filter(|(_, pair)| pair.iter().any(|sample| *sample != 0.0))
                     .map(|(frame, pair)| {

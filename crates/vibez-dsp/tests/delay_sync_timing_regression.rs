@@ -113,7 +113,7 @@ fn observe(
             block[2 * (impulse - frame)..2 * (impulse - frame) + 2].copy_from_slice(&[1.0, 0.25]);
         }
         effect.process(block, 2);
-        for (index, pair) in block.chunks_exact(2).enumerate() {
+        for (index, pair) in block.as_chunks::<2>().0.iter().enumerate() {
             let global_frame = frame + index;
             let weight = if global_frame == impulse + distance.whole {
                 1.0 - distance.fraction

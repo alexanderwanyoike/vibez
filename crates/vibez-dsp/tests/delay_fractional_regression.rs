@@ -94,7 +94,9 @@ fn fractional_distances_preserve_the_first_four_interpolated_feedback_repeats() 
                             })
                             .fold(0.0_f64, f64::max);
                         let positive_witnesses: Vec<_> = expected
-                            .chunks_exact(2)
+                            .as_chunks::<2>()
+                            .0
+                            .iter()
                             .enumerate()
                             .filter(|(_, pair)| pair[channel] > 0.0)
                             .map(|(frame, pair)| {

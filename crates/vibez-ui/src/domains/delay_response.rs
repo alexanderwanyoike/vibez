@@ -184,7 +184,7 @@ pub fn render_reference(state: &DelayState, cancel: &AtomicBool) -> Option<Delay
         if cancel.load(Ordering::Acquire) {
             return None;
         }
-        for (offset, pair) in scratch[..2 * count].chunks_exact(2).enumerate() {
+        for (offset, pair) in scratch[..2 * count].as_chunks::<2>().0.iter().enumerate() {
             if !pair.iter().all(|sample| sample.is_finite()) {
                 return None;
             }

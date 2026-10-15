@@ -232,7 +232,11 @@ fn independent_instances_and_stereo_channels_do_not_share_delay_history() {
     let first_output = render(&mut first, &silence, &[7, 31, 128]);
     let second_output = render(&mut second, &silence, &[1, 64]);
     assert!(first_output.iter().all(|sample| *sample == 0.0));
-    assert!(second_output.chunks_exact(2).all(|pair| pair[0] == 0.0));
+    assert!(second_output
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .all(|pair| pair[0] == 0.0));
     let expected = impulse_response(501, 125, [0.0, -0.5], 0.5, 1.0);
     assert_eq!(second_output.as_slice(), &expected[2..]);
     let unreset_right_repeat_bits =

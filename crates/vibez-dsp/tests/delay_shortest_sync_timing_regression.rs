@@ -45,7 +45,7 @@ fn shortest_sync_timing_retains_divisions_and_matches_fractional_audio_and_obser
                 audio[..2].copy_from_slice(&[0.25, -0.125]);
                 effect.process(&mut audio, 2);
                 let mut expected = [[0.0_f64; 2]; 8];
-                for (frame, pair) in audio.chunks_exact(2).enumerate() {
+                for (frame, pair) in audio.as_chunks::<2>().0.iter().enumerate() {
                     for (channel, &actual) in pair.iter().enumerate() {
                         // Eliminating stored history gives y[n] = weighted (input + feedback*y)
                         // at the two earlier integer times surrounding the fractional delay.

@@ -93,7 +93,7 @@ fn sync_uses_engine_tempo_and_preserves_ping_pong_repeat_positions() {
                     AudioProcessBlock::new(&mut output[..2 * count], 2)
                         .with_live_input(track.raw(), &input[..2 * count]),
                 );
-                for (offset, pair) in output[..2 * count].chunks_exact(2).enumerate() {
+                for (offset, pair) in output[..2 * count].as_chunks::<2>().0.iter().enumerate() {
                     let at = position + offset;
                     let repeat = (1..=3).find(|repeat| at == repeat * distance);
                     for (channel, &actual) in pair.iter().enumerate() {

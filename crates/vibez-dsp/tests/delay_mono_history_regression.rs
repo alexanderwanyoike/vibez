@@ -83,7 +83,7 @@ fn mono_frames_advance_both_histories_with_zero_missing_right_input() {
                     max_left_error =
                         max_left_error.max((f64::from(*actual) - f64::from(expected)).abs());
                 }
-                for (index, pair) in stereo.chunks_exact(2).enumerate() {
+                for (index, pair) in stereo.as_chunks::<2>().0.iter().enumerate() {
                     let frame = 2 * delay + index;
                     let left = expected_left(frame, delay, mono_input);
                     let right = expected_right(frame, delay);
@@ -106,8 +106,12 @@ fn mono_frames_advance_both_histories_with_zero_missing_right_input() {
                         })
                     })
                     .collect();
-                let right_nonzero_count =
-                    stereo.chunks_exact(2).filter(|pair| pair[1] != 0.0).count();
+                let right_nonzero_count = stereo
+                    .as_chunks::<2>()
+                    .0
+                    .iter()
+                    .filter(|pair| pair[1] != 0.0)
+                    .count();
                 if mismatches != 0 {
                     failures.push(format!(
                         "rate={rate}, mono_input={mono_input}, parts={parts:?}: {mismatches} exact sample mismatches, max L/R error={max_left_error}/{max_right_error}"

@@ -121,7 +121,7 @@ impl App {
     ) -> Option<EngineCommand> {
         use vibez_dsp::delay::param;
         let edit = message.param_edit()?;
-        let Some(effect) = self
+        let effect = self
             .state
             .find_track(edit.track_id)
             .and_then(|track| {
@@ -130,10 +130,7 @@ impl App {
                     .iter()
                     .find(|effect| effect.id == edit.effect_id)
             })
-            .filter(|effect| is_native_delay(effect))
-        else {
-            return None;
-        };
+            .filter(|effect| is_native_delay(effect))?;
         let values: std::collections::BTreeMap<_, _> = edit
             .updates
             .into_iter()

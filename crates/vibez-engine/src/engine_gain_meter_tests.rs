@@ -792,7 +792,7 @@ fn native_delay_meter_reports_real_insert_levels_before_channel_faders() {
         assert_eq!(state.routing, 1.0);
         assert!(!state.reference_moving);
         let mut squares = [0.0_f64; 2];
-        for frame in expected_insert.chunks_exact(2) {
+        for frame in expected_insert.as_chunks::<2>().0.iter() {
             for channel in 0..2 {
                 squares[channel] += f64::from(frame[channel]).powi(2);
             }

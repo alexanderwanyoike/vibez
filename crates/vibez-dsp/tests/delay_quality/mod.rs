@@ -514,7 +514,9 @@ fn interpolation_loss(rate: u32, rows: &mut Vec<Value>) -> bool {
         && observation.heap == [0; 3]
         && audio[..2 * frames].iter().all(|sample| sample.is_finite())
         && audio[..2 * frames]
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .all(|pair| pair[1] == 0.0);
     rows.push(json!({ "scenario": "measured_half_sample_interpolation_loss", "rate": rate,
         "distance_samples": distance, "frames": frames, "passed": passed,
