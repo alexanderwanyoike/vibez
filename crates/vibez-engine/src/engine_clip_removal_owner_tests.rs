@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::clip_insertion::{PreparedClipInsertion, PreparedNoteClipInsertion, PreparedNoteInsertion};
+use crate::engine::graph_test_support::{graph_engine, routing_channel};
 use crate::playback_source::{EngineNoteClip, PreparedPlaybackSource};
 use vibez_core::{id::ClipId, midi::MidiNote, perform::GrooveGrid};
 
@@ -205,8 +206,9 @@ fn exactly_full_retirement_storage_keeps_removal_queued_until_ui_delivery() {
 
 #[test]
 fn empty_missing_and_repeated_removals_preserve_independent_live_notes_and_length_semantics() {
-    let (mut engine, mut commands, mut events) = AudioEngine::new();
     let track = TrackId::new();
+    let (mut engine, mut commands, mut events) =
+        graph_engine(&[routing_channel(track), routing_channel(TrackId::MASTER)]);
     let id = ClipId::new();
     commands.push(EngineCommand::add_track(track)).unwrap();
     commands

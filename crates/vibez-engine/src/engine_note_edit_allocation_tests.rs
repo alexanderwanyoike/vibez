@@ -1,5 +1,6 @@
 //! Public note edits retain sample-accurate note-off behavior without callback allocation.
 
+use crate::engine::graph_test_support::{graph_engine, routing_channel};
 use crate::{
     clip_insertion::{PreparedNoteClipInsertion, PreparedNoteInsertion},
     commands::EngineCommand,
@@ -57,8 +58,9 @@ impl vibez_instruments::Instrument for PitchProbe {
 
 #[test]
 fn removing_a_note_rebuilds_its_surviving_note_offs_without_callback_allocation() {
-    let (mut engine, mut commands, mut events) = AudioEngine::new();
     let track = TrackId::new();
+    let (mut engine, mut commands, mut events) =
+        graph_engine(&[routing_channel(track), routing_channel(TrackId::MASTER)]);
     let clip = ClipId::new();
     let notes = vec![
         MidiNote {
@@ -143,8 +145,9 @@ fn removing_a_note_rebuilds_its_surviving_note_offs_without_callback_allocation(
 
 #[test]
 fn editing_pitch_start_and_length_preserves_note_indices_and_allocation_free_note_offs() {
-    let (mut engine, mut commands, mut events) = AudioEngine::new();
     let track = TrackId::new();
+    let (mut engine, mut commands, mut events) =
+        graph_engine(&[routing_channel(track), routing_channel(TrackId::MASTER)]);
     let clip = ClipId::new();
     let note = |pitch, start_beat, duration_beats| MidiNote {
         pitch,
@@ -308,8 +311,9 @@ fn held_note(start_beat: f64, duration_beats: f64) -> MidiNote {
 }
 
 fn public_note_fixture(notes: &[MidiNote], duration_beats: f64) -> PublicNoteFixture {
-    let (mut engine, mut commands, mut events) = AudioEngine::new();
     let track = TrackId::new();
+    let (mut engine, mut commands, mut events) =
+        graph_engine(&[routing_channel(track), routing_channel(TrackId::MASTER)]);
     let clip = ClipId::new();
     for command in [
         EngineCommand::SetSampleRate(96),

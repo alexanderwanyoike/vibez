@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::clip_insertion::PreparedClipInsertion;
+use crate::engine::graph_test_support::{graph_engine, routing_channel};
 use crate::playback_source::EngineNoteClip;
 use vibez_core::id::ClipId;
 use vibez_core::track::{ClipFades, ClipPlaybackDirection};
@@ -39,8 +40,9 @@ fn add_clip(track: TrackId, id: ClipId, audio: Arc<DecodedAudio>, duration: u64)
 #[test]
 fn removing_a_unique_audio_clip_preserves_survivors_without_callback_destruction() {
     for full_ring in [false, true] {
-        let (mut engine, mut commands, mut events) = AudioEngine::new();
         let track = TrackId::new();
+        let (mut engine, mut commands, mut events) =
+            graph_engine(&[routing_channel(track), routing_channel(TrackId::MASTER)]);
         let ids = [ClipId::new(), ClipId::new(), ClipId::new()];
         let removed_audio = audio(0.25);
         let removed_owner = Arc::downgrade(&removed_audio);
@@ -155,8 +157,9 @@ fn removing_a_unique_audio_clip_preserves_survivors_without_callback_destruction
 
 #[test]
 fn duplicate_audio_removal_is_atomic_under_retirement_backpressure_and_reuses_capacity() {
-    let (mut engine, mut commands, mut events) = AudioEngine::new();
     let track = TrackId::new();
+    let (mut engine, mut commands, mut events) =
+        graph_engine(&[routing_channel(track), routing_channel(TrackId::MASTER)]);
     let duplicate = ClipId::new();
     let survivors = [ClipId::new(), ClipId::new()];
     let count = crate::retirement::RETIREMENT_CAPACITY * 2 + 3;
@@ -270,8 +273,9 @@ fn removing_populated_note_clips_flushes_sound_without_callback_destruction() {
     use vibez_core::midi::MidiNote;
     use vibez_core::perform::GrooveGrid;
     for full_ring in [false, true] {
-        let (mut engine, mut commands, mut events) = AudioEngine::new();
         let track = TrackId::new();
+        let (mut engine, mut commands, mut events) =
+            graph_engine(&[routing_channel(track), routing_channel(TrackId::MASTER)]);
         let duplicate = ClipId::new();
         let survivor = ClipId::new();
         let clip = |id, duration, start| {

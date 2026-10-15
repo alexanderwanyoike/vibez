@@ -1,6 +1,7 @@
 //! Pending removed clip owners survive real Section and Clip boundary source transfers.
 
 use super::*;
+use crate::engine::graph_test_support::{graph_engine, routing_channel};
 use crate::playback_source::{PreparedClipPlayback, PreparedPlaybackSource};
 use std::sync::Weak;
 use vibez_core::{
@@ -52,8 +53,9 @@ fn collect_staged(source: &mut PreparedPlaybackSource, returned: &mut Vec<*const
 #[test]
 fn autonomous_section_and_clip_boundaries_transfer_staged_owners_once_under_full_ring() {
     for clip_mode in [false, true] {
-        let (mut engine, mut commands, mut events) = AudioEngine::new();
         let track = TrackId::new();
+        let (mut engine, mut commands, mut events) =
+            graph_engine(&[routing_channel(track), routing_channel(TrackId::MASTER)]);
         let removed_id = ClipId::new();
         let new_id = ClipId::new();
         let count = crate::retirement::RETIREMENT_CAPACITY * 2 + 3;

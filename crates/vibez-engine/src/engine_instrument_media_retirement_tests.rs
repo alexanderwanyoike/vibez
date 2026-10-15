@@ -1,6 +1,7 @@
 //! Native sample commands return complete owners while preserving musical behavior.
 
 use super::*;
+use graph_test_support::{graph_engine, routing_channel};
 use vibez_core::midi::InstrumentKind;
 
 fn audio(value: f32) -> Arc<DecodedAudio> {
@@ -13,8 +14,9 @@ fn audio(value: f32) -> Arc<DecodedAudio> {
 #[test]
 fn actual_sampler_replacement_preserves_reset_params_and_returns_unique_media_off_callback() {
     for full_ring in [false, true] {
-        let (mut engine, mut commands, mut events) = AudioEngine::new();
         let track = TrackId::new();
+        let (mut engine, mut commands, mut events) =
+            graph_engine(&[routing_channel(track), routing_channel(TrackId::MASTER)]);
         let original = audio(0.5);
         let owner = Arc::downgrade(&original);
         commands.push(EngineCommand::SetSampleRate(1000)).unwrap();
@@ -165,8 +167,9 @@ fn unsupported_and_missing_sampler_targets_return_exact_incoming_owners() {
 #[test]
 fn drum_sample_replacement_returns_old_owners_and_keeps_sounding_pad_voices() {
     for full_ring in [false, true] {
-        let (mut engine, mut commands, mut events) = AudioEngine::new();
         let track = TrackId::new();
+        let (mut engine, mut commands, mut events) =
+            graph_engine(&[routing_channel(track), routing_channel(TrackId::MASTER)]);
         let original = audio(0.5);
         let owner = Arc::downgrade(&original);
         commands.push(EngineCommand::SetSampleRate(1000)).unwrap();
@@ -267,8 +270,9 @@ fn drum_sample_replacement_returns_old_owners_and_keeps_sounding_pad_voices() {
 #[test]
 fn first_drum_notes_do_not_destroy_dummy_voice_allocations_in_callback() {
     for count in [1, 32] {
-        let (mut engine, mut commands, mut events) = AudioEngine::new();
         let track = TrackId::new();
+        let (mut engine, mut commands, mut events) =
+            graph_engine(&[routing_channel(track), routing_channel(TrackId::MASTER)]);
         commands.push(EngineCommand::SetSampleRate(1000)).unwrap();
         commands.push(EngineCommand::add_track(track)).unwrap();
         commands
@@ -318,8 +322,9 @@ fn first_drum_notes_do_not_destroy_dummy_voice_allocations_in_callback() {
 #[test]
 fn clearing_populated_pad_returns_owners_and_preserves_unrelated_voice_phase() {
     for full_ring in [false, true] {
-        let (mut engine, mut commands, mut events) = AudioEngine::new();
         let track = TrackId::new();
+        let (mut engine, mut commands, mut events) =
+            graph_engine(&[routing_channel(track), routing_channel(TrackId::MASTER)]);
         let original = audio(0.5);
         let owner = Arc::downgrade(&original);
         let name = String::from("cleared-selected-pad-owned-name.wav");
@@ -441,8 +446,9 @@ fn clearing_populated_pad_returns_owners_and_preserves_unrelated_voice_phase() {
 fn pad_state_name_and_source_preparation_preserves_audio_and_canonical_metadata() {
     use vibez_core::track::{DrumPadState, MediaSourceRef};
     for full_ring in [false, true] {
-        let (mut engine, mut commands, mut events) = AudioEngine::new();
         let track = TrackId::new();
+        let (mut engine, mut commands, mut events) =
+            graph_engine(&[routing_channel(track), routing_channel(TrackId::MASTER)]);
         let old_name = String::from("old-owned-display-name.wav");
         let old_name_pointer = old_name.as_ptr();
         commands.push(EngineCommand::SetSampleRate(1000)).unwrap();
@@ -567,8 +573,9 @@ fn pad_state_name_and_source_preparation_preserves_audio_and_canonical_metadata(
 #[test]
 fn completed_or_released_old_voices_leave_the_returned_ui_guard_as_final_owner() {
     for note_off in [false, true] {
-        let (mut engine, mut commands, mut events) = AudioEngine::new();
         let track = TrackId::new();
+        let (mut engine, mut commands, mut events) =
+            graph_engine(&[routing_channel(track), routing_channel(TrackId::MASTER)]);
         let original = audio(0.5);
         let weak = Arc::downgrade(&original);
         commands.push(EngineCommand::SetSampleRate(1000)).unwrap();
@@ -870,9 +877,12 @@ fn drum_media_commands_return_rejected_owners_without_touching_sounding_audio() 
             MediaEdit::Clear,
         ] {
             for full_ring in [false, true] {
-                let (mut engine, mut commands, mut events) = AudioEngine::new();
                 let sounding = TrackId::new();
                 let other = TrackId::new();
+                let (mut engine, mut commands, mut events) = graph_engine(&[
+                    routing_channel(sounding),
+                    routing_channel(TrackId::MASTER),
+                ]);
                 commands.push(EngineCommand::SetSampleRate(1000)).unwrap();
                 commands.push(EngineCommand::add_track(sounding)).unwrap();
                 commands
@@ -1018,8 +1028,9 @@ fn drum_media_commands_return_rejected_owners_without_touching_sounding_audio() 
 fn retired_voice_guards_cover_repeated_stealing_choke_release_and_reset_without_callback_destruction(
 ) {
     for boundary in ["steal", "choke", "reset"] {
-        let (mut engine, mut commands, mut events) = AudioEngine::new();
         let track = TrackId::new();
+        let (mut engine, mut commands, mut events) =
+            graph_engine(&[routing_channel(track), routing_channel(TrackId::MASTER)]);
         let old = audio(0.1);
         let weak = Arc::downgrade(&old);
         commands.push(EngineCommand::SetSampleRate(1000)).unwrap();

@@ -1,6 +1,7 @@
 //! Clip audio replacements preserve geometry and return owners without callback destruction.
 
 use super::*;
+use crate::engine::graph_test_support::{graph_engine, routing_channel};
 use std::sync::Weak;
 use vibez_core::id::ClipId;
 use vibez_core::track::{ClipFades, ClipPlaybackDirection};
@@ -57,8 +58,9 @@ struct Fixture {
 
 impl Fixture {
     fn new() -> Self {
-        let (mut engine, mut commands, mut events) = AudioEngine::new();
         let track = TrackId::new();
+        let (mut engine, mut commands, mut events) =
+            graph_engine(&[routing_channel(track), routing_channel(TrackId::MASTER)]);
         let clip = ClipId::new();
         let old_audio = audio(0.25);
         let original = Arc::downgrade(&old_audio);

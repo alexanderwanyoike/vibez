@@ -1,6 +1,7 @@
 //! Warp edits preserve clip geometry without destroying marker storage in the callback.
 
 use super::*;
+use crate::engine::graph_test_support::{graph_engine, routing_channel};
 use vibez_core::id::ClipId;
 use vibez_core::track::{ClipFades, ClipPlaybackDirection};
 use vibez_core::warp_marker::WarpMarkers;
@@ -21,8 +22,9 @@ struct Fixture {
 
 impl Fixture {
     fn new() -> Self {
-        let (mut engine, mut commands, mut events) = AudioEngine::new();
         let track = TrackId::new();
+        let (mut engine, mut commands, mut events) =
+            graph_engine(&[routing_channel(track), routing_channel(TrackId::MASTER)]);
         let clip = ClipId::new();
         commands.push(EngineCommand::add_track(track)).unwrap();
         commands
