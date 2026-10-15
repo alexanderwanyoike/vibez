@@ -5,7 +5,7 @@ use iced::{Color, Element, Length, Theme};
 use vibez_core::id::TrackId;
 
 use crate::domains::device_controls::{
-    presented_value, DeviceControlMsg, DeviceControlState, ParameterPresentation,
+    DeviceControlMsg, DeviceControlState, ParameterPresentation,
 };
 use crate::message::Message;
 use crate::state::UiEffect;
@@ -13,34 +13,6 @@ use crate::theme as th;
 use crate::widgets::{
     device_chrome::section_label, effect_knob::EffectKnobWidget, on_blur::on_blur,
 };
-
-pub fn parameter<'a>(
-    track: TrackId,
-    effect: &'a UiEffect,
-    state: &'a DeviceControlState,
-    index: usize,
-    accent: Color,
-    knob_size: Option<f32>,
-) -> Element<'a, Message> {
-    let heading =
-        section_label(crate::domains::device_controls::presentation_descriptor(effect, index).name);
-    parameter_with_heading(track, effect, state, index, accent, knob_size, heading)
-}
-
-#[allow(clippy::too_many_arguments)]
-pub fn parameter_with_heading<'a>(
-    track: TrackId,
-    effect: &'a UiEffect,
-    state: &'a DeviceControlState,
-    index: usize,
-    accent: Color,
-    knob_size: Option<f32>,
-    heading: Element<'a, Message>,
-) -> Element<'a, Message> {
-    parameter_content(
-        track, effect, state, index, accent, knob_size, heading, None,
-    )
-}
 
 #[allow(clippy::too_many_arguments)]
 pub fn parameter_with_presentation<'a>(
@@ -52,29 +24,8 @@ pub fn parameter_with_presentation<'a>(
     knob_size: Option<f32>,
     presentation: &ParameterPresentation,
 ) -> Element<'a, Message> {
-    parameter_content(
-        track,
-        effect,
-        state,
-        index,
-        accent,
-        knob_size.filter(|_| presentation.is_editable()),
-        section_label(presentation.name),
-        Some(presentation),
-    )
-}
-
-#[allow(clippy::too_many_arguments)]
-fn parameter_content<'a>(
-    track: TrackId,
-    effect: &'a UiEffect,
-    state: &'a DeviceControlState,
-    index: usize,
-    accent: Color,
-    knob_size: Option<f32>,
-    heading: Element<'a, Message>,
-    presentation: Option<&ParameterPresentation>,
-) -> Element<'a, Message> {
+    let knob_size = knob_size.filter(|_| presentation.is_editable());
+    let heading = section_label(presentation.name);
     let descriptor = &crate::domains::device_controls::presentation_descriptor(effect, index);
     let value = effect
         .params
@@ -107,7 +58,7 @@ fn parameter_content<'a>(
             };
         }
         let knob: Element<'a, Message> = canvas(knob).width(size).height(size).into();
-        let knob = match presentation.and_then(|value| value.explanation.as_ref()) {
+        let knob = match presentation.explanation.as_ref() {
             Some(explanation) => tooltip(
                 knob,
                 text(explanation.clone()).size(9).width(300.0),
@@ -122,7 +73,7 @@ fn parameter_content<'a>(
         .push(
             row![
                 field,
-                text(presentation.map_or(descriptor.unit, |value| value.unit))
+                text(presentation.unit)
                     .size(8)
                     .color(th::text_dim())
             ]
@@ -133,63 +84,32 @@ fn parameter_content<'a>(
         .into()
 }
 
-pub fn value_field<'a>(
-    track: TrackId,
-    effect: &'a UiEffect,
-    state: &'a DeviceControlState,
-    index: usize,
-    accent: Color,
-) -> Element<'a, Message> {
-    value_field_presented(track, effect, state, index, accent, None)
-}
-
 fn value_field_presented<'a>(
     track: TrackId,
     effect: &'a UiEffect,
     state: &'a DeviceControlState,
     index: usize,
     accent: Color,
-    presentation: Option<&ParameterPresentation>,
+    presentation: &ParameterPresentation,
 ) -> Element<'a, Message> {
-    let descriptor = &crate::domains::device_controls::presentation_descriptor(effect, index);
-    let value = effect
-        .params
-        .get(index)
-        .copied()
-        .unwrap_or(descriptor.default);
-    let editable = presentation.is_none_or(ParameterPresentation::is_editable);
-    let shown = if editable {
-        state.entries.get(&index).cloned().unwrap_or_else(|| {
-            presentation
-                .and_then(|presentation| presentation.value.clone())
-                .unwrap_or_else(|| presented_value(effect, index, value))
-        })
-    } else {
-        "N/A".into()
+    let editable = presentation.is_editable();
+    let shown = match presentation.value.as_ref() {
+        Some(value) => state.entries.get(&index).unwrap_or(value).clone(),
+        None => "N/A".into(),
     };
-    let mut explanation = if let Some(presentation) = presentation {
-        presentation.range.as_ref().map_or_else(
-            || format!("{} unavailable until this native device has a valid prepared host sample rate.", presentation.name),
-            |(minimum, maximum)| format!(
-                "{}: {} to {} {}. Enter applies.",
-                presentation.name, minimum, maximum, presentation.unit
-            ),
-        )
-    } else {
-        format!(
+    let mut explanation = presentation.range.as_ref().map_or_else(
+        || format!("{} unavailable until this native device has a valid prepared host sample rate.", presentation.name),
+        |(minimum, maximum)| format!(
             "{}: {} to {} {}. Enter applies.",
-            descriptor.name,
-            presented_value(effect, index, descriptor.min),
-            presented_value(effect, index, descriptor.max),
-            descriptor.unit
-        )
-    };
-    if let Some(detail) = presentation.and_then(|value| value.explanation.as_ref()) {
+            presentation.name, minimum, maximum, presentation.unit
+        ),
+    );
+    if let Some(detail) = presentation.explanation.as_ref() {
         explanation.push(' ');
         explanation.push_str(detail);
     }
     let explanation = text(explanation).size(9);
-    let explanation = if presentation.is_some_and(|value| value.explanation.is_some()) {
+    let explanation = if presentation.explanation.is_some() {
         explanation.width(300.0)
     } else {
         explanation
