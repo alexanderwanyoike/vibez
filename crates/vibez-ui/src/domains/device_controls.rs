@@ -4,11 +4,28 @@ use std::collections::{BTreeMap, BTreeSet};
 use vibez_core::effect::ParamDescriptor;
 use vibez_core::id::{EffectId, TrackId};
 
+pub type ValueParser = fn(usize, &str, &ParamDescriptor) -> Option<f32>;
+
+#[derive(Clone, Copy)]
+pub struct ValuePolicy {
+    pub display: fn(usize, f32, &ParamDescriptor) -> String,
+    pub parse: ValueParser,
+    pub unit: &'static str,
+}
+
+impl ValuePolicy {
+    pub fn native(unit: &'static str) -> Self {
+        Self { display: |_, value, descriptor| display_value(value, descriptor),
+            parse: |_, text, descriptor| parse_value(text, descriptor), unit }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum DeviceControlMsg {
     ToggleAdvanced(TrackId, EffectId),
     Input(TrackId, EffectId, usize, String),
     Submit(TrackId, EffectId, usize),
+    SubmitUsing(TrackId, EffectId, usize, ValueParser),
 }
 
 impl DeviceControlMsg {
@@ -16,7 +33,8 @@ impl DeviceControlMsg {
         match self {
             Self::ToggleAdvanced(track, effect)
             | Self::Input(track, effect, ..)
-            | Self::Submit(track, effect, ..) => (*track, *effect),
+            | Self::Submit(track, effect, ..)
+            | Self::SubmitUsing(track, effect, ..) => (*track, *effect),
         }
     }
 }
@@ -40,6 +58,11 @@ impl DeviceControlState {
         descriptors: &[ParamDescriptor],
         values: &[f32],
     ) -> Option<(usize, f32)> {
+        let (message, parse) = match message {
+            DeviceControlMsg::SubmitUsing(track, effect, index, parse) =>
+                (DeviceControlMsg::Submit(track, effect, index), parse),
+            message => (message, ValuePolicy::native("").parse),
+        };
         match message {
             DeviceControlMsg::ToggleAdvanced(..) => self.advanced = !self.advanced,
             DeviceControlMsg::Input(_, _, index, text) if index < descriptors.len() => {
@@ -51,7 +74,8 @@ impl DeviceControlState {
                 let Some(value) = self
                     .entries
                     .get(&index)
-                    .and_then(|text| parse_value(text, descriptor))
+                    .and_then(|text| parse(index, text, descriptor))
+                    .filter(|value| value.is_finite() && (descriptor.min..=descriptor.max).contains(value))
                 else {
                     self.errors.insert(index);
                     return None;

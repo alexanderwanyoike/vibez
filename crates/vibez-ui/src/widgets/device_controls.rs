@@ -4,7 +4,8 @@ use iced::widget::{button, canvas, column, pick_list, row, text, text_input, too
 use iced::{Color, Element, Length, Theme};
 use vibez_core::id::TrackId;
 
-use crate::domains::device_controls::{display_value, DeviceControlMsg, DeviceControlState};
+use crate::domains::device_controls::{DeviceControlMsg, DeviceControlState};
+pub use crate::domains::device_controls::ValuePolicy;
 use crate::message::Message;
 use crate::state::UiEffect;
 use crate::theme as th;
@@ -20,6 +21,19 @@ pub fn parameter<'a>(
     accent: Color,
     knob_size: Option<f32>,
 ) -> Element<'a, Message> {
+    parameter_with_policy(track, effect, state, index, accent, knob_size,
+        ValuePolicy::native(effect.descriptors[index].unit))
+}
+
+pub fn parameter_with_policy<'a>(
+    track: TrackId,
+    effect: &'a UiEffect,
+    state: &'a DeviceControlState,
+    index: usize,
+    accent: Color,
+    knob_size: Option<f32>,
+    policy: ValuePolicy,
+) -> Element<'a, Message> {
     let descriptor = &effect.descriptors[index];
     let value = effect
         .params
@@ -30,9 +44,9 @@ pub fn parameter<'a>(
         .entries
         .get(&index)
         .cloned()
-        .unwrap_or_else(|| display_value(value, descriptor));
+        .unwrap_or_else(|| (policy.display)(index, value, descriptor));
     let effect_id = effect.id;
-    let submit = Message::DeviceControl(DeviceControlMsg::Submit(track, effect_id, index));
+    let submit = Message::DeviceControl(DeviceControlMsg::SubmitUsing(track, effect_id, index, policy.parse));
     let invalid = state.errors.contains(&index);
     let input = text_input("", &shown)
         .on_input(move |text| {
@@ -66,9 +80,9 @@ pub fn parameter<'a>(
         text(format!(
             "{}: {} to {} {}. Enter applies.",
             descriptor.name,
-            display_value(descriptor.min, descriptor),
-            display_value(descriptor.max, descriptor),
-            descriptor.unit
+            (policy.display)(index, descriptor.min, descriptor),
+            (policy.display)(index, descriptor.max, descriptor),
+            policy.unit
         ))
         .size(9),
         tooltip::Position::Top,
@@ -94,7 +108,7 @@ pub fn parameter<'a>(
     }
     content
         .push(
-            row![field, text(descriptor.unit).size(8).color(th::text_dim())]
+            row![field, text(policy.unit).size(8).color(th::text_dim())]
                 .spacing(2)
                 .align_y(iced::Alignment::Center),
         )
