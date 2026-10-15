@@ -103,7 +103,7 @@ fn eq_files_reject_wrong_kind_invalid_choices_and_stale_completions_without_muta
     let before = app.state.find_track(track).unwrap().effects[0]
         .params
         .clone();
-    let wrong = device_presets::factory_presets(EffectType::Filter).remove(0);
+    let wrong = device_presets::factory_presets(EffectType::Gain).remove(0);
     let request = app
         .begin_device_preset_load(track, effect)
         .expect("EQ preset load is supported");
