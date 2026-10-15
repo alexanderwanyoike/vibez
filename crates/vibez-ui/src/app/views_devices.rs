@@ -99,9 +99,7 @@ impl App {
                     &self.state.devices,
                 )
             };
-            if crate::domains::gain::is_native_gain(effect)
-                || gate
-            {
+            if crate::domains::gain::is_native_gain(effect) || gate {
                 used += card_width(effect, Some(0.0), sidechain.is_some());
                 responsive_effects.push((cards.len(), effect, sidechain));
                 cards.push(None);
@@ -136,7 +134,7 @@ impl App {
             let share = (available_width - used - spacing) / responsive_effects.len() as f32;
 
             for (position, effect, sidechain) in responsive_effects {
-                    let width = if crate::domains::gate::is_native_gate(effect) {
+                let width = if crate::domains::gate::is_native_gate(effect) {
                     crate::widgets::gate_device::card_width(share)
                 } else {
                     crate::widgets::gain_device::card_width(share)

@@ -19,6 +19,7 @@ pub mod device_latency;
 pub mod device_presets;
 pub mod devices;
 pub mod gain;
+pub mod native_sidechain;
 pub mod perform;
 pub mod piano_roll;
 pub mod project;
@@ -288,7 +289,6 @@ pub mod test_support {
     }
 }
 
-pub mod native_sidechain;
 pub mod gate;
 pub mod gate_history;
 pub mod gate_layout;
