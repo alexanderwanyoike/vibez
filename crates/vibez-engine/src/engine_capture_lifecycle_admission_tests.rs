@@ -323,7 +323,7 @@ struct Expected {
     follow_close: bool,
 }
 
-fn exercise(fixture: &mut Fixture, case: &str, commands: &[bool], expected: Expected) {
+fn exercise(fixture: &mut Fixture, _case: &str, commands: &[bool], expected: Expected) {
     let Expected {
         calls: expected_calls,
         order: expected_order,
@@ -447,8 +447,6 @@ fn exercise(fixture: &mut Fixture, case: &str, commands: &[bool], expected: Expe
         [0, 0]
     );
     assert_eq!(fixture.audio.strong_count(), 1);
-    eprintln!("capture-lifecycle-g1: case={case}; calls={calls:?}; order={:?}; reasons={:?}; times={:?}; sources={:?}; offset_owners={}; held={}; before={before:?}; after={after:?}; follow_order={:?}; follow_times={:?}; final={final_state:?}; audio_bits={:?}",
-        observed.order, observed.reasons, observed.times, observed.sources, observed.offset_owners, fixture.owner.is_some(), followed.order, followed.times, output.map(f32::to_bits));
 }
 
 pub(super) fn teardown(fixture: Fixture) {
