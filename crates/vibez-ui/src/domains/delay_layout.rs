@@ -166,7 +166,9 @@ pub fn arrange(width: f32, height: f32, advanced: bool, page: Page) -> Arrangeme
     }
     if main_visible {
         layout.main = if full_main {
-            controls(FULL_MAIN, &[58.0, 200.0, 76.0, 76.0, 132.0, 58.0], INSET, y, knob_size)
+            let available = width - 2.0 * INSET - 5.0 * GAP;
+            let widths = [0.11, 0.24, 0.13, 0.13, 0.22, 0.17].map(|share| available * share);
+            controls(FULL_MAIN, &widths, INSET, y, knob_size)
         } else {
             controls(MAIN, &[58.0, 146.0, 76.0, 76.0], INSET, y, knob_size)
         };
