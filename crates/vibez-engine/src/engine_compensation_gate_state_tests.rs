@@ -463,32 +463,5 @@ fn rejected_structural_plan_survives_play_and_automation_until_full_acceptance()
             ]
         );
         assert!(fixture.drain_events().is_empty());
-        let readiness = [
-            observed_running,
-            observed_waiting,
-            observed_invalid,
-            observed_play,
-            observed_automation,
-            observed_accepted,
-        ]
-        .map(|state| {
-            [
-                u8::from(state.valid),
-                u8::from(state.awaiting_plan),
-                u8::from(state.suspended),
-                u8::from(state.handoff),
-                u8::from(state.restart_requested),
-                u8::from(state.presentation_fault),
-                u8::from(state.playing),
-                u8::from(state.muted),
-            ]
-        });
-        eprintln!(
-            "compensation-plan-overlap baseline: partitions={partitions:?}; capture_stop={capture_stop}; readiness={readiness:?}; order={order:?}; loss_bits={:?}; play_muted_bits={:?}; automation_muted_bits={:?}; resumed_bits={:?}",
-            loss.iter().copied().map(f32::to_bits).collect::<Vec<_>>(),
-            play_muted.iter().copied().map(f32::to_bits).collect::<Vec<_>>(),
-            automation_muted.iter().copied().map(f32::to_bits).collect::<Vec<_>>(),
-            resumed.iter().copied().map(f32::to_bits).collect::<Vec<_>>(),
-        );
     }
 }
