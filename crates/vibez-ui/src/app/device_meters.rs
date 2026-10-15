@@ -173,6 +173,26 @@ mod tests {
     use super::*;
 
     #[test]
+    fn malformed_output_clears_availability_instead_of_refreshing_the_meter() {
+        let now = Instant::now();
+        let valid = MeterValues { peak_l: 2.0, peak_r: 1.5, rms_l: 1.2, rms_r: 1.0 };
+        for field in 0..4 {
+            for invalid in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY, -0.01] {
+                let mut meter = MeterReadings::default();
+                meter.accept(valid, now);
+                assert!(meter.available_output().is_some());
+                let mut values = [valid.peak_l, valid.peak_r, valid.rms_l, valid.rms_r];
+                values[field] = invalid;
+                meter.accept(MeterValues { peak_l: values[0], peak_r: values[1],
+                    rms_l: values[2], rms_r: values[3] }, now);
+                assert!(meter.available_output().is_none(), "field {field}: {invalid}");
+                meter.accept(MeterValues::SILENT, now);
+                assert_eq!(meter.available_output(), Some(MeterValues::SILENT));
+            }
+        }
+    }
+
+    #[test]
     fn readings_expire_at_the_meter_timeout() {
         let now = Instant::now();
         let levels = MeterValues {
