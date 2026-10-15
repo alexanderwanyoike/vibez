@@ -93,6 +93,7 @@ pub enum Message {
     /// Devices domain (effect chain, instruments, drum pads, menu).
     Devices(crate::domains::devices::DevicesMsg),
     GainControl(crate::domains::gain::GainMsg),
+    Eq(crate::domains::eq::EqMsg),
     /// Typing a value into a built-in device parameter.
     ParamEntry(crate::domains::param_entry::EntryMsg),
     ApplyDevicePreset(TrackId, EffectId, vibez_core::device_preset::DevicePreset),

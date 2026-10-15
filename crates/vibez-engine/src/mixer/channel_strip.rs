@@ -530,6 +530,28 @@ impl EngineTrack {
         )
     }
 
+    pub(crate) fn process_effects_observed(
+        &mut self,
+        frames: usize,
+        channels: usize,
+        meter_generation: Option<u64>,
+        spectrum: &mut crate::effect_spectrum::EffectSpectrumTap,
+    ) {
+        let buf_size = frames * channels;
+        if buf_size == 0 {
+            return;
+        }
+        for slot in &mut self.effects {
+            spectrum.process_slot(
+                self.id,
+                slot,
+                &mut self.mix_buffer[..buf_size],
+                channels,
+                meter_generation,
+            );
+        }
+    }
+
     pub fn process_effects(
         &mut self,
         frames: usize,

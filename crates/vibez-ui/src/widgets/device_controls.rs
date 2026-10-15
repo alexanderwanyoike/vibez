@@ -2,7 +2,7 @@
 //! a readable value you can click to type into, segmented choices, and
 //! headings. Sizes are in logical pixels, which Interface Scale multiplies.
 
-use iced::widget::{button, canvas, column, row, text, text_input};
+use iced::widget::{button, canvas, column, row, text, text_input, Space};
 use iced::{Alignment, Color, Element, Length, Theme};
 use vibez_core::id::TrackId;
 
@@ -194,6 +194,53 @@ impl<'a> Param<'a> {
         .align_x(Alignment::Center)
         .into()
     }
+
+    /// Name on the left, value and knob on the right, for narrow panels
+    /// that list one parameter per line.
+    pub fn row(&self, knob_size: f32) -> Element<'a, Message> {
+        row![
+            text(self.name())
+                .size(LABEL_SIZE)
+                .color(th::text_dim())
+                .wrapping(text::Wrapping::None),
+            Space::with_width(Length::Fill),
+            self.value_entry(),
+            canvas(self.knob()).width(knob_size).height(knob_size),
+        ]
+        .spacing(6)
+        .align_y(Alignment::Center)
+        .into()
+    }
+}
+
+/// A small button that is lit with the track accent while `on`.
+pub fn toggle<'a>(
+    label: Element<'a, Message>,
+    on: bool,
+    message: Message,
+    accent: Color,
+) -> Element<'a, Message> {
+    button(label)
+        .on_press(message)
+        .padding([2, 6])
+        .style(move |_theme: &Theme, status| {
+            let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
+            button::Style {
+                background: Some(if hovered {
+                    th::bg_hover().into()
+                } else {
+                    th::bg_dark().into()
+                }),
+                text_color: if on { accent } else { th::text_dim() },
+                border: iced::Border {
+                    color: if on { accent } else { th::border() },
+                    width: 1.0,
+                    radius: 3.0.into(),
+                },
+                ..Default::default()
+            }
+        })
+        .into()
 }
 
 /// A row of mutually exclusive choices, the chosen one filled with the

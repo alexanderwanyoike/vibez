@@ -91,6 +91,8 @@ pub struct AudioEngine {
     buses: crate::mixer::ChannelList,
     /// Which track streams samples to the UI spectrum analyser.
     spectrum_track: Option<TrackId>,
+    effect_spectrum: crate::effect_spectrum::EffectSpectrumTap,
+    effect_spectrum_rx: Option<Consumer<crate::effect_spectrum::EffectSpectrumSample>>,
     effect_meter: effect_meters::EffectMeterTarget,
     effect_meter_frames: u64,
     /// Producer side of the spectrum ring (mono samples).
@@ -237,6 +239,8 @@ impl AudioEngine {
         let (cmd_tx, cmd_rx) = RingBuffer::<EngineCommand>::new(RING_BUFFER_CAPACITY);
         let (event_tx, event_rx) = RingBuffer::<EngineEvent>::new(RING_BUFFER_CAPACITY);
         let (spectrum_tx, spectrum_rx) = RingBuffer::<f32>::new(SPECTRUM_RING_CAPACITY);
+        let (effect_spectrum, effect_spectrum_rx) =
+            crate::effect_spectrum::EffectSpectrumTap::new(SPECTRUM_RING_CAPACITY);
 
         let engine = Self {
             routing: None,
@@ -281,6 +285,8 @@ impl AudioEngine {
             master: Box::new(EngineTrack::new(TrackId::MASTER)),
             buses: Vec::with_capacity(crate::mixer::CHANNEL_CAPACITY),
             spectrum_track: None,
+            effect_spectrum,
+            effect_spectrum_rx: Some(effect_spectrum_rx),
             effect_meter: effect_meters::EffectMeterTarget::default(),
             effect_meter_frames: 0,
             spectrum_tx,
@@ -320,6 +326,14 @@ impl AudioEngine {
     /// thread; returns `None` if already taken.
     pub fn take_spectrum_consumer(&mut self) -> Option<Consumer<f32>> {
         self.spectrum_rx.take()
+    }
+
+    /// Take before moving the engine to its callback thread. This ring is
+    /// independent of the existing whole-channel spectrum consumer.
+    pub fn take_effect_spectrum_consumer(
+        &mut self,
+    ) -> Option<Consumer<crate::effect_spectrum::EffectSpectrumSample>> {
+        self.effect_spectrum_rx.take()
     }
 
     /// Process one audio callback worth of data.
@@ -428,7 +442,9 @@ impl AudioEngine {
                     bus.clear_buffer(frames, channels);
                 }
                 for slot in &mut bus.effects {
-                    slot.process(
+                    self.effect_spectrum.process_slot(
+                        bus.id,
+                        slot,
                         &mut bus.mix_buffer[..buf_size],
                         channels,
                         self.effect_meter.generation_for(bus.id),
@@ -486,7 +502,9 @@ impl AudioEngine {
                 None => (None, None),
             };
             for slot in &mut self.master.effects {
-                slot.process(
+                self.effect_spectrum.process_slot(
+                    TrackId::MASTER,
+                    slot,
                     output,
                     channels,
                     self.effect_meter.generation_for(TrackId::MASTER),
@@ -1025,3 +1043,7 @@ mod automation_review_tests;
 #[cfg(test)]
 #[path = "engine_automation_retirement_tests.rs"]
 mod automation_retirement_tests;
+
+#[cfg(test)]
+#[path = "engine_effect_spectrum_tests.rs"]
+mod effect_spectrum_tests;

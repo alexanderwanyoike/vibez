@@ -388,3 +388,197 @@ pub fn run_gain() -> iced::Result {
     .font(crate::typography::PLEX_MONO_SEMIBOLD_BYTES)
     .run_with(|| (GainGallery::new(), iced::Task::none()))
 }
+
+/// Native EQ at each width tier and section height it adapts to, with a
+/// fixed spectrum standing in for live audio.
+struct EqGallery {
+    track: TrackId,
+    effect: UiEffect,
+    spectrum: crate::spectrum::SpectrumState,
+    closed: crate::domains::eq::EqPanelState,
+    open: crate::domains::eq::EqPanelState,
+}
+
+impl EqGallery {
+    fn new() -> Self {
+        use vibez_dsp::eq::param;
+        let mut effect = effect(EffectType::Eq, None, false, false, None, 0);
+        effect.params = effect.descriptors.iter().map(|d| d.default).collect();
+        for (index, value) in [
+            (param::GAIN[1], -1.5),
+            (param::FREQUENCY[1], 350.0),
+            (param::GAIN[2], 2.5),
+            (param::FREQUENCY[2], 3200.0),
+            (param::SHAPE[2], 0.8),
+            (param::GAIN[3], -1.0),
+            (param::FREQUENCY[3], 12_000.0),
+        ] {
+            effect.params[index] = value;
+        }
+        let mut spectrum = crate::spectrum::SpectrumState::default();
+        let bins = spectrum.bins.len() as f32;
+        for (bin, level) in spectrum.bins.iter_mut().enumerate() {
+            let position = bin as f32 / bins;
+            *level = -18.0 - position * 30.0 + (position * 41.0).sin() * 4.0;
+        }
+        spectrum.active = true;
+        let level = |db: f32| vibez_engine::metering::MeterValues {
+            peak_l: vibez_core::level::db_to_amplitude(db),
+            peak_r: vibez_core::level::db_to_amplitude(db - 0.6),
+            rms_l: vibez_core::level::db_to_amplitude(db - 5.0),
+            rms_r: vibez_core::level::db_to_amplitude(db - 5.6),
+        };
+        let closed = crate::domains::eq::EqPanelState {
+            band: 2,
+            input: level(-6.2),
+            output: level(-6.1),
+            ..Default::default()
+        };
+        Self {
+            track: TrackId::new(),
+            effect,
+            spectrum,
+            open: crate::domains::eq::EqPanelState {
+                advanced: true,
+                ..closed.clone()
+            },
+            closed,
+        }
+    }
+
+    fn scene<'a>(
+        &'a self,
+        label: &'static str,
+        card_width: f32,
+        section: (f32, f32),
+        panel: &'a crate::domains::eq::EqPanelState,
+    ) -> Element<'a, Message> {
+        let accent = th::track_color(0);
+        let effect = &self.effect;
+        let track = self.track;
+        let spectrum = &self.spectrum;
+        let body = iced::widget::responsive(move |size| {
+            crate::widgets::eq_device::EqView {
+                track_id: track,
+                effect,
+                accent,
+                panel,
+                entry: None,
+                spectrum: Some(spectrum),
+                sample_rate: 48_000.0,
+            }
+            .view(
+                crate::widgets::device_preset_bar::view(
+                    track,
+                    effect,
+                    None,
+                    accent,
+                    crate::widgets::eq_device::preset_bar_width(size),
+                ),
+                size,
+            )
+        });
+        let card = view_effect_slot(
+            track,
+            effect,
+            accent,
+            Some(crate::widgets::effect_slot::DeviceBody {
+                content: body.into(),
+                width: card_width,
+                padding: iced::Padding::ZERO,
+            }),
+            None,
+            48_000,
+        );
+        column![
+            text(label).size(11).color(th::text_dim()),
+            container(row![card].height(Length::Fill))
+                .padding(8)
+                .width(section.0)
+                .height(section.1)
+                .style(|_theme: &Theme| container::Style {
+                    background: Some(th::bg_dark().into()),
+                    border: iced::Border {
+                        color: th::border(),
+                        width: 1.0,
+                        radius: 0.0.into(),
+                    },
+                    ..Default::default()
+                }),
+        ]
+        .spacing(4)
+        .into()
+    }
+
+    fn view(&self) -> Element<'_, Message> {
+        use crate::widgets::eq_device::{COMPACT_W, FULL_W, MEDIUM_W};
+        let (closed, open) = (&self.closed, &self.open);
+        container(
+            column![
+                row![self.scene("Full, tall", FULL_W, (FULL_W + 16.0, 330.0), closed)],
+                row![
+                    self.scene("Medium, normal", MEDIUM_W, (MEDIUM_W + 16.0, 250.0), closed),
+                    self.scene(
+                        "Full, minimum height",
+                        FULL_W,
+                        (FULL_W + 16.0, 150.0),
+                        closed
+                    ),
+                ]
+                .spacing(24),
+                row![
+                    self.scene(
+                        "Compact, tall",
+                        COMPACT_W,
+                        (COMPACT_W + 16.0, 300.0),
+                        closed
+                    ),
+                    self.scene(
+                        "Compact, minimum height",
+                        COMPACT_W,
+                        (COMPACT_W + 16.0, 150.0),
+                        closed
+                    ),
+                    self.scene("Full, Advanced open", FULL_W, (FULL_W + 16.0, 300.0), open),
+                ]
+                .spacing(24),
+                row![
+                    self.scene("Full, shortest", FULL_W, (FULL_W + 16.0, 130.0), closed),
+                    self.scene(
+                        "Compact, shortest, Advanced open",
+                        COMPACT_W,
+                        (COMPACT_W + 16.0, 130.0),
+                        open
+                    ),
+                ]
+                .spacing(24),
+            ]
+            .spacing(16),
+        )
+        .padding(16)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .style(|_theme: &Theme| container::Style {
+            background: Some(th::bg_surface().into()),
+            ..Default::default()
+        })
+        .into()
+    }
+}
+
+pub fn run_eq() -> iced::Result {
+    iced::application(
+        "EQ device gallery",
+        |_: &mut EqGallery, _: Message| {},
+        EqGallery::view,
+    )
+    .theme(|_| th::vibez_theme())
+    .antialiasing(true)
+    .window_size((1900.0, 1260.0))
+    .font(crate::icons::ICON_FONT_BYTES)
+    .font(crate::typography::PLEX_SANS_CONDENSED_MEDIUM_BYTES)
+    .font(crate::typography::PLEX_SANS_CONDENSED_SEMIBOLD_BYTES)
+    .font(crate::typography::PLEX_MONO_MEDIUM_BYTES)
+    .font(crate::typography::PLEX_MONO_SEMIBOLD_BYTES)
+    .run_with(|| (EqGallery::new(), iced::Task::none()))
+}

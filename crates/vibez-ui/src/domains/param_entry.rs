@@ -43,7 +43,7 @@ impl ParamFormat {
     pub fn format(self, value: f32) -> String {
         match self {
             Self::Amplitude { .. } if value <= 0.0 || !value.is_finite() => "-inf dB".into(),
-            Self::Hertz if value >= 1000.0 => format!("{:.2} kHz", value / 1000.0),
+            Self::Hertz if value >= 1000.0 => format!("{:.1} kHz", value / 1000.0),
             Self::Amplitude { .. } | Self::Decibels | Self::Seconds | Self::Hertz => {
                 format!("{} {}", self.edit_text(value), self.unit(value))
             }
@@ -240,7 +240,8 @@ mod tests {
     #[test]
     fn values_read_the_way_a_producer_says_them() {
         assert_eq!(ParamFormat::Hertz.format(80.0), "80 Hz");
-        assert_eq!(ParamFormat::Hertz.format(1200.0), "1.20 kHz");
+        assert_eq!(ParamFormat::Hertz.format(1200.0), "1.2 kHz");
+        assert_eq!(ParamFormat::Hertz.format(12_000.0), "12.0 kHz");
         assert_eq!(ParamFormat::Decibels.format(-18.0), "-18.0 dB");
         assert_eq!(AMPLITUDE.format(1.0), "0.0 dB");
         assert_eq!(AMPLITUDE.format(0.0), "-inf dB");

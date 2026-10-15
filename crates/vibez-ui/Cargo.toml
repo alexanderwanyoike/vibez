@@ -54,3 +54,7 @@ harness = false
 [[example]]
 name = "gain_device"
 required-features = ["dev-gallery"]
+
+[[example]]
+name = "eq_device"
+required-features = ["dev-gallery"]
