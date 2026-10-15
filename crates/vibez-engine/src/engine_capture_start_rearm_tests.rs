@@ -30,7 +30,10 @@ fn collect(fixture: &mut Fixture) -> Events {
                 section_id,
                 section_position_samples,
             } => {
-                assert!(Arc::ptr_eq(&offsets, &fixture.engine.routing.capture_offsets));
+                assert!(Arc::ptr_eq(
+                    &offsets,
+                    &fixture.engine.routing.capture_offsets
+                ));
                 assert_eq!((section_id, section_position_samples), (None, None));
                 observed.order.push("start");
                 observed.times.push(effective_at_samples);
@@ -41,12 +44,18 @@ fn collect(fixture: &mut Fixture) -> Events {
                 position,
                 effective_at_samples,
             } => {
-                let index = fixture.tracks.iter().position(|id| *id == track_id).unwrap();
+                let index = fixture
+                    .tracks
+                    .iter()
+                    .position(|id| *id == track_id)
+                    .unwrap();
                 observed.order.push("source");
                 observed.times.push(effective_at_samples);
                 observed.sources.push((index, position));
             }
-            EngineEvent::PerformanceCaptureStopped { effective_at_samples } => {
+            EngineEvent::PerformanceCaptureStopped {
+                effective_at_samples,
+            } => {
                 observed.order.push("stop");
                 observed.times.push(effective_at_samples);
             }
@@ -78,10 +87,16 @@ fn successful_start_rearms_local_close_before_clear_validation_without_repeating
 
     // Admission sees recovery, but validation cannot see a clear observation between these commands.
     fixture.commands.push(local(&fixture, false)).unwrap();
-    fixture.commands.push(EngineCommand::StartPerformanceCapture).unwrap();
+    fixture
+        .commands
+        .push(EngineCommand::StartPerformanceCapture)
+        .unwrap();
     fixture.commands.push(local(&fixture, true)).unwrap();
     let offsets = Arc::strong_count(&fixture.engine.routing.capture_offsets);
-    for (phase, frames) in [("same-drain-refail", 8), ("persistent-after-published-stop", 16)] {
+    for (phase, frames) in [
+        ("same-drain-refail", 8),
+        ("persistent-after-published-stop", 16),
+    ] {
         fixture.calls.clear();
         let mut audio = [0.0; 16];
         assert_eq!(
@@ -94,7 +109,10 @@ fn successful_start_rearms_local_close_before_clear_validation_without_repeating
         let after = state(&fixture.engine);
         let calls = fixture.calls.observed();
         let starts = usize::from(frames == 8);
-        assert_eq!(Arc::strong_count(&fixture.engine.routing.capture_offsets), offsets + starts);
+        assert_eq!(
+            Arc::strong_count(&fixture.engine.routing.capture_offsets),
+            offsets + starts
+        );
         let observed = collect(&mut fixture);
         eprintln!("capture-start-rearm: phase={phase}; calls={calls:?}; after={after:?}; order={:?}; times={:?}; sources={:?}; offset_owners={}; audio_bits={:?}",
             observed.order, observed.times, observed.sources, observed.offset_owners, audio.map(f32::to_bits));
@@ -109,13 +127,20 @@ fn successful_start_rearms_local_close_before_clear_validation_without_repeating
         );
         assert_eq!(
             observed.order,
-            if starts == 1 { vec!["start", "source", "source", "stop"] } else { vec![] },
+            if starts == 1 {
+                vec!["start", "source", "source", "stop"]
+            } else {
+                vec![]
+            },
             "{phase}"
         );
         assert_eq!(observed.times, vec![0; starts * 4]);
         assert_eq!(observed.sources, [(0, 0), (1, 0)].repeat(starts));
         assert_eq!(observed.offset_owners, starts);
-        assert_eq!(Arc::strong_count(&fixture.engine.routing.capture_offsets), offsets);
+        assert_eq!(
+            Arc::strong_count(&fixture.engine.routing.capture_offsets),
+            offsets
+        );
         assert!(!fixture.engine.capture_stop_pending());
         assert!(fixture.owner.is_none());
         for frame in audio.as_chunks::<2>().0 {
