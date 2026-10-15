@@ -58,7 +58,6 @@ pub struct AudioEngine {
     pending_source_cleanup: bool,
     compensation_callback_heard_start: u64,
     capture_clip_positions: Vec<(TrackId, u64, u64)>,
-    device_failure_capture_closed: bool,
     device_handoff: device_handoff::DeviceHandoffState,
     compensation_plan: compensation_plan::CompensationPlanState,
     output_gate: output_gate::OutputGate,
@@ -255,7 +254,6 @@ impl AudioEngine {
             capture_clip_positions: Vec::with_capacity(
                 presentation_queue::PRESENTATION_EVENT_CAPACITY,
             ),
-            device_failure_capture_closed: false,
             device_handoff: device_handoff::DeviceHandoffState::default(),
             compensation_plan: compensation_plan::CompensationPlanState::default(),
             output_gate: output_gate::OutputGate::default(),

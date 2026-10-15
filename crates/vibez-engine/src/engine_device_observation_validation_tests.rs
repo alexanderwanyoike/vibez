@@ -467,7 +467,7 @@ fn validation_preserves_order_first_invalid_reason_and_accumulated_local_failure
         );
         assert_eq!(fixture.engine.transport.is_playing(), failure.is_none());
         assert_eq!(fixture.engine.capture_lifecycle.is_active(), !local && failure.is_none());
-        assert_eq!(fixture.engine.device_failure_capture_closed, local);
+        assert_eq!(fixture.engine.capture_lifecycle.local_failure_closure_requested(), local);
         assert_eq!(fixture.engine.transport.position(), 0);
         assert_eq!(fixture.engine.output_position, 0);
         assert_eq!(
