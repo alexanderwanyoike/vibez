@@ -516,3 +516,7 @@ mod note_owner_tests;
 #[cfg(test)]
 #[path = "note_value_insertion_owner_tests.rs"]
 mod note_value_owner_tests;
+
+#[cfg(test)]
+#[path = "automation_lane_insertion_owner_tests.rs"]
+mod automation_lane_owner_tests;
