@@ -217,9 +217,9 @@ impl DelayEffect {
         }
         self.targets[index] = target;
         if index == param::MIX {
-            self.mix.edit(target, automated, self.history.sample_rate());
+            self.mix.edit(target, automated, (self.history.sample_rate() as usize).div_ceil(100));
         } else if index == param::FEEDBACK {
-            self.feedback.edit(target, automated, self.history.sample_rate());
+            self.feedback.edit(target, automated, (self.history.sample_rate() as usize).div_ceil(100));
         }
         self.timing.parameter_edited(index, &self.targets, self.history.sample_rate(), automated);
         true

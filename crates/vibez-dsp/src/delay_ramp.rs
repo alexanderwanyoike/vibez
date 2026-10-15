@@ -29,7 +29,7 @@ impl ScalarRamp {
         self.frames = 0;
     }
 
-    pub(super) fn edit(&mut self, target: f32, automated: bool, sample_rate: f32) {
+    pub(super) fn edit(&mut self, target: f32, automated: bool, frames: usize) {
         if !self.started || automated {
             self.snap(target);
             return;
@@ -37,7 +37,7 @@ impl ScalarRamp {
         self.origin = self.current;
         self.target = target;
         self.frame = 0;
-        self.frames = (sample_rate as usize).div_ceil(100);
+        self.frames = frames;
     }
 
     pub(super) fn next_frame(&mut self) -> f32 {
