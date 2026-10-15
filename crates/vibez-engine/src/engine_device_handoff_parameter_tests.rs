@@ -654,8 +654,5 @@ fn retained_parameter_capacity_coalesces_and_replays_every_entry() {
                 "old-owner-retired"
             ]
         );
-        let ids = [first_id, second_id];
-        let final_position = engine.transport.position();
-        eprintln!("device-handoff-parameters baseline: instrument={instrument}; capacity={capacity}; rejected_index={REJECTED_INDEX}; overflow_index={PARAMETER_CAPACITY}; overflow_consumed={overflow_consumed}; replay_count={}; backing_survived={backing_survived}; first_owner_roundtrip={first_owner_roundtrip}; replacement_intact={replacement_intact}; ids={ids:?}; final_position={final_position}; indices={indices:?}; offered_bits={offered_bits:?}; applied_bits={applied_bits:?}; replacement_bits={replacement_bits:?}; readiness={readiness:?}; order={order:?}", audit.calls.load(Ordering::Relaxed));
     }
 }
