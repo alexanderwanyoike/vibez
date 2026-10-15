@@ -54,10 +54,14 @@ impl Calls {
     }
     pub(super) fn assert_effect_recovered_after_failure(&self) {
         let calls = self.observed();
-        let failure = calls.iter().position(|answer| *answer == EFFECT_PROBE_OWNER * 100 + 11)
+        let failure = calls
+            .iter()
+            .position(|answer| *answer == EFFECT_PROBE_OWNER * 100 + 11)
             .expect("the first Start must observe the local failure");
-        assert!(calls[failure + 1..].contains(&(EFFECT_PROBE_OWNER * 100 + 10)),
-            "the later Start must observe the recovery edit");
+        assert!(
+            calls[failure + 1..].contains(&(EFFECT_PROBE_OWNER * 100 + 10)),
+            "the later Start must observe the recovery edit"
+        );
     }
     pub(super) fn assert_effect_recovered_before_refailure(&self) {
         let calls = self.observed();
@@ -409,8 +413,14 @@ fn exercise(fixture: &mut Fixture, _case: &str, commands: &[bool], expected: Exp
         AdmissionObservation::EffectFailure => fixture.calls.assert_effect_failure_observed(true),
         AdmissionObservation::InstrumentFailure => {
             fixture.calls.assert_local_answer(1, true);
-            assert!(fixture.calls.observed().iter().all(|answer| answer / 100 == 1),
-                "the first local instrument failure must short-circuit the effect scan");
+            assert!(
+                fixture
+                    .calls
+                    .observed()
+                    .iter()
+                    .all(|answer| answer / 100 == 1),
+                "the first local instrument failure must short-circuit the effect scan"
+            );
         }
         AdmissionObservation::OwnedGate => assert!(fixture.calls.observed().is_empty()),
     }

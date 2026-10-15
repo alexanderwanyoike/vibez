@@ -158,7 +158,10 @@ fn pending_stop_rebase_preserves_first_timestamp_with_idle_or_new_active_capture
                     fixture.calls.assert_effect_failure_observed(true);
                 }
             } else {
-                assert!(fixture.calls.observed().is_empty(), "rebasing and publishing must not rescan devices");
+                assert!(
+                    fixture.calls.observed().is_empty(),
+                    "rebasing and publishing must not rescan devices"
+                );
             }
             fixture.calls.clear();
         }
