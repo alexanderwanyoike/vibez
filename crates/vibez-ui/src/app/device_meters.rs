@@ -91,3 +91,26 @@ impl App {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domains::devices::DevicesMsg;
+    use crate::state::ProjectTrack;
+    use vibez_core::effect::EffectType;
+
+    #[test]
+    fn a_native_eq_on_the_visible_chain_is_metered() {
+        let mut app = super::super::test_support::app();
+        let track = ProjectTrack::new(TrackId::new(), "Vocals".into(), 2);
+        let id = track.id;
+        Arc::make_mut(&mut app.state.project_tracks)
+            .tracks
+            .push(track);
+        let _ = app.update(Message::Devices(DevicesMsg::AddEffect(id, EffectType::Eq)));
+        app.state.arrangement.selected_track = Some(id);
+        app.state.view.detail_panel_tab = DetailPanelTab::Devices;
+        app.poll_device_meters();
+        assert_eq!(app.device_meters.channel, Some(id));
+    }
+}
