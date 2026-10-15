@@ -105,6 +105,34 @@ pub struct EngineNoteClip {
     groove_latch: Cell<Option<(i64, vibez_core::perform::SwingAmount)>>,
 }
 
+pub(crate) struct NoteInsertionStorage {
+    notes: Vec<MidiNote>,
+    clamps: Vec<Option<f64>>,
+}
+
+impl NoteInsertionStorage {
+    pub(crate) fn new(capacity: usize) -> Self {
+        Self { notes: Vec::with_capacity(capacity), clamps: Vec::with_capacity(capacity) }
+    }
+
+    pub(crate) fn install_if_needed(&mut self, clip: &mut EngineNoteClip) -> bool {
+        assert_eq!(clip.notes.len(), clip.next_same_pitch_start_beats.len());
+        let required = clip.notes.len().checked_add(1).expect("note length overflow");
+        if clip.notes.capacity() >= required && clip.next_same_pitch_start_beats.capacity() >= required {
+            return true;
+        }
+        if self.notes.capacity() < required || self.clamps.capacity() < required { return false; }
+        // Clamp changes affect sounding notes, so no cache mutation precedes
+        // complete capacity admission for both arrays and the original delta.
+        assert!(self.notes.is_empty() && self.clamps.is_empty());
+        self.notes.append(&mut clip.notes);
+        self.clamps.append(&mut clip.next_same_pitch_start_beats);
+        std::mem::swap(&mut self.notes, &mut clip.notes);
+        std::mem::swap(&mut self.clamps, &mut clip.next_same_pitch_start_beats);
+        true
+    }
+}
+
 impl EngineNoteClip {
     pub(crate) fn same_pitch_schedule(&self, other: &Self, pitch: u8) -> bool {
         self.position_beats == other.position_beats
