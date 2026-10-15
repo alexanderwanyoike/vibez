@@ -1095,3 +1095,6 @@ mod resumed_record_pressure_tests;
 #[cfg(test)]
 #[path = "engine_retained_count_in_tests.rs"]
 mod retained_count_in_tests;
+#[cfg(test)]
+#[path = "engine_resumed_section_rejection_tests.rs"]
+mod resumed_section_rejection_tests;
