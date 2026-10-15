@@ -155,6 +155,7 @@ impl crate::engine::AudioEngine {
         let permit = allowance.next().expect("the closed owner-return path stays within its admitted budget");
         self.pending_retirements
             .publish(&mut self.event_tx, event, permit)
+            .map_err(crate::retirement_queue::WrongQueue::into_parts)
             .expect("the engine's sole queue issued this allowance");
     }
     pub(super) fn dispose_effect(&mut self, mut effect: Box<dyn vibez_dsp::effect::AudioEffect>, allowance: &mut RetirementAllowance) {

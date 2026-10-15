@@ -63,15 +63,18 @@ impl RetirementQueue {
         }
     }
 
+    #[cfg(test)]
     pub(super) fn as_slice(&self) -> &[EngineEvent] {
         &self.queued
     }
     pub(super) fn len(&self) -> usize {
         self.queued.len()
     }
+    #[cfg(test)]
     pub(super) fn is_empty(&self) -> bool {
         self.queued.is_empty()
     }
+    #[cfg(test)]
     pub(super) fn capacity(&self) -> usize {
         CAPACITY
     }
@@ -149,6 +152,7 @@ impl RetirementQueue {
 }
 
 impl RetirementAllowance {
+    #[cfg(test)]
     pub(super) fn remaining(&self) -> usize {
         self.remaining
     }
