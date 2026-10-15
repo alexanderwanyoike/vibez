@@ -40,6 +40,10 @@ impl Duck {
         wet.map(|sample| (f64::from(sample) * gain) as f32)
     }
 
+    pub(super) fn attenuation_db(&self) -> f32 {
+        (24.0 * f64::from(self.amount.current()) * (self.envelope / 0.25).clamp(0.0, 1.0)) as f32
+    }
+
     pub(super) fn reset(&mut self, target: f32) {
         self.envelope = 0.0;
         self.amount.reset(target);

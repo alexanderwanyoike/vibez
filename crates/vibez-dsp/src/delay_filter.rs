@@ -132,6 +132,20 @@ impl FeedbackFilters {
             + f64::from(amount) * f64::from(filtered)) }
     }
 
+    pub(super) fn snapshot(&self) -> ([vibez_core::delay_state::DelayFilterState; 2], bool) {
+        let states = [
+            (&self.high_pass_enabled, &self.high_pass_cutoff),
+            (&self.low_pass_enabled, &self.low_pass_cutoff),
+        ];
+        let snapshots = states.map(|(enabled, cutoff)| vibez_core::delay_state::DelayFilterState {
+            enabled: enabled.current(), cutoff_hz: cutoff.current,
+            moving: enabled.moving() || cutoff.frame < cutoff.frames,
+        });
+        let reference_moving = states.into_iter().any(|(enabled, cutoff)|
+            enabled.moving() || (enabled.current() > 0.0 && cutoff.frame < cutoff.frames));
+        (snapshots, reference_moving)
+    }
+
     pub(super) fn process(&mut self, input: [f32; 2]) -> [f32; 2] {
         let high_pass = self.high_pass_enabled.next_frame();
         let low_pass = self.low_pass_enabled.next_frame();

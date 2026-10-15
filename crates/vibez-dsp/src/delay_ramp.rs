@@ -40,6 +40,10 @@ impl ScalarRamp {
         self.frames = frames;
     }
 
+    pub(super) fn current(&self) -> f32 { self.current }
+
+    pub(super) fn moving(&self) -> bool { self.frame < self.frames && self.current != self.target }
+
     pub(super) fn next_frame(&mut self) -> f32 {
         self.started = true;
         if self.frame < self.frames {

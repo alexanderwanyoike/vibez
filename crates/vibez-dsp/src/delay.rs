@@ -268,7 +268,12 @@ impl AudioEffect for DelayEffect {
             return None;
         }
         let (bpm, lines) = self.timing.snapshot(&self.targets, self.history.sample_rate());
+        let (filters, filters_moving) = self.filters.snapshot();
+        let reference_moving = lines.iter().any(|line| line.moving) || filters_moving
+            || self.feedback.moving() || self.routing.moving();
         Some(vibez_core::delay_state::DelayState {
+            mix: self.mix.current(), feedback: self.feedback.current(), routing: self.routing.current(),
+            filters, duck_attenuation_db: self.duck.attenuation_db(), reference_moving,
             sample_rate: self.history.activation_sample_rate()?, bpm,
             processed_frames: self.processed_frames, targets: self.targets, lines,
         })
