@@ -241,7 +241,11 @@ impl EqEffect {
 
     fn applied_target(&self, index: usize) -> f32 {
         if [2, 11, 12, 13, 14, 15, 17, 19].contains(&index) {
-            if self.params[index] >= 0.5 { 1.0 } else { 0.0 }
+            if self.params[index] >= 0.5 {
+                1.0
+            } else {
+                0.0
+            }
         } else {
             self.params[index]
         }
