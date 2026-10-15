@@ -220,17 +220,13 @@ impl<'a, const N: usize> PresentationAdmission<'a, N> {
         Some(Self { events, scheduled, terminals })
     }
 
-    pub(super) fn publish(self, prefix: [Option<ScheduledPresentation>; N], source_now: u64, heard_now: u64) {
+    pub(super) fn publish(mut self, prefix: [Option<ScheduledPresentation>; N], source_now: u64, heard_now: u64) {
         for pending in prefix.into_iter().flatten() {
-            debug_assert!(pending.due <= source_now || pending.event.time_domain() == crate::events::TimeDomain::Heard);
-            flush_presentation_parts(self.events, self.scheduled, self.terminals, source_now, heard_now);
-            // Only this exclusive borrow can write the Vec. The fixed array cannot
-            // spend more than the prefix admitted before its source was detached.
-            queue_admitted_event(pending.event, self.events, self.scheduled, source_now, pending.due, heard_now);
+            self.publish_one(pending, source_now, heard_now);
         }
     }
     pub(super) fn publish_clip(
-        self, prefix: [Option<EngineEvent>; N],
+        mut self, prefix: [Option<EngineEvent>; N],
         mut context: super::clip_launcher::ClipEventContext<'_>,
         source_now: u64, heard_now: u64,
     ) {
@@ -238,31 +234,32 @@ impl<'a, const N: usize> PresentationAdmission<'a, N> {
             // Clip drop telemetry observes each prior publication, including
             // terminal-priority flushing, before preparing the next fact.
             let pending = context.prepare(event, self.events.is_full());
-            debug_assert!(pending.due <= source_now || pending.event.time_domain() == crate::events::TimeDomain::Heard);
-            flush_presentation_parts(self.events, self.scheduled, self.terminals, source_now, heard_now);
-            queue_admitted_event(pending.event, self.events, self.scheduled, source_now, pending.due, heard_now);
+            self.publish_one(pending, source_now, heard_now);
         }
     }
 
+    fn publish_one(&mut self, pending: ScheduledPresentation, source_now: u64, heard_now: u64) {
+        debug_assert!(pending.due <= source_now || pending.event.time_domain() == crate::events::TimeDomain::Heard);
+        flush_presentation_parts(self.events, self.scheduled, self.terminals, source_now, heard_now);
+        // The fixed prefix and consuming advance steps cannot spend more than
+        // this exclusive borrow admitted before its source was detached.
+        queue_admitted_event(pending.event, self.events, self.scheduled, source_now, pending.due, heard_now);
+    }
 }
 
 impl<'a> PresentationAdmission<'a, 3> {
-    pub(super) fn advance(self, pending: Option<ScheduledPresentation>, source_now: u64, heard_now: u64) -> PresentationAdmission<'a, 2> {
+    pub(super) fn advance(mut self, pending: Option<ScheduledPresentation>, source_now: u64, heard_now: u64) -> PresentationAdmission<'a, 2> {
         if let Some(pending) = pending {
-            debug_assert!(pending.due <= source_now || pending.event.time_domain() == crate::events::TimeDomain::Heard);
-            flush_presentation_parts(self.events, self.scheduled, self.terminals, source_now, heard_now);
-            queue_admitted_event(pending.event, self.events, self.scheduled, source_now, pending.due, heard_now);
+            self.publish_one(pending, source_now, heard_now);
         }
         PresentationAdmission { events: self.events, scheduled: self.scheduled, terminals: self.terminals }
     }
 }
 
 impl<'a> PresentationAdmission<'a, 2> {
-    pub(super) fn advance(self, pending: Option<ScheduledPresentation>, source_now: u64, heard_now: u64) -> PresentationAdmission<'a, 1> {
+    pub(super) fn advance(mut self, pending: Option<ScheduledPresentation>, source_now: u64, heard_now: u64) -> PresentationAdmission<'a, 1> {
         if let Some(pending) = pending {
-            debug_assert!(pending.due <= source_now || pending.event.time_domain() == crate::events::TimeDomain::Heard);
-            flush_presentation_parts(self.events, self.scheduled, self.terminals, source_now, heard_now);
-            queue_admitted_event(pending.event, self.events, self.scheduled, source_now, pending.due, heard_now);
+            self.publish_one(pending, source_now, heard_now);
         }
         PresentationAdmission { events: self.events, scheduled: self.scheduled, terminals: self.terminals }
     }
