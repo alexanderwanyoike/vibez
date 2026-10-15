@@ -84,24 +84,6 @@ impl AudioEngine {
         self.recalculate_audio_length();
     }
 
-    pub(super) fn command_add_note(
-        &mut self,
-        track_id: vibez_core::id::TrackId,
-        clip_id: vibez_core::id::ClipId,
-        note: vibez_core::midi::MidiNote,
-    ) {
-        if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
-            if let Some(clip) = track
-                .playback_source
-                .note_clips
-                .iter_mut()
-                .find(|c| c.id == clip_id)
-            {
-                clip.push_note(note);
-            }
-        }
-    }
-
     pub(super) fn command_remove_note(
         &mut self,
         track_id: vibez_core::id::TrackId,

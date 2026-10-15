@@ -315,7 +315,7 @@ fn assert_complete(
             };
             clip
         }
-        ClipInsertionOutcome::MissingTrack => unreachable!(),
+        ClipInsertionOutcome::MissingTrack | ClipInsertionOutcome::MissingClip => unreachable!(),
     };
     assert_eq!(clip.id, delta.clip);
     assert_eq!(

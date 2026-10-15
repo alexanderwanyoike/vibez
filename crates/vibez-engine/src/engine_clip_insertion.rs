@@ -1,9 +1,9 @@
-//! Audio and note clip appends commit live content through one bounded FIFO storage exchange.
+//! Clip and note value appends commit live content through one bounded FIFO storage exchange.
 
 use super::*;
 use crate::clip_insertion::{
-    ClipInsertionDelta, ClipInsertionOutcome, ClipInsertionReply, CompletedClipInsertion,
-    PreparedClipInsertion, PreparedNoteClipInsertion,
+    ClipInsertionAttempt, ClipInsertionDelta, ClipInsertionOutcome, ClipInsertionReply, CompletedClipInsertion,
+    PreparedClipInsertion, PreparedNoteClipInsertion, PreparedNoteInsertion,
 };
 
 impl AudioEngine {
@@ -13,8 +13,9 @@ impl AudioEngine {
         clip: EngineClip,
         mut insertion: Box<PreparedClipInsertion>,
     ) {
+        let clip_id = clip.id;
         insertion.clip = Some(ClipInsertionDelta::Audio(clip));
-        self.begin_clip_insertion(track_id, insertion);
+        self.begin_clip_insertion(track_id, clip_id, insertion);
     }
 
     pub(super) fn command_add_note_clip(
@@ -22,28 +23,38 @@ impl AudioEngine {
         track_id: TrackId,
         insertion: PreparedNoteClipInsertion,
     ) {
-        self.begin_clip_insertion(track_id, insertion.into_control());
+        let (clip_id, control) = insertion.into_control();
+        self.begin_clip_insertion(track_id, clip_id, control);
+    }
+
+    pub(super) fn command_add_note(
+        &mut self,
+        track_id: TrackId,
+        clip_id: ClipId,
+        insertion: PreparedNoteInsertion,
+    ) {
+        self.begin_clip_insertion(track_id, clip_id, insertion.into_control());
     }
 
     fn begin_clip_insertion(
         &mut self,
         track_id: TrackId,
+        clip_id: ClipId,
         mut insertion: Box<PreparedClipInsertion>,
     ) {
-        insertion.target = Some((track_id, insertion.clip_id()));
+        insertion.target = Some((track_id, clip_id));
         let Some(track) = self.tracks.iter_mut().find(|track| track.id == track_id) else {
             self.complete_clip_insertion(insertion, ClipInsertionOutcome::MissingTrack);
-            self.recalculate_audio_length();
             return;
         };
-        if insertion.try_apply(&mut track.playback_source) {
-            self.complete_clip_insertion(insertion, ClipInsertionOutcome::Applied);
-            self.recalculate_audio_length();
-        } else {
-            let required = insertion.required_capacity(&track.playback_source);
-            let request = insertion.request(required);
-            self.pending_clip_insertion = Some(insertion);
-            self.retire_event(EngineEvent::ClipInsertionStorageRequested(request));
+        match insertion.try_apply(&mut track.playback_source) {
+            ClipInsertionAttempt::Applied => self.complete_clip_insertion(insertion, ClipInsertionOutcome::Applied),
+            ClipInsertionAttempt::MissingClip => self.complete_clip_insertion(insertion, ClipInsertionOutcome::MissingClip),
+            ClipInsertionAttempt::NeedsCapacity(required) => {
+                let request = insertion.request(required);
+                self.pending_clip_insertion = Some(insertion);
+                self.retire_event(EngineEvent::ClipInsertionStorageRequested(request));
+            }
         }
     }
 
@@ -64,12 +75,14 @@ impl AudioEngine {
                 if let Some(track) = self.tracks.iter_mut().find(|track| track.id == track_id) {
                     // FIFO is paused and runtime Section/Clip rendering restores
                     // Arrange storage before command drain. No writer can grow it.
-                    assert!(insertion.try_apply(&mut track.playback_source));
-                    self.complete_clip_insertion(insertion, ClipInsertionOutcome::Applied);
+                    match insertion.try_apply(&mut track.playback_source) {
+                        ClipInsertionAttempt::Applied => self.complete_clip_insertion(insertion, ClipInsertionOutcome::Applied),
+                        ClipInsertionAttempt::MissingClip => self.complete_clip_insertion(insertion, ClipInsertionOutcome::MissingClip),
+                        ClipInsertionAttempt::NeedsCapacity(_) => unreachable!("FIFO and restored Arrange storage keep the prepared reply sufficient"),
+                    }
                 } else {
                     self.complete_clip_insertion(insertion, ClipInsertionOutcome::MissingTrack);
                 }
-                self.recalculate_audio_length();
             }
         }
     }
@@ -79,6 +92,7 @@ impl AudioEngine {
         owner: Box<PreparedClipInsertion>,
         outcome: ClipInsertionOutcome,
     ) {
+        let recalculate_length = owner.affects_length() && outcome != ClipInsertionOutcome::Abandoned;
         let (track_id, clip_id) = owner.target.expect("one insertion outcome target");
         self.retire_event(EngineEvent::ClipInsertionCompleted(
             CompletedClipInsertion {
@@ -88,5 +102,6 @@ impl AudioEngine {
                 owner,
             },
         ));
+        if recalculate_length { self.recalculate_audio_length(); }
     }
 }

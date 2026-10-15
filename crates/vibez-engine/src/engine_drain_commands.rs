@@ -620,8 +620,8 @@ impl AudioEngine {
                 EngineCommand::AddNote {
                     track_id,
                     clip_id,
-                    note,
-                } => self.command_add_note(track_id, clip_id, note),
+                    insertion,
+                } => self.command_add_note(track_id, clip_id, insertion),
                 EngineCommand::RemoveNote {
                     track_id,
                     clip_id,
