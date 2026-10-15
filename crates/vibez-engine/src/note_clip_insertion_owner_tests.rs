@@ -71,3 +71,6 @@ fn public_missing_track_returns_complete_prepared_note_clip_without_callback_hea
             | EngineEvent::ClipInsertionStorageRequested(_)));
     }
 }
+
+#[path = "note_clip_insertion_pressure_tests.rs"]
+mod pressure_tests;
