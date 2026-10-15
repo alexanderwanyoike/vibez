@@ -254,7 +254,7 @@ mod tests {
         assert!(worker.complete(old, Ok(None)).is_none());
         let next_token = next.token;
         drop(next);
-        worker.complete(next_token, Ok(None)).unwrap();
+        assert!(worker.complete(next_token, Ok(None)).unwrap().1.unwrap().is_none());
         assert_eq!(worker.admit().unwrap().request.state.feedback, 0.7);
     }
 
