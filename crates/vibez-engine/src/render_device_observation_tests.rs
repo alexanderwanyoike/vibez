@@ -317,7 +317,7 @@ fn public_offline_full_and_cropped_master_and_track_outputs_keep_origin_warmed_h
             assert_eq!(facts.frames.load(Ordering::Relaxed), end as usize);
             if let Some(previous) = &full {
                 let previous: &Vec<Vec<f32>> = previous;
-                for channel in 0..2 { assert_eq!(result.audio.channels[channel], previous[channel][start as usize..end as usize]); }
+                for (channel, expected) in previous.iter().enumerate() { assert_eq!(result.audio.channels[channel], expected[start as usize..end as usize]); }
             } else { full = Some(result.audio.channels.clone()); }
             let calls = trace.observed();
             assert_eq!(calls.first(), Some(&(2, LATENCY, 0)), "caller-thread latency reporting precedes construction");
