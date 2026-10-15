@@ -590,8 +590,9 @@ mod tests {
         used
     }
 
-    /// The device section's minimum leaves this much for a card body.
-    const MIN_BODY_H: u32 = 86;
+    /// At its minimum the device section leaves this much for a card body;
+    /// at 1.5x interface scale the real app measured about 73.
+    const MIN_BODY_H: u32 = 56;
 
     #[test]
     fn every_supported_size_fits_without_scrolling() {
