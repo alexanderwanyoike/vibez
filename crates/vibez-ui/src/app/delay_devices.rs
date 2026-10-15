@@ -154,7 +154,10 @@ impl App {
                     | param::LEFT_MODIFIER
                     | param::ROUTING
                     | param::RIGHT_DIVISION
-                    | param::RIGHT_MODIFIER => value.round(),
+                    | param::RIGHT_MODIFIER => {
+                        // Echo matching needs the DSP's single ordinal zero representation.
+                        value.round() as u32 as f32
+                    }
                     _ => value,
                 };
                 Some((index, value))
