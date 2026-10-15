@@ -1,4 +1,4 @@
-//! Gain panel readings identify each insert and measure its actual stereo signal.
+//! Selected native insert readings measure stereo signal independently of channel faders.
 
 use super::*;
 use vibez_core::effect::EffectType;
@@ -627,4 +627,131 @@ fn gain_meter_fixture(
         })
         .unwrap();
     (engine, commands, events, track_id, effect_id)
+}
+
+#[test]
+fn native_delay_meter_reports_real_insert_levels_before_channel_faders() {
+    use vibez_dsp::delay::param;
+
+    for use_graph in [false, true] {
+        let (mut engine, mut commands, mut events) = AudioEngine::new();
+        let track = TrackId::new();
+        let effect = EffectId::new();
+        commands.push(EngineCommand::SetSampleRate(48_000)).unwrap();
+        commands.push(EngineCommand::add_track(track)).unwrap();
+        commands
+            .push(EngineCommand::insert_built_in_effect(
+                track, effect, EffectType::Delay, 48_000,
+            ))
+            .unwrap();
+        for (param_index, value) in [
+            (param::TIME_MS, 3.0),
+            (param::LINK, 0.0),
+            (param::RIGHT_TIME_MS, 5.0),
+            (param::ROUTING, 1.0),
+            (param::FEEDBACK, 0.5),
+            (param::MIX, 0.25),
+        ] {
+            commands.push(EngineCommand::SetEffectParam {
+                track_id: track, effect_id: effect, param_index, value,
+            }).unwrap();
+        }
+        commands.push(EngineCommand::SetTrackGain(track, 0.125)).unwrap();
+        commands.push(EngineCommand::SetTrackGain(TrackId::MASTER, 0.25)).unwrap();
+        if use_graph {
+            let routing = crate::routing::PreparedRouting::prepare(
+                &[
+                    RoutingChannel {
+                        id: track,
+                        is_bus: false,
+                        effects: vec![RoutingEffect {
+                            id: effect, inputs: vec![], assignments: vec![],
+                            inactive_inputs: vec![],
+                        }],
+                        sends: vec![],
+                    },
+                    RoutingChannel {
+                        id: TrackId::MASTER, is_bus: true, effects: vec![], sends: vec![],
+                    },
+                ],
+                128,
+            ).unwrap();
+            commands.push(EngineCommand::SetRouting(routing)).unwrap();
+        }
+        let silence = [0.0_f32; 1920];
+        let mut output = [0.0_f32; 1920];
+        engine.process_block(
+            AudioProcessBlock::new(&mut output, 2).with_live_input(track.raw(), &silence),
+        );
+        while events.pop().is_ok() {}
+        commands.push(EngineCommand::SetEffectMeterChannel {
+            track_id: Some(track), generation: 73,
+        }).unwrap();
+
+        let mut input = [0.0_f32; 1920];
+        input[0] = 0.5;
+        input[1] = -0.25;
+        let mut expected_insert = [0.0_f32; 1920];
+        expected_insert[0] = 0.375;
+        expected_insert[1] = -0.1875;
+        // Crossed feedback traverses the destination's 144 or 240 sample history.
+        for (frame, channel, sample) in [
+            (144, 0, 0.125), (240, 1, -0.0625),
+            (384, 0, -0.03125), (384, 1, 0.0625),
+            (528, 0, 0.03125), (624, 1, -0.015625),
+            (768, 0, -0.0078125), (768, 1, 0.015625),
+            (912, 0, 0.0078125),
+        ] {
+            expected_insert[2 * frame + channel] = sample;
+        }
+        let mut reading = None;
+        for half in 0..2 {
+            let range = half * 960..(half + 1) * 960;
+            assert_eq!(
+                crate::retirement::tests::allocations(|| {
+                    engine.process_block(
+                        AudioProcessBlock::new(&mut output[range.clone()], 2)
+                            .with_live_input(track.raw(), &input[range.clone()]),
+                    );
+                }),
+                (0, 0),
+                "Delay meter callback heap activity, graph={use_graph}, half={half}",
+            );
+            while let Ok(event) = events.pop() {
+                if let EngineEvent::EffectMeter {
+                    track_id, effect_id, generation, input, output,
+                } = event {
+                    assert_eq!(half, 1, "a 50Hz window must include all 960 frames");
+                    assert_eq!((track_id, effect_id, generation), (track, effect, 73));
+                    assert!(reading.replace((input, output)).is_none());
+                }
+            }
+        }
+        let post_fader_gain = 0.125 * 0.25 * std::f32::consts::FRAC_1_SQRT_2;
+        for (sample, (&actual, &expected)) in output.iter().zip(&expected_insert).enumerate() {
+            assert!((actual - expected * post_fader_gain).abs() <= 2e-7,
+                "graph={use_graph}, sample={sample}: heard={actual}, insert={expected}");
+        }
+        let (input_levels, output_levels) =
+            reading.expect("the selected native Delay must publish its real insert meter");
+        let mut squares = [0.0_f64; 2];
+        for frame in expected_insert.chunks_exact(2) {
+            for channel in 0..2 {
+                squares[channel] += f64::from(frame[channel]).powi(2);
+            }
+        }
+        for (actual, expected) in [
+            (input_levels.peak_l, 0.5),
+            (input_levels.peak_r, 0.25),
+            (input_levels.rms_l, 0.5 / 960.0_f32.sqrt()),
+            (input_levels.rms_r, 0.25 / 960.0_f32.sqrt()),
+            (output_levels.peak_l, 0.375),
+            (output_levels.peak_r, 0.1875),
+            (output_levels.rms_l, (squares[0] / 960.0).sqrt() as f32),
+            (output_levels.rms_r, (squares[1] / 960.0).sqrt() as f32),
+        ] {
+            assert!((actual - expected).abs() <= 1e-6,
+                "graph={use_graph}: meter={actual}, independent expected={expected}");
+        }
+    }
 }
