@@ -1,3 +1,5 @@
+//! Public note repeat preserves engine-clock scheduling and matching note releases.
+
 use super::*;
 use crate::playback_source::{
     EngineNoteClip, PreparedPlaybackSource, PreparedSectionPlaybackSource,
