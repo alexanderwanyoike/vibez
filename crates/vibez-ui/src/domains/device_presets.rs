@@ -142,7 +142,10 @@ pub fn prepare_updates(
             .ok_or_else(|| "The device's parameters are unavailable".to_string())?;
         if !value.is_finite()
             || !(descriptor.min..=descriptor.max).contains(&value)
-            || (vibez_dsp::gain::param::POLARITY.contains(&index) && value != 0.0 && value != 1.0)
+            || (effect.effect_type == EffectType::Gain
+                && vibez_dsp::gain::param::POLARITY.contains(&index)
+                && value != 0.0
+                && value != 1.0)
         {
             return Err(format!(
                 "Preset parameter {key} is outside its supported range"
