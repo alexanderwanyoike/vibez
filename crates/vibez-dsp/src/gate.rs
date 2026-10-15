@@ -2,7 +2,7 @@
 
 use vibez_core::effect::{DynamicsMeter, EffectType, GateMeter, GatePhase, ParamDescriptor};
 
-use crate::{detector_filter::DetectorFilter, effect::AudioEffect};
+use crate::{butterworth_filter::ButterworthFilter as DetectorFilter, effect::AudioEffect};
 
 pub mod param {
     pub const THRESHOLD: usize = 0;

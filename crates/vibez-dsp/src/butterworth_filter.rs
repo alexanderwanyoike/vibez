@@ -1,13 +1,13 @@
-//! Detector-only Butterworth filtering with persistent stereo histories.
+//! Second-order Butterworth filtering with persistent stereo histories.
 
 #[derive(Clone, Copy)]
-pub(crate) struct DetectorFilter {
+pub(crate) struct ButterworthFilter {
     b: [f64; 3],
     a: [f64; 2],
     state: [[f64; 4]; 2],
 }
 
-impl DetectorFilter {
+impl ButterworthFilter {
     pub const EMPTY: Self = Self {
         b: [1.0, 0.0, 0.0],
         a: [0.0; 2],
