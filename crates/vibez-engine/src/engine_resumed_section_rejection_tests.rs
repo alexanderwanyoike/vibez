@@ -309,7 +309,6 @@ fn resumed_section_rejection_preserves_complete_owner_with_an_old_inline_stop() 
         after_capacity,
     } = returning_section_fixture();
     let active_after = engine.active_section.map(|section| section.section_id);
-    eprintln!("resumed Section rejection: heap={heap:?}, ordinary={after_len}/{after_capacity}");
     let expected_fade = std::array::from_fn(|frame| 0.25 * (1.0 - frame as f32 / 64.0));
     assert_eq!(output, expected_fade);
     assert_eq!(active_after, Some(old_section));
