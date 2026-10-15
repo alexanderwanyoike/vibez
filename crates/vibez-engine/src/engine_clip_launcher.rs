@@ -265,6 +265,11 @@ impl AudioEngine {
             let now = self.performance_position + rendered as u64;
             self.apply_clip_record_boundary(now);
             self.apply_clip_boundaries(now);
+            // A fault may retain a due source. The output gate owns this
+            // callback's loss envelope, so do not revisit that boundary.
+            if self.presentation_state.is_faulted() {
+                break;
+            }
             let mut count = frames - rendered;
             if let Some(boundary) = self.next_clip_record_boundary() {
                 count = count.min(boundary.saturating_sub(now) as usize);
