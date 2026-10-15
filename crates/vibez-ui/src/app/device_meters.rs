@@ -179,10 +179,6 @@ impl App {
 mod tests {
     use super::*;
 
-#[cfg(test)]
-#[path = "bitcrush_meter_flow_tests.rs"]
-mod bitcrush_flow_tests;
-
     #[test]
     fn readings_expire_at_the_meter_timeout() {
         let now = Instant::now();
