@@ -74,9 +74,9 @@ impl AudioEngine {
                 instrument.reconfiguration_requested()
                     || !instrument.processing_configuration_valid()
             }) {
-                return OfflineConfigurationFacts::Unavailable(
-                    OfflineDeviceTarget::Instrument(track.id),
-                );
+                return OfflineConfigurationFacts::Unavailable(OfflineDeviceTarget::Instrument(
+                    track.id,
+                ));
             }
             for slot in &track.effects {
                 if let Some(rate) = slot
@@ -85,7 +85,10 @@ impl AudioEngine {
                     .filter(|rate| *rate != self.sample_rate)
                 {
                     return OfflineConfigurationFacts::ActivationMismatch {
-                        target: OfflineDeviceTarget::Effect { track: track.id, effect: slot.id },
+                        target: OfflineDeviceTarget::Effect {
+                            track: track.id,
+                            effect: slot.id,
+                        },
                         active: rate,
                         requested: self.sample_rate,
                     };
