@@ -1187,10 +1187,18 @@ fn staging_at_a_real_render_offset_cannot_spend_recovered_ring_slots() {
             .map(|owner| Arc::downgrade(&owner.source.clips[0].audio))
             .collect();
         let packet_storage = (packet.as_ptr() as usize, packet.capacity());
-        {
-            let mut retirement_allowance = engine.pending_retirements.reserve(2).expect("fixture admits its original owner-return budget");
-            engine.queue_clips(packet, MusicalBoundary::Immediate, &mut retirement_allowance)
-        };
+        assert!(engine.clip_performance);
+        assert!(engine.transport().is_playing());
+        assert!(engine.pending_clip_batch.is_none());
+        // This lower-layer render witness starts with an already owned packet.
+        // Public command admission cannot enter with all ordinary credits used.
+        engine.pending_clip_batch = Some(PendingClipBatch {
+            clips: packet,
+            quantization: MusicalBoundary::Immediate,
+            boundary: engine.performance_position,
+            starting: false,
+            phase: BatchPhase::Staging,
+        });
         assert_eq!(engine.pending_clip_batch.as_ref().unwrap().clips.len(), 3);
         assert!(!engine.presentation_state.is_faulted());
         assert_eq!(engine.presentation_state.terminals.occupied_slots(), 0);
