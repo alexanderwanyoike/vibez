@@ -55,9 +55,12 @@ AddNoteClip carries an opaque `PreparedNoteClipInsertion`, which constructs the
 complete empty note clip, its cache and the same control outside the callback.
 Following AddNote commands remain separate FIFO edits with an opaque
 `PreparedNoteInsertion` owning the original MidiNote and the same control.
-All three operations share one pending insertion, mailbox implementation and
-request/completion event family. Capacity is only a hint, never a content limit
-or a content snapshot.
+SetAutomationLane carries an opaque `PreparedAutomationLaneInsertion` owning
+the original whole lane and one empty lane Vec in that same control.
+All four operations share one pending insertion, mailbox implementation and
+request/completion event family. Their typed target distinguishes ClipId from
+LaneId without inventing a clip identity for a lane. Capacity is only a hint,
+never a content limit or a content snapshot.
 If current live clip/removal storage cannot accept the original delta, the
 engine retains that delta and requests empty storage through
 `ClipInsertionStorageRequested`. Current complete clip values move in order
@@ -77,7 +80,26 @@ Undo/replay remain later FIFO work; a canonical UI replacement cannot redirect
 an already pending note to a future reused target. Public construction and
 actual offline preparation retain complete caches before live growth.
 
-This branch has two inner Vecs. If PR #286's note-sort scratch is integrated,
+SetAutomationLane resolves Master first, then the first Track or Bus, and
+replaces the first matching LaneId before considering outer capacity. Matching
+is by ID, so a replacement can change target or points without changing other
+lane order or duplicate semantics. A new-ID append moves the current lane
+values and their original point Vecs into sufficient prepared outer storage.
+Only that empty old outer allocation moves into the complete control; lane
+editing does not flush notes, reset devices/history or recalculate length.
+
+Replacement and missing-channel paths preserve the original
+`RetiredAutomationLane` event before emitting their complete control. Initial
+admission needs two current retirement slots before popping the command, even
+when eager storage is adequate. Under a full event ring the existing bounded
+store flushes LIFO, so eventual control publication can precede the lane return.
+A pending new-ID append or abandonment needs one current completion slot;
+defensive pending replacement/rejection checks both slots before mutation.
+There is no credit held while awaiting a reply. This operation uses one lane
+Vec, without a parallel removal-staging Vec or a new mailbox.
+
+AddNote's bundle has two inner Vecs on this branch. If PR #286's note-sort
+scratch is integrated,
 extend this SAME bundle/preflight/complete return to all three Vecs and prove
 that union; two-buffer proofs do not cover a third callback-owned allocation.
 Do not add a parallel storage protocol or discard live scratch owners.
