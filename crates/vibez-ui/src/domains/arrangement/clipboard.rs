@@ -368,7 +368,7 @@ impl TimelineEditorState {
                     clip.position_beats = position_beats;
                     clip.selected_notes.clear();
                     engine.send(EngineCommand::AddNoteClip {
-                        track_id: track_id,
+                        track_id,
                         insertion: vibez_engine::clip_insertion::PreparedNoteClipInsertion::new(
                             clip.id,
                             clip.position_beats,

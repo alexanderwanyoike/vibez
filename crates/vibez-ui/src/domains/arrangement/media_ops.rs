@@ -622,7 +622,7 @@ impl TimelineEditorState {
         // Add joined clip
         let new_id = ClipId::new();
         engine.send(EngineCommand::AddNoteClip {
-            track_id: track_id,
+            track_id,
             insertion: vibez_engine::clip_insertion::PreparedNoteClipInsertion::new(
                 new_id,
                 start_pos,
@@ -726,7 +726,7 @@ impl TimelineEditorState {
         }
         for clip in &fragments {
             engine.send(EngineCommand::AddNoteClip {
-                track_id: track_id,
+                track_id,
                 insertion: vibez_engine::clip_insertion::PreparedNoteClipInsertion::new(
                     clip.id,
                     clip.position_beats,

@@ -213,7 +213,7 @@ fn looped_note_ons_per_bar(batch_render: bool) -> Vec<usize> {
         .unwrap();
     cmd_tx
         .push(EngineCommand::AddNoteClip {
-            track_id: track_id,
+            track_id,
             insertion: crate::clip_insertion::PreparedNoteClipInsertion::new(
                 clip_id,
                 0.0,
