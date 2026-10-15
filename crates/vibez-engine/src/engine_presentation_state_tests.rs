@@ -443,11 +443,6 @@ fn play_with_full_ui_ring_retains_capture_terminals_and_owner_but_cancels_inline
     drop(events);
     assert_eq!(Arc::strong_count(&offsets), 1);
     assert!(fixture.drain_events().is_empty());
-    eprintln!(
-        "presentation-play-under-full baseline: capture_start={capture_start}; capture_stop={capture_stop}; order={order:?}; loss_bits={:?}; resumed_bits={:?}",
-        loss.map(f32::to_bits),
-        resumed.map(f32::to_bits)
-    );
 }
 
 #[test]
@@ -547,9 +542,6 @@ fn capture_terminals_keep_first_writer_after_public_backward_seek() {
         .failure()
         .is_none());
     assert!(fixture.drain_events().is_empty());
-    eprintln!(
-        "presentation-first-writer baseline: first={first_boundary}; later={later_boundary}; order={order:?}"
-    );
 }
 
 #[test]
@@ -706,6 +698,5 @@ fn partial_terminal_publication_preserves_each_full_boundary_and_exact_overflow_
             (0, 0)
         );
         assert!(fixture.events.pop().is_err());
-        eprintln!("presentation-partial-terminals: initial_credits={credits}; first_published={credits}; remaining={}; final_order={order:?}; overflow_returns=1; allocations=(0,0)", 4 - credits);
     }
 }
