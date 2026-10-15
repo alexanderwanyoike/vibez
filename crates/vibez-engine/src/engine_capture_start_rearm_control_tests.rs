@@ -53,7 +53,7 @@ fn idle_closed_episode_survives_each_non_start_transport_command() {
         "stopped-play-reset",
         "begin-perform",
     ] {
-        let (mut fixture, audio) = prepared(0);
+        let (mut fixture, _) = prepared(0);
         if case == "perform-seek" {
             fixture
                 .commands
