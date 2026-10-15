@@ -32,6 +32,11 @@ impl MeterReadings {
     }
 
     fn accept(&mut self, output: MeterValues, now: Instant) {
+        if ![output.peak_l, output.peak_r, output.rms_l, output.rms_r]
+            .into_iter().all(|value| value.is_finite() && value >= 0.0) {
+            *self = Self::default();
+            return;
+        }
         self.output = output;
         self.last_meter_at = Some(now);
     }
