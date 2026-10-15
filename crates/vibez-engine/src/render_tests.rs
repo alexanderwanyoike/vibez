@@ -894,3 +894,6 @@ mod sidechain_tests;
 
 #[path = "render_device_observation_tests.rs"]
 mod device_observation_tests;
+
+#[path = "render_audio_insertion_tests.rs"]
+mod audio_storage_tests;

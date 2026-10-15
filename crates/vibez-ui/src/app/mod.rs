@@ -769,3 +769,6 @@ mod compensation_selection_tests;
 mod undo_replay_routing_tests;
 
 mod midi_input;
+
+#[cfg(test)]
+mod clip_insertion_tests;
