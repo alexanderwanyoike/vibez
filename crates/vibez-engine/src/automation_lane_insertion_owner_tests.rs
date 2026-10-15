@@ -39,6 +39,15 @@ fn measured(engine: &mut AudioEngine) {
     }), (0, 0));
 }
 
+fn assert_stopped_zero_frame_telemetry(events: &mut Consumer<EngineEvent>) {
+    assert!(matches!(events.pop().unwrap(), EngineEvent::PlaybackPosition(0)));
+    let EngineEvent::Metering { peak_l, peak_r, rms_l, rms_r } = events.pop().unwrap() else {
+        panic!("the stopped zero-frame callback must publish silent master meters");
+    };
+    assert_eq!((peak_l, peak_r, rms_l, rms_r), (0.0, 0.0, 0.0, 0.0));
+    assert!(events.is_empty(), "no further owner or other event may remain");
+}
+
 #[test]
 fn an_eager_append_uses_actual_spare_lane_capacity_without_a_storage_request() {
     let old = lane(AutomationTarget::TrackPan, 0.0);
@@ -79,7 +88,7 @@ fn an_eager_append_uses_actual_spare_lane_capacity_without_a_storage_request() {
     assert!(unused.is_empty());
     assert_eq!(unused.capacity(), 0);
     drop(completed);
-    assert!(events.is_empty());
+    assert_stopped_zero_frame_telemetry(&mut events);
     assert_eq!(engine.transport().position(), 0);
     assert_eq!(engine.transport().audio_length(), None);
 }
@@ -152,7 +161,7 @@ fn full_capacity_replacement_returns_lane_before_control_and_preserves_full_ring
         assert!(completed.owner.sender.is_some());
         drop(completed);
         assert_eq!(crate::retirement::tests::allocations(|| drop(returned)), (0, 1));
-        assert!(events.is_empty());
+        assert_stopped_zero_frame_telemetry(&mut events);
         assert!(engine.pending_retirements.is_empty());
         assert_eq!(engine.transport().position(), 0);
         assert_eq!(engine.transport().audio_length(), None);
@@ -208,7 +217,7 @@ fn a_missing_channel_returns_original_points_and_the_complete_unused_control() {
     drop(completed);
     assert_eq!(identity.strong_count(), 0);
     assert_eq!(crate::retirement::tests::allocations(|| drop(returned)), (0, 1));
-    assert!(events.is_empty());
+    assert_stopped_zero_frame_telemetry(&mut events);
     assert_eq!(engine.transport().position(), 0);
     assert_eq!(engine.transport().audio_length(), None);
 }
