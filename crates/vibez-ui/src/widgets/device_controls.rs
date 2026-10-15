@@ -99,7 +99,7 @@ pub fn parameter_with_policy<'a>(
         .size(9),
         tooltip::Position::Top,
     );
-    let mut content = column![section_label(descriptor.name)]
+    let mut content = column![section_label(policy.label.unwrap_or(descriptor.name))]
         .spacing(3)
         .align_x(iced::Alignment::Center);
     if let Some(size) = knob_size {

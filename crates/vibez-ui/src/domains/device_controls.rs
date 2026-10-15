@@ -8,6 +8,7 @@ pub type ValueParser = fn(usize, &str, &ParamDescriptor) -> Option<f32>;
 
 #[derive(Clone, Copy)]
 pub struct ValuePolicy {
+    pub label: Option<&'static str>,
     pub display: fn(usize, f32, &ParamDescriptor) -> String,
     pub parse: ValueParser,
     pub unit: &'static str,
@@ -16,6 +17,7 @@ pub struct ValuePolicy {
 impl ValuePolicy {
     pub fn native(unit: &'static str) -> Self {
         Self {
+            label: None,
             display: |_, value, descriptor| display_value(value, descriptor),
             parse: |_, text, descriptor| parse_value(text, descriptor),
             unit,

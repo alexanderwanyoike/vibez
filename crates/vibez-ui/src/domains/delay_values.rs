@@ -12,6 +12,11 @@ pub fn policy(index: usize) -> ValuePolicy {
         _ => "",
     };
     ValuePolicy {
+        label: match index {
+            param::RIGHT_TIME_MS => Some("R Time"),
+            param::FEEDBACK_HP_HZ | param::FEEDBACK_LP_HZ => Some("Cutoff"),
+            _ => None,
+        },
         display,
         parse,
         unit,

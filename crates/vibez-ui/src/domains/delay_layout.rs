@@ -274,13 +274,12 @@ pub fn arrange(width: f32, height: f32, advanced: bool, page: Page) -> Arrangeme
             width: 88.0,
             height: FIELD_HEIGHT,
         });
-        layout.details = controls(
-            page.parameters(),
-            &[58.0, 98.0, 76.0, 76.0],
-            INSET + 96.0,
-            y,
-            None,
-        );
+        let widths = if matches!(page, Page::Left | Page::Right) {
+            [98.0, 98.0, 76.0, 76.0]
+        } else {
+            [58.0, 98.0, 76.0, 76.0]
+        };
+        layout.details = controls(page.parameters(), &widths, INSET + 96.0, y, None);
     }
     layout
 }
