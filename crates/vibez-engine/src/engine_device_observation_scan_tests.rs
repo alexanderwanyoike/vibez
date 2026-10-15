@@ -206,10 +206,6 @@ fn observe(fixture: &Fixture, case: &str, selected: usize, expected: bool, expec
     assert_eq!(muted, expected);
     let calls = fixture.trace.observed();
     assert_eq!(calls, expected_calls, "{case}, selected={selected}");
-    eprintln!("device-observation-b-scan: case={case}; selected={selected}; muted={muted}; calls={calls:?}; playing={}; valid={}; awaiting={}; suspended={}; fault={}",
-        fixture.engine.transport.is_playing(), fixture.engine.compensation_plan.applied_plan_is_valid(),
-        fixture.engine.compensation_plan.awaiting_structural_plan(), fixture.engine.device_handoff.is_suspended(),
-        fixture.engine.presentation_state.is_faulted());
 }
 
 #[test]
