@@ -378,8 +378,16 @@ fn duplicate_preserves_audio_and_midi_loop_settings() {
     }
     playback.process_block(vibez_engine::engine::AudioProcessBlock::new(&mut [], 2));
     while events.pop().is_ok() {}
-    let copied = playback.tracks().iter().find(|track| track.id == midi_tid).unwrap()
-        .playback_source.note_clips.iter().find(|clip| clip.id == midi_copy.id).unwrap();
+    let copied = playback
+        .tracks()
+        .iter()
+        .find(|track| track.id == midi_tid)
+        .unwrap()
+        .playback_source
+        .note_clips
+        .iter()
+        .find(|clip| clip.id == midi_copy.id)
+        .unwrap();
     assert_eq!(copied.start_marker_beats, 0.0);
     assert!(copied.loop_enabled);
     assert_eq!(copied.loop_start_beats, 0.0);

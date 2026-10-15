@@ -485,8 +485,13 @@ impl EngineEvent {
 impl PartialEq for EngineEvent {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (Self::ClipInsertionStorageRequested(left), Self::ClipInsertionStorageRequested(right)) => left == right,
-            (Self::ClipInsertionCompleted(left), Self::ClipInsertionCompleted(right)) => left == right,
+            (
+                Self::ClipInsertionStorageRequested(left),
+                Self::ClipInsertionStorageRequested(right),
+            ) => left == right,
+            (Self::ClipInsertionCompleted(left), Self::ClipInsertionCompleted(right)) => {
+                left == right
+            }
             (Self::SourceNoteInput { .. }, Self::SourceNoteInput { .. })
             | (Self::SourceNoteRepeated { .. }, Self::SourceNoteRepeated { .. }) => {
                 recording::source_eq(self, other)
