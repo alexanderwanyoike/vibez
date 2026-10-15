@@ -595,6 +595,22 @@ impl App {
         );
     }
 
+    fn insert_built_in_effect_with_params(
+        &mut self,
+        track_id: vibez_core::id::TrackId,
+        effect_id: vibez_core::id::EffectId,
+        effect_type: vibez_core::effect::EffectType,
+        params: &[f32],
+    ) {
+        crate::domains::EngineHandle::insert_built_in_effect_with_params(
+            &mut self.cmd_tx,
+            track_id,
+            effect_id,
+            effect_type,
+            params,
+        );
+    }
+
     fn set_built_in_instrument(
         &mut self,
         track_id: vibez_core::id::TrackId,
