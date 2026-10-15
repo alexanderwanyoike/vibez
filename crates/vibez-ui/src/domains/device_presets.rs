@@ -518,6 +518,46 @@ mod presentation_tests {
         assert!(prepare_updates(&effect, &half).is_err());
     }
 
+    fn compressor() -> UiEffect {
+        let descriptors =
+            vibez_dsp::factory::create_effect(EffectType::Compressor, 44_100.0).param_descriptors();
+        UiEffect {
+            effect_type: EffectType::Compressor,
+            params: descriptors
+                .iter()
+                .map(|descriptor| descriptor.default)
+                .collect(),
+            descriptors,
+            ..gain()
+        }
+    }
+
+    #[test]
+    fn compressor_factory_presets_are_valid_distinct_and_start_from_init() {
+        let effect = compressor();
+        let presets = factory_presets(EffectType::Compressor);
+        assert!(presets.len() >= 6);
+        assert_eq!(presets[0].name(), "Init");
+        assert_eq!(prepare_updates(&effect, &presets[0]), Ok(Vec::new()));
+        for preset in &presets[1..] {
+            assert!(!prepare_updates(&effect, preset).unwrap().is_empty());
+        }
+        let mut names: Vec<_> = presets.iter().map(DevicePreset::name).collect();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(names.len(), presets.len(), "names are unique");
+    }
+
+    #[test]
+    fn compressor_presets_leave_detector_listening_alone() {
+        let listen = vibez_dsp::compressor::param::DETECTOR_LISTEN;
+        let mut effect = compressor();
+        effect.params[listen] = 1.0;
+        let captured = capture(&effect, "Listening").unwrap();
+        effect.params[listen] = 0.0;
+        assert_eq!(prepare_updates(&effect, &captured), Ok(Vec::new()));
+    }
+
     #[test]
     fn a_device_without_factory_presets_has_no_navigation() {
         let mut effect = gain();
