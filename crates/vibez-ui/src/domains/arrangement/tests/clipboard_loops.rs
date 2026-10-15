@@ -380,12 +380,15 @@ fn duplicate_preserves_audio_and_midi_loop_settings() {
     loop {
         let mut fulfilled = false;
         while let Ok(event) = events.pop() {
-            if let vibez_engine::events::EngineEvent::ClipInsertionStorageRequested(request) = event {
+            if let vibez_engine::events::EngineEvent::ClipInsertionStorageRequested(request) = event
+            {
                 request.fulfill();
                 fulfilled = true;
             }
         }
-        if !fulfilled { break; }
+        if !fulfilled {
+            break;
+        }
         playback.process_block(vibez_engine::engine::AudioProcessBlock::new(&mut [], 2));
     }
     let copied = playback

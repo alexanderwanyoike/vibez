@@ -8,9 +8,11 @@ use std::sync::{
 use rtrb::{Consumer, Producer, RingBuffer};
 use vibez_core::id::{ClipId, TrackId};
 
-use crate::playback_source::{EngineClip, EngineNoteClip, NoteInsertionStorage, PreparedPlaybackSource};
-use vibez_core::perform::GrooveGrid;
+use crate::playback_source::{
+    EngineClip, EngineNoteClip, NoteInsertionStorage, PreparedPlaybackSource,
+};
 use vibez_core::midi::MidiNote;
+use vibez_core::perform::GrooveGrid;
 
 #[derive(Clone)]
 pub struct ClipInsertionId(Arc<()>);
@@ -148,18 +150,27 @@ impl PreparedClipInsertion {
         self.id.clone()
     }
 
-    pub(crate) fn try_apply(&mut self, source: &mut PreparedPlaybackSource) -> ClipInsertionAttempt {
+    pub(crate) fn try_apply(
+        &mut self,
+        source: &mut PreparedPlaybackSource,
+    ) -> ClipInsertionAttempt {
         let (_, clip_id) = self.target.expect("the command supplies its target");
         let storage = self.reply.as_mut().unwrap_or(&mut self.storage);
-        let (ready, length) = match (storage, self.clip.as_ref().expect("one original insertion delta")) {
-            (ClipInsertionStorage::Audio(storage), ClipInsertionDelta::Audio(_)) => {
-                (storage.install_if_needed(&mut source.clips, &mut source.removed_audio_clips), source.clips.len())
-            }
-            (ClipInsertionStorage::NoteClip(storage), ClipInsertionDelta::NoteClip(_)) => {
-                (storage.install_if_needed(&mut source.note_clips, &mut source.removed_note_clips), source.note_clips.len())
-            }
+        let (ready, length) = match (
+            storage,
+            self.clip.as_ref().expect("one original insertion delta"),
+        ) {
+            (ClipInsertionStorage::Audio(storage), ClipInsertionDelta::Audio(_)) => (
+                storage.install_if_needed(&mut source.clips, &mut source.removed_audio_clips),
+                source.clips.len(),
+            ),
+            (ClipInsertionStorage::NoteClip(storage), ClipInsertionDelta::NoteClip(_)) => (
+                storage.install_if_needed(&mut source.note_clips, &mut source.removed_note_clips),
+                source.note_clips.len(),
+            ),
             (ClipInsertionStorage::NoteValue(storage), ClipInsertionDelta::NoteValue(_)) => {
-                let Some(clip) = source.note_clips.iter_mut().find(|clip| clip.id == clip_id) else {
+                let Some(clip) = source.note_clips.iter_mut().find(|clip| clip.id == clip_id)
+                else {
                     return ClipInsertionAttempt::MissingClip;
                 };
                 (storage.install_if_needed(clip), clip.notes.len())
@@ -167,14 +178,20 @@ impl PreparedClipInsertion {
             _ => unreachable!("private preparation keeps delta and storage kinds paired"),
         };
         if !ready {
-            return ClipInsertionAttempt::NeedsCapacity(length.checked_add(1).expect("insertion length overflow"));
+            return ClipInsertionAttempt::NeedsCapacity(
+                length.checked_add(1).expect("insertion length overflow"),
+            );
         }
         match self.clip.take().expect("one original insertion delta") {
             ClipInsertionDelta::Audio(clip) => source.clips.push(clip),
             ClipInsertionDelta::NoteClip(clip) => source.note_clips.push(clip),
             ClipInsertionDelta::NoteValue(note) => {
-                source.note_clips.iter_mut().find(|clip| clip.id == clip_id)
-                    .expect("the admitted first note clip is still current").push_note(note);
+                source
+                    .note_clips
+                    .iter_mut()
+                    .find(|clip| clip.id == clip_id)
+                    .expect("the admitted first note clip is still current")
+                    .push_note(note);
             }
         }
         ClipInsertionAttempt::Applied
@@ -298,16 +315,25 @@ impl PreparedNoteClipInsertion {
 pub struct PreparedNoteInsertion(Box<PreparedClipInsertion>);
 
 impl PreparedNoteInsertion {
-    pub fn new(note: MidiNote) -> Self { Self::with_capacity(note, 1) }
-
-    pub fn with_capacity(note: MidiNote, capacity: usize) -> Self {
-        Self(PreparedClipInsertion::prepare(ClipInsertionKind::NoteValue, capacity,
-            Some(ClipInsertionDelta::NoteValue(note))))
+    pub fn new(note: MidiNote) -> Self {
+        Self::with_capacity(note, 1)
     }
 
-    pub fn id(&self) -> ClipInsertionId { self.0.id() }
+    pub fn with_capacity(note: MidiNote, capacity: usize) -> Self {
+        Self(PreparedClipInsertion::prepare(
+            ClipInsertionKind::NoteValue,
+            capacity,
+            Some(ClipInsertionDelta::NoteValue(note)),
+        ))
+    }
 
-    pub(crate) fn into_control(self) -> Box<PreparedClipInsertion> { self.0 }
+    pub fn id(&self) -> ClipInsertionId {
+        self.0.id()
+    }
+
+    pub(crate) fn into_control(self) -> Box<PreparedClipInsertion> {
+        self.0
+    }
 }
 
 pub(crate) enum ClipInsertionAttempt {
