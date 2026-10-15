@@ -1,3 +1,5 @@
+//! Callback allocation counters and bounded retirement tests retain channel and lane owners.
+
 use super::*;
 use crate::{
     commands::EngineCommand,
