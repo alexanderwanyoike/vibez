@@ -101,7 +101,7 @@ impl App {
     /// while disclosure state belongs to the device rather than the subscription.
     pub(super) fn restart_device_metering(&mut self) {
         self.discard_all_device_entries();
-        for panel in self.delay_panels.values_mut() { panel.restart(); }
+        for panel in self.delay_devices.panels.values_mut() { panel.restart(); }
         self.device_meters.generation = self.device_meters.generation.wrapping_add(1);
         for readings in self.device_meters.readings.values_mut() {
             *readings = MeterReadings::default();
@@ -119,7 +119,7 @@ impl App {
         self.device_meters.channel = None;
         self.device_meters.generation = self.device_meters.generation.wrapping_add(1);
         self.device_meters.readings.clear();
-        self.delay_panels.clear();
+        self.delay_devices.panels.clear();
         self.gain_devices.panels.clear();
         self.reset_device_controls();
         self.send_command(EngineCommand::SetEffectMeterChannel {

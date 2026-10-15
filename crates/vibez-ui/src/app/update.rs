@@ -250,7 +250,7 @@ impl App {
             Message::DelayPage(track, effect, page) => {
                 if self.state.find_track(track).is_some_and(|track| track.effects.iter().any(|item|
                     item.id == effect && crate::domains::delay_observation::is_native_delay(item))) {
-                    self.delay_panels.entry(effect).or_default().page = page;
+                    self.delay_devices.panels.entry(effect).or_default().page = page;
                 }
             }
             Message::DevicePreset(message) => return self.update_device_preset(message),

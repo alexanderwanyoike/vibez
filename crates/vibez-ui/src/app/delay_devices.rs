@@ -4,6 +4,12 @@ use super::*;
 use crate::domains::delay_observation::is_native_delay;
 use vibez_core::{delay_state::DelayState, id::{EffectId, TrackId}};
 
+#[derive(Default)]
+pub(super) struct DelayDevices {
+    pub panels: std::collections::HashMap<EffectId, crate::domains::delay_observation::DelayObservation>,
+    pub empty_panel: crate::domains::delay_observation::DelayObservation,
+}
+
 impl App {
     pub(super) fn accept_delay_state(&mut self, track_id: TrackId, effect_id: EffectId,
         generation: u64, snapshot: Option<DelayState>) {
@@ -12,16 +18,16 @@ impl App {
             .and_then(|track| track.effects.iter().find(|effect| effect.id == effect_id))
             .filter(|effect| is_native_delay(effect)) else { return; };
         let snapshot = if effect.bypass || effect.reconfiguration_failed { None } else { snapshot };
-        self.delay_panels.entry(effect_id).or_default().accept(snapshot,
+        self.delay_devices.panels.entry(effect_id).or_default().accept(snapshot,
             self.state.transport.sample_rate, std::time::Instant::now());
     }
 
     pub(super) fn poll_delay_devices(&mut self) {
         let project = &self.state.project_tracks;
-        self.delay_panels.retain(|id, _| project.tracks.iter().chain(&project.buses)
+        self.delay_devices.panels.retain(|id, _| project.tracks.iter().chain(&project.buses)
             .chain(std::iter::once(&project.master)).any(|track| track.effects.iter()
                 .any(|effect| effect.id == *id && is_native_delay(effect))));
         let now = std::time::Instant::now();
-        for panel in self.delay_panels.values_mut() { panel.expire(now); }
+        for panel in self.delay_devices.panels.values_mut() { panel.expire(now); }
     }
 }

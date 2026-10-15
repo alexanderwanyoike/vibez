@@ -212,7 +212,7 @@ impl App {
 
     fn delay_device_body<'a>(&'a self, track_id: TrackId, effect: &'a crate::state::UiEffect,
         accent: Color, width: f32) -> DeviceBody<'a> {
-        let observation = self.delay_panels.get(&effect.id).unwrap_or(&self.empty_delay_panel);
+        let observation = self.delay_devices.panels.get(&effect.id).unwrap_or(&self.delay_devices.empty_panel);
         let controls = self.device_control_state(effect.id);
         let output = self.device_meters.readings.get(&effect.id).and_then(|reading| reading.available_output());
         let content = iced::widget::responsive(move |size| {
