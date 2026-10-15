@@ -53,9 +53,11 @@ that still allocate may only shrink.
 AddClip carries a required sender-prepared `PreparedClipInsertion` control.
 AddNoteClip carries an opaque `PreparedNoteClipInsertion`, which constructs the
 complete empty note clip, its cache and the same control outside the callback.
-Following AddNote commands remain separate FIFO edits. Both operations share
-one pending insertion, mailbox implementation and request/completion event
-family. Capacity is only a hint, never a content limit or a content snapshot.
+Following AddNote commands remain separate FIFO edits with an opaque
+`PreparedNoteInsertion` owning the original MidiNote and the same control.
+All three operations share one pending insertion, mailbox implementation and
+request/completion event family. Capacity is only a hint, never a content limit
+or a content snapshot.
 If current live clip/removal storage cannot accept the original delta, the
 engine retains that delta and requests empty storage through
 `ClipInsertionStorageRequested`. Current complete clip values move in order
@@ -63,6 +65,22 @@ into the prepared allocation; existing note caches and groove latches move
 with them. Source construction and offline preparation reserve removal
 staging from actual content, and live insertion installs sufficient live and
 staging capacity together.
+
+AddNote addresses the current first matching Arrange note clip. Its concrete
+storage bundle owns both the notes Vec and next-same-pitch clamp-cache Vec.
+Both capacities are checked before either allocation or any existing clamp
+value changes. Current notes and cache values move together in caller order;
+then the original note appends using the existing incremental clamp update.
+Insertion preserves geometry, groove latch and sounding voices, and neither
+flushes notes nor recalculates project length. Later index edits, removal or
+Undo/replay remain later FIFO work; a canonical UI replacement cannot redirect
+an already pending note to a future reused target. Public construction and
+actual offline preparation retain complete caches before live growth.
+
+This branch has two inner Vecs. If PR #286's note-sort scratch is integrated,
+extend this SAME bundle/preflight/complete return to all three Vecs and prove
+that union; two-buffer proofs do not cover a third callback-owned allocation.
+Do not add a parallel storage protocol or discard live scratch owners.
 
 Current playback continues while one insertion waits, but later FIFO commands,
 including Stop, Undo replay and NoteOff, wait for this exchange. Preparation
