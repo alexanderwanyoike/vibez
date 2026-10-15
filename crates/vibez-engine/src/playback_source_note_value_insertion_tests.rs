@@ -366,3 +366,6 @@ fn public_add_note_at_full_capacity_preserves_first_duplicate_voice_and_future_c
 
 #[path = "playback_source_note_value_fifo_tests.rs"]
 mod fifo_tests;
+
+#[path = "playback_source_note_value_consumer_tests.rs"]
+mod consumer_tests;
