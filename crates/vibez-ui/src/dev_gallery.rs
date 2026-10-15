@@ -422,8 +422,16 @@ impl EqGallery {
             *level = -18.0 - position * 30.0 + (position * 41.0).sin() * 4.0;
         }
         spectrum.active = true;
+        let level = |db: f32| vibez_engine::metering::MeterValues {
+            peak_l: vibez_core::level::db_to_amplitude(db),
+            peak_r: vibez_core::level::db_to_amplitude(db - 0.6),
+            rms_l: vibez_core::level::db_to_amplitude(db - 5.0),
+            rms_r: vibez_core::level::db_to_amplitude(db - 5.6),
+        };
         let closed = crate::domains::eq::EqPanelState {
             band: 2,
+            input: level(-6.2),
+            output: level(-6.1),
             ..Default::default()
         };
         Self {

@@ -16,6 +16,7 @@ use crate::state::UiEffect;
 use crate::theme as th;
 use crate::widgets::device_controls::{heading, segmented, toggle, Param, LABEL_SIZE};
 use crate::widgets::eq_display::EqDisplayWidget;
+use crate::widgets::level_meter::{self, LevelMeter};
 
 const PAD: f32 = 10.0;
 const PRESET_ROW_H: f32 = 28.0;
@@ -31,7 +32,7 @@ const TABS_W: f32 = 320.0;
 const STRIP_H: f32 = 86.0;
 const ADVANCED_H: f32 = 56.0;
 const BAND_GROUP_W: f32 = 172.0;
-const OUTPUT_W: f32 = 230.0;
+const OUTPUT_W: f32 = 340.0;
 const STRIP_KNOB: f32 = 28.0;
 const ROW_KNOB: f32 = 24.0;
 
@@ -46,7 +47,7 @@ const ADVANCED_SPECTRUM_W: f32 = 640.0;
 pub const STRIP_W: f32 = BAND_GROUP_W * 4.0 + 3.0 + PAD * 2.0;
 /// The band row plus output and analyser controls at its end.
 pub const FULL_W: f32 = STRIP_W + 1.0 + OUTPUT_W;
-pub const MAX_W: f32 = 1000.0;
+pub const MAX_W: f32 = 1100.0;
 
 /// Card width for a share of the device section.
 pub fn card_width(available: f32) -> f32 {
@@ -433,11 +434,23 @@ impl<'a> EqView<'a> {
     }
 
     fn output_controls(&self) -> Element<'a, Message> {
+        let meter = |label: &'static str, levels| {
+            column![
+                heading(label),
+                canvas(LevelMeter { levels })
+                    .width(level_meter::WIDTH)
+                    .height(Length::Fill),
+            ]
+            .spacing(2)
+            .height(STRIP_H - 8.0)
+        };
         row![
-            self.param(param::OUTPUT).label("Output").column(STRIP_KNOB),
+            meter("Input", self.panel.input),
+            meter("Output", self.panel.output),
+            self.param(param::OUTPUT).label("Trim").column(STRIP_KNOB),
             self.spectrum_controls(),
         ]
-        .spacing(12)
+        .spacing(10)
         .align_y(Alignment::Center)
         .into()
     }
