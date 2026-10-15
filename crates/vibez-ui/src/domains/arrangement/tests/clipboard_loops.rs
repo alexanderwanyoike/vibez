@@ -377,7 +377,17 @@ fn duplicate_preserves_audio_and_midi_loop_settings() {
         commands.push(command).unwrap();
     }
     playback.process_block(vibez_engine::engine::AudioProcessBlock::new(&mut [], 2));
-    while events.pop().is_ok() {}
+    loop {
+        let mut fulfilled = false;
+        while let Ok(event) = events.pop() {
+            if let vibez_engine::events::EngineEvent::ClipInsertionStorageRequested(request) = event {
+                request.fulfill();
+                fulfilled = true;
+            }
+        }
+        if !fulfilled { break; }
+        playback.process_block(vibez_engine::engine::AudioProcessBlock::new(&mut [], 2));
+    }
     let copied = playback
         .tracks()
         .iter()
