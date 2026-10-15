@@ -66,33 +66,33 @@ impl<T> ClipStorage<T> {
 #[derive(Clone, Copy, Debug)]
 enum ClipInsertionKind {
     Audio,
-    Note,
+    NoteClip,
 }
 
 enum ClipInsertionStorage {
     Audio(ClipStorage<EngineClip>),
-    Note(ClipStorage<EngineNoteClip>),
+    NoteClip(ClipStorage<EngineNoteClip>),
 }
 
 impl ClipInsertionStorage {
     fn new(kind: ClipInsertionKind, capacity: usize) -> Self {
         match kind {
             ClipInsertionKind::Audio => Self::Audio(ClipStorage::new(capacity)),
-            ClipInsertionKind::Note => Self::Note(ClipStorage::new(capacity)),
+            ClipInsertionKind::NoteClip => Self::NoteClip(ClipStorage::new(capacity)),
         }
     }
 
     fn kind(&self) -> ClipInsertionKind {
         match self {
             Self::Audio(_) => ClipInsertionKind::Audio,
-            Self::Note(_) => ClipInsertionKind::Note,
+            Self::NoteClip(_) => ClipInsertionKind::NoteClip,
         }
     }
 }
 
 pub(crate) enum ClipInsertionDelta {
     Audio(EngineClip),
-    Note(EngineNoteClip),
+    NoteClip(EngineNoteClip),
 }
 
 /// Required sender-owned control. Construct only outside the audio callback.
@@ -151,7 +151,7 @@ impl PreparedClipInsertion {
             (ClipInsertionStorage::Audio(storage), ClipInsertionDelta::Audio(_)) => {
                 storage.install_if_needed(&mut source.clips, &mut source.removed_audio_clips)
             }
-            (ClipInsertionStorage::Note(storage), ClipInsertionDelta::Note(_)) => {
+            (ClipInsertionStorage::NoteClip(storage), ClipInsertionDelta::NoteClip(_)) => {
                 storage.install_if_needed(&mut source.note_clips, &mut source.removed_note_clips)
             }
             _ => unreachable!("private preparation keeps delta and storage kinds paired"),
@@ -161,7 +161,7 @@ impl PreparedClipInsertion {
         }
         match self.clip.take().expect("one original insertion delta") {
             ClipInsertionDelta::Audio(clip) => source.clips.push(clip),
-            ClipInsertionDelta::Note(clip) => source.note_clips.push(clip),
+            ClipInsertionDelta::NoteClip(clip) => source.note_clips.push(clip),
         }
         true
     }
@@ -169,14 +169,14 @@ impl PreparedClipInsertion {
     pub(crate) fn clip_id(&self) -> ClipId {
         match self.clip.as_ref().expect("one original insertion delta") {
             ClipInsertionDelta::Audio(clip) => clip.id,
-            ClipInsertionDelta::Note(clip) => clip.id,
+            ClipInsertionDelta::NoteClip(clip) => clip.id,
         }
     }
 
     pub(crate) fn required_capacity(&self, source: &PreparedPlaybackSource) -> usize {
         match self.storage.kind() {
             ClipInsertionKind::Audio => source.clips.len(),
-            ClipInsertionKind::Note => source.note_clips.len(),
+            ClipInsertionKind::NoteClip => source.note_clips.len(),
         }
         .checked_add(1)
         .expect("clip length overflow")
@@ -273,9 +273,9 @@ impl PreparedNoteClipInsertion {
             groove_grid,
         );
         Self(PreparedClipInsertion::prepare(
-            ClipInsertionKind::Note,
+            ClipInsertionKind::NoteClip,
             capacity,
-            Some(ClipInsertionDelta::Note(clip)),
+            Some(ClipInsertionDelta::NoteClip(clip)),
         ))
     }
 
