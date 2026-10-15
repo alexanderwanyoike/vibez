@@ -1,6 +1,7 @@
 //! Clip and note value appends commit live content through one bounded FIFO storage exchange.
 
 use super::*;
+use vibez_core::id::ClipId;
 use crate::clip_insertion::{
     ClipInsertionAttempt, ClipInsertionDelta, ClipInsertionOutcome, ClipInsertionReply, CompletedClipInsertion,
     PreparedClipInsertion, PreparedNoteClipInsertion, PreparedNoteInsertion,
