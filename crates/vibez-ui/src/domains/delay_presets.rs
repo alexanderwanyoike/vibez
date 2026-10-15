@@ -26,3 +26,10 @@ pub(super) fn factory_presets() -> Vec<DevicePreset> {
             .expect("Delay factory preset values are valid")
     }).collect()
 }
+
+pub(super) fn is_canonical(index: usize, value: f32) -> bool {
+    !matches!(index, param::SYNC | param::LEFT_DIVISION | param::LEFT_MODIFIER |
+        param::ROUTING | param::LINK | param::RIGHT_DIVISION | param::RIGHT_MODIFIER |
+        param::FEEDBACK_HP_ENABLED | param::FEEDBACK_LP_ENABLED | param::TIME_CHANGE)
+        || value.fract() == 0.0
+}
