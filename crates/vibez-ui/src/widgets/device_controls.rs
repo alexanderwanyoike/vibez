@@ -71,14 +71,9 @@ pub fn parameter_with_presentation<'a>(
     }
     content
         .push(
-            row![
-                field,
-                text(presentation.unit)
-                    .size(8)
-                    .color(th::text_dim())
-            ]
-            .spacing(2)
-            .align_y(iced::Alignment::Center),
+            row![field, text(presentation.unit).size(8).color(th::text_dim())]
+                .spacing(2)
+                .align_y(iced::Alignment::Center),
         )
         .width(Length::Fill)
         .into()
@@ -98,11 +93,18 @@ fn value_field_presented<'a>(
         None => "N/A".into(),
     };
     let mut explanation = presentation.range.as_ref().map_or_else(
-        || format!("{} unavailable until this native device has a valid prepared host sample rate.", presentation.name),
-        |(minimum, maximum)| format!(
-            "{}: {} to {} {}. Enter applies.",
-            presentation.name, minimum, maximum, presentation.unit
-        ),
+        || {
+            format!(
+                "{} unavailable until this native device has a valid prepared host sample rate.",
+                presentation.name
+            )
+        },
+        |(minimum, maximum)| {
+            format!(
+                "{}: {} to {} {}. Enter applies.",
+                presentation.name, minimum, maximum, presentation.unit
+            )
+        },
     );
     if let Some(detail) = presentation.explanation.as_ref() {
         explanation.push(' ');
