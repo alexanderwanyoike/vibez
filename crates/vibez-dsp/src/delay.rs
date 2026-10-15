@@ -10,6 +10,9 @@ mod history;
 mod time;
 #[path = "delay_ramp.rs"]
 mod ramp;
+#[path = "delay_filter.rs"]
+mod filter;
+use filter::FeedbackFilters;
 use history::DelayHistory;
 use ramp::ScalarRamp;
 use time::DelayTime;
@@ -165,11 +168,18 @@ pub struct DelayEffect {
     mix: ScalarRamp,
     feedback: ScalarRamp,
     routing: ScalarRamp,
+    filters: FeedbackFilters,
 }
 
 impl DelayEffect {
     pub fn new(sample_rate: f32) -> Self {
         let history = DelayHistory::new(sample_rate);
+        let filters = if history.is_valid() {
+            FeedbackFilters::new(sample_rate, DELAY_PARAMS[param::FEEDBACK_HP_HZ].default,
+                DELAY_PARAMS[param::FEEDBACK_LP_HZ].default)
+        } else {
+            FeedbackFilters::default()
+        };
         Self {
             targets: std::array::from_fn(|index| DELAY_PARAMS[index].default),
             history,
@@ -177,6 +187,7 @@ impl DelayEffect {
             mix: ScalarRamp::new(DELAY_PARAMS[param::MIX].default),
             feedback: ScalarRamp::new(DELAY_PARAMS[param::FEEDBACK].default),
             routing: ScalarRamp::new(DELAY_PARAMS[param::ROUTING].default),
+            filters,
         }
     }
 
@@ -224,6 +235,13 @@ impl DelayEffect {
             self.feedback.edit(target, automated, (self.history.sample_rate() as usize).div_ceil(100));
         } else if index == param::ROUTING {
             self.routing.edit(target, automated, (self.history.sample_rate() as usize).div_ceil(50));
+        }
+        if self.history.is_valid() {
+            match index {
+                param::FEEDBACK_HP_HZ => self.filters.set_high_pass_hz(target, self.history.sample_rate()),
+                param::FEEDBACK_LP_HZ => self.filters.set_low_pass_hz(target, self.history.sample_rate()),
+                _ => {}
+            }
         }
         self.timing.parameter_edited(index, &self.targets, self.history.sample_rate(), automated);
         true
@@ -287,6 +305,8 @@ impl AudioEffect for DelayEffect {
         self.timing.begin_audio(&self.targets, sample_rate);
         let fade_frames = (sample_rate as usize).div_ceil(50);
         let use_glide = self.targets[param::TIME_CHANGE] >= 0.5;
+        let high_pass = self.targets[param::FEEDBACK_HP_ENABLED] >= 0.5;
+        let low_pass = self.targets[param::FEEDBACK_LP_ENABLED] >= 0.5;
 
         for frame in 0..frames {
             let [left, right] = self.timing.next_frame(fade_frames, sample_rate, use_glide);
@@ -307,10 +327,11 @@ impl AudioEffect for DelayEffect {
                     (f64::from(delayed_r) * own + f64::from(delayed_l) * cross) as f32,
                 )
             };
+            let [filtered_l, filtered_r] = self.filters.process([routed_l, routed_r], high_pass, low_pass);
 
             // Left channel
             let dry_l = Self::finite_or_zero(buffer[frame * ch]);
-            let write_l = Self::finite_or_zero(dry_l + routed_l * feedback);
+            let write_l = Self::finite_or_zero(dry_l + filtered_l * feedback);
             buffer[frame * ch] = Self::finite_or_zero(dry_l * (1.0 - mix) + delayed_l * mix);
 
             // Missing mono input is zero, but its feedback continues while unobserved.
@@ -319,7 +340,7 @@ impl AudioEffect for DelayEffect {
             } else {
                 0.0
             };
-            let write_r = Self::finite_or_zero(dry_r + routed_r * feedback);
+            let write_r = Self::finite_or_zero(dry_r + filtered_r * feedback);
             if ch >= 2 {
                 buffer[frame * ch + 1] =
                     Self::finite_or_zero(dry_r * (1.0 - mix) + delayed_r * mix);
@@ -335,6 +356,7 @@ impl AudioEffect for DelayEffect {
         self.mix.reset(self.targets[param::MIX]);
         self.feedback.reset(self.targets[param::FEEDBACK]);
         self.routing.reset(self.targets[param::ROUTING]);
+        self.filters.reset();
     }
 }
 
