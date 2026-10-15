@@ -7,6 +7,8 @@ use vibez_core::effect::{EffectType, ParamDescriptor};
 use vibez_core::id::EffectId;
 use vibez_core::midi::InstrumentKind;
 
+const EFFECT_PROBE_OWNER: u32 = 2;
+
 pub(super) struct Calls {
     values: [AtomicU32; 64],
     len: AtomicUsize,
@@ -39,6 +41,23 @@ impl Calls {
             .iter()
             .map(|value| value.load(Ordering::Relaxed))
             .collect()
+    }
+    fn assert_local_answer(&self, owner: u32, local: bool) {
+        let answer = owner * 100 + 10 + u32::from(local);
+        assert!(
+            self.observed().contains(&answer),
+            "device {owner} must be observed with local failure = {local}"
+        );
+    }
+    pub(super) fn assert_effect_failure_observed(&self, local: bool) {
+        self.assert_local_answer(EFFECT_PROBE_OWNER, local);
+    }
+    pub(super) fn assert_effect_recovered_after_failure(&self) {
+        let calls = self.observed();
+        let failure = calls.iter().position(|answer| *answer == EFFECT_PROBE_OWNER * 100 + 11)
+            .expect("the first Start must observe the local failure");
+        assert!(calls[failure + 1..].contains(&(EFFECT_PROBE_OWNER * 100 + 10)),
+            "the later Start must observe the recovery edit");
     }
 }
 
@@ -151,7 +170,7 @@ pub(super) fn fixture() -> Fixture {
         calls: Arc::clone(&calls),
     }));
     let device: Box<dyn vibez_dsp::effect::AudioEffect> = Box::new(Probe {
-        owner: 2,
+        owner: EFFECT_PROBE_OWNER,
         control: Arc::clone(&controls[1]),
         calls: Arc::clone(&calls),
     });
@@ -313,8 +332,15 @@ fn collect(fixture: &mut Fixture) -> Events {
     result
 }
 
+enum AdmissionObservation {
+    Healthy,
+    EffectFailure,
+    InstrumentFailure,
+    OwnedGate,
+}
+
 struct Expected {
-    calls: Vec<u32>,
+    observation: AdmissionObservation,
     order: Vec<&'static str>,
     reason: Option<&'static str>,
     active: bool,
@@ -325,7 +351,7 @@ struct Expected {
 
 fn exercise(fixture: &mut Fixture, _case: &str, commands: &[bool], expected: Expected) {
     let Expected {
-        calls: expected_calls,
+        observation,
         order: expected_order,
         reason,
         active,
@@ -363,8 +389,19 @@ fn exercise(fixture: &mut Fixture, _case: &str, commands: &[bool], expected: Exp
         (0, 0)
     );
     assert!(fixture.engine.cmd_rx.peek().is_err());
-    let calls = fixture.calls.observed();
-    assert_eq!(calls, expected_calls);
+    match observation {
+        AdmissionObservation::Healthy => {
+            fixture.calls.assert_local_answer(1, false);
+            fixture.calls.assert_effect_failure_observed(false);
+        }
+        AdmissionObservation::EffectFailure => fixture.calls.assert_effect_failure_observed(true),
+        AdmissionObservation::InstrumentFailure => {
+            fixture.calls.assert_local_answer(1, true);
+            assert!(fixture.calls.observed().iter().all(|answer| answer / 100 == 1),
+                "the first local instrument failure must short-circuit the effect scan");
+        }
+        AdmissionObservation::OwnedGate => assert!(fixture.calls.observed().is_empty()),
+    }
     let after = state(&fixture.engine);
     assert_eq!(
         after,
@@ -485,7 +522,7 @@ fn healthy_repeated_starts_and_stops_keep_each_public_acknowledgement() {
             case,
             &commands,
             Expected {
-                calls: vec![110, 210, 110, 210],
+                observation: AdmissionObservation::Healthy,
                 order,
                 reason: None,
                 active,
@@ -551,14 +588,14 @@ fn refused_starts_and_explicit_stop_preserve_local_priority_and_episode_independ
             latched
         );
         assert_eq!(fixture.owner.is_some(), case == "local-token");
-        let calls = if case == "local-token" {
-            Vec::new()
+        let observation = if case == "local-token" {
+            AdmissionObservation::OwnedGate
         } else if instrument {
-            vec![111, 111]
+            AdmissionObservation::InstrumentFailure
         } else if case == "invalid" {
-            vec![110, 210, 110, 210]
+            AdmissionObservation::Healthy
         } else {
-            vec![110, 211, 110, 211]
+            AdmissionObservation::EffectFailure
         };
         let reason = if case == "invalid" {
             "Capture requires a valid applied audio configuration"
@@ -570,7 +607,7 @@ fn refused_starts_and_explicit_stop_preserve_local_priority_and_episode_independ
             case,
             &[true, true, false],
             Expected {
-                calls,
+                observation,
                 order: vec!["stop", "refused", "stop", "refused", "stop"],
                 reason: Some(reason),
                 active: false,
