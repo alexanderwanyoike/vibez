@@ -1,6 +1,9 @@
 //! Off-callback storage exchanges retain complete owners for one pending audio or note clip.
 
-use std::sync::{atomic::{fence, Ordering}, Arc};
+use std::sync::{
+    atomic::{fence, Ordering},
+    Arc,
+};
 
 use rtrb::{Consumer, Producer, RingBuffer};
 use vibez_core::id::{ClipId, TrackId};
@@ -21,7 +24,9 @@ impl Eq for ClipInsertionId {}
 
 impl std::fmt::Debug for ClipInsertionId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("ClipInsertionId").field(&Arc::as_ptr(&self.0)).finish()
+        f.debug_tuple("ClipInsertionId")
+            .field(&Arc::as_ptr(&self.0))
+            .finish()
     }
 }
 
@@ -116,7 +121,11 @@ impl PreparedClipInsertion {
         Self::prepare(ClipInsertionKind::Audio, capacity, None)
     }
 
-    fn prepare(kind: ClipInsertionKind, capacity: usize, clip: Option<ClipInsertionDelta>) -> Box<Self> {
+    fn prepare(
+        kind: ClipInsertionKind,
+        capacity: usize,
+        clip: Option<ClipInsertionDelta>,
+    ) -> Box<Self> {
         let (sender, receiver) = RingBuffer::new(1);
         Box::new(Self {
             id: ClipInsertionId(Arc::new(())),
@@ -135,7 +144,10 @@ impl PreparedClipInsertion {
 
     pub(crate) fn try_apply(&mut self, source: &mut PreparedPlaybackSource) -> bool {
         let storage = self.reply.as_mut().unwrap_or(&mut self.storage);
-        let ready = match (storage, self.clip.as_ref().expect("one original insertion delta")) {
+        let ready = match (
+            storage,
+            self.clip.as_ref().expect("one original insertion delta"),
+        ) {
             (ClipInsertionStorage::Audio(storage), ClipInsertionDelta::Audio(_)) => {
                 storage.install_if_needed(&mut source.clips, &mut source.removed_audio_clips)
             }
@@ -165,7 +177,9 @@ impl PreparedClipInsertion {
         match self.storage.kind() {
             ClipInsertionKind::Audio => source.clips.len(),
             ClipInsertionKind::Note => source.note_clips.len(),
-        }.checked_add(1).expect("clip length overflow")
+        }
+        .checked_add(1)
+        .expect("clip length overflow")
     }
 
     pub(crate) fn request(&mut self, required: usize) -> ClipInsertionStorageRequest {
@@ -176,7 +190,10 @@ impl PreparedClipInsertion {
             clip_id,
             capacity: required.checked_mul(2).unwrap_or(required),
             kind: self.storage.kind(),
-            sender: self.sender.take().expect("one storage request per insertion"),
+            sender: self
+                .sender
+                .take()
+                .expect("one storage request per insertion"),
         }
     }
 
@@ -219,8 +236,17 @@ impl PreparedNoteClipInsertion {
         loop_end_beats: f64,
         groove_grid: GrooveGrid,
     ) -> Self {
-        Self::with_capacity(clip_id, position_beats, duration_beats, start_marker_beats,
-            loop_enabled, loop_start_beats, loop_end_beats, groove_grid, 1)
+        Self::with_capacity(
+            clip_id,
+            position_beats,
+            duration_beats,
+            start_marker_beats,
+            loop_enabled,
+            loop_start_beats,
+            loop_end_beats,
+            groove_grid,
+            1,
+        )
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -235,10 +261,22 @@ impl PreparedNoteClipInsertion {
         groove_grid: GrooveGrid,
         capacity: usize,
     ) -> Self {
-        let clip = EngineNoteClip::new(clip_id, position_beats, duration_beats, Vec::new(),
-            start_marker_beats, loop_enabled, loop_start_beats, loop_end_beats, groove_grid);
-        Self(PreparedClipInsertion::prepare(ClipInsertionKind::Note, capacity,
-            Some(ClipInsertionDelta::Note(clip))))
+        let clip = EngineNoteClip::new(
+            clip_id,
+            position_beats,
+            duration_beats,
+            Vec::new(),
+            start_marker_beats,
+            loop_enabled,
+            loop_start_beats,
+            loop_end_beats,
+            groove_grid,
+        );
+        Self(PreparedClipInsertion::prepare(
+            ClipInsertionKind::Note,
+            capacity,
+            Some(ClipInsertionDelta::Note(clip)),
+        ))
     }
 
     pub fn id(&self) -> ClipInsertionId {
@@ -275,16 +313,21 @@ impl ClipInsertionStorageRequest {
     pub fn fulfill(mut self) {
         // A consumer may already be destroyed. Even a successful orphaned push
         // remains owned by this producer and is destroyed here off callback.
-        let _ = self.sender.push(ClipInsertionStorage::new(self.kind, self.capacity));
+        let _ = self
+            .sender
+            .push(ClipInsertionStorage::new(self.kind, self.capacity));
     }
 }
 
 impl std::fmt::Debug for ClipInsertionStorageRequest {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ClipInsertionStorageRequest")
-            .field("id", &self.id).field("track_id", &self.track_id)
+            .field("id", &self.id)
+            .field("track_id", &self.track_id)
             .field("kind", &self.kind)
-            .field("clip_id", &self.clip_id).field("capacity", &self.capacity).finish()
+            .field("clip_id", &self.clip_id)
+            .field("capacity", &self.capacity)
+            .finish()
     }
 }
 
@@ -320,9 +363,12 @@ impl CompletedClipInsertion {
 impl std::fmt::Debug for CompletedClipInsertion {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("CompletedClipInsertion")
-            .field("id", &self.owner.id).field("track_id", &self.track_id)
+            .field("id", &self.owner.id)
+            .field("track_id", &self.track_id)
             .field("kind", &self.owner.storage.kind())
-            .field("clip_id", &self.clip_id).field("outcome", &self.outcome).finish()
+            .field("clip_id", &self.clip_id)
+            .field("outcome", &self.outcome)
+            .finish()
     }
 }
 

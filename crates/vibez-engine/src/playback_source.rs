@@ -393,7 +393,8 @@ impl PreparedPlaybackSource {
         // Off-callback construction prepares the matching complete removal owner.
         let required = self.note_clips.len() + 1;
         if self.removed_note_clips.capacity() < required {
-            self.removed_note_clips.reserve(required - self.removed_note_clips.len());
+            self.removed_note_clips
+                .reserve(required - self.removed_note_clips.len());
         }
         self.note_clips.push(clip);
     }

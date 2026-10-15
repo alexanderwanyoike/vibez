@@ -8,12 +8,23 @@ fn on_audio_thread(mut engine: AudioEngine, sounding: bool) -> (AudioEngine, [f3
         assert_ne!(std::thread::current().id(), owner_thread);
         let output = callback(&mut engine, sounding);
         (engine, output)
-    }).join().unwrap()
+    })
+    .join()
+    .unwrap()
 }
 
-fn publish_request(mut fixture: Fixture, delta: &mut Delta, with_sentinel: bool) -> (Fixture, ClipInsertionStorageRequest) {
-    fixture.commands.push(delta.command.take().unwrap()).unwrap();
-    if with_sentinel { fixture.commands.push(EngineCommand::SetBpm(137.0)).unwrap(); }
+fn publish_request(
+    mut fixture: Fixture,
+    delta: &mut Delta,
+    with_sentinel: bool,
+) -> (Fixture, ClipInsertionStorageRequest) {
+    fixture
+        .commands
+        .push(delta.command.take().unwrap())
+        .unwrap();
+    if with_sentinel {
+        fixture.commands.push(EngineCommand::SetBpm(137.0)).unwrap();
+    }
     // Moving only the engine avoids sending any raw identity-observer pointers to the worker.
     let (engine, _) = on_audio_thread(fixture.engine, false);
     fixture.engine = engine;
@@ -29,7 +40,10 @@ fn publish_request(mut fixture: Fixture, delta: &mut Delta, with_sentinel: bool)
 
 #[test]
 fn ready_and_unfulfilled_note_requests_complete_on_audio_and_release_control_on_owner_thread() {
-    for outcome in [ClipInsertionOutcome::Applied, ClipInsertionOutcome::Abandoned] {
+    for outcome in [
+        ClipInsertionOutcome::Applied,
+        ClipInsertionOutcome::Abandoned,
+    ] {
         let fixture = setup();
         let mut delta = delta(fixture.track);
         let identity = delta.identity.clone();
@@ -39,7 +53,10 @@ fn ready_and_unfulfilled_note_requests_complete_on_audio_and_release_control_on_
             assert!(prepared.0 > 0);
             assert_eq!(prepared.1, 0);
         } else {
-            assert_eq!(crate::retirement::tests::allocations(|| drop(request)), (0, 0));
+            assert_eq!(
+                crate::retirement::tests::allocations(|| drop(request)),
+                (0, 0)
+            );
         }
         assert_eq!(identity.strong_count(), 2);
         let (engine, _) = on_audio_thread(fixture.engine, false);
@@ -60,7 +77,11 @@ fn ready_and_unfulfilled_note_requests_complete_on_audio_and_release_control_on_
         assert_eq!(disposed.0, 0);
         // Both eager Vecs, the final ring's two allocations and the control Box
         // return together. Applied also returns both emptied source allocations.
-        let old_vectors = if outcome == ClipInsertionOutcome::Applied { 2 } else { 0 };
+        let old_vectors = if outcome == ClipInsertionOutcome::Applied {
+            2
+        } else {
+            0
+        };
         assert_eq!(disposed.1, 2 + 2 + 1 + old_vectors);
         assert_eq!(identity.strong_count(), 1);
         assert_resident(&fixture);
@@ -121,9 +142,12 @@ fn consumer_first_note_shutdown_releases_successful_orphaned_replies_on_owner_th
             assert!(prepared.0 > 0);
             assert_eq!(prepared.1, 0);
             let mut pushed = None;
-            assert_eq!(crate::retirement::tests::allocations(|| {
-                pushed = Some(request.sender.push(storage.take().unwrap()));
-            }), (0, 0));
+            assert_eq!(
+                crate::retirement::tests::allocations(|| {
+                    pushed = Some(request.sender.push(storage.take().unwrap()));
+                }),
+                (0, 0)
+            );
             assert!(pushed.unwrap().is_ok());
             assert_eq!(request.sender.slots(), 0);
             let disposed = crate::retirement::tests::allocations(|| drop(request));
@@ -149,13 +173,19 @@ fn undrained_event_requests_and_unsent_note_controls_release_both_rings_after_ow
         let mut delta = delta(fixture.track);
         let identity = delta.identity.clone();
         if admitted {
-            fixture.commands.push(delta.command.take().unwrap()).unwrap();
+            fixture
+                .commands
+                .push(delta.command.take().unwrap())
+                .unwrap();
             let (engine, _) = on_audio_thread(fixture.engine, false);
             fixture.engine = engine;
             assert!(fixture.events.slots() > 0);
             assert_eq!(identity.strong_count(), 3);
             assert_unchanged(&fixture);
-            assert_eq!(crate::retirement::tests::allocations(|| drop(fixture.events)), (0, 0));
+            assert_eq!(
+                crate::retirement::tests::allocations(|| drop(fixture.events)),
+                (0, 0)
+            );
             let (engine, output) = on_audio_thread(fixture.engine, true);
             fixture.engine = engine;
             assert_signal(&output);
@@ -189,10 +219,17 @@ fn undrained_event_requests_and_unsent_note_controls_release_both_rings_after_ow
 fn eager_and_missing_note_completions_return_both_unused_mailbox_endpoints() {
     for missing in [false, true] {
         let mut fixture = setup();
-        let target = if missing { TrackId::new() } else { fixture.track };
+        let target = if missing {
+            TrackId::new()
+        } else {
+            fixture.track
+        };
         let mut delta = delta_with_capacity(target, 2);
         let identity = delta.identity.clone();
-        fixture.commands.push(delta.command.take().unwrap()).unwrap();
+        fixture
+            .commands
+            .push(delta.command.take().unwrap())
+            .unwrap();
         let (engine, _) = on_audio_thread(fixture.engine, false);
         fixture.engine = engine;
         let mut received = Received::default();
@@ -203,21 +240,32 @@ fn eager_and_missing_note_completions_return_both_unused_mailbox_endpoints() {
         assert_eq!(returned.id(), delta.id);
         assert_eq!((returned.track_id, returned.clip_id), (target, delta.clip));
         assert_eq!(std::ptr::from_ref(returned.owner.as_ref()), delta.control);
-        assert_eq!(std::ptr::from_ref(returned.owner.receiver.buffer()), delta.ring);
-        let sender = returned.owner.sender.as_ref().expect("the producer never left its original owner");
+        assert_eq!(
+            std::ptr::from_ref(returned.owner.receiver.buffer()),
+            delta.ring
+        );
+        let sender = returned
+            .owner
+            .sender
+            .as_ref()
+            .expect("the producer never left its original owner");
         assert_eq!(std::ptr::from_ref(sender.buffer()), delta.ring);
         assert!(!sender.is_abandoned());
         assert!(!returned.owner.receiver.is_abandoned());
         assert!(returned.owner.receiver.is_empty());
         assert!(returned.owner.reply.is_none());
-        let ClipInsertionStorage::Note(storage) = &returned.owner.storage else { panic!("complete note storage") };
+        let ClipInsertionStorage::Note(storage) = &returned.owner.storage else {
+            panic!("complete note storage")
+        };
         assert!(storage.live.is_empty());
         assert!(storage.removed.is_empty());
         if missing {
             assert_eq!(returned.outcome, ClipInsertionOutcome::MissingTrack);
             assert_eq!(storage.live.as_ptr(), delta.eager);
             assert_eq!(storage.removed.as_ptr(), delta.eager_staging);
-            let Some(ClipInsertionDelta::Note(clip)) = &returned.owner.clip else { panic!("complete original note owner") };
+            let Some(ClipInsertionDelta::Note(clip)) = &returned.owner.clip else {
+                panic!("complete original note owner")
+            };
             assert_eq!(clip.id, delta.clip);
             assert!(clip.notes.is_empty());
             assert_unchanged(&fixture);
