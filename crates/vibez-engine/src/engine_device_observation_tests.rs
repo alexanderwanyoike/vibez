@@ -65,22 +65,32 @@ impl RequestTrace {
             .collect()
     }
     fn processed_frames(&self) -> Vec<usize> {
-        self.observed().into_iter().filter(|event| *event >= PROCESS)
-            .map(|event| event - PROCESS).collect()
+        self.observed()
+            .into_iter()
+            .filter(|event| *event >= PROCESS)
+            .map(|event| event - PROCESS)
+            .collect()
     }
 
     fn assert_request_after_processing(&self, frames: &[usize], resumed: bool) {
         assert_eq!(self.processed_frames(), frames);
         let calls = self.observed();
         let processed = calls.iter().position(|event| *event >= PROCESS).unwrap();
-        let requested = calls[processed + 1..].iter().position(|event| *event == QUERY_REQUESTED)
+        let requested = calls[processed + 1..]
+            .iter()
+            .position(|event| *event == QUERY_REQUESTED)
             .map(|offset| processed + 1 + offset)
             .expect("a process-raised request must reach the next output gate");
         if resumed {
-            let next_process = calls[requested + 1..].iter().position(|event| *event >= PROCESS)
-                .map(|offset| requested + 1 + offset).unwrap();
-            assert!(calls[requested + 1..next_process].contains(&QUERY_CLEAR),
-                "a later child may resume only after observing the cleared request");
+            let next_process = calls[requested + 1..]
+                .iter()
+                .position(|event| *event >= PROCESS)
+                .map(|offset| requested + 1 + offset)
+                .unwrap();
+            assert!(
+                calls[requested + 1..next_process].contains(&QUERY_CLEAR),
+                "a later child may resume only after observing the cleared request"
+            );
         }
     }
 }
@@ -273,7 +283,9 @@ fn oversized_graph_segments_observe_new_and_cleared_requests_without_reusing_par
             assert_signal(&output, channels, audible);
             assert_signal(&selected, channels, audible);
             fixture.trace.assert_request_after_processing(
-                if clear_later { &[8, 8] } else { &[8] }, clear_later);
+                if clear_later { &[8, 8] } else { &[8] },
+                clear_later,
+            );
             assert_eq!(fixture.engine.transport.position(), 64);
             assert_eq!(fixture.engine.output_position, 64);
         }
@@ -291,9 +303,18 @@ fn wider_layout_reentry_observes_a_request_after_its_outer_gate_and_zeros_both_o
         assert!(output.iter().all(|sample| *sample == 0.0));
         assert!(selected.iter().all(|sample| *sample == 0.0));
         let calls = fixture.trace.observed();
-        let requested = calls.iter().position(|event| *event == QUERY_REQUESTED).unwrap();
-        assert!(calls[..requested].contains(&QUERY_CLEAR), "the outer gate was clear before reentry");
-        assert!(fixture.trace.processed_frames().is_empty(), "the reentrant request blocks the real child");
+        let requested = calls
+            .iter()
+            .position(|event| *event == QUERY_REQUESTED)
+            .unwrap();
+        assert!(
+            calls[..requested].contains(&QUERY_CLEAR),
+            "the outer gate was clear before reentry"
+        );
+        assert!(
+            fixture.trace.processed_frames().is_empty(),
+            "the reentrant request blocks the real child"
+        );
         assert_eq!(fixture.engine.transport.position(), 64);
     }
 }
@@ -304,7 +325,10 @@ fn empty_graph_entries_keep_the_original_request_observation_without_processing_
         let mut fixture = fixture(8, false);
         fixture.trace.arm(false, 0, 0);
         render_graph(&mut fixture, &mut [], &mut [], channels);
-        assert!(fixture.trace.processed_frames().is_empty(), "empty graph entries never process audio");
+        assert!(
+            fixture.trace.processed_frames().is_empty(),
+            "empty graph entries never process audio"
+        );
         assert_eq!(fixture.engine.transport.position(), 64);
         assert_eq!(fixture.engine.output_position, 64);
     }
@@ -376,7 +400,13 @@ fn callback_final_gate_observes_the_last_process_request_and_preserves_loss_fade
         );
         assert_eq!(fixture.engine.output_position, 160);
         fixture.trace.assert_request_after_processing(
-            if matches!(mode, CallbackSource::ArrangeLoop) { &[16] } else { &[96] }, false);
+            if matches!(mode, CallbackSource::ArrangeLoop) {
+                &[16]
+            } else {
+                &[96]
+            },
+            false,
+        );
         while let Ok(event) = fixture.events.pop() {
             assert!(!matches!(
                 event,

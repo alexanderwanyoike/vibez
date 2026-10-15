@@ -275,7 +275,10 @@ fn assert_validation_targets(trace: &Trace, case: ValidationCase) {
             owners.push(owner);
         }
     }
-    assert_eq!(owners, expected, "{case:?}: validation order ends at the first invalid owner");
+    assert_eq!(
+        owners, expected,
+        "{case:?}: validation order ends at the first invalid owner"
+    );
 }
 
 #[test]
@@ -368,41 +371,37 @@ fn validation_preserves_order_first_invalid_reason_and_accumulated_local_failure
                     failure = Some((fixture.tracks[0], Some(fixture.effects[0]), config_reason));
                 }
             }
-            _ => {
-                match case {
-                    ValidationCase::EffectRate | ValidationCase::RateBeforeLocal => {
-                        fixture.facts[1].rate.store(48_000, Ordering::Release);
-                        if matches!(case, ValidationCase::RateBeforeLocal) {
-                            fixture.facts[1].local.store(true, Ordering::Release);
-                            fixture.facts[1].valid.store(false, Ordering::Release);
-                        }
-                        failure = Some((fixture.tracks[0], Some(fixture.effects[0]), rate_reason));
-                    }
-                    ValidationCase::Configuration => {
-                        fixture.facts[1].valid.store(false, Ordering::Release);
-                        failure =
-                            Some((fixture.tracks[0], Some(fixture.effects[0]), config_reason));
-                    }
-                    ValidationCase::Latency => {
-                        fixture.facts[1].latency.store(1, Ordering::Release);
-                        failure =
-                            Some((fixture.tracks[0], Some(fixture.effects[0]), latency_reason));
-                    }
-                    ValidationCase::LocalOnly | ValidationCase::LocalThenInvalid => {
-                        local = true;
-                        fixture.facts[1].valid.store(false, Ordering::Release);
+            _ => match case {
+                ValidationCase::EffectRate | ValidationCase::RateBeforeLocal => {
+                    fixture.facts[1].rate.store(48_000, Ordering::Release);
+                    if matches!(case, ValidationCase::RateBeforeLocal) {
                         fixture.facts[1].local.store(true, Ordering::Release);
-                        fixture.facts[1].latency.store(521, Ordering::Release);
-                        if matches!(case, ValidationCase::LocalThenInvalid) {
-                            fixture.facts[2].valid.store(false, Ordering::Release);
-                            fixture.facts[3].rate.store(96_000, Ordering::Release);
-                            failure =
-                                Some((fixture.tracks[0], Some(fixture.effects[1]), config_reason));
-                        }
+                        fixture.facts[1].valid.store(false, Ordering::Release);
                     }
-                    _ => unreachable!(),
+                    failure = Some((fixture.tracks[0], Some(fixture.effects[0]), rate_reason));
                 }
-            }
+                ValidationCase::Configuration => {
+                    fixture.facts[1].valid.store(false, Ordering::Release);
+                    failure = Some((fixture.tracks[0], Some(fixture.effects[0]), config_reason));
+                }
+                ValidationCase::Latency => {
+                    fixture.facts[1].latency.store(1, Ordering::Release);
+                    failure = Some((fixture.tracks[0], Some(fixture.effects[0]), latency_reason));
+                }
+                ValidationCase::LocalOnly | ValidationCase::LocalThenInvalid => {
+                    local = true;
+                    fixture.facts[1].valid.store(false, Ordering::Release);
+                    fixture.facts[1].local.store(true, Ordering::Release);
+                    fixture.facts[1].latency.store(521, Ordering::Release);
+                    if matches!(case, ValidationCase::LocalThenInvalid) {
+                        fixture.facts[2].valid.store(false, Ordering::Release);
+                        fixture.facts[3].rate.store(96_000, Ordering::Release);
+                        failure =
+                            Some((fixture.tracks[0], Some(fixture.effects[1]), config_reason));
+                    }
+                }
+                _ => unreachable!(),
+            },
         }
         assert_eq!(
             crate::retirement::tests::allocations(|| fixture.engine.validate_compensation()),
@@ -505,12 +504,25 @@ fn handoff_classifies_recovery_after_stop_and_full_restoration_keeps_the_same_ow
                 (0, 0)
             );
             let calls = fixture.trace.observed();
-            let stopped = calls.iter().position(|call| *call == (2, STOP, u32::from(after_local)))
+            let stopped = calls
+                .iter()
+                .position(|call| *call == (2, STOP, u32::from(after_local)))
                 .expect("the selected device must really stop before ownership transfers");
-            assert_eq!(calls.iter().filter(|(_, method, _)| *method == STOP).count(), 1);
-            assert!(calls[..stopped].contains(&(2, REQUEST, 1)), "handoff requires a current request");
-            assert!(calls[stopped + 1..].contains(&(2, RECOVERY, u32::from(after_local))),
-                "handoff classification must use the stopped owner's recovery answer");
+            assert_eq!(
+                calls
+                    .iter()
+                    .filter(|(_, method, _)| *method == STOP)
+                    .count(),
+                1
+            );
+            assert!(
+                calls[..stopped].contains(&(2, REQUEST, 1)),
+                "handoff requires a current request"
+            );
+            assert!(
+                calls[stopped + 1..].contains(&(2, RECOVERY, u32::from(after_local))),
+                "handoff classification must use the stopped owner's recovery answer"
+            );
             assert_eq!(fixture.engine.device_handoff.last_issued_identity(), 1);
             let mut returned = None;
             let mut observed_fillers = 0;
