@@ -99,6 +99,20 @@ fn thirty_two_sounding_retired_generations_do_not_block_note_off_or_stop_and_ui_
         commands.push(EngineCommand::SetSampleRate(1000)).unwrap();
         commands.push(EngineCommand::add_track(track)).unwrap();
         commands
+            .push(EngineCommand::SetRouting(
+                vibez_engine::routing::PreparedRouting::prepare(
+                    &[track, TrackId::MASTER].map(|id| vibez_core::routing::RoutingChannel {
+                        id,
+                        is_bus: id.is_master(),
+                        effects: vec![],
+                        sends: vec![],
+                    }),
+                    vibez_engine::routing::MAX_BLOCK_FRAMES,
+                )
+                .unwrap(),
+            ))
+            .unwrap();
+        commands
             .push(EngineCommand::set_built_in_instrument(
                 track,
                 InstrumentKind::DrumRack,

@@ -100,6 +100,20 @@ fn actual_app_shutdown_stops_engine_before_destroying_sample_guards_and_state_ca
     commands.push(EngineCommand::SetSampleRate(1000)).unwrap();
     commands.push(EngineCommand::add_track(track)).unwrap();
     commands
+        .push(EngineCommand::SetRouting(
+            vibez_engine::routing::PreparedRouting::prepare(
+                &[track, TrackId::MASTER].map(|id| vibez_core::routing::RoutingChannel {
+                    id,
+                    is_bus: id.is_master(),
+                    effects: vec![],
+                    sends: vec![],
+                }),
+                vibez_engine::routing::MAX_BLOCK_FRAMES,
+            )
+            .unwrap(),
+        ))
+        .unwrap();
+    commands
         .push(EngineCommand::SetInstrument {
             track_id: track,
             instrument: Box::new(DropObserverInstrument {

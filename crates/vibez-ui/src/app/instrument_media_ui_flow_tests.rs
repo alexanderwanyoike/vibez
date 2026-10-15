@@ -125,6 +125,7 @@ fn actual_drum_ui_clear_load_and_undo_preserve_fifo_media_audio_and_retired_guar
         .push(track.clone());
     app.send_command(EngineCommand::SetSampleRate(1000));
     app.replay_track_to_engine(&track);
+    app.sync_sidechain_routing();
     drop(track);
     forward_ui_commands(&mut app, &mut observed, &mut engine_commands, |commands| {
         assert_pad_load_fifo(commands, track_id, &initial_state, old_owner.as_ptr());
