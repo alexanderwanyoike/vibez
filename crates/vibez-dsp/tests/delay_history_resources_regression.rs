@@ -234,7 +234,7 @@ fn either_real_history_allocation_failure_returns_a_bounded_invalid_instance() {
         #[cfg(unix)]
         let mut command = {
             let mut command = Command::new("sh");
-            // An infallible predecessor may abort; child failure must not create core files.
+            // Limit ordinary abort dumps; a piped system handler can still retain diagnostics.
             command.args(["-c", "ulimit -c 0 || exit 125; exec \"$@\"", "delay-allocation-child"]);
             command.arg(&executable);
             command
