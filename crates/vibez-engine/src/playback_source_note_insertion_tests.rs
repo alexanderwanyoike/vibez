@@ -617,3 +617,201 @@ fn prepared_note_constructor_preserves_complete_schedules_and_grows_live_and_sta
         verify_prepared_note_storage_growth(source, count);
     }
 }
+
+struct HomeSnapshot {
+    source: *const PreparedPlaybackSource,
+    live: *const EngineNoteClip,
+    staging: *const EngineNoteClip,
+    live_capacity: usize,
+    staging_capacity: usize,
+    clips: Vec<ResidentSchedule>,
+}
+
+impl HomeSnapshot {
+    fn observe(source: &PreparedPlaybackSource) -> Self {
+        Self {
+            source: std::ptr::from_ref(source), live: source.note_clips.as_ptr(),
+            staging: source.removed_note_clips.as_ptr(), live_capacity: source.note_clips.capacity(),
+            staging_capacity: source.removed_note_clips.capacity(),
+            clips: source.note_clips.iter().map(ResidentSchedule::observe).collect(),
+        }
+    }
+
+    fn assert_unchanged(&self, source: &PreparedPlaybackSource) {
+        assert_eq!(std::ptr::from_ref(source), self.source);
+        assert_eq!(source.note_clips.as_ptr(), self.live);
+        assert_eq!(source.removed_note_clips.as_ptr(), self.staging);
+        assert_eq!(source.note_clips.capacity(), self.live_capacity);
+        assert_eq!(source.removed_note_clips.capacity(), self.staging_capacity);
+        assert_eq!(source.note_clips.len(), self.clips.len());
+        assert!(source.removed_note_clips.is_empty());
+        for (snapshot, clip) in self.clips.iter().zip(&source.note_clips) { snapshot.assert_unchanged(clip); }
+    }
+}
+
+fn home_source(count: usize) -> PreparedPlaybackSource {
+    let clips = (0..count).map(|index| {
+        let mut clip = resident_clip(index, ClipId::new());
+        clip.groove_grid = GrooveGrid::Off;
+        clip
+    }).collect();
+    PreparedPlaybackSource::new(Vec::new(), clips, Vec::new())
+}
+
+#[derive(Debug, Clone, Copy)]
+enum PendingHome { Section, LauncherReplacement, LauncherStop }
+
+#[test]
+fn pending_note_storage_keeps_arrange_distinct_through_reachable_section_and_launcher_boundaries() {
+    use crate::clip_insertion::{ClipInsertionOutcome, PreparedNoteClipInsertion};
+    use crate::events::EngineEvent;
+    use vibez_core::perform::{MusicalBoundary, SectionLaunchQuantization};
+
+    for home in [PendingHome::Section, PendingHome::LauncherReplacement, PendingHome::LauncherStop] {
+        let (mut engine, mut commands, mut events) = AudioEngine::new();
+        let track_id = TrackId::new();
+        let calls = Arc::new(VoiceCalls::default());
+        let mut track = EngineTrack::with_playback_source(track_id, home_source(1));
+        track.pan = 0.0;
+        track.instrument = Some(Box::new(CountedInstrument {
+            instrument: crate::test_support::DelayProbeInstrument::new(0, 0.25),
+            calls: Arc::clone(&calls),
+        }));
+        let arrange = HomeSnapshot::observe(&track.playback_source);
+        let inactive = HomeSnapshot::observe(&track.empty_launcher_source);
+        let initial_section = HomeSnapshot::observe(&track.section_playback_source);
+        let section_id = SectionId::new();
+        let next_section = SectionId::new();
+        let (launch, old_home) = if matches!(home, PendingHome::Section) {
+            let source = PreparedSectionPlaybackSource::new(section_id, 2.0, true, vec![(track_id, home_source(1))]);
+            let snapshot = HomeSnapshot::observe(&source.tracks()[0].source);
+            (EngineCommand::LaunchSection(Box::new(source)), snapshot)
+        } else {
+            let source = home_source(1);
+            let clip_id = source.note_clips[0].id;
+            let source = Box::new(source);
+            let snapshot = HomeSnapshot::observe(&source);
+            (EngineCommand::QueueClips {
+                clips: vec![Box::new(PreparedClipPlayback {
+                    track_id, clip_id: Some(clip_id), request_id: 1, length_samples: 32,
+                    looping: true, source,
+                })], quantization: MusicalBoundary::Immediate,
+            }, snapshot)
+        };
+        commands.push(EngineCommand::SetSampleRate(32)).unwrap();
+        commands.push(EngineCommand::AddTrack(Box::new(track))).unwrap();
+        let channels: Vec<_> = [track_id, TrackId::MASTER].into_iter().map(|id| RoutingChannel {
+            id, is_bus: id.is_master(), sends: Vec::new(), effects: Vec::new(),
+        }).collect();
+        commands.push(EngineCommand::SetRouting(crate::routing::PreparedRouting::prepare(&channels, 8).unwrap())).unwrap();
+        commands.push(launch).unwrap();
+        let mut output = [0.0; 16];
+        engine.process_block(AudioProcessBlock::new(&mut output, 2));
+        assert_sounding(&output);
+        while events.pop().is_ok() {}
+        arrange.assert_unchanged(&engine.tracks()[0].playback_source);
+        let (queued, next_home) = match home {
+            PendingHome::Section => {
+                old_home.assert_unchanged(&engine.tracks()[0].section_playback_source);
+                let source = PreparedSectionPlaybackSource::new(next_section, 2.0, true, vec![(track_id, home_source(2))]);
+                let snapshot = HomeSnapshot::observe(&source.tracks()[0].source);
+                (EngineCommand::QueueSection { prepared: Box::new(source), quantization: SectionLaunchQuantization::EndOfSection }, snapshot)
+            }
+            PendingHome::LauncherReplacement | PendingHome::LauncherStop => {
+                old_home.assert_unchanged(&engine.tracks()[0].launcher_source);
+                let prepared = if matches!(home, PendingHome::LauncherStop) {
+                    PreparedClipPlayback::stop(track_id, 2)
+                } else {
+                    let source = home_source(2);
+                    Box::new(PreparedClipPlayback {
+                        track_id, clip_id: Some(source.note_clips[0].id), request_id: 2,
+                        length_samples: 32, looping: true, source: Box::new(source),
+                    })
+                };
+                let snapshot = HomeSnapshot::observe(&prepared.source);
+                (EngineCommand::QueueClips { clips: vec![prepared], quantization: MusicalBoundary::OneBeat }, snapshot)
+            }
+        };
+        commands.push(queued).unwrap();
+        let inserted_id = ClipId::new();
+        let insertion = PreparedNoteClipInsertion::new(inserted_id, 32.0, 4.0, 0.0, false, 0.0, 4.0, GrooveGrid::Off);
+        let operation = insertion.id();
+        commands.push(EngineCommand::AddNoteClip { track_id, insertion }).unwrap();
+        commands.push(EngineCommand::SetTrackGain(track_id, 0.5)).unwrap();
+        measured_callback(&mut engine, &mut []);
+        let mut request = None;
+        while let Ok(event) = events.pop() {
+            if let EngineEvent::ClipInsertionStorageRequested(value) = event {
+                assert_eq!(value.id, operation);
+                assert!(request.replace(value).is_none());
+            }
+        }
+        let request = request.expect("queued boundary must leave one real pending Arrange insertion");
+        let mut displaced = 0;
+        for step in 0..4 {
+            measured_callback(&mut engine, &mut output);
+            let expected = if matches!(home, PendingHome::LauncherStop) && step >= 1 { 0.0 } else { 0.25 };
+            for &[left, right] in output.as_chunks::<2>().0 { assert_eq!((left, right), (expected, 0.0), "{home:?} block {step}"); }
+            arrange.assert_unchanged(&engine.tracks()[0].playback_source);
+            assert_eq!(engine.tracks()[0].gain, 1.0);
+            assert_eq!(commands.slots(), vibez_core::constants::RING_BUFFER_CAPACITY - 1);
+            while let Ok(event) = events.pop() {
+                match event {
+                    EngineEvent::SectionTransitioned { section_id, effective_at_samples, retired } => {
+                        assert!(matches!(home, PendingHome::Section));
+                        assert_eq!(section_id, next_section);
+                        assert_eq!(effective_at_samples, 32);
+                        old_home.assert_unchanged(&retired.tracks()[0].source);
+                        displaced += 1;
+                        drop(retired);
+                    }
+                    EngineEvent::ClipTransitioned { request_id, effective_at_samples, retired, .. } => {
+                        assert!(!matches!(home, PendingHome::Section));
+                        assert_eq!(request_id, 2);
+                        assert_eq!(effective_at_samples, 16);
+                        old_home.assert_unchanged(&retired.unwrap().source);
+                        displaced += 1;
+                    }
+                    EngineEvent::ClipInsertionStorageRequested(_) | EngineEvent::ClipInsertionCompleted(_) => {
+                        panic!("pending reply must not duplicate or complete early");
+                    }
+                    _ => {}
+                }
+            }
+        }
+        assert_eq!(displaced, 1, "{home:?}");
+        let channel = &engine.tracks()[0];
+        inactive.assert_unchanged(&channel.empty_launcher_source);
+        if matches!(home, PendingHome::Section) { next_home.assert_unchanged(&channel.section_playback_source); }
+        else {
+            next_home.assert_unchanged(&channel.launcher_source);
+            initial_section.assert_unchanged(&channel.section_playback_source);
+        }
+        let before = calls.observed();
+        request.fulfill();
+        measured_callback(&mut engine, &mut []);
+        let EngineEvent::ClipInsertionCompleted(completed) = events.pop().unwrap() else { panic!("Arrange growth must complete first"); };
+        assert_eq!(completed.id(), operation);
+        assert_eq!(completed.outcome, ClipInsertionOutcome::Applied);
+        assert_eq!((completed.track_id, completed.clip_id), (track_id, inserted_id));
+        assert_eq!(crate::retirement::tests::allocations(|| drop(completed)), (0, 7));
+        assert_eq!(commands.slots(), vibez_core::constants::RING_BUFFER_CAPACITY);
+        let channel = &engine.tracks()[0];
+        assert_eq!(channel.gain, 0.5);
+        assert_eq!(std::ptr::from_ref(channel.playback_source.as_ref()), arrange.source);
+        assert_eq!(channel.playback_source.note_clips.len(), 2);
+        arrange.clips[0].assert_unchanged(&channel.playback_source.note_clips[0]);
+        assert_eq!(channel.playback_source.note_clips[1].id, inserted_id);
+        assert!(channel.playback_source.note_clips[1].notes.is_empty());
+        assert!(channel.playback_source.note_clips.capacity() >= 2);
+        assert!(channel.playback_source.removed_note_clips.capacity() >= 2);
+        inactive.assert_unchanged(&channel.empty_launcher_source);
+        if matches!(home, PendingHome::Section) { next_home.assert_unchanged(&channel.section_playback_source); }
+        else { next_home.assert_unchanged(&channel.launcher_source); }
+        assert_eq!(calls.observed(), before, "insertion cannot flush or retrigger a performance voice");
+        measured_callback(&mut engine, &mut output);
+        let expected = if matches!(home, PendingHome::LauncherStop) { 0.0 } else { 0.125 };
+        for &[left, right] in output.as_chunks::<2>().0 { assert_eq!((left, right), (expected, 0.0)); }
+        assert_eq!(calls.observed(), before);
+    }
+}
