@@ -382,7 +382,7 @@ pub struct PreparedPlaybackSource {
     pub note_clips: Vec<EngineNoteClip>,
     pub automation: Vec<AutomationLane>,
     pub(crate) removed_audio_clips: Vec<EngineClip>,
-    removed_note_clips: Vec<EngineNoteClip>,
+    pub(crate) removed_note_clips: Vec<EngineNoteClip>,
 }
 
 /// One Project Track's resident content for a prepared Section.
