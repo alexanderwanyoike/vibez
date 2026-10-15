@@ -125,9 +125,15 @@ fn fixture() -> Fixture {
     let trace = Arc::new(ScanTrace::new());
     let tracks = [TrackId::new(), TrackId::new(), TrackId::new()];
     let mut model = Vec::new();
-    for (index, (instrument, effects)) in [(1, &[2, 3][..]), (4, &[5][..]), (6, &[7][..])].into_iter().enumerate() {
+    for (index, (instrument, effects)) in [(1, &[2, 3][..]), (4, &[5][..]), (6, &[7][..])]
+        .into_iter()
+        .enumerate()
+    {
         let mut source = EngineTrack::new(tracks[index]);
-        source.instrument = Some(Box::new(ScanProbe { owner: instrument, trace: Arc::clone(&trace) }));
+        source.instrument = Some(Box::new(ScanProbe {
+            owner: instrument,
+            trace: Arc::clone(&trace),
+        }));
         if index == 0 {
             source.playback_source.clips.push(constant_clip(4096, 0.25));
         }
@@ -137,39 +143,66 @@ fn fixture() -> Fixture {
             let effect = EffectId::new();
             source.effects.push(EffectSlot {
                 id: effect,
-                effect: Box::new(ScanProbe { owner, trace: Arc::clone(&trace) }),
+                effect: Box::new(ScanProbe {
+                    owner,
+                    trace: Arc::clone(&trace),
+                }),
                 bypass: false,
             });
             channel.effects.push(routing_effect(effect));
         }
-        commands.push(if index == 2 { EngineCommand::AddBus(Box::new(source)) } else { EngineCommand::AddTrack(Box::new(source)) }).unwrap();
+        commands
+            .push(if index == 2 {
+                EngineCommand::AddBus(Box::new(source))
+            } else {
+                EngineCommand::AddTrack(Box::new(source))
+            })
+            .unwrap();
         model.push(channel);
     }
     let master_effect = EffectId::new();
-    commands.push(EngineCommand::InsertEffect {
-        track_id: TrackId::MASTER,
-        effect_id: master_effect,
-        effect: Box::new(ScanProbe { owner: 8, trace: Arc::clone(&trace) }),
-        position: None,
-    }).unwrap();
+    commands
+        .push(EngineCommand::InsertEffect {
+            track_id: TrackId::MASTER,
+            effect_id: master_effect,
+            effect: Box::new(ScanProbe {
+                owner: 8,
+                trace: Arc::clone(&trace),
+            }),
+            position: None,
+        })
+        .unwrap();
     let mut master = routing_channel(TrackId::MASTER);
     master.effects.push(routing_effect(master_effect));
     model.push(master);
-    commands.push(EngineCommand::SetRouting(crate::routing::PreparedRouting::prepare(&model, 64).unwrap())).unwrap();
+    commands
+        .push(EngineCommand::SetRouting(
+            crate::routing::PreparedRouting::prepare(&model, 64).unwrap(),
+        ))
+        .unwrap();
     commands.push(EngineCommand::Play).unwrap();
     engine.drain_commands();
     assert!(engine.compensation_plan.applied_plan_is_valid());
     assert!(!engine.compensation_plan.awaiting_structural_plan());
     assert!(engine.transport.is_playing());
     trace.clear_calls();
-    Fixture { engine, commands, _events: events, first_track: tracks[0], trace }
+    Fixture {
+        engine,
+        commands,
+        _events: events,
+        first_track: tracks[0],
+        trace,
+    }
 }
 
 fn observe(fixture: &Fixture, case: &str, selected: usize, expected: bool, expected_calls: &[u32]) {
     let mut muted = false;
-    assert_eq!(crate::retirement::tests::allocations(|| {
-        muted = fixture.engine.project_processing_muted();
-    }), (0, 0));
+    assert_eq!(
+        crate::retirement::tests::allocations(|| {
+            muted = fixture.engine.project_processing_muted();
+        }),
+        (0, 0)
+    );
     assert_eq!(muted, expected);
     let calls = fixture.trace.observed();
     assert_eq!(calls, expected_calls, "{case}, selected={selected}");
@@ -182,12 +215,21 @@ fn observe(fixture: &Fixture, case: &str, selected: usize, expected: bool, expec
 #[test]
 fn resident_restart_scan_keeps_effect_instrument_channel_order_and_short_circuits_local_requests() {
     let fixture = fixture();
-    observe(&fixture, "clear", 0, false, &SCAN_ORDER.map(|owner| owner as u32 * 100 + 10));
+    observe(
+        &fixture,
+        "clear",
+        0,
+        false,
+        &SCAN_ORDER.map(|owner| owner as u32 * 100 + 10),
+    );
     fixture.trace.clear_calls();
     for owner in SCAN_ORDER {
         fixture.trace.set(owner, 3);
     }
-    let local_calls: Vec<_> = SCAN_ORDER.iter().flat_map(|&owner| [owner as u32 * 100 + 11, owner as u32 * 100 + 21]).collect();
+    let local_calls: Vec<_> = SCAN_ORDER
+        .iter()
+        .flat_map(|&owner| [owner as u32 * 100 + 11, owner as u32 * 100 + 21])
+        .collect();
     observe(&fixture, "local-only", 0, false, &local_calls);
     for (target, &selected) in SCAN_ORDER.iter().enumerate() {
         fixture.trace.clear_calls();
@@ -211,24 +253,49 @@ fn owned_output_gates_suppress_live_plugin_queries_after_real_transitions() {
         let mut fixture = fixture();
         match case {
             "awaiting" | "invalid" => {
-                fixture.commands.push(EngineCommand::insert_built_in_effect(fixture.first_track, EffectId::new(), EffectType::Gain, DEFAULT_SAMPLE_RATE)).unwrap();
+                fixture
+                    .commands
+                    .push(EngineCommand::insert_built_in_effect(
+                        fixture.first_track,
+                        EffectId::new(),
+                        EffectType::Gain,
+                        DEFAULT_SAMPLE_RATE,
+                    ))
+                    .unwrap();
                 if case == "invalid" {
-                    fixture.commands.push(EngineCommand::RejectRoutingUpdate { reason: "Observation baseline rejected plan".into() }).unwrap();
+                    fixture
+                        .commands
+                        .push(EngineCommand::RejectRoutingUpdate {
+                            reason: "Observation baseline rejected plan".into(),
+                        })
+                        .unwrap();
                 }
                 fixture.engine.drain_commands();
                 assert!(fixture.engine.compensation_plan.awaiting_structural_plan());
-                assert_eq!(fixture.engine.compensation_plan.applied_plan_is_valid(), case != "invalid");
+                assert_eq!(
+                    fixture.engine.compensation_plan.applied_plan_is_valid(),
+                    case != "invalid"
+                );
             }
             "suspended" => {
                 fixture.trace.set(8, 1);
-                fixture.engine.process_block(AudioProcessBlock::new(&mut [], 2));
+                fixture
+                    .engine
+                    .process_block(AudioProcessBlock::new(&mut [], 2));
                 assert!(fixture.engine.device_handoff.is_suspended());
                 assert!(fixture.engine.device_handoff.pending().is_some());
             }
             "presentation" => {
-                while fixture.engine.event_tx.push(EngineEvent::PlaybackPosition(0)).is_ok() {}
+                while fixture
+                    .engine
+                    .event_tx
+                    .push(EngineEvent::PlaybackPosition(0))
+                    .is_ok()
+                {}
                 for _ in 0..=fixture.engine.scheduled_presentation.capacity() {
-                    fixture.engine.present_event_after(EngineEvent::PlaybackStarted, 521);
+                    fixture
+                        .engine
+                        .present_event_after(EngineEvent::PlaybackStarted, 521);
                 }
                 assert!(fixture.engine.presentation_state.is_faulted());
             }
