@@ -135,7 +135,8 @@ fn queued_section_end_mutes_leave_room_for_the_complete_transition_owner() {
         _ => "other",
     }).collect();
     eprintln!("activation candidate: heap={heap:?}, ordinary={after_len}/{after_capacity}, active={active_after:?}, fallback={fallback_kinds:?}");
-    assert_eq!(output, [0.0; 32]);
+    let expected_fade = std::array::from_fn(|frame| 0.25 * (1.0 - frame as f32 / 64.0));
+    assert_eq!(output, expected_fade);
     assert_eq!(engine.performance_position, 33);
     assert_eq!(engine.output_position_samples(), 33);
     assert_eq!(engine.transport().position(), 40);
