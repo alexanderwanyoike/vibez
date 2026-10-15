@@ -862,7 +862,11 @@ fn clip_mute_point_uses_its_local_position_after_the_first_callback() {
 #[test]
 fn record_source_start_precedes_its_same_boundary_transition_and_keeps_real_audio() {
     let (mut engine, mut commands, mut events, record_track, other_track) = setup();
-    launch(&mut commands, vec![clip(other_track, 10, &[0.25; 64], true)], MusicalBoundary::Immediate);
+    launch(
+        &mut commands,
+        vec![clip(other_track, 10, &[0.25; 64], true)],
+        MusicalBoundary::Immediate,
+    );
     let mut first = [0.0];
     engine.process(&mut first, 1);
     assert_eq!(first, [0.25]);
@@ -873,14 +877,30 @@ fn record_source_start_precedes_its_same_boundary_transition_and_keeps_real_audi
     let id = prepared.clip_id.unwrap();
     let original = std::ptr::from_ref(prepared.as_ref()) as usize;
     let audio = Arc::downgrade(&prepared.source.clips[0].audio);
-    commands.push(EngineCommand::ArmClipRecord {
-        free_length: false, prepared, count_in_bars: 0,
-    }).unwrap();
+    commands
+        .push(EngineCommand::ArmClipRecord {
+            free_length: false,
+            prepared,
+            count_in_bars: 0,
+        })
+        .unwrap();
     let mut output = [0.0; 17];
-    assert_eq!(crate::retirement::tests::allocations(|| engine.process(&mut output, 1)), (0, 0));
+    assert_eq!(
+        crate::retirement::tests::allocations(|| engine.process(&mut output, 1)),
+        (0, 0)
+    );
     for (index, actual) in output.iter().enumerate() {
-        let expected = if index >= 15 { 0.75 }
-            else { 0.25 + if index == 0 { 0.32 } else if index.is_multiple_of(4) { 0.22 } else { 0.0 } };
+        let expected = if index >= 15 {
+            0.75
+        } else {
+            0.25 + if index == 0 {
+                0.32
+            } else if index.is_multiple_of(4) {
+                0.22
+            } else {
+                0.0
+            }
+        };
         assert_eq!(*actual, expected, "frame {index}");
     }
     assert_eq!(engine.performance_position, 18);
@@ -891,38 +911,61 @@ fn record_source_start_precedes_its_same_boundary_transition_and_keeps_real_audi
     let mut facts = Vec::new();
     for event in &delivered {
         match event {
-            EngineEvent::ClipRecordArmed { clip_id, start: 16, output_start: 16, .. } if *clip_id == id => facts.push("armed"),
+            EngineEvent::ClipRecordArmed {
+                clip_id,
+                start: 16,
+                output_start: 16,
+                ..
+            } if *clip_id == id => facts.push("armed"),
             EngineEvent::ClipRecordStarted { clip_id, at: 16 } if *clip_id == id => {
                 assert_eq!(event.time_domain(), crate::events::TimeDomain::Source);
                 facts.push("started");
             }
             EngineEvent::ClipTransitioned {
-                track_id, clip_id: Some(clip_id), request_id: 11, effective_at_samples: 16, retired: Some(retired),
+                track_id,
+                clip_id: Some(clip_id),
+                request_id: 11,
+                effective_at_samples: 16,
+                retired: Some(retired),
             } if *track_id == record_track && *clip_id == id => {
                 assert_eq!(std::ptr::from_ref(retired.as_ref()) as usize, original);
                 facts.push("transitioned");
             }
-            _ => {},
+            _ => {}
         }
     }
     assert_eq!(facts, ["armed", "started", "transitioned"]);
     drop(delivered);
 
-    commands.push(EngineCommand::StopClipRecord { immediate: true }).unwrap();
+    commands
+        .push(EngineCommand::StopClipRecord { immediate: true })
+        .unwrap();
     let mut after_record_stop = [0.0];
-    assert_eq!(crate::retirement::tests::allocations(|| engine.process(&mut after_record_stop, 1)), (0, 0));
+    assert_eq!(
+        crate::retirement::tests::allocations(|| engine.process(&mut after_record_stop, 1)),
+        (0, 0)
+    );
     assert_eq!(after_record_stop, [0.75]);
     assert!(engine.clip_record.is_none());
     assert!(engine.transport().is_playing());
-    assert!(std::iter::from_fn(|| events.pop().ok()).any(|event| matches!(event,
-        EngineEvent::ClipRecordStopped { clip_id, at: 18, started: true } if clip_id == id
-    )));
+    assert!(
+        std::iter::from_fn(|| events.pop().ok()).any(|event| matches!(event,
+            EngineEvent::ClipRecordStopped { clip_id, at: 18, started: true } if clip_id == id
+        ))
+    );
     while events.pop().is_ok() {}
     assert_eq!(audio.strong_count(), 1);
 
-    launch(&mut commands, vec![stop(record_track)], MusicalBoundary::Immediate);
+    launch(
+        &mut commands,
+        vec![stop(record_track)],
+        MusicalBoundary::Immediate,
+    );
     let mut after_clip_stop = [0.0];
-    assert_eq!(crate::retirement::tests::allocations(|| engine.process(&mut after_clip_stop, 1)), (0, 0));
+    assert_eq!(
+        crate::retirement::tests::allocations(|| engine.process(&mut after_clip_stop, 1)),
+        (0, 0)
+    );
     assert_eq!(after_clip_stop, [0.25]);
     assert!(engine.tracks[0].active_clip.is_none());
     let returned: Vec<_> = std::iter::from_fn(|| events.pop().ok()).collect();

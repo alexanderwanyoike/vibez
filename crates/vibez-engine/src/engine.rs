@@ -1087,11 +1087,11 @@ mod unload_routed_pressure_tests;
 mod section_activation_pressure_tests;
 
 #[cfg(test)]
+#[path = "engine_clip_record_pressure_tests.rs"]
+mod clip_record_pressure_tests;
+#[cfg(test)]
 #[path = "engine_resumed_record_pressure_tests.rs"]
 mod resumed_record_pressure_tests;
 #[cfg(test)]
 #[path = "engine_retained_count_in_tests.rs"]
 mod retained_count_in_tests;
-#[cfg(test)]
-#[path = "engine_clip_record_pressure_tests.rs"]
-mod clip_record_pressure_tests;
