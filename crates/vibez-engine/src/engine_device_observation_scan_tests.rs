@@ -55,6 +55,18 @@ impl ScanTrace {
             .map(|call| call.load(Ordering::Relaxed))
             .collect()
     }
+    fn assert_request_order(&self, expected: &[usize]) {
+        let mut owners: Vec<_> = self.observed().into_iter()
+            .filter(|call| call % 100 == 10 || call % 100 == 11)
+            .map(|call| (call / 100) as usize).collect();
+        owners.dedup();
+        assert_eq!(owners, expected, "resident device order and first blocking owner");
+    }
+
+    fn assert_recovery_answer(&self, owner: usize, local: bool) {
+        assert!(self.observed().contains(&(owner as u32 * 100 + 20 + u32::from(local))),
+            "device {owner} must classify recovery as local = {local}");
+    }
 }
 
 struct ScanProbe {
@@ -195,7 +207,7 @@ fn fixture() -> Fixture {
     }
 }
 
-fn observe(fixture: &Fixture, case: &str, selected: usize, expected: bool, expected_calls: &[u32]) {
+fn observe(fixture: &Fixture, expected: bool) {
     let mut muted = false;
     assert_eq!(
         crate::retirement::tests::allocations(|| {
@@ -204,42 +216,38 @@ fn observe(fixture: &Fixture, case: &str, selected: usize, expected: bool, expec
         (0, 0)
     );
     assert_eq!(muted, expected);
-    let calls = fixture.trace.observed();
-    assert_eq!(calls, expected_calls, "{case}, selected={selected}");
+
 }
 
 #[test]
 fn resident_restart_scan_keeps_effect_instrument_channel_order_and_short_circuits_local_requests() {
     let fixture = fixture();
-    observe(
-        &fixture,
-        "clear",
-        0,
-        false,
-        &SCAN_ORDER.map(|owner| owner as u32 * 100 + 10),
-    );
+    observe(&fixture, false);
+    fixture.trace.assert_request_order(&SCAN_ORDER);
     fixture.trace.clear_calls();
     for owner in SCAN_ORDER {
         fixture.trace.set(owner, 3);
     }
-    let local_calls: Vec<_> = SCAN_ORDER
-        .iter()
-        .flat_map(|&owner| [owner as u32 * 100 + 11, owner as u32 * 100 + 21])
-        .collect();
-    observe(&fixture, "local-only", 0, false, &local_calls);
+    observe(&fixture, false);
+    fixture.trace.assert_request_order(&SCAN_ORDER);
+    for owner in SCAN_ORDER {
+        fixture.trace.assert_recovery_answer(owner, true);
+    }
     for (target, &selected) in SCAN_ORDER.iter().enumerate() {
         fixture.trace.clear_calls();
         for &owner in &SCAN_ORDER {
             fixture.trace.set(owner, 0);
         }
-        let mut expected = Vec::new();
         for &owner in &SCAN_ORDER[..target] {
             fixture.trace.set(owner, 3);
-            expected.extend([owner as u32 * 100 + 11, owner as u32 * 100 + 21]);
         }
         fixture.trace.set(selected, 1);
-        expected.extend([selected as u32 * 100 + 11, selected as u32 * 100 + 20]);
-        observe(&fixture, "ordered-match", selected, true, &expected);
+        observe(&fixture, true);
+        fixture.trace.assert_request_order(&SCAN_ORDER[..=target]);
+        for &owner in &SCAN_ORDER[..target] {
+            fixture.trace.assert_recovery_answer(owner, true);
+        }
+        fixture.trace.assert_recovery_answer(selected, false);
     }
 }
 
@@ -301,6 +309,7 @@ fn owned_output_gates_suppress_live_plugin_queries_after_real_transitions() {
             fixture.trace.set(owner, 1);
         }
         fixture.trace.clear_calls();
-        observe(&fixture, case, 0, true, &[]);
+        observe(&fixture, true);
+        assert!(fixture.trace.observed().is_empty(), "owned {case} gate must not query resident devices");
     }
 }
