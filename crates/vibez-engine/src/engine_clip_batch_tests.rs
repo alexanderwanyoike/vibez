@@ -980,3 +980,146 @@ fn public_packet_preserves_last_credit_for_all_retained_terminals_and_returns_ea
     assert!(!fixture.engine.presentation_state.is_faulted());
     assert!(fixture.drain_events().is_empty());
 }
+
+#[test]
+fn staging_at_a_real_render_offset_cannot_spend_recovered_ring_slots() {
+    use crate::events::{DisposalCell, SectionTransitionedEvent};
+    use crate::playback_source::PreparedSectionPlaybackSource;
+    use super::super::graph_test_support::{graph_engine, routing_channel};
+    use vibez_core::id::SectionId;
+
+    let mut outcomes = Vec::new();
+    for receiver_first in [false, true] {
+        let track = TrackId::new();
+        let missing = TrackId::new();
+        let removed_id = ClipId::new();
+        let removed: Vec<_> = (0..32).map(|request| {
+            let prepared = *clip(track, request);
+            let mut source = *prepared.source;
+            let mut owner = source.clips.pop().unwrap();
+            owner.id = removed_id;
+            owner
+        }).collect();
+        let removed_audio: Vec<_> = removed.iter().map(|owner| Arc::downgrade(&owner.audio)).collect();
+        let launched = clip(track, 100);
+        let launched_audio = Arc::downgrade(&launched.source.clips[0].audio);
+        let (mut engine, mut commands, mut events) = graph_engine(&[
+            routing_channel(track), routing_channel(TrackId::MASTER),
+        ]);
+        commands.push(EngineCommand::SetSampleRate(8)).unwrap();
+        commands.push(EngineCommand::AddTrack(Box::new(EngineTrack::with_playback_source(
+            track, PreparedPlaybackSource::new(removed, vec![], vec![]),
+        )))).unwrap();
+        commands.push(EngineCommand::QueueClips {
+            clips: vec![launched], quantization: MusicalBoundary::Immediate,
+        }).unwrap();
+        let mut first = [0.0];
+        engine.process_block(AudioProcessBlock::new(&mut first, 1));
+        assert_eq!(first, [0.1]);
+        while events.pop().is_ok() {}
+        assert_eq!((engine.output_position, engine.performance_position, engine.rendered_callback_frames), (1, 1, 0));
+        assert!(engine.transport().is_playing());
+        assert!(!engine.presentation_state.is_faulted());
+        assert!(engine.pending_clip_batch.is_none());
+        engine.tracks_mut_for_retirement()[0].playback_source.remove_audio_clips(removed_id);
+        for position in 0..1024 { engine.event_tx.push(EngineEvent::PlaybackPosition(position)).unwrap(); }
+        let mut source_owners = Vec::new();
+        let mut source_audio = Vec::new();
+        for request in 0..2048 {
+            let prepared = *clip(missing, request);
+            source_audio.push(Arc::downgrade(&prepared.source.clips[0].audio));
+            let owner = Box::new(PreparedSectionPlaybackSource::new(
+                SectionId::new(), 1.0, false, vec![(missing, *prepared.source)],
+            ));
+            source_owners.push(std::ptr::from_ref(owner.as_ref()) as usize);
+            engine.present_event_after(EngineEvent::SectionTransitioned(SectionTransitionedEvent {
+                section_id: owner.section_id, effective_at_samples: 1,
+                retired: DisposalCell::new(owner),
+            }), 5000);
+        }
+        assert_eq!(engine.scheduled_presentation.len(), 2048);
+        assert!(engine.scheduled_presentation.iter().all(|pending| pending.due == 5001));
+        assert_eq!(crate::retirement::tests::allocations(|| engine.drain_commands()), (0, 0));
+        assert_eq!((engine.pending_retirements.len(), engine.pending_retirements.capacity()), (32, 32));
+        assert!(engine.cmd_rx.peek().is_err());
+        let packet: Vec<_> = (200..203).map(|request| clip(missing, request)).collect();
+        let mut packet_owners: Vec<_> = packet.iter().map(|owner| (owner.request_id, std::ptr::from_ref(owner.as_ref()) as usize)).collect();
+        let packet_audio: Vec<_> = packet.iter().map(|owner| Arc::downgrade(&owner.source.clips[0].audio)).collect();
+        let packet_storage = (packet.as_ptr() as usize, packet.capacity());
+        engine.queue_clips(packet, MusicalBoundary::Immediate);
+        assert_eq!(engine.pending_clip_batch.as_ref().unwrap().clips.len(), 3);
+        assert!(!engine.presentation_state.is_faulted());
+        assert_eq!(engine.presentation_state.terminals.occupied_slots(), 0);
+        let mut segment = [0.0];
+        assert_eq!(crate::retirement::tests::allocations(|| {
+            engine.process_clip_multitrack(&mut segment, 1, 1, None, None);
+        }), (0, 0));
+        assert_eq!(segment, [0.1]);
+        assert_eq!((engine.output_position, engine.performance_position, engine.rendered_callback_frames), (1, 1, 1));
+        assert_eq!(engine.tracks()[0].active_clip.unwrap().position, 2);
+        for expected in 0..2 {
+            assert!(matches!(events.pop(), Ok(EngineEvent::PlaybackPosition(actual)) if actual == expected));
+        }
+        assert_eq!(engine.event_tx.slots(), 2);
+        assert_eq!(engine.scheduled_presentation.len(), 2048);
+        assert!(!engine.presentation_state.is_faulted());
+        let failure_boundary = engine.compensation_callback_heard_start;
+        assert_eq!(failure_boundary, 0);
+        let heap = crate::retirement::tests::allocations(|| engine.continue_clip_batch(2));
+        let faulted = engine.presentation_state.is_faulted();
+        let batch = engine.pending_clip_batch.as_ref().unwrap();
+        let retained = batch.clips.len();
+        let ring_slots = engine.event_tx.slots();
+        let terminal_slots = engine.presentation_state.terminals.occupied_slots();
+        let playing = engine.transport().is_playing();
+        assert_eq!((batch.clips.as_ptr() as usize, batch.clips.capacity()), packet_storage);
+        assert!(matches!(batch.phase, BatchPhase::Staging));
+        assert_eq!((engine.pending_retirements.len(), engine.pending_retirements.capacity()), (32, 32));
+        assert_eq!(engine.scheduled_presentation.len(), 2048);
+        assert_eq!((engine.output_position, engine.performance_position, engine.rendered_callback_frames), (1, 1, 1));
+        let mut actual_sources = Vec::new();
+        for pending in &engine.scheduled_presentation {
+            let pointer = match &pending.event {
+                EngineEvent::SectionTransitioned(event) => std::ptr::from_ref(&*event.retired) as usize,
+                EngineEvent::SectionQueueCancelled { retired } => std::ptr::from_ref(retired.as_ref()) as usize,
+                other => panic!("unexpected retained source {other:?}"),
+            };
+            assert_eq!(pending.due, if faulted { 1 } else { 5001 });
+            actual_sources.push(pointer);
+        }
+        source_owners.sort_unstable();
+        actual_sources.sort_unstable();
+        assert_eq!(actual_sources, source_owners);
+        for owner in &removed_audio {
+            assert_eq!(engine.pending_retirements.iter().filter(|event| matches!(event,
+                EngineEvent::RetiredAudioClip(clip) if Arc::as_ptr(&clip.audio) == owner.as_ptr()
+            )).count(), 1);
+        }
+        let mut actual_packet: Vec<_> = batch.clips.iter().map(|owner| (owner.request_id, std::ptr::from_ref(owner.as_ref()) as usize)).collect();
+        if let Some(EngineEvent::ClipRequestRetired(owner)) = engine.presentation_state.terminals.overflow_owner() {
+            actual_packet.push((owner.request_id, std::ptr::from_ref(owner.as_ref()) as usize));
+        }
+        packet_owners.sort_unstable();
+        actual_packet.sort_unstable();
+        assert_eq!(actual_packet, packet_owners);
+        assert!(removed_audio.iter().chain(&source_audio).chain(&packet_audio).all(|owner| owner.strong_count() == 1));
+        assert_eq!(launched_audio.strong_count(), 1);
+        let delivered: Vec<_> = std::iter::from_fn(|| events.pop().ok()).collect();
+        for (index, event) in delivered.iter().take(1022).enumerate() {
+            assert!(matches!(event, EngineEvent::PlaybackPosition(actual) if *actual == index as u64 + 2));
+        }
+        if faulted {
+            assert_eq!(delivered.len(), 1024);
+            assert!(matches!(delivered[1022], EngineEvent::PerformanceCaptureStopped { effective_at_samples } if effective_at_samples == failure_boundary));
+            assert!(matches!(delivered[1023], EngineEvent::CompensationInvalid { .. }));
+        } else { assert_eq!(delivered.len(), 1022); }
+        assert_eq!(heap, (0, 0));
+        outcomes.push((faulted, retained, ring_slots, terminal_slots, playing));
+        if receiver_first { drop(events); drop(commands); drop(engine); }
+        else { drop(engine); drop(events); drop(commands); }
+        drop(delivered);
+        assert!(removed_audio.iter().chain(&source_audio).chain(&packet_audio).all(|owner| owner.strong_count() == 0));
+        assert_eq!(launched_audio.strong_count(), 0);
+    }
+    assert_eq!(outcomes, vec![(false, 3, 2, 0, true); 2]);
+}
