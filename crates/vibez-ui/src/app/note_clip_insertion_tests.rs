@@ -370,3 +370,6 @@ fn note_app_idle_stream_shutdown_consumes_each_real_protocol_stage() {
 
 #[path = "note_value_insertion_tests.rs"]
 mod note_value_tests;
+
+#[path = "automation_lane_insertion_tests.rs"]
+mod automation_lane_tests;
