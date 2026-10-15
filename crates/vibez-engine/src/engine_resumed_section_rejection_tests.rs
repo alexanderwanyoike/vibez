@@ -253,7 +253,16 @@ fn resumed_section_rejection_preserves_complete_owner_with_an_old_inline_stop() 
     assert!(!engine.transport().is_playing());
     assert!(!engine.capture_lifecycle.is_active());
     assert!(engine.presentation_state.is_faulted());
-    assert!(engine.queued_section.is_none());
+    let is_incoming = |event: &EngineEvent| matches!(event,
+        EngineEvent::SectionQueueCancelled { retired }
+            if std::ptr::from_ref(retired.as_ref()) as usize == incoming_pointer);
+    let held = engine.queued_section.as_ref().is_some_and(|queued| {
+        std::ptr::from_ref(queued.prepared.as_ref()) as usize == incoming_pointer
+    });
+    let published = engine.pending_retirements.iter().filter(|event| is_incoming(event)).count()
+        + engine.scheduled_presentation.iter().filter(|pending| is_incoming(&pending.event)).count()
+        + usize::from(engine.presentation_state.terminals.overflow_owner().is_some_and(is_incoming));
+    assert_eq!(usize::from(held) + published, 1);
     assert_eq!(engine.presentation_state.terminals.capture_stop(), Some(1));
     assert!(matches!(engine.presentation_state.terminals.overflow_owner(), Some(
         EngineEvent::SectionRecordStopped(SectionRecordStoppedEvent { section_id, effective_at_samples: 8, .. })
