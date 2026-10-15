@@ -1,8 +1,12 @@
-//! Prepares bounded stereo delay histories and processes linear feedback echoes.
+//! Admits Delay parameter edits and processes finite linear feedback echoes.
 
 use vibez_core::effect::{EffectType, ParamDescriptor};
 
 use crate::effect::AudioEffect;
+
+#[path = "delay_history.rs"]
+mod history;
+use history::DelayHistory;
 
 static DELAY_PARAMS: &[ParamDescriptor] = &[
     ParamDescriptor {
@@ -28,73 +32,23 @@ static DELAY_PARAMS: &[ParamDescriptor] = &[
     },
 ];
 
-const MAX_HISTORY_BYTES: u64 = 64 * 1024 * 1024;
-const MAX_SYNC_SECONDS: u64 = 18;
-const INTERPOLATION_GUARDS: u64 = 2;
-
 /// Stereo delay effect with feedback.
 pub struct DelayEffect {
     time_ms: f32,
     feedback: f32,
     mix: f32,
-    sample_rate: f32,
-    configuration_valid: bool,
-    buffer_l: Vec<f32>,
-    buffer_r: Vec<f32>,
-    write_pos: usize,
+    history: DelayHistory,
 }
 
 impl DelayEffect {
     pub fn new(sample_rate: f32) -> Self {
-        let histories = Self::prepare_histories(sample_rate);
-        let configuration_valid = histories.is_some();
-        let (buffer_l, buffer_r) = histories.unwrap_or_default();
+        let history = DelayHistory::new(sample_rate);
         Self {
             time_ms: 500.0,
             feedback: 0.5,
             mix: 0.3,
-            sample_rate,
-            configuration_valid,
-            buffer_l,
-            buffer_r,
-            write_pos: 0,
+            history,
         }
-    }
-
-    fn prepare_histories(sample_rate: f32) -> Option<(Vec<f32>, Vec<f32>)> {
-        let frames = Self::requested_activation_rate(sample_rate)
-            .filter(|rate| *rate >= 1000)
-            .and_then(|rate| u64::from(rate).checked_mul(MAX_SYNC_SECONDS))
-            .and_then(|frames| frames.checked_add(INTERPOLATION_GUARDS))?;
-        let bytes = frames
-            .checked_mul(2)?
-            .checked_mul(std::mem::size_of::<f32>() as u64)?;
-        if bytes > MAX_HISTORY_BYTES {
-            return None;
-        }
-        let count = usize::try_from(frames).ok()?;
-        let mut buffer_l = Vec::new();
-        buffer_l.try_reserve_exact(count).ok()?;
-        buffer_l.resize(count, 0.0);
-        let mut buffer_r = Vec::new();
-        buffer_r.try_reserve_exact(count).ok()?;
-        buffer_r.resize(count, 0.0);
-        Some((buffer_l, buffer_r))
-    }
-
-    fn requested_activation_rate(sample_rate: f32) -> Option<u32> {
-        let rate = f64::from(sample_rate);
-        if rate.is_finite() && rate.fract() == 0.0 && (0.0..=f64::from(u32::MAX)).contains(&rate) {
-            Some(rate as u32)
-        } else {
-            None
-        }
-    }
-
-    fn delay_samples(&self) -> f64 {
-        let samples = f64::from(self.time_ms) * f64::from(self.sample_rate) / 1000.0;
-        // Full-ring distance reads the prior lap before the current frame overwrites it.
-        samples.max(1.0).min(self.buffer_l.len().max(1) as f64)
     }
 
     fn finite_or_zero(sample: f32) -> f32 {
@@ -108,11 +62,11 @@ impl DelayEffect {
 
 impl AudioEffect for DelayEffect {
     fn activation_sample_rate(&self) -> Option<u32> {
-        Self::requested_activation_rate(self.sample_rate)
+        self.history.activation_sample_rate()
     }
 
     fn processing_configuration_valid(&self) -> bool {
-        self.configuration_valid
+        self.history.is_valid()
     }
 
     fn effect_type(&self) -> EffectType {
@@ -157,7 +111,7 @@ impl AudioEffect for DelayEffect {
         if channels == 0 {
             return;
         }
-        if !self.configuration_valid {
+        if !self.history.is_valid() {
             for frame in buffer.chunks_exact_mut(channels) {
                 for sample in frame.iter_mut().take(2) {
                     if !sample.is_finite() {
@@ -170,29 +124,14 @@ impl AudioEffect for DelayEffect {
 
         let ch = channels;
         let frames = buffer.len() / ch;
-        let delay = self.delay_samples();
-        let whole = delay.floor() as usize;
-        let fraction = delay.fract();
-        let buf_len = self.buffer_l.len();
-        let read = |history: &[f32], position: usize| {
-            let recent = history[position];
-            // Integer taps bypass blend arithmetic to retain the legacy sample algebra.
-            if fraction == 0.0 {
-                recent
-            } else {
-                let older = history[(position + buf_len - 1) % buf_len];
-                (f64::from(recent) * (1.0 - fraction) + f64::from(older) * fraction) as f32
-            }
-        };
+        let tap = self.history.tap(self.time_ms);
 
         for frame in 0..frames {
-            let read_pos = (self.write_pos + buf_len - whole) % buf_len;
-            let delayed_l = read(&self.buffer_l, read_pos);
-            let delayed_r = read(&self.buffer_r, read_pos);
+            let (delayed_l, delayed_r) = self.history.read(tap);
 
             // Left channel
             let dry_l = Self::finite_or_zero(buffer[frame * ch]);
-            self.buffer_l[self.write_pos] = Self::finite_or_zero(dry_l + delayed_l * self.feedback);
+            let write_l = Self::finite_or_zero(dry_l + delayed_l * self.feedback);
             buffer[frame * ch] = Self::finite_or_zero(dry_l * (1.0 - self.mix) + delayed_l * self.mix);
 
             // Missing mono input is zero, but its feedback continues while unobserved.
@@ -201,20 +140,18 @@ impl AudioEffect for DelayEffect {
             } else {
                 0.0
             };
-            self.buffer_r[self.write_pos] = Self::finite_or_zero(dry_r + delayed_r * self.feedback);
+            let write_r = Self::finite_or_zero(dry_r + delayed_r * self.feedback);
             if ch >= 2 {
                 buffer[frame * ch + 1] =
                     Self::finite_or_zero(dry_r * (1.0 - self.mix) + delayed_r * self.mix);
             }
 
-            self.write_pos = (self.write_pos + 1) % buf_len;
+            self.history.write_and_advance(write_l, write_r);
         }
     }
 
     fn reset(&mut self) {
-        self.buffer_l.fill(0.0);
-        self.buffer_r.fill(0.0);
-        self.write_pos = 0;
+        self.history.reset();
     }
 }
 
@@ -287,7 +224,7 @@ mod tests {
         let mut buf = vec![1.0; 100];
         fx.process(&mut buf, 2);
         fx.reset();
-        assert_eq!(fx.write_pos, 0);
-        assert!(fx.buffer_l.iter().all(|&s| s == 0.0));
+        assert_eq!(fx.history.write_position(), 0);
+        assert!(fx.history.left_samples().iter().all(|&s| s == 0.0));
     }
 }
