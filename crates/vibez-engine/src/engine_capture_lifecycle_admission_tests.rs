@@ -7,7 +7,7 @@ use vibez_core::effect::{EffectType, ParamDescriptor};
 use vibez_core::id::EffectId;
 use vibez_core::midi::InstrumentKind;
 
-struct Calls {
+pub(super) struct Calls {
     values: [AtomicU32; 64],
     len: AtomicUsize,
     overflow: AtomicBool,
@@ -22,8 +22,8 @@ impl Calls {
         if let Some(value) = self.values.get(index) { value.store(owner * 100 + 10 + u32::from(local), Ordering::Relaxed); }
         else { self.overflow.store(true, Ordering::Relaxed); }
     }
-    fn clear(&self) { self.len.store(0, Ordering::Relaxed); self.overflow.store(false, Ordering::Relaxed); }
-    fn observed(&self) -> Vec<u32> {
+    pub(super) fn clear(&self) { self.len.store(0, Ordering::Relaxed); self.overflow.store(false, Ordering::Relaxed); }
+    pub(super) fn observed(&self) -> Vec<u32> {
         assert!(!self.overflow.load(Ordering::Relaxed));
         self.values[..self.len.load(Ordering::Relaxed)].iter().map(|value| value.load(Ordering::Relaxed)).collect()
     }
@@ -71,20 +71,20 @@ impl vibez_instruments::Instrument for Probe {
     fn render(&mut self, buffer: &mut [f32], _: usize) { buffer.fill(0.0); }
 }
 
-struct Fixture {
-    engine: AudioEngine,
-    commands: Producer<EngineCommand>,
-    events: Consumer<EngineEvent>,
-    tracks: [TrackId; 2],
-    effect: EffectId,
+pub(super) struct Fixture {
+    pub(super) engine: AudioEngine,
+    pub(super) commands: Producer<EngineCommand>,
+    pub(super) events: Consumer<EngineEvent>,
+    pub(super) tracks: [TrackId; 2],
+    pub(super) effect: EffectId,
     controls: [Arc<Control>; 2],
-    calls: Arc<Calls>,
+    pub(super) calls: Arc<Calls>,
     audio: std::sync::Weak<DecodedAudio>,
-    owner: Option<reconfiguration::DeviceReconfiguration>,
+    pub(super) owner: Option<reconfiguration::DeviceReconfiguration>,
     effect_identity: usize,
 }
 
-fn fixture() -> Fixture {
+pub(super) fn fixture() -> Fixture {
     let tracks = [TrackId::new(), TrackId::new()]; let effect = EffectId::new();
     let controls = [Arc::new(Control::new()), Arc::new(Control::new())]; let calls = Arc::new(Calls::new());
     let mut affected = EngineTrack::new(tracks[0]); affected.pan = 0.0;
@@ -110,7 +110,7 @@ fn set(fixture: &Fixture, instrument: bool, index: usize) -> EngineCommand {
     else { EngineCommand::SetEffectParam { track_id: fixture.tracks[0], effect_id: fixture.effect, param_index: index, value: 1.0 } }
 }
 
-fn discard_setup(fixture: &mut Fixture) {
+pub(super) fn discard_setup(fixture: &mut Fixture) {
     while let Ok(event) = fixture.events.pop() {
         if let EngineEvent::DeviceReconfiguration(owner) = event {
             assert!(fixture.owner.is_none()); assert_eq!(owner.effect_id(), Some(fixture.effect));
@@ -119,7 +119,7 @@ fn discard_setup(fixture: &mut Fixture) {
     }
 }
 
-fn state(engine: &AudioEngine) -> [u64; 7] {
+pub(super) fn state(engine: &AudioEngine) -> [u64; 7] {
     [u64::from(engine.capture_active), u64::from(engine.device_failure_capture_closed),
         u64::from(engine.compensation_plan.applied_plan_is_valid()), u64::from(engine.transport.is_playing()),
         engine.transport.position(), engine.performance_position, engine.output_position]
@@ -193,7 +193,7 @@ fn exercise(fixture: &mut Fixture, case: &str, commands: &[bool], expected: Expe
         observed.order, observed.reasons, observed.times, observed.sources, observed.offset_owners, fixture.owner.is_some(), followed.order, followed.times, output.map(f32::to_bits));
 }
 
-fn teardown(fixture: Fixture) {
+pub(super) fn teardown(fixture: Fixture) {
     let controls = fixture.controls.clone(); let audio = fixture.audio.clone(); drop(fixture);
     assert!(controls.iter().all(|control| control.drops.load(Ordering::Relaxed) == 1)); assert_eq!(audio.strong_count(), 0);
 }
