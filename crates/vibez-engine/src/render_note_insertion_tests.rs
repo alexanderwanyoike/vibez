@@ -84,3 +84,6 @@ fn offline_note_channel_prepares_actual_content_and_grows_live_and_staging_at_bo
         verify_prepared_note_storage_growth(*channel.playback_source, count);
     }
 }
+
+#[path = "render_note_value_insertion_tests.rs"]
+mod note_value_tests;
