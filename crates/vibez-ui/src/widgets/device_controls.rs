@@ -1,6 +1,6 @@
 //! Native numeric fields, selectors and disclosure controls shared by device bodies.
 
-use iced::widget::{button, canvas, column, pick_list, row, text, text_input, tooltip};
+use iced::widget::{button, column, pick_list, text, text_input, tooltip};
 use iced::{Color, Element, Length, Theme};
 use vibez_core::id::TrackId;
 
@@ -9,52 +9,8 @@ use crate::message::Message;
 use crate::state::UiEffect;
 use crate::theme as th;
 use crate::widgets::{
-    device_chrome::section_label, effect_knob::EffectKnobWidget, on_blur::on_blur,
+    device_chrome::section_label, on_blur::on_blur,
 };
-
-pub fn parameter<'a>(
-    track: TrackId,
-    effect: &'a UiEffect,
-    state: &'a DeviceControlState,
-    index: usize,
-    accent: Color,
-    knob_size: Option<f32>,
-) -> Element<'a, Message> {
-    let descriptor = &effect.descriptors[index];
-    let value = effect
-        .params
-        .get(index)
-        .copied()
-        .unwrap_or(descriptor.default);
-    let field = value_field(track, effect, state, index, accent);
-    let mut content = column![section_label(descriptor.name)]
-        .spacing(3)
-        .align_x(iced::Alignment::Center);
-    if let Some(size) = knob_size {
-        let mut knob = EffectKnobWidget::new(
-            track,
-            effect.id,
-            index,
-            value,
-            descriptor.min,
-            descriptor.max,
-            descriptor.default,
-            accent,
-        );
-        if descriptor.unit == "Hz" {
-            knob.target = crate::widgets::effect_knob::KnobTarget::LogEffect(effect.id);
-        }
-        content = content.push(canvas(knob).width(size).height(size));
-    }
-    content
-        .push(
-            row![field, text(descriptor.unit).size(8).color(th::text_dim())]
-                .spacing(2)
-                .align_y(iced::Alignment::Center),
-        )
-        .width(Length::Fill)
-        .into()
-}
 
 pub fn value_field<'a>(
     track: TrackId,
