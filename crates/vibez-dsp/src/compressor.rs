@@ -1,4 +1,8 @@
 //! Feedforward compression with smooth controls, filtered detectors and real reduction diagnostics.
+//!
+//! The quadratic soft knee and the log-domain attack/release detector follow
+//! Giannoulis, Massberg and Reiss, "Digital Dynamic Range Compressor Design:
+//! A Tutorial and Analysis", JAES 60(6), 2012.
 
 use vibez_core::effect::{DynamicsMeter, EffectType, ParamDescriptor};
 use vibez_core::level::{amplitude_to_db, db_to_amplitude};
