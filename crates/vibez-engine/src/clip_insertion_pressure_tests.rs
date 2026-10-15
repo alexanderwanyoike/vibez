@@ -466,3 +466,6 @@ fn ready_clip_reply_waits_for_one_completion_credit_and_keeps_later_fifo_queued(
 
 #[path = "clip_insertion_lifecycle_tests.rs"]
 mod lifecycle_tests;
+
+#[path = "clip_insertion_storage_tests.rs"]
+mod storage_tests;
