@@ -7,12 +7,12 @@ use vibez_core::id::EffectId;
 use vibez_core::perform::SectionLaunchQuantization;
 use vibez_core::routing::{NodeStage, RoutingNode};
 
-fn local(fixture: &Fixture, value: bool) -> EngineCommand {
+pub(super) fn local(fixture: &Fixture, value: bool) -> EngineCommand {
     EngineCommand::SetEffectParam { track_id: fixture.tracks[0], effect_id: fixture.effect,
         param_index: 0, value: f32::from(u8::from(value)) }
 }
 
-fn drain(fixture: &mut Fixture) {
+pub(super) fn drain(fixture: &mut Fixture) {
     assert_eq!(crate::retirement::tests::allocations(|| fixture.engine.drain_commands()), (0, 0));
     assert!(fixture.engine.cmd_rx.peek().is_err());
 }
@@ -21,7 +21,7 @@ fn render(fixture: &mut Fixture, output: &mut [f32]) {
     assert_eq!(crate::retirement::tests::allocations(|| fixture.engine.process_block(AudioProcessBlock::new(output, 2))), (0, 0));
 }
 
-fn prepared(delay: u32) -> (Fixture, [f32; 64]) {
+pub(super) fn prepared(delay: u32) -> (Fixture, [f32; 64]) {
     let mut fixture = fixture();
     if delay != 0 {
         let effect = EffectId::new();
