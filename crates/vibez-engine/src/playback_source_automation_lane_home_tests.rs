@@ -193,7 +193,7 @@ fn queued_section_with_colliding_lane_id_keeps_arrange_growth_and_perform_owners
         arrange.assert_unchanged(&channel.playback_source);
         assert_eq!(
             channel.playback_source.automation,
-            [expected_resident.clone()]
+            std::slice::from_ref(&expected_resident)
         );
         assert_eq!(channel.playback_source.automation.as_ptr(), arrange_outer);
         assert_eq!(
@@ -214,7 +214,7 @@ fn queued_section_with_colliding_lane_id_keeps_arrange_growth_and_perform_owners
                     old_home.assert_unchanged(&retired.tracks()[0].source);
                     assert_eq!(
                         retired.tracks()[0].source.automation,
-                        [expected_old.clone()]
+                        std::slice::from_ref(&expected_old)
                     );
                     assert_eq!(
                         retired.tracks()[0].source.automation[0].points.as_ptr(),
@@ -288,7 +288,7 @@ fn queued_section_with_colliding_lane_id_keeps_arrange_growth_and_perform_owners
     let before = calls.observed();
     let next = &engine.tracks()[0].section_playback_source;
     next_home.assert_unchanged(next);
-    assert_eq!(next.automation, [expected_next.clone()]);
+    assert_eq!(next.automation, std::slice::from_ref(&expected_next));
     assert_eq!(next.automation[0].points.as_ptr(), next_points);
     request.fulfill();
     measured_callback(&mut engine, &mut []);
