@@ -134,8 +134,6 @@ fn record(
     fixture: &mut Fixture,
     case: &str,
     expected: Expected,
-    delivered: &Delivered,
-    audio: &[f32],
     overflow: Option<&Arc<[(TrackId, u32)]>>,
 ) {
     let observed_state = state(&fixture.engine);
@@ -154,9 +152,7 @@ fn record(
     assert_eq!(overflow_refs, expected.overflow_refs, "{case}");
     let full = fixture.engine.event_tx.slots() == 0;
     assert_eq!(full, expected.full, "{case}");
-    let calls = fixture.calls.observed();
-    eprintln!("capture-lifecycle-g3: case={case}; calls={calls:?}; state={observed_state:?}; scheduled={scheduled}; terminal={}; terminals={terminals}; fault={fault}; offset_refs={offset_refs}; overflow_refs={overflow_refs}; full={full}; order={:?}; times={:?}; fillers={}; audio_bits={:?}",
-        terminal.unwrap_or(u64::MAX), delivered.order, delivered.times, delivered.fillers, audio.iter().map(|sample| sample.to_bits()).collect::<Vec<_>>());
+    let _calls = fixture.calls.observed();
     fixture.calls.clear();
 }
 
@@ -194,7 +190,6 @@ fn old_local_stop_and_new_activity_survive_zero_one_two_and_remaining_ui_credits
         } else {
             "active"
         };
-        let delivered = Delivered::default();
         record(
             &mut fixture,
             &format!("{label}-accepted"),
@@ -208,8 +203,6 @@ fn old_local_stop_and_new_activity_survive_zero_one_two_and_remaining_ui_credits
                 overflow_refs: 0,
                 full: true,
             },
-            &delivered,
-            &audio,
             None,
         );
         if explicit_stop {
@@ -242,8 +235,6 @@ fn old_local_stop_and_new_activity_survive_zero_one_two_and_remaining_ui_credits
                     overflow_refs: 0,
                     full: true,
                 },
-                &delivered,
-                &[],
                 None,
             );
         }
@@ -273,8 +264,6 @@ fn old_local_stop_and_new_activity_survive_zero_one_two_and_remaining_ui_credits
                 overflow_refs: 0,
                 full: false,
             },
-            &delivered,
-            &[],
             None,
         );
         teardown(fixture);
@@ -316,7 +305,6 @@ fn repeated_fault_and_play_preserve_the_episode_rearmed_by_accepted_start() {
             .present_event_after(discovering, 521)),
         (0, 0)
     );
-    let delivered = Delivered::default();
     for stage in ["fault", "repeated-fault"] {
         if stage == "repeated-fault" {
             assert_eq!(
@@ -337,8 +325,6 @@ fn repeated_fault_and_play_preserve_the_episode_rearmed_by_accepted_start() {
                 overflow_refs: 2,
                 full: true,
             },
-            &delivered,
-            &[],
             Some(&overflow),
         );
     }
@@ -361,8 +347,6 @@ fn repeated_fault_and_play_preserve_the_episode_rearmed_by_accepted_start() {
             overflow_refs: 2,
             full: true,
         },
-        &delivered,
-        &[],
         Some(&overflow),
     );
     zero(&mut fixture);
@@ -379,8 +363,6 @@ fn repeated_fault_and_play_preserve_the_episode_rearmed_by_accepted_start() {
             overflow_refs: 2,
             full: true,
         },
-        &delivered,
-        &[],
         Some(&overflow),
     );
     let mut delivered = Delivered::default();
@@ -417,8 +399,6 @@ fn repeated_fault_and_play_preserve_the_episode_rearmed_by_accepted_start() {
             overflow_refs: 1,
             full: false,
         },
-        &delivered,
-        &[],
         Some(&overflow),
     );
     teardown(fixture);

@@ -292,8 +292,6 @@ fn transport_commands_preserve_the_episode_rearmed_by_start_at_zero_and_positive
             assert!(!fixture.engine.capture_stop_pending());
             let calls = fixture.calls.observed();
             assert!(calls.is_empty());
-            eprintln!("capture-lifecycle-g4-control: delay={delay}; case={case}; calls={calls:?}; before={before:?}; after={after:?}; perform={perform}; order={:?}; times={:?}; audio_bits={:?}",
-                observed.order, observed.times, audio.map(f32::to_bits));
             teardown(fixture);
         }
     }
@@ -426,8 +424,6 @@ fn local_refailure_closes_capture_without_changing_section_end_boundaries_at_rea
                 assert_eq!(observed.owners, owners);
                 let calls = fixture.calls.observed();
                 assert!(!calls.is_empty());
-                eprintln!("capture-lifecycle-g4-section: delay={delay}; queued={queued}; stage={stage}; calls={calls:?}; after={after:?}; pending={pending}; order={:?}; times={:?}; owners={:?}; prime_bits={:?}; audio_bits={:?}",
-                    observed.order, observed.times, observed.owners, if stage == "end" { prime.map(f32::to_bits).to_vec() } else { vec![] }, audio[..frames * 2].iter().map(|sample| sample.to_bits()).collect::<Vec<_>>());
                 fixture.calls.clear();
             }
             teardown(fixture);
