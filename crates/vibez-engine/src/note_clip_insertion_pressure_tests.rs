@@ -77,9 +77,13 @@ struct Delta {
 }
 
 fn delta(track: TrackId) -> Delta {
+    delta_with_capacity(track, 1)
+}
+
+fn delta_with_capacity(track: TrackId, capacity: usize) -> Delta {
     let clip = ClipId::new();
-    let insertion = PreparedNoteClipInsertion::new(
-        clip, 10.0, 2.0, 0.75, true, 0.25, 1.5, GrooveGrid::Eighth,
+    let insertion = PreparedNoteClipInsertion::with_capacity(
+        clip, 10.0, 2.0, 0.75, true, 0.25, 1.5, GrooveGrid::Eighth, capacity,
     );
     let id = insertion.id();
     let identity = Arc::downgrade(&id.0);
