@@ -29,3 +29,4 @@ pub mod vu_meter;
 pub mod waveform;
 
 pub mod device_controls;
+pub mod native_sidechain;

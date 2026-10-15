@@ -287,3 +287,5 @@ pub mod test_support {
         }
     }
 }
+
+pub mod native_sidechain;
