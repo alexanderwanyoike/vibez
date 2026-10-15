@@ -301,7 +301,7 @@ impl DevicesState {
                 if let Some(track) = find_track_mut(tracks, master, buses, track_id) {
                     track.effects.push(UiEffect {
                         reconfiguration_failed: false,
-                        latency_samples: Some(0),
+                        latency_samples: Some(fx.latency_samples()),
                         inactive_sidechains: Default::default(),
                         sidechains: Default::default(),
                         external_inputs: fx.external_inputs().to_vec(),
@@ -309,14 +309,14 @@ impl DevicesState {
                         id: effect_id,
                         effect_type,
                         bypass: false,
-                        params,
+                        params: params.clone(),
                         descriptors,
                         plugin_name: None,
                         has_plugin_gui: false,
                         plugin_ref: None,
                     });
                 }
-                engine.insert_built_in_effect(track_id, effect_id, effect_type);
+                engine.insert_built_in_effect_with_params(track_id, effect_id, effect_type, &params);
                 self.context_menu = None;
                 action.status = Some(format!("Added {} effect", effect_type.name()));
             }

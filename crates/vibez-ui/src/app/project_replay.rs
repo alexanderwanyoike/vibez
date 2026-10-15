@@ -406,15 +406,12 @@ impl App {
             if effect.plugin_ref.is_some() {
                 continue;
             }
-            self.insert_built_in_effect(track.id, effect.id, effect.effect_type);
-            for (idx, value) in effect.params.iter().copied().enumerate() {
-                self.send_command(EngineCommand::SetEffectParam {
-                    track_id: track.id,
-                    effect_id: effect.id,
-                    param_index: idx,
-                    value,
-                });
-            }
+            self.insert_built_in_effect_with_params(
+                track.id,
+                effect.id,
+                effect.effect_type,
+                &effect.params,
+            );
             self.send_command(EngineCommand::SetEffectBypass {
                 track_id: track.id,
                 effect_id: effect.id,
