@@ -202,6 +202,49 @@ pub fn run() -> iced::Result {
     .run_with(|| (Gallery::new(), iced::Task::none()))
 }
 
+/// A device card as the device section would hold it, `section` wide and
+/// tall, under a caption naming the case.
+fn framed_card<'a>(
+    label: &'static str,
+    card_width: f32,
+    section: (f32, f32),
+    track: TrackId,
+    effect: &'a UiEffect,
+    accent: iced::Color,
+    body: Element<'a, Message>,
+) -> Element<'a, Message> {
+    let card = view_effect_slot(
+        track,
+        effect,
+        accent,
+        Some(crate::widgets::effect_slot::DeviceBody {
+            content: body,
+            width: card_width,
+            padding: iced::Padding::ZERO,
+        }),
+        None,
+        48_000,
+    );
+    column![
+        text(label).size(11).color(th::text_dim()),
+        container(row![card].height(Length::Fill))
+            .padding(8)
+            .width(section.0)
+            .height(section.1)
+            .style(|_theme: &Theme| container::Style {
+                background: Some(th::bg_dark().into()),
+                border: iced::Border {
+                    color: th::border(),
+                    width: 1.0,
+                    radius: 0.0.into(),
+                },
+                ..Default::default()
+            }),
+    ]
+    .spacing(4)
+    .into()
+}
+
 /// Native Gain at each width tier and section height it adapts to, with
 /// meter readings and a level history standing in for live audio.
 struct GainGallery {
@@ -282,36 +325,15 @@ impl GainGallery {
                 size,
             )
         });
-        let card = view_effect_slot(
+        framed_card(
+            label,
+            card_width,
+            section,
             track,
             effect,
             accent,
-            Some(crate::widgets::effect_slot::DeviceBody {
-                content: body.into(),
-                width: card_width,
-                padding: iced::Padding::ZERO,
-            }),
-            None,
-            48_000,
-        );
-        column![
-            text(label).size(11).color(th::text_dim()),
-            container(row![card].height(Length::Fill))
-                .padding(8)
-                .width(section.0)
-                .height(section.1)
-                .style(|_theme: &Theme| container::Style {
-                    background: Some(th::bg_dark().into()),
-                    border: iced::Border {
-                        color: th::border(),
-                        width: 1.0,
-                        radius: 0.0.into(),
-                    },
-                    ..Default::default()
-                }),
-        ]
-        .spacing(4)
-        .into()
+            body.into(),
+        )
     }
 
     fn view(&self) -> Element<'_, Message> {
@@ -478,36 +500,15 @@ impl EqGallery {
                 size,
             )
         });
-        let card = view_effect_slot(
+        framed_card(
+            label,
+            card_width,
+            section,
             track,
             effect,
             accent,
-            Some(crate::widgets::effect_slot::DeviceBody {
-                content: body.into(),
-                width: card_width,
-                padding: iced::Padding::ZERO,
-            }),
-            None,
-            48_000,
-        );
-        column![
-            text(label).size(11).color(th::text_dim()),
-            container(row![card].height(Length::Fill))
-                .padding(8)
-                .width(section.0)
-                .height(section.1)
-                .style(|_theme: &Theme| container::Style {
-                    background: Some(th::bg_dark().into()),
-                    border: iced::Border {
-                        color: th::border(),
-                        width: 1.0,
-                        radius: 0.0.into(),
-                    },
-                    ..Default::default()
-                }),
-        ]
-        .spacing(4)
-        .into()
+            body.into(),
+        )
     }
 
     fn view(&self) -> Element<'_, Message> {
