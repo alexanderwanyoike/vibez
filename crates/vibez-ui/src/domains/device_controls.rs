@@ -175,4 +175,23 @@ mod tests {
             assert!((restored / frequency - 1.0).abs() < 1e-5);
         }
     }
+    #[test]
+    fn domain_entry_policy_converts_display_units_without_changing_native_values() {
+        fn percent(_: usize, text: &str, _: &ParamDescriptor) -> Option<f32> {
+            Some(text.trim().trim_end_matches('%').parse::<f32>().ok()? / 100.0)
+        }
+        let (track, effect) = (TrackId::new(), EffectId::new());
+        let descriptor = ParamDescriptor { name: "Feedback", min: 0.0, max: 0.95, default: 0.5, unit: "" };
+        let descriptors = [descriptor];
+        let mut state = DeviceControlState::default();
+        for (text, expected) in [("35%", Some((0, 0.35))), ("50%", None), ("96%", None), ("NaN", None)] {
+            state.update(DeviceControlMsg::Input(track, effect, 0, text.into()), &descriptors, &[0.5]);
+            assert_eq!(state.update(DeviceControlMsg::SubmitUsing(track, effect, 0, percent),
+                &descriptors, &[0.5]), expected);
+            assert_eq!(state.errors.contains(&0), matches!(text, "96%" | "NaN"));
+        }
+        state.update(DeviceControlMsg::Input(track, effect, 0, "0.35".into()), &descriptors, &[0.5]);
+        assert_eq!(state.update(DeviceControlMsg::Submit(track, effect, 0), &descriptors, &[0.5]), Some((0, 0.35)));
+    }
+
 }
