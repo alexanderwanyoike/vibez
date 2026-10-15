@@ -979,5 +979,4 @@ fn public_packet_preserves_last_credit_for_all_retained_terminals_and_returns_ea
     assert!(fixture.engine.scheduled_presentation.is_empty());
     assert!(!fixture.engine.presentation_state.is_faulted());
     assert!(fixture.drain_events().is_empty());
-    eprintln!("presentation-packet-credits: reserved=4; blocked_credits=0..=5; owners=2100; target_timestamp={expected_timestamp}; target_returns={transitions}; overflow_returns={overflow_returns}");
 }
