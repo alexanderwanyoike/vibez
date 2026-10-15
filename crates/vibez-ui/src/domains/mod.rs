@@ -14,6 +14,7 @@ pub mod audio_settings;
 pub mod automation;
 pub mod browser;
 pub mod compensation;
+pub mod device_controls;
 pub mod device_latency;
 pub mod device_presets;
 pub mod devices;
