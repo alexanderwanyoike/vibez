@@ -358,3 +358,6 @@ fn pending_ready_or_abandoned_lane_uses_one_current_credit_and_keeps_stop_waitin
         assert_eq!(delta.identity.strong_count(), 1);
     }
 }
+
+#[path = "automation_lane_insertion_lifecycle_tests.rs"]
+mod lifecycle_tests;
