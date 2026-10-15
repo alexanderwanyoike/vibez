@@ -116,6 +116,9 @@ impl AudioEffect for DelayEffect {
     }
 
     fn set_param(&mut self, index: usize, value: f32) -> bool {
+        if !value.is_finite() {
+            return false;
+        }
         match index {
             0 => {
                 self.time_ms = value.clamp(1.0, 2000.0);
