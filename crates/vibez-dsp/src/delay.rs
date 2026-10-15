@@ -12,6 +12,9 @@ mod time;
 mod ramp;
 #[path = "delay_filter.rs"]
 mod filter;
+#[path = "delay_duck.rs"]
+mod duck;
+use duck::Duck;
 use filter::FeedbackFilters;
 use history::DelayHistory;
 use ramp::ScalarRamp;
@@ -169,6 +172,7 @@ pub struct DelayEffect {
     feedback: ScalarRamp,
     routing: ScalarRamp,
     filters: FeedbackFilters,
+    duck: Duck,
 }
 
 impl DelayEffect {
@@ -180,6 +184,7 @@ impl DelayEffect {
         } else {
             FeedbackFilters::default()
         };
+        let duck = if history.is_valid() { Duck::new(sample_rate) } else { Duck::default() };
         Self {
             targets: std::array::from_fn(|index| DELAY_PARAMS[index].default),
             history,
@@ -188,6 +193,7 @@ impl DelayEffect {
             feedback: ScalarRamp::new(DELAY_PARAMS[param::FEEDBACK].default),
             routing: ScalarRamp::new(DELAY_PARAMS[param::ROUTING].default),
             filters,
+            duck,
         }
     }
 
@@ -233,6 +239,8 @@ impl DelayEffect {
             self.mix.edit(target, automated, (self.history.sample_rate() as usize).div_ceil(100));
         } else if index == param::FEEDBACK {
             self.feedback.edit(target, automated, (self.history.sample_rate() as usize).div_ceil(100));
+        } else if index == param::DUCK {
+            self.duck.edit(target, automated, (self.history.sample_rate() as usize).div_ceil(100));
         } else if index == param::ROUTING {
             self.routing.edit(target, automated, (self.history.sample_rate() as usize).div_ceil(50));
         }
@@ -331,21 +339,20 @@ impl AudioEffect for DelayEffect {
             };
             let [filtered_l, filtered_r] = self.filters.process([routed_l, routed_r]);
 
-            // Left channel
             let dry_l = Self::finite_or_zero(buffer[frame * ch]);
-            let write_l = Self::finite_or_zero(dry_l + filtered_l * feedback);
-            buffer[frame * ch] = Self::finite_or_zero(dry_l * (1.0 - mix) + delayed_l * mix);
-
             // Missing mono input is zero, but its feedback continues while unobserved.
             let dry_r = if ch >= 2 {
                 Self::finite_or_zero(buffer[frame * ch + 1])
             } else {
                 0.0
             };
+            let [wet_l, wet_r] = self.duck.process([dry_l, dry_r], [delayed_l, delayed_r]);
+            let write_l = Self::finite_or_zero(dry_l + filtered_l * feedback);
             let write_r = Self::finite_or_zero(dry_r + filtered_r * feedback);
+            buffer[frame * ch] = Self::finite_or_zero(dry_l * (1.0 - mix) + wet_l * mix);
             if ch >= 2 {
                 buffer[frame * ch + 1] =
-                    Self::finite_or_zero(dry_r * (1.0 - mix) + delayed_r * mix);
+                    Self::finite_or_zero(dry_r * (1.0 - mix) + wet_r * mix);
             }
 
             self.history.write_and_advance(write_l, write_r);
@@ -359,6 +366,7 @@ impl AudioEffect for DelayEffect {
         self.feedback.reset(self.targets[param::FEEDBACK]);
         self.routing.reset(self.targets[param::ROUTING]);
         self.filters.reset(self.targets[param::FEEDBACK_HP_ENABLED], self.targets[param::FEEDBACK_LP_ENABLED]);
+        self.duck.reset(self.targets[param::DUCK]);
     }
 }
 
