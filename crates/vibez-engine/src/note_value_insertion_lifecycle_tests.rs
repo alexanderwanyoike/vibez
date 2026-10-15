@@ -261,7 +261,13 @@ fn adequate_eager_and_missing_note_values_return_unused_endpoints_and_zero_or_no
         assert_eq!(received.completed.len(), 1);
         let returned = &received.completed[0];
         assert_eq!(returned.id(), delta.id);
-        assert_eq!((returned.track_id, returned.target), (track_id, crate::clip_insertion::ClipInsertionTarget::Clip(clip_id)));
+        assert_eq!(
+            (returned.track_id, returned.target),
+            (
+                track_id,
+                crate::clip_insertion::ClipInsertionTarget::Clip(clip_id)
+            )
+        );
         assert_eq!(std::ptr::from_ref(returned.owner.as_ref()), delta.control);
         assert_eq!(
             std::ptr::from_ref(returned.owner.receiver.buffer()),

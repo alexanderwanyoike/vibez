@@ -31,7 +31,10 @@ fn replacing_and_removing_lanes_retains_point_storage_without_callback_destructi
         let operation = insertion.id();
         commands
             .push(if replace {
-                EngineCommand::SetAutomationLane { track_id: id, insertion }
+                EngineCommand::SetAutomationLane {
+                    track_id: id,
+                    insertion,
+                }
             } else {
                 EngineCommand::RemoveAutomationLane {
                     track_id: id,
@@ -55,8 +58,14 @@ fn replacing_and_removing_lanes_retains_point_storage_without_callback_destructi
             };
             assert_eq!(completed.id(), operation);
             assert_eq!(completed.track_id, id);
-            assert_eq!(completed.target, crate::clip_insertion::ClipInsertionTarget::AutomationLane(lane_id));
-            assert_eq!(completed.outcome, crate::clip_insertion::ClipInsertionOutcome::Applied);
+            assert_eq!(
+                completed.target,
+                crate::clip_insertion::ClipInsertionTarget::AutomationLane(lane_id)
+            );
+            assert_eq!(
+                completed.outcome,
+                crate::clip_insertion::ClipInsertionOutcome::Applied
+            );
             drop(completed);
         }
         let returned = events.pop().unwrap();

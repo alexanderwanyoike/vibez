@@ -481,9 +481,10 @@ impl AudioEngine {
                 EngineCommand::SetTrackGain(id, gain) => {
                     self.set_track_gain(id, gain);
                 }
-                EngineCommand::SetAutomationLane { track_id, insertion } => {
-                    self.command_set_automation_lane(track_id, insertion)
-                }
+                EngineCommand::SetAutomationLane {
+                    track_id,
+                    insertion,
+                } => self.command_set_automation_lane(track_id, insertion),
                 EngineCommand::RemoveAutomationLane { track_id, lane_id } => {
                     self.remove_automation_lane(track_id, lane_id)
                 }

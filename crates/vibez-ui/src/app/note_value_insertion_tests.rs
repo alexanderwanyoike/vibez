@@ -55,7 +55,10 @@ fn pending_inner() -> InnerPending {
     let operation = request.id.clone();
     assert_eq!(
         (request.track_id, request.target),
-        (outer.track, vibez_engine::clip_insertion::ClipInsertionTarget::Clip(outer.resident))
+        (
+            outer.track,
+            vibez_engine::clip_insertion::ClipInsertionTarget::Clip(outer.resident)
+        )
     );
     assert_eq!(
         outer.engine.tracks()[0].playback_source.note_clips[0]

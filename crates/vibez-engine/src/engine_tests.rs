@@ -2659,7 +2659,10 @@ fn remove_bus_drops_its_send_automation() {
         curve: 0.0,
     });
     cmd_tx
-        .push(EngineCommand::SetAutomationLane { track_id, insertion: crate::clip_insertion::PreparedAutomationLaneInsertion::new(lane) })
+        .push(EngineCommand::SetAutomationLane {
+            track_id,
+            insertion: crate::clip_insertion::PreparedAutomationLaneInsertion::new(lane),
+        })
         .unwrap();
     cmd_tx.push(EngineCommand::RemoveBus(bus_id)).unwrap();
 

@@ -10,13 +10,23 @@ use vibez_core::automation::{AutomationPoint, AutomationTarget};
 fn lane(target: AutomationTarget, value: f32) -> AutomationLane {
     let mut lane = AutomationLane::new(target);
     lane.points = vec![
-        AutomationPoint { beat: 0.0, value, curve: -0.5 },
-        AutomationPoint { beat: 2.25, value, curve: 0.75 },
+        AutomationPoint {
+            beat: 0.0,
+            value,
+            curve: -0.5,
+        },
+        AutomationPoint {
+            beat: 2.25,
+            value,
+            curve: 0.75,
+        },
     ];
     lane
 }
 
-fn setup(lanes: Vec<AutomationLane>) -> (
+fn setup(
+    lanes: Vec<AutomationLane>,
+) -> (
     AudioEngine,
     Producer<EngineCommand>,
     Consumer<EngineEvent>,
@@ -25,27 +35,44 @@ fn setup(lanes: Vec<AutomationLane>) -> (
     let track = TrackId::new();
     let source = PreparedPlaybackSource::new(Vec::new(), Vec::new(), lanes);
     let (mut engine, mut commands, mut events) = AudioEngine::new();
-    commands.push(EngineCommand::AddTrack(Box::new(
-        EngineTrack::with_playback_source(track, source),
-    ))).unwrap();
+    commands
+        .push(EngineCommand::AddTrack(Box::new(
+            EngineTrack::with_playback_source(track, source),
+        )))
+        .unwrap();
     measured(&mut engine);
     while events.pop().is_ok() {}
     (engine, commands, events, track)
 }
 
 fn measured(engine: &mut AudioEngine) {
-    assert_eq!(crate::retirement::tests::allocations(|| {
-        engine.process_block(AudioProcessBlock::new(&mut [], 2));
-    }), (0, 0));
+    assert_eq!(
+        crate::retirement::tests::allocations(|| {
+            engine.process_block(AudioProcessBlock::new(&mut [], 2));
+        }),
+        (0, 0)
+    );
 }
 
 fn assert_stopped_zero_frame_telemetry(events: &mut Consumer<EngineEvent>) {
-    assert!(matches!(events.pop().unwrap(), EngineEvent::PlaybackPosition(0)));
-    let EngineEvent::Metering { peak_l, peak_r, rms_l, rms_r } = events.pop().unwrap() else {
+    assert!(matches!(
+        events.pop().unwrap(),
+        EngineEvent::PlaybackPosition(0)
+    ));
+    let EngineEvent::Metering {
+        peak_l,
+        peak_r,
+        rms_l,
+        rms_r,
+    } = events.pop().unwrap()
+    else {
         panic!("the stopped zero-frame callback must publish silent master meters");
     };
     assert_eq!((peak_l, peak_r, rms_l, rms_r), (0.0, 0.0, 0.0, 0.0));
-    assert!(events.is_empty(), "no further owner or other event may remain");
+    assert!(
+        events.is_empty(),
+        "no further owner or other event may remain"
+    );
 }
 
 #[test]
@@ -63,9 +90,17 @@ fn an_eager_append_uses_actual_spare_lane_capacity_without_a_storage_request() {
     let insertion = PreparedAutomationLaneInsertion::with_capacity(incoming, 0);
     let operation = insertion.id();
     let control = std::ptr::from_ref(insertion.0.as_ref());
-    commands.push(EngineCommand::SetAutomationLane { track_id: track, insertion }).unwrap();
+    commands
+        .push(EngineCommand::SetAutomationLane {
+            track_id: track,
+            insertion,
+        })
+        .unwrap();
     measured(&mut engine);
-    assert_eq!(commands.slots(), vibez_core::constants::RING_BUFFER_CAPACITY);
+    assert_eq!(
+        commands.slots(),
+        vibez_core::constants::RING_BUFFER_CAPACITY
+    );
     let current = &engine.tracks()[0].playback_source.automation;
     assert_eq!(current, &expected);
     assert_eq!(current.as_ptr(), outer);
@@ -76,7 +111,10 @@ fn an_eager_append_uses_actual_spare_lane_capacity_without_a_storage_request() {
         panic!("spare lane storage completes without a request");
     };
     assert_eq!(completed.id(), operation);
-    assert_eq!((completed.track_id, completed.target), (track, ClipInsertionTarget::AutomationLane(expected[1].id)));
+    assert_eq!(
+        (completed.track_id, completed.target),
+        (track, ClipInsertionTarget::AutomationLane(expected[1].id))
+    );
     assert_eq!(completed.outcome, ClipInsertionOutcome::Applied);
     assert_eq!(std::ptr::from_ref(completed.owner.as_ref()), control);
     assert!(completed.owner.clip.is_none());
@@ -117,14 +155,26 @@ fn full_capacity_replacement_returns_lane_before_control_and_preserves_full_ring
         let retained_capacity = engine.pending_retirements.capacity();
         let mut fillers = 0;
         if full {
-            while engine.event_tx.push(EngineEvent::PlaybackPosition(123)).is_ok() {
+            while engine
+                .event_tx
+                .push(EngineEvent::PlaybackPosition(123))
+                .is_ok()
+            {
                 fillers += 1;
             }
             assert_eq!(fillers, vibez_core::constants::RING_BUFFER_CAPACITY);
         }
-        commands.push(EngineCommand::SetAutomationLane { track_id: track, insertion }).unwrap();
+        commands
+            .push(EngineCommand::SetAutomationLane {
+                track_id: track,
+                insertion,
+            })
+            .unwrap();
         measured(&mut engine);
-        assert_eq!(commands.slots(), vibez_core::constants::RING_BUFFER_CAPACITY);
+        assert_eq!(
+            commands.slots(),
+            vibez_core::constants::RING_BUFFER_CAPACITY
+        );
         let current = &engine.tracks()[0].playback_source.automation;
         assert_eq!(current, &[expected_incoming, expected_survivor]);
         assert_eq!(current.as_ptr(), outer);
@@ -135,10 +185,17 @@ fn full_capacity_replacement_returns_lane_before_control_and_preserves_full_ring
         assert_eq!(engine.pending_retirements.capacity(), retained_capacity);
         assert_eq!(engine.pending_retirements.len(), usize::from(full) * 2);
         if full {
-            assert!(matches!(&engine.pending_retirements[0], EngineEvent::RetiredAutomationLane(value) if value.points.as_ptr() == old_points));
-            assert!(matches!(&engine.pending_retirements[1], EngineEvent::ClipInsertionCompleted(value) if value.id() == operation));
+            assert!(
+                matches!(&engine.pending_retirements[0], EngineEvent::RetiredAutomationLane(value) if value.points.as_ptr() == old_points)
+            );
+            assert!(
+                matches!(&engine.pending_retirements[1], EngineEvent::ClipInsertionCompleted(value) if value.id() == operation)
+            );
             for _ in 0..fillers {
-                assert!(matches!(events.pop().unwrap(), EngineEvent::PlaybackPosition(123)));
+                assert!(matches!(
+                    events.pop().unwrap(),
+                    EngineEvent::PlaybackPosition(123)
+                ));
             }
             assert!(events.is_empty());
             measured(&mut engine);
@@ -146,21 +203,37 @@ fn full_capacity_replacement_returns_lane_before_control_and_preserves_full_ring
         let first = events.pop().unwrap();
         let second = events.pop().unwrap();
         let (returned, completed) = match (full, first, second) {
-            (false, EngineEvent::RetiredAutomationLane(lane), EngineEvent::ClipInsertionCompleted(control)) => (lane, control),
-            (true, EngineEvent::ClipInsertionCompleted(control), EngineEvent::RetiredAutomationLane(lane)) => (lane, control),
-            (_, first, second) => panic!("actual lane/control publication order changed: {first:?}, {second:?}"),
+            (
+                false,
+                EngineEvent::RetiredAutomationLane(lane),
+                EngineEvent::ClipInsertionCompleted(control),
+            ) => (lane, control),
+            (
+                true,
+                EngineEvent::ClipInsertionCompleted(control),
+                EngineEvent::RetiredAutomationLane(lane),
+            ) => (lane, control),
+            (_, first, second) => {
+                panic!("actual lane/control publication order changed: {first:?}, {second:?}")
+            }
         };
         assert_eq!(returned, expected_old);
         assert_eq!(returned.points.as_ptr(), old_points);
         assert_eq!(completed.id(), operation);
-        assert_eq!(completed.target, ClipInsertionTarget::AutomationLane(returned.id));
+        assert_eq!(
+            completed.target,
+            ClipInsertionTarget::AutomationLane(returned.id)
+        );
         assert_eq!(completed.outcome, ClipInsertionOutcome::Applied);
         assert_eq!(std::ptr::from_ref(completed.owner.as_ref()), control);
         assert!(completed.owner.clip.is_none());
         assert!(completed.owner.reply.is_none());
         assert!(completed.owner.sender.is_some());
         drop(completed);
-        assert_eq!(crate::retirement::tests::allocations(|| drop(returned)), (0, 1));
+        assert_eq!(
+            crate::retirement::tests::allocations(|| drop(returned)),
+            (0, 1)
+        );
         assert_stopped_zero_frame_telemetry(&mut events);
         assert!(engine.pending_retirements.is_empty());
         assert_eq!(engine.transport().position(), 0);
@@ -185,10 +258,18 @@ fn a_missing_channel_returns_original_points_and_the_complete_unused_control() {
     };
     let eager = storage.as_ptr();
     let capacity = storage.capacity();
-    commands.push(EngineCommand::SetAutomationLane { track_id: track, insertion }).unwrap();
+    commands
+        .push(EngineCommand::SetAutomationLane {
+            track_id: track,
+            insertion,
+        })
+        .unwrap();
     measured(&mut engine);
     assert!(engine.tracks().is_empty());
-    assert_eq!(commands.slots(), vibez_core::constants::RING_BUFFER_CAPACITY);
+    assert_eq!(
+        commands.slots(),
+        vibez_core::constants::RING_BUFFER_CAPACITY
+    );
     let EngineEvent::RetiredAutomationLane(returned) = events.pop().unwrap() else {
         panic!("missing channel must return its lane at the original emission position");
     };
@@ -198,7 +279,10 @@ fn a_missing_channel_returns_original_points_and_the_complete_unused_control() {
         panic!("missing lane target must also return its entire unused control");
     };
     assert_eq!(completed.id(), operation);
-    assert_eq!((completed.track_id, completed.target), (track, ClipInsertionTarget::AutomationLane(returned.id)));
+    assert_eq!(
+        (completed.track_id, completed.target),
+        (track, ClipInsertionTarget::AutomationLane(returned.id))
+    );
     assert_eq!(completed.outcome, ClipInsertionOutcome::MissingChannel);
     assert_eq!(std::ptr::from_ref(completed.owner.as_ref()), control);
     assert_eq!(std::ptr::from_ref(completed.owner.receiver.buffer()), ring);
@@ -216,7 +300,10 @@ fn a_missing_channel_returns_original_points_and_the_complete_unused_control() {
     assert_eq!(identity.strong_count(), 1);
     drop(completed);
     assert_eq!(identity.strong_count(), 0);
-    assert_eq!(crate::retirement::tests::allocations(|| drop(returned)), (0, 1));
+    assert_eq!(
+        crate::retirement::tests::allocations(|| drop(returned)),
+        (0, 1)
+    );
     assert_stopped_zero_frame_telemetry(&mut events);
     assert_eq!(engine.transport().position(), 0);
     assert_eq!(engine.transport().audio_length(), None);

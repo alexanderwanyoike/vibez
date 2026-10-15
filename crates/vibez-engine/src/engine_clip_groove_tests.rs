@@ -110,7 +110,10 @@ fn render_events(
             curve: 0.0,
         });
         commands
-            .push(EngineCommand::SetAutomationLane { track_id, insertion: crate::clip_insertion::PreparedAutomationLaneInsertion::new(lane) })
+            .push(EngineCommand::SetAutomationLane {
+                track_id,
+                insertion: crate::clip_insertion::PreparedAutomationLaneInsertion::new(lane),
+            })
             .unwrap();
     }
     commands

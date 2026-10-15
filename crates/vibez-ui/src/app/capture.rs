@@ -346,7 +346,9 @@ fn apply_capture_to_arrangement(
         for lane in &destination.automation {
             commands.push(EngineCommand::SetAutomationLane {
                 track_id,
-                insertion: vibez_engine::clip_insertion::PreparedAutomationLaneInsertion::new(lane.clone()),
+                insertion: vibez_engine::clip_insertion::PreparedAutomationLaneInsertion::new(
+                    lane.clone(),
+                ),
             });
         }
         if let Some(muted) = pre_capture_mutes.get(&track_id) {
@@ -933,7 +935,11 @@ mod tests {
                 match event {
                     vibez_engine::events::EngineEvent::ClipInsertionStorageRequested(request) => {
                         assert!(expected_targets.iter().any(|&(track, clip, _)| {
-                            (request.track_id, request.target) == (track, vibez_engine::clip_insertion::ClipInsertionTarget::Clip(clip))
+                            (request.track_id, request.target)
+                                == (
+                                    track,
+                                    vibez_engine::clip_insertion::ClipInsertionTarget::Clip(clip),
+                                )
                         }));
                         assert!(!requested.contains(&request.id));
                         requested.push(request.id.clone());
@@ -949,7 +955,13 @@ mod tests {
                         } else {
                             expected_targets[1]
                         };
-                        assert_eq!((owner.track_id, owner.target), (target.0, vibez_engine::clip_insertion::ClipInsertionTarget::Clip(target.1)));
+                        assert_eq!(
+                            (owner.track_id, owner.target),
+                            (
+                                target.0,
+                                vibez_engine::clip_insertion::ClipInsertionTarget::Clip(target.1)
+                            )
+                        );
                         let id = owner.id();
                         assert!(!completed.contains(&id));
                         completed.push(id);
