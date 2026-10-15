@@ -145,6 +145,7 @@ impl std::fmt::Debug for EngineNoteClip {
 pub(crate) struct NoteInsertionStorage {
     notes: Vec<MidiNote>,
     clamps: Vec<Option<f64>>,
+    sort_indices: Vec<usize>,
 }
 
 impl NoteInsertionStorage {
@@ -152,11 +153,13 @@ impl NoteInsertionStorage {
         Self {
             notes: Vec::with_capacity(capacity),
             clamps: Vec::with_capacity(capacity),
+            sort_indices: Vec::with_capacity(capacity),
         }
     }
 
     pub(crate) fn install_if_needed(&mut self, clip: &mut EngineNoteClip) -> bool {
         assert_eq!(clip.notes.len(), clip.next_same_pitch_start_beats.len());
+        assert_eq!(clip.notes.len(), clip.note_sort_indices.len());
         let required = clip
             .notes
             .len()
@@ -164,19 +167,25 @@ impl NoteInsertionStorage {
             .expect("note length overflow");
         if clip.notes.capacity() >= required
             && clip.next_same_pitch_start_beats.capacity() >= required
+            && clip.note_sort_indices.capacity() >= required
         {
             return true;
         }
-        if self.notes.capacity() < required || self.clamps.capacity() < required {
+        if self.notes.capacity() < required
+            || self.clamps.capacity() < required
+            || self.sort_indices.capacity() < required
+        {
             return false;
         }
         // Clamp changes affect sounding notes, so no cache mutation precedes
-        // complete capacity admission for both arrays and the original delta.
-        assert!(self.notes.is_empty() && self.clamps.is_empty());
+        // complete capacity admission for all three arrays and the original delta.
+        assert!(self.notes.is_empty() && self.clamps.is_empty() && self.sort_indices.is_empty());
         self.notes.append(&mut clip.notes);
         self.clamps.append(&mut clip.next_same_pitch_start_beats);
+        self.sort_indices.append(&mut clip.note_sort_indices);
         std::mem::swap(&mut self.notes, &mut clip.notes);
         std::mem::swap(&mut self.clamps, &mut clip.next_same_pitch_start_beats);
+        std::mem::swap(&mut self.sort_indices, &mut clip.note_sort_indices);
         true
     }
 }
