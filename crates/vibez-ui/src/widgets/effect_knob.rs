@@ -33,6 +33,7 @@ const DOUBLE_CLICK_MS: u64 = 300;
 pub enum KnobTarget {
     Effect(EffectId),
     GainDb(EffectId),
+    LogEffect(EffectId),
     Instrument,
     DrumPad {
         pad_index: usize,
@@ -173,7 +174,9 @@ impl EffectKnobWidget {
 
     fn immediate_value_message(&self, value: f32) -> Message {
         match self.target {
-            KnobTarget::Effect(effect_id) | KnobTarget::GainDb(effect_id) => {
+            KnobTarget::Effect(effect_id)
+            | KnobTarget::GainDb(effect_id)
+            | KnobTarget::LogEffect(effect_id) => {
                 Message::set_effect_param(self.track_id, effect_id, self.param_index, value)
             }
             KnobTarget::Instrument => {
@@ -253,6 +256,9 @@ impl EffectKnobWidget {
         if matches!(self.target, KnobTarget::GainDb(_)) {
             return crate::domains::gain::knob_position(self.value);
         }
+        if matches!(self.target, KnobTarget::LogEffect(_)) {
+            return crate::domains::device_controls::log_position(self.value, self.min, self.max);
+        }
         let range = self.max - self.min;
         if range <= 0.0 {
             0.0
@@ -265,6 +271,9 @@ impl EffectKnobWidget {
     fn denormalize(&self, n: f32) -> f32 {
         if matches!(self.target, KnobTarget::GainDb(_)) {
             return crate::domains::gain::knob_amplitude(n).clamp(self.min, self.max);
+        }
+        if matches!(self.target, KnobTarget::LogEffect(_)) {
+            return crate::domains::device_controls::log_value(n, self.min, self.max);
         }
         self.min + n.clamp(0.0, 1.0) * (self.max - self.min)
     }
