@@ -56,10 +56,15 @@ impl ScanTrace {
             .collect()
     }
     fn assert_request_order(&self, expected: &[usize]) {
-        let mut owners: Vec<_> = self.observed().into_iter()
-            .filter(|call| call % 100 == 10 || call % 100 == 11)
-            .map(|call| (call / 100) as usize).collect();
-        owners.dedup();
+        let mut owners = Vec::new();
+        for call in self.observed() {
+            if call % 100 == 10 || call % 100 == 11 {
+                let owner = (call / 100) as usize;
+                if !owners.contains(&owner) {
+                    owners.push(owner);
+                }
+            }
+        }
         assert_eq!(owners, expected, "resident device order and first blocking owner");
     }
 
