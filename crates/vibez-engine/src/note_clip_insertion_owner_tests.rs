@@ -10,9 +10,8 @@ fn public_missing_track_returns_complete_prepared_note_clip_without_callback_hea
     let (mut engine, mut commands, mut events) = AudioEngine::new();
     let track = TrackId::new();
     let clip = ClipId::new();
-    let insertion = PreparedNoteClipInsertion::new(
-        clip, 2.25, 5.5, 0.75, true, 0.25, 2.5, GrooveGrid::Eighth,
-    );
+    let insertion =
+        PreparedNoteClipInsertion::new(clip, 2.25, 5.5, 0.75, true, 0.25, 2.5, GrooveGrid::Eighth);
     let identity = Arc::downgrade(&insertion.0.id.0);
     let control = std::ptr::from_ref(insertion.0.as_ref());
     let ring = std::ptr::from_ref(insertion.0.receiver.buffer());
@@ -21,11 +20,19 @@ fn public_missing_track_returns_complete_prepared_note_clip_without_callback_hea
     };
     let live = storage.live.as_ptr();
     let removed = storage.removed.as_ptr();
-    commands.push(EngineCommand::AddNoteClip { track_id: track, insertion }).unwrap();
+    commands
+        .push(EngineCommand::AddNoteClip {
+            track_id: track,
+            insertion,
+        })
+        .unwrap();
     assert_eq!(identity.strong_count(), 1);
-    assert_eq!(crate::retirement::tests::allocations(|| {
-        engine.process_block(AudioProcessBlock::new(&mut [], 2));
-    }), (0, 0));
+    assert_eq!(
+        crate::retirement::tests::allocations(|| {
+            engine.process_block(AudioProcessBlock::new(&mut [], 2));
+        }),
+        (0, 0)
+    );
     assert!(engine.tracks().is_empty());
     assert!(!engine.transport().is_playing());
     assert_eq!(engine.transport().position(), 0);
@@ -67,8 +74,10 @@ fn public_missing_track_returns_complete_prepared_note_clip_without_callback_hea
     drop(completed);
     assert_eq!(identity.strong_count(), 0);
     while let Ok(event) = events.pop() {
-        assert!(!matches!(event, EngineEvent::ClipInsertionCompleted(_)
-            | EngineEvent::ClipInsertionStorageRequested(_)));
+        assert!(!matches!(
+            event,
+            EngineEvent::ClipInsertionCompleted(_) | EngineEvent::ClipInsertionStorageRequested(_)
+        ));
     }
 }
 

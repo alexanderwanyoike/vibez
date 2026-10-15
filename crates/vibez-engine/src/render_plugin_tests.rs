@@ -163,7 +163,9 @@ fn audio_echo_fixture() -> (BounceRequest, Vec<Command>) {
             warped_to_bpm: None,
         };
         commands.push(Command::AddClip {
-            insertion: crate::clip_insertion::PreparedClipInsertion::with_capacity(request.audio_clips.len() + 1),
+            insertion: crate::clip_insertion::PreparedClipInsertion::with_capacity(
+                request.audio_clips.len() + 1,
+            ),
             track_id: tid,
             clip_id: clip.id,
             audio: Arc::clone(&sample),

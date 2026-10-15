@@ -16,8 +16,7 @@ use crate::engine_audition::{audition_fade_frames, next_audition_boundary, Audit
 use crate::events::EngineEvent;
 use crate::metering;
 use crate::mixer::{
-    any_solo, equal_power_pan, EffectSlot, EngineClip, EngineTrack,
-    InstrumentRenderContext,
+    any_solo, equal_power_pan, EffectSlot, EngineClip, EngineTrack, InstrumentRenderContext,
 };
 use crate::note_repeat::{NoteRepeatClock, NoteRepeatStart};
 use crate::playback_source::{calculate_total_length, PreparedSectionPlaybackSource};

@@ -362,7 +362,10 @@ fn fulfill_clip_insertions(
                 fulfilled = true;
             }
         }
-        assert!(fulfilled, "the real request must reach its off-callback consumer");
+        assert!(
+            fulfilled,
+            "the real request must reach its off-callback consumer"
+        );
         let completion = crate::retirement::tests::allocations(|| {
             engine.process_block(AudioProcessBlock::new(&mut [], 2));
         });
@@ -963,7 +966,10 @@ fn public_add_clip_at_exhausted_capacity_preserves_content_without_callback_heap
         commands.push(filler).unwrap();
         engine.process_block(AudioProcessBlock::new(&mut [], 2));
         while events.pop().is_ok() {}
-        assert_eq!(engine.tracks()[0].playback_source.clips.capacity(), capacity);
+        assert_eq!(
+            engine.tracks()[0].playback_source.clips.capacity(),
+            capacity
+        );
     }
     assert_eq!(engine.tracks()[0].playback_source.clips.len(), capacity);
     let snapshot = |clip: &crate::playback_source::EngineClip| {
@@ -1136,7 +1142,10 @@ fn public_add_clip_to_missing_track_returns_unique_payload_without_callback_heap
     while events.pop().is_ok() {}
 
     let missing_track = TrackId::new();
-    assert!(engine.tracks().iter().all(|track| track.id != missing_track));
+    assert!(engine
+        .tracks()
+        .iter()
+        .all(|track| track.id != missing_track));
     let incoming_audio = audio(256);
     let incoming_owner = Arc::downgrade(&incoming_audio);
     assert_eq!(incoming_owner.strong_count(), 1);
