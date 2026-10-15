@@ -227,3 +227,18 @@ fn delay_snapshot_reports_applied_controls_and_reference_motion_independently() 
     effect.reset();
     assert!(effect.delay_snapshot().is_none());
 }
+
+#[test]
+fn snapshot_order_survives_history_reset_so_live_readings_can_reject_stale_packets() {
+    let mut effect = DelayEffect::new(1000.0);
+    effect.process(&mut [0.0; 20], 2);
+    let before = effect.delay_snapshot().unwrap();
+    effect.reset();
+    assert!(effect.delay_snapshot().is_none());
+    effect.process(&mut [0.0; 2], 2);
+    let after = effect.delay_snapshot().unwrap();
+    assert_eq!(before.processed_frames, 10);
+    assert_eq!(after.processed_frames, 1);
+    assert!(after.observation_order > before.observation_order);
+    assert_eq!(effect.delay_snapshot().unwrap().observation_order, after.observation_order);
+}
