@@ -118,6 +118,10 @@ fn scope_fits(width: f32, height: f32, advanced: bool, knob: Option<f32>) -> boo
 
 #[test]
 fn responsive_regions_preserve_real_children_and_concept_order_at_every_supported_height() {
+    assert_eq!(DetailPage::ALL, [
+        DetailPage::Main, DetailPage::Color, DetailPage::Clock,
+        DetailPage::Filter, DetailPage::Input, DetailPage::Output,
+    ]);
     for width in WIDTHS {
         for height in 64..=304 {
             let height = height as f32;
@@ -239,6 +243,21 @@ fn responsive_regions_preserve_real_children_and_concept_order_at_every_supporte
                             details.content.height + 0.001 >= FIELD_HEIGHT,
                             "detail field height: {context}"
                         );
+                        if width == 430.0 && height == 64.0 {
+                            for (child, parent) in [
+                                (layout.presets, body), (layout.disclosure, body),
+                                (details.bounds, body), (details.selector, details.bounds),
+                                (details.content, details.bounds),
+                            ] {
+                                assert!(child.x >= parent.x && child.y >= parent.y, "{context}");
+                            }
+                            assert!(right(layout.presets) + 8.0 <= layout.disclosure.x);
+                            assert!(details.bounds.y >= bottom(layout.presets));
+                            assert!(details.selector.height >= FIELD_HEIGHT);
+                            assert!(details.content.height >= FIELD_HEIGHT);
+                            assert!(details.content.width >= 4.0 * 68.0 + 3.0 * CELL_GAP);
+                            assert!(right(details.selector) + 8.0 <= details.content.x);
+                        }
                         let expected = required_cells(page, drive_in_core);
                         assert_eq!(
                             details.cells,
