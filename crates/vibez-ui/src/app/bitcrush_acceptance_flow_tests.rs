@@ -208,6 +208,7 @@ async fn fractional_user_sound_survives_files_project_reopen_and_replay_on_every
         let before = app.state.find_track(track).unwrap().clone();
         let automation = app.state.arrange_content(track).unwrap().automation.clone();
         let request = app.begin_device_preset_save(track, effect).unwrap();
+        assert_eq!(request.preset.parameters().len(), KEYS.len());
         let path = folder.path().join(format!("User-{owner:?}.vzpreset"));
         let saved = tasks::save_device_preset_at(path.clone(), request.preset.clone())
             .await
@@ -219,22 +220,39 @@ async fn fractional_user_sound_survives_files_project_reopen_and_replay_on_every
                 .collect::<Vec<_>>(),
             SOUND
         );
+        assert_eq!(app.state.find_track(track).unwrap().effects[1].params, before.effects[1].params);
         assert!(!app.state.project.history.can_undo());
         assert!(!app.state.project.dirty);
         let _ = app.update(Message::set_effect_param(track, effect, param::BITS, 5.0));
+        let before_load = app.state.find_track(track).unwrap().effects[1].params.clone();
         app.state.project.history = Default::default();
         app.state.project.dirty = false;
         let request = app.begin_device_preset_load(track, effect).unwrap();
         let loaded = vibez_project::device_preset::load_device_preset(&path).unwrap();
+        assert_eq!(loaded, saved);
         let _ = app.update(Message::DevicePreset(DevicePresetMsg::Loaded(
             request,
-            Ok(Some(loaded)),
+            Ok(Some(loaded.clone())),
         )));
         assert_eq!(
             app.state.find_track(track).unwrap().effects[1].params,
             SOUND
         );
+        let destination = &app.state.find_track(track).unwrap().effects[1];
+        assert_eq!((destination.id, destination.bypass, destination.latency_samples),
+            (effect, before.effects[1].bypass, Some(0)));
+        assert!(app.state.project.dirty);
         assert_eq!(app.state.project.history.undo.len(), 1);
+        app.state.project.dirty = false;
+        let request = app.begin_device_preset_load(track, effect).unwrap();
+        let _ = app.update(Message::DevicePreset(DevicePresetMsg::Loaded(request, Ok(Some(loaded)))));
+        assert!(!app.state.project.dirty, "same user sound is a no-op");
+        assert_eq!(app.state.project.history.undo.len(), 1);
+        let _ = app.update(Message::Project(ProjectMsg::Undo));
+        assert_eq!(app.state.find_track(track).unwrap().effects[1].params, before_load);
+        assert!(!app.state.project.history.can_undo());
+        let _ = app.update(Message::Project(ProjectMsg::Redo));
+        assert_eq!(app.state.find_track(track).unwrap().effects[1].params, SOUND);
         for extension in ["vibez", "vzp"] {
             let path = folder.path().join(format!("Project-{owner:?}.{extension}"));
             super::super::super::save_project_async(path.clone(), None, app.project_for_save())
@@ -358,6 +376,9 @@ async fn real_bitcrush_file_failures_and_stale_completions_never_partially_apply
         let result = vibez_project::device_preset::load_device_preset(&path)
             .map(Some)
             .map_err(|error| error.to_string());
+        if name.starts_with("fractional-") {
+            assert!(result.is_ok(), "fractional choices must reach App validation");
+        }
         let request = app.begin_device_preset_load(track, effect).unwrap();
         let _ = app.update(Message::DevicePreset(DevicePresetMsg::Loaded(
             request, result,
