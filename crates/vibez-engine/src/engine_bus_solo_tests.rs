@@ -359,8 +359,10 @@ fn ordinary_bus_delay_tail_survives_solo_without_a_selected_track_send() {
     for (frame, weight) in [(12, 0.9), (13, 0.1)] {
         let expected = weight * std::f32::consts::FRAC_1_SQRT_2;
         for channel in 0..2 {
-            assert!((output[frame * 2 + channel] - expected).abs() < 1e-5,
-                "fractional return at frame {frame} was cut off by unrelated track solo");
+            assert!(
+                (output[frame * 2 + channel] - expected).abs() < 1e-5,
+                "fractional return at frame {frame} was cut off by unrelated track solo"
+            );
         }
     }
     assert_eq!(output, capture, "the audible return must remain capturable");

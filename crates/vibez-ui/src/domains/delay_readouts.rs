@@ -20,10 +20,15 @@ pub fn bank_tooltip(snapshot: Option<&DelayState>) -> String {
                 line.progress * 100.0, line.target_samples * milliseconds,
             )
         } else {
-            let mode = if line.gliding { "pitch glide" } else { "settled" };
+            let mode = if line.gliding {
+                "pitch glide"
+            } else {
+                "settled"
+            };
             format!(
                 "{name} {mode}: applied {:.2} ms; target {:.2} ms; {remaining:.3} s remaining.",
-                line.old_samples * milliseconds, line.target_samples * milliseconds,
+                line.old_samples * milliseconds,
+                line.target_samples * milliseconds,
             )
         }
     });
@@ -32,18 +37,28 @@ pub fn bank_tooltip(snapshot: Option<&DelayState>) -> String {
         let parameter = [param::FEEDBACK_HP_HZ, param::FEEDBACK_LP_HZ][index];
         let stored = state.targets[parameter];
         let filter = state.filters[index];
-        let limited = if f64::from(stored) > 0.45 * rate { " (sample-rate limited)" } else { "" };
+        let limited = if f64::from(stored) > 0.45 * rate {
+            " (sample-rate limited)"
+        } else {
+            ""
+        };
         let moving = if filter.moving { "; moving" } else { "" };
         format!(
             "{name} stored {stored:.2} Hz; effective {:.2} Hz{limited}; enable {:.0}%{moving}.",
-            filter.cutoff_hz, filter.enabled * 100.0,
+            filter.cutoff_hz,
+            filter.enabled * 100.0,
         )
     });
     let linking = if state.targets[param::LINK] == 1.0 {
         "Linked timing uses Left; stored Right settings are retained."
-    } else { "Left and Right timing are independent." };
+    } else {
+        "Left and Right timing are independent."
+    };
     format!(
         "Applied BPM {:.2}.\n{}\n{}\nWet-only Duck attenuation {:.1} dB.\n{linking}",
-        state.bpm, timing.join("\n"), filters.join("\n"), state.duck_attenuation_db,
+        state.bpm,
+        timing.join("\n"),
+        filters.join("\n"),
+        state.duck_attenuation_db,
     )
 }

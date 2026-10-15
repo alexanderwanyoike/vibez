@@ -1,7 +1,10 @@
 //! Checks the shortest supported musical timing against fractional feedback audio and observations.
 
 use vibez_core::audio_context::DeviceAudioContext;
-use vibez_dsp::{delay::{DelayEffect, param}, effect::AudioEffect};
+use vibez_dsp::{
+    delay::{param, DelayEffect},
+    effect::AudioEffect,
+};
 
 #[test]
 fn shortest_sync_timing_retains_divisions_and_matches_fractional_audio_and_observations() {
@@ -20,17 +23,24 @@ fn shortest_sync_timing_retains_divisions_and_matches_fractional_audio_and_obser
                 (param::FEEDBACK, 0.5),
                 (param::MIX, 1.0),
             ];
-            for (index, value) in stored { assert!(effect.set_param(index, value)); }
+            for (index, value) in stored {
+                assert!(effect.set_param(index, value));
+            }
             effect.set_audio_context(DeviceAudioContext {
-                musical_sample: 0, continuous_sample: 0, sample_rate: rate,
-                bpm: 999.0, playing: true,
+                musical_sample: 0,
+                continuous_sample: 0,
+                sample_rate: rate,
+                bpm: 999.0,
+                playing: true,
             });
             let requested = (60.0 / 999.0) * (4.0 / 64.0) * (2.0 / 3.0) * f64::from(rate);
             assert!(requested > 2.0 && requested < 3.0);
             let whole = requested.floor() as usize;
             let fraction = requested.fract();
             for pass in 0..2 {
-                if pass == 1 { effect.reset(); }
+                if pass == 1 {
+                    effect.reset();
+                }
                 let mut audio = [0.0; 16];
                 audio[..2].copy_from_slice(&[0.25, -0.125]);
                 effect.process(&mut audio, 2);
@@ -42,7 +52,11 @@ fn shortest_sync_timing_retains_divisions_and_matches_fractional_audio_and_obser
                         let mut wet = 0.0;
                         for (offset, weight) in [(whole, 1.0 - fraction), (whole + 1, fraction)] {
                             if let Some(previous) = frame.checked_sub(offset) {
-                                let input = if previous == 0 { [0.25, -0.125][channel] } else { 0.0 };
+                                let input = if previous == 0 {
+                                    [0.25, -0.125][channel]
+                                } else {
+                                    0.0
+                                };
                                 wet += weight * (input + 0.5 * expected[previous][channel]);
                             }
                         }
@@ -51,8 +65,10 @@ fn shortest_sync_timing_retains_divisions_and_matches_fractional_audio_and_obser
                             "rate={rate}, linked={linked}, pass={pass}, frame={frame}, channel={channel}: actual={actual}, expected={wet}");
                     }
                 }
-                assert!(audio[4] > 0.0 && audio[6] > 0.0,
-                    "the fractional first repeat must span frames2 and3");
+                assert!(
+                    audio[4] > 0.0 && audio[6] > 0.0,
+                    "the fractional first repeat must span frames2 and3"
+                );
                 let snapshot = effect.delay_snapshot().unwrap();
                 assert_eq!(snapshot.sample_rate, rate);
                 assert_eq!(snapshot.bpm, 999.0);
@@ -65,9 +81,15 @@ fn shortest_sync_timing_retains_divisions_and_matches_fractional_audio_and_obser
                     assert!(!state.moving && !state.gliding);
                     assert_eq!(state.remaining_frames, 0);
                     assert_eq!(state.pending_samples, None);
-                    assert_eq!((state.old_samples, state.destination_samples, state.target_samples),
+                    assert_eq!(
+                        (
+                            state.old_samples,
+                            state.destination_samples,
+                            state.target_samples
+                        ),
                         (requested, requested, requested),
-                        "rate={rate}, linked={linked}, pass={pass}, line={line}");
+                        "rate={rate}, linked={linked}, pass={pass}, line={line}"
+                    );
                 }
             }
         }

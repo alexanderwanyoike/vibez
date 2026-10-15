@@ -18,8 +18,8 @@ pub mod delay_layout;
 #[cfg(test)]
 mod delay_layout_geometry_tests;
 pub mod delay_observation;
-pub mod delay_response;
 pub mod delay_readouts;
+pub mod delay_response;
 pub mod delay_values;
 pub mod device_controls;
 pub mod device_latency;
