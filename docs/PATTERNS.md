@@ -50,6 +50,33 @@ Offline channel preparation preserves that reserved storage.
 `engine_command_allocation_tests` measures every command; its list of commands
 that still allocate may only shrink.
 
+Ordinary owner returns use one private `RetirementQueue` with 32 fixed slots.
+Reserve the command's existing worst-case allowance before popping it, then
+lend that allowance through the closed dispatcher and its bounded callees.
+The constructor-owned ledger identifies the queue; neither that queue nor the
+engine may be replaced or destroyed while a borrowed allowance is active.
+Allowances and single-use permits cannot be cloned or sent to another thread.
+Direct delivery releases its fallback credit, unused scope credits return on
+drop, and a Full retry reuses the owner's already occupied slot. No external
+mutable Vec access or publication without a permit is available. Release unused
+command credits before RemoveBus's independent, incremental lane cleanup.
+Source, lane and Capture-timing microdrains reserve before taking each owner;
+mailbox waits and retained recording/Section lifetimes hold no ordinary credit.
+
+Runtime fixed presentation prefixes use a separate `PresentationAdmission`.
+It exclusively borrows the existing producer, scheduled storage and terminals
+at the original capacity guard, before detaching the next source. Fixed arrays
+and consuming three-to-two-to-one Section steps bound publication without a
+second ledger or owner queue. Admission does not preflush. Each original
+per-event terminal-priority flush, latency read and telemetry update stays at
+its original action point. Clip prefixes preserve their physical deadlines;
+UI slots cannot pay for a future event or an already retained terminal.
+
+If the final natural playback stop discovers exhaustion while the overflow
+owner slot is occupied, its returned literal shares the fault's existing
+reliable stop terminal. This narrow recovery leaves first-holder behavior and
+explicit command Stop acknowledgements unchanged.
+
 AddClip carries a required sender-prepared `PreparedClipInsertion` control.
 AddNoteClip carries an opaque `PreparedNoteClipInsertion`, which constructs the
 complete empty note clip, its cache and the same control outside the callback.
