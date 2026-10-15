@@ -918,128 +918,149 @@ enum PendingHome {
     LauncherStop,
 }
 
+struct PendingHomeFixture {
+    engine: AudioEngine,
+    commands: rtrb::Producer<EngineCommand>,
+    events: rtrb::Consumer<crate::events::EngineEvent>,
+    track_id: TrackId,
+    calls: Arc<VoiceCalls>,
+    arrange: HomeSnapshot,
+    inactive: HomeSnapshot,
+    initial_section: HomeSnapshot,
+    old_home: HomeSnapshot,
+    next_home: HomeSnapshot,
+    next_section: SectionId,
+}
+
+fn prepare_pending_home(home: PendingHome) -> PendingHomeFixture {
+    use vibez_core::perform::{MusicalBoundary, SectionLaunchQuantization};
+    let (mut engine, mut commands, mut events) = AudioEngine::new();
+    let track_id = TrackId::new();
+    let calls = Arc::new(VoiceCalls::default());
+    let mut track = EngineTrack::with_playback_source(track_id, home_source(1));
+    track.pan = 0.0;
+    track.instrument = Some(Box::new(CountedInstrument {
+        instrument: crate::test_support::DelayProbeInstrument::new(0, 0.25),
+        calls: Arc::clone(&calls),
+    }));
+    let arrange = HomeSnapshot::observe(&track.playback_source);
+    let inactive = HomeSnapshot::observe(&track.empty_launcher_source);
+    let initial_section = HomeSnapshot::observe(&track.section_playback_source);
+    let section_id = SectionId::new();
+    let next_section = SectionId::new();
+    let (launch, old_home) = if matches!(home, PendingHome::Section) {
+        let source = PreparedSectionPlaybackSource::new(
+            section_id,
+            2.0,
+            true,
+            vec![(track_id, home_source(1))],
+        );
+        let snapshot = HomeSnapshot::observe(&source.tracks()[0].source);
+        (EngineCommand::LaunchSection(Box::new(source)), snapshot)
+    } else {
+        let source = home_source(1);
+        let clip_id = source.note_clips[0].id;
+        let source = Box::new(source);
+        let snapshot = HomeSnapshot::observe(&source);
+        (
+            EngineCommand::QueueClips {
+                clips: vec![Box::new(PreparedClipPlayback {
+                    track_id,
+                    clip_id: Some(clip_id),
+                    request_id: 1,
+                    length_samples: 32,
+                    looping: true,
+                    source,
+                })],
+                quantization: MusicalBoundary::Immediate,
+            },
+            snapshot,
+        )
+    };
+    commands.push(EngineCommand::SetSampleRate(32)).unwrap();
+    commands
+        .push(EngineCommand::AddTrack(Box::new(track)))
+        .unwrap();
+    let channels: Vec<_> = [track_id, TrackId::MASTER]
+        .into_iter()
+        .map(|id| RoutingChannel {
+            id,
+            is_bus: id.is_master(),
+            sends: Vec::new(),
+            effects: Vec::new(),
+        })
+        .collect();
+    commands
+        .push(EngineCommand::SetRouting(
+            crate::routing::PreparedRouting::prepare(&channels, 8).unwrap(),
+        ))
+        .unwrap();
+    commands.push(launch).unwrap();
+    let mut output = [0.0; 16];
+    engine.process_block(AudioProcessBlock::new(&mut output, 2));
+    assert_sounding(&output);
+    while events.pop().is_ok() {}
+    arrange.assert_unchanged(&engine.tracks()[0].playback_source);
+    let (queued, next_home) = match home {
+        PendingHome::Section => {
+            old_home.assert_unchanged(&engine.tracks()[0].section_playback_source);
+            let source = PreparedSectionPlaybackSource::new(
+                next_section,
+                2.0,
+                true,
+                vec![(track_id, home_source(2))],
+            );
+            let snapshot = HomeSnapshot::observe(&source.tracks()[0].source);
+            (
+                EngineCommand::QueueSection {
+                    prepared: Box::new(source),
+                    quantization: SectionLaunchQuantization::EndOfSection,
+                },
+                snapshot,
+            )
+        }
+        PendingHome::LauncherReplacement | PendingHome::LauncherStop => {
+            old_home.assert_unchanged(&engine.tracks()[0].launcher_source);
+            let prepared = if matches!(home, PendingHome::LauncherStop) {
+                PreparedClipPlayback::stop(track_id, 2)
+            } else {
+                let source = home_source(2);
+                Box::new(PreparedClipPlayback {
+                    track_id,
+                    clip_id: Some(source.note_clips[0].id),
+                    request_id: 2,
+                    length_samples: 32,
+                    looping: true,
+                    source: Box::new(source),
+                })
+            };
+            let snapshot = HomeSnapshot::observe(&prepared.source);
+            (
+                EngineCommand::QueueClips {
+                    clips: vec![prepared],
+                    quantization: MusicalBoundary::OneBeat,
+                },
+                snapshot,
+            )
+        }
+    };
+    commands.push(queued).unwrap();
+    PendingHomeFixture { engine, commands, events, track_id, calls, arrange, inactive, initial_section, old_home, next_home, next_section }
+}
+
 #[test]
 fn pending_note_storage_keeps_arrange_distinct_through_reachable_section_and_launcher_boundaries() {
     use crate::clip_insertion::{ClipInsertionOutcome, PreparedNoteClipInsertion};
     use crate::events::EngineEvent;
-    use vibez_core::perform::{MusicalBoundary, SectionLaunchQuantization};
 
     for home in [
         PendingHome::Section,
         PendingHome::LauncherReplacement,
         PendingHome::LauncherStop,
     ] {
-        let (mut engine, mut commands, mut events) = AudioEngine::new();
-        let track_id = TrackId::new();
-        let calls = Arc::new(VoiceCalls::default());
-        let mut track = EngineTrack::with_playback_source(track_id, home_source(1));
-        track.pan = 0.0;
-        track.instrument = Some(Box::new(CountedInstrument {
-            instrument: crate::test_support::DelayProbeInstrument::new(0, 0.25),
-            calls: Arc::clone(&calls),
-        }));
-        let arrange = HomeSnapshot::observe(&track.playback_source);
-        let inactive = HomeSnapshot::observe(&track.empty_launcher_source);
-        let initial_section = HomeSnapshot::observe(&track.section_playback_source);
-        let section_id = SectionId::new();
-        let next_section = SectionId::new();
-        let (launch, old_home) = if matches!(home, PendingHome::Section) {
-            let source = PreparedSectionPlaybackSource::new(
-                section_id,
-                2.0,
-                true,
-                vec![(track_id, home_source(1))],
-            );
-            let snapshot = HomeSnapshot::observe(&source.tracks()[0].source);
-            (EngineCommand::LaunchSection(Box::new(source)), snapshot)
-        } else {
-            let source = home_source(1);
-            let clip_id = source.note_clips[0].id;
-            let source = Box::new(source);
-            let snapshot = HomeSnapshot::observe(&source);
-            (
-                EngineCommand::QueueClips {
-                    clips: vec![Box::new(PreparedClipPlayback {
-                        track_id,
-                        clip_id: Some(clip_id),
-                        request_id: 1,
-                        length_samples: 32,
-                        looping: true,
-                        source,
-                    })],
-                    quantization: MusicalBoundary::Immediate,
-                },
-                snapshot,
-            )
-        };
-        commands.push(EngineCommand::SetSampleRate(32)).unwrap();
-        commands
-            .push(EngineCommand::AddTrack(Box::new(track)))
-            .unwrap();
-        let channels: Vec<_> = [track_id, TrackId::MASTER]
-            .into_iter()
-            .map(|id| RoutingChannel {
-                id,
-                is_bus: id.is_master(),
-                sends: Vec::new(),
-                effects: Vec::new(),
-            })
-            .collect();
-        commands
-            .push(EngineCommand::SetRouting(
-                crate::routing::PreparedRouting::prepare(&channels, 8).unwrap(),
-            ))
-            .unwrap();
-        commands.push(launch).unwrap();
+        let PendingHomeFixture { mut engine, mut commands, mut events, track_id, calls,
+            arrange, inactive, initial_section, old_home, next_home, next_section } = prepare_pending_home(home);
         let mut output = [0.0; 16];
-        engine.process_block(AudioProcessBlock::new(&mut output, 2));
-        assert_sounding(&output);
-        while events.pop().is_ok() {}
-        arrange.assert_unchanged(&engine.tracks()[0].playback_source);
-        let (queued, next_home) = match home {
-            PendingHome::Section => {
-                old_home.assert_unchanged(&engine.tracks()[0].section_playback_source);
-                let source = PreparedSectionPlaybackSource::new(
-                    next_section,
-                    2.0,
-                    true,
-                    vec![(track_id, home_source(2))],
-                );
-                let snapshot = HomeSnapshot::observe(&source.tracks()[0].source);
-                (
-                    EngineCommand::QueueSection {
-                        prepared: Box::new(source),
-                        quantization: SectionLaunchQuantization::EndOfSection,
-                    },
-                    snapshot,
-                )
-            }
-            PendingHome::LauncherReplacement | PendingHome::LauncherStop => {
-                old_home.assert_unchanged(&engine.tracks()[0].launcher_source);
-                let prepared = if matches!(home, PendingHome::LauncherStop) {
-                    PreparedClipPlayback::stop(track_id, 2)
-                } else {
-                    let source = home_source(2);
-                    Box::new(PreparedClipPlayback {
-                        track_id,
-                        clip_id: Some(source.note_clips[0].id),
-                        request_id: 2,
-                        length_samples: 32,
-                        looping: true,
-                        source: Box::new(source),
-                    })
-                };
-                let snapshot = HomeSnapshot::observe(&prepared.source);
-                (
-                    EngineCommand::QueueClips {
-                        clips: vec![prepared],
-                        quantization: MusicalBoundary::OneBeat,
-                    },
-                    snapshot,
-                )
-            }
-        };
-        commands.push(queued).unwrap();
         let inserted_id = ClipId::new();
         let insertion = PreparedNoteClipInsertion::new(
             inserted_id,
