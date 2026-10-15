@@ -177,16 +177,19 @@ refuse Capture.
 
 `CaptureLifecycle` owns current Idle/Active activity independently of the
 aggregate Clear/ClosureRequested local-failure episode. Accepted Start changes
-only activity; Stop and the existing closure paths end only activity. They do
-not rearm the validation episode or take ownership of pending notifications.
-An older retained stop can therefore coexist with a newly active Capture.
+activity and rearms local closure after its fresh admission succeeds: a device
+may fail again before validation observes recovery. Stop and the existing
+closure paths end only activity; refused Start leaves the episode unchanged.
+None takes ownership of pending notifications. An older retained stop can
+therefore coexist with a newly active Capture.
 
 Validation consumes its already observed local-failure fact in a pure
 first-close decision, performs the existing local closure, then records that
-fact at the original assignment boundary. An admitted clear observation rearms
-the aggregate episode; a skipped validation leaves it unchanged. This is a
-validation episode, not a Capture session or per-device identity. Start, Play,
-Seek, Unload, effect reset and current device Resume do not implicitly rearm it.
+fact at the original assignment boundary. An admitted clear observation also
+rearms the aggregate episode; a skipped validation leaves it unchanged. This
+eligibility is aggregate local-failure state, with no per-device identity or
+universal notification deduplication. Play, Seek, Unload, effect reset and
+current device Resume do not implicitly rearm it.
 Local closure followed by a global invalid action retains both original stop
 acknowledgements; public Stop and refused Start keep their independent replies.
 
