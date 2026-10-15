@@ -27,3 +27,5 @@ pub mod track_header;
 pub mod transient_sensitivity_knob;
 pub mod vu_meter;
 pub mod waveform;
+
+pub mod device_controls;

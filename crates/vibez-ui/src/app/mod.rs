@@ -57,6 +57,11 @@ struct App {
     plugin_instrument_tx: std::sync::mpsc::Sender<PluginInstrumentLoadResult>,
     plugin_load_requests: plugin_load_requests::PluginLoadRequests,
     gain_devices: gain_devices::GainDevices,
+    device_controls: std::collections::HashMap<
+        vibez_core::id::EffectId,
+        crate::domains::device_controls::DeviceControlState,
+    >,
+    empty_device_controls: crate::domains::device_controls::DeviceControlState,
     device_presets: device_presets::DevicePresetRuntime,
     // Plugin GUI support
     plugin_window_manager: Option<PluginWindowManager>,
@@ -160,6 +165,7 @@ mod audio_tasks;
 mod bounce;
 mod capture;
 mod compensation;
+mod device_controls;
 pub(crate) mod device_presets;
 mod drum_rack_preparation;
 mod engine_events;
@@ -434,6 +440,8 @@ impl App {
             plugin_effect_tx,
             plugin_load_requests: Default::default(),
             gain_devices: Default::default(),
+            device_controls: Default::default(),
+            empty_device_controls: Default::default(),
             device_presets: Default::default(),
             sidechain_sync_inputs: None,
             track_meter_peaks: Default::default(),
