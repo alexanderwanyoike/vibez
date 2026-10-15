@@ -379,3 +379,5 @@ fn interpolation_loss_and_transition_excess_match_declared_quality_models() {
     }));
     assert_eq!(failures, 0, "Declared interpolation/transition gates failed");
 }
+
+mod cpu;
