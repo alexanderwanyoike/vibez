@@ -31,7 +31,7 @@ fn expected_left(frame: usize, delay: usize, mono_input: f32) -> f32 {
 }
 
 fn expected_right(frame: usize, delay: usize) -> f32 {
-    if frame >= delay && frame % delay == 0 {
+    if frame >= delay && frame.is_multiple_of(delay) {
         0.5_f32.powi((frame / delay - 1) as i32)
     } else {
         0.0

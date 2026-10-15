@@ -53,7 +53,7 @@ fn dry_input(case: &str, frame: usize, channel: usize, affected: usize, delay: u
 }
 
 fn impulse_wet(frame: usize, at: usize, amplitude: f32, delay: usize) -> f32 {
-    if frame >= at + delay && (frame - at) % delay == 0 {
+    if frame >= at + delay && (frame - at).is_multiple_of(delay) {
         amplitude * 0.5_f32.powi(((frame - at) / delay - 1) as i32)
     } else {
         0.0

@@ -171,6 +171,10 @@ fn median(mut values: [f64; 5]) -> f64 {
 #[test]
 #[ignore = "Explicit optimized machine-local CPU observation; requires source/binary/machine labels"]
 fn optimized_delay_cpu_observation() {
+    #[allow(
+        clippy::assertions_on_constants,
+        reason = "This ignored observation must compile in debug and refuse execution outside release."
+    )]
     assert!(
         !cfg!(debug_assertions),
         "Run only the optimized release test binary"

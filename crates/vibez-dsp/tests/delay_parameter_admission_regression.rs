@@ -28,7 +28,7 @@ fn expected_sample(frame: usize, channel: usize, delay: usize) -> f32 {
     let amplitude = if channel == 0 { 1.0 } else { 0.25 };
     if frame == 0 {
         amplitude * 0.5
-    } else if frame % delay == 0 {
+    } else if frame.is_multiple_of(delay) {
         amplitude * 0.5_f32.powi((frame / delay) as i32)
     } else {
         0.0

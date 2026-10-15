@@ -39,7 +39,7 @@ impl Signal {
                 (std::f64::consts::TAU * 0.45 * frame as f64 + channel as f64 * 0.37).sin()
             }
             Self::Impulse => f64::from(u8::from(frame == 0 && channel == 0)),
-            Self::Polarity => sign * if frame % 2 == 0 { 1.0 } else { -1.0 },
+            Self::Polarity => sign * if frame.is_multiple_of(2) { 1.0 } else { -1.0 },
             Self::Transient => {
                 let period = (f64::from(rate) * 0.2).ceil() as usize;
                 let time = (frame % period) as f64 / f64::from(rate);
@@ -284,8 +284,12 @@ fn moving_edits(
         [
             left,
             right,
-            if step % 2 == 0 { 20.0 } else { 1000.0 },
-            if step % 2 == 0 { 20000.0 } else { 1000.0 },
+            if step.is_multiple_of(2) { 20.0 } else { 1000.0 },
+            if step.is_multiple_of(2) {
+                20000.0
+            } else {
+                1000.0
+            },
             enabled.0,
             enabled.1,
             (step % 2) as f32,

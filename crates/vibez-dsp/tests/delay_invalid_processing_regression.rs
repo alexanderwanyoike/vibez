@@ -74,11 +74,7 @@ fn inputs() -> Vec<(&'static str, usize, Vec<f32>)> {
 }
 
 fn expected_bits(input: &[f32], channels: usize) -> Vec<u32> {
-    let complete_samples = if channels == 0 {
-        0
-    } else {
-        input.len() / channels * channels
-    };
+    let complete_samples = input.len().checked_div(channels).unwrap_or(0) * channels;
     input
         .iter()
         .enumerate()

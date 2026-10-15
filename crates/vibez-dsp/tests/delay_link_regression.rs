@@ -310,7 +310,7 @@ fn exact_link_and_sync_automation_recalls_retained_right_intent_without_erasing_
             let epoch_frames = 3 * (62.5 * f64::from(rate) / 1000.0).ceil() as usize + 16;
             let frames = 8 * epoch_frames;
             let mut impulses = Vec::new();
-            for epoch in 0..8 {
+            for (epoch, expected_ms) in epoch_ms.iter().enumerate() {
                 impulses.push((epoch * epoch_frames + 8, [0.5, 0.25]));
                 if epoch > 0 {
                     impulses.push((epoch * epoch_frames - 2, [1.0, 0.5]));
@@ -359,7 +359,7 @@ fn exact_link_and_sync_automation_recalls_retained_right_intent_without_erasing_
                 }
                 let mut epochs = Vec::new();
                 let mut all_targets_match = true;
-                for epoch in 0..8 {
+                for (epoch, expected_ms) in epoch_ms.iter().enumerate() {
                     let edits: Vec<(usize, f32)> = match epoch {
                         0 => vec![],
                         1 if initial_sync => vec![(9, 0.0), (10, 1.0)],
@@ -393,7 +393,7 @@ fn exact_link_and_sync_automation_recalls_retained_right_intent_without_erasing_
                             "expected": expected[2 * peak_frame + channel], "actual_bits": audio[2 * peak_frame + channel].to_bits() }));
                     }
                     epochs.push(json!({ "epoch": epoch, "start_frame": start, "edits": edits,
-                        "expected_ms": epoch_ms[epoch], "expected_target_bits": targets.map(f32::to_bits),
+                        "expected_ms": expected_ms, "expected_target_bits": targets.map(f32::to_bits),
                         "target_mismatches": target_mismatches, "witnesses": witnesses }));
                 }
                 let (errors, audio_matches) = observe(&audio, &expected);

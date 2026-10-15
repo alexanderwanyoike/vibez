@@ -83,7 +83,7 @@ fn delay_snapshot_observes_applied_crossfade_without_changing_audio() {
         assert_copy_bounded(&state);
         assert_eq!(state.sample_rate, 1000);
         assert_eq!(state.bpm, 137.0);
-        assert_eq!(state.processed_frames, frame as u64 + 2);
+        assert_eq!(state.processed_frames, frame + 2);
         assert_eq!(state.targets, targets);
         for line in state.lines {
             assert_eq!(line.target_samples, 5.0);
