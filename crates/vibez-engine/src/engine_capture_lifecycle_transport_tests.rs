@@ -134,6 +134,13 @@ fn collect(fixture: &mut Fixture, sections: &[(SectionId, usize)]) -> Events {
                 observed.order.push("section-source");
                 observed.times.push(effective_at_samples);
             }
+            EngineEvent::CaptureTimingRetired(offsets) => {
+                assert!(Arc::ptr_eq(
+                    &offsets,
+                    &fixture.engine.routing.capture_offsets
+                ));
+                observed.order.push("offsets-retired");
+            }
             EngineEvent::SectionTransitioned {
                 section_id,
                 effective_at_samples,
@@ -173,7 +180,7 @@ fn collect(fixture: &mut Fixture, sections: &[(SectionId, usize)]) -> Events {
 }
 
 #[test]
-fn transport_commands_preserve_the_validation_episode_at_zero_and_positive_pdc() {
+fn transport_commands_preserve_the_episode_rearmed_by_start_at_zero_and_positive_pdc() {
     for delay in [0, 7] {
         for case in [
             "stop",
@@ -208,7 +215,7 @@ fn transport_commands_preserve_the_validation_episode_at_zero_and_positive_pdc()
                 before,
                 [
                     1,
-                    1,
+                    0,
                     1,
                     u64::from(case != "stopped-play-reset"),
                     32,
@@ -228,38 +235,38 @@ fn transport_commands_preserve_the_validation_episode_at_zero_and_positive_pdc()
             let (command, expected, order, perform) = match case {
                 "stop" => (
                     EngineCommand::Stop,
-                    [0, 1, 1, 0, 32, 32, 32],
+                    [0, 0, 1, 0, 32, 32, 32],
                     vec!["stop", "playback-stop"],
                     false,
                 ),
                 "play" | "stopped-play-reset" => (
                     EngineCommand::Play,
-                    [0, 1, 1, 1, 32, 32, 32],
+                    [0, 0, 1, 1, 32, 32, 32],
                     vec!["stop", "playback-start"],
                     false,
                 ),
                 "arrange-seek" => (
                     EngineCommand::Seek(3),
-                    [0, 1, 1, 1, 3, 3, 32],
+                    [0, 0, 1, 1, 3, 3, 32],
                     vec!["stop"],
                     false,
                 ),
-                "perform-seek" => (EngineCommand::Seek(3), [1, 1, 1, 1, 3, 0, 32], vec![], true),
+                "perform-seek" => (EngineCommand::Seek(3), [1, 0, 1, 1, 3, 0, 32], vec![], true),
                 "unload" => (
                     EngineCommand::UnloadAudio,
-                    [0, 1, 1, 0, 32, 32, 32],
+                    [0, 0, 1, 0, 32, 32, 32],
                     vec!["stop", "playback-stop"],
                     false,
                 ),
                 "same-rate" => (
                     EngineCommand::SetSampleRate(DEFAULT_SAMPLE_RATE),
-                    [1, 1, 1, 1, 32, 32, 32],
+                    [1, 0, 1, 1, 32, 32, 32],
                     vec![],
                     false,
                 ),
                 "begin-perform" => (
                     EngineCommand::BeginClipPerformance,
-                    [1, 1, 1, 1, 32, 0, 32],
+                    [1, 0, 1, 1, 32, 0, 32],
                     vec![],
                     true,
                 ),
@@ -302,7 +309,7 @@ fn section(length: u64, looping: bool) -> Box<PreparedSectionPlaybackSource> {
 }
 
 #[test]
-fn one_shot_and_queued_successor_keep_the_original_capture_end_boundary_at_real_pdc() {
+fn local_refailure_closes_capture_without_changing_section_end_boundaries_at_real_pdc() {
     for delay in [0, 7] {
         for queued in [false, true] {
             let (mut fixture, prime) = prepared(delay);
@@ -355,7 +362,7 @@ fn one_shot_and_queued_successor_keep_the_original_capture_end_boundary_at_real_
                 assert_eq!(
                     after,
                     [
-                        u64::from(queued),
+                        0,
                         1,
                         1,
                         u64::from(queued),
@@ -374,33 +381,43 @@ fn one_shot_and_queued_successor_keep_the_original_capture_end_boundary_at_real_
                 );
                 let pending = fixture.engine.capture_stop_pending();
                 assert_eq!(pending, !queued && delay != 0 && stage == "end");
+                assert_eq!(
+                    Arc::strong_count(&fixture.engine.routing.capture_offsets),
+                    1 + usize::from(stage == "end" || queued)
+                );
                 let observed = collect(&mut fixture, &sections);
+                assert_eq!(Arc::strong_count(&fixture.engine.routing.capture_offsets), 1);
                 let (order, times, owners) = match (queued, delay, stage) {
                     (false, 0, "end") => (
                         vec![
                             "section-source",
                             "section",
+                            "stop",
                             "section-stop",
                             "stop",
                             "playback-stop",
                         ],
-                        vec![0, 0, 8, 8],
+                        vec![0, 0, 32, 8, 8],
                         vec![1],
                     ),
-                    (false, 7, "end") => (vec!["section-source", "section"], vec![0, 0], vec![1]),
+                    (false, 7, "end") => (
+                        vec!["stop", "offsets-retired", "section"],
+                        vec![25, 0],
+                        vec![1],
+                    ),
                     (false, 7, "settled") => (
                         vec!["section-stop", "stop", "playback-stop"],
                         vec![8, 8],
                         vec![],
                     ),
                     (true, 0, "end") => (
-                        vec!["section-source", "section", "queued"],
-                        vec![0, 0],
+                        vec!["section-source", "section", "queued", "stop"],
+                        vec![0, 0, 32],
                         vec![1],
                     ),
                     (true, 7, "end") => (
-                        vec!["queued", "section-source", "section"],
-                        vec![0, 0],
+                        vec!["queued", "stop", "offsets-retired", "section"],
+                        vec![25, 0],
                         vec![1],
                     ),
                     (true, _, "settled") => {

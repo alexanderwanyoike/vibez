@@ -23,6 +23,7 @@ pub(super) struct CaptureLifecycle {
 impl CaptureLifecycle {
     pub(super) fn begin(&mut self) {
         self.activity = CaptureActivity::Active;
+        self.local_failure_episode = LocalFailureEpisode::Clear;
     }
 
     pub(super) fn end(&mut self) {

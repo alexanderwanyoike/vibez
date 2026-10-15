@@ -199,7 +199,7 @@ fn old_local_stop_and_new_activity_survive_zero_one_two_and_remaining_ui_credits
             &mut fixture,
             &format!("{label}-accepted"),
             Expected {
-                state: [1, 1, 1, 1, 8, 8, 8],
+                state: [1, 0, 1, 1, 8, 8, 8],
                 scheduled: 3,
                 terminal: Some(8),
                 terminals: 1,
@@ -282,7 +282,7 @@ fn old_local_stop_and_new_activity_survive_zero_one_two_and_remaining_ui_credits
 }
 
 #[test]
-fn repeated_fault_and_play_keep_the_closed_episode_until_an_admitted_clear_validation() {
+fn repeated_fault_and_play_preserve_the_episode_rearmed_by_accepted_start() {
     let mut fixture = fixture();
     fixture.commands.push(local(&fixture, true)).unwrap();
     zero(&mut fixture);
@@ -294,7 +294,7 @@ fn repeated_fault_and_play_keep_the_closed_episode_until_an_admitted_clear_valid
         .unwrap();
     drain(&mut fixture);
     discard_setup(&mut fixture);
-    assert_eq!(state(&fixture.engine), [1, 1, 1, 1, 0, 0, 0]);
+    assert_eq!(state(&fixture.engine), [1, 0, 1, 1, 0, 0, 0]);
     full(&mut fixture);
     for _ in 0..fixture.engine.scheduled_presentation.capacity() {
         fixture
@@ -328,7 +328,7 @@ fn repeated_fault_and_play_keep_the_closed_episode_until_an_admitted_clear_valid
             &mut fixture,
             stage,
             Expected {
-                state: [0, 1, 1, 0, 0, 0, 0],
+                state: [0, 0, 1, 0, 0, 0, 0],
                 scheduled: 0,
                 terminal: Some(0),
                 terminals: 4,
@@ -352,7 +352,7 @@ fn repeated_fault_and_play_keep_the_closed_episode_until_an_admitted_clear_valid
         &mut fixture,
         "play-new-start",
         Expected {
-            state: [1, 1, 1, 1, 0, 0, 0],
+            state: [1, 0, 1, 1, 0, 0, 0],
             scheduled: 4,
             terminal: Some(0),
             terminals: 3,

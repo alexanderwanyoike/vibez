@@ -1,4 +1,4 @@
-//! Validation-defined aggregate episodes retain their original command-boundary behavior.
+//! Local Capture closure rearms at accepted Start or clear validation while global actions stay independent.
 
 use super::capture_lifecycle_admission_tests::{discard_setup, fixture, state, teardown, Fixture};
 use super::*;
@@ -163,7 +163,7 @@ fn playing(active: bool, closed: bool, frames: u64) -> [u64; 7] {
 }
 
 #[test]
-fn persistent_and_two_device_failures_rearm_only_after_clear_validation() {
+fn persistent_and_two_device_failures_close_once_between_recovery_boundaries() {
     let mut fixture = fixture();
     let cases = [
         (
@@ -305,7 +305,7 @@ fn persistent_and_two_device_failures_rearm_only_after_clear_validation() {
 }
 
 #[test]
-fn clear_start_refail_in_one_drain_retains_the_old_episode_until_validation_clears_it() {
+fn clear_start_refail_closes_the_new_capture_with_or_without_prior_clear_validation() {
     for clear_validation in [false, true] {
         let mut fixture = fixture();
         fixture
@@ -340,11 +340,6 @@ fn clear_start_refail_in_one_drain_retains_the_old_episode_until_validation_clea
             .commands
             .push(set(&fixture, false, 0, true))
             .unwrap();
-        let mut order = vec!["start", "source", "source"];
-        if clear_validation {
-            order.push("stop");
-        }
-        // Accepted Start does not rearm the old validation latch in this original behavior.
         phase(
             &mut fixture,
             if clear_validation {
@@ -354,8 +349,8 @@ fn clear_start_refail_in_one_drain_retains_the_old_episode_until_validation_clea
             },
             Expected {
                 before: playing(false, !clear_validation, 0),
-                after: playing(!clear_validation, true, 8),
-                order,
+                after: playing(false, true, 8),
+                order: vec!["start", "source", "source", "stop"],
                 invalid_targets: vec![],
                 starts: 1,
             },

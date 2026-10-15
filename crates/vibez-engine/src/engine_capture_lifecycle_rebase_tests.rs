@@ -126,7 +126,7 @@ fn pending_stop_rebase_preserves_first_timestamp_with_idle_or_new_active_capture
                 observed,
                 [
                     u64::from(pending && new_start),
-                    1,
+                    u64::from(!new_start),
                     1,
                     1,
                     32,
