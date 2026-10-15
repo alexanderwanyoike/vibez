@@ -62,7 +62,10 @@ impl AudioEngine {
                 || self.section_capture_timing.len() + 2 >= self.section_capture_timing.capacity()
                 || self.pending_bus_cleanup.is_some()
                 || (self.pending_section_record_stop.is_some()
-                    && matches!(self.cmd_rx.peek(), Ok(EngineCommand::ArmSectionRecord { .. })))
+                    && matches!(
+                        self.cmd_rx.peek(),
+                        Ok(EngineCommand::ArmSectionRecord { .. })
+                    ))
                 || self
                     .pending_retirements
                     .capacity()
