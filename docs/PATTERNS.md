@@ -51,12 +51,25 @@ Offline channel preparation preserves that reserved storage.
 that still allocate may only shrink.
 
 AddClip carries a required sender-prepared `PreparedClipInsertion` control.
-Its empty Vec capacity is only a hint. If current live clip/removal storage
-cannot accept the original delta, the engine retains that delta and requests
-empty storage through `ClipInsertionStorageRequested`. One insertion waits at
-a time: current playback continues, but later FIFO commands, including Stop,
-Undo replay and NoteOff, wait for this exchange. Preparation may therefore
-move an edit to a later callback boundary.
+AddNoteClip carries an opaque `PreparedNoteClipInsertion`, which constructs the
+complete empty note clip, its cache and the same control outside the callback.
+Following AddNote commands remain separate FIFO edits. Both operations share
+one pending insertion, mailbox implementation and request/completion event
+family. Capacity is only a hint, never a content limit or a content snapshot.
+If current live clip/removal storage cannot accept the original delta, the
+engine retains that delta and requests empty storage through
+`ClipInsertionStorageRequested`. Current complete clip values move in order
+into the prepared allocation; existing note caches and groove latches move
+with them. Source construction and offline preparation reserve removal
+staging from actual content, and live insertion installs sufficient live and
+staging capacity together.
+
+Current playback continues while one insertion waits, but later FIFO commands,
+including Stop, Undo replay and NoteOff, wait for this exchange. Preparation
+may therefore move an edit to a later callback boundary. Section and launcher
+rendering restore the Arrange source before command drain, so a pending
+insertion edits the current Arrange collection even if an already queued
+musical source transition occurs while storage is prepared.
 
 The App always consumes each request with `request.fulfill()` outside the
 callback, including when project reset or Undo has made its target stale.
