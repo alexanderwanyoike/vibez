@@ -21,6 +21,8 @@ pub(super) fn app() -> super::App {
         plugin_load_requests: Default::default(),
         gain_devices: Default::default(),
         device_meters: Default::default(),
+        delay_panels: Default::default(),
+        empty_delay_panel: Default::default(),
         device_controls: Default::default(),
         empty_device_controls: Default::default(),
         device_presets: Default::default(),
