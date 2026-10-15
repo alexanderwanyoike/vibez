@@ -482,9 +482,10 @@ impl AudioEngine {
         // A queued Section owns the next boundary: the finished one-shot
         // stays silent on the Perform clock until the queue takes over.
         if section_ended
-            && !self.queued_section.as_ref().is_some_and(|queued| {
-                queued.phase == SectionQueuePhase::Waiting
-            })
+            && !self
+                .queued_section
+                .as_ref()
+                .is_some_and(|queued| queued.phase == SectionQueuePhase::Waiting)
         {
             self.stop_section_record();
             self.apply_end_of_section_track_mutes_at_queued_boundary();
@@ -1104,8 +1105,8 @@ mod clip_record_pressure_tests;
 #[path = "engine_resumed_record_pressure_tests.rs"]
 mod resumed_record_pressure_tests;
 #[cfg(test)]
-#[path = "engine_retained_count_in_tests.rs"]
-mod retained_count_in_tests;
-#[cfg(test)]
 #[path = "engine_resumed_section_rejection_tests.rs"]
 mod resumed_section_rejection_tests;
+#[cfg(test)]
+#[path = "engine_retained_count_in_tests.rs"]
+mod retained_count_in_tests;

@@ -144,7 +144,10 @@ impl AudioEngine {
     pub(super) fn presentation_return_has_room(&self) -> bool {
         self.event_tx.slots() > 0
             || self.scheduled_presentation.len() < self.scheduled_presentation.capacity()
-            || self.presentation_state.terminals.can_retain_overflow_owner()
+            || self
+                .presentation_state
+                .terminals
+                .can_retain_overflow_owner()
             || self.pending_retirements.len() < self.pending_retirements.capacity()
     }
 

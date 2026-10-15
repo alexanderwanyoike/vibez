@@ -1,9 +1,12 @@
 //! Channel-bound fallback permits reserve capacity before ownership transfer.
 
+use crate::events::EngineEvent;
 use std::marker::PhantomData;
 use std::rc::Rc;
-use std::sync::{atomic::{AtomicUsize, Ordering}, Arc};
-use crate::events::EngineEvent;
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Arc,
+};
 
 const CAPACITY: usize = 32;
 
@@ -54,21 +57,40 @@ impl WrongQueue {
 
 impl RetirementQueue {
     pub(super) fn new() -> Self {
-        Self { queued: Vec::with_capacity(CAPACITY), ledger: Arc::new(Ledger::default()) }
+        Self {
+            queued: Vec::with_capacity(CAPACITY),
+            ledger: Arc::new(Ledger::default()),
+        }
     }
 
-    pub(super) fn as_slice(&self) -> &[EngineEvent] { &self.queued }
-    pub(super) fn len(&self) -> usize { self.queued.len() }
-    pub(super) fn is_empty(&self) -> bool { self.queued.is_empty() }
-    pub(super) fn capacity(&self) -> usize { CAPACITY }
-    pub(super) fn reserved(&self) -> usize { self.ledger.reserved.load(Ordering::Relaxed) }
-    pub(super) fn available(&self) -> usize { CAPACITY - self.len() - self.reserved() }
+    pub(super) fn as_slice(&self) -> &[EngineEvent] {
+        &self.queued
+    }
+    pub(super) fn len(&self) -> usize {
+        self.queued.len()
+    }
+    pub(super) fn is_empty(&self) -> bool {
+        self.queued.is_empty()
+    }
+    pub(super) fn capacity(&self) -> usize {
+        CAPACITY
+    }
+    pub(super) fn reserved(&self) -> usize {
+        self.ledger.reserved.load(Ordering::Relaxed)
+    }
+    pub(super) fn available(&self) -> usize {
+        CAPACITY - self.len() - self.reserved()
+    }
 
     pub(super) fn reserve(&mut self, count: usize) -> Option<RetirementAllowance> {
-        if count == 0 || count > self.available() { return None; }
+        if count == 0 || count > self.available() {
+            return None;
+        }
         self.ledger.reserved.fetch_add(count, Ordering::Relaxed);
         Some(RetirementAllowance {
-            ledger: Arc::clone(&self.ledger), remaining: count, local: PhantomData,
+            ledger: Arc::clone(&self.ledger),
+            remaining: count,
+            local: PhantomData,
         })
     }
 
@@ -96,7 +118,10 @@ impl RetirementQueue {
                 Publication::Direct
             }
             Err(rtrb::PushError::Full(event)) => {
-                assert!(self.queued.len() < CAPACITY, "the permit already paid for this slot");
+                assert!(
+                    self.queued.len() < CAPACITY,
+                    "the permit already paid for this slot"
+                );
                 // Remove the reservation before installing its occupied slot.
                 // The exclusive queue borrow prevents another producer between them.
                 permit.consume();
@@ -112,21 +137,31 @@ impl RetirementQueue {
             // otherwise available capacity. Full restores its original LIFO place.
             self.ledger.reserved.fetch_add(1, Ordering::Relaxed);
             let permit = RetirementPermit {
-                ledger: Arc::clone(&self.ledger), active: true, local: PhantomData,
+                ledger: Arc::clone(&self.ledger),
+                active: true,
+                local: PhantomData,
             };
-            if self.publish_reserved(events, event, permit) == Publication::Retained { break; }
+            if self.publish_reserved(events, event, permit) == Publication::Retained {
+                break;
+            }
         }
     }
 }
 
 impl RetirementAllowance {
-    pub(super) fn remaining(&self) -> usize { self.remaining }
+    pub(super) fn remaining(&self) -> usize {
+        self.remaining
+    }
 
     pub(super) fn next(&mut self) -> Option<RetirementPermit> {
-        if self.remaining == 0 { return None; }
+        if self.remaining == 0 {
+            return None;
+        }
         self.remaining -= 1;
         Some(RetirementPermit {
-            ledger: Arc::clone(&self.ledger), active: true, local: PhantomData,
+            ledger: Arc::clone(&self.ledger),
+            active: true,
+            local: PhantomData,
         })
     }
 }
@@ -134,7 +169,10 @@ impl RetirementAllowance {
 impl Drop for RetirementAllowance {
     fn drop(&mut self) {
         if self.remaining != 0 {
-            let previous = self.ledger.reserved.fetch_sub(self.remaining, Ordering::Relaxed);
+            let previous = self
+                .ledger
+                .reserved
+                .fetch_sub(self.remaining, Ordering::Relaxed);
             debug_assert!(previous >= self.remaining);
         }
     }
@@ -151,7 +189,9 @@ impl RetirementPermit {
 
 impl Drop for RetirementPermit {
     fn drop(&mut self) {
-        if self.active { self.consume(); }
+        if self.active {
+            self.consume();
+        }
     }
 }
 

@@ -127,16 +127,21 @@ impl AudioEngine {
     }
 
     pub(crate) fn flush_returning_section(&mut self) -> bool {
-        if !self.queued_section.as_ref().is_some_and(|queued| {
-            queued.phase == SectionQueuePhase::Returning
-        }) {
+        if !self
+            .queued_section
+            .as_ref()
+            .is_some_and(|queued| queued.phase == SectionQueuePhase::Returning)
+        {
             return true;
         }
         self.flush_presentation();
         if !self.presentation_return_has_room() {
             return false;
         }
-        let queued = self.queued_section.take().expect("one returning Section source");
+        let queued = self
+            .queued_section
+            .take()
+            .expect("one returning Section source");
         let event = EngineEvent::SectionQueueCancelled {
             retired: queued.prepared,
         };
