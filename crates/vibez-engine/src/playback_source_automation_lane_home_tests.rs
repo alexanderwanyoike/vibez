@@ -163,7 +163,9 @@ fn queued_section_with_colliding_lane_id_keeps_arrange_growth_and_perform_owners
     assert_eq!(completed.id(), operation);
     assert_eq!(completed.outcome, ClipInsertionOutcome::Applied);
     assert_eq!((completed.track_id, completed.target), (track_id, ClipInsertionTarget::AutomationLane(expected_incoming.id)));
-    assert_eq!(crate::retirement::tests::allocations(|| drop(completed)), (0, 4));
+    // Default1 retains its unused eager Vec plus the old outer Vec, Box and
+    // two ring allocations; the held operation ID excludes its Arc from Drop.
+    assert_eq!(crate::retirement::tests::allocations(|| drop(completed)), (0, 5));
     let channel = &engine.tracks()[0];
     arrange.assert_unchanged(&channel.playback_source);
     assert_eq!(channel.playback_source.automation, [expected_resident, expected_incoming]);
