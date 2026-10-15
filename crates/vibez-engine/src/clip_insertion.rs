@@ -169,15 +169,15 @@ impl PreparedClipInsertion {
         let (_, target) = self.target.expect("the command supplies its target");
         // Replacing the first existing ID never needs more outer storage,
         // even when the channel is exactly full or the target changes.
-        if let Some(ClipInsertionDelta::AutomationLane(lane)) = self.clip.as_ref() {
-            if let Some(index) = source.automation.iter().position(|current| current.id == lane.id) {
-                let Some(ClipInsertionDelta::AutomationLane(lane)) = self.clip.take() else {
-                    unreachable!("the opaque lane wrapper owns one original lane");
-                };
-                return ClipInsertionAttempt::Applied(Some(std::mem::replace(
-                    &mut source.automation[index], lane,
-                )));
-            }
+        if let Some(ClipInsertionDelta::AutomationLane(lane)) = self.clip.as_ref()
+            && let Some(index) = source.automation.iter().position(|current| current.id == lane.id)
+        {
+            let Some(ClipInsertionDelta::AutomationLane(lane)) = self.clip.take() else {
+                unreachable!("the opaque lane wrapper owns one original lane");
+            };
+            return ClipInsertionAttempt::Applied(Some(std::mem::replace(
+                &mut source.automation[index], lane,
+            )));
         }
         let storage = self.reply.as_mut().unwrap_or(&mut self.storage);
         let (ready, length) = match (
