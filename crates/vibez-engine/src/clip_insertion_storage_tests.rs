@@ -90,6 +90,9 @@ fn prepared_source_and_live_growth_preserve_matching_storage_at_content_boundari
             panic!("full prepared source must request real growth");
         };
         assert_eq!(request.id, incoming.id);
+        // Every process_block publishes position, including this zero-frame request callback.
+        assert_eq!(events.pop().unwrap(), EngineEvent::PlaybackPosition(8));
+        assert!(events.pop().is_err());
         request.fulfill();
         callback(&mut engine, false);
         let EngineEvent::ClipInsertionCompleted(completed) = events.pop().unwrap() else {
