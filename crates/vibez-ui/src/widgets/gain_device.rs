@@ -682,10 +682,13 @@ mod tests {
             arrange(medium(200.0), true),
             Arrangement::AdvancedBeside { .. }
         ));
-        assert!(matches!(
-            arrange(medium(100.0), true),
-            Arrangement::AdvancedBeside { .. }
-        ));
+        assert!(
+            matches!(
+                arrange(medium(100.0), true),
+                Arrangement::AdvancedOnly { .. }
+            ),
+            "short trims are too wide to sit beside the meters of a medium card"
+        );
         assert!(matches!(
             arrange(compact(200.0), true),
             Arrangement::AdvancedOnly { .. }
