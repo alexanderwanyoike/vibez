@@ -312,7 +312,7 @@ pub enum EngineCommand {
     AddNote {
         track_id: TrackId,
         clip_id: ClipId,
-        note: MidiNote,
+        insertion: crate::clip_insertion::PreparedNoteInsertion,
     },
     RemoveNote {
         track_id: TrackId,
