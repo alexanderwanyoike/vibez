@@ -483,10 +483,6 @@ fn validation_preserves_order_first_invalid_reason_and_accumulated_local_failure
             held_device.is_some(),
             matches!(case, ValidationCase::LocalAway)
         );
-        eprintln!("device-observation-b-validation: case={case:?}; calls={calls:?}; order={order:?}; capture_stops={capture_stops:?}; failure_owner={}; failure_reason={:?}; valid={}; playing={}; capture={}; local_episode={local}",
-            failure.map_or(0, |(_, effect, _)| effect.map_or(1, |id| if id == fixture.effects[0] { 2 } else { 3 })),
-            failure.map(|(_, _, reason)| reason), fixture.engine.compensation_plan.applied_plan_is_valid(),
-            fixture.engine.transport.is_playing(), fixture.engine.capture_lifecycle.is_active());
     }
 }
 
@@ -578,9 +574,6 @@ fn handoff_classifies_recovery_after_stop_and_full_restoration_keeps_the_same_ow
                 fixture.engine.capture_lifecycle.is_active(),
                 "handoff alone does not run the validation Capture close"
             );
-            eprintln!("device-observation-b-handoff: full={full}; before_local={}; after_local={after_local}; calls={calls:?}; returned={}; same_owner=true; issued={}; suspended={}; pending={}; capture={}",
-                !after_local, returned.is_some(), fixture.engine.device_handoff.last_issued_identity(),
-                fixture.engine.device_handoff.is_suspended(), pending.is_some(), fixture.engine.capture_lifecycle.is_active());
         }
     }
 }

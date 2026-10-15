@@ -230,22 +230,6 @@ fn render_graph(fixture: &mut Fixture, output: &mut [f32], selected: &mut [f32],
     );
 }
 
-fn report(
-    case: &str,
-    channels: usize,
-    calls: &[usize],
-    output: &[f32],
-    selected: &[f32],
-    engine: &AudioEngine,
-) {
-    let output_bits: Vec<_> = output.iter().map(|value| value.to_bits()).collect();
-    let selected_bits: Vec<_> = selected.iter().map(|value| value.to_bits()).collect();
-    eprintln!("device-observation-a: case={case}; channels={channels}; calls={calls:?}; arrange={}; performance={}; output_position={}; playing={}; loss={}; resume={}; output_bits={output_bits:?}; selected_bits={selected_bits:?}",
-        engine.transport.position(), engine.performance_position, engine.output_position,
-        engine.transport.is_playing(), engine.output_gate.remaining_loss_frames(),
-        engine.output_gate.remaining_resume_frames());
-}
-
 #[test]
 fn oversized_graph_segments_observe_new_and_cleared_requests_without_reusing_parent_permission() {
     for channels in [1, 2, 8] {
@@ -290,18 +274,6 @@ fn oversized_graph_segments_observe_new_and_cleared_requests_without_reusing_par
             );
             assert_eq!(fixture.engine.transport.position(), 64);
             assert_eq!(fixture.engine.output_position, 64);
-            report(
-                if clear_later {
-                    "recursive-clear"
-                } else {
-                    "recursive-request"
-                },
-                channels,
-                &calls,
-                &output,
-                &selected,
-                &fixture.engine,
-            );
         }
     }
 }
@@ -319,14 +291,6 @@ fn wider_layout_reentry_observes_a_request_after_its_outer_gate_and_zeros_both_o
         let calls = fixture.trace.observed();
         assert_eq!(calls, [QUERY_CLEAR, QUERY_REQUESTED, RECOVERY_CLEAR]);
         assert_eq!(fixture.engine.transport.position(), 64);
-        report(
-            "layout-reentry",
-            channels,
-            &calls,
-            &output,
-            &selected,
-            &fixture.engine,
-        );
     }
 }
 
@@ -347,7 +311,6 @@ fn empty_graph_entries_keep_the_original_request_observation_without_processing_
         );
         assert_eq!(fixture.engine.transport.position(), 64);
         assert_eq!(fixture.engine.output_position, 64);
-        report("empty-entry", channels, &calls, &[], &[], &fixture.engine);
     }
 }
 
@@ -446,17 +409,5 @@ fn callback_final_gate_observes_the_last_process_request_and_preserves_loss_fade
                     | EngineEvent::PlaybackStopped
             ));
         }
-        report(
-            match mode {
-                CallbackSource::Arrange => "final-arrange",
-                CallbackSource::IdleInstrument => "final-idle",
-                CallbackSource::ArrangeLoop => "final-loop",
-            },
-            2,
-            &calls,
-            &output,
-            &selected,
-            &fixture.engine,
-        );
     }
 }
