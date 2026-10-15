@@ -247,6 +247,7 @@ fn assert_export_preserves_insert_echo(
         .push(Command::SetArrangementRecording(true))
         .unwrap();
     commands.push(Command::Play).unwrap();
+    crate::test_support::fulfill_insertion_setup(&mut engine, &mut events);
     let mut live = vec![0.0; request.range_samples.1 as usize * CHANNELS];
     for block in live.chunks_mut(BLOCK_FRAMES * 2) {
         engine.process_block(AudioProcessBlock::new(block, 2));

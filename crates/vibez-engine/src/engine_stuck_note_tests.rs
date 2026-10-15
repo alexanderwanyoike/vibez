@@ -200,7 +200,7 @@ fn dogfood_clip_loop_one_bar_in_two_bar_clip() {
 
 fn looped_note_ons_per_bar(batch_render: bool) -> Vec<usize> {
     let track_id = TrackId::new();
-    let (mut engine, mut cmd_tx, _event_rx) =
+    let (mut engine, mut cmd_tx, mut insertion_events) =
         graph_engine(&[routing_channel(track_id), routing_channel(TrackId::MASTER)]);
     let events = Arc::new(Mutex::new(Vec::new()));
     let clip_id = ClipId::new();
@@ -245,6 +245,7 @@ fn looped_note_ons_per_bar(batch_render: bool) -> Vec<usize> {
             .unwrap();
     }
     cmd_tx.push(EngineCommand::Play).unwrap();
+    crate::test_support::fulfill_insertion_setup(&mut engine, &mut insertion_events);
 
     // At 44.1 kHz and 120 BPM, one four-beat bar is 88,200 frames. This
     // production-rate boundary catches adjacent-frame retriggers that a tiny
