@@ -26,16 +26,25 @@ pub enum Page {
     History,
 }
 
+/// Advanced's two groups when there is room for only one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AdvancedPage {
+    #[default]
+    Dynamics,
+    Detector,
+}
+
 #[derive(Debug, Clone)]
 pub enum CompressorMsg {
     ToggleAdvanced(EffectId),
     ShowPage(EffectId, Page),
+    ShowAdvancedPage(EffectId, AdvancedPage),
 }
 
 impl CompressorMsg {
     pub fn effect_id(&self) -> EffectId {
         match self {
-            Self::ToggleAdvanced(id) | Self::ShowPage(id, _) => *id,
+            Self::ToggleAdvanced(id) | Self::ShowPage(id, _) | Self::ShowAdvancedPage(id, _) => *id,
         }
     }
 }
@@ -51,6 +60,7 @@ pub struct ReductionPoint {
 pub struct CompressorPanelState {
     pub advanced: bool,
     pub page: Page,
+    pub advanced_page: AdvancedPage,
     pub input: MeterValues,
     pub output: MeterValues,
     /// Decibels of reduction now, the larger of the two channels.
@@ -64,6 +74,7 @@ impl CompressorPanelState {
         match message {
             CompressorMsg::ToggleAdvanced(_) => self.advanced = !self.advanced,
             CompressorMsg::ShowPage(_, page) => self.page = page,
+            CompressorMsg::ShowAdvancedPage(_, page) => self.advanced_page = page,
         }
     }
 

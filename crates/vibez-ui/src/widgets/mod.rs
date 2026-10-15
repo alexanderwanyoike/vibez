@@ -4,6 +4,8 @@ pub mod browser_drag_ghost;
 pub mod browser_waveform;
 mod clip_loop_markers;
 pub mod clip_slot;
+pub mod compressor_device;
+pub mod compressor_display;
 pub mod device_chrome;
 pub mod device_controls;
 pub(crate) mod device_preset_bar;
