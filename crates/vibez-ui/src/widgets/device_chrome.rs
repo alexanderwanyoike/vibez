@@ -15,6 +15,32 @@ pub const PLUGIN_CARD_W: f32 = 196.0;
 /// queried while building the view, so names are fitted by estimate.
 const TITLE_CHAR_W: f32 = 6.2;
 
+/// The widths a native device lays itself out for.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CardWidths {
+    pub compact: f32,
+    pub medium: f32,
+    pub max: f32,
+}
+
+impl CardWidths {
+    /// Compact until the medium layout fits, then everything offered up to
+    /// the maximum.
+    pub fn card_width(self, available: f32) -> f32 {
+        if available >= self.medium {
+            available.min(self.max)
+        } else {
+            self.compact
+        }
+    }
+
+    /// Width in a device chain, given the share the other cards leave and
+    /// the section's whole width.
+    pub fn chain_width(self, share: f32, _section: f32) -> f32 {
+        self.card_width(share)
+    }
+}
+
 /// Thin vertical rule separating sections inside a device body.
 pub fn divider() -> Element<'static, Message> {
     container(text(""))

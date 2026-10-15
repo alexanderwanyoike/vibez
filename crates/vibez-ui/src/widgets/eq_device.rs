@@ -54,14 +54,12 @@ pub const STRIP_W: f32 = BAND_GROUP_W * 4.0 + 3.0 + PAD * 2.0;
 pub const FULL_W: f32 = STRIP_W + 1.0 + OUTPUT_W;
 pub const MAX_W: f32 = 1100.0;
 
-/// Card width for a share of the device section.
-pub fn card_width(available: f32) -> f32 {
-    if available >= MEDIUM_W {
-        available.min(MAX_W)
-    } else {
-        COMPACT_W
-    }
-}
+pub const WIDTHS: crate::widgets::device_chrome::CardWidths =
+    crate::widgets::device_chrome::CardWidths {
+        compact: COMPACT_W,
+        medium: MEDIUM_W,
+        max: MAX_W,
+    };
 
 /// What fills the space between the preset row and anything below it.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -744,8 +742,8 @@ mod tests {
 
     #[test]
     fn card_width_is_compact_until_the_side_panel_fits() {
-        assert_eq!(card_width(200.0), COMPACT_W);
-        assert_eq!(card_width(MEDIUM_W), MEDIUM_W);
-        assert_eq!(card_width(5000.0), MAX_W);
+        assert_eq!(WIDTHS.card_width(200.0), COMPACT_W);
+        assert_eq!(WIDTHS.card_width(MEDIUM_W), MEDIUM_W);
+        assert_eq!(WIDTHS.card_width(5000.0), MAX_W);
     }
 }

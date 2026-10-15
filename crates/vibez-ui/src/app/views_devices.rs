@@ -132,19 +132,20 @@ impl App {
                         track_id,
                         effect,
                         track_color,
-                        crate::widgets::gain_device::card_width(share),
+                        crate::widgets::gain_device::WIDTHS.chain_width(share, available_width),
                     ),
                     Flexible::Eq => self.eq_device_body(
                         track_id,
                         effect,
                         track_color,
-                        crate::widgets::eq_device::card_width(share),
+                        crate::widgets::eq_device::WIDTHS.chain_width(share, available_width),
                     ),
                     Flexible::Compressor => self.compressor_device_body(
                         track_id,
                         effect,
                         track_color,
-                        crate::widgets::compressor_device::card_width(share),
+                        crate::widgets::compressor_device::WIDTHS
+                            .chain_width(share, available_width),
                     ),
                 };
                 cards[position] = Some(view_effect_slot(

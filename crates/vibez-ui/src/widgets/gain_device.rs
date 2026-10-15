@@ -41,15 +41,12 @@ const MAIN_MAX_H: f32 = 150.0;
 const MAIN_MIN_H: f32 = 92.0;
 const ADVANCED_H: f32 = 76.0;
 
-/// Card width for a share of the device section: compact until the history
-/// fits, then everything the section offers up to a readable maximum.
-pub fn card_width(available: f32) -> f32 {
-    if available >= MEDIUM_W {
-        available.min(MAX_W)
-    } else {
-        COMPACT_W
-    }
-}
+pub const WIDTHS: crate::widgets::device_chrome::CardWidths =
+    crate::widgets::device_chrome::CardWidths {
+        compact: COMPACT_W,
+        medium: MEDIUM_W,
+        max: MAX_W,
+    };
 
 /// How the body divides its measured height. Advanced either stacks under
 /// the main controls or takes their place; the body never scrolls.
@@ -712,9 +709,9 @@ mod tests {
 
     #[test]
     fn card_width_is_compact_until_the_history_fits() {
-        assert_eq!(card_width(200.0), COMPACT_W);
-        assert_eq!(card_width(MEDIUM_W - 1.0), COMPACT_W);
-        assert_eq!(card_width(MEDIUM_W), MEDIUM_W);
-        assert_eq!(card_width(4000.0), MAX_W);
+        assert_eq!(WIDTHS.card_width(200.0), COMPACT_W);
+        assert_eq!(WIDTHS.card_width(MEDIUM_W - 1.0), COMPACT_W);
+        assert_eq!(WIDTHS.card_width(MEDIUM_W), MEDIUM_W);
+        assert_eq!(WIDTHS.card_width(4000.0), MAX_W);
     }
 }
