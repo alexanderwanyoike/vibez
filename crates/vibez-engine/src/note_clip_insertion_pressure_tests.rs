@@ -355,3 +355,6 @@ fn ready_or_abandoned_note_clip_waits_at_zero_and_uses_only_the_last_completion_
         assert_eq!(identity.strong_count(), 0);
     }
 }
+
+#[path = "note_clip_insertion_lifecycle_tests.rs"]
+mod lifecycle_tests;
