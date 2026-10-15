@@ -6,7 +6,7 @@ use vibez_core::midi::{InstrumentKind, MidiNote};
 use vibez_core::perform::GrooveGrid;
 use vibez_core::routing::RoutingChannel;
 use vibez_engine::clip_insertion::{
-    ClipInsertionId, ClipInsertionOutcome, PreparedNoteClipInsertion,
+    ClipInsertionId, ClipInsertionOutcome, PreparedNoteClipInsertion, PreparedNoteInsertion,
 };
 use vibez_engine::commands::EngineCommand;
 use vibez_engine::engine::{AudioEngine, AudioProcessBlock};
@@ -63,6 +63,7 @@ fn assert_signal(output: &[f32], expected: f32) {
 struct Expected {
     id: ClipId,
     operation: ClipInsertionId,
+    note_operation: ClipInsertionId,
     position: f64,
     duration: f64,
     note: MidiNote,
@@ -152,16 +153,15 @@ fn native_note_consumer_fulfills_stale_hints_and_preserves_first_duplicate_note_
         };
         // The separate existing AddNote command must stay behind its own empty
         // insertion; duplicate IDs continue resolving to the first resident clip.
+        let insertion = PreparedNoteInsertion::new(note);
+        let note_operation = insertion.id();
         commands
-            .push(EngineCommand::AddNote {
-                track_id,
-                clip_id: id,
-                insertion: crate::clip_insertion::PreparedNoteInsertion::new(note),
-            })
+            .push(EngineCommand::AddNote { track_id, clip_id: id, insertion })
             .unwrap();
         expected.push(Expected {
             id,
             operation,
+            note_operation,
             position,
             duration,
             note,
@@ -190,17 +190,18 @@ fn native_note_consumer_fulfills_stale_hints_and_preserves_first_duplicate_note_
         resident_notes
     );
     let mut completed = 0;
+    let mut notes_completed = 0;
     let mut requested = Vec::new();
-    // Every insertion can request at most one current-capacity exchange.
-    // Servicing each request off callback gives this finite protocol bound.
-    for _ in 0..=expected.len() {
+    // Each outer clip and its following note can request one exchange.
+    // Servicing both actual operations preserves the original public FIFO.
+    for _ in 0..=expected.len() * 2 {
         render(&mut engine, false);
         while let Ok(event) = events.pop() {
             match event {
                 EngineEvent::ClipInsertionStorageRequested(request) => {
                     let item = expected
                         .iter()
-                        .find(|item| item.operation == request.id)
+                        .find(|item| item.operation == request.id || item.note_operation == request.id)
                         .unwrap();
                     assert_eq!((request.track_id, request.clip_id), (track_id, item.id));
                     assert!(!requested.contains(&request.id));
@@ -208,21 +209,31 @@ fn native_note_consumer_fulfills_stale_hints_and_preserves_first_duplicate_note_
                     request.fulfill();
                 }
                 EngineEvent::ClipInsertionCompleted(value) => {
-                    let item = &expected[completed];
-                    assert_eq!(value.id(), item.operation);
+                    let item = if completed == notes_completed {
+                        let item = &expected[completed];
+                        assert_eq!(value.id(), item.operation);
+                        completed += 1;
+                        item
+                    } else {
+                        assert_eq!(completed, notes_completed + 1);
+                        let item = &expected[notes_completed];
+                        assert_eq!(value.id(), item.note_operation);
+                        notes_completed += 1;
+                        item
+                    };
                     assert_eq!((value.track_id, value.clip_id), (track_id, item.id));
                     assert_eq!(value.outcome, ClipInsertionOutcome::Applied);
-                    completed += 1;
                     drop(value);
                 }
                 _ => {}
             }
         }
-        if completed == expected.len() {
+        if completed == expected.len() && notes_completed == expected.len() {
             break;
         }
     }
     assert_eq!(completed, 257);
+    assert_eq!(notes_completed, 257);
     assert!(!requested.is_empty());
     assert_eq!(
         commands.slots(),
