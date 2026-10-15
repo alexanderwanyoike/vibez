@@ -332,21 +332,6 @@ fn clip_segment_frames(count: usize, remaining: usize) -> usize {
     }
 }
 
-#[cfg(test)]
-mod segment_tests {
-    use super::clip_segment_frames;
-
-    #[test]
-    fn zero_length_segment_renders_the_remainder_without_spinning() {
-        for remaining in [1, 32, 512] {
-            assert_eq!(clip_segment_frames(0, remaining), remaining);
-            for count in [1, remaining] {
-                assert_eq!(clip_segment_frames(count, remaining), count);
-            }
-        }
-    }
-}
-
 pub(super) struct ClipEventContext<'a> {
     pub(super) routing: &'a crate::routing::PreparedRouting,
     pub(super) physical: u64,
@@ -391,3 +376,19 @@ impl ClipEventContext<'_> {
         super::presentation_queue::ScheduledPresentation { due, event }
     }
 }
+
+#[cfg(test)]
+mod segment_tests {
+    use super::clip_segment_frames;
+
+    #[test]
+    fn zero_length_segment_renders_the_remainder_without_spinning() {
+        for remaining in [1, 32, 512] {
+            assert_eq!(clip_segment_frames(0, remaining), remaining);
+            for count in [1, remaining] {
+                assert_eq!(clip_segment_frames(count, remaining), count);
+            }
+        }
+    }
+}
+
