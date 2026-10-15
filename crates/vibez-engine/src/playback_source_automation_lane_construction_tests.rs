@@ -37,6 +37,14 @@ fn callback(engine: &mut AudioEngine) {
 }
 
 fn telemetry(events: &mut rtrb::Consumer<EngineEvent>) {
+    assert_eq!(
+        events.pop().unwrap(),
+        EngineEvent::TrackMeter(crate::events::TrackMeterEvent {
+            track_id: TrackId::MASTER,
+            peak_l: 0.0,
+            peak_r: 0.0,
+        })
+    );
     assert!(matches!(
         events.pop().unwrap(),
         EngineEvent::PlaybackPosition(0)
