@@ -176,7 +176,6 @@ mod drum_rack_preparation;
 mod engine_events;
 mod gain_devices;
 mod gate_devices;
-mod gate_devices;
 mod keyboard;
 mod local_watcher;
 mod menu_lifecycle;
