@@ -417,8 +417,6 @@ fn stale_old_reply_preserves_new_token_metadata_parameters_and_applied_graph() {
             }
             let mut retired_old = None;
             let mut stale_plan_returns = 0;
-            let mut reason_roundtrip = false;
-            let mut old_parameter_bits = [0; 2];
             while let Ok(event) = events.pop() {
                 match event {
                     EngineEvent::RoutingRetired(plan) => {
@@ -434,7 +432,7 @@ fn stale_old_reply_preserves_new_token_metadata_parameters_and_applied_graph() {
                         assert!(retired_old.is_none());
                         assert_eq!(device.owner_identity(), old_identity);
                         assert_eq!(device.handoff_id(), old_id);
-                        reason_roundtrip = if rejected {
+                        let reason_roundtrip = if rejected {
                             reason.as_ref().is_some_and(|reason| {
                                 reason == "stale old owner must not consume newer parameter intent"
                                     && reason.as_ptr() as usize == reason_identity
@@ -447,7 +445,7 @@ fn stale_old_reply_preserves_new_token_metadata_parameters_and_applied_graph() {
                         else {
                             panic!("old effect owner")
                         };
-                        old_parameter_bits = [
+                        let old_parameter_bits = [
                             slot.effect.get_param(0).to_bits(),
                             slot.effect.get_param(1).to_bits(),
                         ];
