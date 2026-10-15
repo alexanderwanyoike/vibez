@@ -992,6 +992,10 @@ mod capture_lifecycle_episode_tests;
 mod capture_start_rearm_tests;
 
 #[cfg(test)]
+#[path = "engine_capture_start_rearm_control_tests.rs"]
+mod capture_start_rearm_control_tests;
+
+#[cfg(test)]
 #[path = "engine_capture_lifecycle_recovery_tests.rs"]
 mod capture_lifecycle_recovery_tests;
 
