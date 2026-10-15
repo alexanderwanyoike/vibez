@@ -3,7 +3,7 @@
 use crate::{
     domains::{
         delay_layout::{Control, Page},
-        delay_values,
+        delay_readouts, delay_values,
         device_controls::DeviceControlState,
         devices::DevicesMsg,
     },
@@ -278,12 +278,7 @@ pub fn bank<'a>(
                 .height(control.bounds.height),
         );
     }
-    let detail = snapshot.map_or_else(|| "Actual timing and Duck attenuation unavailable".into(), |state|
-        format!("Applied BPM {:.2}. L old/destination {:.2}/{:.2} ms; R {:.2}/{:.2} ms. Duck {:.1} dB. Right timing is retained while linked.",
-            state.bpm, state.lines[0].old_samples * 1000.0 / f64::from(state.sample_rate),
-            state.lines[0].destination_samples * 1000.0 / f64::from(state.sample_rate),
-            state.lines[1].old_samples * 1000.0 / f64::from(state.sample_rate),
-            state.lines[1].destination_samples * 1000.0 / f64::from(state.sample_rate), state.duck_attenuation_db));
+    let detail = delay_readouts::bank_tooltip(snapshot);
     tooltip(
         bank,
         text(detail).size(9).width(320.0),
