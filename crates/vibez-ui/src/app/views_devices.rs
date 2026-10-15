@@ -22,10 +22,13 @@ const CHAIN_SPACING: f32 = 6.0;
 const SYNTH_CARD_W: f32 = 570.0;
 const SAMPLER_CARD_W: f32 = 560.0;
 const PLACEHOLDER_W: f32 = 120.0;
-const DISPLAY_W: f32 = 380.0;
-const BAND_COL_W: f32 = 50.0;
-/// Padding (20), display, divider, four band columns and their spacing.
-const EQ_CARD_W: f32 = DISPLAY_W + 4.0 * (BAND_COL_W + 4.0) + 48.0;
+
+/// Native devices that lay themselves out from the width they are given.
+#[derive(Clone, Copy)]
+enum Flexible {
+    Gain,
+    Eq,
+}
 
 impl App {
     /// Build the device chain for the detail panel.
@@ -77,15 +80,15 @@ impl App {
         available_width: f32,
     ) -> Element<'a, Message> {
         use crate::widgets::effect_slot::card_width;
-        // Every other card is built first and measured, so each Gain can take
-        // its share of whatever width the section has left.
+        // Every other card is built first and measured, so each flexible
+        // device can take its share of whatever width the section has left.
         let mut cards: Vec<Option<Element<'a, Message>>> = Vec::new();
         let mut used = 0.0;
         if let Some((card, width)) = self.instrument_card(track_id, track, track_color) {
             cards.push(Some(card));
             used += width;
         }
-        let mut gains = Vec::new();
+        let mut flexible = Vec::new();
         for effect in &track.effects {
             let sidechain = view_sidechain(
                 track_id,
@@ -94,46 +97,52 @@ impl App {
                 &self.state.project_tracks.buses,
                 &self.state.devices,
             );
-            if crate::domains::gain::is_native_gain(effect) {
+            let kind = if crate::domains::gain::is_native_gain(effect) {
+                Some(Flexible::Gain)
+            } else if crate::domains::eq::is_native_eq(effect) {
+                Some(Flexible::Eq)
+            } else {
+                None
+            };
+            if let Some(kind) = kind {
                 used += card_width(effect, Some(0.0), sidechain.is_some());
-                gains.push((cards.len(), effect, sidechain));
+                flexible.push((cards.len(), effect, sidechain, kind));
                 cards.push(None);
                 continue;
             }
-            let custom = (effect.effect_type == vibez_core::effect::EffectType::Eq
-                && effect.plugin_ref.is_none())
-            .then(|| {
-                let (content, width) = self.eq_device_body(track_id, effect);
-                DeviceBody {
-                    content,
-                    width,
-                    padding: iced::Padding::from([8.0, 10.0]),
-                }
-            });
-            used += card_width(
-                effect,
-                custom.as_ref().map(|body| body.width),
-                sidechain.is_some(),
-            );
+            used += card_width(effect, None, sidechain.is_some());
             cards.push(Some(view_effect_slot(
                 track_id,
                 effect,
                 track_color,
-                custom,
+                None,
                 sidechain,
                 self.state.transport.sample_rate,
             )));
         }
-        if !gains.is_empty() {
+        if !flexible.is_empty() {
             let spacing = CHAIN_SPACING * cards.len().saturating_sub(1) as f32;
-            let share = (available_width - used - spacing) / gains.len() as f32;
-            let width = crate::widgets::gain_device::card_width(share);
-            for (position, effect, sidechain) in gains {
+            let share = (available_width - used - spacing) / flexible.len() as f32;
+            for (position, effect, sidechain, kind) in flexible {
+                let body = match kind {
+                    Flexible::Gain => self.gain_device_body(
+                        track_id,
+                        effect,
+                        track_color,
+                        crate::widgets::gain_device::card_width(share),
+                    ),
+                    Flexible::Eq => self.eq_device_body(
+                        track_id,
+                        effect,
+                        track_color,
+                        crate::widgets::eq_device::card_width(share),
+                    ),
+                };
                 cards[position] = Some(view_effect_slot(
                     track_id,
                     effect,
                     track_color,
-                    Some(self.gain_device_body(track_id, effect, track_color, width)),
+                    Some(body),
                     sidechain,
                     self.state.transport.sample_rate,
                 ));
@@ -239,148 +248,38 @@ impl App {
         }
     }
 
-    /// Channel EQ card body: response display over the live analyser
-    /// on the left, four color-coded band columns on the right. The
-    /// analyser follows the selected track, which is exactly the
-    /// track whose device chain is on screen.
     fn eq_device_body<'a>(
         &'a self,
         track_id: TrackId,
         effect: &'a crate::state::UiEffect,
-    ) -> (Element<'a, Message>, f32) {
-        use crate::widgets::effect_knob::{format_value, EffectKnobWidget};
-        use crate::widgets::eq_display::EqDisplayWidget;
-
-        let display = EqDisplayWidget {
-            track_id,
-            effect_id: effect.id,
-            params: effect.params.clone(),
-            descriptors: effect.descriptors,
-            bypass: effect.bypass,
-            sample_rate: self.state.transport.sample_rate as f32,
-            spectrum: self
-                .eq_devices
-                .spectrum_for(effect.id)
-                .map(|spectrum| spectrum.bins.clone())
-                .unwrap_or_default(),
-            spectrum_active: self
-                .eq_devices
-                .spectrum_for(effect.id)
-                .is_some_and(|spectrum| spectrum.active),
-        };
-        let display_canvas: Element<'a, Message> = canvas(display)
-            .width(Length::Fixed(DISPLAY_W))
-            .height(Length::Fill)
-            .into();
-
-        // Band columns, left to right along the frequency axis:
-        // (label, gain idx, freq idx, third idx, bell?, color)
-        let bands: [(&str, usize, usize, usize, bool, Color); 4] = [
-            ("LF", 0, 1, 2, true, th::eq_lf()),
-            ("LMF", 3, 4, 5, false, th::eq_lmf()),
-            ("HMF", 6, 7, 8, false, th::eq_hmf()),
-            ("HF", 9, 10, 11, true, th::eq_hf()),
-        ];
-
-        let knob_color = if effect.bypass {
-            th::text_muted()
-        } else {
-            th::text_dim()
-        };
-        let mut band_row = row![].spacing(4);
-        for (label, gain_i, freq_i, third_i, is_bell, color) in bands {
-            let band_color = if effect.bypass { knob_color } else { color };
-            let knob = |i: usize, size: f32| -> Element<'a, Message> {
-                let d = &effect.descriptors[i];
-                let w = EffectKnobWidget::new(
-                    track_id,
-                    effect.id,
-                    i,
-                    effect.params.get(i).copied().unwrap_or(d.default),
-                    d.min,
-                    d.max,
-                    d.default,
-                    band_color,
-                );
-                canvas(w)
-                    .width(Length::Fixed(size))
-                    .height(Length::Fixed(size))
-                    .into()
-            };
-            let gain_v = effect.params.get(gain_i).copied().unwrap_or(0.0);
-            let freq_v = effect.params.get(freq_i).copied().unwrap_or(0.0);
-
-            let mut col = column![
-                text(label).size(9).color(band_color),
-                knob(gain_i, 28.0),
-                text(format!("{gain_v:+.1}")).size(8).color(th::text_dim()),
-                knob(freq_i, 24.0),
-                text(format_value(freq_v, "Hz"))
-                    .size(8)
-                    .color(th::text_dim()),
-            ]
-            .spacing(2)
-            .width(Length::Fixed(BAND_COL_W))
-            .align_x(iced::Alignment::Center);
-
-            if is_bell {
-                let bell_on = effect.params.get(third_i).copied().unwrap_or(0.0) >= 0.5;
-                let bell = button(text("BELL").size(6).color(if bell_on {
-                    th::bg_dark()
-                } else {
-                    th::text_dim()
-                }))
-                .on_press(Message::set_effect_param(
-                    track_id,
-                    effect.id,
-                    third_i,
-                    if bell_on { 0.0 } else { 1.0 },
-                ))
-                .padding([3, 6])
-                .style(move |_theme: &Theme, _status| button::Style {
-                    background: Some(if bell_on {
-                        band_color.into()
-                    } else {
-                        th::bg_elevated().into()
-                    }),
-                    text_color: if bell_on {
-                        th::bg_dark()
-                    } else {
-                        th::text_dim()
-                    },
-                    border: iced::Border {
-                        color: th::border(),
-                        width: 1.0,
-                        radius: 2.0.into(),
-                    },
-                    ..Default::default()
-                });
-                col = col.push(bell);
-            } else {
-                let q_v = effect.params.get(third_i).copied().unwrap_or(0.7);
-                col = col.push(
-                    row![
-                        text("Q").size(8).color(th::text_dim()),
-                        knob(third_i, 20.0),
-                        text(format!("{q_v:.2}")).size(8).color(th::text_dim()),
-                    ]
-                    .spacing(2)
-                    .align_y(iced::Alignment::Center),
-                );
+        accent: Color,
+        width: f32,
+    ) -> DeviceBody<'a> {
+        let content = iced::widget::responsive(move |size| {
+            crate::widgets::eq_device::EqView {
+                track_id,
+                effect,
+                accent,
+                panel: self.eq_devices.panel(effect.id),
+                entry: self.param_entry.as_ref(),
+                spectrum: self.eq_devices.spectrum_for(effect.id),
+                sample_rate: self.state.transport.sample_rate as f32,
             }
-            band_row = band_row.push(col);
+            .view(
+                self.view_device_preset_bar(
+                    track_id,
+                    effect,
+                    accent,
+                    crate::widgets::eq_device::preset_bar_width(size),
+                ),
+                size,
+            )
+        });
+        DeviceBody {
+            content: content.into(),
+            width,
+            padding: iced::Padding::ZERO,
         }
-
-        let body: Element<'a, Message> = row![
-            display_canvas,
-            Self::device_divider(),
-            container(band_row).padding([0, 2]),
-        ]
-        .spacing(8)
-        .align_y(iced::Alignment::Center)
-        .into();
-
-        (body, EQ_CARD_W)
     }
 
     // ── Shared device card helpers ──────────────────────────────────

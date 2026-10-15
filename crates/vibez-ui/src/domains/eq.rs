@@ -3,8 +3,20 @@
 //! analyser is frozen.
 
 use vibez_core::id::EffectId;
+use vibez_dsp::eq::param;
 
 pub const BAND_NAMES: [&str; 4] = ["LF", "LMF", "HMF", "HF"];
+
+/// The two shelves switch between shelf and bell; the mids have a Q.
+pub fn has_q(band: usize) -> bool {
+    matches!(band, 1 | 2)
+}
+
+/// The audition parameter stores the soloed band plus one, zero for none.
+pub fn auditioned_band(params: &[f32]) -> Option<usize> {
+    let value = params.get(param::AUDITION).copied().unwrap_or(0.0).round();
+    (1.0..=4.0).contains(&value).then(|| value as usize - 1)
+}
 
 pub fn is_native_eq(effect: &crate::state::UiEffect) -> bool {
     effect.effect_type == vibez_core::effect::EffectType::Eq
@@ -76,5 +88,13 @@ mod tests {
         panel.update(EqMsg::ToggleFreeze(id));
         assert_eq!(panel.side, SpectrumSide::Pre);
         assert!(panel.frozen);
+    }
+
+    #[test]
+    fn audition_reads_the_soloed_band() {
+        let mut params = vec![0.0; param::COUNT];
+        assert_eq!(auditioned_band(&params), None);
+        params[param::AUDITION] = 3.0;
+        assert_eq!(auditioned_band(&params), Some(2));
     }
 }
