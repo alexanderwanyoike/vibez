@@ -347,7 +347,7 @@ fn engine_automation_is_exact_while_manual_mix_uses_the_ten_ms_trajectory() {
             while position < count {
                 let frames = [1, 7, 31, 128][part % 4].min(count - position);
                 let mut input = [0.0; 256];
-                for pair in input[..2 * frames].chunks_exact_mut(2) {
+                for pair in input[..2 * frames].as_chunks_mut::<2>().0.iter_mut() {
                     pair.copy_from_slice(&[0.25, -0.125]);
                 }
                 let mut output = [0.0; 256];
@@ -360,7 +360,7 @@ fn engine_automation_is_exact_while_manual_mix_uses_the_ten_ms_trajectory() {
                 position += frames;
                 part += 1;
             }
-            for (frame, pair) in heard.chunks_exact(2).enumerate() {
+            for (frame, pair) in heard.as_chunks::<2>().0.iter().enumerate() {
                 for channel in 0..2 {
                     let mix = if automated {
                         1.0
