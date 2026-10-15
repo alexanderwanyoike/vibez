@@ -57,6 +57,7 @@ struct App {
     plugin_instrument_tx: std::sync::mpsc::Sender<PluginInstrumentLoadResult>,
     plugin_load_requests: plugin_load_requests::PluginLoadRequests,
     gain_devices: gain_devices::GainDevices,
+    param_entry: Option<crate::domains::param_entry::ValueEntry>,
     device_presets: device_presets::DevicePresetRuntime,
     // Plugin GUI support
     plugin_window_manager: Option<PluginWindowManager>,
@@ -167,6 +168,7 @@ mod gain_devices;
 mod keyboard;
 mod local_watcher;
 mod menu_lifecycle;
+mod param_entry;
 mod tasks;
 mod tracked_request;
 
@@ -434,6 +436,7 @@ impl App {
             plugin_effect_tx,
             plugin_load_requests: Default::default(),
             gain_devices: Default::default(),
+            param_entry: None,
             device_presets: Default::default(),
             sidechain_sync_inputs: None,
             track_meter_peaks: Default::default(),

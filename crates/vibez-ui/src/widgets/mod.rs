@@ -5,6 +5,7 @@ pub mod browser_waveform;
 mod clip_loop_markers;
 pub mod clip_slot;
 pub mod device_chrome;
+pub mod device_controls;
 pub(crate) mod device_preset_bar;
 pub mod double_click;
 pub mod drag;

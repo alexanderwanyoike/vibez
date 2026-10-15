@@ -15,8 +15,6 @@ const _: () = assert!(
 
 #[derive(Debug, Clone)]
 pub enum GainMsg {
-    SetInput(TrackId, EffectId, usize, String),
-    SubmitInput(TrackId, EffectId, usize),
     ToggleAdvanced(EffectId),
     ClearClip(EffectId),
 }
@@ -30,20 +28,11 @@ pub fn is_native_gain(effect: &crate::state::UiEffect) -> bool {
 impl GainMsg {
     pub fn destination(&self, channel: Option<TrackId>) -> Option<(TrackId, EffectId)> {
         match self {
-            Self::SetInput(track, effect, ..) | Self::SubmitInput(track, effect, ..) => {
-                (Some(*track) == channel).then_some((*track, *effect))
-            }
             Self::ToggleAdvanced(effect) | Self::ClearClip(effect) => {
                 channel.map(|track| (track, *effect))
             }
         }
     }
-}
-
-#[derive(Debug, PartialEq)]
-pub enum GainAction {
-    None,
-    SetParameter(usize, f32),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -56,8 +45,6 @@ pub struct GainHistoryPoint {
 #[derive(Debug, Clone, Default)]
 pub struct GainPanelState {
     pub advanced: bool,
-    pub input_text: [Option<String>; 3],
-    pub input_error: [bool; 3],
     pub input: MeterValues,
     pub output: MeterValues,
     pub clip_latched: bool,
@@ -66,39 +53,10 @@ pub struct GainPanelState {
 }
 
 impl GainPanelState {
-    pub fn update(&mut self, message: GainMsg, parameters: &[f32]) -> GainAction {
+    pub fn update(&mut self, message: GainMsg) {
         match message {
             GainMsg::ToggleAdvanced(_) => self.advanced = !self.advanced,
             GainMsg::ClearClip(_) => self.clear_clip(),
-            GainMsg::SetInput(_, _, index, value) if index < self.input_text.len() => {
-                self.input_text[index] = Some(value);
-                self.input_error[index] = false;
-            }
-            GainMsg::SubmitInput(_, _, index) if index < self.input_text.len() => {
-                let Some(text) = self.input_text[index].as_deref() else {
-                    return GainAction::None;
-                };
-                let Some(value) = parse_input(index, text) else {
-                    self.input_error[index] = true;
-                    return GainAction::None;
-                };
-                self.discard_input(index);
-                if parameters
-                    .get(index)
-                    .is_some_and(|current| *current != value)
-                {
-                    return GainAction::SetParameter(index, value);
-                }
-            }
-            _ => {}
-        }
-        GainAction::None
-    }
-
-    pub fn discard_input(&mut self, index: usize) {
-        if index < self.input_text.len() {
-            self.input_text[index] = None;
-            self.input_error[index] = false;
         }
     }
 
@@ -124,14 +82,11 @@ impl GainPanelState {
         self.clip_latched = false;
     }
 
-    /// Drops readings and unsubmitted entries that describe the replaced
-    /// values, keeping what the user has opened.
+    /// Drops readings that describe the replaced values, keeping what the
+    /// user has opened.
     pub fn restart_metering(&mut self) {
         self.clear_readings();
         self.clip_latched = false;
-        for index in 0..self.input_text.len() {
-            self.discard_input(index);
-        }
     }
 
     pub fn reset_stale(&mut self, now: Instant) {
@@ -176,58 +131,9 @@ pub fn knob_amplitude(position: f32) -> f32 {
     vibez_core::level::db_to_amplitude(db)
 }
 
-pub fn parse_input(index: usize, text: &str) -> Option<f32> {
-    let text = text.trim();
-    if index == vibez_dsp::gain::param::GAIN && (text.eq_ignore_ascii_case("-inf") || text == "-∞")
-    {
-        return Some(0.0);
-    }
-    let db = text.parse::<f32>().ok()?;
-    if !db.is_finite() {
-        return None;
-    }
-    use vibez_dsp::gain::{param, TRIM_RANGE_DB};
-    if index == param::GAIN {
-        (MIN_GAIN_DB..=MAX_GAIN_DB)
-            .contains(&db)
-            .then(|| vibez_core::level::db_to_amplitude(db))
-    } else if param::TRIM.contains(&index) {
-        (-TRIM_RANGE_DB..=TRIM_RANGE_DB).contains(&db).then_some(db)
-    } else {
-        None
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn gain_decibel_entry_preserves_native_amplitude_and_rejects_invalid_values() {
-        assert_eq!(parse_input(0, "0"), Some(1.0));
-        assert!((parse_input(0, " -6.0 ").unwrap() - 0.501_187_2).abs() < 1e-6);
-        assert_eq!(parse_input(0, "-inf"), Some(0.0));
-        assert_eq!(parse_input(0, "-∞"), Some(0.0));
-        assert!((parse_input(0, "-60").unwrap() - 0.001).abs() < 1e-6);
-        assert!((parse_input(0, "6.0205999").unwrap() - 2.0).abs() < 1e-6);
-
-        for invalid in ["", "NaN", "inf", "+inf", "100", "-61", "oops"] {
-            assert_eq!(parse_input(0, invalid), None, "accepted {invalid}");
-        }
-    }
-
-    #[test]
-    fn trim_entry_preserves_decibels_and_rejects_values_outside_its_range() {
-        for index in [1, 2] {
-            for db in [-24.0, -6.0, 0.0, 6.0, 24.0] {
-                assert_eq!(parse_input(index, &db.to_string()), Some(db));
-            }
-            for invalid in ["-inf", "-∞", "NaN", "inf", "-24.1", "24.1", "oops"] {
-                assert_eq!(parse_input(index, invalid), None, "accepted {invalid}");
-            }
-        }
-        assert_eq!(parse_input(3, "0"), None);
-    }
 
     #[test]
     fn gain_meter_history_is_bounded_and_stale_readings_preserve_the_clip_latch() {

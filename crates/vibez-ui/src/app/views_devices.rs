@@ -222,6 +222,7 @@ impl App {
                 effect,
                 accent,
                 panel,
+                self.param_entry.as_ref(),
                 self.view_device_preset_bar(
                     track_id,
                     effect,
