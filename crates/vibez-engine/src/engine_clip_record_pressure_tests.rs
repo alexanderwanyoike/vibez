@@ -170,7 +170,14 @@ fn nested_packet_publication_preserves_record_started_without_growing_retirement
     assert_eq!(engine.transport().position(), 168);
     assert!(engine.presentation_state.is_faulted());
     assert!(!engine.transport().is_playing());
-    assert!(engine.pending_clip_batch.is_none());
+    let held_packet = engine.pending_clip_batch.as_ref().is_some_and(|batch| {
+        batch.clips.is_empty() && batch.clips.as_ptr() as usize == packet_storage
+    });
+    let published_packets = engine.scheduled_presentation.iter().filter(|pending| {
+        matches!(&pending.event, EngineEvent::ClipBatchRetired(packet)
+            if packet.is_empty() && packet.as_ptr() as usize == packet_storage)
+    }).count();
+    assert_eq!(usize::from(held_packet) + published_packets, 1);
     assert_eq!(engine.next_clip_record_boundary(), None);
     assert!(engine.tracks().iter().all(|track| track.active_clip.is_none()));
     assert!(matches!(engine.tracks()[0].queued_clip.as_ref(), Some(queued)
