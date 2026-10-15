@@ -31,8 +31,14 @@ pub struct Vst3PluginInstance {
     param_values: Vec<f32>,
     /// VST3 ParamIDs, index-aligned with the descriptors.
     param_ids: Vec<u32>,
-    /// (id, normalized value) queued for the next process block.
+    /// (id, normalized value) queued for the next process block, at most one
+    /// entry per parameter.
     pending_params: Vec<(u32, f64)>,
+    /// Each parameter's position in `pending_params`, or `NOT_PENDING`.
+    pending_slots: Vec<usize>,
+    param_index: std::collections::HashMap<u32, usize>,
+    /// Changes made in the plugin's own editor, bound for the processor.
+    editor_edits: Option<super::component_handler::EditorEdits>,
     input_ports: Vec<(String, crate::audio_ports::AudioPort)>,
     output_ports: Vec<(String, crate::audio_ports::AudioPort)>,
     input_buses: Vec<AudioBusBuffersRaw>,
@@ -375,6 +381,9 @@ impl Vst3PluginInstance {
             param_values: Vec::new(),
             param_ids: Vec::new(),
             pending_params: Vec::with_capacity(2048),
+            pending_slots: Vec::new(),
+            param_index: std::collections::HashMap::new(),
+            editor_edits: None,
             input_ports: Vec::new(),
             output_ports: Vec::new(),
             input_buses: Vec::new(),
@@ -413,9 +422,25 @@ impl Vst3PluginInstance {
             instance.param_values = values;
             instance.param_ids = ids;
         }
+        let count = instance.param_ids.len();
+        instance.pending_slots = vec![NOT_PENDING; count];
+        instance.param_index = instance
+            .param_ids
+            .iter()
+            .enumerate()
+            .map(|(index, id)| (*id, index))
+            .collect();
+        instance.pending_params.reserve(count.saturating_sub(2048));
+        instance.live_queues.reserve(count.saturating_sub(2048));
 
-        instance.component_handler =
-            Some(unsafe { super::component_handler::ComponentHandler::install(controller) });
+        let (handler, edits) = unsafe {
+            super::component_handler::ComponentHandler::install(
+                controller,
+                instance.param_ids.clone(),
+            )
+        };
+        instance.component_handler = Some(handler);
+        instance.editor_edits = Some(edits);
         let _preparation = instance
             .component_handler
             .as_ref()
@@ -556,17 +581,7 @@ impl PluginInstance for Vst3PluginInstance {
     }
 
     fn set_param(&mut self, index: usize, value: f32) -> bool {
-        if index < self.param_values.len() {
-            if self.pending_params.len() == self.pending_params.capacity() {
-                return false;
-            }
-            self.param_values[index] = value;
-            self.pending_params
-                .push((self.param_ids[index], value.clamp(0.0, 1.0) as f64));
-            true
-        } else {
-            false
-        }
+        self.queue_param(index, value.clamp(0.0, 1.0) as f64)
     }
 
     fn get_param(&self, index: usize) -> f32 {
@@ -621,8 +636,12 @@ impl PluginInstance for Vst3PluginInstance {
             inputs,
             frames,
         );
+        self.take_editor_edits();
         self.live_queues.clear();
         for (id, value) in self.pending_params.drain(..) {
+            if let Some(&index) = self.param_index.get(&id) {
+                self.pending_slots[index] = NOT_PENDING;
+            }
             self.live_queues.push(LiveParamQueue {
                 vtbl: &LIVE_PARAM_QUEUE_VTBL,
                 id,
@@ -842,6 +861,43 @@ impl PluginInstance for Vst3PluginInstance {
 
 #[path = "instance_lifecycle.rs"]
 mod lifecycle;
+
+const NOT_PENDING: usize = usize::MAX;
+
+impl Vst3PluginInstance {
+    /// Queues a normalized value for the next block. A parameter changed
+    /// twice before then keeps one entry with its latest value.
+    fn queue_param(&mut self, index: usize, value: f64) -> bool {
+        let Some(&id) = self.param_ids.get(index) else {
+            return false;
+        };
+        let slot = self.pending_slots[index];
+        if slot != NOT_PENDING {
+            self.pending_params[slot].1 = value;
+        } else if self.pending_params.len() == self.pending_params.capacity() {
+            return false;
+        } else {
+            self.pending_slots[index] = self.pending_params.len();
+            self.pending_params.push((id, value));
+        }
+        self.param_values[index] = value as f32;
+        true
+    }
+
+    /// Moves editor changes into this block's parameter changes and the
+    /// host's readback. Runs on the audio thread: no locks or allocation.
+    fn take_editor_edits(&mut self) {
+        let Some(mut edits) = self.editor_edits.take() else {
+            return;
+        };
+        while let Ok((id, value)) = edits.pop() {
+            if let Some(&index) = self.param_index.get(&id) {
+                self.queue_param(index, value);
+            }
+        }
+        self.editor_edits = Some(edits);
+    }
+}
 
 /// Best-effort IConnectionPoint wiring between a dual-component
 /// plugin's processor and controller. JUCE plugins use this channel to

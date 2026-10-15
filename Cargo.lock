@@ -5218,6 +5218,7 @@ dependencies = [
  "libc",
  "libloading 0.8.9",
  "log",
+ "rtrb",
  "serde",
  "serde_json",
  "vibez-core",
