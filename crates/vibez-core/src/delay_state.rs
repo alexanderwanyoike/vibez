@@ -24,6 +24,7 @@ pub struct DelayState {
     pub sample_rate: u32,
     pub bpm: f64,
     pub processed_frames: u64,
+    pub observation_order: u64,
     pub targets: [f32; 17],
     pub lines: [DelayLineState; 2],
     pub mix: f32,

@@ -169,6 +169,7 @@ pub struct DelayEffect {
     history: DelayHistory,
     timing: DelayTime,
     processed_frames: u64,
+    observation_order: u64,
     mix: ScalarRamp,
     feedback: ScalarRamp,
     routing: ScalarRamp,
@@ -191,6 +192,7 @@ impl DelayEffect {
             history,
             timing: DelayTime::new(),
             processed_frames: 0,
+            observation_order: 0,
             mix: ScalarRamp::new(DELAY_PARAMS[param::MIX].default),
             feedback: ScalarRamp::new(DELAY_PARAMS[param::FEEDBACK].default),
             routing: ScalarRamp::new(DELAY_PARAMS[param::ROUTING].default),
@@ -275,7 +277,7 @@ impl AudioEffect for DelayEffect {
             mix: self.mix.current(), feedback: self.feedback.current(), routing: self.routing.current(),
             filters, duck_attenuation_db: self.duck.attenuation_db(), reference_moving,
             sample_rate: self.history.activation_sample_rate()?, bpm,
-            processed_frames: self.processed_frames, targets: self.targets, lines,
+            processed_frames: self.processed_frames, observation_order: self.observation_order, targets: self.targets, lines,
         })
     }
 
@@ -380,6 +382,7 @@ impl AudioEffect for DelayEffect {
             self.history.write_and_advance(write_l, write_r);
         }
         self.processed_frames = self.processed_frames.saturating_add(frames as u64);
+        self.observation_order = self.observation_order.saturating_add(1);
     }
 
     fn reset(&mut self) {
