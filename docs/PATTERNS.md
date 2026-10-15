@@ -256,6 +256,12 @@ remains independent. Exhaustion still faults presentation at the discovering
 boundary. If the receiver never recovers, non-audio engine teardown releases the
 retained source.
 
+Clip recording publishes its committed Source start fact before nested launch
+packets publish their Heard transitions. Both retain the same musical boundary;
+the packet keeps its original storage while waiting for remaining publication
+space. A presentation fault exits the Clip render loop before revisiting a held
+due source, leaving the callback's existing output loss envelope to OutputGate.
+
 Every engine starts with a caller-prepared master-only routing plan and keeps
 one non-optional active plan. The first project publication parks that bootstrap
 owner in one fixed engine slot until non-audio engine teardown; it emits no
