@@ -140,6 +140,7 @@ fn full_publication_restores_same_box_and_consumes_identity_before_retry() {
         let parameter_storage = engine.device_handoff.retained_parameters().as_ptr();
         let parameter_capacity = engine.device_handoff.retained_parameter_capacity();
         assert_eq!(parameter_capacity, 2048);
+        let processed_before = counts.process.load(Ordering::Relaxed);
         let mut filled = 0;
         while engine
             .event_tx
