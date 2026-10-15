@@ -1,8 +1,9 @@
-//! AddClip commits live content through one bounded FIFO storage exchange.
+//! Audio and note clip appends commit live content through one bounded FIFO storage exchange.
 
 use super::*;
 use crate::clip_insertion::{
-    ClipInsertionOutcome, ClipInsertionReply, CompletedClipInsertion, PreparedClipInsertion,
+    ClipInsertionDelta, ClipInsertionOutcome, ClipInsertionReply, CompletedClipInsertion,
+    PreparedClipInsertion, PreparedNoteClipInsertion,
 };
 
 impl AudioEngine {
@@ -12,8 +13,20 @@ impl AudioEngine {
         clip: EngineClip,
         mut insertion: Box<PreparedClipInsertion>,
     ) {
-        insertion.target = Some((track_id, clip.id));
-        insertion.clip = Some(clip);
+        insertion.clip = Some(ClipInsertionDelta::Audio(clip));
+        self.begin_clip_insertion(track_id, insertion);
+    }
+
+    pub(super) fn command_add_note_clip(
+        &mut self,
+        track_id: TrackId,
+        insertion: PreparedNoteClipInsertion,
+    ) {
+        self.begin_clip_insertion(track_id, insertion.into_control());
+    }
+
+    fn begin_clip_insertion(&mut self, track_id: TrackId, mut insertion: Box<PreparedClipInsertion>) {
+        insertion.target = Some((track_id, insertion.clip_id()));
         let Some(track) = self.tracks.iter_mut().find(|track| track.id == track_id) else {
             self.complete_clip_insertion(insertion, ClipInsertionOutcome::MissingTrack);
             self.recalculate_audio_length();
@@ -23,7 +36,7 @@ impl AudioEngine {
             self.complete_clip_insertion(insertion, ClipInsertionOutcome::Applied);
             self.recalculate_audio_length();
         } else {
-            let required = track.playback_source.clips.len() + 1;
+            let required = insertion.required_capacity(&track.playback_source);
             let request = insertion.request(required);
             self.pending_clip_insertion = Some(insertion);
             self.retire_event(EngineEvent::ClipInsertionStorageRequested(request));
