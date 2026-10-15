@@ -331,3 +331,7 @@ impl PartialEq for CompletedClipInsertion {
         self.owner.id == other.owner.id && self.outcome == other.outcome
     }
 }
+
+#[cfg(test)]
+#[path = "note_clip_insertion_owner_tests.rs"]
+mod note_owner_tests;
