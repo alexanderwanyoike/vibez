@@ -267,13 +267,15 @@ impl AudioEffect for DelayEffect {
         if frames == 0 {
             return;
         }
-        self.timing.begin_audio(&self.targets, self.history.sample_rate());
-        let fade_frames = (self.history.sample_rate() as usize).div_ceil(50);
+        let sample_rate = self.history.sample_rate();
+        self.timing.begin_audio(&self.targets, sample_rate);
+        let fade_frames = (sample_rate as usize).div_ceil(50);
+        let use_glide = self.targets[param::TIME_CHANGE] >= 0.5;
         let feedback = self.targets[param::FEEDBACK];
         let mix = self.targets[param::MIX];
 
         for frame in 0..frames {
-            let [left, right] = self.timing.next_frame(fade_frames);
+            let [left, right] = self.timing.next_frame(fade_frames, sample_rate, use_glide);
             let (delayed_l, delayed_r) = self.history.read(left, right);
 
             // Left channel
