@@ -185,7 +185,7 @@ fn transport_commands_preserve_the_validation_episode_at_zero_and_positive_pdc()
             "stopped-play-reset",
             "begin-perform",
         ] {
-            let (mut fixture, audio) = prepared(delay);
+            let (mut fixture, _) = prepared(delay);
             if case == "perform-seek" {
                 fixture
                     .commands
@@ -303,7 +303,7 @@ fn section(length: u64, looping: bool) -> Box<PreparedSectionPlaybackSource> {
 fn one_shot_and_queued_successor_keep_the_original_capture_end_boundary_at_real_pdc() {
     for delay in [0, 7] {
         for queued in [false, true] {
-            let (mut fixture, prime) = prepared(delay);
+            let (mut fixture, _) = prepared(delay);
             fixture
                 .commands
                 .push(EngineCommand::StartPerformanceCapture)
