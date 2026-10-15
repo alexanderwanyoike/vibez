@@ -11,6 +11,9 @@ use vibez_core::perform::SwingAmount;
 use vibez_core::routing::RoutingChannel;
 use vibez_instruments::Instrument;
 
+pub(crate) const NOTE_ARRAY_ALLOCATIONS: usize = 3;
+pub(crate) const INSERTION_CONTROL_ALLOCATIONS: usize = 3;
+
 #[derive(Default)]
 struct VoiceCalls {
     on: AtomicUsize,
@@ -77,6 +80,9 @@ pub(crate) struct ClipSnapshot {
     clamps: Vec<Option<f64>>,
     clamps_owner: *const Option<f64>,
     clamps_capacity: usize,
+    sort_indices: Vec<usize>,
+    sort_owner: *const usize,
+    sort_capacity: usize,
     latch: Option<(i64, SwingAmount)>,
 }
 
@@ -99,6 +105,9 @@ impl ClipSnapshot {
             clamps: clip.next_same_pitch_start_beats.clone(),
             clamps_owner: clip.next_same_pitch_start_beats.as_ptr(),
             clamps_capacity: clip.next_same_pitch_start_beats.capacity(),
+            sort_indices: clip.note_sort_indices.clone(),
+            sort_owner: clip.note_sort_indices.as_ptr(),
+            sort_capacity: clip.note_sort_indices.capacity(),
             latch: clip.groove_latch.get(),
         }
     }
@@ -107,6 +116,7 @@ impl ClipSnapshot {
         assert!(!self.notes.is_empty());
         assert_eq!(self.notes.len(), self.notes_capacity);
         assert_eq!(self.clamps.len(), self.clamps_capacity);
+        assert_eq!(self.sort_indices.len(), self.sort_capacity);
         assert_eq!(self.clamps, expected_clamps(&self.notes));
     }
 
@@ -119,18 +129,23 @@ impl ClipSnapshot {
         assert_eq!(clip.notes.len(), clip.next_same_pitch_start_beats.len());
         assert!(clip.notes.capacity() >= expected.len());
         assert!(clip.next_same_pitch_start_beats.capacity() >= expected.len());
+        assert!(clip.note_sort_indices.capacity() >= expected.len());
         assert_ne!(clip.notes.as_ptr(), self.notes_owner);
         assert_ne!(clip.next_same_pitch_start_beats.as_ptr(), self.clamps_owner);
+        assert_ne!(clip.note_sort_indices.as_ptr(), self.sort_owner);
         assert_eq!(clip.groove_latch.get(), self.latch);
     }
 
     pub(crate) fn assert_retired_storage(&self, storage: &NoteInsertionStorage) {
         assert!(storage.notes.is_empty());
         assert!(storage.clamps.is_empty());
+        assert!(storage.sort_indices.is_empty());
         assert_eq!(storage.notes.as_ptr(), self.notes_owner);
         assert_eq!(storage.notes.capacity(), self.notes_capacity);
         assert_eq!(storage.clamps.as_ptr(), self.clamps_owner);
         assert_eq!(storage.clamps.capacity(), self.clamps_capacity);
+        assert_eq!(storage.sort_indices.as_ptr(), self.sort_owner);
+        assert_eq!(storage.sort_indices.capacity(), self.sort_capacity);
     }
 
     fn assert_geometry(&self, clip: &EngineNoteClip) {
@@ -161,6 +176,9 @@ impl ClipSnapshot {
             self.clamps_capacity
         );
         assert_eq!(clip.groove_latch.get(), self.latch);
+        assert_eq!(clip.note_sort_indices, self.sort_indices);
+        assert_eq!(clip.note_sort_indices.as_ptr(), self.sort_owner);
+        assert_eq!(clip.note_sort_indices.capacity(), self.sort_capacity);
     }
 }
 
@@ -169,21 +187,28 @@ pub(crate) struct EmptyNoteStorageSnapshot {
     notes_capacity: usize,
     clamps_owner: *const Option<f64>,
     clamps_capacity: usize,
+    sort_owner: *const usize,
+    sort_capacity: usize,
 }
 
 impl EmptyNoteStorageSnapshot {
     pub(crate) fn observe(storage: &NoteInsertionStorage) -> Self {
         assert!(storage.notes.is_empty());
         assert!(storage.clamps.is_empty());
+        assert!(storage.sort_indices.is_empty());
         Self {
             notes_owner: storage.notes.as_ptr(),
             notes_capacity: storage.notes.capacity(),
             clamps_owner: storage.clamps.as_ptr(),
             clamps_capacity: storage.clamps.capacity(),
+            sort_owner: storage.sort_indices.as_ptr(),
+            sort_capacity: storage.sort_indices.capacity(),
         }
     }
 
     pub(crate) fn assert_installed_in(&self, clip: &EngineNoteClip) {
+        assert_eq!(clip.note_sort_indices.as_ptr(), self.sort_owner);
+        assert_eq!(clip.note_sort_indices.capacity(), self.sort_capacity);
         assert_eq!(clip.notes.as_ptr(), self.notes_owner);
         assert_eq!(clip.notes.capacity(), self.notes_capacity);
         assert_eq!(clip.next_same_pitch_start_beats.as_ptr(), self.clamps_owner);
@@ -196,10 +221,13 @@ impl EmptyNoteStorageSnapshot {
     pub(crate) fn assert_unchanged(&self, storage: &NoteInsertionStorage) {
         assert!(storage.notes.is_empty());
         assert!(storage.clamps.is_empty());
+        assert!(storage.sort_indices.is_empty());
         assert_eq!(storage.notes.as_ptr(), self.notes_owner);
         assert_eq!(storage.notes.capacity(), self.notes_capacity);
         assert_eq!(storage.clamps.as_ptr(), self.clamps_owner);
         assert_eq!(storage.clamps.capacity(), self.clamps_capacity);
+        assert_eq!(storage.sort_indices.as_ptr(), self.sort_owner);
+        assert_eq!(storage.sort_indices.capacity(), self.sort_capacity);
     }
 }
 

@@ -1,5 +1,7 @@
 //! Missing note targets return complete prepared data, storage and mailbox owners off callback.
 
+use crate::playback_source::note_value_insertion_tests::{NOTE_ARRAY_ALLOCATIONS, INSERTION_CONTROL_ALLOCATIONS};
+
 use super::*;
 use crate::commands::EngineCommand;
 use crate::engine::{AudioEngine, AudioProcessBlock};
@@ -134,7 +136,7 @@ fn missing_track_or_clip_returns_complete_prepared_note_value_without_callback_h
         assert_eq!(identity.strong_count(), 2);
         assert_eq!(
             crate::retirement::tests::allocations(|| drop(completed)),
-            (0, 5)
+            (0, NOTE_ARRAY_ALLOCATIONS + INSERTION_CONTROL_ALLOCATIONS)
         );
         assert_eq!(identity.strong_count(), 1);
         drop(operation);

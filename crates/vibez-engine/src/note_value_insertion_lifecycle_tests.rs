@@ -1,5 +1,7 @@
 //! Complete note-value data, cache allocations and mailbox endpoints leave the audio worker intact.
 
+use crate::playback_source::note_value_insertion_tests::{NOTE_ARRAY_ALLOCATIONS, INSERTION_CONTROL_ALLOCATIONS};
+
 use super::super::lifecycle_tests::on_audio_thread;
 use super::*;
 
@@ -42,7 +44,7 @@ fn ready_and_abandoned_note_values_return_complete_array_bundles_from_audio_work
             // Public fulfillment publishes the reply before dropping its producer.
             assert_eq!(
                 crate::retirement::tests::allocations(|| request.fulfill()),
-                (2, 0)
+                (NOTE_ARRAY_ALLOCATIONS, 0)
             );
         } else {
             assert_eq!(
@@ -67,15 +69,14 @@ fn ready_and_abandoned_note_values_return_complete_array_bundles_from_audio_work
         let owner = received.completed.pop().unwrap();
         drop(received);
         let old_arrays = if outcome == ClipInsertionOutcome::Applied {
-            2
+            NOTE_ARRAY_ALLOCATIONS
         } else {
             0
         };
-        // The held id isolates two eager arrays, two ring allocations, Box and
-        // the applied leg's two displaced arrays in the owner-thread destructor.
+        // The held operation ID excludes its Arc from these final-owner frees.
         assert_eq!(
             crate::retirement::tests::allocations(|| drop(owner)),
-            (0, 5 + old_arrays)
+            (0, NOTE_ARRAY_ALLOCATIONS + INSERTION_CONTROL_ALLOCATIONS + old_arrays)
         );
         assert_eq!(identity.strong_count(), 1);
         let disposed = crate::retirement::tests::allocations(|| drop(fixture.engine));
@@ -87,14 +88,14 @@ fn ready_and_abandoned_note_values_return_complete_array_bundles_from_audio_work
 }
 
 #[test]
-fn producer_first_note_value_shutdown_drops_queued_two_array_reply_on_owner_thread() {
+fn producer_first_note_value_shutdown_drops_queued_three_array_reply_on_owner_thread() {
     let fixture = setup();
     let mut delta = NoteDelta::prepare(&fixture);
     let identity = delta.identity.clone();
     let (fixture, request) = publish_request(fixture, &mut delta, false);
     assert_eq!(
         crate::retirement::tests::allocations(|| request.fulfill()),
-        (2, 0)
+        (NOTE_ARRAY_ALLOCATIONS, 0)
     );
     delta.assert_waiting(&fixture);
     assert_eq!(identity.strong_count(), 2);
@@ -128,7 +129,7 @@ fn consumer_first_note_value_shutdown_releases_public_and_successfully_orphaned_
                 crate::retirement::tests::allocations(|| {
                     storage = Some(ClipInsertionStorage::new(request.kind, request.capacity));
                 }),
-                (2, 0)
+                (NOTE_ARRAY_ALLOCATIONS, 0)
             );
             let mut result = None;
             // rtrb0.3.2 can accept this reply after consumer destruction; prove
@@ -143,12 +144,12 @@ fn consumer_first_note_value_shutdown_releases_public_and_successfully_orphaned_
             assert_eq!(request.sender.slots(), 0);
             assert_eq!(
                 crate::retirement::tests::allocations(|| drop(request)),
-                (0, 4)
+                (0, NOTE_ARRAY_ALLOCATIONS + 2)
             );
         } else {
             assert_eq!(
                 crate::retirement::tests::allocations(|| request.fulfill()),
-                (2, 4)
+                (NOTE_ARRAY_ALLOCATIONS, NOTE_ARRAY_ALLOCATIONS + 2)
             );
         }
         assert_eq!(identity.strong_count(), 1);
@@ -196,7 +197,7 @@ fn ui_first_and_unsent_note_value_shutdown_release_event_and_reply_rings() {
             assert_eq!(identity.strong_count(), 2);
             assert_eq!(
                 crate::retirement::tests::allocations(|| drop(delta.command.take())),
-                (0, 5)
+                (0, NOTE_ARRAY_ALLOCATIONS + INSERTION_CONTROL_ALLOCATIONS)
             );
         }
         assert_eq!(identity.strong_count(), 1);
@@ -284,7 +285,7 @@ fn adequate_eager_and_missing_note_values_return_unused_endpoints_and_zero_or_no
         assert!(returned.owner.receiver.is_empty());
         assert!(returned.owner.reply.is_none());
         let ClipInsertionStorage::NoteValue(storage) = &returned.owner.storage else {
-            panic!("both eager or displaced note arrays belong to this complete owner");
+            panic!("all eager or displaced note arrays belong to this complete owner");
         };
         let missing = matches!(target, EagerTarget::MissingTrack | EagerTarget::MissingClip);
         if missing {
@@ -327,7 +328,7 @@ fn adequate_eager_and_missing_note_values_return_unused_endpoints_and_zero_or_no
         drop(received);
         assert_eq!(
             crate::retirement::tests::allocations(|| drop(owner)),
-            (0, if empty { 3 } else { 5 })
+            (0, INSERTION_CONTROL_ALLOCATIONS + if empty { 0 } else { NOTE_ARRAY_ALLOCATIONS })
         );
         assert_eq!(identity.strong_count(), 1);
         let disposed = crate::retirement::tests::allocations(|| drop(fixture.engine));

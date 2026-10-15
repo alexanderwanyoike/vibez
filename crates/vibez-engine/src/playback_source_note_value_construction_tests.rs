@@ -1,5 +1,7 @@
 //! Constructor and offline note arrays cross actual inner capacity with complete schedules intact.
 
+use crate::playback_source::note_value_insertion_tests::{NOTE_ARRAY_ALLOCATIONS, INSERTION_CONTROL_ALLOCATIONS};
+
 use super::consumer_tests::measured;
 use super::*;
 use crate::clip_insertion::{ClipInsertionOutcome, PreparedNoteInsertion};
@@ -166,7 +168,7 @@ pub(crate) fn verify_note_value_source_growth(source: PreparedPlaybackSource, co
     assert_eq!(calls.observed(), (1, 0, 0));
     assert_eq!(
         crate::retirement::tests::allocations(|| drop(owner)),
-        (0, 7)
+        (0, NOTE_ARRAY_ALLOCATIONS * 2 + INSERTION_CONTROL_ALLOCATIONS)
     );
     while events.pop().is_ok() {}
     let mut step = 0;
