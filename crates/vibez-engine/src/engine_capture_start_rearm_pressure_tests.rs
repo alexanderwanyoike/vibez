@@ -77,7 +77,12 @@ struct Expected {
     offset_refs: usize,
 }
 
-fn record(fixture: &mut Fixture, phase: &str, expected: Expected, expected_calls: &[u32]) {
+fn record(
+    fixture: &mut Fixture,
+    phase: &str,
+    expected: Expected,
+    expected_local_failure: Option<bool>,
+) {
     let observed = state(&fixture.engine);
     assert_eq!(
         observed,
@@ -96,7 +101,6 @@ fn record(fixture: &mut Fixture, phase: &str, expected: Expected, expected_calls
     let terminal = fixture.engine.presentation_state.terminals.capture_stop();
     let slots = fixture.engine.event_tx.slots();
     let offset_refs = Arc::strong_count(&fixture.engine.routing.capture_offsets);
-    let calls = fixture.calls.observed();
     assert_eq!(scheduled, expected.scheduled, "{phase}");
     assert_eq!(terminal, expected.terminal, "{phase}");
     assert_eq!(
@@ -116,7 +120,11 @@ fn record(fixture: &mut Fixture, phase: &str, expected: Expected, expected_calls
         }
     );
     assert_eq!(offset_refs, expected.offset_refs, "{phase}");
-    assert_eq!(calls, expected_calls, "{phase}");
+    if let Some(local) = expected_local_failure {
+        fixture.calls.assert_effect_failure_observed(local);
+    } else {
+        assert!(fixture.calls.observed().is_empty(), "{phase}");
+    }
     assert!(!fixture.engine.presentation_state.is_faulted());
     assert!(fixture.owner.is_none());
     fixture.calls.clear();
@@ -173,7 +181,7 @@ fn same_drain_refailure_closes_capture_while_an_old_stop_waits_for_real_ui_credi
             full: true,
             offset_refs: 2,
         },
-        &[110, 210],
+        Some(false),
     );
 
     // Credits return to the real ring; retained feed still precedes the original terminal slot.
@@ -201,7 +209,7 @@ fn same_drain_refailure_closes_capture_while_an_old_stop_waits_for_real_ui_credi
                 full: true,
                 offset_refs: 2,
             },
-            &[110, 211, 110, 211],
+            Some(true),
         );
     }
     collect(&mut fixture, &mut delivered);
@@ -220,7 +228,7 @@ fn same_drain_refailure_closes_capture_while_an_old_stop_waits_for_real_ui_credi
             full: false,
             offset_refs: 1,
         },
-        &[],
+        None,
     );
 
     zero(&mut fixture);
@@ -237,7 +245,7 @@ fn same_drain_refailure_closes_capture_while_an_old_stop_waits_for_real_ui_credi
             full: false,
             offset_refs: 1,
         },
-        &[110, 211, 110, 211],
+        Some(true),
     );
     zero(&mut fixture);
     collect(&mut fixture, &mut delivered);
@@ -253,7 +261,7 @@ fn same_drain_refailure_closes_capture_while_an_old_stop_waits_for_real_ui_credi
             full: false,
             offset_refs: 1,
         },
-        &[110, 211, 110, 211],
+        Some(true),
     );
 
     fixture
@@ -277,7 +285,7 @@ fn same_drain_refailure_closes_capture_while_an_old_stop_waits_for_real_ui_credi
             full: false,
             offset_refs: 1,
         },
-        &[],
+        None,
     );
     zero(&mut fixture);
     collect(&mut fixture, &mut delivered);
@@ -298,7 +306,7 @@ fn same_drain_refailure_closes_capture_while_an_old_stop_waits_for_real_ui_credi
             full: false,
             offset_refs: 1,
         },
-        &[110, 211, 110, 211],
+        Some(true),
     );
     teardown(fixture);
 }

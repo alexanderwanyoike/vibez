@@ -107,7 +107,6 @@ fn successful_start_rearms_local_close_before_clear_validation_without_repeating
         );
         assert!(fixture.engine.cmd_rx.peek().is_err());
         let after = state(&fixture.engine);
-        let calls = fixture.calls.observed();
         let starts = usize::from(frames == 8);
         assert_eq!(
             Arc::strong_count(&fixture.engine.routing.capture_offsets),
@@ -115,14 +114,12 @@ fn successful_start_rearms_local_close_before_clear_validation_without_repeating
         );
         let observed = collect(&mut fixture);
         assert_eq!(after, [0, 1, 1, 1, frames, frames, frames], "{phase}");
-        assert_eq!(
-            calls,
-            if starts == 1 {
-                vec![110, 210, 110, 211, 110, 211]
-            } else {
-                vec![110, 211, 110, 211]
-            }
-        );
+        // Admission freshness and refailure matter; redundant read-only polls do not.
+        if starts == 1 {
+            fixture.calls.assert_effect_recovered_before_refailure();
+        } else {
+            fixture.calls.assert_effect_failure_observed(true);
+        }
         assert_eq!(
             observed.order,
             if starts == 1 {

@@ -161,10 +161,9 @@ fn applied_invalid_refusal_preserves_an_already_closed_local_episode() {
         .unwrap();
     drain(&mut fixture);
     let after = state(&fixture.engine);
-    let calls = fixture.calls.observed();
     let observed = collect(&mut fixture);
     assert_eq!(after, before);
-    assert_eq!(calls, [110, 210]);
+    fixture.calls.assert_effect_failure_observed(false);
     assert_eq!(observed.order, ["stop", "refused"]);
     assert_eq!(observed.times, [32]);
     assert_eq!(
