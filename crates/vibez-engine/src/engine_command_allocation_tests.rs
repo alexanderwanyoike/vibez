@@ -652,7 +652,7 @@ fn cases() -> Vec<Case> {
             clip_id: f.note_clip,
             new_position_beats: 1.0,
         }),
-        case!("AddNote", true, |f| C::AddNote {
+        case!("AddNote", false, |f| C::AddNote {
             track_id: f.synth,
             clip_id: f.empty_note_clip,
             insertion: crate::clip_insertion::PreparedNoteInsertion::new(note()),
