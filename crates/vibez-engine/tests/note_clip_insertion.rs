@@ -156,7 +156,7 @@ fn native_note_consumer_fulfills_stale_hints_and_preserves_first_duplicate_note_
             .push(EngineCommand::AddNote {
                 track_id,
                 clip_id: id,
-                note,
+                insertion: crate::clip_insertion::PreparedNoteInsertion::new(note),
             })
             .unwrap();
         expected.push(Expected {

@@ -315,7 +315,7 @@ impl PianoRollState {
                 engine.send(EngineCommand::AddNote {
                     track_id,
                     clip_id,
-                    note,
+                    insertion: vibez_engine::clip_insertion::PreparedNoteInsertion::new(note),
                 });
             }
             PianoRollMsg::RemoveNote(track_id, clip_id, note_index) => {
@@ -566,7 +566,7 @@ impl PianoRollState {
                             engine.send(EngineCommand::AddNote {
                                 track_id,
                                 clip_id,
-                                note: *note,
+                                insertion: vibez_engine::clip_insertion::PreparedNoteInsertion::new(*note),
                             });
                         }
                         // The engine clip must grow too, or playback
@@ -644,7 +644,7 @@ impl PianoRollState {
                         engine.send(EngineCommand::AddNote {
                             track_id,
                             clip_id,
-                            note: *note,
+                            insertion: vibez_engine::clip_insertion::PreparedNoteInsertion::new(*note),
                         });
                     }
                 }
@@ -717,7 +717,7 @@ impl PianoRollState {
                         engine.send(EngineCommand::AddNote {
                             track_id,
                             clip_id,
-                            note: *note,
+                            insertion: vibez_engine::clip_insertion::PreparedNoteInsertion::new(*note),
                         });
                     }
                 }
