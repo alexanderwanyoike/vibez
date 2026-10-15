@@ -1,4 +1,4 @@
-//! Note Repeat and Groove scheduling through prepared routing fixtures.
+//! Public note repeat preserves engine-clock scheduling and matching note releases.
 
 use super::*;
 use crate::playback_source::{

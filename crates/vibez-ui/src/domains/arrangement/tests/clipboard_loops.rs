@@ -1,3 +1,5 @@
+//! Timeline copy and duplication preserve clip offsets, loops and playback geometry.
+
 use super::*;
 
 #[test]
