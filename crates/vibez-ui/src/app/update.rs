@@ -108,6 +108,7 @@ impl App {
         };
         if let Message::Devices(edit) = &message {
             self.discard_gain_entries(edit);
+            self.discard_device_entries(edit);
             if crate::domains::devices::is_unchanged_param_edit(&self.state.project_tracks, edit) {
                 return Task::none();
             }
@@ -245,6 +246,7 @@ impl App {
 
         match message {
             Message::GainControl(message) => return self.update_gain_control(message),
+            Message::DeviceControl(message) => return self.update_device_control(message),
             Message::DevicePreset(message) => return self.update_device_preset(message),
             Message::ApplyDevicePreset(track_id, effect_id, preset) => {
                 return self.apply_device_preset(track_id, effect_id, preset);
