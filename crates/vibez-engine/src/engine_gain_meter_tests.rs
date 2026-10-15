@@ -705,6 +705,7 @@ fn native_delay_meter_reports_real_insert_levels_before_channel_faders() {
             expected_insert[2 * frame + channel] = sample;
         }
         let mut reading = None;
+        let mut delay_state = None;
         for half in 0..2 {
             let range = half * 960..(half + 1) * 960;
             assert_eq!(
@@ -718,6 +719,12 @@ fn native_delay_meter_reports_real_insert_levels_before_channel_faders() {
                 "Delay meter callback heap activity, graph={use_graph}, half={half}",
             );
             while let Ok(event) = events.pop() {
+                if let EngineEvent::EffectDelayState { track_id, effect_id, generation, snapshot } = &event {
+                    assert_eq!(event.time_domain(), crate::events::TimeDomain::Untimed);
+                    assert_eq!(half, 1);
+                    assert_eq!((*track_id, *effect_id, *generation), (track, effect, 73));
+                    assert!(delay_state.replace(snapshot.expect("active Delay snapshot")).is_none());
+                }
                 if let EngineEvent::EffectMeter {
                     track_id, effect_id, generation, input, output,
                 } = event {
@@ -734,6 +741,15 @@ fn native_delay_meter_reports_real_insert_levels_before_channel_faders() {
         }
         let (input_levels, output_levels) =
             reading.expect("the selected native Delay must publish its real insert meter");
+        let state = delay_state.expect("the live insert must report applied Delay state");
+        assert_eq!(state.sample_rate, 48000);
+        assert_eq!(state.processed_frames, 1920);
+        assert_eq!(state.lines[0].old_samples, 144.0);
+        assert_eq!(state.lines[1].old_samples, 240.0);
+        assert_eq!(state.feedback, 0.5);
+        assert_eq!(state.mix, 0.25);
+        assert_eq!(state.routing, 1.0);
+        assert!(!state.reference_moving);
         let mut squares = [0.0_f64; 2];
         for frame in expected_insert.chunks_exact(2) {
             for channel in 0..2 {
