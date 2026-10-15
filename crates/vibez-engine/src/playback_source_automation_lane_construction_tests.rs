@@ -165,6 +165,7 @@ pub(crate) fn verify_lane_source_growth(source: PreparedPlaybackSource) {
 }
 
 #[test]
+#[allow(clippy::field_reassign_with_default, reason = "Exercises the public Default constructor independently of struct literal construction")]
 fn public_new_default_and_struct_lane_sources_cross_repeated_actual_capacity_boundaries() {
     for constructor in 0..3 {
         let lanes = vec![lane(0.0), lane(0.75)].into_boxed_slice().into_vec();
