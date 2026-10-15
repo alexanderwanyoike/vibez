@@ -179,6 +179,11 @@ fn appending_a_lane_at_full_capacity_preserves_audio_and_owners_without_callback
     assert_eq!(request.id, operation);
     assert_eq!(request.track_id, track_id);
     assert_eq!(request.target, crate::clip_insertion::ClipInsertionTarget::AutomationLane(expected_lanes[2].id));
+    assert!(matches!(events.pop().unwrap(), EngineEvent::PlaybackPosition(position) if position == before));
+    let EngineEvent::Metering { peak_l, peak_r, rms_l, rms_r } = events.pop().unwrap() else {
+        panic!("zero-frame admission must report its silent master meters");
+    };
+    assert_eq!((peak_l, peak_r, rms_l, rms_r), (0.0, 0.0, 0.0, 0.0));
     assert!(events.is_empty());
     request.fulfill();
 
