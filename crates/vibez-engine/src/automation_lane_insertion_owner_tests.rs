@@ -221,3 +221,6 @@ fn a_missing_channel_returns_original_points_and_the_complete_unused_control() {
     assert_eq!(engine.transport().position(), 0);
     assert_eq!(engine.transport().audio_length(), None);
 }
+
+#[path = "automation_lane_insertion_pressure_tests.rs"]
+mod pressure_tests;
