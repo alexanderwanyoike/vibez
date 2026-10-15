@@ -136,7 +136,7 @@ fn delta_with_capacity(track: TrackId, capacity: usize) -> Delta {
     let identity = Arc::downgrade(&id.0);
     let control = std::ptr::from_ref(insertion.0.as_ref());
     let ring = std::ptr::from_ref(insertion.0.receiver.buffer());
-    let ClipInsertionStorage::Note(storage) = &insertion.0.storage else {
+    let ClipInsertionStorage::NoteClip(storage) = &insertion.0.storage else {
         unreachable!()
     };
     let eager = storage.live.as_ptr();
@@ -283,7 +283,7 @@ fn assert_complete(
     );
     assert!(owner.owner.sender.is_none());
     assert!(owner.owner.receiver.is_abandoned());
-    let ClipInsertionStorage::Note(eager) = &owner.owner.storage else {
+    let ClipInsertionStorage::NoteClip(eager) = &owner.owner.storage else {
         panic!("complete note eager owner")
     };
     assert_eq!(eager.live.as_ptr(), delta.eager);
@@ -292,7 +292,7 @@ fn assert_complete(
     assert!(eager.removed.is_empty());
     let clip = match outcome {
         ClipInsertionOutcome::Applied => {
-            let Some(ClipInsertionStorage::Note(old)) = &owner.owner.reply else {
+            let Some(ClipInsertionStorage::NoteClip(old)) = &owner.owner.reply else {
                 panic!("complete old note storage")
             };
             assert!(old.live.is_empty());
@@ -310,7 +310,7 @@ fn assert_complete(
         ClipInsertionOutcome::Abandoned => {
             assert!(owner.owner.reply.is_none());
             assert_unchanged(fixture);
-            let Some(ClipInsertionDelta::Note(clip)) = &owner.owner.clip else {
+            let Some(ClipInsertionDelta::NoteClip(clip)) = &owner.owner.clip else {
                 panic!("complete rejected original note clip")
             };
             clip
