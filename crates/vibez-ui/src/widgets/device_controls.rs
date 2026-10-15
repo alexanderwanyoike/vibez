@@ -8,9 +8,7 @@ use crate::domains::device_controls::{display_value, DeviceControlMsg, DeviceCon
 use crate::message::Message;
 use crate::state::UiEffect;
 use crate::theme as th;
-use crate::widgets::{
-    device_chrome::section_label, on_blur::on_blur,
-};
+use crate::widgets::{device_chrome::section_label, on_blur::on_blur};
 
 pub fn value_field<'a>(
     track: TrackId,
