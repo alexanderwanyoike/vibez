@@ -163,6 +163,7 @@ pub struct DelayEffect {
     history: DelayHistory,
     timing: DelayTime,
     mix: ScalarRamp,
+    feedback: ScalarRamp,
 }
 
 impl DelayEffect {
@@ -173,6 +174,7 @@ impl DelayEffect {
             history,
             timing: DelayTime::new(),
             mix: ScalarRamp::new(DELAY_PARAMS[param::MIX].default),
+            feedback: ScalarRamp::new(DELAY_PARAMS[param::FEEDBACK].default),
         }
     }
 
@@ -216,6 +218,8 @@ impl DelayEffect {
         self.targets[index] = target;
         if index == param::MIX {
             self.mix.edit(target, automated, self.history.sample_rate());
+        } else if index == param::FEEDBACK {
+            self.feedback.edit(target, automated, self.history.sample_rate());
         }
         self.timing.parameter_edited(index, &self.targets, self.history.sample_rate(), automated);
         true
@@ -279,12 +283,12 @@ impl AudioEffect for DelayEffect {
         self.timing.begin_audio(&self.targets, sample_rate);
         let fade_frames = (sample_rate as usize).div_ceil(50);
         let use_glide = self.targets[param::TIME_CHANGE] >= 0.5;
-        let feedback = self.targets[param::FEEDBACK];
 
         for frame in 0..frames {
             let [left, right] = self.timing.next_frame(fade_frames, sample_rate, use_glide);
             let (delayed_l, delayed_r) = self.history.read(left, right);
             let mix = self.mix.next_frame();
+            let feedback = self.feedback.next_frame();
 
             // Left channel
             let dry_l = Self::finite_or_zero(buffer[frame * ch]);
@@ -311,6 +315,7 @@ impl AudioEffect for DelayEffect {
         self.history.reset();
         self.timing.reset(&self.targets, self.history.sample_rate());
         self.mix.reset(self.targets[param::MIX]);
+        self.feedback.reset(self.targets[param::FEEDBACK]);
     }
 }
 

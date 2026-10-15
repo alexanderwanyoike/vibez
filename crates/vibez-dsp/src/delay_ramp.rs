@@ -1,4 +1,4 @@
-//! Owns sample-rate manual Mix ramps and exact automation/reset targets.
+//! Owns sample-rate manual Delay scalar ramps and exact automation/reset targets.
 
 pub(super) struct ScalarRamp {
     current: f32,
