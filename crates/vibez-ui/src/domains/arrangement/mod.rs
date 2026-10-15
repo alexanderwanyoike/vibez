@@ -766,7 +766,7 @@ impl TimelineEditorState {
                         track.note_clips.push(new_clip);
                     }
                     engine.send(EngineCommand::AddNoteClip {
-                        track_id: track_id,
+                        track_id,
                         insertion: vibez_engine::clip_insertion::PreparedNoteClipInsertion::new(
                             new_clip_id,
                             pos,
