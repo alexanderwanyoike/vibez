@@ -4,9 +4,7 @@ use vibez_core::effect::{DynamicsMeter, EffectType, ParamDescriptor};
 use vibez_core::level::{amplitude_to_db, db_to_amplitude};
 use vibez_core::routing::{ExternalInputBlock, ExternalInputDescriptor, ExternalInputId};
 
-#[path = "compressor_detector.rs"]
-mod detector;
-use detector::DetectorFilter;
+use crate::butterworth_filter::ButterworthFilter as DetectorFilter;
 
 pub mod param {
     pub const THRESHOLD: usize = 0;
