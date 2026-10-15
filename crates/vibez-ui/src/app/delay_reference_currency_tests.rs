@@ -133,3 +133,40 @@ fn pre_edit_observation_cannot_acknowledge_a_revert_while_its_intermediate_edit_
     assert!(old_observation_kept_pending && intermediate_kept_pending,
         "queued old snapshot acknowledged revert before execution: old_kept_pending={old_observation_kept_pending}, intermediate_kept_pending={intermediate_kept_pending}");
 }
+
+#[test]
+fn accepted_negative_zero_ordinals_acknowledge_their_canonical_dsp_targets() {
+    let (mut engine, mut commands, events) = AudioEngine::new();
+    let (producer, mut published) = rtrb::RingBuffer::new(1);
+    let mut app = super::super::test_support::app();
+    app.cmd_tx = EngineCommandQueue::new(producer);
+    app.event_rx = Some(events);
+    app.state.transport.sample_rate = 1000;
+    app.send_command(EngineCommand::SetSampleRate(1000));
+    let track = ProjectTrack::new(TrackId::new(), "Canonical Delay".into(), 3);
+    let track_id = track.id;
+    Arc::make_mut(&mut app.state.project_tracks).tracks.push(track);
+    app.send_command(EngineCommand::add_track(track_id));
+    let _ = app.update(Message::Devices(DevicesMsg::AddEffect(track_id, EffectType::Delay)));
+    let effect_id = app.state.find_track(track_id).unwrap().effects[0].id;
+    app.state.arrangement.selected_track = Some(track_id);
+    app.state.view.detail_panel_tab = DetailPanelTab::Devices;
+    app.poll_device_meters();
+    publish_all(&mut app, &mut published, &mut commands);
+    render_window(&mut engine, track_id);
+    app.poll_engine_events();
+    for index in [param::LEFT_DIVISION, param::LEFT_MODIFIER, param::ROUTING,
+        param::RIGHT_DIVISION, param::RIGHT_MODIFIER] {
+        let _ = app.update(Message::set_effect_param(track_id, effect_id, index, 1.0));
+        publish_all(&mut app, &mut published, &mut commands);
+        render_window(&mut engine, track_id);
+        app.poll_engine_events();
+        let _ = app.update(Message::set_effect_param(track_id, effect_id, index, -0.0));
+        publish_all(&mut app, &mut published, &mut commands);
+        render_window(&mut engine, track_id);
+        app.poll_engine_events();
+        assert_eq!(app.delay_devices.panels[&effect_id].snapshot.unwrap().targets[index].to_bits(),
+            0.0_f32.to_bits());
+        assert_ne!(app.delay_reference(track_id, effect_id).1, "Awaiting applied state", "index {index}");
+    }
+}
