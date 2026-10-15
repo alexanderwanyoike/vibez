@@ -238,8 +238,12 @@ impl DelayEffect {
         }
         if self.history.is_valid() {
             match index {
-                param::FEEDBACK_HP_HZ => self.filters.set_high_pass_hz(target, self.history.sample_rate()),
-                param::FEEDBACK_LP_HZ => self.filters.set_low_pass_hz(target, self.history.sample_rate()),
+                param::FEEDBACK_HP_ENABLED => self.filters.set_high_pass_enabled(target, automated,
+                    (self.history.sample_rate() as usize).div_ceil(100)),
+                param::FEEDBACK_LP_ENABLED => self.filters.set_low_pass_enabled(target, automated,
+                    (self.history.sample_rate() as usize).div_ceil(100)),
+                param::FEEDBACK_HP_HZ => self.filters.set_high_pass_hz(target, automated),
+                param::FEEDBACK_LP_HZ => self.filters.set_low_pass_hz(target, automated),
                 _ => {}
             }
         }
@@ -305,8 +309,6 @@ impl AudioEffect for DelayEffect {
         self.timing.begin_audio(&self.targets, sample_rate);
         let fade_frames = (sample_rate as usize).div_ceil(50);
         let use_glide = self.targets[param::TIME_CHANGE] >= 0.5;
-        let high_pass = self.targets[param::FEEDBACK_HP_ENABLED] >= 0.5;
-        let low_pass = self.targets[param::FEEDBACK_LP_ENABLED] >= 0.5;
 
         for frame in 0..frames {
             let [left, right] = self.timing.next_frame(fade_frames, sample_rate, use_glide);
@@ -327,7 +329,7 @@ impl AudioEffect for DelayEffect {
                     (f64::from(delayed_r) * own + f64::from(delayed_l) * cross) as f32,
                 )
             };
-            let [filtered_l, filtered_r] = self.filters.process([routed_l, routed_r], high_pass, low_pass);
+            let [filtered_l, filtered_r] = self.filters.process([routed_l, routed_r]);
 
             // Left channel
             let dry_l = Self::finite_or_zero(buffer[frame * ch]);
@@ -356,7 +358,7 @@ impl AudioEffect for DelayEffect {
         self.mix.reset(self.targets[param::MIX]);
         self.feedback.reset(self.targets[param::FEEDBACK]);
         self.routing.reset(self.targets[param::ROUTING]);
-        self.filters.reset();
+        self.filters.reset(self.targets[param::FEEDBACK_HP_ENABLED], self.targets[param::FEEDBACK_LP_ENABLED]);
     }
 }
 
