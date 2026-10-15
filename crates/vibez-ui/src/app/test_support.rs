@@ -20,6 +20,7 @@ pub(super) fn app() -> super::App {
         plugin_effect_tx,
         plugin_load_requests: Default::default(),
         gain_devices: Default::default(),
+        param_entry: None,
         device_presets: Default::default(),
         sidechain_sync_inputs: None,
         track_meter_peaks: Default::default(),
