@@ -44,29 +44,40 @@ pub struct DelayEffect {
 
 impl DelayEffect {
     pub fn new(sample_rate: f32) -> Self {
-        let configuration_valid = Self::requested_activation_rate(sample_rate)
-            .filter(|rate| *rate >= 1000)
-            .and_then(|rate| u64::from(rate).checked_mul(MAX_SYNC_SECONDS))
-            .and_then(|frames| frames.checked_add(INTERPOLATION_GUARDS))
-            .and_then(|frames| frames.checked_mul(2))
-            .and_then(|samples| samples.checked_mul(std::mem::size_of::<f32>() as u64))
-            .is_some_and(|bytes| bytes <= MAX_HISTORY_BYTES);
-        // Max delay = 2 seconds
-        let max_samples = if configuration_valid {
-            (sample_rate * 2.0) as usize
-        } else {
-            0
-        };
+        let histories = Self::prepare_histories(sample_rate);
+        let configuration_valid = histories.is_some();
+        let (buffer_l, buffer_r) = histories.unwrap_or_default();
         Self {
             time_ms: 500.0,
             feedback: 0.5,
             mix: 0.3,
             sample_rate,
             configuration_valid,
-            buffer_l: vec![0.0; max_samples],
-            buffer_r: vec![0.0; max_samples],
+            buffer_l,
+            buffer_r,
             write_pos: 0,
         }
+    }
+
+    fn prepare_histories(sample_rate: f32) -> Option<(Vec<f32>, Vec<f32>)> {
+        let frames = Self::requested_activation_rate(sample_rate)
+            .filter(|rate| *rate >= 1000)
+            .and_then(|rate| u64::from(rate).checked_mul(MAX_SYNC_SECONDS))
+            .and_then(|frames| frames.checked_add(INTERPOLATION_GUARDS))?;
+        let bytes = frames
+            .checked_mul(2)?
+            .checked_mul(std::mem::size_of::<f32>() as u64)?;
+        if bytes > MAX_HISTORY_BYTES {
+            return None;
+        }
+        let count = usize::try_from(frames).ok()?;
+        let mut buffer_l = Vec::new();
+        buffer_l.try_reserve_exact(count).ok()?;
+        buffer_l.resize(count, 0.0);
+        let mut buffer_r = Vec::new();
+        buffer_r.try_reserve_exact(count).ok()?;
+        buffer_r.resize(count, 0.0);
+        Some((buffer_l, buffer_r))
     }
 
     fn requested_activation_rate(sample_rate: f32) -> Option<u32> {
