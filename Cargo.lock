@@ -5144,6 +5144,7 @@ version = "0.4.1"
 dependencies = [
  "audio_thread_priority",
  "cpal",
+ "libc",
  "midir",
  "rubato",
  "serde",
