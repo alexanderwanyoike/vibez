@@ -54,7 +54,9 @@ fn ready_and_unfulfilled_note_requests_complete_on_audio_and_release_control_on_
         let (engine, output) = on_audio_thread(fixture.engine, true);
         fixture.engine = engine;
         assert_signal(&output);
-        let disposed = crate::retirement::tests::allocations(|| drop(received));
+        let owner = received.completed.pop().unwrap();
+        drop(received);
+        let disposed = crate::retirement::tests::allocations(|| drop(owner));
         assert_eq!(disposed.0, 0);
         // Both eager Vecs, the final ring's two allocations and the control Box
         // return together. Applied also returns both emptied source allocations.
@@ -235,7 +237,9 @@ fn eager_and_missing_note_completions_return_both_unused_mailbox_endpoints() {
         let (engine, output) = on_audio_thread(fixture.engine, true);
         fixture.engine = engine;
         assert_signal(&output);
-        let disposed = crate::retirement::tests::allocations(|| drop(received));
+        let owner = received.completed.pop().unwrap();
+        drop(received);
+        let disposed = crate::retirement::tests::allocations(|| drop(owner));
         assert_eq!(disposed, (0, 5));
         assert_eq!(identity.strong_count(), 1);
         let disposed = crate::retirement::tests::allocations(|| drop(fixture.engine));
