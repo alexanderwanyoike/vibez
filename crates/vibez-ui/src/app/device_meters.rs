@@ -6,6 +6,7 @@ use std::time::Instant;
 use vibez_core::id::{EffectId, TrackId};
 use vibez_engine::metering::MeterValues;
 
+use crate::domains::eq::is_native_eq;
 use crate::domains::gain::is_native_gain;
 use crate::state::{DetailPanelTab, UiEffect};
 
@@ -18,7 +19,7 @@ pub(super) struct DeviceMeters {
 }
 
 fn is_metered(effect: &UiEffect) -> bool {
-    is_native_gain(effect)
+    is_native_gain(effect) || is_native_eq(effect)
 }
 
 impl App {
@@ -36,6 +37,10 @@ impl App {
             self.restart_device_metering();
         }
         self.poll_gain_devices(wanted);
+        let now = Instant::now();
+        for panel in self.eq_devices.panels.values_mut() {
+            panel.reset_stale(now);
+        }
     }
 
     /// Metering restarts under a new generation after undo or redo (which
@@ -45,6 +50,9 @@ impl App {
         self.device_meters.generation = self.device_meters.generation.wrapping_add(1);
         for panel in self.gain_devices.panels.values_mut() {
             panel.restart_metering();
+        }
+        for panel in self.eq_devices.panels.values_mut() {
+            panel.clear_readings();
         }
         self.send_command(EngineCommand::SetEffectMeterChannel {
             track_id: self.device_meters.channel,
@@ -56,6 +64,7 @@ impl App {
         self.device_meters.channel = None;
         self.device_meters.generation = self.device_meters.generation.wrapping_add(1);
         self.gain_devices.panels.clear();
+        self.eq_devices.panels.clear();
         self.send_command(EngineCommand::SetEffectMeterChannel {
             track_id: None,
             generation: self.device_meters.generation,
@@ -88,6 +97,12 @@ impl App {
                 .entry(effect_id)
                 .or_default()
                 .accept_meter(input, output, Instant::now());
+        } else if is_native_eq(effect) {
+            self.eq_devices
+                .panels
+                .entry(effect_id)
+                .or_default()
+                .accept_meter(input, output, Instant::now());
         }
     }
 }
@@ -112,5 +127,18 @@ mod tests {
         app.state.view.detail_panel_tab = DetailPanelTab::Devices;
         app.poll_device_meters();
         assert_eq!(app.device_meters.channel, Some(id));
+
+        let eq = app.state.find_track(id).unwrap().effects[0].id;
+        let level = MeterValues {
+            peak_l: 0.5,
+            peak_r: 0.25,
+            rms_l: 0.3,
+            rms_r: 0.15,
+        };
+        let generation = app.device_meters.generation;
+        app.accept_device_meter(id, eq, generation.wrapping_sub(1), level, level);
+        assert_eq!(app.eq_devices.panel(eq).output, MeterValues::SILENT);
+        app.accept_device_meter(id, eq, generation, level, level);
+        assert_eq!(app.eq_devices.panel(eq).output, level);
     }
 }

@@ -2,8 +2,11 @@
 //! edited, which side of the EQ the analyser listens to, and whether the
 //! analyser is frozen.
 
+use std::time::{Duration, Instant};
+
 use vibez_core::id::EffectId;
 use vibez_dsp::eq::param;
+use vibez_engine::metering::MeterValues;
 
 pub const BAND_NAMES: [&str; 4] = ["LF", "LMF", "HMF", "HF"];
 
@@ -58,6 +61,9 @@ pub struct EqPanelState {
     pub side: SpectrumSide,
     pub frozen: bool,
     pub advanced: bool,
+    pub input: MeterValues,
+    pub output: MeterValues,
+    pub last_meter_at: Option<Instant>,
 }
 
 impl EqPanelState {
@@ -69,6 +75,29 @@ impl EqPanelState {
             EqMsg::ToggleFreeze(_) => self.frozen = !self.frozen,
             EqMsg::ToggleAdvanced(_) => self.advanced = !self.advanced,
         }
+    }
+
+    pub fn accept_meter(&mut self, input: MeterValues, output: MeterValues, now: Instant) {
+        self.input = input;
+        self.output = output;
+        self.last_meter_at = Some(now);
+    }
+
+    /// Readings stop when audio stops reaching the EQ; a held level would
+    /// claim signal that is no longer there.
+    pub fn reset_stale(&mut self, now: Instant) {
+        if self
+            .last_meter_at
+            .is_some_and(|last| now.saturating_duration_since(last) >= Duration::from_millis(250))
+        {
+            self.clear_readings();
+        }
+    }
+
+    pub fn clear_readings(&mut self) {
+        self.input = MeterValues::SILENT;
+        self.output = MeterValues::SILENT;
+        self.last_meter_at = None;
     }
 }
 
