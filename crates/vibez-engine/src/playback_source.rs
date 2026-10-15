@@ -539,6 +539,10 @@ pub(crate) struct QueuedClipPlayback {
 }
 
 #[cfg(test)]
+#[path = "playback_source_note_insertion_tests.rs"]
+mod note_insertion_tests;
+
+#[cfg(test)]
 mod tests {
     use std::sync::Arc;
 
