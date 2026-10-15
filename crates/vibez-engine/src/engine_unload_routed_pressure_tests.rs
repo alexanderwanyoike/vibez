@@ -574,7 +574,8 @@ fn routed_unload_needs_two_free_credits_without_retiring_the_arrange_buffer() {
             assert_eq!(output, [0.0; 8]);
             assert!(engine.cmd_rx.peek().is_err());
             assert!(!engine.transport().is_playing());
-            assert_eq!(engine.transport().audio_length(), None);
+            // The following BPM command derives length from the surviving Arrange clip.
+            assert_eq!(engine.transport().audio_length(), Some(256));
             assert_eq!(engine.transport().bpm(), 137.0);
             25
         };
