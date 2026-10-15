@@ -1010,3 +1010,7 @@ mod automation_review_tests;
 #[cfg(test)]
 #[path = "engine_automation_retirement_tests.rs"]
 mod automation_retirement_tests;
+
+#[cfg(test)]
+#[path = "engine_automation_lane_insertion_tests.rs"]
+mod automation_lane_insertion_tests;
