@@ -66,14 +66,16 @@ fn engine_with_held_note() -> (
     cmd_tx
         .push(EngineCommand::AddNoteClip {
             track_id: tid,
-            clip_id: cid,
-            position_beats: 0.0,
-            duration_beats: 8.0,
-            start_marker_beats: 0.0,
-            loop_enabled: false,
-            loop_start_beats: 0.0,
-            loop_end_beats: 0.0,
-            groove_grid: vibez_core::perform::GrooveGrid::Off,
+            insertion: crate::clip_insertion::PreparedNoteClipInsertion::new(
+                cid,
+                0.0,
+                8.0,
+                0.0,
+                false,
+                0.0,
+                0.0,
+                vibez_core::perform::GrooveGrid::Off,
+            ),
         })
         .unwrap();
     cmd_tx
@@ -139,14 +141,16 @@ fn run_scenario(
     cmd_tx
         .push(EngineCommand::AddNoteClip {
             track_id: tid,
-            clip_id: cid,
-            position_beats: 0.0,
-            duration_beats: 8.0,
-            start_marker_beats: 0.0,
-            loop_enabled: clip_loop.0,
-            loop_start_beats: clip_loop.1,
-            loop_end_beats: clip_loop.2,
-            groove_grid: vibez_core::perform::GrooveGrid::Off,
+            insertion: crate::clip_insertion::PreparedNoteClipInsertion::new(
+                cid,
+                0.0,
+                8.0,
+                0.0,
+                clip_loop.0,
+                clip_loop.1,
+                clip_loop.2,
+                vibez_core::perform::GrooveGrid::Off,
+            ),
         })
         .unwrap();
     cmd_tx
@@ -209,15 +213,17 @@ fn looped_note_ons_per_bar(batch_render: bool) -> Vec<usize> {
         .unwrap();
     cmd_tx
         .push(EngineCommand::AddNoteClip {
-            track_id,
-            clip_id,
-            position_beats: 0.0,
-            duration_beats: 16.0,
-            start_marker_beats: 0.0,
-            loop_enabled: true,
-            loop_start_beats: 0.0,
-            loop_end_beats: 4.0,
-            groove_grid: vibez_core::perform::GrooveGrid::Off,
+            track_id: track_id,
+            insertion: crate::clip_insertion::PreparedNoteClipInsertion::new(
+                clip_id,
+                0.0,
+                16.0,
+                0.0,
+                true,
+                0.0,
+                4.0,
+                vibez_core::perform::GrooveGrid::Off,
+            ),
         })
         .unwrap();
     for step in 0..8 {

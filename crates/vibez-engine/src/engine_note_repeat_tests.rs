@@ -441,15 +441,17 @@ fn clip_engine(
         .unwrap();
     commands
         .push(EngineCommand::AddNoteClip {
-            track_id,
-            clip_id,
-            position_beats: 0.0,
-            duration_beats: 1.0,
-            start_marker_beats: 0.0,
-            loop_enabled: false,
-            loop_start_beats: 0.0,
-            loop_end_beats: 0.0,
-            groove_grid,
+            track_id: track_id,
+            insertion: crate::clip_insertion::PreparedNoteClipInsertion::new(
+                clip_id,
+                0.0,
+                1.0,
+                0.0,
+                false,
+                0.0,
+                0.0,
+                groove_grid,
+            ),
         })
         .unwrap();
     commands
