@@ -50,6 +50,7 @@ fn add_unity_clip(
         .unwrap();
     commands
         .push(EngineCommand::AddClip {
+            insertion: crate::clip_insertion::PreparedClipInsertion::new(),
             track_id,
             clip_id: ClipId::new(),
             audio,

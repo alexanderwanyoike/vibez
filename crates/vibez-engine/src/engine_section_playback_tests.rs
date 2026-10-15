@@ -1167,7 +1167,7 @@ fn section_refresh_then_public_capture_stop_preserves_owner_and_original_late_fe
         .unwrap();
     let mut output = [0.0; 64];
     process_refresh_block(&mut fixture.engine, &mut output);
-    assert!(fixture.engine.capture_active);
+    assert!(fixture.engine.capture_lifecycle.is_active());
     while fixture.events.pop().is_ok() {}
     let ring_capacity = fixture.engine.event_tx.slots();
     for _ in 0..ring_capacity {
@@ -1191,7 +1191,7 @@ fn section_refresh_then_public_capture_stop_preserves_owner_and_original_late_fe
         .unwrap();
     process_refresh_block(&mut fixture.engine, &mut output);
     assert_refresh_left_audio(&output, 0.25);
-    assert!(!fixture.engine.capture_active);
+    assert!(!fixture.engine.capture_lifecycle.is_active());
     assert!(fixture.engine.transport().is_playing());
     assert_eq!(fixture.engine.active_section.unwrap().position_samples, 160);
     assert_eq!(fixture.old_owner.strong_count(), 1);
@@ -1269,6 +1269,6 @@ fn section_refresh_then_public_capture_stop_preserves_owner_and_original_late_fe
     )));
     process_refresh_block(&mut fixture.engine, &mut output);
     assert_refresh_left_audio(&output, 0.75);
-    assert!(!fixture.engine.capture_active);
+    assert!(!fixture.engine.capture_lifecycle.is_active());
     assert_eq!(fixture.engine.active_section.unwrap().position_samples, 224);
 }

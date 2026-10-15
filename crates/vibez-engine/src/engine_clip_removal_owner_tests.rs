@@ -1,7 +1,8 @@
 //! Clip retirement retains complete owners across resident source homes and command backpressure.
 
 use super::*;
-use crate::playback_source::PreparedPlaybackSource;
+use crate::clip_insertion::{PreparedClipInsertion, PreparedNoteClipInsertion, PreparedNoteInsertion};
+use crate::playback_source::{EngineNoteClip, PreparedPlaybackSource};
 use vibez_core::{id::ClipId, midi::MidiNote, perform::GrooveGrid};
 
 fn note_clip(id: ClipId) -> EngineNoteClip {
@@ -284,6 +285,7 @@ fn public_audio_and_note_insertion_growth_keeps_later_removal_allocation_free() 
             );
             commands
                 .push(EngineCommand::AddClip {
+                    insertion: PreparedClipInsertion::new(),
                     track_id: track,
                     clip_id: clip.id,
                     audio: clip.audio,
@@ -303,30 +305,25 @@ fn public_audio_and_note_insertion_growth_keeps_later_removal_allocation_free() 
             commands
                 .push(EngineCommand::AddNoteClip {
                     track_id: track,
-                    clip_id: *id,
-                    position_beats: 0.0,
-                    duration_beats: 4.0,
-                    start_marker_beats: 0.0,
-                    loop_enabled: false,
-                    loop_start_beats: 0.0,
-                    loop_end_beats: 4.0,
-                    groove_grid: GrooveGrid::Off,
+                    insertion: PreparedNoteClipInsertion::new(
+                        *id, 0.0, 4.0, 0.0, false, 0.0, 4.0, GrooveGrid::Off,
+                    ),
                 })
                 .unwrap();
             commands
                 .push(EngineCommand::AddNote {
                     track_id: track,
                     clip_id: *id,
-                    note: MidiNote {
+                    insertion: PreparedNoteInsertion::new(MidiNote {
                         pitch: 60,
                         velocity: 100,
                         start_beat: 0.0,
                         duration_beats: 3.0,
-                    },
+                    }),
                 })
                 .unwrap();
         }
-        engine.process(&mut [], 2);
+        crate::test_support::fulfill_insertion_setup(&mut engine, &mut events);
         while events.pop().is_ok() {}
         let middle = ids[count / 2];
         commands

@@ -1,6 +1,8 @@
 //! Complete clip removal preserves playback and returns owned storage outside the callback.
 
 use super::*;
+use crate::clip_insertion::PreparedClipInsertion;
+use crate::playback_source::EngineNoteClip;
 use vibez_core::id::ClipId;
 use vibez_core::track::{ClipFades, ClipPlaybackDirection};
 use vibez_core::warp_marker::WarpMarkers;
@@ -16,6 +18,7 @@ fn add_clip(track: TrackId, id: ClipId, audio: Arc<DecodedAudio>, duration: u64)
     let mut warp_markers = WarpMarkers::default();
     assert!(warp_markers.add(32, 32, 0, 512, 512));
     EngineCommand::AddClip {
+        insertion: PreparedClipInsertion::new(),
         track_id: track,
         clip_id: id,
         audio,
@@ -53,6 +56,7 @@ fn removing_a_unique_audio_clip_preserves_survivors_without_callback_destruction
             .unwrap();
         commands.push(EngineCommand::Play).unwrap();
         let mut before = [0.0; 16];
+        crate::test_support::fulfill_insertion_setup(&mut engine, &mut events);
         engine.process(&mut before, 2);
         let expected_before = (0.125 + 0.25 + 0.5) * 0.75 * std::f32::consts::FRAC_1_SQRT_2;
         assert!(before
@@ -172,6 +176,7 @@ fn duplicate_audio_removal_is_atomic_under_retirement_backpressure_and_reuses_ca
         .push(add_clip(track, survivors[1], audio(0.5), 200))
         .unwrap();
     commands.push(EngineCommand::Play).unwrap();
+    crate::test_support::fulfill_insertion_setup(&mut engine, &mut events);
     engine.process(&mut [0.0; 16], 2);
     while events.pop().is_ok() {}
     while engine.event_tx.push(EngineEvent::PlaybackStarted).is_ok() {}

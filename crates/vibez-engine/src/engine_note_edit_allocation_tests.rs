@@ -1,6 +1,7 @@
 //! Public note edits retain sample-accurate note-off behavior without callback allocation.
 
 use crate::{
+    clip_insertion::{PreparedNoteClipInsertion, PreparedNoteInsertion},
     commands::EngineCommand,
     engine::{AudioEngine, AudioProcessBlock},
     mixer::EngineTrack,
@@ -307,7 +308,7 @@ fn held_note(start_beat: f64, duration_beats: f64) -> MidiNote {
 }
 
 fn public_note_fixture(notes: &[MidiNote], duration_beats: f64) -> PublicNoteFixture {
-    let (mut engine, mut commands, events) = AudioEngine::new();
+    let (mut engine, mut commands, mut events) = AudioEngine::new();
     let track = TrackId::new();
     let clip = ClipId::new();
     for command in [
@@ -322,14 +323,10 @@ fn public_note_fixture(notes: &[MidiNote], duration_beats: f64) -> PublicNoteFix
         },
         EngineCommand::AddNoteClip {
             track_id: track,
-            clip_id: clip,
-            position_beats: 0.0,
-            duration_beats,
-            start_marker_beats: 0.0,
-            loop_enabled: false,
-            loop_start_beats: 0.0,
-            loop_end_beats: duration_beats,
-            groove_grid: GrooveGrid::Sixteenth,
+            insertion: PreparedNoteClipInsertion::new(
+                clip, 0.0, duration_beats, 0.0, false, 0.0, duration_beats,
+                GrooveGrid::Sixteenth,
+            ),
         },
     ] {
         commands.push(command).unwrap();
@@ -339,11 +336,11 @@ fn public_note_fixture(notes: &[MidiNote], duration_beats: f64) -> PublicNoteFix
             .push(EngineCommand::AddNote {
                 track_id: track,
                 clip_id: clip,
-                note,
+                insertion: PreparedNoteInsertion::new(note),
             })
             .unwrap();
     }
-    engine.process_block(AudioProcessBlock::new(&mut [], 2));
+    crate::test_support::fulfill_insertion_setup(&mut engine, &mut events);
     (engine, commands, events, track, clip)
 }
 

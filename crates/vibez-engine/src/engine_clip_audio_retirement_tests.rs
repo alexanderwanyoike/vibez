@@ -67,6 +67,7 @@ impl Fixture {
         commands.push(EngineCommand::add_track(track)).unwrap();
         commands
             .push(EngineCommand::AddClip {
+                insertion: crate::clip_insertion::PreparedClipInsertion::new(),
                 track_id: track,
                 clip_id: clip,
                 audio: old_audio,
@@ -83,6 +84,7 @@ impl Fixture {
                 warp_markers,
             })
             .unwrap();
+        crate::test_support::fulfill_insertion_setup(&mut engine, &mut events);
         engine.process(&mut [0.0; 32], 2);
         while events.pop().is_ok() {}
         Self {
