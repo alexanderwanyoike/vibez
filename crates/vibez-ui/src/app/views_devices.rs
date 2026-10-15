@@ -99,9 +99,7 @@ impl App {
                     &self.state.devices,
                 )
             };
-            if crate::domains::gain::is_native_gain(effect)
-                || compressor
-            {
+            if crate::domains::gain::is_native_gain(effect) || compressor {
                 used += card_width(effect, Some(0.0), sidechain.is_some());
                 responsive_effects.push((cards.len(), effect, sidechain));
                 cards.push(None);
