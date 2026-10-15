@@ -76,9 +76,7 @@ pub fn presentation_descriptor(effect: &crate::state::UiEffect, index: usize) ->
     {
         descriptor.name = "Cutoff";
     }
-    if effect.effect_type == vibez_core::effect::EffectType::Bitcrush
-        && effect.plugin_ref.is_none()
-        && effect.plugin_name.is_none()
+    if crate::domains::bitcrush::is_native_bitcrush(effect)
         && [
             vibez_dsp::bitcrush::param::MIX,
             vibez_dsp::bitcrush::param::JITTER,
@@ -91,9 +89,7 @@ pub fn presentation_descriptor(effect: &crate::state::UiEffect, index: usize) ->
 }
 
 pub fn presented_value(effect: &crate::state::UiEffect, index: usize, value: f32) -> String {
-    if effect.effect_type == vibez_core::effect::EffectType::Bitcrush
-        && effect.plugin_ref.is_none()
-        && effect.plugin_name.is_none()
+    if crate::domains::bitcrush::is_native_bitcrush(effect)
         && index == vibez_dsp::bitcrush::param::BITS
     {
         return format!("{:.0}", value.trunc());
