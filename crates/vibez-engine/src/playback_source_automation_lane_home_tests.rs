@@ -106,6 +106,7 @@ fn queued_section_with_colliding_lane_id_keeps_arrange_growth_and_perform_owners
     assert_eq!(queued, 1);
     let request = request.expect("restored Arrange capacity must require growth despite the live Section's matching ID");
     let mut retired_sections = Vec::new();
+    let mut capture_sources = Vec::new();
     for step in 0..4 {
         let output_position = engine.output_position_samples();
         measured_callback(&mut engine, &mut output);
@@ -130,6 +131,11 @@ fn queued_section_with_colliding_lane_id_keeps_arrange_growth_and_perform_owners
                     assert_eq!(retired.tracks()[0].source.automation[0].points.as_ptr(), old_points);
                     retired_sections.push(retired);
                 }
+                EngineEvent::SectionCaptureSource { section_id, effective_at_samples, section_position_samples, refreshed, offsets } => {
+                    assert_eq!((section_id, effective_at_samples, section_position_samples, refreshed), (next_section_id, 32, 0, false));
+                    assert!(offsets.is_empty());
+                    capture_sources.push(offsets);
+                }
                 EngineEvent::PlaybackPosition(0) => {}
                 EngineEvent::PerformancePosition(value) => assert!(heard_perform.replace(value).is_none()),
                 EngineEvent::SectionPlaybackPosition { section_id, position_samples } => assert!(heard_section.replace((section_id, position_samples)).is_none()),
@@ -145,6 +151,7 @@ fn queued_section_with_colliding_lane_id_keeps_arrange_growth_and_perform_owners
         assert_eq!(heard_section, Some((if step < 3 { old_section_id } else { next_section_id }, (16 + step * 8) % 32)));
     }
     assert_eq!(retired_sections.len(), 1);
+    assert_eq!(capture_sources.len(), 1);
     let before = calls.observed();
     let next = &engine.tracks()[0].section_playback_source;
     next_home.assert_unchanged(next);
