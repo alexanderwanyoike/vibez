@@ -209,7 +209,7 @@ impl App {
                         input,
                         output,
                     } => {
-                        self.accept_gain_meter(track_id, effect_id, generation, input, output);
+                        self.accept_device_meter(track_id, effect_id, generation, input, output);
                     }
                     EngineEvent::RetiredEffectStorage(storage) => drop(storage),
                     EngineEvent::DeviceReconfigurationRetired { device, reason } => {
