@@ -52,7 +52,12 @@ fn full_two_second_delay_arrives_at_the_endpoint_and_never_one_sample_early() {
                     })
                     .collect();
                 let exact_impulse = actual.iter().enumerate().all(|(index, sample)| {
-                    *sample == if index == endpoint + channel { 1.0 } else { 0.0 }
+                    *sample
+                        == if index == endpoint + channel {
+                            1.0
+                        } else {
+                            0.0
+                        }
                 });
                 if !exact_impulse {
                     failures.push(format!(

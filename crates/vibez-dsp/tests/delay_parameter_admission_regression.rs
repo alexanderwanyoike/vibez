@@ -39,13 +39,22 @@ fn expected_sample(frame: usize, channel: usize, delay: usize) -> f32 {
 fn rejected_manual_and_automated_edits_preserve_legacy_targets_and_impulse_history() {
     let mut edits = Vec::new();
     for index in 0..3 {
-        for (label, value) in [("nan", f32::NAN), ("positive_infinity", f32::INFINITY), ("negative_infinity", f32::NEG_INFINITY)] {
+        for (label, value) in [
+            ("nan", f32::NAN),
+            ("positive_infinity", f32::INFINITY),
+            ("negative_infinity", f32::NEG_INFINITY),
+        ] {
             edits.push((index, label, value));
         }
     }
     // The appended layout admits 3..16; rejection now starts at 17.
     for index in [17, usize::MAX] {
-        for (label, value) in [("unknown_finite", 0.25), ("unknown_nan", f32::NAN), ("unknown_positive_infinity", f32::INFINITY), ("unknown_negative_infinity", f32::NEG_INFINITY)] {
+        for (label, value) in [
+            ("unknown_finite", 0.25),
+            ("unknown_nan", f32::NAN),
+            ("unknown_positive_infinity", f32::INFINITY),
+            ("unknown_negative_infinity", f32::NEG_INFINITY),
+        ] {
             edits.push((index, label, value));
         }
     }
@@ -60,7 +69,10 @@ fn rejected_manual_and_automated_edits_preserve_legacy_targets_and_impulse_histo
             for &(index, label, value) in &edits {
                 for parts in partitions {
                     let mut effect = prepare(rate as f32);
-                    assert_eq!(f64::from(effect.get_param(0)) * f64::from(rate as f32) / 1000.0, delay as f64);
+                    assert_eq!(
+                        f64::from(effect.get_param(0)) * f64::from(rate as f32) / 1000.0,
+                        delay as f64
+                    );
                     let mut prefix = vec![0.0; 2 * prefix_frames];
                     prefix[0] = 1.0;
                     prefix[1] = 0.25;
@@ -77,10 +89,20 @@ fn rejected_manual_and_automated_edits_preserve_legacy_targets_and_impulse_histo
                         frame = end;
                         part += 1;
                     }
-                    let mismatches = prefix.iter().chain(output.iter()).enumerate().filter(|(sample, actual)| {
-                        actual.to_bits() != expected_sample(sample / 2, sample % 2, delay).to_bits()
-                    }).count();
-                    let nonfinite_outputs = prefix.iter().chain(output.iter()).filter(|sample| !sample.is_finite()).count();
+                    let mismatches = prefix
+                        .iter()
+                        .chain(output.iter())
+                        .enumerate()
+                        .filter(|(sample, actual)| {
+                            actual.to_bits()
+                                != expected_sample(sample / 2, sample % 2, delay).to_bits()
+                        })
+                        .count();
+                    let nonfinite_outputs = prefix
+                        .iter()
+                        .chain(output.iter())
+                        .filter(|sample| !sample.is_finite())
+                        .count();
                     let after_audio = target_bits(&effect);
                     let witnesses: Vec<_> = (1..=4).map(|repeat| {
                         let frame = repeat * delay;
@@ -91,7 +113,8 @@ fn rejected_manual_and_automated_edits_preserve_legacy_targets_and_impulse_histo
                             "actual_bits": [output[offset].to_bits(), output[offset + 1].to_bits()],
                         })
                     }).collect();
-                    if accepted || after_edit != before || after_audio != before || mismatches != 0 {
+                    if accepted || after_edit != before || after_audio != before || mismatches != 0
+                    {
                         failures.push(format!(
                             "automated={automated}, rate={rate}, index={index}, value={label}, parts={parts:?}: accepted={accepted}, target_bits_changed={}, sample_mismatches={mismatches}",
                             after_edit != before || after_audio != before
@@ -111,24 +134,39 @@ fn rejected_manual_and_automated_edits_preserve_legacy_targets_and_impulse_histo
             }
         }
     }
-    println!("DELAY_PARAMETER_REJECTION_RECORD {}", json!({
-        "case": "legacy_rejected_edits_preserve_targets_and_history",
-        "execution_head": std::env::var("VIBEZ_VERIFICATION_HEAD")
-            .unwrap_or_else(|_| "UNLABELLED".into()),
-        "observed": observations,
-    }));
+    println!(
+        "DELAY_PARAMETER_REJECTION_RECORD {}",
+        json!({
+            "case": "legacy_rejected_edits_preserve_targets_and_history",
+            "execution_head": std::env::var("VIBEZ_VERIFICATION_HEAD")
+                .unwrap_or_else(|_| "UNLABELLED".into()),
+            "observed": observations,
+        })
+    );
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
 #[test]
 fn finite_manual_and_automated_legacy_values_keep_the_original_clamp_bounds() {
     let cases: [(usize, f32, f32); 18] = [
-        (0, -f32::MAX, 1.0), (0, 0.0, 1.0), (0, 1.0, 1.0),
-        (0, 16.25, 16.25), (0, 2000.0, 2000.0), (0, f32::MAX, 2000.0),
-        (1, -f32::MAX, 0.0), (1, 0.0, 0.0), (1, 0.375, 0.375),
-        (1, 0.5, 0.5), (1, 0.95, 0.95), (1, f32::MAX, 0.95),
-        (2, -f32::MAX, 0.0), (2, 0.0, 0.0), (2, 0.375, 0.375),
-        (2, 0.5, 0.5), (2, 1.0, 1.0), (2, f32::MAX, 1.0),
+        (0, -f32::MAX, 1.0),
+        (0, 0.0, 1.0),
+        (0, 1.0, 1.0),
+        (0, 16.25, 16.25),
+        (0, 2000.0, 2000.0),
+        (0, f32::MAX, 2000.0),
+        (1, -f32::MAX, 0.0),
+        (1, 0.0, 0.0),
+        (1, 0.375, 0.375),
+        (1, 0.5, 0.5),
+        (1, 0.95, 0.95),
+        (1, f32::MAX, 0.95),
+        (2, -f32::MAX, 0.0),
+        (2, 0.0, 0.0),
+        (2, 0.375, 0.375),
+        (2, 0.5, 0.5),
+        (2, 1.0, 1.0),
+        (2, f32::MAX, 1.0),
     ];
     let mut observations = Vec::new();
     let mut failures = Vec::new();
@@ -143,7 +181,9 @@ fn finite_manual_and_automated_legacy_values_keep_the_original_clamp_bounds() {
             let accepted = edit(&mut effect, automated, index, value);
             let actual = target_bits(&effect);
             if !accepted || actual != expected {
-                failures.push(format!("automated={automated}, index={index}, finite_value={value}: clamp mismatch"));
+                failures.push(format!(
+                    "automated={automated}, index={index}, finite_value={value}: clamp mismatch"
+                ));
             }
             observations.push(json!({
                 "automated": automated, "index": index, "requested_bits": value.to_bits(),
@@ -151,11 +191,14 @@ fn finite_manual_and_automated_legacy_values_keep_the_original_clamp_bounds() {
             }));
         }
     }
-    println!("DELAY_PARAMETER_CLAMP_RECORD {}", json!({
-        "case": "original_finite_legacy_clamp_bounds",
-        "execution_head": std::env::var("VIBEZ_VERIFICATION_HEAD")
-            .unwrap_or_else(|_| "UNLABELLED".into()),
-        "observed": observations,
-    }));
+    println!(
+        "DELAY_PARAMETER_CLAMP_RECORD {}",
+        json!({
+            "case": "original_finite_legacy_clamp_bounds",
+            "execution_head": std::env::var("VIBEZ_VERIFICATION_HEAD")
+                .unwrap_or_else(|_| "UNLABELLED".into()),
+            "observed": observations,
+        })
+    );
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }

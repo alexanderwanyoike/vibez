@@ -22,8 +22,11 @@ struct Cutoff {
 
 impl Cutoff {
     fn new(hertz: f32, sample_rate: f32) -> Self {
-        let mut cutoff = Self { rate: f64::from(sample_rate),
-            frames: (sample_rate as usize).div_ceil(100), ..Default::default() };
+        let mut cutoff = Self {
+            rate: f64::from(sample_rate),
+            frames: (sample_rate as usize).div_ceil(100),
+            ..Default::default()
+        };
         cutoff.snap(f64::from(hertz).min(0.45 * cutoff.rate));
         cutoff
     }
@@ -59,8 +62,11 @@ impl Cutoff {
         self.started = true;
         if self.frame < self.frames {
             self.frame += 1;
-            let hertz = if self.frame == self.frames { self.target }
-                else { self.origin + (self.target - self.origin) * self.frame as f64 / self.frames as f64 };
+            let hertz = if self.frame == self.frames {
+                self.target
+            } else {
+                self.origin + (self.target - self.origin) * self.frame as f64 / self.frames as f64
+            };
             self.apply(hertz);
         }
         self.g
@@ -82,9 +88,13 @@ pub(super) struct FeedbackFilters {
 
 impl Default for FeedbackFilters {
     fn default() -> Self {
-        Self { channels: Default::default(), high_pass_enabled: ScalarRamp::new(0.0),
-            low_pass_enabled: ScalarRamp::new(0.0), high_pass_cutoff: Cutoff::default(),
-            low_pass_cutoff: Cutoff::default() }
+        Self {
+            channels: Default::default(),
+            high_pass_enabled: ScalarRamp::new(0.0),
+            low_pass_enabled: ScalarRamp::new(0.0),
+            high_pass_cutoff: Cutoff::default(),
+            low_pass_cutoff: Cutoff::default(),
+        }
     }
 }
 
@@ -123,13 +133,24 @@ impl FeedbackFilters {
     fn finite_sample(value: f64) -> f32 {
         let sample = value as f32;
         // Exceptional bridge overflow must not poison the next filter's persistent state.
-        if sample.is_finite() { sample } else { 0.0 }
+        if sample.is_finite() {
+            sample
+        } else {
+            0.0
+        }
     }
 
     fn blend(input: f32, filtered: f32, amount: f32) -> f32 {
-        if amount == 0.0 { input } else if amount == 1.0 { filtered }
-        else { Self::finite_sample((1.0 - f64::from(amount)) * f64::from(input)
-            + f64::from(amount) * f64::from(filtered)) }
+        if amount == 0.0 {
+            input
+        } else if amount == 1.0 {
+            filtered
+        } else {
+            Self::finite_sample(
+                (1.0 - f64::from(amount)) * f64::from(input)
+                    + f64::from(amount) * f64::from(filtered),
+            )
+        }
     }
 
     pub(super) fn snapshot(&self) -> ([vibez_core::delay_state::DelayFilterState; 2], bool) {
@@ -137,12 +158,16 @@ impl FeedbackFilters {
             (&self.high_pass_enabled, &self.high_pass_cutoff),
             (&self.low_pass_enabled, &self.low_pass_cutoff),
         ];
-        let snapshots = states.map(|(enabled, cutoff)| vibez_core::delay_state::DelayFilterState {
-            enabled: enabled.current(), cutoff_hz: cutoff.current,
-            moving: enabled.moving() || cutoff.frame < cutoff.frames,
+        let snapshots = states.map(
+            |(enabled, cutoff)| vibez_core::delay_state::DelayFilterState {
+                enabled: enabled.current(),
+                cutoff_hz: cutoff.current,
+                moving: enabled.moving() || cutoff.frame < cutoff.frames,
+            },
+        );
+        let reference_moving = states.into_iter().any(|(enabled, cutoff)| {
+            enabled.moving() || (enabled.current() > 0.0 && cutoff.frame < cutoff.frames)
         });
-        let reference_moving = states.into_iter().any(|(enabled, cutoff)|
-            enabled.moving() || (enabled.current() > 0.0 && cutoff.frame < cutoff.frames));
         (snapshots, reference_moving)
     }
 

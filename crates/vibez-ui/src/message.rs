@@ -95,7 +95,10 @@ pub enum Message {
     GainControl(crate::domains::gain::GainMsg),
     DeviceControl(crate::domains::device_controls::DeviceControlMsg),
     DelayPage(TrackId, EffectId, crate::domains::delay_layout::Page),
-    DelayResponseReady(u64, Result<Option<Arc<crate::domains::delay_response::DelayResponse>>, String>),
+    DelayResponseReady(
+        u64,
+        Result<Option<Arc<crate::domains::delay_response::DelayResponse>>, String>,
+    ),
     ApplyDevicePreset(TrackId, EffectId, vibez_core::device_preset::DevicePreset),
     DevicePreset(crate::domains::device_presets::DevicePresetMsg),
     /// Arrangement domain (tracks, selection; clips arriving next).

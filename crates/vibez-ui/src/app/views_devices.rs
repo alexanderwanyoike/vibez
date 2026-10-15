@@ -94,7 +94,8 @@ impl App {
                 &self.state.devices,
             );
             if crate::domains::gain::is_native_gain(effect)
-                || crate::domains::delay_observation::is_native_delay(effect) {
+                || crate::domains::delay_observation::is_native_delay(effect)
+            {
                 used += card_width(effect, Some(0.0), sidechain.is_some());
                 gains.push((cards.len(), effect, sidechain));
                 cards.push(None);
@@ -129,11 +130,19 @@ impl App {
             let share = (available_width - used - spacing) / gains.len() as f32;
             for (position, effect, sidechain) in gains {
                 let body = if crate::domains::delay_observation::is_native_delay(effect) {
-                    self.delay_device_body(track_id, effect, track_color,
-                        crate::widgets::delay_device::card_width(share))
+                    self.delay_device_body(
+                        track_id,
+                        effect,
+                        track_color,
+                        crate::widgets::delay_device::card_width(share),
+                    )
                 } else {
-                    self.gain_device_body(track_id, effect, track_color,
-                        crate::widgets::gain_device::card_width(share))
+                    self.gain_device_body(
+                        track_id,
+                        effect,
+                        track_color,
+                        crate::widgets::gain_device::card_width(share),
+                    )
                 };
                 cards[position] = Some(view_effect_slot(
                     track_id,
@@ -210,22 +219,50 @@ impl App {
         ))
     }
 
-    fn delay_device_body<'a>(&'a self, track_id: TrackId, effect: &'a crate::state::UiEffect,
-        accent: Color, width: f32) -> DeviceBody<'a> {
-        let observation = self.delay_devices.panels.get(&effect.id).unwrap_or(&self.delay_devices.empty_panel);
+    fn delay_device_body<'a>(
+        &'a self,
+        track_id: TrackId,
+        effect: &'a crate::state::UiEffect,
+        accent: Color,
+        width: f32,
+    ) -> DeviceBody<'a> {
+        let observation = self
+            .delay_devices
+            .panels
+            .get(&effect.id)
+            .unwrap_or(&self.delay_devices.empty_panel);
         let controls = self.device_control_state(effect.id);
-        let output = self.device_meters.readings.get(&effect.id).and_then(|reading| reading.available_output());
+        let output = self
+            .device_meters
+            .readings
+            .get(&effect.id)
+            .and_then(|reading| reading.available_output());
         let (response, response_status) = self.delay_reference(track_id, effect.id);
         let content = iced::widget::responsive(move |size| {
             crate::widgets::delay_device::view(crate::widgets::delay_device::DelayView {
-                track: track_id, effect, accent, controls, observation, response,
-                response_status, output,
-                presets: self.view_device_preset_bar(track_id, effect, accent,
-                    crate::widgets::delay_device::preset_bar_width(size)),
-                size, on_page: Message::DelayPage,
+                track: track_id,
+                effect,
+                accent,
+                controls,
+                observation,
+                response,
+                response_status,
+                output,
+                presets: self.view_device_preset_bar(
+                    track_id,
+                    effect,
+                    accent,
+                    crate::widgets::delay_device::preset_bar_width(size),
+                ),
+                size,
+                on_page: Message::DelayPage,
             })
         });
-        DeviceBody { content: content.into(), width, padding: iced::Padding::ZERO }
+        DeviceBody {
+            content: content.into(),
+            width,
+            padding: iced::Padding::ZERO,
+        }
     }
 
     fn gain_device_body<'a>(

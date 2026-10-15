@@ -115,11 +115,21 @@ unsafe impl GlobalAlloc for ConstructorAllocator {
 #[global_allocator]
 static ALLOCATOR: ConstructorAllocator = ConstructorAllocator;
 
-fn observe_constructor(rate: f32, fail_at: usize) -> (bool, Option<u32>, AllocationRecord, AllocationRecord) {
-    RECORD.set(AllocationRecord { active: true, fail_at, ..AllocationRecord::default() });
+fn observe_constructor(
+    rate: f32,
+    fail_at: usize,
+) -> (bool, Option<u32>, AllocationRecord, AllocationRecord) {
+    RECORD.set(AllocationRecord {
+        active: true,
+        fail_at,
+        ..AllocationRecord::default()
+    });
     let effect = DelayEffect::new(rate);
     let constructed = RECORD.get();
-    RECORD.set(AllocationRecord { active: false, ..constructed });
+    RECORD.set(AllocationRecord {
+        active: false,
+        ..constructed
+    });
     let valid = effect.processing_configuration_valid();
     let identity = effect.activation_sample_rate();
     RECORD.set(constructed);
@@ -150,7 +160,9 @@ fn execution_head() -> String {
 fn constructor_prepares_exactly_two_guarded_eighteen_second_histories() {
     let mut failures = Vec::new();
     let mut observations = Vec::new();
-    for rate in [1000_u32, 1001, 44_100, 48_000, 88_200, 96_000, 176_400, 192_000, 352_800, 384_000, 466_033] {
+    for rate in [
+        1000_u32, 1001, 44_100, 48_000, 88_200, 96_000, 176_400, 192_000, 352_800, 384_000, 466_033,
+    ] {
         let line_bytes = (18 * u64::from(rate) + 2) * 4;
         let line_bytes = usize::try_from(line_bytes).unwrap();
         let (valid, identity, constructed, dropped) = observe_constructor(rate as f32, 0);
@@ -158,7 +170,13 @@ fn constructor_prepares_exactly_two_guarded_eighteen_second_histories() {
             && identity == Some(rate)
             && constructed.attempts == 2
             && constructed.sizes == [line_bytes, line_bytes, 0, 0]
-            && constructed.alignments == [std::mem::align_of::<f32>(), std::mem::align_of::<f32>(), 0, 0]
+            && constructed.alignments
+                == [
+                    std::mem::align_of::<f32>(),
+                    std::mem::align_of::<f32>(),
+                    0,
+                    0,
+                ]
             && constructed.successes == 2
             && constructed.deallocations == 0
             && constructed.live_bytes == 2 * line_bytes
@@ -167,7 +185,9 @@ fn constructor_prepares_exactly_two_guarded_eighteen_second_histories() {
             && dropped.deallocations == 2
             && dropped.live_bytes == 0;
         if !matches {
-            failures.push(format!("rate={rate}: exact two-history allocation contract mismatch"));
+            failures.push(format!(
+                "rate={rate}: exact two-history allocation contract mismatch"
+            ));
         }
         observations.push(json!({
             "rate": rate, "expected_line_bytes": line_bytes,
@@ -186,8 +206,10 @@ fn constructor_prepares_exactly_two_guarded_eighteen_second_histories() {
         ("unrepresentable", 4_294_967_296.0, None),
     ] {
         let (valid, identity, constructed, dropped) = observe_constructor(rate, 0);
-        let matches = !valid && identity == expected_identity
-            && constructed.attempts == 0 && constructed.live_bytes == 0
+        let matches = !valid
+            && identity == expected_identity
+            && constructed.attempts == 0
+            && constructed.live_bytes == 0
             && dropped.deallocations == 0;
         if !matches {
             failures.push(format!("rejected rate={case}: must allocate no history"));
@@ -198,32 +220,49 @@ fn constructor_prepares_exactly_two_guarded_eighteen_second_histories() {
             "matches": matches, "constructed": observation(constructed), "dropped": observation(dropped),
         }));
     }
-    println!("DELAY_HISTORY_RESOURCES_RECORD {}", json!({
-        "case": "exact_bounded_history_preparation", "execution_head": execution_head(),
-        "observed": observations,
-    }));
+    println!(
+        "DELAY_HISTORY_RESOURCES_RECORD {}",
+        json!({
+            "case": "exact_bounded_history_preparation", "execution_head": execution_head(),
+            "observed": observations,
+        })
+    );
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
 #[test]
 fn allocation_failure_child() {
-    let Ok(ordinal) = std::env::var("VIBEZ_DELAY_FAIL_ALLOCATION") else { return; };
+    let Ok(ordinal) = std::env::var("VIBEZ_DELAY_FAIL_ALLOCATION") else {
+        return;
+    };
     let ordinal: usize = ordinal.parse().unwrap();
     assert!((1..=2).contains(&ordinal));
     let (valid, identity, constructed, dropped) = observe_constructor(1000.0, ordinal);
     let line_bytes = (18 * 1000 + 2) * 4;
-    let matches = !valid && identity == Some(1000)
-        && constructed.attempts == ordinal && constructed.successes == ordinal - 1
-        && constructed.sizes[..ordinal].iter().all(|size| *size == line_bytes)
-        && constructed.live_bytes == 0 && dropped.live_bytes == 0
-        && constructed.deallocations == ordinal - 1 && dropped.deallocations == ordinal - 1
+    let matches = !valid
+        && identity == Some(1000)
+        && constructed.attempts == ordinal
+        && constructed.successes == ordinal - 1
+        && constructed.sizes[..ordinal]
+            .iter()
+            .all(|size| *size == line_bytes)
+        && constructed.live_bytes == 0
+        && dropped.live_bytes == 0
+        && constructed.deallocations == ordinal - 1
+        && dropped.deallocations == ordinal - 1
         && constructed.reallocations == 0;
-    println!("DELAY_HISTORY_FAILURE_CHILD_RECORD {}", json!({
-        "execution_head": execution_head(), "failed_allocation_ordinal": ordinal,
-        "expected_line_bytes": line_bytes, "valid": valid, "identity": identity,
-        "matches": matches, "constructed": observation(constructed), "dropped": observation(dropped),
-    }));
-    assert!(matches, "failed reservation must return an invalid instance without retaining history");
+    println!(
+        "DELAY_HISTORY_FAILURE_CHILD_RECORD {}",
+        json!({
+            "execution_head": execution_head(), "failed_allocation_ordinal": ordinal,
+            "expected_line_bytes": line_bytes, "valid": valid, "identity": identity,
+            "matches": matches, "constructed": observation(constructed), "dropped": observation(dropped),
+        })
+    );
+    assert!(
+        matches,
+        "failed reservation must return an invalid instance without retaining history"
+    );
 }
 
 #[test]
@@ -235,14 +274,23 @@ fn either_real_history_allocation_failure_returns_a_bounded_invalid_instance() {
         let mut command = {
             let mut command = Command::new("sh");
             // Limit ordinary abort dumps; a piped system handler can still retain diagnostics.
-            command.args(["-c", "ulimit -c 0 || exit 125; exec \"$@\"", "delay-allocation-child"]);
+            command.args([
+                "-c",
+                "ulimit -c 0 || exit 125; exec \"$@\"",
+                "delay-allocation-child",
+            ]);
             command.arg(&executable);
             command
         };
         #[cfg(not(unix))]
         let mut command = Command::new(&executable);
         let output = command
-            .args(["--exact", "allocation_failure_child", "--nocapture", "--test-threads=1"])
+            .args([
+                "--exact",
+                "allocation_failure_child",
+                "--nocapture",
+                "--test-threads=1",
+            ])
             .env("VIBEZ_DELAY_FAIL_ALLOCATION", ordinal.to_string())
             .output()
             .unwrap();
@@ -258,14 +306,20 @@ fn either_real_history_allocation_failure_returns_a_bounded_invalid_instance() {
                     && record["failed_allocation_ordinal"] == ordinal
                     && record["execution_head"] == execution_head()
             });
-        println!("DELAY_HISTORY_FAILURE_PARENT_RECORD {}", json!({
-            "execution_head": execution_head(), "failed_allocation_ordinal": ordinal,
-            "status": output.status.to_string(), "exit_code": output.status.code(),
-            "success": output.status.success(), "stdout": stdout, "stderr": stderr,
-            "child_record": child_record, "matches": matches,
-        }));
+        println!(
+            "DELAY_HISTORY_FAILURE_PARENT_RECORD {}",
+            json!({
+                "execution_head": execution_head(), "failed_allocation_ordinal": ordinal,
+                "status": output.status.to_string(), "exit_code": output.status.code(),
+                "success": output.status.success(), "stdout": stdout, "stderr": stderr,
+                "child_record": child_record, "matches": matches,
+            })
+        );
         if !matches {
-            failures.push(format!("allocation {ordinal}: child did not return a bounded invalid instance ({})", output.status));
+            failures.push(format!(
+                "allocation {ordinal}: child did not return a bounded invalid instance ({})",
+                output.status
+            ));
         }
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));

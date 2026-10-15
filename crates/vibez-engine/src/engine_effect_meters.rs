@@ -66,10 +66,17 @@ impl AudioEngine {
                 output,
             });
             if slot.effect.effect_type() == vibez_core::effect::EffectType::Delay {
-                let snapshot = if slot.bypass { None } else { slot.effect.delay_snapshot() };
+                let snapshot = if slot.bypass {
+                    None
+                } else {
+                    slot.effect.delay_snapshot()
+                };
                 let _ = self.event_tx.push(EngineEvent::EffectDelayState {
-                    track_id, effect_id: slot.id, generation: self.effect_meter.generation,
-                    observation_token: slot.levels.observation_token, snapshot,
+                    track_id,
+                    effect_id: slot.id,
+                    generation: self.effect_meter.generation,
+                    observation_token: slot.levels.observation_token,
+                    snapshot,
                 });
             }
         }

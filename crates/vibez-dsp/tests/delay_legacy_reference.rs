@@ -113,7 +113,10 @@ fn original_descriptors_getters_activation_and_zero_latency_remain_observable() 
             "target_bits": (0..3).map(|index| effect.get_param(index).to_bits()).collect::<Vec<_>>(),
         }));
     }
-    record("descriptors_getters_activation_latency", json!(observations));
+    record(
+        "descriptors_getters_activation_latency",
+        json!(observations),
+    );
 }
 
 #[test]
@@ -138,7 +141,10 @@ fn integer_stereo_impulses_keep_arrivals_geometric_decay_and_linear_mix() {
                 let expected = impulse_response(frames, delay_frames, [0.75, -0.25], feedback, mix);
                 let mut effect = configured(rate as f32, [time_ms, feedback, mix]);
                 let actual = render(&mut effect, &input, &[1, 7, 64, 128, 512, 31]);
-                assert_eq!(actual, expected, "rate={rate}, feedback={feedback}, mix={mix}");
+                assert_eq!(
+                    actual, expected,
+                    "rate={rate}, feedback={feedback}, mix={mix}"
+                );
                 observations.push(json!({
                     "rate": rate,
                     "time_ms": time_ms,
@@ -202,12 +208,15 @@ fn reset_clears_audible_history_and_keeps_the_saved_targets() {
     assert_eq!(actual, expected);
     assert_eq!(effect.activation_sample_rate(), Some(1000));
     assert_eq!(effect.latency_samples(), 0);
-    record("reset", json!({
-        "silent_frames": silent.len() / 2,
-        "silent_nonzero_samples": silent.iter().filter(|sample| **sample != 0.0).count(),
-        "replayed_output_fnv1a64": fingerprint(&actual),
-        "target_bits": parameters.map(f32::to_bits),
-    }));
+    record(
+        "reset",
+        json!({
+            "silent_frames": silent.len() / 2,
+            "silent_nonzero_samples": silent.iter().filter(|sample| **sample != 0.0).count(),
+            "replayed_output_fnv1a64": fingerprint(&actual),
+            "target_bits": parameters.map(f32::to_bits),
+        }),
+    );
 }
 
 #[test]
@@ -228,11 +237,14 @@ fn independent_instances_and_stereo_channels_do_not_share_delay_history() {
     assert_eq!(second_output.as_slice(), &expected[2..]);
     let unreset_right_repeat_bits =
         [124, 249, 374, 499].map(|frame| second_output[2 * frame + 1].to_bits());
-    record("instance_and_channel_isolation", json!({
-        "reset_instance_nonzero_samples": first_output.iter().filter(|sample| **sample != 0.0).count(),
-        "unreset_right_repeat_bits": unreset_right_repeat_bits,
-        "unreset_output_fnv1a64": fingerprint(&second_output),
-    }));
+    record(
+        "instance_and_channel_isolation",
+        json!({
+            "reset_instance_nonzero_samples": first_output.iter().filter(|sample| **sample != 0.0).count(),
+            "unreset_right_repeat_bits": unreset_right_repeat_bits,
+            "unreset_output_fnv1a64": fingerprint(&second_output),
+        }),
+    );
 }
 
 #[test]
@@ -247,12 +259,15 @@ fn integer_delay_samples_are_identical_across_partitions_and_ring_wraps() {
         let actual = render(&mut effect, &input, parts);
         assert_eq!(actual, whole, "parts={parts:?}");
     }
-    record("partitions_and_ring_wraps", json!({
-        "rate": 1000,
-        "time_ms": 125,
-        "frames": input.len() / 2,
-        "original_ring_frames": 2000,
-        "partitions": partitions,
-        "output_fnv1a64": fingerprint(&whole),
-    }));
+    record(
+        "partitions_and_ring_wraps",
+        json!({
+            "rate": 1000,
+            "time_ms": 125,
+            "frames": input.len() / 2,
+            "original_ring_frames": 2000,
+            "partitions": partitions,
+            "output_fnv1a64": fingerprint(&whole),
+        }),
+    );
 }

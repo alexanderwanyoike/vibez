@@ -40,7 +40,10 @@ fn expected_right(frame: usize, delay: usize) -> f32 {
 
 fn sample_bits_hash(samples: &[f32]) -> String {
     let mut hash = 0xcbf2_9ce4_8422_2325_u64;
-    for byte in samples.iter().flat_map(|sample| sample.to_bits().to_le_bytes()) {
+    for byte in samples
+        .iter()
+        .flat_map(|sample| sample.to_bits().to_le_bytes())
+    {
         hash = (hash ^ u64::from(byte)).wrapping_mul(0x100_0000_01b3);
     }
     format!("{hash:016x}")
@@ -60,7 +63,8 @@ fn mono_frames_advance_both_histories_with_zero_missing_right_input() {
                 assert!(effect.set_param(0, 10.0));
                 assert!(effect.set_param(1, 0.5));
                 assert!(effect.set_param(2, 1.0));
-                let stored_distance = f64::from(effect.get_param(0)) * f64::from(rate as f32) / 1000.0;
+                let stored_distance =
+                    f64::from(effect.get_param(0)) * f64::from(rate as f32) / 1000.0;
                 assert_eq!(stored_distance, delay as f64);
                 let mut prime = [0.0, 1.0];
                 process_parts(&mut effect, &mut prime, 2, parts);
@@ -76,7 +80,8 @@ fn mono_frames_advance_both_histories_with_zero_missing_right_input() {
                 for (index, actual) in mono.iter().enumerate() {
                     let expected = expected_left(index + 1, delay, mono_input);
                     mismatches += usize::from(actual.to_bits() != expected.to_bits());
-                    max_left_error = max_left_error.max((f64::from(*actual) - f64::from(expected)).abs());
+                    max_left_error =
+                        max_left_error.max((f64::from(*actual) - f64::from(expected)).abs());
                 }
                 for (index, pair) in stereo.chunks_exact(2).enumerate() {
                     let frame = 2 * delay + index;
@@ -84,19 +89,25 @@ fn mono_frames_advance_both_histories_with_zero_missing_right_input() {
                     let right = expected_right(frame, delay);
                     mismatches += usize::from(pair[0].to_bits() != left.to_bits());
                     mismatches += usize::from(pair[1].to_bits() != right.to_bits());
-                    max_left_error = max_left_error.max((f64::from(pair[0]) - f64::from(left)).abs());
-                    max_right_error = max_right_error.max((f64::from(pair[1]) - f64::from(right)).abs());
+                    max_left_error =
+                        max_left_error.max((f64::from(pair[0]) - f64::from(left)).abs());
+                    max_right_error =
+                        max_right_error.max((f64::from(pair[1]) - f64::from(right)).abs());
                 }
-                let witnesses: Vec<_> = [2, 3, 4].into_iter().map(|repeat| {
-                    let frame = repeat * delay;
-                    let actual = stereo[2 * (frame - 2 * delay) + 1];
-                    json!({
-                        "frame": frame, "repeat": repeat,
-                        "expected_right_bits": expected_right(frame, delay).to_bits(),
-                        "actual_right_bits": actual.to_bits(),
+                let witnesses: Vec<_> = [2, 3, 4]
+                    .into_iter()
+                    .map(|repeat| {
+                        let frame = repeat * delay;
+                        let actual = stereo[2 * (frame - 2 * delay) + 1];
+                        json!({
+                            "frame": frame, "repeat": repeat,
+                            "expected_right_bits": expected_right(frame, delay).to_bits(),
+                            "actual_right_bits": actual.to_bits(),
+                        })
                     })
-                }).collect();
-                let right_nonzero_count = stereo.chunks_exact(2).filter(|pair| pair[1] != 0.0).count();
+                    .collect();
+                let right_nonzero_count =
+                    stereo.chunks_exact(2).filter(|pair| pair[1] != 0.0).count();
                 if mismatches != 0 {
                     failures.push(format!(
                         "rate={rate}, mono_input={mono_input}, parts={parts:?}: {mismatches} exact sample mismatches, max L/R error={max_left_error}/{max_right_error}"
@@ -118,11 +129,14 @@ fn mono_frames_advance_both_histories_with_zero_missing_right_input() {
             }
         }
     }
-    println!("DELAY_MONO_HISTORY_RECORD {}", json!({
-        "case": "mono_missing_right_feedback_lifecycle",
-        "execution_head": std::env::var("VIBEZ_VERIFICATION_HEAD")
-            .unwrap_or_else(|_| "UNLABELLED".into()),
-        "observed": observations,
-    }));
+    println!(
+        "DELAY_MONO_HISTORY_RECORD {}",
+        json!({
+            "case": "mono_missing_right_feedback_lifecycle",
+            "execution_head": std::env::var("VIBEZ_VERIFICATION_HEAD")
+                .unwrap_or_else(|_| "UNLABELLED".into()),
+            "observed": observations,
+        })
+    );
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }

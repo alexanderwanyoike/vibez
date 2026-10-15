@@ -476,10 +476,12 @@ fn cases() -> Vec<Case> {
                 generation: 1,
             }
         }),
-        case!("SetEffectObservationToken", false, |f| C::SetEffectObservationToken {
-            track_id: f.synth,
-            effect_id: f.effect,
-            token: 7,
+        case!("SetEffectObservationToken", false, |f| {
+            C::SetEffectObservationToken {
+                track_id: f.synth,
+                effect_id: f.effect,
+                token: 7,
+            }
         }),
         case!("RemoveEffect", false, |f| C::RemoveEffect(
             f.synth, f.effect

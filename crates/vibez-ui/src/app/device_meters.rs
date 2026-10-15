@@ -26,7 +26,9 @@ pub(super) struct MeterReadings {
 
 impl MeterReadings {
     pub(super) fn available_output(&self) -> Option<MeterValues> {
-        self.last_meter_at.filter(|at| at.elapsed() < Duration::from_millis(250)).map(|_| self.output)
+        self.last_meter_at
+            .filter(|at| at.elapsed() < Duration::from_millis(250))
+            .map(|_| self.output)
     }
 
     fn accept(&mut self, output: MeterValues, now: Instant) {

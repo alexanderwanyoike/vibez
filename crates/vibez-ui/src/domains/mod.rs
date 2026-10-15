@@ -15,11 +15,11 @@ pub mod automation;
 pub mod browser;
 pub mod compensation;
 pub mod delay_layout;
-pub mod delay_response;
-pub mod delay_observation;
-pub mod delay_values;
 #[cfg(test)]
 mod delay_layout_geometry_tests;
+pub mod delay_observation;
+pub mod delay_response;
+pub mod delay_values;
 pub mod device_controls;
 pub mod device_latency;
 pub mod device_presets;

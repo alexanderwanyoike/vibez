@@ -502,9 +502,22 @@ impl PartialEq for EngineEvent {
             | (Self::SourceNoteRepeated { .. }, Self::SourceNoteRepeated { .. }) => {
                 recording::source_eq(self, other)
             }
-            (Self::EffectDelayState { track_id: lt, effect_id: le, generation: lg, observation_token: lo, snapshot: ls },
-             Self::EffectDelayState { track_id: rt, effect_id: re, generation: rg, observation_token: ro, snapshot: rs }) =>
-                lt == rt && le == re && lg == rg && lo == ro && ls == rs,
+            (
+                Self::EffectDelayState {
+                    track_id: lt,
+                    effect_id: le,
+                    generation: lg,
+                    observation_token: lo,
+                    snapshot: ls,
+                },
+                Self::EffectDelayState {
+                    track_id: rt,
+                    effect_id: re,
+                    generation: rg,
+                    observation_token: ro,
+                    snapshot: rs,
+                },
+            ) => lt == rt && le == re && lg == rg && lo == ro && ls == rs,
             (Self::DisposeEffect(left), Self::DisposeEffect(right)) => left == right,
             (Self::DisposeInstrument(left), Self::DisposeInstrument(right)) => left == right,
             (Self::PlaybackPosition(left), Self::PlaybackPosition(right)) => left == right,

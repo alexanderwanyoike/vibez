@@ -4,9 +4,16 @@ use serde_json::json;
 use vibez_dsp::{delay::DelayEffect, effect::AudioEffect};
 
 fn unowned_sample(index: usize) -> f32 {
-    f32::from_bits([
-        0x7fc1_2345, 0xffc2_3456, 0x8000_0000, 0x7f80_0000, 0xff80_0000, 0x3f40_0000,
-    ][index % 6])
+    f32::from_bits(
+        [
+            0x7fc1_2345,
+            0xffc2_3456,
+            0x8000_0000,
+            0x7f80_0000,
+            0xff80_0000,
+            0x3f40_0000,
+        ][index % 6],
+    )
 }
 
 fn expected_owned(frame: usize, channel: usize, impulse_channel: usize, delay: usize) -> f32 {
@@ -33,10 +40,20 @@ struct Comparison {
 }
 
 impl Comparison {
-    fn process(&mut self, effect: &mut DelayEffect, samples: &mut [f32], channels: usize, expected: &[u32]) {
+    fn process(
+        &mut self,
+        effect: &mut DelayEffect,
+        samples: &mut [f32],
+        channels: usize,
+        expected: &[u32],
+    ) {
         effect.process(samples, channels);
         self.calls += 1;
-        let complete_samples = if channels == 0 { 0 } else { samples.len() / channels * channels };
+        let complete_samples = if channels == 0 {
+            0
+        } else {
+            samples.len() / channels * channels
+        };
         for (index, (actual, expected)) in samples.iter().zip(expected).enumerate() {
             let owned = channels != 0 && index < complete_samples && index % channels < 2;
             if owned {
@@ -89,7 +106,10 @@ fn valid_instances_process_only_owned_channels_of_complete_caller_frames() {
                     assert!(effect.set_param(0, 10.0));
                     assert!(effect.set_param(1, 0.5));
                     assert!(effect.set_param(2, 0.5));
-                    assert_eq!(f64::from(effect.get_param(0)) * f64::from(rate as f32) / 1000.0, delay as f64);
+                    assert_eq!(
+                        f64::from(effect.get_param(0)) * f64::from(rate as f32) / 1000.0,
+                        delay as f64
+                    );
                     let mut comparison = Comparison::default();
                     let mut witnesses = Vec::new();
                     let mut frame = 0;
@@ -97,7 +117,8 @@ fn valid_instances_process_only_owned_channels_of_complete_caller_frames() {
                     while frame < frames {
                         if let Some((probe_channels, probe_length)) = interrupt {
                             let mut probe: Vec<_> = (0..probe_length).map(unowned_sample).collect();
-                            let expected: Vec<_> = probe.iter().map(|sample| sample.to_bits()).collect();
+                            let expected: Vec<_> =
+                                probe.iter().map(|sample| sample.to_bits()).collect();
                             comparison.process(&mut effect, &mut probe, probe_channels, &expected);
                         }
                         let end = (frame + parts[part % parts.len()]).min(frames);
@@ -106,8 +127,22 @@ fn valid_instances_process_only_owned_channels_of_complete_caller_frames() {
                         for global_frame in frame..end {
                             for channel in 0..channels {
                                 if channel < 2 {
-                                    samples.push(if global_frame == 0 && channel == impulse_channel { 1.0 } else { 0.0 });
-                                    expected.push(expected_owned(global_frame, channel, impulse_channel, delay).to_bits());
+                                    samples.push(
+                                        if global_frame == 0 && channel == impulse_channel {
+                                            1.0
+                                        } else {
+                                            0.0
+                                        },
+                                    );
+                                    expected.push(
+                                        expected_owned(
+                                            global_frame,
+                                            channel,
+                                            impulse_channel,
+                                            delay,
+                                        )
+                                        .to_bits(),
+                                    );
                                 } else {
                                     let sample = unowned_sample(global_frame + channel);
                                     samples.push(sample);
@@ -157,11 +192,14 @@ fn valid_instances_process_only_owned_channels_of_complete_caller_frames() {
             }
         }
     }
-    println!("DELAY_SAMPLE_OWNERSHIP_RECORD {}", json!({
-        "case": "complete_frame_and_stride_ownership",
-        "execution_head": std::env::var("VIBEZ_VERIFICATION_HEAD")
-            .unwrap_or_else(|_| "UNLABELLED".into()),
-        "observed": observations,
-    }));
+    println!(
+        "DELAY_SAMPLE_OWNERSHIP_RECORD {}",
+        json!({
+            "case": "complete_frame_and_stride_ownership",
+            "execution_head": std::env::var("VIBEZ_VERIFICATION_HEAD")
+                .unwrap_or_else(|_| "UNLABELLED".into()),
+            "observed": observations,
+        })
+    );
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }

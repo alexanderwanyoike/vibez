@@ -641,7 +641,10 @@ fn native_delay_meter_reports_real_insert_levels_before_channel_faders() {
         commands.push(EngineCommand::add_track(track)).unwrap();
         commands
             .push(EngineCommand::insert_built_in_effect(
-                track, effect, EffectType::Delay, 48_000,
+                track,
+                effect,
+                EffectType::Delay,
+                48_000,
             ))
             .unwrap();
         for (param_index, value) in [
@@ -652,12 +655,21 @@ fn native_delay_meter_reports_real_insert_levels_before_channel_faders() {
             (param::FEEDBACK, 0.5),
             (param::MIX, 0.25),
         ] {
-            commands.push(EngineCommand::SetEffectParam {
-                track_id: track, effect_id: effect, param_index, value,
-            }).unwrap();
+            commands
+                .push(EngineCommand::SetEffectParam {
+                    track_id: track,
+                    effect_id: effect,
+                    param_index,
+                    value,
+                })
+                .unwrap();
         }
-        commands.push(EngineCommand::SetTrackGain(track, 0.125)).unwrap();
-        commands.push(EngineCommand::SetTrackGain(TrackId::MASTER, 0.25)).unwrap();
+        commands
+            .push(EngineCommand::SetTrackGain(track, 0.125))
+            .unwrap();
+        commands
+            .push(EngineCommand::SetTrackGain(TrackId::MASTER, 0.25))
+            .unwrap();
         if use_graph {
             let routing = crate::routing::PreparedRouting::prepare(
                 &[
@@ -665,17 +677,23 @@ fn native_delay_meter_reports_real_insert_levels_before_channel_faders() {
                         id: track,
                         is_bus: false,
                         effects: vec![RoutingEffect {
-                            id: effect, inputs: vec![], assignments: vec![],
+                            id: effect,
+                            inputs: vec![],
+                            assignments: vec![],
                             inactive_inputs: vec![],
                         }],
                         sends: vec![],
                     },
                     RoutingChannel {
-                        id: TrackId::MASTER, is_bus: true, effects: vec![], sends: vec![],
+                        id: TrackId::MASTER,
+                        is_bus: true,
+                        effects: vec![],
+                        sends: vec![],
                     },
                 ],
                 128,
-            ).unwrap();
+            )
+            .unwrap();
             commands.push(EngineCommand::SetRouting(routing)).unwrap();
         }
         let silence = [0.0_f32; 1920];
@@ -684,9 +702,12 @@ fn native_delay_meter_reports_real_insert_levels_before_channel_faders() {
             AudioProcessBlock::new(&mut output, 2).with_live_input(track.raw(), &silence),
         );
         while events.pop().is_ok() {}
-        commands.push(EngineCommand::SetEffectMeterChannel {
-            track_id: Some(track), generation: 73,
-        }).unwrap();
+        commands
+            .push(EngineCommand::SetEffectMeterChannel {
+                track_id: Some(track),
+                generation: 73,
+            })
+            .unwrap();
 
         let mut input = [0.0_f32; 1920];
         input[0] = 0.5;
@@ -696,10 +717,14 @@ fn native_delay_meter_reports_real_insert_levels_before_channel_faders() {
         expected_insert[1] = -0.1875;
         // Crossed feedback traverses the destination's 144 or 240 sample history.
         for (frame, channel, sample) in [
-            (144, 0, 0.125), (240, 1, -0.0625),
-            (384, 0, -0.03125), (384, 1, 0.0625),
-            (528, 0, 0.03125), (624, 1, -0.015625),
-            (768, 0, -0.0078125), (768, 1, 0.015625),
+            (144, 0, 0.125),
+            (240, 1, -0.0625),
+            (384, 0, -0.03125),
+            (384, 1, 0.0625),
+            (528, 0, 0.03125),
+            (624, 1, -0.015625),
+            (768, 0, -0.0078125),
+            (768, 1, 0.015625),
             (912, 0, 0.0078125),
         ] {
             expected_insert[2 * frame + channel] = sample;
@@ -719,15 +744,29 @@ fn native_delay_meter_reports_real_insert_levels_before_channel_faders() {
                 "Delay meter callback heap activity, graph={use_graph}, half={half}",
             );
             while let Ok(event) = events.pop() {
-                if let EngineEvent::EffectDelayState { track_id, effect_id, generation, snapshot, .. } = &event {
+                if let EngineEvent::EffectDelayState {
+                    track_id,
+                    effect_id,
+                    generation,
+                    snapshot,
+                    ..
+                } = &event
+                {
                     assert_eq!(event.time_domain(), crate::events::TimeDomain::Untimed);
                     assert_eq!(half, 1);
                     assert_eq!((*track_id, *effect_id, *generation), (track, effect, 73));
-                    assert!(delay_state.replace(snapshot.expect("active Delay snapshot")).is_none());
+                    assert!(delay_state
+                        .replace(snapshot.expect("active Delay snapshot"))
+                        .is_none());
                 }
                 if let EngineEvent::EffectMeter {
-                    track_id, effect_id, generation, input, output,
-                } = event {
+                    track_id,
+                    effect_id,
+                    generation,
+                    input,
+                    output,
+                } = event
+                {
                     assert_eq!(half, 1, "a 50Hz window must include all 960 frames");
                     assert_eq!((track_id, effect_id, generation), (track, effect, 73));
                     assert!(reading.replace((input, output)).is_none());
@@ -736,8 +775,10 @@ fn native_delay_meter_reports_real_insert_levels_before_channel_faders() {
         }
         let post_fader_gain = 0.125 * 0.25 * std::f32::consts::FRAC_1_SQRT_2;
         for (sample, (&actual, &expected)) in output.iter().zip(&expected_insert).enumerate() {
-            assert!((actual - expected * post_fader_gain).abs() <= 2e-7,
-                "graph={use_graph}, sample={sample}: heard={actual}, insert={expected}");
+            assert!(
+                (actual - expected * post_fader_gain).abs() <= 2e-7,
+                "graph={use_graph}, sample={sample}: heard={actual}, insert={expected}"
+            );
         }
         let (input_levels, output_levels) =
             reading.expect("the selected native Delay must publish its real insert meter");
@@ -766,8 +807,10 @@ fn native_delay_meter_reports_real_insert_levels_before_channel_faders() {
             (output_levels.rms_l, (squares[0] / 960.0).sqrt() as f32),
             (output_levels.rms_r, (squares[1] / 960.0).sqrt() as f32),
         ] {
-            assert!((actual - expected).abs() <= 1e-6,
-                "graph={use_graph}: meter={actual}, independent expected={expected}");
+            assert!(
+                (actual - expected).abs() <= 1e-6,
+                "graph={use_graph}: meter={actual}, independent expected={expected}"
+            );
         }
     }
 }

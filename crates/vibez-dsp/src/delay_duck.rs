@@ -11,15 +11,23 @@ pub(super) struct Duck {
 
 impl Default for Duck {
     fn default() -> Self {
-        Self { amount: ScalarRamp::new(0.0), envelope: 0.0, attack: 0.0, release: 0.0 }
+        Self {
+            amount: ScalarRamp::new(0.0),
+            envelope: 0.0,
+            attack: 0.0,
+            release: 0.0,
+        }
     }
 }
 
 impl Duck {
     pub(super) fn new(sample_rate: f32) -> Self {
         let rate = f64::from(sample_rate);
-        Self { attack: (-1.0 / (0.005 * rate)).exp(), release: (-1.0 / (0.150 * rate)).exp(),
-            ..Default::default() }
+        Self {
+            attack: (-1.0 / (0.005 * rate)).exp(),
+            release: (-1.0 / (0.150 * rate)).exp(),
+            ..Default::default()
+        }
     }
 
     pub(super) fn edit(&mut self, target: f32, automated: bool, frames: usize) {
@@ -28,7 +36,11 @@ impl Duck {
 
     pub(super) fn process(&mut self, input: [f32; 2], wet: [f32; 2]) -> [f32; 2] {
         let peak = f64::from(input[0].abs().max(input[1].abs()));
-        let coefficient = if peak > self.envelope { self.attack } else { self.release };
+        let coefficient = if peak > self.envelope {
+            self.attack
+        } else {
+            self.release
+        };
         self.envelope = coefficient * self.envelope + (1.0 - coefficient) * peak;
         let amount = self.amount.next_frame();
         // Unity bypass still observes input so later enabling cannot expose a stale envelope.

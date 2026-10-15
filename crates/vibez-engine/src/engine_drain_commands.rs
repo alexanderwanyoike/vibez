@@ -569,9 +569,14 @@ impl AudioEngine {
                     track_id,
                     generation,
                 } => self.set_effect_meter_channel(track_id, generation),
-                EngineCommand::SetEffectObservationToken { track_id, effect_id, token } => {
-                    if let Some(slot) = self.channel_mut(track_id)
-                        .and_then(|channel| channel.effects.iter_mut().find(|slot| slot.id == effect_id)) {
+                EngineCommand::SetEffectObservationToken {
+                    track_id,
+                    effect_id,
+                    token,
+                } => {
+                    if let Some(slot) = self.channel_mut(track_id).and_then(|channel| {
+                        channel.effects.iter_mut().find(|slot| slot.id == effect_id)
+                    }) {
                         slot.levels.observation_token = token;
                     }
                 }

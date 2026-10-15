@@ -35,7 +35,11 @@ struct LineTime {
 
 impl LineTime {
     fn new() -> Self {
-        Self { current: 0.0, movement: Movement::Idle, pending: None }
+        Self {
+            current: 0.0,
+            movement: Movement::Idle,
+            pending: None,
+        }
     }
 
     fn snap(&mut self, target: f64) {
@@ -53,10 +57,21 @@ impl LineTime {
         self.movement = if target == self.current {
             Movement::Idle
         } else if use_glide {
-            let frames = (0.05 * f64::from(sample_rate)).max(2.0 * (target - self.current).abs()).ceil() as usize;
-            Movement::Glide(Glide { origin: self.current, destination: target, frames, frame: 0 })
+            let frames = (0.05 * f64::from(sample_rate))
+                .max(2.0 * (target - self.current).abs())
+                .ceil() as usize;
+            Movement::Glide(Glide {
+                origin: self.current,
+                destination: target,
+                frames,
+                frame: 0,
+            })
         } else {
-            Movement::Crossfade(Crossfade { old: self.current, destination: target, frame: 0 })
+            Movement::Crossfade(Crossfade {
+                old: self.current,
+                destination: target,
+                frame: 0,
+            })
         };
     }
 
@@ -67,13 +82,26 @@ impl LineTime {
             self.current = if glide.frame == glide.frames {
                 glide.destination
             } else {
-                glide.origin + (glide.destination - glide.origin) * glide.frame as f64 / glide.frames as f64
+                glide.origin
+                    + (glide.destination - glide.origin) * glide.frame as f64 / glide.frames as f64
             };
-            self.movement = if glide.frame == glide.frames { Movement::Idle } else { Movement::Glide(glide) };
-            return ReadBlend { old: self.current, destination: self.current, progress: 0.0 };
+            self.movement = if glide.frame == glide.frames {
+                Movement::Idle
+            } else {
+                Movement::Glide(glide)
+            };
+            return ReadBlend {
+                old: self.current,
+                destination: self.current,
+                progress: 0.0,
+            };
         }
         let Movement::Crossfade(mut fade) = self.movement else {
-            return ReadBlend { old: self.current, destination: self.current, progress: 0.0 };
+            return ReadBlend {
+                old: self.current,
+                destination: self.current,
+                progress: 0.0,
+            };
         };
         // Both endpoints must fit within N frames to preserve the literal two-fade settle bound.
         let read = ReadBlend {
@@ -103,7 +131,11 @@ pub(super) struct DelayTime {
 
 impl DelayTime {
     pub(super) fn new() -> Self {
-        Self { bpm: DEFAULT_BPM, started: false, lines: [LineTime::new(); 2] }
+        Self {
+            bpm: DEFAULT_BPM,
+            started: false,
+            lines: [LineTime::new(); 2],
+        }
     }
 
     pub(super) fn set_bpm(&mut self, bpm: f64, targets: &[f32; param::COUNT], sample_rate: f32) {
@@ -164,7 +196,11 @@ impl DelayTime {
         let use_glide = targets[param::TIME_CHANGE] >= 0.5;
         for ((line, target), affected) in self.lines.iter_mut().zip(distances).zip([left, right]) {
             if affected {
-                if automated { line.snap(target); } else { line.request(target, use_glide, sample_rate); }
+                if automated {
+                    line.snap(target);
+                } else {
+                    line.request(target, use_glide, sample_rate);
+                }
             }
         }
     }
@@ -176,21 +212,36 @@ impl DelayTime {
         }
     }
 
-    pub(super) fn next_frame(&mut self, fade_frames: usize, sample_rate: f32, use_glide: bool) -> [ReadBlend; 2] {
-        self.lines.each_mut().map(|line| line.next_read(fade_frames, sample_rate, use_glide))
+    pub(super) fn next_frame(
+        &mut self,
+        fade_frames: usize,
+        sample_rate: f32,
+        use_glide: bool,
+    ) -> [ReadBlend; 2] {
+        self.lines
+            .each_mut()
+            .map(|line| line.next_read(fade_frames, sample_rate, use_glide))
     }
 
-    pub(super) fn snapshot(&self, targets: &[f32; param::COUNT], sample_rate: f32)
-        -> (f64, [vibez_core::delay_state::DelayLineState; 2]) {
+    pub(super) fn snapshot(
+        &self,
+        targets: &[f32; param::COUNT],
+        sample_rate: f32,
+    ) -> (f64, [vibez_core::delay_state::DelayLineState; 2]) {
         use vibez_core::delay_state::DelayLineState;
         let fade_frames = (sample_rate as usize).div_ceil(50);
         let distances = self.distances(targets, sample_rate);
         let lines = std::array::from_fn(|index| {
             let line = self.lines[index];
             let mut state = DelayLineState {
-                old_samples: line.current, destination_samples: line.current, progress: 0.0,
-                target_samples: distances[index], pending_samples: line.pending,
-                remaining_frames: 0, moving: false, gliding: false,
+                old_samples: line.current,
+                destination_samples: line.current,
+                progress: 0.0,
+                target_samples: distances[index],
+                pending_samples: line.pending,
+                remaining_frames: 0,
+                moving: false,
+                gliding: false,
             };
             match line.movement {
                 Movement::Idle => {}
@@ -202,8 +253,12 @@ impl DelayTime {
                     state.remaining_frames = (fade_frames - fade.frame) as u64;
                     if let Some(pending) = line.pending {
                         let next = if targets[param::TIME_CHANGE] >= 0.5 {
-                            (0.05 * f64::from(sample_rate)).max(2.0 * (pending - fade.destination).abs()).ceil() as u64
-                        } else { fade_frames as u64 };
+                            (0.05 * f64::from(sample_rate))
+                                .max(2.0 * (pending - fade.destination).abs())
+                                .ceil() as u64
+                        } else {
+                            fade_frames as u64
+                        };
                         state.remaining_frames = state.remaining_frames.saturating_add(next);
                     }
                     state.moving = true;
@@ -255,8 +310,7 @@ impl DelayTime {
         modifier: usize,
     ) -> f64 {
         if targets[param::SYNC] >= 0.5 {
-            let denominator = [64.0, 32.0, 16.0, 8.0, 4.0, 2.0, 1.0]
-                [targets[division] as usize];
+            let denominator = [64.0, 32.0, 16.0, 8.0, 4.0, 2.0, 1.0][targets[division] as usize];
             let modifier = [1.0, 1.5, 2.0 / 3.0][targets[modifier] as usize];
             (60.0 / self.bpm) * (4.0 / denominator) * modifier * f64::from(sample_rate)
         } else {

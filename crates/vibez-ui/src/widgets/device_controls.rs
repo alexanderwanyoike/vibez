@@ -4,8 +4,8 @@ use iced::widget::{button, canvas, column, pick_list, row, text, text_input, too
 use iced::{Color, Element, Length, Theme};
 use vibez_core::id::TrackId;
 
-use crate::domains::device_controls::{DeviceControlMsg, DeviceControlState};
 pub use crate::domains::device_controls::ValuePolicy;
+use crate::domains::device_controls::{DeviceControlMsg, DeviceControlState};
 use crate::message::Message;
 use crate::state::UiEffect;
 use crate::theme as th;
@@ -21,8 +21,15 @@ pub fn parameter<'a>(
     accent: Color,
     knob_size: Option<f32>,
 ) -> Element<'a, Message> {
-    parameter_with_policy(track, effect, state, index, accent, knob_size,
-        ValuePolicy::native(effect.descriptors[index].unit))
+    parameter_with_policy(
+        track,
+        effect,
+        state,
+        index,
+        accent,
+        knob_size,
+        ValuePolicy::native(effect.descriptors[index].unit),
+    )
 }
 
 pub fn parameter_with_policy<'a>(
@@ -46,7 +53,12 @@ pub fn parameter_with_policy<'a>(
         .cloned()
         .unwrap_or_else(|| (policy.display)(index, value, descriptor));
     let effect_id = effect.id;
-    let submit = Message::DeviceControl(DeviceControlMsg::SubmitUsing(track, effect_id, index, policy.parse));
+    let submit = Message::DeviceControl(DeviceControlMsg::SubmitUsing(
+        track,
+        effect_id,
+        index,
+        policy.parse,
+    ));
     let invalid = state.errors.contains(&index);
     let input = text_input("", &shown)
         .on_input(move |text| {

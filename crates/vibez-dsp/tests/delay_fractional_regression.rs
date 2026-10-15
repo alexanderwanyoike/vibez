@@ -71,13 +71,8 @@ fn fractional_distances_preserve_the_first_four_interpolated_feedback_repeats() 
                     let frames = impulse_frame + 4 * whole + 5;
                     let mut input = vec![0.0; frames * 2];
                     input[impulse_frame * 2 + channel] = 1.0;
-                    let expected = expected_response(
-                        frames,
-                        impulse_frame,
-                        channel,
-                        distance,
-                        feedback,
-                    );
+                    let expected =
+                        expected_response(frames, impulse_frame, channel, distance, feedback);
                     let partitions: &[&[usize]] = &[&[frames], &[1], &[7, 31, 64, 128, 512]];
                     for parts in partitions {
                         let mut effect = DelayEffect::new(rate as f32);
@@ -110,7 +105,10 @@ fn fractional_distances_preserve_the_first_four_interpolated_feedback_repeats() 
                                 })
                             })
                             .collect();
-                        assert_eq!(positive_witnesses.len(), if feedback == 0.0 { 2 } else { 14 });
+                        assert_eq!(
+                            positive_witnesses.len(),
+                            if feedback == 0.0 { 2 } else { 14 }
+                        );
                         if !finite || maximum_error > SAMPLE_TOLERANCE {
                             failures.push(format!(
                                 "rate={rate}, time_ms={stored_time_ms}, feedback={feedback}, channel={channel}, impulse_frame={impulse_frame}, parts={parts:?}: maximum_error={maximum_error} exceeds {SAMPLE_TOLERANCE}"

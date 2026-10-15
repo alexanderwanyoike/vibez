@@ -35,5 +35,8 @@ fn finite_invalid_activation_rates_do_not_claim_valid_processing_configuration()
             "observed": observations,
         })
     );
-    assert!(accepted.is_empty(), "invalid rates reported valid: {accepted:?}");
+    assert!(
+        accepted.is_empty(),
+        "invalid rates reported valid: {accepted:?}"
+    );
 }

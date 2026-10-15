@@ -4,16 +4,16 @@ use vibez_core::effect::{EffectType, ParamDescriptor};
 
 use crate::effect::AudioEffect;
 
-#[path = "delay_history.rs"]
-mod history;
-#[path = "delay_time.rs"]
-mod time;
-#[path = "delay_ramp.rs"]
-mod ramp;
-#[path = "delay_filter.rs"]
-mod filter;
 #[path = "delay_duck.rs"]
 mod duck;
+#[path = "delay_filter.rs"]
+mod filter;
+#[path = "delay_history.rs"]
+mod history;
+#[path = "delay_ramp.rs"]
+mod ramp;
+#[path = "delay_time.rs"]
+mod time;
 use duck::Duck;
 use filter::FeedbackFilters;
 use history::DelayHistory;
@@ -181,12 +181,19 @@ impl DelayEffect {
     pub fn new(sample_rate: f32) -> Self {
         let history = DelayHistory::new(sample_rate);
         let filters = if history.is_valid() {
-            FeedbackFilters::new(sample_rate, DELAY_PARAMS[param::FEEDBACK_HP_HZ].default,
-                DELAY_PARAMS[param::FEEDBACK_LP_HZ].default)
+            FeedbackFilters::new(
+                sample_rate,
+                DELAY_PARAMS[param::FEEDBACK_HP_HZ].default,
+                DELAY_PARAMS[param::FEEDBACK_LP_HZ].default,
+            )
         } else {
             FeedbackFilters::default()
         };
-        let duck = if history.is_valid() { Duck::new(sample_rate) } else { Duck::default() };
+        let duck = if history.is_valid() {
+            Duck::new(sample_rate)
+        } else {
+            Duck::default()
+        };
         Self {
             targets: std::array::from_fn(|index| DELAY_PARAMS[index].default),
             history,
@@ -240,26 +247,49 @@ impl DelayEffect {
         }
         self.targets[index] = target;
         if index == param::MIX {
-            self.mix.edit(target, automated, (self.history.sample_rate() as usize).div_ceil(100));
+            self.mix.edit(
+                target,
+                automated,
+                (self.history.sample_rate() as usize).div_ceil(100),
+            );
         } else if index == param::FEEDBACK {
-            self.feedback.edit(target, automated, (self.history.sample_rate() as usize).div_ceil(100));
+            self.feedback.edit(
+                target,
+                automated,
+                (self.history.sample_rate() as usize).div_ceil(100),
+            );
         } else if index == param::DUCK {
-            self.duck.edit(target, automated, (self.history.sample_rate() as usize).div_ceil(100));
+            self.duck.edit(
+                target,
+                automated,
+                (self.history.sample_rate() as usize).div_ceil(100),
+            );
         } else if index == param::ROUTING {
-            self.routing.edit(target, automated, (self.history.sample_rate() as usize).div_ceil(50));
+            self.routing.edit(
+                target,
+                automated,
+                (self.history.sample_rate() as usize).div_ceil(50),
+            );
         }
         if self.history.is_valid() {
             match index {
-                param::FEEDBACK_HP_ENABLED => self.filters.set_high_pass_enabled(target, automated,
-                    (self.history.sample_rate() as usize).div_ceil(100)),
-                param::FEEDBACK_LP_ENABLED => self.filters.set_low_pass_enabled(target, automated,
-                    (self.history.sample_rate() as usize).div_ceil(100)),
+                param::FEEDBACK_HP_ENABLED => self.filters.set_high_pass_enabled(
+                    target,
+                    automated,
+                    (self.history.sample_rate() as usize).div_ceil(100),
+                ),
+                param::FEEDBACK_LP_ENABLED => self.filters.set_low_pass_enabled(
+                    target,
+                    automated,
+                    (self.history.sample_rate() as usize).div_ceil(100),
+                ),
                 param::FEEDBACK_HP_HZ => self.filters.set_high_pass_hz(target, automated),
                 param::FEEDBACK_LP_HZ => self.filters.set_low_pass_hz(target, automated),
                 _ => {}
             }
         }
-        self.timing.parameter_edited(index, &self.targets, self.history.sample_rate(), automated);
+        self.timing
+            .parameter_edited(index, &self.targets, self.history.sample_rate(), automated);
         true
     }
 }
@@ -269,15 +299,27 @@ impl AudioEffect for DelayEffect {
         if self.processed_frames == 0 || !self.history.is_valid() {
             return None;
         }
-        let (bpm, lines) = self.timing.snapshot(&self.targets, self.history.sample_rate());
+        let (bpm, lines) = self
+            .timing
+            .snapshot(&self.targets, self.history.sample_rate());
         let (filters, filters_moving) = self.filters.snapshot();
-        let reference_moving = lines.iter().any(|line| line.moving) || filters_moving
-            || self.feedback.moving() || self.routing.moving();
+        let reference_moving = lines.iter().any(|line| line.moving)
+            || filters_moving
+            || self.feedback.moving()
+            || self.routing.moving();
         Some(vibez_core::delay_state::DelayState {
-            mix: self.mix.current(), feedback: self.feedback.current(), routing: self.routing.current(),
-            filters, duck_attenuation_db: self.duck.attenuation_db(), reference_moving,
-            sample_rate: self.history.activation_sample_rate()?, bpm,
-            processed_frames: self.processed_frames, observation_order: self.observation_order, targets: self.targets, lines,
+            mix: self.mix.current(),
+            feedback: self.feedback.current(),
+            routing: self.routing.current(),
+            filters,
+            duck_attenuation_db: self.duck.attenuation_db(),
+            reference_moving,
+            sample_rate: self.history.activation_sample_rate()?,
+            bpm,
+            processed_frames: self.processed_frames,
+            observation_order: self.observation_order,
+            targets: self.targets,
+            lines,
         })
     }
 
@@ -286,7 +328,8 @@ impl AudioEffect for DelayEffect {
     }
 
     fn set_audio_context(&mut self, context: vibez_core::audio_context::DeviceAudioContext) {
-        self.timing.set_bpm(context.bpm, &self.targets, self.history.sample_rate());
+        self.timing
+            .set_bpm(context.bpm, &self.targets, self.history.sample_rate());
     }
 
     fn activation_sample_rate(&self) -> Option<u32> {
@@ -375,8 +418,7 @@ impl AudioEffect for DelayEffect {
             let write_r = Self::finite_or_zero(dry_r + filtered_r * feedback);
             buffer[frame * ch] = Self::finite_or_zero(dry_l * (1.0 - mix) + wet_l * mix);
             if ch >= 2 {
-                buffer[frame * ch + 1] =
-                    Self::finite_or_zero(dry_r * (1.0 - mix) + wet_r * mix);
+                buffer[frame * ch + 1] = Self::finite_or_zero(dry_r * (1.0 - mix) + wet_r * mix);
             }
 
             self.history.write_and_advance(write_l, write_r);
@@ -392,7 +434,10 @@ impl AudioEffect for DelayEffect {
         self.mix.reset(self.targets[param::MIX]);
         self.feedback.reset(self.targets[param::FEEDBACK]);
         self.routing.reset(self.targets[param::ROUTING]);
-        self.filters.reset(self.targets[param::FEEDBACK_HP_ENABLED], self.targets[param::FEEDBACK_LP_ENABLED]);
+        self.filters.reset(
+            self.targets[param::FEEDBACK_HP_ENABLED],
+            self.targets[param::FEEDBACK_LP_ENABLED],
+        );
         self.duck.reset(self.targets[param::DUCK]);
     }
 }

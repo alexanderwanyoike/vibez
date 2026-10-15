@@ -22,12 +22,18 @@ fn prepared(rate: u32, targets: [f32; 17], bpm: u32) -> DelayEffect {
 }
 
 fn target_mismatches(effect: &DelayEffect, expected: &[f32; 17]) -> Vec<Value> {
-    expected.iter().enumerate().filter_map(|(index, value)| {
-        let actual = effect.get_param(index).to_bits();
-        (actual != value.to_bits()).then(|| json!({
-            "index": index, "expected_bits": value.to_bits(), "actual_bits": actual,
-        }))
-    }).collect()
+    expected
+        .iter()
+        .enumerate()
+        .filter_map(|(index, value)| {
+            let actual = effect.get_param(index).to_bits();
+            (actual != value.to_bits()).then(|| {
+                json!({
+                    "index": index, "expected_bits": value.to_bits(), "actual_bits": actual,
+                })
+            })
+        })
+        .collect()
 }
 
 fn musical_distance(rate: u32, bpm: u32, division: usize, modifier: usize) -> f64 {
@@ -51,7 +57,11 @@ fn kernel_weight(repeat: usize, older_terms: usize, fraction: f64) -> f64 {
         * fraction.powi(older_terms as i32)
 }
 
-fn stationary_expected(frames: usize, distances: [f64; 2], feedback: f32) -> (Vec<f64>, Vec<Value>) {
+fn stationary_expected(
+    frames: usize,
+    distances: [f64; 2],
+    feedback: f32,
+) -> (Vec<f64>, Vec<Value>) {
     let mut expected = vec![0.0; 2 * frames];
     let mut peaks = Vec::new();
     for (channel, distance) in distances.into_iter().enumerate() {
@@ -69,7 +79,9 @@ fn stationary_expected(frames: usize, distances: [f64; 2], feedback: f32) -> (Ve
                 let contribution = gain * kernel_weight(repeat, older_terms, fraction);
                 if frame < frames {
                     expected[2 * frame + channel] += contribution;
-                    if contribution > peak.1 { peak = (frame, contribution); }
+                    if contribution > peak.1 {
+                        peak = (frame, contribution);
+                    }
                 }
             }
             if repeat <= 4 && gain > 0.0 {
@@ -94,7 +106,11 @@ fn observe(actual: &[f32], expected: &[f64]) -> (Value, bool) {
     let mut missing_witnesses = [0; 2];
     for (index, (&actual, &expected)) in actual.iter().zip(expected).enumerate() {
         let channel = index % 2;
-        let error = if actual.is_finite() { (f64::from(actual) - expected).abs() } else { f64::INFINITY };
+        let error = if actual.is_finite() {
+            (f64::from(actual) - expected).abs()
+        } else {
+            f64::INFINITY
+        };
         maximum_error[channel] = maximum_error[channel].max(error);
         mismatches[channel] += usize::from(error > SAMPLE_TOLERANCE);
         nonfinite[channel] += usize::from(!actual.is_finite());
@@ -103,15 +119,28 @@ fn observe(actual: &[f32], expected: &[f64]) -> (Value, bool) {
             missing_witnesses[channel] += usize::from(f64::from(actual) <= SAMPLE_TOLERANCE);
         }
     }
-    (json!({
-        "maximum_error": maximum_error, "mismatched_samples": mismatches,
-        "nonfinite_samples": nonfinite, "expected_significant_witnesses": expected_witnesses,
-        "missing_witnesses": missing_witnesses,
-    }), mismatches == [0, 0] && nonfinite == [0, 0] && missing_witnesses == [0, 0])
+    (
+        json!({
+            "maximum_error": maximum_error, "mismatched_samples": mismatches,
+            "nonfinite_samples": nonfinite, "expected_significant_witnesses": expected_witnesses,
+            "missing_witnesses": missing_witnesses,
+        }),
+        mismatches == [0, 0] && nonfinite == [0, 0] && missing_witnesses == [0, 0],
+    )
 }
 
-fn process_range(effect: &mut DelayEffect, audio: &mut [f32], start: usize, end: usize, mixed: bool) {
-    let parts: &[usize] = if mixed { &[1, 7, 31, 64, 128, 512] } else { &[end - start] };
+fn process_range(
+    effect: &mut DelayEffect,
+    audio: &mut [f32],
+    start: usize,
+    end: usize,
+    mixed: bool,
+) {
+    let parts: &[usize] = if mixed {
+        &[1, 7, 31, 64, 128, 512]
+    } else {
+        &[end - start]
+    };
     let mut frame = start;
     let mut part = 0;
     while frame < end {
@@ -123,11 +152,14 @@ fn process_range(effect: &mut DelayEffect, audio: &mut [f32], start: usize, end:
 }
 
 fn finish(case: &str, rows: Vec<Value>, failures: Vec<String>) {
-    println!("DELAY_LINK_RECORD {}", json!({
-        "case": case, "sample_tolerance": SAMPLE_TOLERANCE,
-        "execution_head": std::env::var("VIBEZ_VERIFICATION_HEAD").unwrap_or_else(|_| "UNLABELLED".into()),
-        "observed": rows,
-    }));
+    println!(
+        "DELAY_LINK_RECORD {}",
+        json!({
+            "case": case, "sample_tolerance": SAMPLE_TOLERANCE,
+            "execution_head": std::env::var("VIBEZ_VERIFICATION_HEAD").unwrap_or_else(|_| "UNLABELLED".into()),
+            "observed": rows,
+        })
+    );
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
@@ -135,29 +167,85 @@ fn finish(case: &str, rows: Vec<Value>, failures: Vec<String>) {
 fn unlinked_free_and_sync_lines_have_independent_fractional_geometric_echoes() {
     let mut fixtures = Vec::new();
     for (rate, left, right) in [
-        (1000, 10.0_f32, 17.0_f32), (1000, 16.25, 23.5),
-        (48_000, 10.0, 17.0), (48_000, 1.046875, 1.03125),
+        (1000, 10.0_f32, 17.0_f32),
+        (1000, 16.25, 23.5),
+        (48_000, 10.0, 17.0),
+        (48_000, 1.046875, 1.03125),
         (1000, 1000.0, 2000.0),
     ] {
-        fixtures.push((rate, false, 120, left, right, 4, 0, 4, 0,
-            [f64::from(left) * f64::from(rate) / 1000.0, f64::from(right) * f64::from(rate) / 1000.0]));
+        fixtures.push((
+            rate,
+            false,
+            120,
+            left,
+            right,
+            4,
+            0,
+            4,
+            0,
+            [
+                f64::from(left) * f64::from(rate) / 1000.0,
+                f64::from(right) * f64::from(rate) / 1000.0,
+            ],
+        ));
     }
     for rate in [1000, 48_000] {
-        for (bpm, left_division, left_modifier, right_division, right_modifier) in [
-            (120, 3, 0, 3, 1), (20, 3, 0, 3, 1), (999, 0, 2, 1, 0),
-        ] {
-            fixtures.push((rate, true, bpm, 17.25, 23.5, left_division, left_modifier, right_division, right_modifier,
-                [musical_distance(rate, bpm, left_division, left_modifier), musical_distance(rate, bpm, right_division, right_modifier)]));
+        for (bpm, left_division, left_modifier, right_division, right_modifier) in
+            [(120, 3, 0, 3, 1), (20, 3, 0, 3, 1), (999, 0, 2, 1, 0)]
+        {
+            fixtures.push((
+                rate,
+                true,
+                bpm,
+                17.25,
+                23.5,
+                left_division,
+                left_modifier,
+                right_division,
+                right_modifier,
+                [
+                    musical_distance(rate, bpm, left_division, left_modifier),
+                    musical_distance(rate, bpm, right_division, right_modifier),
+                ],
+            ));
         }
     }
     fixtures.push((1000, true, 20, 17.25, 23.5, 4, 0, 6, 1, [3000.0, 18_000.0]));
     let mut rows = Vec::new();
     let mut failures = Vec::new();
-    for (rate, sync, bpm, left, right, left_division, left_modifier, right_division, right_modifier, distances) in fixtures {
+    for (
+        rate,
+        sync,
+        bpm,
+        left,
+        right,
+        left_division,
+        left_modifier,
+        right_division,
+        right_modifier,
+        distances,
+    ) in fixtures
+    {
         for feedback in [0.0_f32, 0.5] {
-            let targets = [left, feedback, 1.0, u8::from(sync) as f32, left_division as f32,
-                left_modifier as f32, 0.0, 0.0, right, right_division as f32, right_modifier as f32,
-                0.0, 120.0, 0.0, 8000.0, 0.0, 0.0];
+            let targets = [
+                left,
+                feedback,
+                1.0,
+                u8::from(sync) as f32,
+                left_division as f32,
+                left_modifier as f32,
+                0.0,
+                0.0,
+                right,
+                right_division as f32,
+                right_modifier as f32,
+                0.0,
+                120.0,
+                0.0,
+                8000.0,
+                0.0,
+                0.0,
+            ];
             let frames = 4 * distances.into_iter().fold(0.0_f64, f64::max).ceil() as usize + 5;
             let (expected, witness_template) = stationary_expected(frames, distances, feedback);
             for mixed in [false, true] {
@@ -169,7 +257,8 @@ fn unlinked_free_and_sync_lines_have_independent_fractional_geometric_echoes() {
                 let target_mismatches = target_mismatches(&effect, &targets);
                 let mut witnesses = witness_template.clone();
                 for witness in &mut witnesses {
-                    let index = 2 * witness["frame"].as_u64().unwrap() as usize + witness["channel"].as_u64().unwrap() as usize;
+                    let index = 2 * witness["frame"].as_u64().unwrap() as usize
+                        + witness["channel"].as_u64().unwrap() as usize;
                     witness["actual_bits"] = json!(audio[index].to_bits());
                 }
                 let matches = audio_matches && target_mismatches.is_empty();
@@ -180,7 +269,9 @@ fn unlinked_free_and_sync_lines_have_independent_fractional_geometric_echoes() {
                     "repeat_witnesses": witnesses, "target_mismatches": target_mismatches, "matches": matches,
                     "oracle": "Independent binomial convolution powers of two-tap interpolation, all repeats within the rendered interval",
                 }));
-                if !matches { failures.push(format!("rate={rate}, sync={sync}, bpm={bpm}, distances={distances:?}, feedback={feedback}, mixed={mixed}")); }
+                if !matches {
+                    failures.push(format!("rate={rate}, sync={sync}, bpm={bpm}, distances={distances:?}, feedback={feedback}, mixed={mixed}"));
+                }
             }
         }
     }
@@ -194,36 +285,77 @@ fn exact_link_and_sync_automation_recalls_retained_right_intent_without_erasing_
     for rate in [1000, 48_000] {
         for initial_sync in [false, true] {
             let epoch_ms = if initial_sync {
-                [[31.25, 31.25], [31.25, 31.25], [31.25, 46.875], [31.25, 31.25],
-                    [31.25, 31.25], [31.25, 62.5], [10.25, 23.75], [31.25, 62.5]]
+                [
+                    [31.25, 31.25],
+                    [31.25, 31.25],
+                    [31.25, 46.875],
+                    [31.25, 31.25],
+                    [31.25, 31.25],
+                    [31.25, 62.5],
+                    [10.25, 23.75],
+                    [31.25, 62.5],
+                ]
             } else {
-                [[10.25, 10.25], [10.25, 10.25], [10.25, 23.75], [10.25, 10.25],
-                    [10.25, 10.25], [10.25, 17.5], [31.25, 46.875], [10.25, 17.5]]
+                [
+                    [10.25, 10.25],
+                    [10.25, 10.25],
+                    [10.25, 23.75],
+                    [10.25, 10.25],
+                    [10.25, 10.25],
+                    [10.25, 17.5],
+                    [31.25, 46.875],
+                    [10.25, 17.5],
+                ]
             };
             let epoch_frames = 3 * (62.5 * f64::from(rate) / 1000.0).ceil() as usize + 16;
             let frames = 8 * epoch_frames;
             let mut impulses = Vec::new();
             for epoch in 0..8 {
                 impulses.push((epoch * epoch_frames + 8, [0.5, 0.25]));
-                if epoch > 0 { impulses.push((epoch * epoch_frames - 2, [1.0, 0.5])); }
+                if epoch > 0 {
+                    impulses.push((epoch * epoch_frames - 2, [1.0, 0.5]));
+                }
             }
             let mut expected = vec![0.0; 2 * frames];
             for frame in 0..frames {
                 for channel in 0..2 {
-                    let distance = epoch_ms[frame / epoch_frames][channel] * f64::from(rate) / 1000.0;
+                    let distance =
+                        epoch_ms[frame / epoch_frames][channel] * f64::from(rate) / 1000.0;
                     // With zero feedback, each past dry impulse contributes its triangular interpolation kernel at the current tap.
-                    expected[2 * frame + channel] = impulses.iter().filter(|(at, _)| *at <= frame)
-                        .fold(0.0, |sum, (at, amplitudes)| sum + amplitudes[channel]
-                            * (1.0 - ((frame - at) as f64 - distance).abs()).max(0.0));
+                    expected[2 * frame + channel] = impulses
+                        .iter()
+                        .filter(|(at, _)| *at <= frame)
+                        .fold(0.0, |sum, (at, amplitudes)| {
+                            sum + amplitudes[channel]
+                                * (1.0 - ((frame - at) as f64 - distance).abs()).max(0.0)
+                        });
                 }
             }
             for mixed in [false, true] {
-                let mut targets = [10.25, 0.0, 1.0, u8::from(initial_sync) as f32, 0.0, 0.0,
-                    0.0, 1.0, 17.5, 1.0, 0.0, 0.0, 120.0, 0.0, 8000.0, 0.0, 0.0];
+                let mut targets = [
+                    10.25,
+                    0.0,
+                    1.0,
+                    u8::from(initial_sync) as f32,
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0,
+                    17.5,
+                    1.0,
+                    0.0,
+                    0.0,
+                    120.0,
+                    0.0,
+                    8000.0,
+                    0.0,
+                    0.0,
+                ];
                 let mut effect = prepared(rate, targets, 120);
                 let mut audio = vec![0.0; 2 * frames];
                 for (at, amplitudes) in &impulses {
-                    audio[2 * at..2 * at + 2].copy_from_slice(&amplitudes.map(|value| value as f32));
+                    audio[2 * at..2 * at + 2]
+                        .copy_from_slice(&amplitudes.map(|value| value as f32));
                 }
                 let mut epochs = Vec::new();
                 let mut all_targets_match = true;
@@ -251,7 +383,11 @@ fn exact_link_and_sync_automation_recalls_retained_right_intent_without_erasing_
                     all_targets_match &= target_mismatches.is_empty();
                     let mut witnesses = Vec::new();
                     for channel in 0..2 {
-                        let peak_frame = (start..end).max_by(|&a, &b| expected[2 * a + channel].total_cmp(&expected[2 * b + channel])).unwrap();
+                        let peak_frame = (start..end)
+                            .max_by(|&a, &b| {
+                                expected[2 * a + channel].total_cmp(&expected[2 * b + channel])
+                            })
+                            .unwrap();
                         assert!(expected[2 * peak_frame + channel] > SAMPLE_TOLERANCE);
                         witnesses.push(json!({ "channel": channel, "frame": peak_frame,
                             "expected": expected[2 * peak_frame + channel], "actual_bits": audio[2 * peak_frame + channel].to_bits() }));
@@ -267,9 +403,17 @@ fn exact_link_and_sync_automation_recalls_retained_right_intent_without_erasing_
                     "errors": errors, "matches": matches,
                     "oracle": "Explicit piecewise Free/musical distances; independent triangular kernels of past dry impulses; zero feedback; automation before the next frame",
                 }));
-                if !matches { failures.push(format!("rate={rate}, initial_sync={initial_sync}, mixed={mixed}")); }
+                if !matches {
+                    failures.push(format!(
+                        "rate={rate}, initial_sync={initial_sync}, mixed={mixed}"
+                    ));
+                }
             }
         }
     }
-    finish("exact_automation_retains_inactive_right_and_both_time_representations", rows, failures);
+    finish(
+        "exact_automation_retains_inactive_right_and_both_time_representations",
+        rows,
+        failures,
+    );
 }

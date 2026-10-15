@@ -15,8 +15,11 @@ pub struct ValuePolicy {
 
 impl ValuePolicy {
     pub fn native(unit: &'static str) -> Self {
-        Self { display: |_, value, descriptor| display_value(value, descriptor),
-            parse: |_, text, descriptor| parse_value(text, descriptor), unit }
+        Self {
+            display: |_, value, descriptor| display_value(value, descriptor),
+            parse: |_, text, descriptor| parse_value(text, descriptor),
+            unit,
+        }
     }
 }
 
@@ -59,8 +62,9 @@ impl DeviceControlState {
         values: &[f32],
     ) -> Option<(usize, f32)> {
         let (message, parse) = match message {
-            DeviceControlMsg::SubmitUsing(track, effect, index, parse) =>
-                (DeviceControlMsg::Submit(track, effect, index), parse),
+            DeviceControlMsg::SubmitUsing(track, effect, index, parse) => {
+                (DeviceControlMsg::Submit(track, effect, index), parse)
+            }
             message => (message, ValuePolicy::native("").parse),
         };
         match message {
@@ -75,7 +79,9 @@ impl DeviceControlState {
                     .entries
                     .get(&index)
                     .and_then(|text| parse(index, text, descriptor))
-                    .filter(|value| value.is_finite() && (descriptor.min..=descriptor.max).contains(value))
+                    .filter(|value| {
+                        value.is_finite() && (descriptor.min..=descriptor.max).contains(value)
+                    })
                 else {
                     self.errors.insert(index);
                     return None;
@@ -205,17 +211,48 @@ mod tests {
             Some(text.trim().trim_end_matches('%').parse::<f32>().ok()? / 100.0)
         }
         let (track, effect) = (TrackId::new(), EffectId::new());
-        let descriptor = ParamDescriptor { name: "Feedback", min: 0.0, max: 0.95, default: 0.5, unit: "" };
+        let descriptor = ParamDescriptor {
+            name: "Feedback",
+            min: 0.0,
+            max: 0.95,
+            default: 0.5,
+            unit: "",
+        };
         let descriptors = [descriptor];
         let mut state = DeviceControlState::default();
-        for (text, expected) in [("35%", Some((0, 0.35))), ("50%", None), ("96%", None), ("NaN", None)] {
-            state.update(DeviceControlMsg::Input(track, effect, 0, text.into()), &descriptors, &[0.5]);
-            assert_eq!(state.update(DeviceControlMsg::SubmitUsing(track, effect, 0, percent),
-                &descriptors, &[0.5]), expected);
+        for (text, expected) in [
+            ("35%", Some((0, 0.35))),
+            ("50%", None),
+            ("96%", None),
+            ("NaN", None),
+        ] {
+            state.update(
+                DeviceControlMsg::Input(track, effect, 0, text.into()),
+                &descriptors,
+                &[0.5],
+            );
+            assert_eq!(
+                state.update(
+                    DeviceControlMsg::SubmitUsing(track, effect, 0, percent),
+                    &descriptors,
+                    &[0.5]
+                ),
+                expected
+            );
             assert_eq!(state.errors.contains(&0), matches!(text, "96%" | "NaN"));
         }
-        state.update(DeviceControlMsg::Input(track, effect, 0, "0.35".into()), &descriptors, &[0.5]);
-        assert_eq!(state.update(DeviceControlMsg::Submit(track, effect, 0), &descriptors, &[0.5]), Some((0, 0.35)));
+        state.update(
+            DeviceControlMsg::Input(track, effect, 0, "0.35".into()),
+            &descriptors,
+            &[0.5],
+        );
+        assert_eq!(
+            state.update(
+                DeviceControlMsg::Submit(track, effect, 0),
+                &descriptors,
+                &[0.5]
+            ),
+            Some((0, 0.35))
+        );
     }
-
 }

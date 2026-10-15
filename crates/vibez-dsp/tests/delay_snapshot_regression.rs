@@ -1,7 +1,10 @@
 //! Delay snapshots expose applied timing without advancing or changing audio.
 
 use vibez_core::audio_context::DeviceAudioContext;
-use vibez_dsp::{delay::{param, DelayEffect}, effect::AudioEffect};
+use vibez_dsp::{
+    delay::{param, DelayEffect},
+    effect::AudioEffect,
+};
 
 fn assert_copy_bounded<T: Copy>(_: &T) {
     assert!(std::mem::size_of::<T>() <= 512);
@@ -12,16 +15,18 @@ fn delay_snapshot_observes_applied_crossfade_without_changing_audio() {
     let mut observed = DelayEffect::new(1000.0);
     let mut untouched = DelayEffect::new(1000.0);
     let mut targets = [
-        3.0, 0.0, 1.0, 0.0, 4.0, 0.0, 0.0, 1.0, 500.0,
-        4.0, 0.0, 0.0, 120.0, 0.0, 8000.0, 0.0, 0.0,
+        3.0, 0.0, 1.0, 0.0, 4.0, 0.0, 0.0, 1.0, 500.0, 4.0, 0.0, 0.0, 120.0, 0.0, 8000.0, 0.0, 0.0,
     ];
     for effect in [&mut observed, &mut untouched] {
         for (index, value) in targets.into_iter().enumerate() {
             assert!(effect.set_param(index, value));
         }
         effect.set_audio_context(DeviceAudioContext {
-            musical_sample: 700, continuous_sample: 900,
-            sample_rate: 1000, bpm: 137.0, playing: true,
+            musical_sample: 700,
+            continuous_sample: 900,
+            sample_rate: 1000,
+            bpm: 137.0,
+            playing: true,
         });
     }
     assert!(observed.delay_snapshot().is_none());
@@ -32,7 +37,9 @@ fn delay_snapshot_observes_applied_crossfade_without_changing_audio() {
     for effect in [&mut observed, &mut untouched] {
         effect.process(&mut [0.25, -0.125], 2);
     }
-    let initial = observed.delay_snapshot().expect("one complete frame is observable");
+    let initial = observed
+        .delay_snapshot()
+        .expect("one complete frame is observable");
     assert_copy_bounded(&initial);
     assert_eq!(initial.sample_rate, 1000);
     assert_eq!(initial.bpm, 137.0);
@@ -60,12 +67,19 @@ fn delay_snapshot_observes_applied_crossfade_without_changing_audio() {
         assert_eq!(actual.map(f32::to_bits), reference.map(f32::to_bits));
         let progress = frame as f64 / 19.0;
         // The original impulse reaches fixed old/new taps at different fade frames.
-        let weight = if frame == 2 { 1.0 - progress }
-            else if frame == 4 { progress } else { 0.0 };
+        let weight = if frame == 2 {
+            1.0 - progress
+        } else if frame == 4 {
+            progress
+        } else {
+            0.0
+        };
         for (value, impulse) in actual.into_iter().zip([0.25, -0.125]) {
             assert!((f64::from(value) - impulse * weight).abs() <= 2e-7);
         }
-        let state = observed.delay_snapshot().expect("processed timing stays observable");
+        let state = observed
+            .delay_snapshot()
+            .expect("processed timing stays observable");
         assert_copy_bounded(&state);
         assert_eq!(state.sample_rate, 1000);
         assert_eq!(state.bpm, 137.0);
@@ -103,21 +117,27 @@ fn delay_snapshot_observes_applied_crossfade_without_changing_audio() {
     let restarted = observed.delay_snapshot().unwrap();
     assert_eq!(restarted.processed_frames, 1);
     assert_eq!(restarted.targets, targets);
-    assert!(restarted.lines.iter().all(|line| !line.moving
-        && line.old_samples == 5.0 && line.destination_samples == 5.0));
+    assert!(restarted
+        .lines
+        .iter()
+        .all(|line| !line.moving && line.old_samples == 5.0 && line.destination_samples == 5.0));
 }
 
 #[test]
 fn delay_snapshot_reports_applied_controls_and_reference_motion_independently() {
     let mut effect = DelayEffect::new(1000.0);
     for (index, value) in [
-        (param::TIME_MS, 3.0), (param::FEEDBACK, 0.0), (param::MIX, 0.0),
+        (param::TIME_MS, 3.0),
+        (param::FEEDBACK, 0.0),
+        (param::MIX, 0.0),
     ] {
         assert!(effect.set_param(index, value));
     }
     effect.process(&mut [0.25; 200], 2);
     for (index, value) in [
-        (param::MIX, 1.0), (param::DUCK, 1.0), (param::FEEDBACK_HP_HZ, 200.0),
+        (param::MIX, 1.0),
+        (param::DUCK, 1.0),
+        (param::FEEDBACK_HP_HZ, 200.0),
     ] {
         assert!(effect.set_param(index, value));
     }
@@ -148,8 +168,10 @@ fn delay_snapshot_reports_applied_controls_and_reference_motion_independently() 
     assert!(!settled.filters[0].moving);
     assert!(!settled.reference_moving);
     for (index, value) in [
-        (param::FEEDBACK, 0.5), (param::ROUTING, 1.0),
-        (param::FEEDBACK_HP_ENABLED, 1.0), (param::FEEDBACK_LP_ENABLED, 1.0),
+        (param::FEEDBACK, 0.5),
+        (param::ROUTING, 1.0),
+        (param::FEEDBACK_HP_ENABLED, 1.0),
+        (param::FEEDBACK_LP_ENABLED, 1.0),
     ] {
         assert!(effect.set_param(index, value));
         effect.process(&mut [0.25, 0.125], 2);
@@ -166,9 +188,13 @@ fn delay_snapshot_reports_applied_controls_and_reference_motion_independently() 
     assert!(!effect.delay_snapshot().unwrap().reference_moving);
 
     for (index, value) in [
-        (param::TIME_MS, 5.0), (param::FEEDBACK, 0.5), (param::ROUTING, 1.0),
-        (param::FEEDBACK_HP_ENABLED, 1.0), (param::FEEDBACK_HP_HZ, 400.0),
-        (param::FEEDBACK_LP_ENABLED, 1.0), (param::FEEDBACK_LP_HZ, 20000.0),
+        (param::TIME_MS, 5.0),
+        (param::FEEDBACK, 0.5),
+        (param::ROUTING, 1.0),
+        (param::FEEDBACK_HP_ENABLED, 1.0),
+        (param::FEEDBACK_HP_HZ, 400.0),
+        (param::FEEDBACK_LP_ENABLED, 1.0),
+        (param::FEEDBACK_LP_HZ, 20000.0),
     ] {
         assert!(effect.set_param(index, value));
     }
@@ -176,8 +202,11 @@ fn delay_snapshot_reports_applied_controls_and_reference_motion_independently() 
     let moving = effect.delay_snapshot().unwrap();
     assert_copy_bounded(&moving);
     for (actual, expected) in [
-        (moving.feedback, 0.05), (moving.mix, 1.0), (moving.routing, 0.05),
-        (moving.filters[0].enabled, 0.1), (moving.filters[1].enabled, 0.1),
+        (moving.feedback, 0.05),
+        (moving.mix, 1.0),
+        (moving.routing, 0.05),
+        (moving.filters[0].enabled, 0.1),
+        (moving.filters[1].enabled, 0.1),
     ] {
         assert!((actual - expected).abs() <= 1e-6);
     }
@@ -186,7 +215,10 @@ fn delay_snapshot_reports_applied_controls_and_reference_motion_independently() 
     assert_eq!(moving.targets[param::FEEDBACK_LP_HZ], 20000.0);
     assert!(moving.filters.iter().all(|filter| filter.moving));
     assert!(moving.reference_moving);
-    assert!(moving.lines.iter().all(|line| line.moving && line.progress == 0.0));
+    assert!(moving
+        .lines
+        .iter()
+        .all(|line| line.moving && line.progress == 0.0));
 
     assert!(effect.set_automated_param(param::FEEDBACK, 0.25));
     assert!(effect.set_automated_param(param::MIX, 0.75));
@@ -209,7 +241,10 @@ fn delay_snapshot_reports_applied_controls_and_reference_motion_independently() 
     assert_eq!(next.mix, 0.75);
     assert!((next.routing - 0.1).abs() <= 1e-6);
     assert_eq!(next.filters[0].cutoff_hz, 240.0);
-    assert!(next.lines.iter().all(|line| (line.progress - 1.0 / 19.0).abs() <= 1e-12));
+    assert!(next
+        .lines
+        .iter()
+        .all(|line| (line.progress - 1.0 / 19.0).abs() <= 1e-12));
 
     effect.process(&mut [0.25; 36], 2);
     let final_state = effect.delay_snapshot().unwrap();
@@ -240,5 +275,8 @@ fn snapshot_order_survives_history_reset_so_live_readings_can_reject_stale_packe
     assert_eq!(before.processed_frames, 10);
     assert_eq!(after.processed_frames, 1);
     assert!(after.observation_order > before.observation_order);
-    assert_eq!(effect.delay_snapshot().unwrap().observation_order, after.observation_order);
+    assert_eq!(
+        effect.delay_snapshot().unwrap().observation_order,
+        after.observation_order
+    );
 }

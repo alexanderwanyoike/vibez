@@ -1,12 +1,19 @@
 //! Serializes bounded Delay reference work until its history-owning closure has exited.
 
 use std::collections::VecDeque;
-use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 
-use iced::Task;
-use vibez_core::{constants::MAX_EFFECTS_PER_TRACK, delay_state::DelayState, id::{EffectId, TrackId}};
-use crate::domains::delay_response::{DelayResponse, render_reference};
 use super::{tasks::run_off_ui_thread, tracked_request::TrackedRequest};
+use crate::domains::delay_response::{render_reference, DelayResponse};
+use iced::Task;
+use vibez_core::{
+    constants::MAX_EFFECTS_PER_TRACK,
+    delay_state::DelayState,
+    id::{EffectId, TrackId},
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct Owner {
@@ -34,8 +41,10 @@ impl ReferenceKey {
             right_samples: state.lines[1].destination_samples.to_bits(),
             feedback: state.feedback.to_bits(),
             routing: state.routing.to_bits(),
-            high_pass: (state.filters[0].enabled != 0.0).then(|| state.filters[0].cutoff_hz.to_bits()),
-            low_pass: (state.filters[1].enabled != 0.0).then(|| state.filters[1].cutoff_hz.to_bits()),
+            high_pass: (state.filters[0].enabled != 0.0)
+                .then(|| state.filters[0].cutoff_hz.to_bits()),
+            low_pass: (state.filters[1].enabled != 0.0)
+                .then(|| state.filters[1].cutoff_hz.to_bits()),
         }
     }
 }
@@ -49,7 +58,11 @@ pub(super) struct Request {
 
 impl Request {
     pub fn new(owner: Owner, state: DelayState) -> Self {
-        Self { owner, key: ReferenceKey::of(&state), state }
+        Self {
+            owner,
+            key: ReferenceKey::of(&state),
+            state,
+        }
     }
 }
 
@@ -78,13 +91,18 @@ pub(super) struct Work {
 
 impl Work {
     pub async fn run(self) -> Completion {
-        let Self { token, request, exit } = self;
+        let Self {
+            token,
+            request,
+            exit,
+        } = self;
         let result = run_off_ui_thread("Delay reference", move || {
             // The guard moves through the unpolled future into the blocking closure.
             // render_reference destroys its private history before this guard acknowledges exit.
             let _exit = exit;
             render_reference(&request.state, &_exit.0.cancel).map(Arc::new)
-        }).await;
+        })
+        .await;
         (token, result)
     }
 }
@@ -105,27 +123,46 @@ pub(super) struct DelayResponseWorker {
 
 impl DelayResponseWorker {
     pub fn reconcile(&mut self, visible: &[Owner]) -> bool {
-        if visible.len() > MAX_EFFECTS_PER_TRACK { return false; }
+        if visible.len() > MAX_EFFECTS_PER_TRACK {
+            return false;
+        }
         self.visible.clear();
         for &owner in visible {
-            if !self.visible.contains(&owner) { self.visible.push(owner); }
+            if !self.visible.contains(&owner) {
+                self.visible.push(owner);
+            }
         }
-        self.pending.retain(|request| self.visible.contains(&request.owner));
-        if self.active.as_ref().is_some_and(|active| !self.visible.contains(&active.request.owner)) {
+        self.pending
+            .retain(|request| self.visible.contains(&request.owner));
+        if self
+            .active
+            .as_ref()
+            .is_some_and(|active| !self.visible.contains(&active.request.owner))
+        {
             self.cancel_active();
         }
         true
     }
 
     pub fn offer(&mut self, request: Request) -> bool {
-        if !self.visible.contains(&request.owner) { return false; }
-        if let Some(active) = self.active.as_ref().filter(|active| active.request.owner == request.owner) {
+        if !self.visible.contains(&request.owner) {
+            return false;
+        }
+        if let Some(active) = self
+            .active
+            .as_ref()
+            .filter(|active| active.request.owner == request.owner)
+        {
             if self.tracked.is_current(active.token) && active.request.key == request.key {
                 return false;
             }
             self.cancel_active();
         }
-        if let Some(pending) = self.pending.iter_mut().find(|pending| pending.owner == request.owner) {
+        if let Some(pending) = self
+            .pending
+            .iter_mut()
+            .find(|pending| pending.owner == request.owner)
+        {
             *pending = request;
         } else {
             self.pending.push_back(request);
@@ -135,7 +172,11 @@ impl DelayResponseWorker {
 
     pub fn cancel(&mut self, owner: Owner) {
         self.pending.retain(|request| request.owner != owner);
-        if self.active.as_ref().is_some_and(|active| active.request.owner == owner) {
+        if self
+            .active
+            .as_ref()
+            .is_some_and(|active| active.request.owner == owner)
+        {
             self.cancel_active();
         }
     }
@@ -151,7 +192,9 @@ impl DelayResponseWorker {
         if let Some(active) = &self.active {
             // Task abort does not stop an already spawned blocking closure. A normal
             // completion also retains the slot until the router consumes its result.
-            if self.tracked.is_current(active.token) || !active.control.exited.load(Ordering::Acquire) {
+            if self.tracked.is_current(active.token)
+                || !active.control.exited.load(Ordering::Acquire)
+            {
                 return None;
             }
             self.active = None;
@@ -159,18 +202,38 @@ impl DelayResponseWorker {
         let request = self.pending.pop_front()?;
         let token = self.tracked.begin();
         let control = Arc::new(Control::default());
-        self.active = Some(Active { token, request, control: Arc::clone(&control) });
-        Some(Work { token, request, exit: ExitGuard(control) })
+        self.active = Some(Active {
+            token,
+            request,
+            control: Arc::clone(&control),
+        });
+        Some(Work {
+            token,
+            request,
+            exit: ExitGuard(control),
+        })
     }
 
     pub fn attach<Message: 'static>(&mut self, token: u64, task: Task<Message>) -> Task<Message> {
-        if self.tracked.is_current(token) { self.tracked.attach(task) } else { Task::none() }
+        if self.tracked.is_current(token) {
+            self.tracked.attach(task)
+        } else {
+            Task::none()
+        }
     }
 
-    pub fn complete(&mut self, token: u64, result: ResponseResult) -> Option<(Request, ResponseResult)> {
+    pub fn complete(
+        &mut self,
+        token: u64,
+        result: ResponseResult,
+    ) -> Option<(Request, ResponseResult)> {
         let active = self.active.as_ref()?;
-        if active.token != token || !active.control.exited.load(Ordering::Acquire)
-            || !self.tracked.finish(token) { return None; }
+        if active.token != token
+            || !active.control.exited.load(Ordering::Acquire)
+            || !self.tracked.finish(token)
+        {
+            return None;
+        }
         let active = self.active.take()?;
         Some((active.request, result))
     }
@@ -185,10 +248,17 @@ impl Drop for DelayResponseWorker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vibez_dsp::{delay::{DelayEffect, param}, effect::AudioEffect};
+    use vibez_dsp::{
+        delay::{param, DelayEffect},
+        effect::AudioEffect,
+    };
 
     fn owner() -> Owner {
-        Owner { track_id: TrackId::new(), effect_id: EffectId::new(), generation: 1 }
+        Owner {
+            track_id: TrackId::new(),
+            effect_id: EffectId::new(),
+            generation: 1,
+        }
     }
 
     fn state() -> DelayState {
@@ -211,7 +281,9 @@ mod tests {
         let owners: Vec<_> = (0..MAX_EFFECTS_PER_TRACK).map(|_| owner()).collect();
         let mut worker = DelayResponseWorker::default();
         assert!(worker.reconcile(&owners));
-        for &owner in &owners { assert!(worker.offer(changed(owner, 0.2))); }
+        for &owner in &owners {
+            assert!(worker.offer(changed(owner, 0.2)));
+        }
         assert!(worker.offer(changed(owners[3], 0.7)));
         assert_eq!(worker.pending.len(), MAX_EFFECTS_PER_TRACK);
         let mut too_many = owners.clone();
@@ -223,7 +295,10 @@ mod tests {
             let work = worker.admit().unwrap();
             let token = work.token;
             assert_eq!(work.request.owner, *owner);
-            assert_eq!(work.request.state.feedback, if index == 3 { 0.7 } else { 0.2 });
+            assert_eq!(
+                work.request.state.feedback,
+                if index == 3 { 0.7 } else { 0.2 }
+            );
             drop(work);
             assert!(worker.admit().is_none());
             assert!(worker.complete(token, Ok(None)).is_some());
@@ -254,7 +329,12 @@ mod tests {
         assert!(worker.complete(old, Ok(None)).is_none());
         let next_token = next.token;
         drop(next);
-        assert!(worker.complete(next_token, Ok(None)).unwrap().1.unwrap().is_none());
+        assert!(worker
+            .complete(next_token, Ok(None))
+            .unwrap()
+            .1
+            .unwrap()
+            .is_none());
         assert_eq!(worker.admit().unwrap().request.state.feedback, 0.7);
     }
 
@@ -290,7 +370,10 @@ mod tests {
         let response = result.unwrap().unwrap();
         assert_eq!(response.sample_rate, 1000);
         assert_eq!(response.frames, 13);
-        assert!(response.bins.iter().any(|bin| bin.left == 1.0 && bin.left_frame == 3));
+        assert!(response
+            .bins
+            .iter()
+            .any(|bin| bin.left == 1.0 && bin.left_frame == 3));
         worker.offer(changed(a, 0.7));
         let next = worker.admit().unwrap();
         assert_ne!(next.token, token);

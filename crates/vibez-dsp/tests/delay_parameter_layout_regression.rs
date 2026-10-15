@@ -24,8 +24,8 @@ const PARAMETERS: [(&str, f32, f32, f32, &str); 17] = [
 ];
 
 const RETAINED: [f32; 17] = [
-    531.25, 0.625, 0.375, 1.0, 2.0, 1.0, 1.0, 0.0, 987.5,
-    6.0, 2.0, 1.0, 220.5, 1.0, 12000.5, 0.25, 1.0,
+    531.25, 0.625, 0.375, 1.0, 2.0, 1.0, 1.0, 0.0, 987.5, 6.0, 2.0, 1.0, 220.5, 1.0, 12000.5, 0.25,
+    1.0,
 ];
 
 fn targets(effect: &DelayEffect) -> [u32; 17] {
@@ -41,12 +41,15 @@ fn edit(effect: &mut DelayEffect, automated: bool, index: usize, value: f32) -> 
 }
 
 fn record(case: &str, observed: serde_json::Value) {
-    println!("DELAY_PARAMETER_LAYOUT_RECORD {}", json!({
-        "case": case,
-        "execution_head": std::env::var("VIBEZ_VERIFICATION_HEAD")
-            .unwrap_or_else(|_| "UNLABELLED".into()),
-        "observed": observed,
-    }));
+    println!(
+        "DELAY_PARAMETER_LAYOUT_RECORD {}",
+        json!({
+            "case": case,
+            "execution_head": std::env::var("VIBEZ_VERIFICATION_HEAD")
+                .unwrap_or_else(|_| "UNLABELLED".into()),
+            "observed": observed,
+        })
+    );
 }
 
 #[test]
@@ -55,18 +58,28 @@ fn seventeen_descriptors_append_neutral_defaults_and_preserve_legacy_normalized_
     let mut failures = Vec::new();
     let mut descriptors = Vec::new();
     if effect.param_descriptors().len() != 17 {
-        failures.push(format!("descriptor count={} expected17", effect.param_descriptors().len()));
+        failures.push(format!(
+            "descriptor count={} expected17",
+            effect.param_descriptors().len()
+        ));
     }
     for (index, (meaning, min, max, default, unit)) in PARAMETERS.into_iter().enumerate() {
         let actual = effect.param_descriptors().get(index).copied();
         let matches = actual.is_some_and(|descriptor| {
-            (if index < 3 { descriptor.name == meaning } else { !descriptor.name.is_empty() })
-                && descriptor.min.to_bits() == min.to_bits()
+            (if index < 3 {
+                descriptor.name == meaning
+            } else {
+                !descriptor.name.is_empty()
+            }) && descriptor.min.to_bits() == min.to_bits()
                 && descriptor.max.to_bits() == max.to_bits()
                 && descriptor.default.to_bits() == default.to_bits()
                 && descriptor.unit == unit
         }) && effect.get_param(index).to_bits() == default.to_bits();
-        if !matches { failures.push(format!("descriptor/default index={index} ({meaning}) mismatch")); }
+        if !matches {
+            failures.push(format!(
+                "descriptor/default index={index} ({meaning}) mismatch"
+            ));
+        }
         descriptors.push(json!({
             "index": index, "meaning": meaning, "matches": matches,
             "expected_bits": [min.to_bits(), max.to_bits(), default.to_bits()], "expected_unit": unit,
@@ -89,7 +102,9 @@ fn seventeen_descriptors_append_neutral_defaults_and_preserve_legacy_normalized_
             let accepted = effect.set_automated_param(index, stored);
             let actual = effect.get_param(index);
             if !accepted || actual.to_bits() != expected.to_bits() {
-                failures.push(format!("legacy normalized index={index}, value={value} changed meaning"));
+                failures.push(format!(
+                    "legacy normalized index={index}, value={value} changed meaning"
+                ));
             }
             normalized.push(json!({
                 "index": index, "normalized": value, "accepted": accepted,
@@ -97,11 +112,14 @@ fn seventeen_descriptors_append_neutral_defaults_and_preserve_legacy_normalized_
             }));
         }
     }
-    record("layout_defaults_and_legacy_descriptor_mapping", json!({
-        "descriptor_count": effect.param_descriptors().len(), "descriptors": descriptors,
-        "legacy_mapping_scope": "Public descriptors and setter only; actual engine ingress remains a separate gate",
-        "legacy_normalized_mapping": normalized,
-    }));
+    record(
+        "layout_defaults_and_legacy_descriptor_mapping",
+        json!({
+            "descriptor_count": effect.param_descriptors().len(), "descriptors": descriptors,
+            "legacy_mapping_scope": "Public descriptors and setter only; actual engine ingress remains a separate gate",
+            "legacy_normalized_mapping": normalized,
+        }),
+    );
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
@@ -109,7 +127,14 @@ fn seventeen_descriptors_append_neutral_defaults_and_preserve_legacy_normalized_
 fn finite_manual_and_automated_targets_are_canonical_and_preserve_other_retained_values() {
     let mut cases: Vec<(usize, f32, f32)> = Vec::new();
     for index in [3, 7, 11, 13] {
-        for (input, expected) in [(-f32::MAX, 0.0), (-0.0, 0.0), (0.499_999_97, 0.0), (0.5, 1.0), (0.500_000_06, 1.0), (f32::MAX, 1.0)] {
+        for (input, expected) in [
+            (-f32::MAX, 0.0),
+            (-0.0, 0.0),
+            (0.499_999_97, 0.0),
+            (0.5, 1.0),
+            (0.500_000_06, 1.0),
+            (f32::MAX, 1.0),
+        ] {
             cases.push((index, input, expected));
         }
     }
@@ -121,25 +146,70 @@ fn finite_manual_and_automated_targets_are_canonical_and_preserve_other_retained
         (10, [0.0, 0.0, 0.0, 1.0, 1.0, 2.0, 2.0, 2.0, 2.0]),
         (16, [0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]),
     ] {
-        for (input, expected) in [-f32::MAX, -0.25, 0.49, 0.5, 1.49, 1.5, 2.5, 5.5, f32::MAX].into_iter().zip(expected) {
+        for (input, expected) in [-f32::MAX, -0.25, 0.49, 0.5, 1.49, 1.5, 2.5, 5.5, f32::MAX]
+            .into_iter()
+            .zip(expected)
+        {
             cases.push((index, input, expected));
         }
     }
     for (index, cases_for_index) in [
-        (8, [(-f32::MAX, 1.0), (0.0, 1.0), (531.25, 531.25), (f32::MAX, 2000.0)]),
-        (12, [(-f32::MAX, 20.0), (20.0, 20.0), (220.5, 220.5), (f32::MAX, 1000.0)]),
-        (14, [(-f32::MAX, 1000.0), (1000.0, 1000.0), (12000.5, 12000.5), (f32::MAX, 20000.0)]),
-        (15, [(-f32::MAX, 0.0), (0.0, 0.0), (0.375, 0.375), (f32::MAX, 1.0)]),
+        (
+            8,
+            [
+                (-f32::MAX, 1.0),
+                (0.0, 1.0),
+                (531.25, 531.25),
+                (f32::MAX, 2000.0),
+            ],
+        ),
+        (
+            12,
+            [
+                (-f32::MAX, 20.0),
+                (20.0, 20.0),
+                (220.5, 220.5),
+                (f32::MAX, 1000.0),
+            ],
+        ),
+        (
+            14,
+            [
+                (-f32::MAX, 1000.0),
+                (1000.0, 1000.0),
+                (12000.5, 12000.5),
+                (f32::MAX, 20000.0),
+            ],
+        ),
+        (
+            15,
+            [
+                (-f32::MAX, 0.0),
+                (0.0, 0.0),
+                (0.375, 0.375),
+                (f32::MAX, 1.0),
+            ],
+        ),
     ] {
-        for (input, expected) in cases_for_index { cases.push((index, input, expected)); }
+        for (input, expected) in cases_for_index {
+            cases.push((index, input, expected));
+        }
     }
     let mut failures = Vec::new();
     let mut observations = Vec::new();
     for automated in [false, true] {
         let mut effect = DelayEffect::new(1000.0);
-        let prepared: Vec<_> = RETAINED.into_iter().enumerate().map(|(index, value)| edit(&mut effect, automated, index, value)).collect();
-        if !prepared.iter().all(|accepted| *accepted) || targets(&effect) != RETAINED.map(f32::to_bits) {
-            failures.push(format!("automated={automated}: full retained vector not stored"));
+        let prepared: Vec<_> = RETAINED
+            .into_iter()
+            .enumerate()
+            .map(|(index, value)| edit(&mut effect, automated, index, value))
+            .collect();
+        if !prepared.iter().all(|accepted| *accepted)
+            || targets(&effect) != RETAINED.map(f32::to_bits)
+        {
+            failures.push(format!(
+                "automated={automated}: full retained vector not stored"
+            ));
         }
         for &(index, input, expected) in &cases {
             let before = targets(&effect);
@@ -149,7 +219,11 @@ fn finite_manual_and_automated_targets_are_canonical_and_preserve_other_retained
             let actual = targets(&effect);
             let repeated = edit(&mut effect, automated, index, input);
             let repeated_targets = targets(&effect);
-            if !accepted || !repeated || actual != expected_targets || repeated_targets != expected_targets {
+            if !accepted
+                || !repeated
+                || actual != expected_targets
+                || repeated_targets != expected_targets
+            {
                 failures.push(format!("automated={automated}, index={index}, input={input}: canonical/retained target mismatch"));
             }
             observations.push(json!({
@@ -161,9 +235,14 @@ fn finite_manual_and_automated_targets_are_canonical_and_preserve_other_retained
         }
         let before_reset = targets(&effect);
         effect.reset();
-        if targets(&effect) != before_reset { failures.push(format!("automated={automated}: reset rewrote targets")); }
+        if targets(&effect) != before_reset {
+            failures.push(format!("automated={automated}: reset rewrote targets"));
+        }
     }
-    record("finite_canonical_targets_and_retention", json!(observations));
+    record(
+        "finite_canonical_targets_and_retention",
+        json!(observations),
+    );
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
@@ -173,23 +252,38 @@ fn nonfinite_and_unknown_edits_reject_without_mutating_any_of_seventeen_targets(
     let mut observations = Vec::new();
     for automated in [false, true] {
         let mut effect = DelayEffect::new(1000.0);
-        let prepared: Vec<_> = RETAINED.into_iter().enumerate().map(|(index, value)| edit(&mut effect, automated, index, value)).collect();
-        if !prepared.iter().all(|accepted| *accepted) || targets(&effect) != RETAINED.map(f32::to_bits) {
-            failures.push(format!("automated={automated}: full rejection baseline not stored"));
+        let prepared: Vec<_> = RETAINED
+            .into_iter()
+            .enumerate()
+            .map(|(index, value)| edit(&mut effect, automated, index, value))
+            .collect();
+        if !prepared.iter().all(|accepted| *accepted)
+            || targets(&effect) != RETAINED.map(f32::to_bits)
+        {
+            failures.push(format!(
+                "automated={automated}: full rejection baseline not stored"
+            ));
         }
         let mut cases = Vec::new();
         for index in 0..17 {
-            for value in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] { cases.push((index, value)); }
+            for value in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+                cases.push((index, value));
+            }
         }
         for index in [17, 18, usize::MAX] {
-            for value in [0.25, f32::NAN, f32::INFINITY, f32::NEG_INFINITY] { cases.push((index, value)); }
+            for value in [0.25, f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+                cases.push((index, value));
+            }
         }
         for (index, value) in cases {
             let before = targets(&effect);
             let accepted = edit(&mut effect, automated, index, value);
             let after = targets(&effect);
             if accepted || before != after {
-                failures.push(format!("automated={automated}, index={index}, bits={}: rejected edit mutated targets", value.to_bits()));
+                failures.push(format!(
+                    "automated={automated}, index={index}, bits={}: rejected edit mutated targets",
+                    value.to_bits()
+                ));
             }
             observations.push(json!({
                 "automated": automated, "index": index, "requested_bits": value.to_bits(),

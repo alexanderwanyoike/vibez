@@ -40,9 +40,13 @@ impl ScalarRamp {
         self.frames = frames;
     }
 
-    pub(super) fn current(&self) -> f32 { self.current }
+    pub(super) fn current(&self) -> f32 {
+        self.current
+    }
 
-    pub(super) fn moving(&self) -> bool { self.frame < self.frames && self.current != self.target }
+    pub(super) fn moving(&self) -> bool {
+        self.frame < self.frames && self.current != self.target
+    }
 
     pub(super) fn next_frame(&mut self) -> f32 {
         self.started = true;
@@ -53,8 +57,8 @@ impl ScalarRamp {
             } else {
                 // Origin-based progress avoids drift and retargets from the last audible coefficient.
                 (f64::from(self.origin)
-                    + (f64::from(self.target) - f64::from(self.origin))
-                        * self.frame as f64 / self.frames as f64) as f32
+                    + (f64::from(self.target) - f64::from(self.origin)) * self.frame as f64
+                        / self.frames as f64) as f32
             };
         }
         self.current

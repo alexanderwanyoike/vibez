@@ -102,7 +102,8 @@ impl DelayHistory {
                 read_tap(history, blend.destination)
             } else {
                 (f64::from(read_tap(history, blend.old)) * (1.0 - blend.progress)
-                    + f64::from(read_tap(history, blend.destination)) * blend.progress) as f32
+                    + f64::from(read_tap(history, blend.destination)) * blend.progress)
+                    as f32
             }
         };
         (read(&self.buffer_l, left), read(&self.buffer_r, right))

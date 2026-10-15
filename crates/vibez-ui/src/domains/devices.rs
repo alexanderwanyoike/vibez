@@ -323,7 +323,12 @@ impl DevicesState {
                         plugin_ref: None,
                     });
                 }
-                engine.insert_built_in_effect_with_params(track_id, effect_id, effect_type, &params);
+                engine.insert_built_in_effect_with_params(
+                    track_id,
+                    effect_id,
+                    effect_type,
+                    &params,
+                );
                 self.context_menu = None;
                 action.status = Some(format!("Added {} effect", effect_type.name()));
             }
