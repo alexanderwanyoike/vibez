@@ -171,6 +171,16 @@ mod tests {
     }
 
     #[test]
+    fn a_removed_eq_forgets_its_panel_and_focus() {
+        let (mut app, track, first, _) = eq_app();
+        let _ = app.update(Message::Eq(EqMsg::ToggleAdvanced(first)));
+        let _ = app.update(Message::Devices(DevicesMsg::RemoveEffect(track, first)));
+        app.poll_eq_devices();
+        assert!(!app.eq_devices.panels.contains_key(&first));
+        assert_eq!(app.eq_devices.focus, None);
+    }
+
+    #[test]
     fn the_analyser_stops_listening_when_devices_are_hidden() {
         let (mut app, ..) = eq_app();
         app.poll_eq_devices();
