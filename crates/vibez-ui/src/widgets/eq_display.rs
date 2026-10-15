@@ -460,3 +460,57 @@ impl canvas::Program<Message> for EqDisplayWidget {
         (canvas::event::Status::Ignored, None)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use iced::widget::canvas::Program;
+    use vibez_dsp::effect::AudioEffect;
+
+    fn widget() -> EqDisplayWidget {
+        let eq = vibez_dsp::eq::EqEffect::new(48_000.0);
+        let descriptors = eq.param_descriptors();
+        EqDisplayWidget {
+            track_id: TrackId::new(),
+            effect_id: EffectId::new(),
+            params: descriptors.iter().map(|d| d.default).collect(),
+            descriptors,
+            bypass: false,
+            sample_rate: 48_000.0,
+            spectrum: vec![FLOOR_DB; DISPLAY_BINS],
+            spectrum_active: false,
+        }
+    }
+
+    fn wheel_over_band(widget: &EqDisplayWidget, band: usize) -> Option<Message> {
+        let bounds = Rectangle::new(Point::ORIGIN, iced::Size::new(400.0, 160.0));
+        let handle = widget.handle_pos(&BANDS[band], bounds);
+        let (_, message) = widget.update(
+            &mut EqDisplayState::default(),
+            canvas::Event::Mouse(mouse::Event::WheelScrolled {
+                delta: mouse::ScrollDelta::Lines { x: 0.0, y: 1.0 },
+            }),
+            bounds,
+            mouse::Cursor::Available(handle),
+        );
+        message
+    }
+
+    #[test]
+    fn the_wheel_sets_q_on_the_mid_bands_and_leaves_the_shelves_alone() {
+        let widget = widget();
+        for (band, q) in [(1, 5), (2, 8)] {
+            assert!(matches!(
+                wheel_over_band(&widget, band),
+                Some(Message::Devices(crate::domains::devices::DevicesMsg::SetEffectParam(
+                    _, _, index, _
+                ))) if index == q
+            ));
+        }
+        assert!(wheel_over_band(&widget, 0).is_none());
+        assert!(
+            wheel_over_band(&widget, 3).is_none(),
+            "HF index 11 is its Bell switch, not a Q"
+        );
+    }
+}
