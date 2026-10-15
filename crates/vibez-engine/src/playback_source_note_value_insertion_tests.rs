@@ -54,7 +54,7 @@ impl Instrument for VelocityProbe {
     }
 }
 
-struct ClipSnapshot {
+pub(crate) struct ClipSnapshot {
     id: ClipId,
     geometry: (f64, f64, f64, bool, f64, f64, GrooveGrid),
     notes: Vec<MidiNote>,
@@ -67,7 +67,7 @@ struct ClipSnapshot {
 }
 
 impl ClipSnapshot {
-    fn observe(clip: &EngineNoteClip) -> Self {
+    pub(crate) fn observe(clip: &EngineNoteClip) -> Self {
         Self {
             id: clip.id,
             geometry: (clip.position_beats, clip.duration_beats, clip.start_marker_beats,
@@ -78,13 +78,43 @@ impl ClipSnapshot {
         }
     }
 
+    pub(crate) fn assert_full(&self) {
+        assert!(!self.notes.is_empty());
+        assert_eq!(self.notes.len(), self.notes_capacity);
+        assert_eq!(self.clamps.len(), self.clamps_capacity);
+        assert_eq!(self.clamps, expected_clamps(&self.notes));
+    }
+
+    pub(crate) fn assert_appended(&self, clip: &EngineNoteClip, note: MidiNote) {
+        self.assert_geometry(clip);
+        let mut expected = self.notes.clone();
+        expected.push(note);
+        assert_eq!(clip.notes, expected);
+        assert_eq!(clip.next_same_pitch_start_beats, expected_clamps(&expected));
+        assert_eq!(clip.notes.len(), clip.next_same_pitch_start_beats.len());
+        assert!(clip.notes.capacity() >= expected.len());
+        assert!(clip.next_same_pitch_start_beats.capacity() >= expected.len());
+        assert_ne!(clip.notes.as_ptr(), self.notes_owner);
+        assert_ne!(clip.next_same_pitch_start_beats.as_ptr(), self.clamps_owner);
+        assert_eq!(clip.groove_latch.get(), self.latch);
+    }
+
+    pub(crate) fn assert_retired_storage(&self, storage: &NoteInsertionStorage) {
+        assert!(storage.notes.is_empty());
+        assert!(storage.clamps.is_empty());
+        assert_eq!(storage.notes.as_ptr(), self.notes_owner);
+        assert_eq!(storage.notes.capacity(), self.notes_capacity);
+        assert_eq!(storage.clamps.as_ptr(), self.clamps_owner);
+        assert_eq!(storage.clamps.capacity(), self.clamps_capacity);
+    }
+
     fn assert_geometry(&self, clip: &EngineNoteClip) {
         assert_eq!(clip.id, self.id);
         assert_eq!((clip.position_beats, clip.duration_beats, clip.start_marker_beats,
             clip.loop_enabled, clip.loop_start_beats, clip.loop_end_beats, clip.groove_grid), self.geometry);
     }
 
-    fn assert_unchanged(&self, clip: &EngineNoteClip) {
+    pub(crate) fn assert_unchanged(&self, clip: &EngineNoteClip) {
         self.assert_geometry(clip);
         assert_eq!(clip.notes, self.notes);
         assert_eq!(clip.notes.as_ptr(), self.notes_owner);
@@ -93,6 +123,35 @@ impl ClipSnapshot {
         assert_eq!(clip.next_same_pitch_start_beats.as_ptr(), self.clamps_owner);
         assert_eq!(clip.next_same_pitch_start_beats.capacity(), self.clamps_capacity);
         assert_eq!(clip.groove_latch.get(), self.latch);
+    }
+}
+
+pub(crate) struct EmptyNoteStorageSnapshot {
+    notes_owner: *const MidiNote,
+    notes_capacity: usize,
+    clamps_owner: *const Option<f64>,
+    clamps_capacity: usize,
+}
+
+impl EmptyNoteStorageSnapshot {
+    pub(crate) fn observe(storage: &NoteInsertionStorage) -> Self {
+        assert!(storage.notes.is_empty());
+        assert!(storage.clamps.is_empty());
+        Self {
+            notes_owner: storage.notes.as_ptr(),
+            notes_capacity: storage.notes.capacity(),
+            clamps_owner: storage.clamps.as_ptr(),
+            clamps_capacity: storage.clamps.capacity(),
+        }
+    }
+
+    pub(crate) fn assert_unchanged(&self, storage: &NoteInsertionStorage) {
+        assert!(storage.notes.is_empty());
+        assert!(storage.clamps.is_empty());
+        assert_eq!(storage.notes.as_ptr(), self.notes_owner);
+        assert_eq!(storage.notes.capacity(), self.notes_capacity);
+        assert_eq!(storage.clamps.as_ptr(), self.clamps_owner);
+        assert_eq!(storage.clamps.capacity(), self.clamps_capacity);
     }
 }
 
