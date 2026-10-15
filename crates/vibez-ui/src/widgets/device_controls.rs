@@ -209,10 +209,6 @@ pub fn selector<'a>(
         .into()
 }
 
-pub fn disclosure<'a>(track: TrackId, effect: &UiEffect, open: bool) -> Element<'a, Message> {
-    disclosure_with_label(track, effect, open, "Advanced")
-}
-
 pub fn disclosure_with_label<'a>(
     track: TrackId,
     effect: &UiEffect,
