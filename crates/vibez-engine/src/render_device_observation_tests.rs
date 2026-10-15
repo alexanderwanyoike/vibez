@@ -376,7 +376,6 @@ fn isolated_offline_segments_sample_validation_entry_and_post_process_at_distinc
         }
         let mut second = Vec::new();
         let mut second_selected = Vec::new();
-        let mut second_error = None;
         if mode == Mode::Latency {
             second = vec![-123.0; 16];
             second_selected = vec![-123.0; 16];
@@ -388,7 +387,7 @@ fn isolated_offline_segments_sample_validation_entry_and_post_process_at_distinc
                 )),
                 (0, 0)
             );
-            second_error = normalize(engine.offline_compensation_failure(), track, effect);
+            let second_error = normalize(engine.offline_compensation_failure(), track, effect);
             assert_eq!(
                 second_error.as_deref(),
                 Some("Applied audio configuration became invalid during Bounce")
@@ -409,10 +408,6 @@ fn isolated_offline_segments_sample_validation_entry_and_post_process_at_distinc
             usize::from(!blocked)
         );
         assert_eq!(engine.output_position_samples(), 0);
-        eprintln!("device-observation-d-segment: mode={mode:?}; calls={calls:?}; error={error:?}; second_error={second_error:?}; processes={}; frames={}; first_bits={:?}; selected_bits={:?}; second_bits={:?}; second_selected_bits={:?}",
-            facts.processes.load(Ordering::Relaxed), facts.frames.load(Ordering::Relaxed),
-            output.map(f32::to_bits), selected.map(f32::to_bits), second.iter().map(|sample| sample.to_bits()).collect::<Vec<_>>(),
-            second_selected.iter().map(|sample| sample.to_bits()).collect::<Vec<_>>());
     }
 }
 
@@ -556,10 +551,6 @@ fn public_offline_full_and_cropped_master_and_track_outputs_keep_origin_warmed_h
                 Some(&(2, LATENCY, 0)),
                 "caller-thread latency reporting precedes construction"
             );
-            eprintln!("device-observation-d-healthy: selected={selected}; start={start}; end={end}; calls={calls:?}; processes={}; frames={}; same_owner=true; left_bits={:?}; right_bits={:?}",
-                facts.processes.load(Ordering::Relaxed), facts.frames.load(Ordering::Relaxed),
-                result.audio.channels[0].iter().map(|sample| sample.to_bits()).collect::<Vec<_>>(),
-                result.audio.channels[1].iter().map(|sample| sample.to_bits()).collect::<Vec<_>>());
         }
     }
 }
@@ -638,7 +629,5 @@ fn public_offline_failures_keep_processing_error_precedence_and_original_stop_bl
             facts.frames.load(Ordering::Relaxed),
             if mode == Mode::AtEntry { 0 } else { 512 }
         );
-        eprintln!("device-observation-d-failure: mode={mode:?}; calls={calls:?}; error={error:?}; processes={}; frames={}; same_owner=true",
-            facts.processes.load(Ordering::Relaxed), facts.frames.load(Ordering::Relaxed));
     }
 }
