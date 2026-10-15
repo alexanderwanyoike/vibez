@@ -1207,3 +1207,6 @@ fn pending_note_storage_keeps_arrange_distinct_through_reachable_section_and_lau
         assert_eq!(calls.observed(), before);
     }
 }
+
+#[path = "playback_source_note_value_home_tests.rs"]
+mod note_value_home_tests;
