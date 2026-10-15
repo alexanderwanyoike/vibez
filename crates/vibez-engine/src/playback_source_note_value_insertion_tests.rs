@@ -194,10 +194,45 @@ fn public_add_note_at_full_capacity_preserves_first_duplicate_voice_and_future_c
     assert_eq!(clamps[2], None);
     assert_eq!(clamps[3], None);
     assert_eq!(clamps[count], Some(2.0));
-    commands.push(EngineCommand::AddNote { track_id, clip_id: duplicate, note: inserted }).unwrap();
+    let insertion = crate::clip_insertion::PreparedNoteInsertion::new(inserted);
+    let operation = insertion.id();
+    commands.push(EngineCommand::AddNote { track_id, clip_id: duplicate, insertion }).unwrap();
     let mut heap = crate::retirement::tests::allocations(|| {
+        engine.process_block(AudioProcessBlock::new(&mut [], 2));
+    });
+    let mut request = None;
+    while let Ok(event) = events.pop() {
+        if let crate::events::EngineEvent::ClipInsertionStorageRequested(value) = event {
+            assert_eq!(value.id, operation);
+            assert!(request.replace(value).is_none());
+        }
+    }
+    let waiting = crate::retirement::tests::allocations(|| {
+        engine.process_block(AudioProcessBlock::new(&mut [], 2));
+    });
+    heap.0 += waiting.0;
+    heap.1 += waiting.1;
+    request.expect("the original full note/cache fixture must request real storage").fulfill();
+    let resumed = crate::retirement::tests::allocations(|| {
+        engine.process_block(AudioProcessBlock::new(&mut [], 2));
+    });
+    heap.0 += resumed.0;
+    heap.1 += resumed.1;
+    let mut completed = 0;
+    while let Ok(event) = events.pop() {
+        if let crate::events::EngineEvent::ClipInsertionCompleted(value) = event {
+            assert_eq!(value.id(), operation);
+            assert_eq!(value.outcome, crate::clip_insertion::ClipInsertionOutcome::Applied);
+            assert_eq!((value.track_id, value.clip_id), (track_id, duplicate));
+            completed += 1;
+        }
+    }
+    assert_eq!(completed, 1);
+    let inserted_render = crate::retirement::tests::allocations(|| {
         engine.process_block(AudioProcessBlock::new(&mut output[..16], 2));
     });
+    heap.0 += inserted_render.0;
+    heap.1 += inserted_render.1;
     assert_signal(&output[..16], 0.375);
     assert_eq!(target_calls.observed(), (1, 0, 0));
     assert_eq!(unrelated_calls.observed(), (1, 0, 0));
