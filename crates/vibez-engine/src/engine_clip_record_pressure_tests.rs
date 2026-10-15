@@ -161,7 +161,6 @@ fn nested_packet_publication_preserves_record_started_without_growing_retirement
     });
     let ordinary_length = engine.pending_retirements.len();
     let ordinary_capacity = engine.pending_retirements.capacity();
-    eprintln!("clip-start tail proposal: heap={heap:?}, ordinary={ordinary_length}/{ordinary_capacity}");
     for (index, sample) in crossing.iter().enumerate() {
         assert_eq!(*sample, 0.25 * (64 - index) as f32 / 64.0, "frame{index}");
     }
