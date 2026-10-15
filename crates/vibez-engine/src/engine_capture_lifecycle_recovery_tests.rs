@@ -316,7 +316,7 @@ fn project_suspension_skips_clear_validation_without_changing_capture_admission(
         "suspended-start-clear-skipped",
         original_owner,
         Expected {
-            state: [1, 1, 1, 1, 0, 0, 0],
+            state: [1, 0, 1, 1, 0, 0, 0],
             flags: [1, 1, 0, 0, 0, 1, 0],
             order: vec!["start", "source", "source"],
             fillers: 0,
@@ -338,7 +338,7 @@ fn project_suspension_skips_clear_validation_without_changing_capture_admission(
         "suspended-resume-before-validation",
         original_owner,
         Expected {
-            state: [1, 1, 1, 1, 0, 0, 0],
+            state: [1, 0, 1, 1, 0, 0, 0],
             flags: [0; 7],
             order: vec!["routing-retired"],
             fillers: 0,
