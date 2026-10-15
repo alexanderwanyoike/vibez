@@ -240,10 +240,7 @@ mod tests {
         assert!(app.device_controls[&eq].advanced);
         assert!(app.device_controls[&eq].entries.is_empty());
         assert!(app.device_controls[&eq].errors.is_empty());
-        assert_eq!(
-            app.device_meters.readings[&eq].output,
-            MeterValues::SILENT
-        );
+        assert_eq!(app.device_meters.readings[&eq].output, MeterValues::SILENT);
     }
 
     #[test]
@@ -253,18 +250,12 @@ mod tests {
         app.accept_device_meter(track, eq, stale_generation, levels(), levels());
         app.state.arrangement.selected_track = None;
         app.poll_device_meters();
-        assert_eq!(
-            app.device_meters.readings[&eq].output,
-            MeterValues::SILENT
-        );
+        assert_eq!(app.device_meters.readings[&eq].output, MeterValues::SILENT);
 
         app.state.arrangement.selected_track = Some(track);
         app.poll_device_meters();
         app.accept_device_meter(track, eq, stale_generation, levels(), levels());
-        assert_eq!(
-            app.device_meters.readings[&eq].output,
-            MeterValues::SILENT
-        );
+        assert_eq!(app.device_meters.readings[&eq].output, MeterValues::SILENT);
         let generation = app.device_meters.generation;
         app.accept_device_meter(track, eq, generation, levels(), levels());
         assert_eq!(app.device_meters.readings[&eq].output, levels());
