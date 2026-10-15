@@ -179,10 +179,10 @@ mod tests {
         assert!(app.device_controls[&effect].advanced);
     }
 
-    fn legacy_bitcrush_app() -> (App, TrackId, EffectId) {
+    fn prepared_bitcrush_app(sample_rate: u32) -> (App, TrackId, EffectId) {
         let mut app = super::super::test_support::app();
-        app.state.transport.sample_rate = 48_000;
-        app.send_command(EngineCommand::SetSampleRate(48_000));
+        app.state.transport.sample_rate = sample_rate;
+        app.send_command(EngineCommand::SetSampleRate(sample_rate));
         let channel = ProjectTrack::new(TrackId::new(), "Bitcrush".into(), 3);
         let track = channel.id;
         Arc::make_mut(&mut app.state.project_tracks)
@@ -192,10 +192,25 @@ mod tests {
             track,
             EffectType::Bitcrush,
         )));
-        let target = &mut app.state.find_track_mut(track).unwrap().effects[0];
-        let effect = target.id;
-        target.params[1] = 4.49;
+        let effect = app.state.find_track(track).unwrap().effects[0].id;
+        app.state.project.history = Default::default();
+        app.state.project.dirty = false;
         (app, track, effect)
+    }
+
+    fn legacy_bitcrush_app() -> (App, TrackId, EffectId) {
+        let (mut app, track, effect) = prepared_bitcrush_app(48_000);
+        app.state.find_track_mut(track).unwrap().effects[0].params[1] = 4.49;
+        (app, track, effect)
+    }
+
+    fn submit_bitcrush(app: &mut App, track: TrackId, effect: EffectId, index: usize, text: impl Into<String>) {
+        let _ = app.update(Message::DeviceControl(DeviceControlMsg::Input(
+            track, effect, index, text.into(),
+        )));
+        let _ = app.update(Message::DeviceControl(DeviceControlMsg::Submit(
+            track, effect, index,
+        )));
     }
 
     #[test]
@@ -204,17 +219,7 @@ mod tests {
         let target = &app.state.find_track(track).unwrap().effects[0];
         let before = target.params.clone();
         assert_eq!(target.descriptors[1].unit, "x");
-        app.state.project.history = Default::default();
-        app.state.project.dirty = false;
-        let _ = app.update(Message::DeviceControl(DeviceControlMsg::Input(
-            track,
-            effect,
-            1,
-            "19.8 kHz".into(),
-        )));
-        let _ = app.update(Message::DeviceControl(DeviceControlMsg::Submit(
-            track, effect, 1,
-        )));
+        submit_bitcrush(&mut app, track, effect, 1, "19.8 kHz");
         assert_eq!(
             app.state.find_track(track).unwrap().effects[0].params[1],
             3.0,
@@ -236,20 +241,10 @@ mod tests {
         let (mut app, track, effect) = legacy_bitcrush_app();
         let target = &app.state.find_track(track).unwrap().effects[0];
         let before = target.params.clone();
-        app.state.project.history = Default::default();
-        app.state.project.dirty = false;
         app.state.transport.sample_rate = 96_000;
         app.send_command(EngineCommand::SetSampleRate(96_000));
         assert!(!app.state.find_track(track).unwrap().effects[0].reconfiguration_failed);
-        let _ = app.update(Message::DeviceControl(DeviceControlMsg::Input(
-            track,
-            effect,
-            1,
-            "24 kHz".into(),
-        )));
-        let _ = app.update(Message::DeviceControl(DeviceControlMsg::Submit(
-            track, effect, 1,
-        )));
+        submit_bitcrush(&mut app, track, effect, 1, "24 kHz");
         assert_eq!(
             app.state.find_track(track).unwrap().effects[0].params,
             before
@@ -264,17 +259,7 @@ mod tests {
         let (mut app, track, effect) = legacy_bitcrush_app();
         let target = &app.state.find_track(track).unwrap().effects[0];
         let before = target.params.clone();
-        app.state.project.history = Default::default();
-        app.state.project.dirty = false;
-        let _ = app.update(Message::DeviceControl(DeviceControlMsg::Input(
-            track,
-            effect,
-            1,
-            "12 kHz".into(),
-        )));
-        let _ = app.update(Message::DeviceControl(DeviceControlMsg::Submit(
-            track, effect, 1,
-        )));
+        submit_bitcrush(&mut app, track, effect, 1, "12 kHz");
         assert_eq!(
             app.state.find_track(track).unwrap().effects[0].params,
             before
@@ -293,8 +278,6 @@ mod tests {
         let before = app.state.find_track(track).unwrap().effects[0]
             .params
             .clone();
-        app.state.project.history = Default::default();
-        app.state.project.dirty = false;
         let assert_known = |app: &App, value: &str, minimum: &str, maximum: &str| {
             let presentation = app
                 .device_parameter_presentation(track, effect, param::SR_REDUCE)
@@ -381,19 +364,7 @@ mod tests {
     fn bitcrush_minimum_rate_readout_reenters_without_relaxing_the_prepared_rate_range() {
         use vibez_dsp::bitcrush::param;
 
-        let mut app = super::super::test_support::app();
-        app.state.transport.sample_rate = 44_100;
-        app.send_command(EngineCommand::SetSampleRate(44_100));
-        let channel = ProjectTrack::new(TrackId::new(), "Bitcrush".into(), 3);
-        let track = channel.id;
-        Arc::make_mut(&mut app.state.project_tracks)
-            .tracks
-            .push(channel);
-        let _ = app.update(Message::Devices(DevicesMsg::AddEffect(
-            track,
-            EffectType::Bitcrush,
-        )));
-        let effect = app.state.find_track(track).unwrap().effects[0].id;
+        let (mut app, track, effect) = prepared_bitcrush_app(44_100);
         let _ = app.update(Message::set_effect_param(
             track,
             effect,
@@ -413,17 +384,7 @@ mod tests {
         app.state.project.history = Default::default();
         app.state.project.dirty = false;
 
-        let _ = app.update(Message::DeviceControl(DeviceControlMsg::Input(
-            track,
-            effect,
-            param::SR_REDUCE,
-            shown,
-        )));
-        let _ = app.update(Message::DeviceControl(DeviceControlMsg::Submit(
-            track,
-            effect,
-            param::SR_REDUCE,
-        )));
+        submit_bitcrush(&mut app, track, effect, param::SR_REDUCE, shown);
         assert!(
             app.device_controls[&effect].errors.is_empty(),
             "the canonical minimum-rate readout was rejected"
@@ -436,17 +397,7 @@ mod tests {
         assert!(!app.state.project.dirty);
 
         for invalid in ["1.377k", "1378.001 Hz", "44.101k", "NaN", "inf"] {
-            let _ = app.update(Message::DeviceControl(DeviceControlMsg::Input(
-                track,
-                effect,
-                param::SR_REDUCE,
-                invalid.into(),
-            )));
-            let _ = app.update(Message::DeviceControl(DeviceControlMsg::Submit(
-                track,
-                effect,
-                param::SR_REDUCE,
-            )));
+            submit_bitcrush(&mut app, track, effect, param::SR_REDUCE, invalid);
             assert!(app.device_controls[&effect]
                 .errors
                 .contains(&param::SR_REDUCE));
@@ -472,17 +423,7 @@ mod tests {
             target.params[vibez_dsp::bitcrush::param::BITS],
         );
         assert_eq!(shown, "8");
-        app.state.project.history = Default::default();
-        app.state.project.dirty = false;
-        let _ = app.update(Message::DeviceControl(DeviceControlMsg::Input(
-            track,
-            effect,
-            0,
-            format!("{shown} bit"),
-        )));
-        let _ = app.update(Message::DeviceControl(DeviceControlMsg::Submit(
-            track, effect, 0,
-        )));
+        submit_bitcrush(&mut app, track, effect, 0, format!("{shown} bit"));
         assert_eq!(
             app.state.find_track(track).unwrap().effects[0].params,
             before
@@ -501,17 +442,7 @@ mod tests {
             target.params[index] = 0.373_14;
             assert_eq!(target.descriptors[index].unit, "");
             let before = target.params.clone();
-            app.state.project.history = Default::default();
-            app.state.project.dirty = false;
-            let _ = app.update(Message::DeviceControl(DeviceControlMsg::Input(
-                track,
-                effect,
-                index,
-                "37 %".into(),
-            )));
-            let _ = app.update(Message::DeviceControl(DeviceControlMsg::Submit(
-                track, effect, index,
-            )));
+            submit_bitcrush(&mut app, track, effect, index, "37 %");
             assert_eq!(
                 app.state.find_track(track).unwrap().effects[0].params,
                 before
@@ -522,15 +453,7 @@ mod tests {
             );
             assert!(!app.state.project.history.can_undo());
             assert!(!app.state.project.dirty);
-            let _ = app.update(Message::DeviceControl(DeviceControlMsg::Input(
-                track,
-                effect,
-                index,
-                "65 %".into(),
-            )));
-            let _ = app.update(Message::DeviceControl(DeviceControlMsg::Submit(
-                track, effect, index,
-            )));
+            submit_bitcrush(&mut app, track, effect, index, "65 %");
             assert_eq!(
                 app.state.find_track(track).unwrap().effects[0].params[index],
                 0.65
@@ -613,8 +536,6 @@ mod tests {
 
         let (mut app, track, effect) = legacy_bitcrush_app();
         app.state.find_track_mut(track).unwrap().effects[0].params[param::POST_LP_HZ] = 20_000.0;
-        app.state.project.history = Default::default();
-        app.state.project.dirty = false;
         let before = app.state.find_track(track).unwrap().effects[0]
             .params
             .clone();
