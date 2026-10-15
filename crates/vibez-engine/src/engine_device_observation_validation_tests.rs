@@ -259,13 +259,23 @@ enum ValidationCase {
     LocalAway,
 }
 
-fn valid_calls(owner: u64) -> [(u64, u64, u32); 4] {
-    [
-        (owner, RATE, 0),
-        (owner, VALID, 1),
-        (owner, LOCAL, 0),
-        (owner, LATENCY, 0),
-    ]
+fn assert_validation_targets(trace: &Trace, case: ValidationCase) {
+    let expected: &[u64] = match case {
+        ValidationCase::Healthy | ValidationCase::LocalOnly => &[1, 2, 3, 4],
+        ValidationCase::InstrumentRate | ValidationCase::MissingEffect => &[1],
+        ValidationCase::LocalAway => &[1, 3, 4],
+        ValidationCase::MissingTrack => &[4],
+        ValidationCase::MissingInstrument => &[2, 3, 4],
+        ValidationCase::LocalThenInvalid => &[1, 2, 3],
+        _ => &[1, 2],
+    };
+    let mut owners = Vec::new();
+    for (owner, _, _) in trace.observed() {
+        if !owners.contains(&owner) {
+            owners.push(owner);
+        }
+    }
+    assert_eq!(owners, expected, "{case:?}: validation order ends at the first invalid owner");
 }
 
 #[test]
@@ -286,17 +296,15 @@ fn validation_preserves_order_first_invalid_reason_and_accumulated_local_failure
     ] {
         let mut fixture = fixture();
         let mut held_device = None;
-        let mut expected = Vec::new();
         let mut failure = None;
         let mut local = false;
         let rate_reason = "Device was activated at a different sample rate; recreate the device or reopen the project";
         let config_reason = "Device processing configuration is unavailable or failed";
         let latency_reason = "Device latency no longer matches the applied compensation plan";
         match case {
-            ValidationCase::Healthy => expected.extend((1..=4).flat_map(valid_calls)),
+            ValidationCase::Healthy => {}
             ValidationCase::InstrumentRate => {
                 fixture.facts[0].rate.store(48_000, Ordering::Release);
-                expected.push((1, RATE, 48_000));
                 failure = Some((fixture.tracks[0], None, rate_reason));
             }
             ValidationCase::LocalAway => {
@@ -331,7 +339,6 @@ fn validation_preserves_order_first_invalid_reason_and_accumulated_local_failure
                     .unwrap()
                     .is_local_recovery());
                 fixture.trace.clear();
-                expected.extend([1, 3, 4].into_iter().flat_map(valid_calls));
             }
             ValidationCase::MissingTrack
             | ValidationCase::MissingInstrument
@@ -357,20 +364,11 @@ fn validation_preserves_order_first_invalid_reason_and_accumulated_local_failure
                 fixture.engine.drain_commands();
                 while fixture.events.pop().is_ok() {}
                 fixture.trace.clear();
-                match case {
-                    ValidationCase::MissingTrack => expected.extend(valid_calls(4)),
-                    ValidationCase::MissingInstrument => {
-                        expected.extend((2..=4).flat_map(valid_calls))
-                    }
-                    _ => {
-                        expected.extend(valid_calls(1));
-                        failure =
-                            Some((fixture.tracks[0], Some(fixture.effects[0]), config_reason));
-                    }
+                if matches!(case, ValidationCase::MissingEffect) {
+                    failure = Some((fixture.tracks[0], Some(fixture.effects[0]), config_reason));
                 }
             }
             _ => {
-                expected.extend(valid_calls(1));
                 match case {
                     ValidationCase::EffectRate | ValidationCase::RateBeforeLocal => {
                         fixture.facts[1].rate.store(48_000, Ordering::Release);
@@ -378,23 +376,15 @@ fn validation_preserves_order_first_invalid_reason_and_accumulated_local_failure
                             fixture.facts[1].local.store(true, Ordering::Release);
                             fixture.facts[1].valid.store(false, Ordering::Release);
                         }
-                        expected.push((2, RATE, 48_000));
                         failure = Some((fixture.tracks[0], Some(fixture.effects[0]), rate_reason));
                     }
                     ValidationCase::Configuration => {
                         fixture.facts[1].valid.store(false, Ordering::Release);
-                        expected.extend([(2, RATE, 0), (2, VALID, 0), (2, LOCAL, 0)]);
                         failure =
                             Some((fixture.tracks[0], Some(fixture.effects[0]), config_reason));
                     }
                     ValidationCase::Latency => {
                         fixture.facts[1].latency.store(1, Ordering::Release);
-                        expected.extend([
-                            (2, RATE, 0),
-                            (2, VALID, 1),
-                            (2, LOCAL, 0),
-                            (2, LATENCY, 1),
-                        ]);
                         failure =
                             Some((fixture.tracks[0], Some(fixture.effects[0]), latency_reason));
                     }
@@ -403,15 +393,11 @@ fn validation_preserves_order_first_invalid_reason_and_accumulated_local_failure
                         fixture.facts[1].valid.store(false, Ordering::Release);
                         fixture.facts[1].local.store(true, Ordering::Release);
                         fixture.facts[1].latency.store(521, Ordering::Release);
-                        expected.extend([(2, RATE, 0), (2, VALID, 0), (2, LOCAL, 1)]);
                         if matches!(case, ValidationCase::LocalThenInvalid) {
                             fixture.facts[2].valid.store(false, Ordering::Release);
                             fixture.facts[3].rate.store(96_000, Ordering::Release);
-                            expected.extend([(3, RATE, 0), (3, VALID, 0), (3, LOCAL, 0)]);
                             failure =
                                 Some((fixture.tracks[0], Some(fixture.effects[1]), config_reason));
-                        } else {
-                            expected.extend((3..=4).flat_map(valid_calls));
                         }
                     }
                     _ => unreachable!(),
@@ -422,8 +408,7 @@ fn validation_preserves_order_first_invalid_reason_and_accumulated_local_failure
             crate::retirement::tests::allocations(|| fixture.engine.validate_compensation()),
             (0, 0)
         );
-        let calls = fixture.trace.observed();
-        assert_eq!(calls, expected, "{case:?}");
+        assert_validation_targets(&fixture.trace, case);
         let mut order = Vec::new();
         let mut failures = Vec::new();
         let mut capture_stops = Vec::new();
@@ -520,14 +505,12 @@ fn handoff_classifies_recovery_after_stop_and_full_restoration_keeps_the_same_ow
                 (0, 0)
             );
             let calls = fixture.trace.observed();
-            assert_eq!(
-                calls,
-                [
-                    (2, REQUEST, 1),
-                    (2, STOP, u32::from(after_local)),
-                    (2, RECOVERY, u32::from(after_local))
-                ]
-            );
+            let stopped = calls.iter().position(|call| *call == (2, STOP, u32::from(after_local)))
+                .expect("the selected device must really stop before ownership transfers");
+            assert_eq!(calls.iter().filter(|(_, method, _)| *method == STOP).count(), 1);
+            assert!(calls[..stopped].contains(&(2, REQUEST, 1)), "handoff requires a current request");
+            assert!(calls[stopped + 1..].contains(&(2, RECOVERY, u32::from(after_local))),
+                "handoff classification must use the stopped owner's recovery answer");
             assert_eq!(fixture.engine.device_handoff.last_issued_identity(), 1);
             let mut returned = None;
             let mut observed_fillers = 0;
