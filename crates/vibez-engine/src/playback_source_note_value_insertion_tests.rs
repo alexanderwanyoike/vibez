@@ -145,6 +145,13 @@ impl EmptyNoteStorageSnapshot {
         }
     }
 
+    pub(crate) fn assert_installed_in(&self, clip: &EngineNoteClip) {
+        assert_eq!(clip.notes.as_ptr(), self.notes_owner);
+        assert_eq!(clip.notes.capacity(), self.notes_capacity);
+        assert_eq!(clip.next_same_pitch_start_beats.as_ptr(), self.clamps_owner);
+        assert_eq!(clip.next_same_pitch_start_beats.capacity(), self.clamps_capacity);
+    }
+
     pub(crate) fn assert_unchanged(&self, storage: &NoteInsertionStorage) {
         assert!(storage.notes.is_empty());
         assert!(storage.clamps.is_empty());

@@ -16,10 +16,15 @@ struct NoteDelta {
 
 impl NoteDelta {
     fn prepare(fixture: &Fixture) -> Self {
+        let delta = Self::with_capacity(fixture, 1);
+        delta.original.assert_full();
+        delta
+    }
+
+    fn with_capacity(fixture: &Fixture, capacity: usize) -> Self {
         let original = ClipSnapshot::observe(&fixture.engine.tracks()[0].playback_source.note_clips[0]);
-        original.assert_full();
         let note = MidiNote { pitch: 60, velocity: 93, start_beat: 1.0, duration_beats: 0.5 };
-        let insertion = PreparedNoteInsertion::new(note);
+        let insertion = PreparedNoteInsertion::with_capacity(note, capacity);
         let id = insertion.id();
         let identity = Arc::downgrade(&id.0);
         let control = std::ptr::from_ref(insertion.0.as_ref());
@@ -217,3 +222,6 @@ fn ready_or_unfulfilled_note_value_waits_at_zero_then_returns_both_arrays_on_one
         assert_eq!(identity.strong_count(), 0);
     }
 }
+
+#[path = "note_value_insertion_lifecycle_tests.rs"]
+mod lifecycle_tests;
