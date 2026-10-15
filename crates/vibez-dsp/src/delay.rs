@@ -1,3 +1,5 @@
+//! Prepares bounded stereo delay histories and processes linear feedback echoes.
+
 use vibez_core::effect::{EffectType, ParamDescriptor};
 
 use crate::effect::AudioEffect;
