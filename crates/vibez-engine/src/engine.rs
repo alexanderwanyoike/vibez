@@ -1083,3 +1083,7 @@ mod unload_routed_pressure_tests;
 #[cfg(test)]
 #[path = "engine_section_activation_pressure_tests.rs"]
 mod section_activation_pressure_tests;
+
+#[cfg(test)]
+#[path = "engine_resumed_record_pressure_tests.rs"]
+mod resumed_record_pressure_tests;
