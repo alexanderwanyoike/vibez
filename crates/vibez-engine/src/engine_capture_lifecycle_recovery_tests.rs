@@ -158,7 +158,7 @@ fn awaiting_and_invalid_plans_skip_clear_episode_observation_until_full_publicat
             Expected { state: [0, 1, u64::from(!invalid), u64::from(!invalid), 0, 0, 0], flags: [0, 0, 0, 1, 0, 0, 0], order: vec![], fillers: 0, retired: None });
         let retired = std::ptr::from_ref(fixture.engine.routing.as_ref()) as usize; let routing = plan(&fixture, Some(extra));
         fixture.commands.push(EngineCommand::SetRouting(routing)).unwrap(); drain(&mut fixture);
-        assert!(fixture.engine.device_failure_capture_closed);
+        assert!(fixture.engine.capture_lifecycle.local_failure_closure_requested());
         assert_eq!(crate::retirement::tests::allocations(|| fixture.engine.validate_compensation()), (0, 0));
         record(&mut fixture, if invalid { "invalid-full-plan-clear" } else { "awaiting-full-plan-clear" }, original_owner,
             Expected { state: [0, 0, 1, u64::from(!invalid), 0, 0, 0], flags: [0; 7], order: vec!["routing-retired"], fillers: 0, retired: Some(retired) });
