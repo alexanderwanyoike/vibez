@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::clip_insertion::{
-    ClipInsertionAttempt, ClipInsertionDelta, ClipInsertionOutcome, ClipInsertionReply,
+    ClipInsertionAttempt, ClipInsertionDelta, ClipInsertionOutcome, ClipInsertionReply, ClipInsertionTarget,
     CompletedClipInsertion, PreparedClipInsertion, PreparedNoteClipInsertion,
     PreparedNoteInsertion,
 };
@@ -44,7 +44,7 @@ impl AudioEngine {
         clip_id: ClipId,
         mut insertion: Box<PreparedClipInsertion>,
     ) {
-        insertion.target = Some((track_id, clip_id));
+        insertion.target = Some((track_id, ClipInsertionTarget::Clip(clip_id)));
         let Some(track) = self.tracks.iter_mut().find(|track| track.id == track_id) else {
             self.complete_clip_insertion(insertion, ClipInsertionOutcome::MissingTrack);
             return;
@@ -105,11 +105,11 @@ impl AudioEngine {
     ) {
         let recalculate_length =
             owner.affects_length() && outcome != ClipInsertionOutcome::Abandoned;
-        let (track_id, clip_id) = owner.target.expect("one insertion outcome target");
+        let (track_id, target) = owner.target.expect("one insertion outcome target");
         self.retire_event(EngineEvent::ClipInsertionCompleted(
             CompletedClipInsertion {
                 track_id,
-                clip_id,
+                target,
                 outcome,
                 owner,
             },

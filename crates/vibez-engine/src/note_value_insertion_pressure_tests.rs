@@ -71,8 +71,8 @@ impl NoteDelta {
     ) {
         assert_eq!(completed.id(), self.id);
         assert_eq!(
-            (completed.track_id, completed.clip_id),
-            (fixture.track, fixture.resident)
+            (completed.track_id, completed.target),
+            (fixture.track, crate::clip_insertion::ClipInsertionTarget::Clip(fixture.resident))
         );
         assert_eq!(completed.outcome, outcome);
         assert_eq!(std::ptr::from_ref(completed.owner.as_ref()), self.control);

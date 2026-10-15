@@ -124,14 +124,14 @@ fn native_many_note_consumer_keeps_indices_equal_starts_and_ceil_audio_while_ser
             match event {
                 EngineEvent::ClipInsertionStorageRequested(request) => {
                     assert!(operations.contains(&request.id));
-                    assert_eq!((request.track_id, request.clip_id), (track_id, clip_id));
+                    assert_eq!((request.track_id, request.target), (track_id, crate::clip_insertion::ClipInsertionTarget::Clip(clip_id)));
                     assert!(!requested.contains(&request.id));
                     requested.push(request.id.clone());
                     request.fulfill();
                 }
                 EngineEvent::ClipInsertionCompleted(owner) => {
                     assert_eq!(owner.id(), operations[completed]);
-                    assert_eq!((owner.track_id, owner.clip_id), (track_id, clip_id));
+                    assert_eq!((owner.track_id, owner.target), (track_id, crate::clip_insertion::ClipInsertionTarget::Clip(clip_id)));
                     assert_eq!(owner.outcome, ClipInsertionOutcome::Applied);
                     completed += 1;
                     drop(owner);

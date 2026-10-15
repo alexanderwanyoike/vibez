@@ -283,7 +283,7 @@ fn assert_complete(
     outcome: ClipInsertionOutcome,
 ) {
     assert_eq!(owner.id(), delta.id);
-    assert_eq!((owner.track_id, owner.clip_id), (fixture.track, delta.clip));
+    assert_eq!((owner.track_id, owner.target), (fixture.track, crate::clip_insertion::ClipInsertionTarget::Clip(delta.clip)));
     assert_eq!(owner.outcome, outcome);
     assert_eq!(std::ptr::from_ref(owner.owner.as_ref()), delta.control);
     assert_eq!(

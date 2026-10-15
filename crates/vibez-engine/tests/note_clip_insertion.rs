@@ -209,7 +209,7 @@ fn native_note_consumer_fulfills_stale_hints_and_preserves_first_duplicate_note_
                             item.operation == request.id || item.note_operation == request.id
                         })
                         .unwrap();
-                    assert_eq!((request.track_id, request.clip_id), (track_id, item.id));
+                    assert_eq!((request.track_id, request.target), (track_id, vibez_engine::clip_insertion::ClipInsertionTarget::Clip(item.id)));
                     assert!(!requested.contains(&request.id));
                     requested.push(request.id.clone());
                     request.fulfill();
@@ -227,7 +227,7 @@ fn native_note_consumer_fulfills_stale_hints_and_preserves_first_duplicate_note_
                         notes_completed += 1;
                         item
                     };
-                    assert_eq!((value.track_id, value.clip_id), (track_id, item.id));
+                    assert_eq!((value.track_id, value.target), (track_id, vibez_engine::clip_insertion::ClipInsertionTarget::Clip(item.id)));
                     assert_eq!(value.outcome, ClipInsertionOutcome::Applied);
                     drop(value);
                 }

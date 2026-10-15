@@ -249,7 +249,7 @@ fn note_request_polling_serves_current_stale_delete_undo_stop_and_clear_state() 
             matches!(fixture.app.event_rx.as_ref().unwrap().peek().unwrap(),
             EngineEvent::ClipInsertionCompleted(completed)
                 if completed.id() == fixture.operation && completed.outcome == ClipInsertionOutcome::Applied
-                    && (completed.track_id, completed.clip_id) == (fixture.track, fixture.incoming.id)),
+                    && (completed.track_id, completed.target) == (fixture.track, vibez_engine::clip_insertion::ClipInsertionTarget::Clip(fixture.incoming.id))),
             "{change:?}"
         );
         fixture.app.poll_engine_events();

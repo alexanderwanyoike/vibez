@@ -157,7 +157,7 @@ fn pending_notes_keep_current_first_match_edits_and_clamps_until_fifo_release() 
         match event {
             EngineEvent::ClipInsertionStorageRequested(value) => {
                 assert_eq!(value.id, a_id);
-                assert_eq!((value.track_id, value.clip_id), (track_id, duplicate));
+                assert_eq!((value.track_id, value.target), (track_id, crate::clip_insertion::ClipInsertionTarget::Clip(duplicate)));
                 assert!(request.replace(value).is_none());
             }
             EngineEvent::ClipInsertionCompleted(_) => {
@@ -198,7 +198,7 @@ fn pending_notes_keep_current_first_match_edits_and_clamps_until_fifo_release() 
         match event {
             EngineEvent::ClipInsertionCompleted(value) => {
                 assert_eq!(value.outcome, ClipInsertionOutcome::Applied);
-                assert_eq!((value.track_id, value.clip_id), (track_id, duplicate));
+                assert_eq!((value.track_id, value.target), (track_id, crate::clip_insertion::ClipInsertionTarget::Clip(duplicate)));
                 applied.push(value.id());
             }
             EngineEvent::ClipInsertionStorageRequested(_) => {
@@ -260,12 +260,12 @@ fn pending_notes_keep_current_first_match_edits_and_clamps_until_fifo_release() 
             EngineEvent::ClipInsertionCompleted(value) => {
                 assert_eq!(value.id(), tail_ids[applied.len() - 2]);
                 assert_eq!(value.outcome, ClipInsertionOutcome::Applied);
-                assert_eq!((value.track_id, value.clip_id), (track_id, duplicate));
+                assert_eq!((value.track_id, value.target), (track_id, crate::clip_insertion::ClipInsertionTarget::Clip(duplicate)));
                 applied.push(value.id());
             }
             EngineEvent::ClipInsertionStorageRequested(value) => {
                 assert_eq!(value.id, *tail_ids.last().unwrap());
-                assert_eq!((value.track_id, value.clip_id), (track_id, duplicate));
+                assert_eq!((value.track_id, value.target), (track_id, crate::clip_insertion::ClipInsertionTarget::Clip(duplicate)));
                 assert!(request.replace(value).is_none());
             }
             EngineEvent::SourceNoteInput { on: false, .. }
@@ -317,7 +317,7 @@ fn pending_notes_keep_current_first_match_edits_and_clamps_until_fifo_release() 
             EngineEvent::ClipInsertionCompleted(value) => {
                 assert_eq!(value.id(), *tail_ids.last().unwrap());
                 assert_eq!(value.outcome, ClipInsertionOutcome::Applied);
-                assert_eq!((value.track_id, value.clip_id), (track_id, duplicate));
+                assert_eq!((value.track_id, value.target), (track_id, crate::clip_insertion::ClipInsertionTarget::Clip(duplicate)));
                 applied.push(value.id());
                 order.push("complete");
             }

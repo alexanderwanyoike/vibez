@@ -54,8 +54,8 @@ fn pending_inner() -> InnerPending {
     };
     let operation = request.id.clone();
     assert_eq!(
-        (request.track_id, request.clip_id),
-        (outer.track, outer.resident)
+        (request.track_id, request.target),
+        (outer.track, vibez_engine::clip_insertion::ClipInsertionTarget::Clip(outer.resident))
     );
     assert_eq!(
         outer.engine.tracks()[0].playback_source.note_clips[0]
@@ -178,7 +178,7 @@ fn piano_roll_note_growth_is_served_before_current_stale_batch_reuse_undo_stop_a
             matches!(outer.app.event_rx.as_ref().unwrap().peek().unwrap(),
             EngineEvent::ClipInsertionCompleted(owner) if owner.id() == operation
                 && owner.outcome == ClipInsertionOutcome::Applied
-                && (owner.track_id, owner.clip_id) == (outer.track, outer.resident)),
+                && (owner.track_id, owner.target) == (outer.track, vibez_engine::clip_insertion::ClipInsertionTarget::Clip(outer.resident))),
             "{change:?}"
         );
         // Undo/replay and batch expansion may themselves need the same real
