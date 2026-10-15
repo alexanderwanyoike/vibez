@@ -77,7 +77,7 @@ fn render_events(
     notes: &[MidiNote],
     frames: usize,
 ) -> Vec<TimedEvent> {
-    let (mut engine, mut commands, _events) = AudioEngine::new();
+    let (mut engine, mut commands, mut insertion_events) = AudioEngine::new();
     let track_id = TrackId::new();
     let clip_id = ClipId::new();
     let events = Arc::new(Mutex::new(Vec::new()));
@@ -136,6 +136,7 @@ fn render_events(
             .unwrap();
     }
     commands.push(EngineCommand::Play).unwrap();
+    crate::test_support::fulfill_insertion_setup(&mut engine, &mut insertion_events);
     engine.process(&mut vec![0.0; frames * 2], 2);
     let rendered = events.lock().unwrap().clone();
     rendered
@@ -152,7 +153,7 @@ fn midpoint_note(start_beat: f64) -> MidiNote {
 
 #[test]
 fn midi_start_plays_once_then_returns_to_loop_start() {
-    let (mut engine, mut commands, _events) = AudioEngine::new();
+    let (mut engine, mut commands, mut insertion_events) = AudioEngine::new();
     let track_id = TrackId::new();
     let clip_id = ClipId::new();
     let events = Arc::new(Mutex::new(Vec::new()));
@@ -197,6 +198,7 @@ fn midi_start_plays_once_then_returns_to_loop_start() {
             .unwrap();
     }
     commands.push(EngineCommand::Play).unwrap();
+    crate::test_support::fulfill_insertion_setup(&mut engine, &mut insertion_events);
     engine.process(&mut vec![0.0; 300 * 2], 2);
 
     let events = events.lock().unwrap();
@@ -207,7 +209,7 @@ fn midi_start_plays_once_then_returns_to_loop_start() {
 
 #[test]
 fn dense_recorded_groove_schedules_each_note_once_per_audio_block() {
-    let (mut engine, mut commands, _events) = AudioEngine::new();
+    let (mut engine, mut commands, mut insertion_events) = AudioEngine::new();
     let track_id = TrackId::new();
     let clip_id = ClipId::new();
     commands.push(EngineCommand::SetSampleRate(44_100)).unwrap();
@@ -254,6 +256,7 @@ fn dense_recorded_groove_schedules_each_note_once_per_audio_block() {
     }
     commands.push(EngineCommand::Play).unwrap();
 
+    crate::test_support::fulfill_insertion_setup(&mut engine, &mut insertion_events);
     crate::playback_source::reset_audio_thread_note_end_lookups();
     engine.process(&mut vec![0.0; 236 * 2], 2);
 
