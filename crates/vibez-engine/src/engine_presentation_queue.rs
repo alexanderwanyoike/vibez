@@ -231,7 +231,7 @@ impl AudioEngine {
         if !self.presentation_state.enter_fault() {
             return;
         }
-        self.capture_active = false;
+        self.capture_lifecycle.end();
         self.transport.stop();
         for track in &mut self.tracks {
             track.active_clip = None;

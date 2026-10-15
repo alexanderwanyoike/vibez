@@ -15,7 +15,7 @@ impl AudioEngine {
         let context = self.presentation_context(self.mix_latency());
         let section_id = context.section_id;
         let section_position_samples = context.section;
-        self.capture_active = true;
+        self.capture_lifecycle.begin();
         self.present_event(EngineEvent::PerformanceCaptureStarted {
             offsets: self.capture_offsets(),
             effective_at_samples: self.heard_capture_position(),
@@ -47,7 +47,7 @@ impl AudioEngine {
     }
 
     pub(super) fn command_stop_performance_capture(&mut self) {
-        self.capture_active = false;
+        self.capture_lifecycle.end();
         self.present_event(EngineEvent::PerformanceCaptureStopped {
             effective_at_samples: self.heard_capture_position(),
         });

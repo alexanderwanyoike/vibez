@@ -663,14 +663,14 @@ fn capture_admission_uses_applied_plan_validity_instead_of_global_processing_gat
         assert_eq!(before.valid, allowed);
         assert_eq!(before.muted, !matches!(start, StartingCondition::Running));
         assert!(!fixture.engine.local_device_failure_pending());
-        assert!(!fixture.engine.capture_active);
+        assert!(!fixture.engine.capture_lifecycle.is_active());
         let capture_start = fixture.engine.heard_capture_position();
         assert_eq!(capture_start, 64);
         let plan = std::ptr::from_ref(fixture.engine.routing.as_ref());
         fixture.drain_command(EngineCommand::StartPerformanceCapture);
         let after = Readiness::observe(&fixture.engine);
         assert_eq!(after, before, "{start:?}");
-        assert_eq!(fixture.engine.capture_active, allowed, "{start:?}");
+        assert_eq!(fixture.engine.capture_lifecycle.is_active(), allowed, "{start:?}");
         assert_eq!(std::ptr::from_ref(fixture.engine.routing.as_ref()), plan);
         let mut order = Vec::new();
         let mut source_count = 0;
@@ -732,7 +732,7 @@ fn capture_admission_uses_applied_plan_validity_instead_of_global_processing_gat
             assert_eq!(order, ["capture-start", "capture-source", "capture-source"]);
             assert_eq!(source_count, 2);
             fixture.drain_command(EngineCommand::StopPerformanceCapture);
-            assert!(!fixture.engine.capture_active);
+            assert!(!fixture.engine.capture_lifecycle.is_active());
             assert_eq!(Readiness::observe(&fixture.engine), before);
             let stopped = fixture.drain_events();
             assert_eq!(stopped.len(), 1);
@@ -746,7 +746,7 @@ fn capture_admission_uses_applied_plan_validity_instead_of_global_processing_gat
             assert_eq!(source_count, 0);
         }
         assert_eq!(std::ptr::from_ref(fixture.engine.routing.as_ref()), plan);
-        assert!(!fixture.engine.capture_active);
+        assert!(!fixture.engine.capture_lifecycle.is_active());
         assert!(fixture.drain_events().is_empty());
         let columns = |state: Readiness| {
             [
