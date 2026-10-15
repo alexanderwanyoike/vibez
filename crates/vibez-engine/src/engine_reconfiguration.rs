@@ -202,7 +202,10 @@ impl AudioEngine {
                 }
             }
         }
-        if self.capture_lifecycle.needs_first_local_close(local_failure) {
+        if self
+            .capture_lifecycle
+            .needs_first_local_close(local_failure)
+        {
             self.close_capture_for_device_failure();
         }
         self.capture_lifecycle.record_local_failure(local_failure);
