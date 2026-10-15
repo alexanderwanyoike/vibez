@@ -98,3 +98,57 @@ async fn delay_file_roundtrip_loads_all_seventeen_parameters_as_one_undoable_edi
     assert!(!app.state.project.dirty);
     assert!(!app.state.project.history.can_undo());
 }
+
+#[test]
+fn cancelled_or_stale_delay_loads_cannot_overwrite_current_device_or_new_request() {
+    for action in ["cancel", "edit away and back", "remove and undo", "runtime reset", "superseded"] {
+        let (mut app, track, effect) = delay_app();
+        let original = app.capture_device_preset(track, effect).unwrap();
+        let stale = app.begin_device_preset_load(track, effect).unwrap();
+        let mut superseding = None;
+        match action {
+            "cancel" => {
+                let _ = app.update(Message::DevicePreset(DevicePresetMsg::Loaded(
+                    stale.clone(), Ok(None),
+                )));
+            }
+            "edit away and back" => {
+                for value in [501.0, 500.0] {
+                    let _ = app.update(Message::Devices(DevicesMsg::SetEffectParam(
+                        track, effect, param::TIME_MS, value,
+                    )));
+                }
+            }
+            "remove and undo" => {
+                let _ = app.update(Message::Devices(DevicesMsg::RemoveEffect(track, effect)));
+                let _ = app.update(Message::Project(ProjectMsg::Undo));
+            }
+            "runtime reset" => app.clear_project_runtime(),
+            "superseded" => superseding = app.begin_device_preset_load(track, effect),
+            _ => unreachable!(),
+        }
+        let current = app.capture_device_preset(track, effect).unwrap();
+        assert_eq!(current.parameters(), original.parameters(), "{action}");
+        let selected = app.device_presets.selection.get(&(track, effect)).cloned();
+        app.state.project.history = Default::default();
+        app.state.project.dirty = false;
+        let replacement = crate::domains::device_presets::factory_presets(EffectType::Delay)[6].clone();
+        let _ = app.update(Message::DevicePreset(DevicePresetMsg::Loaded(
+            stale.clone(), Ok(Some(replacement)),
+        )));
+        assert_eq!(app.capture_device_preset(track, effect).unwrap().parameters(),
+            current.parameters(), "{action}");
+        assert_eq!(app.state.find_track(track).unwrap().effects[1].id, effect, "{action}");
+        assert_eq!(app.device_presets.selection.get(&(track, effect)), selected.as_ref(), "{action}");
+        assert!(!app.state.project.dirty, "{action}");
+        assert!(!app.state.project.history.can_undo(), "{action}");
+        assert!(!app.device_presets.load_request.is_current(stale.token), "{action}");
+        if let Some(request) = superseding {
+            assert!(app.device_presets.load_request.is_current(request.token));
+            assert_eq!(app.device_presets.load_target, Some((track, effect)));
+        } else {
+            assert!(!app.device_presets.load_request.is_active());
+            assert!(app.device_presets.load_target.is_none());
+        }
+    }
+}
