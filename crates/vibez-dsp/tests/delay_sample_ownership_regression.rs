@@ -21,7 +21,7 @@ fn expected_owned(frame: usize, channel: usize, impulse_channel: usize, delay: u
         0.0
     } else if frame == 0 {
         0.5
-    } else if frame % delay == 0 {
+    } else if frame.is_multiple_of(delay) {
         0.5_f32.powi((frame / delay) as i32)
     } else {
         0.0
@@ -49,11 +49,7 @@ impl Comparison {
     ) {
         effect.process(samples, channels);
         self.calls += 1;
-        let complete_samples = if channels == 0 {
-            0
-        } else {
-            samples.len() / channels * channels
-        };
+        let complete_samples = samples.len().checked_div(channels).unwrap_or(0) * channels;
         for (index, (actual, expected)) in samples.iter().zip(expected).enumerate() {
             let owned = channels != 0 && index < complete_samples && index % channels < 2;
             if owned {
@@ -157,7 +153,7 @@ fn valid_instances_process_only_owned_channels_of_complete_caller_frames() {
                         }
                         comparison.process(&mut effect, &mut samples, channels, &expected);
                         for global_frame in frame..end {
-                            if global_frame != 0 && global_frame % delay == 0 {
+                            if global_frame != 0 && global_frame.is_multiple_of(delay) {
                                 witnesses.push(json!({
                                     "frame": global_frame,
                                     "expected_bits": expected_owned(global_frame, impulse_channel, impulse_channel, delay).to_bits(),
