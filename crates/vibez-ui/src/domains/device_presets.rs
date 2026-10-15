@@ -317,3 +317,7 @@ mod presentation_tests {
         assert!(unsupported.next.is_none());
     }
 }
+
+#[cfg(test)]
+#[path = "delay_preset_tests.rs"]
+mod delay_preset_tests;
