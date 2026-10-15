@@ -410,3 +410,7 @@ impl PartialEq for CompletedClipInsertion {
 #[cfg(test)]
 #[path = "note_clip_insertion_owner_tests.rs"]
 mod note_owner_tests;
+
+#[cfg(test)]
+#[path = "note_value_insertion_owner_tests.rs"]
+mod note_value_owner_tests;
