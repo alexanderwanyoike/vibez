@@ -361,15 +361,7 @@ fn local_refailure_closes_capture_without_changing_section_end_boundaries_at_rea
                 let elapsed = if stage == "end" { 8 } else { 15 };
                 assert_eq!(
                     after,
-                    [
-                        0,
-                        1,
-                        1,
-                        u64::from(queued),
-                        32,
-                        elapsed,
-                        32 + elapsed
-                    ]
+                    [0, 1, 1, u64::from(queued), 32, elapsed, 32 + elapsed]
                 );
                 assert_eq!(fixture.engine.clock_domain == ClockDomain::Perform, queued);
                 assert_eq!(
@@ -386,7 +378,10 @@ fn local_refailure_closes_capture_without_changing_section_end_boundaries_at_rea
                     1 + usize::from(stage == "end" || queued)
                 );
                 let observed = collect(&mut fixture, &sections);
-                assert_eq!(Arc::strong_count(&fixture.engine.routing.capture_offsets), 1);
+                assert_eq!(
+                    Arc::strong_count(&fixture.engine.routing.capture_offsets),
+                    1
+                );
                 let (order, times, owners) = match (queued, delay, stage) {
                     (false, 0, "end") => (
                         vec![
