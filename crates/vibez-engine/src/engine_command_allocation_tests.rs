@@ -282,9 +282,16 @@ fn playing(
         }
     }
     assert!(engine.pending_clip_insertion.is_none());
-    assert_eq!(commands.slots(), vibez_core::constants::RING_BUFFER_CAPACITY);
+    assert_eq!(
+        commands.slots(),
+        vibez_core::constants::RING_BUFFER_CAPACITY
+    );
     assert!(engine.transport().is_playing());
-    let synth = engine.tracks().iter().find(|track| track.id == f.synth).unwrap();
+    let synth = engine
+        .tracks()
+        .iter()
+        .find(|track| track.id == f.synth)
+        .unwrap();
     let clips = &synth.playback_source.note_clips;
     assert_eq!(clips.len(), 2);
     assert_eq!([clips[0].id, clips[1].id], [f.note_clip, f.empty_note_clip]);
@@ -1027,15 +1034,28 @@ fn every_table_command_drains_without_allocating_unless_named_as_card_04_work() 
             panic!("{} is measured by {test}", case.name);
         }
         let added_note = match &command {
-            EngineCommand::AddNote { track_id, clip_id, note } => Some((*track_id, *clip_id, *note)),
+            EngineCommand::AddNote {
+                track_id,
+                clip_id,
+                note,
+            } => Some((*track_id, *clip_id, *note)),
             _ => None,
         };
         assert!(commands.push(command).is_ok());
         let mut output = [0.0_f32; 512];
         let measured = crate::retirement::tests::allocations(|| engine.process(&mut output, 2));
         if let Some((track_id, clip_id, note)) = added_note {
-            let track = engine.tracks().iter().find(|track| track.id == track_id).unwrap();
-            let clip = track.playback_source.note_clips.iter().find(|clip| clip.id == clip_id).unwrap();
+            let track = engine
+                .tracks()
+                .iter()
+                .find(|track| track.id == track_id)
+                .unwrap();
+            let clip = track
+                .playback_source
+                .note_clips
+                .iter()
+                .find(|clip| clip.id == clip_id)
+                .unwrap();
             assert_eq!(clip.notes, [note]);
         }
         if (measured != (0, 0)) != case.allocates {
