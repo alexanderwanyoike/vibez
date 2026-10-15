@@ -369,3 +369,6 @@ mod fifo_tests;
 
 #[path = "playback_source_note_value_consumer_tests.rs"]
 mod consumer_tests;
+
+#[path = "playback_source_note_value_construction_tests.rs"]
+pub(crate) mod construction_tests;
