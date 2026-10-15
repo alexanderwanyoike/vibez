@@ -985,3 +985,7 @@ mod capture_lifecycle_admission_tests;
 #[cfg(test)]
 #[path = "engine_capture_lifecycle_episode_tests.rs"]
 mod capture_lifecycle_episode_tests;
+
+#[cfg(test)]
+#[path = "engine_capture_lifecycle_recovery_tests.rs"]
+mod capture_lifecycle_recovery_tests;
