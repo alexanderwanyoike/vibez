@@ -258,8 +258,15 @@ impl App {
             descriptors: effect.descriptors,
             bypass: effect.bypass,
             sample_rate: self.state.transport.sample_rate as f32,
-            spectrum: self.state.spectrum.bins.clone(),
-            spectrum_active: self.state.spectrum.active,
+            spectrum: self
+                .eq_devices
+                .spectrum_for(effect.id)
+                .map(|spectrum| spectrum.bins.clone())
+                .unwrap_or_default(),
+            spectrum_active: self
+                .eq_devices
+                .spectrum_for(effect.id)
+                .is_some_and(|spectrum| spectrum.active),
         };
         let display_canvas: Element<'a, Message> = canvas(display)
             .width(Length::Fixed(DISPLAY_W))

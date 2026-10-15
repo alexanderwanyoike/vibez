@@ -541,43 +541,6 @@ impl App {
         }
     }
 
-    /// Keep the engine's spectrum tap on the selected track and pump
-    /// drained samples through the analyser.
-    fn poll_spectrum(&mut self) {
-        let wanted = self.state.arrangement.selected_track;
-        if wanted != self.spectrum_tap {
-            self.send_command(EngineCommand::SetSpectrumTap(wanted));
-            self.spectrum_tap = wanted;
-            self.state.spectrum.reset();
-        }
-        if let Some(ref mut rx) = self.spectrum_rx {
-            // Drain in slices; the ring holds well under a second.
-            let mut chunk = [0.0f32; 512];
-            loop {
-                let mut n = 0;
-                while n < chunk.len() {
-                    match rx.pop() {
-                        Ok(s) => {
-                            chunk[n] = s;
-                            n += 1;
-                        }
-                        Err(_) => break,
-                    }
-                }
-                if n == 0 {
-                    break;
-                }
-                self.state.spectrum.ingest(&chunk[..n]);
-                if n < chunk.len() {
-                    break;
-                }
-            }
-        }
-        self.state
-            .spectrum
-            .analyse(self.state.transport.sample_rate as f32);
-    }
-
     pub(super) fn poll_audio_stream_events(&mut self) {
         let mut events = Vec::new();
         let measured_cpu_load = if let Some(stream) = self._stream.as_ref() {
@@ -607,7 +570,7 @@ impl App {
         self.state
             .view
             .prune_drum_pad_flashes(std::time::Instant::now());
-        self.poll_spectrum();
+        self.poll_eq_devices();
         self.poll_plugin_loads();
         self.poll_plugin_windows();
         self.poll_midi_input();

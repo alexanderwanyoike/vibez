@@ -40,12 +40,6 @@ struct App {
     edge_shortcuts: EdgeShortcutState,
     cmd_tx: crate::domains::EngineCommandQueue,
     event_rx: Option<Consumer<EngineEvent>>,
-    /// Post-effects mono samples from the engine's spectrum tap,
-    /// feeding the EQ analyser.
-    spectrum_rx: Option<Consumer<f32>>,
-    /// Track the engine tap currently points at, so tick can retarget
-    /// it when the selection moves.
-    spectrum_tap: Option<vibez_core::id::TrackId>,
     _stream: Option<AudioOutputStream>,
     input_bridge: Arc<vibez_audio_io::audio_input::AudioInputBridge>,
     /// Open only while one Audio Track is armed or explicitly monitors input.
@@ -57,6 +51,7 @@ struct App {
     plugin_instrument_tx: std::sync::mpsc::Sender<PluginInstrumentLoadResult>,
     plugin_load_requests: plugin_load_requests::PluginLoadRequests,
     gain_devices: gain_devices::GainDevices,
+    eq_devices: eq_devices::EqDevices,
     param_entry: Option<crate::domains::param_entry::ValueEntry>,
     device_presets: device_presets::DevicePresetRuntime,
     // Plugin GUI support
@@ -164,6 +159,7 @@ mod compensation;
 pub(crate) mod device_presets;
 mod drum_rack_preparation;
 mod engine_events;
+mod eq_devices;
 mod gain_devices;
 mod keyboard;
 mod local_watcher;
@@ -249,7 +245,7 @@ impl Drop for App {
 impl App {
     fn new() -> (Self, Task<Message>) {
         let (mut engine, cmd_tx, event_rx) = AudioEngine::new();
-        let spectrum_rx = engine.take_spectrum_consumer();
+        let eq_spectrum_rx = engine.take_effect_spectrum_consumer();
         let ui_settings = UiSettings::load();
         // Read before the settings are picked apart below, and clamped
         // here rather than at the render site so a hand-edited ui.json
@@ -427,8 +423,6 @@ impl App {
             edge_shortcuts: EdgeShortcutState::default(),
             cmd_tx: crate::domains::EngineCommandQueue::new(cmd_tx),
             event_rx: Some(event_rx),
-            spectrum_rx,
-            spectrum_tap: None,
             _stream: Some(output_stream),
             input_bridge,
             _input_stream: None,
@@ -436,6 +430,10 @@ impl App {
             plugin_effect_tx,
             plugin_load_requests: Default::default(),
             gain_devices: Default::default(),
+            eq_devices: eq_devices::EqDevices {
+                spectrum_rx: eq_spectrum_rx,
+                ..Default::default()
+            },
             param_entry: None,
             device_presets: Default::default(),
             sidechain_sync_inputs: None,

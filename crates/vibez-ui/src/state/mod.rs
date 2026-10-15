@@ -597,9 +597,6 @@ pub struct AppState {
     pub peak_r: f32,
     /// Smoothed audio callback work as a percentage of its buffer deadline.
     pub audio_cpu_load_percent: f32,
-    /// Spectrum analyser fed by the engine's per-track tap (follows
-    /// the selected track); drawn behind the channel EQ curve.
-    pub spectrum: crate::spectrum::SpectrumState,
 
     pub status_text: String,
     /// Active project-export completion percentage.
@@ -673,7 +670,6 @@ impl Default for AppState {
             peak_l: 0.0,
             peak_r: 0.0,
             audio_cpu_load_percent: 0.0,
-            spectrum: crate::spectrum::SpectrumState::default(),
             status_text: "Ready — Add a track to get started".to_string(),
             export_progress: None,
             audio_stream_health: AudioStreamHealth::default(),
