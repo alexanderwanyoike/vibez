@@ -1506,3 +1506,6 @@ mod duck {
         assert_eq!(failures, 0, "Duck envelope/output/ownership failures; see observations above");
     }
 }
+
+#[path = "delay_quality/mod.rs"]
+mod quality;
