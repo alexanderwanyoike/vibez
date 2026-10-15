@@ -297,3 +297,6 @@ fn public_add_note_at_full_capacity_preserves_first_duplicate_voice_and_future_c
     assert_eq!(target_calls.observed(), (2, 2, 0));
     assert_eq!(heap, (0, 0), "AddNote complete callback allocation/destruction counts");
 }
+
+#[path = "playback_source_note_value_fifo_tests.rs"]
+mod fifo_tests;
