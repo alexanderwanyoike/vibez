@@ -10,9 +10,22 @@ fn pending_note_value_growth_keeps_all_source_homes_and_perform_clocks_distinct(
     for home in [PendingHome::Section, PendingHome::LauncherReplacement, PendingHome::LauncherStop] {
         let PendingHomeFixture { mut engine, mut commands, mut events, track_id, calls,
             arrange, inactive, initial_section, old_home, next_home, next_section } = prepare_pending_home(home);
-        let homes = [arrange.source, inactive.source, initial_section.source, old_home.source, next_home.source];
-        for (index, source) in homes.iter().enumerate() {
-            for other in &homes[index + 1..] { assert_ne!(source, other); }
+        // Section launch already returned and dropped its initial empty Box.
+        // Its historical address may be reused by the later queued source.
+        let homes = [("Arrange", arrange.source), ("inactive launcher", inactive.source),
+            ("active performance", old_home.source), ("queued performance", next_home.source)];
+        for (index, (name, source)) in homes.iter().enumerate() {
+            for (other_name, other) in &homes[index + 1..] {
+                assert_ne!(source, other, "simultaneously live {name} and {other_name}");
+            }
+            if !matches!(home, PendingHome::Section) {
+                assert_ne!(*source, initial_section.source, "live initial Section and {name}");
+            }
+        }
+        if matches!(home, PendingHome::Section) {
+            old_home.assert_unchanged(&engine.tracks()[0].section_playback_source);
+        } else {
+            initial_section.assert_unchanged(&engine.tracks()[0].section_playback_source);
         }
         let resident = &engine.tracks()[0].playback_source.note_clips[0];
         let original = ClipSnapshot::observe(resident);
