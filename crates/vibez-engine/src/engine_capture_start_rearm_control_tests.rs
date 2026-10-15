@@ -128,7 +128,6 @@ fn idle_closed_episode_survives_each_non_start_transport_command() {
             1
         );
         assert!(fixture.owner.is_none());
-        eprintln!("capture-start-rearm-control: case={case}; calls={calls:?}; before={before:?}; after={after:?}; order={:?}; times={:?}; reasons={:?}; audio_bits={:?}", observed.order, observed.times, observed.reasons, audio.map(f32::to_bits));
         teardown(fixture);
     }
 }
@@ -178,6 +177,5 @@ fn applied_invalid_refusal_preserves_an_already_closed_local_episode() {
         1
     );
     assert!(fixture.owner.is_none());
-    eprintln!("capture-start-rearm-control: case=invalid-refusal; calls={calls:?}; before={before:?}; after={after:?}; order={:?}; times={:?}; reasons={:?}; audio_bits=[]", observed.order, observed.times, observed.reasons);
     teardown(fixture);
 }
