@@ -29,9 +29,9 @@ impl Calls {
     }
 }
 
-struct Control { local: AtomicBool, offer: AtomicBool, drops: AtomicUsize }
+struct Control { local: AtomicBool, offer: AtomicBool, valid: AtomicBool, drops: AtomicUsize }
 impl Control {
-    fn new() -> Self { Self { local: AtomicBool::new(false), offer: AtomicBool::new(false), drops: AtomicUsize::new(0) } }
+    fn new() -> Self { Self { local: AtomicBool::new(false), offer: AtomicBool::new(false), valid: AtomicBool::new(true), drops: AtomicUsize::new(0) } }
 }
 
 struct Probe { owner: u32, control: Arc<Control>, calls: Arc<Calls> }
@@ -44,13 +44,14 @@ macro_rules! observations {
         fn processing_failure_is_local(&self) -> bool {
             let local = self.control.local.load(Ordering::Acquire); self.calls.record(self.owner, local); local
         }
-        fn processing_configuration_valid(&self) -> bool { !self.control.local.load(Ordering::Acquire) }
+        fn processing_configuration_valid(&self) -> bool { !self.control.local.load(Ordering::Acquire) && self.control.valid.load(Ordering::Acquire) }
         fn reconfiguration_requested(&self) -> bool { self.control.offer.load(Ordering::Acquire) && self.control.local.load(Ordering::Acquire) }
         fn processing_recovery_requested(&self) -> bool { self.control.offer.load(Ordering::Acquire) && self.control.local.load(Ordering::Acquire) }
         fn param_descriptors(&self) -> &'static [ParamDescriptor] { &[] }
         fn set_param(&mut self, index: usize, value: f32) -> bool {
             match index { 0 => self.control.local.store(value != 0.0, Ordering::Release),
-                1 => self.control.offer.store(value != 0.0, Ordering::Release), _ => return false }
+                1 => self.control.offer.store(value != 0.0, Ordering::Release),
+                2 => self.control.valid.store(value != 0.0, Ordering::Release), _ => return false }
             true
         }
         fn get_param(&self, _: usize) -> f32 { 0.0 }
