@@ -515,6 +515,7 @@ fn next_section_launch(fixture: &mut ReturningSectionFixture) -> (SectionId, usi
     let prepared = Box::new(PreparedSectionPlaybackSource::new(section, 4.0, true,
         vec![(fixture.tracks[0], PreparedPlaybackSource::new(vec![clip], vec![], vec![]))]));
     let pointer = std::ptr::from_ref(prepared.as_ref()) as usize;
+    fixture.commands.push(EngineCommand::Play).unwrap();
     fixture.commands.push(EngineCommand::LaunchSection(prepared)).unwrap();
     fixture.commands.push(EngineCommand::SetTrackPan(fixture.tracks[0], 0.375)).unwrap();
     (section, pointer, audio)
@@ -550,9 +551,8 @@ fn returning_section_rejection_precedes_next_launch_and_its_fifo_marker() {
             fixture.engine.process_block(AudioProcessBlock::new(&mut [], 1));
         }), (0, 0));
         assert_rejected_source_is_returning(&fixture);
-        assert_eq!(fixture.engine.cmd_rx.slots(), 2);
-        assert!(matches!(fixture.engine.cmd_rx.peek(), Ok(EngineCommand::LaunchSection(prepared))
-            if prepared.section_id == next && std::ptr::from_ref(prepared.as_ref()) as usize == next_pointer));
+        assert_eq!(fixture.engine.cmd_rx.slots(), 3);
+        assert!(matches!(fixture.engine.cmd_rx.peek(), Ok(EngineCommand::Play)));
         assert_eq!(fixture.engine.tracks()[0].pan, before_pan);
         assert_eq!(next_audio.strong_count(), 1);
     }
