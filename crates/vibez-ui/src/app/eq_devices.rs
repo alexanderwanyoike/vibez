@@ -65,6 +65,15 @@ impl App {
     }
 
     pub(super) fn poll_eq_devices(&mut self) {
+        let state = &self.state;
+        self.eq_devices.panels.retain(|id, _| state.has_effect(*id));
+        if self
+            .eq_devices
+            .focus
+            .is_some_and(|id| !state.has_effect(id))
+        {
+            self.eq_devices.focus = None;
+        }
         let wanted = self.wanted_eq_tap();
         let current = self
             .eq_devices
