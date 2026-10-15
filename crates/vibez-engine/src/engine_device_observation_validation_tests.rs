@@ -39,7 +39,10 @@ impl Trace {
     fn record(&self, owner: u64, method: u64, value: u32) {
         let index = self.len.fetch_add(1, Ordering::Relaxed);
         if let Some(call) = self.calls.get(index) {
-            call.store((owner << 48) | (method << 40) | u64::from(value), Ordering::Relaxed);
+            call.store(
+                (owner << 48) | (method << 40) | u64::from(value),
+                Ordering::Relaxed,
+            );
         } else {
             self.overflow.store(true, Ordering::Relaxed);
         }
@@ -185,26 +188,59 @@ fn fixture() -> Fixture {
     first.instrument = Some(Box::new(probe(1)));
     first.playback_source.clips.push(constant_clip(4096, 0.25));
     for (owner, id) in [(2, effects[0]), (3, effects[1])] {
-        first.effects.push(EffectSlot { id, effect: Box::new(probe(owner)), bypass: false });
+        first.effects.push(EffectSlot {
+            id,
+            effect: Box::new(probe(owner)),
+            bypass: false,
+        });
     }
     let mut second = EngineTrack::new(tracks[1]);
-    second.effects.push(EffectSlot { id: effects[2], effect: Box::new(probe(4)), bypass: false });
+    second.effects.push(EffectSlot {
+        id: effects[2],
+        effect: Box::new(probe(4)),
+        bypass: false,
+    });
     let mut first_channel = routing_channel(tracks[0]);
-    first_channel.effects.extend(effects[..2].iter().copied().map(routing_effect));
+    first_channel
+        .effects
+        .extend(effects[..2].iter().copied().map(routing_effect));
     let mut second_channel = routing_channel(tracks[1]);
     second_channel.effects.push(routing_effect(effects[2]));
-    let model = vec![first_channel, second_channel, routing_channel(TrackId::MASTER)];
-    commands.push(EngineCommand::AddTrack(Box::new(first))).unwrap();
-    commands.push(EngineCommand::AddTrack(Box::new(second))).unwrap();
-    commands.push(EngineCommand::SetRouting(crate::routing::PreparedRouting::prepare(&model, 64).unwrap())).unwrap();
+    let model = vec![
+        first_channel,
+        second_channel,
+        routing_channel(TrackId::MASTER),
+    ];
+    commands
+        .push(EngineCommand::AddTrack(Box::new(first)))
+        .unwrap();
+    commands
+        .push(EngineCommand::AddTrack(Box::new(second)))
+        .unwrap();
+    commands
+        .push(EngineCommand::SetRouting(
+            crate::routing::PreparedRouting::prepare(&model, 64).unwrap(),
+        ))
+        .unwrap();
     commands.push(EngineCommand::Play).unwrap();
-    commands.push(EngineCommand::StartPerformanceCapture).unwrap();
+    commands
+        .push(EngineCommand::StartPerformanceCapture)
+        .unwrap();
     engine.drain_commands();
     assert!(engine.capture_active);
     assert!(engine.compensation_plan.applied_plan_is_valid());
     while events.pop().is_ok() {}
     trace.clear();
-    Fixture { engine, commands, events, tracks, effects, model, facts, trace }
+    Fixture {
+        engine,
+        commands,
+        events,
+        tracks,
+        effects,
+        model,
+        facts,
+        trace,
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -224,15 +260,30 @@ enum ValidationCase {
 }
 
 fn valid_calls(owner: u64) -> [(u64, u64, u32); 4] {
-    [(owner, RATE, 0), (owner, VALID, 1), (owner, LOCAL, 0), (owner, LATENCY, 0)]
+    [
+        (owner, RATE, 0),
+        (owner, VALID, 1),
+        (owner, LOCAL, 0),
+        (owner, LATENCY, 0),
+    ]
 }
 
 #[test]
 fn validation_preserves_order_first_invalid_reason_and_accumulated_local_failure() {
-    for case in [ValidationCase::Healthy, ValidationCase::InstrumentRate, ValidationCase::EffectRate,
-        ValidationCase::Configuration, ValidationCase::LocalOnly, ValidationCase::LocalThenInvalid,
-        ValidationCase::Latency, ValidationCase::RateBeforeLocal, ValidationCase::MissingEffect,
-        ValidationCase::MissingTrack, ValidationCase::MissingInstrument, ValidationCase::LocalAway] {
+    for case in [
+        ValidationCase::Healthy,
+        ValidationCase::InstrumentRate,
+        ValidationCase::EffectRate,
+        ValidationCase::Configuration,
+        ValidationCase::LocalOnly,
+        ValidationCase::LocalThenInvalid,
+        ValidationCase::Latency,
+        ValidationCase::RateBeforeLocal,
+        ValidationCase::MissingEffect,
+        ValidationCase::MissingTrack,
+        ValidationCase::MissingInstrument,
+        ValidationCase::LocalAway,
+    ] {
         let mut fixture = fixture();
         let mut held_device = None;
         let mut expected = Vec::new();
@@ -251,9 +302,18 @@ fn validation_preserves_order_first_invalid_reason_and_accumulated_local_failure
             ValidationCase::LocalAway => {
                 local = true;
                 fixture.facts[1].requested.store(true, Ordering::Release);
-                fixture.facts[1].local_after_stop.store(true, Ordering::Release);
-                let owner = reconfiguration::effect_owner_identity(&*fixture.engine.tracks[0].effects[0].effect);
-                assert_eq!(crate::retirement::tests::allocations(|| fixture.engine.begin_device_reconfiguration()), (0, 0));
+                fixture.facts[1]
+                    .local_after_stop
+                    .store(true, Ordering::Release);
+                let owner = reconfiguration::effect_owner_identity(
+                    &*fixture.engine.tracks[0].effects[0].effect,
+                );
+                assert_eq!(
+                    crate::retirement::tests::allocations(|| fixture
+                        .engine
+                        .begin_device_reconfiguration()),
+                    (0, 0)
+                );
                 while let Ok(event) = fixture.events.pop() {
                     if let EngineEvent::DeviceReconfiguration(device) = event {
                         assert!(held_device.is_none());
@@ -264,26 +324,48 @@ fn validation_preserves_order_first_invalid_reason_and_accumulated_local_failure
                     }
                 }
                 assert!(held_device.is_some());
-                assert!(fixture.engine.device_handoff.pending().unwrap().is_local_recovery());
+                assert!(fixture
+                    .engine
+                    .device_handoff
+                    .pending()
+                    .unwrap()
+                    .is_local_recovery());
                 fixture.trace.clear();
                 expected.extend([1, 3, 4].into_iter().flat_map(valid_calls));
             }
-            ValidationCase::MissingTrack | ValidationCase::MissingInstrument | ValidationCase::MissingEffect => {
-                fixture.commands.push(match case {
-                    ValidationCase::MissingTrack => EngineCommand::RemoveTrack(fixture.tracks[0]),
-                    ValidationCase::MissingInstrument => EngineCommand::RemoveTrackInstrument(fixture.tracks[0]),
-                    _ => EngineCommand::RemoveEffect(fixture.tracks[0], fixture.effects[0]),
-                }).unwrap();
-                fixture.commands.push(EngineCommand::SetRouting(crate::routing::PreparedRouting::prepare(&fixture.model, 64).unwrap())).unwrap();
+            ValidationCase::MissingTrack
+            | ValidationCase::MissingInstrument
+            | ValidationCase::MissingEffect => {
+                fixture
+                    .commands
+                    .push(match case {
+                        ValidationCase::MissingTrack => {
+                            EngineCommand::RemoveTrack(fixture.tracks[0])
+                        }
+                        ValidationCase::MissingInstrument => {
+                            EngineCommand::RemoveTrackInstrument(fixture.tracks[0])
+                        }
+                        _ => EngineCommand::RemoveEffect(fixture.tracks[0], fixture.effects[0]),
+                    })
+                    .unwrap();
+                fixture
+                    .commands
+                    .push(EngineCommand::SetRouting(
+                        crate::routing::PreparedRouting::prepare(&fixture.model, 64).unwrap(),
+                    ))
+                    .unwrap();
                 fixture.engine.drain_commands();
                 while fixture.events.pop().is_ok() {}
                 fixture.trace.clear();
                 match case {
                     ValidationCase::MissingTrack => expected.extend(valid_calls(4)),
-                    ValidationCase::MissingInstrument => expected.extend((2..=4).flat_map(valid_calls)),
+                    ValidationCase::MissingInstrument => {
+                        expected.extend((2..=4).flat_map(valid_calls))
+                    }
                     _ => {
                         expected.extend(valid_calls(1));
-                        failure = Some((fixture.tracks[0], Some(fixture.effects[0]), config_reason));
+                        failure =
+                            Some((fixture.tracks[0], Some(fixture.effects[0]), config_reason));
                     }
                 }
             }
@@ -302,12 +384,19 @@ fn validation_preserves_order_first_invalid_reason_and_accumulated_local_failure
                     ValidationCase::Configuration => {
                         fixture.facts[1].valid.store(false, Ordering::Release);
                         expected.extend([(2, RATE, 0), (2, VALID, 0), (2, LOCAL, 0)]);
-                        failure = Some((fixture.tracks[0], Some(fixture.effects[0]), config_reason));
+                        failure =
+                            Some((fixture.tracks[0], Some(fixture.effects[0]), config_reason));
                     }
                     ValidationCase::Latency => {
                         fixture.facts[1].latency.store(1, Ordering::Release);
-                        expected.extend([(2, RATE, 0), (2, VALID, 1), (2, LOCAL, 0), (2, LATENCY, 1)]);
-                        failure = Some((fixture.tracks[0], Some(fixture.effects[0]), latency_reason));
+                        expected.extend([
+                            (2, RATE, 0),
+                            (2, VALID, 1),
+                            (2, LOCAL, 0),
+                            (2, LATENCY, 1),
+                        ]);
+                        failure =
+                            Some((fixture.tracks[0], Some(fixture.effects[0]), latency_reason));
                     }
                     ValidationCase::LocalOnly | ValidationCase::LocalThenInvalid => {
                         local = true;
@@ -319,7 +408,8 @@ fn validation_preserves_order_first_invalid_reason_and_accumulated_local_failure
                             fixture.facts[2].valid.store(false, Ordering::Release);
                             fixture.facts[3].rate.store(96_000, Ordering::Release);
                             expected.extend([(3, RATE, 0), (3, VALID, 0), (3, LOCAL, 0)]);
-                            failure = Some((fixture.tracks[0], Some(fixture.effects[1]), config_reason));
+                            failure =
+                                Some((fixture.tracks[0], Some(fixture.effects[1]), config_reason));
                         } else {
                             expected.extend((3..=4).flat_map(valid_calls));
                         }
@@ -328,7 +418,10 @@ fn validation_preserves_order_first_invalid_reason_and_accumulated_local_failure
                 }
             }
         }
-        assert_eq!(crate::retirement::tests::allocations(|| fixture.engine.validate_compensation()), (0, 0));
+        assert_eq!(
+            crate::retirement::tests::allocations(|| fixture.engine.validate_compensation()),
+            (0, 0)
+        );
         let calls = fixture.trace.observed();
         assert_eq!(calls, expected, "{case:?}");
         let mut order = Vec::new();
@@ -336,11 +429,17 @@ fn validation_preserves_order_first_invalid_reason_and_accumulated_local_failure
         let mut capture_stops = Vec::new();
         while let Ok(event) = fixture.events.pop() {
             match event {
-                EngineEvent::PerformanceCaptureStopped { effective_at_samples } => {
+                EngineEvent::PerformanceCaptureStopped {
+                    effective_at_samples,
+                } => {
                     order.push("capture-stop");
                     capture_stops.push(effective_at_samples);
                 }
-                EngineEvent::CompensationInvalid { track_id, effect_id, reason } => {
+                EngineEvent::CompensationInvalid {
+                    track_id,
+                    effect_id,
+                    reason,
+                } => {
                     order.push("invalid");
                     failures.push((track_id, effect_id, reason));
                 }
@@ -348,7 +447,11 @@ fn validation_preserves_order_first_invalid_reason_and_accumulated_local_failure
                 event => panic!("unexpected validation event: {event:?}"),
             }
         }
-        assert_eq!(failures, failure.into_iter().collect::<Vec<_>>(), "{case:?}");
+        assert_eq!(
+            failures,
+            failure.into_iter().collect::<Vec<_>>(),
+            "{case:?}"
+        );
         let mut expected_order = Vec::new();
         if local {
             expected_order.push("capture-stop");
@@ -358,13 +461,19 @@ fn validation_preserves_order_first_invalid_reason_and_accumulated_local_failure
         }
         assert_eq!(order, expected_order, "{case:?}");
         assert!(capture_stops.iter().all(|position| *position == 0));
-        assert_eq!(fixture.engine.compensation_plan.applied_plan_is_valid(), failure.is_none());
+        assert_eq!(
+            fixture.engine.compensation_plan.applied_plan_is_valid(),
+            failure.is_none()
+        );
         assert_eq!(fixture.engine.transport.is_playing(), failure.is_none());
         assert_eq!(fixture.engine.capture_active, !local && failure.is_none());
         assert_eq!(fixture.engine.device_failure_capture_closed, local);
         assert_eq!(fixture.engine.transport.position(), 0);
         assert_eq!(fixture.engine.output_position, 0);
-        assert_eq!(held_device.is_some(), matches!(case, ValidationCase::LocalAway));
+        assert_eq!(
+            held_device.is_some(),
+            matches!(case, ValidationCase::LocalAway)
+        );
         eprintln!("device-observation-b-validation: case={case:?}; calls={calls:?}; order={order:?}; capture_stops={capture_stops:?}; failure_owner={}; failure_reason={:?}; valid={}; playing={}; capture={}; local_episode={local}",
             failure.map_or(0, |(_, effect, _)| effect.map_or(1, |id| if id == fixture.effects[0] { 2 } else { 3 })),
             failure.map(|(_, _, reason)| reason), fixture.engine.compensation_plan.applied_plan_is_valid(),
@@ -378,19 +487,42 @@ fn handoff_classifies_recovery_after_stop_and_full_restoration_keeps_the_same_ow
         for after_local in [false, true] {
             let mut fixture = fixture();
             fixture.facts[1].requested.store(true, Ordering::Release);
-            fixture.facts[1].recovery.store(!after_local, Ordering::Release);
-            fixture.facts[1].local_after_stop.store(after_local, Ordering::Release);
-            let original_owner = reconfiguration::effect_owner_identity(&*fixture.engine.tracks[0].effects[0].effect);
+            fixture.facts[1]
+                .recovery
+                .store(!after_local, Ordering::Release);
+            fixture.facts[1]
+                .local_after_stop
+                .store(after_local, Ordering::Release);
+            let original_owner = reconfiguration::effect_owner_identity(
+                &*fixture.engine.tracks[0].effects[0].effect,
+            );
             let mut fillers = 0;
             if full {
-                while fixture.engine.event_tx.push(EngineEvent::PlaybackPosition(0)).is_ok() {
+                while fixture
+                    .engine
+                    .event_tx
+                    .push(EngineEvent::PlaybackPosition(0))
+                    .is_ok()
+                {
                     fillers += 1;
                 }
             }
             fixture.trace.clear();
-            assert_eq!(crate::retirement::tests::allocations(|| fixture.engine.begin_device_reconfiguration()), (0, 0));
+            assert_eq!(
+                crate::retirement::tests::allocations(|| fixture
+                    .engine
+                    .begin_device_reconfiguration()),
+                (0, 0)
+            );
             let calls = fixture.trace.observed();
-            assert_eq!(calls, [(2, REQUEST, 1), (2, STOP, u32::from(after_local)), (2, RECOVERY, u32::from(after_local))]);
+            assert_eq!(
+                calls,
+                [
+                    (2, REQUEST, 1),
+                    (2, STOP, u32::from(after_local)),
+                    (2, RECOVERY, u32::from(after_local))
+                ]
+            );
             assert_eq!(fixture.engine.device_handoff.last_issued_identity(), 1);
             let mut returned = None;
             let mut observed_fillers = 0;
@@ -410,7 +542,10 @@ fn handoff_classifies_recovery_after_stop_and_full_restoration_keeps_the_same_ow
             }
             assert_eq!(observed_fillers, fillers);
             assert_eq!(returned.is_some(), !full);
-            assert_eq!(fixture.engine.device_handoff.is_suspended(), !full && !after_local);
+            assert_eq!(
+                fixture.engine.device_handoff.is_suspended(),
+                !full && !after_local
+            );
             let pending = fixture.engine.device_handoff.pending();
             assert_eq!(pending.is_some(), !full);
             if let Some(pending) = pending {
@@ -421,11 +556,19 @@ fn handoff_classifies_recovery_after_stop_and_full_restoration_keeps_the_same_ow
                 assert!(!pending.bypass);
                 assert_eq!(pending.is_local_recovery(), after_local);
             } else {
-                assert_eq!(reconfiguration::effect_owner_identity(&*fixture.engine.tracks[0].effects[0].effect), original_owner);
+                assert_eq!(
+                    reconfiguration::effect_owner_identity(
+                        &*fixture.engine.tracks[0].effects[0].effect
+                    ),
+                    original_owner
+                );
             }
             assert!(fixture.engine.compensation_plan.applied_plan_is_valid());
             assert!(fixture.engine.transport.is_playing());
-            assert!(fixture.engine.capture_active, "handoff alone does not run the validation Capture close");
+            assert!(
+                fixture.engine.capture_active,
+                "handoff alone does not run the validation Capture close"
+            );
             eprintln!("device-observation-b-handoff: full={full}; before_local={}; after_local={after_local}; calls={calls:?}; returned={}; same_owner=true; issued={}; suspended={}; pending={}; capture={}",
                 !after_local, returned.is_some(), fixture.engine.device_handoff.last_issued_identity(),
                 fixture.engine.device_handoff.is_suspended(), pending.is_some(), fixture.engine.capture_active);

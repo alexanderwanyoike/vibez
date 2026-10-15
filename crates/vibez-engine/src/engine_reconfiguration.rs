@@ -1,10 +1,10 @@
 //! Exclusive device handoff and applied-plan validation.
 
-use super::*;
 use super::device_validation::DeviceValidationDecision;
 use super::handoff_observation::{
     observe_handoff_request, observe_transferred_recovery, HandoffRequestFacts,
 };
+use super::*;
 use vibez_core::id::EffectId;
 
 pub struct RetiredEffectStorage(pub(super) Vec<EffectSlot>);
@@ -181,7 +181,10 @@ impl AudioEngine {
                 // receiving paths keep their valid prepared alignment.
                 continue;
             };
-            match self.observe_device_validation(track, *node, index).decision() {
+            match self
+                .observe_device_validation(track, *node, index)
+                .decision()
+            {
                 DeviceValidationDecision::Current => {}
                 DeviceValidationDecision::LocalRecovery => {
                     local_failure = true;

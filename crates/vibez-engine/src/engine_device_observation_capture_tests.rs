@@ -16,7 +16,11 @@ struct Calls {
 
 impl Calls {
     fn new() -> Self {
-        Self { entries: std::array::from_fn(|_| AtomicU32::new(0)), len: AtomicUsize::new(0), overflow: AtomicBool::new(false) }
+        Self {
+            entries: std::array::from_fn(|_| AtomicU32::new(0)),
+            len: AtomicUsize::new(0),
+            overflow: AtomicBool::new(false),
+        }
     }
     fn clear(&self) {
         self.len.store(0, Ordering::Relaxed);
@@ -25,14 +29,20 @@ impl Calls {
     fn record(&self, owner: u32, method: u32, value: bool) {
         let index = self.len.fetch_add(1, Ordering::Relaxed);
         if let Some(entry) = self.entries.get(index) {
-            entry.store(owner * 100 + method * 10 + u32::from(value), Ordering::Relaxed);
+            entry.store(
+                owner * 100 + method * 10 + u32::from(value),
+                Ordering::Relaxed,
+            );
         } else {
             self.overflow.store(true, Ordering::Relaxed);
         }
     }
     fn observed(&self) -> Vec<u32> {
         assert!(!self.overflow.load(Ordering::Relaxed));
-        self.entries[..self.len.load(Ordering::Relaxed)].iter().map(|entry| entry.load(Ordering::Relaxed)).collect()
+        self.entries[..self.len.load(Ordering::Relaxed)]
+            .iter()
+            .map(|entry| entry.load(Ordering::Relaxed))
+            .collect()
     }
 }
 
@@ -45,7 +55,12 @@ struct Control {
 
 impl Control {
     fn new() -> Self {
-        Self { local: AtomicBool::new(false), offer_handoff: AtomicBool::new(false), stopped: AtomicBool::new(false), drops: AtomicUsize::new(0) }
+        Self {
+            local: AtomicBool::new(false),
+            offer_handoff: AtomicBool::new(false),
+            stopped: AtomicBool::new(false),
+            drops: AtomicUsize::new(0),
+        }
     }
 }
 
@@ -69,10 +84,12 @@ macro_rules! capture_observations {
             local
         }
         fn reconfiguration_requested(&self) -> bool {
-            self.control.offer_handoff.load(Ordering::Acquire) && self.control.local.load(Ordering::Acquire)
+            self.control.offer_handoff.load(Ordering::Acquire)
+                && self.control.local.load(Ordering::Acquire)
         }
         fn processing_recovery_requested(&self) -> bool {
-            self.control.offer_handoff.load(Ordering::Acquire) && self.control.local.load(Ordering::Acquire)
+            self.control.offer_handoff.load(Ordering::Acquire)
+                && self.control.local.load(Ordering::Acquire)
         }
         fn stop_for_reconfiguration(&mut self) {
             self.control.stopped.store(true, Ordering::Release);
@@ -111,16 +128,22 @@ macro_rules! capture_observations {
 
 impl vibez_dsp::effect::AudioEffect for Probe {
     capture_observations!();
-    fn effect_type(&self) -> EffectType { EffectType::Gain }
+    fn effect_type(&self) -> EffectType {
+        EffectType::Gain
+    }
     fn process(&mut self, _: &mut [f32], _: usize) {}
 }
 
 impl vibez_instruments::Instrument for Probe {
     capture_observations!();
-    fn instrument_kind(&self) -> InstrumentKind { InstrumentKind::SubtractiveSynth }
+    fn instrument_kind(&self) -> InstrumentKind {
+        InstrumentKind::SubtractiveSynth
+    }
     fn note_on(&mut self, _: u8, _: u8) {}
     fn note_off(&mut self, _: u8) {}
-    fn render(&mut self, buffer: &mut [f32], _: usize) { buffer.fill(0.0); }
+    fn render(&mut self, buffer: &mut [f32], _: usize) {
+        buffer.fill(0.0);
+    }
 }
 
 struct Fixture {
@@ -141,26 +164,64 @@ fn fixture(playing: bool) -> Fixture {
     let controls = [Arc::new(Control::new()), Arc::new(Control::new())];
     let calls = Arc::new(Calls::new());
     let mut source = EngineTrack::new(track);
-    source.instrument = Some(Box::new(Probe { owner: 1, control: Arc::clone(&controls[0]), calls: Arc::clone(&calls) }));
-    source.effects.push(EffectSlot { id: effect, effect: Box::new(Probe { owner: 2, control: Arc::clone(&controls[1]), calls: Arc::clone(&calls) }), bypass: false });
+    source.instrument = Some(Box::new(Probe {
+        owner: 1,
+        control: Arc::clone(&controls[0]),
+        calls: Arc::clone(&calls),
+    }));
+    source.effects.push(EffectSlot {
+        id: effect,
+        effect: Box::new(Probe {
+            owner: 2,
+            control: Arc::clone(&controls[1]),
+            calls: Arc::clone(&calls),
+        }),
+        bypass: false,
+    });
     source.playback_source.clips.push(constant_clip(4096, 0.25));
     let mut channel = routing_channel(track);
     channel.effects.push(routing_effect(effect));
     let model = vec![channel, routing_channel(TrackId::MASTER)];
-    commands.push(EngineCommand::AddTrack(Box::new(source))).unwrap();
-    commands.push(EngineCommand::SetRouting(crate::routing::PreparedRouting::prepare(&model, 64).unwrap())).unwrap();
-    if playing { commands.push(EngineCommand::Play).unwrap(); }
+    commands
+        .push(EngineCommand::AddTrack(Box::new(source)))
+        .unwrap();
+    commands
+        .push(EngineCommand::SetRouting(
+            crate::routing::PreparedRouting::prepare(&model, 64).unwrap(),
+        ))
+        .unwrap();
+    if playing {
+        commands.push(EngineCommand::Play).unwrap();
+    }
     engine.drain_commands();
     while events.pop().is_ok() {}
     calls.clear();
-    Fixture { engine, commands, events, track, effect, model, controls, calls }
+    Fixture {
+        engine,
+        commands,
+        events,
+        track,
+        effect,
+        model,
+        controls,
+        calls,
+    }
 }
 
 fn set_local(fixture: &Fixture, instrument: bool, local: bool) -> EngineCommand {
     if instrument {
-        EngineCommand::SetInstrumentParam { track_id: fixture.track, param_index: 0, value: f32::from(u8::from(local)) }
+        EngineCommand::SetInstrumentParam {
+            track_id: fixture.track,
+            param_index: 0,
+            value: f32::from(u8::from(local)),
+        }
     } else {
-        EngineCommand::SetEffectParam { track_id: fixture.track, effect_id: fixture.effect, param_index: 0, value: f32::from(u8::from(local)) }
+        EngineCommand::SetEffectParam {
+            track_id: fixture.track,
+            effect_id: fixture.effect,
+            param_index: 0,
+            value: f32::from(u8::from(local)),
+        }
     }
 }
 
@@ -172,24 +233,51 @@ struct Events {
 }
 
 fn collect(fixture: &mut Fixture) -> Events {
-    let mut result = Events { order: Vec::new(), reasons: Vec::new(), positions: Vec::new() };
+    let mut result = Events {
+        order: Vec::new(),
+        reasons: Vec::new(),
+        positions: Vec::new(),
+    };
     while let Ok(event) = fixture.events.pop() {
         match event {
-            EngineEvent::PerformanceCaptureStarted { offsets, effective_at_samples, section_id, section_position_samples } => {
-                assert!(Arc::ptr_eq(&offsets, &fixture.engine.routing.capture_offsets));
+            EngineEvent::PerformanceCaptureStarted {
+                offsets,
+                effective_at_samples,
+                section_id,
+                section_position_samples,
+            } => {
+                assert!(Arc::ptr_eq(
+                    &offsets,
+                    &fixture.engine.routing.capture_offsets
+                ));
                 assert_eq!((section_id, section_position_samples), (None, None));
-                result.order.push("start"); result.positions.push(effective_at_samples);
+                result.order.push("start");
+                result.positions.push(effective_at_samples);
             }
-            EngineEvent::ClipCaptureSource { track_id, position, effective_at_samples } => {
-                assert_eq!(track_id, fixture.track); assert_eq!(position, 0);
-                result.order.push("source"); result.positions.push(effective_at_samples);
+            EngineEvent::ClipCaptureSource {
+                track_id,
+                position,
+                effective_at_samples,
+            } => {
+                assert_eq!(track_id, fixture.track);
+                assert_eq!(position, 0);
+                result.order.push("source");
+                result.positions.push(effective_at_samples);
             }
-            EngineEvent::PerformanceCaptureStopped { effective_at_samples } => {
-                result.order.push("stop"); result.positions.push(effective_at_samples);
+            EngineEvent::PerformanceCaptureStopped {
+                effective_at_samples,
+            } => {
+                result.order.push("stop");
+                result.positions.push(effective_at_samples);
             }
-            EngineEvent::CompensationInvalid { track_id, effect_id, reason } => {
+            EngineEvent::CompensationInvalid {
+                track_id,
+                effect_id,
+                reason,
+            } => {
                 assert_eq!((track_id, effect_id), (TrackId::MASTER, None));
-                result.order.push("refused"); result.reasons.push(reason);
+                result.order.push("refused");
+                result.reasons.push(reason);
             }
             EngineEvent::DisposeEffect(_) => result.order.push("retire-effect"),
             EngineEvent::DisposeInstrument(_) => result.order.push("retire-instrument"),
@@ -203,14 +291,24 @@ fn collect(fixture: &mut Fixture) -> Events {
 }
 
 fn drain(fixture: &mut Fixture) {
-    assert_eq!(crate::retirement::tests::allocations(|| fixture.engine.drain_commands()), (0, 0));
+    assert_eq!(
+        crate::retirement::tests::allocations(|| fixture.engine.drain_commands()),
+        (0, 0)
+    );
     assert!(fixture.engine.cmd_rx.peek().is_err());
     assert_eq!(fixture.engine.transport.position(), 0);
     assert_eq!(fixture.engine.performance_position, 0);
     assert_eq!(fixture.engine.output_position, 0);
 }
 
-fn report(case: &str, instrument: bool, before: bool, calls: &[u32], events: &Events, fixture: &Fixture) {
+fn report(
+    case: &str,
+    instrument: bool,
+    before: bool,
+    calls: &[u32],
+    events: &Events,
+    fixture: &Fixture,
+) {
     eprintln!("device-observation-c: case={case}; instrument={instrument}; before={before}; calls={calls:?}; order={:?}; reasons={:?}; positions={:?}; capture={}; playing={}; valid={}; awaiting={}; pending={}",
         events.order, events.reasons, events.positions, fixture.engine.capture_active, fixture.engine.transport.is_playing(),
         fixture.engine.compensation_plan.applied_plan_is_valid(), fixture.engine.compensation_plan.awaiting_structural_plan(),
@@ -224,19 +322,49 @@ fn same_drain_capture_starts_observe_effect_and_instrument_manual_edits() {
     for instrument in [false, true] {
         for before in [false, true] {
             let mut fixture = fixture(true);
-            fixture.controls[usize::from(!instrument)].local.store(before, Ordering::Release);
-            fixture.commands.push(EngineCommand::StartPerformanceCapture).unwrap();
-            fixture.commands.push(set_local(&fixture, instrument, !before)).unwrap();
-            fixture.commands.push(EngineCommand::StartPerformanceCapture).unwrap();
+            fixture.controls[usize::from(!instrument)]
+                .local
+                .store(before, Ordering::Release);
+            fixture
+                .commands
+                .push(EngineCommand::StartPerformanceCapture)
+                .unwrap();
+            fixture
+                .commands
+                .push(set_local(&fixture, instrument, !before))
+                .unwrap();
+            fixture
+                .commands
+                .push(EngineCommand::StartPerformanceCapture)
+                .unwrap();
             drain(&mut fixture);
             let calls = fixture.calls.observed();
-            let first = if instrument && before { vec![111] } else { vec![110, if before { 211 } else { 210 }] };
+            let first = if instrument && before {
+                vec![111]
+            } else {
+                vec![110, if before { 211 } else { 210 }]
+            };
             let mut expected = first;
-            expected.push(if instrument { 120 + u32::from(!before) } else { 220 + u32::from(!before) });
-            expected.extend(if instrument && !before { vec![111] } else { vec![110, if before || instrument { 210 } else { 211 }] });
+            expected.push(if instrument {
+                120 + u32::from(!before)
+            } else {
+                220 + u32::from(!before)
+            });
+            expected.extend(if instrument && !before {
+                vec![111]
+            } else {
+                vec![110, if before || instrument { 210 } else { 211 }]
+            });
             assert_eq!(calls, expected);
             let events = collect(&mut fixture);
-            assert_eq!(events.order, if before { vec!["stop", "refused", "start", "source"] } else { vec!["start", "source", "stop", "refused"] });
+            assert_eq!(
+                events.order,
+                if before {
+                    vec!["stop", "refused", "start", "source"]
+                } else {
+                    vec!["start", "source", "stop", "refused"]
+                }
+            );
             assert_eq!(events.reasons, [LOCAL_REASON]);
             assert_eq!(fixture.engine.capture_active, before);
             assert!(fixture.engine.compensation_plan.applied_plan_is_valid());
@@ -249,9 +377,15 @@ fn same_drain_capture_starts_observe_effect_and_instrument_manual_edits() {
 fn a_play_reset_between_capture_commands_is_observed_in_the_same_drain() {
     let mut fixture = fixture(false);
     fixture.controls[1].local.store(true, Ordering::Release);
-    fixture.commands.push(EngineCommand::StartPerformanceCapture).unwrap();
+    fixture
+        .commands
+        .push(EngineCommand::StartPerformanceCapture)
+        .unwrap();
     fixture.commands.push(EngineCommand::Play).unwrap();
-    fixture.commands.push(EngineCommand::StartPerformanceCapture).unwrap();
+    fixture
+        .commands
+        .push(EngineCommand::StartPerformanceCapture)
+        .unwrap();
     drain(&mut fixture);
     let calls = fixture.calls.observed();
     assert_eq!(calls, [110, 211, 230, 110, 210]);
@@ -268,27 +402,72 @@ fn same_drain_capture_admission_observes_removed_and_replaced_device_owners() {
     for instrument in [false, true] {
         let mut fixture = fixture(true);
         let target = usize::from(!instrument);
-        fixture.controls[target].local.store(true, Ordering::Release);
+        fixture.controls[target]
+            .local
+            .store(true, Ordering::Release);
         let replacement = Arc::new(Control::new());
-        fixture.commands.push(EngineCommand::StartPerformanceCapture).unwrap();
-        fixture.commands.push(if instrument {
-            EngineCommand::SetInstrument { track_id: fixture.track, instrument: Box::new(Probe { owner: 3, control: Arc::clone(&replacement), calls: Arc::clone(&fixture.calls) }) }
-        } else {
-            EngineCommand::RemoveEffect(fixture.track, fixture.effect)
-        }).unwrap();
-        fixture.commands.push(EngineCommand::StartPerformanceCapture).unwrap();
+        fixture
+            .commands
+            .push(EngineCommand::StartPerformanceCapture)
+            .unwrap();
+        fixture
+            .commands
+            .push(if instrument {
+                EngineCommand::SetInstrument {
+                    track_id: fixture.track,
+                    instrument: Box::new(Probe {
+                        owner: 3,
+                        control: Arc::clone(&replacement),
+                        calls: Arc::clone(&fixture.calls),
+                    }),
+                }
+            } else {
+                EngineCommand::RemoveEffect(fixture.track, fixture.effect)
+            })
+            .unwrap();
+        fixture
+            .commands
+            .push(EngineCommand::StartPerformanceCapture)
+            .unwrap();
         drain(&mut fixture);
-        assert_eq!(fixture.controls[target].drops.load(Ordering::Relaxed), 0, "the callback returns the previous owner");
+        assert_eq!(
+            fixture.controls[target].drops.load(Ordering::Relaxed),
+            0,
+            "the callback returns the previous owner"
+        );
         let calls = fixture.calls.observed();
-        assert_eq!(calls, if instrument { vec![111, 310, 210] } else { vec![110, 211, 110] });
+        assert_eq!(
+            calls,
+            if instrument {
+                vec![111, 310, 210]
+            } else {
+                vec![110, 211, 110]
+            }
+        );
         let events = collect(&mut fixture);
-        assert_eq!(events.order, ["stop", "refused", if instrument { "retire-instrument" } else { "retire-effect" }, "start", "source"]);
+        assert_eq!(
+            events.order,
+            [
+                "stop",
+                "refused",
+                if instrument {
+                    "retire-instrument"
+                } else {
+                    "retire-effect"
+                },
+                "start",
+                "source"
+            ]
+        );
         assert_eq!(events.reasons, [LOCAL_REASON]);
         assert_eq!(fixture.controls[target].drops.load(Ordering::Relaxed), 1);
         assert_eq!(replacement.drops.load(Ordering::Relaxed), 0);
         assert!(fixture.engine.capture_active);
         assert!(fixture.engine.compensation_plan.applied_plan_is_valid());
-        assert_eq!(fixture.engine.compensation_plan.awaiting_structural_plan(), !instrument);
+        assert_eq!(
+            fixture.engine.compensation_plan.awaiting_structural_plan(),
+            !instrument
+        );
         report("owner-edit", instrument, true, &calls, &events, &fixture);
     }
 }
@@ -297,54 +476,122 @@ fn same_drain_capture_admission_observes_removed_and_replaced_device_owners() {
 fn current_local_resume_changes_capture_admission_at_its_original_same_drain_boundary() {
     let mut fixture = fixture(true);
     fixture.controls[1].local.store(true, Ordering::Release);
-    fixture.controls[1].offer_handoff.store(true, Ordering::Release);
-    let original = reconfiguration::effect_owner_identity(&*fixture.engine.tracks[0].effects[0].effect);
-    assert_eq!(crate::retirement::tests::allocations(|| fixture.engine.begin_device_reconfiguration()), (0, 0));
+    fixture.controls[1]
+        .offer_handoff
+        .store(true, Ordering::Release);
+    let original =
+        reconfiguration::effect_owner_identity(&*fixture.engine.tracks[0].effects[0].effect);
+    assert_eq!(
+        crate::retirement::tests::allocations(|| fixture.engine.begin_device_reconfiguration()),
+        (0, 0)
+    );
     let mut owner = match fixture.events.pop().unwrap() {
         EngineEvent::DeviceReconfiguration(device) => device,
         event => panic!("expected actual local handoff, got{event:?}"),
     };
     assert!(fixture.events.is_empty());
-    assert!(fixture.engine.device_handoff.pending().unwrap().is_local_recovery());
+    assert!(fixture
+        .engine
+        .device_handoff
+        .pending()
+        .unwrap()
+        .is_local_recovery());
     assert_eq!(owner.owner_identity(), original);
     owner.reconfigure_on_main_thread().unwrap();
     fixture.calls.clear();
-    fixture.commands.push(EngineCommand::StartPerformanceCapture).unwrap();
-    fixture.commands.push(EngineCommand::ResumeDeviceReconfiguration { device: owner, routing: crate::routing::PreparedRouting::prepare(&fixture.model, 64).unwrap() }).unwrap();
-    fixture.commands.push(EngineCommand::StartPerformanceCapture).unwrap();
+    fixture
+        .commands
+        .push(EngineCommand::StartPerformanceCapture)
+        .unwrap();
+    fixture
+        .commands
+        .push(EngineCommand::ResumeDeviceReconfiguration {
+            device: owner,
+            routing: crate::routing::PreparedRouting::prepare(&fixture.model, 64).unwrap(),
+        })
+        .unwrap();
+    fixture
+        .commands
+        .push(EngineCommand::StartPerformanceCapture)
+        .unwrap();
     drain(&mut fixture);
     let calls = fixture.calls.observed();
-    assert_eq!(calls, [110, 210], "the first local token refuses without querying residents");
+    assert_eq!(
+        calls,
+        [110, 210],
+        "the first local token refuses without querying residents"
+    );
     let events = collect(&mut fixture);
-    assert_eq!(events.order, ["stop", "refused", "routing-retired", "start", "source"]);
+    assert_eq!(
+        events.order,
+        ["stop", "refused", "routing-retired", "start", "source"]
+    );
     assert_eq!(events.reasons, [LOCAL_REASON]);
     assert!(fixture.engine.capture_active);
     assert!(fixture.engine.device_handoff.pending().is_none());
     assert_eq!(fixture.engine.device_handoff.last_issued_identity(), 1);
-    assert_eq!(reconfiguration::effect_owner_identity(&*fixture.engine.tracks[0].effects[0].effect), original);
+    assert_eq!(
+        reconfiguration::effect_owner_identity(&*fixture.engine.tracks[0].effects[0].effect),
+        original
+    );
     report("current-resume", false, true, &calls, &events, &fixture);
 }
 
 #[test]
 fn local_failure_keeps_refusal_priority_then_same_drain_clear_reveals_invalid_plan() {
     let mut fixture = fixture(true);
-    fixture.commands.push(EngineCommand::insert_built_in_effect(fixture.track, EffectId::new(), EffectType::Gain, DEFAULT_SAMPLE_RATE)).unwrap();
-    fixture.commands.push(EngineCommand::RejectRoutingUpdate { reason: "Capture admission baseline".into() }).unwrap();
+    fixture
+        .commands
+        .push(EngineCommand::insert_built_in_effect(
+            fixture.track,
+            EffectId::new(),
+            EffectType::Gain,
+            DEFAULT_SAMPLE_RATE,
+        ))
+        .unwrap();
+    fixture
+        .commands
+        .push(EngineCommand::RejectRoutingUpdate {
+            reason: "Capture admission baseline".into(),
+        })
+        .unwrap();
     fixture.engine.drain_commands();
     while fixture.events.pop().is_ok() {}
     fixture.controls[0].local.store(true, Ordering::Release);
     fixture.calls.clear();
-    fixture.commands.push(EngineCommand::StartPerformanceCapture).unwrap();
-    fixture.commands.push(set_local(&fixture, true, false)).unwrap();
-    fixture.commands.push(EngineCommand::StartPerformanceCapture).unwrap();
+    fixture
+        .commands
+        .push(EngineCommand::StartPerformanceCapture)
+        .unwrap();
+    fixture
+        .commands
+        .push(set_local(&fixture, true, false))
+        .unwrap();
+    fixture
+        .commands
+        .push(EngineCommand::StartPerformanceCapture)
+        .unwrap();
     drain(&mut fixture);
     let calls = fixture.calls.observed();
     assert_eq!(calls, [111, 120, 110, 210]);
     let events = collect(&mut fixture);
     assert_eq!(events.order, ["stop", "refused", "stop", "refused"]);
-    assert_eq!(events.reasons, [LOCAL_REASON, "Capture requires a valid applied audio configuration"]);
+    assert_eq!(
+        events.reasons,
+        [
+            LOCAL_REASON,
+            "Capture requires a valid applied audio configuration"
+        ]
+    );
     assert!(!fixture.engine.capture_active);
     assert!(!fixture.engine.compensation_plan.applied_plan_is_valid());
     assert!(fixture.engine.compensation_plan.awaiting_structural_plan());
-    report("local-before-invalid", true, true, &calls, &events, &fixture);
+    report(
+        "local-before-invalid",
+        true,
+        true,
+        &calls,
+        &events,
+        &fixture,
+    );
 }
