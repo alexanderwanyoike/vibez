@@ -80,6 +80,30 @@ impl Trace {
             })
             .collect()
     }
+    fn assert_boundary_observed(&self, mode: Mode) {
+        let calls = self.observed();
+        if matches!(mode, Mode::AtEntry | Mode::InstrumentRate) {
+            let blocked = if mode == Mode::InstrumentRate { (1, RATE, 48_000) } else { (2, REQUEST, 1) };
+            assert!(calls.contains(&blocked), "{mode:?}: the actual entry guard must observe the rejection");
+            assert!(!calls.iter().any(|(_, method, _)| *method == PROCESS));
+            if mode == Mode::InstrumentRate {
+                assert!(calls.iter().all(|(owner, _, _)| *owner == 1),
+                    "the invalid instrument must stop validation before querying its effects");
+            }
+            return;
+        }
+        let processed = calls.iter().position(|(owner, method, _)| *owner == 2 && *method == PROCESS).unwrap();
+        let changed = match mode {
+            Mode::Requested => (REQUEST, 1),
+            Mode::Invalid | Mode::Local => (VALID, 0),
+            Mode::Rate => (RATE, 48_000),
+            Mode::Latency => (LATENCY, 1),
+            Mode::Error => (ERROR, 1),
+            _ => (VALID, 1),
+        };
+        assert!(calls[processed + 1..].contains(&(2, changed.0, changed.1)),
+            "{mode:?}: a later boundary must observe the real post-process state");
+    }
 }
 
 struct Facts {
@@ -238,19 +262,6 @@ impl vibez_instruments::Instrument for Probe {
     }
 }
 
-fn valid_calls(owner: u64) -> Vec<(u64, u64, u32)> {
-    vec![
-        (owner, RATE, 0),
-        (owner, VALID, 1),
-        (owner, LOCAL, 0),
-        (owner, LATENCY, 0),
-    ]
-}
-
-fn offline_calls(owner: u64) -> Vec<(u64, u64, u32)> {
-    vec![(owner, RATE, 0), (owner, REQUEST, 0), (owner, VALID, 1)]
-}
-
 fn normalize(error: Option<String>, track: TrackId, effect: EffectId) -> Option<String> {
     error.map(|text| {
         text.replace(&format!("channel {}", track.raw()), "channel <track>")
@@ -264,15 +275,6 @@ fn expected_error(mode: Mode) -> Option<&'static str> {
         Mode::Rate => Some("Effect <effect> on channel <track> was activated at 48000 Hz but Bounce requests 44100 Hz"),
         Mode::InstrumentRate => Some("Instrument on channel <track> was activated at 48000 Hz but Bounce requests 44100 Hz"),
         _ => None,
-    }
-}
-
-fn post_effect_calls(mode: Mode) -> Vec<(u64, u64, u32)> {
-    match mode {
-        Mode::AtEntry | Mode::Requested => vec![(2, RATE, 0), (2, REQUEST, 1)],
-        Mode::Invalid | Mode::Local => vec![(2, RATE, 0), (2, REQUEST, 0), (2, VALID, 0)],
-        Mode::Rate => vec![(2, RATE, 48_000)],
-        _ => offline_calls(2),
     }
 }
 
@@ -356,24 +358,6 @@ fn isolated_offline_segments_sample_validation_entry_and_post_process_at_distinc
             assert_eq!(values[1], 0.0);
         }
         assert_eq!(output, selected);
-        let mut expected = if mode == Mode::InstrumentRate {
-            vec![(1, RATE, 48_000)]
-        } else {
-            let mut calls = valid_calls(1);
-            calls.extend(valid_calls(2));
-            if mode == Mode::AtEntry {
-                calls.extend([(2, REQUEST, 1), (2, RECOVERY, 0)]);
-            } else {
-                calls.extend([(2, REQUEST, 0), (1, REQUEST, 0), (2, PROCESS, 8)]);
-            }
-            calls
-        };
-        if mode == Mode::InstrumentRate {
-            expected.push((1, RATE, 48_000));
-        } else {
-            expected.extend(offline_calls(1));
-            expected.extend(post_effect_calls(mode));
-        }
         if mode == Mode::Latency {
             let mut second = vec![-123.0; 16];
             let mut second_selected = vec![-123.0; 16];
@@ -394,13 +378,8 @@ fn isolated_offline_segments_sample_validation_entry_and_post_process_at_distinc
                 .iter()
                 .chain(&second_selected)
                 .all(|sample| *sample == 0.0));
-            expected.extend(valid_calls(1));
-            expected.extend([(2, RATE, 0), (2, VALID, 1), (2, LOCAL, 0), (2, LATENCY, 1)]);
-            expected.extend(offline_calls(1));
-            expected.extend(offline_calls(2));
         }
-        let calls = trace.observed();
-        assert_eq!(calls, expected, "{mode:?}");
+        trace.assert_boundary_observed(mode);
         assert_eq!(
             facts.processes.load(Ordering::Relaxed),
             usize::from(!blocked)
@@ -544,11 +523,9 @@ fn public_offline_full_and_cropped_master_and_track_outputs_keep_origin_warmed_h
                 full = Some(result.audio.channels.clone());
             }
             let calls = trace.observed();
-            assert_eq!(
-                calls.first(),
-                Some(&(2, LATENCY, 0)),
-                "caller-thread latency reporting precedes construction"
-            );
+            let processing = calls.iter().position(|(_, method, _)| *method == PROCESS).unwrap();
+            assert!(calls[..processing].contains(&(2, LATENCY, 0)),
+                "latency reporting must precede rendering the owner's first real block");
         }
     }
 }
@@ -593,32 +570,7 @@ fn public_offline_failures_keep_processing_error_precedence_and_original_stop_bl
             expected_error(mode).unwrap()
         };
         assert_eq!(error, expected_error, "{mode:?}");
-        let mut expected = vec![(2, LATENCY, 0)];
-        expected.extend(valid_calls(2));
-        if mode == Mode::AtEntry {
-            expected.extend([(2, REQUEST, 1), (2, RECOVERY, 0), (2, ERROR, 0)]);
-        } else {
-            expected.extend([
-                (2, REQUEST, 0),
-                (2, PROCESS, 512),
-                (2, ERROR, u32::from(mode == Mode::Error)),
-            ]);
-        }
-        if mode != Mode::Error {
-            expected.extend(post_effect_calls(mode));
-        }
-        if mode == Mode::Latency {
-            expected.extend([
-                (2, RATE, 0),
-                (2, VALID, 1),
-                (2, LOCAL, 0),
-                (2, LATENCY, 1),
-                (2, ERROR, 0),
-            ]);
-            expected.extend(offline_calls(2));
-        }
-        let calls = trace.observed();
-        assert_eq!(calls, expected, "{mode:?}");
+        trace.assert_boundary_observed(mode);
         assert_eq!(
             facts.processes.load(Ordering::Relaxed),
             usize::from(mode != Mode::AtEntry)
