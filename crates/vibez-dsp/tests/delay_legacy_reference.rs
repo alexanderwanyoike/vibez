@@ -89,7 +89,8 @@ fn original_descriptors_getters_activation_and_zero_latency_remain_observable() 
         assert_eq!(effect.activation_sample_rate(), Some(rate));
         assert!(effect.processing_configuration_valid());
         assert_eq!(effect.latency_samples(), 0);
-        assert_eq!(effect.param_descriptors().len(), 3);
+        // Only the appended count changes; every original descriptor below stays bit-exact.
+        assert_eq!(effect.param_descriptors().len(), 17);
         for (index, (name, minimum, maximum, default, unit)) in expected.into_iter().enumerate() {
             let descriptor = effect.param_descriptors()[index];
             assert_eq!(descriptor.name, name);
@@ -108,6 +109,7 @@ fn original_descriptors_getters_activation_and_zero_latency_remain_observable() 
             "activation_rate": effect.activation_sample_rate(),
             "latency_samples": effect.latency_samples(),
             "descriptor_count": effect.param_descriptors().len(),
+            "descriptor_scope": "Original indices 0..2 checked bit-exact; count includes fourteen appended parameters",
             "target_bits": (0..3).map(|index| effect.get_param(index).to_bits()).collect::<Vec<_>>(),
         }));
     }

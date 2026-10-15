@@ -58,7 +58,8 @@ async fn three_value_delay_files_restore_stored_units_identity_and_original_soun
         assert!(!effect.bypass);
         assert!(effect.plugin_ref.is_none());
         assert!(effect.plugin_name.is_none());
-        assert_eq!(effect.params, parameters);
+        // Loaded legacy values remain exact; descriptor defaults now append fourteen targets.
+        assert_eq!(&effect.params[..parameters.len()], &parameters);
         assert_eq!(effect.descriptors[0].unit, "ms");
         assert_eq!(effect.latency_samples, Some(0));
         let mut processor = create_effect_with_params(EffectType::Delay, 48_000.0, &effect.params);
@@ -83,6 +84,7 @@ async fn three_value_delay_files_restore_stored_units_identity_and_original_soun
             "track_id": track_id.raw(),
             "effect_id": effect_id.raw(),
             "loaded_parameter_bits": effect.params.iter().map(|value| value.to_bits()).collect::<Vec<_>>(),
+            "parameter_scope": "Original three stored values preserved; loaded vector includes appended defaults",
             "activation_rate": processor.activation_sample_rate(),
             "latency_samples": processor.latency_samples(),
             "dry_bits": [actual[0].to_bits(), actual[1].to_bits()],

@@ -8,7 +8,28 @@ use crate::effect::AudioEffect;
 mod history;
 use history::DelayHistory;
 
-static DELAY_PARAMS: &[ParamDescriptor] = &[
+pub mod param {
+    pub const TIME_MS: usize = 0;
+    pub const FEEDBACK: usize = 1;
+    pub const MIX: usize = 2;
+    pub const SYNC: usize = 3;
+    pub const LEFT_DIVISION: usize = 4;
+    pub const LEFT_MODIFIER: usize = 5;
+    pub const ROUTING: usize = 6;
+    pub const LINK: usize = 7;
+    pub const RIGHT_TIME_MS: usize = 8;
+    pub const RIGHT_DIVISION: usize = 9;
+    pub const RIGHT_MODIFIER: usize = 10;
+    pub const FEEDBACK_HP_ENABLED: usize = 11;
+    pub const FEEDBACK_HP_HZ: usize = 12;
+    pub const FEEDBACK_LP_ENABLED: usize = 13;
+    pub const FEEDBACK_LP_HZ: usize = 14;
+    pub const DUCK: usize = 15;
+    pub const TIME_CHANGE: usize = 16;
+    pub const COUNT: usize = 17;
+}
+
+pub static DELAY_PARAMS: &[ParamDescriptor] = &[
     ParamDescriptor {
         name: "Time",
         min: 1.0,
@@ -30,13 +51,109 @@ static DELAY_PARAMS: &[ParamDescriptor] = &[
         default: 0.3,
         unit: "",
     },
+    ParamDescriptor {
+        name: "Sync",
+        min: 0.0,
+        max: 1.0,
+        default: 0.0,
+        unit: "",
+    },
+    ParamDescriptor {
+        name: "Left Division",
+        min: 0.0,
+        max: 6.0,
+        default: 4.0,
+        unit: "",
+    },
+    ParamDescriptor {
+        name: "Left Modifier",
+        min: 0.0,
+        max: 2.0,
+        default: 0.0,
+        unit: "",
+    },
+    ParamDescriptor {
+        name: "Routing",
+        min: 0.0,
+        max: 1.0,
+        default: 0.0,
+        unit: "",
+    },
+    ParamDescriptor {
+        name: "L/R Link",
+        min: 0.0,
+        max: 1.0,
+        default: 1.0,
+        unit: "",
+    },
+    ParamDescriptor {
+        name: "Right Free Time",
+        min: 1.0,
+        max: 2000.0,
+        default: 500.0,
+        unit: "ms",
+    },
+    ParamDescriptor {
+        name: "Right Division",
+        min: 0.0,
+        max: 6.0,
+        default: 4.0,
+        unit: "",
+    },
+    ParamDescriptor {
+        name: "Right Modifier",
+        min: 0.0,
+        max: 2.0,
+        default: 0.0,
+        unit: "",
+    },
+    ParamDescriptor {
+        name: "Feedback HP Enabled",
+        min: 0.0,
+        max: 1.0,
+        default: 0.0,
+        unit: "",
+    },
+    ParamDescriptor {
+        name: "Feedback HP Frequency",
+        min: 20.0,
+        max: 1000.0,
+        default: 120.0,
+        unit: "Hz",
+    },
+    ParamDescriptor {
+        name: "Feedback LP Enabled",
+        min: 0.0,
+        max: 1.0,
+        default: 0.0,
+        unit: "",
+    },
+    ParamDescriptor {
+        name: "Feedback LP Frequency",
+        min: 1000.0,
+        max: 20000.0,
+        default: 8000.0,
+        unit: "Hz",
+    },
+    ParamDescriptor {
+        name: "Duck",
+        min: 0.0,
+        max: 1.0,
+        default: 0.0,
+        unit: "",
+    },
+    ParamDescriptor {
+        name: "Time Change",
+        min: 0.0,
+        max: 1.0,
+        default: 0.0,
+        unit: "",
+    },
 ];
 
 /// Stereo delay effect with feedback.
 pub struct DelayEffect {
-    time_ms: f32,
-    feedback: f32,
-    mix: f32,
+    targets: [f32; param::COUNT],
     history: DelayHistory,
 }
 
@@ -44,9 +161,7 @@ impl DelayEffect {
     pub fn new(sample_rate: f32) -> Self {
         let history = DelayHistory::new(sample_rate);
         Self {
-            time_ms: 500.0,
-            feedback: 0.5,
-            mix: 0.3,
+            targets: std::array::from_fn(|index| DELAY_PARAMS[index].default),
             history,
         }
     }
@@ -81,30 +196,34 @@ impl AudioEffect for DelayEffect {
         if !value.is_finite() {
             return false;
         }
-        match index {
-            0 => {
-                self.time_ms = value.clamp(1.0, 2000.0);
-                true
+        let Some(descriptor) = DELAY_PARAMS.get(index) else {
+            return false;
+        };
+        let target = match index {
+            param::SYNC | param::LINK | param::FEEDBACK_HP_ENABLED | param::FEEDBACK_LP_ENABLED => {
+                if value >= 0.5 {
+                    1.0
+                } else {
+                    0.0
+                }
             }
-            1 => {
-                self.feedback = value.clamp(0.0, 0.95);
-                true
+            param::LEFT_DIVISION
+            | param::LEFT_MODIFIER
+            | param::ROUTING
+            | param::RIGHT_DIVISION
+            | param::RIGHT_MODIFIER
+            | param::TIME_CHANGE => {
+                // Ordinals have one zero representation for stored/preset matching.
+                value.round().clamp(descriptor.min, descriptor.max) as u32 as f32
             }
-            2 => {
-                self.mix = value.clamp(0.0, 1.0);
-                true
-            }
-            _ => false,
-        }
+            _ => value.clamp(descriptor.min, descriptor.max),
+        };
+        self.targets[index] = target;
+        true
     }
 
     fn get_param(&self, index: usize) -> f32 {
-        match index {
-            0 => self.time_ms,
-            1 => self.feedback,
-            2 => self.mix,
-            _ => 0.0,
-        }
+        self.targets.get(index).copied().unwrap_or(0.0)
     }
 
     fn process(&mut self, buffer: &mut [f32], channels: usize) {
@@ -124,15 +243,17 @@ impl AudioEffect for DelayEffect {
 
         let ch = channels;
         let frames = buffer.len() / ch;
-        let tap = self.history.tap(self.time_ms);
+        let tap = self.history.tap(self.targets[param::TIME_MS]);
+        let feedback = self.targets[param::FEEDBACK];
+        let mix = self.targets[param::MIX];
 
         for frame in 0..frames {
             let (delayed_l, delayed_r) = self.history.read(tap);
 
             // Left channel
             let dry_l = Self::finite_or_zero(buffer[frame * ch]);
-            let write_l = Self::finite_or_zero(dry_l + delayed_l * self.feedback);
-            buffer[frame * ch] = Self::finite_or_zero(dry_l * (1.0 - self.mix) + delayed_l * self.mix);
+            let write_l = Self::finite_or_zero(dry_l + delayed_l * feedback);
+            buffer[frame * ch] = Self::finite_or_zero(dry_l * (1.0 - mix) + delayed_l * mix);
 
             // Missing mono input is zero, but its feedback continues while unobserved.
             let dry_r = if ch >= 2 {
@@ -140,10 +261,10 @@ impl AudioEffect for DelayEffect {
             } else {
                 0.0
             };
-            let write_r = Self::finite_or_zero(dry_r + delayed_r * self.feedback);
+            let write_r = Self::finite_or_zero(dry_r + delayed_r * feedback);
             if ch >= 2 {
                 buffer[frame * ch + 1] =
-                    Self::finite_or_zero(dry_r * (1.0 - self.mix) + delayed_r * self.mix);
+                    Self::finite_or_zero(dry_r * (1.0 - mix) + delayed_r * mix);
             }
 
             self.history.write_and_advance(write_l, write_r);
@@ -215,7 +336,8 @@ mod tests {
         assert!((fx.get_param(2) - 0.3).abs() < 1e-3);
         fx.set_param(0, 100.0);
         assert!((fx.get_param(0) - 100.0).abs() < 1e-3);
-        assert!(!fx.set_param(3, 1.0));
+        // Appended indices 3..16 are valid; the original three values stay unchanged.
+        assert!(!fx.set_param(17, 1.0));
     }
 
     #[test]

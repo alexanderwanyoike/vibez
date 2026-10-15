@@ -43,7 +43,8 @@ fn rejected_manual_and_automated_edits_preserve_legacy_targets_and_impulse_histo
             edits.push((index, label, value));
         }
     }
-    for index in [3, usize::MAX] {
+    // The appended layout admits 3..16; rejection now starts at 17.
+    for index in [17, usize::MAX] {
         for (label, value) in [("unknown_finite", 0.25), ("unknown_nan", f32::NAN), ("unknown_positive_infinity", f32::INFINITY), ("unknown_negative_infinity", f32::NEG_INFINITY)] {
             edits.push((index, label, value));
         }
