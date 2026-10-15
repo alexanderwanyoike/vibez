@@ -351,11 +351,5 @@ fn full_publication_restores_same_box_and_consumes_identity_before_retry() {
         assert_eq!(counts.reactivations.load(Ordering::Relaxed), 1);
         assert_eq!(engine.output_gate.remaining_resume_frames(), 0);
         assert_eq!(order, ["handoff", "routing-return"]);
-        let final_position = engine.transport.position();
-        let ids = [rejected_identity, pending.handoff_id];
-        let processed_after = counts.process.load(Ordering::Relaxed);
-        eprintln!("device-handoff-full baseline: bypass={bypass}; filled={filled}; released={released}; available_before_retry={available_before_retry}; ids={ids:?}; stops={}; reactivations={}; processed_before={processed_before}; processed_after={processed_after}; owner_roundtrip={owner_roundtrip}; final_position={final_position}; readiness={readiness:?}; order={order:?}; loss_bits={:?}; resumed_bits={:?}",
-            counts.stops.load(Ordering::Relaxed), counts.reactivations.load(Ordering::Relaxed),
-            loss.iter().copied().map(f32::to_bits).collect::<Vec<_>>(), resumed.iter().copied().map(f32::to_bits).collect::<Vec<_>>());
     }
 }
