@@ -4,6 +4,12 @@ const MAX_HISTORY_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_SYNC_SECONDS: u64 = 18;
 const INTERPOLATION_GUARDS: u64 = 2;
 
+pub(super) struct ReadBlend {
+    pub(super) old: f64,
+    pub(super) destination: f64,
+    pub(super) progress: f64,
+}
+
 pub(super) struct DelayHistory {
     sample_rate: f32,
     configuration_valid: bool,
@@ -68,15 +74,16 @@ impl DelayHistory {
         self.sample_rate
     }
 
-    pub(super) fn tap(&self, samples: f64) -> (usize, f64) {
+    fn tap(&self, samples: f64) -> (usize, f64) {
         // Full-ring distance reads the prior lap before the current frame overwrites it.
         let delay = samples.max(1.0).min(self.buffer_l.len().max(1) as f64);
         (delay.floor() as usize, delay.fract())
     }
 
-    pub(super) fn read(&self, left_tap: (usize, f64), right_tap: (usize, f64)) -> (f32, f32) {
+    pub(super) fn read(&self, left: ReadBlend, right: ReadBlend) -> (f32, f32) {
         let buf_len = self.buffer_l.len();
-        let read = |history: &[f32], (whole, fraction): (usize, f64)| {
+        let read_tap = |history: &[f32], distance: f64| {
+            let (whole, fraction) = self.tap(distance);
             let position = (self.write_pos + buf_len - whole) % buf_len;
             let recent = history[position];
             // Integer taps bypass blend arithmetic to retain the legacy sample algebra.
@@ -87,7 +94,18 @@ impl DelayHistory {
                 (f64::from(recent) * (1.0 - fraction) + f64::from(older) * fraction) as f32
             }
         };
-        (read(&self.buffer_l, left_tap), read(&self.buffer_r, right_tap))
+        let read = |history: &[f32], blend: ReadBlend| {
+            // Exact endpoints retain the chosen tap without zero-weight exceptional arithmetic.
+            if blend.progress == 0.0 {
+                read_tap(history, blend.old)
+            } else if blend.progress == 1.0 {
+                read_tap(history, blend.destination)
+            } else {
+                (f64::from(read_tap(history, blend.old)) * (1.0 - blend.progress)
+                    + f64::from(read_tap(history, blend.destination)) * blend.progress) as f32
+            }
+        };
+        (read(&self.buffer_l, left), read(&self.buffer_r, right))
     }
 
     pub(super) fn write_and_advance(&mut self, left: f32, right: f32) {

@@ -178,30 +178,8 @@ impl DelayEffect {
             0.0
         }
     }
-}
 
-impl AudioEffect for DelayEffect {
-    fn set_audio_context(&mut self, context: vibez_core::audio_context::DeviceAudioContext) {
-        self.timing.set_bpm(context.bpm);
-    }
-
-    fn activation_sample_rate(&self) -> Option<u32> {
-        self.history.activation_sample_rate()
-    }
-
-    fn processing_configuration_valid(&self) -> bool {
-        self.history.is_valid()
-    }
-
-    fn effect_type(&self) -> EffectType {
-        EffectType::Delay
-    }
-
-    fn param_descriptors(&self) -> &'static [ParamDescriptor] {
-        DELAY_PARAMS
-    }
-
-    fn set_param(&mut self, index: usize, value: f32) -> bool {
+    fn set_target(&mut self, index: usize, value: f32, automated: bool) -> bool {
         if !value.is_finite() {
             return false;
         }
@@ -227,8 +205,42 @@ impl AudioEffect for DelayEffect {
             }
             _ => value.clamp(descriptor.min, descriptor.max),
         };
+        if !automated && self.targets[index].to_bits() == target.to_bits() {
+            return true;
+        }
         self.targets[index] = target;
+        self.timing.parameter_edited(index, &self.targets, self.history.sample_rate(), automated);
         true
+    }
+}
+
+impl AudioEffect for DelayEffect {
+    fn set_audio_context(&mut self, context: vibez_core::audio_context::DeviceAudioContext) {
+        self.timing.set_bpm(context.bpm, &self.targets, self.history.sample_rate());
+    }
+
+    fn activation_sample_rate(&self) -> Option<u32> {
+        self.history.activation_sample_rate()
+    }
+
+    fn processing_configuration_valid(&self) -> bool {
+        self.history.is_valid()
+    }
+
+    fn effect_type(&self) -> EffectType {
+        EffectType::Delay
+    }
+
+    fn param_descriptors(&self) -> &'static [ParamDescriptor] {
+        DELAY_PARAMS
+    }
+
+    fn set_param(&mut self, index: usize, value: f32) -> bool {
+        self.set_target(index, value, false)
+    }
+
+    fn set_automated_param(&mut self, index: usize, value: f32) -> bool {
+        self.set_target(index, value, true)
     }
 
     fn get_param(&self, index: usize) -> f32 {
@@ -252,13 +264,17 @@ impl AudioEffect for DelayEffect {
 
         let ch = channels;
         let frames = buffer.len() / ch;
-        let distances = self.timing.distances(&self.targets, self.history.sample_rate());
-        let [left_tap, right_tap] = distances.map(|distance| self.history.tap(distance));
+        if frames == 0 {
+            return;
+        }
+        self.timing.begin_audio(&self.targets, self.history.sample_rate());
+        let fade_frames = (self.history.sample_rate() as usize).div_ceil(50);
         let feedback = self.targets[param::FEEDBACK];
         let mix = self.targets[param::MIX];
 
         for frame in 0..frames {
-            let (delayed_l, delayed_r) = self.history.read(left_tap, right_tap);
+            let [left, right] = self.timing.next_frame(fade_frames);
+            let (delayed_l, delayed_r) = self.history.read(left, right);
 
             // Left channel
             let dry_l = Self::finite_or_zero(buffer[frame * ch]);
@@ -283,6 +299,7 @@ impl AudioEffect for DelayEffect {
 
     fn reset(&mut self) {
         self.history.reset();
+        self.timing.reset(&self.targets, self.history.sample_rate());
     }
 }
 
