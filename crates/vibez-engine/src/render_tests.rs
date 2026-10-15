@@ -1,3 +1,5 @@
+//! Offline renders preserve public routing, device and export behavior.
+
 use super::*;
 use crate::commands::EngineCommand as Command;
 use crate::engine::{AudioEngine, AudioProcessBlock};
