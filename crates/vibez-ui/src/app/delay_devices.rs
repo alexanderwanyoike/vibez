@@ -8,6 +8,7 @@ use crate::domains::delay_response::DelayResponse;
 
 struct PendingEdit {
     after_order: u64,
+    token: u64,
     values: std::collections::BTreeMap<usize, f32>,
 }
 
@@ -25,11 +26,12 @@ pub(super) struct DelayDevices {
     worker: DelayResponseWorker,
     responses: std::collections::HashMap<EffectId, CachedResponse>,
     pending_edits: std::collections::HashMap<EffectId, PendingEdit>,
+    next_token: u64,
 }
 
 impl App {
     pub(super) fn accept_delay_state(&mut self, track_id: TrackId, effect_id: EffectId,
-        generation: u64, snapshot: Option<DelayState>) {
+        generation: u64, observation_token: u64, snapshot: Option<DelayState>) {
         if self.device_meters.channel != Some(track_id) || self.device_meters.generation != generation { return; }
         let Some(effect) = self.state.find_track(track_id)
             .and_then(|track| track.effects.iter().find(|effect| effect.id == effect_id))
@@ -39,7 +41,8 @@ impl App {
         panel.accept(snapshot, self.state.transport.sample_rate, std::time::Instant::now());
         if let Some(state) = panel.snapshot {
             let acknowledged = self.delay_devices.pending_edits.get(&effect_id).is_some_and(|pending|
-                state.observation_order > pending.after_order && pending.values.iter().all(|(&index, &value)|
+                observation_token == pending.token && state.observation_order > pending.after_order
+                    && pending.values.iter().all(|(&index, &value)|
                     state.targets[index].to_bits() == value.to_bits()));
             if acknowledged { self.delay_devices.pending_edits.remove(&effect_id); }
         }
@@ -61,12 +64,13 @@ impl App {
         for panel in self.delay_devices.panels.values_mut() { panel.restart(); }
     }
 
-    pub(super) fn invalidate_delay_reference(&mut self, message: &crate::domains::devices::DevicesMsg) {
+    pub(super) fn invalidate_delay_reference(&mut self, message: &crate::domains::devices::DevicesMsg)
+        -> Option<EngineCommand> {
         use vibez_dsp::delay::param;
-        let Some(edit) = message.param_edit() else { return; };
+        let edit = message.param_edit()?;
         let Some(effect) = self.state.find_track(edit.track_id).and_then(|track|
             track.effects.iter().find(|effect| effect.id == edit.effect_id)).filter(|effect| is_native_delay(effect))
-            else { return; };
+            else { return None; };
         let values: std::collections::BTreeMap<_, _> = edit.updates.into_iter().filter_map(|(index, value)| {
             if matches!(index, param::MIX | param::DUCK | param::TIME_CHANGE) || !value.is_finite() { return None; }
             let descriptor = effect.descriptors.get(index)?;
@@ -80,15 +84,21 @@ impl App {
             };
             Some((index, value))
         }).collect();
-        if values.is_empty() { return; }
+        if values.is_empty() { return None; }
         let after_order = self.delay_devices.panels.get(&edit.effect_id)
             .and_then(|panel| panel.snapshot).map_or(0, |state| state.observation_order);
+        self.delay_devices.next_token = self.delay_devices.next_token.wrapping_add(1).max(1);
+        let token = self.delay_devices.next_token;
         let pending = self.delay_devices.pending_edits.entry(edit.effect_id)
-            .or_insert(PendingEdit { after_order, values: Default::default() });
+            .or_insert(PendingEdit { after_order, token, values: Default::default() });
+        pending.token = token;
         pending.after_order = pending.after_order.max(after_order);
         pending.values.extend(values);
         self.delay_devices.worker.cancel(Owner { track_id: edit.track_id, effect_id: edit.effect_id,
             generation: self.device_meters.generation });
+        Some(EngineCommand::SetEffectObservationToken {
+            track_id: edit.track_id, effect_id: edit.effect_id, token,
+        })
     }
 
     fn delay_request(&self, owner: Owner) -> Option<Request> {

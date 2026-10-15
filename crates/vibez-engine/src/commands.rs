@@ -267,6 +267,12 @@ pub enum EngineCommand {
         track_id: Option<TrackId>,
         generation: u64,
     },
+    /// Echoed with insert observations after all preceding parameter commands.
+    SetEffectObservationToken {
+        track_id: TrackId,
+        effect_id: EffectId,
+        token: u64,
+    },
 
     // -- Effects --
     RemoveEffect(TrackId, EffectId),

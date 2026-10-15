@@ -89,6 +89,7 @@ fn coverage(command: &EngineCommand) -> Coverage {
         | C::SetSampleRate(_)
         | C::SetSpectrumTap(_)
         | C::SetEffectMeterChannel { .. }
+        | C::SetEffectObservationToken { .. }
         | C::RemoveEffect(..)
         | C::SetEffectParam { .. }
         | C::SetEffectBypass { .. }
@@ -474,6 +475,11 @@ fn cases() -> Vec<Case> {
                 track_id: Some(f.synth),
                 generation: 1,
             }
+        }),
+        case!("SetEffectObservationToken", false, |f| C::SetEffectObservationToken {
+            track_id: f.synth,
+            effect_id: f.effect,
+            token: 7,
         }),
         case!("RemoveEffect", false, |f| C::RemoveEffect(
             f.synth, f.effect

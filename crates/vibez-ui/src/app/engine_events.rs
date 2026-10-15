@@ -202,8 +202,8 @@ impl App {
             while let Some(event) = self.event_rx.as_mut().and_then(|rx| rx.pop().ok()) {
                 apply_drum_pad_flash(&mut self.state.view, &event, std::time::Instant::now());
                 match event {
-                    EngineEvent::EffectDelayState { track_id, effect_id, generation, snapshot } => {
-                        self.accept_delay_state(track_id, effect_id, generation, snapshot);
+                    EngineEvent::EffectDelayState { track_id, effect_id, generation, observation_token, snapshot } => {
+                        self.accept_delay_state(track_id, effect_id, generation, observation_token, snapshot);
                     }
                     EngineEvent::EffectMeter {
                         track_id,

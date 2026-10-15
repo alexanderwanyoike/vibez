@@ -719,7 +719,7 @@ fn native_delay_meter_reports_real_insert_levels_before_channel_faders() {
                 "Delay meter callback heap activity, graph={use_graph}, half={half}",
             );
             while let Ok(event) = events.pop() {
-                if let EngineEvent::EffectDelayState { track_id, effect_id, generation, snapshot } = &event {
+                if let EngineEvent::EffectDelayState { track_id, effect_id, generation, snapshot, .. } = &event {
                     assert_eq!(event.time_domain(), crate::events::TimeDomain::Untimed);
                     assert_eq!(half, 1);
                     assert_eq!((*track_id, *effect_id, *generation), (track, effect, 73));

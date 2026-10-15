@@ -112,7 +112,6 @@ impl App {
             if crate::domains::devices::is_unchanged_param_edit(&self.state.project_tracks, edit) {
                 return Task::none();
             }
-            self.invalidate_delay_reference(edit);
         }
         let message =
             apply_project_track_deletion_policy(message, self.state.confirm_project_track_deletion);
@@ -329,6 +328,7 @@ impl App {
             // shared model handed in explicitly; the returned action
             // carries GUI teardown / selection / status effects.
             Message::Devices(msg) => {
+                let observation_barrier = self.invalidate_delay_reference(&msg);
                 if let crate::domains::devices::DevicesMsg::SetTrackInstrument(track_id, _)
                 | crate::domains::devices::DevicesMsg::RemoveTrackInstrument(track_id) = &msg
                 {
@@ -359,6 +359,7 @@ impl App {
                         },
                     )
                 };
+                if let Some(barrier) = observation_barrier { self.send_command(barrier); }
                 if let (Some(true), Some(snapshot)) = (action.routing_changed, snapshot) {
                     self.state.project.history.push_edit(snapshot, undo_gesture);
                     self.mark_project_dirty();

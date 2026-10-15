@@ -87,6 +87,7 @@ impl LevelAccumulator {
 /// handoffs without introducing a callback-side allocation.
 #[derive(Default)]
 pub struct EffectMeterState {
+    pub(crate) observation_token: u64,
     generation: Option<u64>,
     input: LevelAccumulator,
     output: LevelAccumulator,
@@ -97,6 +98,7 @@ impl EffectMeterState {
         if self.generation != Some(generation) {
             *self = Self {
                 generation: Some(generation),
+                observation_token: self.observation_token,
                 ..Self::default()
             };
         }
