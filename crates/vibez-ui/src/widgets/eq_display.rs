@@ -53,7 +53,7 @@ const BANDS: [Band; 4] = [
     Band {
         gain_i: 9,
         freq_i: 10,
-        q_i: Some(11),
+        q_i: None,
     },
 ];
 
