@@ -310,7 +310,7 @@ fn exact_link_and_sync_automation_recalls_retained_right_intent_without_erasing_
             let epoch_frames = 3 * (62.5 * f64::from(rate) / 1000.0).ceil() as usize + 16;
             let frames = 8 * epoch_frames;
             let mut impulses = Vec::new();
-            for (epoch, expected_ms) in epoch_ms.iter().enumerate() {
+            for epoch in 0..8 {
                 impulses.push((epoch * epoch_frames + 8, [0.5, 0.25]));
                 if epoch > 0 {
                     impulses.push((epoch * epoch_frames - 2, [1.0, 0.5]));
