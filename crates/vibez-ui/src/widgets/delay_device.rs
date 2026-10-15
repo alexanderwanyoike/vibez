@@ -59,9 +59,9 @@ pub fn view<'a>(args: DelayView<'a>) -> Element<'a, Message> {
     let available = !effect.bypass && !effect.reconfiguration_failed;
     let snapshot = observation.snapshot.as_ref().filter(|_| available);
     let response = response.filter(|_| snapshot.is_some_and(|state| !state.reference_moving));
-    let toolbar = row![container(presets).width(layout.presets.width).height(26.0),
+    let toolbar = row![container(presets).width(layout.presets.width).height(layout.toolbar.height),
         container(disclosure(track, effect, controls.advanced)).width(layout.disclosure.width)
-            .height(26.0).align_y(iced::Alignment::Center)].spacing(8);
+            .height(layout.toolbar.height).align_y(iced::Alignment::Center)].spacing(8);
     let mut content = column![];
     if let Some(graph) = layout.graph {
         let display = canvas(DelayDisplay { response, snapshot, layout: graph, accent,
@@ -89,7 +89,7 @@ pub fn view<'a>(args: DelayView<'a>) -> Element<'a, Message> {
             delay_controls::bank(track, effect, controls, accent, &layout.details, snapshot)
         ].height(selector.height));
     }
-    column![container(toolbar).padding([0, 4]).height(26.0), Space::with_height(2.0),
-        container(content).padding([0, 4]).height(size.height - 28.0)]
+    column![container(toolbar).padding([0, 4]).height(layout.toolbar.height), Space::with_height(2.0),
+        container(content).padding([0, 4]).height(size.height - layout.toolbar.height - 2.0)]
         .width(Length::Fill).height(Length::Fill).into()
 }
