@@ -492,3 +492,163 @@ fn resumed_section_rejection_preserves_complete_owner_with_an_old_inline_stop() 
     assert_eq!(heap, (0, 0));
 }
 
+fn assert_rejected_source_is_returning(fixture: &ReturningSectionFixture) {
+    let queued = fixture.engine.queued_section.as_ref().expect("retained rejected source");
+    assert!(queued.phase == SectionQueuePhase::Returning);
+    assert_eq!(queued.effective_at_samples, 32);
+    assert_eq!(std::ptr::from_ref(queued.prepared.as_ref()) as usize, fixture.incoming_pointer);
+    assert_eq!(queued.prepared.section_id, fixture.new_section);
+    assert_eq!(fixture.engine.active_section.unwrap().section_id, fixture.old_section);
+    assert_eq!(Arc::as_ptr(&fixture.engine.tracks()[0].section_playback_source.clips[0].audio), fixture.original_audio.as_ptr());
+    assert_eq!(fixture.incoming_audio.strong_count(), 1);
+    assert_eq!(fixture.heap, (0, 0));
+    assert_eq!(fixture.after_len, 32);
+    assert_eq!(fixture.after_capacity, 32);
+    assert_eq!(fixture.engine.pending_retirements.len(), 32);
+    assert_eq!(fixture.engine.pending_retirements.capacity(), 32);
+}
+
+fn next_section_launch(fixture: &mut ReturningSectionFixture) -> (SectionId, usize, std::sync::Weak<DecodedAudio>) {
+    let section = SectionId::new();
+    let clip = activation_clip(ClipId::new(), 0.125);
+    let audio = Arc::downgrade(&clip.audio);
+    let prepared = Box::new(PreparedSectionPlaybackSource::new(section, 4.0, true,
+        vec![(fixture.tracks[0], PreparedPlaybackSource::new(vec![clip], vec![], vec![]))]));
+    let pointer = std::ptr::from_ref(prepared.as_ref()) as usize;
+    fixture.commands.push(EngineCommand::LaunchSection(prepared)).unwrap();
+    fixture.commands.push(EngineCommand::SetTrackPan(fixture.tracks[0], 0.375)).unwrap();
+    (section, pointer, audio)
+}
+
+fn remove_original_ring_filler(events: &mut Consumer<EngineEvent>) {
+    for position in 0..1024 {
+        assert!(matches!(events.pop(), Ok(EngineEvent::PlaybackPosition(actual)) if actual == position));
+    }
+    assert!(events.pop().is_err());
+}
+
+fn retry_empty_callbacks(fixture: &mut ReturningSectionFixture) -> Vec<EngineEvent> {
+    let mut delivered = Vec::new();
+    for _ in 0..8 {
+        assert_eq!(crate::retirement::tests::allocations(|| {
+            fixture.engine.process_block(AudioProcessBlock::new(&mut [], 1));
+        }), (0, 0));
+        while let Ok(event) = fixture.events.pop() { delivered.push(event); }
+    }
+    delivered
+}
+
+#[test]
+fn returning_section_rejection_precedes_next_launch_and_its_fifo_marker() {
+    let mut fixture = returning_section_fixture();
+    assert_rejected_source_is_returning(&fixture);
+    let before_pan = fixture.engine.tracks()[0].pan;
+    assert_ne!(before_pan, 0.375);
+    let (next, next_pointer, next_audio) = next_section_launch(&mut fixture);
+    for _ in 0..2 {
+        assert_eq!(crate::retirement::tests::allocations(|| {
+            fixture.engine.process_block(AudioProcessBlock::new(&mut [], 1));
+        }), (0, 0));
+        assert_rejected_source_is_returning(&fixture);
+        assert_eq!(fixture.engine.cmd_rx.slots(), 2);
+        assert!(matches!(fixture.engine.cmd_rx.peek(), Ok(EngineCommand::LaunchSection(prepared))
+            if prepared.section_id == next && std::ptr::from_ref(prepared.as_ref()) as usize == next_pointer));
+        assert_eq!(fixture.engine.tracks()[0].pan, before_pan);
+        assert_eq!(next_audio.strong_count(), 1);
+    }
+    remove_original_ring_filler(&mut fixture.events);
+    let delivered = retry_empty_callbacks(&mut fixture);
+    assert!(fixture.engine.cmd_rx.peek().is_err());
+    assert!(fixture.engine.queued_section.is_none());
+    assert_eq!(fixture.engine.active_section.unwrap().section_id, next);
+    assert_eq!(Arc::as_ptr(&fixture.engine.tracks()[0].section_playback_source.clips[0].audio), next_audio.as_ptr());
+    assert_eq!(fixture.engine.tracks()[0].pan, 0.375);
+    let rejected: Vec<_> = delivered.iter().enumerate().filter(|(_, event)| matches!(event,
+        EngineEvent::SectionQueueCancelled { retired }
+        if std::ptr::from_ref(retired.as_ref()) as usize == fixture.incoming_pointer)).collect();
+    let launched: Vec<_> = delivered.iter().enumerate().filter(|(_, event)| matches!(event,
+        EngineEvent::SectionTransitioned(transition)
+        if transition.section_id == next && std::ptr::from_ref(&*transition.retired) as usize == next_pointer)).collect();
+    assert_eq!(rejected.len(), 1);
+    assert_eq!(launched.len(), 1);
+    assert!(rejected[0].0 < launched[0].0);
+    assert!(!delivered.iter().any(|event| matches!(event,
+        EngineEvent::SectionTransitioned(transition) if transition.section_id == fixture.new_section)));
+    for owner in &fixture.removed_owners {
+        assert_eq!(delivered.iter().filter(|event| matches!(event,
+            EngineEvent::RetiredAudioClip(clip) if Arc::as_ptr(&clip.audio) == owner.as_ptr())).count(), 1);
+    }
+    assert_eq!(fixture.incoming_audio.strong_count(), 1);
+    assert_eq!(next_audio.strong_count(), 1);
+    drop(rejected);
+    drop(launched);
+    drop(delivered);
+    assert_eq!(fixture.incoming_audio.strong_count(), 0);
+    assert_eq!(fixture.original_audio.strong_count(), 0);
+    assert_eq!(fixture.first_audio.strong_count(), 0);
+    assert!(fixture.removed_owners.iter().all(|owner| owner.strong_count() == 0));
+    assert_eq!(next_audio.strong_count(), 1);
+    assert_eq!(fixture.arrange_audio.strong_count(), 1);
+    drop(fixture.engine);
+    assert_eq!(next_audio.strong_count(), 0);
+    assert_eq!(fixture.arrange_audio.strong_count(), 0);
+}
+
+#[test]
+fn returning_section_rejection_and_queued_next_launch_release_in_both_teardown_orders() {
+    for engine_first in [false, true] {
+        let mut fixture = returning_section_fixture();
+        assert_rejected_source_is_returning(&fixture);
+        let (_, _, next_audio) = next_section_launch(&mut fixture);
+        if engine_first {
+            drop(fixture.engine);
+            assert_eq!(fixture.incoming_audio.strong_count(), 0);
+            assert_eq!(fixture.original_audio.strong_count(), 0);
+            assert_eq!(fixture.first_audio.strong_count(), 0);
+            assert_eq!(fixture.arrange_audio.strong_count(), 0);
+            assert!(fixture.removed_owners.iter().all(|owner| owner.strong_count() == 0));
+            assert_eq!(next_audio.strong_count(), 1);
+            drop(fixture.events);
+            drop(fixture.commands);
+        } else {
+            drop(fixture.events);
+            drop(fixture.commands);
+            assert_eq!(fixture.incoming_audio.strong_count(), 1);
+            assert_eq!(fixture.original_audio.strong_count(), 1);
+            assert_eq!(fixture.first_audio.strong_count(), 1);
+            assert_eq!(fixture.arrange_audio.strong_count(), 1);
+            assert!(fixture.removed_owners.iter().all(|owner| owner.strong_count() == 1));
+            assert_eq!(next_audio.strong_count(), 1);
+            drop(fixture.engine);
+        }
+        assert_eq!(fixture.incoming_audio.strong_count(), 0);
+        assert_eq!(next_audio.strong_count(), 0);
+    }
+}
+
+#[test]
+fn play_after_returning_section_recovery_never_revives_the_rejected_source() {
+    let mut fixture = returning_section_fixture();
+    assert_rejected_source_is_returning(&fixture);
+    fixture.commands.push(EngineCommand::Play).unwrap();
+    remove_original_ring_filler(&mut fixture.events);
+    let delivered = retry_empty_callbacks(&mut fixture);
+    assert!(!fixture.engine.presentation_state.is_faulted());
+    assert!(fixture.engine.transport().is_playing());
+    assert!(fixture.engine.queued_section.is_none());
+    assert!(fixture.engine.active_section.is_none_or(|active| active.section_id != fixture.new_section));
+    assert_eq!(delivered.iter().filter(|event| matches!(event,
+        EngineEvent::SectionQueueCancelled { retired }
+        if std::ptr::from_ref(retired.as_ref()) as usize == fixture.incoming_pointer)).count(), 1);
+    assert!(!delivered.iter().any(|event| matches!(event,
+        EngineEvent::SectionTransitioned(transition) if transition.section_id == fixture.new_section)));
+    drop(delivered);
+    assert_eq!(fixture.incoming_audio.strong_count(), 0);
+    fixture.commands.push(EngineCommand::Play).unwrap();
+    let later = retry_empty_callbacks(&mut fixture);
+    assert!(fixture.engine.queued_section.is_none());
+    assert!(fixture.engine.active_section.is_none_or(|active| active.section_id != fixture.new_section));
+    assert!(!later.iter().any(|event| matches!(event,
+        EngineEvent::SectionTransitioned(transition) if transition.section_id == fixture.new_section)));
+    assert_eq!(fixture.incoming_audio.strong_count(), 0);
+}
