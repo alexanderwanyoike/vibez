@@ -28,6 +28,7 @@ const PLACEHOLDER_W: f32 = 120.0;
 enum Flexible {
     Gain,
     Eq,
+    Compressor,
 }
 
 impl App {
@@ -101,6 +102,8 @@ impl App {
                 Some(Flexible::Gain)
             } else if crate::domains::eq::is_native_eq(effect) {
                 Some(Flexible::Eq)
+            } else if crate::domains::compressor::is_native_compressor(effect) {
+                Some(Flexible::Compressor)
             } else {
                 None
             };
@@ -136,6 +139,12 @@ impl App {
                         effect,
                         track_color,
                         crate::widgets::eq_device::card_width(share),
+                    ),
+                    Flexible::Compressor => self.compressor_device_body(
+                        track_id,
+                        effect,
+                        track_color,
+                        crate::widgets::compressor_device::card_width(share),
                     ),
                 };
                 cards[position] = Some(view_effect_slot(
@@ -237,6 +246,38 @@ impl App {
                     effect,
                     accent,
                     crate::widgets::gain_device::preset_bar_width(size),
+                ),
+                size,
+            )
+        });
+        DeviceBody {
+            content: content.into(),
+            width,
+            padding: iced::Padding::ZERO,
+        }
+    }
+
+    fn compressor_device_body<'a>(
+        &'a self,
+        track_id: TrackId,
+        effect: &'a crate::state::UiEffect,
+        accent: Color,
+        width: f32,
+    ) -> DeviceBody<'a> {
+        let content = iced::widget::responsive(move |size| {
+            crate::widgets::compressor_device::CompressorView {
+                track_id,
+                effect,
+                accent,
+                panel: self.compressor_devices.panel(effect.id),
+                entry: self.param_entry.as_ref(),
+            }
+            .view(
+                self.view_device_preset_bar(
+                    track_id,
+                    effect,
+                    accent,
+                    crate::widgets::compressor_device::preset_bar_width(size),
                 ),
                 size,
             )

@@ -94,6 +94,7 @@ pub enum Message {
     Devices(crate::domains::devices::DevicesMsg),
     GainControl(crate::domains::gain::GainMsg),
     Eq(crate::domains::eq::EqMsg),
+    Compressor(crate::domains::compressor::CompressorMsg),
     /// Typing a value into a built-in device parameter.
     ParamEntry(crate::domains::param_entry::EntryMsg),
     ApplyDevicePreset(TrackId, EffectId, vibez_core::device_preset::DevicePreset),

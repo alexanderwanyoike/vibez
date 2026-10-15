@@ -1,5 +1,6 @@
 pub mod auto_pan;
 pub mod bitcrush;
+mod butterworth_filter;
 pub mod compensation_delay;
 pub mod compressor;
 pub mod delay;

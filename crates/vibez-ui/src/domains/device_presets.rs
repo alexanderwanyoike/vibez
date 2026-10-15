@@ -68,6 +68,30 @@ const EQ_KEYS: [(usize, &str, bool); 21] = {
     ]
 };
 
+/// Native Compressor parameters a preset stores: everything but detector
+/// listening, which is a monitoring aid rather than part of the sound.
+const COMPRESSOR_KEYS: [(usize, &str, bool); 16] = {
+    use vibez_dsp::compressor::param::*;
+    [
+        (THRESHOLD, "threshold_db", false),
+        (RATIO, "ratio", false),
+        (ATTACK, "attack_ms", false),
+        (RELEASE, "release_ms", false),
+        (MAKEUP, "makeup_db", false),
+        (MIX, "mix", false),
+        (KNEE, "knee_db", false),
+        (HP_ENABLED, "hp_enabled", true),
+        (HP_FREQUENCY, "hp_frequency_hz", false),
+        (LP_ENABLED, "lp_enabled", true),
+        (LP_FREQUENCY, "lp_frequency_hz", false),
+        (DETECTOR_MODE, "detector_mode", true),
+        (AUTO_RELEASE, "auto_release", true),
+        (STEREO_LINK, "stereo_link", true),
+        (RANGE_ENABLED, "range_enabled", true),
+        (RANGE, "range_db", false),
+    ]
+};
+
 /// One stored parameter: its index, preset key and whether it is a switch.
 type PresetParam = (usize, &'static str, bool);
 
@@ -130,6 +154,7 @@ fn parameter_keys(effect: &UiEffect) -> Result<Vec<PresetParam>, String> {
             })
             .collect()),
         EffectType::Eq => Ok(EQ_KEYS.to_vec()),
+        EffectType::Compressor => Ok(COMPRESSOR_KEYS.to_vec()),
         _ => Err("Presets are not yet supported by this built-in device".into()),
     }
 }
@@ -204,6 +229,7 @@ pub fn factory_presets(effect_type: EffectType) -> Vec<DevicePreset> {
     match effect_type {
         EffectType::Gain => gain_factory_presets(),
         EffectType::Eq => eq_factory_presets(),
+        EffectType::Compressor => compressor_factory_presets(),
         _ => Vec::new(),
     }
 }
@@ -340,28 +366,140 @@ fn eq_factory_presets() -> Vec<DevicePreset> {
             ],
         ),
     ];
+    keyed_presets(EffectType::Eq, &EQ_KEYS, vibez_dsp::eq::EQ_PARAMS, &presets)
+}
+
+/// Starting points for common dynamics jobs, after Sol's tuning.
+fn compressor_factory_presets() -> Vec<DevicePreset> {
+    let presets: [(&str, &[(&str, f32)]); 8] = [
+        ("Init", &[]),
+        (
+            "Clean bus",
+            &[
+                ("threshold_db", -16.0),
+                ("ratio", 2.0),
+                ("attack_ms", 20.0),
+                ("release_ms", 150.0),
+                ("makeup_db", 1.0),
+                ("knee_db", 6.0),
+                ("hp_enabled", 1.0),
+            ],
+        ),
+        (
+            "Drum punch",
+            &[
+                ("threshold_db", -18.0),
+                ("ratio", 4.0),
+                ("attack_ms", 25.0),
+                ("release_ms", 80.0),
+                ("knee_db", 3.0),
+                ("hp_enabled", 1.0),
+                ("hp_frequency_hz", 60.0),
+            ],
+        ),
+        (
+            "Vocal level",
+            &[
+                ("threshold_db", -24.0),
+                ("ratio", 3.0),
+                ("attack_ms", 4.0),
+                ("release_ms", 120.0),
+                ("makeup_db", 5.0),
+                ("knee_db", 9.0),
+                ("detector_mode", 1.0),
+                ("auto_release", 1.0),
+                ("hp_enabled", 1.0),
+                ("hp_frequency_hz", 100.0),
+            ],
+        ),
+        (
+            "Gentle glue",
+            &[
+                ("threshold_db", -16.0),
+                ("ratio", 1.8),
+                ("attack_ms", 30.0),
+                ("release_ms", 200.0),
+                ("makeup_db", 1.0),
+                ("knee_db", 12.0),
+                ("auto_release", 1.0),
+                ("hp_enabled", 1.0),
+                ("hp_frequency_hz", 90.0),
+            ],
+        ),
+        (
+            "Parallel crush",
+            &[
+                ("threshold_db", -30.0),
+                ("ratio", 10.0),
+                ("attack_ms", 15.0),
+                ("release_ms", 140.0),
+                ("makeup_db", 12.0),
+                ("mix", 0.25),
+                ("knee_db", 3.0),
+                ("range_enabled", 1.0),
+                ("range_db", 24.0),
+            ],
+        ),
+        (
+            "Kick duck",
+            &[
+                ("threshold_db", -24.0),
+                ("ratio", 8.0),
+                ("attack_ms", 2.0),
+                ("release_ms", 140.0),
+                ("makeup_db", 0.0),
+                ("knee_db", 3.0),
+                ("lp_enabled", 1.0),
+                ("lp_frequency_hz", 1800.0),
+            ],
+        ),
+        (
+            "Smooth limit",
+            &[
+                ("threshold_db", -6.0),
+                ("ratio", 20.0),
+                ("attack_ms", 1.0),
+                ("release_ms", 60.0),
+                ("knee_db", 2.0),
+                ("auto_release", 1.0),
+            ],
+        ),
+    ];
+    keyed_presets(
+        EffectType::Compressor,
+        &COMPRESSOR_KEYS,
+        vibez_dsp::compressor::COMPRESSOR_PARAMS,
+        &presets,
+    )
+}
+
+/// Presets that start from the device's defaults and change the named keys.
+fn keyed_presets(
+    effect_type: EffectType,
+    keys: &[PresetParam],
+    descriptors: &[vibez_core::effect::ParamDescriptor],
+    presets: &[(&str, &[(&str, f32)])],
+) -> Vec<DevicePreset> {
     presets
-        .into_iter()
+        .iter()
         .map(|(name, changes)| {
             debug_assert!(
                 changes
                     .iter()
-                    .all(|(changed, _)| EQ_KEYS.iter().any(|(_, key, _)| key == changed)),
-                "{name} names a parameter the EQ does not store"
+                    .all(|(changed, _)| keys.iter().any(|(_, key, _)| key == changed)),
+                "{name} names a parameter the device does not store"
             );
-            let parameters = EQ_KEYS
+            let parameters = keys
                 .iter()
                 .map(|(index, key, _)| {
                     let value = changes
                         .iter()
                         .find(|(changed, _)| changed == key)
-                        .map_or(vibez_dsp::eq::EQ_PARAMS[*index].default, |(_, value)| {
-                            *value
-                        });
+                        .map_or(descriptors[*index].default, |(_, value)| *value);
                     ((*key).to_owned(), value)
                 })
                 .collect();
-            DevicePreset::new(DevicePresetKind::Effect(EffectType::Eq), name, parameters)
+            DevicePreset::new(DevicePresetKind::Effect(effect_type), *name, parameters)
                 .expect("Factory preset values are valid")
         })
         .collect()
@@ -516,6 +654,46 @@ mod presentation_tests {
         let half = DevicePreset::new(DevicePresetKind::Effect(EffectType::Eq), "Half", parameters)
             .unwrap();
         assert!(prepare_updates(&effect, &half).is_err());
+    }
+
+    fn compressor() -> UiEffect {
+        let descriptors =
+            vibez_dsp::factory::create_effect(EffectType::Compressor, 44_100.0).param_descriptors();
+        UiEffect {
+            effect_type: EffectType::Compressor,
+            params: descriptors
+                .iter()
+                .map(|descriptor| descriptor.default)
+                .collect(),
+            descriptors,
+            ..gain()
+        }
+    }
+
+    #[test]
+    fn compressor_factory_presets_are_valid_distinct_and_start_from_init() {
+        let effect = compressor();
+        let presets = factory_presets(EffectType::Compressor);
+        assert!(presets.len() >= 6);
+        assert_eq!(presets[0].name(), "Init");
+        assert_eq!(prepare_updates(&effect, &presets[0]), Ok(Vec::new()));
+        for preset in &presets[1..] {
+            assert!(!prepare_updates(&effect, preset).unwrap().is_empty());
+        }
+        let mut names: Vec<_> = presets.iter().map(DevicePreset::name).collect();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(names.len(), presets.len(), "names are unique");
+    }
+
+    #[test]
+    fn compressor_presets_leave_detector_listening_alone() {
+        let listen = vibez_dsp::compressor::param::DETECTOR_LISTEN;
+        let mut effect = compressor();
+        effect.params[listen] = 1.0;
+        let captured = capture(&effect, "Listening").unwrap();
+        effect.params[listen] = 0.0;
+        assert_eq!(prepare_updates(&effect, &captured), Ok(Vec::new()));
     }
 
     #[test]
