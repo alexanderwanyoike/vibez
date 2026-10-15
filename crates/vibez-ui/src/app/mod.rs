@@ -721,6 +721,9 @@ mod views_clip_launcher;
 mod clip_project_tests;
 
 #[cfg(test)]
+mod note_clip_insertion_tests;
+
+#[cfg(test)]
 mod compensation_persistence_tests;
 
 #[cfg(test)]
