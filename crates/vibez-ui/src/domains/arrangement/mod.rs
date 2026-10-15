@@ -398,15 +398,17 @@ impl TimelineEditorState {
                         engine.send(EngineCommand::RemoveNoteClip(source_track, clip_id));
                         // Add to engine target track
                         engine.send(EngineCommand::AddNoteClip {
-                            start_marker_beats: clip.start_marker_beats,
                             track_id: target_track,
-                            clip_id,
-                            position_beats: clip.position_beats,
-                            duration_beats: clip.duration_beats,
-                            loop_enabled: clip.loop_enabled,
-                            loop_start_beats: clip.loop_start_beats,
-                            loop_end_beats: clip.loop_end_beats,
-                            groove_grid: clip.groove_grid,
+                            insertion: vibez_engine::clip_insertion::PreparedNoteClipInsertion::new(
+                                clip_id,
+                                clip.position_beats,
+                                clip.duration_beats,
+                                clip.start_marker_beats,
+                                clip.loop_enabled,
+                                clip.loop_start_beats,
+                                clip.loop_end_beats,
+                                clip.groove_grid,
+                            ),
                         });
                         for note in &clip.notes {
                             engine.send(EngineCommand::AddNote {
@@ -575,15 +577,17 @@ impl TimelineEditorState {
                                     });
                                 if let Some(duplicate) = duplicate {
                                     engine.send(EngineCommand::AddNoteClip {
-                                        start_marker_beats: duplicate.start_marker_beats,
                                         track_id: *track_id,
-                                        clip_id: duplicate.id,
-                                        position_beats: duplicate.position_beats,
-                                        duration_beats: duplicate.duration_beats,
-                                        loop_enabled: duplicate.loop_enabled,
-                                        loop_start_beats: duplicate.loop_start_beats,
-                                        loop_end_beats: duplicate.loop_end_beats,
-                                        groove_grid: duplicate.groove_grid,
+                                        insertion: vibez_engine::clip_insertion::PreparedNoteClipInsertion::new(
+                                            duplicate.id,
+                                            duplicate.position_beats,
+                                            duplicate.duration_beats,
+                                            duplicate.start_marker_beats,
+                                            duplicate.loop_enabled,
+                                            duplicate.loop_start_beats,
+                                            duplicate.loop_end_beats,
+                                            duplicate.groove_grid,
+                                        ),
                                     });
                                     for note in &duplicate.notes {
                                         engine.send(EngineCommand::AddNote {
@@ -762,15 +766,17 @@ impl TimelineEditorState {
                         track.note_clips.push(new_clip);
                     }
                     engine.send(EngineCommand::AddNoteClip {
-                        start_marker_beats,
-                        track_id,
-                        clip_id: new_clip_id,
-                        position_beats: pos,
-                        duration_beats: dur,
-                        loop_enabled,
-                        loop_start_beats: loop_start,
-                        loop_end_beats: loop_end,
-                        groove_grid,
+                        track_id: track_id,
+                        insertion: vibez_engine::clip_insertion::PreparedNoteClipInsertion::new(
+                            new_clip_id,
+                            pos,
+                            dur,
+                            start_marker_beats,
+                            loop_enabled,
+                            loop_start,
+                            loop_end,
+                            groove_grid,
+                        ),
                     });
                     for note in &notes {
                         engine.send(EngineCommand::AddNote {

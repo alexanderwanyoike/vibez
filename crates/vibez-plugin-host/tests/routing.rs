@@ -223,14 +223,16 @@ fn loaded_instrument_formats_trigger_other_formats_on_the_exact_note_frames() {
             commands
                 .push(EngineCommand::AddNoteClip {
                     track_id: ghost,
-                    clip_id: note_clip,
-                    position_beats: 0.0,
-                    duration_beats: 1.0,
-                    start_marker_beats: 0.0,
-                    loop_enabled: false,
-                    loop_start_beats: 0.0,
-                    loop_end_beats: 0.0,
-                    groove_grid: Default::default(),
+                    insertion: vibez_engine::clip_insertion::PreparedNoteClipInsertion::new(
+                        note_clip,
+                        0.0,
+                        1.0,
+                        0.0,
+                        false,
+                        0.0,
+                        0.0,
+                        Default::default(),
+                    ),
                 })
                 .unwrap();
             commands
@@ -353,14 +355,16 @@ fn all_instrument_source_formats_feed_builtins_and_hosted_receivers() {
             commands
                 .push(EngineCommand::AddNoteClip {
                     track_id: ghost,
-                    clip_id: note_clip,
-                    position_beats: 0.0,
-                    duration_beats: 1.0,
-                    start_marker_beats: 0.0,
-                    loop_enabled: false,
-                    loop_start_beats: 0.0,
-                    loop_end_beats: 0.0,
-                    groove_grid: Default::default(),
+                    insertion: vibez_engine::clip_insertion::PreparedNoteClipInsertion::new(
+                        note_clip,
+                        0.0,
+                        1.0,
+                        0.0,
+                        false,
+                        0.0,
+                        0.0,
+                        Default::default(),
+                    ),
                 })
                 .unwrap();
             commands
