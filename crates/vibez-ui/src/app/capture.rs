@@ -927,10 +927,15 @@ mod tests {
                         request.fulfill();
                     }
                     vibez_engine::events::EngineEvent::ClipInsertionCompleted(owner) => {
-                        assert_eq!(owner.outcome, vibez_engine::clip_insertion::ClipInsertionOutcome::Applied);
+                        assert_eq!(
+                            owner.outcome,
+                            vibez_engine::clip_insertion::ClipInsertionOutcome::Applied
+                        );
                         let target = if completed.len() < expected_targets[0].2 {
                             expected_targets[0]
-                        } else { expected_targets[1] };
+                        } else {
+                            expected_targets[1]
+                        };
                         assert_eq!((owner.track_id, owner.clip_id), (target.0, target.1));
                         let id = owner.id();
                         assert!(!completed.contains(&id));
@@ -941,20 +946,31 @@ mod tests {
                 }
             }
             commands.flush();
-            if completed.len() == operations { break; }
+            if completed.len() == operations {
+                break;
+            }
             audio_engine.process_block(AudioProcessBlock::new(&mut [], 2));
         }
         assert_eq!(commands.pending_len(), 0);
         assert_eq!(completed.len(), operations);
         assert!(!requested.is_empty());
-        for id in &requested { assert!(completed.contains(id)); }
+        for id in &requested {
+            assert!(completed.contains(id));
+        }
         for (track_id, clip_id, count) in expected_targets {
-            let actual = audio_engine.tracks().iter().find(|track| track.id == track_id).unwrap();
+            let actual = audio_engine
+                .tracks()
+                .iter()
+                .find(|track| track.id == track_id)
+                .unwrap();
             let clips = &actual.playback_source.note_clips;
             assert_eq!(clips.len(), 1);
             assert_eq!(clips[0].id, clip_id);
             assert_eq!(clips[0].notes.len(), count - 1);
-            assert_eq!(clips[0].notes, timeline.get(track_id).unwrap().note_clips[0].notes);
+            assert_eq!(
+                clips[0].notes,
+                timeline.get(track_id).unwrap().note_clips[0].notes
+            );
         }
         assert_eq!(audio_engine.transport().position(), 0);
         assert!(!audio_engine.transport().is_playing());
