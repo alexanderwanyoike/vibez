@@ -164,8 +164,6 @@ fn pending_stop_rebase_preserves_first_timestamp_with_idle_or_new_active_capture
                     vec![]
                 }
             );
-            eprintln!("capture-lifecycle-g4-rebase: new_start={new_start}; stage={stage}; calls={calls:?}; state={observed:?}; terminal={}; occupied={occupied}; scheduled={scheduled}; perform={perform}; offset_refs={offset_refs}; order={order:?}; times={times:?}; positions={positions:?}; fillers={}",
-                terminal.unwrap_or(u64::MAX), if released { fillers } else { 0 });
             fixture.calls.clear();
         }
         teardown(fixture);

@@ -150,8 +150,7 @@ fn record(fixture: &mut Fixture, case: &str, original_owner: usize, expected: Ex
     assert_eq!(fillers, expected.fillers);
     assert_eq!(retired, expected.retired);
     assert!(times.iter().all(|time| *time == 0));
-    let calls = fixture.calls.observed();
-    eprintln!("capture-lifecycle-g2-recovery: case={case}; calls={calls:?}; order={order:?}; times={times:?}; state={observed_state:?}; flags={flags:?}; fillers={fillers}; retired={}; same_owner=true", retired.is_some());
+    let _calls = fixture.calls.observed();
     fixture.calls.clear();
 }
 

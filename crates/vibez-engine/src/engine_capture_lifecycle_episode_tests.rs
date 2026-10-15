@@ -146,8 +146,6 @@ fn phase(fixture: &mut Fixture, case: &str, expected: Expected) {
         );
     }
     assert!(fixture.owner.is_none());
-    eprintln!("capture-lifecycle-g2: case={case}; calls={calls:?}; order={:?}; times={:?}; sources={:?}; invalid_targets={:?}; offset_owners={}; before={before:?}; after={after:?}; audio_bits={:?}",
-        observed.order, observed.times, observed.sources, observed.invalid_targets, observed.offset_owners, output.map(f32::to_bits));
 }
 
 fn playing(active: bool, closed: bool, frames: u64) -> [u64; 7] {
