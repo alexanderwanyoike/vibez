@@ -1,4 +1,4 @@
-//! Requires sample-rate Mix ramps and exact automation without disturbing Delay timing.
+//! Verifies Delay scalar/routing ramps and independent automation through public audio.
 
 use std::{
     alloc::{GlobalAlloc, Layout, System},
@@ -486,5 +486,301 @@ mod feedback {
             "sample_tolerance": SAMPLE_TOLERANCE, "observed": rows,
         }));
         assert_eq!(failures, 0, "Feedback ramp/ownership failures; see all observations above");
+    }
+}
+
+mod routing {
+    use super::*;
+
+    #[derive(Clone, Copy)]
+    struct Controls {
+        feedback: f64,
+        mix: f64,
+        routing: f64,
+        left_old_ms: f64,
+        left_new_ms: f64,
+        left_blend: f64,
+    }
+
+    fn stationary(routing: f64, feedback: f64, mix: f64) -> Controls {
+        Controls { feedback, mix, routing, left_old_ms: 3.0, left_new_ms: 3.0, left_blend: 0.0 }
+    }
+
+    fn reference(
+        rate: u32,
+        frames: usize,
+        input: impl Fn(usize, usize) -> f32,
+        controls: impl Fn(usize) -> Controls,
+    ) -> Vec<[f64; 2]> {
+        // Chronological channel writes are independent of the production ring and routing implementation.
+        let mut writes: Vec<[f64; 2]> = Vec::with_capacity(frames);
+        let mut output = Vec::with_capacity(frames);
+        for frame in 0..frames {
+            let state = controls(frame);
+            let read = |channel, milliseconds: f64| {
+                let distance = milliseconds * f64::from(rate) / 1000.0;
+                let whole = distance.floor() as usize;
+                let fraction = distance.fract();
+                let sample = |delay| frame.checked_sub(delay)
+                    .map(|at| writes[at][channel]).unwrap_or(0.0);
+                sample(whole) * (1.0 - fraction) + sample(whole + 1) * fraction
+            };
+            let wet = [
+                read(0, state.left_old_ms) * (1.0 - state.left_blend)
+                    + read(0, state.left_new_ms) * state.left_blend,
+                read(1, 5.0),
+            ];
+            let dry = [f64::from(input(frame, 0)), f64::from(input(frame, 1))];
+            writes.push([
+                dry[0] + state.feedback * ((1.0 - state.routing) * wet[0] + state.routing * wet[1]),
+                dry[1] + state.feedback * ((1.0 - state.routing) * wet[1] + state.routing * wet[0]),
+            ]);
+            output.push([
+                dry[0] * (1.0 - state.mix) + wet[0] * state.mix,
+                dry[1] * (1.0 - state.mix) + wet[1] * state.mix,
+            ]);
+        }
+        output
+    }
+
+    fn prepare(rate: u32, requested_routing: f32, effective_routing: f32, feedback: f32, mix: f32) -> DelayEffect {
+        let mut effect = prepared(rate, 3.0, mix);
+        for (index, value) in [(param::FEEDBACK, feedback), (param::LINK, 0.0),
+            (param::RIGHT_TIME_MS, 5.0), (param::ROUTING, requested_routing)] {
+            assert!(effect.set_param(index, value));
+        }
+        assert_eq!(effect.get_param(param::ROUTING).to_bits(), effective_routing.to_bits());
+        effect
+    }
+
+    fn finish(observation: Observation, scenario: &str, rate: u32, parts: &[usize], rows: &mut Vec<Value>) -> bool {
+        let matches = observation.heap == [0; 3] && observation.mismatches == 0
+            && observation.rejected_expected_edits == 0 && observation.target_mismatches == 0
+            && observation.exact_endpoint_mismatches == 0;
+        rows.push(json!({
+            "scenario": scenario, "rate": rate, "partitions": parts,
+            "routing_frames": (rate as usize).div_ceil(50), "matches": matches,
+            "heap_alloc_realloc_dealloc": observation.heap,
+            "sample_mismatches": observation.mismatches, "maximum_error": observation.maximum_error,
+            "first_mismatch": observation.first_mismatch,
+            "unexpected_rejected_edits": observation.rejected_expected_edits,
+            "target_bit_mismatches": observation.target_mismatches,
+            "exact_routing_endpoint_mismatches": observation.exact_endpoint_mismatches,
+        }));
+        matches
+    }
+
+    fn mono_prefix(
+        effect: &mut DelayEffect,
+        frames: usize,
+        parts: &[usize],
+        input: impl Fn(usize, usize) -> f32,
+        expected: &[[f64; 2]],
+        observation: &mut Observation,
+    ) {
+        let mut scratch = [0.0; 512];
+        let mut frame = 0;
+        let mut part = 0;
+        while frame < frames {
+            let end = (frame + parts[part % parts.len()]).min(frames);
+            let block = &mut scratch[..end - frame];
+            for (index, sample) in block.iter_mut().enumerate() { *sample = input(frame + index, 0); }
+            measured(|| effect.process(block, 1), &mut observation.heap);
+            for (index, &actual) in block.iter().enumerate() {
+                observation.sample(frame + index, 0, actual, expected[frame + index][0]);
+            }
+            frame = end;
+            part += 1;
+        }
+    }
+
+    struct StaticCase {
+        name: &'static str,
+        requested_routing: f32,
+        routing: f32,
+        right_impulse: f32,
+        mono: bool,
+    }
+
+    fn static_arrivals(rate: u32, parts: &[usize], rows: &mut Vec<Value>) -> usize {
+        let cases = [
+            StaticCase { name: "ping_pong_left3_right8_left11", requested_routing: 42.0, routing: 1.0, right_impulse: 0.0, mono: false },
+            StaticCase { name: "ping_pong_preserves_distinct_stereo_inputs", requested_routing: 1.0, routing: 1.0, right_impulse: -0.0625, mono: false },
+            StaticCase { name: "stereo_feedback_preserves_independent_lines", requested_routing: -42.0, routing: 0.0, right_impulse: -0.0625, mono: false },
+            StaticCase { name: "hidden_mono_right_feedback_returns_after_stereo_resume", requested_routing: 1.0, routing: 1.0, right_impulse: 0.0, mono: true },
+        ];
+        let frames = (0.036 * f64::from(rate)).ceil() as usize + 3;
+        let mut failures = 0;
+        for case in cases {
+            let input = |frame, channel| if frame == 0 {
+                if channel == 0 { 0.125 } else { case.right_impulse }
+            } else { 0.0 };
+            let expected = reference(rate, frames, input, |_| stationary(f64::from(case.routing), 0.5, 1.0));
+            if rate == 1000 && case.routing == 1.0 && case.right_impulse == 0.0 {
+                assert_eq!(expected[3], [0.125, 0.0]);
+                assert_eq!(expected[8], [0.0, 0.0625]);
+                assert_eq!(expected[11], [0.03125, 0.0]);
+            }
+            let mut effect = prepare(rate, case.requested_routing, case.routing, 0.5, 1.0);
+            let mut observation = Observation::default();
+            let prefix = if case.mono { (0.009 * f64::from(rate)).ceil() as usize } else { 0 };
+            mono_prefix(&mut effect, prefix, parts, input, &expected, &mut observation);
+            render(&mut effect, prefix..frames, parts, input,
+                |frame, channel| expected[frame][channel], &mut observation);
+            failures += usize::from(!finish(observation, case.name, rate, parts, rows));
+        }
+        failures
+    }
+
+    fn small_input(frame: usize, channel: usize) -> f32 { rich(frame, channel) / 16.0 }
+
+    fn exact_nth_endpoint(rate: u32, parts: &[usize], observation: &mut Observation) {
+        let n = (rate as usize).div_ceil(50);
+        let left_delay = if rate == 1001 { 1001 } else { 3 * rate as usize / 1000 };
+        let right_delay = if rate == 1001 { 1001 } else { 5 * rate as usize / 1000 };
+        let start = left_delay.saturating_sub(n - 1);
+        let arrival_left = start + n - 1;
+        let input_at = arrival_left - left_delay;
+        let arrival_right = arrival_left + right_delay;
+        let input = |frame, channel| if frame == input_at && channel == 0 { 0.125 } else { 0.0 };
+        let expected = |frame, channel| match (frame, channel) {
+            (at, 0) if at == arrival_left => 0.125,
+            (at, 1) if at == arrival_right => 0.0625,
+            _ => 0.0,
+        };
+        let mut effect = prepare(rate, 0.0, 0.0, 0.5, 1.0);
+        // Whole-second distances at 1001 Hz isolate the coefficient endpoint from fractional rounding.
+        if rate == 1001 {
+            assert!(effect.set_param(param::TIME_MS, 1000.0));
+            assert!(effect.set_param(param::RIGHT_TIME_MS, 1000.0));
+        }
+        let mut silent = [0.0; 2];
+        measured(|| effect.process(&mut silent, 2), &mut observation.heap);
+        render(&mut effect, 0..start, parts, input, expected, observation);
+        observation.edit(&mut effect, param::ROUTING, 1.0, false);
+        render(&mut effect, start..arrival_right, parts, input, expected, observation);
+        let mut actual = [0.0; 2];
+        measured(|| effect.process(&mut actual, 2), &mut observation.heap);
+        for (channel, sample) in actual.into_iter().enumerate() {
+            let expected = expected(arrival_right, channel);
+            observation.sample(arrival_right, channel, sample, expected);
+            observation.exact_endpoint_mismatches += usize::from(sample.to_bits() != (expected as f32).to_bits());
+        }
+    }
+
+    fn manual_transition(rate: u32, parts: &[usize], retarget: bool, rows: &mut Vec<Value>) -> bool {
+        let n = (rate as usize).div_ceil(50);
+        let warm = (rate as usize).div_ceil(50);
+        let retarget_at = warm + n / 2;
+        let repeated = if retarget { retarget_at + n / 3 } else { warm + n / 3 };
+        let transition_start = if retarget { retarget_at } else { warm };
+        let end = transition_start + n + (0.015 * f64::from(rate)).ceil() as usize + 3;
+        let origin = (n / 2) as f64 / n as f64;
+        let routing = |frame: usize| {
+            if frame < warm { 0.0 }
+            else if retarget && frame >= retarget_at {
+                origin * (1.0 - ((frame - retarget_at + 1) as f64 / n as f64).min(1.0))
+            } else { ((frame - warm + 1) as f64 / n as f64).min(1.0) }
+        };
+        let expected = reference(rate, end, small_input, |frame| stationary(routing(frame), 0.5, 1.0));
+        let oracle = |frame: usize, channel| expected[frame][channel];
+        let mut effect = prepare(rate, 0.0, 0.0, 0.5, 1.0);
+        let mut observation = Observation::default();
+        render(&mut effect, 0..warm, parts, small_input, oracle, &mut observation);
+        observation.edit(&mut effect, param::ROUTING, 1.0, false);
+        if retarget {
+            render(&mut effect, warm..retarget_at, parts, small_input, oracle, &mut observation);
+            observation.edit(&mut effect, param::ROUTING, 0.0, false);
+        }
+        render(&mut effect, transition_start..repeated,
+            parts, small_input, oracle, &mut observation);
+        let target = if retarget { 0.0 } else { 1.0 };
+        observation.edit(&mut effect, param::ROUTING, target, false);
+        for value in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            for automated in [false, true] {
+                let accepted = measured(|| if automated { effect.set_automated_param(param::ROUTING, value) }
+                    else { effect.set_param(param::ROUTING, value) }, &mut observation.heap);
+                observation.rejected_expected_edits += usize::from(accepted);
+                observation.target_mismatches += usize::from(effect.get_param(param::ROUTING).to_bits() != target.to_bits());
+            }
+        }
+        render(&mut effect, repeated..end, parts, small_input, oracle, &mut observation);
+        for pre_audio in [false, true] {
+            let target = if pre_audio { 1.0 } else { 1.0 - target };
+            observation.edit(&mut effect, param::ROUTING, if pre_audio { 0.0 } else { target }, false);
+            measured(|| effect.reset(), &mut observation.heap);
+            if pre_audio { observation.edit(&mut effect, param::ROUTING, target, false); }
+            let frames = (0.024 * f64::from(rate)).ceil() as usize + 3;
+            let impulse = |frame, channel| if frame == 0 { [0.125, -0.0625][channel] } else { 0.0 };
+            let expected = reference(rate, frames, impulse, |_| stationary(f64::from(target), 0.5, 1.0));
+            render(&mut effect, 0..frames, parts, impulse,
+                |frame, channel| expected[frame][channel], &mut observation);
+        }
+        if !retarget { exact_nth_endpoint(rate, parts, &mut observation); }
+        finish(observation, if retarget { "routing_retargets_last_applied_then_reset_and_pre_audio_snap" }
+            else { "routing_twenty_ms_same_rejected_then_reset_and_pre_audio_snap" }, rate, parts, rows)
+    }
+
+    fn automation_ownership(rate: u32, parts: &[usize], automate_routing: bool, rows: &mut Vec<Value>) -> bool {
+        let scalar_frames = (rate as usize).div_ceil(100);
+        let routing_frames = (rate as usize).div_ceil(50);
+        let warm = routing_frames;
+        let time_edit = warm + scalar_frames / 4;
+        let automation = warm + scalar_frames / 2;
+        let end = time_edit + routing_frames + (0.021 * f64::from(rate)).ceil() as usize + 3;
+        let amount = |frame: usize, automated| {
+            if frame < warm { 0.25 }
+            else if automated && frame >= automation { 0.75 }
+            else { 0.25 + 0.5 * ((frame - warm + 1) as f64 / scalar_frames as f64).min(1.0) }
+        };
+        let expected = reference(rate, end, small_input, |frame| {
+            let routing = if frame < warm { 0.0 }
+                else if automate_routing && frame >= automation { 1.0 }
+                else { ((frame - warm + 1) as f64 / routing_frames as f64).min(1.0) };
+            Controls {
+                routing, feedback: amount(frame, !automate_routing), mix: amount(frame, false),
+                left_old_ms: 3.0, left_new_ms: if frame < time_edit { 3.0 } else { 7.0 },
+                left_blend: if frame < time_edit { 0.0 }
+                    else { ((frame - time_edit) as f64 / (routing_frames - 1) as f64).min(1.0) },
+            }
+        });
+        let oracle = |frame: usize, channel| expected[frame][channel];
+        let mut effect = prepare(rate, 0.0, 0.0, 0.25, 0.25);
+        let mut observation = Observation::default();
+        render(&mut effect, 0..warm, parts, small_input, oracle, &mut observation);
+        for (index, value) in [(param::ROUTING, 1.0), (param::FEEDBACK, 0.75), (param::MIX, 0.75)] {
+            observation.edit(&mut effect, index, value, false);
+        }
+        render(&mut effect, warm..time_edit, parts, small_input, oracle, &mut observation);
+        observation.edit(&mut effect, param::TIME_MS, 7.0, false);
+        render(&mut effect, time_edit..automation, parts, small_input, oracle, &mut observation);
+        observation.edit(&mut effect, if automate_routing { param::ROUTING } else { param::FEEDBACK },
+            if automate_routing { 1.0 } else { 0.75 }, true);
+        render(&mut effect, automation..end, parts, small_input, oracle, &mut observation);
+        finish(observation, if automate_routing { "routing_automation_preserves_mix_feedback_and_time" }
+            else { "feedback_automation_preserves_routing_mix_and_time" }, rate, parts, rows)
+    }
+
+    #[test]
+    fn feedback_routing_uses_independent_lines_and_twenty_millisecond_own_field_edits() {
+        let mut rows = Vec::new();
+        let mut failures = 0;
+        for rate in [1000, 1001, 48_000] {
+            for parts in [&[1][..], &[7, 31, 64, 1, 128, 512][..]] {
+                failures += static_arrivals(rate, parts, &mut rows);
+                for retarget in [false, true] {
+                    failures += usize::from(!manual_transition(rate, parts, retarget, &mut rows));
+                }
+                for automate_routing in [false, true] {
+                    failures += usize::from(!automation_ownership(rate, parts, automate_routing, &mut rows));
+                }
+            }
+        }
+        println!("DELAY_ROUTING_RECORD {}", json!({
+            "execution_head": std::env::var("VIBEZ_VERIFICATION_HEAD").unwrap_or_else(|_| "UNLABELLED".into()),
+            "oracle": "Independent two-channel chronological feedback writes, identity/swap convex matrices, input and first wet unchanged; routing k/N, timing i/(N-1)",
+            "sample_tolerance": SAMPLE_TOLERANCE, "observed": rows,
+        }));
+        assert_eq!(failures, 0, "Routing/ownership failures; see all observations above");
     }
 }
