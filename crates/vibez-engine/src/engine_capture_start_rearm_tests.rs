@@ -114,8 +114,6 @@ fn successful_start_rearms_local_close_before_clear_validation_without_repeating
             offsets + starts
         );
         let observed = collect(&mut fixture);
-        eprintln!("capture-start-rearm: phase={phase}; calls={calls:?}; after={after:?}; order={:?}; times={:?}; sources={:?}; offset_owners={}; audio_bits={:?}",
-            observed.order, observed.times, observed.sources, observed.offset_owners, audio.map(f32::to_bits));
         assert_eq!(after, [0, 1, 1, 1, frames, frames, frames], "{phase}");
         assert_eq!(
             calls,
