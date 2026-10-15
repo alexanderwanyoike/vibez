@@ -10,7 +10,9 @@ fn start_capture_through_command(
     events: &mut Consumer<EngineEvent>,
 ) {
     let offset_owners = Arc::strong_count(&engine.routing.capture_offsets);
-    commands.push(EngineCommand::StartPerformanceCapture).unwrap();
+    commands
+        .push(EngineCommand::StartPerformanceCapture)
+        .unwrap();
     assert_eq!(
         crate::retirement::tests::allocations(|| engine.drain_commands()),
         (0, 0)
@@ -22,15 +24,25 @@ fn start_capture_through_command(
         effective_at_samples,
         section_id,
         section_position_samples,
-    } = events.pop().unwrap() else {
+    } = events.pop().unwrap()
+    else {
         panic!("expected real Capture command acknowledgement");
     };
     assert!(Arc::ptr_eq(&offsets, &engine.routing.capture_offsets));
     assert!(offsets.is_empty());
-    assert_eq!((effective_at_samples, section_id, section_position_samples), (0, None, None));
-    assert_eq!(Arc::strong_count(&engine.routing.capture_offsets), offset_owners + 1);
+    assert_eq!(
+        (effective_at_samples, section_id, section_position_samples),
+        (0, None, None)
+    );
+    assert_eq!(
+        Arc::strong_count(&engine.routing.capture_offsets),
+        offset_owners + 1
+    );
     drop(offsets);
-    assert_eq!(Arc::strong_count(&engine.routing.capture_offsets), offset_owners);
+    assert_eq!(
+        Arc::strong_count(&engine.routing.capture_offsets),
+        offset_owners
+    );
     assert!(events.pop().is_err());
 }
 

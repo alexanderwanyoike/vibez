@@ -46,6 +46,9 @@ impl CaptureLifecycle {
     }
 
     pub(super) fn local_failure_closure_requested(&self) -> bool {
-        matches!(self.local_failure_episode, LocalFailureEpisode::ClosureRequested)
+        matches!(
+            self.local_failure_episode,
+            LocalFailureEpisode::ClosureRequested
+        )
     }
 }

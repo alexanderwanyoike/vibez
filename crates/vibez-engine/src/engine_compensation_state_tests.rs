@@ -670,7 +670,11 @@ fn capture_admission_uses_applied_plan_validity_instead_of_global_processing_gat
         fixture.drain_command(EngineCommand::StartPerformanceCapture);
         let after = Readiness::observe(&fixture.engine);
         assert_eq!(after, before, "{start:?}");
-        assert_eq!(fixture.engine.capture_lifecycle.is_active(), allowed, "{start:?}");
+        assert_eq!(
+            fixture.engine.capture_lifecycle.is_active(),
+            allowed,
+            "{start:?}"
+        );
         assert_eq!(std::ptr::from_ref(fixture.engine.routing.as_ref()), plan);
         let mut order = Vec::new();
         let mut source_count = 0;
