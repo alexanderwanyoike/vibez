@@ -52,10 +52,10 @@ impl DelayEffect {
         }
     }
 
-    fn delay_samples(&self) -> usize {
-        let samples = (self.time_ms * 0.001 * self.sample_rate) as usize;
+    fn delay_samples(&self) -> f64 {
+        let samples = f64::from(self.time_ms) * f64::from(self.sample_rate) / 1000.0;
         // Full-ring distance reads the prior lap before the current frame overwrites it.
-        samples.min(self.buffer_l.len()).max(1)
+        samples.max(1.0).min(self.buffer_l.len().max(1) as f64)
     }
 }
 
@@ -103,21 +103,37 @@ impl AudioEffect for DelayEffect {
         let ch = channels.clamp(1, 2);
         let frames = buffer.len() / ch;
         let delay = self.delay_samples();
+        let whole = delay.floor() as usize;
+        let fraction = delay.fract();
         let buf_len = self.buffer_l.len();
+        let read = |history: &[f32], position: usize| {
+            let recent = history[position];
+            // Integer taps bypass blend arithmetic to retain the legacy sample algebra.
+            if fraction == 0.0 {
+                recent
+            } else {
+                let older = history[(position + buf_len - 1) % buf_len];
+                (f64::from(recent) * (1.0 - fraction) + f64::from(older) * fraction) as f32
+            }
+        };
 
         for frame in 0..frames {
-            let read_pos = (self.write_pos + buf_len - delay) % buf_len;
+            let read_pos = (self.write_pos + buf_len - whole) % buf_len;
+            let delayed_l = read(&self.buffer_l, read_pos);
+            let delayed_r = if ch >= 2 {
+                read(&self.buffer_r, read_pos)
+            } else {
+                0.0
+            };
 
             // Left channel
             let dry_l = buffer[frame * ch];
-            let delayed_l = self.buffer_l[read_pos];
             self.buffer_l[self.write_pos] = dry_l + delayed_l * self.feedback;
             buffer[frame * ch] = dry_l * (1.0 - self.mix) + delayed_l * self.mix;
 
             // Right channel (or duplicate mono)
             if ch >= 2 {
                 let dry_r = buffer[frame * ch + 1];
-                let delayed_r = self.buffer_r[read_pos];
                 self.buffer_r[self.write_pos] = dry_r + delayed_r * self.feedback;
                 buffer[frame * ch + 1] = dry_r * (1.0 - self.mix) + delayed_r * self.mix;
             }
