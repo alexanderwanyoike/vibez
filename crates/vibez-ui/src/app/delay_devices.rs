@@ -151,3 +151,7 @@ impl App {
     }
 
 }
+
+#[cfg(test)]
+#[path = "delay_reference_currency_tests.rs"]
+mod currency_tests;
