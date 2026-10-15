@@ -193,9 +193,8 @@ fn natural_last_playback_stop_keeps_all_owners_without_growing_ordinary_returns(
     assert_eq!(delivered.iter().filter(|event| matches!(event, EngineEvent::SectionRecordStopped(SectionRecordStoppedEvent {
         section_id, effective_at_samples: 8, section_position_samples: 8, started: true, retired: None, ..
     }) if *section_id == fixture.first_section)).count(), 1);
-    // Baseline expectation only: synthetic fault terminal plus original natural acknowledgement.
-    // A later coalescing correction requires an explicit, separately reviewed intentional delta.
-    assert_eq!(delivered.iter().filter(|event| matches!(event, EngineEvent::PlaybackStopped)).count(), 2);
+    // Natural completion and its overflow fault describe the same stopped state.
+    assert_eq!(delivered.iter().filter(|event| matches!(event, EngineEvent::PlaybackStopped)).count(), 1);
     assert_eq!(delivered.iter().filter(|event| matches!(event, EngineEvent::CompensationInvalid {
         track_id, effect_id: None, reason: "Audio presentation event history is full"
     } if *track_id == TrackId::MASTER)).count(), 1);
