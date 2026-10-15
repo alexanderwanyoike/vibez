@@ -1307,3 +1307,202 @@ mod feedback_filters {
         }
     }
 }
+
+mod duck {
+    use super::*;
+
+    fn finite(sample: f32) -> f32 { if sample.is_finite() { sample } else { 0.0 } }
+
+    fn plateau(prior: f64, peak: f64, frames: usize, rate: u32, tau: f64) -> f64 {
+        peak + (prior - peak) * (-(frames as f64) / (tau * f64::from(rate))).exp()
+    }
+
+    fn gain(envelope: f64, amount: f32) -> f64 {
+        if amount == 0.0 { 1.0 }
+        else { 10.0_f64.powf(-24.0 * f64::from(amount) * (envelope / 0.25).clamp(0.0, 1.0) / 20.0) }
+    }
+
+    fn unducked_wet(rate: u32, frames: usize, channels: usize, time_ms: f32, feedback: f32,
+        input: impl Fn(usize, usize) -> f32) -> Vec<[f32; 2]> {
+        let distance = f64::from(time_ms) * f64::from(rate) / 1000.0;
+        let mut writes: Vec<[f32; 2]> = Vec::with_capacity(frames);
+        let mut output = Vec::with_capacity(frames);
+        for frame in 0..frames {
+            let wet: [f32; 2] = std::array::from_fn(|channel| {
+                let sample = |delay| frame.checked_sub(delay)
+                    .map(|at| f64::from(writes[at][channel])).unwrap_or(0.0);
+                (sample(distance.floor() as usize) * (1.0 - distance.fract())
+                    + sample(distance.floor() as usize + 1) * distance.fract()) as f32
+            });
+            writes.push(std::array::from_fn(|channel| {
+                let dry = if channel < channels { finite(input(frame, channel)) } else { 0.0 };
+                dry + feedback * wet[channel]
+            }));
+            output.push(wet);
+        }
+        output
+    }
+
+    fn output(dry: f32, wet: f32, mix: f32, amount: f32, envelope: f64) -> f64 {
+        let ducked = (f64::from(wet) * gain(envelope, amount)) as f32;
+        f64::from(finite(dry) * (1.0 - mix) + ducked * mix)
+    }
+
+    fn capture(effect: &mut DelayEffect, audio: &mut [f32], channels: usize,
+        parts: &[usize], observation: &mut Observation) {
+        let mut frame = 0;
+        let mut part = 0;
+        while frame < audio.len() / channels {
+            let end = (frame + parts[part % parts.len()]).min(audio.len() / channels);
+            measured(|| effect.process(&mut audio[channels * frame..channels * end], channels), &mut observation.heap);
+            frame = end;
+            part += 1;
+        }
+    }
+
+    fn pulse(frame: usize, channel: usize, low_end: usize, high_end: usize) -> f32 {
+        if frame < low_end { [0.0625, -0.125][channel] }
+        else if frame < high_end { [0.5, -0.25][channel] }
+        else if frame == high_end + 2 { [f32::NAN, f32::INFINITY][channel] }
+        else if frame == high_end + 3 { [f32::NEG_INFINITY, f32::NAN][channel] }
+        else { 0.0 }
+    }
+
+    fn analytic_envelope(frame: usize, channels: usize, low_end: usize, high_end: usize, rate: u32) -> f64 {
+        let low = if channels == 1 { 0.0625 } else { 0.125 };
+        let low_final = plateau(0.0, low, low_end, rate, 0.005);
+        if frame < low_end { plateau(0.0, low, frame + 1, rate, 0.005) }
+        else if frame < high_end { plateau(low_final, 0.5, frame - low_end + 1, rate, 0.005) }
+        else {
+            let high_final = plateau(low_final, 0.5, high_end - low_end, rate, 0.005);
+            plateau(high_final, 0.0, frame - high_end + 1, rate, 0.150)
+        }
+    }
+
+    fn analytic_attack_release(rate: u32, parts: &[usize], channels: usize, warm: bool, rows: &mut Vec<Value>) -> bool {
+        let span = |seconds: f64| (seconds * f64::from(rate)).ceil() as usize;
+        let low_end = span(0.040);
+        let high_end = low_end + span(0.020);
+        let duck_off = high_end + span(0.300);
+        let end = duck_off + span(0.080);
+        let duck_on = if warm { span(0.030) } else { 0 };
+        let input = |frame, channel| pulse(frame, channel, low_end, high_end);
+        let wet = unducked_wet(rate, end, channels, 20.0, 0.75, input);
+        let mut actual: Vec<_> = (0..channels * end).map(|i| input(i / channels, i % channels)).collect();
+        let mut baseline = actual.clone();
+        let mut effect = prepared(rate, 20.0, 0.375);
+        let mut neutral = prepared(rate, 20.0, 0.375);
+        for effect in [&mut effect, &mut neutral] { assert!(effect.set_param(param::FEEDBACK, 0.75)); }
+        let mut observation = Observation::default();
+        observation.edit(&mut effect, param::DUCK, if warm { 0.0 } else { 0.75 }, false);
+        capture(&mut neutral, &mut baseline, channels, parts, &mut observation);
+        capture(&mut effect, &mut actual[..channels * duck_on], channels, parts, &mut observation);
+        if warm { observation.edit(&mut effect, param::DUCK, 0.75, true); }
+        capture(&mut effect, &mut actual[channels * duck_on..channels * duck_off], channels, parts, &mut observation);
+        observation.edit(&mut effect, param::DUCK, 0.0, true);
+        capture(&mut effect, &mut actual[channels * duck_off..], channels, parts, &mut observation);
+        for (index, &sample) in actual.iter().enumerate() {
+            let (frame, channel) = (index / channels, index % channels);
+            let amount = if frame < duck_on || frame >= duck_off { 0.0 } else { 0.75 };
+            let expected = output(input(frame, channel), wet[frame][channel], 0.375, amount,
+                analytic_envelope(frame, channels, low_end, high_end, rate));
+            observation.sample(frame, channel, sample, expected);
+            // Equality after bypass also detects any attenuation incorrectly stored in feedback.
+            if amount == 0.0 || wet[frame][channel] == 0.0 {
+                observation.exact_endpoint_mismatches += usize::from(sample.to_bits() != baseline[index].to_bits());
+            }
+        }
+        let scenario = if warm { "zero_amount_is_exact_and_detector_warm_before_enable" }
+            else if channels == 1 { "mono_analytic_attack_release_and_unchanged_feedback" }
+            else { "stereo_linked_peak_analytic_attack_release_and_unchanged_feedback" };
+        observation.finish(scenario, rate, parts, rows)
+    }
+
+    fn trajectory(frame: usize, start: usize, frames: usize, from: f32, to: f32) -> f32 {
+        if frame < start { from } else if frame - start + 1 >= frames { to }
+        else { (f64::from(from) + (f64::from(to) - f64::from(from))
+            * (frame - start + 1) as f64 / frames as f64) as f32 }
+    }
+
+    fn manual_amount_and_ownership(rate: u32, parts: &[usize], rows: &mut Vec<Value>) -> bool {
+        let n = (rate as usize).div_ceil(100);
+        let start = 2 * n;
+        let retarget = start + n / 2;
+        let snap_duck = retarget + n / 3;
+        let second = start + 2 * n;
+        let snap_mix = second + n / 2;
+        let end = snap_mix + n / 3;
+        let from = trajectory(retarget - 1, start, n, 0.0, 1.0);
+        let amount = |frame| {
+            if frame >= second { trajectory(frame, second, n, 0.25, 1.0) }
+            else if frame >= snap_duck { 0.25 }
+            else if frame >= retarget { trajectory(frame, retarget, n, from, 0.25) }
+            else { trajectory(frame, start, n, 0.0, 1.0) }
+        };
+        let mix = |frame| {
+            if frame >= snap_mix { 0.25 }
+            else if frame >= second { trajectory(frame, second, n, 0.75, 0.25) }
+            else { trajectory(frame, start, n, 0.25, 0.75) }
+        };
+        let wet = unducked_wet(rate, end, 2, 3.0, 0.5, dry);
+        let expected = |frame: usize, channel| output(dry(frame, channel), wet[frame][channel], mix(frame),
+            amount(frame), plateau(0.0, 0.25, frame + 1, rate, 0.005));
+        let changes = [(start, param::DUCK, 1.0, false), (start, param::MIX, 0.75, false),
+            (start + n / 3, param::DUCK, 1.0, false), (retarget, param::DUCK, 0.25, false),
+            (snap_duck, param::DUCK, 0.25, true), (snap_duck + 1, param::DUCK, 0.25, true),
+            (second, param::DUCK, 1.0, false), (second, param::MIX, 0.25, false),
+            (second + n / 3, param::DUCK, 1.0, false), (snap_mix, param::MIX, 0.25, true)];
+        let mut effect = prepared(rate, 3.0, 0.25);
+        assert!(effect.set_param(param::FEEDBACK, 0.5));
+        let mut observation = Observation::default();
+        let mut previous = 0;
+        for (at, index, target, automated) in changes {
+            render(&mut effect, previous..at, parts, dry, expected, &mut observation);
+            observation.edit(&mut effect, index, target, automated);
+            if at == retarget {
+                for value in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+                    let accepted = measured(|| effect.set_param(param::DUCK, value), &mut observation.heap);
+                    observation.rejected_expected_edits += usize::from(accepted);
+                    observation.target_mismatches += usize::from(effect.get_param(param::DUCK).to_bits() != target.to_bits());
+                }
+            }
+            previous = at;
+        }
+        render(&mut effect, previous..end, parts, dry, expected, &mut observation);
+        // The second amount ramp is still moving when reset must snap its target.
+        measured(|| effect.reset(), &mut observation.heap);
+        let wet = unducked_wet(rate, 3 * n, 2, 3.0, 0.5, dry);
+        render(&mut effect, 0..3 * n, parts, dry,
+            |frame, channel| output(dry(frame, channel), wet[frame][channel], 0.25, 1.0,
+                plateau(0.0, 0.25, frame + 1, rate, 0.005)), &mut observation);
+        measured(|| effect.reset(), &mut observation.heap);
+        observation.edit(&mut effect, param::DUCK, 0.5, false);
+        observation.edit(&mut effect, param::MIX, 0.5, false);
+        render(&mut effect, 0..3 * n, parts, dry,
+            |frame, channel| output(dry(frame, channel), wet[frame][channel], 0.5, 0.5,
+                plateau(0.0, 0.25, frame + 1, rate, 0.005)), &mut observation);
+        observation.finish("manual_duck_retarget_noop_exact_own_and_converse_automation_reset", rate, parts, rows)
+    }
+
+    #[test]
+    fn duck_uses_linked_input_peak_and_wet_only_gain_with_independent_amount_edits() {
+        let mut rows = Vec::new();
+        let mut failures = 0;
+        for rate in [1000, 1001, 48000] {
+            for parts in [&[1][..], &[7, 31, 64, 1, 128, 512][..]] {
+                for channels in [1, 2] {
+                    failures += usize::from(!analytic_attack_release(rate, parts, channels, false, &mut rows));
+                }
+                failures += usize::from(!analytic_attack_release(rate, parts, 2, true, &mut rows));
+                failures += usize::from(!manual_amount_and_ownership(rate, parts, &mut rows));
+            }
+        }
+        assert_eq!(rows.len(), 24);
+        println!("DELAY_DUCK_RECORD {}", json!({
+            "execution_head": std::env::var("VIBEZ_VERIFICATION_HEAD").unwrap_or_else(|_| "UNLABELLED".into()),
+            "oracle": "Analytic constant-step exp attack/release, chronological unducked feedback writes, wet-only24dB amount law; amount k/N and independent Mix ownership",
+            "sample_tolerance": SAMPLE_TOLERANCE, "observed": rows,
+        }));
+        assert_eq!(failures, 0, "Duck envelope/output/ownership failures; see observations above");
+    }
+}
