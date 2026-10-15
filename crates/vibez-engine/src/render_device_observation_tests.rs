@@ -83,16 +83,28 @@ impl Trace {
     fn assert_boundary_observed(&self, mode: Mode) {
         let calls = self.observed();
         if matches!(mode, Mode::AtEntry | Mode::InstrumentRate) {
-            let blocked = if mode == Mode::InstrumentRate { (1, RATE, 48_000) } else { (2, REQUEST, 1) };
-            assert!(calls.contains(&blocked), "{mode:?}: the actual entry guard must observe the rejection");
+            let blocked = if mode == Mode::InstrumentRate {
+                (1, RATE, 48_000)
+            } else {
+                (2, REQUEST, 1)
+            };
+            assert!(
+                calls.contains(&blocked),
+                "{mode:?}: the actual entry guard must observe the rejection"
+            );
             assert!(!calls.iter().any(|(_, method, _)| *method == PROCESS));
             if mode == Mode::InstrumentRate {
-                assert!(calls.iter().all(|(owner, _, _)| *owner == 1),
-                    "the invalid instrument must stop validation before querying its effects");
+                assert!(
+                    calls.iter().all(|(owner, _, _)| *owner == 1),
+                    "the invalid instrument must stop validation before querying its effects"
+                );
             }
             return;
         }
-        let processed = calls.iter().position(|(owner, method, _)| *owner == 2 && *method == PROCESS).unwrap();
+        let processed = calls
+            .iter()
+            .position(|(owner, method, _)| *owner == 2 && *method == PROCESS)
+            .unwrap();
         let changed = match mode {
             Mode::Requested => (REQUEST, 1),
             Mode::Invalid | Mode::Local => (VALID, 0),
@@ -101,8 +113,10 @@ impl Trace {
             Mode::Error => (ERROR, 1),
             _ => (VALID, 1),
         };
-        assert!(calls[processed + 1..].contains(&(2, changed.0, changed.1)),
-            "{mode:?}: a later boundary must observe the real post-process state");
+        assert!(
+            calls[processed + 1..].contains(&(2, changed.0, changed.1)),
+            "{mode:?}: a later boundary must observe the real post-process state"
+        );
     }
 }
 
@@ -523,9 +537,14 @@ fn public_offline_full_and_cropped_master_and_track_outputs_keep_origin_warmed_h
                 full = Some(result.audio.channels.clone());
             }
             let calls = trace.observed();
-            let processing = calls.iter().position(|(_, method, _)| *method == PROCESS).unwrap();
-            assert!(calls[..processing].contains(&(2, LATENCY, 0)),
-                "latency reporting must precede rendering the owner's first real block");
+            let processing = calls
+                .iter()
+                .position(|(_, method, _)| *method == PROCESS)
+                .unwrap();
+            assert!(
+                calls[..processing].contains(&(2, LATENCY, 0)),
+                "latency reporting must precede rendering the owner's first real block"
+            );
         }
     }
 }
