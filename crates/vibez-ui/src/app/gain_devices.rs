@@ -18,15 +18,10 @@ pub(super) struct GainDevices {
 
 impl App {
     pub(super) fn poll_gain_devices(&mut self, metered: Option<TrackId>) {
-        let project = &self.state.project_tracks;
-        self.gain_devices.panels.retain(|id, _| {
-            project
-                .tracks
-                .iter()
-                .chain(&project.buses)
-                .chain(std::iter::once(&project.master))
-                .any(|track| track.effects.iter().any(|effect| effect.id == *id))
-        });
+        let state = &self.state;
+        self.gain_devices
+            .panels
+            .retain(|id, _| state.has_effect(*id));
         if let Some(track) = metered.and_then(|track_id| self.state.find_track(track_id)) {
             let now = Instant::now();
             for effect in &track.effects {

@@ -890,6 +890,17 @@ impl AppState {
         self.project_tracks.find(id)
     }
 
+    /// Whether any channel, bus or the master still holds this effect.
+    pub fn has_effect(&self, id: vibez_core::id::EffectId) -> bool {
+        let project = &self.project_tracks;
+        project
+            .tracks
+            .iter()
+            .chain(&project.buses)
+            .chain(std::iter::once(&project.master))
+            .any(|track| track.effects.iter().any(|effect| effect.id == id))
+    }
+
     pub fn find_track_mut(&mut self, id: TrackId) -> Option<&mut ProjectTrack> {
         Arc::make_mut(&mut self.project_tracks).find_mut(id)
     }
