@@ -261,6 +261,10 @@ impl DelayEffect {
 }
 
 impl AudioEffect for DelayEffect {
+    fn supports_level_meter(&self) -> bool {
+        true
+    }
+
     fn set_audio_context(&mut self, context: vibez_core::audio_context::DeviceAudioContext) {
         self.timing.set_bpm(context.bpm, &self.targets, self.history.sample_rate());
     }
