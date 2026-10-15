@@ -775,7 +775,7 @@ impl App {
                 self.send_command(EngineCommand::AddNote {
                     track_id: note_clip.track_id,
                     clip_id: note_clip.id,
-                    note: *note,
+                    insertion: vibez_engine::clip_insertion::PreparedNoteInsertion::new(*note),
                 });
             }
             if self.state.find_track(note_clip.track_id).is_some() {

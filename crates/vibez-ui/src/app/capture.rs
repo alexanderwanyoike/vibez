@@ -531,7 +531,7 @@ fn add_note_clip_commands(
     commands.extend(clip.notes.iter().map(|note| EngineCommand::AddNote {
         track_id,
         clip_id: clip.id,
-        note: *note,
+        insertion: vibez_engine::clip_insertion::PreparedNoteInsertion::new(*note),
     }));
     commands
 }

@@ -371,7 +371,7 @@ impl App {
                 self.send_command(EngineCommand::AddNote {
                     track_id: track.id,
                     clip_id: clip.id,
-                    note: *note,
+                    insertion: vibez_engine::clip_insertion::PreparedNoteInsertion::new(*note),
                 });
             }
         }

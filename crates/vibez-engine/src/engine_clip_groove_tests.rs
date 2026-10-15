@@ -133,7 +133,7 @@ fn render_events(
             .push(EngineCommand::AddNote {
                 track_id,
                 clip_id,
-                note: *note,
+                insertion: crate::clip_insertion::PreparedNoteInsertion::new(*note),
             })
             .unwrap();
     }
@@ -190,12 +190,12 @@ fn midi_start_plays_once_then_returns_to_loop_start() {
             .push(EngineCommand::AddNote {
                 track_id,
                 clip_id,
-                note: MidiNote {
+                insertion: crate::clip_insertion::PreparedNoteInsertion::new(MidiNote {
                     pitch,
                     velocity: 100,
                     start_beat,
                     duration_beats: 0.1,
-                },
+                }),
             })
             .unwrap();
     }
@@ -247,12 +247,12 @@ fn dense_recorded_groove_schedules_each_note_once_per_audio_block() {
             .push(EngineCommand::AddNote {
                 track_id,
                 clip_id,
-                note: MidiNote {
+                insertion: crate::clip_insertion::PreparedNoteInsertion::new(MidiNote {
                     pitch: 48 + (index % 8) as u8,
                     velocity: 100,
                     start_beat: index as f64 * 0.25,
                     duration_beats: 0.2,
-                },
+                }),
             })
             .unwrap();
     }

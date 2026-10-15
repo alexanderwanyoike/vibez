@@ -273,7 +273,7 @@ fn playing(
         EngineCommand::AddNote {
             track_id: f.synth,
             clip_id: f.note_clip,
-            note: note(),
+            insertion: crate::clip_insertion::PreparedNoteInsertion::new(note()),
         },
         add_note_clip(f.synth, f.empty_note_clip),
         EngineCommand::SetSend {
@@ -655,7 +655,7 @@ fn cases() -> Vec<Case> {
         case!("AddNote", true, |f| C::AddNote {
             track_id: f.synth,
             clip_id: f.empty_note_clip,
-            note: note(),
+            insertion: crate::clip_insertion::PreparedNoteInsertion::new(note()),
         }),
         case!("RemoveNote", false, |f| C::RemoveNote {
             track_id: f.synth,
@@ -1236,8 +1236,8 @@ fn every_table_command_drains_without_allocating_unless_named_as_card_04_work() 
             EngineCommand::AddNote {
                 track_id,
                 clip_id,
-                note,
-            } => Some((*track_id, *clip_id, *note)),
+                ..
+            } => Some((*track_id, *clip_id, note())),
             _ => None,
         };
         assert!(commands.push(command).is_ok());

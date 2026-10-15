@@ -84,12 +84,12 @@ fn engine_with_held_note() -> (
         .push(EngineCommand::AddNote {
             track_id: tid,
             clip_id: cid,
-            note: MidiNote {
+            insertion: crate::clip_insertion::PreparedNoteInsertion::new(MidiNote {
                 pitch: 60,
                 velocity: 100,
                 start_beat: 0.0,
                 duration_beats: 8.0,
-            },
+            }),
         })
         .unwrap();
     cmd_tx.push(EngineCommand::Play).unwrap();
@@ -160,12 +160,12 @@ fn run_scenario(
         .push(EngineCommand::AddNote {
             track_id: tid,
             clip_id: cid,
-            note: MidiNote {
+            insertion: crate::clip_insertion::PreparedNoteInsertion::new(MidiNote {
                 pitch: 60,
                 velocity: 100,
                 start_beat: 0.0,
                 duration_beats: note_dur,
-            },
+            }),
         })
         .unwrap();
     if let Some((start, end)) = arr_loop {
@@ -235,12 +235,12 @@ fn looped_note_ons_per_bar(batch_render: bool) -> Vec<usize> {
             .push(EngineCommand::AddNote {
                 track_id,
                 clip_id,
-                note: MidiNote {
+                insertion: crate::clip_insertion::PreparedNoteInsertion::new(MidiNote {
                     pitch: 36,
                     velocity: 100,
                     start_beat: step as f64 * 0.5,
                     duration_beats: 0.5,
-                },
+                }),
             })
             .unwrap();
     }

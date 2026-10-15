@@ -125,7 +125,7 @@ fn sampler_echo_fixture() -> (BounceRequest, Vec<Command>) {
         commands.push(Command::AddNote {
             track_id: tid,
             clip_id: clip.id,
-            note: *note,
+            insertion: crate::clip_insertion::PreparedNoteInsertion::new(*note),
         });
     }
     request.note_clips.push(clip);

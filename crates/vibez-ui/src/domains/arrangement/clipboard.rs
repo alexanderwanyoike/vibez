@@ -384,7 +384,7 @@ impl TimelineEditorState {
                         engine.send(EngineCommand::AddNote {
                             track_id,
                             clip_id: clip.id,
-                            note: *note,
+                            insertion: vibez_engine::clip_insertion::PreparedNoteInsertion::new(*note),
                         });
                     }
                     selected.insert(ArrangementSelection::NoteClip {
