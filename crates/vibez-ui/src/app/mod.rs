@@ -50,6 +50,7 @@ struct App {
     plugin_instrument_rx: std::sync::mpsc::Receiver<PluginInstrumentLoadResult>,
     plugin_instrument_tx: std::sync::mpsc::Sender<PluginInstrumentLoadResult>,
     plugin_load_requests: plugin_load_requests::PluginLoadRequests,
+    device_meters: device_meters::DeviceMeters,
     gain_devices: gain_devices::GainDevices,
     eq_devices: eq_devices::EqDevices,
     param_entry: Option<crate::domains::param_entry::ValueEntry>,
@@ -156,6 +157,7 @@ mod audio_tasks;
 mod bounce;
 mod capture;
 mod compensation;
+mod device_meters;
 pub(crate) mod device_presets;
 mod drum_rack_preparation;
 mod engine_events;
@@ -429,6 +431,7 @@ impl App {
             plugin_effect_rx,
             plugin_effect_tx,
             plugin_load_requests: Default::default(),
+            device_meters: Default::default(),
             gain_devices: Default::default(),
             eq_devices: eq_devices::EqDevices {
                 spectrum_rx: eq_spectrum_rx,
