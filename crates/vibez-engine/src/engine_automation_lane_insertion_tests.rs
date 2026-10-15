@@ -1,6 +1,7 @@
 //! Public automation insertion preserves live sound and resident owners at the outer storage boundary.
 
 use super::*;
+use crate::mixer::EngineNoteClip;
 use crate::playback_source::PreparedPlaybackSource;
 use crate::test_support::DelayProbeInstrument;
 use vibez_core::automation::{AutomationLane, AutomationPoint, AutomationTarget};
