@@ -691,7 +691,7 @@ fn prepared_send_edges_follow_automation_without_mutating_manual_sends() {
     commands
         .push(EngineCommand::SetAutomationLane {
             track_id: source,
-            lane,
+            insertion: crate::clip_insertion::PreparedAutomationLaneInsertion::new(lane),
         })
         .unwrap();
     let mut source_model = channel(source);

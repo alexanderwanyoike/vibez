@@ -263,7 +263,7 @@ fn playing(
         },
         EngineCommand::SetAutomationLane {
             track_id: f.synth,
-            lane,
+            insertion: crate::clip_insertion::PreparedAutomationLaneInsertion::new(lane),
         },
     ] {
         assert!(commands.push(command).is_ok());
@@ -478,7 +478,7 @@ fn cases() -> Vec<Case> {
         case!("SetTrackGain", false, |f| C::SetTrackGain(f.synth, 0.5)),
         case!("SetAutomationLane", true, |f| C::SetAutomationLane {
             track_id: f.empty,
-            lane: AutomationLane::new(AutomationTarget::TrackPan),
+            insertion: crate::clip_insertion::PreparedAutomationLaneInsertion::new(AutomationLane::new(AutomationTarget::TrackPan)),
         }),
         case!("RemoveAutomationLane", false, |f| C::RemoveAutomationLane {
             track_id: f.synth,

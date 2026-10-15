@@ -162,7 +162,7 @@ fn appending_a_lane_at_full_capacity_preserves_audio_and_owners_without_callback
     assert_eq!((resident.len(), resident.capacity()), (2, 2));
     let before = engine.transport().position();
     let length = engine.transport().audio_length();
-    commands.push(EngineCommand::SetAutomationLane { track_id, lane: gain }).unwrap();
+    commands.push(EngineCommand::SetAutomationLane { track_id, insertion: crate::clip_insertion::PreparedAutomationLaneInsertion::new(gain)}).unwrap();
 
     let measured = crate::retirement::tests::allocations(|| {
         engine.process_block(AudioProcessBlock::new(&mut output, 2)

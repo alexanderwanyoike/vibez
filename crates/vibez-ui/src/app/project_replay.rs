@@ -254,7 +254,7 @@ impl App {
             for lane in &content.automation {
                 self.send_command(EngineCommand::SetAutomationLane {
                     track_id: track.id,
-                    lane: lane.clone(),
+                    insertion: vibez_engine::clip_insertion::PreparedAutomationLaneInsertion::new(lane.clone()),
                 });
             }
             return;
@@ -319,7 +319,7 @@ impl App {
         for lane in &content.automation {
             self.send_command(EngineCommand::SetAutomationLane {
                 track_id: track.id,
-                lane: lane.clone(),
+                insertion: vibez_engine::clip_insertion::PreparedAutomationLaneInsertion::new(lane.clone()),
             });
         }
 
@@ -394,7 +394,7 @@ impl App {
         for lane in &automation {
             self.send_command(EngineCommand::SetAutomationLane {
                 track_id: bus.id,
-                lane: lane.clone(),
+                insertion: vibez_engine::clip_insertion::PreparedAutomationLaneInsertion::new(lane.clone()),
             });
         }
     }

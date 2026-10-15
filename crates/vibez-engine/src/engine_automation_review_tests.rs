@@ -234,7 +234,7 @@ fn non_finite_swing_points_restore_the_manual_value_and_retire_replaced_storage(
     commands
         .push(EngineCommand::SetAutomationLane {
             track_id: id,
-            lane: edited,
+            insertion: crate::clip_insertion::PreparedAutomationLaneInsertion::new(edited),
         })
         .unwrap();
     assert_eq!(

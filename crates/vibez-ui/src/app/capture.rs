@@ -346,7 +346,7 @@ fn apply_capture_to_arrangement(
         for lane in &destination.automation {
             commands.push(EngineCommand::SetAutomationLane {
                 track_id,
-                lane: lane.clone(),
+                insertion: vibez_engine::clip_insertion::PreparedAutomationLaneInsertion::new(lane.clone()),
             });
         }
         if let Some(muted) = pre_capture_mutes.get(&track_id) {

@@ -405,7 +405,7 @@ fn automation_target_addition_and_point_edit_preserve_running_delay_history() {
     commands
         .push(EngineCommand::SetAutomationLane {
             track_id: track,
-            lane: lane.clone(),
+            insertion: crate::clip_insertion::PreparedAutomationLaneInsertion::new(lane.clone()),
         })
         .unwrap();
     commands
@@ -432,7 +432,7 @@ fn automation_target_addition_and_point_edit_preserve_running_delay_history() {
     commands
         .push(EngineCommand::SetAutomationLane {
             track_id: track,
-            lane,
+            insertion: crate::clip_insertion::PreparedAutomationLaneInsertion::new(lane),
         })
         .unwrap();
     engine.process(&mut block, 2);

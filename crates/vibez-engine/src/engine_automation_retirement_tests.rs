@@ -29,7 +29,7 @@ fn replacing_and_removing_lanes_retains_point_storage_without_callback_destructi
         while engine.event_tx.push(EngineEvent::PlaybackStarted).is_ok() {}
         commands
             .push(if replace {
-                EngineCommand::SetAutomationLane { track_id: id, lane }
+                EngineCommand::SetAutomationLane { track_id: id, insertion: crate::clip_insertion::PreparedAutomationLaneInsertion::new(lane) }
             } else {
                 EngineCommand::RemoveAutomationLane {
                     track_id: id,

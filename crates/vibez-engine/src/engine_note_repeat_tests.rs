@@ -292,7 +292,7 @@ fn track_swing_automation_shapes_future_note_repeat_pairs() {
         .push(EngineCommand::SetProjectSwing(SwingAmount::new(0.56)))
         .unwrap();
     commands
-        .push(EngineCommand::SetAutomationLane { track_id, lane })
+        .push(EngineCommand::SetAutomationLane { track_id, insertion: crate::clip_insertion::PreparedAutomationLaneInsertion::new(lane) })
         .unwrap();
     engine.process(&mut [0.0; 2], 2);
     commands
@@ -334,7 +334,7 @@ fn track_swing_automation_waits_for_the_next_note_repeat_pair() {
         curve: 0.0,
     });
     commands
-        .push(EngineCommand::SetAutomationLane { track_id, lane })
+        .push(EngineCommand::SetAutomationLane { track_id, insertion: crate::clip_insertion::PreparedAutomationLaneInsertion::new(lane) })
         .unwrap();
     engine.process(&mut [0.0; 140 * 2], 2);
 

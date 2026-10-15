@@ -1,4 +1,4 @@
-//! Off-callback storage exchanges retain complete owners for one pending clip or note value.
+//! Off-callback storage exchanges retain complete owners for one pending content edit.
 
 use std::sync::{
     atomic::{fence, Ordering},
@@ -6,7 +6,8 @@ use std::sync::{
 };
 
 use rtrb::{Consumer, Producer, RingBuffer};
-use vibez_core::id::{ClipId, TrackId};
+use vibez_core::automation::AutomationLane;
+use vibez_core::id::{ClipId, LaneId, TrackId};
 
 use crate::playback_source::{
     EngineClip, EngineNoteClip, NoteInsertionStorage, PreparedPlaybackSource,
@@ -17,6 +18,7 @@ use vibez_core::perform::GrooveGrid;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ClipInsertionTarget {
     Clip(ClipId),
+    AutomationLane(LaneId),
 }
 
 #[derive(Clone)]
@@ -76,12 +78,14 @@ enum ClipInsertionKind {
     Audio,
     NoteClip,
     NoteValue,
+    AutomationLane,
 }
 
 enum ClipInsertionStorage {
     Audio(ClipStorage<EngineClip>),
     NoteClip(ClipStorage<EngineNoteClip>),
     NoteValue(NoteInsertionStorage),
+    AutomationLane(Vec<AutomationLane>),
 }
 
 impl ClipInsertionStorage {
@@ -90,6 +94,7 @@ impl ClipInsertionStorage {
             ClipInsertionKind::Audio => Self::Audio(ClipStorage::new(capacity)),
             ClipInsertionKind::NoteClip => Self::NoteClip(ClipStorage::new(capacity)),
             ClipInsertionKind::NoteValue => Self::NoteValue(NoteInsertionStorage::new(capacity)),
+            ClipInsertionKind::AutomationLane => Self::AutomationLane(Vec::with_capacity(capacity)),
         }
     }
 
@@ -98,6 +103,7 @@ impl ClipInsertionStorage {
             Self::Audio(_) => ClipInsertionKind::Audio,
             Self::NoteClip(_) => ClipInsertionKind::NoteClip,
             Self::NoteValue(_) => ClipInsertionKind::NoteValue,
+            Self::AutomationLane(_) => ClipInsertionKind::AutomationLane,
         }
     }
 }
@@ -106,6 +112,7 @@ pub(crate) enum ClipInsertionDelta {
     Audio(EngineClip),
     NoteClip(EngineNoteClip),
     NoteValue(MidiNote),
+    AutomationLane(AutomationLane),
 }
 
 /// Required sender-owned control. Construct only outside the audio callback.
@@ -159,28 +166,55 @@ impl PreparedClipInsertion {
         &mut self,
         source: &mut PreparedPlaybackSource,
     ) -> ClipInsertionAttempt {
-        let (_, ClipInsertionTarget::Clip(clip_id)) = self.target.expect("the command supplies its target");
+        let (_, target) = self.target.expect("the command supplies its target");
+        // Replacing the first existing ID never needs more outer storage,
+        // even when the channel is exactly full or the target changes.
+        if let Some(ClipInsertionDelta::AutomationLane(lane)) = self.clip.as_ref() {
+            if let Some(index) = source.automation.iter().position(|current| current.id == lane.id) {
+                let Some(ClipInsertionDelta::AutomationLane(lane)) = self.clip.take() else {
+                    unreachable!("the opaque lane wrapper owns one original lane");
+                };
+                return ClipInsertionAttempt::Applied(Some(std::mem::replace(
+                    &mut source.automation[index], lane,
+                )));
+            }
+        }
         let storage = self.reply.as_mut().unwrap_or(&mut self.storage);
         let (ready, length) = match (
             storage,
             self.clip.as_ref().expect("one original insertion delta"),
+            target,
         ) {
-            (ClipInsertionStorage::Audio(storage), ClipInsertionDelta::Audio(_)) => (
+            (ClipInsertionStorage::Audio(storage), ClipInsertionDelta::Audio(_), ClipInsertionTarget::Clip(_)) => (
                 storage.install_if_needed(&mut source.clips, &mut source.removed_audio_clips),
                 source.clips.len(),
             ),
-            (ClipInsertionStorage::NoteClip(storage), ClipInsertionDelta::NoteClip(_)) => (
+            (ClipInsertionStorage::NoteClip(storage), ClipInsertionDelta::NoteClip(_), ClipInsertionTarget::Clip(_)) => (
                 storage.install_if_needed(&mut source.note_clips, &mut source.removed_note_clips),
                 source.note_clips.len(),
             ),
-            (ClipInsertionStorage::NoteValue(storage), ClipInsertionDelta::NoteValue(_)) => {
+            (ClipInsertionStorage::NoteValue(storage), ClipInsertionDelta::NoteValue(_), ClipInsertionTarget::Clip(clip_id)) => {
                 let Some(clip) = source.note_clips.iter_mut().find(|clip| clip.id == clip_id)
                 else {
                     return ClipInsertionAttempt::MissingClip;
                 };
                 (storage.install_if_needed(clip), clip.notes.len())
             }
-            _ => unreachable!("private preparation keeps delta and storage kinds paired"),
+            (ClipInsertionStorage::AutomationLane(storage), ClipInsertionDelta::AutomationLane(_), ClipInsertionTarget::AutomationLane(_)) => {
+                let required = source.automation.len().checked_add(1).expect("lane length overflow");
+                let ready = if source.automation.capacity() >= required {
+                    true
+                } else if storage.capacity() >= required {
+                    assert!(storage.is_empty());
+                    storage.append(&mut source.automation);
+                    std::mem::swap(storage, &mut source.automation);
+                    true
+                } else {
+                    false
+                };
+                (ready, source.automation.len())
+            }
+            _ => unreachable!("private preparation keeps delta, target and storage kinds paired"),
         };
         if !ready {
             return ClipInsertionAttempt::NeedsCapacity(
@@ -191,6 +225,9 @@ impl PreparedClipInsertion {
             ClipInsertionDelta::Audio(clip) => source.clips.push(clip),
             ClipInsertionDelta::NoteClip(clip) => source.note_clips.push(clip),
             ClipInsertionDelta::NoteValue(note) => {
+                let ClipInsertionTarget::Clip(clip_id) = target else {
+                    unreachable!("note values have an original clip target");
+                };
                 source
                     .note_clips
                     .iter_mut()
@@ -198,12 +235,13 @@ impl PreparedClipInsertion {
                     .expect("the admitted first note clip is still current")
                     .push_note(note);
             }
+            ClipInsertionDelta::AutomationLane(lane) => source.automation.push(lane),
         }
-        ClipInsertionAttempt::Applied
+        ClipInsertionAttempt::Applied(None)
     }
 
     pub(crate) fn affects_length(&self) -> bool {
-        !matches!(self.storage, ClipInsertionStorage::NoteValue(_))
+        matches!(self.storage, ClipInsertionStorage::Audio(_) | ClipInsertionStorage::NoteClip(_))
     }
 
     pub(crate) fn request(&mut self, required: usize) -> ClipInsertionStorageRequest {
@@ -222,6 +260,9 @@ impl PreparedClipInsertion {
     }
 
     pub(crate) fn receive(&mut self) -> ClipInsertionReply {
+        if self.reply.is_some() {
+            return ClipInsertionReply::Ready;
+        }
         if let Ok(reply) = self.receiver.pop() {
             self.reply = Some(reply);
             return ClipInsertionReply::Ready;
@@ -341,8 +382,37 @@ impl PreparedNoteInsertion {
     }
 }
 
+/// One original whole lane and its outer storage, prepared off callback.
+#[must_use = "send this prepared lane or drop it off callback"]
+pub struct PreparedAutomationLaneInsertion(Box<PreparedClipInsertion>);
+
+impl PreparedAutomationLaneInsertion {
+    pub fn new(lane: AutomationLane) -> Self {
+        Self::with_capacity(lane, 1)
+    }
+
+    pub fn with_capacity(lane: AutomationLane, capacity: usize) -> Self {
+        Self(PreparedClipInsertion::prepare(
+            ClipInsertionKind::AutomationLane,
+            capacity,
+            Some(ClipInsertionDelta::AutomationLane(lane)),
+        ))
+    }
+
+    pub fn id(&self) -> ClipInsertionId {
+        self.0.id()
+    }
+
+    pub(crate) fn into_control(self) -> (LaneId, Box<PreparedClipInsertion>) {
+        let Some(ClipInsertionDelta::AutomationLane(lane)) = self.0.clip.as_ref() else {
+            unreachable!("the opaque wrapper owns one original lane");
+        };
+        (lane.id, self.0)
+    }
+}
+
 pub(crate) enum ClipInsertionAttempt {
-    Applied,
+    Applied(Option<AutomationLane>),
     NeedsCapacity(usize),
     MissingClip,
 }
@@ -401,6 +471,7 @@ pub enum ClipInsertionOutcome {
     Applied,
     MissingTrack,
     MissingClip,
+    MissingChannel,
     Abandoned,
 }
 
