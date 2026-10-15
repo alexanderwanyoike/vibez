@@ -54,7 +54,8 @@ impl DelayEffect {
 
     fn delay_samples(&self) -> usize {
         let samples = (self.time_ms * 0.001 * self.sample_rate) as usize;
-        samples.min(self.buffer_l.len() - 1).max(1)
+        // Full-ring distance reads the prior lap before the current frame overwrites it.
+        samples.min(self.buffer_l.len()).max(1)
     }
 }
 
