@@ -228,6 +228,8 @@ fn pending_box_fixture() -> PendingBoxFixture {
         (0, 0)
     );
     assert_eq!(count_in, [0.32, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
+    assert_eq!(engine.pending_retirements.reserved(), 0);
+    assert!(engine.pending_retirements.len() <= 32);
     assert_eq!(engine.performance_position, 8);
     assert_eq!(engine.output_position_samples(), 144);
     assert_eq!(engine.transport().position(), 168);
@@ -311,6 +313,8 @@ fn retained_count_in_box_precedes_next_arm_and_fifo_marker_when_ui_recovers() {
             (0, 0)
         );
         assert_eq!(fixture.engine.cmd_rx.slots(), 2);
+        assert_eq!(fixture.engine.pending_retirements.reserved(), 0);
+        assert!(fixture.engine.pending_retirements.len() <= 32);
         assert!(
             matches!(fixture.engine.cmd_rx.peek(), Ok(EngineCommand::ArmSectionRecord { section_id, prepared: Some(prepared), .. })
             if *section_id == next && std::ptr::from_ref(prepared.as_ref()) as usize == next_pointer)
@@ -344,6 +348,8 @@ fn retained_count_in_box_precedes_next_arm_and_fifo_marker_when_ui_recovers() {
                 .process_block(AudioProcessBlock::new(&mut [], 1))),
             (0, 0)
         );
+        assert_eq!(fixture.engine.pending_retirements.reserved(), 0);
+        assert!(fixture.engine.pending_retirements.len() <= 32);
         while let Ok(event) = fixture.events.pop() {
             delivered.push(event);
         }

@@ -314,6 +314,8 @@ fn returning_section_fixture() -> ReturningSectionFixture {
     let heap = crate::retirement::tests::allocations(|| {
         engine.process_block(AudioProcessBlock::new(&mut output, 1));
     });
+    assert_eq!(engine.pending_retirements.reserved(), 0);
+    assert!(engine.pending_retirements.len() <= 32);
     let after_len = engine.pending_retirements.len();
     let after_capacity = engine.pending_retirements.capacity();
     ReturningSectionFixture {
@@ -660,6 +662,8 @@ fn retry_empty_callbacks(fixture: &mut ReturningSectionFixture) -> Vec<EngineEve
             }),
             (0, 0)
         );
+        assert_eq!(fixture.engine.pending_retirements.reserved(), 0);
+        assert!(fixture.engine.pending_retirements.len() <= 32);
         while let Ok(event) = fixture.events.pop() {
             delivered.push(event);
         }

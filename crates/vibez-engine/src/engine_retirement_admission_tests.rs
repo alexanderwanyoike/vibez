@@ -452,6 +452,8 @@ fn remove_bus_nested_lane_cleanup_uses_remaining_slots_after_staged_source_owner
     );
     assert_eq!(output, [0.25; 8]);
     assert_eq!(engine.transport().position(), before + 8);
+    assert_eq!(engine.pending_retirements.reserved(), 0);
+    assert!(engine.pending_retirements.len() <= 32);
     assert_eq!(engine.pending_retirements.len(), 32);
     assert_eq!(engine.pending_retirements.capacity(), 32);
     assert_eq!(
@@ -499,6 +501,8 @@ fn remove_bus_nested_lane_cleanup_uses_remaining_slots_after_staged_source_owner
     );
     assert_eq!(engine.pending_retirements.len(), 32);
     assert_eq!(engine.cmd_rx.slots(), 1);
+    assert_eq!(engine.pending_retirements.reserved(), 0);
+    assert!(engine.pending_retirements.len() <= 32);
     remove_ring_markers(&mut events);
     assert_eq!(
         crate::retirement::tests::allocations(|| engine.drain_commands()),
@@ -508,6 +512,8 @@ fn remove_bus_nested_lane_cleanup_uses_remaining_slots_after_staged_source_owner
     assert_eq!(engine.project_swing, swing);
     assert!(engine.pending_bus_cleanup.is_none());
     assert!(engine.pending_retirements.is_empty());
+    assert_eq!(engine.pending_retirements.reserved(), 0);
+    assert!(engine.pending_retirements.len() <= 32);
     assert!(engine.tracks()[0].sends.is_empty());
     let retained = &engine.tracks()[0].playback_source.automation;
     assert_eq!(retained.len(), 1);

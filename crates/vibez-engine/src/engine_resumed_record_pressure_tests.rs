@@ -276,6 +276,8 @@ fn resumed_record_end_retains_both_reliable_stops_without_growing_ordinary_owner
     let heap = crate::retirement::tests::allocations(|| {
         engine.process_block(AudioProcessBlock::new(&mut second_loss, 1));
     });
+    assert_eq!(engine.pending_retirements.reserved(), 0);
+    assert!(engine.pending_retirements.len() <= 32);
     let ordinary_length = engine.pending_retirements.len();
     let ordinary_capacity = engine.pending_retirements.capacity();
     for (index, actual) in second_loss.iter().enumerate() {
@@ -327,6 +329,8 @@ fn resumed_record_end_retains_both_reliable_stops_without_growing_ordinary_owner
             }),
             (0, 0)
         );
+        assert_eq!(engine.pending_retirements.reserved(), 0);
+        assert!(engine.pending_retirements.len() <= 32);
         while let Ok(event) = events.pop() {
             delivered.push(event);
         }

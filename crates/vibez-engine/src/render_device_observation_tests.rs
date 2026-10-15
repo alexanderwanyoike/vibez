@@ -359,6 +359,8 @@ fn isolated_offline_segments_sample_validation_entry_and_post_process_at_distinc
             )),
             (0, 0)
         );
+        assert_eq!(engine.pending_retirements.reserved(), 0);
+        assert!(engine.pending_retirements.len() <= 32);
         let error = normalize(engine.offline_compensation_failure(), track, effect);
         assert_eq!(error.as_deref(), expected_error(mode));
         let blocked = matches!(mode, Mode::AtEntry | Mode::InstrumentRate);

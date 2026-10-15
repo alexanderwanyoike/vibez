@@ -21,6 +21,8 @@ fn on_audio_thread(mut engine: AudioEngine, track: TrackId, sounding: bool) -> A
             (0, 0)
         );
         let frames = u64::from(sounding) * 64;
+        assert_eq!(engine.pending_retirements.reserved(), 0);
+        assert!(engine.pending_retirements.len() <= 32);
         assert_eq!(engine.transport().position(), position + frames);
         assert_eq!(engine.output_position_samples(), output_position + frames);
         if sounding {
