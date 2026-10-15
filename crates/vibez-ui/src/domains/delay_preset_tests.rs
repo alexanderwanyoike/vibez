@@ -68,3 +68,39 @@ fn factory_catalog_contains_eight_complete_canonical_delay_sounds() {
     }
     assert_eq!(sounds.len(), 8);
 }
+
+#[test]
+fn delay_presets_reject_fractional_choices_without_rejecting_any_valid_option() {
+    let effect = native_delay();
+    let initial = &factory_presets(EffectType::Delay)[0];
+    let choices = [(param::SYNC, 1), (param::LEFT_DIVISION, 6), (param::LEFT_MODIFIER, 2),
+        (param::ROUTING, 1), (param::LINK, 1), (param::RIGHT_DIVISION, 6),
+        (param::RIGHT_MODIFIER, 2), (param::FEEDBACK_HP_ENABLED, 1),
+        (param::FEEDBACK_LP_ENABLED, 1), (param::TIME_CHANGE, 1)];
+    let mut accepted_fractions = Vec::new();
+    for (index, maximum) in choices {
+        for ordinal in 0..=maximum {
+            let mut parameters = initial.parameters().clone();
+            parameters.insert(KEYS[index].into(), ordinal as f32);
+            let preset = DevicePreset::new(initial.kind(), "Every valid option", parameters).unwrap();
+            assert!(prepare_updates(&effect, &preset).is_ok(), "index{index} must accept ordinal{ordinal}");
+        }
+        for value in [0.25, 0.5, 0.75, maximum as f32 - 0.5] {
+            assert!((effect.descriptors[index].min..=effect.descriptors[index].max).contains(&value));
+            let mut parameters = initial.parameters().clone();
+            parameters.insert(KEYS[index].into(), value);
+            let preset = DevicePreset::new(initial.kind(), "Fractional choice", parameters).unwrap();
+            if prepare_updates(&effect, &preset).is_ok() { accepted_fractions.push((index, value)); }
+        }
+    }
+    let mut missing = initial.parameters().clone();
+    missing.remove(KEYS[param::DUCK]);
+    let mut extra = initial.parameters().clone();
+    extra.insert("unknown_delay_parameter".into(), 0.0);
+    for (kind, parameters) in [(initial.kind(), missing), (initial.kind(), extra),
+        (DevicePresetKind::Effect(EffectType::Gain), initial.parameters().clone())] {
+        let preset = DevicePreset::new(kind, "Wrong Delay shape or kind", parameters).unwrap();
+        assert!(prepare_updates(&effect, &preset).is_err());
+    }
+    assert!(accepted_fractions.is_empty(), "Noncanonical preset choices were accepted: {accepted_fractions:?}");
+}
