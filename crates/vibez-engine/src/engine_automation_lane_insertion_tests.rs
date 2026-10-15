@@ -162,7 +162,25 @@ fn appending_a_lane_at_full_capacity_preserves_audio_and_owners_without_callback
     assert_eq!((resident.len(), resident.capacity()), (2, 2));
     let before = engine.transport().position();
     let length = engine.transport().audio_length();
-    commands.push(EngineCommand::SetAutomationLane { track_id, insertion: crate::clip_insertion::PreparedAutomationLaneInsertion::new(gain)}).unwrap();
+    let insertion = crate::clip_insertion::PreparedAutomationLaneInsertion::new(gain);
+    let operation = insertion.id();
+    commands.push(EngineCommand::SetAutomationLane { track_id, insertion }).unwrap();
+    // Serve the real capacity request without advancing the original audio boundary.
+    let admission = crate::retirement::tests::allocations(|| {
+        engine.process_block(AudioProcessBlock::new(&mut [], 2));
+    });
+    assert!(engine.cmd_rx.peek().is_err());
+    assert_eq!(engine.transport().position(), before);
+    assert_eq!(engine.transport().audio_length(), length);
+    assert_content(&engine, &expected_lanes[..2]);
+    let EngineEvent::ClipInsertionStorageRequested(request) = events.pop().unwrap() else {
+        panic!("the full resident outer lane Vec must request actual storage");
+    };
+    assert_eq!(request.id, operation);
+    assert_eq!(request.track_id, track_id);
+    assert_eq!(request.target, crate::clip_insertion::ClipInsertionTarget::AutomationLane(expected_lanes[2].id));
+    assert!(events.is_empty());
+    request.fulfill();
 
     let measured = crate::retirement::tests::allocations(|| {
         engine.process_block(AudioProcessBlock::new(&mut output, 2)
