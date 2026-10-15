@@ -45,7 +45,7 @@ macro_rules! observations {
             let local = self.control.local.load(Ordering::Acquire); self.calls.record(self.owner, local); local
         }
         fn processing_configuration_valid(&self) -> bool { !self.control.local.load(Ordering::Acquire) && self.control.valid.load(Ordering::Acquire) }
-        fn reconfiguration_requested(&self) -> bool { self.control.offer.load(Ordering::Acquire) && self.control.local.load(Ordering::Acquire) }
+        fn reconfiguration_requested(&self) -> bool { self.control.offer.load(Ordering::Acquire) }
         fn processing_recovery_requested(&self) -> bool { self.control.offer.load(Ordering::Acquire) && self.control.local.load(Ordering::Acquire) }
         fn param_descriptors(&self) -> &'static [ParamDescriptor] { &[] }
         fn set_param(&mut self, index: usize, value: f32) -> bool {
