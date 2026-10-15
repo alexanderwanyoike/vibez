@@ -1981,7 +1981,7 @@ fn track_output_capture_excludes_sends_returns_master_and_inaudible_sources() {
 fn track_output_capture_follows_active_gain_and_pan_automation() {
     use vibez_core::automation::{AutomationLane, AutomationPoint, AutomationTarget};
 
-    let (mut engine, mut cmd_tx, _event_rx) = graph_engine(&[routing_channel(TrackId::MASTER)]);
+    let (mut engine, mut cmd_tx, mut event_rx) = graph_engine(&[routing_channel(TrackId::MASTER)]);
     let (source, _) = constant_clip_track(&mut cmd_tx, 4096);
     let mut gain = AutomationLane::new(AutomationTarget::TrackGain);
     gain.insert_point(AutomationPoint {
@@ -2011,6 +2011,7 @@ fn track_output_capture_follows_active_gain_and_pan_automation() {
         .unwrap();
     cmd_tx.push(EngineCommand::Play).unwrap();
 
+    crate::test_support::fulfill_insertion_setup(&mut engine, &mut event_rx);
     let mut output = vec![0.0; 256];
     let mut capture = vec![0.0; output.len()];
     engine.process_block(

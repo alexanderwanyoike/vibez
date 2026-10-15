@@ -182,5 +182,13 @@ fn appending_a_lane_at_full_capacity_preserves_audio_and_owners_without_callback
     }
     eprintln!("automation-lane-insertion: before={before}; after={}; length={length:?}; lanes=3; old_point_owners=true; incoming_point_owner=true; source_owners=true; note_cache=true; sounding_voice=true; groove_latch=true; callback_heap={measured:?}; capture_bits={:?}; output_bits={:?}",
         engine.transport().position(), capture.map(f32::to_bits), output.map(f32::to_bits));
+    let EngineEvent::ClipInsertionCompleted(completed) = events.pop().unwrap() else {
+        panic!("the original lane edit must return its complete control after commit");
+    };
+    assert_eq!(completed.id(), operation);
+    assert_eq!(completed.target, crate::clip_insertion::ClipInsertionTarget::AutomationLane(expected_lanes[2].id));
+    assert_eq!(completed.outcome, crate::clip_insertion::ClipInsertionOutcome::Applied);
+    drop(completed);
+    assert_eq!(admission, (0, 0));
     assert_eq!(measured, (0, 0));
 }
