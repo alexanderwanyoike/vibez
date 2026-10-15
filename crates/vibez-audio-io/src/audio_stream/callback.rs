@@ -67,6 +67,9 @@ pub(super) struct OutputCallback {
     scratch_frames: u32,
     sample_rate: u32,
     rt_state: Option<Result<audio_thread_priority::RtPriorityHandle, ()>>,
+    /// The thread ran past its realtime budget once; it now sleeps after
+    /// every block so the kernel never reaches the limit that kills it.
+    overran: bool,
     input_bridge: Arc<AudioInputBridge>,
     input_scratch: Vec<f32>,
     resample_scratch: Vec<f32>,
@@ -91,6 +94,7 @@ impl OutputCallback {
             scratch_frames,
             sample_rate,
             rt_state: None,
+            overran: false,
             input_bridge,
             input_scratch: vec![0.0; scratch_frames as usize * channels],
             resample_scratch: vec![0.0; scratch_frames as usize * channels],
@@ -118,6 +122,7 @@ impl OutputCallback {
                     self.sample_rate,
                 ) {
                     Ok(handle) => {
+                        crate::realtime::guard_current_thread();
                         eprintln!("vibez: audio thread promoted to realtime");
                         Ok(handle)
                     }
@@ -126,6 +131,13 @@ impl OutputCallback {
                         Err(())
                     }
                 },
+            );
+        }
+
+        if crate::realtime::take_overrun() && !self.overran {
+            self.overran = true;
+            eprintln!(
+                "vibez: an audio block took longer than the buffer; resting briefly after each block from now on"
             );
         }
 
@@ -181,6 +193,9 @@ impl OutputCallback {
             data.len() / self.channels,
             self.sample_rate,
         );
+        if self.overran {
+            std::thread::sleep(crate::realtime::OVERRUN_REST);
+        }
     }
 }
 
