@@ -500,7 +500,6 @@ fn full_ui_routing_admission_retains_rejected_plan_until_retired_graph_returns()
         .commands
         .push(EngineCommand::SetRouting(accepted))
         .unwrap();
-    let mut readiness = Vec::new();
     for released in 0..=3 {
         if released != 0 {
             assert!(matches!(
@@ -513,12 +512,6 @@ fn full_ui_routing_admission_retains_rejected_plan_until_retired_graph_returns()
             (0, 0)
         );
         let observed = Readiness::observe(&fixture.engine);
-        readiness.push([
-            u8::from(observed.valid),
-            u8::from(observed.awaiting_plan),
-            u8::from(observed.playing),
-            u8::from(observed.muted),
-        ]);
         assert_eq!(fixture.engine.event_tx.slots(), 0);
         assert_eq!(fixture.engine.pending_retirements.len(), 1);
         assert!(matches!(
@@ -638,9 +631,6 @@ fn full_ui_routing_admission_retains_rejected_plan_until_retired_graph_returns()
     );
     assert!(fixture.events.pop().is_err());
     assert!(fixture.drain_events().is_empty());
-    eprintln!(
-        "compensation-plan-full-ring baseline: capture_stop={capture_stop}; accepted_at_credit=3; readiness={readiness:?}; order={order:?}; effect_returns={removed}; original_plan_returns=1; automation_plan_returns=1; rejection_returns=1; allocations=(0,0)"
-    );
 }
 
 #[test]
@@ -752,21 +742,5 @@ fn capture_admission_uses_applied_plan_validity_instead_of_global_processing_gat
         assert_eq!(std::ptr::from_ref(fixture.engine.routing.as_ref()), plan);
         assert!(!fixture.engine.capture_lifecycle.is_active());
         assert!(fixture.drain_events().is_empty());
-        let columns = |state: Readiness| {
-            [
-                u8::from(state.valid),
-                u8::from(state.awaiting_plan),
-                u8::from(state.suspended),
-                u8::from(state.handoff),
-                u8::from(state.restart_requested),
-                u8::from(state.presentation_fault),
-                u8::from(state.playing),
-                u8::from(state.muted),
-            ]
-        };
-        eprintln!(
-            "compensation-capture-validity baseline: case={start:?}; allowed={}; capture_start={capture_start}; before={:?}; after={:?}; source_count={source_count}; order={order:?}; allocations=(0,0)",
-            u8::from(allowed), columns(before), columns(after),
-        );
     }
 }
