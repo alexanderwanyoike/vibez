@@ -2,7 +2,7 @@
 //! a readable value you can click to type into, segmented choices, and
 //! headings. Sizes are in logical pixels, which Interface Scale multiplies.
 
-use iced::widget::{button, canvas, column, row, text, text_input};
+use iced::widget::{button, canvas, column, row, text, text_input, Space};
 use iced::{Alignment, Color, Element, Length, Theme};
 use vibez_core::id::TrackId;
 
@@ -202,8 +202,8 @@ impl<'a> Param<'a> {
             text(self.name())
                 .size(LABEL_SIZE)
                 .color(th::text_dim())
-                .wrapping(text::Wrapping::None)
-                .width(Length::Fill),
+                .wrapping(text::Wrapping::None),
+            Space::with_width(Length::Fill),
             self.value_entry(),
             canvas(self.knob()).width(knob_size).height(knob_size),
         ]
