@@ -15,7 +15,7 @@ fn public_missing_track_returns_complete_prepared_note_clip_without_callback_hea
     let identity = Arc::downgrade(&insertion.0.id.0);
     let control = std::ptr::from_ref(insertion.0.as_ref());
     let ring = std::ptr::from_ref(insertion.0.receiver.buffer());
-    let ClipInsertionStorage::Note(storage) = &insertion.0.storage else {
+    let ClipInsertionStorage::NoteClip(storage) = &insertion.0.storage else {
         unreachable!();
     };
     let live = storage.live.as_ptr();
@@ -50,7 +50,7 @@ fn public_missing_track_returns_complete_prepared_note_clip_without_callback_hea
     assert!(completed.owner.sender.is_some());
     assert!(!completed.owner.receiver.is_abandoned());
     assert!(completed.owner.reply.is_none());
-    let ClipInsertionStorage::Note(storage) = &completed.owner.storage else {
+    let ClipInsertionStorage::NoteClip(storage) = &completed.owner.storage else {
         panic!("rejection must retain note storage");
     };
     assert!(storage.live.is_empty());
@@ -59,7 +59,7 @@ fn public_missing_track_returns_complete_prepared_note_clip_without_callback_hea
     assert_eq!(storage.removed.as_ptr(), removed);
     assert!(storage.live.capacity() >= 1);
     assert!(storage.removed.capacity() >= 1);
-    let Some(ClipInsertionDelta::Note(rejected)) = &completed.owner.clip else {
+    let Some(ClipInsertionDelta::NoteClip(rejected)) = &completed.owner.clip else {
         panic!("rejection must retain the original empty note clip");
     };
     assert_eq!(rejected.id, clip);

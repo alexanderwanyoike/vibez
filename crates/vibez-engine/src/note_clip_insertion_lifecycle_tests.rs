@@ -254,7 +254,7 @@ fn eager_and_missing_note_completions_return_both_unused_mailbox_endpoints() {
         assert!(!returned.owner.receiver.is_abandoned());
         assert!(returned.owner.receiver.is_empty());
         assert!(returned.owner.reply.is_none());
-        let ClipInsertionStorage::Note(storage) = &returned.owner.storage else {
+        let ClipInsertionStorage::NoteClip(storage) = &returned.owner.storage else {
             panic!("complete note storage")
         };
         assert!(storage.live.is_empty());
@@ -263,7 +263,7 @@ fn eager_and_missing_note_completions_return_both_unused_mailbox_endpoints() {
             assert_eq!(returned.outcome, ClipInsertionOutcome::MissingTrack);
             assert_eq!(storage.live.as_ptr(), delta.eager);
             assert_eq!(storage.removed.as_ptr(), delta.eager_staging);
-            let Some(ClipInsertionDelta::Note(clip)) = &returned.owner.clip else {
+            let Some(ClipInsertionDelta::NoteClip(clip)) = &returned.owner.clip else {
                 panic!("complete original note owner")
             };
             assert_eq!(clip.id, delta.clip);
