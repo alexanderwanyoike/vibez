@@ -1,10 +1,10 @@
-//! Keeps applied musical timing observations consistent with the causal one-sample history tap.
+//! Checks the shortest supported musical timing against fractional feedback audio and observations.
 
 use vibez_core::audio_context::DeviceAudioContext;
 use vibez_dsp::{delay::{DelayEffect, param}, effect::AudioEffect};
 
 #[test]
-fn sub_sample_sync_targets_keep_their_divisions_but_report_the_actual_one_sample_delay() {
+fn shortest_sync_timing_retains_divisions_and_matches_fractional_audio_and_observations() {
     for rate in [1000, 1001] {
         for linked in [false, true] {
             let mut effect = DelayEffect::new(rate as f32);
@@ -26,21 +26,33 @@ fn sub_sample_sync_targets_keep_their_divisions_but_report_the_actual_one_sample
                 bpm: 999.0, playing: true,
             });
             let requested = (60.0 / 999.0) * (4.0 / 64.0) * (2.0 / 3.0) * f64::from(rate);
-            assert!(requested > 0.0 && requested < 1.0);
+            assert!(requested > 2.0 && requested < 3.0);
+            let whole = requested.floor() as usize;
+            let fraction = requested.fract();
             for pass in 0..2 {
                 if pass == 1 { effect.reset(); }
                 let mut audio = [0.0; 16];
                 audio[..2].copy_from_slice(&[0.25, -0.125]);
                 effect.process(&mut audio, 2);
+                let mut expected = [[0.0_f64; 2]; 8];
                 for (frame, pair) in audio.chunks_exact(2).enumerate() {
                     for (channel, &actual) in pair.iter().enumerate() {
-                        let expected = if frame == 0 { 0.0 } else {
-                            [0.25, -0.125][channel] * 0.5_f32.powi(frame as i32 - 1)
-                        };
-                        assert_eq!(actual, expected,
-                            "rate={rate}, linked={linked}, pass={pass}, frame={frame}, channel={channel}");
+                        // Eliminating stored history gives y[n] = weighted (input + feedback*y)
+                        // at the two earlier integer times surrounding the fractional delay.
+                        let mut wet = 0.0;
+                        for (offset, weight) in [(whole, 1.0 - fraction), (whole + 1, fraction)] {
+                            if let Some(previous) = frame.checked_sub(offset) {
+                                let input = if previous == 0 { [0.25, -0.125][channel] } else { 0.0 };
+                                wet += weight * (input + 0.5 * expected[previous][channel]);
+                            }
+                        }
+                        expected[frame][channel] = wet;
+                        assert!((f64::from(actual) - wet).abs() <= 2.0e-7,
+                            "rate={rate}, linked={linked}, pass={pass}, frame={frame}, channel={channel}: actual={actual}, expected={wet}");
                     }
                 }
+                assert!(audio[4] > 0.0 && audio[6] > 0.0,
+                    "the fractional first repeat must span frames2 and3");
                 let snapshot = effect.delay_snapshot().unwrap();
                 assert_eq!(snapshot.sample_rate, rate);
                 assert_eq!(snapshot.bpm, 999.0);
@@ -54,8 +66,8 @@ fn sub_sample_sync_targets_keep_their_divisions_but_report_the_actual_one_sample
                     assert_eq!(state.remaining_frames, 0);
                     assert_eq!(state.pending_samples, None);
                     assert_eq!((state.old_samples, state.destination_samples, state.target_samples),
-                        (1.0, 1.0, 1.0),
-                        "audio already repeats every sample but snapshot reports a fractional delay: rate={rate}, linked={linked}, pass={pass}, line={line}");
+                        (requested, requested, requested),
+                        "rate={rate}, linked={linked}, pass={pass}, line={line}");
                 }
             }
         }
