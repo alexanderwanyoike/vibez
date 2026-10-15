@@ -161,7 +161,26 @@ impl AudioEngine {
         self.present_event_at(event, now.saturating_add(delay as u64));
     }
 
+    pub(super) fn present_natural_playback_stop_after(&mut self, delay: u32) {
+        let now = self.output_position + self.rendered_callback_frames as u64;
+        // Only the original literal can come back. Natural completion and the
+        // fault it discovers share the existing reliable stopped-state terminal.
+        if let Err(EngineEvent::PlaybackStopped) = self.try_present_event_at(
+            EngineEvent::PlaybackStopped,
+            now.saturating_add(delay as u64),
+        ) {
+            self.presentation_state.terminals.request_playback_stop();
+            self.flush_presentation();
+        }
+    }
+
     pub(super) fn present_event_at(&mut self, event: EngineEvent, due: u64) {
+        if let Err(event) = self.try_present_event_at(event, due) {
+            self.retire_event(event);
+        }
+    }
+
+    pub(super) fn try_present_event_at(&mut self, event: EngineEvent, due: u64) -> Result<(), EngineEvent> {
         debug_assert!(
             due <= self.output_position + self.rendered_callback_frames as u64
                 || event.time_domain() == crate::events::TimeDomain::Heard,
@@ -172,7 +191,7 @@ impl AudioEngine {
                 EngineEvent::PlaybackStopped => {
                     self.presentation_state.terminals.request_playback_stop();
                     self.flush_presentation();
-                    return;
+                    return Ok(());
                 }
                 EngineEvent::PerformanceCaptureStopped {
                     effective_at_samples,
@@ -181,7 +200,7 @@ impl AudioEngine {
                         .terminals
                         .request_capture_stop(effective_at_samples);
                     self.flush_presentation();
-                    return;
+                    return Ok(());
                 }
                 _ => {}
             }
@@ -208,10 +227,11 @@ impl AudioEngine {
                 // Cancelled feedback owns nothing, so it must not consume the
                 // retirement space reserved for owners awaiting the UI.
                 if !matches!(event, EngineEvent::PresentationCancelled) {
-                    self.retire_event(event);
+                    return Err(event);
                 }
             }
         }
+        Ok(())
     }
 
     pub(super) fn flush_presentation(&mut self) {

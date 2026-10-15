@@ -509,7 +509,7 @@ impl AudioEngine {
                 self.performance_position
                     .saturating_sub(section_end_boundary) as usize,
             );
-            self.present_event_after(EngineEvent::PlaybackStopped, self.mix_latency());
+            self.present_natural_playback_stop_after(self.mix_latency());
             self.rendered_callback_frames = rendered;
             self.active_section = None;
             self.clock_domain = ClockDomain::Arrange;
