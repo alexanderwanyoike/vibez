@@ -173,7 +173,6 @@ fn resumed_record_end_retains_both_reliable_stops_without_growing_ordinary_owner
     });
     let ordinary_length = engine.pending_retirements.len();
     let ordinary_capacity = engine.pending_retirements.capacity();
-    eprintln!("resumed record pressure: ordinary={ordinary_length}/{ordinary_capacity}, heap={heap:?}");
     for (index, actual) in second_loss.iter().enumerate() {
         let expected = if index < 7 { 0.5 } else { 0.5 * (70 - index) as f32 / 64.0 };
         assert_eq!(*actual, expected, "recorded frame {index}");
