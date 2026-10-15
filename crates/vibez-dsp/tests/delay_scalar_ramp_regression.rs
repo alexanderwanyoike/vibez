@@ -1056,4 +1056,254 @@ mod feedback_filters {
         }));
         assert_eq!(failures, 0, "Feedback filter network failures; see all observations above");
     }
+
+    mod edits {
+        use super::*;
+
+        const FIELDS: [usize; 4] = [param::FEEDBACK_HP_ENABLED, param::FEEDBACK_LP_ENABLED,
+            param::FEEDBACK_HP_HZ, param::FEEDBACK_LP_HZ];
+        const INITIAL: Mode = Mode { name: "manual_filter_edits", hp: false, lp: true,
+            hp_hz: 20.0, lp_hz: 20000.0 };
+
+        #[derive(Clone, Copy)]
+        struct Controls { hp: f64, lp: f64, hp_hz: f64, lp_hz: f64, routing: f64 }
+
+        fn effective(rate: u32, hertz: f32) -> f64 {
+            f64::from(hertz).min(0.45 * f64::from(rate))
+        }
+
+        fn initial(rate: u32, mode: Mode) -> Controls {
+            Controls { hp: f64::from(u8::from(mode.hp)), lp: f64::from(u8::from(mode.lp)),
+                hp_hz: effective(rate, mode.hp_hz), lp_hz: effective(rate, mode.lp_hz), routing: 0.0 }
+        }
+
+        fn coefficient(rate: u32, hertz: f64) -> f64 {
+            let (sine, cosine) = (std::f64::consts::PI * hertz / f64::from(rate)).sin_cos();
+            sine / (sine + cosine)
+        }
+
+        #[derive(Clone, Copy)]
+        struct PreviousLow { low: f64, input: f64, g: f64 }
+
+        impl PreviousLow {
+            fn step(&mut self, input: f32, g: f64) -> f64 {
+                // Eliminating the integrator requires the previous G when coefficients move.
+                let low = g * f64::from(input) + (1.0 - g) / (1.0 - self.g)
+                    * ((1.0 - 2.0 * self.g) * self.low + self.g * self.input);
+                *self = Self { low, input: f64::from(input), g };
+                low
+            }
+        }
+
+        fn blend(raw: f32, filtered: f32, amount: f64) -> f32 {
+            if amount == 0.0 { raw } else if amount == 1.0 { filtered }
+            else { ((1.0 - amount) * f64::from(raw) + amount * f64::from(filtered)) as f32 }
+        }
+
+        fn trajectory(frame: usize, start: usize, frames: usize, from: f64, to: f64) -> f64 {
+            if frame < start { from } else if frame - start + 1 >= frames { to }
+            else { from + (to - from) * (frame - start + 1) as f64 / frames as f64 }
+        }
+
+        fn reference_edits(rate: u32, frames: usize, times: [f32; 2], mode: Mode,
+            controls: impl Fn(usize) -> Controls, input: impl Fn(usize, usize) -> f32) -> Vec<[f64; 2]> {
+            let mut hp = [PreviousLow { low: 0.0, input: 0.0, g: coefficient(rate, effective(rate, mode.hp_hz)) }; 2];
+            let mut lp = [PreviousLow { low: 0.0, input: 0.0, g: coefficient(rate, effective(rate, mode.lp_hz)) }; 2];
+            let mut writes: Vec<[f64; 2]> = Vec::with_capacity(frames);
+            let mut output = Vec::with_capacity(frames);
+            for frame in 0..frames {
+                let wet: [f32; 2] = std::array::from_fn(|channel| {
+                    let distance = f64::from(times[channel]) * f64::from(rate) / 1000.0;
+                    let sample = |delay| frame.checked_sub(delay).map(|at| writes[at][channel]).unwrap_or(0.0);
+                    (sample(distance.floor() as usize) * (1.0 - distance.fract())
+                        + sample(distance.floor() as usize + 1) * distance.fract()) as f32
+                });
+                let c = controls(frame);
+                let routed = [blend(wet[0], wet[1], c.routing), blend(wet[1], wet[0], c.routing)];
+                let next = std::array::from_fn(|channel| {
+                    let low = hp[channel].step(routed[channel], coefficient(rate, c.hp_hz));
+                    let high = (f64::from(routed[channel]) - low) as f32;
+                    let after_hp = blend(routed[channel], high, c.hp);
+                    let low = lp[channel].step(after_hp, coefficient(rate, c.lp_hz)) as f32;
+                    f64::from(input(frame, channel)) + 0.5 * f64::from(blend(after_hp, low, c.lp))
+                });
+                writes.push(next);
+                output.push(wet.map(f64::from));
+            }
+            output
+        }
+
+        fn render_changes(effect: &mut DelayEffect, expected: &[[f64; 2]],
+            changes: &[(usize, usize, f32, bool)], parts: &[usize],
+            input: impl Fn(usize, usize) -> f32, observation: &mut Observation) {
+            let mut start = 0;
+            for &(at, index, value, automated) in changes {
+                assert!(at >= start && at <= expected.len());
+                render(effect, start..at, parts, &input,
+                    |frame, channel| expected[frame][channel], observation);
+                if value.is_finite() { observation.edit(effect, index, value, automated); }
+                else {
+                    let before = effect.get_param(index).to_bits();
+                    let accepted = measured(|| if automated { effect.set_automated_param(index, value) }
+                        else { effect.set_param(index, value) }, &mut observation.heap);
+                    observation.rejected_expected_edits += usize::from(accepted);
+                    observation.target_mismatches += usize::from(effect.get_param(index).to_bits() != before);
+                }
+                start = at;
+            }
+            render(effect, start..expected.len(), parts, input,
+                |frame, channel| expected[frame][channel], observation);
+        }
+
+        fn manual_retarget_and_reset(rate: u32, parts: &[usize], rows: &mut Vec<Value>) -> bool {
+            let n = (rate as usize).div_ceil(100);
+            let start = 2 * n;
+            let retarget = start + n / 2;
+            let end = retarget + n / 3;
+            let hz = |frame, from, target, next| {
+                let first = trajectory(frame, start, n, from, target);
+                if frame < retarget { first } else {
+                    trajectory(frame, retarget, n, trajectory(retarget - 1, start, n, from, target), next)
+                }
+            };
+            let expected = reference_edits(rate, end, [3.0, 5.0], INITIAL, |frame| Controls {
+                hp: f64::from(trajectory(frame, start, n, 0.0, 1.0) as f32),
+                lp: f64::from(trajectory(frame, start, n, 1.0, 0.0) as f32),
+                hp_hz: hz(frame, effective(rate, 20.0), effective(rate, 1000.0), effective(rate, 100.0)),
+                lp_hz: hz(frame, effective(rate, 20000.0), effective(rate, 1000.0), effective(rate, 5000.0)),
+                routing: 0.0,
+            }, warm_input);
+            let mut changes: Vec<_> = FIELDS.into_iter().zip([1.0, 0.0, 1000.0, 1000.0])
+                .map(|(field, value)| (start, field, value, false)).collect();
+            changes.extend(FIELDS.into_iter().zip([1.0, 0.0, 1000.0, 1000.0])
+                .map(|(field, value)| (start + n / 3, field, value, false)));
+            changes.extend([(retarget, param::FEEDBACK_HP_HZ, 100.0, false),
+                (retarget, param::FEEDBACK_LP_HZ, 5000.0, false)]);
+            let mut effect = prepare(rate, [3.0, 5.0], INITIAL);
+            let mut observation = Observation::default();
+            render_changes(&mut effect, &expected, &changes, parts, warm_input, &mut observation);
+            // Reset occurs before any of the retargeted frequency trajectories has finished.
+            measured(|| effect.reset(), &mut observation.heap);
+            let reset_mode = Mode { hp: true, lp: false, hp_hz: 100.0, lp_hz: 5000.0, ..INITIAL };
+            let expected = reference_edits(rate, 3 * n, [3.0, 5.0], reset_mode,
+                |_| initial(rate, reset_mode), impulse);
+            render_changes(&mut effect, &expected, &[], parts, impulse, &mut observation);
+            measured(|| effect.reset(), &mut observation.heap);
+            for (field, value) in FIELDS.into_iter().zip([0.0, 1.0, 37.0, 10000.0]) {
+                observation.edit(&mut effect, field, value, false);
+            }
+            let pre_audio = Mode { hp: false, lp: true, hp_hz: 37.0, lp_hz: 10000.0, ..INITIAL };
+            let expected = reference_edits(rate, 3 * n, [3.0, 5.0], pre_audio,
+                |_| initial(rate, pre_audio), impulse);
+            render_changes(&mut effect, &expected, &[], parts, impulse, &mut observation);
+            finish(observation, "manual_retarget_noop_reset_and_pre_audio", rate, parts, 0.0, 0, rows)
+        }
+
+        fn clamp_equivalent(rate: u32, parts: &[usize], automated: bool, rows: &mut Vec<Value>) -> bool {
+            let mode = Mode { hp: true, lp: false, ..INITIAL };
+            let n = (rate as usize).div_ceil(100);
+            let start = 2 * n;
+            let edit = start + n / 2;
+            let cap = effective(rate, 1000.0);
+            assert_eq!(cap, effective(rate, 500.0));
+            let expected = reference_edits(rate, 5 * n, [3.0, 5.0], mode, |frame| Controls {
+                hp_hz: if automated && frame >= edit { cap }
+                    else { trajectory(frame, start, n, 20.0, cap) }, ..initial(rate, mode)
+            }, warm_input);
+            let changes = [(start, param::FEEDBACK_HP_HZ, 1000.0, false),
+                (start + n / 3, param::FEEDBACK_HP_HZ, 1000.0, false),
+                (edit, param::FEEDBACK_HP_HZ, 500.0, automated),
+                (edit, param::FEEDBACK_HP_HZ, f32::NAN, false),
+                (edit, param::FEEDBACK_LP_HZ, f32::INFINITY, true),
+                (edit + 1, param::FEEDBACK_HP_HZ, 500.0, automated)];
+            let mut effect = prepare(rate, [3.0, 5.0], mode);
+            let mut observation = Observation::default();
+            render_changes(&mut effect, &expected, &changes, parts, warm_input, &mut observation);
+            finish(observation, if automated { "clamp_equivalent_automation_snaps_own_hz" }
+                else { "clamp_equivalent_manual_preserves_original_trajectory" }, rate, parts, 0.0, 0, rows)
+        }
+
+        fn own_automation(parts: &[usize], own: usize, rows: &mut Vec<Value>) -> bool {
+            let rate = 48000;
+            let n = (rate as usize).div_ceil(100);
+            let start = 2 * n;
+            let snap = start + n / 2;
+            let targets = [1.0, 0.0, 1000.0, 1000.0];
+            let expected = reference_edits(rate, 6 * n, [3.0, 5.0], INITIAL, |frame| {
+                let value = |field, from, to| {
+                    if FIELDS[field] == own && frame >= snap { to }
+                    else { trajectory(frame, start, n, from, to) }
+                };
+                Controls { hp: f64::from(value(0, 0.0, 1.0) as f32),
+                    lp: f64::from(value(1, 1.0, 0.0) as f32), hp_hz: value(2, 20.0, 1000.0),
+                    lp_hz: value(3, 20000.0, 1000.0),
+                    routing: f64::from(trajectory(frame, start, (rate as usize).div_ceil(50), 0.0, 1.0) as f32) }
+            }, warm_input);
+            let mut changes: Vec<_> = FIELDS.into_iter().zip(targets)
+                .map(|(field, value)| (start, field, value, false)).collect();
+            changes.push((start, param::ROUTING, 1.0, false));
+            let target = targets[FIELDS.iter().position(|&field| field == own).unwrap()];
+            changes.extend([(snap, own, target, true), (snap + n / 3, own, target, true)]);
+            let mut effect = prepare(rate, [3.0, 5.0], INITIAL);
+            let mut observation = Observation::default();
+            render_changes(&mut effect, &expected, &changes, parts, warm_input, &mut observation);
+            let scenario = match own {
+                param::FEEDBACK_HP_ENABLED => "hp_enable_automation_owns_only_hp_enable",
+                param::FEEDBACK_LP_ENABLED => "lp_enable_automation_owns_only_lp_enable",
+                param::FEEDBACK_HP_HZ => "hp_hz_automation_owns_only_hp_hz",
+                param::FEEDBACK_LP_HZ => "lp_hz_automation_owns_only_lp_hz",
+                _ => unreachable!(),
+            };
+            finish(observation, scenario, rate, parts, 0.0, 0, rows)
+        }
+
+        fn exact_effective_endpoint(parts: &[usize], rows: &mut Vec<Value>) -> bool {
+            let rate = 1001;
+            let n = (rate as usize).div_ceil(100);
+            let delay = rate as usize;
+            let start = delay - (n - 1);
+            let mode = Mode { hp: true, lp: false, ..INITIAL };
+            let expected = reference_edits(rate, 2 * delay + 1, [1000.0; 2], mode,
+                |frame| Controls { hp_hz: trajectory(frame, start, n, 20.0, effective(rate, 1000.0)),
+                    ..initial(rate, mode) }, impulse);
+            // Integer delay isolates the very first filtered return, without prior filter input.
+            assert_eq!((expected[2 * delay][0] as f32).to_bits(), 0x3c0c029e);
+            let changes = [(start, param::FEEDBACK_HP_HZ, 1000.0, false),
+                (start + n / 3, param::FEEDBACK_HP_HZ, 500.0, false)];
+            let mut effect = prepare(rate, [1000.0; 2], mode);
+            let mut observation = Observation::default();
+            render_changes(&mut effect, &expected[..2 * delay], &changes, parts, impulse, &mut observation);
+            let mut last = [0.0; 2];
+            measured(|| effect.process(&mut last, 2), &mut observation.heap);
+            for channel in 0..2 { observation.sample(2 * delay, channel, last[channel], expected[2 * delay][channel]); }
+            let exact = usize::from(last[0].to_bits() != 0x3c0c029e);
+            finish(observation, "effective_f64_cutoff_exact_final_frame_no_restart", rate, parts, 0.0, exact, rows)
+        }
+
+        #[test]
+        fn manual_filter_fields_ramp_for_ten_ms_and_automation_owns_only_its_field() {
+            let mut rows = Vec::new();
+            let mut failures = 0;
+            for parts in [&[1][..], &[7, 31, 64, 1, 128, 512][..]] {
+                for rate in [1000, 1001, 48000] {
+                    failures += usize::from(!manual_retarget_and_reset(rate, parts, &mut rows));
+                    if rate != 48000 {
+                        for automated in [false, true] {
+                            failures += usize::from(!clamp_equivalent(rate, parts, automated, &mut rows));
+                        }
+                    }
+                }
+                for field in FIELDS { failures += usize::from(!own_automation(parts, field, &mut rows)); }
+                failures += usize::from(!exact_effective_endpoint(parts, &mut rows));
+            }
+            assert_eq!(rows.len(), 24);
+            println!("DELAY_FILTER_EDIT_RECORD {}", json!({
+                "execution_head": std::env::var("VIBEZ_VERIFICATION_HEAD").unwrap_or_else(|_| "UNLABELLED".into()),
+                "oracle": "Eliminated-integrator varying-TPT previous-low/input/G recurrence, independent sin/cos G; exact f64 effectiveHz and separate k/N field trajectories",
+                "sample_tolerance": SAMPLE_TOLERANCE, "observed": rows,
+                "scope": "Small-signal field trajectories and exact ownership; maximum-feedback moving stability is separate",
+            }));
+            assert_eq!(failures, 0, "Filter edit trajectory/ownership failures; see observations above");
+        }
+    }
 }
