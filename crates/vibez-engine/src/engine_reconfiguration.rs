@@ -289,15 +289,15 @@ impl AudioEngine {
                     bypass,
                     scope,
                 });
-            match self
+            // rtrb returns the original literal input on Full. No other event
+            // variant, or independent retirement owner, exists on this path.
+            if let Err(rtrb::PushError::Full(EngineEvent::DeviceReconfiguration(device))) = self
                 .event_tx
                 .push(EngineEvent::DeviceReconfiguration(device))
             {
-                Ok(()) => self.device_handoff.publication_succeeded(scope),
-                Err(rtrb::PushError::Full(EngineEvent::DeviceReconfiguration(device))) => {
-                    let _ = self.restore_reconfigured_device(device);
-                }
-                Err(rtrb::PushError::Full(event)) => self.retire_event(event),
+                let _ = self.restore_reconfigured_device(device);
+            } else {
+                self.device_handoff.publication_succeeded(scope);
             }
         }
     }
