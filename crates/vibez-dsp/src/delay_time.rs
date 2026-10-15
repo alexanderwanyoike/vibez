@@ -180,6 +180,45 @@ impl DelayTime {
         self.lines.each_mut().map(|line| line.next_read(fade_frames, sample_rate, use_glide))
     }
 
+    pub(super) fn snapshot(&self, targets: &[f32; param::COUNT], sample_rate: f32)
+        -> (f64, [vibez_core::delay_state::DelayLineState; 2]) {
+        use vibez_core::delay_state::DelayLineState;
+        let fade_frames = (sample_rate as usize).div_ceil(50);
+        let distances = self.distances(targets, sample_rate);
+        let lines = std::array::from_fn(|index| {
+            let line = self.lines[index];
+            let mut state = DelayLineState {
+                old_samples: line.current, destination_samples: line.current, progress: 0.0,
+                target_samples: distances[index], pending_samples: line.pending,
+                remaining_frames: 0, moving: false, gliding: false,
+            };
+            match line.movement {
+                Movement::Idle => {}
+                Movement::Crossfade(fade) => {
+                    state.old_samples = fade.old;
+                    state.destination_samples = fade.destination;
+                    // The cursor already points at the next frame; observers see the last audible blend.
+                    state.progress = fade.frame.saturating_sub(1) as f64 / (fade_frames - 1) as f64;
+                    state.remaining_frames = (fade_frames - fade.frame) as u64;
+                    if let Some(pending) = line.pending {
+                        let next = if targets[param::TIME_CHANGE] >= 0.5 {
+                            (0.05 * f64::from(sample_rate)).max(2.0 * (pending - fade.destination).abs()).ceil() as u64
+                        } else { fade_frames as u64 };
+                        state.remaining_frames = state.remaining_frames.saturating_add(next);
+                    }
+                    state.moving = true;
+                }
+                Movement::Glide(glide) => {
+                    state.remaining_frames = (glide.frames - glide.frame) as u64;
+                    state.moving = true;
+                    state.gliding = true;
+                }
+            }
+            state
+        });
+        (self.bpm, lines)
+    }
+
     pub(super) fn reset(&mut self, targets: &[f32; param::COUNT], sample_rate: f32) {
         self.snap(targets, sample_rate);
         self.started = false;

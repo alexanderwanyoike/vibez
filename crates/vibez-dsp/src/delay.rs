@@ -168,6 +168,7 @@ pub struct DelayEffect {
     targets: [f32; param::COUNT],
     history: DelayHistory,
     timing: DelayTime,
+    processed_frames: u64,
     mix: ScalarRamp,
     feedback: ScalarRamp,
     routing: ScalarRamp,
@@ -189,6 +190,7 @@ impl DelayEffect {
             targets: std::array::from_fn(|index| DELAY_PARAMS[index].default),
             history,
             timing: DelayTime::new(),
+            processed_frames: 0,
             mix: ScalarRamp::new(DELAY_PARAMS[param::MIX].default),
             feedback: ScalarRamp::new(DELAY_PARAMS[param::FEEDBACK].default),
             routing: ScalarRamp::new(DELAY_PARAMS[param::ROUTING].default),
@@ -261,6 +263,17 @@ impl DelayEffect {
 }
 
 impl AudioEffect for DelayEffect {
+    fn delay_snapshot(&self) -> Option<vibez_core::delay_state::DelayState> {
+        if self.processed_frames == 0 || !self.history.is_valid() {
+            return None;
+        }
+        let (bpm, lines) = self.timing.snapshot(&self.targets, self.history.sample_rate());
+        Some(vibez_core::delay_state::DelayState {
+            sample_rate: self.history.activation_sample_rate()?, bpm,
+            processed_frames: self.processed_frames, targets: self.targets, lines,
+        })
+    }
+
     fn supports_level_meter(&self) -> bool {
         true
     }
@@ -361,9 +374,11 @@ impl AudioEffect for DelayEffect {
 
             self.history.write_and_advance(write_l, write_r);
         }
+        self.processed_frames = self.processed_frames.saturating_add(frames as u64);
     }
 
     fn reset(&mut self) {
+        self.processed_frames = 0;
         self.history.reset();
         self.timing.reset(&self.targets, self.history.sample_rate());
         self.mix.reset(self.targets[param::MIX]);
