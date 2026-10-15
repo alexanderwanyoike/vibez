@@ -31,7 +31,11 @@ fn prepared_source_and_live_growth_preserve_matching_storage_at_content_boundari
                 EngineClip {
                     id,
                     audio,
-                    position: if index == 0 { 0 } else { 4096 + index as u64 * 64 },
+                    position: if index == 0 {
+                        0
+                    } else {
+                        4096 + index as u64 * 64
+                    },
                     source_offset: 0,
                     start_marker: 0,
                     duration: if index == 0 { 4096 } else { 32 },
@@ -61,7 +65,9 @@ fn prepared_source_and_live_growth_preserve_matching_storage_at_content_boundari
         let mut channel = EngineTrack::with_playback_source(track, source);
         channel.pan = 0.0;
         let (mut engine, mut commands, mut events) = AudioEngine::new();
-        commands.push(EngineCommand::AddTrack(Box::new(channel))).unwrap();
+        commands
+            .push(EngineCommand::AddTrack(Box::new(channel)))
+            .unwrap();
         let model: Vec<_> = [track, TrackId::MASTER]
             .into_iter()
             .map(|id| RoutingChannel {
@@ -71,9 +77,11 @@ fn prepared_source_and_live_growth_preserve_matching_storage_at_content_boundari
                 effects: Vec::new(),
             })
             .collect();
-        commands.push(EngineCommand::SetRouting(
-            crate::routing::PreparedRouting::prepare(&model, 8).unwrap(),
-        )).unwrap();
+        commands
+            .push(EngineCommand::SetRouting(
+                crate::routing::PreparedRouting::prepare(&model, 8).unwrap(),
+            ))
+            .unwrap();
         commands.push(EngineCommand::Play).unwrap();
         let mut warmup = [0.0; 16];
         engine.process_block(AudioProcessBlock::new(&mut warmup, 2));
@@ -92,12 +100,15 @@ fn prepared_source_and_live_growth_preserve_matching_storage_at_content_boundari
         assert_eq!(request.id, incoming.id);
         // The zero-frame callback still publishes its position and silent master meters.
         assert_eq!(events.pop().unwrap(), EngineEvent::PlaybackPosition(8));
-        assert_eq!(events.pop().unwrap(), EngineEvent::Metering {
-            peak_l: 0.0,
-            peak_r: 0.0,
-            rms_l: 0.0,
-            rms_r: 0.0,
-        });
+        assert_eq!(
+            events.pop().unwrap(),
+            EngineEvent::Metering {
+                peak_l: 0.0,
+                peak_r: 0.0,
+                rms_l: 0.0,
+                rms_r: 0.0,
+            }
+        );
         assert!(events.pop().is_err());
         request.fulfill();
         callback(&mut engine, false);
@@ -124,8 +135,18 @@ fn prepared_source_and_live_growth_preserve_matching_storage_at_content_boundari
             assert_eq!(Arc::as_ptr(&clip.audio), resident.audio.as_ptr());
             assert_eq!(resident.audio.strong_count(), 1);
             assert_eq!(clip.warp_markers, resident.markers);
-            assert_eq!(clip.warp_markers.as_slice().as_ptr(), resident.marker_allocation);
-            assert_eq!(clip.position, if index == 0 { 0 } else { 4096 + index as u64 * 64 });
+            assert_eq!(
+                clip.warp_markers.as_slice().as_ptr(),
+                resident.marker_allocation
+            );
+            assert_eq!(
+                clip.position,
+                if index == 0 {
+                    0
+                } else {
+                    4096 + index as u64 * 64
+                }
+            );
             assert_eq!(clip.duration, if index == 0 { 4096 } else { 32 });
             assert_eq!((clip.source_offset, clip.start_marker), (0, 0));
             assert!(clip.loop_enabled);
@@ -142,7 +163,9 @@ fn prepared_source_and_live_growth_preserve_matching_storage_at_content_boundari
         drop(completed);
         assert_signal(&callback(&mut engine, true), 0.3125);
         drop(engine);
-        assert!(expected.iter().all(|resident| resident.audio.strong_count() == 0));
+        assert!(expected
+            .iter()
+            .all(|resident| resident.audio.strong_count() == 0));
         assert_eq!(incoming.audio.strong_count(), 0);
     }
 }

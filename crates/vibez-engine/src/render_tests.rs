@@ -170,7 +170,9 @@ fn offline_channel_prepares_matching_audio_storage_at_content_boundaries() {
         assert!(source.clips.capacity() >= count);
         assert!(source.removed_audio_clips.is_empty());
         assert!(source.removed_audio_clips.capacity() >= source.clips.len());
-        for ((actual, original), owner) in source.clips.iter().zip(&request.audio_clips).zip(&owners) {
+        for ((actual, original), owner) in
+            source.clips.iter().zip(&request.audio_clips).zip(&owners)
+        {
             assert_eq!(actual.id, original.id);
             assert_eq!(Arc::as_ptr(&actual.audio), owner.as_ptr());
             assert_eq!(owner.strong_count(), 2);
@@ -188,7 +190,9 @@ fn offline_channel_prepares_matching_audio_storage_at_content_boundaries() {
         for index in 0..count {
             assert!(channel.render(index as u64 * 32, 8, 2, None));
             let expected = (index + 1) as f32 / 1024.0;
-            assert!(channel.mix_buffer[..16].iter().all(|sample| (*sample - expected).abs() < 1e-7));
+            assert!(channel.mix_buffer[..16]
+                .iter()
+                .all(|sample| (*sample - expected).abs() < 1e-7));
         }
         drop(channel);
         assert!(owners.iter().all(|owner| owner.strong_count() == 1));
