@@ -239,12 +239,14 @@ fn loaded_instrument_formats_trigger_other_formats_on_the_exact_note_frames() {
                 .push(EngineCommand::AddNote {
                     track_id: ghost,
                     clip_id: note_clip,
-                    insertion: vibez_engine::clip_insertion::PreparedNoteInsertion::new(vibez_core::midi::MidiNote {
-                        pitch: 60,
-                        velocity: 100,
-                        start_beat: 3.0 / 24000.0,
-                        duration_beats: 4.0 / 24000.0,
-                    }),
+                    insertion: vibez_engine::clip_insertion::PreparedNoteInsertion::new(
+                        vibez_core::midi::MidiNote {
+                            pitch: 60,
+                            velocity: 100,
+                            start_beat: 3.0 / 24000.0,
+                            duration_beats: 4.0 / 24000.0,
+                        },
+                    ),
                 })
                 .unwrap();
             commands
@@ -371,12 +373,14 @@ fn all_instrument_source_formats_feed_builtins_and_hosted_receivers() {
                 .push(EngineCommand::AddNote {
                     track_id: ghost,
                     clip_id: note_clip,
-                    insertion: vibez_engine::clip_insertion::PreparedNoteInsertion::new(vibez_core::midi::MidiNote {
-                        pitch: 60,
-                        velocity: 127,
-                        start_beat: 0.0,
-                        duration_beats: 1.0,
-                    }),
+                    insertion: vibez_engine::clip_insertion::PreparedNoteInsertion::new(
+                        vibez_core::midi::MidiNote {
+                            pitch: 60,
+                            velocity: 127,
+                            start_beat: 0.0,
+                            duration_beats: 1.0,
+                        },
+                    ),
                 })
                 .unwrap();
             commands

@@ -1007,7 +1007,10 @@ fn prepare_pending_home(home: PendingHome) -> PendingHomeFixture {
             initial_section_returns += 1;
         }
     }
-    assert_eq!(initial_section_returns, usize::from(matches!(home, PendingHome::Section)));
+    assert_eq!(
+        initial_section_returns,
+        usize::from(matches!(home, PendingHome::Section))
+    );
     arrange.assert_unchanged(&engine.tracks()[0].playback_source);
     let (queued, next_home) = match home {
         PendingHome::Section => {
@@ -1053,7 +1056,19 @@ fn prepare_pending_home(home: PendingHome) -> PendingHomeFixture {
         }
     };
     commands.push(queued).unwrap();
-    PendingHomeFixture { engine, commands, events, track_id, calls, arrange, inactive, initial_section, old_home, next_home, next_section }
+    PendingHomeFixture {
+        engine,
+        commands,
+        events,
+        track_id,
+        calls,
+        arrange,
+        inactive,
+        initial_section,
+        old_home,
+        next_home,
+        next_section,
+    }
 }
 
 #[test]
@@ -1066,8 +1081,19 @@ fn pending_note_storage_keeps_arrange_distinct_through_reachable_section_and_lau
         PendingHome::LauncherReplacement,
         PendingHome::LauncherStop,
     ] {
-        let PendingHomeFixture { mut engine, mut commands, mut events, track_id, calls,
-            arrange, inactive, initial_section, old_home, next_home, next_section } = prepare_pending_home(home);
+        let PendingHomeFixture {
+            mut engine,
+            mut commands,
+            mut events,
+            track_id,
+            calls,
+            arrange,
+            inactive,
+            initial_section,
+            old_home,
+            next_home,
+            next_section,
+        } = prepare_pending_home(home);
         let mut output = [0.0; 16];
         let inserted_id = ClipId::new();
         let insertion = PreparedNoteClipInsertion::new(

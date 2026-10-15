@@ -131,7 +131,9 @@ pub(crate) fn fulfill_insertion_setup(
                 fulfilled = true;
             }
         }
-        if !fulfilled { break; }
+        if !fulfilled {
+            break;
+        }
         // Bulk native fixtures must finish preparation without consuming any
         // musical samples or discarding an insertion queued before Play.
         engine.process_block(crate::engine::AudioProcessBlock::new(&mut [], 2));

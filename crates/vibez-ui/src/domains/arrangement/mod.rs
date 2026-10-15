@@ -414,7 +414,9 @@ impl TimelineEditorState {
                             engine.send(EngineCommand::AddNote {
                                 track_id: target_track,
                                 clip_id,
-                                insertion: vibez_engine::clip_insertion::PreparedNoteInsertion::new(*note),
+                                insertion: vibez_engine::clip_insertion::PreparedNoteInsertion::new(
+                                    *note,
+                                ),
                             });
                         }
                         // Add to UI target track
@@ -782,7 +784,9 @@ impl TimelineEditorState {
                         engine.send(EngineCommand::AddNote {
                             track_id,
                             clip_id: new_clip_id,
-                            insertion: vibez_engine::clip_insertion::PreparedNoteInsertion::new(*note),
+                            insertion: vibez_engine::clip_insertion::PreparedNoteInsertion::new(
+                                *note,
+                            ),
                         });
                     }
                     self.selected_note_clip = Some((track_id, new_clip_id));
