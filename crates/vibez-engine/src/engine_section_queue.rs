@@ -13,7 +13,14 @@ impl AudioEngine {
         self.apply_end_of_section_track_mutes(effective_at_samples);
         // End-boundary mutes can consume the caller's transition allowance.
         if !self.presentation_room(4) {
-            self.present_event(EngineEvent::SectionQueueCancelled { retired: prepared });
+            // The vacated queue keeps this complete source if an older lifetime
+            // still occupies every publication path. Returning sources never launch.
+            self.queued_section = Some(QueuedSectionPlayback {
+                prepared,
+                effective_at_samples,
+                phase: SectionQueuePhase::Returning,
+            });
+            self.flush_returning_section();
             return;
         }
         self.begin_performance_clock();
@@ -101,6 +108,7 @@ impl AudioEngine {
         let retired = self.queued_section.replace(QueuedSectionPlayback {
             prepared,
             effective_at_samples,
+            phase: SectionQueuePhase::Waiting,
         });
         let event = EngineEvent::SectionQueued(SectionQueuedEvent {
             section_id,
@@ -111,13 +119,29 @@ impl AudioEngine {
     }
 
     pub(super) fn cancel_section_queue(&mut self) {
-        let Some(queued) = self.queued_section.take() else {
+        let Some(queued) = self.queued_section.as_mut() else {
             return;
         };
+        queued.phase = SectionQueuePhase::Returning;
+        self.flush_returning_section();
+    }
+
+    pub(crate) fn flush_returning_section(&mut self) -> bool {
+        if !self.queued_section.as_ref().is_some_and(|queued| {
+            queued.phase == SectionQueuePhase::Returning
+        }) {
+            return true;
+        }
+        self.flush_presentation();
+        if !self.presentation_return_has_room() {
+            return false;
+        }
+        let queued = self.queued_section.take().expect("one returning Section source");
         let event = EngineEvent::SectionQueueCancelled {
             retired: queued.prepared,
         };
         self.present_event(event);
+        true
     }
 
     pub(super) fn process_section_multitrack(
@@ -131,6 +155,7 @@ impl AudioEngine {
         let boundary = self
             .queued_section
             .as_ref()
+            .filter(|queued| queued.phase == SectionQueuePhase::Waiting)
             .map(|queued| queued.effective_at_samples);
 
         if boundary.is_some_and(|boundary| boundary <= block_start) {

@@ -11,6 +11,7 @@ impl AudioEngine {
         self.rendered_callback_frames = 0;
         self.flush_presentation();
         self.flush_section_record_stop();
+        self.flush_returning_section();
         if self.pending_source_cleanup {
             self.pending_source_cleanup = false;
             self.clear_clip_performance();
@@ -66,6 +67,14 @@ impl AudioEngine {
                         self.cmd_rx.peek(),
                         Ok(EngineCommand::ArmSectionRecord { .. })
                     ))
+                || (self.queued_section.as_ref().is_some_and(|queued| {
+                    queued.phase == SectionQueuePhase::Returning
+                }) && matches!(
+                    self.cmd_rx.peek(),
+                    Ok(EngineCommand::LaunchSection(_)
+                        | EngineCommand::QueueSection { .. }
+                        | EngineCommand::ArmSectionRecord { .. })
+                ))
                 || self
                     .pending_retirements
                     .capacity()

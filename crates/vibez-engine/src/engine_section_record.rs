@@ -163,26 +163,16 @@ impl AudioEngine {
         self.flush_section_record_stop();
     }
 
-    fn section_record_stop_has_room(&self) -> bool {
-        self.event_tx.slots() > 0
-            || self.scheduled_presentation.len() < self.scheduled_presentation.capacity()
-            || self
-                .presentation_state
-                .terminals
-                .can_retain_overflow_owner()
-            || self.pending_retirements.len() < self.pending_retirements.capacity()
-    }
-
     pub(crate) fn flush_section_record_stop(&mut self) -> bool {
         if self.pending_section_record_stop.is_none() {
             return true;
         }
         self.flush_presentation();
-        if !self.section_record_stop_has_room() {
+        if !self.presentation_return_has_room() {
             // Preserve the original failure boundary even when an earlier
             // lifetime still owns the inline discovery slot.
             self.fail_presentation();
-            if !self.section_record_stop_has_room() {
+            if !self.presentation_return_has_room() {
                 return false;
             }
         }

@@ -88,6 +88,9 @@ impl crate::engine::AudioEngine {
         if !self.flush_section_record_stop() {
             return;
         }
+        if !self.flush_returning_section() {
+            return;
+        }
         while let Some(event) = self.pending_retirements.pop() {
             if let Err(rtrb::PushError::Full(event)) = self.event_tx.push(event) {
                 self.pending_retirements.push(event);

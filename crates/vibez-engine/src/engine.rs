@@ -143,6 +143,13 @@ struct ActiveSectionPlayback {
 struct QueuedSectionPlayback {
     prepared: Box<PreparedSectionPlaybackSource>,
     effective_at_samples: u64,
+    phase: SectionQueuePhase,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SectionQueuePhase {
+    Waiting,
+    Returning,
 }
 
 #[derive(Clone, Copy)]
@@ -474,7 +481,11 @@ impl AudioEngine {
         }
         // A queued Section owns the next boundary: the finished one-shot
         // stays silent on the Perform clock until the queue takes over.
-        if section_ended && self.queued_section.is_none() {
+        if section_ended
+            && !self.queued_section.as_ref().is_some_and(|queued| {
+                queued.phase == SectionQueuePhase::Waiting
+            })
+        {
             self.stop_section_record();
             self.apply_end_of_section_track_mutes_at_queued_boundary();
             self.cancel_queued_track_mutes();
