@@ -1,4 +1,7 @@
-//! Cookbook biquad coefficients shared by EQ audio and its complex response.
+//! Biquad coefficients shared by EQ audio and its complex response.
+//!
+//! Peaking, shelf (slope 1) and pass formulas follow Robert Bristow-Johnson's
+//! Audio EQ Cookbook: <https://www.w3.org/TR/audio-eq-cookbook/>.
 
 use std::f64::consts::TAU;
 
