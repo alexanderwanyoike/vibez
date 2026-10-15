@@ -64,8 +64,11 @@ impl DelayHistory {
         self.configuration_valid
     }
 
-    pub(super) fn tap(&self, time_ms: f32) -> (usize, f64) {
-        let samples = f64::from(time_ms) * f64::from(self.sample_rate) / 1000.0;
+    pub(super) fn sample_rate(&self) -> f32 {
+        self.sample_rate
+    }
+
+    pub(super) fn tap(&self, samples: f64) -> (usize, f64) {
         // Full-ring distance reads the prior lap before the current frame overwrites it.
         let delay = samples.max(1.0).min(self.buffer_l.len().max(1) as f64);
         (delay.floor() as usize, delay.fract())

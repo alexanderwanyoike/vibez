@@ -6,7 +6,10 @@ use crate::effect::AudioEffect;
 
 #[path = "delay_history.rs"]
 mod history;
+#[path = "delay_time.rs"]
+mod time;
 use history::DelayHistory;
+use time::DelayTime;
 
 pub mod param {
     pub const TIME_MS: usize = 0;
@@ -155,6 +158,7 @@ pub static DELAY_PARAMS: &[ParamDescriptor] = &[
 pub struct DelayEffect {
     targets: [f32; param::COUNT],
     history: DelayHistory,
+    timing: DelayTime,
 }
 
 impl DelayEffect {
@@ -163,6 +167,7 @@ impl DelayEffect {
         Self {
             targets: std::array::from_fn(|index| DELAY_PARAMS[index].default),
             history,
+            timing: DelayTime::new(),
         }
     }
 
@@ -176,6 +181,10 @@ impl DelayEffect {
 }
 
 impl AudioEffect for DelayEffect {
+    fn set_audio_context(&mut self, context: vibez_core::audio_context::DeviceAudioContext) {
+        self.timing.set_bpm(context.bpm);
+    }
+
     fn activation_sample_rate(&self) -> Option<u32> {
         self.history.activation_sample_rate()
     }
@@ -243,7 +252,8 @@ impl AudioEffect for DelayEffect {
 
         let ch = channels;
         let frames = buffer.len() / ch;
-        let tap = self.history.tap(self.targets[param::TIME_MS]);
+        let distance = self.timing.distance(&self.targets, self.history.sample_rate());
+        let tap = self.history.tap(distance);
         let feedback = self.targets[param::FEEDBACK];
         let mix = self.targets[param::MIX];
 
