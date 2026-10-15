@@ -151,19 +151,15 @@ fn pending_stop_rebase_preserves_first_timestamp_with_idle_or_new_active_capture
             assert_eq!(perform, !pending);
             let offset_refs = Arc::strong_count(&fixture.engine.routing.capture_offsets);
             assert_eq!(offset_refs, 1 + usize::from(new_start && !released));
-            let calls = fixture.calls.observed();
-            assert_eq!(
-                calls,
-                if pending {
-                    if new_start {
-                        vec![110, 211, 110, 210]
-                    } else {
-                        vec![110, 211]
-                    }
+            if pending {
+                if new_start {
+                    fixture.calls.assert_effect_recovered_after_failure();
                 } else {
-                    vec![]
+                    fixture.calls.assert_effect_failure_observed(true);
                 }
-            );
+            } else {
+                assert!(fixture.calls.observed().is_empty(), "rebasing and publishing must not rescan devices");
+            }
             fixture.calls.clear();
         }
         teardown(fixture);
