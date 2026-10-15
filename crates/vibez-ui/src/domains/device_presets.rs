@@ -38,6 +38,39 @@ const GAIN_KEYS: [&str; 5] = [
     "right_polarity",
 ];
 
+/// Native EQ parameters a preset stores: everything but the soloed band,
+/// which is a listening aid rather than part of the sound. Switches must be
+/// exactly on or off.
+const EQ_KEYS: [(usize, &str, bool); 21] = {
+    use vibez_dsp::eq::param::*;
+    [
+        (GAIN[0], "lf_gain_db", false),
+        (FREQUENCY[0], "lf_frequency_hz", false),
+        (SHAPE[0], "lf_bell", true),
+        (GAIN[1], "lmf_gain_db", false),
+        (FREQUENCY[1], "lmf_frequency_hz", false),
+        (SHAPE[1], "lmf_q", false),
+        (GAIN[2], "hmf_gain_db", false),
+        (FREQUENCY[2], "hmf_frequency_hz", false),
+        (SHAPE[2], "hmf_q", false),
+        (GAIN[3], "hf_gain_db", false),
+        (FREQUENCY[3], "hf_frequency_hz", false),
+        (SHAPE[3], "hf_bell", true),
+        (ENABLE[0], "lf_enabled", true),
+        (ENABLE[1], "lmf_enabled", true),
+        (ENABLE[2], "hmf_enabled", true),
+        (ENABLE[3], "hf_enabled", true),
+        (HP_ENABLED, "low_cut_enabled", true),
+        (HP_FREQUENCY, "low_cut_hz", false),
+        (LP_ENABLED, "high_cut_enabled", true),
+        (LP_FREQUENCY, "high_cut_hz", false),
+        (OUTPUT, "output_db", false),
+    ]
+};
+
+/// One stored parameter: its index, preset key and whether it is a switch.
+type PresetParam = (usize, &'static str, bool);
+
 pub struct PresetPresentation {
     pub options: Vec<DevicePreset>,
     pub selected: Option<DevicePreset>,
@@ -83,22 +116,28 @@ pub fn presentation(effect: &UiEffect, remembered: Option<&DevicePreset>) -> Pre
     }
 }
 
-fn parameter_keys(effect: &UiEffect) -> Result<&'static [&'static str], String> {
+fn parameter_keys(effect: &UiEffect) -> Result<Vec<PresetParam>, String> {
     if effect.plugin_ref.is_some() || effect.plugin_name.is_some() {
         return Err("Use the plugin's own preset controls for this device".into());
     }
     match effect.effect_type {
-        EffectType::Gain => Ok(&GAIN_KEYS),
+        EffectType::Gain => Ok(GAIN_KEYS
+            .iter()
+            .enumerate()
+            .map(|(index, key)| {
+                let switch = vibez_dsp::gain::param::POLARITY.contains(&index);
+                (index, *key, switch)
+            })
+            .collect()),
+        EffectType::Eq => Ok(EQ_KEYS.to_vec()),
         _ => Err("Presets are not yet supported by this built-in device".into()),
     }
 }
 
 pub fn capture(effect: &UiEffect, name: &str) -> Result<DevicePreset, String> {
-    let keys = parameter_keys(effect)?;
-    let parameters = keys
-        .iter()
-        .enumerate()
-        .map(|(index, key)| {
+    let parameters = parameter_keys(effect)?
+        .into_iter()
+        .map(|(index, key, _)| {
             let descriptor = effect
                 .descriptors
                 .get(index)
@@ -108,7 +147,7 @@ pub fn capture(effect: &UiEffect, name: &str) -> Result<DevicePreset, String> {
                 .get(index)
                 .copied()
                 .unwrap_or(descriptor.default);
-            Ok(((*key).to_owned(), value))
+            Ok((key.to_owned(), value))
         })
         .collect::<Result<_, String>>()?;
     DevicePreset::new(
@@ -131,10 +170,10 @@ pub fn prepare_updates(
         return Err("The preset does not contain this device's complete parameter set".into());
     }
     let mut updates = Vec::new();
-    for (index, key) in keys.iter().enumerate() {
+    for (index, key, switch) in keys {
         let value = *preset
             .parameters()
-            .get(*key)
+            .get(key)
             .ok_or_else(|| format!("The preset is missing parameter {key}"))?;
         let descriptor = effect
             .descriptors
@@ -142,7 +181,7 @@ pub fn prepare_updates(
             .ok_or_else(|| "The device's parameters are unavailable".to_string())?;
         if !value.is_finite()
             || !(descriptor.min..=descriptor.max).contains(&value)
-            || (vibez_dsp::gain::param::POLARITY.contains(&index) && value != 0.0 && value != 1.0)
+            || (switch && value != 0.0 && value != 1.0)
         {
             return Err(format!(
                 "Preset parameter {key} is outside its supported range"
@@ -162,9 +201,15 @@ pub fn prepare_updates(
 }
 
 pub fn factory_presets(effect_type: EffectType) -> Vec<DevicePreset> {
-    if effect_type != EffectType::Gain {
-        return Vec::new();
+    match effect_type {
+        EffectType::Gain => gain_factory_presets(),
+        EffectType::Eq => eq_factory_presets(),
+        _ => Vec::new(),
     }
+}
+
+fn gain_factory_presets() -> Vec<DevicePreset> {
+    let effect_type = EffectType::Gain;
     [
         ("Unity", [1.0, 0.0, 0.0, 0.0, 0.0]),
         (
@@ -205,6 +250,121 @@ pub fn factory_presets(effect_type: EffectType) -> Vec<DevicePreset> {
         .expect("Factory preset values are valid")
     })
     .collect()
+}
+
+/// Starting points for common mixing jobs, each a change from flat.
+fn eq_factory_presets() -> Vec<DevicePreset> {
+    let presets: [(&str, &[(&str, f32)]); 8] = [
+        ("Flat", &[]),
+        (
+            "Vocal presence",
+            &[
+                ("low_cut_enabled", 1.0),
+                ("low_cut_hz", 90.0),
+                ("lmf_gain_db", -2.0),
+                ("lmf_frequency_hz", 300.0),
+                ("lmf_q", 1.0),
+                ("hmf_gain_db", 3.0),
+                ("hmf_frequency_hz", 3500.0),
+                ("hmf_q", 0.9),
+                ("hf_gain_db", 2.0),
+                ("hf_frequency_hz", 10_000.0),
+            ],
+        ),
+        (
+            "Kick punch",
+            &[
+                ("lf_bell", 1.0),
+                ("lf_gain_db", 3.0),
+                ("lf_frequency_hz", 60.0),
+                ("lmf_gain_db", -4.0),
+                ("lmf_frequency_hz", 350.0),
+                ("lmf_q", 1.4),
+                ("hmf_gain_db", 2.0),
+                ("hmf_frequency_hz", 3000.0),
+                ("hmf_q", 1.2),
+            ],
+        ),
+        (
+            "Tight bass",
+            &[
+                ("low_cut_enabled", 1.0),
+                ("low_cut_hz", 35.0),
+                ("lf_gain_db", 2.0),
+                ("lf_frequency_hz", 80.0),
+                ("lmf_gain_db", -3.0),
+                ("lmf_frequency_hz", 250.0),
+                ("lmf_q", 1.0),
+            ],
+        ),
+        (
+            "Clean hats",
+            &[
+                ("low_cut_enabled", 1.0),
+                ("low_cut_hz", 300.0),
+                ("hmf_gain_db", -2.0),
+                ("hmf_frequency_hz", 5500.0),
+                ("hmf_q", 1.5),
+                ("hf_gain_db", 2.0),
+                ("hf_frequency_hz", 12_000.0),
+            ],
+        ),
+        (
+            "Mud cut",
+            &[
+                ("lmf_gain_db", -4.0),
+                ("lmf_frequency_hz", 300.0),
+                ("lmf_q", 1.2),
+            ],
+        ),
+        (
+            "Bus air",
+            &[
+                ("lf_gain_db", 1.0),
+                ("lf_frequency_hz", 50.0),
+                ("hf_gain_db", 1.5),
+                ("hf_frequency_hz", 12_000.0),
+            ],
+        ),
+        (
+            "Telephone",
+            &[
+                ("low_cut_enabled", 1.0),
+                ("low_cut_hz", 400.0),
+                ("high_cut_enabled", 1.0),
+                ("high_cut_hz", 3500.0),
+                ("hmf_gain_db", 4.0),
+                ("hmf_frequency_hz", 1500.0),
+                ("hmf_q", 1.0),
+                ("output_db", 3.0),
+            ],
+        ),
+    ];
+    presets
+        .into_iter()
+        .map(|(name, changes)| {
+            debug_assert!(
+                changes
+                    .iter()
+                    .all(|(changed, _)| EQ_KEYS.iter().any(|(_, key, _)| key == changed)),
+                "{name} names a parameter the EQ does not store"
+            );
+            let parameters = EQ_KEYS
+                .iter()
+                .map(|(index, key, _)| {
+                    let value = changes
+                        .iter()
+                        .find(|(changed, _)| changed == key)
+                        .map_or(vibez_dsp::eq::EQ_PARAMS[*index].default, |(_, value)| {
+                            *value
+                        });
+                    ((*key).to_owned(), value)
+                })
+                .collect();
+            DevicePreset::new(DevicePresetKind::Effect(EffectType::Eq), name, parameters)
+                .expect("Factory preset values are valid")
+        })
+        .collect()
 }
 
 #[cfg(test)]
