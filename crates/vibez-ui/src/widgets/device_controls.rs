@@ -1,7 +1,7 @@
-//! Native numeric fields, selectors and disclosure controls shared by device bodies.
+//! Native numeric fields and selectors shared by device bodies.
 
-use iced::widget::{button, canvas, column, pick_list, row, text, text_input, tooltip};
-use iced::{Color, Element, Length, Theme};
+use iced::widget::{canvas, column, pick_list, row, text, text_input, tooltip};
+use iced::{Color, Element, Length};
 use vibez_core::id::TrackId;
 
 use crate::domains::device_controls::{display_value, DeviceControlMsg, DeviceControlState};
@@ -185,20 +185,5 @@ pub fn selector<'a>(
     column![section_label(label), control]
         .spacing(3)
         .width(Length::Fill)
-        .into()
-}
-
-pub fn disclosure<'a>(track: TrackId, effect: &UiEffect, open: bool) -> Element<'a, Message> {
-    button(text(if open { "▾ Advanced" } else { "▸ Advanced" }).size(10))
-        .on_press(Message::DeviceControl(DeviceControlMsg::ToggleAdvanced(
-            track, effect.id,
-        )))
-        .padding([2, 4])
-        .style(|_: &Theme, status| button::Style {
-            background: matches!(status, button::Status::Hovered | button::Status::Pressed)
-                .then(|| th::bg_hover().into()),
-            text_color: th::text(),
-            ..Default::default()
-        })
         .into()
 }
