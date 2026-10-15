@@ -1,4 +1,4 @@
-//! Application runtime coordination and resource lifetime.
+//! Application lifecycle, domain dispatch and engine-event consumer composition.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
