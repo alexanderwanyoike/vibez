@@ -96,9 +96,8 @@ fn reject_worst_case_retirement_is_reserved_before_command_ownership_is_popped()
     };
     while engine.event_tx.push(EngineEvent::PlaybackStopped).is_ok() {}
     for _ in 0..engine.pending_retirements.capacity() - 2 {
-        engine
-            .pending_retirements
-            .push(EngineEvent::PlaybackStopped);
+        let mut allowance = engine.pending_retirements.reserve(1).unwrap();
+        engine.retire_event(EngineEvent::PlaybackStopped, &mut allowance);
     }
     let capacity = engine.pending_retirements.capacity();
     commands
