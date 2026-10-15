@@ -106,7 +106,11 @@ fn queued_section_with_colliding_lane_id_keeps_arrange_growth_and_perform_owners
     assert_sounding(&output);
     let mut initial_owners = Vec::new();
     while let Ok(event) = events.pop() {
-        if let EngineEvent::SectionTransitioned(crate::events::SectionTransitionedEvent { retired, .. }) = event {
+        if let EngineEvent::SectionTransitioned(crate::events::SectionTransitionedEvent {
+            retired,
+            ..
+        }) = event
+        {
             initial_section.assert_unchanged(&retired.tracks()[0].source);
             initial_owners.push(retired);
         }
@@ -245,10 +249,12 @@ fn queued_section_with_colliding_lane_id_keeps_arrange_growth_and_perform_owners
                 EngineEvent::PerformancePosition(value) => {
                     assert!(heard_perform.replace(value).is_none())
                 }
-                EngineEvent::SectionPlaybackPosition(crate::events::SectionPlaybackPositionEvent {
-                    section_id,
-                    position_samples,
-                }) => assert!(heard_section
+                EngineEvent::SectionPlaybackPosition(
+                    crate::events::SectionPlaybackPositionEvent {
+                        section_id,
+                        position_samples,
+                    },
+                ) => assert!(heard_section
                     .replace((section_id, position_samples))
                     .is_none()),
                 EngineEvent::TrackMeter(crate::events::TrackMeterEvent {

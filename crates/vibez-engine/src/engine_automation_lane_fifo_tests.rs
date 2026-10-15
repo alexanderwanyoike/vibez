@@ -254,13 +254,15 @@ fn repeated_small_hints_keep_current_duplicate_lanes_and_live_controls_ahead_of_
                     );
                     assert!(pending.replace(request).is_none());
                 }
-                EngineEvent::AutomationGestureChanged(crate::events::AutomationGestureChangedEvent {
-                    track_id: id,
-                    target,
-                    normalized_value,
-                    phase,
-                    effective_at_samples,
-                }) => {
+                EngineEvent::AutomationGestureChanged(
+                    crate::events::AutomationGestureChangedEvent {
+                        track_id: id,
+                        target,
+                        normalized_value,
+                        phase,
+                        effective_at_samples,
+                    },
+                ) => {
                     assert_eq!(
                         (id, target, normalized_value, phase, effective_at_samples),
                         (

@@ -1,8 +1,8 @@
 //! Clock namespace changes and cancellation preserve applied audible state.
 
 use super::*;
-use graph_test_support::{graph_engine, routing_channel};
 use crate::events::{NoteRepeatedEvent, SourceNoteRepeatedEvent, TrackMuteChangedEvent};
+use graph_test_support::{graph_engine, routing_channel};
 use vibez_core::perform::NoteRepeatRate;
 use vibez_core::{
     id::EffectId,

@@ -2,8 +2,8 @@
 //! Split from engine.rs. Runs in the audio callback: keep allocation-free and lock-free.
 
 use super::*;
-use vibez_core::id::ClipId;
 use crate::events::SectionSourceRefreshedEvent;
+use vibez_core::id::ClipId;
 
 impl AudioEngine {
     /// Drain all pending commands from the ring buffer without blocking.

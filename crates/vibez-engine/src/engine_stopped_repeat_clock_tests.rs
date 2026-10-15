@@ -60,7 +60,10 @@ fn stopped_graph_repeats_keep_source_and_heard_timestamps_across_callback_sizes(
         let mut heard = vec![];
         while let Ok(event) = events.pop() {
             match event {
-                EngineEvent::SourceNoteRepeated(crate::events::SourceNoteRepeatedEvent { position, .. }) => {
+                EngineEvent::SourceNoteRepeated(crate::events::SourceNoteRepeatedEvent {
+                    position,
+                    ..
+                }) => {
                     source.push((position.effective_at_samples, position.canonical_at_samples));
                 }
                 EngineEvent::NoteRepeated(crate::events::NoteRepeatedEvent {

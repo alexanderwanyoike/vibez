@@ -754,13 +754,17 @@ mod tests {
                 });
                 let owner = Arc::downgrade(&audio);
                 producer
-                    .push(EngineEvent::SectionSourceRefreshed(vibez_engine::events::SectionSourceRefreshedEvent {
-                        section_id: stale_section,
-                        applied,
-                        effective_at_samples: 96,
-                        section_position_samples: applied.then_some(96),
-                        retired: vibez_engine::events::DisposalCell::new(section_refresh_return(stale_section, stale_track, audio)),
-                    }))
+                    .push(EngineEvent::SectionSourceRefreshed(
+                        vibez_engine::events::SectionSourceRefreshedEvent {
+                            section_id: stale_section,
+                            applied,
+                            effective_at_samples: 96,
+                            section_position_samples: applied.then_some(96),
+                            retired: vibez_engine::events::DisposalCell::new(
+                                section_refresh_return(stale_section, stale_track, audio),
+                            ),
+                        },
+                    ))
                     .unwrap();
                 if after_reset {
                     app.reset_to_new_project();
@@ -830,12 +834,14 @@ mod tests {
         let (mut producer, consumer) = rtrb::RingBuffer::new(2);
         app.event_rx = Some(consumer);
         producer
-            .push(EngineEvent::PerformanceCaptureStarted(vibez_engine::events::PerformanceCaptureStartedEvent {
-                offsets: Arc::from([]),
-                effective_at_samples: 32,
-                section_id: Some(section_id),
-                section_position_samples: Some(32),
-            }))
+            .push(EngineEvent::PerformanceCaptureStarted(
+                vibez_engine::events::PerformanceCaptureStartedEvent {
+                    offsets: Arc::from([]),
+                    effective_at_samples: 32,
+                    section_id: Some(section_id),
+                    section_position_samples: Some(32),
+                },
+            ))
             .unwrap();
         app.poll_engine_events();
         assert!(app.state.perform.capture.is_active());
@@ -845,13 +851,17 @@ mod tests {
         });
         let owner = Arc::downgrade(&old);
         producer
-            .push(EngineEvent::SectionSourceRefreshed(vibez_engine::events::SectionSourceRefreshedEvent {
-                section_id,
-                applied: true,
-                effective_at_samples: 128,
-                section_position_samples: Some(128),
-                retired: vibez_engine::events::DisposalCell::new(section_refresh_return(section_id, track, old)),
-            }))
+            .push(EngineEvent::SectionSourceRefreshed(
+                vibez_engine::events::SectionSourceRefreshedEvent {
+                    section_id,
+                    applied: true,
+                    effective_at_samples: 128,
+                    section_position_samples: Some(128),
+                    retired: vibez_engine::events::DisposalCell::new(section_refresh_return(
+                        section_id, track, old,
+                    )),
+                },
+            ))
             .unwrap();
         producer
             .push(EngineEvent::PerformanceCaptureStopped {

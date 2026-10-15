@@ -59,12 +59,14 @@ fn collect(
     while let Ok(event) = fixture.events.pop() {
         match event {
             EngineEvent::PlaybackPosition(u64::MAX) => delivered.fillers += 1,
-            EngineEvent::PerformanceCaptureStarted(crate::events::PerformanceCaptureStartedEvent {
-                offsets,
-                effective_at_samples,
-                section_id,
-                section_position_samples,
-            }) => {
+            EngineEvent::PerformanceCaptureStarted(
+                crate::events::PerformanceCaptureStartedEvent {
+                    offsets,
+                    effective_at_samples,
+                    section_id,
+                    section_position_samples,
+                },
+            ) => {
                 assert!(Arc::ptr_eq(
                     &offsets,
                     &fixture.engine.routing.capture_offsets

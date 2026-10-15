@@ -328,7 +328,13 @@ fn public_note_fixture(notes: &[MidiNote], duration_beats: f64) -> PublicNoteFix
         EngineCommand::AddNoteClip {
             track_id: track,
             insertion: PreparedNoteClipInsertion::new(
-                clip, 0.0, duration_beats, 0.0, false, 0.0, duration_beats,
+                clip,
+                0.0,
+                duration_beats,
+                0.0,
+                false,
+                0.0,
+                duration_beats,
                 GrooveGrid::Sixteenth,
             ),
         },

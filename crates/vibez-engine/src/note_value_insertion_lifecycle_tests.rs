@@ -1,6 +1,8 @@
 //! Complete note-value data, cache allocations and mailbox endpoints leave the audio worker intact.
 
-use crate::playback_source::note_value_insertion_tests::{NOTE_ARRAY_ALLOCATIONS, INSERTION_CONTROL_ALLOCATIONS};
+use crate::playback_source::note_value_insertion_tests::{
+    INSERTION_CONTROL_ALLOCATIONS, NOTE_ARRAY_ALLOCATIONS,
+};
 
 use super::super::lifecycle_tests::on_audio_thread;
 use super::*;
@@ -76,7 +78,10 @@ fn ready_and_abandoned_note_values_return_complete_array_bundles_from_audio_work
         // The held operation ID excludes its Arc from these final-owner frees.
         assert_eq!(
             crate::retirement::tests::allocations(|| drop(owner)),
-            (0, NOTE_ARRAY_ALLOCATIONS + INSERTION_CONTROL_ALLOCATIONS + old_arrays)
+            (
+                0,
+                NOTE_ARRAY_ALLOCATIONS + INSERTION_CONTROL_ALLOCATIONS + old_arrays
+            )
         );
         assert_eq!(identity.strong_count(), 1);
         let disposed = crate::retirement::tests::allocations(|| drop(fixture.engine));
@@ -328,7 +333,10 @@ fn adequate_eager_and_missing_note_values_return_unused_endpoints_and_zero_or_no
         drop(received);
         assert_eq!(
             crate::retirement::tests::allocations(|| drop(owner)),
-            (0, INSERTION_CONTROL_ALLOCATIONS + if empty { 0 } else { NOTE_ARRAY_ALLOCATIONS })
+            (
+                0,
+                INSERTION_CONTROL_ALLOCATIONS + if empty { 0 } else { NOTE_ARRAY_ALLOCATIONS }
+            )
         );
         assert_eq!(identity.strong_count(), 1);
         let disposed = crate::retirement::tests::allocations(|| drop(fixture.engine));

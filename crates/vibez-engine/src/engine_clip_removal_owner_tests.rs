@@ -1,7 +1,9 @@
 //! Clip retirement retains complete owners across resident source homes and command backpressure.
 
 use super::*;
-use crate::clip_insertion::{PreparedClipInsertion, PreparedNoteClipInsertion, PreparedNoteInsertion};
+use crate::clip_insertion::{
+    PreparedClipInsertion, PreparedNoteClipInsertion, PreparedNoteInsertion,
+};
 use crate::engine::graph_test_support::{graph_engine, routing_channel};
 use crate::playback_source::{EngineNoteClip, PreparedPlaybackSource};
 use vibez_core::{id::ClipId, midi::MidiNote, perform::GrooveGrid};
@@ -308,7 +310,14 @@ fn public_audio_and_note_insertion_growth_keeps_later_removal_allocation_free() 
                 .push(EngineCommand::AddNoteClip {
                     track_id: track,
                     insertion: PreparedNoteClipInsertion::new(
-                        *id, 0.0, 4.0, 0.0, false, 0.0, 4.0, GrooveGrid::Off,
+                        *id,
+                        0.0,
+                        4.0,
+                        0.0,
+                        false,
+                        0.0,
+                        4.0,
+                        GrooveGrid::Off,
                     ),
                 })
                 .unwrap();

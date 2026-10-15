@@ -33,12 +33,14 @@ fn collect(fixture: &mut Fixture, boundary: u64) -> Events {
     let mut observed = Events::default();
     while let Ok(event) = fixture.events.pop() {
         match event {
-            EngineEvent::PerformanceCaptureStarted(crate::events::PerformanceCaptureStartedEvent {
-                offsets,
-                effective_at_samples,
-                section_id,
-                section_position_samples,
-            }) => {
+            EngineEvent::PerformanceCaptureStarted(
+                crate::events::PerformanceCaptureStartedEvent {
+                    offsets,
+                    effective_at_samples,
+                    section_id,
+                    section_position_samples,
+                },
+            ) => {
                 assert!(Arc::ptr_eq(
                     &offsets,
                     &fixture.engine.routing.capture_offsets

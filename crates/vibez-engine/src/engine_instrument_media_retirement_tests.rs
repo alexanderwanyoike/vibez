@@ -879,10 +879,8 @@ fn drum_media_commands_return_rejected_owners_without_touching_sounding_audio() 
             for full_ring in [false, true] {
                 let sounding = TrackId::new();
                 let other = TrackId::new();
-                let (mut engine, mut commands, mut events) = graph_engine(&[
-                    routing_channel(sounding),
-                    routing_channel(TrackId::MASTER),
-                ]);
+                let (mut engine, mut commands, mut events) =
+                    graph_engine(&[routing_channel(sounding), routing_channel(TrackId::MASTER)]);
                 commands.push(EngineCommand::SetSampleRate(1000)).unwrap();
                 commands.push(EngineCommand::add_track(sounding)).unwrap();
                 commands

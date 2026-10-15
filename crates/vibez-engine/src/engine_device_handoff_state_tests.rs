@@ -196,10 +196,12 @@ fn local_away_owner_and_resident_restart_keep_independent_gates() {
             let mut playing = 0;
             while let Ok(event) = events.pop() {
                 match event {
-                    EngineEvent::PerformanceCaptureStarted(crate::events::PerformanceCaptureStartedEvent {
-                        effective_at_samples,
-                        ..
-                    }) => {
+                    EngineEvent::PerformanceCaptureStarted(
+                        crate::events::PerformanceCaptureStartedEvent {
+                            effective_at_samples,
+                            ..
+                        },
+                    ) => {
                         assert_eq!(effective_at_samples, 0);
                         starts += 1;
                     }

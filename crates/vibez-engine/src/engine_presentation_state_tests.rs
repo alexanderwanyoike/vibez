@@ -117,10 +117,12 @@ fn overflowing_capture_delivers_accepted_start_then_stop_cause_and_discovering_o
     let order: Vec<_> = events
         .iter()
         .map(|event| match event {
-            EngineEvent::PerformanceCaptureStarted(crate::events::PerformanceCaptureStartedEvent {
-                effective_at_samples,
-                ..
-            }) => {
+            EngineEvent::PerformanceCaptureStarted(
+                crate::events::PerformanceCaptureStartedEvent {
+                    effective_at_samples,
+                    ..
+                },
+            ) => {
                 assert_eq!(*effective_at_samples, capture_start);
                 "capture-start"
             }
@@ -355,10 +357,12 @@ fn play_with_full_ui_ring_retains_capture_terminals_and_owner_but_cancels_inline
     for event in &events {
         match event {
             EngineEvent::PlaybackPosition(0) => {}
-            EngineEvent::PerformanceCaptureStarted(crate::events::PerformanceCaptureStartedEvent {
-                effective_at_samples,
-                ..
-            }) => {
+            EngineEvent::PerformanceCaptureStarted(
+                crate::events::PerformanceCaptureStartedEvent {
+                    effective_at_samples,
+                    ..
+                },
+            ) => {
                 assert_eq!(*effective_at_samples, capture_start);
                 order.push("capture-start");
             }

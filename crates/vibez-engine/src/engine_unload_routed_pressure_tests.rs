@@ -108,17 +108,32 @@ fn assert_combined_routed_unload_pressure(delayed_minimum_credits: bool) {
     let resident = stereo_ramp(512, 0.5, -0.25, 8);
     let resident_owner = Arc::downgrade(&resident);
     let resident_clip = EngineClip {
-        id: arrange_id, audio: resident, position: 0, source_offset: 0,
-        start_marker: 0, duration: 512, loop_enabled: false,
-        loop_start: 0, loop_end: 0, linear_gain: 1.0,
-        fades: Default::default(), playback_direction: Default::default(),
+        id: arrange_id,
+        audio: resident,
+        position: 0,
+        source_offset: 0,
+        start_marker: 0,
+        duration: 512,
+        loop_enabled: false,
+        loop_start: 0,
+        loop_end: 0,
+        linear_gain: 1.0,
+        fades: Default::default(),
+        playback_direction: Default::default(),
         warp_markers: Default::default(),
     };
-    commands.push(EngineCommand::AddTrack(Box::new(EngineTrack::with_playback_source(
-        tracks[0], crate::playback_source::PreparedPlaybackSource::new(
-            vec![resident_clip], vec![], vec![],
-        ),
-    )))).unwrap();
+    commands
+        .push(EngineCommand::AddTrack(Box::new(
+            EngineTrack::with_playback_source(
+                tracks[0],
+                crate::playback_source::PreparedPlaybackSource::new(
+                    vec![resident_clip],
+                    vec![],
+                    vec![],
+                ),
+            ),
+        )))
+        .unwrap();
     commands.push(EngineCommand::SetSampleRate(8)).unwrap();
     commands.push(EngineCommand::SetBpm(120.0)).unwrap();
     for track in &tracks[1..] {
@@ -194,12 +209,17 @@ fn assert_combined_routed_unload_pressure(delayed_minimum_credits: bool) {
                 .unwrap();
         }
     } else {
-        let mut channels: Vec<_> = tracks.iter().copied()
-            .map(graph_test_support::routing_channel).collect();
+        let mut channels: Vec<_> = tracks
+            .iter()
+            .copied()
+            .map(graph_test_support::routing_channel)
+            .collect();
         channels.push(graph_test_support::routing_channel(TrackId::MASTER));
-        commands.push(EngineCommand::SetRouting(
-            crate::routing::PreparedRouting::prepare(&channels, 64).unwrap(),
-        )).unwrap();
+        commands
+            .push(EngineCommand::SetRouting(
+                crate::routing::PreparedRouting::prepare(&channels, 64).unwrap(),
+            ))
+            .unwrap();
     }
     commands.push(EngineCommand::BeginClipPerformance).unwrap();
     engine.process_block(AudioProcessBlock::new(&mut [0.0; 1], 1));
@@ -279,9 +299,13 @@ fn assert_combined_routed_unload_pressure(delayed_minimum_credits: bool) {
             displaced_audio.push(admitted_resident);
             let incoming = stereo_ramp(512, generation as f32 / 128.0, 0.0, 8);
             admitted_resident = Arc::downgrade(&incoming);
-            commands.push(EngineCommand::ReplaceClipBuffer {
-                track_id: tracks[0], clip_id: arrange_id, audio: incoming,
-            }).unwrap();
+            commands
+                .push(EngineCommand::ReplaceClipBuffer {
+                    track_id: tracks[0],
+                    clip_id: arrange_id,
+                    audio: incoming,
+                })
+                .unwrap();
         }
         assert_eq!(
             crate::retirement::tests::allocations(
@@ -298,7 +322,10 @@ fn assert_combined_routed_unload_pressure(delayed_minimum_credits: bool) {
             engine.section_capture_timing.len(),
             timing_history.as_ref().unwrap().0
         );
-        assert_eq!(Arc::as_ptr(&engine.tracks()[0].playback_source.clips[0].audio), admitted_resident.as_ptr());
+        assert_eq!(
+            Arc::as_ptr(&engine.tracks()[0].playback_source.clips[0].audio),
+            admitted_resident.as_ptr()
+        );
     }
     let retained_owners = presentation_capacity
         - engine.scheduled_presentation.len()
@@ -326,7 +353,10 @@ fn assert_combined_routed_unload_pressure(delayed_minimum_credits: bool) {
         );
         assert_eq!(output, [0.0]);
         assert_eq!(engine.tracks()[0].playback_source.clips.len(), 1);
-        assert_eq!(Arc::as_ptr(&engine.tracks()[0].playback_source.clips[0].audio), admitted_resident.as_ptr());
+        assert_eq!(
+            Arc::as_ptr(&engine.tracks()[0].playback_source.clips[0].audio),
+            admitted_resident.as_ptr()
+        );
         assert!(!engine.transport().is_playing());
         assert_eq!(engine.transport().position(), arrange_cursor);
         assert_eq!(engine.transport().audio_length(), None);
@@ -486,7 +516,11 @@ fn assert_combined_routed_unload_pressure(delayed_minimum_credits: bool) {
     )));
     drop(stopped_recording);
     drop(delivered);
-    assert_eq!(admitted_resident.strong_count(), 1, "Arrange media remains resident after Unload");
+    assert_eq!(
+        admitted_resident.strong_count(),
+        1,
+        "Arrange media remains resident after Unload"
+    );
     assert!(displaced_audio
         .iter()
         .all(|owner| owner.strong_count() == 0));
@@ -503,7 +537,6 @@ fn assert_combined_routed_unload_pressure(delayed_minimum_credits: bool) {
         .all(|owner| owner.audio.strong_count() == 0));
 }
 
-
 #[test]
 fn routed_unload_needs_two_free_credits_without_retiring_the_arrange_buffer() {
     for free_credits in [0, 1, 2, 3] {
@@ -513,29 +546,42 @@ fn routed_unload_needs_two_free_credits_without_retiring_the_arrange_buffer() {
             graph_test_support::routing_channel(track),
             graph_test_support::routing_channel(TrackId::MASTER),
         ]);
-        let make_audio = || Arc::new(DecodedAudio {
-            channels: vec![vec![0.25; 256]], sample_rate: 1000,
-        });
+        let make_audio = || {
+            Arc::new(DecodedAudio {
+                channels: vec![vec![0.25; 256]],
+                sample_rate: 1000,
+            })
+        };
         let original = make_audio();
         let mut owners = vec![Arc::downgrade(&original)];
         let clip = EngineClip {
-            id: clip_id, audio: original, position: 0, source_offset: 0,
-            start_marker: 0, duration: 256, loop_enabled: false,
-            loop_start: 0, loop_end: 0, linear_gain: 1.0,
-            fades: Default::default(), playback_direction: Default::default(),
+            id: clip_id,
+            audio: original,
+            position: 0,
+            source_offset: 0,
+            start_marker: 0,
+            duration: 256,
+            loop_enabled: false,
+            loop_start: 0,
+            loop_end: 0,
+            linear_gain: 1.0,
+            fades: Default::default(),
+            playback_direction: Default::default(),
             warp_markers: Default::default(),
         };
         for command in [
             EngineCommand::SetSampleRate(1000),
             EngineCommand::AddTrack(Box::new(EngineTrack::with_playback_source(
-                track, crate::playback_source::PreparedPlaybackSource::new(
-                    vec![clip], vec![], vec![],
-                ),
+                track,
+                crate::playback_source::PreparedPlaybackSource::new(vec![clip], vec![], vec![]),
             ))),
             EngineCommand::SetArrangementLoopRegion { start: 2, end: 128 },
             EngineCommand::SetArrangementLoop(true),
-            EngineCommand::Seek(17), EngineCommand::Play,
-        ] { commands.push(command).unwrap(); }
+            EngineCommand::Seek(17),
+            EngineCommand::Play,
+        ] {
+            commands.push(command).unwrap();
+        }
         let mut output = [0.0; 8];
         engine.process_block(AudioProcessBlock::new(&mut output, 1));
         assert_eq!(output, [0.25; 8]);
@@ -548,24 +594,37 @@ fn routed_unload_needs_two_free_credits_without_retiring_the_arrange_buffer() {
         for _ in 0..replacements {
             let incoming = make_audio();
             owners.push(Arc::downgrade(&incoming));
-            commands.push(EngineCommand::ReplaceClipBuffer {
-                track_id: track, clip_id, audio: incoming,
-            }).unwrap();
+            commands
+                .push(EngineCommand::ReplaceClipBuffer {
+                    track_id: track,
+                    clip_id,
+                    audio: incoming,
+                })
+                .unwrap();
         }
-        assert_eq!(crate::retirement::tests::allocations(|| {
-            engine.process_block(AudioProcessBlock::new(&mut [], 1));
-        }), (0, 0));
+        assert_eq!(
+            crate::retirement::tests::allocations(|| {
+                engine.process_block(AudioProcessBlock::new(&mut [], 1));
+            }),
+            (0, 0)
+        );
         assert_eq!(engine.pending_retirements.len(), replacements);
         assert_eq!(engine.pending_retirements.capacity(), capacity);
         assert_eq!(engine.transport().position(), 25);
         commands.push(EngineCommand::UnloadAudio).unwrap();
         commands.push(EngineCommand::SetBpm(137.0)).unwrap();
-        assert_eq!(crate::retirement::tests::allocations(|| {
-            engine.process_block(AudioProcessBlock::new(&mut output, 1));
-        }), (0, 0));
+        assert_eq!(
+            crate::retirement::tests::allocations(|| {
+                engine.process_block(AudioProcessBlock::new(&mut output, 1));
+            }),
+            (0, 0)
+        );
         let position = if free_credits < 2 {
             assert_eq!(output, [0.25; 8]);
-            assert!(matches!(engine.cmd_rx.peek(), Ok(EngineCommand::UnloadAudio)));
+            assert!(matches!(
+                engine.cmd_rx.peek(),
+                Ok(EngineCommand::UnloadAudio)
+            ));
             assert!(engine.transport().is_playing());
             assert_eq!(engine.transport().audio_length(), Some(256));
             assert_ne!(engine.transport().bpm(), 137.0);
@@ -586,15 +645,23 @@ fn routed_unload_needs_two_free_credits_without_retiring_the_arrange_buffer() {
         assert_eq!(engine.pending_retirements.capacity(), capacity);
         assert!(owners.iter().all(|owner| owner.strong_count() == 1));
         assert_eq!(engine.tracks()[0].playback_source.clips.len(), 1);
-        assert_eq!(Arc::as_ptr(&engine.tracks()[0].playback_source.clips[0].audio), owners[replacements].as_ptr());
+        assert_eq!(
+            Arc::as_ptr(&engine.tracks()[0].playback_source.clips[0].audio),
+            owners[replacements].as_ptr()
+        );
         drain_full_ui_ring(&mut events, ring_capacity);
         let mut delivered = Vec::new();
         for _ in 0..3 {
-            assert_eq!(crate::retirement::tests::allocations(|| {
-                engine.process_block(AudioProcessBlock::new(&mut output, 1));
-            }), (0, 0));
+            assert_eq!(
+                crate::retirement::tests::allocations(|| {
+                    engine.process_block(AudioProcessBlock::new(&mut output, 1));
+                }),
+                (0, 0)
+            );
             assert_eq!(output, [0.0; 8]);
-            while let Ok(event) = events.pop() { delivered.push(event); }
+            while let Ok(event) = events.pop() {
+                delivered.push(event);
+            }
         }
         assert_eq!(engine.transport().position(), position);
         assert!(!engine.transport().is_playing());
@@ -610,9 +677,17 @@ fn routed_unload_needs_two_free_credits_without_retiring_the_arrange_buffer() {
         assert!(!delivered.iter().any(|event| matches!(event,
             EngineEvent::RetiredAudioBuffer(audio) if Arc::as_ptr(audio) == owners[replacements].as_ptr()
         )));
-        assert_eq!(delivered.iter().filter(|event| matches!(event, EngineEvent::PlaybackStopped)).count(), 1);
+        assert_eq!(
+            delivered
+                .iter()
+                .filter(|event| matches!(event, EngineEvent::PlaybackStopped))
+                .count(),
+            1
+        );
         drop(delivered);
-        assert!(owners[..replacements].iter().all(|owner| owner.strong_count() == 0));
+        assert!(owners[..replacements]
+            .iter()
+            .all(|owner| owner.strong_count() == 0));
         assert_eq!(owners[replacements].strong_count(), 1);
         drop(engine);
         assert_eq!(owners[replacements].strong_count(), 0);
@@ -631,28 +706,72 @@ fn routed_audio_retired_resident_and_unconsumed_owners_teardown_in_either_order(
         let retired = stereo_ramp(128, 0.125, -0.25, 1000);
         let resident = stereo_ramp(128, 0.25, -0.5, 1000);
         let queued = stereo_ramp(128, 0.5, -0.75, 1000);
-        let owners = [Arc::downgrade(&retired), Arc::downgrade(&resident), Arc::downgrade(&queued)];
+        let owners = [
+            Arc::downgrade(&retired),
+            Arc::downgrade(&resident),
+            Arc::downgrade(&queued),
+        ];
         let clip = EngineClip {
-            id: clip_id, audio: retired, position: 0, source_offset: 0,
-            start_marker: 0, duration: 128, loop_enabled: false,
-            loop_start: 0, loop_end: 0, linear_gain: 1.0,
-            fades: Default::default(), playback_direction: Default::default(),
+            id: clip_id,
+            audio: retired,
+            position: 0,
+            source_offset: 0,
+            start_marker: 0,
+            duration: 128,
+            loop_enabled: false,
+            loop_start: 0,
+            loop_end: 0,
+            linear_gain: 1.0,
+            fades: Default::default(),
+            playback_direction: Default::default(),
             warp_markers: Default::default(),
         };
-        commands.push(EngineCommand::AddTrack(Box::new(EngineTrack::with_playback_source(
-            track, crate::playback_source::PreparedPlaybackSource::new(vec![clip], vec![], vec![]),
-        )))).unwrap();
-        commands.push(EngineCommand::ReplaceClipBuffer { track_id: track, clip_id, audio: resident }).unwrap();
-        assert_eq!(crate::retirement::tests::allocations(|| {
-            engine.process_block(AudioProcessBlock::new(&mut [0.0; 2], 2));
-        }), (0, 0));
-        commands.push(EngineCommand::ReplaceClipBuffer { track_id: track, clip_id, audio: queued }).unwrap();
+        commands
+            .push(EngineCommand::AddTrack(Box::new(
+                EngineTrack::with_playback_source(
+                    track,
+                    crate::playback_source::PreparedPlaybackSource::new(vec![clip], vec![], vec![]),
+                ),
+            )))
+            .unwrap();
+        commands
+            .push(EngineCommand::ReplaceClipBuffer {
+                track_id: track,
+                clip_id,
+                audio: resident,
+            })
+            .unwrap();
+        assert_eq!(
+            crate::retirement::tests::allocations(|| {
+                engine.process_block(AudioProcessBlock::new(&mut [0.0; 2], 2));
+            }),
+            (0, 0)
+        );
+        commands
+            .push(EngineCommand::ReplaceClipBuffer {
+                track_id: track,
+                clip_id,
+                audio: queued,
+            })
+            .unwrap();
         assert!(owners.iter().all(|owner| owner.strong_count() == 1));
         if engine_first {
             drop(engine);
-            assert_eq!(owners[0].strong_count(), 1, "UI queue retains retired audio");
-            assert_eq!(owners[1].strong_count(), 0, "resident audio ends with engine");
-            assert_eq!(owners[2].strong_count(), 1, "command queue retains unconsumed incoming audio");
+            assert_eq!(
+                owners[0].strong_count(),
+                1,
+                "UI queue retains retired audio"
+            );
+            assert_eq!(
+                owners[1].strong_count(),
+                0,
+                "resident audio ends with engine"
+            );
+            assert_eq!(
+                owners[2].strong_count(),
+                1,
+                "command queue retains unconsumed incoming audio"
+            );
             drop(events);
             drop(commands);
         } else {

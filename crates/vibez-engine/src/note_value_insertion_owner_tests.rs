@@ -1,6 +1,8 @@
 //! Missing note targets return complete prepared data, storage and mailbox owners off callback.
 
-use crate::playback_source::note_value_insertion_tests::{NOTE_ARRAY_ALLOCATIONS, INSERTION_CONTROL_ALLOCATIONS};
+use crate::playback_source::note_value_insertion_tests::{
+    INSERTION_CONTROL_ALLOCATIONS, NOTE_ARRAY_ALLOCATIONS,
+};
 
 use super::*;
 use crate::commands::EngineCommand;

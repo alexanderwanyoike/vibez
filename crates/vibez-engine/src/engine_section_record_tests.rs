@@ -1,11 +1,11 @@
 //! Section Record boundary regressions at the public command/event seam.
 
 use super::*;
-use graph_test_support::{graph_engine, routing_channel};
 use crate::events::{
     InstrumentNoteInputEvent, NoteRepeatedEvent, SectionRecordArmedEvent,
     SectionRecordStartedEvent, SectionRecordStoppedEvent,
 };
+use graph_test_support::{graph_engine, routing_channel};
 
 use crate::playback_source::{
     EngineClip, EngineNoteClip, PreparedPlaybackSource, PreparedSectionPlaybackSource,

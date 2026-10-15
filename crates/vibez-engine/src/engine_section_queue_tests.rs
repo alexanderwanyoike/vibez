@@ -1,10 +1,10 @@
 //! Quantized Section queueing regressions at the public command/event seam.
 
 use super::*;
-use graph_test_support::{graph_engine, routing_channel};
 use crate::events::{
     NoteRepeatedEvent, SectionQueuedEvent, SectionTransitionedEvent, TrackMuteChangedEvent,
 };
+use graph_test_support::{graph_engine, routing_channel};
 
 use std::sync::Arc;
 

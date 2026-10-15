@@ -1,8 +1,8 @@
 //! Engine unit tests (rendering, transport, looping, metering).
 
 use super::*;
-use graph_test_support::{graph_engine, routing_channel, routing_effect, routing_plan};
 use crate::events::{TrackMeterEvent, TrackNoteActivityEvent};
+use graph_test_support::{graph_engine, routing_channel, routing_effect, routing_plan};
 use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::id::{ClipId, EffectId, TrackId};
 use vibez_core::routing::RoutingChannel;

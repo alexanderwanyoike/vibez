@@ -2,12 +2,12 @@
 //! boundary so the source-switch implementation remains replaceable.
 
 use super::*;
-use graph_test_support::{graph_engine, routing_channel, routing_effect, routing_plan};
-use vibez_core::routing::RoutingChannel;
 use crate::events::{
     PerformanceCaptureStartedEvent, SectionPlaybackPositionEvent, SectionSourceRefreshedEvent,
     SectionTransitionedEvent,
 };
+use graph_test_support::{graph_engine, routing_channel, routing_effect, routing_plan};
+use vibez_core::routing::RoutingChannel;
 
 use std::sync::{Arc, Mutex};
 
@@ -793,7 +793,10 @@ fn delayed_section_refresh_acknowledges_consumption_before_heard_capture_and_pre
             "Capture still waits for the original 64-frame deadline"
         );
         assert!(
-            !matches!(event, EngineEvent::SectionTransitioned(SectionTransitionedEvent { .. })),
+            !matches!(
+                event,
+                EngineEvent::SectionTransitioned(SectionTransitionedEvent { .. })
+            ),
             "refresh does not relaunch the Section"
         );
         if let EngineEvent::SectionSourceRefreshed(SectionSourceRefreshedEvent {
@@ -842,9 +845,10 @@ fn delayed_section_refresh_acknowledges_consumption_before_heard_capture_and_pre
         assert_eq!(*right, 0.0);
     }
     let notifications: Vec<_> = std::iter::from_fn(|| events.pop().ok()).collect();
-    assert!(!notifications
-        .iter()
-        .any(|event| matches!(event, EngineEvent::SectionSourceRefreshed(SectionSourceRefreshedEvent { .. }))));
+    assert!(!notifications.iter().any(|event| matches!(
+        event,
+        EngineEvent::SectionSourceRefreshed(SectionSourceRefreshedEvent { .. })
+    )));
     let capture: Vec<_> = notifications
         .iter()
         .filter_map(|event| match event {
@@ -1265,7 +1269,8 @@ fn section_refresh_then_public_capture_stop_preserves_owner_and_original_late_fe
     );
     assert!(!notifications.iter().any(|event| matches!(
         event,
-        EngineEvent::PerformanceCaptureStarted(PerformanceCaptureStartedEvent { .. }) | EngineEvent::SectionSourceRefreshed(SectionSourceRefreshedEvent { .. })
+        EngineEvent::PerformanceCaptureStarted(PerformanceCaptureStartedEvent { .. })
+            | EngineEvent::SectionSourceRefreshed(SectionSourceRefreshedEvent { .. })
     )));
     process_refresh_block(&mut fixture.engine, &mut output);
     assert_refresh_left_audio(&output, 0.75);

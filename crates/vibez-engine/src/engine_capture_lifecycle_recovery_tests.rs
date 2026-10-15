@@ -95,12 +95,14 @@ fn record(fixture: &mut Fixture, case: &str, original_owner: usize, expected: Ex
                 order.push("stop");
                 times.push(effective_at_samples);
             }
-            EngineEvent::PerformanceCaptureStarted(crate::events::PerformanceCaptureStartedEvent {
-                offsets,
-                effective_at_samples,
-                section_id,
-                section_position_samples,
-            }) => {
+            EngineEvent::PerformanceCaptureStarted(
+                crate::events::PerformanceCaptureStartedEvent {
+                    offsets,
+                    effective_at_samples,
+                    section_id,
+                    section_position_samples,
+                },
+            ) => {
                 assert!(Arc::ptr_eq(
                     &offsets,
                     &fixture.engine.routing.capture_offsets

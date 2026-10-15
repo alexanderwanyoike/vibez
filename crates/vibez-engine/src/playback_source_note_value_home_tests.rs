@@ -1,6 +1,8 @@
 //! Arrange inner growth remains separate from live Section and launcher source boundaries.
 
-use crate::playback_source::note_value_insertion_tests::{NOTE_ARRAY_ALLOCATIONS, INSERTION_CONTROL_ALLOCATIONS};
+use crate::playback_source::note_value_insertion_tests::{
+    INSERTION_CONTROL_ALLOCATIONS, NOTE_ARRAY_ALLOCATIONS,
+};
 
 use super::*;
 use crate::clip_insertion::{ClipInsertionOutcome, PreparedNoteInsertion};
@@ -178,7 +180,10 @@ fn pending_note_value_growth_keeps_all_source_homes_and_perform_clocks_distinct(
         );
         assert_eq!(
             crate::retirement::tests::allocations(|| drop(owner)),
-            (0, NOTE_ARRAY_ALLOCATIONS * 2 + INSERTION_CONTROL_ALLOCATIONS)
+            (
+                0,
+                NOTE_ARRAY_ALLOCATIONS * 2 + INSERTION_CONTROL_ALLOCATIONS
+            )
         );
         assert_eq!(
             commands.slots(),

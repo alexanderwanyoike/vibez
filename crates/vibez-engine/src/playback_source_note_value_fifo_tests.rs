@@ -292,8 +292,13 @@ fn pending_notes_keep_current_first_match_edits_and_clamps_until_fifo_release() 
                 );
                 assert!(request.replace(value).is_none());
             }
-            EngineEvent::SourceNoteInput(crate::events::SourceNoteInputEvent { on: false, .. })
-            | EngineEvent::InstrumentNoteInput(crate::events::InstrumentNoteInputEvent { on: false, .. }) => {
+            EngineEvent::SourceNoteInput(crate::events::SourceNoteInputEvent {
+                on: false, ..
+            })
+            | EngineEvent::InstrumentNoteInput(crate::events::InstrumentNoteInputEvent {
+                on: false,
+                ..
+            }) => {
                 panic!("later note-off cannot overtake the final pending note");
             }
             _ => {}
@@ -328,8 +333,14 @@ fn pending_notes_keep_current_first_match_edits_and_clamps_until_fifo_release() 
                 event,
                 EngineEvent::ClipInsertionCompleted(_)
                     | EngineEvent::ClipInsertionStorageRequested(_)
-                    | EngineEvent::SourceNoteInput(crate::events::SourceNoteInputEvent { on: false, .. })
-                    | EngineEvent::InstrumentNoteInput(crate::events::InstrumentNoteInputEvent { on: false, .. })
+                    | EngineEvent::SourceNoteInput(crate::events::SourceNoteInputEvent {
+                        on: false,
+                        ..
+                    })
+                    | EngineEvent::InstrumentNoteInput(crate::events::InstrumentNoteInputEvent {
+                        on: false,
+                        ..
+                    })
             ));
         }
     }

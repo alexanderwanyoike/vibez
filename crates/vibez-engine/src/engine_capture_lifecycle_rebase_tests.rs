@@ -57,12 +57,14 @@ fn pending_stop_rebase_preserves_first_timestamp_with_idle_or_new_active_capture
                 let mut source = 0;
                 while let Ok(event) = fixture.events.pop() {
                     match event {
-                        EngineEvent::PerformanceCaptureStarted(crate::events::PerformanceCaptureStartedEvent {
-                            offsets,
-                            effective_at_samples,
-                            section_id,
-                            section_position_samples,
-                        }) => {
+                        EngineEvent::PerformanceCaptureStarted(
+                            crate::events::PerformanceCaptureStartedEvent {
+                                offsets,
+                                effective_at_samples,
+                                section_id,
+                                section_position_samples,
+                            },
+                        ) => {
                             assert!(Arc::ptr_eq(
                                 &offsets,
                                 &fixture.engine.routing.capture_offsets

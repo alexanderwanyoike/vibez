@@ -150,10 +150,7 @@ fn collect(fixture: &mut Fixture, sections: &[(SectionId, usize)]) -> Events {
                     .iter()
                     .position(|(id, _)| *id == section_id)
                     .unwrap();
-                assert_eq!(
-                    std::ptr::from_ref(&*retired) as usize,
-                    sections[index].1
-                );
+                assert_eq!(std::ptr::from_ref(&*retired) as usize, sections[index].1);
                 observed.owners.push(index as u32 + 1);
                 observed.order.push("section");
                 observed.times.push(effective_at_samples);
