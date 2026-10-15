@@ -192,7 +192,7 @@ fn transport_commands_preserve_the_episode_rearmed_by_start_at_zero_and_positive
             "stopped-play-reset",
             "begin-perform",
         ] {
-            let (mut fixture, audio) = prepared(delay);
+            let (mut fixture, _) = prepared(delay);
             if case == "perform-seek" {
                 fixture
                     .commands
@@ -310,7 +310,7 @@ fn section(length: u64, looping: bool) -> Box<PreparedSectionPlaybackSource> {
 fn local_refailure_closes_capture_without_changing_section_end_boundaries_at_real_pdc() {
     for delay in [0, 7] {
         for queued in [false, true] {
-            let (mut fixture, prime) = prepared(delay);
+            let (mut fixture, _) = prepared(delay);
             fixture
                 .commands
                 .push(EngineCommand::StartPerformanceCapture)

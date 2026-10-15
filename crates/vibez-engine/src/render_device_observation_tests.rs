@@ -374,11 +374,9 @@ fn isolated_offline_segments_sample_validation_entry_and_post_process_at_distinc
             expected.extend(offline_calls(1));
             expected.extend(post_effect_calls(mode));
         }
-        let mut second = Vec::new();
-        let mut second_selected = Vec::new();
         if mode == Mode::Latency {
-            second = vec![-123.0; 16];
-            second_selected = vec![-123.0; 16];
+            let mut second = vec![-123.0; 16];
+            let mut second_selected = vec![-123.0; 16];
             assert_eq!(
                 crate::retirement::tests::allocations(|| engine.render_offline_routing_segment(
                     8,
