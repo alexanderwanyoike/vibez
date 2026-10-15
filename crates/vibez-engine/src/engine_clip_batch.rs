@@ -99,6 +99,9 @@ impl AudioEngine {
         let Some(mut batch) = self.pending_clip_batch.take() else {
             return;
         };
+        // Untimed facts still wait for this physical render position. Free UI
+        // slots cannot replace scheduled space before the outer clock advances.
+        let current_event_is_future = self.rendered_callback_frames != 0;
         if self.presentation_state.is_faulted() {
             for track in &mut self.tracks {
                 if track
@@ -113,7 +116,7 @@ impl AudioEngine {
                 }
             }
             while !batch.clips.is_empty() {
-                if self.clip_batch_event_room(false) == 0 {
+                if self.clip_batch_event_room(current_event_is_future) == 0 {
                     self.pending_clip_batch = Some(batch);
                     return;
                 }
@@ -121,7 +124,7 @@ impl AudioEngine {
                     batch.clips.pop().expect("packet owner"),
                 ));
             }
-            if self.clip_batch_event_room(false) == 0 {
+            if self.clip_batch_event_room(current_event_is_future) == 0 {
                 self.pending_clip_batch = Some(batch);
                 return;
             }
@@ -132,7 +135,7 @@ impl AudioEngine {
             while !batch.clips.is_empty() {
                 // One displaced owner and one queue acknowledgement are the
                 // worst case. Ownership stays in the packet until both fit.
-                if self.clip_batch_event_room(false) < 2 {
+                if self.clip_batch_event_room(current_event_is_future) < 2 {
                     self.pending_clip_batch = Some(batch);
                     return;
                 }
@@ -236,7 +239,7 @@ impl AudioEngine {
                     physical,
                 );
             }
-            if self.clip_batch_event_room(false) == 0 {
+            if self.clip_batch_event_room(current_event_is_future) == 0 {
                 self.pending_clip_batch = Some(batch);
                 return;
             }
