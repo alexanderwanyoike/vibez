@@ -198,7 +198,7 @@ fn natural_last_playback_stop_keeps_all_owners_without_growing_ordinary_returns(
     assert_eq!(delivered.iter().filter(|event| matches!(event, EngineEvent::PlaybackStopped)).count(), 2);
     assert_eq!(delivered.iter().filter(|event| matches!(event, EngineEvent::CompensationInvalid {
         track_id, effect_id: None, reason: "Audio presentation event history is full"
-    }) if *track_id == TrackId::MASTER)).count(), 1);
+    } if *track_id == TrackId::MASTER)).count(), 1);
     assert!(fixture.engine.pending_retirements.is_empty());
     assert!(fixture.engine.scheduled_presentation.is_empty());
     assert_eq!(fixture.engine.presentation_state.terminals.occupied_slots(), 0);
