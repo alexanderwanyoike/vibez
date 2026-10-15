@@ -8,7 +8,10 @@ use crate::effect::AudioEffect;
 mod history;
 #[path = "delay_time.rs"]
 mod time;
+#[path = "delay_ramp.rs"]
+mod ramp;
 use history::DelayHistory;
+use ramp::MixRamp;
 use time::DelayTime;
 
 pub mod param {
@@ -159,6 +162,7 @@ pub struct DelayEffect {
     targets: [f32; param::COUNT],
     history: DelayHistory,
     timing: DelayTime,
+    mix: MixRamp,
 }
 
 impl DelayEffect {
@@ -168,6 +172,7 @@ impl DelayEffect {
             targets: std::array::from_fn(|index| DELAY_PARAMS[index].default),
             history,
             timing: DelayTime::new(),
+            mix: MixRamp::new(DELAY_PARAMS[param::MIX].default),
         }
     }
 
@@ -209,6 +214,9 @@ impl DelayEffect {
             return true;
         }
         self.targets[index] = target;
+        if index == param::MIX {
+            self.mix.edit(target, automated, self.history.sample_rate());
+        }
         self.timing.parameter_edited(index, &self.targets, self.history.sample_rate(), automated);
         true
     }
@@ -272,11 +280,11 @@ impl AudioEffect for DelayEffect {
         let fade_frames = (sample_rate as usize).div_ceil(50);
         let use_glide = self.targets[param::TIME_CHANGE] >= 0.5;
         let feedback = self.targets[param::FEEDBACK];
-        let mix = self.targets[param::MIX];
 
         for frame in 0..frames {
             let [left, right] = self.timing.next_frame(fade_frames, sample_rate, use_glide);
             let (delayed_l, delayed_r) = self.history.read(left, right);
+            let mix = self.mix.next_frame();
 
             // Left channel
             let dry_l = Self::finite_or_zero(buffer[frame * ch]);
@@ -302,6 +310,7 @@ impl AudioEffect for DelayEffect {
     fn reset(&mut self) {
         self.history.reset();
         self.timing.reset(&self.targets, self.history.sample_rate());
+        self.mix.reset(self.targets[param::MIX]);
     }
 }
 
