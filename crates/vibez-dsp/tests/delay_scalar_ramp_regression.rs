@@ -314,3 +314,177 @@ fn manual_mix_ramps_for_ten_milliseconds_and_automation_owns_only_mix() {
     }));
     assert_eq!(failures, 0, "Mix ramp/ownership failures; see all observations above");
 }
+
+mod feedback {
+    use super::*;
+
+    fn input(frame: usize, channel: usize) -> f32 {
+        rich(frame, channel) / 16.0
+    }
+
+    fn impulse(frame: usize, channel: usize) -> f32 {
+        if frame == 0 { [0.03125, -0.015625][channel] } else { 0.0 }
+    }
+
+    fn reference(
+        rate: u32,
+        frames: usize,
+        dry: impl Fn(usize, usize) -> f32,
+        feedback: impl Fn(usize) -> f64,
+        mix: impl Fn(usize) -> f64,
+        timing: impl Fn(usize) -> (f64, f64, f64),
+    ) -> Vec<[f64; 2]> {
+        // Chronological writes avoid duplicating the production circular-buffer algorithm.
+        let mut writes: Vec<[f64; 2]> = Vec::with_capacity(frames);
+        let mut output = Vec::with_capacity(frames);
+        for frame in 0..frames {
+            let (old_ms, new_ms, blend) = timing(frame);
+            let mut next_write = [0.0; 2];
+            let mut mixed = [0.0; 2];
+            for channel in 0..2 {
+                let read = |milliseconds: f64| {
+                    let distance = milliseconds * f64::from(rate) / 1000.0;
+                    let whole = distance.floor() as usize;
+                    let fraction = distance.fract();
+                    let sample = |delay| frame.checked_sub(delay)
+                        .map(|at| writes[at][channel]).unwrap_or(0.0);
+                    sample(whole) * (1.0 - fraction) + sample(whole + 1) * fraction
+                };
+                let wet = read(old_ms) * (1.0 - blend) + read(new_ms) * blend;
+                let sample = f64::from(dry(frame, channel));
+                next_write[channel] = sample + feedback(frame) * wet;
+                mixed[channel] = sample * (1.0 - mix(frame)) + wet * mix(frame);
+            }
+            writes.push(next_write);
+            output.push(mixed);
+        }
+        output
+    }
+
+    fn prepare(rate: u32, time_ms: f32, mix: f32) -> DelayEffect {
+        let mut effect = prepared(rate, time_ms, mix);
+        assert!(effect.set_param(param::FEEDBACK, 0.25));
+        effect
+    }
+
+    fn manual_ramp_and_lifecycle(rate: u32, parts: &[usize], rows: &mut Vec<Value>) -> bool {
+        let n = (rate as usize).div_ceil(100);
+        let distance = (rate as usize).div_ceil(1000);
+        let warm = 2 * n;
+        let repeated = warm + n / 3;
+        let end = warm + n + 3 * distance + 3;
+        let expected = reference(rate, end, input,
+            |frame| if frame < warm { 0.25 }
+                else { 0.25 + 0.5 * ((frame - warm + 1) as f64 / n as f64).min(1.0) },
+            |_| 1.0, |_| (1.0, 1.0, 0.0));
+        let oracle = |frame: usize, channel| expected[frame][channel];
+        let mut effect = prepare(rate, 1.0, 1.0);
+        let mut observation = Observation::default();
+        render(&mut effect, 0..warm, parts, input, oracle, &mut observation);
+        observation.edit(&mut effect, param::FEEDBACK, 0.75, false);
+        render(&mut effect, warm..repeated, parts, input, oracle, &mut observation);
+        observation.edit(&mut effect, param::FEEDBACK, 0.75, false);
+        let before: [u32; param::COUNT] = std::array::from_fn(|index| effect.get_param(index).to_bits());
+        for automated in [false, true] {
+            for value in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+                let accepted = measured(|| {
+                    if automated { effect.set_automated_param(param::FEEDBACK, value) }
+                    else { effect.set_param(param::FEEDBACK, value) }
+                }, &mut observation.heap);
+                observation.rejected_expected_edits += usize::from(accepted);
+            }
+        }
+        let after: [u32; param::COUNT] = std::array::from_fn(|index| effect.get_param(index).to_bits());
+        observation.target_mismatches += usize::from(before != after);
+        render(&mut effect, repeated..end, parts, input, oracle, &mut observation);
+
+        for (target, pre_audio) in [(0.5_f32, false), (0.125, true)] {
+            observation.edit(&mut effect, param::FEEDBACK, if pre_audio { 0.75 } else { target }, false);
+            measured(|| effect.reset(), &mut observation.heap);
+            if pre_audio { observation.edit(&mut effect, param::FEEDBACK, target, false); }
+            let frames = 3 * distance + 3;
+            let expected = reference(rate, frames, impulse, |_| f64::from(target),
+                |_| 1.0, |_| (1.0, 1.0, 0.0));
+            render(&mut effect, 0..frames, parts, impulse,
+                |frame, channel| expected[frame][channel], &mut observation);
+        }
+        observation.finish("feedback_ramp_same_rejected_reset_pre_audio", rate, parts, rows)
+    }
+
+    fn manual_retarget(rate: u32, parts: &[usize], rows: &mut Vec<Value>) -> bool {
+        let n = (rate as usize).div_ceil(100);
+        let warm = 2 * n;
+        let retarget = warm + n / 2;
+        let repeated = retarget + n / 3;
+        let end = retarget + n + 3 * (rate as usize).div_ceil(1000) + 3;
+        let origin = 0.25 + 0.5 * (n / 2) as f64 / n as f64;
+        let expected = reference(rate, end, input,
+            |frame| if frame < warm { 0.25 }
+                else if frame < retarget { 0.25 + 0.5 * (frame - warm + 1) as f64 / n as f64 }
+                else { origin + (0.125 - origin) * ((frame - retarget + 1) as f64 / n as f64).min(1.0) },
+            |_| 1.0, |_| (1.0, 1.0, 0.0));
+        let oracle = |frame: usize, channel| expected[frame][channel];
+        let mut effect = prepare(rate, 1.0, 1.0);
+        let mut observation = Observation::default();
+        render(&mut effect, 0..warm, parts, input, oracle, &mut observation);
+        observation.edit(&mut effect, param::FEEDBACK, 0.75, false);
+        render(&mut effect, warm..retarget, parts, input, oracle, &mut observation);
+        observation.edit(&mut effect, param::FEEDBACK, 0.125, false);
+        render(&mut effect, retarget..repeated, parts, input, oracle, &mut observation);
+        observation.edit(&mut effect, param::FEEDBACK, 0.125, false);
+        render(&mut effect, repeated..end, parts, input, oracle, &mut observation);
+        observation.finish("feedback_retarget_last_applied_without_same_target_restart", rate, parts, rows)
+    }
+
+    fn exact_automation_ownership(rate: u32, parts: &[usize], automate_feedback: bool, rows: &mut Vec<Value>) -> bool {
+        let n = (rate as usize).div_ceil(100);
+        let fade = (rate as usize).div_ceil(50);
+        let warm = 2 * n;
+        let time_edit = warm + n / 4;
+        let automation = warm + n / 2;
+        let end = time_edit + fade + 3 * (3.5 * f64::from(rate) / 1000.0).ceil() as usize + 3;
+        let amount = |frame: usize, automated| {
+            if frame < warm { 0.25 }
+            else if automated && frame >= automation { 0.75 }
+            else { 0.25 + 0.5 * ((frame - warm + 1) as f64 / n as f64).min(1.0) }
+        };
+        let expected = reference(rate, end, input,
+            |frame| amount(frame, automate_feedback), |frame| amount(frame, !automate_feedback),
+            |frame| if frame < time_edit { (1.25, 1.25, 0.0) }
+                else { (1.25, 3.5, ((frame - time_edit) as f64 / (fade - 1) as f64).min(1.0)) });
+        let oracle = |frame: usize, channel| expected[frame][channel];
+        let mut effect = prepare(rate, 1.25, 0.25);
+        let mut observation = Observation::default();
+        render(&mut effect, 0..warm, parts, input, oracle, &mut observation);
+        observation.edit(&mut effect, param::FEEDBACK, 0.75, false);
+        observation.edit(&mut effect, param::MIX, 0.75, false);
+        render(&mut effect, warm..time_edit, parts, input, oracle, &mut observation);
+        observation.edit(&mut effect, param::TIME_MS, 3.5, false);
+        render(&mut effect, time_edit..automation, parts, input, oracle, &mut observation);
+        observation.edit(&mut effect, if automate_feedback { param::FEEDBACK } else { param::MIX }, 0.75, true);
+        render(&mut effect, automation..end, parts, input, oracle, &mut observation);
+        observation.finish(if automate_feedback { "feedback_automation_keeps_mix_and_time_moving" }
+            else { "mix_automation_keeps_feedback_and_time_moving" }, rate, parts, rows)
+    }
+
+    #[test]
+    fn manual_feedback_ramps_for_ten_milliseconds_and_automation_owns_only_feedback() {
+        let mut rows = Vec::new();
+        let mut failures = 0;
+        for rate in [1000, 1001, 48_000] {
+            for parts in [&[1][..], &[7, 31, 64, 1, 128, 512][..]] {
+                failures += usize::from(!manual_ramp_and_lifecycle(rate, parts, &mut rows));
+                failures += usize::from(!manual_retarget(rate, parts, &mut rows));
+                for automate_feedback in [false, true] {
+                    failures += usize::from(!exact_automation_ownership(rate, parts, automate_feedback, &mut rows));
+                }
+            }
+        }
+        println!("DELAY_FEEDBACK_RAMP_RECORD {}", json!({
+            "execution_head": std::env::var("VIBEZ_VERIFICATION_HEAD").unwrap_or_else(|_| "UNLABELLED".into()),
+            "oracle": "Independent chronological f64 writes x[n]+g[n]*wet[n], fractional past writes and mixed wet output; k/N gain, i/(N-1) fixed-tap Crossfade",
+            "sample_tolerance": SAMPLE_TOLERANCE, "observed": rows,
+        }));
+        assert_eq!(failures, 0, "Feedback ramp/ownership failures; see all observations above");
+    }
+}
