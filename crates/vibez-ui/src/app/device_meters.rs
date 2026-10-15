@@ -20,12 +20,14 @@ pub(super) struct DeviceMeters {
 
 #[derive(Default)]
 pub(super) struct MeterReadings {
+    pub input: MeterValues,
     pub output: MeterValues,
     last_meter_at: Option<Instant>,
 }
 
 impl MeterReadings {
-    fn accept(&mut self, output: MeterValues, now: Instant) {
+    fn accept(&mut self, input: MeterValues, output: MeterValues, now: Instant) {
+        self.input = input;
         self.output = output;
         self.last_meter_at = Some(now);
     }
@@ -153,7 +155,7 @@ impl App {
                 .readings
                 .entry(effect_id)
                 .or_default()
-                .accept(output, now);
+                .accept(input, output, now);
         }
     }
 }
@@ -172,7 +174,7 @@ mod tests {
             rms_r: 0.3,
         };
         let mut readings = MeterReadings::default();
-        readings.accept(levels, now);
+        readings.accept(levels, levels, now);
         readings.reset_stale(now + Duration::from_millis(249));
         assert_eq!(readings.output, levels);
         readings.reset_stale(now + Duration::from_millis(250));
