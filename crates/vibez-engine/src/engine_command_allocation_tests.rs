@@ -476,7 +476,7 @@ fn cases() -> Vec<Case> {
             loop_end: 0,
         }),
         case!("SetTrackGain", false, |f| C::SetTrackGain(f.synth, 0.5)),
-        case!("SetAutomationLane", true, |f| C::SetAutomationLane {
+        case!("SetAutomationLane", false, |f| C::SetAutomationLane {
             track_id: f.empty,
             insertion: crate::clip_insertion::PreparedAutomationLaneInsertion::new(AutomationLane::new(AutomationTarget::TrackPan)),
         }),
