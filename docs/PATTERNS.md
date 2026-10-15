@@ -70,9 +70,10 @@ staging from actual content, and live insertion installs sufficient live and
 staging capacity together.
 
 AddNote addresses the current first matching Arrange note clip. Its concrete
-storage bundle owns both the notes Vec and next-same-pitch clamp-cache Vec.
-Both capacities are checked before either allocation or any existing clamp
-value changes. Current notes and cache values move together in caller order;
+storage bundle owns the notes Vec, next-same-pitch clamp-cache Vec and
+note-sort scratch Vec. All three capacities are checked before any allocation
+or existing clamp value changes. Current notes, cache values and scratch move
+together in caller order;
 then the original note appends using the existing incremental clamp update.
 Insertion preserves geometry, groove latch and sounding voices, and neither
 flushes notes nor recalculates project length. Later index edits, removal or
@@ -98,11 +99,9 @@ defensive pending replacement/rejection checks both slots before mutation.
 There is no credit held while awaiting a reply. This operation uses one lane
 Vec, without a parallel removal-staging Vec or a new mailbox.
 
-AddNote's bundle has two inner Vecs on this branch. If PR #286's note-sort
-scratch is integrated,
-extend this SAME bundle/preflight/complete return to all three Vecs and prove
-that union; two-buffer proofs do not cover a third callback-owned allocation.
-Do not add a parallel storage protocol or discard live scratch owners.
+The same prepared exchange returns all three displaced inner allocations in
+the completed insertion owner. The callback neither grows nor discards live
+sort scratch; source construction and offline preparation use the same bundle.
 
 Current playback continues while one insertion waits, but later FIFO commands,
 including Stop, Undo replay and NoteOff, wait for this exchange. Preparation
