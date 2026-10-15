@@ -38,6 +38,9 @@ impl AudioEngine {
     ) {
         if let Some(track) = self.channel_mut(track_id) {
             if let Some(slot) = track.effects.iter_mut().find(|e| e.id == effect_id) {
+                if slot.bypass != bypass {
+                    slot.effect.take_dynamics_meter();
+                }
                 slot.bypass = bypass;
             }
         }

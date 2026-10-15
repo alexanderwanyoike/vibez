@@ -1,3 +1,5 @@
+//! Effect identities, parameter metadata and native diagnostic snapshots.
+
 use serde::{Deserialize, Serialize};
 
 use crate::id::EffectId;
@@ -49,6 +51,15 @@ impl EffectType {
             EffectType::AutoPan,
         ]
     }
+}
+
+/// Attenuation is positive dB from the wet gain computer before makeup/mix.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct DynamicsMeter {
+    pub current_reduction_db: [f32; 2],
+    pub peak_reduction_db: [f32; 2],
+    /// Linear post-filter detector peaks accumulated since the last drain.
+    pub detector_peak: [f32; 2],
 }
 
 #[derive(Debug, Clone, Copy)]
