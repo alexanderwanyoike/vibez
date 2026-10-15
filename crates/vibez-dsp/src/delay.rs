@@ -252,13 +252,13 @@ impl AudioEffect for DelayEffect {
 
         let ch = channels;
         let frames = buffer.len() / ch;
-        let distance = self.timing.distance(&self.targets, self.history.sample_rate());
-        let tap = self.history.tap(distance);
+        let distances = self.timing.distances(&self.targets, self.history.sample_rate());
+        let [left_tap, right_tap] = distances.map(|distance| self.history.tap(distance));
         let feedback = self.targets[param::FEEDBACK];
         let mix = self.targets[param::MIX];
 
         for frame in 0..frames {
-            let (delayed_l, delayed_r) = self.history.read(tap);
+            let (delayed_l, delayed_r) = self.history.read(left_tap, right_tap);
 
             // Left channel
             let dry_l = Self::finite_or_zero(buffer[frame * ch]);

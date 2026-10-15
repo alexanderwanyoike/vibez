@@ -74,9 +74,10 @@ impl DelayHistory {
         (delay.floor() as usize, delay.fract())
     }
 
-    pub(super) fn read(&self, (whole, fraction): (usize, f64)) -> (f32, f32) {
+    pub(super) fn read(&self, left_tap: (usize, f64), right_tap: (usize, f64)) -> (f32, f32) {
         let buf_len = self.buffer_l.len();
-        let read = |history: &[f32], position: usize| {
+        let read = |history: &[f32], (whole, fraction): (usize, f64)| {
+            let position = (self.write_pos + buf_len - whole) % buf_len;
             let recent = history[position];
             // Integer taps bypass blend arithmetic to retain the legacy sample algebra.
             if fraction == 0.0 {
@@ -86,8 +87,7 @@ impl DelayHistory {
                 (f64::from(recent) * (1.0 - fraction) + f64::from(older) * fraction) as f32
             }
         };
-        let read_pos = (self.write_pos + buf_len - whole) % buf_len;
-        (read(&self.buffer_l, read_pos), read(&self.buffer_r, read_pos))
+        (read(&self.buffer_l, left_tap), read(&self.buffer_r, right_tap))
     }
 
     pub(super) fn write_and_advance(&mut self, left: f32, right: f32) {
