@@ -142,7 +142,8 @@ pub fn view<'a>(
     ];
     let main =
         |height, side| main_controls(track_id, effect, state, entry, control_accent, side, height);
-    let advanced = |height| advanced_controls(track_id, effect, entry, control_accent, height);
+    let advanced =
+        |height| advanced_controls(track_id, effect, entry, control_accent, height, false);
     let history = if size.width >= MEDIUM_W {
         Side::History
     } else {
@@ -205,9 +206,9 @@ fn main_controls<'a>(
     ]
     .height(inner);
     if matches!(side, Side::Advanced) {
-        main = main
-            .push(vertical_rule())
-            .push(advanced_controls(track_id, effect, entry, accent, inner));
+        main = main.push(vertical_rule()).push(advanced_controls(
+            track_id, effect, entry, accent, inner, true,
+        ));
     } else if matches!(side, Side::History) && inner >= HISTORY_MIN_H {
         main = main.push(vertical_rule()).push(
             column![
@@ -341,6 +342,7 @@ fn advanced_controls<'a>(
     entry: Option<&'a ValueEntry>,
     accent: Color,
     height: f32,
+    beside: bool,
 ) -> Element<'a, Message> {
     let roomy = height >= 70.0;
     let trims = row![
@@ -356,17 +358,34 @@ fn advanced_controls<'a>(
         ),
     ]
     .spacing(10);
-    let polarity = row![
-        polarity_control(track_id, effect, param::POLARITY[0], "L polarity", accent),
-        polarity_control(track_id, effect, param::POLARITY[1], "R polarity", accent),
-    ]
-    .spacing(10);
+    // Beside the meters there is room for the trims and two short toggles,
+    // not for a labelled pair.
+    let polarity: Element<'a, Message> = if beside {
+        column![
+            heading("Polarity"),
+            row![
+                phase_toggle(track_id, effect, param::POLARITY[0], "\u{00D8} L", accent),
+                phase_toggle(track_id, effect, param::POLARITY[1], "\u{00D8} R", accent),
+            ]
+            .spacing(4),
+        ]
+        .spacing(4)
+        .align_x(Alignment::Center)
+        .into()
+    } else {
+        row![
+            polarity_control(track_id, effect, param::POLARITY[0], "L polarity", accent),
+            polarity_control(track_id, effect, param::POLARITY[1], "R polarity", accent),
+        ]
+        .spacing(10)
+        .into()
+    };
     container(
         row![trims, vertical_rule(), polarity]
-            .spacing(14)
+            .spacing(if beside { 10 } else { 14 })
             .align_y(Alignment::Center),
     )
-    .padding([4.0, PAD])
+    .padding([4.0, if beside { 6.0 } else { PAD }])
     .height(height)
     .align_y(Alignment::Center)
     .into()
@@ -412,6 +431,22 @@ fn polarity_control<'a>(
     .spacing(4)
     .align_x(Alignment::Center)
     .into()
+}
+
+fn phase_toggle<'a>(
+    track_id: TrackId,
+    effect: &UiEffect,
+    index: usize,
+    label: &'static str,
+    accent: Color,
+) -> Element<'a, Message> {
+    let inverted = effect.params.get(index).copied().unwrap_or(0.0) >= 0.5;
+    small_button(
+        label,
+        Message::set_effect_param(track_id, effect.id, index, if inverted { 0.0 } else { 1.0 }),
+        accent,
+        inverted,
+    )
 }
 
 fn disclosure<'a>(effect: &UiEffect, open: bool) -> Element<'a, Message> {
