@@ -130,6 +130,20 @@ impl AudioEffect for DelayEffect {
     }
 
     fn process(&mut self, buffer: &mut [f32], channels: usize) {
+        if !self.configuration_valid {
+            if channels == 0 {
+                return;
+            }
+            for frame in buffer.chunks_exact_mut(channels) {
+                for sample in frame.iter_mut().take(2) {
+                    if !sample.is_finite() {
+                        *sample = 0.0;
+                    }
+                }
+            }
+            return;
+        }
+
         let ch = channels.clamp(1, 2);
         let frames = buffer.len() / ch;
         let delay = self.delay_samples();
