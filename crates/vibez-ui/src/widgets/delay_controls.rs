@@ -48,6 +48,36 @@ fn musical_time<'a>(track: TrackId, effect: &UiEffect, accent: Color, snapshot: 
     column![section_label(title), control].spacing(3).into()
 }
 
+fn binary_choice<'a>(track: TrackId, effect: &UiEffect, index: usize,
+    label: &'static str, options: &'static [&'static str], accent: Color,
+    width: f32) -> Element<'a, Message> {
+    let value = effect.params.get(index).copied().unwrap_or(effect.descriptors[index].default);
+    let selected = usize::from(value == 1.0);
+    let id = effect.id;
+    let segment = |choice: usize, active: bool| {
+        button(text(options[choice]).size(10).wrapping(iced::widget::text::Wrapping::None))
+            .on_press(Message::set_effect_param(track, id, index, choice as f32))
+            .padding([1, 3]).width(Length::Fill).style(move |_, status| button::Style {
+                background: Some(if matches!(status, button::Status::Hovered | button::Status::Pressed) {
+                    th::bg_hover() } else { th::bg_dark() }.into()),
+                text_color: if active { accent } else { th::text() },
+                border: iced::Border { color: if active { accent } else { th::border() },
+                    width: 1.0, radius: 2.0.into() }, ..Default::default()
+            })
+    };
+    // Text estimates include each button's padding so short pages keep a readable single toggle.
+    let longest = options.iter().map(|label| label.chars().count()).max().unwrap_or(0) as f32;
+    let content: Element<'a, Message> = if (width - 2.0) * 0.5 >= longest * 6.0 + 6.0 {
+        row![segment(0, selected == 0), segment(1, selected == 1)].spacing(2).into()
+    } else {
+        segment(selected, true).on_press(Message::set_effect_param(
+            track, id, index, (1 - selected) as f32)).into()
+    };
+    column![section_label(label), tooltip(content,
+        text(format!("{label}: {} or {}.", options[0], options[1])).size(9),
+        tooltip::Position::Top)].spacing(3).into()
+}
+
 fn cell<'a>(track: TrackId, effect: &'a UiEffect, state: &'a DeviceControlState,
     accent: Color, control: &Control, snapshot: Option<&DelayState>) -> Element<'a, Message> {
     let index = control.parameters[0];
@@ -67,20 +97,8 @@ fn cell<'a>(track: TrackId, effect: &'a UiEffect, state: &'a DeviceControlState,
         _ => None,
     };
     if let Some((label, options)) = choice {
-        if options.len() == 2 && control.bounds.width < 76.0 {
-            let value = effect.params.get(index).copied().unwrap_or(effect.descriptors[index].default);
-            let selected = usize::from(value == 1.0);
-            let toggle = button(text(options[selected]).size(10))
-                .on_press(Message::set_effect_param(track, effect.id, index, (1 - selected) as f32))
-                .padding([1, 3]).width(Length::Fill).style(move |_, status| button::Style {
-                    background: Some(if matches!(status, button::Status::Hovered | button::Status::Pressed) {
-                        th::bg_hover() } else { th::bg_dark() }.into()), text_color: accent,
-                    border: iced::Border { color: th::border(), width: 1.0, radius: 2.0.into() },
-                    ..Default::default()
-                });
-            column![section_label(label), tooltip(toggle,
-                text(format!("{label}: {} or {}. Click to switch.", options[0], options[1])).size(9),
-                tooltip::Position::Top)].spacing(3).into()
+        if options.len() == 2 {
+            binary_choice(track, effect, index, label, options, accent, control.bounds.width)
         } else {
             device_controls::selector(track, effect, index, label, options, accent)
         }
