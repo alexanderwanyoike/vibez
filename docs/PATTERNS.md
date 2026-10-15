@@ -247,6 +247,15 @@ Clip and transport acknowledgements, and immediate recording feeds.
 Cancelled Capture offset owners retain their original physical deadlines so
 retirement cannot advance another still-delayed public state.
 
+A Section recording stop freezes its original coordinates and optional prepared
+source in the recording lifecycle when every presentation return path is full.
+Publication checks capacity before taking this owner and retries it before older
+ordinary retirements, without holding a retirement credit while waiting. A later
+Arm waits at the command FIFO before admission until that stop can return; Play
+remains independent. Exhaustion still faults presentation at the discovering
+boundary. If the receiver never recovers, non-audio engine teardown releases the
+retained source.
+
 Every engine starts with a caller-prepared master-only routing plan and keeps
 one non-optional active plan. The first project publication parks that bootstrap
 owner in one fixed engine slot until non-audio engine teardown; it emits no
