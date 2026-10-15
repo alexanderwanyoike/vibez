@@ -277,7 +277,9 @@ mod tests {
             track, compressor,
         )));
 
-        let _ = app.update(Message::Devices(DevicesMsg::RemoveEffect(track, compressor)));
+        let _ = app.update(Message::Devices(DevicesMsg::RemoveEffect(
+            track, compressor,
+        )));
         app.poll_device_meters();
         app.accept_device_meter(track, compressor, generation, levels(), levels());
         assert!(!app.device_meters.readings.contains_key(&compressor));
