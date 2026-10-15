@@ -159,8 +159,8 @@ fn native_note_consumer_fulfills_stale_hints_and_preserves_first_duplicate_note_
     let samples_per_beat = 44_100.0 * 60.0 / 137.0;
     assert_eq!(engine.transport().audio_length(), Some(((last.position + last.duration) * samples_per_beat).round() as u64));
     for item in &expected[1..] {
-        // Seek inside the note, avoiding rounding of the source's beat-zero edge.
-        commands.push(EngineCommand::Seek(((item.position + 0.25) * samples_per_beat).round() as u64)).unwrap();
+        // The scheduler maps note-on beats to their first reaching sample with ceil.
+        commands.push(EngineCommand::Seek((item.position * samples_per_beat).ceil() as u64)).unwrap();
         commands.push(EngineCommand::Play).unwrap();
         assert_signal(&render(&mut engine, true), item.note.velocity as f32 / 128.0);
         while events.pop().is_ok() {}
