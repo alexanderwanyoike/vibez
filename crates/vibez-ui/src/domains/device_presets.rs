@@ -6,6 +6,9 @@ use vibez_core::id::{EffectId, TrackId};
 
 use crate::state::UiEffect;
 
+#[path = "delay_presets.rs"]
+mod delay;
+
 #[derive(Debug, Clone)]
 pub enum DevicePresetMsg {
     Load(TrackId, EffectId),
@@ -89,6 +92,7 @@ fn parameter_keys(effect: &UiEffect) -> Result<&'static [&'static str], String> 
     }
     match effect.effect_type {
         EffectType::Gain => Ok(&GAIN_KEYS),
+        EffectType::Delay => Ok(&delay::KEYS),
         _ => Err("Presets are not yet supported by this built-in device".into()),
     }
 }
@@ -165,6 +169,9 @@ pub fn prepare_updates(
 }
 
 pub fn factory_presets(effect_type: EffectType) -> Vec<DevicePreset> {
+    if effect_type == EffectType::Delay {
+        return delay::factory_presets();
+    }
     if effect_type != EffectType::Gain {
         return Vec::new();
     }
