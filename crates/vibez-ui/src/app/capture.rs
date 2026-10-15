@@ -920,7 +920,7 @@ mod tests {
                 match event {
                     vibez_engine::events::EngineEvent::ClipInsertionStorageRequested(request) => {
                         assert!(expected_targets.iter().any(|&(track, clip, _)| {
-                            (request.track_id, request.clip_id) == (track, clip)
+                            (request.track_id, request.target) == (track, vibez_engine::clip_insertion::ClipInsertionTarget::Clip(clip))
                         }));
                         assert!(!requested.contains(&request.id));
                         requested.push(request.id.clone());
@@ -936,7 +936,7 @@ mod tests {
                         } else {
                             expected_targets[1]
                         };
-                        assert_eq!((owner.track_id, owner.clip_id), (target.0, target.1));
+                        assert_eq!((owner.track_id, owner.target), (target.0, vibez_engine::clip_insertion::ClipInsertionTarget::Clip(target.1)));
                         let id = owner.id();
                         assert!(!completed.contains(&id));
                         completed.push(id);

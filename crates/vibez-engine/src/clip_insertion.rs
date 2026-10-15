@@ -14,6 +14,11 @@ use crate::playback_source::{
 use vibez_core::midi::MidiNote;
 use vibez_core::perform::GrooveGrid;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClipInsertionTarget {
+    Clip(ClipId),
+}
+
 #[derive(Clone)]
 pub struct ClipInsertionId(Arc<()>);
 
@@ -117,7 +122,7 @@ pub struct PreparedClipInsertion {
     storage: ClipInsertionStorage,
     reply: Option<ClipInsertionStorage>,
     pub(crate) clip: Option<ClipInsertionDelta>,
-    pub(crate) target: Option<(TrackId, ClipId)>,
+    pub(crate) target: Option<(TrackId, ClipInsertionTarget)>,
 }
 
 impl PreparedClipInsertion {
@@ -154,7 +159,7 @@ impl PreparedClipInsertion {
         &mut self,
         source: &mut PreparedPlaybackSource,
     ) -> ClipInsertionAttempt {
-        let (_, clip_id) = self.target.expect("the command supplies its target");
+        let (_, ClipInsertionTarget::Clip(clip_id)) = self.target.expect("the command supplies its target");
         let storage = self.reply.as_mut().unwrap_or(&mut self.storage);
         let (ready, length) = match (
             storage,
@@ -202,11 +207,11 @@ impl PreparedClipInsertion {
     }
 
     pub(crate) fn request(&mut self, required: usize) -> ClipInsertionStorageRequest {
-        let (track_id, clip_id) = self.target.expect("the command supplies its target");
+        let (track_id, target) = self.target.expect("the command supplies its target");
         ClipInsertionStorageRequest {
             id: self.id.clone(),
             track_id,
-            clip_id,
+            target,
             capacity: required.checked_mul(2).unwrap_or(required),
             kind: self.storage.kind(),
             sender: self
@@ -354,7 +359,7 @@ pub(crate) enum ClipInsertionReply {
 pub struct ClipInsertionStorageRequest {
     pub id: ClipInsertionId,
     pub track_id: TrackId,
-    pub clip_id: ClipId,
+    pub target: ClipInsertionTarget,
     capacity: usize,
     kind: ClipInsertionKind,
     sender: Producer<ClipInsertionStorage>,
@@ -379,7 +384,7 @@ impl std::fmt::Debug for ClipInsertionStorageRequest {
             .field("id", &self.id)
             .field("track_id", &self.track_id)
             .field("kind", &self.kind)
-            .field("clip_id", &self.clip_id)
+            .field("target", &self.target)
             .field("capacity", &self.capacity)
             .finish()
     }
@@ -404,7 +409,7 @@ pub enum ClipInsertionOutcome {
 #[must_use = "retain or destroy the complete insertion owner off callback"]
 pub struct CompletedClipInsertion {
     pub track_id: TrackId,
-    pub clip_id: ClipId,
+    pub target: ClipInsertionTarget,
     pub outcome: ClipInsertionOutcome,
     pub(crate) owner: Box<PreparedClipInsertion>,
 }
@@ -421,7 +426,7 @@ impl std::fmt::Debug for CompletedClipInsertion {
             .field("id", &self.owner.id)
             .field("track_id", &self.track_id)
             .field("kind", &self.owner.storage.kind())
-            .field("clip_id", &self.clip_id)
+            .field("target", &self.target)
             .field("outcome", &self.outcome)
             .finish()
     }

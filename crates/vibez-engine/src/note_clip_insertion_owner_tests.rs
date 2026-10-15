@@ -42,7 +42,7 @@ fn public_missing_track_returns_complete_prepared_note_clip_without_callback_hea
         panic!("missing target must return its complete prepared owner");
     };
     assert_eq!(completed.track_id, track);
-    assert_eq!(completed.clip_id, clip);
+    assert_eq!(completed.target, crate::clip_insertion::ClipInsertionTarget::Clip(clip));
     assert_eq!(completed.outcome, ClipInsertionOutcome::MissingTrack);
     assert_eq!(Arc::as_ptr(&completed.owner.id.0), identity.as_ptr());
     assert_eq!(std::ptr::from_ref(completed.owner.as_ref()), control);

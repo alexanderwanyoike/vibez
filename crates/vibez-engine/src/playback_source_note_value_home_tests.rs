@@ -76,7 +76,7 @@ fn pending_note_value_growth_keeps_all_source_homes_and_perform_clocks_distinct(
         while let Ok(event) = events.pop() {
             if let EngineEvent::ClipInsertionStorageRequested(value) = event {
                 assert_eq!(value.id, operation);
-                assert_eq!((value.track_id, value.clip_id), (track_id, clip_id));
+                assert_eq!((value.track_id, value.target), (track_id, crate::clip_insertion::ClipInsertionTarget::Clip(clip_id)));
                 assert!(request.replace(value).is_none());
             } else {
                 assert!(!matches!(event, EngineEvent::ClipInsertionCompleted(_)));
@@ -161,7 +161,7 @@ fn pending_note_value_growth_keeps_all_source_homes_and_perform_clocks_distinct(
         };
         assert_eq!(owner.id(), operation);
         assert_eq!(owner.outcome, ClipInsertionOutcome::Applied);
-        assert_eq!((owner.track_id, owner.clip_id), (track_id, clip_id));
+        assert_eq!((owner.track_id, owner.target), (track_id, crate::clip_insertion::ClipInsertionTarget::Clip(clip_id)));
         assert_eq!(
             crate::retirement::tests::allocations(|| drop(owner)),
             (0, 7)
