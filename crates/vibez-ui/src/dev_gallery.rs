@@ -542,6 +542,16 @@ impl EqGallery {
                     self.scene("Full, Advanced open", FULL_W, (FULL_W + 16.0, 300.0), open),
                 ]
                 .spacing(24),
+                row![
+                    self.scene("Full, shortest", FULL_W, (FULL_W + 16.0, 130.0), closed),
+                    self.scene(
+                        "Compact, shortest, Advanced open",
+                        COMPACT_W,
+                        (COMPACT_W + 16.0, 130.0),
+                        open
+                    ),
+                ]
+                .spacing(24),
             ]
             .spacing(16),
         )
@@ -564,7 +574,7 @@ pub fn run_eq() -> iced::Result {
     )
     .theme(|_| th::vibez_theme())
     .antialiasing(true)
-    .window_size((1900.0, 1100.0))
+    .window_size((1900.0, 1260.0))
     .font(crate::icons::ICON_FONT_BYTES)
     .font(crate::typography::PLEX_SANS_CONDENSED_MEDIUM_BYTES)
     .font(crate::typography::PLEX_SANS_CONDENSED_SEMIBOLD_BYTES)
