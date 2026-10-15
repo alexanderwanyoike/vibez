@@ -5,7 +5,9 @@ use vibez_core::id::{ClipId, TrackId};
 use vibez_core::midi::{InstrumentKind, MidiNote};
 use vibez_core::perform::GrooveGrid;
 use vibez_core::routing::RoutingChannel;
-use vibez_engine::clip_insertion::{ClipInsertionId, ClipInsertionOutcome, PreparedNoteClipInsertion};
+use vibez_engine::clip_insertion::{
+    ClipInsertionId, ClipInsertionOutcome, PreparedNoteClipInsertion,
+};
 use vibez_engine::commands::EngineCommand;
 use vibez_engine::engine::{AudioEngine, AudioProcessBlock};
 use vibez_engine::events::EngineEvent;
@@ -18,14 +20,30 @@ use vibez_instruments::Instrument;
 struct VelocityInstrument(f32);
 
 impl Instrument for VelocityInstrument {
-    fn instrument_kind(&self) -> InstrumentKind { InstrumentKind::SubtractiveSynth }
-    fn param_descriptors(&self) -> &'static [ParamDescriptor] { &[] }
-    fn set_param(&mut self, _: usize, _: f32) -> bool { false }
-    fn get_param(&self, _: usize) -> f32 { 0.0 }
-    fn note_on(&mut self, _: u8, velocity: u8) { self.0 = velocity as f32 / 128.0; }
-    fn note_off(&mut self, _: u8) { self.0 = 0.0; }
-    fn render(&mut self, output: &mut [f32], _: usize) { output.fill(self.0); }
-    fn reset(&mut self) { self.0 = 0.0; }
+    fn instrument_kind(&self) -> InstrumentKind {
+        InstrumentKind::SubtractiveSynth
+    }
+    fn param_descriptors(&self) -> &'static [ParamDescriptor] {
+        &[]
+    }
+    fn set_param(&mut self, _: usize, _: f32) -> bool {
+        false
+    }
+    fn get_param(&self, _: usize) -> f32 {
+        0.0
+    }
+    fn note_on(&mut self, _: u8, velocity: u8) {
+        self.0 = velocity as f32 / 128.0;
+    }
+    fn note_off(&mut self, _: u8) {
+        self.0 = 0.0;
+    }
+    fn render(&mut self, output: &mut [f32], _: usize) {
+        output.fill(self.0);
+    }
+    fn reset(&mut self) {
+        self.0 = 0.0;
+    }
 }
 
 fn render(engine: &mut AudioEngine, sounding: bool) -> [f32; 16] {
@@ -55,20 +73,52 @@ fn native_note_consumer_fulfills_stale_hints_and_preserves_first_duplicate_note_
     let (mut engine, mut commands, mut events) = AudioEngine::new();
     let track_id = TrackId::new();
     let duplicate = ClipId::new();
-    let resident_note = MidiNote { pitch: 60, velocity: 32, start_beat: 0.0, duration_beats: 4.0 };
-    let source = PreparedPlaybackSource::new(Vec::new(), vec![EngineNoteClip::new(
-        duplicate, 0.0, 8.0, vec![resident_note], 0.0, false, 0.0, 8.0, GrooveGrid::Off,
-    )], Vec::new());
+    let resident_note = MidiNote {
+        pitch: 60,
+        velocity: 32,
+        start_beat: 0.0,
+        duration_beats: 4.0,
+    };
+    let source = PreparedPlaybackSource::new(
+        Vec::new(),
+        vec![EngineNoteClip::new(
+            duplicate,
+            0.0,
+            8.0,
+            vec![resident_note],
+            0.0,
+            false,
+            0.0,
+            8.0,
+            GrooveGrid::Off,
+        )],
+        Vec::new(),
+    );
     let resident_notes = source.note_clips[0].notes.as_ptr();
-    assert_eq!((source.note_clips.len(), source.note_clips.capacity()), (1, 1));
+    assert_eq!(
+        (source.note_clips.len(), source.note_clips.capacity()),
+        (1, 1)
+    );
     let mut track = EngineTrack::with_playback_source(track_id, source);
     track.pan = 0.0;
     track.instrument = Some(Box::new(VelocityInstrument::default()));
-    commands.push(EngineCommand::AddTrack(Box::new(track))).unwrap();
-    let channels: Vec<_> = [track_id, TrackId::MASTER].into_iter().map(|id| RoutingChannel {
-        id, is_bus: id.is_master(), sends: Vec::new(), effects: Vec::new(),
-    }).collect();
-    commands.push(EngineCommand::SetRouting(PreparedRouting::prepare(&channels, 8).unwrap())).unwrap();
+    commands
+        .push(EngineCommand::AddTrack(Box::new(track)))
+        .unwrap();
+    let channels: Vec<_> = [track_id, TrackId::MASTER]
+        .into_iter()
+        .map(|id| RoutingChannel {
+            id,
+            is_bus: id.is_master(),
+            sends: Vec::new(),
+            effects: Vec::new(),
+        })
+        .collect();
+    commands
+        .push(EngineCommand::SetRouting(
+            PreparedRouting::prepare(&channels, 8).unwrap(),
+        ))
+        .unwrap();
     commands.push(EngineCommand::Play).unwrap();
     assert_signal(&render(&mut engine, true), 0.25);
     while events.pop().is_ok() {}
@@ -78,10 +128,22 @@ fn native_note_consumer_fulfills_stale_hints_and_preserves_first_duplicate_note_
         let position = 16.0 + index as f64 * 4.0;
         let duration = 2.0 + (index % 2) as f64;
         let insertion = PreparedNoteClipInsertion::new(
-            id, position, duration, 0.0, false, 0.0, duration, GrooveGrid::Off,
+            id,
+            position,
+            duration,
+            0.0,
+            false,
+            0.0,
+            duration,
+            GrooveGrid::Off,
         );
         let operation = insertion.id();
-        commands.push(EngineCommand::AddNoteClip { track_id, insertion }).unwrap();
+        commands
+            .push(EngineCommand::AddNoteClip {
+                track_id,
+                insertion,
+            })
+            .unwrap();
         let note = MidiNote {
             pitch: 61 + (index % 60) as u8,
             velocity: 1 + (index % 127) as u8,
@@ -90,21 +152,43 @@ fn native_note_consumer_fulfills_stale_hints_and_preserves_first_duplicate_note_
         };
         // The separate existing AddNote command must stay behind its own empty
         // insertion; duplicate IDs continue resolving to the first resident clip.
-        commands.push(EngineCommand::AddNote { track_id, clip_id: id, note }).unwrap();
-        expected.push(Expected { id, operation, position, duration, note });
+        commands
+            .push(EngineCommand::AddNote {
+                track_id,
+                clip_id: id,
+                note,
+            })
+            .unwrap();
+        expected.push(Expected {
+            id,
+            operation,
+            position,
+            duration,
+            note,
+        });
     }
     commands.push(EngineCommand::SetBpm(137.0)).unwrap();
     commands.push(EngineCommand::Stop).unwrap();
     render(&mut engine, false);
-    assert!(matches!(events.peek().unwrap(), EngineEvent::ClipInsertionStorageRequested(request)
-        if request.id == expected[0].operation));
+    assert!(
+        matches!(events.peek().unwrap(), EngineEvent::ClipInsertionStorageRequested(request)
+        if request.id == expected[0].operation)
+    );
     assert_signal(&render(&mut engine, true), 0.25);
     assert_eq!(engine.transport().position(), 16);
     assert!(engine.transport().is_playing());
     assert_eq!(engine.transport().bpm(), 120.0);
     assert_eq!(engine.tracks()[0].playback_source.note_clips.len(), 1);
-    assert_eq!(engine.tracks()[0].playback_source.note_clips[0].notes, [resident_note]);
-    assert_eq!(engine.tracks()[0].playback_source.note_clips[0].notes.as_ptr(), resident_notes);
+    assert_eq!(
+        engine.tracks()[0].playback_source.note_clips[0].notes,
+        [resident_note]
+    );
+    assert_eq!(
+        engine.tracks()[0].playback_source.note_clips[0]
+            .notes
+            .as_ptr(),
+        resident_notes
+    );
     let mut completed = 0;
     let mut requested = Vec::new();
     // Every insertion can request at most one current-capacity exchange.
@@ -114,7 +198,10 @@ fn native_note_consumer_fulfills_stale_hints_and_preserves_first_duplicate_note_
         while let Ok(event) = events.pop() {
             match event {
                 EngineEvent::ClipInsertionStorageRequested(request) => {
-                    let item = expected.iter().find(|item| item.operation == request.id).unwrap();
+                    let item = expected
+                        .iter()
+                        .find(|item| item.operation == request.id)
+                        .unwrap();
                     assert_eq!((request.track_id, request.clip_id), (track_id, item.id));
                     assert!(!requested.contains(&request.id));
                     requested.push(request.id.clone());
@@ -131,11 +218,16 @@ fn native_note_consumer_fulfills_stale_hints_and_preserves_first_duplicate_note_
                 _ => {}
             }
         }
-        if completed == expected.len() { break; }
+        if completed == expected.len() {
+            break;
+        }
     }
     assert_eq!(completed, 257);
     assert!(!requested.is_empty());
-    assert_eq!(commands.slots(), vibez_core::constants::RING_BUFFER_CAPACITY);
+    assert_eq!(
+        commands.slots(),
+        vibez_core::constants::RING_BUFFER_CAPACITY
+    );
     assert!(!engine.transport().is_playing());
     assert_eq!(engine.transport().position(), 16);
     assert_eq!(engine.transport().bpm(), 137.0);
@@ -152,17 +244,30 @@ fn native_note_consumer_fulfills_stale_hints_and_preserves_first_duplicate_note_
         assert_eq!(actual.loop_start_beats, 0.0);
         assert_eq!(actual.loop_end_beats, item.duration);
         assert_eq!(actual.groove_grid, GrooveGrid::Off);
-        if item.id == duplicate { assert!(actual.notes.is_empty()); }
-        else { assert_eq!(actual.notes, [item.note]); }
+        if item.id == duplicate {
+            assert!(actual.notes.is_empty());
+        } else {
+            assert_eq!(actual.notes, [item.note]);
+        }
     }
     let last = expected.last().unwrap();
     let samples_per_beat = 44_100.0 * 60.0 / 137.0;
-    assert_eq!(engine.transport().audio_length(), Some(((last.position + last.duration) * samples_per_beat).round() as u64));
+    assert_eq!(
+        engine.transport().audio_length(),
+        Some(((last.position + last.duration) * samples_per_beat).round() as u64)
+    );
     for item in &expected[1..] {
         // The scheduler maps note-on beats to their first reaching sample with ceil.
-        commands.push(EngineCommand::Seek((item.position * samples_per_beat).ceil() as u64)).unwrap();
+        commands
+            .push(EngineCommand::Seek(
+                (item.position * samples_per_beat).ceil() as u64,
+            ))
+            .unwrap();
         commands.push(EngineCommand::Play).unwrap();
-        assert_signal(&render(&mut engine, true), item.note.velocity as f32 / 128.0);
+        assert_signal(
+            &render(&mut engine, true),
+            item.note.velocity as f32 / 128.0,
+        );
         while events.pop().is_ok() {}
     }
 }

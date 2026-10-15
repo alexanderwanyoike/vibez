@@ -25,7 +25,11 @@ impl AudioEngine {
         self.begin_clip_insertion(track_id, insertion.into_control());
     }
 
-    fn begin_clip_insertion(&mut self, track_id: TrackId, mut insertion: Box<PreparedClipInsertion>) {
+    fn begin_clip_insertion(
+        &mut self,
+        track_id: TrackId,
+        mut insertion: Box<PreparedClipInsertion>,
+    ) {
         insertion.target = Some((track_id, insertion.clip_id()));
         let Some(track) = self.tracks.iter_mut().find(|track| track.id == track_id) else {
             self.complete_clip_insertion(insertion, ClipInsertionOutcome::MissingTrack);
@@ -76,11 +80,13 @@ impl AudioEngine {
         outcome: ClipInsertionOutcome,
     ) {
         let (track_id, clip_id) = owner.target.expect("one insertion outcome target");
-        self.retire_event(EngineEvent::ClipInsertionCompleted(CompletedClipInsertion {
-            track_id,
-            clip_id,
-            outcome,
-            owner,
-        }));
+        self.retire_event(EngineEvent::ClipInsertionCompleted(
+            CompletedClipInsertion {
+                track_id,
+                clip_id,
+                outcome,
+                owner,
+            },
+        ));
     }
 }
