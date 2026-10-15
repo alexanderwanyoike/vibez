@@ -16,7 +16,7 @@ fn start_capture_through_command(
         (0, 0)
     );
     assert!(engine.cmd_rx.peek().is_err());
-    assert!(engine.capture_active);
+    assert!(engine.capture_lifecycle.is_active());
     let EngineEvent::PerformanceCaptureStarted {
         offsets,
         effective_at_samples,

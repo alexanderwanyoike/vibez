@@ -310,7 +310,7 @@ fn report(
     fixture: &Fixture,
 ) {
     eprintln!("device-observation-c: case={case}; instrument={instrument}; before={before}; calls={calls:?}; order={:?}; reasons={:?}; positions={:?}; capture={}; playing={}; valid={}; awaiting={}; pending={}",
-        events.order, events.reasons, events.positions, fixture.engine.capture_active, fixture.engine.transport.is_playing(),
+        events.order, events.reasons, events.positions, fixture.engine.capture_lifecycle.is_active(), fixture.engine.transport.is_playing(),
         fixture.engine.compensation_plan.applied_plan_is_valid(), fixture.engine.compensation_plan.awaiting_structural_plan(),
         fixture.engine.device_handoff.pending().is_some());
 }
@@ -366,7 +366,7 @@ fn same_drain_capture_starts_observe_effect_and_instrument_manual_edits() {
                 }
             );
             assert_eq!(events.reasons, [LOCAL_REASON]);
-            assert_eq!(fixture.engine.capture_active, before);
+            assert_eq!(fixture.engine.capture_lifecycle.is_active(), before);
             assert!(fixture.engine.compensation_plan.applied_plan_is_valid());
             report("manual-edit", instrument, before, &calls, &events, &fixture);
         }
@@ -392,7 +392,7 @@ fn a_play_reset_between_capture_commands_is_observed_in_the_same_drain() {
     let events = collect(&mut fixture);
     assert_eq!(events.order, ["stop", "refused", "play", "start", "source"]);
     assert_eq!(events.reasons, [LOCAL_REASON]);
-    assert!(fixture.engine.capture_active);
+    assert!(fixture.engine.capture_lifecycle.is_active());
     assert!(fixture.engine.transport.is_playing());
     report("play-reset", false, true, &calls, &events, &fixture);
 }
@@ -462,7 +462,7 @@ fn same_drain_capture_admission_observes_removed_and_replaced_device_owners() {
         assert_eq!(events.reasons, [LOCAL_REASON]);
         assert_eq!(fixture.controls[target].drops.load(Ordering::Relaxed), 1);
         assert_eq!(replacement.drops.load(Ordering::Relaxed), 0);
-        assert!(fixture.engine.capture_active);
+        assert!(fixture.engine.capture_lifecycle.is_active());
         assert!(fixture.engine.compensation_plan.applied_plan_is_valid());
         assert_eq!(
             fixture.engine.compensation_plan.awaiting_structural_plan(),
@@ -527,7 +527,7 @@ fn current_local_resume_changes_capture_admission_at_its_original_same_drain_bou
         ["stop", "refused", "routing-retired", "start", "source"]
     );
     assert_eq!(events.reasons, [LOCAL_REASON]);
-    assert!(fixture.engine.capture_active);
+    assert!(fixture.engine.capture_lifecycle.is_active());
     assert!(fixture.engine.device_handoff.pending().is_none());
     assert_eq!(fixture.engine.device_handoff.last_issued_identity(), 1);
     assert_eq!(
@@ -583,7 +583,7 @@ fn local_failure_keeps_refusal_priority_then_same_drain_clear_reveals_invalid_pl
             "Capture requires a valid applied audio configuration"
         ]
     );
-    assert!(!fixture.engine.capture_active);
+    assert!(!fixture.engine.capture_lifecycle.is_active());
     assert!(!fixture.engine.compensation_plan.applied_plan_is_valid());
     assert!(fixture.engine.compensation_plan.awaiting_structural_plan());
     report(
