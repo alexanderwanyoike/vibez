@@ -292,7 +292,7 @@ impl TimelineEditorState {
             groove_grid: vibez_core::perform::GrooveGrid::Off,
         });
         engine.send(EngineCommand::AddNoteClip {
-            track_id: track_id,
+            track_id,
             insertion: vibez_engine::clip_insertion::PreparedNoteClipInsertion::new(
                 clip_id,
                 position_beats,
@@ -503,7 +503,7 @@ impl TimelineEditorState {
                     if let Some(clip) = sync {
                         engine.send(EngineCommand::RemoveNoteClip(track_id, clip_id));
                         engine.send(EngineCommand::AddNoteClip {
-                            track_id: track_id,
+                            track_id,
                             insertion: vibez_engine::clip_insertion::PreparedNoteClipInsertion::new(
                                 clip_id,
                                 clip.position_beats,

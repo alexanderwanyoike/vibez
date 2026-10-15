@@ -122,7 +122,7 @@ fn midi_clip_commands_keep_project_length_in_sync() {
     cmd_tx.push(EngineCommand::add_track(track_id)).unwrap();
     cmd_tx
         .push(EngineCommand::AddNoteClip {
-            track_id: track_id,
+            track_id,
             insertion: crate::clip_insertion::PreparedNoteClipInsertion::new(
                 clip_id,
                 2.0,
@@ -1615,7 +1615,7 @@ fn note_clip_reports_triggered_pitches_for_device_feedback() {
         .unwrap();
     cmd_tx
         .push(EngineCommand::AddNoteClip {
-            track_id: track_id,
+            track_id,
             insertion: crate::clip_insertion::PreparedNoteClipInsertion::new(
                 clip_id,
                 0.0,
@@ -1675,7 +1675,7 @@ fn synth_note_clip_does_not_report_drum_pad_activity() {
         .unwrap();
     cmd_tx
         .push(EngineCommand::AddNoteClip {
-            track_id: track_id,
+            track_id,
             insertion: crate::clip_insertion::PreparedNoteClipInsertion::new(
                 clip_id,
                 0.0,
@@ -1734,7 +1734,7 @@ fn drum_pad_activity_dropped_by_a_full_event_ring_is_not_replayed_late() {
         .unwrap();
     cmd_tx
         .push(EngineCommand::AddNoteClip {
-            track_id: track_id,
+            track_id,
             insertion: crate::clip_insertion::PreparedNoteClipInsertion::new(
                 clip_id,
                 0.0,

@@ -516,7 +516,7 @@ fn add_note_clip_commands(
     clip: &crate::state::UiNoteClip,
 ) -> Vec<EngineCommand> {
     let mut commands = vec![EngineCommand::AddNoteClip {
-        track_id: track_id,
+        track_id,
         insertion: vibez_engine::clip_insertion::PreparedNoteClipInsertion::new(
             clip.id,
             clip.position_beats,

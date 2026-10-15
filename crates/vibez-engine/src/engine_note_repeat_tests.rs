@@ -447,7 +447,7 @@ fn clip_engine(
         .unwrap();
     commands
         .push(EngineCommand::AddNoteClip {
-            track_id: track_id,
+            track_id,
             insertion: crate::clip_insertion::PreparedNoteClipInsertion::new(
                 clip_id,
                 0.0,
