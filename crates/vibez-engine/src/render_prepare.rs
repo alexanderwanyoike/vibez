@@ -229,3 +229,7 @@ pub(super) fn return_plugins(
         }
     }
 }
+
+#[cfg(test)]
+#[path = "render_note_insertion_tests.rs"]
+mod note_insertion_tests;
