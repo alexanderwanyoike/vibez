@@ -137,6 +137,11 @@ fn queued_section_end_mutes_leave_room_for_the_complete_transition_owner() {
     eprintln!("activation candidate: heap={heap:?}, ordinary={after_len}/{after_capacity}, active={active_after:?}, fallback={fallback_kinds:?}");
     let expected_fade = std::array::from_fn(|frame| 0.25 * (1.0 - frame as f32 / 64.0));
     assert_eq!(output, expected_fade);
+    assert_eq!(active_after, Some(old_section));
+    assert_eq!(
+        Arc::as_ptr(&engine.tracks()[0].section_playback_source.clips[0].audio),
+        original_audio.as_ptr(),
+    );
     assert_eq!(engine.performance_position, 33);
     assert_eq!(engine.output_position_samples(), 33);
     assert_eq!(engine.transport().position(), 40);
@@ -206,7 +211,8 @@ fn queued_section_end_mutes_leave_room_for_the_complete_transition_owner() {
     assert_eq!(engine.presentation_state.terminals.occupied_slots(), 0);
     drop(delivered);
     assert!(removed_owners.iter().all(|owner| owner.strong_count() == 0));
-    assert_eq!(original_audio.strong_count() + incoming_audio.strong_count(), 1);
+    assert_eq!(original_audio.strong_count(), 1);
+    assert_eq!(incoming_audio.strong_count(), 0);
     assert_eq!(offsets.strong_count(), 1);
     drop(engine);
     assert_eq!(original_audio.strong_count(), 0);
