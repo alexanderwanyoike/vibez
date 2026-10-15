@@ -299,6 +299,7 @@ pub struct PreparedPlaybackSource {
     pub note_clips: Vec<EngineNoteClip>,
     pub automation: Vec<AutomationLane>,
     pub(crate) removed_audio_clips: Vec<EngineClip>,
+    pub(crate) removed_note_clips: Vec<EngineNoteClip>,
 }
 
 /// One Project Track's resident content for a prepared Section.
@@ -368,11 +369,13 @@ impl PreparedPlaybackSource {
         automation: Vec<AutomationLane>,
     ) -> Self {
         let removed_audio_clips = Vec::with_capacity(clips.len());
+        let removed_note_clips = Vec::with_capacity(note_clips.len());
         Self {
             clips,
             note_clips,
             automation,
             removed_audio_clips,
+            removed_note_clips,
         }
     }
 
@@ -384,6 +387,15 @@ impl PreparedPlaybackSource {
                 .reserve(required - self.removed_audio_clips.len());
         }
         self.clips.push(clip);
+    }
+
+    pub(crate) fn push_note_clip(&mut self, clip: EngineNoteClip) {
+        // Off-callback construction prepares the matching complete removal owner.
+        let required = self.note_clips.len() + 1;
+        if self.removed_note_clips.capacity() < required {
+            self.removed_note_clips.reserve(required - self.removed_note_clips.len());
+        }
+        self.note_clips.push(clip);
     }
 
     pub fn set_clip_playback_direction(
