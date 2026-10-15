@@ -206,14 +206,47 @@ pub fn static_transfer_db(input_db: f32, params: &[f32]) -> f32 {
     input_db + amplitude_to_db(gain.max(1e-10))
 }
 
+/// One detector configuration and its envelope state. Only the selected one
+/// runs; a switch crossfades from the previous one, started from its state.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct DetectorPath {
+    rms: bool,
+    linked: bool,
+    auto: bool,
+    envelopes: [f32; 2],
+    activity: [f32; 2],
+    auto_release: [f32; 2],
+}
+
+impl DetectorPath {
+    const COLD: Self = Self {
+        rms: false,
+        linked: true,
+        auto: false,
+        envelopes: [-120.0; 2],
+        activity: [0.0; 2],
+        auto_release: [0.0; 2],
+    };
+}
+
+/// Wet gain and the reduction it applies, in decibels, for one channel.
+#[derive(Clone, Copy)]
+struct Reduction {
+    gain: f32,
+    db: f32,
+}
+
 pub struct CompressorEffect {
     params: [f32; param::COUNT],
     applied: [f32; param::COUNT],
     steps: [f32; param::COUNT],
     remaining: [u32; param::COUNT],
     sample_rate: f32,
-    envelopes: [[[[f32; 2]; 2]; 2]; 2],
-    activity: [[[f32; 2]; 2]; 2],
+    path: DetectorPath,
+    previous: DetectorPath,
+    /// Frames left in a switch crossfade from `previous` to `path`.
+    fading: u32,
+    path_changed: bool,
     rms_squared: [f32; 2],
     filters: [DetectorFilter; 2],
     attack_coefficient: f32,
@@ -241,8 +274,10 @@ impl CompressorEffect {
             steps: [0.0; param::COUNT],
             remaining: [0; param::COUNT],
             sample_rate,
-            envelopes: [[[[-120.0; 2]; 2]; 2]; 2],
-            activity: [[[0.0; 2]; 2]; 2],
+            path: DetectorPath::COLD,
+            previous: DetectorPath::COLD,
+            fading: 0,
+            path_changed: false,
             rms_squared: [0.0; 2],
             filters: [DetectorFilter::EMPTY; 2],
             attack_coefficient: time_coefficient(params[param::ATTACK], sample_rate),
@@ -260,6 +295,7 @@ impl CompressorEffect {
             }],
         };
         effect.configure_filters();
+        effect.select_path();
         effect
     }
 
@@ -306,6 +342,19 @@ impl CompressorEffect {
         }
         self.params[index] = value;
         let target = self.target(index);
+        if [
+            param::DETECTOR_MODE,
+            param::STEREO_LINK,
+            param::AUTO_RELEASE,
+        ]
+        .contains(&index)
+        {
+            if automated || !self.started {
+                self.select_path();
+            } else {
+                self.path_changed = true;
+            }
+        }
         if automated || !self.started {
             self.applied[index] = target;
             self.remaining[index] = 0;
@@ -315,6 +364,25 @@ impl CompressorEffect {
             self.remaining[index] = RAMP_FRAMES;
         }
         true
+    }
+
+    /// Makes the path the switches ask for current at once.
+    fn select_path(&mut self) {
+        self.path.rms = self.target(param::DETECTOR_MODE) >= 0.5;
+        self.path.linked = self.target(param::STEREO_LINK) >= 0.5;
+        self.path.auto = self.target(param::AUTO_RELEASE) >= 0.5;
+        self.fading = 0;
+    }
+
+    /// Starts the switch the user made: the new path takes over from the
+    /// current one's state while the two crossfade.
+    fn begin_path_switch(&mut self) {
+        self.path_changed = false;
+        self.previous = self.path;
+        self.select_path();
+        if self.previous != self.path {
+            self.fading = RAMP_FRAMES;
+        }
     }
 
     fn configure_filters(&mut self) {
@@ -365,8 +433,7 @@ impl CompressorEffect {
         self.coefficient_clock = (self.coefficient_clock + 1) % 8;
     }
 
-    fn gains(&mut self, detector: [f32; 2]) -> [f32; 2] {
-        let p = &self.applied;
+    fn gains(&mut self, detector: [f32; 2]) -> [Reduction; 2] {
         for (channel, sample) in detector.into_iter().enumerate() {
             self.rms_squared[channel] = sample * sample
                 + self.rms_coefficient * (self.rms_squared[channel] - sample * sample);
@@ -375,71 +442,106 @@ impl CompressorEffect {
             detector.map(f32::abs),
             self.rms_squared.map(|v| v.max(0.0).sqrt()),
         ];
-        let mut gains = [0.0; 2];
-        for (mode, levels) in levels.into_iter().enumerate() {
-            for link in 0..2 {
-                for channel in 0..2 {
-                    let value = if link == 1 {
-                        levels[0].max(levels[1])
-                    } else {
-                        levels[channel]
-                    };
-                    let level_db = amplitude_to_db(value.max(1e-10));
-                    let desired = reduction_db(
-                        level_db,
-                        p[param::THRESHOLD],
-                        p[param::RATIO],
-                        p[param::KNEE],
-                    );
-                    let activity = &mut self.activity[mode][link][channel];
-                    let target = (desired / 12.0).clamp(0.0, 1.0);
-                    *activity = target + self.memory_coefficient * (*activity - target);
-                    let adaptive_time =
-                        (p[param::RELEASE] * (0.5 + 2.5 * *activity)).clamp(5.0, 2000.0);
-                    for automatic in 0..2 {
-                        let envelope = &mut self.envelopes[mode][link][automatic][channel];
-                        let release = if automatic == 0 {
-                            self.release_coefficient
-                        } else {
-                            time_coefficient(adaptive_time, self.sample_rate)
-                        };
-                        let coefficient = if level_db > *envelope {
-                            self.attack_coefficient
-                        } else {
-                            release
-                        };
-                        *envelope = level_db + coefficient * (*envelope - level_db);
-                        let weight = if mode == 0 {
-                            1.0 - p[param::DETECTOR_MODE]
-                        } else {
-                            p[param::DETECTOR_MODE]
-                        } * if link == 0 {
-                            1.0 - p[param::STEREO_LINK]
-                        } else {
-                            p[param::STEREO_LINK]
-                        } * if automatic == 0 {
-                            1.0 - p[param::AUTO_RELEASE]
-                        } else {
-                            p[param::AUTO_RELEASE]
-                        };
-                        if weight == 0.0 {
-                            continue;
-                        }
-                        let reduction = reduction_db(
-                            *envelope,
-                            p[param::THRESHOLD],
-                            p[param::RATIO],
-                            p[param::KNEE],
-                        );
-                        let unlimited = db_to_amplitude(-reduction);
-                        let limited = db_to_amplitude(-reduction.min(p[param::RANGE]));
-                        let gain = unlimited + (limited - unlimited) * p[param::RANGE_ENABLED];
-                        gains[channel] += gain * weight;
-                    }
-                }
-            }
+        // Auto release follows an activity measure with a 200 ms memory, so
+        // recalculating its coefficient on the filters' 8-frame tick is exact
+        // to well within a sample's rounding.
+        let refresh = self.coefficient_clock == 0;
+        let mut path = self.path;
+        let current = self.path_reduction(&mut path, &levels, refresh);
+        self.path = path;
+        if self.fading == 0 {
+            return current;
         }
-        gains
+        let mut previous = self.previous;
+        let old = self.path_reduction(&mut previous, &levels, refresh);
+        self.previous = previous;
+        self.fading -= 1;
+        let new_weight = 1.0 - self.fading as f32 / RAMP_FRAMES as f32;
+        std::array::from_fn(|channel| {
+            let gain = old[channel].gain + (current[channel].gain - old[channel].gain) * new_weight;
+            Reduction {
+                gain,
+                db: -amplitude_to_db(gain.max(1e-10)),
+            }
+        })
+    }
+
+    fn path_reduction(
+        &self,
+        path: &mut DetectorPath,
+        levels: &[[f32; 2]; 2],
+        refresh: bool,
+    ) -> [Reduction; 2] {
+        let p = &self.applied;
+        let levels = levels[usize::from(path.rms)];
+        let mut reductions = [Reduction { gain: 1.0, db: 0.0 }; 2];
+        for channel in 0..2 {
+            if path.linked && channel == 1 {
+                path.envelopes[1] = path.envelopes[0];
+                path.activity[1] = path.activity[0];
+                reductions[1] = reductions[0];
+                break;
+            }
+            let value = if path.linked {
+                levels[0].max(levels[1])
+            } else {
+                levels[channel]
+            };
+            let level_db = amplitude_to_db(value.max(1e-10));
+            let desired = reduction_db(
+                level_db,
+                p[param::THRESHOLD],
+                p[param::RATIO],
+                p[param::KNEE],
+            );
+            let target = (desired / 12.0).clamp(0.0, 1.0);
+            let activity = &mut path.activity[channel];
+            *activity = target + self.memory_coefficient * (*activity - target);
+            if refresh || path.auto_release[channel] == 0.0 {
+                let adaptive_time =
+                    (p[param::RELEASE] * (0.5 + 2.5 * *activity)).clamp(5.0, 2000.0);
+                path.auto_release[channel] = time_coefficient(adaptive_time, self.sample_rate);
+            }
+            let release = if path.auto {
+                path.auto_release[channel]
+            } else {
+                self.release_coefficient
+            };
+            let envelope = &mut path.envelopes[channel];
+            let coefficient = if level_db > *envelope {
+                self.attack_coefficient
+            } else {
+                release
+            };
+            *envelope = level_db + coefficient * (*envelope - level_db);
+            let reduction = reduction_db(
+                *envelope,
+                p[param::THRESHOLD],
+                p[param::RATIO],
+                p[param::KNEE],
+            );
+            let range = p[param::RANGE_ENABLED];
+            reductions[channel] = if range == 0.0 || range == 1.0 {
+                let db = if range == 1.0 {
+                    reduction.min(p[param::RANGE])
+                } else {
+                    reduction
+                };
+                Reduction {
+                    gain: db_to_amplitude(-db),
+                    db,
+                }
+            } else {
+                let unlimited = db_to_amplitude(-reduction);
+                let limited = db_to_amplitude(-reduction.min(p[param::RANGE]));
+                let gain = unlimited + (limited - unlimited) * range;
+                Reduction {
+                    gain,
+                    db: -amplitude_to_db(gain.max(1e-10)),
+                }
+            };
+        }
+        reductions
     }
 }
 
@@ -492,6 +594,9 @@ impl AudioEffect for CompressorEffect {
             .find(|input| input.id == ExternalInputId(0) && input.connected && input.channels > 0);
         for (frame_index, frame) in buffer.chunks_exact_mut(channels).enumerate() {
             self.started = true;
+            if self.path_changed {
+                self.begin_path_switch();
+            }
             self.advance();
             let raw: [f32; 2] = std::array::from_fn(|channel| {
                 let sample = if let Some(input) = external {
@@ -516,9 +621,9 @@ impl AudioEffect for CompressorEffect {
                 let low = self.filters[1].process(high, channel);
                 high + (low - high) * self.applied[param::LP_ENABLED]
             });
-            let gains = self.gains(detector);
+            let reductions = self.gains(detector);
             for channel in 0..2 {
-                let reduction = -amplitude_to_db(gains[channel].max(1e-10));
+                let reduction = reductions[channel].db;
                 self.meter.current_reduction_db[channel] = reduction.max(0.0);
                 self.meter.peak_reduction_db[channel] =
                     self.meter.peak_reduction_db[channel].max(reduction);
@@ -526,7 +631,7 @@ impl AudioEffect for CompressorEffect {
                     self.meter.detector_peak[channel].max(detector[channel].abs());
             }
             for (channel, sample) in frame.iter_mut().take(2).enumerate() {
-                let wet = *sample * gains[channel] * self.makeup_gain;
+                let wet = *sample * reductions[channel].gain * self.makeup_gain;
                 let normal =
                     *sample * (1.0 - self.applied[param::MIX]) + wet * self.applied[param::MIX];
                 *sample =
@@ -536,8 +641,9 @@ impl AudioEffect for CompressorEffect {
     }
 
     fn reset(&mut self) {
-        self.envelopes = [[[[-120.0; 2]; 2]; 2]; 2];
-        self.activity = [[[0.0; 2]; 2]; 2];
+        self.path = DetectorPath::COLD;
+        self.previous = DetectorPath::COLD;
+        self.path_changed = false;
         self.rms_squared = [0.0; 2];
         for filter in &mut self.filters {
             filter.reset();
@@ -547,6 +653,7 @@ impl AudioEffect for CompressorEffect {
         self.meter = DynamicsMeter::default();
         self.coefficient_clock = 0;
         self.started = false;
+        self.select_path();
         self.refresh_coefficients();
     }
 }
