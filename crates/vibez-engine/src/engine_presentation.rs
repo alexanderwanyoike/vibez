@@ -147,14 +147,11 @@ impl AudioEngine {
         if self.capture_replay.is_some() {
             return;
         }
-        loop {
-            let Some(index) = self
-                .section_capture_timing
-                .iter()
-                .position(|timing| timing.full_due <= self.output_position)
-            else {
-                break;
-            };
+        while let Some(index) = self
+            .section_capture_timing
+            .iter()
+            .position(|timing| timing.full_due <= self.output_position)
+        {
             let Some(mut allowance) = self.pending_retirements.reserve(1) else {
                 break;
             };

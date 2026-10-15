@@ -317,6 +317,10 @@ impl AudioEngine {
         }
     }
 
+    #[allow(
+        clippy::result_large_err,
+        reason = "Boxing a rejected owner would allocate in the audio callback"
+    )]
     pub(super) fn try_present_event_at(&mut self, event: EngineEvent, due: u64) -> Result<(), EngineEvent> {
         debug_assert!(
             due <= self.output_position + self.rendered_callback_frames as u64

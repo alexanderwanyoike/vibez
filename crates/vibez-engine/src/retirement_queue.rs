@@ -97,6 +97,10 @@ impl RetirementQueue {
         })
     }
 
+    #[allow(
+        clippy::result_large_err,
+        reason = "Boxing a rejected owner would allocate in the audio callback"
+    )]
     pub(super) fn publish(
         &mut self,
         events: &mut rtrb::Producer<EngineEvent>,
