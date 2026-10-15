@@ -159,12 +159,40 @@ intent without freeing storage. A stale reply retires its exact old owners and
 leaves a newer token, queued intent and applied graph unchanged. Prepared effect
 storage and plan retirement retain their separate bounded ownership paths.
 
-The global processing gate still combines these plan facts with suspension,
-presentation health and live hosted-device requests. It is not a pure state
-query. Capture admission checks local failure first and applied-plan validity
-second; a structural wait or another global gate does not independently refuse
-Capture. Device observation and Capture lifecycle ownership remain separate
-migration steps.
+Project processing samples fresh, private Copy facts at each original decision
+boundary and immediately consumes a pure mute projection. Suspension, plan
+blockers and presentation fault retain their lazy order; an owned blocker means
+resident demand was not sampled. Otherwise the live scan visits Tracks, buses
+and Master, effects before instrument, requested before optional recovery, and
+stops at the first nonlocal request. Facts are stack values, never cached engine
+health or a simultaneous snapshot of hosted atomics. Recursive graph children,
+wider-layout stereo reentry and the final post-render gate each observe again.
+
+Each actual Capture Start command independently samples local failure after
+earlier drained commands and owner edits. A current local handoff token takes
+priority; otherwise resident instruments precede effects. Pure admission keeps
+the local-failure reason before applied-plan invalidity. Structural wait,
+nonlocal restart, presentation fault and stopped transport do not independently
+refuse Capture. Capture activity and one-close-per-failure ownership remain a
+separate migration step.
+
+Validation keeps activation rate, configuration validity, metadata/local
+recovery and latency reads at their original lazy points. Local recovery skips
+latency sampling; accumulated local Capture closure still precedes a later
+global invalid action. Handoff discovery samples requests before removal/stop,
+while scope samples the transferred owner's recovery answer only after stop.
+Offline segments retain validation and graph entry separately, followed by the
+strict instrument-first activation/request/valid query only after cached
+processing errors have been consumed. Its typed facts produce the original
+first diagnostic; Bounce gains no realtime final gate or local-recovery
+exemption. Preparation latency reports and public held-owner accessors stay
+independent live queries.
+
+The test-only quiescent Readiness observer retains its original diagnostic scan
+before gate-owned checks, then reuses that typed resident answer for the pure
+mute result instead of querying devices twice. This deliberately reduces only
+the diagnostic helper's duplicate scan. Production gate suppliers always
+sample live demand at that gate and never accept the quiescent adapter's facts.
 
 Structural channel/effect changes must be followed by a new plan prepared
 outside the callback. Send topology
