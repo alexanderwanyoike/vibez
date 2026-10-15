@@ -11,7 +11,7 @@ mod time;
 #[path = "delay_ramp.rs"]
 mod ramp;
 use history::DelayHistory;
-use ramp::MixRamp;
+use ramp::ScalarRamp;
 use time::DelayTime;
 
 pub mod param {
@@ -162,7 +162,7 @@ pub struct DelayEffect {
     targets: [f32; param::COUNT],
     history: DelayHistory,
     timing: DelayTime,
-    mix: MixRamp,
+    mix: ScalarRamp,
 }
 
 impl DelayEffect {
@@ -172,7 +172,7 @@ impl DelayEffect {
             targets: std::array::from_fn(|index| DELAY_PARAMS[index].default),
             history,
             timing: DelayTime::new(),
-            mix: MixRamp::new(DELAY_PARAMS[param::MIX].default),
+            mix: ScalarRamp::new(DELAY_PARAMS[param::MIX].default),
         }
     }
 

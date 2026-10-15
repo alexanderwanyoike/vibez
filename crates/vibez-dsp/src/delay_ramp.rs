@@ -1,6 +1,6 @@
 //! Owns sample-rate manual Mix ramps and exact automation/reset targets.
 
-pub(super) struct MixRamp {
+pub(super) struct ScalarRamp {
     current: f32,
     origin: f32,
     target: f32,
@@ -9,7 +9,7 @@ pub(super) struct MixRamp {
     started: bool,
 }
 
-impl MixRamp {
+impl ScalarRamp {
     pub(super) fn new(value: f32) -> Self {
         Self {
             current: value,
