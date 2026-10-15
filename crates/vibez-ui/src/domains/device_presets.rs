@@ -303,6 +303,61 @@ mod presentation_tests {
         assert_eq!(custom.next, custom.options.first().cloned());
     }
 
+    fn eq() -> UiEffect {
+        let descriptors =
+            vibez_dsp::factory::create_effect(EffectType::Eq, 44_100.0).param_descriptors();
+        UiEffect {
+            effect_type: EffectType::Eq,
+            params: descriptors
+                .iter()
+                .map(|descriptor| descriptor.default)
+                .collect(),
+            descriptors,
+            ..gain()
+        }
+    }
+
+    #[test]
+    fn eq_factory_presets_are_valid_distinct_and_start_from_flat() {
+        let effect = eq();
+        let presets = factory_presets(EffectType::Eq);
+        assert!(presets.len() >= 6);
+        assert_eq!(presets[0].name(), "Flat");
+        assert_eq!(prepare_updates(&effect, &presets[0]), Ok(Vec::new()));
+        for preset in &presets[1..] {
+            let updates = prepare_updates(&effect, preset).unwrap();
+            assert!(!updates.is_empty(), "{} changes nothing", preset.name());
+        }
+        let mut names: Vec<_> = presets.iter().map(DevicePreset::name).collect();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(names.len(), presets.len(), "names are unique");
+    }
+
+    #[test]
+    fn eq_presets_leave_the_soloed_band_alone() {
+        let audition = vibez_dsp::eq::param::AUDITION;
+        let mut effect = eq();
+        effect.params[audition] = 3.0;
+        let captured = capture(&effect, "Soloed").unwrap();
+        effect.params[audition] = 0.0;
+        assert_eq!(prepare_updates(&effect, &captured), Ok(Vec::new()));
+        for preset in factory_presets(EffectType::Eq) {
+            let updates = prepare_updates(&effect, &preset).unwrap();
+            assert!(updates.iter().all(|(index, _)| *index != audition));
+        }
+    }
+
+    #[test]
+    fn eq_switches_in_a_preset_must_be_on_or_off() {
+        let effect = eq();
+        let mut parameters = capture(&effect, "Half").unwrap().parameters().clone();
+        parameters.insert("lf_bell".into(), 0.5);
+        let half = DevicePreset::new(DevicePresetKind::Effect(EffectType::Eq), "Half", parameters)
+            .unwrap();
+        assert!(prepare_updates(&effect, &half).is_err());
+    }
+
     #[test]
     fn a_device_without_factory_presets_has_no_navigation() {
         let mut effect = gain();
