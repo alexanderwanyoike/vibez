@@ -4,7 +4,7 @@ use super::*;
 use crate::clip_insertion::{ClipInsertionOutcome, PreparedNoteInsertion};
 use crate::events::EngineEvent;
 
-fn measured(engine: &mut AudioEngine, output: &mut [f32]) {
+pub(super) fn measured(engine: &mut AudioEngine, output: &mut [f32]) {
     assert_eq!(crate::retirement::tests::allocations(|| {
         engine.process_block(AudioProcessBlock::new(output, 2));
     }), (0, 0));
