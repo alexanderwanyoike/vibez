@@ -202,6 +202,13 @@ pub enum EngineEvent {
         output: crate::metering::MeterValues,
     },
 
+    EffectDelayState {
+        track_id: TrackId,
+        effect_id: vibez_core::id::EffectId,
+        generation: u64,
+        snapshot: Option<vibez_core::delay_state::DelayState>,
+    },
+
     /// Drum Rack pitches triggered by resident MIDI clips during the latest
     /// audio block. One bit per MIDI pitch keeps device feedback bounded to
     /// one event per track and block, even when several notes land together.
@@ -465,6 +472,7 @@ impl EngineEvent {
             | Self::Metering { .. }
             | Self::TrackMeter { .. }
             | Self::EffectMeter { .. }
+            | Self::EffectDelayState { .. }
             | Self::TrackNoteActivity { .. }
             | Self::ClipQueued { .. }
             | Self::ClipEventsDropped { .. }
@@ -493,6 +501,9 @@ impl PartialEq for EngineEvent {
             | (Self::SourceNoteRepeated { .. }, Self::SourceNoteRepeated { .. }) => {
                 recording::source_eq(self, other)
             }
+            (Self::EffectDelayState { track_id: lt, effect_id: le, generation: lg, snapshot: ls },
+             Self::EffectDelayState { track_id: rt, effect_id: re, generation: rg, snapshot: rs }) =>
+                lt == rt && le == re && lg == rg && ls == rs,
             (Self::DisposeEffect(left), Self::DisposeEffect(right)) => left == right,
             (Self::DisposeInstrument(left), Self::DisposeInstrument(right)) => left == right,
             (Self::PlaybackPosition(left), Self::PlaybackPosition(right)) => left == right,
