@@ -615,7 +615,7 @@ fn cases() -> Vec<Case> {
                 groove_grid: Default::default(),
             }
         }),
-        case!("AddNoteClip", true, |f| add_note_clip(
+        case!("AddNoteClip", false, |f| add_note_clip(
             f.empty,
             ClipId::new()
         )),
