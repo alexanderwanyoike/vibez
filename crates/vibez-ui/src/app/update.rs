@@ -112,6 +112,7 @@ impl App {
             if crate::domains::devices::is_unchanged_param_edit(&self.state.project_tracks, edit) {
                 return Task::none();
             }
+            self.invalidate_delay_reference(edit);
         }
         let message =
             apply_project_track_deletion_policy(message, self.state.confirm_project_track_deletion);
@@ -247,6 +248,7 @@ impl App {
         match message {
             Message::GainControl(message) => return self.update_gain_control(message),
             Message::DeviceControl(message) => return self.update_device_control(message),
+            Message::DelayResponseReady(token, result) => self.finish_delay_response(token, result),
             Message::DelayPage(track, effect, page) => {
                 if self.state.find_track(track).is_some_and(|track| track.effects.iter().any(|item|
                     item.id == effect && crate::domains::delay_observation::is_native_delay(item))) {

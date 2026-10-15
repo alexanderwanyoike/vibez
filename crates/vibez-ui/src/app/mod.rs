@@ -170,6 +170,7 @@ mod compensation;
 mod device_controls;
 mod device_meters;
 mod delay_devices;
+mod delay_response_worker;
 pub(crate) mod device_presets;
 mod drum_rack_preparation;
 mod engine_events;

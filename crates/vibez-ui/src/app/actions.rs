@@ -607,6 +607,7 @@ impl App {
         }
         self.poll_device_meters();
         self.poll_engine_events();
+        let delay_task = self.poll_delay_responses();
         self.state
             .view
             .prune_drum_pad_flashes(std::time::Instant::now());
@@ -676,7 +677,7 @@ impl App {
         } else {
             Task::none()
         };
-        Task::batch([export_task, auto_save_task])
+        Task::batch([export_task, auto_save_task, delay_task])
     }
 }
 

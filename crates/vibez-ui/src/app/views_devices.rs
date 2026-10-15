@@ -215,11 +215,11 @@ impl App {
         let observation = self.delay_devices.panels.get(&effect.id).unwrap_or(&self.delay_devices.empty_panel);
         let controls = self.device_control_state(effect.id);
         let output = self.device_meters.readings.get(&effect.id).and_then(|reading| reading.available_output());
+        let (response, response_status) = self.delay_reference(track_id, effect.id);
         let content = iced::widget::responsive(move |size| {
             crate::widgets::delay_device::view(crate::widgets::delay_device::DelayView {
-                track: track_id, effect, accent, controls, observation, response: None,
-                response_status: if observation.snapshot.is_some_and(|state| state.reference_moving) {
-                    "Moving" } else { "Calculating" }, output,
+                track: track_id, effect, accent, controls, observation, response,
+                response_status, output,
                 presets: self.view_device_preset_bar(track_id, effect, accent,
                     crate::widgets::delay_device::preset_bar_width(size)),
                 size, on_page: Message::DelayPage,
