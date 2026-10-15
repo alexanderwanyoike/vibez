@@ -283,3 +283,204 @@ fn public_add_note_clip_at_exhausted_capacity_preserves_schedule_and_voice_witho
     assert_eq!(appended.groove_latch.get(), None);
     assert_eq!(measured, (0, 0), "AddNoteClip callback allocation/destruction counts");
 }
+
+fn measured_callback(engine: &mut AudioEngine, output: &mut [f32]) {
+    assert_eq!(crate::retirement::tests::allocations(|| {
+        engine.process_block(AudioProcessBlock::new(output, 2));
+    }), (0, 0));
+}
+
+#[test]
+fn pending_note_clip_growth_preserves_current_duplicate_edits_and_voice_release_fifo() {
+    use crate::clip_insertion::{ClipInsertionOutcome, PreparedNoteClipInsertion};
+    use crate::events::EngineEvent;
+
+    let duplicate = ClipId::new();
+    let clips = vec![resident_clip(0, duplicate), resident_clip(1, ClipId::new())]
+        .into_boxed_slice().into_vec();
+    assert_eq!(clips.len(), clips.capacity());
+    let source = PreparedPlaybackSource::new(Vec::new(), clips, Vec::new());
+    let scheduled = TrackId::new();
+    let live = TrackId::new();
+    let scheduled_calls = Arc::new(VoiceCalls::default());
+    let live_calls = Arc::new(VoiceCalls::default());
+    let (mut engine, mut commands, mut events) = AudioEngine::new();
+    for (id, source, amplitude, calls) in [
+        (scheduled, source, 0.25, Arc::clone(&scheduled_calls)),
+        (live, PreparedPlaybackSource::default(), 0.125, Arc::clone(&live_calls)),
+    ] {
+        let mut track = EngineTrack::with_playback_source(id, source);
+        track.pan = 0.0;
+        track.instrument = Some(Box::new(CountedInstrument {
+            instrument: crate::test_support::DelayProbeInstrument::new(0, amplitude),
+            calls,
+        }));
+        commands.push(EngineCommand::AddTrack(Box::new(track))).unwrap();
+    }
+    let model: Vec<_> = [scheduled, live, TrackId::MASTER]
+        .into_iter().map(|id| RoutingChannel {
+            id, is_bus: id.is_master(), sends: Vec::new(), effects: Vec::new(),
+        }).collect();
+    commands.push(EngineCommand::SetRouting(
+        crate::routing::PreparedRouting::prepare(&model, 128).unwrap(),
+    )).unwrap();
+    let swing = SwingAmount::new(0.62);
+    commands.push(EngineCommand::SetProjectSwing(swing)).unwrap();
+    commands.push(EngineCommand::Play).unwrap();
+    commands.push(EngineCommand::ExternalNoteOn { track_id: live, pitch: 72, velocity: 100 }).unwrap();
+    let mut warmup = [0.0; 256];
+    engine.process_block(AudioProcessBlock::new(&mut warmup, 2));
+    for &[left, right] in warmup.as_chunks::<2>().0 {
+        assert_eq!((left, right), (0.375, 0.0));
+    }
+    while events.pop().is_ok() {}
+    assert_eq!(engine.transport().position(), 128);
+    let resident = &engine.tracks()[0].playback_source.note_clips;
+    assert_eq!(resident.len(), 2);
+    assert_eq!(resident.capacity(), 2);
+    assert_eq!(resident[0].groove_latch.get(), Some((0, swing)));
+    let mut expected: Vec<_> = resident.iter().map(ResidentSchedule::observe).collect();
+    let owners: Vec<_> = engine.tracks().iter().map(|track| {
+        crate::engine::reconfiguration::instrument_owner_identity(track.instrument.as_deref().unwrap())
+    }).collect();
+    let before_scheduled = scheduled_calls.observed();
+    let before_live = live_calls.observed();
+    assert_eq!(before_scheduled.0, 1);
+    assert_eq!(before_scheduled.1, 0);
+    assert_eq!(before_live.0, 1);
+    assert_eq!(before_live.1, 0);
+    let empty_slots = commands.slots();
+    let first = PreparedNoteClipInsertion::new(
+        duplicate, 26.0, 2.5, 0.5, true, 0.25, 1.5, GrooveGrid::Eighth,
+    );
+    let first_id = first.id();
+    let second = PreparedNoteClipInsertion::new(
+        duplicate, 29.0, 3.5, 0.25, false, 0.0, 0.0, GrooveGrid::Off,
+    );
+    let second_id = second.id();
+    commands.push(EngineCommand::AddNoteClip { track_id: scheduled, insertion: first }).unwrap();
+    commands.push(EngineCommand::MoveNoteClip {
+        track_id: scheduled, clip_id: duplicate, new_position_beats: 0.5,
+    }).unwrap();
+    commands.push(EngineCommand::AddNoteClip { track_id: scheduled, insertion: second }).unwrap();
+    commands.push(EngineCommand::ExternalNoteOff { track_id: live, pitch: 72 }).unwrap();
+    let queued_slots = commands.slots();
+    assert_eq!(empty_slots - queued_slots, 4);
+    measured_callback(&mut engine, &mut []);
+    let mut request = None;
+    while let Ok(event) = events.pop() {
+        match event {
+            EngineEvent::ClipInsertionStorageRequested(value) => {
+                assert_eq!(value.id, first_id);
+                assert_eq!((value.track_id, value.clip_id), (scheduled, duplicate));
+                assert!(request.replace(value).is_none());
+            }
+            EngineEvent::ClipInsertionCompleted(_) => panic!("growth cannot complete before fulfillment"),
+            _ => {}
+        }
+    }
+    let request = request.expect("actually full note storage must request growth");
+    assert_eq!(commands.slots(), queued_slots + 1);
+    for callback in 0..4 {
+        let mut output = [0.0; 16];
+        measured_callback(&mut engine, &mut output);
+        for &[left, right] in output.as_chunks::<2>().0 {
+            assert_eq!((left, right), (0.375, 0.0));
+        }
+        assert_eq!(engine.transport().position(), 128 + (callback + 1) * 8);
+        assert!(engine.transport().is_playing());
+        assert_eq!(commands.slots(), queued_slots + 1);
+        assert_eq!(scheduled_calls.observed(), before_scheduled);
+        assert_eq!(live_calls.observed(), before_live);
+        let resident = &engine.tracks()[0].playback_source.note_clips;
+        assert_eq!(resident.len(), 2);
+        for (original, actual) in expected.iter().zip(resident) {
+            original.assert_unchanged(actual);
+        }
+        while let Ok(event) = events.pop() {
+            assert!(!matches!(event, EngineEvent::ClipInsertionCompleted(_)
+                | EngineEvent::ClipInsertionStorageRequested(_)
+                | EngineEvent::SourceNoteInput { on: false, .. }
+                | EngineEvent::InstrumentNoteInput { on: false, .. }));
+        }
+    }
+    request.fulfill();
+    measured_callback(&mut engine, &mut []);
+    let mut completed = Vec::new();
+    let mut order = Vec::new();
+    while let Ok(event) = events.pop() {
+        match event {
+            EngineEvent::ClipInsertionCompleted(value) => {
+                assert_eq!(value.outcome, ClipInsertionOutcome::Applied);
+                assert_eq!((value.track_id, value.clip_id), (scheduled, duplicate));
+                order.push("complete");
+                completed.push(value);
+            }
+            EngineEvent::ClipInsertionStorageRequested(_) => panic!("the shared grown capacity must hold both deltas"),
+            EngineEvent::SourceNoteInput { track_id, pitch, on: false, position, .. } => {
+                assert_eq!((track_id, pitch), (live, 72));
+                assert_eq!((position.effective_at_samples, position.canonical_at_samples), (160, 160));
+                assert_eq!(position.section_id, None);
+                assert_eq!(position.section_position_samples, None);
+                assert_eq!(position.canonical_section_position_samples, None);
+                order.push("source-off");
+            }
+            EngineEvent::InstrumentNoteInput { track_id, pitch, on: false, effective_at_samples, .. } => {
+                assert_eq!((track_id, pitch, effective_at_samples), (live, 72, 160));
+                order.push("heard-off");
+            }
+            _ => {}
+        }
+    }
+    assert_eq!(order, ["complete", "complete", "source-off", "heard-off"]);
+    assert_eq!(completed.len(), 2);
+    assert_eq!(completed[0].id(), first_id);
+    assert_eq!(completed[1].id(), second_id);
+    assert_eq!(commands.slots(), empty_slots);
+    assert_eq!(scheduled_calls.observed(), before_scheduled);
+    assert_eq!(live_calls.observed(), (before_live.0, before_live.1 + 1, before_live.2));
+    assert_eq!(engine.transport().position(), 160);
+    assert!(engine.transport().is_playing());
+    assert_eq!(engine.transport().audio_length(), Some((32.5_f64 * 22_050.0).round() as u64));
+    expected[0].position = 0.5;
+    let resident = &engine.tracks()[0].playback_source.note_clips;
+    assert_eq!(resident.len(), 4);
+    for (original, actual) in expected.iter().zip(&resident[..2]) {
+        original.assert_unchanged(actual);
+    }
+    assert_eq!(resident.iter().filter(|clip| clip.id == duplicate).count(), 3);
+    for (index, position, duration, start, looping, loop_start, loop_end, groove) in [
+        (2, 26.0, 2.5, 0.5, true, 0.25, 1.5, GrooveGrid::Eighth),
+        (3, 29.0, 3.5, 0.25, false, 0.0, 0.0, GrooveGrid::Off),
+    ] {
+        let clip = &resident[index];
+        assert_eq!(clip.id, duplicate);
+        assert_eq!(clip.position_beats, position);
+        assert_eq!(clip.duration_beats, duration);
+        assert_eq!(clip.start_marker_beats, start);
+        assert_eq!(clip.loop_enabled, looping);
+        assert_eq!(clip.loop_start_beats, loop_start);
+        assert_eq!(clip.loop_end_beats, loop_end);
+        assert_eq!(clip.groove_grid, groove);
+        assert!(clip.notes.is_empty());
+        assert!(clip.next_same_pitch_start_beats.is_empty());
+        assert_eq!(clip.groove_latch.get(), None);
+    }
+    for (track, owner) in engine.tracks().iter().zip(owners) {
+        assert_eq!(crate::engine::reconfiguration::instrument_owner_identity(
+            track.instrument.as_deref().unwrap()), owner);
+    }
+    drop(completed);
+    let mut output = [0.0; 16];
+    measured_callback(&mut engine, &mut output);
+    assert_sounding(&output);
+    assert_eq!(scheduled_calls.observed(), before_scheduled);
+    assert_eq!(live_calls.observed(), (before_live.0, before_live.1 + 1, before_live.2));
+    // Stop clears groove latches by policy, so insertion preservation is checked before it.
+    commands.push(EngineCommand::Stop).unwrap();
+    measured_callback(&mut engine, &mut []);
+    assert!(!engine.transport().is_playing());
+    assert_eq!(scheduled_calls.observed(), (before_scheduled.0, before_scheduled.1 + 1, before_scheduled.2));
+    assert_eq!(live_calls.observed(), (before_live.0, before_live.1 + 1, before_live.2));
+    assert!(engine.tracks()[0].playback_source.note_clips.iter().all(|clip| clip.groove_latch.get().is_none()));
+}
