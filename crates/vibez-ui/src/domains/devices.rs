@@ -168,6 +168,7 @@ pub struct DevicesAction {
     /// Status bar text.
     pub status: Option<String>,
     pub routing_changed: Option<bool>,
+    pub preset_selection: Option<(TrackId, EffectId, vibez_core::device_preset::DevicePreset)>,
 }
 
 /// Devices domain state slice: currently just the context menu; the
@@ -296,9 +297,15 @@ impl DevicesState {
                 let effect_id = EffectId::new();
                 let fx = vibez_dsp::factory::create_effect(effect_type, sample_rate as f32);
                 let descriptors = fx.param_descriptors();
-                let params: Vec<f32> = descriptors.iter().map(|d| d.default).collect();
+                let (preset, params) = if effect_type == EffectType::Delay {
+                    let (preset, params) = super::device_presets::fresh_delay_sound();
+                    (Some(preset), params)
+                } else {
+                    (None, descriptors.iter().map(|d| d.default).collect())
+                };
 
                 if let Some(track) = find_track_mut(tracks, master, buses, track_id) {
+                    action.preset_selection = preset.map(|preset| (track_id, effect_id, preset));
                     track.effects.push(UiEffect {
                         reconfiguration_failed: false,
                         latency_samples: Some(fx.latency_samples()),

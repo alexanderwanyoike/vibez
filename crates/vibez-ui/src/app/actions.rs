@@ -501,6 +501,9 @@ impl App {
         if let Some(track_id) = action.select_track {
             self.state.arrangement.selected_track = Some(track_id);
         }
+        if let Some((track_id, effect_id, preset)) = action.preset_selection {
+            self.device_presets.selection.insert((track_id, effect_id), preset);
+        }
         if let Some(status) = action.status {
             self.state.status_text = status;
         }

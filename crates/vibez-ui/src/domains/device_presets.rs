@@ -169,6 +169,18 @@ pub fn prepare_updates(
     Ok(updates)
 }
 
+pub(super) fn fresh_delay_sound() -> (DevicePreset, Vec<f32>) {
+    let preset = delay::factory_presets()
+        .into_iter()
+        .find(|preset| preset.name() == "Dotted Bounce")
+        .expect("Delay factory catalog contains its fresh sound");
+    let params = delay::KEYS
+        .iter()
+        .map(|key| preset.parameters()[*key])
+        .collect();
+    (preset, params)
+}
+
 pub fn factory_presets(effect_type: EffectType) -> Vec<DevicePreset> {
     if effect_type == EffectType::Delay {
         return delay::factory_presets();
