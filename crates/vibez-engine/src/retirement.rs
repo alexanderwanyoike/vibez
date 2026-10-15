@@ -83,6 +83,11 @@ impl Drop for RetiredChannel {
 
 impl crate::engine::AudioEngine {
     pub(super) fn flush_retirements(&mut self) {
+        // A newly stopped recording precedes older ordinary returns, matching
+        // the existing LIFO retirement order without growing that store.
+        if !self.flush_section_record_stop() {
+            return;
+        }
         while let Some(event) = self.pending_retirements.pop() {
             if let Err(rtrb::PushError::Full(event)) = self.event_tx.push(event) {
                 self.pending_retirements.push(event);

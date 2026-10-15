@@ -130,6 +130,10 @@ impl AudioEngine {
     }
 
     pub(super) fn stop_section_record(&mut self) {
+        // The preceding stop keeps this recording slot until its handoff succeeds.
+        if self.pending_section_record_stop.is_some() {
+            return;
+        }
         let now = self.performance_position;
         let local = self
             .active_section
@@ -148,7 +152,7 @@ impl AudioEngine {
             } else {
                 return;
             };
-        let event = EngineEvent::SectionRecordStopped(SectionRecordStoppedEvent {
+        self.pending_section_record_stop = Some(SectionRecordStoppedEvent {
             section_id,
             track_id,
             effective_at_samples: now,
@@ -156,7 +160,35 @@ impl AudioEngine {
             started,
             retired: retired.map(crate::events::DisposalCell::new),
         });
-        self.present_event(event);
+        self.flush_section_record_stop();
+    }
+
+    fn section_record_stop_has_room(&self) -> bool {
+        self.event_tx.slots() > 0
+            || self.scheduled_presentation.len() < self.scheduled_presentation.capacity()
+            || self.presentation_state.terminals.can_retain_overflow_owner()
+            || self.pending_retirements.len() < self.pending_retirements.capacity()
+    }
+
+    pub(crate) fn flush_section_record_stop(&mut self) -> bool {
+        if self.pending_section_record_stop.is_none() {
+            return true;
+        }
+        self.flush_presentation();
+        if !self.section_record_stop_has_room() {
+            // Preserve the original failure boundary even when an earlier
+            // lifetime still owns the inline discovery slot.
+            self.fail_presentation();
+            if !self.section_record_stop_has_room() {
+                return false;
+            }
+        }
+        let stopped = self
+            .pending_section_record_stop
+            .take()
+            .expect("one retained Section recording stop");
+        self.present_event(EngineEvent::SectionRecordStopped(stopped));
+        true
     }
 
     pub(super) fn start_section_record_if_due(&mut self, through_sample: u64) {

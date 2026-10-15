@@ -51,6 +51,10 @@ impl TerminalNotifications {
         None
     }
 
+    pub(super) fn can_retain_overflow_owner(&self) -> bool {
+        self.overflow_owner.is_none()
+    }
+
     pub(super) fn occupied_slots(&self) -> usize {
         usize::from(self.capture_stop.is_some())
             + usize::from(self.compensation_failure.is_some())

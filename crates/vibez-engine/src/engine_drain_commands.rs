@@ -10,6 +10,7 @@ impl AudioEngine {
     pub(super) fn drain_commands(&mut self) {
         self.rendered_callback_frames = 0;
         self.flush_presentation();
+        self.flush_section_record_stop();
         if self.pending_source_cleanup {
             self.pending_source_cleanup = false;
             self.clear_clip_performance();
@@ -60,6 +61,8 @@ impl AudioEngine {
             if self.scheduled_presentation.len() + 2 >= self.scheduled_presentation.capacity()
                 || self.section_capture_timing.len() + 2 >= self.section_capture_timing.capacity()
                 || self.pending_bus_cleanup.is_some()
+                || (self.pending_section_record_stop.is_some()
+                    && matches!(self.cmd_rx.peek(), Ok(EngineCommand::ArmSectionRecord { .. })))
                 || self
                     .pending_retirements
                     .capacity()

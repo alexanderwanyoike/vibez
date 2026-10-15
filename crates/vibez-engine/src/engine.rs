@@ -107,6 +107,7 @@ pub struct AudioEngine {
     queued_section: Option<QueuedSectionPlayback>,
     pending_section_record: Option<section_record::PendingSectionRecord>,
     active_section_record: Option<section_record::ActiveSectionRecord>,
+    pending_section_record_stop: Option<crate::events::SectionRecordStoppedEvent>,
     /// When a transition lands partway through the current callback, only
     /// these frames advance the newly active Section's local playhead.
     section_advance_override: Option<u64>,
@@ -285,6 +286,7 @@ impl AudioEngine {
             queued_section: None,
             pending_section_record: None,
             active_section_record: None,
+            pending_section_record_stop: None,
             section_advance_override: None,
             arrangement_audio_length: None,
             arrangement_recording: false,
