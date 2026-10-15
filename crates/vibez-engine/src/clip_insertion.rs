@@ -169,9 +169,13 @@ impl PreparedClipInsertion {
         let (_, target) = self.target.expect("the command supplies its target");
         // Replacing the first existing ID never needs more outer storage,
         // even when the channel is exactly full or the target changes.
-        if let Some(ClipInsertionDelta::AutomationLane(lane)) = self.clip.as_ref()
-            && let Some(index) = source.automation.iter().position(|current| current.id == lane.id)
-        {
+        let replacement_index = match self.clip.as_ref() {
+            Some(ClipInsertionDelta::AutomationLane(lane)) => {
+                source.automation.iter().position(|current| current.id == lane.id)
+            }
+            _ => None,
+        };
+        if let Some(index) = replacement_index {
             let Some(ClipInsertionDelta::AutomationLane(lane)) = self.clip.take() else {
                 unreachable!("the opaque lane wrapper owns one original lane");
             };
