@@ -1067,3 +1067,7 @@ mod automation_lane_insertion_tests;
 #[cfg(test)]
 #[path = "engine_automation_lane_fifo_tests.rs"]
 mod automation_lane_fifo_tests;
+
+#[cfg(test)]
+#[path = "engine_retirement_pressure_tests.rs"]
+mod retirement_pressure_tests;
