@@ -4,20 +4,21 @@ use std::collections::VecDeque;
 use std::time::Instant;
 
 use iced::mouse;
-use iced::widget::{button, canvas, column, container, row, text, text_input, tooltip, Space};
+use iced::widget::{button, canvas, column, container, row, text, tooltip, Space};
 use iced::{Alignment, Color, Element, Length, Point, Rectangle, Renderer, Size, Theme};
 use vibez_core::id::TrackId;
-use vibez_dsp::gain::{param, MAX_GAIN, TRIM_RANGE_DB};
+use vibez_dsp::gain::param;
 use vibez_engine::metering::MeterValues;
 
-use crate::domains::gain::{GainHistoryPoint, GainMsg, GainPanelState, MAX_GAIN_DB, MIN_GAIN_DB};
+use crate::domains::gain::{GainHistoryPoint, GainMsg, GainPanelState};
+use crate::domains::param_entry::ValueEntry;
 use crate::message::Message;
 use crate::state::UiEffect;
 use crate::theme as th;
 use crate::widgets::device_chrome::section_label;
-use crate::widgets::effect_knob::{EffectKnobWidget, KnobTarget};
+use crate::widgets::device_controls::Param;
+use crate::widgets::effect_knob::KnobTarget;
 use crate::widgets::level_meter::{self, LevelMeter};
-use crate::widgets::on_blur::on_blur;
 
 const PAD: f32 = 10.0;
 const COLUMN_W: f32 = 104.0;
@@ -117,6 +118,7 @@ pub fn view<'a>(
     effect: &'a UiEffect,
     accent: Color,
     state: &'a GainPanelState,
+    entry: Option<&'a ValueEntry>,
     preset_bar: Element<'a, Message>,
     size: Size,
 ) -> Element<'a, Message> {
@@ -139,8 +141,9 @@ pub fn view<'a>(
             .align_y(Alignment::Center),
         rule(),
     ];
-    let main = |height, side| main_controls(track_id, effect, state, control_accent, side, height);
-    let advanced = |height| advanced_controls(track_id, effect, state, control_accent, height);
+    let main =
+        |height, side| main_controls(track_id, effect, state, entry, control_accent, side, height);
+    let advanced = |height| advanced_controls(track_id, effect, entry, control_accent, height);
     let history = if size.width >= MEDIUM_W {
         Side::History
     } else {
@@ -183,6 +186,7 @@ fn main_controls<'a>(
     track_id: TrackId,
     effect: &'a UiEffect,
     state: &'a GainPanelState,
+    entry: Option<&'a ValueEntry>,
     accent: Color,
     side: Side,
     height: f32,
@@ -191,7 +195,7 @@ fn main_controls<'a>(
     let mut main = row![
         meter_column("Input", state.input, None, inner),
         vertical_rule(),
-        gain_column(track_id, effect, state, accent, inner),
+        gain_column(track_id, effect, entry, accent, inner),
         vertical_rule(),
         meter_column(
             "Output",
@@ -204,7 +208,7 @@ fn main_controls<'a>(
     if matches!(side, Side::Advanced) {
         main = main
             .push(vertical_rule())
-            .push(advanced_controls(track_id, effect, state, accent, inner));
+            .push(advanced_controls(track_id, effect, entry, accent, inner));
     } else if matches!(side, Side::History) && inner >= HISTORY_MIN_H {
         main = main.push(vertical_rule()).push(
             column![
@@ -293,21 +297,12 @@ fn readout<'a>(channel: &'static str, peak: f32) -> Element<'a, Message> {
 fn gain_column<'a>(
     track_id: TrackId,
     effect: &'a UiEffect,
-    state: &'a GainPanelState,
+    entry: Option<&'a ValueEntry>,
     accent: Color,
     height: f32,
 ) -> Element<'a, Message> {
-    let mut knob = EffectKnobWidget::new(
-        track_id,
-        effect.id,
-        param::GAIN,
-        effect.params.get(param::GAIN).copied().unwrap_or(1.0),
-        0.0,
-        MAX_GAIN,
-        1.0,
-        accent,
-    );
-    knob.target = KnobTarget::GainDb(effect.id);
+    let gain = Param::new(track_id, effect, param::GAIN, accent, entry)
+        .knob_target(KnobTarget::GainDb(effect.id));
     let unity = small_button(
         "Unity",
         Message::set_effect_param(track_id, effect.id, param::GAIN, 1.0),
@@ -315,21 +310,19 @@ fn gain_column<'a>(
         false,
     );
     let stacked = height >= 104.0;
-    let entry = value_input(track_id, effect, state, param::GAIN, accent, !stacked);
     let knob_size = (height - 60.0).clamp(28.0, 64.0);
+    let knob = canvas(gain.knob()).width(knob_size).height(knob_size);
     let controls: Element<'a, Message> = if stacked {
-        column![
-            canvas(knob).width(knob_size).height(knob_size),
-            entry,
-            unity
-        ]
-        .spacing(4)
-        .align_x(Alignment::Center)
-        .into()
+        column![knob, gain.value_entry(), unity]
+            .spacing(4)
+            .align_x(Alignment::Center)
+            .into()
     } else {
         row![
-            canvas(knob).width(knob_size).height(knob_size),
-            column![entry, unity].spacing(3).align_x(Alignment::Center),
+            knob,
+            column![gain.value_entry(), unity]
+                .spacing(3)
+                .align_x(Alignment::Center),
         ]
         .spacing(4)
         .align_y(Alignment::Center)
@@ -346,28 +339,20 @@ fn gain_column<'a>(
 fn advanced_controls<'a>(
     track_id: TrackId,
     effect: &'a UiEffect,
-    state: &'a GainPanelState,
+    entry: Option<&'a ValueEntry>,
     accent: Color,
     height: f32,
 ) -> Element<'a, Message> {
     let roomy = height >= 70.0;
     let trims = row![
         trim_control(
-            track_id,
-            effect,
-            state,
-            param::TRIM[0],
+            Param::new(track_id, effect, param::TRIM[0], accent, entry),
             "L trim",
-            accent,
             roomy
         ),
         trim_control(
-            track_id,
-            effect,
-            state,
-            param::TRIM[1],
+            Param::new(track_id, effect, param::TRIM[1], accent, entry),
             "R trim",
-            accent,
             roomy
         ),
     ]
@@ -388,40 +373,23 @@ fn advanced_controls<'a>(
     .into()
 }
 
-fn trim_control<'a>(
-    track_id: TrackId,
-    effect: &'a UiEffect,
-    state: &'a GainPanelState,
-    index: usize,
-    label: &'static str,
-    accent: Color,
-    roomy: bool,
-) -> Element<'a, Message> {
-    let knob = EffectKnobWidget::new(
-        track_id,
-        effect.id,
-        index,
-        effect.params.get(index).copied().unwrap_or(0.0),
-        -TRIM_RANGE_DB,
-        TRIM_RANGE_DB,
-        0.0,
-        accent,
-    );
+fn trim_control<'a>(trim: Param<'a>, label: &'static str, roomy: bool) -> Element<'a, Message> {
     let size = if roomy { 36.0 } else { 26.0 };
-    let knob = canvas(knob).width(size).height(size);
-    let entry = value_input(track_id, effect, state, index, accent, true);
-    let content: Element<'a, Message> = if roomy {
-        column![section_label(label), knob, entry]
+    let knob = canvas(trim.knob()).width(size).height(size);
+    if roomy {
+        column![section_label(label), knob, trim.value_entry()]
             .spacing(3)
             .align_x(Alignment::Center)
             .into()
     } else {
-        row![knob, column![section_label(label), entry].spacing(2)]
-            .spacing(4)
-            .align_y(Alignment::Center)
-            .into()
-    };
-    content
+        row![
+            knob,
+            column![section_label(label), trim.value_entry()].spacing(2)
+        ]
+        .spacing(4)
+        .align_y(Alignment::Center)
+        .into()
+    }
 }
 
 fn polarity_control<'a>(
@@ -473,78 +441,6 @@ fn disclosure<'a>(effect: &UiEffect, open: bool) -> Element<'a, Message> {
         ..Default::default()
     })
     .into()
-}
-
-fn value_input<'a>(
-    track_id: TrackId,
-    effect: &UiEffect,
-    state: &GainPanelState,
-    index: usize,
-    accent: Color,
-    narrow: bool,
-) -> Element<'a, Message> {
-    let effect_id = effect.id;
-    let value = effect
-        .params
-        .get(index)
-        .copied()
-        .unwrap_or(if index == param::GAIN { 1.0 } else { 0.0 });
-    let shown = state.input_text[index].clone().unwrap_or_else(|| {
-        if index == param::GAIN {
-            db_text(value)
-        } else {
-            format!("{value:.1}")
-        }
-    });
-    let invalid = state.input_error[index];
-    let submit = Message::GainControl(GainMsg::SubmitInput(track_id, effect_id, index));
-    let field = text_input("dB", &shown)
-        .on_input(move |text| {
-            Message::GainControl(GainMsg::SetInput(track_id, effect_id, index, text))
-        })
-        .on_submit(submit.clone())
-        .size(if narrow { 10 } else { 12 })
-        .font(crate::typography::PERFORM_TECH)
-        .padding([1, 3])
-        .width(if narrow { 40.0 } else { 52.0 })
-        .style(move |_theme: &Theme, status| {
-            let focused = matches!(status, text_input::Status::Focused);
-            text_input::Style {
-                background: th::bg_dark().into(),
-                border: iced::Border {
-                    color: if invalid {
-                        th::danger()
-                    } else if focused {
-                        accent
-                    } else {
-                        th::border()
-                    },
-                    width: 1.0,
-                    radius: 2.0.into(),
-                },
-                icon: th::text_dim(),
-                placeholder: th::text_muted(),
-                value: th::text(),
-                selection: th::with_alpha(accent, 0.35),
-            }
-        });
-    let field = row![
-        on_blur(field, state.input_text[index].is_some(), submit),
-        text("dB").size(9).color(th::text_dim()),
-    ]
-    .spacing(3)
-    .align_y(Alignment::Center);
-    let range = if index == param::GAIN {
-        format!("{MIN_GAIN_DB:.0} to +{MAX_GAIN_DB:.2} dB, or -inf")
-    } else {
-        format!("-{TRIM_RANGE_DB:.0} to +{TRIM_RANGE_DB:.0} dB")
-    };
-    let help = if invalid {
-        format!("Invalid: enter {range}")
-    } else {
-        format!("{range}. Enter applies.")
-    };
-    tooltip(field, text(help).size(9), tooltip::Position::Bottom).into()
 }
 
 fn small_button<'a>(

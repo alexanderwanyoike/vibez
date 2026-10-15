@@ -6,7 +6,7 @@ use std::time::Instant;
 use vibez_core::id::{EffectId, TrackId};
 use vibez_engine::metering::MeterValues;
 
-use crate::domains::gain::{is_native_gain, GainAction, GainMsg, GainPanelState};
+use crate::domains::gain::{is_native_gain, GainMsg, GainPanelState};
 use crate::state::DetailPanelTab;
 
 use super::*;
@@ -20,18 +20,6 @@ pub(super) struct GainDevices {
 }
 
 impl App {
-    /// A parameter edit supersedes whatever was typed into that Gain field.
-    pub(super) fn discard_gain_entries(&mut self, message: &crate::domains::devices::DevicesMsg) {
-        let Some(edit) = message.param_edit() else {
-            return;
-        };
-        if let Some(panel) = self.gain_devices.panels.get_mut(&edit.effect_id) {
-            for (index, _) in edit.updates {
-                panel.discard_input(index);
-            }
-        }
-    }
-
     pub(super) fn poll_gain_devices(&mut self) {
         let wanted = (self.state.view.detail_panel_tab == DetailPanelTab::Devices)
             .then(|| self.state.active_timeline_editor().selected_track)
@@ -122,23 +110,21 @@ impl App {
         let Some((track_id, effect_id)) = message.destination(self.gain_devices.channel) else {
             return Task::none();
         };
-        let Some(effect) = self
-            .state
-            .find_track(track_id)
-            .and_then(|track| track.effects.iter().find(|effect| effect.id == effect_id))
-            .filter(|effect| is_native_gain(effect))
-        else {
-            return Task::none();
-        };
-        let Some(panel) = self.gain_devices.panels.get_mut(&effect_id) else {
-            return Task::none();
-        };
-        match panel.update(message, &effect.params) {
-            GainAction::SetParameter(index, value) => {
-                self.update(Message::set_effect_param(track_id, effect_id, index, value))
-            }
-            GainAction::None => Task::none(),
+        let is_gain = self.state.find_track(track_id).is_some_and(|track| {
+            track
+                .effects
+                .iter()
+                .any(|effect| effect.id == effect_id && is_native_gain(effect))
+        });
+        if let Some(panel) = self
+            .gain_devices
+            .panels
+            .get_mut(&effect_id)
+            .filter(|_| is_gain)
+        {
+            panel.update(message);
         }
+        Task::none()
     }
 }
 
@@ -238,51 +224,6 @@ mod tests {
             "clamps to the value it already has"
         );
         assert!(!app.state.project.history.can_undo());
-    }
-
-    #[test]
-    fn gain_unity_clears_a_stale_input_without_dirtying_an_unchanged_device() {
-        let (mut app, track, effect) = gain_app();
-        let panel = app.gain_devices.panels.get_mut(&effect).unwrap();
-        panel.input_text[0] = Some("invalid".into());
-        panel.input_error[0] = true;
-        let _ = app.update(Message::set_effect_param(track, effect, 0, 1.0));
-        assert!(!app.state.project.dirty);
-        assert!(!app.state.project.history.can_undo());
-        let panel = &app.gain_devices.panels[&effect];
-        assert!(panel.input_text[0].is_none());
-        assert!(!panel.input_error[0]);
-    }
-
-    #[test]
-    fn numeric_gain_entry_rejects_invalid_values_and_commits_once() {
-        let (mut app, track, effect) = gain_app();
-        for input in ["NaN", "oops", "100"] {
-            let _ = app.update(Message::GainControl(GainMsg::SetInput(
-                track,
-                effect,
-                0,
-                input.into(),
-            )));
-            let _ = app.update(Message::GainControl(GainMsg::SubmitInput(track, effect, 0)));
-            assert!(app.gain_devices.panels[&effect].input_error[0]);
-            assert!(!app.state.project.dirty);
-            assert!(!app.state.project.history.can_undo());
-        }
-        let _ = app.update(Message::GainControl(GainMsg::SetInput(
-            track,
-            effect,
-            0,
-            "-6".into(),
-        )));
-        let _ = app.update(Message::GainControl(GainMsg::SubmitInput(track, effect, 0)));
-        assert!(
-            (app.state.find_track(track).unwrap().effects[0].params[0] - 0.501_187_2).abs() < 1e-6
-        );
-        assert!(app.state.project.dirty);
-        assert!(app.state.project.history.pop_undo().is_some());
-        assert!(!app.state.project.history.can_undo());
-        assert!(!app.gain_devices.panels[&effect].input_error[0]);
     }
 
     #[test]

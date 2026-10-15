@@ -239,7 +239,6 @@ fn gain_panel(advanced: bool, clip: bool) -> crate::domains::gain::GainPanelStat
         clip_latched: clip,
         history,
         last_meter_at: Some(now),
-        ..Default::default()
     }
 }
 
@@ -272,6 +271,7 @@ impl GainGallery {
                 effect,
                 accent,
                 panel,
+                None,
                 crate::widgets::device_preset_bar::view(
                     track,
                     effect,

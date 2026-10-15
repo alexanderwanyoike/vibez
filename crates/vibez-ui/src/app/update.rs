@@ -107,7 +107,6 @@ impl App {
             message => (message, None),
         };
         if let Message::Devices(edit) = &message {
-            self.discard_gain_entries(edit);
             self.discard_param_entry(edit);
             if crate::domains::devices::is_unchanged_param_edit(&self.state.project_tracks, edit) {
                 return Task::none();

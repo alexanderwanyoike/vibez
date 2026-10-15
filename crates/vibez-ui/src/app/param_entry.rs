@@ -124,10 +124,39 @@ mod tests {
     }
 
     #[test]
+    fn typed_gain_refuses_nonsense_and_levels_out_of_range_then_commits_once() {
+        let (mut app, track, effect) = app_with(EffectType::Gain);
+        for text in ["NaN", "oops", "100"] {
+            type_value(&mut app, track, effect, vibez_dsp::gain::param::GAIN, text);
+            assert!(app.param_entry.as_ref().unwrap().invalid);
+            assert!(!app.state.project.dirty);
+        }
+        let _ = app.update(Message::ParamEntry(EntryMsg::Edit("-6".into())));
+        let _ = app.update(Message::ParamEntry(EntryMsg::Submit));
+        assert!((param(&app, track, 0) - 0.501_187_2).abs() < 1e-6);
+        assert!(app.state.project.history.pop_undo().is_some());
+        assert!(!app.state.project.history.can_undo());
+    }
+
+    #[test]
     fn nonsense_stays_open_and_changes_nothing() {
         let (mut app, track, effect) = app_with(EffectType::Filter);
         type_value(&mut app, track, effect, 0, "warm");
         assert!(app.param_entry.as_ref().unwrap().invalid);
+        assert!(!app.state.project.dirty);
+    }
+
+    #[test]
+    fn an_unchanged_knob_edit_still_closes_its_entry_without_dirtying() {
+        let (mut app, track, effect) = app_with(EffectType::Gain);
+        let _ = app.update(Message::ParamEntry(EntryMsg::Begin {
+            track_id: track,
+            effect_id: effect,
+            index: 0,
+            text: "invalid".into(),
+        }));
+        let _ = app.update(Message::set_effect_param(track, effect, 0, 1.0));
+        assert!(app.param_entry.is_none());
         assert!(!app.state.project.dirty);
     }
 

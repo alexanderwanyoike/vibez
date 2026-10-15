@@ -320,6 +320,38 @@ mod tests {
         );
     }
 
+    #[test]
+    fn gain_and_trim_keep_their_typed_ranges() {
+        use vibez_dsp::effect::AudioEffect;
+        use vibez_dsp::gain::param;
+        let descriptors = vibez_dsp::gain::GainEffect::new().param_descriptors();
+        let read = |index: usize, text: &str| {
+            let descriptor = &descriptors[index];
+            param_format(EffectType::Gain, index, descriptor).parse(
+                text,
+                descriptor.min,
+                descriptor.max,
+            )
+        };
+        assert_eq!(read(param::GAIN, "0"), Some(1.0));
+        assert!((read(param::GAIN, " -6.0 ").unwrap() - 0.501_187_2).abs() < 1e-6);
+        assert_eq!(read(param::GAIN, "-inf"), Some(0.0));
+        assert_eq!(read(param::GAIN, "-∞"), Some(0.0));
+        assert!((read(param::GAIN, "-60").unwrap() - 0.001).abs() < 1e-6);
+        assert!((read(param::GAIN, "6.0205999").unwrap() - 2.0).abs() < 1e-6);
+        for invalid in ["", "NaN", "inf", "+inf", "100", "-61", "oops"] {
+            assert_eq!(read(param::GAIN, invalid), None, "accepted {invalid}");
+        }
+        for index in param::TRIM {
+            for db in [-24.0, -6.0, 0.0, 6.0, 24.0] {
+                assert_eq!(read(index, &db.to_string()), Some(db));
+            }
+            for invalid in ["-inf", "-∞", "NaN", "inf", "-24.1", "24.1", "oops"] {
+                assert_eq!(read(index, invalid), None, "accepted {invalid}");
+            }
+        }
+    }
+
     fn begin(entry: &mut Option<ValueEntry>, index: usize) -> (TrackId, EffectId) {
         let (track_id, effect_id) = (TrackId::new(), EffectId::new());
         update(
