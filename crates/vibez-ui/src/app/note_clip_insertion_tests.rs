@@ -367,3 +367,6 @@ fn note_app_idle_stream_shutdown_consumes_each_real_protocol_stage() {
         assert_eq!(fixture.audio.strong_count(), 0, "{stage:?}");
     }
 }
+
+#[path = "note_value_insertion_tests.rs"]
+mod note_value_tests;
