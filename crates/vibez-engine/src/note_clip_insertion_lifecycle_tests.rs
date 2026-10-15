@@ -2,7 +2,7 @@
 
 use super::*;
 
-fn on_audio_thread(mut engine: AudioEngine, sounding: bool) -> (AudioEngine, [f32; 16]) {
+pub(super) fn on_audio_thread(mut engine: AudioEngine, sounding: bool) -> (AudioEngine, [f32; 16]) {
     let owner_thread = std::thread::current().id();
     std::thread::spawn(move || {
         assert_ne!(std::thread::current().id(), owner_thread);

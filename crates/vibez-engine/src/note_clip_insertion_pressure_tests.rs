@@ -19,26 +19,23 @@ struct Fixture {
 }
 
 fn setup() -> Fixture {
+    setup_with_notes(vec![MidiNote {
+        pitch: 60,
+        velocity: 100,
+        start_beat: 0.0,
+        duration_beats: 4.0,
+    }])
+}
+
+fn setup_with_notes(notes: Vec<MidiNote>) -> Fixture {
+    let sounding = !notes.is_empty();
     let (mut engine, mut commands, mut events) = AudioEngine::new();
     let track = TrackId::new();
     let resident = ClipId::new();
     let source = PreparedPlaybackSource::new(
         Vec::new(),
         vec![EngineNoteClip::new(
-            resident,
-            0.0,
-            8.0,
-            vec![MidiNote {
-                pitch: 60,
-                velocity: 100,
-                start_beat: 0.0,
-                duration_beats: 4.0,
-            }],
-            0.0,
-            false,
-            0.0,
-            8.0,
-            GrooveGrid::Off,
+            resident, 0.0, 8.0, notes, 0.0, false, 0.0, 8.0, GrooveGrid::Off,
         )],
         Vec::new(),
     );
@@ -67,7 +64,7 @@ fn setup() -> Fixture {
     commands.push(EngineCommand::Play).unwrap();
     let mut warmup = [0.0; 16];
     engine.process_block(AudioProcessBlock::new(&mut warmup, 2));
-    assert_signal(&warmup);
+    if sounding { assert_signal(&warmup); } else { assert_eq!(warmup, [0.0; 16]); }
     while events.pop().is_ok() {}
     let source = &engine.tracks()[0].playback_source;
     assert_eq!(source.note_clips.len(), source.note_clips.capacity());
