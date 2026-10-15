@@ -15,8 +15,7 @@ use crate::domains::param_entry::ValueEntry;
 use crate::message::Message;
 use crate::state::UiEffect;
 use crate::theme as th;
-use crate::widgets::device_chrome::section_label;
-use crate::widgets::device_controls::Param;
+use crate::widgets::device_controls::{heading, Param};
 use crate::widgets::effect_knob::KnobTarget;
 use crate::widgets::level_meter::{self, LevelMeter};
 
@@ -212,7 +211,7 @@ fn main_controls<'a>(
     } else if matches!(side, Side::History) && inner >= HISTORY_MIN_H {
         main = main.push(vertical_rule()).push(
             column![
-                section_label("Output history"),
+                heading("Output history"),
                 canvas(LevelHistory {
                     points: &state.history,
                     now: state.last_meter_at.unwrap_or_else(Instant::now),
@@ -239,16 +238,16 @@ fn meter_column<'a>(
     clip: Option<(vibez_core::id::EffectId, bool)>,
     height: f32,
 ) -> Element<'a, Message> {
-    let mut heading = row![section_label(label)]
-        .spacing(6)
-        .align_y(Alignment::Center);
+    let mut title = row![heading(label)].spacing(6).align_y(Alignment::Center);
     if let Some((effect_id, latched)) = clip {
-        let clip_label = text("\u{25CF} CLIP").size(8).color(if latched {
-            th::meter_red()
-        } else {
-            th::text_muted()
-        });
-        heading = heading.push(Space::with_width(Length::Fill)).push(tooltip(
+        let clip_label = text("\u{25CF} Clip")
+            .size(crate::widgets::device_controls::LABEL_SIZE)
+            .color(if latched {
+                th::meter_red()
+            } else {
+                th::text_muted()
+            });
+        title = title.push(Space::with_width(Length::Fill)).push(tooltip(
             button(clip_label)
                 .on_press(Message::GainControl(GainMsg::ClearClip(effect_id)))
                 .padding(0)
@@ -258,13 +257,13 @@ fn meter_column<'a>(
         ));
     }
     let readouts = column![
-        text("PEAK").size(7).color(th::text_dim()),
+        text("Peak").size(9).color(th::text_dim()),
         readout("L", levels.peak_l),
         readout("R", levels.peak_r),
     ]
     .spacing(2);
     column![
-        heading,
+        title,
         row![
             canvas(LevelMeter { levels })
                 .width(level_meter::WIDTH)
@@ -328,7 +327,7 @@ fn gain_column<'a>(
         .align_y(Alignment::Center)
         .into()
     };
-    column![section_label("Gain"), controls]
+    column![heading("Gain"), controls]
         .spacing(4)
         .align_x(Alignment::Center)
         .width(COLUMN_W)
@@ -377,18 +376,15 @@ fn trim_control<'a>(trim: Param<'a>, label: &'static str, roomy: bool) -> Elemen
     let size = if roomy { 36.0 } else { 26.0 };
     let knob = canvas(trim.knob()).width(size).height(size);
     if roomy {
-        column![section_label(label), knob, trim.value_entry()]
+        column![heading(label), knob, trim.value_entry()]
             .spacing(3)
             .align_x(Alignment::Center)
             .into()
     } else {
-        row![
-            knob,
-            column![section_label(label), trim.value_entry()].spacing(2)
-        ]
-        .spacing(4)
-        .align_y(Alignment::Center)
-        .into()
+        row![knob, column![heading(label), trim.value_entry()].spacing(2)]
+            .spacing(4)
+            .align_y(Alignment::Center)
+            .into()
     }
 }
 
@@ -401,7 +397,7 @@ fn polarity_control<'a>(
 ) -> Element<'a, Message> {
     let inverted = effect.params.get(index).copied().unwrap_or(0.0) >= 0.5;
     column![
-        section_label(label),
+        heading(label),
         small_button(
             if inverted {
                 "\u{00D8} Inverted"
