@@ -340,28 +340,36 @@ fn eq_factory_presets() -> Vec<DevicePreset> {
             ],
         ),
     ];
+    keyed_presets(EffectType::Eq, &EQ_KEYS, vibez_dsp::eq::EQ_PARAMS, &presets)
+}
+
+/// Presets that start from the device's defaults and change the named keys.
+fn keyed_presets(
+    effect_type: EffectType,
+    keys: &[PresetParam],
+    descriptors: &[vibez_core::effect::ParamDescriptor],
+    presets: &[(&str, &[(&str, f32)])],
+) -> Vec<DevicePreset> {
     presets
-        .into_iter()
+        .iter()
         .map(|(name, changes)| {
             debug_assert!(
                 changes
                     .iter()
-                    .all(|(changed, _)| EQ_KEYS.iter().any(|(_, key, _)| key == changed)),
-                "{name} names a parameter the EQ does not store"
+                    .all(|(changed, _)| keys.iter().any(|(_, key, _)| key == changed)),
+                "{name} names a parameter the device does not store"
             );
-            let parameters = EQ_KEYS
+            let parameters = keys
                 .iter()
                 .map(|(index, key, _)| {
                     let value = changes
                         .iter()
                         .find(|(changed, _)| changed == key)
-                        .map_or(vibez_dsp::eq::EQ_PARAMS[*index].default, |(_, value)| {
-                            *value
-                        });
+                        .map_or(descriptors[*index].default, |(_, value)| *value);
                     ((*key).to_owned(), value)
                 })
                 .collect();
-            DevicePreset::new(DevicePresetKind::Effect(EffectType::Eq), name, parameters)
+            DevicePreset::new(DevicePresetKind::Effect(effect_type), *name, parameters)
                 .expect("Factory preset values are valid")
         })
         .collect()
