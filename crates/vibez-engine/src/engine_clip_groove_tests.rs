@@ -115,15 +115,17 @@ fn render_events(
     }
     commands
         .push(EngineCommand::AddNoteClip {
-            start_marker_beats: 0.0,
-            track_id,
-            clip_id,
-            position_beats: 0.0,
-            duration_beats,
-            loop_enabled: looping,
-            loop_start_beats: 0.0,
-            loop_end_beats,
-            groove_grid: grid,
+            track_id: track_id,
+            insertion: crate::clip_insertion::PreparedNoteClipInsertion::new(
+                clip_id,
+                0.0,
+                duration_beats,
+                0.0,
+                looping,
+                0.0,
+                loop_end_beats,
+                grid,
+            ),
         })
         .unwrap();
     for note in notes {
@@ -170,15 +172,17 @@ fn midi_start_plays_once_then_returns_to_loop_start() {
         .unwrap();
     commands
         .push(EngineCommand::AddNoteClip {
-            track_id,
-            clip_id,
-            position_beats: 0.0,
-            duration_beats: 4.0,
-            start_marker_beats: 2.0,
-            loop_enabled: true,
-            loop_start_beats: 1.0,
-            loop_end_beats: 3.0,
-            groove_grid: GrooveGrid::Off,
+            track_id: track_id,
+            insertion: crate::clip_insertion::PreparedNoteClipInsertion::new(
+                clip_id,
+                0.0,
+                4.0,
+                2.0,
+                true,
+                1.0,
+                3.0,
+                GrooveGrid::Off,
+            ),
         })
         .unwrap();
     for (pitch, start_beat) in [(62, 2.0), (61, 1.0)] {
@@ -225,15 +229,17 @@ fn dense_recorded_groove_schedules_each_note_once_per_audio_block() {
         .unwrap();
     commands
         .push(EngineCommand::AddNoteClip {
-            track_id,
-            clip_id,
-            position_beats: 0.0,
-            duration_beats: 8.0,
-            start_marker_beats: 0.0,
-            loop_enabled: false,
-            loop_start_beats: 0.0,
-            loop_end_beats: 0.0,
-            groove_grid: GrooveGrid::Sixteenth,
+            track_id: track_id,
+            insertion: crate::clip_insertion::PreparedNoteClipInsertion::new(
+                clip_id,
+                0.0,
+                8.0,
+                0.0,
+                false,
+                0.0,
+                0.0,
+                GrooveGrid::Sixteenth,
+            ),
         })
         .unwrap();
     for index in 0..29 {

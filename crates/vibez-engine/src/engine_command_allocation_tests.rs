@@ -187,15 +187,17 @@ fn add_clip(track_id: TrackId, clip_id: ClipId) -> EngineCommand {
 
 fn add_note_clip(track_id: TrackId, clip_id: ClipId) -> EngineCommand {
     EngineCommand::AddNoteClip {
-        track_id,
-        clip_id,
-        position_beats: 0.0,
-        duration_beats: 4.0,
-        start_marker_beats: 0.0,
-        loop_enabled: false,
-        loop_start_beats: 0.0,
-        loop_end_beats: 4.0,
-        groove_grid: Default::default(),
+        track_id: track_id,
+        insertion: crate::clip_insertion::PreparedNoteClipInsertion::new(
+            clip_id,
+            0.0,
+            4.0,
+            0.0,
+            false,
+            0.0,
+            4.0,
+            Default::default(),
+        ),
     }
 }
 

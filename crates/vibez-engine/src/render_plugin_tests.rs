@@ -110,14 +110,16 @@ fn sampler_echo_fixture() -> (BounceRequest, Vec<Command>) {
     };
     commands.push(Command::AddNoteClip {
         track_id: tid,
-        clip_id: clip.id,
-        position_beats: clip.position_beats,
-        duration_beats: clip.duration_beats,
-        start_marker_beats: 0.0,
-        loop_enabled: false,
-        loop_start_beats: 0.0,
-        loop_end_beats: 0.0,
-        groove_grid: clip.groove_grid,
+        insertion: crate::clip_insertion::PreparedNoteClipInsertion::new(
+            clip.id,
+            clip.position_beats,
+            clip.duration_beats,
+            0.0,
+            false,
+            0.0,
+            0.0,
+            clip.groove_grid,
+        ),
     });
     for note in &clip.notes {
         commands.push(Command::AddNote {

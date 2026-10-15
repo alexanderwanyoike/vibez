@@ -122,15 +122,17 @@ fn midi_clip_commands_keep_project_length_in_sync() {
     cmd_tx.push(EngineCommand::add_track(track_id)).unwrap();
     cmd_tx
         .push(EngineCommand::AddNoteClip {
-            track_id,
-            clip_id,
-            position_beats: 2.0,
-            duration_beats: 4.0,
-            start_marker_beats: 0.0,
-            loop_enabled: false,
-            loop_start_beats: 0.0,
-            loop_end_beats: 0.0,
-            groove_grid: vibez_core::perform::GrooveGrid::Off,
+            track_id: track_id,
+            insertion: crate::clip_insertion::PreparedNoteClipInsertion::new(
+                clip_id,
+                2.0,
+                4.0,
+                0.0,
+                false,
+                0.0,
+                0.0,
+                vibez_core::perform::GrooveGrid::Off,
+            ),
         })
         .unwrap();
     let mut output = [0.0; 2];
@@ -1547,14 +1549,16 @@ fn note_clip_loop_renders() {
     cmd_tx
         .push(EngineCommand::AddNoteClip {
             track_id: tid,
-            clip_id: cid,
-            position_beats: 0.0,
-            duration_beats: 4.0,
-            start_marker_beats: 0.0,
-            loop_enabled: true,
-            loop_start_beats: 0.0,
-            loop_end_beats: 2.0,
-            groove_grid: vibez_core::perform::GrooveGrid::Off,
+            insertion: crate::clip_insertion::PreparedNoteClipInsertion::new(
+                cid,
+                0.0,
+                4.0,
+                0.0,
+                true,
+                0.0,
+                2.0,
+                vibez_core::perform::GrooveGrid::Off,
+            ),
         })
         .unwrap();
     // Add a note at beat 0, 1 beat long
@@ -1611,15 +1615,17 @@ fn note_clip_reports_triggered_pitches_for_device_feedback() {
         .unwrap();
     cmd_tx
         .push(EngineCommand::AddNoteClip {
-            track_id,
-            clip_id,
-            position_beats: 0.0,
-            duration_beats: 1.0,
-            start_marker_beats: 0.0,
-            loop_enabled: false,
-            loop_start_beats: 0.0,
-            loop_end_beats: 0.0,
-            groove_grid: vibez_core::perform::GrooveGrid::Off,
+            track_id: track_id,
+            insertion: crate::clip_insertion::PreparedNoteClipInsertion::new(
+                clip_id,
+                0.0,
+                1.0,
+                0.0,
+                false,
+                0.0,
+                0.0,
+                vibez_core::perform::GrooveGrid::Off,
+            ),
         })
         .unwrap();
     cmd_tx
@@ -1669,15 +1675,17 @@ fn synth_note_clip_does_not_report_drum_pad_activity() {
         .unwrap();
     cmd_tx
         .push(EngineCommand::AddNoteClip {
-            track_id,
-            clip_id,
-            position_beats: 0.0,
-            duration_beats: 1.0,
-            start_marker_beats: 0.0,
-            loop_enabled: false,
-            loop_start_beats: 0.0,
-            loop_end_beats: 0.0,
-            groove_grid: vibez_core::perform::GrooveGrid::Off,
+            track_id: track_id,
+            insertion: crate::clip_insertion::PreparedNoteClipInsertion::new(
+                clip_id,
+                0.0,
+                1.0,
+                0.0,
+                false,
+                0.0,
+                0.0,
+                vibez_core::perform::GrooveGrid::Off,
+            ),
         })
         .unwrap();
     cmd_tx
@@ -1726,15 +1734,17 @@ fn drum_pad_activity_dropped_by_a_full_event_ring_is_not_replayed_late() {
         .unwrap();
     cmd_tx
         .push(EngineCommand::AddNoteClip {
-            track_id,
-            clip_id,
-            position_beats: 0.0,
-            duration_beats: 1.0,
-            start_marker_beats: 0.0,
-            loop_enabled: false,
-            loop_start_beats: 0.0,
-            loop_end_beats: 0.0,
-            groove_grid: vibez_core::perform::GrooveGrid::Off,
+            track_id: track_id,
+            insertion: crate::clip_insertion::PreparedNoteClipInsertion::new(
+                clip_id,
+                0.0,
+                1.0,
+                0.0,
+                false,
+                0.0,
+                0.0,
+                vibez_core::perform::GrooveGrid::Off,
+            ),
         })
         .unwrap();
     cmd_tx
