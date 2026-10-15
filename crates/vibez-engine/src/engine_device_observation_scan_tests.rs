@@ -65,12 +65,18 @@ impl ScanTrace {
                 }
             }
         }
-        assert_eq!(owners, expected, "resident device order and first blocking owner");
+        assert_eq!(
+            owners, expected,
+            "resident device order and first blocking owner"
+        );
     }
 
     fn assert_recovery_answer(&self, owner: usize, local: bool) {
-        assert!(self.observed().contains(&(owner as u32 * 100 + 20 + u32::from(local))),
-            "device {owner} must classify recovery as local = {local}");
+        assert!(
+            self.observed()
+                .contains(&(owner as u32 * 100 + 20 + u32::from(local))),
+            "device {owner} must classify recovery as local = {local}"
+        );
     }
 }
 
@@ -221,7 +227,6 @@ fn observe(fixture: &Fixture, expected: bool) {
         (0, 0)
     );
     assert_eq!(muted, expected);
-
 }
 
 #[test]
@@ -315,6 +320,9 @@ fn owned_output_gates_suppress_live_plugin_queries_after_real_transitions() {
         }
         fixture.trace.clear_calls();
         observe(&fixture, true);
-        assert!(fixture.trace.observed().is_empty(), "owned {case} gate must not query resident devices");
+        assert!(
+            fixture.trace.observed().is_empty(),
+            "owned {case} gate must not query resident devices"
+        );
     }
 }
