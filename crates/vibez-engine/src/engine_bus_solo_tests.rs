@@ -355,10 +355,14 @@ fn ordinary_bus_delay_tail_survives_solo_without_a_selected_track_send() {
         )),
         (0, 0)
     );
-    assert!(
-        output[12 * 2] > 0.7,
-        "44-frame echo was cut off by unrelated track solo"
-    );
+    // One millisecond at 44.1 kHz splits the return across frames 44 and 45.
+    for (frame, weight) in [(12, 0.9), (13, 0.1)] {
+        let expected = weight * std::f32::consts::FRAC_1_SQRT_2;
+        for channel in 0..2 {
+            assert!((output[frame * 2 + channel] - expected).abs() < 1e-5,
+                "fractional return at frame {frame} was cut off by unrelated track solo");
+        }
+    }
     assert_eq!(output, capture, "the audible return must remain capturable");
     assert!(engine.tracks[1].sends.is_empty());
 }
