@@ -154,12 +154,12 @@ fn prepared_source_and_live_growth_preserve_matching_storage_at_content_boundari
         assert_eq!(events.pop().unwrap(), EngineEvent::PlaybackPosition(8));
         assert_eq!(
             events.pop().unwrap(),
-            EngineEvent::Metering {
+            EngineEvent::Metering(crate::events::MeteringEvent {
                 peak_l: 0.0,
                 peak_r: 0.0,
                 rms_l: 0.0,
                 rms_r: 0.0,
-            }
+            })
         );
         assert!(events.pop().is_err());
         request.fulfill();
