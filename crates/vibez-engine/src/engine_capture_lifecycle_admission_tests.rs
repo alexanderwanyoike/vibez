@@ -7,6 +7,8 @@ use vibez_core::effect::{EffectType, ParamDescriptor};
 use vibez_core::id::EffectId;
 use vibez_core::midi::InstrumentKind;
 
+const EFFECT_PROBE_OWNER: u32 = 2;
+
 pub(super) struct Calls {
     values: [AtomicU32; 64],
     len: AtomicUsize,
@@ -39,6 +41,25 @@ impl Calls {
             .iter()
             .map(|value| value.load(Ordering::Relaxed))
             .collect()
+    }
+    pub(super) fn assert_effect_failure_observed(&self, local: bool) {
+        let answer = EFFECT_PROBE_OWNER * 100 + 10 + u32::from(local);
+        assert!(
+            self.observed().contains(&answer),
+            "the effect must be observed with local failure = {local}"
+        );
+    }
+    pub(super) fn assert_effect_recovered_before_refailure(&self) {
+        let calls = self.observed();
+        let recovered = EFFECT_PROBE_OWNER * 100 + 10;
+        let recovery = calls
+            .iter()
+            .position(|answer| *answer == recovered)
+            .expect("Capture admission must observe the prior recovery edit");
+        assert!(
+            calls[recovery + 1..].contains(&(recovered + 1)),
+            "validation must observe the later same-drain refailure"
+        );
     }
 }
 
@@ -151,7 +172,7 @@ pub(super) fn fixture() -> Fixture {
         calls: Arc::clone(&calls),
     }));
     let device: Box<dyn vibez_dsp::effect::AudioEffect> = Box::new(Probe {
-        owner: 2,
+        owner: EFFECT_PROBE_OWNER,
         control: Arc::clone(&controls[1]),
         calls: Arc::clone(&calls),
     });
