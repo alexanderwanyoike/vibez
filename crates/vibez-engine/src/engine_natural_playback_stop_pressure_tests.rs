@@ -146,7 +146,6 @@ fn natural_last_playback_stop_keeps_all_owners_without_growing_ordinary_returns(
     });
     let length = fixture.engine.pending_retirements.len();
     let capacity = fixture.engine.pending_retirements.capacity();
-    eprintln!("natural last-stop proposal: heap={heap:?}, ordinary={length}/{capacity}");
     assert_eq!(output, [0.25; 7]);
     assert_eq!(fixture.engine.output_gate.remaining_loss_frames(), 0);
     assert_eq!(fixture.engine.output_gate.remaining_resume_frames(), 0);
