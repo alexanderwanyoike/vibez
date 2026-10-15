@@ -592,25 +592,8 @@ impl AudioEngine {
                 } => self.command_set_note_clip_groove_grid(track_id, clip_id, groove_grid),
                 EngineCommand::AddNoteClip {
                     track_id,
-                    clip_id,
-                    position_beats,
-                    duration_beats,
-                    start_marker_beats,
-                    loop_enabled,
-                    loop_start_beats,
-                    loop_end_beats,
-                    groove_grid,
-                } => self.command_add_note_clip(
-                    track_id,
-                    clip_id,
-                    position_beats,
-                    duration_beats,
-                    start_marker_beats,
-                    loop_enabled,
-                    loop_start_beats,
-                    loop_end_beats,
-                    groove_grid,
-                ),
+                    insertion,
+                } => self.command_add_note_clip(track_id, insertion),
                 EngineCommand::RemoveNoteClip(track_id, clip_id) => {
                     self.command_remove_note_clip(track_id, clip_id)
                 }

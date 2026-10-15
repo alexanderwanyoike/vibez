@@ -298,14 +298,7 @@ pub enum EngineCommand {
     },
     AddNoteClip {
         track_id: TrackId,
-        clip_id: ClipId,
-        position_beats: f64,
-        duration_beats: f64,
-        start_marker_beats: f64,
-        loop_enabled: bool,
-        loop_start_beats: f64,
-        loop_end_beats: f64,
-        groove_grid: GrooveGrid,
+        insertion: crate::clip_insertion::PreparedNoteClipInsertion,
     },
     RemoveNoteClip(TrackId, ClipId),
     /// Move a note clip to a new beat position on the timeline.

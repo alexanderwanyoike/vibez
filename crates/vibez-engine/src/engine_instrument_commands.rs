@@ -50,36 +50,6 @@ impl AudioEngine {
         }
     }
 
-    // Explicit fields keep the public command dispatch compiler checked.
-    #[allow(clippy::too_many_arguments)]
-    pub(super) fn command_add_note_clip(
-        &mut self,
-        track_id: vibez_core::id::TrackId,
-        clip_id: vibez_core::id::ClipId,
-        position_beats: f64,
-        duration_beats: f64,
-        start_marker_beats: f64,
-        loop_enabled: bool,
-        loop_start_beats: f64,
-        loop_end_beats: f64,
-        groove_grid: vibez_core::perform::GrooveGrid,
-    ) {
-        if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
-            track.playback_source.push_note_clip(EngineNoteClip::new(
-                clip_id,
-                position_beats,
-                duration_beats,
-                Vec::new(),
-                start_marker_beats,
-                loop_enabled,
-                loop_start_beats,
-                loop_end_beats,
-                groove_grid,
-            ));
-        }
-        self.recalculate_audio_length();
-    }
-
     pub(super) fn command_remove_note_clip(
         &mut self,
         track_id: vibez_core::id::TrackId,
