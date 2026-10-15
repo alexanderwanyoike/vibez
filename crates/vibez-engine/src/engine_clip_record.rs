@@ -181,8 +181,10 @@ impl AudioEngine {
             return;
         }
         self.clip_record.as_mut().expect("record target").started = true;
-        self.apply_clip_boundaries(now);
+        // Commit the reliable source fact before a track-sized packet can
+        // spend the presentation space admitted for this recording boundary.
         self.clip_event(EngineEvent::ClipRecordStarted { clip_id, at: now });
+        self.apply_clip_boundaries(now);
     }
 
     pub(super) fn refresh_clip(&mut self, mut prepared: Box<PreparedClipPlayback>) {
