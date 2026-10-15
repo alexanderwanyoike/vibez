@@ -207,7 +207,10 @@ impl App {
                         if completed.outcome
                             == vibez_engine::clip_insertion::ClipInsertionOutcome::Abandoned
                         {
-                            self.state.status_text = "Audio Clip insertion was abandoned".into();
+                            self.state.status_text = match completed.target {
+                                vibez_engine::clip_insertion::ClipInsertionTarget::Clip(_) => "Clip or note insertion was abandoned",
+                                vibez_engine::clip_insertion::ClipInsertionTarget::AutomationLane(_) => "Automation lane edit was abandoned",
+                            }.into();
                         }
                         drop(completed);
                     }

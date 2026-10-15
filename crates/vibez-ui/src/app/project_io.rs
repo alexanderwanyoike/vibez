@@ -557,7 +557,7 @@ impl App {
             for lane in &automation {
                 self.send_command(EngineCommand::SetAutomationLane {
                     track_id: track_info.id,
-                    lane: lane.clone(),
+                    insertion: vibez_engine::clip_insertion::PreparedAutomationLaneInsertion::new(lane.clone()),
                 });
             }
 
@@ -682,7 +682,7 @@ impl App {
             for lane in &automation {
                 self.send_command(EngineCommand::SetAutomationLane {
                     track_id: TrackId::MASTER,
-                    lane: lane.clone(),
+                    insertion: vibez_engine::clip_insertion::PreparedAutomationLaneInsertion::new(lane.clone()),
                 });
             }
         }
@@ -713,7 +713,7 @@ impl App {
             for lane in &automation {
                 self.send_command(EngineCommand::SetAutomationLane {
                     track_id: bus_info.id,
-                    lane: lane.clone(),
+                    insertion: vibez_engine::clip_insertion::PreparedAutomationLaneInsertion::new(lane.clone()),
                 });
             }
             Arc::make_mut(&mut self.state.project_tracks)

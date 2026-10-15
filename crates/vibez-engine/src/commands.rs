@@ -198,11 +198,11 @@ pub enum EngineCommand {
     },
     /// Set the gain for a track.
     SetTrackGain(TrackId, f32),
-    /// Upsert one automation lane (whole-lane replace; points are
-    /// built on the UI thread).
+    /// Upsert one whole lane with its storage prepared off callback.
+    /// Native consumers must fulfill storage requests for FIFO progress.
     SetAutomationLane {
         track_id: TrackId,
-        lane: vibez_core::automation::AutomationLane,
+        insertion: crate::clip_insertion::PreparedAutomationLaneInsertion,
     },
     RemoveAutomationLane {
         track_id: TrackId,

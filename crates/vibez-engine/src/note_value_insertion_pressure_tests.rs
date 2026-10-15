@@ -109,7 +109,7 @@ impl NoteDelta {
                 assert_eq!(*original, self.note);
                 self.original.assert_unchanged(&source.note_clips[0]);
             }
-            ClipInsertionOutcome::MissingTrack | ClipInsertionOutcome::MissingClip => {
+            ClipInsertionOutcome::MissingTrack | ClipInsertionOutcome::MissingClip | ClipInsertionOutcome::MissingChannel => {
                 unreachable!()
             }
         }

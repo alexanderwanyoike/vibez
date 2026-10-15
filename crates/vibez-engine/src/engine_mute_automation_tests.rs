@@ -55,7 +55,7 @@ fn mute_step_inside_buffer_starts_the_shared_ramp_at_its_exact_sample() {
         curve: 0.0,
     });
     commands
-        .push(EngineCommand::SetAutomationLane { track_id, lane })
+        .push(EngineCommand::SetAutomationLane { track_id, insertion: crate::clip_insertion::PreparedAutomationLaneInsertion::new(lane) })
         .unwrap();
     commands.push(EngineCommand::Play).unwrap();
 
@@ -85,7 +85,7 @@ fn manual_mute_override_holds_until_automation_is_reenabled() {
         curve: 0.0,
     });
     commands
-        .push(EngineCommand::SetAutomationLane { track_id, lane })
+        .push(EngineCommand::SetAutomationLane { track_id, insertion: crate::clip_insertion::PreparedAutomationLaneInsertion::new(lane) })
         .unwrap();
     commands.push(EngineCommand::Play).unwrap();
     let mut output = vec![0.0; 80 * 2];
@@ -131,7 +131,7 @@ fn live_pan_gesture_overrides_arrange_baseline_then_yields_back() {
         curve: 0.0,
     });
     commands
-        .push(EngineCommand::SetAutomationLane { track_id, lane })
+        .push(EngineCommand::SetAutomationLane { track_id, insertion: crate::clip_insertion::PreparedAutomationLaneInsertion::new(lane) })
         .unwrap();
     commands.push(EngineCommand::Play).unwrap();
     let mut output = vec![0.0; 16 * 2];

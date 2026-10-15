@@ -1999,7 +1999,7 @@ fn track_output_capture_follows_active_gain_and_pan_automation() {
         cmd_tx
             .push(EngineCommand::SetAutomationLane {
                 track_id: source,
-                lane,
+                insertion: crate::clip_insertion::PreparedAutomationLaneInsertion::new(lane),
             })
             .unwrap();
     }
@@ -2050,7 +2050,7 @@ fn gain_lane_ramps_track_volume_down() {
     cmd_tx
         .push(EngineCommand::SetAutomationLane {
             track_id: tid,
-            lane,
+            insertion: crate::clip_insertion::PreparedAutomationLaneInsertion::new(lane),
         })
         .unwrap();
     cmd_tx
@@ -2120,7 +2120,7 @@ fn pan_lane_moves_signal_between_channels() {
     cmd_tx
         .push(EngineCommand::SetAutomationLane {
             track_id: tid,
-            lane,
+            insertion: crate::clip_insertion::PreparedAutomationLaneInsertion::new(lane),
         })
         .unwrap();
     cmd_tx
@@ -2168,7 +2168,7 @@ fn removing_a_lane_restores_the_knob_value() {
     cmd_tx
         .push(EngineCommand::SetAutomationLane {
             track_id: tid,
-            lane,
+            insertion: crate::clip_insertion::PreparedAutomationLaneInsertion::new(lane),
         })
         .unwrap();
     cmd_tx
@@ -2658,7 +2658,7 @@ fn remove_bus_drops_its_send_automation() {
         curve: 0.0,
     });
     cmd_tx
-        .push(EngineCommand::SetAutomationLane { track_id, lane })
+        .push(EngineCommand::SetAutomationLane { track_id, insertion: crate::clip_insertion::PreparedAutomationLaneInsertion::new(lane) })
         .unwrap();
     cmd_tx.push(EngineCommand::RemoveBus(bus_id)).unwrap();
 
@@ -2686,7 +2686,7 @@ fn bus_gain_automation_rides_the_return() {
     cmd_tx
         .push(EngineCommand::SetAutomationLane {
             track_id: bus,
-            lane,
+            insertion: crate::clip_insertion::PreparedAutomationLaneInsertion::new(lane),
         })
         .unwrap();
     let mut buf = vec![0.0f32; 512];
@@ -2713,7 +2713,7 @@ fn send_automation_opens_the_send() {
     cmd_tx
         .push(EngineCommand::SetAutomationLane {
             track_id: tid,
-            lane,
+            insertion: crate::clip_insertion::PreparedAutomationLaneInsertion::new(lane),
         })
         .unwrap();
     let mut buf = vec![0.0f32; 512];
@@ -2740,7 +2740,7 @@ fn master_gain_automation_shapes_the_mix() {
     cmd_tx
         .push(EngineCommand::SetAutomationLane {
             track_id: TrackId::MASTER,
-            lane,
+            insertion: crate::clip_insertion::PreparedAutomationLaneInsertion::new(lane),
         })
         .unwrap();
     let mut buf = vec![0.0f32; 512];

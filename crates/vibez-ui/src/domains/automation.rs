@@ -120,7 +120,7 @@ pub struct AutomationState {
 fn sync_lane(engine: &mut impl EngineHandle, track_id: TrackId, lane: &AutomationLane) {
     engine.send(EngineCommand::SetAutomationLane {
         track_id,
-        lane: lane.clone(),
+        insertion: vibez_engine::clip_insertion::PreparedAutomationLaneInsertion::new(lane.clone()),
     });
 }
 
