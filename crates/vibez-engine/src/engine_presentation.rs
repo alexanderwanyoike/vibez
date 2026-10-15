@@ -22,7 +22,7 @@ pub(super) struct CaptureReplay {
 
 impl AudioEngine {
     pub(super) fn capture_needs_closure(&self) -> bool {
-        self.capture_active || self.capture_stop_pending()
+        self.capture_lifecycle.is_active() || self.capture_stop_pending()
     }
 
     pub(super) fn capture_stop_pending(&self) -> bool {
@@ -193,7 +193,7 @@ impl AudioEngine {
     }
 
     pub(super) fn close_capture_for_device_failure(&mut self) {
-        self.capture_active = false;
+        self.capture_lifecycle.end();
         self.cancel_capture_presentation();
         self.presentation_state
             .terminals
@@ -202,7 +202,7 @@ impl AudioEngine {
     }
 
     pub(super) fn close_capture_on_failure(&mut self) {
-        self.capture_active = false;
+        self.capture_lifecycle.end();
         self.cancel_presentation();
         self.presentation_state
             .terminals
@@ -211,7 +211,7 @@ impl AudioEngine {
     }
 
     pub(super) fn stop_heard_capture(&mut self) {
-        self.capture_active = false;
+        self.capture_lifecycle.end();
         let boundary = self.heard_capture_position();
         self.cancel_capture_presentation();
         self.present_event(EngineEvent::PerformanceCaptureStopped {

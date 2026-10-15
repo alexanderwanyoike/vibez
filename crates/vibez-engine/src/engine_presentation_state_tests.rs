@@ -73,7 +73,7 @@ fn overflowing_capture_delivers_accepted_start_then_stop_cause_and_discovering_o
     );
     assert!(fixture.engine.presentation_state.is_faulted());
     assert!(fixture.engine.compensation_plan.applied_plan_is_valid());
-    assert!(!fixture.engine.capture_active);
+    assert!(!fixture.engine.capture_lifecycle.is_active());
     assert!(!fixture.engine.transport.is_playing());
     assert_eq!(
         fixture.engine.presentation_state.terminals.capture_stop(),
@@ -312,7 +312,7 @@ fn play_with_full_ui_ring_retains_capture_terminals_and_owner_but_cancels_inline
     assert!(fixture.engine.transport.is_playing());
     assert!(fixture.engine.compensation_plan.applied_plan_is_valid());
     assert!(!fixture.engine.project_processing_muted());
-    assert!(!fixture.engine.capture_active);
+    assert!(!fixture.engine.capture_lifecycle.is_active());
     assert_eq!(
         fixture.engine.presentation_state.terminals.capture_stop(),
         Some(capture_stop)
@@ -697,7 +697,7 @@ fn partial_terminal_publication_preserves_each_full_boundary_and_exact_overflow_
         assert_eq!(std::ptr::from_ref(fixture.engine.routing.as_ref()), plan);
         assert!(fixture.engine.compensation_plan.applied_plan_is_valid());
         assert!(!fixture.engine.transport.is_playing());
-        assert!(!fixture.engine.capture_active);
+        assert!(!fixture.engine.capture_lifecycle.is_active());
         assert!(fixture.engine.presentation_state.is_faulted());
         drop(delivered);
         assert_eq!(Arc::strong_count(&offsets), 1);

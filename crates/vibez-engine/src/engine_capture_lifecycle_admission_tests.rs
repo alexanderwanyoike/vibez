@@ -121,7 +121,7 @@ pub(super) fn discard_setup(fixture: &mut Fixture) {
 }
 
 pub(super) fn state(engine: &AudioEngine) -> [u64; 7] {
-    [u64::from(engine.capture_active), u64::from(engine.device_failure_capture_closed),
+    [u64::from(engine.capture_lifecycle.is_active()), u64::from(engine.device_failure_capture_closed),
         u64::from(engine.compensation_plan.applied_plan_is_valid()), u64::from(engine.transport.is_playing()),
         engine.transport.position(), engine.performance_position, engine.output_position]
 }

@@ -54,7 +54,7 @@ pub struct AudioEngine {
     section_capture_timing: Vec<presentation::SectionCaptureTiming>,
     capture_replay: Option<presentation::CaptureReplay>,
     presentation_state: presentation_state::PresentationState,
-    capture_active: bool,
+    capture_lifecycle: capture_lifecycle::CaptureLifecycle,
     pending_source_cleanup: bool,
     compensation_callback_heard_start: u64,
     capture_clip_positions: Vec<(TrackId, u64, u64)>,
@@ -249,7 +249,7 @@ impl AudioEngine {
             ),
             capture_replay: None,
             presentation_state: presentation_state::PresentationState::default(),
-            capture_active: false,
+            capture_lifecycle: capture_lifecycle::CaptureLifecycle::default(),
             pending_source_cleanup: false,
             compensation_callback_heard_start: 0,
             capture_clip_positions: Vec::with_capacity(
@@ -480,7 +480,7 @@ impl AudioEngine {
                     .saturating_sub(section_end_boundary) as usize,
             );
             self.section_capture_stopped(section_end_boundary);
-            self.capture_active = false;
+            self.capture_lifecycle.end();
             self.present_event_after(
                 EngineEvent::PerformanceCaptureStopped {
                     effective_at_samples: section_end_boundary,
@@ -838,6 +838,9 @@ mod device_validation;
 
 #[path = "engine_handoff_observation.rs"]
 mod handoff_observation;
+
+#[path = "engine_capture_lifecycle.rs"]
+mod capture_lifecycle;
 
 #[path = "engine_capture_commands.rs"]
 mod capture_commands;
