@@ -224,10 +224,11 @@ fn independent_instances_and_stereo_channels_do_not_share_delay_history() {
     assert!(second_output.chunks_exact(2).all(|pair| pair[0] == 0.0));
     let expected = impulse_response(501, 125, [0.0, -0.5], 0.5, 1.0);
     assert_eq!(second_output.as_slice(), &expected[2..]);
+    let unreset_right_repeat_bits =
+        [124, 249, 374, 499].map(|frame| second_output[2 * frame + 1].to_bits());
     record("instance_and_channel_isolation", json!({
         "reset_instance_nonzero_samples": first_output.iter().filter(|sample| **sample != 0.0).count(),
-        "unreset_right_repeat_bits": [124, 249, 374, 499]
-            .map(|frame| second_output[2 * frame + 1].to_bits()),
+        "unreset_right_repeat_bits": unreset_right_repeat_bits,
         "unreset_output_fnv1a64": fingerprint(&second_output),
     }));
 }
