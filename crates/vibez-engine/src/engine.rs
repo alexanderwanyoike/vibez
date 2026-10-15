@@ -997,3 +997,7 @@ mod capture_lifecycle_pressure_tests;
 #[cfg(test)]
 #[path = "engine_capture_lifecycle_transport_tests.rs"]
 mod capture_lifecycle_transport_tests;
+
+#[cfg(test)]
+#[path = "engine_capture_lifecycle_rebase_tests.rs"]
+mod capture_lifecycle_rebase_tests;
