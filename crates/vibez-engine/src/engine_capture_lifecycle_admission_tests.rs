@@ -121,7 +121,7 @@ pub(super) fn discard_setup(fixture: &mut Fixture) {
 }
 
 pub(super) fn state(engine: &AudioEngine) -> [u64; 7] {
-    [u64::from(engine.capture_lifecycle.is_active()), u64::from(engine.device_failure_capture_closed),
+    [u64::from(engine.capture_lifecycle.is_active()), u64::from(engine.capture_lifecycle.local_failure_closure_requested()),
         u64::from(engine.compensation_plan.applied_plan_is_valid()), u64::from(engine.transport.is_playing()),
         engine.transport.position(), engine.performance_position, engine.output_position]
 }
@@ -226,7 +226,7 @@ fn refused_starts_and_explicit_stop_preserve_local_priority_and_episode_independ
         fixture.engine.drain_commands(); discard_setup(&mut fixture);
         let latched = matches!(case, "local-closed" | "local-token");
         if latched { fixture.engine.process_block(AudioProcessBlock::new(&mut [], 2)); discard_setup(&mut fixture); }
-        assert_eq!(fixture.engine.device_failure_capture_closed, latched);
+        assert_eq!(fixture.engine.capture_lifecycle.local_failure_closure_requested(), latched);
         assert_eq!(fixture.owner.is_some(), case == "local-token");
         let calls = if case == "local-token" { Vec::new() } else if instrument { vec![111, 111] }
             else if case == "invalid" { vec![110, 210, 110, 210] } else { vec![110, 211, 110, 211] };

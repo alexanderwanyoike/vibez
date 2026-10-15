@@ -202,10 +202,10 @@ impl AudioEngine {
                 }
             }
         }
-        if local_failure && !self.device_failure_capture_closed {
+        if self.capture_lifecycle.needs_first_local_close(local_failure) {
             self.close_capture_for_device_failure();
         }
-        self.device_failure_capture_closed = local_failure;
+        self.capture_lifecycle.record_local_failure(local_failure);
         if let Some((track_id, effect_id, reason)) = invalid {
             self.close_capture_on_failure();
             self.compensation_plan.invalidate_applied_plan();
