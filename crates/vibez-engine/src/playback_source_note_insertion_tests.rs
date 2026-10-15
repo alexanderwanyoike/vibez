@@ -802,8 +802,8 @@ pub(crate) fn verify_prepared_note_storage_growth(
     assert_eq!((completed.track_id, completed.clip_id), (track_id, clip_id));
     let source = &engine.tracks()[0].playback_source;
     assert_eq!(source.note_clips.len(), full + 1);
-    assert!(source.note_clips.capacity() >= full + 1);
-    assert!(source.removed_note_clips.capacity() >= full + 1);
+    assert!(source.note_clips.capacity() > full);
+    assert!(source.removed_note_clips.capacity() > full);
     assert!(source.removed_note_clips.is_empty());
     assert_ne!(source.note_clips.as_ptr(), live);
     assert_ne!(source.removed_note_clips.as_ptr(), staging);
