@@ -11,7 +11,8 @@ impl AudioEngine {
         effective_at_samples: u64,
     ) {
         self.apply_end_of_section_track_mutes(effective_at_samples);
-        if self.presentation_state.is_faulted() {
+        // End-boundary mutes can consume the caller's transition allowance.
+        if !self.presentation_room(4) {
             self.present_event(EngineEvent::SectionQueueCancelled { retired: prepared });
             return;
         }
