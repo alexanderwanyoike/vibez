@@ -209,21 +209,51 @@ fn public_add_note_clip_at_exhausted_capacity_preserves_schedule_and_voice_witho
     assert_eq!(previous_calls.1, 0);
     let position = old_end + 1.25;
     let duration = 5.5;
+    let insertion = crate::clip_insertion::PreparedNoteClipInsertion::new(
+        duplicate, position, duration, 0.75, true, 0.25, 2.5, GrooveGrid::Eighth,
+    );
+    let operation = insertion.id();
     commands.push(EngineCommand::AddNoteClip {
         track_id,
-        clip_id: duplicate,
-        position_beats: position,
-        duration_beats: duration,
-        start_marker_beats: 0.75,
-        loop_enabled: true,
-        loop_start_beats: 0.25,
-        loop_end_beats: 2.5,
-        groove_grid: GrooveGrid::Eighth,
+        insertion,
     }).unwrap();
+    let mut measured = crate::retirement::tests::allocations(|| {
+        engine.process_block(AudioProcessBlock::new(&mut [], 2));
+    });
+    let mut request = None;
+    while let Ok(event) = events.pop() {
+        if let crate::events::EngineEvent::ClipInsertionStorageRequested(value) = event {
+            assert_eq!(value.id, operation);
+            assert!(request.replace(value).is_none());
+        }
+    }
+    assert!(request.is_some());
+    let waiting = crate::retirement::tests::allocations(|| {
+        engine.process_block(AudioProcessBlock::new(&mut [], 2));
+    });
+    measured.0 += waiting.0;
+    measured.1 += waiting.1;
+    request.unwrap().fulfill();
+    let completion = crate::retirement::tests::allocations(|| {
+        engine.process_block(AudioProcessBlock::new(&mut [], 2));
+    });
+    measured.0 += completion.0;
+    measured.1 += completion.1;
+    let mut completed = 0;
+    while let Ok(event) = events.pop() {
+        if let crate::events::EngineEvent::ClipInsertionCompleted(value) = event {
+            assert_eq!(value.id(), operation);
+            assert_eq!(value.outcome, crate::clip_insertion::ClipInsertionOutcome::Applied);
+            completed += 1;
+        }
+    }
+    assert_eq!(completed, 1);
     let mut output = [0.0; 16];
-    let measured = crate::retirement::tests::allocations(|| {
+    let render = crate::retirement::tests::allocations(|| {
         engine.process_block(AudioProcessBlock::new(&mut output, 2));
     });
+    measured.0 += render.0;
+    measured.1 += render.1;
     assert_sounding(&output);
     assert_eq!(calls.observed(), previous_calls, "empty insertion must not retrigger, flush or reset a voice");
     assert_eq!(crate::engine::reconfiguration::instrument_owner_identity(
