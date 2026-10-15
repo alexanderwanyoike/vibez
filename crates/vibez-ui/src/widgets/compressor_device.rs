@@ -384,13 +384,14 @@ impl<'a> CompressorView<'a> {
                 knobs = knobs.push(
                     column![heading("Auto"), self.switch(param::AUTO_RELEASE, "Auto")]
                         .spacing(4)
-                        .width(56.0)
+                        .width(Length::Fill)
                         .align_x(Alignment::Center),
                 );
             }
             knobs = knobs.push(
                 container(self.param(index).column(KNOB))
-                    .width(KNOB_COL_W)
+                    .width(Length::Fill)
+                    .max_width(KNOB_COL_W * 1.6)
                     .align_x(Alignment::Center),
             );
         }
