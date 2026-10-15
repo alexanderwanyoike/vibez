@@ -256,11 +256,22 @@ remains independent. Exhaustion still faults presentation at the discovering
 boundary. If the receiver never recovers, non-audio engine teardown releases the
 retained source.
 
+A rejected Section keeps its complete source in the existing queue's Returning
+phase while every return path is full. Only Waiting sources own a launch boundary;
+Play never revives a Returning source. Retry returns it before older ordinary
+owners, and a new Section-owning command waits before FIFO admission until that
+handoff succeeds. No retirement credit stays reserved while it waits.
+
 Clip recording publishes its committed Source start fact before nested launch
 packets publish their Heard transitions. Both retain the same musical boundary;
 the packet keeps its original storage while waiting for remaining publication
 space. A presentation fault exits the Clip render loop before revisiting a held
 due source, leaving the callback's existing output loss envelope to OutputGate.
+
+Clip packets admit Untimed facts against their actual physical render deadline.
+Recovered UI slots count only when that deadline is already heard; otherwise
+the original packet retains its owners until scheduled space becomes available.
+Transition publication keeps its separately frozen deadline and path latency.
 
 Every engine starts with a caller-prepared master-only routing plan and keeps
 one non-optional active plan. The first project publication parks that bootstrap
