@@ -4,6 +4,36 @@ use super::*;
 use crate::events::SourceRecordingPosition;
 use crate::playback_source::PreparedSectionPlaybackSource;
 
+fn start_capture_through_command(
+    engine: &mut AudioEngine,
+    commands: &mut Producer<EngineCommand>,
+    events: &mut Consumer<EngineEvent>,
+) {
+    let offset_owners = Arc::strong_count(&engine.routing.capture_offsets);
+    commands.push(EngineCommand::StartPerformanceCapture).unwrap();
+    assert_eq!(
+        crate::retirement::tests::allocations(|| engine.drain_commands()),
+        (0, 0)
+    );
+    assert!(engine.cmd_rx.peek().is_err());
+    assert!(engine.capture_active);
+    let EngineEvent::PerformanceCaptureStarted {
+        offsets,
+        effective_at_samples,
+        section_id,
+        section_position_samples,
+    } = events.pop().unwrap() else {
+        panic!("expected real Capture command acknowledgement");
+    };
+    assert!(Arc::ptr_eq(&offsets, &engine.routing.capture_offsets));
+    assert!(offsets.is_empty());
+    assert_eq!((effective_at_samples, section_id, section_position_samples), (0, None, None));
+    assert_eq!(Arc::strong_count(&engine.routing.capture_offsets), offset_owners + 1);
+    drop(offsets);
+    assert_eq!(Arc::strong_count(&engine.routing.capture_offsets), offset_owners);
+    assert!(events.pop().is_err());
+}
+
 #[test]
 fn in_segment_source_feed_does_not_wait_for_a_future_heard_deadline() {
     let (mut engine, _, mut events) = AudioEngine::new();
@@ -77,7 +107,8 @@ fn in_segment_repeat_source_is_immediate_without_advancing_its_heard_copy() {
 #[test]
 fn due_capture_notes_precede_closure_and_continuing_pad_feedback_survives() {
     for closure in 0..3 {
-        let (mut engine, _, mut events) = AudioEngine::new();
+        let (mut engine, mut commands, mut events) = AudioEngine::new();
+        start_capture_through_command(&mut engine, &mut commands, &mut events);
         let track_id = TrackId::new();
         let note = |pitch| EngineEvent::InstrumentNoteInput {
             track_id,
@@ -90,7 +121,6 @@ fn due_capture_notes_precede_closure_and_continuing_pad_feedback_survives() {
         };
         engine.present_event_after(note(60), 137);
         engine.present_event_after(note(61), 138);
-        engine.capture_active = true;
         engine.output_position = 137;
         engine.compensation_callback_heard_start = 137;
         engine.transport.seek(137);
@@ -131,7 +161,8 @@ fn due_capture_notes_precede_closure_and_continuing_pad_feedback_survives() {
 #[test]
 fn accepted_due_capture_start_reaches_the_ui_before_its_note_and_closure() {
     for closure in 0..3 {
-        let (mut engine, _, mut events) = AudioEngine::new();
+        let (mut engine, mut commands, mut events) = AudioEngine::new();
+        start_capture_through_command(&mut engine, &mut commands, &mut events);
         let track_id = TrackId::new();
         let offsets: Arc<[(TrackId, u32)]> = vec![(track_id, 384)].into();
         while engine
@@ -157,7 +188,6 @@ fn accepted_due_capture_start_reaches_the_ui_before_its_note_and_closure() {
             },
             100,
         );
-        engine.capture_active = true;
         engine.output_position = 137;
         engine.compensation_callback_heard_start = 137;
         engine.transport.seek(137);
