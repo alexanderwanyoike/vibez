@@ -1050,3 +1050,7 @@ mod capture_lifecycle_transport_tests;
 #[cfg(test)]
 #[path = "engine_capture_lifecycle_rebase_tests.rs"]
 mod capture_lifecycle_rebase_tests;
+
+#[cfg(test)]
+#[path = "engine_automation_lane_insertion_tests.rs"]
+mod automation_lane_insertion_tests;
