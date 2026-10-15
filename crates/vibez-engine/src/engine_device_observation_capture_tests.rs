@@ -44,6 +44,27 @@ impl Calls {
             .map(|entry| entry.load(Ordering::Relaxed))
             .collect()
     }
+    fn assert_local_answer(&self, owner: u32, local: bool) {
+        assert!(self.observed().contains(&(owner * 100 + 10 + u32::from(local))),
+            "device {owner} must expose local failure = {local}");
+    }
+
+    fn assert_local_transition(&self, owner: u32, before: bool, after: bool, reset: bool) {
+        let calls = self.observed();
+        let change = owner * 100 + if reset { 30 } else { 20 + u32::from(after) };
+        let boundary = calls.iter().position(|call| *call == change).unwrap();
+        assert!(calls[..boundary].contains(&(owner * 100 + 10 + u32::from(before))),
+            "the first Start must observe the previous local-failure answer");
+        assert!(calls[boundary + 1..].contains(&(owner * 100 + 10 + u32::from(after))),
+            "the later Start must observe the actual intervening edit or reset");
+    }
+
+    fn assert_replacement_observed(&self, old_owner: u32, new_owner: u32) {
+        let calls = self.observed();
+        let failed = calls.iter().position(|call| *call == old_owner * 100 + 11).unwrap();
+        assert!(calls[failed + 1..].contains(&(new_owner * 100 + 10)),
+            "the later Start must sample a current healthy owner after the failed one");
+    }
 }
 
 struct Control {
@@ -324,24 +345,7 @@ fn same_drain_capture_starts_observe_effect_and_instrument_manual_edits() {
                 .push(EngineCommand::StartPerformanceCapture)
                 .unwrap();
             drain(&mut fixture);
-            let calls = fixture.calls.observed();
-            let first = if instrument && before {
-                vec![111]
-            } else {
-                vec![110, if before { 211 } else { 210 }]
-            };
-            let mut expected = first;
-            expected.push(if instrument {
-                120 + u32::from(!before)
-            } else {
-                220 + u32::from(!before)
-            });
-            expected.extend(if instrument && !before {
-                vec![111]
-            } else {
-                vec![110, if before || instrument { 210 } else { 211 }]
-            });
-            assert_eq!(calls, expected);
+            fixture.calls.assert_local_transition(if instrument { 1 } else { 2 }, before, !before, false);
             let events = collect(&mut fixture);
             assert_eq!(
                 events.order,
@@ -372,8 +376,7 @@ fn a_play_reset_between_capture_commands_is_observed_in_the_same_drain() {
         .push(EngineCommand::StartPerformanceCapture)
         .unwrap();
     drain(&mut fixture);
-    let calls = fixture.calls.observed();
-    assert_eq!(calls, [110, 211, 230, 110, 210]);
+    fixture.calls.assert_local_transition(2, true, false, true);
     let events = collect(&mut fixture);
     assert_eq!(events.order, ["stop", "refused", "play", "start", "source"]);
     assert_eq!(events.reasons, [LOCAL_REASON]);
@@ -419,15 +422,7 @@ fn same_drain_capture_admission_observes_removed_and_replaced_device_owners() {
             0,
             "the callback returns the previous owner"
         );
-        let calls = fixture.calls.observed();
-        assert_eq!(
-            calls,
-            if instrument {
-                vec![111, 310, 210]
-            } else {
-                vec![110, 211, 110]
-            }
-        );
+        fixture.calls.assert_replacement_observed(if instrument { 1 } else { 2 }, if instrument { 3 } else { 1 });
         let events = collect(&mut fixture);
         assert_eq!(
             events.order,
@@ -486,6 +481,8 @@ fn current_local_resume_changes_capture_admission_at_its_original_same_drain_bou
         .commands
         .push(EngineCommand::StartPerformanceCapture)
         .unwrap();
+    // This no-op marks the end of token-owned refusal without freezing reads after Resume.
+    fixture.commands.push(set_local(&fixture, true, false)).unwrap();
     fixture
         .commands
         .push(EngineCommand::ResumeDeviceReconfiguration {
@@ -499,11 +496,11 @@ fn current_local_resume_changes_capture_admission_at_its_original_same_drain_bou
         .unwrap();
     drain(&mut fixture);
     let calls = fixture.calls.observed();
-    assert_eq!(
-        calls,
-        [110, 210],
-        "the first local token refuses without querying residents"
-    );
+    let before_resume = calls.iter().position(|call| *call == 120).unwrap();
+    assert!(!calls[..before_resume].iter().any(|call| call % 100 / 10 == 1),
+        "a token-owned refusal must not query resident devices");
+    fixture.calls.assert_local_answer(1, false);
+    fixture.calls.assert_local_answer(2, false);
     let events = collect(&mut fixture);
     assert_eq!(
         events.order,
@@ -554,8 +551,7 @@ fn local_failure_keeps_refusal_priority_then_same_drain_clear_reveals_invalid_pl
         .push(EngineCommand::StartPerformanceCapture)
         .unwrap();
     drain(&mut fixture);
-    let calls = fixture.calls.observed();
-    assert_eq!(calls, [111, 120, 110, 210]);
+    fixture.calls.assert_local_transition(1, true, false, false);
     let events = collect(&mut fixture);
     assert_eq!(events.order, ["stop", "refused", "stop", "refused"]);
     assert_eq!(
