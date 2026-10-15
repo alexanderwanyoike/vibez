@@ -22,8 +22,14 @@ impl NoteDelta {
     }
 
     fn with_capacity(fixture: &Fixture, capacity: usize) -> Self {
-        let original = ClipSnapshot::observe(&fixture.engine.tracks()[0].playback_source.note_clips[0]);
-        let note = MidiNote { pitch: 60, velocity: 93, start_beat: 1.0, duration_beats: 0.5 };
+        let original =
+            ClipSnapshot::observe(&fixture.engine.tracks()[0].playback_source.note_clips[0]);
+        let note = MidiNote {
+            pitch: 60,
+            velocity: 93,
+            start_beat: 1.0,
+            duration_beats: 0.5,
+        };
         let insertion = PreparedNoteInsertion::with_capacity(note, capacity);
         let id = insertion.id();
         let identity = Arc::downgrade(&id.0);
@@ -34,24 +40,46 @@ impl NoteDelta {
         };
         let eager = EmptyNoteStorageSnapshot::observe(storage);
         Self {
-            command: Some(EngineCommand::AddNote { track_id: fixture.track, clip_id: fixture.resident, insertion }),
-            id, identity, note, control, ring, eager, original,
+            command: Some(EngineCommand::AddNote {
+                track_id: fixture.track,
+                clip_id: fixture.resident,
+                insertion,
+            }),
+            id,
+            identity,
+            note,
+            control,
+            ring,
+            eager,
+            original,
         }
     }
 
     fn assert_waiting(&self, fixture: &Fixture) {
         assert_unchanged(fixture);
-        self.original.assert_unchanged(&fixture.engine.tracks()[0].playback_source.note_clips[0]);
+        self.original
+            .assert_unchanged(&fixture.engine.tracks()[0].playback_source.note_clips[0]);
         assert_eq!(fixture.engine.transport().audio_length(), Some(8 * 22_050));
         assert!(fixture.engine.transport().is_playing());
     }
 
-    fn assert_complete(&self, fixture: &Fixture, completed: &CompletedClipInsertion, outcome: ClipInsertionOutcome) {
+    fn assert_complete(
+        &self,
+        fixture: &Fixture,
+        completed: &CompletedClipInsertion,
+        outcome: ClipInsertionOutcome,
+    ) {
         assert_eq!(completed.id(), self.id);
-        assert_eq!((completed.track_id, completed.clip_id), (fixture.track, fixture.resident));
+        assert_eq!(
+            (completed.track_id, completed.clip_id),
+            (fixture.track, fixture.resident)
+        );
         assert_eq!(completed.outcome, outcome);
         assert_eq!(std::ptr::from_ref(completed.owner.as_ref()), self.control);
-        assert_eq!(std::ptr::from_ref(completed.owner.receiver.buffer()), self.ring);
+        assert_eq!(
+            std::ptr::from_ref(completed.owner.receiver.buffer()),
+            self.ring
+        );
         assert!(completed.owner.sender.is_none());
         assert!(completed.owner.receiver.is_abandoned());
         let ClipInsertionStorage::NoteValue(eager) = &completed.owner.storage else {
@@ -70,7 +98,8 @@ impl NoteDelta {
                 };
                 self.original.assert_retired_storage(old);
                 assert!(completed.owner.clip.is_none());
-                self.original.assert_appended(&source.note_clips[0], self.note);
+                self.original
+                    .assert_appended(&source.note_clips[0], self.note);
             }
             ClipInsertionOutcome::Abandoned => {
                 assert!(completed.owner.reply.is_none());
@@ -80,7 +109,9 @@ impl NoteDelta {
                 assert_eq!(*original, self.note);
                 self.original.assert_unchanged(&source.note_clips[0]);
             }
-            ClipInsertionOutcome::MissingTrack | ClipInsertionOutcome::MissingClip => unreachable!(),
+            ClipInsertionOutcome::MissingTrack | ClipInsertionOutcome::MissingClip => {
+                unreachable!()
+            }
         }
     }
 }
@@ -94,7 +125,10 @@ fn full_retirement_store_blocks_note_value_before_pop_until_two_current_credits(
     // still exercise the actual full event ring and bounded retirement storage.
     let expected = inject_full_retirement_store(&mut fixture.engine);
     let retirement_allocation = fixture.engine.pending_retirements.as_ptr();
-    fixture.commands.push(delta.command.take().unwrap()).unwrap();
+    fixture
+        .commands
+        .push(delta.command.take().unwrap())
+        .unwrap();
     fixture.commands.push(EngineCommand::SetBpm(137.0)).unwrap();
     let slots = fixture.commands.slots();
     for block in 0..3 {
@@ -103,11 +137,17 @@ fn full_retirement_store_blocks_note_value_before_pop_until_two_current_credits(
         assert_eq!(fixture.engine.transport().position(), 16 + block * 8);
         assert_eq!(fixture.engine.transport().bpm(), 120.0);
         assert_eq!(fixture.engine.pending_retirements.len(), 32);
-        assert_eq!(fixture.engine.pending_retirements.as_ptr(), retirement_allocation);
+        assert_eq!(
+            fixture.engine.pending_retirements.as_ptr(),
+            retirement_allocation
+        );
         delta.assert_waiting(&fixture);
         assert_eq!(delta.identity.strong_count(), 2);
     }
-    assert!(matches!(fixture.events.pop().unwrap(), EngineEvent::PlaybackPosition(u64::MAX)));
+    assert!(matches!(
+        fixture.events.pop().unwrap(),
+        EngineEvent::PlaybackPosition(u64::MAX)
+    ));
     callback(&mut fixture.engine, false);
     assert_eq!(fixture.engine.pending_retirements.len(), 31);
     assert_eq!(fixture.commands.slots(), slots);
@@ -134,12 +174,19 @@ fn full_retirement_store_blocks_note_value_before_pop_until_two_current_credits(
     callback(&mut fixture.engine, false);
     received.drain(&mut fixture.events);
     assert_eq!(received.completed.len(), 1);
-    delta.assert_complete(&fixture, &received.completed[0], ClipInsertionOutcome::Applied);
+    delta.assert_complete(
+        &fixture,
+        &received.completed[0],
+        ClipInsertionOutcome::Applied,
+    );
     assert_eq!(fixture.engine.transport().bpm(), 137.0);
     assert_eq!(fixture.commands.slots(), slots + 2);
     assert!(fixture.engine.pending_retirements.is_empty());
     assert_eq!(fixture.engine.pending_retirements.capacity(), 32);
-    assert_eq!(fixture.engine.pending_retirements.as_ptr(), retirement_allocation);
+    assert_eq!(
+        fixture.engine.pending_retirements.as_ptr(),
+        retirement_allocation
+    );
     assert_signal(&callback(&mut fixture.engine, true));
     assert_eq!(fixture.engine.transport().position(), 48);
     received.drain(&mut fixture.events);
@@ -154,10 +201,16 @@ fn full_retirement_store_blocks_note_value_before_pop_until_two_current_credits(
 
 #[test]
 fn ready_or_unfulfilled_note_value_waits_at_zero_then_returns_both_arrays_on_one_credit() {
-    for outcome in [ClipInsertionOutcome::Applied, ClipInsertionOutcome::Abandoned] {
+    for outcome in [
+        ClipInsertionOutcome::Applied,
+        ClipInsertionOutcome::Abandoned,
+    ] {
         let mut fixture = setup();
         let mut delta = NoteDelta::prepare(&fixture);
-        fixture.commands.push(delta.command.take().unwrap()).unwrap();
+        fixture
+            .commands
+            .push(delta.command.take().unwrap())
+            .unwrap();
         fixture.commands.push(EngineCommand::SetBpm(137.0)).unwrap();
         let slots = fixture.commands.slots();
         callback(&mut fixture.engine, false);
@@ -167,7 +220,11 @@ fn ready_or_unfulfilled_note_value_waits_at_zero_then_returns_both_arrays_on_one
         let request = received.requests.pop().unwrap();
         assert_eq!(request.id, delta.id);
         assert_eq!(std::ptr::from_ref(request.sender.buffer()), delta.ring);
-        if outcome == ClipInsertionOutcome::Applied { request.fulfill(); } else { drop(request); }
+        if outcome == ClipInsertionOutcome::Applied {
+            request.fulfill();
+        } else {
+            drop(request);
+        }
         let full_ring = full_ui_ring(&mut fixture.engine);
         let expected = inject_full_retirement_store(&mut fixture.engine);
         let retirement_allocation = fixture.engine.pending_retirements.as_ptr();
@@ -178,13 +235,28 @@ fn ready_or_unfulfilled_note_value_waits_at_zero_then_returns_both_arrays_on_one
         assert_eq!(fixture.engine.pending_retirements.len(), 32);
         delta.assert_waiting(&fixture);
         assert_eq!(delta.identity.strong_count(), 2);
-        assert!(matches!(fixture.events.pop().unwrap(), EngineEvent::PlaybackPosition(u64::MAX)));
+        assert!(matches!(
+            fixture.events.pop().unwrap(),
+            EngineEvent::PlaybackPosition(u64::MAX)
+        ));
         callback(&mut fixture.engine, false);
         assert_eq!(fixture.engine.pending_retirements.len(), 32);
-        assert_eq!(fixture.engine.pending_retirements.as_ptr(), retirement_allocation);
-        let completions: Vec<_> = fixture.engine.pending_retirements.iter().filter_map(|event| {
-            if let EngineEvent::ClipInsertionCompleted(owner) = event { Some(owner) } else { None }
-        }).collect();
+        assert_eq!(
+            fixture.engine.pending_retirements.as_ptr(),
+            retirement_allocation
+        );
+        let completions: Vec<_> = fixture
+            .engine
+            .pending_retirements
+            .iter()
+            .filter_map(|event| {
+                if let EngineEvent::ClipInsertionCompleted(owner) = event {
+                    Some(owner)
+                } else {
+                    None
+                }
+            })
+            .collect();
         assert_eq!(completions.len(), 1);
         delta.assert_complete(&fixture, completions[0], outcome);
         assert_eq!(fixture.engine.transport().bpm(), 120.0);
@@ -208,8 +280,14 @@ fn ready_or_unfulfilled_note_value_waits_at_zero_then_returns_both_arrays_on_one
         assert_eq!(fixture.commands.slots(), slots + 2);
         assert!(fixture.engine.pending_retirements.is_empty());
         assert_eq!(fixture.engine.pending_retirements.capacity(), 32);
-        assert_eq!(fixture.engine.pending_retirements.as_ptr(), retirement_allocation);
-        assert_eq!(fixture.engine.transport().audio_length(), Some((8.0_f64 * 44_100.0 * 60.0 / 137.0).round() as u64));
+        assert_eq!(
+            fixture.engine.pending_retirements.as_ptr(),
+            retirement_allocation
+        );
+        assert_eq!(
+            fixture.engine.transport().audio_length(),
+            Some((8.0_f64 * 44_100.0 * 60.0 / 137.0).round() as u64)
+        );
         assert_signal(&callback(&mut fixture.engine, true));
         assert_eq!(fixture.engine.transport().position(), 32);
         received.drain(&mut fixture.events);

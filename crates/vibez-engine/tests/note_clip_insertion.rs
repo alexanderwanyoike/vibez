@@ -156,7 +156,11 @@ fn native_note_consumer_fulfills_stale_hints_and_preserves_first_duplicate_note_
         let insertion = PreparedNoteInsertion::new(note);
         let note_operation = insertion.id();
         commands
-            .push(EngineCommand::AddNote { track_id, clip_id: id, insertion })
+            .push(EngineCommand::AddNote {
+                track_id,
+                clip_id: id,
+                insertion,
+            })
             .unwrap();
         expected.push(Expected {
             id,
@@ -201,7 +205,9 @@ fn native_note_consumer_fulfills_stale_hints_and_preserves_first_duplicate_note_
                 EngineEvent::ClipInsertionStorageRequested(request) => {
                     let item = expected
                         .iter()
-                        .find(|item| item.operation == request.id || item.note_operation == request.id)
+                        .find(|item| {
+                            item.operation == request.id || item.note_operation == request.id
+                        })
                         .unwrap();
                     assert_eq!((request.track_id, request.clip_id), (track_id, item.id));
                     assert!(!requested.contains(&request.id));

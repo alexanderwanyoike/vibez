@@ -35,7 +35,15 @@ fn setup_with_notes(notes: Vec<MidiNote>) -> Fixture {
     let source = PreparedPlaybackSource::new(
         Vec::new(),
         vec![EngineNoteClip::new(
-            resident, 0.0, 8.0, notes, 0.0, false, 0.0, 8.0, GrooveGrid::Off,
+            resident,
+            0.0,
+            8.0,
+            notes,
+            0.0,
+            false,
+            0.0,
+            8.0,
+            GrooveGrid::Off,
         )],
         Vec::new(),
     );
@@ -64,7 +72,11 @@ fn setup_with_notes(notes: Vec<MidiNote>) -> Fixture {
     commands.push(EngineCommand::Play).unwrap();
     let mut warmup = [0.0; 16];
     engine.process_block(AudioProcessBlock::new(&mut warmup, 2));
-    if sounding { assert_signal(&warmup); } else { assert_eq!(warmup, [0.0; 16]); }
+    if sounding {
+        assert_signal(&warmup);
+    } else {
+        assert_eq!(warmup, [0.0; 16]);
+    }
     while events.pop().is_ok() {}
     let source = &engine.tracks()[0].playback_source;
     assert_eq!(source.note_clips.len(), source.note_clips.capacity());

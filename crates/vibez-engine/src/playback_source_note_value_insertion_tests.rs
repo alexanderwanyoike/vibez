@@ -20,7 +20,11 @@ struct VoiceCalls {
 
 impl VoiceCalls {
     fn observed(&self) -> (usize, usize, usize) {
-        (self.on.load(Ordering::Relaxed), self.off.load(Ordering::Relaxed), self.reset.load(Ordering::Relaxed))
+        (
+            self.on.load(Ordering::Relaxed),
+            self.off.load(Ordering::Relaxed),
+            self.reset.load(Ordering::Relaxed),
+        )
     }
 }
 
@@ -31,10 +35,18 @@ struct VelocityProbe {
 }
 
 impl Instrument for VelocityProbe {
-    fn instrument_kind(&self) -> InstrumentKind { self.native.instrument_kind() }
-    fn param_descriptors(&self) -> &'static [ParamDescriptor] { self.native.param_descriptors() }
-    fn set_param(&mut self, index: usize, value: f32) -> bool { self.native.set_param(index, value) }
-    fn get_param(&self, index: usize) -> f32 { self.native.get_param(index) }
+    fn instrument_kind(&self) -> InstrumentKind {
+        self.native.instrument_kind()
+    }
+    fn param_descriptors(&self) -> &'static [ParamDescriptor] {
+        self.native.param_descriptors()
+    }
+    fn set_param(&mut self, index: usize, value: f32) -> bool {
+        self.native.set_param(index, value)
+    }
+    fn get_param(&self, index: usize) -> f32 {
+        self.native.get_param(index)
+    }
     fn note_on(&mut self, pitch: u8, velocity: u8) {
         self.calls.on.fetch_add(1, Ordering::Relaxed);
         self.scale = velocity as f32 / 32.0;
@@ -46,7 +58,9 @@ impl Instrument for VelocityProbe {
     }
     fn render(&mut self, output: &mut [f32], channels: usize) {
         self.native.render(output, channels);
-        for value in output { *value *= self.scale; }
+        for value in output {
+            *value *= self.scale;
+        }
     }
     fn reset(&mut self) {
         self.calls.reset.fetch_add(1, Ordering::Relaxed);
@@ -70,11 +84,22 @@ impl ClipSnapshot {
     pub(crate) fn observe(clip: &EngineNoteClip) -> Self {
         Self {
             id: clip.id,
-            geometry: (clip.position_beats, clip.duration_beats, clip.start_marker_beats,
-                clip.loop_enabled, clip.loop_start_beats, clip.loop_end_beats, clip.groove_grid),
-            notes: clip.notes.clone(), notes_owner: clip.notes.as_ptr(), notes_capacity: clip.notes.capacity(),
-            clamps: clip.next_same_pitch_start_beats.clone(), clamps_owner: clip.next_same_pitch_start_beats.as_ptr(),
-            clamps_capacity: clip.next_same_pitch_start_beats.capacity(), latch: clip.groove_latch.get(),
+            geometry: (
+                clip.position_beats,
+                clip.duration_beats,
+                clip.start_marker_beats,
+                clip.loop_enabled,
+                clip.loop_start_beats,
+                clip.loop_end_beats,
+                clip.groove_grid,
+            ),
+            notes: clip.notes.clone(),
+            notes_owner: clip.notes.as_ptr(),
+            notes_capacity: clip.notes.capacity(),
+            clamps: clip.next_same_pitch_start_beats.clone(),
+            clamps_owner: clip.next_same_pitch_start_beats.as_ptr(),
+            clamps_capacity: clip.next_same_pitch_start_beats.capacity(),
+            latch: clip.groove_latch.get(),
         }
     }
 
@@ -110,8 +135,18 @@ impl ClipSnapshot {
 
     fn assert_geometry(&self, clip: &EngineNoteClip) {
         assert_eq!(clip.id, self.id);
-        assert_eq!((clip.position_beats, clip.duration_beats, clip.start_marker_beats,
-            clip.loop_enabled, clip.loop_start_beats, clip.loop_end_beats, clip.groove_grid), self.geometry);
+        assert_eq!(
+            (
+                clip.position_beats,
+                clip.duration_beats,
+                clip.start_marker_beats,
+                clip.loop_enabled,
+                clip.loop_start_beats,
+                clip.loop_end_beats,
+                clip.groove_grid
+            ),
+            self.geometry
+        );
     }
 
     pub(crate) fn assert_unchanged(&self, clip: &EngineNoteClip) {
@@ -121,7 +156,10 @@ impl ClipSnapshot {
         assert_eq!(clip.notes.capacity(), self.notes_capacity);
         assert_eq!(clip.next_same_pitch_start_beats, self.clamps);
         assert_eq!(clip.next_same_pitch_start_beats.as_ptr(), self.clamps_owner);
-        assert_eq!(clip.next_same_pitch_start_beats.capacity(), self.clamps_capacity);
+        assert_eq!(
+            clip.next_same_pitch_start_beats.capacity(),
+            self.clamps_capacity
+        );
         assert_eq!(clip.groove_latch.get(), self.latch);
     }
 }
@@ -149,7 +187,10 @@ impl EmptyNoteStorageSnapshot {
         assert_eq!(clip.notes.as_ptr(), self.notes_owner);
         assert_eq!(clip.notes.capacity(), self.notes_capacity);
         assert_eq!(clip.next_same_pitch_start_beats.as_ptr(), self.clamps_owner);
-        assert_eq!(clip.next_same_pitch_start_beats.capacity(), self.clamps_capacity);
+        assert_eq!(
+            clip.next_same_pitch_start_beats.capacity(),
+            self.clamps_capacity
+        );
     }
 
     pub(crate) fn assert_unchanged(&self, storage: &NoteInsertionStorage) {
@@ -163,13 +204,27 @@ impl EmptyNoteStorageSnapshot {
 }
 
 fn note(pitch: u8, velocity: u8, start_beat: f64, duration_beats: f64) -> MidiNote {
-    MidiNote { pitch, velocity, start_beat, duration_beats }
+    MidiNote {
+        pitch,
+        velocity,
+        start_beat,
+        duration_beats,
+    }
 }
 
 fn expected_clamps(notes: &[MidiNote]) -> Vec<Option<f64>> {
-    notes.iter().map(|note| notes.iter().filter_map(|candidate| {
-        (candidate.pitch == note.pitch && candidate.start_beat > note.start_beat).then_some(candidate.start_beat)
-    }).min_by(f64::total_cmp)).collect()
+    notes
+        .iter()
+        .map(|note| {
+            notes
+                .iter()
+                .filter_map(|candidate| {
+                    (candidate.pitch == note.pitch && candidate.start_beat > note.start_beat)
+                        .then_some(candidate.start_beat)
+                })
+                .min_by(f64::total_cmp)
+        })
+        .collect()
 }
 
 fn assert_signal(output: &[f32], value: f32) {
@@ -180,11 +235,14 @@ fn assert_signal(output: &[f32], value: f32) {
 }
 
 #[test]
-fn public_add_note_at_full_capacity_preserves_first_duplicate_voice_and_future_clamp_without_callback_heap_work() {
+fn public_add_note_at_full_capacity_preserves_first_duplicate_voice_and_future_clamp_without_callback_heap_work(
+) {
     let mut notes = Vec::with_capacity(4);
     notes.extend([
-        note(60, 16, 2.0, 1.0), note(60, 32, 0.0, 4.0),
-        note(60, 96, 2.0, 0.5), note(67, 64, 3.0, 1.0),
+        note(60, 16, 2.0, 1.0),
+        note(60, 32, 0.0, 4.0),
+        note(60, 96, 2.0, 0.5),
+        note(67, 64, 3.0, 1.0),
     ]);
     // Cross the actual nonzero allocation, including any allocator spare slots.
     while notes.len() < notes.capacity() {
@@ -194,12 +252,34 @@ fn public_add_note_at_full_capacity_preserves_first_duplicate_voice_and_future_c
     assert!(count >= 4);
     assert_eq!(count, notes.capacity());
     let duplicate = ClipId::new();
-    let first = EngineNoteClip::new(duplicate, 0.0, 8.0, notes, 0.0, false, 0.0, 8.0, GrooveGrid::Sixteenth);
+    let first = EngineNoteClip::new(
+        duplicate,
+        0.0,
+        8.0,
+        notes,
+        0.0,
+        false,
+        0.0,
+        8.0,
+        GrooveGrid::Sixteenth,
+    );
     assert_eq!(first.next_same_pitch_start_beats.len(), count);
     assert_eq!(first.next_same_pitch_start_beats.capacity(), count);
-    assert_eq!(first.next_same_pitch_start_beats, expected_clamps(&first.notes));
-    let other = EngineNoteClip::new(duplicate, 16.0, 8.0, vec![note(72, 32, 0.5, 2.0)],
-        0.25, true, 0.25, 4.0, GrooveGrid::Eighth);
+    assert_eq!(
+        first.next_same_pitch_start_beats,
+        expected_clamps(&first.notes)
+    );
+    let other = EngineNoteClip::new(
+        duplicate,
+        16.0,
+        8.0,
+        vec![note(72, 32, 0.5, 2.0)],
+        0.25,
+        true,
+        0.25,
+        4.0,
+        GrooveGrid::Eighth,
+    );
     let source = PreparedPlaybackSource::new(Vec::new(), vec![first, other], Vec::new());
     let track_id = TrackId::new();
     let unrelated = TrackId::new();
@@ -208,27 +288,55 @@ fn public_add_note_at_full_capacity_preserves_first_duplicate_voice_and_future_c
     let mut target = EngineTrack::with_playback_source(track_id, source);
     target.pan = 0.0;
     target.instrument = Some(Box::new(VelocityProbe {
-        native: crate::test_support::DelayProbeInstrument::new(0, 0.25), scale: 1.0,
+        native: crate::test_support::DelayProbeInstrument::new(0, 0.25),
+        scale: 1.0,
         calls: Arc::clone(&target_calls),
     }));
     let mut held = EngineTrack::new(unrelated);
     held.pan = 0.0;
     held.instrument = Some(Box::new(VelocityProbe {
-        native: crate::test_support::DelayProbeInstrument::new(0, 0.125), scale: 1.0,
+        native: crate::test_support::DelayProbeInstrument::new(0, 0.125),
+        scale: 1.0,
         calls: Arc::clone(&unrelated_calls),
     }));
-    let target_instrument = crate::engine::reconfiguration::instrument_owner_identity(target.instrument.as_deref().unwrap());
-    let unrelated_instrument = crate::engine::reconfiguration::instrument_owner_identity(held.instrument.as_deref().unwrap());
+    let target_instrument = crate::engine::reconfiguration::instrument_owner_identity(
+        target.instrument.as_deref().unwrap(),
+    );
+    let unrelated_instrument = crate::engine::reconfiguration::instrument_owner_identity(
+        held.instrument.as_deref().unwrap(),
+    );
     let (mut engine, mut commands, mut events) = AudioEngine::new();
-    commands.push(EngineCommand::AddTrack(Box::new(target))).unwrap();
-    commands.push(EngineCommand::AddTrack(Box::new(held))).unwrap();
-    let channels: Vec<_> = [track_id, unrelated, TrackId::MASTER].into_iter().map(|id| RoutingChannel {
-        id, is_bus: id.is_master(), sends: Vec::new(), effects: Vec::new(),
-    }).collect();
-    commands.push(EngineCommand::SetRouting(crate::routing::PreparedRouting::prepare(&channels, 128).unwrap())).unwrap();
+    commands
+        .push(EngineCommand::AddTrack(Box::new(target)))
+        .unwrap();
+    commands
+        .push(EngineCommand::AddTrack(Box::new(held)))
+        .unwrap();
+    let channels: Vec<_> = [track_id, unrelated, TrackId::MASTER]
+        .into_iter()
+        .map(|id| RoutingChannel {
+            id,
+            is_bus: id.is_master(),
+            sends: Vec::new(),
+            effects: Vec::new(),
+        })
+        .collect();
+    commands
+        .push(EngineCommand::SetRouting(
+            crate::routing::PreparedRouting::prepare(&channels, 128).unwrap(),
+        ))
+        .unwrap();
     let swing = SwingAmount::new(0.62);
-    commands.push(EngineCommand::SetProjectSwing(swing)).unwrap();
-    commands.push(EngineCommand::ExternalNoteOn { track_id: unrelated, pitch: 72, velocity: 32 }).unwrap();
+    commands
+        .push(EngineCommand::SetProjectSwing(swing))
+        .unwrap();
+    commands
+        .push(EngineCommand::ExternalNoteOn {
+            track_id: unrelated,
+            pitch: 72,
+            velocity: 32,
+        })
+        .unwrap();
     commands.push(EngineCommand::Play).unwrap();
     let mut output = [0.0; 256];
     engine.process_block(AudioProcessBlock::new(&mut output, 2));
@@ -262,7 +370,13 @@ fn public_add_note_at_full_capacity_preserves_first_duplicate_voice_and_future_c
     assert_eq!(clamps[count], Some(2.0));
     let insertion = crate::clip_insertion::PreparedNoteInsertion::new(inserted);
     let operation = insertion.id();
-    commands.push(EngineCommand::AddNote { track_id, clip_id: duplicate, insertion }).unwrap();
+    commands
+        .push(EngineCommand::AddNote {
+            track_id,
+            clip_id: duplicate,
+            insertion,
+        })
+        .unwrap();
     let mut heap = crate::retirement::tests::allocations(|| {
         engine.process_block(AudioProcessBlock::new(&mut [], 2));
     });
@@ -278,7 +392,9 @@ fn public_add_note_at_full_capacity_preserves_first_duplicate_voice_and_future_c
     });
     heap.0 += waiting.0;
     heap.1 += waiting.1;
-    request.expect("the original full note/cache fixture must request real storage").fulfill();
+    request
+        .expect("the original full note/cache fixture must request real storage")
+        .fulfill();
     let resumed = crate::retirement::tests::allocations(|| {
         engine.process_block(AudioProcessBlock::new(&mut [], 2));
     });
@@ -288,7 +404,10 @@ fn public_add_note_at_full_capacity_preserves_first_duplicate_voice_and_future_c
     while let Ok(event) = events.pop() {
         if let crate::events::EngineEvent::ClipInsertionCompleted(value) = event {
             assert_eq!(value.id(), operation);
-            assert_eq!(value.outcome, crate::clip_insertion::ClipInsertionOutcome::Applied);
+            assert_eq!(
+                value.outcome,
+                crate::clip_insertion::ClipInsertionOutcome::Applied
+            );
             assert_eq!((value.track_id, value.clip_id), (track_id, duplicate));
             completed += 1;
         }
@@ -312,12 +431,25 @@ fn public_add_note_at_full_capacity_preserves_first_duplicate_voice_and_future_c
     assert_eq!(source.note_clips[0].next_same_pitch_start_beats, clamps);
     assert_eq!(source.note_clips[0].groove_latch.get(), first.latch);
     other.assert_unchanged(&source.note_clips[1]);
-    assert_eq!(crate::engine::reconfiguration::instrument_owner_identity(engine.tracks()[0].instrument.as_deref().unwrap()), target_instrument);
-    assert_eq!(crate::engine::reconfiguration::instrument_owner_identity(engine.tracks()[1].instrument.as_deref().unwrap()), unrelated_instrument);
+    assert_eq!(
+        crate::engine::reconfiguration::instrument_owner_identity(
+            engine.tracks()[0].instrument.as_deref().unwrap()
+        ),
+        target_instrument
+    );
+    assert_eq!(
+        crate::engine::reconfiguration::instrument_owner_identity(
+            engine.tracks()[1].instrument.as_deref().unwrap()
+        ),
+        unrelated_instrument
+    );
     assert_eq!(engine.transport().position(), 136);
     assert!(engine.transport().is_playing());
     assert_eq!(engine.transport().audio_length(), Some(24 * 22_050));
-    assert_eq!(commands.slots(), vibez_core::constants::RING_BUFFER_CAPACITY);
+    assert_eq!(
+        commands.slots(),
+        vibez_core::constants::RING_BUFFER_CAPACITY
+    );
     while events.pop().is_ok() {}
     // These pair-aligned edges stay at beats1 and1.5 under Sixteenth Swing.
     // An old clamp, a missing new note or a flushed unrelated voice changes audio.
@@ -336,7 +468,13 @@ fn public_add_note_at_full_capacity_preserves_first_duplicate_voice_and_future_c
         heap.1 += measured.1;
         for (frame, &[left, right]) in output[..frames * 2].as_chunks::<2>().0.iter().enumerate() {
             let position = start + frame as u64;
-            let expected = if position < note_on { 0.375 } else if position < note_off { 0.625 } else { 0.125 };
+            let expected = if position < note_on {
+                0.375
+            } else if position < note_off {
+                0.625
+            } else {
+                0.125
+            };
             assert_eq!(left, expected, "future note boundary at sample {position}");
             assert_eq!(right, 0.0);
         }
@@ -349,10 +487,21 @@ fn public_add_note_at_full_capacity_preserves_first_duplicate_voice_and_future_c
     assert!(engine.transport().is_playing());
     assert_eq!(engine.transport().bpm(), 120.0);
     assert_eq!(engine.transport().audio_length(), Some(24 * 22_050));
-    assert_eq!(engine.tracks()[0].playback_source.note_clips[0].notes, expected);
-    assert_eq!(engine.tracks()[0].playback_source.note_clips[0].next_same_pitch_start_beats, clamps);
+    assert_eq!(
+        engine.tracks()[0].playback_source.note_clips[0].notes,
+        expected
+    );
+    assert_eq!(
+        engine.tracks()[0].playback_source.note_clips[0].next_same_pitch_start_beats,
+        clamps
+    );
     other.assert_unchanged(&engine.tracks()[0].playback_source.note_clips[1]);
-    commands.push(EngineCommand::ExternalNoteOff { track_id: unrelated, pitch: 72 }).unwrap();
+    commands
+        .push(EngineCommand::ExternalNoteOff {
+            track_id: unrelated,
+            pitch: 72,
+        })
+        .unwrap();
     let measured = crate::retirement::tests::allocations(|| {
         engine.process_block(AudioProcessBlock::new(&mut output[..16], 2));
     });
@@ -361,7 +510,11 @@ fn public_add_note_at_full_capacity_preserves_first_duplicate_voice_and_future_c
     assert_signal(&output[..16], 0.0);
     assert_eq!(unrelated_calls.observed(), (1, 1, 0));
     assert_eq!(target_calls.observed(), (2, 2, 0));
-    assert_eq!(heap, (0, 0), "AddNote complete callback allocation/destruction counts");
+    assert_eq!(
+        heap,
+        (0, 0),
+        "AddNote complete callback allocation/destruction counts"
+    );
 }
 
 #[path = "playback_source_note_value_fifo_tests.rs"]

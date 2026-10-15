@@ -1234,9 +1234,7 @@ fn every_table_command_drains_without_allocating_unless_named_as_card_04_work() 
         }
         let added_note = match &command {
             EngineCommand::AddNote {
-                track_id,
-                clip_id,
-                ..
+                track_id, clip_id, ..
             } => Some((*track_id, *clip_id, note())),
             _ => None,
         };
