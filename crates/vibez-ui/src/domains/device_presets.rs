@@ -146,7 +146,7 @@ pub fn prepare_updates(
             .ok_or_else(|| "The device's parameters are unavailable".to_string())?;
         if !value.is_finite()
             || !(descriptor.min..=descriptor.max).contains(&value)
-            || (effect.effect_type == EffectType::Delay && !delay_presets::is_canonical(index, value))
+            || (effect.effect_type == EffectType::Delay && !delay::is_canonical(index, value))
             || (effect.effect_type == EffectType::Gain
                 && vibez_dsp::gain::param::POLARITY.contains(&index)
                 && value != 0.0
