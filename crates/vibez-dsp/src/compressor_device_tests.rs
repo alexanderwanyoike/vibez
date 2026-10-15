@@ -446,3 +446,32 @@ fn mode_link_listen_range_and_filter_switches_crossfade_while_playing() {
         assert!(remainder.iter().all(|sample| sample.is_finite()));
     }
 }
+
+#[test]
+fn detector_switches_change_the_gain_smoothly_through_the_whole_crossfade() {
+    for (index, target) in [(11, 1.0), (12, 1.0), (13, 0.0)] {
+        let mut effect = configured(48000.0, &[(0, -30.0), (1, 8.0), (2, 1.0), (4, 0.0)]);
+        let input = [0.8, 0.3];
+        let mut warmup = input.repeat(4800);
+        effect.process(&mut warmup, 2);
+        effect.set_param(index, target);
+        let mut block = input.repeat(2048);
+        effect.process(&mut block, 2);
+        for channel in 0..2 {
+            let gains: Vec<f32> = block
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|frame| frame[channel] / input[channel])
+                .collect();
+            let jump = gains
+                .windows(2)
+                .map(|pair| (pair[1] - pair[0]).abs())
+                .fold(0.0_f32, f32::max);
+            assert!(
+                jump < 0.002,
+                "index {index} channel {channel}: gain jumped {jump}"
+            );
+        }
+    }
+}
