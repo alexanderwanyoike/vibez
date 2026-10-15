@@ -490,7 +490,13 @@ fn pending_note_clip_growth_preserves_current_duplicate_edits_and_voice_release_
         match event {
             EngineEvent::ClipInsertionStorageRequested(value) => {
                 assert_eq!(value.id, first_id);
-                assert_eq!((value.track_id, value.target), (scheduled, crate::clip_insertion::ClipInsertionTarget::Clip(duplicate)));
+                assert_eq!(
+                    (value.track_id, value.target),
+                    (
+                        scheduled,
+                        crate::clip_insertion::ClipInsertionTarget::Clip(duplicate)
+                    )
+                );
                 assert!(request.replace(value).is_none());
             }
             EngineEvent::ClipInsertionCompleted(_) => {
@@ -535,7 +541,13 @@ fn pending_note_clip_growth_preserves_current_duplicate_edits_and_voice_release_
         match event {
             EngineEvent::ClipInsertionCompleted(value) => {
                 assert_eq!(value.outcome, ClipInsertionOutcome::Applied);
-                assert_eq!((value.track_id, value.target), (scheduled, crate::clip_insertion::ClipInsertionTarget::Clip(duplicate)));
+                assert_eq!(
+                    (value.track_id, value.target),
+                    (
+                        scheduled,
+                        crate::clip_insertion::ClipInsertionTarget::Clip(duplicate)
+                    )
+                );
                 order.push("complete");
                 completed.push(value);
             }
@@ -768,7 +780,13 @@ pub(crate) fn verify_prepared_note_storage_growth(
         panic!("actual exhausted note storage must request growth");
     };
     assert_eq!(request.id, operation);
-    assert_eq!((request.track_id, request.target), (track_id, crate::clip_insertion::ClipInsertionTarget::Clip(clip_id)));
+    assert_eq!(
+        (request.track_id, request.target),
+        (
+            track_id,
+            crate::clip_insertion::ClipInsertionTarget::Clip(clip_id)
+        )
+    );
     let mut output = [0.0; 16];
     measured_callback(&mut engine, &mut output);
     assert_sounding(&output);
@@ -799,7 +817,13 @@ pub(crate) fn verify_prepared_note_storage_growth(
     };
     assert_eq!(completed.id(), operation);
     assert_eq!(completed.outcome, ClipInsertionOutcome::Applied);
-    assert_eq!((completed.track_id, completed.target), (track_id, crate::clip_insertion::ClipInsertionTarget::Clip(clip_id)));
+    assert_eq!(
+        (completed.track_id, completed.target),
+        (
+            track_id,
+            crate::clip_insertion::ClipInsertionTarget::Clip(clip_id)
+        )
+    );
     let source = &engine.tracks()[0].playback_source;
     assert_eq!(source.note_clips.len(), full + 1);
     assert!(source.note_clips.capacity() > full);
@@ -1196,7 +1220,10 @@ fn pending_note_storage_keeps_arrange_distinct_through_reachable_section_and_lau
         assert_eq!(completed.outcome, ClipInsertionOutcome::Applied);
         assert_eq!(
             (completed.track_id, completed.target),
-            (track_id, crate::clip_insertion::ClipInsertionTarget::Clip(inserted_id))
+            (
+                track_id,
+                crate::clip_insertion::ClipInsertionTarget::Clip(inserted_id)
+            )
         );
         assert_eq!(
             crate::retirement::tests::allocations(|| drop(completed)),

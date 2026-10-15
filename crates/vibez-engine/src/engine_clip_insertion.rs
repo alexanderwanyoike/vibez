@@ -2,9 +2,9 @@
 
 use super::*;
 use crate::clip_insertion::{
-    ClipInsertionAttempt, ClipInsertionDelta, ClipInsertionOutcome, ClipInsertionReply, ClipInsertionTarget,
-    CompletedClipInsertion, PreparedClipInsertion, PreparedNoteClipInsertion,
-    PreparedNoteInsertion, PreparedAutomationLaneInsertion,
+    ClipInsertionAttempt, ClipInsertionDelta, ClipInsertionOutcome, ClipInsertionReply,
+    ClipInsertionTarget, CompletedClipInsertion, PreparedAutomationLaneInsertion,
+    PreparedClipInsertion, PreparedNoteClipInsertion, PreparedNoteInsertion,
 };
 use vibez_core::id::ClipId;
 
@@ -35,7 +35,11 @@ impl AudioEngine {
         clip_id: ClipId,
         insertion: PreparedNoteInsertion,
     ) {
-        self.begin_clip_insertion(track_id, ClipInsertionTarget::Clip(clip_id), insertion.into_control());
+        self.begin_clip_insertion(
+            track_id,
+            ClipInsertionTarget::Clip(clip_id),
+            insertion.into_control(),
+        );
     }
 
     pub(super) fn command_set_automation_lane(
@@ -44,7 +48,11 @@ impl AudioEngine {
         insertion: PreparedAutomationLaneInsertion,
     ) {
         let (lane_id, control) = insertion.into_control();
-        self.begin_clip_insertion(track_id, ClipInsertionTarget::AutomationLane(lane_id), control);
+        self.begin_clip_insertion(
+            track_id,
+            ClipInsertionTarget::AutomationLane(lane_id),
+            control,
+        );
     }
 
     fn insertion_channel_mut(
@@ -53,7 +61,11 @@ impl AudioEngine {
         target: ClipInsertionTarget,
     ) -> Option<&mut EngineTrack> {
         match target {
-            ClipInsertionTarget::Clip(_) => self.tracks.iter_mut().find(|track| track.id == track_id).map(|track| &mut **track),
+            ClipInsertionTarget::Clip(_) => self
+                .tracks
+                .iter_mut()
+                .find(|track| track.id == track_id)
+                .map(|track| &mut **track),
             ClipInsertionTarget::AutomationLane(_) => self.channel_mut(track_id),
         }
     }
@@ -118,11 +130,17 @@ impl AudioEngine {
                 let (track_id, target) = insertion.target.expect("one pending command target");
                 if let ClipInsertionTarget::AutomationLane(lane_id) = target {
                     let needs_two = self.channel_mut(track_id).is_none_or(|channel| {
-                        channel.playback_source.automation.iter().any(|lane| lane.id == lane_id)
+                        channel
+                            .playback_source
+                            .automation
+                            .iter()
+                            .any(|lane| lane.id == lane_id)
                     });
                     // Public FIFO cannot replace or remove this target while waiting.
                     // Defensive owner returns still need both credits before mutation.
-                    if needs_two && self.pending_retirements.capacity() - self.pending_retirements.len() < 2 {
+                    if needs_two
+                        && self.pending_retirements.capacity() - self.pending_retirements.len() < 2
+                    {
                         self.pending_clip_insertion = Some(insertion);
                         return;
                     }

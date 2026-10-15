@@ -72,7 +72,10 @@ impl NoteDelta {
         assert_eq!(completed.id(), self.id);
         assert_eq!(
             (completed.track_id, completed.target),
-            (fixture.track, crate::clip_insertion::ClipInsertionTarget::Clip(fixture.resident))
+            (
+                fixture.track,
+                crate::clip_insertion::ClipInsertionTarget::Clip(fixture.resident)
+            )
         );
         assert_eq!(completed.outcome, outcome);
         assert_eq!(std::ptr::from_ref(completed.owner.as_ref()), self.control);
@@ -109,7 +112,9 @@ impl NoteDelta {
                 assert_eq!(*original, self.note);
                 self.original.assert_unchanged(&source.note_clips[0]);
             }
-            ClipInsertionOutcome::MissingTrack | ClipInsertionOutcome::MissingClip | ClipInsertionOutcome::MissingChannel => {
+            ClipInsertionOutcome::MissingTrack
+            | ClipInsertionOutcome::MissingClip
+            | ClipInsertionOutcome::MissingChannel => {
                 unreachable!()
             }
         }

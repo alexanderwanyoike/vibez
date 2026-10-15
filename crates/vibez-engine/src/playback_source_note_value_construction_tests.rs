@@ -113,7 +113,13 @@ pub(crate) fn verify_note_value_source_growth(source: PreparedPlaybackSource, co
     while let Ok(event) = events.pop() {
         if let EngineEvent::ClipInsertionStorageRequested(value) = event {
             assert_eq!(value.id, operation);
-            assert_eq!((value.track_id, value.target), (track_id, crate::clip_insertion::ClipInsertionTarget::Clip(clip_id)));
+            assert_eq!(
+                (value.track_id, value.target),
+                (
+                    track_id,
+                    crate::clip_insertion::ClipInsertionTarget::Clip(clip_id)
+                )
+            );
             assert!(request.replace(value).is_none());
         } else {
             assert!(!matches!(event, EngineEvent::ClipInsertionCompleted(_)));
@@ -138,7 +144,13 @@ pub(crate) fn verify_note_value_source_growth(source: PreparedPlaybackSource, co
         panic!("fulfilled inner growth must return the original complete owner");
     };
     assert_eq!(owner.id(), operation);
-    assert_eq!((owner.track_id, owner.target), (track_id, crate::clip_insertion::ClipInsertionTarget::Clip(clip_id)));
+    assert_eq!(
+        (owner.track_id, owner.target),
+        (
+            track_id,
+            crate::clip_insertion::ClipInsertionTarget::Clip(clip_id)
+        )
+    );
     assert_eq!(owner.outcome, ClipInsertionOutcome::Applied);
     let source = &engine.tracks()[0].playback_source;
     assert_eq!(std::ptr::from_ref(source.as_ref()), source_owner);

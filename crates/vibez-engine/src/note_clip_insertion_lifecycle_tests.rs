@@ -238,7 +238,13 @@ fn eager_and_missing_note_completions_return_both_unused_mailbox_endpoints() {
         assert_eq!(received.completed.len(), 1);
         let returned = &received.completed[0];
         assert_eq!(returned.id(), delta.id);
-        assert_eq!((returned.track_id, returned.target), (target, crate::clip_insertion::ClipInsertionTarget::Clip(delta.clip)));
+        assert_eq!(
+            (returned.track_id, returned.target),
+            (
+                target,
+                crate::clip_insertion::ClipInsertionTarget::Clip(delta.clip)
+            )
+        );
         assert_eq!(std::ptr::from_ref(returned.owner.as_ref()), delta.control);
         assert_eq!(
             std::ptr::from_ref(returned.owner.receiver.buffer()),

@@ -408,7 +408,13 @@ fn public_add_note_at_full_capacity_preserves_first_duplicate_voice_and_future_c
                 value.outcome,
                 crate::clip_insertion::ClipInsertionOutcome::Applied
             );
-            assert_eq!((value.track_id, value.target), (track_id, crate::clip_insertion::ClipInsertionTarget::Clip(duplicate)));
+            assert_eq!(
+                (value.track_id, value.target),
+                (
+                    track_id,
+                    crate::clip_insertion::ClipInsertionTarget::Clip(duplicate)
+                )
+            );
             completed += 1;
         }
     }

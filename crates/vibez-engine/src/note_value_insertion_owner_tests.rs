@@ -110,7 +110,13 @@ fn missing_track_or_clip_returns_complete_prepared_note_value_without_callback_h
             panic!("a missing note target must return its complete prepared owner");
         };
         assert_eq!(completed.id(), operation);
-        assert_eq!((completed.track_id, completed.target), (track_id, crate::clip_insertion::ClipInsertionTarget::Clip(clip_id)));
+        assert_eq!(
+            (completed.track_id, completed.target),
+            (
+                track_id,
+                crate::clip_insertion::ClipInsertionTarget::Clip(clip_id)
+            )
+        );
         assert_eq!(completed.outcome, outcome);
         assert_eq!(std::ptr::from_ref(completed.owner.as_ref()), control);
         assert_eq!(std::ptr::from_ref(completed.owner.receiver.buffer()), ring);

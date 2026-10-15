@@ -23,18 +23,42 @@ fn appending_a_lane_at_full_capacity_preserves_audio_and_owners_without_callback
     let audio_owner = Arc::downgrade(&audio);
     let mut pan = AutomationLane::new(AutomationTarget::TrackPan);
     pan.points = vec![
-        AutomationPoint { beat: 0.0, value: 0.0, curve: 0.5 },
-        AutomationPoint { beat: 4.0, value: 0.0, curve: -0.5 },
+        AutomationPoint {
+            beat: 0.0,
+            value: 0.0,
+            curve: 0.5,
+        },
+        AutomationPoint {
+            beat: 4.0,
+            value: 0.0,
+            curve: -0.5,
+        },
     ];
     let mut mute = AutomationLane::new(AutomationTarget::TrackMute);
-    mute.points.push(AutomationPoint { beat: 0.0, value: 0.0, curve: 0.0 });
+    mute.points.push(AutomationPoint {
+        beat: 0.0,
+        value: 0.0,
+        curve: 0.0,
+    });
     let mut gain = AutomationLane::new(AutomationTarget::TrackGain);
     gain.points = vec![
-        AutomationPoint { beat: 0.0, value: 0.25, curve: -0.5 },
-        AutomationPoint { beat: 4.0, value: 0.25, curve: 0.75 },
+        AutomationPoint {
+            beat: 0.0,
+            value: 0.25,
+            curve: -0.5,
+        },
+        AutomationPoint {
+            beat: 4.0,
+            value: 0.25,
+            curve: 0.75,
+        },
     ];
     let expected_lanes = [pan.clone(), mute.clone(), gain.clone()];
-    let point_owners = [pan.points.as_ptr(), mute.points.as_ptr(), gain.points.as_ptr()];
+    let point_owners = [
+        pan.points.as_ptr(),
+        mute.points.as_ptr(),
+        gain.points.as_ptr(),
+    ];
     let lanes = vec![pan, mute].into_boxed_slice().into_vec();
     assert_eq!((lanes.len(), lanes.capacity()), (2, 2));
     let source = PreparedPlaybackSource::new(
@@ -60,12 +84,30 @@ fn appending_a_lane_at_full_capacity_preserves_audio_and_owners_without_callback
     let source_owner = std::ptr::from_ref(target.playback_source.as_ref());
     let clips_owner = target.playback_source.clips.as_ptr();
     let notes = vec![
-        MidiNote { pitch: 60, velocity: 127, start_beat: 0.0, duration_beats: 4.0 },
-        MidiNote { pitch: 60, velocity: 100, start_beat: 2.0, duration_beats: 1.0 },
+        MidiNote {
+            pitch: 60,
+            velocity: 127,
+            start_beat: 0.0,
+            duration_beats: 4.0,
+        },
+        MidiNote {
+            pitch: 60,
+            velocity: 100,
+            start_beat: 2.0,
+            duration_beats: 1.0,
+        },
     ];
     let expected_notes = notes.clone();
     let note = EngineNoteClip::new(
-        note_id, 0.0, 4.0, notes, 0.0, false, 0.0, 0.0, GrooveGrid::Eighth,
+        note_id,
+        0.0,
+        4.0,
+        notes,
+        0.0,
+        false,
+        0.0,
+        0.0,
+        GrooveGrid::Eighth,
     );
     let mut voice = Box::new(EngineTrack::with_playback_source(
         voice_id,
@@ -85,11 +127,13 @@ fn appending_a_lane_at_full_capacity_preserves_audio_and_owners_without_callback
         effects: vec![],
     });
     let mut routing = crate::routing::PreparedRouting::prepare(&channels, 64).unwrap();
-    routing.configure_automation(&[
-        (track_id, AutomationTarget::TrackPan),
-        (track_id, AutomationTarget::TrackMute),
-        (track_id, AutomationTarget::TrackGain),
-    ]).unwrap();
+    routing
+        .configure_automation(&[
+            (track_id, AutomationTarget::TrackPan),
+            (track_id, AutomationTarget::TrackMute),
+            (track_id, AutomationTarget::TrackGain),
+        ])
+        .unwrap();
     let (mut engine, mut commands, mut events) = AudioEngine::new();
     for command in [
         EngineCommand::SetSampleRate(48_000),
@@ -109,8 +153,10 @@ fn appending_a_lane_at_full_capacity_preserves_audio_and_owners_without_callback
     let mut output = [0.0; 128];
     let mut capture = [0.0; 128];
     for _ in 0..4 {
-        engine.process_block(AudioProcessBlock::new(&mut output, 2)
-            .with_track_output_capture(track_id.raw(), &mut capture));
+        engine.process_block(
+            AudioProcessBlock::new(&mut output, 2)
+                .with_track_output_capture(track_id.raw(), &mut capture),
+        );
         while events.pop().is_ok() {}
     }
     assert!(engine.cmd_rx.peek().is_err());
@@ -125,37 +171,83 @@ fn appending_a_lane_at_full_capacity_preserves_audio_and_owners_without_callback
         assert!((frame[0] - 0.25).abs() < f32::EPSILON);
     }
     let assert_content = |engine: &AudioEngine, expected: &[AutomationLane]| {
-        let target = engine.tracks().iter().find(|track| track.id == track_id).unwrap();
+        let target = engine
+            .tracks()
+            .iter()
+            .find(|track| track.id == track_id)
+            .unwrap();
         assert!(std::ptr::eq(target.playback_source.as_ref(), source_owner));
         assert_eq!(target.playback_source.clips.as_ptr(), clips_owner);
         assert_eq!(target.playback_source.clips.len(), 1);
         let clip = &target.playback_source.clips[0];
-        assert_eq!((clip.id, clip.position, clip.source_offset, clip.start_marker, clip.duration),
-            (audio_id, 0, 0, 0, 4096));
-        assert_eq!((clip.loop_enabled, clip.loop_start, clip.loop_end, clip.linear_gain),
-            (false, 0, 0, 1.0));
+        assert_eq!(
+            (
+                clip.id,
+                clip.position,
+                clip.source_offset,
+                clip.start_marker,
+                clip.duration
+            ),
+            (audio_id, 0, 0, 0, 4096)
+        );
+        assert_eq!(
+            (
+                clip.loop_enabled,
+                clip.loop_start,
+                clip.loop_end,
+                clip.linear_gain
+            ),
+            (false, 0, 0, 1.0)
+        );
         assert_eq!(audio_owner.strong_count(), 1);
         let lanes = &target.playback_source.automation;
         assert_eq!(lanes, expected);
         for (lane, owner) in lanes.iter().zip(point_owners) {
             assert_eq!(lane.points.as_ptr(), owner);
         }
-        let voice = engine.tracks().iter().find(|track| track.id == voice_id).unwrap();
-        assert!(std::ptr::eq(voice.playback_source.as_ref(), voice_source_owner));
+        let voice = engine
+            .tracks()
+            .iter()
+            .find(|track| track.id == voice_id)
+            .unwrap();
+        assert!(std::ptr::eq(
+            voice.playback_source.as_ref(),
+            voice_source_owner
+        ));
         assert_eq!(voice.playback_source.note_clips.as_ptr(), note_clips_owner);
         assert_eq!(voice.playback_source.note_clips.len(), 1);
         let clip = &voice.playback_source.note_clips[0];
-        assert_eq!((clip.id, clip.position_beats, clip.duration_beats, clip.groove_grid),
-            (note_id, 0.0, 4.0, GrooveGrid::Eighth));
-        assert_eq!((clip.start_marker_beats, clip.loop_enabled, clip.loop_start_beats, clip.loop_end_beats),
-            (0.0, false, 0.0, 0.0));
+        assert_eq!(
+            (
+                clip.id,
+                clip.position_beats,
+                clip.duration_beats,
+                clip.groove_grid
+            ),
+            (note_id, 0.0, 4.0, GrooveGrid::Eighth)
+        );
+        assert_eq!(
+            (
+                clip.start_marker_beats,
+                clip.loop_enabled,
+                clip.loop_start_beats,
+                clip.loop_end_beats
+            ),
+            (0.0, false, 0.0, 0.0)
+        );
         assert_eq!(clip.notes, expected_notes);
         assert_eq!(clip.notes.as_ptr(), notes_owner);
         assert_eq!(clip.next_same_pitch_start_beat(0), Some(2.0));
         assert_eq!(clip.next_same_pitch_start_beat(1), None);
         // A different current Swing must not replace this already sounding pair's latch.
-        assert_eq!(clip.swing_for_pair(0.0, SwingAmount::new(0.70), false), swing);
-        assert!(std::ptr::eq(std::ptr::from_ref(voice.instrument.as_deref().unwrap()), instrument_owner));
+        assert_eq!(
+            clip.swing_for_pair(0.0, SwingAmount::new(0.70), false),
+            swing
+        );
+        assert!(std::ptr::eq(
+            std::ptr::from_ref(voice.instrument.as_deref().unwrap()),
+            instrument_owner
+        ));
     };
     assert_content(&engine, &expected_lanes[..2]);
     let resident = &engine.tracks()[0].playback_source.automation;
@@ -164,7 +256,12 @@ fn appending_a_lane_at_full_capacity_preserves_audio_and_owners_without_callback
     let length = engine.transport().audio_length();
     let insertion = crate::clip_insertion::PreparedAutomationLaneInsertion::new(gain);
     let operation = insertion.id();
-    commands.push(EngineCommand::SetAutomationLane { track_id, insertion }).unwrap();
+    commands
+        .push(EngineCommand::SetAutomationLane {
+            track_id,
+            insertion,
+        })
+        .unwrap();
     // Serve the real capacity request without advancing the original audio boundary.
     let admission = crate::retirement::tests::allocations(|| {
         engine.process_block(AudioProcessBlock::new(&mut [], 2));
@@ -178,9 +275,20 @@ fn appending_a_lane_at_full_capacity_preserves_audio_and_owners_without_callback
     };
     assert_eq!(request.id, operation);
     assert_eq!(request.track_id, track_id);
-    assert_eq!(request.target, crate::clip_insertion::ClipInsertionTarget::AutomationLane(expected_lanes[2].id));
-    assert!(matches!(events.pop().unwrap(), EngineEvent::PlaybackPosition(position) if position == before));
-    let EngineEvent::Metering { peak_l, peak_r, rms_l, rms_r } = events.pop().unwrap() else {
+    assert_eq!(
+        request.target,
+        crate::clip_insertion::ClipInsertionTarget::AutomationLane(expected_lanes[2].id)
+    );
+    assert!(
+        matches!(events.pop().unwrap(), EngineEvent::PlaybackPosition(position) if position == before)
+    );
+    let EngineEvent::Metering {
+        peak_l,
+        peak_r,
+        rms_l,
+        rms_r,
+    } = events.pop().unwrap()
+    else {
         panic!("zero-frame admission must report its silent master meters");
     };
     assert_eq!((peak_l, peak_r, rms_l, rms_r), (0.0, 0.0, 0.0, 0.0));
@@ -188,8 +296,10 @@ fn appending_a_lane_at_full_capacity_preserves_audio_and_owners_without_callback
     request.fulfill();
 
     let measured = crate::retirement::tests::allocations(|| {
-        engine.process_block(AudioProcessBlock::new(&mut output, 2)
-            .with_track_output_capture(track_id.raw(), &mut capture));
+        engine.process_block(
+            AudioProcessBlock::new(&mut output, 2)
+                .with_track_output_capture(track_id.raw(), &mut capture),
+        );
     });
     assert!(engine.cmd_rx.peek().is_err());
     assert_eq!(engine.transport().position(), before + 64);
@@ -209,8 +319,14 @@ fn appending_a_lane_at_full_capacity_preserves_audio_and_owners_without_callback
         panic!("the original lane edit must return its complete control after commit");
     };
     assert_eq!(completed.id(), operation);
-    assert_eq!(completed.target, crate::clip_insertion::ClipInsertionTarget::AutomationLane(expected_lanes[2].id));
-    assert_eq!(completed.outcome, crate::clip_insertion::ClipInsertionOutcome::Applied);
+    assert_eq!(
+        completed.target,
+        crate::clip_insertion::ClipInsertionTarget::AutomationLane(expected_lanes[2].id)
+    );
+    assert_eq!(
+        completed.outcome,
+        crate::clip_insertion::ClipInsertionOutcome::Applied
+    );
     drop(completed);
     assert_eq!(admission, (0, 0));
     assert_eq!(measured, (0, 0));

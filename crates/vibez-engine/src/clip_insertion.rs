@@ -170,9 +170,10 @@ impl PreparedClipInsertion {
         // Replacing the first existing ID never needs more outer storage,
         // even when the channel is exactly full or the target changes.
         let replacement_index = match self.clip.as_ref() {
-            Some(ClipInsertionDelta::AutomationLane(lane)) => {
-                source.automation.iter().position(|current| current.id == lane.id)
-            }
+            Some(ClipInsertionDelta::AutomationLane(lane)) => source
+                .automation
+                .iter()
+                .position(|current| current.id == lane.id),
             _ => None,
         };
         if let Some(index) = replacement_index {
@@ -180,7 +181,8 @@ impl PreparedClipInsertion {
                 unreachable!("the opaque lane wrapper owns one original lane");
             };
             return ClipInsertionAttempt::Applied(Some(std::mem::replace(
-                &mut source.automation[index], lane,
+                &mut source.automation[index],
+                lane,
             )));
         }
         let storage = self.reply.as_mut().unwrap_or(&mut self.storage);
@@ -189,23 +191,43 @@ impl PreparedClipInsertion {
             self.clip.as_ref().expect("one original insertion delta"),
             target,
         ) {
-            (ClipInsertionStorage::Audio(storage), ClipInsertionDelta::Audio(_), ClipInsertionTarget::Clip(_)) => (
+            (
+                ClipInsertionStorage::Audio(storage),
+                ClipInsertionDelta::Audio(_),
+                ClipInsertionTarget::Clip(_),
+            ) => (
                 storage.install_if_needed(&mut source.clips, &mut source.removed_audio_clips),
                 source.clips.len(),
             ),
-            (ClipInsertionStorage::NoteClip(storage), ClipInsertionDelta::NoteClip(_), ClipInsertionTarget::Clip(_)) => (
+            (
+                ClipInsertionStorage::NoteClip(storage),
+                ClipInsertionDelta::NoteClip(_),
+                ClipInsertionTarget::Clip(_),
+            ) => (
                 storage.install_if_needed(&mut source.note_clips, &mut source.removed_note_clips),
                 source.note_clips.len(),
             ),
-            (ClipInsertionStorage::NoteValue(storage), ClipInsertionDelta::NoteValue(_), ClipInsertionTarget::Clip(clip_id)) => {
+            (
+                ClipInsertionStorage::NoteValue(storage),
+                ClipInsertionDelta::NoteValue(_),
+                ClipInsertionTarget::Clip(clip_id),
+            ) => {
                 let Some(clip) = source.note_clips.iter_mut().find(|clip| clip.id == clip_id)
                 else {
                     return ClipInsertionAttempt::MissingClip;
                 };
                 (storage.install_if_needed(clip), clip.notes.len())
             }
-            (ClipInsertionStorage::AutomationLane(storage), ClipInsertionDelta::AutomationLane(_), ClipInsertionTarget::AutomationLane(_)) => {
-                let required = source.automation.len().checked_add(1).expect("lane length overflow");
+            (
+                ClipInsertionStorage::AutomationLane(storage),
+                ClipInsertionDelta::AutomationLane(_),
+                ClipInsertionTarget::AutomationLane(_),
+            ) => {
+                let required = source
+                    .automation
+                    .len()
+                    .checked_add(1)
+                    .expect("lane length overflow");
                 let ready = if source.automation.capacity() >= required {
                     true
                 } else if storage.capacity() >= required {
@@ -245,7 +267,10 @@ impl PreparedClipInsertion {
     }
 
     pub(crate) fn affects_length(&self) -> bool {
-        matches!(self.storage, ClipInsertionStorage::Audio(_) | ClipInsertionStorage::NoteClip(_))
+        matches!(
+            self.storage,
+            ClipInsertionStorage::Audio(_) | ClipInsertionStorage::NoteClip(_)
+        )
     }
 
     pub(crate) fn request(&mut self, required: usize) -> ClipInsertionStorageRequest {
