@@ -96,6 +96,14 @@ impl DelayEffect {
         // Full-ring distance reads the prior lap before the current frame overwrites it.
         samples.max(1.0).min(self.buffer_l.len().max(1) as f64)
     }
+
+    fn finite_or_zero(sample: f32) -> f32 {
+        if sample.is_finite() {
+            sample
+        } else {
+            0.0
+        }
+    }
 }
 
 impl AudioEffect for DelayEffect {
@@ -183,15 +191,20 @@ impl AudioEffect for DelayEffect {
             let delayed_r = read(&self.buffer_r, read_pos);
 
             // Left channel
-            let dry_l = buffer[frame * ch];
-            self.buffer_l[self.write_pos] = dry_l + delayed_l * self.feedback;
-            buffer[frame * ch] = dry_l * (1.0 - self.mix) + delayed_l * self.mix;
+            let dry_l = Self::finite_or_zero(buffer[frame * ch]);
+            self.buffer_l[self.write_pos] = Self::finite_or_zero(dry_l + delayed_l * self.feedback);
+            buffer[frame * ch] = Self::finite_or_zero(dry_l * (1.0 - self.mix) + delayed_l * self.mix);
 
             // Missing mono input is zero, but its feedback continues while unobserved.
-            let dry_r = if ch >= 2 { buffer[frame * ch + 1] } else { 0.0 };
-            self.buffer_r[self.write_pos] = dry_r + delayed_r * self.feedback;
+            let dry_r = if ch >= 2 {
+                Self::finite_or_zero(buffer[frame * ch + 1])
+            } else {
+                0.0
+            };
+            self.buffer_r[self.write_pos] = Self::finite_or_zero(dry_r + delayed_r * self.feedback);
             if ch >= 2 {
-                buffer[frame * ch + 1] = dry_r * (1.0 - self.mix) + delayed_r * self.mix;
+                buffer[frame * ch + 1] =
+                    Self::finite_or_zero(dry_r * (1.0 - self.mix) + delayed_r * self.mix);
             }
 
             self.write_pos = (self.write_pos + 1) % buf_len;
