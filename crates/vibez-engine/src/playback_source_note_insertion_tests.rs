@@ -999,7 +999,15 @@ fn prepare_pending_home(home: PendingHome) -> PendingHomeFixture {
     let mut output = [0.0; 16];
     engine.process_block(AudioProcessBlock::new(&mut output, 2));
     assert_sounding(&output);
-    while events.pop().is_ok() {}
+    let mut initial_section_returns = 0;
+    while let Ok(event) = events.pop() {
+        if let crate::events::EngineEvent::SectionTransitioned { retired, .. } = event {
+            assert!(matches!(home, PendingHome::Section));
+            initial_section.assert_unchanged(&retired.tracks()[0].source);
+            initial_section_returns += 1;
+        }
+    }
+    assert_eq!(initial_section_returns, usize::from(matches!(home, PendingHome::Section)));
     arrange.assert_unchanged(&engine.tracks()[0].playback_source);
     let (queued, next_home) = match home {
         PendingHome::Section => {
