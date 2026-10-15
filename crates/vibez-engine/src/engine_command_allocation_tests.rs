@@ -181,7 +181,7 @@ fn add_clip(track_id: TrackId, clip_id: ClipId) -> EngineCommand {
 
 fn add_note_clip(track_id: TrackId, clip_id: ClipId) -> EngineCommand {
     EngineCommand::AddNoteClip {
-        track_id: track_id,
+        track_id,
         insertion: crate::clip_insertion::PreparedNoteClipInsertion::new(
             clip_id,
             0.0,

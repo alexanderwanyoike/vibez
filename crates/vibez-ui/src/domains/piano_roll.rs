@@ -274,7 +274,7 @@ impl PianoRollState {
                     groove_grid: vibez_core::perform::GrooveGrid::Off,
                 });
                 engine.send(EngineCommand::AddNoteClip {
-                    track_id: track_id,
+                    track_id,
                     insertion: vibez_engine::clip_insertion::PreparedNoteClipInsertion::new(
                         clip_id,
                         position_beats,
@@ -628,7 +628,7 @@ impl PianoRollState {
                 if let Some((pos, dur, notes, groove_grid)) = sync_data {
                     engine.send(EngineCommand::RemoveNoteClip(track_id, clip_id));
                     engine.send(EngineCommand::AddNoteClip {
-                        track_id: track_id,
+                        track_id,
                         insertion: vibez_engine::clip_insertion::PreparedNoteClipInsertion::new(
                             clip_id,
                             pos,
@@ -701,7 +701,7 @@ impl PianoRollState {
                 {
                     engine.send(EngineCommand::RemoveNoteClip(track_id, clip_id));
                     engine.send(EngineCommand::AddNoteClip {
-                        track_id: track_id,
+                        track_id,
                         insertion: vibez_engine::clip_insertion::PreparedNoteClipInsertion::new(
                             clip_id,
                             pos,

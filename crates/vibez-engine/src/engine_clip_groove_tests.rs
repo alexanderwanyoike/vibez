@@ -113,7 +113,7 @@ fn render_events(
     }
     commands
         .push(EngineCommand::AddNoteClip {
-            track_id: track_id,
+            track_id,
             insertion: crate::clip_insertion::PreparedNoteClipInsertion::new(
                 clip_id,
                 0.0,
@@ -169,7 +169,7 @@ fn midi_start_plays_once_then_returns_to_loop_start() {
         .unwrap();
     commands
         .push(EngineCommand::AddNoteClip {
-            track_id: track_id,
+            track_id,
             insertion: crate::clip_insertion::PreparedNoteClipInsertion::new(
                 clip_id,
                 0.0,
@@ -225,7 +225,7 @@ fn dense_recorded_groove_schedules_each_note_once_per_audio_block() {
         .unwrap();
     commands
         .push(EngineCommand::AddNoteClip {
-            track_id: track_id,
+            track_id,
             insertion: crate::clip_insertion::PreparedNoteClipInsertion::new(
                 clip_id,
                 0.0,
