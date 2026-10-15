@@ -4,7 +4,7 @@ use iced::widget::{button, canvas, column, pick_list, row, text, text_input, too
 use iced::{Color, Element, Length, Theme};
 use vibez_core::id::TrackId;
 
-use crate::domains::device_controls::{display_value, DeviceControlMsg, DeviceControlState};
+use crate::domains::device_controls::{presented_value, DeviceControlMsg, DeviceControlState};
 use crate::message::Message;
 use crate::state::UiEffect;
 use crate::theme as th;
@@ -20,7 +20,63 @@ pub fn parameter<'a>(
     accent: Color,
     knob_size: Option<f32>,
 ) -> Element<'a, Message> {
-    let descriptor = &effect.descriptors[index];
+    let heading =
+        section_label(crate::domains::device_controls::presentation_descriptor(effect, index).name);
+    parameter_with_heading(track, effect, state, index, accent, knob_size, heading)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn parameter_with_heading<'a>(
+    track: TrackId,
+    effect: &'a UiEffect,
+    state: &'a DeviceControlState,
+    index: usize,
+    accent: Color,
+    knob_size: Option<f32>,
+    heading: Element<'a, Message>,
+) -> Element<'a, Message> {
+    let descriptor = &crate::domains::device_controls::presentation_descriptor(effect, index);
+    let value = effect
+        .params
+        .get(index)
+        .copied()
+        .unwrap_or(descriptor.default);
+    let field = value_field(track, effect, state, index, accent);
+    let mut content = column![heading].spacing(3).align_x(iced::Alignment::Center);
+    if let Some(size) = knob_size {
+        let mut knob = EffectKnobWidget::new(
+            track,
+            effect.id,
+            index,
+            value,
+            descriptor.min,
+            descriptor.max,
+            descriptor.default,
+            accent,
+        );
+        if descriptor.unit == "Hz" {
+            knob.target = crate::widgets::effect_knob::KnobTarget::LogEffect(effect.id);
+        }
+        content = content.push(canvas(knob).width(size).height(size));
+    }
+    content
+        .push(
+            row![field, text(descriptor.unit).size(8).color(th::text_dim())]
+                .spacing(2)
+                .align_y(iced::Alignment::Center),
+        )
+        .width(Length::Fill)
+        .into()
+}
+
+pub fn value_field<'a>(
+    track: TrackId,
+    effect: &'a UiEffect,
+    state: &'a DeviceControlState,
+    index: usize,
+    accent: Color,
+) -> Element<'a, Message> {
+    let descriptor = &crate::domains::device_controls::presentation_descriptor(effect, index);
     let value = effect
         .params
         .get(index)
@@ -30,7 +86,7 @@ pub fn parameter<'a>(
         .entries
         .get(&index)
         .cloned()
-        .unwrap_or_else(|| display_value(value, descriptor));
+        .unwrap_or_else(|| presented_value(effect, index, value));
     let effect_id = effect.id;
     let submit = Message::DeviceControl(DeviceControlMsg::Submit(track, effect_id, index));
     let invalid = state.errors.contains(&index);
@@ -61,45 +117,19 @@ pub fn parameter<'a>(
             value: th::text(),
             selection: th::with_alpha(accent, 0.3),
         });
-    let field = tooltip(
+    tooltip(
         on_blur(input, state.entries.contains_key(&index), submit),
         text(format!(
             "{}: {} to {} {}. Enter applies.",
             descriptor.name,
-            display_value(descriptor.min, descriptor),
-            display_value(descriptor.max, descriptor),
+            presented_value(effect, index, descriptor.min),
+            presented_value(effect, index, descriptor.max),
             descriptor.unit
         ))
         .size(9),
         tooltip::Position::Top,
-    );
-    let mut content = column![section_label(descriptor.name)]
-        .spacing(3)
-        .align_x(iced::Alignment::Center);
-    if let Some(size) = knob_size {
-        let mut knob = EffectKnobWidget::new(
-            track,
-            effect.id,
-            index,
-            value,
-            descriptor.min,
-            descriptor.max,
-            descriptor.default,
-            accent,
-        );
-        if descriptor.unit == "Hz" {
-            knob.target = crate::widgets::effect_knob::KnobTarget::LogEffect(effect.id);
-        }
-        content = content.push(canvas(knob).width(size).height(size));
-    }
-    content
-        .push(
-            row![field, text(descriptor.unit).size(8).color(th::text_dim())]
-                .spacing(2)
-                .align_y(iced::Alignment::Center),
-        )
-        .width(Length::Fill)
-        .into()
+    )
+    .into()
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -172,7 +202,16 @@ pub fn selector<'a>(
 }
 
 pub fn disclosure<'a>(track: TrackId, effect: &UiEffect, open: bool) -> Element<'a, Message> {
-    button(text(if open { "▾ Advanced" } else { "▸ Advanced" }).size(10))
+    disclosure_with_label(track, effect, open, "Advanced")
+}
+
+pub fn disclosure_with_label<'a>(
+    track: TrackId,
+    effect: &UiEffect,
+    open: bool,
+    label: &str,
+) -> Element<'a, Message> {
+    button(text(format!("{} {label}", if open { "▾" } else { "▸" })).size(10))
         .on_press(Message::DeviceControl(DeviceControlMsg::ToggleAdvanced(
             track, effect.id,
         )))

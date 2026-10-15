@@ -4,6 +4,14 @@ use std::collections::{BTreeMap, BTreeSet};
 use vibez_core::effect::ParamDescriptor;
 use vibez_core::id::{EffectId, TrackId};
 
+pub fn presentation_descriptor(effect: &crate::state::UiEffect, index: usize) -> ParamDescriptor {
+    effect.descriptors[index]
+}
+
+pub fn presented_value(effect: &crate::state::UiEffect, index: usize, value: f32) -> String {
+    display_value(value, &presentation_descriptor(effect, index))
+}
+
 #[derive(Debug, Clone)]
 pub enum DeviceControlMsg {
     ToggleAdvanced(TrackId, EffectId),
@@ -40,6 +48,18 @@ impl DeviceControlState {
         descriptors: &[ParamDescriptor],
         values: &[f32],
     ) -> Option<(usize, f32)> {
+        self.update_with_parser(message, descriptors, values, |index, text| {
+            parse_value(text, descriptors.get(index)?)
+        })
+    }
+
+    pub fn update_with_parser(
+        &mut self,
+        message: DeviceControlMsg,
+        descriptors: &[ParamDescriptor],
+        values: &[f32],
+        mut parse: impl FnMut(usize, &str) -> Option<f32>,
+    ) -> Option<(usize, f32)> {
         match message {
             DeviceControlMsg::ToggleAdvanced(..) => self.advanced = !self.advanced,
             DeviceControlMsg::Input(_, _, index, text) if index < descriptors.len() => {
@@ -48,10 +68,7 @@ impl DeviceControlState {
             }
             DeviceControlMsg::Submit(_, _, index) => {
                 let descriptor = descriptors.get(index)?;
-                let Some(value) = self
-                    .entries
-                    .get(&index)
-                    .and_then(|text| parse_value(text, descriptor))
+                let Some(value) = self.entries.get(&index).and_then(|text| parse(index, text))
                 else {
                     self.errors.insert(index);
                     return None;
