@@ -1110,3 +1110,7 @@ mod resumed_section_rejection_tests;
 #[cfg(test)]
 #[path = "engine_retained_count_in_tests.rs"]
 mod retained_count_in_tests;
+
+#[cfg(test)]
+#[path = "engine_natural_playback_stop_pressure_tests.rs"]
+mod natural_playback_stop_pressure_tests;
