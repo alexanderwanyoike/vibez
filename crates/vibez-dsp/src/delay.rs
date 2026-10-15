@@ -175,21 +175,17 @@ impl AudioEffect for DelayEffect {
         for frame in 0..frames {
             let read_pos = (self.write_pos + buf_len - whole) % buf_len;
             let delayed_l = read(&self.buffer_l, read_pos);
-            let delayed_r = if ch >= 2 {
-                read(&self.buffer_r, read_pos)
-            } else {
-                0.0
-            };
+            let delayed_r = read(&self.buffer_r, read_pos);
 
             // Left channel
             let dry_l = buffer[frame * ch];
             self.buffer_l[self.write_pos] = dry_l + delayed_l * self.feedback;
             buffer[frame * ch] = dry_l * (1.0 - self.mix) + delayed_l * self.mix;
 
-            // Right channel (or duplicate mono)
+            // Missing mono input is zero, but its feedback continues while unobserved.
+            let dry_r = if ch >= 2 { buffer[frame * ch + 1] } else { 0.0 };
+            self.buffer_r[self.write_pos] = dry_r + delayed_r * self.feedback;
             if ch >= 2 {
-                let dry_r = buffer[frame * ch + 1];
-                self.buffer_r[self.write_pos] = dry_r + delayed_r * self.feedback;
                 buffer[frame * ch + 1] = dry_r * (1.0 - self.mix) + delayed_r * self.mix;
             }
 
