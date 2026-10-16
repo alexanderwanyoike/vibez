@@ -17,6 +17,11 @@ pub enum ParamFormat {
     /// shaper.
     PreGain,
     Hertz,
+    /// A whole divider of the device's sample rate, shown as the rate it
+    /// leaves, or as a fraction when the sample rate is not known.
+    RateDivider {
+        host_rate: Option<u32>,
+    },
     Milliseconds,
     /// Stored in seconds, shown in milliseconds below one second.
     Seconds,
@@ -38,10 +43,7 @@ impl ParamFormat {
             "s" => Self::Seconds,
             ":1" => Self::Ratio,
             "" | "%" if descriptor.min == 0.0 && descriptor.max == 1.0 => Self::Percent,
-            "deg" => Self::Number {
-                decimals: 0,
-                unit: "deg",
-            },
+            unit @ ("deg" | "bit") => Self::Number { decimals: 0, unit },
             unit => Self::Number { decimals: 2, unit },
         }
     }
@@ -51,6 +53,10 @@ impl ParamFormat {
         match self {
             Self::Amplitude { .. } if value <= 0.0 || !value.is_finite() => "-inf dB".into(),
             Self::Hertz if value >= 1000.0 => format!("{:.1} kHz", value / 1000.0),
+            Self::RateDivider {
+                host_rate: Some(rate),
+            } => Self::Hertz.format(rate as f32 / value.round().max(1.0)),
+            Self::RateDivider { host_rate: None } => format!("1/{}", self.edit_text(value)),
             Self::Amplitude { .. }
             | Self::Decibels
             | Self::PreGain
@@ -79,6 +85,10 @@ impl ParamFormat {
             Self::Hertz if value >= 1000.0 => format!("{:.2}k", value / 1000.0),
             Self::Hertz if value < 10.0 => format!("{value:.2}"),
             Self::Hertz => format!("{value:.0}"),
+            Self::RateDivider {
+                host_rate: Some(rate),
+            } => Self::Hertz.edit_text(rate as f32 / value.round().max(1.0)),
+            Self::RateDivider { host_rate: None } => format!("{:.0}", value.round()),
             Self::Milliseconds => format!("{value:.1}"),
             Self::Seconds if value < 1.0 => format!("{:.0}", value * 1000.0),
             Self::Seconds => format!("{value:.2}"),
@@ -128,6 +138,20 @@ impl ParamFormat {
                         .clamp(min, max)
                 });
             }
+            Self::RateDivider {
+                host_rate: Some(rate),
+            } => {
+                let hertz = if suffix.starts_with('k') {
+                    number * 1000.0
+                } else {
+                    number
+                };
+                if hertz <= 0.0 {
+                    return None;
+                }
+                (rate as f32 / hertz).round()
+            }
+            Self::RateDivider { host_rate: None } => number.round(),
             Self::Hertz if suffix.starts_with('k') => number * 1000.0,
             Self::Seconds if suffix == "s" => number,
             Self::Seconds => number / 1000.0,
@@ -146,13 +170,16 @@ pub fn param_format(
     effect_type: EffectType,
     index: usize,
     descriptor: &ParamDescriptor,
-    _host_rate: Option<u32>,
+    host_rate: Option<u32>,
 ) -> ParamFormat {
     match (effect_type, index) {
         (EffectType::Gain, vibez_dsp::gain::param::GAIN) => ParamFormat::Amplitude {
             floor_db: crate::domains::gain::MIN_GAIN_DB,
         },
         (EffectType::Drive, vibez_dsp::drive::param::AMOUNT) => ParamFormat::PreGain,
+        (EffectType::Bitcrush, vibez_dsp::bitcrush::param::SR_REDUCE) => {
+            ParamFormat::RateDivider { host_rate }
+        }
         (EffectType::Drive, vibez_dsp::drive::param::OUTPUT) => ParamFormat::Amplitude {
             floor_db: crate::domains::gain::MIN_GAIN_DB,
         },
