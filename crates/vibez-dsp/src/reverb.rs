@@ -35,6 +35,17 @@ const FIXED_GAIN: f32 = 0.015;
 const SCALE_WET: f32 = 3.0;
 const STEREO_WIDTH: f32 = 1.0;
 
+/// Zero for a value too small to hear, so a fading tail stops instead of
+/// crawling through denormal numbers, which are many times slower to
+/// compute with. Freeverb's own `undenormalise` does the same.
+fn flush(value: f32) -> f32 {
+    if value.abs() < 1e-15 {
+        0.0
+    } else {
+        value
+    }
+}
+
 struct CombFilter {
     buffer: Vec<f32>,
     pos: usize,
@@ -58,8 +69,8 @@ impl CombFilter {
 
     fn process(&mut self, input: f32) -> f32 {
         let output = self.buffer[self.pos];
-        self.filter_store = output * self.damp2 + self.filter_store * self.damp1;
-        self.buffer[self.pos] = input + self.filter_store * self.feedback;
+        self.filter_store = flush(output * self.damp2 + self.filter_store * self.damp1);
+        self.buffer[self.pos] = flush(input + self.filter_store * self.feedback);
         self.pos = (self.pos + 1) % self.buffer.len();
         output
     }
@@ -87,7 +98,7 @@ impl AllPassFilter {
     fn process(&mut self, input: f32) -> f32 {
         let buffered = self.buffer[self.pos];
         let output = -input + buffered;
-        self.buffer[self.pos] = input + buffered * 0.5;
+        self.buffer[self.pos] = flush(input + buffered * 0.5);
         self.pos = (self.pos + 1) % self.buffer.len();
         output
     }
