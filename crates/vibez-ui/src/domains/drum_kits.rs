@@ -103,7 +103,7 @@ fn pads_909() -> Vec<KitPad> {
         pad(4, "Snare Tight", "snare.wav", &tuned(2.0)),
         pad(5, "Tom Low", "tom-low.wav", &[]),
         choked(pad(6, "Hat Closed", "hat-closed.wav", &[])),
-        pad(7, "Tom Low High", "tom-low.wav", &tuned(3.0)),
+        pad(7, "Tom Low 2", "tom-low.wav", &tuned(3.0)),
         choked(pad(
             8,
             "Hat Pedal",
@@ -112,10 +112,10 @@ fn pads_909() -> Vec<KitPad> {
         )),
         pad(9, "Tom Mid", "tom-low.wav", &tuned(5.0)),
         choked(pad(10, "Hat Open", "hat-open.wav", &[])),
-        pad(11, "Tom Mid High", "tom-low.wav", &tuned(7.0)),
+        pad(11, "Tom Mid 2", "tom-low.wav", &tuned(7.0)),
         pad(12, "Tom High", "tom-high.wav", &[]),
         pad(13, "Crash", "crash.wav", &[]),
-        pad(14, "Tom High High", "tom-high.wav", &tuned(3.0)),
+        pad(14, "Tom High 2", "tom-high.wav", &tuned(3.0)),
         pad(15, "Ride", "ride.wav", &[]),
     ]
 }
