@@ -341,6 +341,26 @@ mod tests {
     }
 
     #[test]
+    fn the_bitcrush_reads_whole_bits_and_its_rate_as_a_frequency() {
+        use vibez_dsp::bitcrush::{param, BITCRUSH_PARAMS};
+        let format = |index: usize, host_rate| {
+            param_format(
+                EffectType::Bitcrush,
+                index,
+                &BITCRUSH_PARAMS[index],
+                host_rate,
+            )
+        };
+        assert_eq!(format(param::BITS, None).format(12.0), "12 bit");
+        let rate = format(param::SR_REDUCE, Some(44_100));
+        assert_eq!(rate.format(4.0), "11.0 kHz");
+        assert_eq!(rate.parse("11k", 1.0, 32.0), Some(4.0));
+        assert_eq!(rate.parse("48 kHz", 1.0, 32.0), Some(1.0));
+        assert_eq!(rate.parse("1k", 1.0, 32.0), None);
+        assert_eq!(format(param::SR_REDUCE, None).format(4.0), "1/4");
+    }
+
+    #[test]
     fn typed_text_accepts_units_and_shorthand() {
         assert_eq!(
             ParamFormat::Hertz.parse("1.2k", 20.0, 20_000.0),
@@ -395,7 +415,7 @@ mod tests {
         assert_eq!(
             ParamFormat::for_descriptor(&descriptor(1.0, 16.0, "bit")),
             ParamFormat::Number {
-                decimals: 2,
+                decimals: 0,
                 unit: "bit"
             }
         );
