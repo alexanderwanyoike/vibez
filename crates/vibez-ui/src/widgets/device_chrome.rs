@@ -259,15 +259,15 @@ mod tests {
     };
 
     #[test]
-    fn a_crowded_chain_keeps_each_device_at_medium_and_scrolls() {
+    fn a_crowded_chain_keeps_each_device_expanded_and_scrolls() {
         assert_eq!(
             WIDTHS.chain_width(120.0, 1600.0),
-            520.0,
-            "never squeezed to compact"
+            760.0,
+            "never squeezed below expanded"
         );
         assert_eq!(
-            WIDTHS.chain_width(700.0, 1600.0),
-            700.0,
+            WIDTHS.chain_width(900.0, 1600.0),
+            900.0,
             "takes a larger share"
         );
         assert_eq!(
@@ -275,6 +275,11 @@ mod tests {
             1000.0,
             "up to its maximum"
         );
+    }
+
+    #[test]
+    fn a_section_too_narrow_for_expanded_uses_medium() {
+        assert_eq!(WIDTHS.chain_width(120.0, 600.0), 520.0);
     }
 
     #[test]
