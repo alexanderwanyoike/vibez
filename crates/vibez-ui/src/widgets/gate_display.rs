@@ -308,6 +308,44 @@ mod tests {
     use super::*;
 
     #[test]
+    fn pressing_the_threshold_line_and_dragging_sets_the_threshold() {
+        use canvas::Program;
+        let params: Vec<f32> = GATE_PARAMS.iter().map(|d| d.default).collect();
+        let readings = ReadingHistory::default();
+        let history = GateHistory {
+            track_id: TrackId::new(),
+            effect_id: EffectId::new(),
+            params: &params,
+            readings: &readings,
+            now: Instant::now(),
+            accent: Color::WHITE,
+        };
+        let bounds = Rectangle::new(Point::new(300.0, 780.0), Size::new(440.0, 100.0));
+        let plot = GateHistory::plot(bounds.size());
+        let line = Point::new(
+            bounds.x + 200.0,
+            bounds.y + GateHistory::y(plot, params[param::THRESHOLD]),
+        );
+        let mut state = HistoryState::default();
+        let (status, _) = history.update(
+            &mut state,
+            canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)),
+            bounds,
+            mouse::Cursor::Available(line),
+        );
+        assert_eq!(status, canvas::event::Status::Captured);
+        let (_, message) = history.update(
+            &mut state,
+            canvas::Event::Mouse(mouse::Event::CursorMoved {
+                position: Point::new(line.x, line.y - 20.0),
+            }),
+            bounds,
+            mouse::Cursor::Available(Point::new(line.x, line.y - 20.0)),
+        );
+        assert!(message.is_some());
+    }
+
+    #[test]
     fn dragging_maps_the_plot_height_to_the_threshold_and_clamps() {
         let plot = GateHistory::plot(Size::new(400.0, 200.0));
         assert_eq!(GateHistory::db_at(plot, plot.y), 0.0);
