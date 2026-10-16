@@ -140,10 +140,13 @@ impl ParamFormat {
 
 /// The format a built-in effect parameter uses. Devices whose stored value
 /// differs from how it reads add their parameter here.
+/// `host_rate` is the sample rate the device runs at, for values that read
+/// as a share of it.
 pub fn param_format(
     effect_type: EffectType,
     index: usize,
     descriptor: &ParamDescriptor,
+    _host_rate: Option<u32>,
 ) -> ParamFormat {
     match (effect_type, index) {
         (EffectType::Gain, vibez_dsp::gain::param::GAIN) => ParamFormat::Amplitude {
@@ -311,6 +314,7 @@ mod tests {
             EffectType::Drive,
             index,
             &vibez_dsp::drive::DRIVE_PARAMS[index],
+            None,
         );
         assert_eq!(format.format(1.0), "0.0 dB");
         assert_eq!(format.format(0.0), "-inf dB");
@@ -325,6 +329,7 @@ mod tests {
             EffectType::Drive,
             index,
             &vibez_dsp::drive::DRIVE_PARAMS[index],
+            None,
         );
         assert_eq!(format.format(0.0), "0.0 dB");
         assert_eq!(format.format(1.0), "29.5 dB");
@@ -398,7 +403,8 @@ mod tests {
             param_format(
                 EffectType::Gain,
                 vibez_dsp::gain::param::GAIN,
-                &descriptor(0.0, 2.0, "")
+                &descriptor(0.0, 2.0, ""),
+                None,
             ),
             ParamFormat::Amplitude { floor_db: -60.0 }
         );
@@ -411,7 +417,7 @@ mod tests {
         let descriptors = vibez_dsp::gain::GainEffect::new().param_descriptors();
         let read = |index: usize, text: &str| {
             let descriptor = &descriptors[index];
-            param_format(EffectType::Gain, index, descriptor).parse(
+            param_format(EffectType::Gain, index, descriptor, None).parse(
                 text,
                 descriptor.min,
                 descriptor.max,

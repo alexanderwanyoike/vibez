@@ -47,6 +47,7 @@ pub struct Param<'a> {
     pub entry: Option<&'a ValueEntry>,
     target: Option<KnobTarget>,
     label: Option<&'a str>,
+    host_rate: Option<u32>,
 }
 
 impl<'a> Param<'a> {
@@ -65,7 +66,15 @@ impl<'a> Param<'a> {
             entry,
             target: None,
             label: None,
+            host_rate: None,
         }
+    }
+
+    /// The sample rate the device runs at, for values that read as a
+    /// share of it.
+    pub fn host_rate(mut self, rate: u32) -> Self {
+        self.host_rate = Some(rate);
+        self
     }
 
     /// Replaces the knob's linear travel, as Gain does for its dB curve.
@@ -124,7 +133,12 @@ impl<'a> Param<'a> {
         let Some(descriptor) = self.descriptor() else {
             return text("").into();
         };
-        let format = param_format(self.effect.effect_type, self.index, descriptor);
+        let format = param_format(
+            self.effect.effect_type,
+            self.index,
+            descriptor,
+            self.host_rate,
+        );
         let accent = self.accent;
         if let Some(entry) = self
             .entry
