@@ -301,6 +301,10 @@ pub struct DrumPadState {
     pub fine_tune: f32,
     pub one_shot: bool,
     pub choke_group: Option<u8>,
+    /// The pad's Sampler controls, by index. Pads saved before each pad was
+    /// a Sampler have none, and play from the fields above instead.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub params: Vec<f32>,
 }
 
 impl Default for DrumPadState {
@@ -318,6 +322,7 @@ impl Default for DrumPadState {
             fine_tune: 0.0,
             one_shot: true,
             choke_group: None,
+            params: Vec::new(),
         }
     }
 }
@@ -905,5 +910,21 @@ mod tests {
 
         assert_eq!(pad.fade_in_ms, DRUM_PAD_DEFAULT_FADE_MS);
         assert_eq!(pad.fade_out_ms, DRUM_PAD_DEFAULT_FADE_MS);
+        assert!(pad.params.is_empty());
+    }
+
+    #[test]
+    fn drum_pad_sampler_controls_round_trip() {
+        let pad = DrumPadState {
+            params: vec![60.0, 0.003],
+            ..DrumPadState::default()
+        };
+
+        let json = serde_json::to_string(&pad).unwrap();
+
+        assert_eq!(serde_json::from_str::<DrumPadState>(&json).unwrap(), pad);
+        assert!(!serde_json::to_string(&DrumPadState::default())
+            .unwrap()
+            .contains("params"));
     }
 }
