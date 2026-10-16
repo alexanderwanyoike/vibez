@@ -89,6 +89,7 @@ impl TimelineEditorState {
                 fine_tune: 0.0,
                 one_shot: true,
                 choke_group: None,
+                params: Vec::new(),
             });
             notes.push(MidiNote {
                 pitch: drum_rack_pad_pitch(index).expect("slice count is capped to the rack"),

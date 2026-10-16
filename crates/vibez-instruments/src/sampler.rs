@@ -18,13 +18,15 @@ use crate::synth_params::{lfo_target, LFO_CUTOFF_OCTAVES, LFO_PITCH_SEMITONES};
 use crate::Instrument;
 
 const MAX_VOICES: usize = 8;
+/// The note a struck voice holds, which a pad's note-off releases.
+pub const PAD_NOTE: u8 = 60;
 /// A sample that stops before its loop or its own end fades out over this
 /// long, so stopping mid-sound does not click.
 const END_FADE_SECONDS: f32 = 0.002;
 /// How fast continuous levels follow an edit, so a moved knob does not
 /// click or zip.
 const SMOOTHING_SECONDS: f32 = 0.005;
-const SMOOTHED: [usize; 3] = [param::VOLUME, param::CUTOFF, param::LFO_AMOUNT];
+const SMOOTHED: [usize; 4] = [param::VOLUME, param::CUTOFF, param::LFO_AMOUNT, param::PAN];
 
 /// The original names, which the older tests use.
 #[cfg(test)]
@@ -40,6 +42,10 @@ const P_LOOP: usize = param::LOOP;
 #[cfg(test)]
 const P_ONE_SHOT: usize = param::ONE_SHOT;
 
+pub fn default_params() -> [f32; param::COUNT] {
+    std::array::from_fn(|index| SAMPLER_PARAMS[index].default)
+}
+
 /// Polyphonic sample-playback instrument.
 pub struct Sampler {
     voices: [SamplerVoice; MAX_VOICES],
@@ -52,12 +58,14 @@ pub struct Sampler {
     amp_times: Times,
     filter_times: Times,
     smoothing: f32,
-    started: bool,
     age: u64,
     last_pitch: Option<f32>,
     lfo_phase: f64,
     filter_for: (f32, f32),
     coefficients: Coefficients,
+    /// Worked out on each edit, not each frame, as the engine renders one
+    /// frame at a time.
+    region: Option<Region>,
 }
 
 impl Sampler {
@@ -67,8 +75,7 @@ impl Sampler {
         } else {
             48_000.0
         };
-        let params: [f32; param::COUNT] =
-            std::array::from_fn(|index| SAMPLER_PARAMS[index].default);
+        let params = default_params();
         let mut sampler = Self {
             voices: [SamplerVoice::default(); MAX_VOICES],
             sample_rate,
@@ -79,12 +86,12 @@ impl Sampler {
             amp_times: Times::new(0.0, 0.0, 0.0, 0.0, sample_rate),
             filter_times: Times::new(0.0, 0.0, 0.0, 0.0, sample_rate),
             smoothing: 1.0 - (-1.0 / (SMOOTHING_SECONDS * sample_rate)).exp(),
-            started: false,
             age: 0,
             last_pitch: None,
             lfo_phase: 0.0,
             filter_for: (f32::NAN, f32::NAN),
             coefficients: Coefficients::new(sample_rate, 1_000.0, 1.0),
+            region: None,
         };
         sampler.retime();
         sampler
@@ -114,7 +121,7 @@ impl Sampler {
 
     /// The part of the sample a note plays, from the trim, loop and
     /// direction controls.
-    fn region(&self) -> Option<Region> {
+    fn find_region(&self) -> Option<Region> {
         let sample = self.sample.as_ref()?;
         let frames = sample.num_frames() as f64;
         let at = |index: usize| f64::from(self.params[index]) * frames;
@@ -154,6 +161,66 @@ impl Sampler {
         })
     }
 
+    /// Starts a voice `semitones` from the root, on a free voice, else the
+    /// oldest released one, else the oldest; `take_over` first reuses a
+    /// voice already playing `pitch`.
+    fn start(&mut self, pitch: u8, semitones: f32, velocity: u8, take_over: bool) {
+        let Some(region) = self.region else {
+            return;
+        };
+        let p = &self.params;
+        let amount = p[param::VELOCITY_AMOUNT];
+        let gain = 1.0 - amount + amount * f32::from(velocity) / 127.0;
+        let glide = (p[param::GLIDE] / 1000.0 * self.sample_rate).round() as u32;
+        let one_shot = p[param::ONE_SHOT] >= 0.5;
+        let from = self.last_pitch;
+        self.last_pitch = Some(semitones);
+        self.age += 1;
+        let voices = &self.voices;
+        let oldest = |candidates: &mut dyn Iterator<Item = usize>| {
+            candidates.min_by_key(|&index| voices[index].age)
+        };
+        let all = 0..MAX_VOICES;
+        let index = all
+            .clone()
+            .find(|&index| take_over && voices[index].active() && voices[index].pitch == pitch)
+            .or_else(|| all.clone().find(|&index| !voices[index].active()))
+            .or_else(|| oldest(&mut all.clone().filter(|&index| voices[index].released())))
+            .or_else(|| oldest(&mut all.clone()))
+            .unwrap_or(0);
+        self.voices[index].start(
+            pitch, semitones, gain, self.age, from, glide, one_shot, region,
+        );
+    }
+
+    /// Plays the sample at its root on a voice of its own, as a drum pad
+    /// is hit: repeated hits ring together rather than cutting each other.
+    pub fn strike(&mut self, velocity: u8) {
+        if velocity > 0 {
+            self.start(PAD_NOTE, 0.0, velocity, false);
+        }
+    }
+
+    /// Releases every voice, one-shots too, over the release time.
+    pub fn choke(&mut self) {
+        for voice in &mut self.voices {
+            voice.release();
+        }
+    }
+
+    pub fn unload(&mut self) {
+        self.sample = None;
+        self.sample_name = None;
+        self.region = None;
+        self.reset();
+    }
+
+    /// Whether any voice is playing; a silent sampler has nothing to
+    /// smooth, so edits land at once.
+    pub fn sounding(&self) -> bool {
+        self.voices.iter().any(SamplerVoice::active)
+    }
+
     fn in_zone(&self, pitch: u8, velocity: u8) -> bool {
         let (pitch, velocity) = (f32::from(pitch), f32::from(velocity));
         (self.params[param::KEY_LOW]..=self.params[param::KEY_HIGH]).contains(&pitch)
@@ -191,10 +258,11 @@ impl Instrument for Sampler {
         }
         .clamp(descriptor.min, descriptor.max);
         self.params[index] = value;
-        if !self.started || !SMOOTHED.contains(&index) {
+        if !SMOOTHED.contains(&index) || !self.sounding() {
             self.current[index] = value;
         }
         self.retime();
+        self.region = self.find_region();
         true
     }
 
@@ -210,34 +278,8 @@ impl Instrument for Sampler {
         if !self.in_zone(pitch, velocity) {
             return;
         }
-        let Some(region) = self.region() else {
-            return;
-        };
-        let p = &self.params;
-        let semitones = f32::from(pitch) - p[param::ROOT_NOTE];
-        let amount = p[param::VELOCITY_AMOUNT];
-        let gain = 1.0 - amount + amount * f32::from(velocity) / 127.0;
-        let glide = (p[param::GLIDE] / 1000.0 * self.sample_rate).round() as u32;
-        let one_shot = p[param::ONE_SHOT] >= 0.5;
-        let from = self.last_pitch;
-        self.last_pitch = Some(semitones);
-        self.age += 1;
-        let voices = &self.voices;
-        let oldest = |candidates: &mut dyn Iterator<Item = usize>| {
-            candidates.min_by_key(|&index| voices[index].age)
-        };
-        let all = 0..MAX_VOICES;
-        // A repeated note takes over its own voice rather than stacking.
-        let index = all
-            .clone()
-            .find(|&index| voices[index].active() && voices[index].pitch == pitch)
-            .or_else(|| all.clone().find(|&index| !voices[index].active()))
-            .or_else(|| oldest(&mut all.clone().filter(|&index| voices[index].released())))
-            .or_else(|| oldest(&mut all.clone()))
-            .unwrap_or(0);
-        self.voices[index].start(
-            pitch, semitones, gain, self.age, from, glide, one_shot, region,
-        );
+        let semitones = f32::from(pitch) - self.params[param::ROOT_NOTE];
+        self.start(pitch, semitones, velocity, true);
     }
 
     fn note_off(&mut self, pitch: u8) {
@@ -249,18 +291,27 @@ impl Instrument for Sampler {
     }
 
     fn render(&mut self, buffer: &mut [f32], channels: usize) {
-        let Some(audio) = self.sample.as_ref().map(Arc::clone) else {
-            return;
-        };
-        let Some(region) = self.region() else {
+        let Some(region) = self.region else {
             return;
         };
         if channels == 0 {
             return;
         }
+        if !self.sounding() {
+            self.current = self.params;
+            let frames = (buffer.len() / channels) as f64;
+            self.lfo_phase = (self.lfo_phase
+                + frames * f64::from(self.params[param::LFO_RATE]) / f64::from(self.sample_rate))
+            .fract();
+            return;
+        }
+        // Moved out while the voices borrow `self`, and back after: cloning
+        // the Arc would cost two atomics every frame on every pad of a rack.
+        let Some(audio) = self.sample.take() else {
+            return;
+        };
         let base_speed = f64::from(audio.sample_rate.max(1)) / f64::from(self.sample_rate);
         for out in buffer.chunks_exact_mut(channels) {
-            self.started = true;
             for index in SMOOTHED {
                 self.current[index] += (self.params[index] - self.current[index]) * self.smoothing;
             }
@@ -292,6 +343,9 @@ impl Instrument for Sampler {
                         0.0
                     },
                 end_fade_frames: f64::from(END_FADE_SECONDS * self.sample_rate),
+                one_shot_fade_frames: f64::from(
+                    END_FADE_SECONDS.max(p[param::RELEASE]) * self.sample_rate,
+                ),
                 filter_type: self.choice(param::FILTER_TYPE),
                 cutoff: c[param::CUTOFF],
                 resonance: p[param::RESONANCE],
@@ -320,11 +374,15 @@ impl Instrument for Sampler {
                 1.0
             };
             let gain = c[param::VOLUME] * tremolo;
-            out[0] += left * gain;
+            // A balance, not equal power, so a centred sampler keeps its
+            // level.
+            let pan = c[param::PAN];
+            out[0] += left * gain * (1.0 - pan).min(1.0);
             if let Some(second) = out.get_mut(1) {
-                *second += right * gain;
+                *second += right * gain * (1.0 + pan).min(1.0);
             }
         }
+        self.sample = Some(audio);
     }
 
     fn reset(&mut self) {
@@ -337,6 +395,7 @@ impl Instrument for Sampler {
     fn load_sample(&mut self, sample: Arc<DecodedAudio>, name: String) {
         self.sample = Some(sample);
         self.sample_name = Some(name);
+        self.region = self.find_region();
         self.reset();
     }
 

@@ -34,6 +34,9 @@ pub struct Frame<'a> {
     /// Semitones from the root the tuning and LFO add.
     pub offset_semitones: f32,
     pub end_fade_frames: f64,
+    /// Host frames a one-shot fades out over before its end: its release,
+    /// which note-offs never reach.
+    pub one_shot_fade_frames: f64,
     pub filter_type: usize,
     pub cutoff: f32,
     pub resonance: f32,
@@ -209,7 +212,12 @@ impl SamplerVoice {
             } else {
                 region.end - self.position
             } / speed;
-            gain *= (left / frame.end_fade_frames).clamp(0.0, 1.0) as f32;
+            let fade = if self.one_shot {
+                frame.one_shot_fade_frames
+            } else {
+                frame.end_fade_frames
+            };
+            gain *= (left / fade).clamp(0.0, 1.0) as f32;
         }
         let mut out = [self.source(frame, 0) * gain, self.source(frame, 1) * gain];
         if frame.filter_type != filter_type::OFF {

@@ -250,3 +250,47 @@ fn bad_values_are_refused_and_extremes_stay_finite() {
     }
     assert!(render(&mut sampler, 9_600).iter().all(|s| s.is_finite()));
 }
+
+#[test]
+fn pan_moves_the_sound_between_the_sides_and_centre_is_unchanged() {
+    let sides = |pan: f32| {
+        let mut sampler = sampler(audio(vec![0.5; 4_800]), &[(param::PAN, pan)]);
+        sampler.note_on(60, 127);
+        let mut buffer = vec![0.0; 4_000];
+        sampler.render(&mut buffer, 2);
+        (buffer[3_998], buffer[3_999])
+    };
+    let (left, right) = sides(0.0);
+    assert!((left - 0.4).abs() < 1e-3 && (right - 0.4).abs() < 1e-3);
+    let (left, right) = sides(-1.0);
+    assert!((left - 0.4).abs() < 1e-3 && right.abs() < 1e-6);
+    let (left, right) = sides(0.5);
+    assert!((left - 0.2).abs() < 1e-3 && (right - 0.4).abs() < 1e-3);
+}
+
+#[test]
+fn a_one_shot_fades_out_over_its_release_as_it_reaches_its_end() {
+    let mut sampler = sampler(
+        audio(vec![0.5; 9_600]),
+        &[(param::ONE_SHOT, 1.0), (param::RELEASE, 0.05)],
+    );
+    sampler.note_on(60, 127);
+
+    let out = render(&mut sampler, 9_600);
+
+    assert!((out[9_600 - 3_000] - 0.4).abs() < 1e-3, "faded too early");
+    assert!(out[9_600 - 1_440] < 0.3, "no fade before the end");
+    assert!(out[9_599] < 0.01);
+}
+
+#[test]
+fn an_edit_made_while_silent_holds_from_the_next_note_on() {
+    let mut sampler = sampler(audio(vec![0.5; 4_800]), &[]);
+    render(&mut sampler, 100);
+    sampler.set_param(param::VOLUME, 0.2);
+    sampler.note_on(60, 127);
+
+    let out = render(&mut sampler, 100);
+
+    assert!((out[60] - 0.1).abs() < 1e-3, "{}", out[60]);
+}

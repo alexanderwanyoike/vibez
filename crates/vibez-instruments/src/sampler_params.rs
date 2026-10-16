@@ -41,7 +41,8 @@ pub mod param {
     pub const LFO_TARGET: usize = 31;
     pub const LFO_RATE: usize = 32;
     pub const LFO_AMOUNT: usize = 33;
-    pub const COUNT: usize = 34;
+    pub const PAN: usize = 34;
+    pub const COUNT: usize = 35;
 }
 
 /// The sampler's filter choices: off, then the synth's four types.
@@ -104,6 +105,7 @@ pub static SAMPLER_PARAMS: &[ParamDescriptor] = &[
     descriptor("LFO Target", 0.0, 2.0, 0.0, ""),
     descriptor("LFO Rate", 0.05, 20.0, 1.2, "Hz"),
     descriptor("LFO Amount", 0.0, 1.0, 0.0, ""),
+    descriptor("Pan", -1.0, 1.0, 0.0, ""),
 ];
 
 /// Choices, switches, notes and velocities, stored as whole numbers.

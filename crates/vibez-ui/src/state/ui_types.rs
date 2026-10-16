@@ -281,6 +281,7 @@ pub struct UiDrumPad {
     pub fine_tune: f32,
     pub one_shot: bool,
     pub choke_group: Option<u8>,
+    pub params: Vec<f32>,
 }
 
 impl Default for UiDrumPad {
@@ -299,6 +300,7 @@ impl Default for UiDrumPad {
             fine_tune: 0.0,
             one_shot: true,
             choke_group: None,
+            params: Vec::new(),
         }
     }
 }
@@ -318,6 +320,7 @@ impl UiDrumPad {
             fine_tune: self.fine_tune,
             one_shot: self.one_shot,
             choke_group: self.choke_group,
+            params: self.params.clone(),
         }
     }
 
@@ -339,6 +342,7 @@ impl UiDrumPad {
             fine_tune: state.fine_tune,
             one_shot: state.one_shot,
             choke_group: state.choke_group,
+            params: state.params.clone(),
         }
     }
 }
