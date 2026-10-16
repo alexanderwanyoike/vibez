@@ -34,7 +34,11 @@ impl ParamFormat {
             "ms" => Self::Milliseconds,
             "s" => Self::Seconds,
             ":1" => Self::Ratio,
-            "" if descriptor.min == 0.0 && descriptor.max == 1.0 => Self::Percent,
+            "" | "%" if descriptor.min == 0.0 && descriptor.max == 1.0 => Self::Percent,
+            "deg" => Self::Number {
+                decimals: 0,
+                unit: "deg",
+            },
             unit => Self::Number { decimals: 2, unit },
         }
     }
@@ -62,6 +66,7 @@ impl ParamFormat {
             Self::Amplitude { .. } => format!("{:.1}", vibez_core::level::amplitude_to_db(value)),
             Self::Decibels => format!("{value:.1}"),
             Self::Hertz if value >= 1000.0 => format!("{:.2}k", value / 1000.0),
+            Self::Hertz if value < 10.0 => format!("{value:.2}"),
             Self::Hertz => format!("{value:.0}"),
             Self::Milliseconds => format!("{value:.1}"),
             Self::Seconds if value < 1.0 => format!("{:.0}", value * 1000.0),
