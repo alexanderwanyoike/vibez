@@ -1,4 +1,8 @@
 //! Biquad coefficients and complex response shared by Filter audio and its display.
+//!
+//! Low-pass, high-pass, band-pass (0 dB peak) and notch numerators over shared
+//! poles follow Robert Bristow-Johnson's Audio EQ Cookbook:
+//! <https://www.w3.org/TR/audio-eq-cookbook/>.
 
 use std::f64::consts::TAU;
 
