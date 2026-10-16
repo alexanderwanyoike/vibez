@@ -84,12 +84,8 @@ impl Lane {
                 } else {
                     scaled
                 };
-                let code = match self.configuration.rounding {
-                    1 => scaled.floor(),
-                    2 => scaled.trunc(),
-                    _ => scaled.round(),
-                };
-                self.hold[channel] = (code * f64::from(step)).clamp(-1.0, 1.0) as f32;
+                self.hold[channel] =
+                    super::held(scaled, f64::from(step), self.configuration.rounding);
             }
         }
         acquired

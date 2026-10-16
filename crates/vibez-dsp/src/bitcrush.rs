@@ -99,6 +99,17 @@ pub static BITCRUSH_PARAMS: &[ParamDescriptor] = &[
     },
 ];
 
+/// The sample held for `scaled`, a level counted in quantizer steps of
+/// `step`, rounded the way `rounding` says.
+fn held(scaled: f64, step: f64, rounding: u32) -> f32 {
+    let code = match rounding {
+        1 => scaled.floor(),
+        2 => scaled.trunc(),
+        _ => scaled.round(),
+    };
+    (code * step).clamp(-1.0, 1.0) as f32
+}
+
 /// Lo-fi effect: reduces bit depth and sample rate (sample-and-hold).
 pub struct BitcrushEffect {
     params: [f32; param::COUNT],
