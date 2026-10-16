@@ -437,7 +437,6 @@ impl crate::Instrument for SubtractiveSynth {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::envelope::{Envelope, EnvelopeStage};
 
     #[test]
     fn synth_silence_without_notes() {
@@ -609,52 +608,6 @@ mod tests {
         synth.render_block(&mut buf, 1, &notes, 0.0, 120.0);
         let energy: f32 = buf.iter().map(|s| s * s).sum();
         assert!(energy > 0.01, "Mono output should produce sound");
-    }
-
-    #[test]
-    fn envelope_adsr_stages() {
-        let mut env = Envelope::new(1000.0); // 1kHz for easy math
-        env.attack = 0.01; // 10 samples
-        env.decay = 0.01;
-        env.sustain = 0.5;
-        env.release = 0.01;
-
-        assert_eq!(env.stage, EnvelopeStage::Idle);
-        assert!(!env.is_active());
-
-        env.trigger();
-        assert_eq!(env.stage, EnvelopeStage::Attack);
-        assert!(env.is_active());
-
-        // Run through attack (10 samples at rate 0.1/sample)
-        for _ in 0..10 {
-            env.tick();
-        }
-        // Should have reached peak
-        assert!(
-            env.level >= 0.9,
-            "After attack, level should be near 1.0, got {}",
-            env.level
-        );
-
-        // Run through decay to sustain
-        for _ in 0..30 {
-            env.tick();
-        }
-        assert!(
-            (env.level - 0.5).abs() < 0.1,
-            "After decay, level should be near sustain (0.5), got {}",
-            env.level
-        );
-
-        env.release();
-        assert_eq!(env.stage, EnvelopeStage::Release);
-
-        // Run through release
-        for _ in 0..100 {
-            env.tick();
-        }
-        assert_eq!(env.stage, EnvelopeStage::Idle);
     }
 
     #[test]

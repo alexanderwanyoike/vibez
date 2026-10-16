@@ -1,10 +1,14 @@
+//! The sampler: one loaded sample played across the keyboard by changing
+//! its speed, through an ADSR, eight voices, each new note taking a free
+//! voice or else the oldest.
+
 use std::sync::Arc;
 
 use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::effect::ParamDescriptor;
 use vibez_core::midi::InstrumentKind;
 
-use crate::envelope::{Envelope, EnvelopeStage};
+use crate::synth_envelope::{Envelope, Times};
 use crate::Instrument;
 
 /// Sampler parameter descriptors.
@@ -82,6 +86,9 @@ pub static SAMPLER_PARAMS: &[ParamDescriptor] = &[
 ];
 
 const MAX_VOICES: usize = 8;
+/// A sample that stops before its loop or its own end fades out over this
+/// long, so stopping mid-sound does not click.
+const END_FADE_SECONDS: f64 = 0.002;
 
 /// Parameter indices for the sampler.
 const P_ROOT_NOTE: usize = 0;
@@ -94,93 +101,74 @@ const P_END: usize = 6;
 const P_LOOP: usize = 7;
 const P_ONE_SHOT: usize = 8;
 const P_VOLUME: usize = 9;
+const COUNT: usize = 10;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, Default)]
 struct SamplerVoice {
-    active: bool,
     pitch: u8,
+    /// The note count when this voice started; smallest is oldest.
+    age: u64,
     velocity: f32,
     position: f64,
+    /// Source frames a host frame, for the note and the file's own rate.
     speed: f64,
     envelope: Envelope,
     one_shot: bool,
 }
 
 impl SamplerVoice {
-    fn new(sample_rate: f32) -> Self {
-        Self {
-            active: false,
-            pitch: 0,
-            velocity: 0.0,
-            position: 0.0,
-            speed: 1.0,
-            envelope: Envelope::new(sample_rate),
-            one_shot: false,
-        }
+    fn active(&self) -> bool {
+        self.envelope.active()
     }
 }
 
 /// Polyphonic sample-playback instrument.
-///
-/// Load an audio file, map it to a root note, and play it pitched across the
-/// keyboard via playback-speed shifting with ADSR envelope.
 pub struct Sampler {
-    voices: Vec<SamplerVoice>,
-    #[allow(dead_code)]
+    voices: [SamplerVoice; MAX_VOICES],
     sample_rate: f32,
     sample: Option<Arc<DecodedAudio>>,
     sample_name: Option<String>,
-    // Parameters
-    root_note: f32,
-    attack: f32,
-    decay: f32,
-    sustain: f32,
-    release: f32,
-    start: f32,
-    end: f32,
-    loop_enabled: bool,
-    one_shot: bool,
-    volume: f32,
+    params: [f32; COUNT],
+    times: Times,
+    age: u64,
 }
 
 impl Sampler {
     pub fn new(sample_rate: f32) -> Self {
-        Self {
-            voices: (0..MAX_VOICES)
-                .map(|_| SamplerVoice::new(sample_rate))
-                .collect(),
+        let sample_rate = if sample_rate.is_finite() && sample_rate > 0.0 {
+            sample_rate
+        } else {
+            48_000.0
+        };
+        let params: [f32; COUNT] = std::array::from_fn(|index| SAMPLER_PARAMS[index].default);
+        let mut sampler = Self {
+            voices: [SamplerVoice::default(); MAX_VOICES],
             sample_rate,
             sample: None,
             sample_name: None,
-            root_note: 60.0,
-            attack: 0.001,
-            decay: 0.1,
-            sustain: 1.0,
-            release: 0.01,
-            start: 0.0,
-            end: 1.0,
-            loop_enabled: false,
-            one_shot: false,
-            volume: 0.8,
-        }
+            params,
+            times: Times::new(0.0, 0.0, 0.0, 0.0, sample_rate),
+            age: 0,
+        };
+        sampler.retime();
+        sampler
     }
 
-    /// Compute the start frame from the normalized start parameter.
-    fn start_frame(&self) -> usize {
-        if let Some(ref sample) = self.sample {
-            (self.start * sample.num_frames() as f32) as usize
-        } else {
-            0
-        }
+    fn retime(&mut self) {
+        let p = &self.params;
+        self.times = Times::new(
+            p[P_ATTACK],
+            p[P_DECAY],
+            p[P_SUSTAIN],
+            p[P_RELEASE],
+            self.sample_rate,
+        );
     }
 
-    /// Compute the end frame from the normalized end parameter.
-    fn end_frame(&self) -> usize {
-        if let Some(ref sample) = self.sample {
-            (self.end * sample.num_frames() as f32) as usize
-        } else {
-            0
-        }
+    fn frame_at(&self, position: f32) -> usize {
+        self.sample
+            .as_ref()
+            .map_or(0, |sample| (position * sample.num_frames() as f32) as usize)
     }
 }
 
@@ -212,190 +200,122 @@ impl Instrument for Sampler {
     }
 
     fn set_param(&mut self, index: usize, value: f32) -> bool {
-        match index {
-            P_ROOT_NOTE => {
-                self.root_note = value.clamp(0.0, 127.0);
-                true
-            }
-            P_ATTACK => {
-                self.attack = value.clamp(0.001, 2.0);
-                true
-            }
-            P_DECAY => {
-                self.decay = value.clamp(0.001, 2.0);
-                true
-            }
-            P_SUSTAIN => {
-                self.sustain = value.clamp(0.0, 1.0);
-                true
-            }
-            P_RELEASE => {
-                self.release = value.clamp(0.001, 5.0);
-                true
-            }
-            P_START => {
-                self.start = value.clamp(0.0, 1.0);
-                true
-            }
-            P_END => {
-                self.end = value.clamp(0.0, 1.0);
-                true
-            }
-            P_LOOP => {
-                self.loop_enabled = value >= 0.5;
-                true
-            }
-            P_ONE_SHOT => {
-                self.one_shot = value >= 0.5;
-                true
-            }
-            P_VOLUME => {
-                self.volume = value.clamp(0.0, 1.0);
-                true
-            }
-            _ => false,
+        let Some(descriptor) = SAMPLER_PARAMS.get(index) else {
+            return false;
+        };
+        if !value.is_finite() {
+            return false;
         }
+        self.params[index] = match index {
+            P_LOOP | P_ONE_SHOT => f32::from(value >= 0.5),
+            _ => value.clamp(descriptor.min, descriptor.max),
+        };
+        self.retime();
+        true
     }
 
     fn get_param(&self, index: usize) -> f32 {
-        match index {
-            P_ROOT_NOTE => self.root_note,
-            P_ATTACK => self.attack,
-            P_DECAY => self.decay,
-            P_SUSTAIN => self.sustain,
-            P_RELEASE => self.release,
-            P_START => self.start,
-            P_END => self.end,
-            P_LOOP => {
-                if self.loop_enabled {
-                    1.0
-                } else {
-                    0.0
-                }
-            }
-            P_ONE_SHOT => {
-                if self.one_shot {
-                    1.0
-                } else {
-                    0.0
-                }
-            }
-            P_VOLUME => self.volume,
-            _ => 0.0,
-        }
+        self.params.get(index).copied().unwrap_or(0.0)
     }
 
     fn note_on(&mut self, pitch: u8, velocity: u8) {
-        let speed = 2.0_f64.powf((pitch as f64 - self.root_note as f64) / 12.0);
-        let start_pos = self.start_frame() as f64;
-
-        // Update envelope params on all voices
-        for voice in &mut self.voices {
-            voice.envelope.attack = self.attack;
-            voice.envelope.decay = self.decay;
-            voice.envelope.sustain = self.sustain;
-            voice.envelope.release = self.release;
+        let Some(sample) = self.sample.as_ref() else {
+            return;
+        };
+        if velocity == 0 {
+            self.note_off(pitch);
+            return;
         }
-
-        // Find free voice or steal oldest
-        let voice_idx = self.voices.iter().position(|v| !v.active).unwrap_or(0);
-
-        let voice = &mut self.voices[voice_idx];
-        voice.active = true;
+        let file_rate = f64::from(sample.sample_rate.max(1));
+        let speed = ((f64::from(pitch) - f64::from(self.params[P_ROOT_NOTE])) / 12.0).exp2()
+            * file_rate
+            / f64::from(self.sample_rate);
+        let start = self.frame_at(self.params[P_START]) as f64;
+        self.age += 1;
+        let voices = &self.voices;
+        let oldest = |candidates: &mut dyn Iterator<Item = usize>| {
+            candidates.min_by_key(|&index| voices[index].age)
+        };
+        let all = 0..MAX_VOICES;
+        // A repeated note takes over its own voice rather than stacking.
+        let index = all
+            .clone()
+            .find(|&index| voices[index].active() && voices[index].pitch == pitch)
+            .or_else(|| all.clone().find(|&index| !voices[index].active()))
+            .or_else(|| {
+                oldest(
+                    &mut all
+                        .clone()
+                        .filter(|&index| voices[index].envelope.released()),
+                )
+            })
+            .or_else(|| oldest(&mut all.clone()))
+            .unwrap_or(0);
+        let voice = &mut self.voices[index];
         voice.pitch = pitch;
-        voice.velocity = velocity as f32 / 127.0;
-        voice.position = start_pos;
+        voice.age = self.age;
+        voice.velocity = f32::from(velocity) / 127.0;
+        voice.position = start;
         voice.speed = speed;
-        voice.one_shot = self.one_shot;
+        voice.one_shot = self.params[P_ONE_SHOT] >= 0.5;
         voice.envelope.trigger();
     }
 
     fn note_off(&mut self, pitch: u8) {
         for voice in &mut self.voices {
-            if voice.active && voice.pitch == pitch && !voice.one_shot {
+            if voice.active() && voice.pitch == pitch && !voice.one_shot {
                 voice.envelope.release();
             }
         }
     }
 
     fn render(&mut self, buffer: &mut [f32], channels: usize) {
-        let audio = match self.sample {
-            Some(ref s) => Arc::clone(s),
-            None => return,
+        let Some(audio) = self.sample.as_ref().map(Arc::clone) else {
+            return;
         };
-
-        let ch = channels.clamp(1, 2);
-        let frames = buffer.len() / ch;
-        let start_f = self.start_frame();
-        let end_f = self.end_frame();
-
-        if end_f <= start_f {
+        if channels == 0 {
             return;
         }
-
-        let loop_enabled = self.loop_enabled;
-        let volume = self.volume;
-
-        for frame in 0..frames {
-            let mut sample_l = 0.0_f32;
-            let mut sample_r = 0.0_f32;
-
+        let start = self.frame_at(self.params[P_START]) as f64;
+        let end = self.frame_at(self.params[P_END]) as f64;
+        if end <= start {
+            return;
+        }
+        let looping = self.params[P_LOOP] >= 0.5;
+        let volume = self.params[P_VOLUME];
+        let fade = END_FADE_SECONDS * f64::from(self.sample_rate);
+        for frame in buffer.chunks_exact_mut(channels) {
+            let (mut left, mut right) = (0.0f32, 0.0f32);
             for voice in &mut self.voices {
-                if !voice.active {
+                if !voice.active() {
                     continue;
                 }
-
-                let env = voice.envelope.tick();
-                if !voice.envelope.is_active() {
-                    voice.active = false;
-                    continue;
+                let level = voice.envelope.tick(&self.times);
+                let mut gain = level * voice.velocity * volume;
+                if !looping {
+                    let left_frames = (end - voice.position) / voice.speed;
+                    gain *= (left_frames / fade).clamp(0.0, 1.0) as f32;
                 }
-
-                // Read interpolated sample
-                let sl = read_sample(&audio, voice.position, 0);
-                let sr = if ch >= 2 {
-                    read_sample(&audio, voice.position, 1)
-                } else {
-                    sl
-                };
-
-                let gain = env * voice.velocity * volume;
-                sample_l += sl * gain;
-                sample_r += sr * gain;
-
-                // Advance position
+                left += read_sample(&audio, voice.position, 0) * gain;
+                right += read_sample(&audio, voice.position, 1) * gain;
                 voice.position += voice.speed;
-
-                // Check end boundary
-                if voice.position >= end_f as f64 {
-                    if loop_enabled {
-                        // Wrap back to start
-                        let loop_len = (end_f - start_f) as f64;
-                        voice.position =
-                            start_f as f64 + (voice.position - start_f as f64) % loop_len;
+                if voice.position >= end {
+                    if looping {
+                        voice.position = start + (voice.position - start) % (end - start);
                     } else {
-                        // Sample finished
-                        voice.active = false;
-                        voice.envelope.stage = EnvelopeStage::Idle;
-                        voice.envelope.level = 0.0;
+                        voice.envelope = Envelope::default();
                     }
                 }
             }
-
-            buffer[frame * ch] += sample_l;
-            if ch >= 2 {
-                buffer[frame * ch + 1] += sample_r;
+            frame[0] += left;
+            if let Some(second) = frame.get_mut(1) {
+                *second += right;
             }
         }
     }
 
     fn reset(&mut self) {
-        for voice in &mut self.voices {
-            voice.active = false;
-            voice.envelope.stage = EnvelopeStage::Idle;
-            voice.envelope.level = 0.0;
-            voice.position = 0.0;
-        }
+        self.voices = [SamplerVoice::default(); MAX_VOICES];
     }
 
     fn load_sample(&mut self, sample: Arc<DecodedAudio>, name: String) {
@@ -474,7 +394,7 @@ mod tests {
             sampler
                 .voices
                 .iter()
-                .any(|v| v.active && (v.speed - 2.0).abs() < 1e-6),
+                .any(|v| v.active() && (v.speed - 2.0).abs() < 1e-6),
             "Octave up should have speed 2.0"
         );
     }
@@ -492,7 +412,7 @@ mod tests {
             sampler
                 .voices
                 .iter()
-                .any(|v| v.active && (v.speed - 1.0).abs() < 1e-6),
+                .any(|v| v.active() && (v.speed - 1.0).abs() < 1e-6),
             "Root note should have speed 1.0"
         );
     }
@@ -508,7 +428,7 @@ mod tests {
         sampler.note_off(60);
 
         // Voice should still be active (one-shot ignores note_off)
-        let active_count = sampler.voices.iter().filter(|v| v.active).count();
+        let active_count = sampler.voices.iter().filter(|v| v.active()).count();
         assert_eq!(
             active_count, 1,
             "One-shot should keep voice active after note_off"
@@ -564,7 +484,7 @@ mod tests {
         sampler.render(&mut buf, 2);
 
         // Voice should still be active (looping)
-        let active = sampler.voices.iter().any(|v| v.active);
+        let active = sampler.voices.iter().any(|v| v.active());
         assert!(active, "Loop mode should keep voice active past sample end");
 
         // Should still produce sound
@@ -593,7 +513,7 @@ mod tests {
         sampler.note_on(60, 127);
 
         // The voice position should start at frame 500
-        let voice = sampler.voices.iter().find(|v| v.active).unwrap();
+        let voice = sampler.voices.iter().find(|v| v.active()).unwrap();
         assert!(
             (voice.position - 500.0).abs() < 1.0,
             "Start position should be ~500, got {}",
@@ -611,7 +531,7 @@ mod tests {
         sampler.note_on(64, 100);
         sampler.note_on(67, 100);
 
-        let active_count = sampler.voices.iter().filter(|v| v.active).count();
+        let active_count = sampler.voices.iter().filter(|v| v.active()).count();
         assert_eq!(active_count, 3, "Should have 3 active voices");
 
         let mut buf = vec![0.0_f32; 512];
@@ -653,7 +573,7 @@ mod tests {
         sampler.note_on(60, 100);
         sampler.reset();
         for voice in &sampler.voices {
-            assert!(!voice.active);
+            assert!(!voice.active());
         }
     }
 
