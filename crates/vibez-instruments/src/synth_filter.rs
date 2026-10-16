@@ -5,6 +5,8 @@
 /// Coefficients for a cutoff and Q at a sample rate.
 #[derive(Clone, Copy, Debug)]
 pub struct Coefficients {
+    g: f32,
+    k: f32,
     a1: f32,
     a2: f32,
     a3: f32,
@@ -14,11 +16,35 @@ impl Coefficients {
     pub fn new(sample_rate: f32, cutoff: f32, q: f32) -> Self {
         let g =
             (std::f32::consts::PI * cutoff.min(sample_rate * 0.45).max(0.001) / sample_rate).tan();
+        Self::from_g(g, q)
+    }
+
+    fn from_g(g: f32, q: f32) -> Self {
         let k = 1.0 / q.max(0.05);
         let a1 = 1.0 / (1.0 + g * (g + k));
         let a2 = g * a1;
-        Self { a1, a2, a3: g * a2 }
+        Self {
+            g,
+            k,
+            a1,
+            a2,
+            a3: g * a2,
+        }
     }
+
+    /// The same cutoff with another Q.
+    pub fn with_q(self, q: f32) -> Self {
+        Self::from_g(self.g, q)
+    }
+}
+
+/// The filter's outputs for one input sample; the band-pass is scaled to
+/// unity at its centre.
+#[derive(Clone, Copy, Debug)]
+pub struct Outputs {
+    pub low: f32,
+    pub band: f32,
+    pub high: f32,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -38,17 +64,16 @@ fn flush(value: f32) -> f32 {
 }
 
 impl Svf {
-    /// The low-pass output for one input sample.
-    pub fn low(&mut self, input: f32, c: Coefficients) -> f32 {
+    pub fn process(&mut self, input: f32, c: Coefficients) -> Outputs {
         let v3 = input - self.ic2;
         let band = c.a1 * self.ic1 + c.a2 * v3;
         let low = self.ic2 + c.a2 * self.ic1 + c.a3 * v3;
         self.ic1 = flush(2.0 * band - self.ic1);
         self.ic2 = flush(2.0 * low - self.ic2);
-        low
-    }
-
-    pub fn reset(&mut self) {
-        *self = Self::default();
+        Outputs {
+            low,
+            band: c.k * band,
+            high: input - c.k * band - low,
+        }
     }
 }
