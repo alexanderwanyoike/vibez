@@ -7,7 +7,9 @@ use vibez_core::id::{EffectId, TrackId};
 use vibez_engine::metering::MeterValues;
 
 use crate::domains::compressor::is_native_compressor;
+use crate::domains::device_levels::MeteredPanel;
 use crate::domains::eq::is_native_eq;
+use crate::domains::filter::is_native_filter;
 use crate::domains::gain::is_native_gain;
 use crate::state::{DetailPanelTab, UiEffect};
 
@@ -20,7 +22,10 @@ pub(super) struct DeviceMeters {
 }
 
 fn is_metered(effect: &UiEffect) -> bool {
-    is_native_gain(effect) || is_native_eq(effect) || is_native_compressor(effect)
+    is_native_gain(effect)
+        || is_native_eq(effect)
+        || is_native_compressor(effect)
+        || is_native_filter(effect)
 }
 
 impl App {
@@ -43,6 +48,11 @@ impl App {
             panel.reset_stale(now);
         }
         self.poll_compressor_devices();
+        let state = &self.state;
+        self.filter_panels.retain_existing(state);
+        for panel in self.filter_panels.values_mut() {
+            panel.reset_stale(now);
+        }
     }
 
     /// Metering restarts under a new generation after undo or redo (which
@@ -59,6 +69,9 @@ impl App {
         for panel in self.compressor_devices.panels.values_mut() {
             panel.clear_readings();
         }
+        for panel in self.filter_panels.values_mut() {
+            panel.clear_readings();
+        }
         self.send_command(EngineCommand::SetEffectMeterChannel {
             track_id: self.device_meters.channel,
             generation: self.device_meters.generation,
@@ -71,6 +84,7 @@ impl App {
         self.gain_devices.panels.clear();
         self.eq_devices.panels.clear();
         self.compressor_devices.panels.clear();
+        self.filter_panels.clear();
         self.send_command(EngineCommand::SetEffectMeterChannel {
             track_id: None,
             generation: self.device_meters.generation,
@@ -107,13 +121,15 @@ impl App {
             self.eq_devices
                 .panels
                 .entry(effect_id)
-                .or_default()
-                .accept_meter(input, output, Instant::now());
+                .accept_levels(input, output, Instant::now());
+        } else if is_native_filter(effect) {
+            self.filter_panels
+                .entry(effect_id)
+                .accept_levels(input, output, Instant::now());
         } else if is_native_compressor(effect) {
             self.compressor_devices
                 .panels
                 .entry(effect_id)
-                .or_default()
                 .accept_levels(input, output, Instant::now());
         }
     }

@@ -92,7 +92,29 @@ const COMPRESSOR_KEYS: [(usize, &str, bool); 16] = {
     ]
 };
 
-/// One stored parameter: its index, preset key and whether it is a switch.
+/// Every native Filter parameter; its type, slope, source and sync are
+/// choices.
+const FILTER_KEYS: [(usize, &str, bool); 13] = {
+    use vibez_dsp::filter::param::*;
+    [
+        (CUTOFF, "cutoff_hz", false),
+        (RESONANCE, "resonance_q", false),
+        (MODE, "mode", true),
+        (SLOPE, "slope", true),
+        (DRIVE, "drive_db", false),
+        (MIX, "mix", false),
+        (MOD_SOURCE, "mod_source", true),
+        (RATE, "rate_hz", false),
+        (DEPTH, "depth_octaves", false),
+        (SYNC, "sync", true),
+        (STEREO_PHASE, "stereo_phase_degrees", false),
+        (ENV_ATTACK, "envelope_attack_ms", false),
+        (ENV_RELEASE, "envelope_release_ms", false),
+    ]
+};
+
+/// One stored parameter: its index, preset key and whether it only takes
+/// whole numbers, as switches and choices do.
 type PresetParam = (usize, &'static str, bool);
 
 pub struct PresetPresentation {
@@ -149,12 +171,13 @@ fn parameter_keys(effect: &UiEffect) -> Result<Vec<PresetParam>, String> {
             .iter()
             .enumerate()
             .map(|(index, key)| {
-                let switch = vibez_dsp::gain::param::POLARITY.contains(&index);
-                (index, *key, switch)
+                let whole = vibez_dsp::gain::param::POLARITY.contains(&index);
+                (index, *key, whole)
             })
             .collect()),
         EffectType::Eq => Ok(EQ_KEYS.to_vec()),
         EffectType::Compressor => Ok(COMPRESSOR_KEYS.to_vec()),
+        EffectType::Filter => Ok(FILTER_KEYS.to_vec()),
         _ => Err("Presets are not yet supported by this built-in device".into()),
     }
 }
@@ -195,7 +218,7 @@ pub fn prepare_updates(
         return Err("The preset does not contain this device's complete parameter set".into());
     }
     let mut updates = Vec::new();
-    for (index, key, switch) in keys {
+    for (index, key, whole) in keys {
         let value = *preset
             .parameters()
             .get(key)
@@ -206,7 +229,7 @@ pub fn prepare_updates(
             .ok_or_else(|| "The device's parameters are unavailable".to_string())?;
         if !value.is_finite()
             || !(descriptor.min..=descriptor.max).contains(&value)
-            || (switch && value != 0.0 && value != 1.0)
+            || (whole && value.fract() != 0.0)
         {
             return Err(format!(
                 "Preset parameter {key} is outside its supported range"
@@ -230,6 +253,7 @@ pub fn factory_presets(effect_type: EffectType) -> Vec<DevicePreset> {
         EffectType::Gain => gain_factory_presets(),
         EffectType::Eq => eq_factory_presets(),
         EffectType::Compressor => compressor_factory_presets(),
+        EffectType::Filter => filter_factory_presets(),
         _ => Vec::new(),
     }
 }
@@ -473,6 +497,79 @@ fn compressor_factory_presets() -> Vec<DevicePreset> {
     )
 }
 
+/// Sol's starting points, with Gentle Sweep moving as its name and the
+/// concept say.
+fn filter_factory_presets() -> Vec<DevicePreset> {
+    let presets: [(&str, &[(&str, f32)]); 8] = [
+        ("Init", &[]),
+        (
+            "Gentle Sweep",
+            &[
+                ("cutoff_hz", 1200.0),
+                ("slope", 1.0),
+                ("mod_source", 1.0),
+                ("sync", 3.0),
+                ("depth_octaves", 1.1),
+            ],
+        ),
+        (
+            "Subsonic Cut",
+            &[("cutoff_hz", 80.0), ("mode", 1.0), ("slope", 1.0)],
+        ),
+        (
+            "Telephone",
+            &[
+                ("resonance_q", 0.5),
+                ("mode", 2.0),
+                ("drive_db", 2.0),
+                ("mix", 0.8),
+            ],
+        ),
+        (
+            "Resonant Edge",
+            &[("cutoff_hz", 2200.0), ("resonance_q", 3.0)],
+        ),
+        (
+            "Hum Notch",
+            &[
+                ("cutoff_hz", 50.0),
+                ("resonance_q", 5.0),
+                ("mode", 3.0),
+                ("slope", 1.0),
+            ],
+        ),
+        (
+            "Envelope Wah",
+            &[
+                ("cutoff_hz", 400.0),
+                ("resonance_q", 1.0),
+                ("slope", 1.0),
+                ("mod_source", 2.0),
+                ("depth_octaves", 3.0),
+                ("envelope_release_ms", 200.0),
+            ],
+        ),
+        (
+            "Stereo Eighths",
+            &[
+                ("cutoff_hz", 1800.0),
+                ("resonance_q", 0.9),
+                ("slope", 1.0),
+                ("mod_source", 1.0),
+                ("depth_octaves", 2.0),
+                ("sync", 4.0),
+                ("stereo_phase_degrees", 90.0),
+            ],
+        ),
+    ];
+    keyed_presets(
+        EffectType::Filter,
+        &FILTER_KEYS,
+        vibez_dsp::filter::FILTER_PARAMS,
+        &presets,
+    )
+}
+
 /// Presets that start from the device's defaults and change the named keys.
 fn keyed_presets(
     effect_type: EffectType,
@@ -694,6 +791,62 @@ mod presentation_tests {
         let captured = capture(&effect, "Listening").unwrap();
         effect.params[listen] = 0.0;
         assert_eq!(prepare_updates(&effect, &captured), Ok(Vec::new()));
+    }
+
+    fn filter() -> UiEffect {
+        let descriptors =
+            vibez_dsp::factory::create_effect(EffectType::Filter, 44_100.0).param_descriptors();
+        UiEffect {
+            effect_type: EffectType::Filter,
+            params: descriptors
+                .iter()
+                .map(|descriptor| descriptor.default)
+                .collect(),
+            descriptors,
+            ..gain()
+        }
+    }
+
+    #[test]
+    fn filter_factory_presets_are_valid_distinct_and_start_from_init() {
+        let effect = filter();
+        let presets = factory_presets(EffectType::Filter);
+        assert!(presets.len() >= 6);
+        assert_eq!(presets[0].name(), "Init");
+        assert_eq!(prepare_updates(&effect, &presets[0]), Ok(Vec::new()));
+        for preset in &presets[1..] {
+            let mut applied = filter();
+            for (index, value) in prepare_updates(&effect, preset).unwrap() {
+                applied.params[index] = value;
+            }
+            assert_ne!(applied.params, effect.params, "{}", preset.name());
+            assert_eq!(capture(&applied, preset.name()).as_ref(), Ok(preset));
+        }
+        let mut names: Vec<_> = presets.iter().map(DevicePreset::name).collect();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(names.len(), presets.len(), "names are unique");
+    }
+
+    #[test]
+    fn filter_choices_in_a_preset_must_be_whole() {
+        use vibez_dsp::filter::param;
+        let effect = filter();
+        let captured = capture(&effect, "Current").unwrap();
+        for key in ["mode", "slope", "mod_source", "sync"] {
+            let mut parameters = captured.parameters().clone();
+            assert!(parameters.contains_key(key), "{key}");
+            parameters.insert(key.into(), 0.5);
+            let fractional = DevicePreset::new(captured.kind(), "Fractional", parameters).unwrap();
+            assert!(prepare_updates(&effect, &fractional).is_err(), "{key}");
+        }
+        let mut parameters = captured.parameters().clone();
+        parameters.insert("sync".into(), 7.0);
+        let synced = DevicePreset::new(captured.kind(), "Synced", parameters).unwrap();
+        assert_eq!(
+            prepare_updates(&effect, &synced),
+            Ok(vec![(param::SYNC, 7.0)])
+        );
     }
 
     #[test]

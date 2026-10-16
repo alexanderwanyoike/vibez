@@ -2,7 +2,7 @@
 //! a readable value you can click to type into, segmented choices, and
 //! headings. Sizes are in logical pixels, which Interface Scale multiplies.
 
-use iced::widget::{button, canvas, column, row, text, text_input, Space};
+use iced::widget::{button, canvas, column, container, pick_list, row, text, text_input, Space};
 use iced::{Alignment, Color, Element, Length, Theme};
 use vibez_core::id::TrackId;
 
@@ -288,6 +288,85 @@ pub fn segmented<'a, T: Copy + PartialEq + 'a>(
         );
     }
     choices.into()
+}
+
+/// A compact choice from a list, for options too many for [`segmented`].
+pub fn dropdown<'a, T: Clone + ToString + PartialEq + 'a>(
+    options: Vec<T>,
+    selected: T,
+    on_select: impl Fn(T) -> Message + 'a,
+) -> Element<'a, Message> {
+    pick_list(options, Some(selected), on_select)
+        .width(Length::Fill)
+        .padding([3, 5])
+        .text_size(9)
+        .style(|_theme: &Theme, status| pick_list::Style {
+            text_color: th::text(),
+            placeholder_color: th::text_muted(),
+            handle_color: th::text_dim(),
+            background: th::bg_dark().into(),
+            border: iced::Border {
+                color: if matches!(
+                    status,
+                    pick_list::Status::Opened | pick_list::Status::Hovered
+                ) {
+                    th::accent_dim()
+                } else {
+                    th::border()
+                },
+                width: 1.0,
+                radius: 3.0.into(),
+            },
+        })
+        .menu_style(|_theme: &Theme| iced::widget::overlay::menu::Style {
+            background: th::bg_surface().into(),
+            border: iced::Border {
+                color: th::border(),
+                width: 1.0,
+                radius: 3.0.into(),
+            },
+            text_color: th::text(),
+            selected_text_color: th::accent(),
+            selected_background: th::bg_hover().into(),
+        })
+        .into()
+}
+
+/// The "Advanced" switch that opens a device's less used controls.
+pub fn disclosure<'a>(open: bool, message: Message, accent: Color) -> Element<'a, Message> {
+    toggle(
+        row![
+            text(if open { "\u{25BE}" } else { "\u{25B8}" })
+                .size(9)
+                .color(th::text_dim()),
+            text("Advanced").size(LABEL_SIZE).color(th::text()),
+        ]
+        .spacing(4)
+        .align_y(Alignment::Center)
+        .into(),
+        open,
+        message,
+        accent,
+    )
+}
+
+/// A divider between the sections of a device body.
+pub fn rule<'a>() -> Element<'a, Message> {
+    container(Space::new(Length::Fill, 1.0))
+        .style(|_| container::Style {
+            background: Some(th::divider().into()),
+            ..Default::default()
+        })
+        .into()
+}
+
+pub fn vertical_rule<'a>() -> Element<'a, Message> {
+    container(Space::new(1.0, Length::Fill))
+        .style(|_| container::Style {
+            background: Some(th::divider().into()),
+            ..Default::default()
+        })
+        .into()
 }
 
 #[cfg(test)]

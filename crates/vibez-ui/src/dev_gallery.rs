@@ -741,3 +741,171 @@ pub fn run_compressor() -> iced::Result {
     .font(crate::typography::PLEX_MONO_SEMIBOLD_BYTES)
     .run_with(|| (CompressorGallery::new(), iced::Task::none()))
 }
+
+/// Native Filter at each width tier and section height it adapts to, on
+/// the Gentle Sweep preset as in the concept, with an output level standing
+/// in for live audio.
+struct FilterGallery {
+    track: TrackId,
+    effect: UiEffect,
+    closed: crate::domains::filter::FilterPanelState,
+    open: crate::domains::filter::FilterPanelState,
+    modulation: crate::domains::filter::FilterPanelState,
+}
+
+impl FilterGallery {
+    fn new() -> Self {
+        use crate::domains::filter::{FilterPanelState, Page};
+        use vibez_dsp::filter::param;
+        let mut effect = effect(EffectType::Filter, None, false, false, None, 0);
+        effect.params = effect.descriptors.iter().map(|d| d.default).collect();
+        effect.params[param::CUTOFF] = 1_200.0;
+        effect.params[param::SLOPE] = 1.0;
+        effect.params[param::MOD_SOURCE] = 1.0;
+        effect.params[param::SYNC] = 3.0;
+        effect.params[param::DEPTH] = 1.1;
+        let level = |db: f32| vibez_engine::metering::MeterValues {
+            peak_l: vibez_core::level::db_to_amplitude(db),
+            peak_r: vibez_core::level::db_to_amplitude(db - 0.5),
+            rms_l: vibez_core::level::db_to_amplitude(db - 6.0),
+            rms_r: vibez_core::level::db_to_amplitude(db - 6.5),
+        };
+        let closed = FilterPanelState {
+            output: level(-14.0),
+            last_meter_at: Some(std::time::Instant::now()),
+            ..Default::default()
+        };
+        Self {
+            track: TrackId::new(),
+            effect,
+            open: FilterPanelState {
+                advanced: true,
+                ..closed.clone()
+            },
+            modulation: FilterPanelState {
+                page: Page::Modulation,
+                ..closed.clone()
+            },
+            closed,
+        }
+    }
+
+    fn scene<'a>(
+        &'a self,
+        label: &'static str,
+        card_width: f32,
+        section: (f32, f32),
+        panel: &'a crate::domains::filter::FilterPanelState,
+    ) -> Element<'a, Message> {
+        let accent = th::track_color(0);
+        let effect = &self.effect;
+        let track = self.track;
+        let body = iced::widget::responsive(move |size| {
+            crate::widgets::filter_device::FilterView {
+                track_id: track,
+                effect,
+                accent,
+                panel,
+                entry: None,
+                sample_rate: 48_000.0,
+            }
+            .view(
+                crate::widgets::device_preset_bar::view(
+                    track,
+                    effect,
+                    None,
+                    accent,
+                    crate::widgets::filter_device::preset_bar_width(size),
+                ),
+                size,
+            )
+        });
+        framed_card(
+            label,
+            card_width,
+            section,
+            track,
+            effect,
+            accent,
+            body.into(),
+        )
+    }
+
+    fn view(&self) -> Element<'_, Message> {
+        use crate::widgets::filter_device::{COMPACT_W, FULL_W, MEDIUM_W};
+        let (closed, open, modulation) = (&self.closed, &self.open, &self.modulation);
+        container(
+            column![
+                row![
+                    self.scene("Full, tall", FULL_W, (FULL_W + 16.0, 330.0), closed),
+                    self.scene(
+                        "Compact, tall",
+                        COMPACT_W,
+                        (COMPACT_W + 16.0, 330.0),
+                        closed
+                    ),
+                    self.scene("Medium, normal", MEDIUM_W, (MEDIUM_W + 16.0, 330.0), closed),
+                ]
+                .spacing(24),
+                row![
+                    self.scene("Full, Advanced open", FULL_W, (FULL_W + 16.0, 400.0), open),
+                    self.scene(
+                        "Compact, Modulation",
+                        COMPACT_W,
+                        (COMPACT_W + 16.0, 250.0),
+                        modulation
+                    ),
+                    self.scene(
+                        "Medium, Advanced open",
+                        MEDIUM_W,
+                        (MEDIUM_W + 16.0, 250.0),
+                        open
+                    ),
+                ]
+                .spacing(24),
+                row![
+                    self.scene("Full, shortest", FULL_W, (FULL_W + 16.0, 110.0), closed),
+                    self.scene(
+                        "Compact, short",
+                        COMPACT_W,
+                        (COMPACT_W + 16.0, 150.0),
+                        closed
+                    ),
+                    self.scene(
+                        "Compact, shortest",
+                        COMPACT_W,
+                        (COMPACT_W + 16.0, 110.0),
+                        modulation
+                    ),
+                ]
+                .spacing(24),
+            ]
+            .spacing(16),
+        )
+        .padding(16)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .style(|_theme: &Theme| container::Style {
+            background: Some(th::bg_surface().into()),
+            ..Default::default()
+        })
+        .into()
+    }
+}
+
+pub fn run_filter() -> iced::Result {
+    iced::application(
+        "Filter device gallery",
+        |_: &mut FilterGallery, _: Message| {},
+        FilterGallery::view,
+    )
+    .theme(|_| th::vibez_theme())
+    .antialiasing(true)
+    .window_size((1900.0, 1260.0))
+    .font(crate::icons::ICON_FONT_BYTES)
+    .font(crate::typography::PLEX_SANS_CONDENSED_MEDIUM_BYTES)
+    .font(crate::typography::PLEX_SANS_CONDENSED_SEMIBOLD_BYTES)
+    .font(crate::typography::PLEX_MONO_MEDIUM_BYTES)
+    .font(crate::typography::PLEX_MONO_SEMIBOLD_BYTES)
+    .run_with(|| (FilterGallery::new(), iced::Task::none()))
+}

@@ -1,25 +1,24 @@
 //! Native Compressor cards on the visible device chain: their panel state
 //! and the gain reduction the engine measures for them.
 
-use std::collections::HashMap;
 use std::time::Instant;
 
 use vibez_core::effect::DynamicsMeter;
 use vibez_core::id::{EffectId, TrackId};
 
 use crate::domains::compressor::{is_native_compressor, CompressorMsg, CompressorPanelState};
+use crate::domains::device_levels::MeteredPanel;
 
 use super::*;
 
 #[derive(Default)]
 pub(super) struct CompressorDevices {
-    pub panels: HashMap<EffectId, CompressorPanelState>,
-    pub empty_panel: CompressorPanelState,
+    pub panels: super::device_panels::DevicePanels<CompressorPanelState>,
 }
 
 impl CompressorDevices {
     pub fn panel(&self, effect_id: EffectId) -> &CompressorPanelState {
-        self.panels.get(&effect_id).unwrap_or(&self.empty_panel)
+        self.panels.panel(effect_id)
     }
 }
 
@@ -28,16 +27,13 @@ impl App {
         self.compressor_devices
             .panels
             .entry(message.effect_id())
-            .or_default()
             .update(message);
         Task::none()
     }
 
     pub(super) fn poll_compressor_devices(&mut self) {
         let state = &self.state;
-        self.compressor_devices
-            .panels
-            .retain(|id, _| state.has_effect(*id));
+        self.compressor_devices.panels.retain_existing(state);
         let now = Instant::now();
         for panel in self.compressor_devices.panels.values_mut() {
             panel.reset_stale(now);
@@ -66,7 +62,6 @@ impl App {
             self.compressor_devices
                 .panels
                 .entry(effect_id)
-                .or_default()
                 .accept_dynamics(meter, Instant::now());
         }
     }
@@ -128,6 +123,6 @@ mod tests {
         let _ = app.update(Message::Compressor(CompressorMsg::ToggleAdvanced(effect)));
         let _ = app.update(Message::Devices(DevicesMsg::RemoveEffect(track, effect)));
         app.poll_compressor_devices();
-        assert!(!app.compressor_devices.panels.contains_key(&effect));
+        assert!(!app.compressor_devices.panels.contains(effect));
     }
 }

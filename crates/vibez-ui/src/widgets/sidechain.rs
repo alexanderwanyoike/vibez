@@ -1,5 +1,5 @@
-use iced::widget::{button, column, container, pick_list, row, scrollable, text, Space};
-use iced::{Element, Length, Theme};
+use iced::widget::{button, column, container, row, scrollable, text, Space};
+use iced::{Element, Length};
 use vibez_core::{
     id::{EffectId, TrackId},
     routing::{ExternalInputId, SourceTap},
@@ -10,6 +10,7 @@ use crate::{
     message::Message,
     state::{ProjectTrack, UiEffect},
     theme as th,
+    widgets::device_controls::dropdown,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -47,47 +48,6 @@ fn source_message(
         input_id,
         source,
     })
-}
-
-fn selector<'a, T: Clone + ToString + PartialEq + 'a>(
-    options: Vec<T>,
-    selected: T,
-    on_select: impl Fn(T) -> Message + 'a,
-) -> Element<'a, Message> {
-    pick_list(options, Some(selected), on_select)
-        .width(Length::Fill)
-        .padding([3, 5])
-        .text_size(9)
-        .style(|_theme: &Theme, status| pick_list::Style {
-            text_color: th::text(),
-            placeholder_color: th::text_muted(),
-            handle_color: th::text_dim(),
-            background: th::bg_dark().into(),
-            border: iced::Border {
-                color: if matches!(
-                    status,
-                    pick_list::Status::Opened | pick_list::Status::Hovered
-                ) {
-                    th::accent_dim()
-                } else {
-                    th::border()
-                },
-                width: 1.0,
-                radius: 3.0.into(),
-            },
-        })
-        .menu_style(|_theme: &Theme| iced::widget::overlay::menu::Style {
-            background: th::bg_surface().into(),
-            border: iced::Border {
-                color: th::border(),
-                width: 1.0,
-                radius: 3.0.into(),
-            },
-            text_color: th::text(),
-            selected_text_color: th::accent(),
-            selected_background: th::bg_hover().into(),
-        })
-        .into()
 }
 
 fn meter<'a>(level: (f32, f32)) -> Element<'a, Message> {
@@ -200,7 +160,7 @@ pub fn view<'a>(
         if route.is_some() && effect.inactive_sidechains.contains(&id) {
             selected.name.push_str(" (inactive)");
         }
-        let source = selector(choices, selected, move |choice| {
+        let source = dropdown(choices, selected, move |choice| {
             source_message(receiver, effect_id, id, choice.id)
         });
         let mut controls = column![].spacing(4);
@@ -222,7 +182,7 @@ pub fn view<'a>(
                 .map(|option| option.taps.as_slice())
                 .unwrap_or_default();
             if !taps.is_empty() {
-                controls = controls.push(selector(
+                controls = controls.push(dropdown(
                     taps.iter().copied().map(TapChoice).collect(),
                     TapChoice(route.tap),
                     move |choice| {

@@ -34,7 +34,11 @@ impl ParamFormat {
             "ms" => Self::Milliseconds,
             "s" => Self::Seconds,
             ":1" => Self::Ratio,
-            "" if descriptor.min == 0.0 && descriptor.max == 1.0 => Self::Percent,
+            "" | "%" if descriptor.min == 0.0 && descriptor.max == 1.0 => Self::Percent,
+            "deg" => Self::Number {
+                decimals: 0,
+                unit: "deg",
+            },
             unit => Self::Number { decimals: 2, unit },
         }
     }
@@ -62,6 +66,7 @@ impl ParamFormat {
             Self::Amplitude { .. } => format!("{:.1}", vibez_core::level::amplitude_to_db(value)),
             Self::Decibels => format!("{value:.1}"),
             Self::Hertz if value >= 1000.0 => format!("{:.2}k", value / 1000.0),
+            Self::Hertz if value < 10.0 => format!("{value:.2}"),
             Self::Hertz => format!("{value:.0}"),
             Self::Milliseconds => format!("{value:.1}"),
             Self::Seconds if value < 1.0 => format!("{:.0}", value * 1000.0),
@@ -250,6 +255,30 @@ mod tests {
         assert_eq!(ParamFormat::Milliseconds.format(10.0), "10.0 ms");
         assert_eq!(ParamFormat::Percent.format(0.24), "24 %");
         assert_eq!(ParamFormat::Ratio.format(4.0), "4.0 :1");
+    }
+
+    #[test]
+    fn slow_rates_percent_units_and_angles_read_sensibly() {
+        assert_eq!(ParamFormat::Hertz.format(0.25), "0.25 Hz");
+        assert_eq!(ParamFormat::Hertz.format(4.5), "4.50 Hz");
+        assert_eq!(ParamFormat::Hertz.format(42.0), "42 Hz");
+        assert_eq!(ParamFormat::Hertz.parse("0.25", 0.05, 20.0), Some(0.25));
+        let mix = ParamDescriptor {
+            name: "Mix",
+            min: 0.0,
+            max: 1.0,
+            default: 1.0,
+            unit: "%",
+        };
+        assert_eq!(ParamFormat::for_descriptor(&mix), ParamFormat::Percent);
+        let phase = ParamDescriptor {
+            name: "Stereo Phase",
+            min: 0.0,
+            max: 180.0,
+            default: 0.0,
+            unit: "deg",
+        };
+        assert_eq!(ParamFormat::for_descriptor(&phase).format(90.0), "90 deg");
     }
 
     #[test]

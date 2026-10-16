@@ -15,7 +15,9 @@ use crate::message::Message;
 use crate::state::UiEffect;
 use crate::theme as th;
 use crate::widgets::compressor_display::{ReductionHistory, ReductionMeter, TransferPlot};
-use crate::widgets::device_controls::{heading, segmented, toggle, Param, LABEL_SIZE};
+use crate::widgets::device_controls::{
+    disclosure, heading, rule, segmented, toggle, vertical_rule, Param, LABEL_SIZE,
+};
 use crate::widgets::level_meter::{self, LevelMeter};
 
 const PAD: f32 = 10.0;
@@ -541,40 +543,12 @@ impl<'a> CompressorView<'a> {
     }
 
     fn disclosure(&self) -> Element<'a, Message> {
-        let open = self.panel.advanced;
-        toggle(
-            row![
-                text(if open { "\u{25BE}" } else { "\u{25B8}" })
-                    .size(9)
-                    .color(th::text_dim()),
-                text("Advanced").size(LABEL_SIZE).color(th::text()),
-            ]
-            .spacing(4)
-            .align_y(Alignment::Center)
-            .into(),
-            open,
+        disclosure(
+            self.panel.advanced,
             Message::Compressor(CompressorMsg::ToggleAdvanced(self.effect.id)),
             self.accent(),
         )
     }
-}
-
-fn vertical_rule<'a>() -> Element<'a, Message> {
-    container(Space::new(1.0, Length::Fill))
-        .style(|_| container::Style {
-            background: Some(th::divider().into()),
-            ..Default::default()
-        })
-        .into()
-}
-
-fn rule<'a>() -> Element<'a, Message> {
-    container(Space::new(Length::Fill, 1.0))
-        .style(|_| container::Style {
-            background: Some(th::divider().into()),
-            ..Default::default()
-        })
-        .into()
 }
 
 #[cfg(test)]
