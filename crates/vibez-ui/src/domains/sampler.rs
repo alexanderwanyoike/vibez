@@ -84,19 +84,38 @@ impl SamplerPage {
     }
 }
 
-/// The tabs a card shows.
-pub fn pages(_pad: bool) -> &'static [SamplerPage] {
-    &SamplerPage::ALL
+/// The tabs a card shows. A drum pad plays at its root whatever the note,
+/// so it has no zone.
+pub fn pages(pad: bool) -> &'static [SamplerPage] {
+    if pad {
+        &[
+            SamplerPage::Sample,
+            SamplerPage::Pitch,
+            SamplerPage::Filter,
+            SamplerPage::Modulation,
+        ]
+    } else {
+        &SamplerPage::ALL
+    }
 }
 
 /// The values typed beside the sample's name on a wide card.
-pub fn header_controls(_pad: bool) -> &'static [usize] {
-    &[param::ROOT_NOTE, param::TUNE, param::VOLUME]
+pub fn header_controls(pad: bool) -> &'static [usize] {
+    if pad {
+        &[param::TUNE, param::VOLUME, param::PAN]
+    } else {
+        &[param::ROOT_NOTE, param::TUNE, param::VOLUME, param::PAN]
+    }
 }
 
-/// The Pitch tab's controls.
-pub fn pitch_controls(_pad: bool) -> &'static [usize] {
-    &[param::ROOT_NOTE, param::TUNE, param::FINE, param::GLIDE]
+/// The Pitch tab's controls; a pad's velocity lives here, its Zones tab
+/// being gone.
+pub fn pitch_controls(pad: bool) -> &'static [usize] {
+    if pad {
+        &[param::TUNE, param::FINE, param::VELOCITY_AMOUNT]
+    } else {
+        &[param::ROOT_NOTE, param::TUNE, param::FINE, param::GLIDE]
+    }
 }
 
 pub fn is_native_sampler(track: &crate::state::UiTrack) -> bool {
