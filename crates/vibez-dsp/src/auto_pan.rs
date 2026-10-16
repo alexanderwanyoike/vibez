@@ -155,3 +155,7 @@ mod tests {
         assert!(any_diff);
     }
 }
+
+#[cfg(test)]
+#[path = "auto_pan_legacy_tests.rs"]
+mod legacy_tests;
