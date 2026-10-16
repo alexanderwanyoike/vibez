@@ -401,6 +401,21 @@ mod tests {
     }
 
     #[test]
+    fn the_reverb_room_size_reads_as_its_decay_time() {
+        use vibez_dsp::reverb::{decay_seconds, param, REVERB_PARAMS};
+        let format = param_format(
+            EffectType::Reverb,
+            param::ROOM_SIZE,
+            &REVERB_PARAMS[param::ROOM_SIZE],
+            None,
+        );
+        assert_eq!(format.format(0.5), format!("{:.1} s", decay_seconds(0.5)));
+        let room = format.parse("2.4 s", 0.0, 1.0).unwrap();
+        assert!((decay_seconds(room) - 2.4).abs() < 1e-3);
+        assert_eq!(format.parse("0", 0.0, 1.0), None);
+    }
+
+    #[test]
     fn typed_text_accepts_units_and_shorthand() {
         assert_eq!(
             ParamFormat::Hertz.parse("1.2k", 20.0, 20_000.0),
