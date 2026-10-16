@@ -190,3 +190,7 @@ mod tests {
         assert!((a - b).abs() > 0.0 || a.is_finite());
     }
 }
+
+#[cfg(test)]
+#[path = "phaser_legacy_tests.rs"]
+mod legacy_tests;
