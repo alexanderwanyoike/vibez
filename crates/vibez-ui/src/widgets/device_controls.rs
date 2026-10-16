@@ -392,6 +392,37 @@ pub fn segmented<'a, T: Copy + PartialEq + 'a>(
     choices.into()
 }
 
+/// Text tabs across a card, the chosen one underlined in the track accent,
+/// for cards that show one of their sections at a time.
+pub fn tabs<'a, T: Copy + PartialEq + 'a>(
+    options: &[(T, &'a str)],
+    selected: T,
+    on_select: impl Fn(T) -> Message,
+    accent: Color,
+) -> Element<'a, Message> {
+    let mut strip = row![].spacing(14);
+    for (value, label) in options.iter().copied() {
+        let chosen = value == selected;
+        let name = text(label)
+            .size(LABEL_SIZE + 1.0)
+            .wrapping(text::Wrapping::None)
+            .color(if chosen { th::text() } else { th::text_dim() });
+        let underline = container(Space::new(Length::Fill, 2.0)).style(move |_theme: &Theme| {
+            container::Style {
+                background: chosen.then(|| accent.into()),
+                ..Default::default()
+            }
+        });
+        strip = strip.push(
+            button(column![name, underline].spacing(3).width(Length::Shrink))
+                .on_press(on_select(value))
+                .padding([2, 0])
+                .style(|_theme: &Theme, _status| button::Style::default()),
+        );
+    }
+    strip.into()
+}
+
 /// A compact choice from a list, for options too many for [`segmented`].
 pub fn dropdown<'a, T: Clone + ToString + PartialEq + 'a>(
     options: Vec<T>,
