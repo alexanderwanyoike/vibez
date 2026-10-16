@@ -2,19 +2,21 @@
 //! for 20 s, one frame at a time as the engine renders it, best of five
 //! runs. Run with
 //! `cargo run --release -p vibez-instruments --example instrument_cost -- Sampler`
-//! (or no argument for the Subtractive Synth).
+//! (`DrumRack` for the rack, which holds sixteen looping pads instead, or no
+//! argument for the Subtractive Synth).
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::midi::InstrumentKind;
-use vibez_instruments::{sampler, synth};
+use vibez_core::track::{DrumPadState, DRUM_RACK_BASE_NOTE};
+use vibez_instruments::{drum_rack, sampler, synth};
 
 /// Settings worth timing for each instrument: (label, parameter edits).
 fn cases(kind: InstrumentKind) -> Vec<(&'static str, Vec<(usize, f32)>)> {
     match kind {
-        InstrumentKind::Sampler => {
+        InstrumentKind::Sampler | InstrumentKind::DrumRack => {
             use sampler::{filter_type, param};
             vec![
                 ("defaults, looping", vec![(param::LOOP, 1.0)]),
@@ -78,12 +80,32 @@ fn sample() -> Arc<DecodedAudio> {
 fn run(kind: InstrumentKind, edits: &[(usize, f32)]) -> Duration {
     let rate = 48_000.0;
     let mut instrument = vibez_instruments::create_instrument(kind, rate);
-    instrument.load_sample(sample(), "noise.wav".into());
-    for &(index, value) in edits {
-        instrument.set_param(index, value);
-    }
-    for pitch in [36, 48, 55, 60, 64, 67, 71, 74] {
-        instrument.note_on(pitch, 100);
+    if kind == InstrumentKind::DrumRack {
+        let mut params = drum_rack::pad_params(&DrumPadState::default());
+        params[sampler::param::ONE_SHOT] = 0.0;
+        for &(index, value) in edits {
+            params[index] = value;
+        }
+        let sample = sample();
+        for pad in 0..16 {
+            instrument.load_drum_pad_sample(pad, Arc::clone(&sample), "noise.wav".into());
+            instrument.set_drum_pad_state(
+                pad,
+                DrumPadState {
+                    params: params.to_vec(),
+                    ..DrumPadState::default()
+                },
+            );
+            instrument.note_on(DRUM_RACK_BASE_NOTE + pad as u8, 100);
+        }
+    } else {
+        instrument.load_sample(sample(), "noise.wav".into());
+        for &(index, value) in edits {
+            instrument.set_param(index, value);
+        }
+        for pitch in [36, 48, 55, 60, 64, 67, 71, 74] {
+            instrument.note_on(pitch, 100);
+        }
     }
     let mut frame = [0.0f32; 2];
     let start = Instant::now();
@@ -97,6 +119,7 @@ fn run(kind: InstrumentKind, edits: &[(usize, f32)]) -> Duration {
 fn main() {
     let kind = match std::env::args().nth(1).as_deref() {
         Some("Sampler") => InstrumentKind::Sampler,
+        Some("DrumRack") => InstrumentKind::DrumRack,
         _ => InstrumentKind::SubtractiveSynth,
     };
     for (label, edits) in cases(kind) {
