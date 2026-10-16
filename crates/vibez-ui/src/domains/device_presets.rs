@@ -113,6 +113,28 @@ const FILTER_KEYS: [(usize, &str, bool); 13] = {
     ]
 };
 
+/// Native Gate parameters a preset stores: everything but detector
+/// audition, which is a listening aid rather than part of the sound.
+const GATE_KEYS: [(usize, &str, bool); 14] = {
+    use vibez_dsp::gate::param::*;
+    [
+        (THRESHOLD, "threshold_db", false),
+        (ATTACK, "attack_ms", false),
+        (RELEASE, "release_ms", false),
+        (HOLD, "hold_ms", false),
+        (HYSTERESIS, "hysteresis_db", false),
+        (RANGE_ENABLED, "range_enabled", true),
+        (RANGE, "range_db", false),
+        (MODE, "mode", true),
+        (EXPANSION_RATIO, "expansion_ratio", false),
+        (HP_ENABLED, "hp_enabled", true),
+        (HP_FREQUENCY, "hp_frequency_hz", false),
+        (LP_ENABLED, "lp_enabled", true),
+        (LP_FREQUENCY, "lp_frequency_hz", false),
+        (MIX, "mix", false),
+    ]
+};
+
 /// One stored parameter: its index, preset key and whether it only takes
 /// whole numbers, as switches and choices do.
 type PresetParam = (usize, &'static str, bool);
@@ -178,6 +200,7 @@ fn parameter_keys(effect: &UiEffect) -> Result<Vec<PresetParam>, String> {
         EffectType::Eq => Ok(EQ_KEYS.to_vec()),
         EffectType::Compressor => Ok(COMPRESSOR_KEYS.to_vec()),
         EffectType::Filter => Ok(FILTER_KEYS.to_vec()),
+        EffectType::Gate => Ok(GATE_KEYS.to_vec()),
         _ => Err("Presets are not yet supported by this built-in device".into()),
     }
 }
@@ -254,6 +277,7 @@ pub fn factory_presets(effect_type: EffectType) -> Vec<DevicePreset> {
         EffectType::Eq => eq_factory_presets(),
         EffectType::Compressor => compressor_factory_presets(),
         EffectType::Filter => filter_factory_presets(),
+        EffectType::Gate => gate_factory_presets(),
         _ => Vec::new(),
     }
 }
@@ -566,6 +590,112 @@ fn filter_factory_presets() -> Vec<DevicePreset> {
         EffectType::Filter,
         &FILTER_KEYS,
         vibez_dsp::filter::FILTER_PARAMS,
+        &presets,
+    )
+}
+
+/// Sol's starting points for drums, vocals and keyed gating.
+fn gate_factory_presets() -> Vec<DevicePreset> {
+    let presets: [(&str, &[(&str, f32)]); 8] = [
+        ("Init", &[]),
+        (
+            "Tight Drums",
+            &[
+                ("threshold_db", -32.0),
+                ("hold_ms", 60.0),
+                ("release_ms", 120.0),
+                ("hysteresis_db", 6.0),
+                ("range_enabled", 1.0),
+                ("range_db", 60.0),
+            ],
+        ),
+        (
+            "Gentle Cleanup",
+            &[
+                ("threshold_db", -48.0),
+                ("attack_ms", 3.0),
+                ("hold_ms", 30.0),
+                ("release_ms", 180.0),
+                ("hysteresis_db", 4.0),
+                ("range_enabled", 1.0),
+                ("range_db", 18.0),
+            ],
+        ),
+        (
+            "Snare Body",
+            &[
+                ("threshold_db", -28.0),
+                ("attack_ms", 0.5),
+                ("hold_ms", 85.0),
+                ("release_ms", 170.0),
+                ("hysteresis_db", 5.0),
+                ("hp_enabled", 1.0),
+                ("hp_frequency_hz", 160.0),
+                ("lp_enabled", 1.0),
+                ("lp_frequency_hz", 6000.0),
+                ("range_enabled", 1.0),
+                ("range_db", 48.0),
+            ],
+        ),
+        (
+            "Short Percussion",
+            &[
+                ("threshold_db", -34.0),
+                ("attack_ms", 0.2),
+                ("hold_ms", 12.0),
+                ("release_ms", 35.0),
+                ("hysteresis_db", 3.0),
+                ("range_enabled", 1.0),
+                ("range_db", 72.0),
+            ],
+        ),
+        (
+            "Vocal Expander",
+            &[
+                ("threshold_db", -42.0),
+                ("attack_ms", 4.0),
+                ("hold_ms", 35.0),
+                ("release_ms", 210.0),
+                ("hysteresis_db", 2.0),
+                ("mode", 1.0),
+                ("expansion_ratio", 2.0),
+                ("range_enabled", 1.0),
+                ("range_db", 15.0),
+                ("hp_enabled", 1.0),
+                ("hp_frequency_hz", 100.0),
+            ],
+        ),
+        (
+            "External Trigger",
+            &[
+                ("threshold_db", -24.0),
+                ("attack_ms", 0.2),
+                ("hold_ms", 45.0),
+                ("release_ms", 90.0),
+                ("hysteresis_db", 4.0),
+                ("hp_enabled", 1.0),
+                ("hp_frequency_hz", 40.0),
+                ("lp_enabled", 1.0),
+                ("lp_frequency_hz", 1800.0),
+            ],
+        ),
+        (
+            "Soft Floor",
+            &[
+                ("threshold_db", -38.0),
+                ("attack_ms", 8.0),
+                ("hold_ms", 20.0),
+                ("release_ms", 250.0),
+                ("hysteresis_db", 5.0),
+                ("range_enabled", 1.0),
+                ("range_db", 12.0),
+            ],
+        ),
+    ];
+    keyed_presets(
+        EffectType::Gate,
+        &GATE_KEYS,
+        vibez_dsp::gate::GATE_PARAMS,
         &presets,
     )
 }
