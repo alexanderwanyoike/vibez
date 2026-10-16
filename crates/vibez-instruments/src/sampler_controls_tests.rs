@@ -282,3 +282,15 @@ fn a_one_shot_fades_out_over_its_release_as_it_reaches_its_end() {
     assert!(out[9_600 - 1_440] < 0.3, "no fade before the end");
     assert!(out[9_599] < 0.01);
 }
+
+#[test]
+fn an_edit_made_while_silent_holds_from_the_next_note_on() {
+    let mut sampler = sampler(audio(vec![0.5; 4_800]), &[]);
+    render(&mut sampler, 100);
+    sampler.set_param(param::VOLUME, 0.2);
+    sampler.note_on(60, 127);
+
+    let out = render(&mut sampler, 100);
+
+    assert!((out[60] - 0.1).abs() < 1e-3, "{}", out[60]);
+}
