@@ -18,6 +18,8 @@ use crate::synth_params::{lfo_target, LFO_CUTOFF_OCTAVES, LFO_PITCH_SEMITONES};
 use crate::Instrument;
 
 const MAX_VOICES: usize = 8;
+/// The note a struck voice holds, which a pad's note-off releases.
+pub const PAD_NOTE: u8 = 60;
 /// A sample that stops before its loop or its own end fades out over this
 /// long, so stopping mid-sound does not click.
 const END_FADE_SECONDS: f32 = 0.002;
@@ -182,6 +184,27 @@ impl Sampler {
         self.voices[index].start(
             pitch, semitones, gain, self.age, from, glide, one_shot, region,
         );
+    }
+
+    /// Plays the sample at its root on a voice of its own, as a drum pad
+    /// is hit: repeated hits ring together rather than cutting each other.
+    pub fn strike(&mut self, velocity: u8) {
+        if velocity > 0 {
+            self.start(PAD_NOTE, 0.0, velocity, false);
+        }
+    }
+
+    /// Releases every voice, one-shots too, over the release time.
+    pub fn choke(&mut self) {
+        for voice in &mut self.voices {
+            voice.release();
+        }
+    }
+
+    pub fn unload(&mut self) {
+        self.sample = None;
+        self.sample_name = None;
+        self.reset();
     }
 
     /// Whether any voice is playing; a silent sampler has nothing to
