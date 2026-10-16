@@ -1225,3 +1225,148 @@ pub fn run_drive() -> iced::Result {
     .font(crate::typography::PLEX_MONO_SEMIBOLD_BYTES)
     .run_with(|| (DriveGallery::new(), iced::Task::none()))
 }
+
+/// Native Bitcrush at each width tier and section height it adapts to, set
+/// like the concept's Crunchy 12 with levels standing in for live audio.
+struct BitcrushGallery {
+    track: TrackId,
+    effect: UiEffect,
+    closed: crate::domains::device_card::CardPanelState,
+    open: crate::domains::device_card::CardPanelState,
+}
+
+impl BitcrushGallery {
+    fn new() -> Self {
+        use crate::domains::device_card::CardPanelState;
+        use vibez_dsp::bitcrush::param;
+        let mut effect = effect(EffectType::Bitcrush, None, false, false, None, 0);
+        effect.params = effect.descriptors.iter().map(|d| d.default).collect();
+        effect.params[param::BITS] = 12.0;
+        effect.params[param::SR_REDUCE] = 4.0;
+        effect.params[param::DRIVE_DB] = 2.0;
+        effect.params[param::MIX] = 0.65;
+        let level = |db: f32| vibez_engine::metering::MeterValues {
+            peak_l: vibez_core::level::db_to_amplitude(db),
+            peak_r: vibez_core::level::db_to_amplitude(db - 0.5),
+            rms_l: vibez_core::level::db_to_amplitude(db - 6.0),
+            rms_r: vibez_core::level::db_to_amplitude(db - 6.5),
+        };
+        let closed = CardPanelState {
+            input: level(-2.0),
+            output: level(-3.0),
+            last_meter_at: Some(std::time::Instant::now()),
+            ..Default::default()
+        };
+        Self {
+            track: TrackId::new(),
+            effect,
+            open: CardPanelState {
+                advanced: true,
+                ..closed.clone()
+            },
+            closed,
+        }
+    }
+
+    fn scene<'a>(
+        &'a self,
+        label: &'static str,
+        card_width: f32,
+        section: (f32, f32),
+        panel: &'a crate::domains::device_card::CardPanelState,
+    ) -> Element<'a, Message> {
+        let accent = th::track_color(0);
+        let effect = &self.effect;
+        let track = self.track;
+        let body = iced::widget::responsive(move |size| {
+            crate::widgets::bitcrush_device::BitcrushView {
+                track_id: track,
+                effect,
+                accent,
+                panel,
+                entry: None,
+                host_rate: 44_100,
+            }
+            .view(
+                crate::widgets::device_preset_bar::view(
+                    track,
+                    effect,
+                    None,
+                    accent,
+                    crate::widgets::bitcrush_device::preset_bar_width(size),
+                ),
+                size,
+            )
+        });
+        framed_card(
+            label,
+            card_width,
+            section,
+            track,
+            effect,
+            accent,
+            body.into(),
+        )
+    }
+
+    fn view(&self) -> Element<'_, Message> {
+        use crate::widgets::bitcrush_device::COMPACT_W;
+        let wide = 900.0;
+        let (closed, open) = (&self.closed, &self.open);
+        container(
+            column![
+                row![
+                    self.scene("Wide, tall", wide, (wide + 16.0, 330.0), closed),
+                    self.scene(
+                        "Compact, tall",
+                        COMPACT_W,
+                        (COMPACT_W + 16.0, 330.0),
+                        closed
+                    ),
+                ]
+                .spacing(24),
+                row![
+                    self.scene("Wide, Advanced open", wide, (wide + 16.0, 400.0), open),
+                    self.scene(
+                        "Compact, Advanced open",
+                        COMPACT_W,
+                        (COMPACT_W + 16.0, 400.0),
+                        open
+                    ),
+                ]
+                .spacing(24),
+                row![
+                    self.scene("Wide, shortest", wide, (wide + 16.0, 110.0), closed),
+                    self.scene("Compact, short", COMPACT_W, (COMPACT_W + 16.0, 150.0), open),
+                ]
+                .spacing(24),
+            ]
+            .spacing(16),
+        )
+        .padding(16)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .style(|_theme: &Theme| container::Style {
+            background: Some(th::bg_surface().into()),
+            ..Default::default()
+        })
+        .into()
+    }
+}
+
+pub fn run_bitcrush() -> iced::Result {
+    iced::application(
+        "Bitcrush device gallery",
+        |_: &mut BitcrushGallery, _: Message| {},
+        BitcrushGallery::view,
+    )
+    .theme(|_| th::vibez_theme())
+    .antialiasing(true)
+    .window_size((1900.0, 1260.0))
+    .font(crate::icons::ICON_FONT_BYTES)
+    .font(crate::typography::PLEX_SANS_CONDENSED_MEDIUM_BYTES)
+    .font(crate::typography::PLEX_SANS_CONDENSED_SEMIBOLD_BYTES)
+    .font(crate::typography::PLEX_MONO_MEDIUM_BYTES)
+    .font(crate::typography::PLEX_MONO_SEMIBOLD_BYTES)
+    .run_with(|| (BitcrushGallery::new(), iced::Task::none()))
+}

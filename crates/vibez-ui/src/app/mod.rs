@@ -158,6 +158,7 @@ mod audio_recording;
 mod audio_settings;
 mod audio_take_finalization;
 mod audio_tasks;
+mod bitcrush_devices;
 mod bounce;
 mod capture;
 mod card_devices;
