@@ -268,11 +268,13 @@ fn gain_panel(advanced: bool, clip: bool) -> crate::domains::gain::GainPanelStat
         .map(|step| {
             let seconds = step as f32 * 0.05;
             let swell = (seconds * 1.7).sin() * 1.5 + (seconds * 5.3).sin() * 0.8;
-            GainHistoryPoint {
-                at: now - std::time::Duration::from_secs_f32(10.0 - seconds),
-                peak: vibez_core::level::db_to_amplitude(-7.0 + swell),
-                rms: vibez_core::level::db_to_amplitude(-12.5 + swell * 0.6),
-            }
+            (
+                now - std::time::Duration::from_secs_f32(10.0 - seconds),
+                GainHistoryPoint {
+                    peak: vibez_core::level::db_to_amplitude(-7.0 + swell),
+                    rms: vibez_core::level::db_to_amplitude(-12.5 + swell * 0.6),
+                },
+            )
         })
         .collect();
     GainPanelState {
@@ -595,7 +597,7 @@ struct CompressorGallery {
 
 impl CompressorGallery {
     fn new() -> Self {
-        use crate::domains::compressor::{CompressorPanelState, ReductionPoint};
+        use crate::domains::compressor::CompressorPanelState;
         let mut effect = effect(EffectType::Compressor, None, false, false, None, 0);
         effect.params = effect.descriptors.iter().map(|d| d.default).collect();
         let now = std::time::Instant::now();
@@ -610,10 +612,10 @@ impl CompressorGallery {
                 let seconds = step as f32 * 0.025;
                 let swell =
                     3.0 + (seconds * 4.1).sin() * 1.2 + (seconds * 11.0).sin().max(0.0) * 2.5;
-                ReductionPoint {
-                    at: now - std::time::Duration::from_secs_f32(5.0 - seconds),
-                    db: swell.max(0.0),
-                }
+                (
+                    now - std::time::Duration::from_secs_f32(5.0 - seconds),
+                    swell.max(0.0),
+                )
             })
             .collect();
         let closed = CompressorPanelState {

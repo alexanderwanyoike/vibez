@@ -1,6 +1,5 @@
 //! Native Gain body: dB gain, stereo trim and polarity, metered on both sides.
 
-use std::collections::VecDeque;
 use std::time::Instant;
 
 use iced::mouse;
@@ -514,12 +513,10 @@ fn db_text(amplitude: f32) -> String {
 }
 
 struct LevelHistory<'a> {
-    points: &'a VecDeque<GainHistoryPoint>,
+    points: &'a crate::domains::device_levels::ReadingHistory<GainHistoryPoint>,
     now: Instant,
     accent: Color,
 }
-
-const HISTORY_SECONDS: f32 = 10.0;
 
 impl canvas::Program<Message> for LevelHistory<'_> {
     type State = ();
@@ -553,7 +550,7 @@ impl canvas::Program<Message> for LevelHistory<'_> {
             level_meter::draw_scale_label(&mut frame, db, Point::new(left - 4.0, y));
         }
         for second in (2..10).step_by(2) {
-            let x = left + second as f32 / HISTORY_SECONDS * width;
+            let x = left + second as f32 / crate::domains::gain::HISTORY.as_secs_f32() * width;
             frame.stroke(
                 &canvas::Path::line(Point::new(x, 0.0), Point::new(x, height)),
                 canvas::Stroke::default()
@@ -564,9 +561,9 @@ impl canvas::Program<Message> for LevelHistory<'_> {
         for peak in [true, false] {
             let path = canvas::Path::new(|builder| {
                 let mut started = false;
-                for point in self.points {
-                    let age = self.now.saturating_duration_since(point.at).as_secs_f32();
-                    if age > HISTORY_SECONDS {
+                for (at, point) in self.points.iter() {
+                    let age = self.now.saturating_duration_since(*at).as_secs_f32();
+                    if age > crate::domains::gain::HISTORY.as_secs_f32() {
                         continue;
                     }
                     let value = if peak { point.peak } else { point.rms };
@@ -576,8 +573,10 @@ impl canvas::Program<Message> for LevelHistory<'_> {
                         started = false;
                         continue;
                     }
-                    let position =
-                        Point::new(left + (1.0 - age / HISTORY_SECONDS) * width, y_of(db));
+                    let position = Point::new(
+                        left + (1.0 - age / crate::domains::gain::HISTORY.as_secs_f32()) * width,
+                        y_of(db),
+                    );
                     if started {
                         builder.line_to(position);
                     } else {
