@@ -37,6 +37,8 @@ pub enum ParamFormat {
     Ratio,
     /// A MIDI note, shown and typed by name ("C4", "F#2") or number.
     Note,
+    /// Stored -1..1, shown as the mixer shows pan ("C", "L50", "R30").
+    Pan,
     Number {
         decimals: u8,
         unit: &'static str,
@@ -78,7 +80,7 @@ impl ParamFormat {
             Self::Milliseconds => format!("{} ms", self.edit_text(value)),
             Self::Percent => format!("{} %", self.edit_text(value)),
             Self::Ratio => format!("{} :1", self.edit_text(value)),
-            Self::Note => self.edit_text(value),
+            Self::Note | Self::Pan => self.edit_text(value),
             Self::Number { unit: "", .. } => self.edit_text(value),
             Self::Number { unit, .. } => format!("{} {unit}", self.edit_text(value)),
         }
@@ -108,6 +110,11 @@ impl ParamFormat {
             Self::Percent => format!("{:.0}", value * 100.0),
             Self::Ratio => format!("{value:.1}"),
             Self::Note => vibez_core::midi::pitch_name(value.round().clamp(0.0, 127.0) as u8),
+            Self::Pan => match (value * 100.0).round() {
+                side if side < 0.0 => format!("L{:.0}", -side),
+                side if side > 0.0 => format!("R{side:.0}"),
+                _ => "C".into(),
+            },
             Self::Number { decimals, .. } => format!("{value:.*}", decimals as usize),
         }
     }
@@ -130,6 +137,9 @@ impl ParamFormat {
             if let Some(pitch) = note_from_name(&text) {
                 return (min..=max).contains(&pitch).then_some(pitch);
             }
+        }
+        if matches!(self, Self::Pan) {
+            return parse_pan(&text).filter(|value| (min..=max).contains(value));
         }
         if matches!(self, Self::Amplitude { .. }) && matches!(text.as_str(), "-inf" | "-∞") {
             return Some(0.0);
@@ -188,6 +198,32 @@ impl ParamFormat {
     }
 }
 
+/// "C", a side and a share ("L50", "50 R"), or a signed share ("-25").
+fn parse_pan(text: &str) -> Option<f32> {
+    if text == "c" {
+        return Some(0.0);
+    }
+    let side = match (text.contains('l'), text.contains('r')) {
+        (true, false) => -1.0,
+        (false, true) => 1.0,
+        (false, false) => 0.0,
+        (true, true) => return None,
+    };
+    let number = text.replace(['l', 'r'], "");
+    let share = number
+        .trim()
+        .parse::<f32>()
+        .ok()
+        .filter(|share| share.is_finite())?;
+    Some(if side == 0.0 {
+        share / 100.0
+    } else if share >= 0.0 {
+        side * share / 100.0
+    } else {
+        return None;
+    })
+}
+
 /// The format a built-in effect parameter uses. Devices whose stored value
 /// differs from how it reads add their parameter here.
 /// `host_rate` is the sample rate the device runs at, for values that read
@@ -221,6 +257,7 @@ pub fn param_format(
                     decimals: 1,
                     unit: "oct",
                 },
+                param::PAN => ParamFormat::Pan,
                 _ => ParamFormat::for_descriptor(descriptor),
             }
         }
@@ -648,6 +685,27 @@ mod tests {
         assert_eq!(format(param::DETUNE, 0.26), "0.3 st");
         assert_eq!(format(param::VOICES, 8.0), "8");
         assert_eq!(format(param::CUTOFF, 2_400.0), "2.4 kHz");
+    }
+
+    #[test]
+    fn pan_reads_and_types_as_the_mixer_shows_it() {
+        let pan = ParamFormat::Pan;
+        assert_eq!(pan.format(0.0), "C");
+        assert_eq!(pan.format(-0.5), "L50");
+        assert_eq!(pan.format(0.3), "R30");
+        for (text, value) in [
+            ("C", 0.0),
+            ("l50", -0.5),
+            ("50 L", -0.5),
+            ("R30", 0.3),
+            ("-25", -0.25),
+        ] {
+            assert_eq!(pan.parse(text, -1.0, 1.0), Some(value), "{text}");
+        }
+        for text in ["L150", "X20", "oops"] {
+            assert_eq!(pan.parse(text, -1.0, 1.0), None, "{text}");
+        }
+        assert_eq!(pan.parse(&pan.edit_text(-0.4), -1.0, 1.0), Some(-0.4));
     }
 
     #[test]

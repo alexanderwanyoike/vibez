@@ -84,9 +84,52 @@ impl SamplerPage {
     }
 }
 
+/// The tabs a card shows. A drum pad plays at its root whatever the note,
+/// so it has no zone.
+pub fn pages(pad: bool) -> &'static [SamplerPage] {
+    if pad {
+        &[
+            SamplerPage::Sample,
+            SamplerPage::Pitch,
+            SamplerPage::Filter,
+            SamplerPage::Modulation,
+        ]
+    } else {
+        &SamplerPage::ALL
+    }
+}
+
+/// The values typed beside the sample's name on a wide card.
+pub fn header_controls(pad: bool) -> &'static [usize] {
+    if pad {
+        &[param::TUNE, param::VOLUME, param::PAN]
+    } else {
+        &[param::ROOT_NOTE, param::TUNE, param::VOLUME, param::PAN]
+    }
+}
+
+/// The Pitch tab's controls; a pad's velocity lives here, its Zones tab
+/// being gone.
+pub fn pitch_controls(pad: bool) -> &'static [usize] {
+    if pad {
+        &[param::TUNE, param::FINE, param::VELOCITY_AMOUNT]
+    } else {
+        &[param::ROOT_NOTE, param::TUNE, param::FINE, param::GLIDE]
+    }
+}
+
 pub fn is_native_sampler(track: &crate::state::UiTrack) -> bool {
+    is_native(track, vibez_core::midi::InstrumentKind::Sampler)
+}
+
+/// A Drum Rack, whose pads are Samplers.
+pub fn is_native_drum_rack(track: &crate::state::UiTrack) -> bool {
+    is_native(track, vibez_core::midi::InstrumentKind::DrumRack)
+}
+
+fn is_native(track: &crate::state::UiTrack, kind: vibez_core::midi::InstrumentKind) -> bool {
     track.has_instrument
-        && track.instrument_kind == Some(vibez_core::midi::InstrumentKind::Sampler)
+        && track.instrument_kind == Some(kind)
         && track.plugin_instrument_name.is_none()
         && track.plugin_instrument_ref.is_none()
 }
@@ -106,6 +149,19 @@ mod tests {
             }
             assert_eq!(Mode::of(&params), mode);
         }
+    }
+
+    #[test]
+    fn a_pad_shows_no_zone_root_or_glide_and_both_show_pan() {
+        assert!(!pages(true).contains(&SamplerPage::Zones));
+        assert_eq!(pages(false), &SamplerPage::ALL);
+        for index in [param::ROOT_NOTE, param::GLIDE] {
+            assert!(!pitch_controls(true).contains(&index));
+            assert!(!header_controls(true).contains(&index));
+        }
+        assert!(pitch_controls(true).contains(&param::VELOCITY_AMOUNT));
+        assert!(header_controls(true).contains(&param::PAN));
+        assert!(header_controls(false).contains(&param::PAN));
     }
 
     #[test]

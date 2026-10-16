@@ -76,20 +76,15 @@ impl TimelineEditorState {
                 return failure("A marker produced an empty Drum Rack slice");
             }
             pads.push(UiDrumPad {
-                name: Some(format!("{} Slice {}", original.name, index + 1)),
-                source: Some(source.clone()),
                 audio: Some(Arc::clone(&audio)),
-                gain: original.gain_db.linear(),
-                pan: 0.0,
-                start: source_start as f32 / source_frames,
-                end: source_end as f32 / source_frames,
-                fade_in_ms: vibez_core::track::DRUM_PAD_DEFAULT_FADE_MS,
-                fade_out_ms: vibez_core::track::DRUM_PAD_DEFAULT_FADE_MS,
-                coarse_tune: 0,
-                fine_tune: 0.0,
-                one_shot: true,
-                choke_group: None,
-                params: Vec::new(),
+                ..UiDrumPad::from_state(&vibez_core::track::DrumPadState {
+                    name: Some(format!("{} Slice {}", original.name, index + 1)),
+                    source: Some(source.clone()),
+                    gain: original.gain_db.linear(),
+                    start: source_start as f32 / source_frames,
+                    end: source_end as f32 / source_frames,
+                    ..Default::default()
+                })
             });
             notes.push(MidiNote {
                 pitch: drum_rack_pad_pitch(index).expect("slice count is capped to the rack"),

@@ -2010,7 +2010,7 @@ impl SynthGallery {
                 track_id,
                 device,
                 accent,
-                panel,
+                panel: panel.clone(),
                 entry: None,
             }
             .view(
@@ -2063,7 +2063,7 @@ impl SynthGallery {
         let medium = 760.0;
         let page = |page: SynthPage| InstrumentPanel {
             page: page.index(),
-            filter_envelope: false,
+            ..Default::default()
         };
         container(
             column![
@@ -2102,6 +2102,7 @@ impl SynthGallery {
                         InstrumentPanel {
                             page: SynthPage::Envelope.index(),
                             filter_envelope: true,
+                            ..Default::default()
                         }
                     ),
                 ]
@@ -2215,10 +2216,11 @@ impl SamplerGallery {
             crate::widgets::sampler_device::SamplerView {
                 track_id,
                 device,
+                load: Message::LoadSamplerSample(track_id),
                 audio: track.sample_audio.as_ref(),
-                sample_name: track.sample_name.as_deref(),
+                sample_name: track.sample_name.clone(),
                 accent,
-                panel,
+                panel: panel.clone(),
                 entry: None,
             }
             .view(
@@ -2272,6 +2274,7 @@ impl SamplerGallery {
         let page = |page: SamplerPage, filter_envelope: bool| InstrumentPanel {
             page: page.index(),
             filter_envelope,
+            ..Default::default()
         };
         container(
             column![
@@ -2346,4 +2349,242 @@ pub fn run_sampler() -> iced::Result {
     .font(crate::typography::PLEX_MONO_MEDIUM_BYTES)
     .font(crate::typography::PLEX_MONO_SEMIBOLD_BYTES)
     .run_with(|| (SamplerGallery::new(), iced::Task::none()))
+}
+
+/// Native Drum Rack at each width and height it adapts to, with a kit of
+/// generated hits in its first bank.
+struct DrumRackGallery {
+    track: ProjectTrack,
+}
+
+impl DrumRackGallery {
+    fn new() -> Self {
+        use crate::state::UiDrumPad;
+        use vibez_instruments::sampler::param;
+        let rate = 44_100.0f32;
+        let mut seed = 0x9e37_79b9_u32;
+        let mut noise = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 17;
+            seed ^= seed << 5;
+            seed as f32 / u32::MAX as f32 * 2.0 - 1.0
+        };
+        let mut hit = |seconds: f32, tone: f32, sweep: f32, grit: f32, decay: f32| {
+            let samples: Vec<f32> = (0..(rate * seconds) as usize)
+                .map(|i| {
+                    let t = i as f32 / rate;
+                    let pitch = tone * (1.0 + sweep * (-t * 30.0).exp());
+                    let body = (std::f32::consts::TAU * pitch * t).sin() * (1.0 - grit);
+                    (body + noise() * grit) * (-t * decay).exp() * 0.9
+                })
+                .collect();
+            std::sync::Arc::new(vibez_core::audio_buffer::DecodedAudio {
+                channels: vec![samples.clone(), samples],
+                sample_rate: rate as u32,
+            })
+        };
+        let kit = [
+            ("Kick", hit(0.6, 50.0, 3.0, 0.05, 7.0)),
+            ("Snare", hit(0.35, 190.0, 0.5, 0.6, 14.0)),
+            ("Closed Hat", hit(0.12, 0.0, 0.0, 1.0, 40.0)),
+            ("Open Hat Long Tail 03", hit(0.8, 0.0, 0.0, 1.0, 5.0)),
+            ("Clap", hit(0.3, 0.0, 0.0, 0.9, 16.0)),
+            ("Rim", hit(0.08, 800.0, 0.2, 0.3, 50.0)),
+            ("Tom Low", hit(0.5, 90.0, 0.8, 0.1, 8.0)),
+            ("Tom High", hit(0.4, 150.0, 0.8, 0.1, 9.0)),
+            ("Shaker", hit(0.2, 0.0, 0.0, 1.0, 22.0)),
+            ("Ride", hit(1.2, 520.0, 0.0, 0.7, 3.0)),
+            ("Crash", hit(1.6, 0.0, 0.0, 1.0, 2.0)),
+        ];
+        let mut track = ProjectTrack::new(TrackId::new(), "Drums".into(), 0);
+        track.kind = vibez_core::midi::TrackKind::Midi;
+        track.has_instrument = true;
+        track.instrument_kind = Some(vibez_core::midi::InstrumentKind::DrumRack);
+        track.drum_rack_pads = crate::state::default_drum_rack_pads();
+        for (pad, (name, audio)) in kit.into_iter().enumerate() {
+            let index = if pad < 11 { pad } else { pad + 1 };
+            track.drum_rack_pads[index] = UiDrumPad {
+                name: Some(name.into()),
+                source: Some(vibez_core::track::MediaSourceRef::LocalFile {
+                    path: format!("/kits/dusty/{}.wav", name.to_lowercase().replace(' ', "_"))
+                        .into(),
+                }),
+                audio: Some(audio),
+                choke_group: matches!(pad, 2 | 3).then_some(1),
+                ..UiDrumPad::default()
+            };
+        }
+        let snare = track.drum_rack_pads[1].sampler_params_mut();
+        snare[param::START] = 0.02;
+        snare[param::END] = 0.85;
+        snare[param::TUNE] = -2.0;
+        snare[param::PAN] = -0.2;
+        track.drum_rack_pads[17] = UiDrumPad {
+            name: Some("Perc".into()),
+            audio: track.drum_rack_pads[5].audio.clone(),
+            ..UiDrumPad::default()
+        };
+        track.selected_drum_pad = 1;
+        Self { track }
+    }
+
+    fn scene<'a>(
+        &'a self,
+        label: &'static str,
+        card_width: f32,
+        section: (f32, f32),
+        panel: crate::domains::instrument_card::InstrumentPanel,
+    ) -> Element<'a, Message> {
+        use crate::domains::device_params::{DeviceParams, DeviceSlot};
+        let accent = th::track_color(2);
+        let track_id = self.track.id;
+        let track = &self.track;
+        let selected = track.selected_drum_pad;
+        let Some(device) = DeviceParams::find(track, DeviceSlot::DrumPad(selected)) else {
+            return text("no pad").into();
+        };
+        let body = iced::widget::responsive(move |size| {
+            let layout = crate::widgets::drum_rack_device::arrange(size);
+            let mut firing = [false; vibez_core::track::DRUM_RACK_BANK_SIZE];
+            firing[0] = true;
+            crate::widgets::drum_rack_device::DrumRackView {
+                track_id,
+                pads: &track.drum_rack_pads,
+                selected,
+                device,
+                firing,
+                banks_firing: [true, false, false, false],
+                drop_target: Some(14),
+                accent,
+                panel: panel.clone(),
+                entry: None,
+            }
+            .view(
+                crate::widgets::device_preset_bar::view(
+                    track_id,
+                    device,
+                    None,
+                    accent,
+                    crate::widgets::sampler_device::preset_bar_width(layout.sampler),
+                ),
+                size,
+            )
+        });
+        let title = crate::widgets::device_chrome::title_bar(
+            row![
+                text("\u{25CF}").size(8).color(accent),
+                text("Drum Rack").size(11).color(th::text())
+            ]
+            .spacing(5)
+            .align_y(iced::Alignment::Center),
+        );
+        let card = crate::widgets::device_chrome::card(
+            column![title, body].width(Length::Fixed(card_width)),
+        );
+        column![
+            text(label).size(11).color(th::text_dim()),
+            container(row![card].height(Length::Fill))
+                .padding(8)
+                .width(section.0)
+                .height(section.1)
+                .style(|_theme: &Theme| container::Style {
+                    background: Some(th::bg_dark().into()),
+                    border: iced::Border {
+                        color: th::border(),
+                        width: 1.0,
+                        radius: 0.0.into(),
+                    },
+                    ..Default::default()
+                }),
+        ]
+        .spacing(4)
+        .into()
+    }
+
+    fn view(&self) -> Element<'_, Message> {
+        use crate::domains::instrument_card::InstrumentPanel;
+        use crate::domains::sampler::SamplerPage;
+        use crate::widgets::drum_rack_device::{COMPACT_W, SIDE_BY_SIDE_W};
+        let full = 1_200.0;
+        let page = |page: SamplerPage, pad_sampler: bool| InstrumentPanel {
+            page: page.index(),
+            pad_sampler,
+            ..Default::default()
+        };
+        container(
+            column![
+                self.scene(
+                    "Full, tall",
+                    full,
+                    (full + 16.0, 380.0),
+                    page(SamplerPage::Sample, false)
+                ),
+                row![
+                    self.scene(
+                        "Side by side at its narrowest, Pitch tab",
+                        SIDE_BY_SIDE_W,
+                        (SIDE_BY_SIDE_W + 16.0, 330.0),
+                        page(SamplerPage::Pitch, false)
+                    ),
+                    self.scene(
+                        "Compact, Pads",
+                        COMPACT_W,
+                        (COMPACT_W + 16.0, 330.0),
+                        page(SamplerPage::Sample, false)
+                    ),
+                    self.scene(
+                        "Compact, Sampler",
+                        COMPACT_W,
+                        (COMPACT_W + 16.0, 330.0),
+                        page(SamplerPage::Filter, true)
+                    ),
+                ]
+                .spacing(24),
+                row![
+                    self.scene(
+                        "Full, short",
+                        full,
+                        (full + 16.0, 220.0),
+                        page(SamplerPage::Sample, false)
+                    ),
+                    self.scene(
+                        "Compact, Pads, short",
+                        COMPACT_W,
+                        (COMPACT_W + 16.0, 220.0),
+                        page(SamplerPage::Sample, false)
+                    ),
+                ]
+                .spacing(24),
+            ]
+            .spacing(14),
+        )
+        .padding(16)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .style(|_theme: &Theme| container::Style {
+            background: Some(th::bg_surface().into()),
+            ..Default::default()
+        })
+        .into()
+    }
+}
+
+pub fn run_drum_rack() -> iced::Result {
+    iced::application(
+        "Drum Rack device gallery",
+        |_: &mut DrumRackGallery, _: Message| {},
+        DrumRackGallery::view,
+    )
+    .theme(|_| th::vibez_theme())
+    .antialiasing(true)
+    .window_size((1900.0, 1500.0))
+    .subscription(|_| {
+        iced::time::every(std::time::Duration::from_millis(16)).map(|_| Message::Tick)
+    })
+    .font(crate::icons::ICON_FONT_BYTES)
+    .font(crate::typography::PLEX_SANS_CONDENSED_MEDIUM_BYTES)
+    .font(crate::typography::PLEX_SANS_CONDENSED_SEMIBOLD_BYTES)
+    .font(crate::typography::PLEX_MONO_MEDIUM_BYTES)
+    .font(crate::typography::PLEX_MONO_SEMIBOLD_BYTES)
+    .run_with(|| (DrumRackGallery::new(), iced::Task::none()))
 }

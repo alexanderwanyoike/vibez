@@ -118,6 +118,10 @@ pub trait Instrument: Send {
     /// Apply pad settings to a drum-rack pad. No-op for other instruments.
     fn set_drum_pad_state(&mut self, _pad_index: usize, _state: DrumPadState) {}
 
+    /// Set one of a drum-rack pad's Sampler controls. No-op for other
+    /// instruments.
+    fn set_drum_pad_param(&mut self, _pad_index: usize, _index: usize, _value: f32) {}
+
     /// Sample name for UI display. None for non-sample instruments.
     fn sample_name(&self) -> Option<&str> {
         None

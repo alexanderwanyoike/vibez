@@ -102,3 +102,7 @@ required-features = ["dev-gallery"]
 [[example]]
 name = "sampler_device"
 required-features = ["dev-gallery"]
+
+[[example]]
+name = "drum_rack_device"
+required-features = ["dev-gallery"]

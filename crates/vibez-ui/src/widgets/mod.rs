@@ -20,6 +20,7 @@ pub mod double_click;
 pub mod drag;
 pub mod drive_device;
 pub mod drive_display;
+pub mod drum_rack_device;
 pub mod effect_knob;
 pub mod effect_slot;
 pub mod eq_device;

@@ -108,6 +108,7 @@ fn coverage(command: &EngineCommand) -> Coverage {
         | C::LoadDrumRackPadSample { .. }
         | C::ClearDrumRackPad { .. }
         | C::SetDrumRackPadState { .. }
+        | C::SetDrumRackPadParam { .. }
         | C::SetArrangementRecording(_)
         | C::SetArrangementLoop(_)
         | C::SetArrangementLoopRegion { .. }
@@ -575,6 +576,12 @@ fn cases() -> Vec<Case> {
             track_id: f.drums,
             pad_index: 0,
             state: Default::default(),
+        }),
+        case!("SetDrumRackPadParam", false, |f| C::SetDrumRackPadParam {
+            track_id: f.drums,
+            pad_index: 0,
+            param_index: 0,
+            value: 0.5,
         }),
         case!("SetArrangementRecording", false, |_| {
             C::SetArrangementRecording(true)

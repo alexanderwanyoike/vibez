@@ -6,6 +6,7 @@ use vibez_core::device_preset::DevicePresetKind;
 use vibez_core::effect::ParamDescriptor;
 use vibez_core::id::{EffectId, TrackId};
 
+use crate::domains::devices::DevicesMsg;
 use crate::message::Message;
 use crate::state::{UiEffect, UiTrack};
 
@@ -14,6 +15,8 @@ use crate::state::{UiEffect, UiTrack};
 pub enum DeviceSlot {
     Effect(EffectId),
     Instrument,
+    /// A Drum Rack pad's Sampler.
+    DrumPad(usize),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -66,6 +69,14 @@ impl<'a> DeviceParams<'a> {
                 .find(|effect| effect.id == id)
                 .map(Self::from),
             DeviceSlot::Instrument => Self::instrument(track),
+            DeviceSlot::DrumPad(pad) => track.drum_rack_pads.get(pad).map(|pad| Self {
+                slot,
+                kind: DevicePresetKind::Instrument(vibez_core::midi::InstrumentKind::Sampler),
+                params: &pad.params,
+                descriptors: vibez_instruments::sampler::SAMPLER_PARAMS,
+                bypass: false,
+                plugin: false,
+            }),
         }
     }
 
@@ -91,6 +102,20 @@ impl DeviceSlot {
         match self {
             Self::Effect(id) => Message::set_effect_param(track_id, id, index, value),
             Self::Instrument => Message::set_instrument_param(track_id, index, value),
+            Self::DrumPad(pad) => Message::Devices(DevicesMsg::SetDrumPadParams(
+                track_id,
+                pad,
+                vec![(index, value)],
+            )),
+        }
+    }
+
+    /// Sets several values on this device as one edit.
+    pub fn set_all(self, track_id: TrackId, updates: Vec<(usize, f32)>) -> DevicesMsg {
+        match self {
+            Self::Effect(id) => DevicesMsg::SetEffectParams(track_id, id, updates),
+            Self::Instrument => DevicesMsg::SetInstrumentParams(track_id, updates),
+            Self::DrumPad(pad) => DevicesMsg::SetDrumPadParams(track_id, pad, updates),
         }
     }
 }

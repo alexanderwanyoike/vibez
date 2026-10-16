@@ -12,9 +12,12 @@ use vibez_core::id::TrackId;
 use vibez_instruments::sampler::{filter_type, param};
 
 use crate::domains::device_params::DeviceParams;
+use crate::domains::device_params::DeviceSlot;
 use crate::domains::instrument_card::{InstrumentCardMsg, InstrumentPanel};
 use crate::domains::param_entry::ValueEntry;
-use crate::domains::sampler::{Mode, SamplerPage, FILTER_NAMES};
+use crate::domains::sampler::{
+    header_controls, pages, pitch_controls, Mode, SamplerPage, FILTER_NAMES,
+};
 use crate::domains::synth::{LFO_SHAPE_NAMES, LFO_TARGET_NAMES};
 use crate::message::Message;
 use crate::theme as th;
@@ -144,8 +147,10 @@ pub fn arrange(size: Size) -> Layout {
 pub struct SamplerView<'a> {
     pub track_id: TrackId,
     pub device: DeviceParams<'a>,
+    /// What the Load button asks for.
+    pub load: Message,
     pub audio: Option<&'a Arc<DecodedAudio>>,
-    pub sample_name: Option<&'a str>,
+    pub sample_name: Option<String>,
     pub accent: Color,
     pub panel: InstrumentPanel,
     pub entry: Option<&'a ValueEntry>,
@@ -173,6 +178,10 @@ impl<'a> SamplerView<'a> {
         }
     }
 
+    fn on_pad(&self) -> bool {
+        matches!(self.device.slot, DeviceSlot::DrumPad(_))
+    }
+
     fn whole(&self, index: usize) -> usize {
         self.device.value(index).round().max(0.0) as usize
     }
@@ -189,7 +198,7 @@ impl<'a> SamplerView<'a> {
         ];
         if layout.section > 0.0 {
             let track_id = self.track_id;
-            let pages: Vec<(SamplerPage, &str)> = SamplerPage::ALL
+            let pages: Vec<(SamplerPage, &str)> = pages(self.on_pad())
                 .iter()
                 .map(|page| (*page, page.name()))
                 .collect();
@@ -231,14 +240,18 @@ impl<'a> SamplerView<'a> {
         let length = self
             .audio
             .map(|audio| audio.num_frames() as f32 / audio.sample_rate.max(1) as f32);
-        let name = text(self.sample_name.unwrap_or("No sample"))
-            .size(LABEL_SIZE + 1.0)
-            .wrapping(text::Wrapping::None)
-            .color(if self.sample_name.is_some() {
-                th::text()
-            } else {
-                th::text_muted()
-            });
+        let name = text(
+            self.sample_name
+                .clone()
+                .unwrap_or_else(|| "No sample".into()),
+        )
+        .size(LABEL_SIZE + 1.0)
+        .wrapping(text::Wrapping::None)
+        .color(if self.sample_name.is_some() {
+            th::text()
+        } else {
+            th::text_muted()
+        });
         let mut header = row![container(name).width(Length::Fill).clip(true)]
             .spacing(10)
             .align_y(Alignment::Center);
@@ -246,7 +259,7 @@ impl<'a> SamplerView<'a> {
             header = header.push(heading(format!("{seconds:.3} s")));
         }
         if !layout.compact {
-            for index in [param::ROOT_NOTE, param::TUNE, param::VOLUME] {
+            for &index in header_controls(self.on_pad()) {
                 let param = self.param(index);
                 header = header.push(
                     row![heading(param.name()), param.value_entry()]
@@ -257,7 +270,7 @@ impl<'a> SamplerView<'a> {
         }
         header = header.push(
             button(text("Load").size(LABEL_SIZE))
-                .on_press(Message::LoadSamplerSample(self.track_id))
+                .on_press(self.load.clone())
                 .padding([2, 10])
                 .style(|_theme: &Theme, status| button::Style {
                     background: Some(
@@ -284,6 +297,7 @@ impl<'a> SamplerView<'a> {
             left = left.push(
                 iced::widget::canvas(SampleView {
                     track_id: self.track_id,
+                    slot: self.device.slot,
                     audio: self.audio,
                     markers: self.markers(),
                     accent: self.accent,
@@ -326,16 +340,11 @@ impl<'a> SamplerView<'a> {
     }
 
     fn mode(&self) -> Element<'a, Message> {
-        let track_id = self.track_id;
+        let (track_id, slot) = (self.track_id, self.device.slot);
         segmented(
             &Mode::ALL,
             Mode::of(self.device.params),
-            move |mode| {
-                Message::Devices(crate::domains::devices::DevicesMsg::SetInstrumentParams(
-                    track_id,
-                    mode.updates(),
-                ))
-            },
+            move |mode| Message::Devices(slot.set_all(track_id, mode.updates())),
             self.accent,
         )
     }
@@ -509,7 +518,7 @@ impl<'a> SamplerView<'a> {
                 layout,
                 heading("Pitch").into(),
                 None,
-                &[param::ROOT_NOTE, param::TUNE, param::FINE, param::GLIDE],
+                pitch_controls(self.on_pad()),
             ),
             SamplerPage::Filter if layout.compact && self.panel.filter_envelope => {
                 self.envelope(layout, true)

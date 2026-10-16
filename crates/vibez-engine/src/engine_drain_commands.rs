@@ -678,6 +678,12 @@ impl AudioEngine {
                     pad_index,
                     state,
                 } => self.command_set_drum_rack_pad_state(track_id, pad_index, state),
+                EngineCommand::SetDrumRackPadParam {
+                    track_id,
+                    pad_index,
+                    param_index,
+                    value,
+                } => self.command_set_drum_rack_pad_param(track_id, pad_index, param_index, value),
                 EngineCommand::SetArrangementRecording(active) => {
                     self.arrangement_recording = active;
                     if self.active_section.is_none() {

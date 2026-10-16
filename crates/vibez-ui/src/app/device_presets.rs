@@ -167,6 +167,10 @@ impl App {
                 | DevicesMsg::SetTrackInstrument(track, _)
                 | DevicesMsg::RemoveTrackInstrument(track),
             ) => (*track, DeviceSlot::Instrument) == pending,
+            Message::Devices(
+                DevicesMsg::SetDrumPadParams(track, pad, _)
+                | DevicesMsg::ClearDrumRackPad(track, pad),
+            ) => (*track, DeviceSlot::DrumPad(*pad)) == pending,
             Message::ApplyDevicePreset(track, slot, _) => (*track, *slot) == pending,
             Message::Arrangement(
                 ArrangementMsg::RemoveTrack(track)
@@ -255,13 +259,7 @@ impl App {
         if updates.is_empty() {
             return Task::none();
         }
-        use crate::domains::devices::DevicesMsg;
-        self.update(Message::Devices(match slot {
-            DeviceSlot::Effect(effect_id) => {
-                DevicesMsg::SetEffectParams(track_id, effect_id, updates)
-            }
-            DeviceSlot::Instrument => DevicesMsg::SetInstrumentParams(track_id, updates),
-        }))
+        self.update(Message::Devices(slot.set_all(track_id, updates)))
     }
 }
 

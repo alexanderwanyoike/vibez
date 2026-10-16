@@ -362,6 +362,14 @@ pub enum EngineCommand {
         pad_index: usize,
         state: DrumPadState,
     },
+    /// One of a pad's Sampler controls, which unlike a whole pad state
+    /// frees nothing on the audio thread.
+    SetDrumRackPadParam {
+        track_id: TrackId,
+        pad_index: usize,
+        param_index: usize,
+        value: f32,
+    },
 
     // -- Arrangement recording / loop --
     /// Suspend ordinary end-of-content auto-stop while an Audio Track take
