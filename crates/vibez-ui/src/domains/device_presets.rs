@@ -580,7 +580,12 @@ fn eq_factory_presets() -> Vec<DevicePreset> {
             ],
         ),
     ];
-    keyed_presets(EffectType::Eq, &EQ_KEYS, vibez_dsp::eq::EQ_PARAMS, &presets)
+    keyed_presets(
+        DevicePresetKind::Effect(EffectType::Eq),
+        &EQ_KEYS,
+        vibez_dsp::eq::EQ_PARAMS,
+        &presets,
+    )
 }
 
 /// Starting points for common dynamics jobs, after Sol's tuning.
@@ -680,7 +685,7 @@ fn compressor_factory_presets() -> Vec<DevicePreset> {
         ),
     ];
     keyed_presets(
-        EffectType::Compressor,
+        DevicePresetKind::Effect(EffectType::Compressor),
         &COMPRESSOR_KEYS,
         vibez_dsp::compressor::COMPRESSOR_PARAMS,
         &presets,
@@ -753,7 +758,7 @@ fn filter_factory_presets() -> Vec<DevicePreset> {
         ),
     ];
     keyed_presets(
-        EffectType::Filter,
+        DevicePresetKind::Effect(EffectType::Filter),
         &FILTER_KEYS,
         vibez_dsp::filter::FILTER_PARAMS,
         &presets,
@@ -859,7 +864,7 @@ fn gate_factory_presets() -> Vec<DevicePreset> {
         ),
     ];
     keyed_presets(
-        EffectType::Gate,
+        DevicePresetKind::Effect(EffectType::Gate),
         &GATE_KEYS,
         vibez_dsp::gate::GATE_PARAMS,
         &presets,
@@ -972,7 +977,7 @@ fn drive_factory_presets() -> Vec<DevicePreset> {
         .map(|(name, changes)| (*name, changes.as_slice()))
         .collect();
     keyed_presets(
-        EffectType::Drive,
+        DevicePresetKind::Effect(EffectType::Drive),
         &DRIVE_KEYS,
         vibez_dsp::drive::DRIVE_PARAMS,
         &presets,
@@ -1043,7 +1048,7 @@ fn bitcrush_factory_presets() -> Vec<DevicePreset> {
         ),
     ];
     keyed_presets(
-        EffectType::Bitcrush,
+        DevicePresetKind::Effect(EffectType::Bitcrush),
         &BITCRUSH_KEYS,
         vibez_dsp::bitcrush::BITCRUSH_PARAMS,
         &presets,
@@ -1161,7 +1166,7 @@ fn delay_factory_presets() -> Vec<DevicePreset> {
         ),
     ];
     keyed_presets(
-        EffectType::Delay,
+        DevicePresetKind::Effect(EffectType::Delay),
         &DELAY_KEYS,
         vibez_dsp::delay::DELAY_PARAMS,
         &presets,
@@ -1265,7 +1270,7 @@ fn reverb_factory_presets() -> Vec<DevicePreset> {
         .map(|(name, changes)| (*name, changes.as_slice()))
         .collect();
     keyed_presets(
-        EffectType::Reverb,
+        DevicePresetKind::Effect(EffectType::Reverb),
         &REVERB_KEYS,
         vibez_dsp::reverb::REVERB_PARAMS,
         &presets,
@@ -1331,7 +1336,7 @@ fn auto_pan_factory_presets() -> Vec<DevicePreset> {
         ),
     ];
     keyed_presets(
-        EffectType::AutoPan,
+        DevicePresetKind::Effect(EffectType::AutoPan),
         &AUTO_PAN_KEYS,
         vibez_dsp::auto_pan::AUTO_PAN_PARAMS,
         &presets,
@@ -1340,7 +1345,7 @@ fn auto_pan_factory_presets() -> Vec<DevicePreset> {
 
 /// Presets that start from the device's defaults and change the named keys.
 fn keyed_presets(
-    effect_type: EffectType,
+    kind: DevicePresetKind,
     keys: &[PresetParam],
     descriptors: &[vibez_core::effect::ParamDescriptor],
     presets: &[(&str, &[(&str, f32)])],
@@ -1364,8 +1369,7 @@ fn keyed_presets(
                     ((*key).to_owned(), value)
                 })
                 .collect();
-            DevicePreset::new(DevicePresetKind::Effect(effect_type), *name, parameters)
-                .expect("Factory preset values are valid")
+            DevicePreset::new(kind, *name, parameters).expect("Factory preset values are valid")
         })
         .collect()
 }
