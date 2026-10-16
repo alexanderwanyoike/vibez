@@ -24,6 +24,13 @@ fn cases(effect: EffectType) -> Vec<(&'static str, Vec<(usize, f32)>)> {
             ),
             ("envelope follower", vec![(6, 2.0), (8, 2.0)]),
         ],
+        EffectType::Gate => vec![
+            ("defaults", vec![]),
+            (
+                "expander, range, both detector filters",
+                vec![(5, 1.0), (7, 1.0), (9, 1.0), (11, 1.0)],
+            ),
+        ],
         _ => vec![("defaults", vec![])],
     }
 }
