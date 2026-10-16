@@ -119,4 +119,56 @@ mod tests {
             "the rest at defaults"
         );
     }
+
+    fn drum_rack_app() -> (App, TrackId) {
+        let (mut app, id) = synth_app();
+        let _ = app.update(Message::Devices(DevicesMsg::SetTrackInstrument(
+            id,
+            InstrumentKind::DrumRack,
+        )));
+        app.state.project.history = Default::default();
+        (app, id)
+    }
+
+    fn pad_value(app: &App, track: TrackId, pad: usize, index: usize) -> f32 {
+        DeviceParams::find(
+            app.state.find_track(track).unwrap(),
+            DeviceSlot::DrumPad(pad),
+        )
+        .unwrap()
+        .value(index)
+    }
+
+    #[test]
+    fn typing_a_pad_value_sets_that_pad_alone() {
+        use vibez_instruments::sampler::param;
+        let (mut app, track) = drum_rack_app();
+        let _ = app.update(Message::ParamEntry(EntryMsg::Begin {
+            track_id: track,
+            slot: DeviceSlot::DrumPad(3),
+            index: param::TUNE,
+            text: String::new(),
+        }));
+        let _ = app.update(Message::ParamEntry(EntryMsg::Edit("7".into())));
+        let _ = app.update(Message::ParamEntry(EntryMsg::Submit));
+        assert_eq!(pad_value(&app, track, 3, param::TUNE), 7.0);
+        assert_eq!(pad_value(&app, track, 2, param::TUNE), 0.0);
+    }
+
+    #[test]
+    fn a_sampler_preset_applies_to_a_drum_pad_in_one_undo_step() {
+        use vibez_instruments::sampler::param;
+        let (mut app, track) = drum_rack_app();
+        let pad = DeviceSlot::DrumPad(5);
+        let device = DeviceParams::find(app.state.find_track(track).unwrap(), pad).unwrap();
+        let defaults = crate::domains::device_presets::capture(device, "Defaults").unwrap();
+        let _ = app.update(pad.set(track, param::CUTOFF, 900.0));
+        let _ = app.update(pad.set(track, param::DECAY, 0.4));
+        let _ = app.update(Message::ApplyDevicePreset(track, pad, defaults));
+        assert_eq!(pad_value(&app, track, 5, param::CUTOFF), 20_000.0);
+        assert_eq!(pad_value(&app, track, 5, param::DECAY), 0.1);
+        let _ = app.update(Message::Project(ProjectMsg::Undo));
+        assert_eq!(pad_value(&app, track, 5, param::CUTOFF), 900.0);
+        assert_eq!(pad_value(&app, track, 5, param::DECAY), 0.4);
+    }
 }

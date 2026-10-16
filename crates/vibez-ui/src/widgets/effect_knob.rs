@@ -34,6 +34,8 @@ pub enum KnobTarget {
     Effect(EffectId),
     GainDb(EffectId),
     Instrument,
+    /// Any device a `DeviceSlot` names.
+    Device(crate::domains::device_params::DeviceSlot),
     DrumPad {
         pad_index: usize,
         param: DrumPadParam,
@@ -179,6 +181,7 @@ impl EffectKnobWidget {
             KnobTarget::Instrument => {
                 Message::set_instrument_param(self.track_id, self.param_index, value)
             }
+            KnobTarget::Device(slot) => slot.set(self.track_id, self.param_index, value),
             KnobTarget::DrumPad { pad_index, param } => {
                 Message::Devices(crate::domains::devices::DevicesMsg::SetDrumPadParam {
                     track_id: self.track_id,

@@ -125,6 +125,19 @@ impl<'a> Param<'a> {
                 default,
                 self.accent,
             ),
+            DeviceSlot::DrumPad(_) => {
+                let mut knob = EffectKnobWidget::for_instrument(
+                    self.track_id,
+                    self.index,
+                    self.value(),
+                    min,
+                    max,
+                    default,
+                    self.accent,
+                );
+                knob.target = KnobTarget::Device(self.device.slot);
+                knob
+            }
         };
         if let Some(target) = self.target {
             knob.target = target;
