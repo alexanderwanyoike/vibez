@@ -34,10 +34,15 @@ impl CardWidths {
         }
     }
 
-    /// Width in a device chain, given the share the other cards leave and
-    /// the section's whole width.
-    pub fn chain_width(self, share: f32, _section: f32) -> f32 {
-        self.card_width(share)
+    /// Width in a device chain: the share the other cards leave, but never
+    /// squeezed below medium while the section could show it. A crowded
+    /// chain scrolls instead.
+    pub fn chain_width(self, share: f32, section: f32) -> f32 {
+        if section >= self.medium {
+            self.card_width(share.max(self.medium))
+        } else {
+            self.compact
+        }
     }
 }
 

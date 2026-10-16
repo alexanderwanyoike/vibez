@@ -162,14 +162,14 @@ impl App {
             .spacing(CHAIN_SPACING)
             .height(Length::Fill);
 
-        // Only a chain wider than the section scrolls, behind a hairline that
+        // Only a chain wider than the section scrolls, behind a bar that
         // appears only then: scrollbar spacing would show it permanently.
         // Built with its direction: the default vertical check rejects the
         // full-height cards before a later `.direction` could apply.
         scrollable::Scrollable::with_direction(
             devices_row,
             scrollable::Direction::Horizontal(
-                scrollable::Scrollbar::new().width(3).scroller_width(3),
+                scrollable::Scrollbar::new().width(7).scroller_width(7),
             ),
         )
         .width(Length::Fill)
