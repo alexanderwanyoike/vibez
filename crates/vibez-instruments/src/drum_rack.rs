@@ -169,6 +169,7 @@ impl Instrument for DrumRack {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sampler::SAMPLER_PARAMS;
 
     fn make_test_audio(frames: usize, value: f32) -> Arc<DecodedAudio> {
         Arc::new(DecodedAudio {
@@ -369,5 +370,22 @@ mod tests {
 
         assert!(buffer[2 * 2_000] > 0.3);
         assert_eq!(buffer[2 * 2_000 + 1], 0.0);
+    }
+
+    #[test]
+    fn translated_pad_values_stay_in_the_samplers_ranges() {
+        let loud = pad_params(&DrumPadState {
+            gain: 2.0,
+            fade_in_ms: 0.0,
+            ..DrumPadState::default()
+        });
+        let stored = pad_params(&DrumPadState {
+            params: vec![60.0, 9.0],
+            ..DrumPadState::default()
+        });
+
+        assert_eq!(loud[param::VOLUME], 1.0);
+        assert_eq!(loud[param::ATTACK], SAMPLER_PARAMS[param::ATTACK].min);
+        assert_eq!(stored[param::ATTACK], SAMPLER_PARAMS[param::ATTACK].max);
     }
 }
