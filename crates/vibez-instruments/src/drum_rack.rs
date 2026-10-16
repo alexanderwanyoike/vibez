@@ -411,6 +411,54 @@ mod tests {
         })
     }
 
+    fn rendered(rack: &mut DrumRack, frames: usize) -> Vec<f32> {
+        let mut buffer = vec![0.0; frames * 2];
+        rack.render(&mut buffer, 2);
+        buffer.chunks(2).map(|frame| frame[0]).collect()
+    }
+
+    #[test]
+    fn pad_plays_its_sample_at_the_file_rate() {
+        let mut rack = DrumRack::new(48_000.0);
+        let sample = Arc::new(DecodedAudio {
+            channels: vec![vec![0.5; 4_800], vec![0.5; 4_800]],
+            sample_rate: 24_000,
+        });
+        rack.load_drum_pad_sample(0, sample, "slow.wav".into());
+        rack.note_on(36, 127);
+
+        let sounding = rendered(&mut rack, 12_000)
+            .iter()
+            .filter(|sample| sample.abs() > 1e-6)
+            .count();
+
+        assert!((9_400..=9_700).contains(&sounding), "{sounding} frames");
+    }
+
+    #[test]
+    fn hits_on_one_pad_never_cut_another_pad_off() {
+        let mut rack = DrumRack::new(48_000.0);
+        rack.load_drum_pad_sample(0, make_test_audio(96_000, 0.5), "pad.wav".into());
+        rack.load_drum_pad_sample(1, make_test_audio(96_000, 0.0), "silent.wav".into());
+        for pad_index in [0, 1] {
+            rack.set_drum_pad_state(
+                pad_index,
+                DrumPadState {
+                    one_shot: false,
+                    ..DrumPadState::default()
+                },
+            );
+        }
+        rack.note_on(36, 127);
+        for _ in 0..MAX_VOICES {
+            rack.note_on(37, 127);
+        }
+
+        let after = rendered(&mut rack, 4_800);
+
+        assert!(after[4_799].abs() > 0.1, "the held pad stopped");
+    }
+
     #[test]
     fn rack_renders_loaded_pad() {
         let mut rack = DrumRack::new(44_100.0);
