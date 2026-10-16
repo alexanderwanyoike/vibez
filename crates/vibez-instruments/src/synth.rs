@@ -6,7 +6,7 @@
 use vibez_core::effect::ParamDescriptor;
 use vibez_core::midi::MidiNote;
 
-use crate::synth_envelope::Times;
+use crate::envelope::Times;
 use crate::synth_filter::Coefficients;
 pub use crate::synth_oscillator::Waveform;
 pub use crate::synth_params::{

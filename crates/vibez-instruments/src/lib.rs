@@ -1,9 +1,9 @@
 //! Instrument rendering and native ownership configuration.
 
 pub mod drum_rack;
+mod envelope;
 pub mod sampler;
 pub mod synth;
-mod synth_envelope;
 mod synth_filter;
 pub mod synth_oscillator;
 pub mod synth_params;

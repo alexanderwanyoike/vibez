@@ -1,4 +1,4 @@
-//! The synth's ADSR: a straight attack, then decay and release that fall
+//! The instruments' ADSR: a straight attack, then decay and release that fall
 //! exponentially and reach -60 dB of their distance in exactly their time,
 //! the way analogue envelopes and most soft synths read their knobs.
 

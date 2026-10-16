@@ -8,7 +8,7 @@ use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::effect::ParamDescriptor;
 use vibez_core::midi::InstrumentKind;
 
-use crate::synth_envelope::{Envelope, Times};
+use crate::envelope::{Envelope, Times};
 use crate::Instrument;
 
 /// Sampler parameter descriptors.
