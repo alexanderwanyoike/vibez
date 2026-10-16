@@ -175,3 +175,67 @@ fn menu_style(accent: Color) -> impl Fn(&Theme) -> iced::widget::overlay::menu::
         selected_background: th::bg_hover().into(),
     }
 }
+
+#[derive(Clone, Debug, PartialEq)]
+struct KitChoice {
+    index: usize,
+    name: &'static str,
+}
+
+impl std::fmt::Display for KitChoice {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.name)
+    }
+}
+
+/// A Drum Rack's kit: the factory kits to load, and opening or saving a kit
+/// folder. `kit` is the one last loaded or saved.
+pub(crate) fn kit_bar<'a>(
+    track_id: TrackId,
+    kit: Option<&str>,
+    accent: Color,
+    available_width: f32,
+) -> Element<'a, Message> {
+    let options: Vec<KitChoice> = crate::domains::drum_kits::FACTORY_KITS
+        .iter()
+        .enumerate()
+        .map(|(index, factory)| KitChoice {
+            index,
+            name: factory.name,
+        })
+        .collect();
+    let chosen = kit.and_then(|kit| options.iter().find(|option| option.name == kit).cloned());
+    let selector = pick_list(options, chosen, move |choice| {
+        Message::LoadFactoryDrumKit(track_id, choice.index)
+    })
+    .placeholder(kit.unwrap_or("Choose a kit").to_string())
+    .width(Length::Fixed(
+        (available_width - KIT_FIXED_W).clamp(72.0, 220.0),
+    ))
+    .padding([2, 5])
+    .text_size(11)
+    .style(selector_style(accent))
+    .menu_style(menu_style(accent));
+    row![
+        text("Kit").size(10).color(th::text_dim()),
+        selector,
+        preset_button(
+            crate::icons::FOLDER_OPEN,
+            "Open kit folder",
+            Some(Message::OpenDrumKit(track_id)),
+            accent
+        ),
+        preset_button(
+            crate::icons::SAVE,
+            "Save kit folder",
+            Some(Message::SaveDrumKit(track_id)),
+            accent
+        ),
+    ]
+    .spacing(3)
+    .align_y(iced::Alignment::Center)
+    .into()
+}
+
+/// The label and two icon buttons with their spacing.
+const KIT_FIXED_W: f32 = 80.0;
