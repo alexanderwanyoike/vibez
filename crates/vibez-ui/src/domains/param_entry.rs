@@ -110,7 +110,11 @@ impl ParamFormat {
             Self::Percent => format!("{:.0}", value * 100.0),
             Self::Ratio => format!("{value:.1}"),
             Self::Note => vibez_core::midi::pitch_name(value.round().clamp(0.0, 127.0) as u8),
-            Self::Pan => format!("{value:.2}"),
+            Self::Pan => match (value * 100.0).round() {
+                side if side < 0.0 => format!("L{:.0}", -side),
+                side if side > 0.0 => format!("R{side:.0}"),
+                _ => "C".into(),
+            },
             Self::Number { decimals, .. } => format!("{value:.*}", decimals as usize),
         }
     }
@@ -133,6 +137,9 @@ impl ParamFormat {
             if let Some(pitch) = note_from_name(&text) {
                 return (min..=max).contains(&pitch).then_some(pitch);
             }
+        }
+        if matches!(self, Self::Pan) {
+            return parse_pan(&text).filter(|value| (min..=max).contains(value));
         }
         if matches!(self, Self::Amplitude { .. }) && matches!(text.as_str(), "-inf" | "-∞") {
             return Some(0.0);
@@ -191,6 +198,32 @@ impl ParamFormat {
     }
 }
 
+/// "C", a side and a share ("L50", "50 R"), or a signed share ("-25").
+fn parse_pan(text: &str) -> Option<f32> {
+    if text == "c" {
+        return Some(0.0);
+    }
+    let side = match (text.contains('l'), text.contains('r')) {
+        (true, false) => -1.0,
+        (false, true) => 1.0,
+        (false, false) => 0.0,
+        (true, true) => return None,
+    };
+    let number = text.replace(['l', 'r'], "");
+    let share = number
+        .trim()
+        .parse::<f32>()
+        .ok()
+        .filter(|share| share.is_finite())?;
+    Some(if side == 0.0 {
+        share / 100.0
+    } else if share >= 0.0 {
+        side * share / 100.0
+    } else {
+        return None;
+    })
+}
+
 /// The format a built-in effect parameter uses. Devices whose stored value
 /// differs from how it reads add their parameter here.
 /// `host_rate` is the sample rate the device runs at, for values that read
@@ -224,6 +257,7 @@ pub fn param_format(
                     decimals: 1,
                     unit: "oct",
                 },
+                param::PAN => ParamFormat::Pan,
                 _ => ParamFormat::for_descriptor(descriptor),
             }
         }
