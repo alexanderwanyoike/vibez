@@ -912,8 +912,9 @@ pub fn run_filter() -> iced::Result {
     .run_with(|| (FilterGallery::new(), iced::Task::none()))
 }
 
-/// Native Gate at each width tier and section height it adapts to, with a
-/// kick-like detector history and levels standing in for live audio.
+/// Native Gate at each width tier and section height it adapts to, on the
+/// Tight Drums preset as in the concept, with a kick-like detector history
+/// and levels standing in for live audio.
 struct GateGallery {
     track: TrackId,
     effect: UiEffect,
@@ -930,6 +931,7 @@ impl GateGallery {
         effect.params[param::THRESHOLD] = -32.0;
         effect.params[param::HOLD] = 60.0;
         effect.params[param::RELEASE] = 120.0;
+        effect.params[param::HYSTERESIS] = 6.0;
         effect.params[param::RANGE_ENABLED] = 1.0;
         let now = std::time::Instant::now();
         let level = |db: f32| vibez_engine::metering::MeterValues {
