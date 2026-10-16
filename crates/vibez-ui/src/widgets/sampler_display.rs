@@ -11,6 +11,7 @@ use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::id::TrackId;
 use vibez_instruments::sampler::param;
 
+use crate::domains::device_params::DeviceSlot;
 use crate::message::Message;
 use crate::state::UndoGestureId;
 use crate::theme as th;
@@ -76,6 +77,7 @@ fn time_label(seconds: f32) -> String {
 
 pub struct SampleView<'a> {
     pub track_id: TrackId,
+    pub slot: DeviceSlot,
     pub audio: Option<&'a Arc<DecodedAudio>>,
     pub markers: Markers,
     pub accent: Color,
@@ -148,7 +150,8 @@ impl canvas::Program<Message> for SampleView<'_> {
                     return (
                         canvas::event::Status::Captured,
                         Some(
-                            Message::set_instrument_param(self.track_id, index, value)
+                            self.slot
+                                .set(self.track_id, index, value)
                                 .in_undo_gesture(gesture),
                         ),
                     );

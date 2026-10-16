@@ -144,6 +144,8 @@ pub fn arrange(size: Size) -> Layout {
 pub struct SamplerView<'a> {
     pub track_id: TrackId,
     pub device: DeviceParams<'a>,
+    /// What the Load button asks for.
+    pub load: Message,
     pub audio: Option<&'a Arc<DecodedAudio>>,
     pub sample_name: Option<&'a str>,
     pub accent: Color,
@@ -257,7 +259,7 @@ impl<'a> SamplerView<'a> {
         }
         header = header.push(
             button(text("Load").size(LABEL_SIZE))
-                .on_press(Message::LoadSamplerSample(self.track_id))
+                .on_press(self.load.clone())
                 .padding([2, 10])
                 .style(|_theme: &Theme, status| button::Style {
                     background: Some(
@@ -284,6 +286,7 @@ impl<'a> SamplerView<'a> {
             left = left.push(
                 iced::widget::canvas(SampleView {
                     track_id: self.track_id,
+                    slot: self.device.slot,
                     audio: self.audio,
                     markers: self.markers(),
                     accent: self.accent,
@@ -326,16 +329,11 @@ impl<'a> SamplerView<'a> {
     }
 
     fn mode(&self) -> Element<'a, Message> {
-        let track_id = self.track_id;
+        let (track_id, slot) = (self.track_id, self.device.slot);
         segmented(
             &Mode::ALL,
             Mode::of(self.device.params),
-            move |mode| {
-                Message::Devices(crate::domains::devices::DevicesMsg::SetInstrumentParams(
-                    track_id,
-                    mode.updates(),
-                ))
-            },
+            move |mode| Message::Devices(slot.set_all(track_id, mode.updates())),
             self.accent,
         )
     }

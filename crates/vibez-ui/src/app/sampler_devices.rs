@@ -34,6 +34,7 @@ impl App {
             crate::widgets::sampler_device::SamplerView {
                 track_id,
                 device,
+                load: Message::LoadSamplerSample(track_id),
                 audio: track.sample_audio.as_ref(),
                 sample_name: track.sample_name.as_deref(),
                 accent,
