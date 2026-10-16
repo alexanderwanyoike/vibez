@@ -99,3 +99,58 @@ fn bad_values_and_audio_cannot_poison_the_phaser() {
     fx.process(&mut buffer, 2);
     assert!(buffer.iter().all(|s| s.is_finite()));
 }
+
+/// Level of a sine at `frequency` after the phaser, in dB.
+fn level_after(edits: &[(usize, f32)], frequency: f32) -> f32 {
+    let mut fx = phaser(edits);
+    let mut buffer: Vec<f32> = (0..24_000)
+        .flat_map(|frame| {
+            let v = 0.5 * (std::f32::consts::TAU * frequency * frame as f32 / RATE).sin();
+            [v, v]
+        })
+        .collect();
+    fx.process(&mut buffer, 2);
+    let tail = &buffer[24_000..];
+    let power = tail.iter().map(|s| s * s).sum::<f32>() / tail.len() as f32;
+    10.0 * power.max(1e-12).log10()
+}
+
+#[test]
+fn two_stages_notch_out_their_centre_frequency() {
+    let still = [
+        (param::STAGES, 0.0),
+        (param::DEPTH, 0.0),
+        (param::FEEDBACK, 0.0),
+        (param::CENTRE, 800.0),
+    ];
+    let at_centre = level_after(&still, 800.0);
+    let far_away = level_after(&still, 6000.0);
+    assert!(
+        at_centre < far_away - 20.0,
+        "800 Hz {at_centre} dB against 6 kHz {far_away} dB"
+    );
+}
+
+/// Notches: how many times the response dips 12 dB below its neighbours.
+fn notches(params: &[f32]) -> usize {
+    let db: Vec<f32> = (0..600)
+        .map(|step| {
+            let frequency = 20.0 * 1000f32.powf(step as f32 / 600.0);
+            response_db(params, 0.5, frequency, RATE)
+        })
+        .collect();
+    db.windows(3)
+        .filter(|w| w[1] < w[0] && w[1] <= w[2] && w[1] < -12.0)
+        .count()
+}
+
+#[test]
+fn every_two_stages_add_an_audible_notch() {
+    for (choice, stages) in STAGE_COUNTS.iter().enumerate() {
+        let notches = notches(&params(&[
+            (param::STAGES, choice as f32),
+            (param::FEEDBACK, 0.0),
+        ]));
+        assert_eq!(notches, stages / 2, "{stages} stages");
+    }
+}
