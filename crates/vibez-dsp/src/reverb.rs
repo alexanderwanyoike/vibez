@@ -316,6 +316,23 @@ mod tests {
     }
 
     #[test]
+    fn a_fading_tail_reaches_silence_without_slow_denormal_numbers() {
+        let mut fx = ReverbEffect::new(48_000.0);
+        fx.set_param(2, 1.0);
+        let mut buf = vec![0.0_f32; 1024];
+        buf[0] = 1.0;
+        buf[1] = 1.0;
+        fx.process(&mut buf, 2);
+        let mut denormals = 0;
+        for _ in 0..(20 * 48_000 / 512) {
+            let mut silence = vec![0.0_f32; 1024];
+            fx.process(&mut silence, 2);
+            denormals += silence.iter().filter(|s| s.is_subnormal()).count();
+        }
+        assert_eq!(denormals, 0);
+    }
+
+    #[test]
     fn reverb_param_access() {
         let mut fx = ReverbEffect::new(44100.0);
         assert!((fx.get_param(0) - 0.5).abs() < 1e-3);
