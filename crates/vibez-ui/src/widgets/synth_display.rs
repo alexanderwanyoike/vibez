@@ -5,7 +5,7 @@
 use iced::mouse;
 use iced::widget::canvas;
 use iced::{Color, Point, Rectangle, Renderer, Size, Theme};
-use vibez_instruments::synth::{filter_response_db, lfo, Waveform};
+use vibez_instruments::synth::{lfo, svf_response_db, Waveform};
 use vibez_instruments::synth_oscillator::sample;
 
 use crate::message::Message;
@@ -130,13 +130,16 @@ impl canvas::Program<Message> for WavePlot {
     }
 }
 
-/// The filter's gain from 20 Hz to 20 kHz.
-pub struct FilterPlot<'a> {
-    pub params: &'a [f32],
+/// A filter's gain from 20 Hz to 20 kHz, flat while it is off.
+pub struct FilterPlot {
+    /// One of the synth's filter types, or `None` when off.
+    pub filter_type: Option<usize>,
+    pub cutoff: f32,
+    pub resonance: f32,
     pub accent: Color,
 }
 
-impl canvas::Program<Message> for FilterPlot<'_> {
+impl canvas::Program<Message> for FilterPlot {
     type State = ();
 
     fn draw(
@@ -196,7 +199,15 @@ impl canvas::Program<Message> for FilterPlot<'_> {
         let points: Vec<Point> = (0..=steps)
             .map(|step| {
                 let position = step as f32 / steps as f32;
-                let db = filter_response_db(self.params, norm_to_freq(position), DISPLAY_RATE);
+                let db = self.filter_type.map_or(0.0, |kind| {
+                    svf_response_db(
+                        kind,
+                        self.cutoff,
+                        self.resonance,
+                        norm_to_freq(position),
+                        DISPLAY_RATE,
+                    )
+                });
                 Point::new(plot.x + position * plot.width, y(db))
             })
             .collect();

@@ -333,7 +333,9 @@ impl<'a> SynthView<'a> {
         .spacing(6)
         .align_y(Alignment::Center);
         let plot = iced::widget::canvas(FilterPlot {
-            params: self.device.params,
+            filter_type: Some(self.whole(param::FILTER_TYPE)),
+            cutoff: self.device.value(param::CUTOFF),
+            resonance: self.device.value(param::RESONANCE),
             accent: self.accent,
         })
         .width(Length::Fill)
