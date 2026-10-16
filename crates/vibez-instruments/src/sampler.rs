@@ -52,7 +52,6 @@ pub struct Sampler {
     amp_times: Times,
     filter_times: Times,
     smoothing: f32,
-    started: bool,
     age: u64,
     last_pitch: Option<f32>,
     lfo_phase: f64,
@@ -79,7 +78,6 @@ impl Sampler {
             amp_times: Times::new(0.0, 0.0, 0.0, 0.0, sample_rate),
             filter_times: Times::new(0.0, 0.0, 0.0, 0.0, sample_rate),
             smoothing: 1.0 - (-1.0 / (SMOOTHING_SECONDS * sample_rate)).exp(),
-            started: false,
             age: 0,
             last_pitch: None,
             lfo_phase: 0.0,
@@ -154,6 +152,12 @@ impl Sampler {
         })
     }
 
+    /// Whether any voice is playing; a silent sampler has nothing to
+    /// smooth, so edits land at once.
+    pub fn sounding(&self) -> bool {
+        self.voices.iter().any(SamplerVoice::active)
+    }
+
     fn in_zone(&self, pitch: u8, velocity: u8) -> bool {
         let (pitch, velocity) = (f32::from(pitch), f32::from(velocity));
         (self.params[param::KEY_LOW]..=self.params[param::KEY_HIGH]).contains(&pitch)
@@ -191,7 +195,7 @@ impl Instrument for Sampler {
         }
         .clamp(descriptor.min, descriptor.max);
         self.params[index] = value;
-        if !self.started || !SMOOTHED.contains(&index) {
+        if !SMOOTHED.contains(&index) || !self.sounding() {
             self.current[index] = value;
         }
         self.retime();
@@ -260,7 +264,6 @@ impl Instrument for Sampler {
         }
         let base_speed = f64::from(audio.sample_rate.max(1)) / f64::from(self.sample_rate);
         for out in buffer.chunks_exact_mut(channels) {
-            self.started = true;
             for index in SMOOTHED {
                 self.current[index] += (self.params[index] - self.current[index]) * self.smoothing;
             }
