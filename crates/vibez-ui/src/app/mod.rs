@@ -57,8 +57,10 @@ struct App {
     filter_panels: device_panels::DevicePanels<crate::domains::filter::FilterPanelState>,
     gate_panels: device_panels::DevicePanels<crate::domains::gate::GatePanelState>,
     card_panels: device_panels::DevicePanels<crate::domains::device_card::CardPanelState>,
-    synth_panels:
-        std::collections::HashMap<vibez_core::id::TrackId, crate::domains::synth::SynthPanel>,
+    instrument_panels: std::collections::HashMap<
+        vibez_core::id::TrackId,
+        crate::domains::instrument_card::InstrumentPanel,
+    >,
     param_entry: Option<crate::domains::param_entry::ValueEntry>,
     device_presets: device_presets::DevicePresetRuntime,
     // Plugin GUI support
@@ -455,7 +457,7 @@ impl App {
             filter_panels: Default::default(),
             gate_panels: Default::default(),
             card_panels: Default::default(),
-            synth_panels: Default::default(),
+            instrument_panels: Default::default(),
             gain_devices: Default::default(),
             eq_devices: eq_devices::EqDevices {
                 spectrum_rx: eq_spectrum_rx,

@@ -10,10 +10,10 @@ use vibez_core::id::TrackId;
 use vibez_instruments::synth::{param, Waveform};
 
 use crate::domains::device_params::DeviceParams;
+use crate::domains::instrument_card::{InstrumentCardMsg, InstrumentPanel};
 use crate::domains::param_entry::ValueEntry;
 use crate::domains::synth::{
-    SynthMsg, SynthPage, SynthPanel, FILTER_NAMES, LFO_SHAPE_NAMES, LFO_TARGET_NAMES,
-    VOICE_MODE_NAMES, WAVE_NAMES,
+    SynthPage, FILTER_NAMES, LFO_SHAPE_NAMES, LFO_TARGET_NAMES, VOICE_MODE_NAMES, WAVE_NAMES,
 };
 use crate::message::Message;
 use crate::widgets::device_controls::{
@@ -132,7 +132,7 @@ pub struct SynthView<'a> {
     pub track_id: TrackId,
     pub device: DeviceParams<'a>,
     pub accent: Color,
-    pub panel: SynthPanel,
+    pub panel: InstrumentPanel,
     pub entry: Option<&'a ValueEntry>,
 }
 
@@ -185,8 +185,13 @@ impl<'a> SynthView<'a> {
                 .push(
                     container(tabs(
                         &pages,
-                        self.panel.page,
-                        move |page| Message::Synth(SynthMsg::ShowPage(track_id, page)),
+                        SynthPage::at(self.panel.page),
+                        move |page| {
+                            Message::InstrumentCard(InstrumentCardMsg::ShowPage(
+                                track_id,
+                                page.index(),
+                            ))
+                        },
                         self.accent,
                     ))
                     .padding([0.0, PAD])
@@ -203,7 +208,7 @@ impl<'a> SynthView<'a> {
     }
 
     fn sections(&self, layout: Layout) -> Element<'a, Message> {
-        let content: Element<'a, Message> = match (layout.tier, self.panel.page) {
+        let content: Element<'a, Message> = match (layout.tier, SynthPage::at(self.panel.page)) {
             (Tier::Full, _) => row![
                 self.oscillator(layout, false),
                 vertical_rule(),
@@ -369,7 +374,9 @@ impl<'a> SynthView<'a> {
                 segmented(
                     &[(false, "Amp"), (true, "Filter")],
                     filter,
-                    move |filter| Message::Synth(SynthMsg::ShowFilterEnvelope(track_id, filter)),
+                    move |filter| Message::InstrumentCard(InstrumentCardMsg::ShowFilterEnvelope(
+                        track_id, filter
+                    )),
                     self.accent,
                 )
             ]

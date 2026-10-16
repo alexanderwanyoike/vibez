@@ -1,7 +1,4 @@
-//! What a native Subtractive Synth card names its choices, and which of
-//! its sections a card too narrow for all of them shows.
-
-use vibez_core::id::TrackId;
+//! What a native Subtractive Synth card names its choices and its tabs.
 
 /// Index-aligned with `vibez_instruments::synth::Waveform`.
 pub const WAVE_NAMES: [&str; 4] = ["Sine", "Saw", "Square", "Triangle"];
@@ -32,42 +29,21 @@ impl SynthPage {
         Self::Modulation,
     ];
 
+    /// The page at this place in the tabs, as a panel remembers it.
+    pub fn at(index: usize) -> Self {
+        Self::ALL.get(index).copied().unwrap_or_default()
+    }
+
+    pub fn index(self) -> usize {
+        self as usize
+    }
+
     pub fn name(self) -> &'static str {
         match self {
             Self::Oscillator => "Oscillator",
             Self::Filter => "Filter",
             Self::Envelope => "Envelope",
             Self::Modulation => "Modulation",
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub enum SynthMsg {
-    ShowPage(TrackId, SynthPage),
-    /// Shows the filter's envelope instead of the level's, or back.
-    ShowFilterEnvelope(TrackId, bool),
-}
-
-impl SynthMsg {
-    pub fn track_id(&self) -> TrackId {
-        match self {
-            Self::ShowPage(id, _) | Self::ShowFilterEnvelope(id, _) => *id,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct SynthPanel {
-    pub page: SynthPage,
-    pub filter_envelope: bool,
-}
-
-impl SynthPanel {
-    pub fn update(&mut self, message: SynthMsg) {
-        match message {
-            SynthMsg::ShowPage(_, page) => self.page = page,
-            SynthMsg::ShowFilterEnvelope(_, filter) => self.filter_envelope = filter,
         }
     }
 }
@@ -94,12 +70,10 @@ mod tests {
     }
 
     #[test]
-    fn a_panel_remembers_its_page_and_envelope() {
-        let mut panel = SynthPanel::default();
-        let track = TrackId::new();
-        panel.update(SynthMsg::ShowPage(track, SynthPage::Filter));
-        panel.update(SynthMsg::ShowFilterEnvelope(track, true));
-        assert_eq!(panel.page, SynthPage::Filter);
-        assert!(panel.filter_envelope);
+    fn pages_round_trip_through_their_place_in_the_tabs() {
+        for page in SynthPage::ALL {
+            assert_eq!(SynthPage::at(page.index()), page);
+        }
+        assert_eq!(SynthPage::at(99), SynthPage::Oscillator);
     }
 }

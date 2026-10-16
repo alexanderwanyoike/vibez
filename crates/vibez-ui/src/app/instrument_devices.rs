@@ -1,5 +1,19 @@
-//! Native instruments on the device chain: their controls, typed values and
-//! presets act as an effect's do.
+//! Native instruments on the device chain: their card's tabs, and their
+//! controls, typed values and presets, which act as an effect's do.
+
+use crate::domains::instrument_card::InstrumentCardMsg;
+
+use super::*;
+
+impl App {
+    pub(super) fn update_instrument_card(&mut self, message: InstrumentCardMsg) -> Task<Message> {
+        self.instrument_panels
+            .entry(message.track_id())
+            .or_default()
+            .update(message);
+        Task::none()
+    }
+}
 
 #[cfg(test)]
 mod tests {

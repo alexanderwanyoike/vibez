@@ -1997,7 +1997,7 @@ impl SynthGallery {
         label: &'static str,
         card_width: f32,
         section: (f32, f32),
-        panel: crate::domains::synth::SynthPanel,
+        panel: crate::domains::instrument_card::InstrumentPanel,
     ) -> Element<'a, Message> {
         let accent = th::track_color(0);
         let track_id = self.track.id;
@@ -2056,12 +2056,13 @@ impl SynthGallery {
     }
 
     fn view(&self) -> Element<'_, Message> {
-        use crate::domains::synth::{SynthPage, SynthPanel};
+        use crate::domains::instrument_card::InstrumentPanel;
+        use crate::domains::synth::SynthPage;
         use crate::widgets::synth_device::{COMPACT_W, FULL_W};
         let full = FULL_W + 40.0;
         let medium = 760.0;
-        let page = |page: SynthPage| SynthPanel {
-            page,
+        let page = |page: SynthPage| InstrumentPanel {
+            page: page.index(),
             filter_envelope: false,
         };
         container(
@@ -2098,8 +2099,8 @@ impl SynthGallery {
                         "Compact, Envelope tab, filter",
                         COMPACT_W,
                         (COMPACT_W + 16.0, 330.0),
-                        SynthPanel {
-                            page: SynthPage::Envelope,
+                        InstrumentPanel {
+                            page: SynthPage::Envelope.index(),
                             filter_envelope: true,
                         }
                     ),
