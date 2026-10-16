@@ -317,7 +317,6 @@ fn parameter_keys(effect: &UiEffect) -> Result<Vec<PresetParam>, String> {
         EffectType::Reverb => Ok(REVERB_KEYS.to_vec()),
         EffectType::AutoPan => Ok(AUTO_PAN_KEYS.to_vec()),
         EffectType::Phaser => Ok(PHASER_KEYS.to_vec()),
-        _ => Err("Presets are not yet supported by this built-in device".into()),
     }
 }
 
@@ -400,7 +399,6 @@ pub fn factory_presets(effect_type: EffectType) -> Vec<DevicePreset> {
         EffectType::Reverb => reverb_factory_presets(),
         EffectType::AutoPan => auto_pan_factory_presets(),
         EffectType::Phaser => phaser_factory_presets(),
-        _ => Vec::new(),
     }
 }
 
@@ -1983,16 +1981,5 @@ mod presentation_tests {
             let fractional = DevicePreset::new(captured.kind(), "Fractional", parameters).unwrap();
             assert!(prepare_updates(&effect, &fractional).is_err(), "{key}");
         }
-    }
-
-    #[test]
-    fn a_device_without_factory_presets_has_no_navigation() {
-        let mut effect = gain();
-        effect.effect_type = EffectType::Phaser;
-        let unsupported = presentation(&effect, None);
-        assert!(unsupported.options.is_empty());
-        assert!(unsupported.selected.is_none());
-        assert!(unsupported.previous.is_none());
-        assert!(unsupported.next.is_none());
     }
 }
