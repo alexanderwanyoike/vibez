@@ -262,6 +262,14 @@ impl Instrument for Sampler {
         if channels == 0 {
             return;
         }
+        if !self.sounding() {
+            self.current = self.params;
+            let frames = (buffer.len() / channels) as f64;
+            self.lfo_phase = (self.lfo_phase
+                + frames * f64::from(self.params[param::LFO_RATE]) / f64::from(self.sample_rate))
+            .fract();
+            return;
+        }
         let base_speed = f64::from(audio.sample_rate.max(1)) / f64::from(self.sample_rate);
         for out in buffer.chunks_exact_mut(channels) {
             for index in SMOOTHED {
