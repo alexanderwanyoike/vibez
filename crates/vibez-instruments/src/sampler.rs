@@ -152,6 +152,38 @@ impl Sampler {
         })
     }
 
+    /// Starts a voice `semitones` from the root, on a free voice, else the
+    /// oldest released one, else the oldest; `take_over` first reuses a
+    /// voice already playing `pitch`.
+    fn start(&mut self, pitch: u8, semitones: f32, velocity: u8, take_over: bool) {
+        let Some(region) = self.region() else {
+            return;
+        };
+        let p = &self.params;
+        let amount = p[param::VELOCITY_AMOUNT];
+        let gain = 1.0 - amount + amount * f32::from(velocity) / 127.0;
+        let glide = (p[param::GLIDE] / 1000.0 * self.sample_rate).round() as u32;
+        let one_shot = p[param::ONE_SHOT] >= 0.5;
+        let from = self.last_pitch;
+        self.last_pitch = Some(semitones);
+        self.age += 1;
+        let voices = &self.voices;
+        let oldest = |candidates: &mut dyn Iterator<Item = usize>| {
+            candidates.min_by_key(|&index| voices[index].age)
+        };
+        let all = 0..MAX_VOICES;
+        let index = all
+            .clone()
+            .find(|&index| take_over && voices[index].active() && voices[index].pitch == pitch)
+            .or_else(|| all.clone().find(|&index| !voices[index].active()))
+            .or_else(|| oldest(&mut all.clone().filter(|&index| voices[index].released())))
+            .or_else(|| oldest(&mut all.clone()))
+            .unwrap_or(0);
+        self.voices[index].start(
+            pitch, semitones, gain, self.age, from, glide, one_shot, region,
+        );
+    }
+
     /// Whether any voice is playing; a silent sampler has nothing to
     /// smooth, so edits land at once.
     pub fn sounding(&self) -> bool {
@@ -214,34 +246,8 @@ impl Instrument for Sampler {
         if !self.in_zone(pitch, velocity) {
             return;
         }
-        let Some(region) = self.region() else {
-            return;
-        };
-        let p = &self.params;
-        let semitones = f32::from(pitch) - p[param::ROOT_NOTE];
-        let amount = p[param::VELOCITY_AMOUNT];
-        let gain = 1.0 - amount + amount * f32::from(velocity) / 127.0;
-        let glide = (p[param::GLIDE] / 1000.0 * self.sample_rate).round() as u32;
-        let one_shot = p[param::ONE_SHOT] >= 0.5;
-        let from = self.last_pitch;
-        self.last_pitch = Some(semitones);
-        self.age += 1;
-        let voices = &self.voices;
-        let oldest = |candidates: &mut dyn Iterator<Item = usize>| {
-            candidates.min_by_key(|&index| voices[index].age)
-        };
-        let all = 0..MAX_VOICES;
-        // A repeated note takes over its own voice rather than stacking.
-        let index = all
-            .clone()
-            .find(|&index| voices[index].active() && voices[index].pitch == pitch)
-            .or_else(|| all.clone().find(|&index| !voices[index].active()))
-            .or_else(|| oldest(&mut all.clone().filter(|&index| voices[index].released())))
-            .or_else(|| oldest(&mut all.clone()))
-            .unwrap_or(0);
-        self.voices[index].start(
-            pitch, semitones, gain, self.age, from, glide, one_shot, region,
-        );
+        let semitones = f32::from(pitch) - self.params[param::ROOT_NOTE];
+        self.start(pitch, semitones, velocity, true);
     }
 
     fn note_off(&mut self, pitch: u8) {
