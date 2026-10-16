@@ -11,6 +11,7 @@ pub mod factory;
 pub mod filter;
 pub mod gain;
 pub mod gate;
+pub mod oversampling;
 pub mod phaser;
 pub mod reverb;
 pub mod time_stretch;

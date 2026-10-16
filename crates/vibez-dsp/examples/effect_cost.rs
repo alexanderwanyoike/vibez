@@ -31,6 +31,15 @@ fn cases(effect: EffectType) -> Vec<(&'static str, Vec<(usize, f32)>)> {
                 vec![(5, 1.0), (7, 1.0), (9, 1.0), (11, 1.0)],
             ),
         ],
+        EffectType::Drive => vec![
+            ("defaults (Classic)", vec![]),
+            ("Soft at 1x", vec![(4, 1.0), (5, 0.0)]),
+            ("Soft at 2x", vec![(4, 1.0), (5, 1.0)]),
+            (
+                "Hard at 4x, both filters",
+                vec![(4, 3.0), (5, 2.0), (6, 1.0), (8, 1.0)],
+            ),
+        ],
         _ => vec![("defaults", vec![])],
     }
 }

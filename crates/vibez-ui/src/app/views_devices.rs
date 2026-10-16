@@ -31,6 +31,7 @@ enum Flexible {
     Compressor,
     Filter,
     Gate,
+    Drive,
 }
 
 impl App {
@@ -110,6 +111,8 @@ impl App {
                 Some(Flexible::Filter)
             } else if crate::domains::gate::is_native_gate(effect) {
                 Some(Flexible::Gate)
+            } else if crate::domains::drive::is_native_drive(effect) {
+                Some(Flexible::Drive)
             } else {
                 None
             };
@@ -163,6 +166,12 @@ impl App {
                         effect,
                         track_color,
                         crate::widgets::gate_device::card_width(share),
+                    ),
+                    Flexible::Drive => self.drive_device_body(
+                        track_id,
+                        effect,
+                        track_color,
+                        crate::widgets::drive_device::card_width(share),
                     ),
                 };
                 cards[position] = Some(view_effect_slot(
@@ -296,6 +305,38 @@ impl App {
                     effect,
                     accent,
                     crate::widgets::compressor_device::preset_bar_width(size),
+                ),
+                size,
+            )
+        });
+        DeviceBody {
+            content: content.into(),
+            width,
+            padding: iced::Padding::ZERO,
+        }
+    }
+
+    fn drive_device_body<'a>(
+        &'a self,
+        track_id: TrackId,
+        effect: &'a crate::state::UiEffect,
+        accent: Color,
+        width: f32,
+    ) -> DeviceBody<'a> {
+        let content = iced::widget::responsive(move |size| {
+            crate::widgets::drive_device::DriveView {
+                track_id,
+                effect,
+                accent,
+                panel: self.drive_panels.panel(effect.id),
+                entry: self.param_entry.as_ref(),
+            }
+            .view(
+                self.view_device_preset_bar(
+                    track_id,
+                    effect,
+                    accent,
+                    crate::widgets::drive_device::preset_bar_width(size),
                 ),
                 size,
             )
