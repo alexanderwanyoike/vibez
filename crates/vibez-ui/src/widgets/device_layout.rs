@@ -19,15 +19,16 @@ pub struct Stack {
 /// Splits `below`, the height under the preset row, giving the knobs their
 /// row first, then Advanced (`advanced_h` tall when open) and the plots
 /// whatever is left when that reaches `plot_min`. A divider separates each
-/// band.
+/// band. Short of room, the plots go first, then the knobs fold onto a line,
+/// and only then does Advanced take the whole body.
 pub fn stack(below: f32, advanced_h: Option<f32>, plot_min: f32) -> Stack {
-    let knob_row = if below >= KNOB_ROW_H {
+    let stacked = advanced_h.map_or(0.0, |height| 1.0 + height);
+    let knob_row = if below >= KNOB_ROW_H + stacked {
         KNOB_ROW_H
     } else {
         LINE_H
     };
-    let stacked = advanced_h.map_or(0.0, |height| 1.0 + height);
-    if advanced_h.is_some() && below < plot_min + 1.0 + knob_row + stacked {
+    if advanced_h.is_some() && below < knob_row + stacked {
         return Stack {
             plots: 0.0,
             knob_row: 0.0,
