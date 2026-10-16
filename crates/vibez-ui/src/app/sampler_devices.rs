@@ -28,7 +28,7 @@ impl App {
         let panel = self
             .instrument_panels
             .get(&track_id)
-            .copied()
+            .cloned()
             .unwrap_or_default();
         let body = iced::widget::responsive(move |size| {
             crate::widgets::sampler_device::SamplerView {
@@ -38,7 +38,7 @@ impl App {
                 audio: track.sample_audio.as_ref(),
                 sample_name: track.sample_name.clone(),
                 accent,
-                panel,
+                panel: panel.clone(),
                 entry: self.param_entry.as_ref(),
             }
             .view(

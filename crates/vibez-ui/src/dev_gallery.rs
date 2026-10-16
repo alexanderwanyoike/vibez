@@ -2010,7 +2010,7 @@ impl SynthGallery {
                 track_id,
                 device,
                 accent,
-                panel,
+                panel: panel.clone(),
                 entry: None,
             }
             .view(
@@ -2063,7 +2063,7 @@ impl SynthGallery {
         let medium = 760.0;
         let page = |page: SynthPage| InstrumentPanel {
             page: page.index(),
-            filter_envelope: false,
+            ..Default::default()
         };
         container(
             column![
@@ -2102,6 +2102,7 @@ impl SynthGallery {
                         InstrumentPanel {
                             page: SynthPage::Envelope.index(),
                             filter_envelope: true,
+                            ..Default::default()
                         }
                     ),
                 ]
@@ -2219,7 +2220,7 @@ impl SamplerGallery {
                 audio: track.sample_audio.as_ref(),
                 sample_name: track.sample_name.clone(),
                 accent,
-                panel,
+                panel: panel.clone(),
                 entry: None,
             }
             .view(
@@ -2273,6 +2274,7 @@ impl SamplerGallery {
         let page = |page: SamplerPage, filter_envelope: bool| InstrumentPanel {
             page: page.index(),
             filter_envelope,
+            ..Default::default()
         };
         container(
             column![

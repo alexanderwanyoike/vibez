@@ -7,11 +7,18 @@ use super::*;
 
 impl App {
     pub(super) fn update_instrument_card(&mut self, message: InstrumentCardMsg) -> Task<Message> {
-        self.instrument_panels
-            .entry(message.track_id())
+        let track_id = message.track_id();
+        let named = self
+            .instrument_panels
+            .entry(track_id)
             .or_default()
             .update(message);
-        Task::none()
+        match named {
+            Some((pad, name)) => self.update(Message::Devices(
+                crate::domains::devices::DevicesMsg::RenameDrumPad(track_id, pad, name),
+            )),
+            None => Task::none(),
+        }
     }
 }
 
