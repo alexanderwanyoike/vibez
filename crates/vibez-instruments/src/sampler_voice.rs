@@ -72,6 +72,9 @@ pub struct SamplerVoice {
     target: f32,
     glide_step: f32,
     glide_left: u32,
+    /// The pitch, in semitones, that `speed` was worked out for.
+    speed_for: f32,
+    speed: f64,
     amp: Envelope,
     filter_env: Envelope,
     /// `[stage][channel]`.
@@ -192,8 +195,12 @@ impl SamplerVoice {
                 self.current = self.target;
             }
         }
-        let speed =
-            frame.base_speed * f64::from((self.current + frame.offset_semitones) / 12.0).exp2();
+        let semitones = self.current + frame.offset_semitones;
+        if semitones != self.speed_for || self.speed == 0.0 {
+            self.speed_for = semitones;
+            self.speed = f64::from(semitones / 12.0).exp2();
+        }
+        let speed = frame.base_speed * self.speed;
         let region = frame.region;
         let mut gain = level * self.gain;
         if region.looped.is_none() {
