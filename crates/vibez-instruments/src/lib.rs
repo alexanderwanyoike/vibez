@@ -3,6 +3,8 @@
 pub mod drum_rack;
 mod envelope;
 pub mod sampler;
+pub mod sampler_params;
+mod sampler_voice;
 pub mod synth;
 mod synth_filter;
 pub mod synth_oscillator;
