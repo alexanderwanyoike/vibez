@@ -742,9 +742,9 @@ pub fn run_compressor() -> iced::Result {
     .run_with(|| (CompressorGallery::new(), iced::Task::none()))
 }
 
-/// Native Filter at each width tier and section height it adapts to, set
-/// like the concept's Gentle Sweep with an output level standing in for
-/// live audio.
+/// Native Filter at each width tier and section height it adapts to, on
+/// the Gentle Sweep preset as in the concept, with an output level standing
+/// in for live audio.
 struct FilterGallery {
     track: TrackId,
     effect: UiEffect,
@@ -760,12 +760,10 @@ impl FilterGallery {
         let mut effect = effect(EffectType::Filter, None, false, false, None, 0);
         effect.params = effect.descriptors.iter().map(|d| d.default).collect();
         effect.params[param::CUTOFF] = 1_200.0;
-        effect.params[param::RESONANCE] = 1.2;
         effect.params[param::SLOPE] = 1.0;
         effect.params[param::MOD_SOURCE] = 1.0;
         effect.params[param::SYNC] = 3.0;
         effect.params[param::DEPTH] = 1.1;
-        effect.params[param::STEREO_PHASE] = 90.0;
         let level = |db: f32| vibez_engine::metering::MeterValues {
             peak_l: vibez_core::level::db_to_amplitude(db),
             peak_r: vibez_core::level::db_to_amplitude(db - 0.5),
