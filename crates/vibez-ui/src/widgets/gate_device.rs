@@ -16,22 +16,19 @@ use crate::message::Message;
 use crate::state::UiEffect;
 use crate::theme as th;
 use crate::widgets::device_controls::{
-    disclosure, heading, rule, segmented, toggle, vertical_rule, Param, LABEL_SIZE,
+    disclosure, heading, level_column, rule, segmented, vertical_rule, Param, LABEL_SIZE,
 };
 use crate::widgets::device_layout::{stack, KNOB_ROW_H};
 use crate::widgets::gate_display::GateHistory;
-use crate::widgets::level_meter::{self, LevelMeter};
 
 const PAD: f32 = 10.0;
 const PRESET_ROW_H: f32 = 28.0;
 const KNOB: f32 = 32.0;
-const SMALL_KNOB: f32 = 18.0;
 const KNOB_COL_W: f32 = 68.0;
 const PLOT_MIN_H: f32 = 72.0;
 const TABS_H: f32 = 22.0;
 /// Page tabs over one row of controls.
 const ADVANCED_H: f32 = TABS_H + 4.0 + KNOB_ROW_H;
-const METER_W: f32 = 58.0;
 /// The legend with the state under it.
 const LEGEND_W: f32 = 110.0;
 /// Width of one advanced group's row.
@@ -114,24 +111,6 @@ impl<'a> GateView<'a> {
         self.effect.params.get(index).copied().unwrap_or(0.0) >= 0.5
     }
 
-    fn switch(&self, index: usize, label: &'a str) -> Element<'a, Message> {
-        let on = self.on(index);
-        toggle(
-            text(label)
-                .size(LABEL_SIZE)
-                .wrapping(text::Wrapping::None)
-                .into(),
-            on,
-            Message::set_effect_param(
-                self.track_id,
-                self.effect.id,
-                index,
-                if on { 0.0 } else { 1.0 },
-            ),
-            self.accent(),
-        )
-    }
-
     pub fn view(self, preset_bar: Element<'a, Message>, size: Size) -> Element<'a, Message> {
         let layout = arrange(size, self.panel.advanced);
         let top = row![
@@ -165,22 +144,6 @@ impl<'a> GateView<'a> {
             body = body.push(rule()).push(self.advanced(layout, height));
         }
         body.width(Length::Fill).height(Length::Fill).into()
-    }
-
-    fn meter(
-        &self,
-        name: &'a str,
-        levels: vibez_engine::metering::MeterValues,
-    ) -> Element<'a, Message> {
-        column![
-            heading(name),
-            canvas(LevelMeter { levels })
-                .width(level_meter::WIDTH)
-                .height(Length::Fill),
-        ]
-        .spacing(2)
-        .width(METER_W)
-        .into()
     }
 
     /// Without room for the state column, the state reads in the
@@ -253,8 +216,8 @@ impl<'a> GateView<'a> {
 
     fn plots(&self, layout: Arrangement) -> Element<'a, Message> {
         let mut content = row![
-            self.meter("Input", self.panel.input),
-            self.meter("Output", self.panel.output),
+            level_column("Input", self.panel.input),
+            level_column("Output", self.panel.output),
             self.history(!layout.full),
         ]
         .spacing(8);
@@ -276,36 +239,12 @@ impl<'a> GateView<'a> {
         param::RANGE,
     ];
 
-    fn value_knob(&self, index: usize) -> Element<'a, Message> {
-        let param = self.param(index);
-        row![
-            param.value_entry(),
-            canvas(param.knob()).width(SMALL_KNOB).height(SMALL_KNOB),
-        ]
-        .spacing(2)
-        .align_y(Alignment::Center)
-        .into()
-    }
-
-    fn line_item(&self, index: usize) -> Element<'a, Message> {
-        row![
-            text(self.param(index).name())
-                .size(LABEL_SIZE)
-                .color(th::text_dim())
-                .wrapping(text::Wrapping::None),
-            self.value_knob(index),
-        ]
-        .spacing(4)
-        .align_y(Alignment::Center)
-        .into()
-    }
-
     /// Range only applies while its floor is on, so its switch is its name.
     fn range_column(&self) -> Element<'a, Message> {
         let param = self.param(param::RANGE);
         column![
             canvas(param.knob()).width(KNOB).height(KNOB),
-            self.switch(param::RANGE_ENABLED, "Range"),
+            self.param(param::RANGE_ENABLED).switch("Range"),
             param.value_entry(),
         ]
         .spacing(2)
@@ -330,7 +269,7 @@ impl<'a> GateView<'a> {
             .into_iter()
             .take(fits)
             {
-                line = line.push(self.line_item(index));
+                line = line.push(self.param(index).line_item());
             }
             return container(
                 line.push(Space::with_width(Length::Fill))
@@ -398,17 +337,20 @@ impl<'a> GateView<'a> {
 
     fn detector_group(&self) -> Element<'a, Message> {
         let filter = |enabled, frequency, label| -> Element<'a, Message> {
-            column![self.switch(enabled, label), self.value_knob(frequency)]
-                .spacing(4)
-                .align_x(Alignment::Center)
-                .into()
+            column![
+                self.param(enabled).switch(label),
+                self.param(frequency).value_knob()
+            ]
+            .spacing(4)
+            .align_x(Alignment::Center)
+            .into()
         };
         row![
             filter(param::HP_ENABLED, param::HP_FREQUENCY, "Low cut"),
             filter(param::LP_ENABLED, param::LP_FREQUENCY, "High cut"),
             column![
                 heading("Detector"),
-                self.switch(param::DETECTOR_LISTEN, "Audition")
+                self.param(param::DETECTOR_LISTEN).switch("Audition")
             ]
             .spacing(4),
         ]
@@ -468,13 +410,13 @@ impl<'a> GateView<'a> {
     fn advanced_line(&self) -> Element<'a, Message> {
         match self.panel.advanced_page {
             AdvancedPage::Response => row![
-                self.line_item(param::HYSTERESIS),
-                self.line_item(param::MIX),
+                self.param(param::HYSTERESIS).line_item(),
+                self.param(param::MIX).line_item(),
             ],
             AdvancedPage::Detector => row![
-                self.switch(param::HP_ENABLED, "Low cut"),
-                self.value_knob(param::HP_FREQUENCY),
-                self.switch(param::DETECTOR_LISTEN, "Audition"),
+                self.param(param::HP_ENABLED).switch("Low cut"),
+                self.param(param::HP_FREQUENCY).value_knob(),
+                self.param(param::DETECTOR_LISTEN).switch("Audition"),
             ],
         }
         .spacing(8)
