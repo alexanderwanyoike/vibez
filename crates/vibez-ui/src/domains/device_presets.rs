@@ -92,6 +92,27 @@ const COMPRESSOR_KEYS: [(usize, &str, bool); 16] = {
     ]
 };
 
+/// Every native Filter parameter; its type, slope, source and sync are
+/// choices.
+const FILTER_KEYS: [(usize, &str, bool); 13] = {
+    use vibez_dsp::filter::param::*;
+    [
+        (CUTOFF, "cutoff_hz", false),
+        (RESONANCE, "resonance_q", false),
+        (MODE, "mode", true),
+        (SLOPE, "slope", true),
+        (DRIVE, "drive_db", false),
+        (MIX, "mix", false),
+        (MOD_SOURCE, "mod_source", true),
+        (RATE, "rate_hz", false),
+        (DEPTH, "depth_octaves", false),
+        (SYNC, "sync", true),
+        (STEREO_PHASE, "stereo_phase_degrees", false),
+        (ENV_ATTACK, "envelope_attack_ms", false),
+        (ENV_RELEASE, "envelope_release_ms", false),
+    ]
+};
+
 /// One stored parameter: its index, preset key and whether it only takes
 /// whole numbers, as switches and choices do.
 type PresetParam = (usize, &'static str, bool);
@@ -156,6 +177,7 @@ fn parameter_keys(effect: &UiEffect) -> Result<Vec<PresetParam>, String> {
             .collect()),
         EffectType::Eq => Ok(EQ_KEYS.to_vec()),
         EffectType::Compressor => Ok(COMPRESSOR_KEYS.to_vec()),
+        EffectType::Filter => Ok(FILTER_KEYS.to_vec()),
         _ => Err("Presets are not yet supported by this built-in device".into()),
     }
 }
@@ -231,6 +253,7 @@ pub fn factory_presets(effect_type: EffectType) -> Vec<DevicePreset> {
         EffectType::Gain => gain_factory_presets(),
         EffectType::Eq => eq_factory_presets(),
         EffectType::Compressor => compressor_factory_presets(),
+        EffectType::Filter => filter_factory_presets(),
         _ => Vec::new(),
     }
 }
@@ -470,6 +493,79 @@ fn compressor_factory_presets() -> Vec<DevicePreset> {
         EffectType::Compressor,
         &COMPRESSOR_KEYS,
         vibez_dsp::compressor::COMPRESSOR_PARAMS,
+        &presets,
+    )
+}
+
+/// Sol's starting points, with Gentle Sweep moving as its name and the
+/// concept say.
+fn filter_factory_presets() -> Vec<DevicePreset> {
+    let presets: [(&str, &[(&str, f32)]); 8] = [
+        ("Init", &[]),
+        (
+            "Gentle Sweep",
+            &[
+                ("cutoff_hz", 1200.0),
+                ("slope", 1.0),
+                ("mod_source", 1.0),
+                ("sync", 3.0),
+                ("depth_octaves", 1.1),
+            ],
+        ),
+        (
+            "Subsonic Cut",
+            &[("cutoff_hz", 80.0), ("mode", 1.0), ("slope", 1.0)],
+        ),
+        (
+            "Telephone",
+            &[
+                ("resonance_q", 0.5),
+                ("mode", 2.0),
+                ("drive_db", 2.0),
+                ("mix", 0.8),
+            ],
+        ),
+        (
+            "Resonant Edge",
+            &[("cutoff_hz", 2200.0), ("resonance_q", 3.0)],
+        ),
+        (
+            "Hum Notch",
+            &[
+                ("cutoff_hz", 50.0),
+                ("resonance_q", 5.0),
+                ("mode", 3.0),
+                ("slope", 1.0),
+            ],
+        ),
+        (
+            "Envelope Wah",
+            &[
+                ("cutoff_hz", 400.0),
+                ("resonance_q", 1.0),
+                ("slope", 1.0),
+                ("mod_source", 2.0),
+                ("depth_octaves", 3.0),
+                ("envelope_release_ms", 200.0),
+            ],
+        ),
+        (
+            "Stereo Eighths",
+            &[
+                ("cutoff_hz", 1800.0),
+                ("resonance_q", 0.9),
+                ("slope", 1.0),
+                ("mod_source", 1.0),
+                ("depth_octaves", 2.0),
+                ("sync", 4.0),
+                ("stereo_phase_degrees", 90.0),
+            ],
+        ),
+    ];
+    keyed_presets(
+        EffectType::Filter,
+        &FILTER_KEYS,
+        vibez_dsp::filter::FILTER_PARAMS,
         &presets,
     )
 }
