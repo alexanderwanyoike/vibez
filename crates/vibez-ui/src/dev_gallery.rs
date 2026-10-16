@@ -1079,8 +1079,9 @@ pub fn run_gate() -> iced::Result {
     .run_with(|| (GateGallery::new(), iced::Task::none()))
 }
 
-/// Native Drive at each width tier and section height it adapts to, set
-/// like the concept's Warm Edge with levels standing in for live audio.
+/// Native Drive at each width tier and section height it adapts to, on the
+/// Warm Edge preset as in the concept, with levels standing in for live
+/// audio.
 struct DriveGallery {
     track: TrackId,
     effect: UiEffect,
@@ -1094,7 +1095,8 @@ impl DriveGallery {
         use vibez_dsp::drive::{character, param};
         let mut effect = effect(EffectType::Drive, None, false, false, None, 0);
         effect.params = effect.descriptors.iter().map(|d| d.default).collect();
-        effect.params[param::AMOUNT] = 0.45;
+        effect.params[param::AMOUNT] =
+            ((vibez_core::level::db_to_amplitude(6.0) - 1.0) / 29.0).sqrt();
         effect.params[param::TONE] = 0.55;
         effect.params[param::OUTPUT] = vibez_core::level::db_to_amplitude(-3.0);
         effect.params[param::MIX] = 0.8;
