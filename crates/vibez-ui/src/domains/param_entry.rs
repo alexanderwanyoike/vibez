@@ -148,6 +148,13 @@ impl ParamFormat {
         if matches!(self, Self::Pan) {
             return parse_pan(&text).filter(|value| (min..=max).contains(value));
         }
+        if let Self::Names(names) = self {
+            return names
+                .iter()
+                .position(|name| name.to_ascii_lowercase() == text)
+                .map(|index| index as f32)
+                .filter(|value| (min..=max).contains(value));
+        }
         if matches!(self, Self::Amplitude { .. }) && matches!(text.as_str(), "-inf" | "-∞") {
             return Some(0.0);
         }
