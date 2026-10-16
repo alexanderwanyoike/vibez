@@ -31,6 +31,7 @@ pub mod param_entry;
 pub mod perform;
 pub mod piano_roll;
 pub mod project;
+pub mod reverb;
 pub mod sidechain;
 pub mod timeline_editor;
 pub mod transport;

@@ -36,6 +36,8 @@ pub mod mixer_strip;
 pub mod on_blur;
 pub mod piano_roll;
 mod playhead;
+pub mod reverb_device;
+pub mod reverb_display;
 pub mod swing_knob;
 pub mod timeline;
 pub mod track_header;

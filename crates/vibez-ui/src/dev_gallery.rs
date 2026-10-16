@@ -1522,3 +1522,152 @@ pub fn run_delay() -> iced::Result {
     .font(crate::typography::PLEX_MONO_SEMIBOLD_BYTES)
     .run_with(|| (DelayGallery::new(), iced::Task::none()))
 }
+
+/// Native Reverb at each width tier and section height it adapts to, on the
+/// Warm Hall preset as in the concept, with an output level standing in for
+/// live audio.
+struct ReverbGallery {
+    track: TrackId,
+    effect: UiEffect,
+    closed: crate::domains::device_card::CardPanelState,
+    open: crate::domains::device_card::CardPanelState,
+}
+
+impl ReverbGallery {
+    fn new() -> Self {
+        use crate::domains::device_card::CardPanelState;
+        use vibez_dsp::reverb::param;
+        let mut effect = effect(EffectType::Reverb, None, false, false, None, 0);
+        effect.params = effect.descriptors.iter().map(|d| d.default).collect();
+        effect.params[param::ROOM_SIZE] = vibez_dsp::reverb::room_for_decay(2.4);
+        effect.params[param::DAMPING] = 0.6;
+        effect.params[param::MIX] = 0.22;
+        effect.params[param::PREDELAY_MS] = 24.0;
+        effect.params[param::DIFFUSION] = 0.8;
+        effect.params[param::LOW_CUT_HZ] = 120.0;
+        effect.params[param::HIGH_CUT_HZ] = 10_000.0;
+        let level = |db: f32| vibez_engine::metering::MeterValues {
+            peak_l: vibez_core::level::db_to_amplitude(db),
+            peak_r: vibez_core::level::db_to_amplitude(db - 0.5),
+            rms_l: vibez_core::level::db_to_amplitude(db - 6.0),
+            rms_r: vibez_core::level::db_to_amplitude(db - 6.5),
+        };
+        let closed = CardPanelState {
+            input: level(-2.0),
+            output: level(-3.0),
+            last_meter_at: Some(std::time::Instant::now()),
+            ..Default::default()
+        };
+        Self {
+            track: TrackId::new(),
+            effect,
+            open: CardPanelState {
+                advanced: true,
+                ..closed.clone()
+            },
+            closed,
+        }
+    }
+
+    fn scene<'a>(
+        &'a self,
+        label: &'static str,
+        card_width: f32,
+        section: (f32, f32),
+        panel: &'a crate::domains::device_card::CardPanelState,
+    ) -> Element<'a, Message> {
+        let accent = th::track_color(0);
+        let effect = &self.effect;
+        let track = self.track;
+        let body = iced::widget::responsive(move |size| {
+            crate::widgets::reverb_device::ReverbView {
+                track_id: track,
+                effect,
+                accent,
+                panel,
+                entry: None,
+                bpm: 120.0,
+            }
+            .view(
+                crate::widgets::device_preset_bar::view(
+                    track,
+                    effect,
+                    None,
+                    accent,
+                    crate::widgets::reverb_device::preset_bar_width(size),
+                ),
+                size,
+            )
+        });
+        framed_card(
+            label,
+            card_width,
+            section,
+            track,
+            effect,
+            accent,
+            body.into(),
+        )
+    }
+
+    fn view(&self) -> Element<'_, Message> {
+        use crate::widgets::reverb_device::COMPACT_W;
+        let wide = 900.0;
+        let (closed, open) = (&self.closed, &self.open);
+        container(
+            column![
+                row![
+                    self.scene("Wide, tall", wide, (wide + 16.0, 330.0), closed),
+                    self.scene(
+                        "Compact, tall",
+                        COMPACT_W,
+                        (COMPACT_W + 16.0, 330.0),
+                        closed
+                    ),
+                ]
+                .spacing(24),
+                row![
+                    self.scene("Wide, Advanced open", wide, (wide + 16.0, 400.0), open),
+                    self.scene(
+                        "Compact, Advanced open",
+                        COMPACT_W,
+                        (COMPACT_W + 16.0, 400.0),
+                        open
+                    ),
+                ]
+                .spacing(24),
+                row![
+                    self.scene("Wide, shortest", wide, (wide + 16.0, 110.0), closed),
+                    self.scene("Compact, short", COMPACT_W, (COMPACT_W + 16.0, 150.0), open),
+                ]
+                .spacing(24),
+            ]
+            .spacing(16),
+        )
+        .padding(16)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .style(|_theme: &Theme| container::Style {
+            background: Some(th::bg_surface().into()),
+            ..Default::default()
+        })
+        .into()
+    }
+}
+
+pub fn run_reverb() -> iced::Result {
+    iced::application(
+        "Reverb device gallery",
+        |_: &mut ReverbGallery, _: Message| {},
+        ReverbGallery::view,
+    )
+    .theme(|_| th::vibez_theme())
+    .antialiasing(true)
+    .window_size((1900.0, 1260.0))
+    .font(crate::icons::ICON_FONT_BYTES)
+    .font(crate::typography::PLEX_SANS_CONDENSED_MEDIUM_BYTES)
+    .font(crate::typography::PLEX_SANS_CONDENSED_SEMIBOLD_BYTES)
+    .font(crate::typography::PLEX_MONO_MEDIUM_BYTES)
+    .font(crate::typography::PLEX_MONO_SEMIBOLD_BYTES)
+    .run_with(|| (ReverbGallery::new(), iced::Task::none()))
+}

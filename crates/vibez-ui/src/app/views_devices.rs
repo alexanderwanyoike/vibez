@@ -34,6 +34,7 @@ enum Flexible {
     Drive,
     Bitcrush,
     Delay,
+    Reverb,
 }
 
 impl App {
@@ -119,6 +120,8 @@ impl App {
                 Some(Flexible::Bitcrush)
             } else if crate::domains::delay::is_native_delay(effect) {
                 Some(Flexible::Delay)
+            } else if crate::domains::reverb::is_native_reverb(effect) {
+                Some(Flexible::Reverb)
             } else {
                 None
             };
@@ -190,6 +193,12 @@ impl App {
                         effect,
                         track_color,
                         crate::widgets::delay_device::card_width(share),
+                    ),
+                    Flexible::Reverb => self.reverb_device_body(
+                        track_id,
+                        effect,
+                        track_color,
+                        crate::widgets::reverb_device::card_width(share),
                     ),
                 };
                 cards[position] = Some(view_effect_slot(
@@ -323,6 +332,39 @@ impl App {
                     effect,
                     accent,
                     crate::widgets::compressor_device::preset_bar_width(size),
+                ),
+                size,
+            )
+        });
+        DeviceBody {
+            content: content.into(),
+            width,
+            padding: iced::Padding::ZERO,
+        }
+    }
+
+    fn reverb_device_body<'a>(
+        &'a self,
+        track_id: TrackId,
+        effect: &'a crate::state::UiEffect,
+        accent: Color,
+        width: f32,
+    ) -> DeviceBody<'a> {
+        let content = iced::widget::responsive(move |size| {
+            crate::widgets::reverb_device::ReverbView {
+                track_id,
+                effect,
+                accent,
+                panel: self.card_panels.panel(effect.id),
+                entry: self.param_entry.as_ref(),
+                bpm: self.state.transport.bpm,
+            }
+            .view(
+                self.view_device_preset_bar(
+                    track_id,
+                    effect,
+                    accent,
+                    crate::widgets::reverb_device::preset_bar_width(size),
                 ),
                 size,
             )

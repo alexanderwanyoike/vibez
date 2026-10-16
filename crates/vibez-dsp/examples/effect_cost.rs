@@ -61,6 +61,13 @@ fn cases(effect: EffectType) -> Vec<(&'static str, Vec<(usize, f32)>)> {
                 ],
             ),
         ],
+        EffectType::Reverb => vec![
+            ("defaults", vec![]),
+            (
+                "pre-delay, narrow, both cuts",
+                vec![(3, 24.0), (5, 0.6), (7, 120.0), (8, 9500.0)],
+            ),
+        ],
         _ => vec![("defaults", vec![])],
     }
 }
