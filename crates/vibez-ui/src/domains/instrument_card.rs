@@ -38,6 +38,8 @@ pub struct InstrumentPanel {
     pub pad_sampler: bool,
     /// The pad being named and its name so far.
     pub pad_name: Option<(usize, String)>,
+    /// The kit a Drum Rack last loaded or saved.
+    pub kit: Option<String>,
 }
 
 impl InstrumentPanel {

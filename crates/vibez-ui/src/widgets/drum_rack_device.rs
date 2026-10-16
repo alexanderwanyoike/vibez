@@ -31,6 +31,8 @@ const PAD: f32 = 10.0;
 const GAP: f32 = 4.0;
 const TABS_H: f32 = 24.0;
 const BANK_ROW_H: f32 = 24.0;
+/// The kit picker above the banks.
+const KIT_ROW_H: f32 = 26.0;
 /// The selected pad's name, note, choke group and Clear, above its Sampler.
 const STRIP_H: f32 = 30.0;
 /// The share of a side-by-side card the pads take.
@@ -93,7 +95,7 @@ pub struct Layout {
 pub fn arrange(size: Size) -> Layout {
     let side_by_side = size.width >= SIDE_BY_SIDE_W;
     let tabs = if side_by_side { 0.0 } else { TABS_H + 1.0 };
-    let grid_h = (size.height - tabs - PAD * 2.0 - BANK_ROW_H - GAP).max(0.0);
+    let grid_h = (size.height - tabs - PAD * 2.0 - KIT_ROW_H - BANK_ROW_H - GAP * 2.0).max(0.0);
     let pad_h = ((grid_h - GAP * 3.0) / 4.0).max(0.0);
     let shaped = pad_h * PAD_MAX_ASPECT * 4.0 + GAP * 3.0;
     let grid_w = if side_by_side {
@@ -489,7 +491,15 @@ impl<'a> DrumRackView<'a> {
             }
             grid = grid.push(cells);
         }
-        column![self.banks(layout.grid_w), grid.height(Length::Fill)]
+        let kit = container(crate::widgets::device_preset_bar::kit_bar(
+            self.track_id,
+            self.panel.kit.as_deref(),
+            self.accent,
+            layout.grid_w,
+        ))
+        .height(KIT_ROW_H)
+        .align_y(Alignment::Center);
+        column![kit, self.banks(layout.grid_w), grid.height(Length::Fill)]
             .spacing(GAP)
             .width(layout.grid_w)
             .height(Length::Fill)
@@ -810,7 +820,13 @@ mod tests {
                 } else {
                     TABS_H + 1.0
                 };
-                let pads = tabs + PAD * 2.0 + BANK_ROW_H + GAP + layout.pad_h * 4.0 + GAP * 3.0;
+                let pads = tabs
+                    + PAD * 2.0
+                    + KIT_ROW_H
+                    + BANK_ROW_H
+                    + GAP * 2.0
+                    + layout.pad_h * 4.0
+                    + GAP * 3.0;
                 assert!(pads <= height + 0.01, "{context}");
                 assert!(
                     layout.grid_w >= GRID_MIN_W.min(width - PAD * 2.0),

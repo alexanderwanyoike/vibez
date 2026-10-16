@@ -75,35 +75,8 @@ pub(crate) fn view<'a>(
     ))
     .padding([2, 5])
     .text_size(11)
-    .style(move |_theme: &Theme, status| pick_list::Style {
-        text_color: th::text(),
-        placeholder_color: th::text_dim(),
-        handle_color: th::text_dim(),
-        background: th::bg_dark().into(),
-        border: iced::Border {
-            color: if matches!(
-                status,
-                pick_list::Status::Opened | pick_list::Status::Hovered
-            ) {
-                accent
-            } else {
-                th::border()
-            },
-            width: 1.0,
-            radius: 3.0.into(),
-        },
-    })
-    .menu_style(move |_theme: &Theme| iced::widget::overlay::menu::Style {
-        background: th::bg_surface().into(),
-        border: iced::Border {
-            color: th::border(),
-            width: 1.0,
-            radius: 3.0.into(),
-        },
-        text_color: th::text(),
-        selected_text_color: accent,
-        selected_background: th::bg_hover().into(),
-    });
+    .style(selector_style(accent))
+    .menu_style(menu_style(accent));
     let mut selection = row![text("Preset").size(10).color(th::text_dim()), selector,]
         .spacing(3)
         .align_y(iced::Alignment::Center);
@@ -167,3 +140,102 @@ fn preset_button<'a>(
         });
     tooltip(control, text(help).size(9), tooltip::Position::Top).into()
 }
+
+fn selector_style(accent: Color) -> impl Fn(&Theme, pick_list::Status) -> pick_list::Style {
+    move |_theme: &Theme, status| pick_list::Style {
+        text_color: th::text(),
+        placeholder_color: th::text_dim(),
+        handle_color: th::text_dim(),
+        background: th::bg_dark().into(),
+        border: iced::Border {
+            color: if matches!(
+                status,
+                pick_list::Status::Opened | pick_list::Status::Hovered
+            ) {
+                accent
+            } else {
+                th::border()
+            },
+            width: 1.0,
+            radius: 3.0.into(),
+        },
+    }
+}
+
+fn menu_style(accent: Color) -> impl Fn(&Theme) -> iced::widget::overlay::menu::Style {
+    move |_theme: &Theme| iced::widget::overlay::menu::Style {
+        background: th::bg_surface().into(),
+        border: iced::Border {
+            color: th::border(),
+            width: 1.0,
+            radius: 3.0.into(),
+        },
+        text_color: th::text(),
+        selected_text_color: accent,
+        selected_background: th::bg_hover().into(),
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct KitChoice {
+    index: usize,
+    name: &'static str,
+}
+
+impl std::fmt::Display for KitChoice {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.name)
+    }
+}
+
+/// A Drum Rack's kit: the factory kits to load, and opening or saving a kit
+/// folder. `kit` is the one last loaded or saved.
+pub(crate) fn kit_bar<'a>(
+    track_id: TrackId,
+    kit: Option<&str>,
+    accent: Color,
+    available_width: f32,
+) -> Element<'a, Message> {
+    let options: Vec<KitChoice> = crate::domains::drum_kits::FACTORY_KITS
+        .iter()
+        .enumerate()
+        .map(|(index, factory)| KitChoice {
+            index,
+            name: factory.name,
+        })
+        .collect();
+    let chosen = kit.and_then(|kit| options.iter().find(|option| option.name == kit).cloned());
+    let selector = pick_list(options, chosen, move |choice| {
+        Message::LoadFactoryDrumKit(track_id, choice.index)
+    })
+    .placeholder(kit.unwrap_or("Choose a kit").to_string())
+    .width(Length::Fixed(
+        (available_width - KIT_FIXED_W).clamp(72.0, 220.0),
+    ))
+    .padding([2, 5])
+    .text_size(11)
+    .style(selector_style(accent))
+    .menu_style(menu_style(accent));
+    row![
+        text("Kit").size(10).color(th::text_dim()),
+        selector,
+        preset_button(
+            crate::icons::FOLDER_OPEN,
+            "Open kit folder",
+            Some(Message::OpenDrumKit(track_id)),
+            accent
+        ),
+        preset_button(
+            crate::icons::SAVE,
+            "Save kit folder",
+            Some(Message::SaveDrumKit(track_id)),
+            accent
+        ),
+    ]
+    .spacing(3)
+    .align_y(iced::Alignment::Center)
+    .into()
+}
+
+/// The label and two icon buttons with their spacing.
+const KIT_FIXED_W: f32 = 80.0;

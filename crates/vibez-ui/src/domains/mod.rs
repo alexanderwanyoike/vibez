@@ -25,6 +25,7 @@ pub mod device_params;
 pub mod device_presets;
 pub mod devices;
 pub mod drive;
+pub mod drum_kits;
 pub mod eq;
 pub mod filter;
 pub mod gain;
