@@ -267,3 +267,18 @@ fn pan_moves_the_sound_between_the_sides_and_centre_is_unchanged() {
     let (left, right) = sides(0.5);
     assert!((left - 0.2).abs() < 1e-3 && (right - 0.4).abs() < 1e-3);
 }
+
+#[test]
+fn a_one_shot_fades_out_over_its_release_as_it_reaches_its_end() {
+    let mut sampler = sampler(
+        audio(vec![0.5; 9_600]),
+        &[(param::ONE_SHOT, 1.0), (param::RELEASE, 0.05)],
+    );
+    sampler.note_on(60, 127);
+
+    let out = render(&mut sampler, 9_600);
+
+    assert!((out[9_600 - 3_000] - 0.4).abs() < 1e-3, "faded too early");
+    assert!(out[9_600 - 1_440] < 0.3, "no fade before the end");
+    assert!(out[9_599] < 0.01);
+}
