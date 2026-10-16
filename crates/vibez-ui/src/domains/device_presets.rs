@@ -1347,6 +1347,54 @@ mod presentation_tests {
         }
     }
 
+    fn delay() -> UiEffect {
+        let descriptors =
+            vibez_dsp::factory::create_effect(EffectType::Delay, 44_100.0).param_descriptors();
+        UiEffect {
+            effect_type: EffectType::Delay,
+            params: descriptors
+                .iter()
+                .map(|descriptor| descriptor.default)
+                .collect(),
+            descriptors,
+            ..gain()
+        }
+    }
+
+    #[test]
+    fn delay_factory_presets_are_valid_distinct_and_start_from_init() {
+        let effect = delay();
+        let presets = factory_presets(EffectType::Delay);
+        assert!(presets.len() >= 6);
+        assert_eq!(presets[0].name(), "Init");
+        assert_eq!(prepare_updates(&effect, &presets[0]), Ok(Vec::new()));
+        for preset in &presets[1..] {
+            let mut applied = delay();
+            for (index, value) in prepare_updates(&effect, preset).unwrap() {
+                applied.params[index] = value;
+            }
+            assert_ne!(applied.params, effect.params, "{}", preset.name());
+            assert_eq!(capture(&applied, preset.name()).as_ref(), Ok(preset));
+        }
+        let mut names: Vec<_> = presets.iter().map(DevicePreset::name).collect();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(names.len(), presets.len(), "names are unique");
+    }
+
+    #[test]
+    fn delay_choices_in_a_preset_must_be_whole() {
+        let effect = delay();
+        let captured = capture(&effect, "Current").unwrap();
+        for key in ["sync", "left_division", "routing", "link", "time_change"] {
+            let mut parameters = captured.parameters().clone();
+            assert!(parameters.contains_key(key), "{key}");
+            parameters.insert(key.into(), 0.5);
+            let fractional = DevicePreset::new(captured.kind(), "Fractional", parameters).unwrap();
+            assert!(prepare_updates(&effect, &fractional).is_err(), "{key}");
+        }
+    }
+
     #[test]
     fn a_device_without_factory_presets_has_no_navigation() {
         let mut effect = gain();
