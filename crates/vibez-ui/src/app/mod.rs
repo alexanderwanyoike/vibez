@@ -176,6 +176,7 @@ mod eq_devices;
 mod filter_devices;
 mod gain_devices;
 mod gate_devices;
+mod instrument_devices;
 mod keyboard;
 mod local_watcher;
 mod menu_lifecycle;

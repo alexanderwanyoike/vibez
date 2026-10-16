@@ -4,6 +4,7 @@ use super::*;
 use crate::domains::devices::DevicesMsg;
 use crate::state::ProjectTrack;
 use vibez_core::effect::EffectType;
+use vibez_core::id::EffectId;
 
 fn gain_app() -> (App, TrackId, EffectId) {
     let mut app = super::super::test_support::app();
@@ -52,7 +53,7 @@ fn cancelled_and_unchanged_loads_do_not_create_project_edits() {
         original.parameters()
     );
     assert_eq!(
-        app.device_presets.selection[&(track_id, effect_id)],
+        app.device_presets.selection[&(track_id, effect_id.into())],
         unchanged
     );
     assert!(!app.state.project.dirty);
@@ -154,7 +155,7 @@ fn a_late_save_does_not_replace_a_newly_selected_preset_name() {
     let selected = crate::domains::device_presets::factory_presets(EffectType::Gain)[1].clone();
     let _ = app.update(Message::ApplyDevicePreset(
         track_id,
-        effect_id,
+        effect_id.into(),
         selected.clone(),
     ));
     app.state.project.history = Default::default();
@@ -172,7 +173,7 @@ fn a_late_save_does_not_replace_a_newly_selected_preset_name() {
     )));
 
     assert_eq!(
-        app.device_presets.selection[&(track_id, effect_id)],
+        app.device_presets.selection[&(track_id, effect_id.into())],
         selected
     );
     assert_eq!(
@@ -210,7 +211,7 @@ fn undo_keeps_the_remembered_preset_and_lets_a_save_finish() {
     let selected = crate::domains::device_presets::factory_presets(EffectType::Gain)[1].clone();
     let _ = app.update(Message::ApplyDevicePreset(
         track_id,
-        effect_id,
+        effect_id.into(),
         selected.clone(),
     ));
     let request = app.begin_device_preset_save(track_id, effect_id).unwrap();
@@ -219,7 +220,7 @@ fn undo_keeps_the_remembered_preset_and_lets_a_save_finish() {
     )));
     let _ = app.update(Message::Project(crate::domains::project::ProjectMsg::Undo));
     assert_eq!(
-        app.device_presets.selection[&(track_id, effect_id)],
+        app.device_presets.selection[&(track_id, effect_id.into())],
         selected
     );
 
@@ -240,7 +241,8 @@ fn undo_keeps_the_remembered_preset_and_lets_a_save_finish() {
 fn a_load_cancelled_by_an_edit_says_so() {
     let (mut app, track_id, effect_id) = gain_app();
     let _ = app.update(Message::DevicePreset(DevicePresetMsg::Load(
-        track_id, effect_id,
+        track_id,
+        effect_id.into(),
     )));
     let _ = app.update(Message::Devices(DevicesMsg::SetEffectParam(
         track_id, effect_id, 1, 3.0,

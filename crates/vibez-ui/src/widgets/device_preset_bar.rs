@@ -5,10 +5,10 @@ use iced::{Color, Element, Length, Theme};
 use vibez_core::device_preset::DevicePreset;
 use vibez_core::id::TrackId;
 
+use crate::domains::device_params::DeviceParams;
 use crate::domains::device_presets::presentation;
 use crate::domains::device_presets::DevicePresetMsg;
 use crate::message::Message;
-use crate::state::UiEffect;
 use crate::theme as th;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -40,18 +40,20 @@ const FIXED_W: f32 = 140.0;
 
 pub(crate) fn view<'a>(
     track_id: TrackId,
-    effect: &'a UiEffect,
+    device: impl Into<DeviceParams<'a>>,
     remembered: Option<&DevicePreset>,
     accent: Color,
     available_width: f32,
 ) -> Element<'a, Message> {
-    let presentation = presentation(effect, remembered);
+    let device = device.into();
+    let presentation = presentation(device, remembered);
+    let slot = device.slot;
     let previous = presentation
         .previous
-        .map(|preset| Message::ApplyDevicePreset(track_id, effect.id, preset));
+        .map(|preset| Message::ApplyDevicePreset(track_id, slot, preset));
     let next = presentation
         .next
-        .map(|preset| Message::ApplyDevicePreset(track_id, effect.id, preset));
+        .map(|preset| Message::ApplyDevicePreset(track_id, slot, preset));
     let choice = presentation.selected.map(|preset| PresetChoice {
         modified: presentation.modified,
         preset,
@@ -64,9 +66,8 @@ pub(crate) fn view<'a>(
             modified: false,
         })
         .collect::<Vec<_>>();
-    let effect_id = effect.id;
     let selector = pick_list(options, choice, move |choice| {
-        Message::ApplyDevicePreset(track_id, effect_id, choice.preset)
+        Message::ApplyDevicePreset(track_id, slot, choice.preset)
     })
     .placeholder("Custom")
     .width(Length::Fixed(
@@ -123,17 +124,13 @@ pub(crate) fn view<'a>(
         preset_button(
             crate::icons::FOLDER_OPEN,
             "Load preset file",
-            Some(Message::DevicePreset(DevicePresetMsg::Load(
-                track_id, effect_id
-            ))),
+            Some(Message::DevicePreset(DevicePresetMsg::Load(track_id, slot))),
             accent
         ),
         preset_button(
             crate::icons::SAVE,
             "Save preset file",
-            Some(Message::DevicePreset(DevicePresetMsg::Save(
-                track_id, effect_id
-            ))),
+            Some(Message::DevicePreset(DevicePresetMsg::Save(track_id, slot))),
             accent
         ),
     ]

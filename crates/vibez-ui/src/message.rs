@@ -100,7 +100,11 @@ pub enum Message {
     Card(crate::domains::device_card::CardMsg),
     /// Typing a value into a built-in device parameter.
     ParamEntry(crate::domains::param_entry::EntryMsg),
-    ApplyDevicePreset(TrackId, EffectId, vibez_core::device_preset::DevicePreset),
+    ApplyDevicePreset(
+        TrackId,
+        crate::domains::device_params::DeviceSlot,
+        vibez_core::device_preset::DevicePreset,
+    ),
     DevicePreset(crate::domains::device_presets::DevicePresetMsg),
     /// Arrangement domain (tracks, selection; clips arriving next).
     Arrangement(crate::domains::arrangement::ArrangementMsg),

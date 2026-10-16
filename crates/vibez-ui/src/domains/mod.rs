@@ -21,6 +21,7 @@ pub mod delay;
 pub mod device_card;
 pub mod device_latency;
 pub mod device_levels;
+pub mod device_params;
 pub mod device_presets;
 pub mod devices;
 pub mod drive;

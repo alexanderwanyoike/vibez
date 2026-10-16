@@ -2,14 +2,17 @@
 
 use vibez_core::device_preset::{DevicePreset, DevicePresetKind};
 use vibez_core::effect::EffectType;
-use vibez_core::id::{EffectId, TrackId};
+use vibez_core::id::TrackId;
+use vibez_core::midi::InstrumentKind;
 
+use crate::domains::device_params::{DeviceParams, DeviceSlot};
+#[cfg(test)]
 use crate::state::UiEffect;
 
 #[derive(Debug, Clone)]
 pub enum DevicePresetMsg {
-    Load(TrackId, EffectId),
-    Save(TrackId, EffectId),
+    Load(TrackId, DeviceSlot),
+    Save(TrackId, DeviceSlot),
     Loaded(PresetLoadRequest, Result<Option<DevicePreset>, String>),
     Saved(PresetSaveRequest, Result<Option<DevicePreset>, String>),
 }
@@ -18,7 +21,7 @@ pub enum DevicePresetMsg {
 pub struct PresetSaveRequest {
     pub token: u64,
     pub track_id: TrackId,
-    pub effect_id: EffectId,
+    pub slot: DeviceSlot,
     pub preset: DevicePreset,
 }
 
@@ -26,7 +29,7 @@ pub struct PresetSaveRequest {
 pub struct PresetLoadRequest {
     pub token: u64,
     pub track_id: TrackId,
-    pub effect_id: EffectId,
+    pub slot: DeviceSlot,
     pub expected: DevicePreset,
 }
 
@@ -245,6 +248,40 @@ const AUTO_PAN_KEYS: [(usize, &str, bool); 9] = {
     ]
 };
 
+/// Every Subtractive Synth control. Shapes, types, modes and counts are
+/// whole.
+const SYNTH_KEYS: [&str; vibez_instruments::synth::param::COUNT] = [
+    "waveform",
+    "attack",
+    "decay",
+    "sustain",
+    "release",
+    "cutoff",
+    "resonance",
+    "volume",
+    "octave",
+    "detune",
+    "waveform_2",
+    "octave_2",
+    "detune_2",
+    "level_2",
+    "sub",
+    "noise",
+    "filter_type",
+    "voice_mode",
+    "voices",
+    "glide",
+    "lfo_shape",
+    "lfo_target",
+    "lfo_rate",
+    "lfo_amount",
+    "filter_env",
+    "filter_attack",
+    "filter_decay",
+    "filter_sustain",
+    "filter_release",
+];
+
 /// One stored parameter: its index, preset key and whether it only takes
 /// whole numbers, as switches and choices do.
 type PresetParam = (usize, &'static str, bool);
@@ -257,12 +294,16 @@ pub struct PresetPresentation {
     pub next: Option<DevicePreset>,
 }
 
-pub fn presentation(effect: &UiEffect, remembered: Option<&DevicePreset>) -> PresetPresentation {
-    let presets = factory_presets(effect.effect_type);
+pub fn presentation<'a>(
+    device: impl Into<DeviceParams<'a>>,
+    remembered: Option<&DevicePreset>,
+) -> PresetPresentation {
+    let device = device.into();
+    let presets = presets_for(device.kind);
     let selected = remembered.cloned().or_else(|| {
         presets
             .iter()
-            .find(|preset| prepare_updates(effect, preset).is_ok_and(|updates| updates.is_empty()))
+            .find(|preset| prepare_updates(device, preset).is_ok_and(|updates| updates.is_empty()))
             .cloned()
     });
     let position = selected
@@ -283,7 +324,7 @@ pub fn presentation(effect: &UiEffect, remembered: Option<&DevicePreset>) -> Pre
     let previous = adjacent(false);
     let next = adjacent(true);
     let modified = selected.as_ref().is_some_and(|preset| {
-        prepare_updates(effect, preset).map_or(true, |updates| !updates.is_empty())
+        prepare_updates(device, preset).map_or(true, |updates| !updates.is_empty())
     });
     PresetPresentation {
         options: presets,
@@ -294,11 +335,24 @@ pub fn presentation(effect: &UiEffect, remembered: Option<&DevicePreset>) -> Pre
     }
 }
 
-fn parameter_keys(effect: &UiEffect) -> Result<Vec<PresetParam>, String> {
-    if effect.plugin_ref.is_some() || effect.plugin_name.is_some() {
+fn parameter_keys(device: &DeviceParams) -> Result<Vec<PresetParam>, String> {
+    if device.plugin {
         return Err("Use the plugin's own preset controls for this device".into());
     }
-    match effect.effect_type {
+    let effect_type = match device.kind {
+        DevicePresetKind::Effect(effect_type) => effect_type,
+        DevicePresetKind::Instrument(InstrumentKind::SubtractiveSynth) => {
+            return Ok(SYNTH_KEYS
+                .iter()
+                .enumerate()
+                .map(|(index, key)| (index, *key, vibez_instruments::synth::is_whole(index)))
+                .collect());
+        }
+        DevicePresetKind::Instrument(_) => {
+            return Err("Presets are not yet supported by this built-in device".into());
+        }
+    };
+    match effect_type {
         EffectType::Gain => Ok(GAIN_KEYS
             .iter()
             .enumerate()
@@ -320,15 +374,19 @@ fn parameter_keys(effect: &UiEffect) -> Result<Vec<PresetParam>, String> {
     }
 }
 
-pub fn capture(effect: &UiEffect, name: &str) -> Result<DevicePreset, String> {
-    let parameters = parameter_keys(effect)?
+pub fn capture<'a>(
+    device: impl Into<DeviceParams<'a>>,
+    name: &str,
+) -> Result<DevicePreset, String> {
+    let device = device.into();
+    let parameters = parameter_keys(&device)?
         .into_iter()
         .map(|(index, key, _)| {
-            let descriptor = effect
+            let descriptor = device
                 .descriptors
                 .get(index)
                 .ok_or_else(|| "The device's parameters are unavailable".to_string())?;
-            let value = effect
+            let value = device
                 .params
                 .get(index)
                 .copied()
@@ -336,20 +394,16 @@ pub fn capture(effect: &UiEffect, name: &str) -> Result<DevicePreset, String> {
             Ok((key.to_owned(), value))
         })
         .collect::<Result<_, String>>()?;
-    DevicePreset::new(
-        DevicePresetKind::Effect(effect.effect_type),
-        name,
-        parameters,
-    )
-    .map_err(|error| error.to_string())
+    DevicePreset::new(device.kind, name, parameters).map_err(|error| error.to_string())
 }
 
-pub fn prepare_updates(
-    effect: &UiEffect,
+pub fn prepare_updates<'a>(
+    device: impl Into<DeviceParams<'a>>,
     preset: &DevicePreset,
 ) -> Result<Vec<(usize, f32)>, String> {
-    let keys = parameter_keys(effect)?;
-    if preset.kind() != DevicePresetKind::Effect(effect.effect_type) {
+    let device = device.into();
+    let keys = parameter_keys(&device)?;
+    if preset.kind() != device.kind {
         return Err("This preset belongs to a different device".into());
     }
     if preset.parameters().len() != keys.len() {
@@ -361,7 +415,7 @@ pub fn prepare_updates(
             .parameters()
             .get(key)
             .ok_or_else(|| format!("The preset is missing parameter {key}"))?;
-        let descriptor = effect
+        let descriptor = device
             .descriptors
             .get(index)
             .ok_or_else(|| "The device's parameters are unavailable".to_string())?;
@@ -373,7 +427,7 @@ pub fn prepare_updates(
                 "Preset parameter {key} is outside its supported range"
             ));
         }
-        if effect
+        if device
             .params
             .get(index)
             .copied()
@@ -384,6 +438,14 @@ pub fn prepare_updates(
         }
     }
     Ok(updates)
+}
+
+/// Every built-in device's factory presets, by kind.
+pub fn presets_for(kind: DevicePresetKind) -> Vec<DevicePreset> {
+    match kind {
+        DevicePresetKind::Effect(effect_type) => factory_presets(effect_type),
+        DevicePresetKind::Instrument(_) => Vec::new(),
+    }
 }
 
 pub fn factory_presets(effect_type: EffectType) -> Vec<DevicePreset> {
