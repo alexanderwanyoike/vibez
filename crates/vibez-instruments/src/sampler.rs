@@ -292,6 +292,9 @@ impl Instrument for Sampler {
                         0.0
                     },
                 end_fade_frames: f64::from(END_FADE_SECONDS * self.sample_rate),
+                one_shot_fade_frames: f64::from(
+                    END_FADE_SECONDS.max(p[param::RELEASE]) * self.sample_rate,
+                ),
                 filter_type: self.choice(param::FILTER_TYPE),
                 cutoff: c[param::CUTOFF],
                 resonance: p[param::RESONANCE],
