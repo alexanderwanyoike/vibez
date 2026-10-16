@@ -301,7 +301,7 @@ impl DevicesState {
                 if let Some(track) = find_track_mut(tracks, master, buses, track_id) {
                     track.effects.push(UiEffect {
                         reconfiguration_failed: false,
-                        latency_samples: Some(0),
+                        latency_samples: Some(fx.latency_samples()),
                         inactive_sidechains: Default::default(),
                         sidechains: Default::default(),
                         external_inputs: fx.external_inputs().to_vec(),
