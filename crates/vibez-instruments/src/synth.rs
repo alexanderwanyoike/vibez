@@ -624,3 +624,7 @@ mod tests {
         assert_eq!(Waveform::from_index(99), Waveform::Sine); // fallback
     }
 }
+
+#[cfg(test)]
+#[path = "synth_quality_tests.rs"]
+mod quality_tests;
