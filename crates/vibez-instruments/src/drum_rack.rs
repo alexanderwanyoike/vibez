@@ -350,4 +350,18 @@ mod tests {
         assert!((buffer[2 * 2_000] - 0.25).abs() < 1e-3);
         assert_eq!(buffer[2 * 2_000 + 1], 0.0);
     }
+
+    #[test]
+    fn one_pad_control_changes_alone() {
+        let mut rack = DrumRack::new(48_000.0);
+        rack.load_drum_pad_sample(0, make_test_audio(4_800, 0.5), "kick.wav".into());
+        rack.set_drum_pad_param(0, param::PAN, -1.0);
+        rack.note_on(36, 127);
+
+        let mut buffer = vec![0.0; 2 * 2_400];
+        rack.render(&mut buffer, 2);
+
+        assert!(buffer[2 * 2_000] > 0.3);
+        assert_eq!(buffer[2 * 2_000 + 1], 0.0);
+    }
 }
