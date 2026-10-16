@@ -665,7 +665,20 @@ impl DevicesState {
                     });
                 }
             }
-            DevicesMsg::RenameDrumPad(..) => {}
+            DevicesMsg::RenameDrumPad(track_id, pad_index, name) => {
+                if let Some(pad) = find_track_mut(tracks, master, buses, track_id)
+                    .and_then(|track| track.drum_rack_pads.get_mut(pad_index))
+                {
+                    let name = name.trim();
+                    pad.name = if name.is_empty() {
+                        pad.source
+                            .as_ref()
+                            .map(vibez_core::track::MediaSourceRef::display_name)
+                    } else {
+                        Some(name.to_string())
+                    };
+                }
+            }
             DevicesMsg::AuditionNote {
                 track_id,
                 pitch,
