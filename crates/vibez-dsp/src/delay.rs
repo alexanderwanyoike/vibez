@@ -174,6 +174,35 @@ pub fn synced_beats(division: usize, modifier: usize) -> f64 {
     (4.0 / denominator) * [1.0, 1.5, 2.0 / 3.0][modifier.min(2)]
 }
 
+/// Milliseconds to each line's echo at `bpm`, left then right.
+pub fn line_times_ms(params: &[f32], bpm: f64) -> [f64; 2] {
+    let value = |index: usize| {
+        params
+            .get(index)
+            .copied()
+            .unwrap_or(DELAY_PARAMS[index].default)
+    };
+    let line = |time: usize, division: usize, modifier: usize| {
+        if value(param::SYNC) >= 0.5 {
+            60_000.0 / bpm.max(1.0)
+                * synced_beats(value(division) as usize, value(modifier) as usize)
+        } else {
+            f64::from(value(time))
+        }
+    };
+    let left = line(param::TIME_MS, param::LEFT_DIVISION, param::LEFT_MODIFIER);
+    let right = if value(param::LINK) >= 0.5 {
+        left
+    } else {
+        line(
+            param::RIGHT_TIME_MS,
+            param::RIGHT_DIVISION,
+            param::RIGHT_MODIFIER,
+        )
+    };
+    [left, right]
+}
+
 /// Stereo delay effect with feedback.
 pub struct DelayEffect {
     targets: [f32; param::COUNT],
@@ -421,6 +450,22 @@ impl AudioEffect for DelayEffect {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn line_times_follow_sync_tempo_and_link() {
+        let mut params: Vec<f32> = DELAY_PARAMS.iter().map(|d| d.default).collect();
+        assert_eq!(line_times_ms(&params, 120.0), [500.0, 500.0]);
+        params[param::SYNC] = 1.0;
+        params[param::LEFT_DIVISION] = 3.0;
+        params[param::LEFT_MODIFIER] = 1.0;
+        assert_eq!(line_times_ms(&params, 120.0), [375.0, 375.0]);
+        params[param::LINK] = 0.0;
+        params[param::RIGHT_DIVISION] = 4.0;
+        params[param::RIGHT_MODIFIER] = 2.0;
+        let [left, right] = line_times_ms(&params, 120.0);
+        assert_eq!(left, 375.0);
+        assert!((right - 1000.0 / 3.0).abs() < 1e-9);
+    }
 
     #[test]
     fn delay_dry_only_when_mix_zero() {
