@@ -849,6 +849,55 @@ mod presentation_tests {
         );
     }
 
+    fn gate() -> UiEffect {
+        let descriptors =
+            vibez_dsp::factory::create_effect(EffectType::Gate, 44_100.0).param_descriptors();
+        UiEffect {
+            effect_type: EffectType::Gate,
+            params: descriptors
+                .iter()
+                .map(|descriptor| descriptor.default)
+                .collect(),
+            descriptors,
+            ..gain()
+        }
+    }
+
+    #[test]
+    fn gate_factory_presets_are_valid_distinct_and_start_from_init() {
+        let effect = gate();
+        let presets = factory_presets(EffectType::Gate);
+        assert!(presets.len() >= 6);
+        assert_eq!(presets[0].name(), "Init");
+        assert_eq!(prepare_updates(&effect, &presets[0]), Ok(Vec::new()));
+        for preset in &presets[1..] {
+            let mut applied = gate();
+            for (index, value) in prepare_updates(&effect, preset).unwrap() {
+                applied.params[index] = value;
+            }
+            assert_ne!(applied.params, effect.params, "{}", preset.name());
+            assert_eq!(capture(&applied, preset.name()).as_ref(), Ok(preset));
+        }
+        let mut names: Vec<_> = presets.iter().map(DevicePreset::name).collect();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(names.len(), presets.len(), "names are unique");
+    }
+
+    #[test]
+    fn gate_presets_leave_detector_audition_alone() {
+        let listen = vibez_dsp::gate::param::DETECTOR_LISTEN;
+        let mut effect = gate();
+        effect.params[listen] = 1.0;
+        let captured = capture(&effect, "Auditioning").unwrap();
+        effect.params[listen] = 0.0;
+        assert_eq!(prepare_updates(&effect, &captured), Ok(Vec::new()));
+        let mut parameters = captured.parameters().clone();
+        parameters.insert("mode".into(), 0.5);
+        let half = DevicePreset::new(captured.kind(), "Half", parameters).unwrap();
+        assert!(prepare_updates(&effect, &half).is_err());
+    }
+
     #[test]
     fn a_device_without_factory_presets_has_no_navigation() {
         let mut effect = gain();
