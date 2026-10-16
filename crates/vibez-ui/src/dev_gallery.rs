@@ -1523,9 +1523,9 @@ pub fn run_delay() -> iced::Result {
     .run_with(|| (DelayGallery::new(), iced::Task::none()))
 }
 
-/// Native Reverb at each width tier and section height it adapts to, set
-/// like the concept's Warm Hall with an output level standing in for live
-/// audio.
+/// Native Reverb at each width tier and section height it adapts to, on the
+/// Warm Hall preset as in the concept, with an output level standing in for
+/// live audio.
 struct ReverbGallery {
     track: TrackId,
     effect: UiEffect,
@@ -1540,10 +1540,12 @@ impl ReverbGallery {
         let mut effect = effect(EffectType::Reverb, None, false, false, None, 0);
         effect.params = effect.descriptors.iter().map(|d| d.default).collect();
         effect.params[param::ROOM_SIZE] = vibez_dsp::reverb::room_for_decay(2.4);
-        effect.params[param::MIX] = 0.24;
+        effect.params[param::DAMPING] = 0.6;
+        effect.params[param::MIX] = 0.22;
         effect.params[param::PREDELAY_MS] = 24.0;
+        effect.params[param::DIFFUSION] = 0.8;
         effect.params[param::LOW_CUT_HZ] = 120.0;
-        effect.params[param::HIGH_CUT_HZ] = 9500.0;
+        effect.params[param::HIGH_CUT_HZ] = 10_000.0;
         let level = |db: f32| vibez_engine::metering::MeterValues {
             peak_l: vibez_core::level::db_to_amplitude(db),
             peak_r: vibez_core::level::db_to_amplitude(db - 0.5),
