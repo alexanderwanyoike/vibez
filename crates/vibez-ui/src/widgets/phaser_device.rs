@@ -177,23 +177,27 @@ impl<'a> PhaserView<'a> {
         )
     }
 
-    /// The rate's knob with its name, value or note length, and Sync beside
-    /// it, as the concept names it.
+    fn division(&self) -> Element<'a, Message> {
+        container(self.param(param::SYNC).choices(&SYNC_NAMES, 1))
+            .width(DIVISION_W)
+            .into()
+    }
+
+    /// The rate's knob with its name, value and Sync beside it, or while
+    /// synced the note length, as the free rate's knob would do nothing.
     fn rate(&self) -> Element<'a, Message> {
-        let sync = self.choice(param::SYNC).min(SYNC_NAMES.len() - 1);
+        if self.choice(param::SYNC) > 0 {
+            return column![heading("Rate"), self.division(), self.sync_switch()]
+                .spacing(4)
+                .align_x(Alignment::Center)
+                .into();
+        }
         let rate = self.param(param::RATE);
-        let value: Element<'a, Message> = if sync == 0 {
-            rate.value_entry()
-        } else {
-            container(self.param(param::SYNC).choices(&SYNC_NAMES, 1))
-                .width(DIVISION_W)
-                .into()
-        };
         row![
             iced::widget::canvas(rate.knob()).width(KNOB).height(KNOB),
             column![
                 heading("Rate").wrapping(text::Wrapping::None),
-                value,
+                rate.value_entry(),
                 self.sync_switch()
             ]
             .spacing(2),
@@ -219,7 +223,11 @@ impl<'a> PhaserView<'a> {
             .into_iter()
             .take(fits)
             {
-                line = line.push(self.param(index).line_item());
+                line = line.push(if index == param::RATE && self.choice(param::SYNC) > 0 {
+                    self.division()
+                } else {
+                    self.param(index).line_item()
+                });
             }
             return container(line)
                 .padding([0.0, PAD])
