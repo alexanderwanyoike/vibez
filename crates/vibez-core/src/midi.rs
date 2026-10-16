@@ -12,7 +12,7 @@ pub fn pitch_name(pitch: u8) -> String {
     format!(
         "{}{}",
         NAMES[pitch as usize % 12],
-        (pitch / 12).saturating_sub(1)
+        i32::from(pitch / 12) - 1
     )
 }
 
