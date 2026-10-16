@@ -316,16 +316,16 @@ impl<'a> DelayView<'a> {
         }
         let knob = |index| -> Element<'a, Message> {
             container(self.param(index).column(KNOB))
-                .width(Length::Fill)
-                .max_width(KNOB_COL_W * 1.6)
+                .width(KNOB_COL_W)
                 .align_x(Alignment::Center)
                 .into()
         };
         let mut content = row![
             self.timing(),
             vertical_rule(),
-            knob(param::FEEDBACK),
-            knob(param::MIX),
+            container(row![knob(param::FEEDBACK), knob(param::MIX)].spacing(12))
+                .width(Length::Fill)
+                .align_x(Alignment::Center),
         ]
         .spacing(10)
         .align_y(Alignment::Center);
