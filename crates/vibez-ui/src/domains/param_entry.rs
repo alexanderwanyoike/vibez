@@ -13,6 +13,9 @@ pub enum ParamFormat {
     Amplitude {
         floor_db: f32,
     },
+    /// A Drive amount, stored 0..1, shown as the gain it puts into the
+    /// shaper.
+    PreGain,
     Hertz,
     Milliseconds,
     /// Stored in seconds, shown in milliseconds below one second.
@@ -48,7 +51,11 @@ impl ParamFormat {
         match self {
             Self::Amplitude { .. } if value <= 0.0 || !value.is_finite() => "-inf dB".into(),
             Self::Hertz if value >= 1000.0 => format!("{:.1} kHz", value / 1000.0),
-            Self::Amplitude { .. } | Self::Decibels | Self::Seconds | Self::Hertz => {
+            Self::Amplitude { .. }
+            | Self::Decibels
+            | Self::PreGain
+            | Self::Seconds
+            | Self::Hertz => {
                 format!("{} {}", self.edit_text(value), self.unit(value))
             }
             Self::Milliseconds => format!("{} ms", self.edit_text(value)),
@@ -65,6 +72,10 @@ impl ParamFormat {
             Self::Amplitude { .. } if value <= 0.0 || !value.is_finite() => "-inf".into(),
             Self::Amplitude { .. } => format!("{:.1}", vibez_core::level::amplitude_to_db(value)),
             Self::Decibels => format!("{value:.1}"),
+            Self::PreGain => format!(
+                "{:.1}",
+                vibez_core::level::amplitude_to_db(vibez_dsp::drive::drive_gain(value))
+            ),
             Self::Hertz if value >= 1000.0 => format!("{:.2}k", value / 1000.0),
             Self::Hertz if value < 10.0 => format!("{value:.2}"),
             Self::Hertz => format!("{value:.0}"),
@@ -109,6 +120,14 @@ impl ParamFormat {
                     .contains(&number)
                     .then(|| vibez_core::level::db_to_amplitude(number).clamp(min, max));
             }
+            Self::PreGain => {
+                let ceiling_db =
+                    vibez_core::level::amplitude_to_db(vibez_dsp::drive::drive_gain(max));
+                return (0.0..=ceiling_db).contains(&number).then(|| {
+                    vibez_dsp::drive::amount_for_gain(vibez_core::level::db_to_amplitude(number))
+                        .clamp(min, max)
+                });
+            }
             Self::Hertz if suffix.starts_with('k') => number * 1000.0,
             Self::Seconds if suffix == "s" => number,
             Self::Seconds => number / 1000.0,
@@ -130,6 +149,7 @@ pub fn param_format(
         (EffectType::Gain, vibez_dsp::gain::param::GAIN) => ParamFormat::Amplitude {
             floor_db: crate::domains::gain::MIN_GAIN_DB,
         },
+        (EffectType::Drive, vibez_dsp::drive::param::AMOUNT) => ParamFormat::PreGain,
         (EffectType::Drive, vibez_dsp::drive::param::OUTPUT) => ParamFormat::Amplitude {
             floor_db: crate::domains::gain::MIN_GAIN_DB,
         },
