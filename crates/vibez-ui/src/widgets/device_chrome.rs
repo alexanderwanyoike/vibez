@@ -20,6 +20,7 @@ const TITLE_CHAR_W: f32 = 6.2;
 pub struct CardWidths {
     pub compact: f32,
     pub medium: f32,
+    pub expanded: f32,
     pub max: f32,
 }
 
@@ -253,6 +254,7 @@ mod tests {
     const WIDTHS: CardWidths = CardWidths {
         compact: 340.0,
         medium: 520.0,
+        expanded: 760.0,
         max: 1000.0,
     };
 
