@@ -42,7 +42,7 @@ impl ParamFormat {
             "ms" => Self::Milliseconds,
             "s" => Self::Seconds,
             ":1" => Self::Ratio,
-            "" | "%" if descriptor.min == 0.0 && descriptor.max == 1.0 => Self::Percent,
+            "" | "%" if descriptor.min == 0.0 && descriptor.max <= 1.0 => Self::Percent,
             unit @ ("deg" | "bit") => Self::Number { decimals: 0, unit },
             unit => Self::Number { decimals: 2, unit },
         }
