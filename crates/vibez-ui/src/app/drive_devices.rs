@@ -55,6 +55,67 @@ mod tests {
     }
 
     #[test]
+    fn a_new_drive_carries_its_latency_into_compensation() {
+        let (app, track, effect) = drive_app();
+        let effect = app
+            .state
+            .find_track(track)
+            .unwrap()
+            .effects
+            .iter()
+            .find(|candidate| candidate.id == effect)
+            .unwrap();
+        assert_eq!(
+            effect.latency_samples,
+            Some(vibez_dsp::drive::LATENCY_SAMPLES)
+        );
+    }
+
+    #[tokio::test]
+    async fn a_loaded_drive_carries_its_latency_into_compensation() {
+        use super::super::{load_project_async, save_project_async};
+        use vibez_core::effect::EffectInfo;
+        use vibez_core::track::TrackInfo;
+        let directory = tempfile::Builder::new()
+            .prefix(".drive-project-test-")
+            .tempdir_in(std::env::current_dir().unwrap())
+            .unwrap();
+        let mut project = vibez_project::Project::default();
+        let mut track = TrackInfo::new("Old Drive");
+        let track_id = track.id;
+        let effect_id = EffectId::new();
+        track.effects.push(EffectInfo {
+            id: effect_id,
+            effect_type: EffectType::Drive,
+            bypass: false,
+            params: vec![0.5, 0.5, 0.7, 1.0],
+            plugin: None,
+            sidechains: vec![],
+            inactive_sidechains: vec![],
+        });
+        project.tracks.push(track);
+        let path = directory.path().join("old-drive.vibez");
+        save_project_async(path.clone(), None, project)
+            .await
+            .unwrap();
+        let loaded = load_project_async(path, None).await.unwrap();
+        let mut app = super::super::test_support::app();
+        app.rebuild_from_loaded_project(loaded);
+        let effect = app
+            .state
+            .find_track(track_id)
+            .unwrap()
+            .effects
+            .iter()
+            .find(|effect| effect.id == effect_id)
+            .unwrap();
+        assert_eq!(
+            effect.latency_samples,
+            Some(vibez_dsp::drive::LATENCY_SAMPLES)
+        );
+    }
+
+    #[test]
     fn a_removed_drive_forgets_its_panel() {
         let (mut app, track, effect) = drive_app();
         let _ = app.update(Message::Drive(DriveMsg::ToggleAdvanced(effect)));
