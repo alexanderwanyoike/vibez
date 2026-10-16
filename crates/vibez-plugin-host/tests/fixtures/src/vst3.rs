@@ -24,7 +24,11 @@ struct Probe {
 }
 const INSTRUMENT_CID: TUID = uid(0xFEDCBA98, 0x76543210, 0xFEDCBA98, 0x76543210);
 const CID: TUID = uid(0x01234567, 0x89ABCDEF, 0x01234567, 0x89ABCDEF);
-const CIDS: [TUID; 8] = [
+/// The "Editor edits" class: one parameter whose editor changes reach the
+/// processor only through the host, like an NIH-plug plugin.
+const EDITOR_SCENARIO: usize = 8;
+const EDITOR_PARAM_ID: u32 = 7;
+const CIDS: [TUID; 9] = [
     CID,
     INSTRUMENT_CID,
     uid(0x01234567, 0x89ABCDEF, 0x01234567, 0x00000001),
@@ -33,8 +37,9 @@ const CIDS: [TUID; 8] = [
     uid(0x01234567, 0x89ABCDEF, 0x01234567, 0x00000004),
     uid(0x01234567, 0x89ABCDEF, 0x01234567, 0x00000005),
     uid(0x01234567, 0x89ABCDEF, 0x01234567, 0x00000006),
+    uid(0x01234567, 0x89ABCDEF, 0x01234567, 0x00000007),
 ];
-const NAMES: [&str; 8] = [
+const NAMES: [&str; 9] = [
     "Routing Probe",
     "Pulse Instrument",
     "Refused aux",
@@ -43,7 +48,58 @@ const NAMES: [&str; 8] = [
     "Processing error",
     "Surround main",
     "Refused handler",
+    "Editor edits",
 ];
+
+// One editor-edits instance per loaded copy of the fixture library, which
+// each test loads separately.
+static EDITOR_HANDLER: std::sync::atomic::AtomicPtr<IComponentHandler> =
+    std::sync::atomic::AtomicPtr::new(ptr::null_mut());
+static CONTROLLER_VALUE: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0x3FD9_9999_9999_999A);
+static PROCESSOR_VALUE: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0x3FD9_9999_9999_999A);
+
+fn load(value: &std::sync::atomic::AtomicU64) -> f64 {
+    f64::from_bits(value.load(std::sync::atomic::Ordering::Acquire))
+}
+fn store(value: &std::sync::atomic::AtomicU64, to: f64) {
+    value.store(to.to_bits(), std::sync::atomic::Ordering::Release);
+}
+
+/// Acts as the plugin's editor: a knob gesture reported to the host.
+#[no_mangle]
+pub extern "C" fn fixture_editor_edit(value: f64) -> i32 {
+    let handler = EDITOR_HANDLER.load(std::sync::atomic::Ordering::Acquire);
+    let Some(handler) = (unsafe { ComRef::from_raw(handler) }) else {
+        return kResultFalse;
+    };
+    store(&CONTROLLER_VALUE, value);
+    unsafe {
+        handler.beginEdit(EDITOR_PARAM_ID);
+        let result = handler.performEdit(EDITOR_PARAM_ID, value);
+        handler.endEdit(EDITOR_PARAM_ID);
+        result
+    }
+}
+
+/// Acts as the plugin's preset browser: the controller takes new values and
+/// tells the host they all changed.
+#[no_mangle]
+pub extern "C" fn fixture_editor_preset(value: f64) -> i32 {
+    let handler = EDITOR_HANDLER.load(std::sync::atomic::Ordering::Acquire);
+    let Some(handler) = (unsafe { ComRef::from_raw(handler) }) else {
+        return kResultFalse;
+    };
+    store(&CONTROLLER_VALUE, value);
+    unsafe { handler.restartComponent(RestartFlags_::kParamValuesChanged) }
+}
+
+/// The value the processor last received through its parameter changes.
+#[no_mangle]
+pub extern "C" fn fixture_processor_value() -> f64 {
+    load(&PROCESSOR_VALUE)
+}
 impl Class for Probe {
     type Interfaces = (IComponent, IAudioProcessor, IEditController);
 }
@@ -199,6 +255,13 @@ impl IComponentTrait for Probe {
         {
             return kResultFalse;
         }
+        if self.scenario == EDITOR_SCENARIO {
+            let mut value = [0u8; 8];
+            if stream.read(value.as_mut_ptr().cast(), 8, &mut read) == kResultOk && read == 8 {
+                store(&PROCESSOR_VALUE, f64::from_le_bytes(value));
+                store(&CONTROLLER_VALUE, f64::from_le_bytes(value));
+            }
+        }
         if self.active.get() {
             if let Some(handler) = self.handler.borrow().as_ref() {
                 handler.restartComponent(if self.timing.borrow().flag(21) {
@@ -216,7 +279,12 @@ impl IComponentTrait for Probe {
         };
         let bytes = self.timing.borrow().state();
         let mut written = 0;
-        stream.write(bytes.as_ptr().cast_mut().cast(), 12, &mut written)
+        let result = stream.write(bytes.as_ptr().cast_mut().cast(), 12, &mut written);
+        if self.scenario != EDITOR_SCENARIO || result != kResultOk {
+            return result;
+        }
+        let value = load(&PROCESSOR_VALUE).to_le_bytes();
+        stream.write(value.as_ptr().cast_mut().cast(), 8, &mut written)
     }
 }
 impl IAudioProcessorTrait for Probe {
@@ -288,6 +356,24 @@ impl IAudioProcessorTrait for Probe {
         }
         let _call = crate::ProcessingCall::enter(&self.in_call);
         let data = &*data;
+        if self.scenario == EDITOR_SCENARIO {
+            if let Some(changes) = ComRef::<IParameterChanges>::from_raw(data.inputParameterChanges)
+            {
+                for index in 0..changes.getParameterCount() {
+                    let Some(queue) = ComRef::from_raw(changes.getParameterData(index)) else {
+                        continue;
+                    };
+                    let points = queue.getPointCount();
+                    let (mut offset, mut value) = (0, 0.0);
+                    if queue.getParameterId() == EDITOR_PARAM_ID
+                        && points > 0
+                        && queue.getPoint(points - 1, &mut offset, &mut value) == kResultOk
+                    {
+                        store(&PROCESSOR_VALUE, value);
+                    }
+                }
+            }
+        }
         if !data.processContext.is_null() {
             self.timing
                 .borrow_mut()
@@ -394,10 +480,20 @@ impl IEditControllerTrait for Probe {
         kResultOk
     }
     unsafe fn getParameterCount(&self) -> i32 {
-        0
+        i32::from(self.scenario == EDITOR_SCENARIO)
     }
-    unsafe fn getParameterInfo(&self, _: i32, _: *mut ParameterInfo) -> tresult {
-        kInvalidArgument
+    unsafe fn getParameterInfo(&self, index: i32, info: *mut ParameterInfo) -> tresult {
+        if self.scenario != EDITOR_SCENARIO || index != 0 {
+            return kInvalidArgument;
+        }
+        *info = std::mem::zeroed();
+        (*info).id = EDITOR_PARAM_ID;
+        for (slot, unit) in (*info).title.iter_mut().zip("Cutoff".encode_utf16()) {
+            *slot = unit as TChar;
+        }
+        (*info).defaultNormalizedValue = 0.4;
+        (*info).flags = ParameterInfo_::ParameterFlags_::kCanAutomate;
+        kResultOk
     }
     unsafe fn getParamStringByValue(&self, _: u32, _: f64, _: *mut String128) -> tresult {
         kInvalidArgument
@@ -411,11 +507,19 @@ impl IEditControllerTrait for Probe {
     unsafe fn plainParamToNormalized(&self, _: u32, value: f64) -> f64 {
         value
     }
-    unsafe fn getParamNormalized(&self, _: u32) -> f64 {
-        0.0
+    unsafe fn getParamNormalized(&self, id: u32) -> f64 {
+        if self.scenario == EDITOR_SCENARIO && id == EDITOR_PARAM_ID {
+            load(&CONTROLLER_VALUE)
+        } else {
+            0.0
+        }
     }
-    unsafe fn setParamNormalized(&self, _: u32, _: f64) -> tresult {
-        kInvalidArgument
+    unsafe fn setParamNormalized(&self, id: u32, value: f64) -> tresult {
+        if self.scenario != EDITOR_SCENARIO || id != EDITOR_PARAM_ID {
+            return kInvalidArgument;
+        }
+        store(&CONTROLLER_VALUE, value);
+        kResultOk
     }
     unsafe fn setComponentHandler(&self, handler: *mut IComponentHandler) -> tresult {
         if self.scenario == 7 {
@@ -423,6 +527,9 @@ impl IEditControllerTrait for Probe {
         }
         *self.handler.borrow_mut() =
             ComRef::from_raw(handler).map(|reference| reference.to_com_ptr());
+        if self.scenario == EDITOR_SCENARIO {
+            EDITOR_HANDLER.store(handler, std::sync::atomic::Ordering::Release);
+        }
         kResultOk
     }
     unsafe fn createView(&self, _: *const c_char) -> *mut IPlugView {
