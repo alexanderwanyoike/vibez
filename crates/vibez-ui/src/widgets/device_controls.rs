@@ -2,7 +2,7 @@
 //! a readable value you can click to type into, segmented choices, and
 //! headings. Sizes are in logical pixels, which Interface Scale multiplies.
 
-use iced::widget::{button, canvas, column, pick_list, row, text, text_input, Space};
+use iced::widget::{button, canvas, column, container, pick_list, row, text, text_input, Space};
 use iced::{Alignment, Color, Element, Length, Theme};
 use vibez_core::id::TrackId;
 
@@ -328,6 +328,43 @@ pub fn dropdown<'a, T: Clone + ToString + PartialEq + 'a>(
             text_color: th::text(),
             selected_text_color: th::accent(),
             selected_background: th::bg_hover().into(),
+        })
+        .into()
+}
+
+/// The "Advanced" switch that opens a device's less used controls.
+pub fn disclosure<'a>(open: bool, message: Message, accent: Color) -> Element<'a, Message> {
+    toggle(
+        row![
+            text(if open { "\u{25BE}" } else { "\u{25B8}" })
+                .size(9)
+                .color(th::text_dim()),
+            text("Advanced").size(LABEL_SIZE).color(th::text()),
+        ]
+        .spacing(4)
+        .align_y(Alignment::Center)
+        .into(),
+        open,
+        message,
+        accent,
+    )
+}
+
+/// A divider between the sections of a device body.
+pub fn rule<'a>() -> Element<'a, Message> {
+    container(Space::new(Length::Fill, 1.0))
+        .style(|_| container::Style {
+            background: Some(th::divider().into()),
+            ..Default::default()
+        })
+        .into()
+}
+
+pub fn vertical_rule<'a>() -> Element<'a, Message> {
+    container(Space::new(1.0, Length::Fill))
+        .style(|_| container::Style {
+            background: Some(th::divider().into()),
+            ..Default::default()
         })
         .into()
 }

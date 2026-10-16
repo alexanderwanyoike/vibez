@@ -15,7 +15,7 @@ use crate::domains::param_entry::ValueEntry;
 use crate::message::Message;
 use crate::state::UiEffect;
 use crate::theme as th;
-use crate::widgets::device_controls::{heading, Param};
+use crate::widgets::device_controls::{heading, rule, vertical_rule, Param};
 use crate::widgets::effect_knob::KnobTarget;
 use crate::widgets::level_meter::{self, LevelMeter};
 
@@ -500,24 +500,6 @@ fn small_button<'a>(
                 width: 1.0,
                 radius: 3.0.into(),
             },
-            ..Default::default()
-        })
-        .into()
-}
-
-fn vertical_rule<'a>() -> Element<'a, Message> {
-    container(Space::new(1.0, Length::Fill))
-        .style(|_| container::Style {
-            background: Some(th::divider().into()),
-            ..Default::default()
-        })
-        .into()
-}
-
-fn rule<'a>() -> Element<'a, Message> {
-    container(Space::new(Length::Fill, 1.0))
-        .style(|_| container::Style {
-            background: Some(th::divider().into()),
             ..Default::default()
         })
         .into()
