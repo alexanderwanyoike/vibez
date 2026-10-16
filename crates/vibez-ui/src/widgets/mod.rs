@@ -36,6 +36,8 @@ pub mod local_drag;
 pub mod mini_waveform;
 pub mod mixer_strip;
 pub mod on_blur;
+pub mod phaser_device;
+pub mod phaser_display;
 pub mod piano_roll;
 mod playhead;
 pub mod reverb_device;

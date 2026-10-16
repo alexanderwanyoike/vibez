@@ -92,5 +92,9 @@ name = "auto_pan_device"
 required-features = ["dev-gallery"]
 
 [[example]]
+name = "phaser_device"
+required-features = ["dev-gallery"]
+
+[[example]]
 name = "synth_device"
 required-features = ["dev-gallery"]

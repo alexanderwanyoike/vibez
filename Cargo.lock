@@ -5194,6 +5194,7 @@ version = "0.4.1"
 dependencies = [
  "audio_thread_priority",
  "cpal",
+ "libc",
  "midir",
  "rubato",
  "serde",
@@ -5269,6 +5270,7 @@ dependencies = [
  "libc",
  "libloading 0.8.9",
  "log",
+ "rtrb",
  "serde",
  "serde_json",
  "vibez-core",

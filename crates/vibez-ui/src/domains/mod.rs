@@ -31,6 +31,7 @@ pub mod gain;
 pub mod gate;
 pub mod param_entry;
 pub mod perform;
+pub mod phaser;
 pub mod piano_roll;
 pub mod project;
 pub mod reverb;

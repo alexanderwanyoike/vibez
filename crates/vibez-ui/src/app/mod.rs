@@ -183,6 +183,7 @@ mod keyboard;
 mod local_watcher;
 mod menu_lifecycle;
 mod param_entry;
+mod phaser_devices;
 mod reverb_devices;
 mod synth_devices;
 mod tasks;

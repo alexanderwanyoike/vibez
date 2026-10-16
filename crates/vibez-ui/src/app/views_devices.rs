@@ -35,6 +35,7 @@ enum Flexible {
     Delay,
     Reverb,
     AutoPan,
+    Phaser,
 }
 
 impl App {
@@ -128,6 +129,8 @@ impl App {
                 Some(Flexible::Reverb)
             } else if crate::domains::auto_pan::is_native_auto_pan(effect) {
                 Some(Flexible::AutoPan)
+            } else if crate::domains::phaser::is_native_phaser(effect) {
+                Some(Flexible::Phaser)
             } else {
                 None
             };
@@ -214,6 +217,12 @@ impl App {
                         effect,
                         track_color,
                         crate::widgets::reverb_device::card_width(share),
+                    ),
+                    Flexible::Phaser => self.phaser_device_body(
+                        track_id,
+                        effect,
+                        track_color,
+                        crate::widgets::phaser_device::card_width(share),
                     ),
                     Flexible::AutoPan => self.auto_pan_device_body(
                         track_id,
@@ -384,6 +393,39 @@ impl App {
                     effect,
                     accent,
                     crate::widgets::reverb_device::preset_bar_width(size),
+                ),
+                size,
+            )
+        });
+        DeviceBody {
+            content: content.into(),
+            width,
+            padding: iced::Padding::ZERO,
+        }
+    }
+
+    fn phaser_device_body<'a>(
+        &'a self,
+        track_id: TrackId,
+        effect: &'a crate::state::UiEffect,
+        accent: Color,
+        width: f32,
+    ) -> DeviceBody<'a> {
+        let content = iced::widget::responsive(move |size| {
+            crate::widgets::phaser_device::PhaserView {
+                track_id,
+                effect,
+                accent,
+                panel: self.card_panels.panel(effect.id),
+                entry: self.param_entry.as_ref(),
+                bpm: self.state.transport.bpm,
+            }
+            .view(
+                self.view_device_preset_bar(
+                    track_id,
+                    effect,
+                    accent,
+                    crate::widgets::phaser_device::preset_bar_width(size),
                 ),
                 size,
             )

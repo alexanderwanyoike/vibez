@@ -23,5 +23,6 @@ pub mod audio_input;
 pub mod audio_stream;
 pub mod file_io;
 pub mod midi_input;
+pub mod realtime;
 mod stream_config;
 pub use stream_config::StreamOpenError;
