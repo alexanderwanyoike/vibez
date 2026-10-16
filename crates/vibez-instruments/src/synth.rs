@@ -46,6 +46,38 @@ pub fn lfo(shape: usize, phase: f64) -> f32 {
     }
 }
 
+/// The filter's gain in dB at `frequency`: the trapezoidal SVF is the
+/// analogue prototype at the prewarped frequency, so this is exact.
+pub fn filter_response_db(params: &[f32], frequency: f32, sample_rate: f32) -> f32 {
+    let value = |index: usize| {
+        params
+            .get(index)
+            .copied()
+            .unwrap_or(SYNTH_PARAMS[index].default)
+    };
+    let nyquist = sample_rate * 0.5;
+    let warp = |hz: f32| (std::f32::consts::PI * hz.min(nyquist * 0.999) / sample_rate).tan();
+    let cutoff = value(param::CUTOFF).min(sample_rate * 0.45);
+    let w = f64::from(warp(frequency) / warp(cutoff));
+    let response = |q: f32| {
+        let k = 1.0 / f64::from(q.max(0.05));
+        // 1 / (s^2 + k s + 1) at s = jw.
+        let (re, im) = (1.0 - w * w, k * w);
+        (re * re + im * im, k)
+    };
+    let (denominator, k) = response(value(param::RESONANCE));
+    let power = match value(param::FILTER_TYPE) as usize {
+        filter_type::LP24 => {
+            let (second, _) = response(std::f32::consts::FRAC_1_SQRT_2);
+            1.0 / (denominator * second)
+        }
+        filter_type::HP12 => w.powi(4) / denominator,
+        filter_type::BP12 => (k * w).powi(2) / denominator,
+        _ => 1.0 / denominator,
+    };
+    (10.0 * power.max(1e-12).log10()) as f32
+}
+
 /// A triangle in step with a sine: 0 rising at the cycle's start.
 fn triangle(x: f32) -> f32 {
     4.0 * ((x - 0.25).rem_euclid(1.0) - 0.5).abs() - 1.0

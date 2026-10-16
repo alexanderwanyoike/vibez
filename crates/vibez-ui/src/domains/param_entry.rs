@@ -4,6 +4,7 @@
 use vibez_core::device_preset::DevicePresetKind;
 use vibez_core::effect::{EffectType, ParamDescriptor};
 use vibez_core::id::TrackId;
+use vibez_core::midi::InstrumentKind;
 
 use crate::domains::device_params::DeviceSlot;
 
@@ -188,6 +189,33 @@ pub fn param_format(
     host_rate: Option<u32>,
 ) -> ParamFormat {
     match (kind, index) {
+        (DevicePresetKind::Instrument(InstrumentKind::SubtractiveSynth), index) => {
+            use vibez_instruments::synth::param;
+            match index {
+                param::VOLUME | param::LEVEL_2 | param::SUB | param::NOISE => {
+                    ParamFormat::Amplitude {
+                        floor_db: crate::domains::gain::MIN_GAIN_DB,
+                    }
+                }
+                param::OCTAVE | param::OCTAVE_2 => ParamFormat::Number {
+                    decimals: 0,
+                    unit: "oct",
+                },
+                param::DETUNE | param::DETUNE_2 => ParamFormat::Number {
+                    decimals: 1,
+                    unit: "st",
+                },
+                param::FILTER_ENV => ParamFormat::Number {
+                    decimals: 1,
+                    unit: "oct",
+                },
+                param::VOICES => ParamFormat::Number {
+                    decimals: 0,
+                    unit: "",
+                },
+                _ => ParamFormat::for_descriptor(descriptor),
+            }
+        }
         (DevicePresetKind::Effect(EffectType::Gain), vibez_dsp::gain::param::GAIN) => {
             ParamFormat::Amplitude {
                 floor_db: crate::domains::gain::MIN_GAIN_DB,
@@ -541,6 +569,25 @@ mod tests {
                 assert_eq!(read(index, invalid), None, "accepted {invalid}");
             }
         }
+    }
+
+    #[test]
+    fn synth_levels_read_in_decibels_and_tuning_in_its_steps() {
+        use vibez_instruments::synth::{param, SYNTH_PARAMS};
+        let format = |index: usize, value: f32| {
+            param_format(
+                DevicePresetKind::Instrument(InstrumentKind::SubtractiveSynth),
+                index,
+                &SYNTH_PARAMS[index],
+                None,
+            )
+            .format(value)
+        };
+        assert_eq!(format(param::VOLUME, 0.5), "-6.0 dB");
+        assert_eq!(format(param::OCTAVE_2, -1.0), "-1 oct");
+        assert_eq!(format(param::DETUNE, 0.26), "0.3 st");
+        assert_eq!(format(param::VOICES, 8.0), "8");
+        assert_eq!(format(param::CUTOFF, 2_400.0), "2.4 kHz");
     }
 
     fn begin(entry: &mut Option<ValueEntry>, index: usize) -> (TrackId, DeviceSlot) {

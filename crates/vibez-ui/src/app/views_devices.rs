@@ -19,7 +19,6 @@ use crate::widgets::effect_slot::{view_effect_slot, view_sidechain, DeviceBody};
 use super::*;
 
 const CHAIN_SPACING: f32 = 6.0;
-const SYNTH_CARD_W: f32 = 570.0;
 const SAMPLER_CARD_W: f32 = 560.0;
 const PLACEHOLDER_W: f32 = 120.0;
 
@@ -93,7 +92,11 @@ impl App {
         // device can take its share of whatever width the section has left.
         let mut cards: Vec<Option<Element<'a, Message>>> = Vec::new();
         let mut used = 0.0;
-        if let Some((card, width)) = self.instrument_card(track_id, track, track_color) {
+        // The native synth takes a flexible share like the effects do.
+        let synth = crate::domains::synth::is_native_synth(track);
+        if synth {
+            cards.push(None);
+        } else if let Some((card, width)) = self.instrument_card(track_id, track, track_color) {
             cards.push(Some(card));
             used += width;
         }
@@ -147,9 +150,18 @@ impl App {
                 self.state.transport.sample_rate,
             )));
         }
-        if !flexible.is_empty() {
+        let shares = flexible.len() + usize::from(synth);
+        if shares > 0 {
             let spacing = CHAIN_SPACING * cards.len().saturating_sub(1) as f32;
-            let share = (available_width - used - spacing) / flexible.len() as f32;
+            let share = (available_width - used - spacing) / shares as f32;
+            if synth {
+                cards[0] = Some(self.synth_card(
+                    track_id,
+                    track,
+                    track_color,
+                    crate::widgets::synth_device::card_width(share),
+                ));
+            }
             for (position, effect, sidechain, kind) in flexible {
                 let body = match kind {
                     Flexible::Gain => self.gain_device_body(
@@ -277,10 +289,8 @@ impl App {
                 self.view_drum_rack_device(track_id, track, track_color),
                 drum_rack::DRUM_RACK_CARD_W,
             ),
-            _ => (
-                self.view_synth_device(track_id, track, track_color),
-                SYNTH_CARD_W,
-            ),
+            // The native synth is laid out with the flexible cards.
+            _ => return None,
         };
         let latency = crate::domains::device_latency::latency_label(
             track.instrument_latency_samples,
@@ -750,135 +760,6 @@ impl App {
                 self.state.transport.sample_rate,
             ),
             track_color,
-        )
-    }
-
-    /// Synth device card for instrument tracks.
-    pub(super) fn view_synth_device<'a>(
-        &'a self,
-        track_id: TrackId,
-        track: &'a UiTrack,
-        track_color: Color,
-    ) -> Element<'a, Message> {
-        use crate::widgets::effect_knob::{format_value, param_column, EffectKnobWidget};
-        let title = Self::device_title_bar(Self::device_title_row(
-            "Synth",
-            track_color,
-            Some(Message::remove_track_instrument(track_id)),
-        ));
-
-        let descriptors = vibez_instruments::synth::SYNTH_PARAMS;
-        let value_of = |i: usize| {
-            track
-                .instrument_params
-                .get(i)
-                .copied()
-                .unwrap_or(descriptors[i].default)
-        };
-        let knob = |i: usize, label: &str| {
-            param_column(
-                EffectKnobWidget::for_instrument(
-                    track_id,
-                    i,
-                    value_of(i),
-                    descriptors[i].min,
-                    descriptors[i].max,
-                    descriptors[i].default,
-                    track_color,
-                ),
-                label.to_string(),
-                format_value(value_of(i), descriptors[i].unit),
-            )
-        };
-
-        // OSC section: 2x2 waveform selector grid.
-        let wave_value = value_of(0).round() as usize;
-        let wave_btn = |i: usize, label: &'static str| {
-            let active = wave_value == i;
-            button(
-                text(label)
-                    .size(9)
-                    .width(Length::Fixed(30.0))
-                    .align_x(iced::Alignment::Center)
-                    .color(if active {
-                        th::bg_dark()
-                    } else {
-                        th::text_dim()
-                    }),
-            )
-            .on_press(Message::set_instrument_param(track_id, 0, i as f32))
-            .padding([3, 4])
-            .style(move |_theme: &Theme, _status| button::Style {
-                background: Some(if active { th::accent() } else { th::bg_dark() }.into()),
-                text_color: if active {
-                    th::bg_dark()
-                } else {
-                    th::text_dim()
-                },
-                border: iced::Border {
-                    color: if active { th::accent() } else { th::border() },
-                    width: 1.0,
-                    radius: 3.0.into(),
-                },
-                ..Default::default()
-            })
-        };
-        let scope: Element<'a, Message> = canvas(crate::widgets::mini_waveform::OscScope {
-            waveform_index: wave_value,
-            color: track_color,
-        })
-        .width(Length::Fixed(66.0))
-        .height(Length::Fixed(38.0))
-        .into();
-        let osc = column![
-            scope,
-            row![wave_btn(0, "Sin"), wave_btn(1, "Saw")].spacing(3),
-            row![wave_btn(2, "Sqr"), wave_btn(3, "Tri")].spacing(3),
-        ]
-        .spacing(3)
-        .align_x(iced::Alignment::Center);
-
-        let adsr: Element<'a, Message> = canvas(crate::widgets::mini_waveform::AdsrScope {
-            attack: value_of(1),
-            decay: value_of(2),
-            sustain: value_of(3),
-            release: value_of(4),
-            color: track_color,
-        })
-        .width(Length::Fixed(240.0))
-        .height(Length::Fixed(34.0))
-        .into();
-        let envelope = column![
-            adsr,
-            row![
-                knob(1, "Attack"),
-                knob(2, "Decay"),
-                knob(3, "Sustain"),
-                knob(4, "Release")
-            ]
-            .spacing(6)
-        ]
-        .spacing(5)
-        .align_x(iced::Alignment::Center);
-
-        let body = row![
-            Self::device_section("OSC", osc.into()),
-            Self::device_divider(),
-            Self::device_section("ENVELOPE", envelope.into()),
-            Self::device_divider(),
-            Self::device_section(
-                "FILTER",
-                row![knob(5, "Cutoff"), knob(6, "Res")].spacing(6).into()
-            ),
-            Self::device_divider(),
-            Self::device_section("OUT", knob(7, "Volume")),
-        ]
-        .spacing(10)
-        .align_y(iced::Alignment::Start);
-
-        // OSC 66 + envelope 240 + filter 118 + out 56 + chrome.
-        Self::device_card(
-            column![title, Self::device_body(body.into())].width(Length::Fixed(SYNTH_CARD_W)),
         )
     }
 

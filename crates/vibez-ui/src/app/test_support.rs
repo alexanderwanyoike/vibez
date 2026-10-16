@@ -22,6 +22,7 @@ pub(super) fn app() -> super::App {
         filter_panels: Default::default(),
         gate_panels: Default::default(),
         card_panels: Default::default(),
+        synth_panels: Default::default(),
         gain_devices: Default::default(),
         eq_devices: Default::default(),
         param_entry: None,
