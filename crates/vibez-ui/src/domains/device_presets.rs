@@ -92,7 +92,8 @@ const COMPRESSOR_KEYS: [(usize, &str, bool); 16] = {
     ]
 };
 
-/// One stored parameter: its index, preset key and whether it is a switch.
+/// One stored parameter: its index, preset key and whether it only takes
+/// whole numbers, as switches and choices do.
 type PresetParam = (usize, &'static str, bool);
 
 pub struct PresetPresentation {
@@ -149,8 +150,8 @@ fn parameter_keys(effect: &UiEffect) -> Result<Vec<PresetParam>, String> {
             .iter()
             .enumerate()
             .map(|(index, key)| {
-                let switch = vibez_dsp::gain::param::POLARITY.contains(&index);
-                (index, *key, switch)
+                let whole = vibez_dsp::gain::param::POLARITY.contains(&index);
+                (index, *key, whole)
             })
             .collect()),
         EffectType::Eq => Ok(EQ_KEYS.to_vec()),
@@ -195,7 +196,7 @@ pub fn prepare_updates(
         return Err("The preset does not contain this device's complete parameter set".into());
     }
     let mut updates = Vec::new();
-    for (index, key, switch) in keys {
+    for (index, key, whole) in keys {
         let value = *preset
             .parameters()
             .get(key)
@@ -206,7 +207,7 @@ pub fn prepare_updates(
             .ok_or_else(|| "The device's parameters are unavailable".to_string())?;
         if !value.is_finite()
             || !(descriptor.min..=descriptor.max).contains(&value)
-            || (switch && value != 0.0 && value != 1.0)
+            || (whole && value.fract() != 0.0)
         {
             return Err(format!(
                 "Preset parameter {key} is outside its supported range"
