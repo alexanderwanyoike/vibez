@@ -304,3 +304,42 @@ fn synth_extremes() -> SubtractiveSynth {
     }
     synth
 }
+
+#[test]
+fn the_filter_response_matches_each_type_at_its_cutoff() {
+    let at = |filter: usize, q: f32, hz: f32| {
+        let mut params: Vec<f32> = SYNTH_PARAMS.iter().map(|d| d.default).collect();
+        params[param::CUTOFF] = 1_000.0;
+        params[param::RESONANCE] = q;
+        params[param::FILTER_TYPE] = filter as f32;
+        filter_response_db(&params, hz, RATE)
+    };
+    assert!((at(filter_type::LP12, 4.0, 1_000.0) - db(4.0)).abs() < 0.01);
+    assert!((at(filter_type::LP24, 4.0, 1_000.0) - (db(4.0) - 3.01)).abs() < 0.05);
+    assert!(at(filter_type::HP12, 0.707, 10_000.0).abs() < 0.1);
+    assert!(at(filter_type::BP12, 2.0, 1_000.0).abs() < 0.01);
+    assert!(at(filter_type::LP12, 0.707, 100.0).abs() < 0.1);
+}
+
+#[test]
+fn the_drawn_response_is_what_the_filter_does() {
+    // A sine at twice the cutoff through LP24, against the curve.
+    let mut synth = synth(&[
+        SINE,
+        (param::CUTOFF, 500.0),
+        (param::RESONANCE, 2.0),
+        (param::FILTER_TYPE, filter_type::LP24 as f32),
+    ]);
+    synth.note_on(81, 127);
+    render(&mut synth, 9_600);
+    let heard = db(level_at(&render(&mut synth, 9_600), 880.0) / 0.8);
+    let mut params: Vec<f32> = SYNTH_PARAMS.iter().map(|d| d.default).collect();
+    params[param::CUTOFF] = 500.0;
+    params[param::RESONANCE] = 2.0;
+    params[param::FILTER_TYPE] = filter_type::LP24 as f32;
+    let drawn = filter_response_db(&params, 880.0, RATE) + db(0.7);
+    assert!(
+        (heard - drawn).abs() < 0.5,
+        "heard {heard:.2} dB, drawn {drawn:.2} dB"
+    );
+}
