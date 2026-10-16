@@ -326,3 +326,7 @@ mod tests {
         assert!(!fx.set_param(3, 1.0));
     }
 }
+
+#[cfg(test)]
+#[path = "reverb_legacy_tests.rs"]
+mod legacy_tests;
