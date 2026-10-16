@@ -1,4 +1,7 @@
 //! Second-order Butterworth filtering with persistent stereo histories.
+//!
+//! The coefficients are the low- and high-pass biquads of Robert
+//! Bristow-Johnson's Audio EQ Cookbook at Q = 1/sqrt(2).
 
 #[derive(Clone, Copy)]
 pub(crate) struct ButterworthFilter {

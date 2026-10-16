@@ -1,4 +1,9 @@
 //! Legacy-compatible linked gating with an explicit, stable native parameter contract.
+//!
+//! The dB-domain attack/release detector and the expander's gain computer
+//! (the downward mirror of a hard-knee compressor's) follow Giannoulis,
+//! Massberg and Reiss, "Digital Dynamic Range Compressor Design: A Tutorial
+//! and Analysis", JAES 60(6), 2012.
 
 use vibez_core::effect::{DynamicsMeter, EffectType, GateMeter, GatePhase, ParamDescriptor};
 
