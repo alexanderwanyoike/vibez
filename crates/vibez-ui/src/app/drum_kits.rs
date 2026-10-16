@@ -274,4 +274,46 @@ mod tests {
         assert_eq!(staged.len(), 1);
         assert_eq!(staged[0].file, "kick.wav");
     }
+
+    #[test]
+    fn loading_a_kit_is_one_undo_step_and_shows_its_first_pad() {
+        use crate::domains::devices::DevicesMsg;
+        use crate::state::ProjectTrack;
+        use vibez_core::midi::{InstrumentKind, TrackKind};
+        let mut app = super::super::test_support::app();
+        let mut track = ProjectTrack::new(TrackId::new(), "Drums".into(), 0);
+        track.kind = TrackKind::Midi;
+        let id = track.id;
+        Arc::make_mut(&mut app.state.project_tracks)
+            .tracks
+            .push(track);
+        let _ = app.update(Message::Devices(DevicesMsg::SetTrackInstrument(
+            id,
+            InstrumentKind::DrumRack,
+        )));
+        app.state.find_track_mut(id).unwrap().selected_drum_pad = 40;
+        app.state.project.history = Default::default();
+        let kit = FACTORY_KITS[1].kit();
+        let samples = vec![KitSample {
+            file: "kick.wav".into(),
+            audio: Arc::new(vibez_core::audio_buffer::DecodedAudio {
+                channels: vec![vec![0.5; 32]],
+                sample_rate: 44_100,
+            }),
+            source: vibez_core::track::MediaSourceRef::LocalFile {
+                path: "/kits/909/kick.wav".into(),
+            },
+        }];
+
+        let _ = app.apply_drum_kit(id, Ok((kit, samples)));
+        let loaded = app.state.find_track(id).unwrap();
+        assert_eq!(loaded.drum_rack_pads[0].name.as_deref(), Some("Kick"));
+        assert_eq!(loaded.selected_drum_pad, 0);
+        assert_eq!(app.instrument_panels[&id].kit.as_deref(), Some("909"));
+
+        let _ = app.update(Message::Project(crate::domains::project::ProjectMsg::Undo));
+        assert!(app.state.find_track(id).unwrap().drum_rack_pads[0]
+            .name
+            .is_none());
+    }
 }
