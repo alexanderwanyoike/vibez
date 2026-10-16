@@ -203,7 +203,9 @@ impl canvas::Program<Message> for PadView<'_> {
         bounds: Rectangle,
         cursor: mouse::Cursor,
     ) -> (canvas::event::Status, Option<Message>) {
-        if let canvas::Event::Mouse(mouse::Event::CursorMoved { .. }) = event {
+        if let canvas::Event::Mouse(mouse::Event::CursorMoved { .. } | mouse::Event::CursorLeft) =
+            event
+        {
             let over = cursor.is_over(bounds);
             if over != state.hovered_since.is_some() {
                 state.hovered_since = over.then(Instant::now);
