@@ -252,8 +252,8 @@ impl App {
             Message::Card(message) => return self.update_card(message),
             Message::ParamEntry(message) => return self.update_param_entry(message),
             Message::DevicePreset(message) => return self.update_device_preset(message),
-            Message::ApplyDevicePreset(track_id, effect_id, preset) => {
-                return self.apply_device_preset(track_id, effect_id, preset);
+            Message::ApplyDevicePreset(track_id, slot, preset) => {
+                return self.apply_device_preset(track_id, slot, preset);
             }
             Message::SectionTimeline(_) => {
                 unreachable!("section timeline wrappers are removed before routing")

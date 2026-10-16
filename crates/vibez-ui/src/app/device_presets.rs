@@ -2,8 +2,9 @@
 
 use super::*;
 use vibez_core::device_preset::DevicePreset;
-use vibez_core::id::{EffectId, TrackId};
+use vibez_core::id::TrackId;
 
+use crate::domains::device_params::{DeviceParams, DeviceSlot};
 use crate::domains::device_presets::{DevicePresetMsg, PresetLoadRequest, PresetSaveRequest};
 
 #[cfg(test)]
@@ -16,15 +17,15 @@ mod flow_tests;
 pub(crate) struct DevicePresetRuntime {
     pub(super) load_request: super::tracked_request::TrackedRequest,
     pub(super) save_request: super::tracked_request::TrackedRequest,
-    pub(super) load_target: Option<(TrackId, EffectId)>,
-    pub(super) selection: std::collections::HashMap<(TrackId, EffectId), DevicePreset>,
+    pub(super) load_target: Option<(TrackId, DeviceSlot)>,
+    pub(super) selection: std::collections::HashMap<(TrackId, DeviceSlot), DevicePreset>,
 }
 
 impl App {
     pub(super) fn update_device_preset(&mut self, message: DevicePresetMsg) -> Task<Message> {
         match message {
-            DevicePresetMsg::Load(track_id, effect_id) => {
-                let Some(request) = self.begin_device_preset_load(track_id, effect_id) else {
+            DevicePresetMsg::Load(track_id, slot) => {
+                let Some(request) = self.begin_device_preset_load(track_id, slot) else {
                     return Task::none();
                 };
                 let task = Task::perform(tasks::load_device_preset_dialog(), move |result| {
@@ -32,8 +33,8 @@ impl App {
                 });
                 self.device_presets.load_request.attach(task)
             }
-            DevicePresetMsg::Save(track_id, effect_id) => {
-                let Some(request) = self.begin_device_preset_save(track_id, effect_id) else {
+            DevicePresetMsg::Save(track_id, slot) => {
+                let Some(request) = self.begin_device_preset_save(track_id, slot) else {
                     return Task::none();
                 };
                 let task = Task::perform(
@@ -66,33 +67,30 @@ impl App {
     fn capture_device_preset(
         &self,
         track_id: TrackId,
-        effect_id: EffectId,
+        slot: impl Into<DeviceSlot>,
     ) -> Option<DevicePreset> {
-        let effect = self
-            .state
-            .find_track(track_id)?
-            .effects
-            .iter()
-            .find(|effect| effect.id == effect_id)?;
+        let slot = slot.into();
+        let device = DeviceParams::find(self.state.find_track(track_id)?, slot)?;
         let name = self
             .device_presets
             .selection
-            .get(&(track_id, effect_id))
+            .get(&(track_id, slot))
             .map_or("Custom", DevicePreset::name);
-        crate::domains::device_presets::capture(effect, name).ok()
+        crate::domains::device_presets::capture(device, name).ok()
     }
 
     fn begin_device_preset_load(
         &mut self,
         track_id: TrackId,
-        effect_id: EffectId,
+        slot: impl Into<DeviceSlot>,
     ) -> Option<PresetLoadRequest> {
-        let expected = self.capture_device_preset(track_id, effect_id)?;
-        self.device_presets.load_target = Some((track_id, effect_id));
+        let slot = slot.into();
+        let expected = self.capture_device_preset(track_id, slot)?;
+        self.device_presets.load_target = Some((track_id, slot));
         Some(PresetLoadRequest {
             token: self.device_presets.load_request.begin(),
             track_id,
-            effect_id,
+            slot,
             expected,
         })
     }
@@ -100,13 +98,14 @@ impl App {
     fn begin_device_preset_save(
         &mut self,
         track_id: TrackId,
-        effect_id: EffectId,
+        slot: impl Into<DeviceSlot>,
     ) -> Option<PresetSaveRequest> {
-        let preset = self.capture_device_preset(track_id, effect_id)?;
+        let slot = slot.into();
+        let preset = self.capture_device_preset(track_id, slot)?;
         Some(PresetSaveRequest {
             token: self.device_presets.save_request.begin(),
             track_id,
-            effect_id,
+            slot,
             preset,
         })
     }
@@ -122,12 +121,12 @@ impl App {
         match result {
             Ok(Some(saved)) => {
                 if self
-                    .capture_device_preset(request.track_id, request.effect_id)
+                    .capture_device_preset(request.track_id, request.slot)
                     .is_some_and(|current| current == request.preset)
                 {
                     self.device_presets
                         .selection
-                        .insert((request.track_id, request.effect_id), saved.clone());
+                        .insert((request.track_id, request.slot), saved.clone());
                 }
                 self.state.status_text = format!("Saved preset: {}", saved.name());
             }
@@ -153,7 +152,7 @@ impl App {
     pub(super) fn invalidate_device_preset_load(&mut self, message: &Message) {
         use crate::domains::arrangement::ArrangementMsg;
         use crate::domains::devices::DevicesMsg;
-        let Some((pending_track, pending_effect)) = self.device_presets.load_target else {
+        let Some(pending) = self.device_presets.load_target else {
             return;
         };
         let invalidated = match message {
@@ -161,15 +160,13 @@ impl App {
                 DevicesMsg::SetEffectParam(track, effect, ..)
                 | DevicesMsg::SetEffectParams(track, effect, ..)
                 | DevicesMsg::RemoveEffect(track, effect),
-            )
-            | Message::ApplyDevicePreset(track, effect, _) => {
-                (*track, *effect) == (pending_track, pending_effect)
-            }
+            ) => (*track, DeviceSlot::Effect(*effect)) == pending,
+            Message::ApplyDevicePreset(track, slot, _) => (*track, *slot) == pending,
             Message::Arrangement(
                 ArrangementMsg::RemoveTrack(track)
                 | ArrangementMsg::ConfirmRemoveTrack(track)
                 | ArrangementMsg::RemoveBus(track),
-            ) => *track == pending_track,
+            ) => *track == pending.0,
             _ => false,
         };
         if invalidated {
@@ -183,14 +180,15 @@ impl App {
     pub(super) fn view_device_preset_bar<'a>(
         &'a self,
         track_id: TrackId,
-        effect: &'a crate::state::UiEffect,
+        device: impl Into<DeviceParams<'a>>,
         accent: iced::Color,
         available_width: f32,
     ) -> iced::Element<'a, Message> {
+        let device = device.into();
         crate::widgets::device_preset_bar::view(
             track_id,
-            effect,
-            self.device_presets.selection.get(&(track_id, effect.id)),
+            device,
+            self.device_presets.selection.get(&(track_id, device.slot)),
             accent,
             available_width,
         )
@@ -208,21 +206,16 @@ impl App {
         let expected_is_current = self
             .state
             .find_track(request.track_id)
-            .and_then(|track| {
-                track
-                    .effects
-                    .iter()
-                    .find(|effect| effect.id == request.effect_id)
-            })
-            .and_then(|effect| {
-                crate::domains::device_presets::capture(effect, request.expected.name()).ok()
+            .and_then(|track| DeviceParams::find(track, request.slot))
+            .and_then(|device| {
+                crate::domains::device_presets::capture(device, request.expected.name()).ok()
             })
             .is_some_and(|current| current == request.expected);
         if !expected_is_current {
             return Task::none();
         }
         match result {
-            Ok(preset) => self.apply_device_preset(request.track_id, request.effect_id, preset),
+            Ok(preset) => self.apply_device_preset(request.track_id, request.slot, preset),
             Err(error) => {
                 self.state.status_text = format!("Preset load failed: {error}");
                 Task::none()
@@ -233,17 +226,17 @@ impl App {
     pub(super) fn apply_device_preset(
         &mut self,
         track_id: TrackId,
-        effect_id: EffectId,
+        slot: DeviceSlot,
         preset: DevicePreset,
     ) -> Task<Message> {
-        let Some(effect) = self
+        let Some(device) = self
             .state
             .find_track(track_id)
-            .and_then(|track| track.effects.iter().find(|effect| effect.id == effect_id))
+            .and_then(|track| DeviceParams::find(track, slot))
         else {
             return Task::none();
         };
-        let updates = match crate::domains::device_presets::prepare_updates(effect, &preset) {
+        let updates = match crate::domains::device_presets::prepare_updates(device, &preset) {
             Ok(updates) => updates,
             Err(error) => {
                 self.state.status_text = error;
@@ -252,7 +245,10 @@ impl App {
         };
         self.device_presets
             .selection
-            .insert((track_id, effect_id), preset);
+            .insert((track_id, slot), preset);
+        let DeviceSlot::Effect(effect_id) = slot else {
+            return Task::none();
+        };
         if updates.is_empty() {
             return Task::none();
         }
@@ -285,7 +281,7 @@ mod tests {
         let request = PresetLoadRequest {
             token: app.device_presets.load_request.begin(),
             track_id,
-            effect_id: before.id,
+            slot: before.id.into(),
             expected: crate::domains::device_presets::capture(&before, "Current").unwrap(),
         };
         let snapshot = app.take_snapshot();
@@ -320,14 +316,14 @@ mod tests {
         let stale = PresetLoadRequest {
             token: app.device_presets.load_request.begin(),
             track_id,
-            effect_id: before.id,
+            slot: before.id.into(),
             expected: expected.clone(),
         };
         app.device_presets.load_request.cancel();
         let current = PresetLoadRequest {
             token: app.device_presets.load_request.begin(),
             track_id,
-            effect_id: before.id,
+            slot: before.id.into(),
             expected,
         };
         let presets = crate::domains::device_presets::factory_presets(EffectType::Gain);
@@ -378,7 +374,11 @@ mod tests {
                 "left_polarity": 1.0, "right_polarity": 0.0}
         }))
         .unwrap();
-        let _ = app.update(Message::ApplyDevicePreset(track_id, before.id, preset));
+        let _ = app.update(Message::ApplyDevicePreset(
+            track_id,
+            before.id.into(),
+            preset,
+        ));
 
         let after = &app.state.find_track(track_id).unwrap().effects[0];
         assert_eq!(after.params, vec![0.5, -3.0, 2.0, 1.0, 0.0]);

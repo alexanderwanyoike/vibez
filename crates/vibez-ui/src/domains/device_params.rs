@@ -79,6 +79,12 @@ impl<'a> DeviceParams<'a> {
     }
 }
 
+impl From<EffectId> for DeviceSlot {
+    fn from(id: EffectId) -> Self {
+        Self::Effect(id)
+    }
+}
+
 impl DeviceSlot {
     /// Sets one value on this device.
     pub fn set(self, track_id: TrackId, index: usize, value: f32) -> Message {
