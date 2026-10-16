@@ -37,6 +37,8 @@ pub enum ParamFormat {
     Ratio,
     /// A MIDI note, shown and typed by name ("C4", "F#2") or number.
     Note,
+    /// Stored -1..1, shown as the mixer shows pan ("C", "L50", "R30").
+    Pan,
     Number {
         decimals: u8,
         unit: &'static str,
@@ -78,7 +80,7 @@ impl ParamFormat {
             Self::Milliseconds => format!("{} ms", self.edit_text(value)),
             Self::Percent => format!("{} %", self.edit_text(value)),
             Self::Ratio => format!("{} :1", self.edit_text(value)),
-            Self::Note => self.edit_text(value),
+            Self::Note | Self::Pan => self.edit_text(value),
             Self::Number { unit: "", .. } => self.edit_text(value),
             Self::Number { unit, .. } => format!("{} {unit}", self.edit_text(value)),
         }
@@ -108,6 +110,7 @@ impl ParamFormat {
             Self::Percent => format!("{:.0}", value * 100.0),
             Self::Ratio => format!("{value:.1}"),
             Self::Note => vibez_core::midi::pitch_name(value.round().clamp(0.0, 127.0) as u8),
+            Self::Pan => format!("{value:.2}"),
             Self::Number { decimals, .. } => format!("{value:.*}", decimals as usize),
         }
     }
@@ -648,6 +651,27 @@ mod tests {
         assert_eq!(format(param::DETUNE, 0.26), "0.3 st");
         assert_eq!(format(param::VOICES, 8.0), "8");
         assert_eq!(format(param::CUTOFF, 2_400.0), "2.4 kHz");
+    }
+
+    #[test]
+    fn pan_reads_and_types_as_the_mixer_shows_it() {
+        let pan = ParamFormat::Pan;
+        assert_eq!(pan.format(0.0), "C");
+        assert_eq!(pan.format(-0.5), "L50");
+        assert_eq!(pan.format(0.3), "R30");
+        for (text, value) in [
+            ("C", 0.0),
+            ("l50", -0.5),
+            ("50 L", -0.5),
+            ("R30", 0.3),
+            ("-25", -0.25),
+        ] {
+            assert_eq!(pan.parse(text, -1.0, 1.0), Some(value), "{text}");
+        }
+        for text in ["L150", "X20", "oops"] {
+            assert_eq!(pan.parse(text, -1.0, 1.0), None, "{text}");
+        }
+        assert_eq!(pan.parse(&pan.edit_text(-0.4), -1.0, 1.0), Some(-0.4));
     }
 
     #[test]
