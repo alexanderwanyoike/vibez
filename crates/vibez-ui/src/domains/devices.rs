@@ -74,6 +74,8 @@ pub enum DevicesMsg {
         pad_index: usize,
         choke_group: Option<u8>,
     },
+    /// Several of a pad's Sampler values as one edit.
+    SetDrumPadParams(TrackId, usize, Vec<(usize, f32)>),
     /// Preview a pitch on a track's instrument. `on: false` releases.
     AuditionNote {
         track_id: TrackId,
@@ -637,6 +639,7 @@ impl DevicesState {
                     action.status = Some(format!("Pad {} updated", pad_index + 1));
                 }
             }
+            DevicesMsg::SetDrumPadParams(..) => {}
             DevicesMsg::AuditionNote {
                 track_id,
                 pitch,
@@ -996,6 +999,45 @@ mod tests {
                 ref state,
                 ..
             } if state.fade_out_ms == vibez_core::track::DRUM_PAD_MAX_FADE_MS
+        ));
+    }
+
+    #[test]
+    fn a_pad_edit_sets_its_sampler_values_from_the_ones_it_was_saved_with() {
+        use vibez_instruments::sampler::param;
+        let (mut tracks, track_id, _) = midi_track_with_effect();
+        tracks[0].drum_rack_pads = (0..16).map(|_| UiDrumPad::default()).collect();
+        tracks[0].drum_rack_pads[2] = UiDrumPad::from_state(&vibez_core::track::DrumPadState {
+            coarse_tune: 5,
+            ..Default::default()
+        });
+        tracks[0].drum_rack_pads[2].params.clear();
+        let mut devices = DevicesState::default();
+        let mut engine = RecordingEngine::default();
+        devices.update(
+            DevicesMsg::SetDrumPadParams(track_id, 2, vec![(param::PAN, -0.5)]),
+            &mut engine,
+            &mut tracks,
+            &mut crate::state::new_master_track(),
+            &mut [],
+            DevicesCtx {
+                sample_rate: 44_100,
+                ..Default::default()
+            },
+        );
+
+        let params = &tracks[0].drum_rack_pads[2].params;
+        assert_eq!(params.len(), param::COUNT);
+        assert_eq!(params[param::PAN], -0.5);
+        assert_eq!(params[param::TUNE], 5.0, "the saved tuning carried over");
+        assert!(matches!(
+            engine.0[..],
+            [EngineCommand::SetDrumRackPadParam {
+                pad_index: 2,
+                param_index: param::PAN,
+                value,
+                ..
+            }] if value == -0.5
         ));
     }
 
