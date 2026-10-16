@@ -1,7 +1,7 @@
 //! One voice of the synth: two oscillators, a sub and noise into a filter,
 //! with an envelope each for the level and the cutoff.
 
-use crate::synth_envelope::{Envelope, Times};
+use crate::envelope::{Envelope, Times};
 use crate::synth_filter::{Coefficients, Svf};
 use crate::synth_oscillator::{sample, Waveform};
 use crate::synth_params::filter_type;
