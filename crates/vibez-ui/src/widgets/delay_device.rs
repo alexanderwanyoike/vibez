@@ -16,7 +16,8 @@ use crate::state::UiEffect;
 use crate::theme as th;
 use crate::widgets::delay_display::EchoPlot;
 use crate::widgets::device_controls::{
-    disclosure, dropdown, heading, level_column, rule, segmented, vertical_rule, Param, LABEL_SIZE,
+    disclosure, dropdown, heading, level_column, plot_band, rule, segmented, vertical_rule, Param,
+    LABEL_SIZE,
 };
 use crate::widgets::device_layout::{stack, Stack, KNOB_ROW_H};
 
@@ -161,7 +162,7 @@ impl<'a> DelayView<'a> {
     }
 
     fn plots(&self, height: f32) -> Element<'a, Message> {
-        container(
+        plot_band(
             row![
                 iced::widget::canvas(EchoPlot {
                     params: &self.effect.params,
@@ -170,14 +171,13 @@ impl<'a> DelayView<'a> {
                 })
                 .width(Length::Fill)
                 .height(Length::Fill),
+                vertical_rule(),
                 level_column("Output", self.panel.output),
             ]
             .spacing(8),
+            height,
+            PAD,
         )
-        .padding([6.0, PAD])
-        .height(height)
-        .width(Length::Fill)
-        .into()
     }
 
     fn milliseconds(&self, right: bool) -> String {
@@ -333,6 +333,7 @@ impl<'a> DelayView<'a> {
             content = content
                 .push(vertical_rule())
                 .push(self.mode())
+                .push(vertical_rule())
                 .push(self.link());
         }
         container(content)

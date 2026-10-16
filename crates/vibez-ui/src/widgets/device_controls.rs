@@ -438,6 +438,24 @@ pub fn rule<'a>() -> Element<'a, Message> {
         .into()
 }
 
+/// The dark band a device's plots and meters sit on, full width and
+/// `height` tall, with `pad` either side.
+pub fn plot_band<'a>(
+    content: impl Into<Element<'a, Message>>,
+    height: f32,
+    pad: f32,
+) -> Element<'a, Message> {
+    container(content)
+        .padding([6.0, pad])
+        .height(height)
+        .width(Length::Fill)
+        .style(|_| container::Style {
+            background: Some(th::bg_dark().into()),
+            ..Default::default()
+        })
+        .into()
+}
+
 pub fn vertical_rule<'a>() -> Element<'a, Message> {
     container(Space::new(1.0, Length::Fill))
         .style(|_| container::Style {
