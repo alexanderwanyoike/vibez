@@ -12,6 +12,8 @@ pub mod device_layout;
 pub(crate) mod device_preset_bar;
 pub mod double_click;
 pub mod drag;
+pub mod drive_device;
+pub mod drive_display;
 pub mod effect_knob;
 pub mod effect_slot;
 pub mod eq_device;

@@ -1078,3 +1078,148 @@ pub fn run_gate() -> iced::Result {
     .font(crate::typography::PLEX_MONO_SEMIBOLD_BYTES)
     .run_with(|| (GateGallery::new(), iced::Task::none()))
 }
+
+/// Native Drive at each width tier and section height it adapts to, set
+/// like the concept's Warm Edge with levels standing in for live audio.
+struct DriveGallery {
+    track: TrackId,
+    effect: UiEffect,
+    closed: crate::domains::drive::DrivePanelState,
+    open: crate::domains::drive::DrivePanelState,
+}
+
+impl DriveGallery {
+    fn new() -> Self {
+        use crate::domains::drive::DrivePanelState;
+        use vibez_dsp::drive::{character, param};
+        let mut effect = effect(EffectType::Drive, None, false, false, None, 0);
+        effect.params = effect.descriptors.iter().map(|d| d.default).collect();
+        effect.params[param::AMOUNT] = 0.45;
+        effect.params[param::TONE] = 0.55;
+        effect.params[param::OUTPUT] = vibez_core::level::db_to_amplitude(-3.0);
+        effect.params[param::MIX] = 0.8;
+        effect.params[param::CHARACTER] = character::SOFT as f32;
+        let level = |db: f32| vibez_engine::metering::MeterValues {
+            peak_l: vibez_core::level::db_to_amplitude(db),
+            peak_r: vibez_core::level::db_to_amplitude(db - 0.5),
+            rms_l: vibez_core::level::db_to_amplitude(db - 6.0),
+            rms_r: vibez_core::level::db_to_amplitude(db - 6.5),
+        };
+        let closed = DrivePanelState {
+            input: level(-9.0),
+            output: level(-7.0),
+            last_meter_at: Some(std::time::Instant::now()),
+            ..Default::default()
+        };
+        Self {
+            track: TrackId::new(),
+            effect,
+            open: DrivePanelState {
+                advanced: true,
+                ..closed.clone()
+            },
+            closed,
+        }
+    }
+
+    fn scene<'a>(
+        &'a self,
+        label: &'static str,
+        card_width: f32,
+        section: (f32, f32),
+        panel: &'a crate::domains::drive::DrivePanelState,
+    ) -> Element<'a, Message> {
+        let accent = th::track_color(0);
+        let effect = &self.effect;
+        let track = self.track;
+        let body = iced::widget::responsive(move |size| {
+            crate::widgets::drive_device::DriveView {
+                track_id: track,
+                effect,
+                accent,
+                panel,
+                entry: None,
+            }
+            .view(
+                crate::widgets::device_preset_bar::view(
+                    track,
+                    effect,
+                    None,
+                    accent,
+                    crate::widgets::drive_device::preset_bar_width(size),
+                ),
+                size,
+            )
+        });
+        framed_card(
+            label,
+            card_width,
+            section,
+            track,
+            effect,
+            accent,
+            body.into(),
+        )
+    }
+
+    fn view(&self) -> Element<'_, Message> {
+        use crate::widgets::drive_device::{COMPACT_W, WAVEFORM_W};
+        let wide = 900.0;
+        let (closed, open) = (&self.closed, &self.open);
+        container(
+            column![
+                row![
+                    self.scene("Wide, tall", wide, (wide + 16.0, 330.0), closed),
+                    self.scene(
+                        "Compact, tall",
+                        COMPACT_W,
+                        (COMPACT_W + 16.0, 330.0),
+                        closed
+                    ),
+                ]
+                .spacing(24),
+                row![
+                    self.scene("Wide, Advanced open", wide, (wide + 16.0, 400.0), open),
+                    self.scene(
+                        "Medium, Advanced open",
+                        WAVEFORM_W,
+                        (WAVEFORM_W + 16.0, 400.0),
+                        open
+                    ),
+                ]
+                .spacing(24),
+                row![
+                    self.scene("Wide, shortest", wide, (wide + 16.0, 110.0), closed),
+                    self.scene("Compact, short", COMPACT_W, (COMPACT_W + 16.0, 150.0), open),
+                ]
+                .spacing(24),
+            ]
+            .spacing(16),
+        )
+        .padding(16)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .style(|_theme: &Theme| container::Style {
+            background: Some(th::bg_surface().into()),
+            ..Default::default()
+        })
+        .into()
+    }
+}
+
+pub fn run_drive() -> iced::Result {
+    iced::application(
+        "Drive device gallery",
+        |_: &mut DriveGallery, _: Message| {},
+        DriveGallery::view,
+    )
+    .theme(|_| th::vibez_theme())
+    .antialiasing(true)
+    .window_size((1900.0, 1260.0))
+    .font(crate::icons::ICON_FONT_BYTES)
+    .font(crate::typography::PLEX_SANS_CONDENSED_MEDIUM_BYTES)
+    .font(crate::typography::PLEX_SANS_CONDENSED_SEMIBOLD_BYTES)
+    .font(crate::typography::PLEX_MONO_MEDIUM_BYTES)
+    .font(crate::typography::PLEX_MONO_SEMIBOLD_BYTES)
+    .run_with(|| (DriveGallery::new(), iced::Task::none()))
+}

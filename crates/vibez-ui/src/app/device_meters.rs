@@ -9,6 +9,7 @@ use vibez_engine::metering::MeterValues;
 
 use crate::domains::compressor::is_native_compressor;
 use crate::domains::device_levels::MeteredPanel;
+use crate::domains::drive::is_native_drive;
 use crate::domains::eq::is_native_eq;
 use crate::domains::filter::is_native_filter;
 use crate::domains::gain::is_native_gain;
@@ -24,6 +25,7 @@ enum Metered {
     Filter,
     Compressor,
     Gate,
+    Drive,
 }
 
 #[derive(Default)]
@@ -38,6 +40,7 @@ fn is_metered(effect: &UiEffect) -> bool {
         || is_native_compressor(effect)
         || is_native_filter(effect)
         || is_native_gate(effect)
+        || is_native_drive(effect)
 }
 
 impl App {
@@ -69,6 +72,10 @@ impl App {
         for panel in self.gate_panels.values_mut() {
             panel.reset_stale(now);
         }
+        self.drive_panels.retain_existing(state);
+        for panel in self.drive_panels.values_mut() {
+            panel.reset_stale(now);
+        }
     }
 
     /// Metering restarts under a new generation after undo or redo (which
@@ -91,6 +98,9 @@ impl App {
         for panel in self.gate_panels.values_mut() {
             panel.clear_readings();
         }
+        for panel in self.drive_panels.values_mut() {
+            panel.clear_readings();
+        }
         self.send_command(EngineCommand::SetEffectMeterChannel {
             track_id: self.device_meters.channel,
             generation: self.device_meters.generation,
@@ -105,6 +115,7 @@ impl App {
         self.compressor_devices.panels.clear();
         self.filter_panels.clear();
         self.gate_panels.clear();
+        self.drive_panels.clear();
         self.send_command(EngineCommand::SetEffectMeterChannel {
             track_id: None,
             generation: self.device_meters.generation,
@@ -135,6 +146,8 @@ impl App {
             Some(Metered::Compressor)
         } else if is_native_gate(effect) {
             Some(Metered::Gate)
+        } else if is_native_drive(effect) {
+            Some(Metered::Drive)
         } else {
             None
         }
@@ -172,6 +185,10 @@ impl App {
                 .accept_levels(input, output, now),
             Some(Metered::Gate) => self
                 .gate_panels
+                .entry(effect_id)
+                .accept_levels(input, output, now),
+            Some(Metered::Drive) => self
+                .drive_panels
                 .entry(effect_id)
                 .accept_levels(input, output, now),
             None => {}

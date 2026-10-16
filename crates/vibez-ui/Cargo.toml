@@ -70,3 +70,7 @@ required-features = ["dev-gallery"]
 [[example]]
 name = "gate_device"
 required-features = ["dev-gallery"]
+
+[[example]]
+name = "drive_device"
+required-features = ["dev-gallery"]

@@ -56,6 +56,7 @@ struct App {
     compressor_devices: compressor_devices::CompressorDevices,
     filter_panels: device_panels::DevicePanels<crate::domains::filter::FilterPanelState>,
     gate_panels: device_panels::DevicePanels<crate::domains::gate::GatePanelState>,
+    drive_panels: device_panels::DevicePanels<crate::domains::drive::DrivePanelState>,
     param_entry: Option<crate::domains::param_entry::ValueEntry>,
     device_presets: device_presets::DevicePresetRuntime,
     // Plugin GUI support
@@ -164,6 +165,7 @@ mod compressor_devices;
 mod device_meters;
 mod device_panels;
 pub(crate) mod device_presets;
+mod drive_devices;
 mod drum_rack_preparation;
 mod engine_events;
 mod eq_devices;
@@ -442,6 +444,7 @@ impl App {
             compressor_devices: Default::default(),
             filter_panels: Default::default(),
             gate_panels: Default::default(),
+            drive_panels: Default::default(),
             gain_devices: Default::default(),
             eq_devices: eq_devices::EqDevices {
                 spectrum_rx: eq_spectrum_rx,

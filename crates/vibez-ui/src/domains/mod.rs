@@ -19,6 +19,7 @@ pub mod device_latency;
 pub mod device_levels;
 pub mod device_presets;
 pub mod devices;
+pub mod drive;
 pub mod eq;
 pub mod filter;
 pub mod gain;
