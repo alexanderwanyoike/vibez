@@ -14,8 +14,8 @@ use crate::message::Message;
 use crate::state::UiEffect;
 use crate::theme as th;
 use crate::widgets::device_controls::{
-    disclosure, dropdown, heading, level_column, rule, segmented, vertical_rule, Param, LABEL_SIZE,
-    METER_W,
+    disclosure, dropdown, heading, level_column, plot_band, rule, segmented, vertical_rule, Param,
+    LABEL_SIZE, METER_W,
 };
 use crate::widgets::device_layout::{stack, KNOB_ROW_H};
 use crate::widgets::drive_display::{TransferCurve, Waveform};
@@ -152,6 +152,7 @@ impl<'a> DriveView<'a> {
     fn plots(&self, layout: Arrangement) -> Element<'a, Message> {
         let mut content = row![
             level_column("Input", self.panel.input),
+            vertical_rule(),
             column![
                 heading("Transfer curve (dB)"),
                 canvas(TransferCurve {
@@ -167,7 +168,7 @@ impl<'a> DriveView<'a> {
         ]
         .spacing(8);
         if layout.waveform {
-            content = content.push(
+            content = content.push(vertical_rule()).push(
                 column![
                     heading("Waveform (in/out)"),
                     canvas(Waveform {
@@ -182,11 +183,13 @@ impl<'a> DriveView<'a> {
                 .width(Length::Fill),
             );
         }
-        container(content.push(level_column("Output", self.panel.output)))
-            .padding([6.0, PAD])
-            .height(layout.plots)
-            .width(Length::Fill)
-            .into()
+        plot_band(
+            content
+                .push(vertical_rule())
+                .push(level_column("Output", self.panel.output)),
+            layout.plots,
+            PAD,
+        )
     }
 
     const MAIN: [usize; 4] = [param::AMOUNT, param::TONE, param::OUTPUT, param::MIX];
