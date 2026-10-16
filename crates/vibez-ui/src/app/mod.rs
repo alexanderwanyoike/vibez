@@ -164,6 +164,7 @@ mod capture;
 mod card_devices;
 mod compensation;
 mod compressor_devices;
+mod delay_devices;
 mod device_meters;
 mod device_panels;
 pub(crate) mod device_presets;

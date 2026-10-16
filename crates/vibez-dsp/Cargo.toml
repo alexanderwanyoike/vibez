@@ -7,3 +7,6 @@ license.workspace = true
 [dependencies]
 signalsmith-stretch = "0.1.3"
 vibez-core = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }

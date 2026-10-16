@@ -9,6 +9,7 @@ use vibez_engine::metering::MeterValues;
 
 use crate::domains::bitcrush::is_native_bitcrush;
 use crate::domains::compressor::is_native_compressor;
+use crate::domains::delay::is_native_delay;
 use crate::domains::device_levels::MeteredPanel;
 use crate::domains::drive::is_native_drive;
 use crate::domains::eq::is_native_eq;
@@ -44,6 +45,7 @@ fn is_metered(effect: &UiEffect) -> bool {
         || is_native_gate(effect)
         || is_native_drive(effect)
         || is_native_bitcrush(effect)
+        || is_native_delay(effect)
 }
 
 impl App {
@@ -149,7 +151,7 @@ impl App {
             Some(Metered::Compressor)
         } else if is_native_gate(effect) {
             Some(Metered::Gate)
-        } else if is_native_drive(effect) || is_native_bitcrush(effect) {
+        } else if is_native_drive(effect) || is_native_bitcrush(effect) || is_native_delay(effect) {
             Some(Metered::Card)
         } else {
             None

@@ -42,7 +42,7 @@ impl ParamFormat {
             "ms" => Self::Milliseconds,
             "s" => Self::Seconds,
             ":1" => Self::Ratio,
-            "" | "%" if descriptor.min == 0.0 && descriptor.max == 1.0 => Self::Percent,
+            "" | "%" if descriptor.min == 0.0 && descriptor.max <= 1.0 => Self::Percent,
             unit @ ("deg" | "bit") => Self::Number { decimals: 0, unit },
             unit => Self::Number { decimals: 2, unit },
         }
@@ -385,6 +385,19 @@ mod tests {
         assert_eq!(rate.parse("48 kHz", 1.0, 32.0), Some(1.0));
         assert_eq!(rate.parse("1k", 1.0, 32.0), None);
         assert_eq!(format(param::SR_REDUCE, None).format(4.0), "1/4");
+    }
+
+    #[test]
+    fn a_unitless_share_below_one_reads_as_a_percentage() {
+        let feedback = descriptor(0.0, 0.95, "");
+        assert_eq!(ParamFormat::for_descriptor(&feedback), ParamFormat::Percent);
+        assert_eq!(
+            ParamFormat::for_descriptor(&descriptor(0.0, 2.0, "")),
+            ParamFormat::Number {
+                decimals: 2,
+                unit: ""
+            }
+        );
     }
 
     #[test]

@@ -8,6 +8,8 @@ mod clip_loop_markers;
 pub mod clip_slot;
 pub mod compressor_device;
 pub mod compressor_display;
+pub mod delay_device;
+pub mod delay_display;
 pub mod device_chrome;
 pub mod device_controls;
 pub mod device_layout;
