@@ -11,6 +11,7 @@ use std::collections::VecDeque;
 pub mod arrangement;
 pub mod audio_recording;
 pub mod audio_settings;
+pub mod auto_pan;
 pub mod automation;
 pub mod bitcrush;
 pub mod browser;

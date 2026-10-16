@@ -7,6 +7,7 @@ use vibez_core::effect::DynamicsMeter;
 use vibez_core::id::{EffectId, TrackId};
 use vibez_engine::metering::MeterValues;
 
+use crate::domains::auto_pan::is_native_auto_pan;
 use crate::domains::bitcrush::is_native_bitcrush;
 use crate::domains::compressor::is_native_compressor;
 use crate::domains::delay::is_native_delay;
@@ -48,6 +49,7 @@ fn is_metered(effect: &UiEffect) -> bool {
         || is_native_bitcrush(effect)
         || is_native_delay(effect)
         || is_native_reverb(effect)
+        || is_native_auto_pan(effect)
 }
 
 impl App {
@@ -157,6 +159,7 @@ impl App {
             || is_native_bitcrush(effect)
             || is_native_delay(effect)
             || is_native_reverb(effect)
+            || is_native_auto_pan(effect)
         {
             Some(Metered::Card)
         } else {

@@ -1,4 +1,6 @@
 pub mod audio_clip_detail;
+pub mod auto_pan_device;
+pub mod auto_pan_display;
 pub mod automation_lane;
 pub mod bitcrush_device;
 pub mod bitcrush_display;
