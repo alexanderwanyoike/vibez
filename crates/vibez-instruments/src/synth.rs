@@ -68,6 +68,11 @@ pub struct SubtractiveSynth {
     held_count: usize,
     last_pitch: Option<f32>,
     lfo_phase: f64,
+    /// Each oscillator's frequency against the note's.
+    ratios: (f64, f64),
+    /// The cutoff and Q `coefficients` were worked out for.
+    filter_for: (f32, f32),
+    coefficients: Coefficients,
 }
 
 impl SubtractiveSynth {
@@ -92,6 +97,9 @@ impl SubtractiveSynth {
             held_count: 0,
             last_pitch: None,
             lfo_phase: 0.0,
+            ratios: (1.0, 1.0),
+            filter_for: (f32::NAN, f32::NAN),
+            coefficients: Coefficients::new(sample_rate, 1_000.0, 1.0),
         };
         synth.retime();
         synth
@@ -99,6 +107,11 @@ impl SubtractiveSynth {
 
     fn retime(&mut self) {
         let p = &self.params;
+        let ratio = |octave: usize, detune: usize| f64::from(p[octave] + p[detune] / 12.0).exp2();
+        self.ratios = (
+            ratio(param::OCTAVE, param::DETUNE),
+            ratio(param::OCTAVE_2, param::DETUNE_2),
+        );
         self.amp_times = Times::new(
             p[param::ATTACK],
             p[param::DECAY],
@@ -246,30 +259,34 @@ impl SubtractiveSynth {
         for index in SMOOTHED {
             self.current[index] += (self.params[index] - self.current[index]) * self.smoothing;
         }
+        let filter_for = (self.current[param::CUTOFF], self.params[param::RESONANCE]);
+        if filter_for != self.filter_for {
+            self.filter_for = filter_for;
+            self.coefficients = Coefficients::new(self.sample_rate, filter_for.0, filter_for.1);
+        }
         let p = &self.params;
         let c = &self.current;
-        let modulation = lfo(self.choice(param::LFO_SHAPE), self.lfo_phase) * c[param::LFO_AMOUNT];
+        let modulation = if c[param::LFO_AMOUNT] == 0.0 {
+            0.0
+        } else {
+            lfo(self.choice(param::LFO_SHAPE), self.lfo_phase) * c[param::LFO_AMOUNT]
+        };
         self.lfo_phase =
             (self.lfo_phase + f64::from(p[param::LFO_RATE]) / f64::from(self.sample_rate)).fract();
         let target = self.choice(param::LFO_TARGET);
-        let ratio = |octave: usize, detune: usize| f64::from(p[octave] + p[detune] / 12.0).exp2();
         let frame = Frame {
             sample_rate: self.sample_rate,
             waveform: Waveform::from_index(p[param::WAVEFORM] as usize),
             waveform_2: Waveform::from_index(p[param::WAVEFORM_2] as usize),
-            ratio: ratio(param::OCTAVE, param::DETUNE),
-            ratio_2: ratio(param::OCTAVE_2, param::DETUNE_2),
+            ratio: self.ratios.0,
+            ratio_2: self.ratios.1,
             level_2: c[param::LEVEL_2],
             sub: c[param::SUB],
             noise: c[param::NOISE],
             filter_type: p[param::FILTER_TYPE] as usize,
             cutoff: c[param::CUTOFF],
             resonance: p[param::RESONANCE],
-            coefficients: Coefficients::new(
-                self.sample_rate,
-                c[param::CUTOFF],
-                p[param::RESONANCE],
-            ),
+            coefficients: self.coefficients,
             filter_env: p[param::FILTER_ENV],
             cutoff_octaves: if target == lfo_target::CUTOFF {
                 modulation * LFO_CUTOFF_OCTAVES

@@ -6,6 +6,9 @@ use crate::synth_filter::{Coefficients, Svf};
 use crate::synth_oscillator::{sample, Waveform};
 use crate::synth_params::filter_type;
 
+/// A moving cutoff is worked out again every this many samples, well
+/// above any envelope or LFO speed.
+const CONTROL_FRAMES: u8 = 8;
 /// The second stage of the 24 dB low-pass adds slope, not more resonance.
 const BUTTERWORTH_Q: f32 = std::f32::consts::FRAC_1_SQRT_2;
 
@@ -42,11 +45,18 @@ pub struct Voice {
     current: f32,
     glide_step: f32,
     glide_left: u32,
+    /// The pitch, in semitones, that `increment` was worked out for.
+    increment_for: f32,
+    /// Cycles a sample at the note's frequency.
+    increment: f64,
     phases: [f64; 3],
     noise: u32,
     amp: Envelope,
     filter_env: Envelope,
     filters: [Svf; 2],
+    /// The modulated cutoff's coefficients and samples until they are
+    /// worked out again.
+    moved: Option<(Coefficients, u8)>,
 }
 
 impl Voice {
@@ -115,8 +125,13 @@ impl Voice {
                 self.current = f32::from(self.pitch);
             }
         }
-        let semitones = f64::from(self.current + frame.pitch_semitones);
-        let increment = 440.0 * ((semitones - 69.0) / 12.0).exp2() / f64::from(frame.sample_rate);
+        let semitones = self.current + frame.pitch_semitones;
+        if semitones != self.increment_for || self.increment == 0.0 {
+            self.increment_for = semitones;
+            self.increment = 440.0 * ((f64::from(semitones) - 69.0) / 12.0).exp2()
+                / f64::from(frame.sample_rate);
+        }
+        let increment = self.increment;
         let increments = [
             increment * frame.ratio,
             increment * frame.ratio_2,
@@ -141,13 +156,22 @@ impl Voice {
 
         let octaves = opening * frame.filter_env + frame.cutoff_octaves;
         let coefficients = if octaves == 0.0 {
+            self.moved = None;
             frame.coefficients
         } else {
-            Coefficients::new(
-                frame.sample_rate,
-                frame.cutoff * octaves.exp2(),
-                frame.resonance,
-            )
+            let (coefficients, left) = match self.moved {
+                Some((coefficients, left)) if left > 0 => (coefficients, left - 1),
+                _ => (
+                    Coefficients::new(
+                        frame.sample_rate,
+                        frame.cutoff * octaves.exp2(),
+                        frame.resonance,
+                    ),
+                    CONTROL_FRAMES - 1,
+                ),
+            };
+            self.moved = Some((coefficients, left));
+            coefficients
         };
         let first = self.filters[0].process(raw, coefficients);
         let filtered = match frame.filter_type {
