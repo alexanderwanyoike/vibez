@@ -2540,12 +2540,21 @@ impl DrumRackGallery {
                     ),
                 ]
                 .spacing(24),
-                self.scene(
-                    "Full, short",
-                    full,
-                    (full + 16.0, 220.0),
-                    page(SamplerPage::Sample, false)
-                ),
+                row![
+                    self.scene(
+                        "Full, short",
+                        full,
+                        (full + 16.0, 220.0),
+                        page(SamplerPage::Sample, false)
+                    ),
+                    self.scene(
+                        "Compact, Pads, short",
+                        COMPACT_W,
+                        (COMPACT_W + 16.0, 220.0),
+                        page(SamplerPage::Sample, false)
+                    ),
+                ]
+                .spacing(24),
             ]
             .spacing(14),
         )
