@@ -249,7 +249,7 @@ impl App {
             Message::Compressor(message) => return self.update_compressor(message),
             Message::Filter(message) => return self.update_filter(message),
             Message::Gate(message) => return self.update_gate(message),
-            Message::Drive(message) => return self.update_drive(message),
+            Message::Card(message) => return self.update_card(message),
             Message::ParamEntry(message) => return self.update_param_entry(message),
             Message::DevicePreset(message) => return self.update_device_preset(message),
             Message::ApplyDevicePreset(track_id, effect_id, preset) => {

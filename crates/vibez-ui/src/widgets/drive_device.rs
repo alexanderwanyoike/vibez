@@ -7,7 +7,8 @@ use iced::{Alignment, Color, Element, Length, Size};
 use vibez_core::id::TrackId;
 use vibez_dsp::drive::{character, param};
 
-use crate::domains::drive::{DriveMsg, DrivePanelState, CHARACTER_NAMES, QUALITY_NAMES};
+use crate::domains::device_card::{CardMsg, CardPanelState};
+use crate::domains::drive::{CHARACTER_NAMES, QUALITY_NAMES};
 use crate::domains::param_entry::ValueEntry;
 use crate::message::Message;
 use crate::state::UiEffect;
@@ -84,7 +85,7 @@ pub struct DriveView<'a> {
     pub track_id: TrackId,
     pub effect: &'a UiEffect,
     pub accent: Color,
-    pub panel: &'a DrivePanelState,
+    pub panel: &'a CardPanelState,
     pub entry: Option<&'a ValueEntry>,
 }
 
@@ -144,7 +145,7 @@ impl<'a> DriveView<'a> {
             Space::with_width(Length::Fill),
             disclosure(
                 self.panel.advanced,
-                Message::Drive(DriveMsg::ToggleAdvanced(self.effect.id)),
+                Message::Card(CardMsg::ToggleAdvanced(self.effect.id)),
                 self.accent(),
             )
         ]

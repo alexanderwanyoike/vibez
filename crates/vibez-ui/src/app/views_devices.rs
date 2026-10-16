@@ -328,7 +328,7 @@ impl App {
                 track_id,
                 effect,
                 accent,
-                panel: self.drive_panels.panel(effect.id),
+                panel: self.card_panels.panel(effect.id),
                 entry: self.param_entry.as_ref(),
             }
             .view(

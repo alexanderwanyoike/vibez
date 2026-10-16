@@ -25,7 +25,8 @@ enum Metered {
     Filter,
     Compressor,
     Gate,
-    Drive,
+    /// A device whose card has only an Advanced switch.
+    Card,
 }
 
 #[derive(Default)]
@@ -72,8 +73,8 @@ impl App {
         for panel in self.gate_panels.values_mut() {
             panel.reset_stale(now);
         }
-        self.drive_panels.retain_existing(state);
-        for panel in self.drive_panels.values_mut() {
+        self.card_panels.retain_existing(state);
+        for panel in self.card_panels.values_mut() {
             panel.reset_stale(now);
         }
     }
@@ -98,7 +99,7 @@ impl App {
         for panel in self.gate_panels.values_mut() {
             panel.clear_readings();
         }
-        for panel in self.drive_panels.values_mut() {
+        for panel in self.card_panels.values_mut() {
             panel.clear_readings();
         }
         self.send_command(EngineCommand::SetEffectMeterChannel {
@@ -115,7 +116,7 @@ impl App {
         self.compressor_devices.panels.clear();
         self.filter_panels.clear();
         self.gate_panels.clear();
-        self.drive_panels.clear();
+        self.card_panels.clear();
         self.send_command(EngineCommand::SetEffectMeterChannel {
             track_id: None,
             generation: self.device_meters.generation,
@@ -147,7 +148,7 @@ impl App {
         } else if is_native_gate(effect) {
             Some(Metered::Gate)
         } else if is_native_drive(effect) {
-            Some(Metered::Drive)
+            Some(Metered::Card)
         } else {
             None
         }
@@ -187,8 +188,8 @@ impl App {
                 .gate_panels
                 .entry(effect_id)
                 .accept_levels(input, output, now),
-            Some(Metered::Drive) => self
-                .drive_panels
+            Some(Metered::Card) => self
+                .card_panels
                 .entry(effect_id)
                 .accept_levels(input, output, now),
             None => {}

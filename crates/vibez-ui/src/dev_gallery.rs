@@ -1085,13 +1085,13 @@ pub fn run_gate() -> iced::Result {
 struct DriveGallery {
     track: TrackId,
     effect: UiEffect,
-    closed: crate::domains::drive::DrivePanelState,
-    open: crate::domains::drive::DrivePanelState,
+    closed: crate::domains::device_card::CardPanelState,
+    open: crate::domains::device_card::CardPanelState,
 }
 
 impl DriveGallery {
     fn new() -> Self {
-        use crate::domains::drive::DrivePanelState;
+        use crate::domains::device_card::CardPanelState;
         use vibez_dsp::drive::{character, param};
         let mut effect = effect(EffectType::Drive, None, false, false, None, 0);
         effect.params = effect.descriptors.iter().map(|d| d.default).collect();
@@ -1107,7 +1107,7 @@ impl DriveGallery {
             rms_l: vibez_core::level::db_to_amplitude(db - 6.0),
             rms_r: vibez_core::level::db_to_amplitude(db - 6.5),
         };
-        let closed = DrivePanelState {
+        let closed = CardPanelState {
             input: level(-9.0),
             output: level(-7.0),
             last_meter_at: Some(std::time::Instant::now()),
@@ -1116,7 +1116,7 @@ impl DriveGallery {
         Self {
             track: TrackId::new(),
             effect,
-            open: DrivePanelState {
+            open: CardPanelState {
                 advanced: true,
                 ..closed.clone()
             },
@@ -1129,7 +1129,7 @@ impl DriveGallery {
         label: &'static str,
         card_width: f32,
         section: (f32, f32),
-        panel: &'a crate::domains::drive::DrivePanelState,
+        panel: &'a crate::domains::device_card::CardPanelState,
     ) -> Element<'a, Message> {
         let accent = th::track_color(0);
         let effect = &self.effect;
