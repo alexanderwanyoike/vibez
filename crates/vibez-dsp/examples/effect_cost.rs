@@ -40,6 +40,13 @@ fn cases(effect: EffectType) -> Vec<(&'static str, Vec<(usize, f32)>)> {
                 vec![(4, 3.0), (5, 2.0), (6, 1.0), (8, 1.0)],
             ),
         ],
+        EffectType::Bitcrush => vec![
+            ("defaults", vec![]),
+            (
+                "8 bit, 1/4 rate, drive, dither, jitter, post filter",
+                vec![(0, 8.0), (1, 4.0), (3, 6.0), (5, 1.0), (6, 0.5), (7, 1.0)],
+            ),
+        ],
         _ => vec![("defaults", vec![])],
     }
 }
