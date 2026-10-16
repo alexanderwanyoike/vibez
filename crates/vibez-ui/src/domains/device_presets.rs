@@ -3,6 +3,7 @@
 use vibez_core::device_preset::{DevicePreset, DevicePresetKind};
 use vibez_core::effect::EffectType;
 use vibez_core::id::TrackId;
+use vibez_core::midi::InstrumentKind;
 
 use crate::domains::device_params::{DeviceParams, DeviceSlot};
 #[cfg(test)]
@@ -231,6 +232,40 @@ const AUTO_PAN_KEYS: [(usize, &str, bool); 9] = {
     ]
 };
 
+/// Every Subtractive Synth control. Shapes, types, modes and counts are
+/// whole.
+const SYNTH_KEYS: [&str; vibez_instruments::synth::param::COUNT] = [
+    "waveform",
+    "attack",
+    "decay",
+    "sustain",
+    "release",
+    "cutoff",
+    "resonance",
+    "volume",
+    "octave",
+    "detune",
+    "waveform_2",
+    "octave_2",
+    "detune_2",
+    "level_2",
+    "sub",
+    "noise",
+    "filter_type",
+    "voice_mode",
+    "voices",
+    "glide",
+    "lfo_shape",
+    "lfo_target",
+    "lfo_rate",
+    "lfo_amount",
+    "filter_env",
+    "filter_attack",
+    "filter_decay",
+    "filter_sustain",
+    "filter_release",
+];
+
 /// One stored parameter: its index, preset key and whether it only takes
 /// whole numbers, as switches and choices do.
 type PresetParam = (usize, &'static str, bool);
@@ -288,8 +323,18 @@ fn parameter_keys(device: &DeviceParams) -> Result<Vec<PresetParam>, String> {
     if device.plugin {
         return Err("Use the plugin's own preset controls for this device".into());
     }
-    let DevicePresetKind::Effect(effect_type) = device.kind else {
-        return Err("Presets are not yet supported by this built-in device".into());
+    let effect_type = match device.kind {
+        DevicePresetKind::Effect(effect_type) => effect_type,
+        DevicePresetKind::Instrument(InstrumentKind::SubtractiveSynth) => {
+            return Ok(SYNTH_KEYS
+                .iter()
+                .enumerate()
+                .map(|(index, key)| (index, *key, vibez_instruments::synth::is_whole(index)))
+                .collect());
+        }
+        DevicePresetKind::Instrument(_) => {
+            return Err("Presets are not yet supported by this built-in device".into());
+        }
     };
     match effect_type {
         EffectType::Gain => Ok(GAIN_KEYS

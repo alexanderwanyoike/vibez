@@ -15,6 +15,7 @@
 //! management, and file dialogs. Their cross-domain needs surface as
 //! [`DevicesAction`] fields instead.
 
+use crate::domains::device_params::DeviceSlot;
 use vibez_core::effect::EffectType;
 use vibez_core::id::{EffectId, TrackId};
 use vibez_core::midi::InstrumentKind;
@@ -52,6 +53,8 @@ pub enum DevicesMsg {
     SetTrackInstrument(TrackId, InstrumentKind),
     RemoveTrackInstrument(TrackId),
     SetInstrumentParam(TrackId, usize, f32),
+    /// Several instrument values as one edit, as a preset applies them.
+    SetInstrumentParams(TrackId, Vec<(usize, f32)>),
     SelectDrumRackPad(TrackId, usize),
     SelectDrumRackBank(TrackId, usize),
     ClearDrumRackPad(TrackId, usize),
@@ -106,24 +109,30 @@ impl DevicesMsg {
 /// The device and parameter values a parameter edit asks for.
 pub struct ParamEdit {
     pub track_id: TrackId,
-    pub slot: crate::domains::device_params::DeviceSlot,
+    pub slot: DeviceSlot,
     pub updates: Vec<(usize, f32)>,
 }
 
 impl DevicesMsg {
     pub fn param_edit(&self) -> Option<ParamEdit> {
-        let (track_id, effect_id, updates) = match self {
+        let (track_id, slot, updates) = match self {
             DevicesMsg::SetEffectParam(track, effect, index, value) => {
-                (*track, *effect, vec![(*index, *value)])
+                (*track, DeviceSlot::Effect(*effect), vec![(*index, *value)])
             }
             DevicesMsg::SetEffectParams(track, effect, updates) => {
-                (*track, *effect, updates.clone())
+                (*track, DeviceSlot::Effect(*effect), updates.clone())
+            }
+            DevicesMsg::SetInstrumentParam(track, index, value) => {
+                (*track, DeviceSlot::Instrument, vec![(*index, *value)])
+            }
+            DevicesMsg::SetInstrumentParams(track, updates) => {
+                (*track, DeviceSlot::Instrument, updates.clone())
             }
             _ => return None,
         };
         Some(ParamEdit {
             track_id,
-            slot: crate::domains::device_params::DeviceSlot::Effect(effect_id),
+            slot,
             updates,
         })
     }
@@ -182,6 +191,26 @@ pub struct DevicesState {
 }
 
 /// Default parameter values for a freshly added native instrument.
+/// Stores instrument values. A track saved before its instrument gained
+/// controls holds fewer values; the missing ones take their defaults first,
+/// so edits to the newer controls are kept.
+fn store_instrument_values(track: &mut crate::state::ProjectTrack, updates: &[(usize, f32)]) {
+    let descriptors = track
+        .instrument_kind
+        .map_or(&[][..], vibez_instruments::descriptors_for);
+    for &(index, value) in updates {
+        let stored = track.instrument_params.len();
+        if index >= stored && index < descriptors.len() {
+            track
+                .instrument_params
+                .extend(descriptors[stored..].iter().map(|d| d.default));
+        }
+        if let Some(slot) = track.instrument_params.get_mut(index) {
+            *slot = value;
+        }
+    }
+}
+
 pub fn default_instrument_params(kind: InstrumentKind, sample_rate: f32) -> Vec<f32> {
     let instrument = vibez_instruments::create_instrument(kind, sample_rate);
     instrument
@@ -468,9 +497,7 @@ impl DevicesState {
             }
             DevicesMsg::SetInstrumentParam(track_id, param_index, value) => {
                 if let Some(track) = find_track_mut(tracks, master, buses, track_id) {
-                    if param_index < track.instrument_params.len() {
-                        track.instrument_params[param_index] = value;
-                    }
+                    store_instrument_values(track, &[(param_index, value)]);
                 }
                 engine.send(EngineCommand::SetInstrumentParam {
                     track_id,
@@ -478,6 +505,18 @@ impl DevicesState {
                     value,
                 });
                 action.status = Some(format!("Param {param_index} = {value:.2}"));
+            }
+            DevicesMsg::SetInstrumentParams(track_id, updates) => {
+                if let Some(track) = find_track_mut(tracks, master, buses, track_id) {
+                    store_instrument_values(track, &updates);
+                }
+                for (param_index, value) in updates {
+                    engine.send(EngineCommand::SetInstrumentParam {
+                        track_id,
+                        param_index,
+                        value,
+                    });
+                }
             }
             DevicesMsg::SelectDrumRackPad(track_id, pad_index) => {
                 // Audition the pad like Ableton: hear it on click.

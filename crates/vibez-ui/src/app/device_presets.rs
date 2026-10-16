@@ -161,6 +161,12 @@ impl App {
                 | DevicesMsg::SetEffectParams(track, effect, ..)
                 | DevicesMsg::RemoveEffect(track, effect),
             ) => (*track, DeviceSlot::Effect(*effect)) == pending,
+            Message::Devices(
+                DevicesMsg::SetInstrumentParam(track, ..)
+                | DevicesMsg::SetInstrumentParams(track, ..)
+                | DevicesMsg::SetTrackInstrument(track, _)
+                | DevicesMsg::RemoveTrackInstrument(track),
+            ) => (*track, DeviceSlot::Instrument) == pending,
             Message::ApplyDevicePreset(track, slot, _) => (*track, *slot) == pending,
             Message::Arrangement(
                 ArrangementMsg::RemoveTrack(track)
@@ -246,15 +252,16 @@ impl App {
         self.device_presets
             .selection
             .insert((track_id, slot), preset);
-        let DeviceSlot::Effect(effect_id) = slot else {
-            return Task::none();
-        };
         if updates.is_empty() {
             return Task::none();
         }
-        self.update(Message::Devices(
-            crate::domains::devices::DevicesMsg::SetEffectParams(track_id, effect_id, updates),
-        ))
+        use crate::domains::devices::DevicesMsg;
+        self.update(Message::Devices(match slot {
+            DeviceSlot::Effect(effect_id) => {
+                DevicesMsg::SetEffectParams(track_id, effect_id, updates)
+            }
+            DeviceSlot::Instrument => DevicesMsg::SetInstrumentParams(track_id, updates),
+        }))
     }
 }
 
