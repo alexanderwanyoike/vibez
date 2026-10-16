@@ -75,35 +75,8 @@ pub(crate) fn view<'a>(
     ))
     .padding([2, 5])
     .text_size(11)
-    .style(move |_theme: &Theme, status| pick_list::Style {
-        text_color: th::text(),
-        placeholder_color: th::text_dim(),
-        handle_color: th::text_dim(),
-        background: th::bg_dark().into(),
-        border: iced::Border {
-            color: if matches!(
-                status,
-                pick_list::Status::Opened | pick_list::Status::Hovered
-            ) {
-                accent
-            } else {
-                th::border()
-            },
-            width: 1.0,
-            radius: 3.0.into(),
-        },
-    })
-    .menu_style(move |_theme: &Theme| iced::widget::overlay::menu::Style {
-        background: th::bg_surface().into(),
-        border: iced::Border {
-            color: th::border(),
-            width: 1.0,
-            radius: 3.0.into(),
-        },
-        text_color: th::text(),
-        selected_text_color: accent,
-        selected_background: th::bg_hover().into(),
-    });
+    .style(selector_style(accent))
+    .menu_style(menu_style(accent));
     let mut selection = row![text("Preset").size(10).color(th::text_dim()), selector,]
         .spacing(3)
         .align_y(iced::Alignment::Center);
@@ -166,4 +139,39 @@ fn preset_button<'a>(
             ..Default::default()
         });
     tooltip(control, text(help).size(9), tooltip::Position::Top).into()
+}
+
+fn selector_style(accent: Color) -> impl Fn(&Theme, pick_list::Status) -> pick_list::Style {
+    move |_theme: &Theme, status| pick_list::Style {
+        text_color: th::text(),
+        placeholder_color: th::text_dim(),
+        handle_color: th::text_dim(),
+        background: th::bg_dark().into(),
+        border: iced::Border {
+            color: if matches!(
+                status,
+                pick_list::Status::Opened | pick_list::Status::Hovered
+            ) {
+                accent
+            } else {
+                th::border()
+            },
+            width: 1.0,
+            radius: 3.0.into(),
+        },
+    }
+}
+
+fn menu_style(accent: Color) -> impl Fn(&Theme) -> iced::widget::overlay::menu::Style {
+    move |_theme: &Theme| iced::widget::overlay::menu::Style {
+        background: th::bg_surface().into(),
+        border: iced::Border {
+            color: th::border(),
+            width: 1.0,
+            radius: 3.0.into(),
+        },
+        text_color: th::text(),
+        selected_text_color: accent,
+        selected_background: th::bg_hover().into(),
+    }
 }
