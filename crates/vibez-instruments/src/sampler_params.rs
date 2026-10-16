@@ -41,6 +41,7 @@ pub mod param {
     pub const LFO_TARGET: usize = 31;
     pub const LFO_RATE: usize = 32;
     pub const LFO_AMOUNT: usize = 33;
+    pub const PAN: usize = 34;
     pub const COUNT: usize = 34;
 }
 

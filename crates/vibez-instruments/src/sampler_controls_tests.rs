@@ -250,3 +250,20 @@ fn bad_values_are_refused_and_extremes_stay_finite() {
     }
     assert!(render(&mut sampler, 9_600).iter().all(|s| s.is_finite()));
 }
+
+#[test]
+fn pan_moves_the_sound_between_the_sides_and_centre_is_unchanged() {
+    let sides = |pan: f32| {
+        let mut sampler = sampler(audio(vec![0.5; 4_800]), &[(param::PAN, pan)]);
+        sampler.note_on(60, 127);
+        let mut buffer = vec![0.0; 4_000];
+        sampler.render(&mut buffer, 2);
+        (buffer[3_998], buffer[3_999])
+    };
+    let (left, right) = sides(0.0);
+    assert!((left - 0.4).abs() < 1e-3 && (right - 0.4).abs() < 1e-3);
+    let (left, right) = sides(-1.0);
+    assert!((left - 0.4).abs() < 1e-3 && right.abs() < 1e-6);
+    let (left, right) = sides(0.5);
+    assert!((left - 0.2).abs() < 1e-3 && (right - 0.4).abs() < 1e-3);
+}
