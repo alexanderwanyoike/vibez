@@ -76,6 +76,8 @@ pub enum DevicesMsg {
     },
     /// Several of a pad's Sampler values as one edit.
     SetDrumPadParams(TrackId, usize, Vec<(usize, f32)>),
+    /// Names a pad; an empty name goes back to its sample's.
+    RenameDrumPad(TrackId, usize, String),
     /// Preview a pitch on a track's instrument. `on: false` releases.
     AuditionNote {
         track_id: TrackId,
@@ -663,6 +665,7 @@ impl DevicesState {
                     });
                 }
             }
+            DevicesMsg::RenameDrumPad(..) => {}
             DevicesMsg::AuditionNote {
                 track_id,
                 pitch,
@@ -1062,6 +1065,37 @@ mod tests {
                 ..
             }] if value == -0.5
         ));
+    }
+
+    #[test]
+    fn renaming_a_pad_keeps_a_name_and_an_empty_one_falls_back_to_the_sample() {
+        let (mut tracks, track_id, _) = midi_track_with_effect();
+        tracks[0].drum_rack_pads = (0..16).map(|_| UiDrumPad::default()).collect();
+        tracks[0].drum_rack_pads[1].source = Some(vibez_core::track::MediaSourceRef::LocalFile {
+            path: "/kits/snare_02.wav".into(),
+        });
+        let mut devices = DevicesState::default();
+        let mut engine = RecordingEngine::default();
+        let mut rename = |tracks: &mut Vec<ProjectTrack>, name: &str| {
+            devices.update(
+                DevicesMsg::RenameDrumPad(track_id, 1, name.into()),
+                &mut engine,
+                tracks,
+                &mut crate::state::new_master_track(),
+                &mut [],
+                DevicesCtx::default(),
+            );
+        };
+        rename(&mut tracks, "  Snare  ");
+        let renamed = tracks[0].drum_rack_pads[1].name.clone();
+        rename(&mut tracks, "   ");
+
+        assert_eq!(renamed.as_deref(), Some("Snare"));
+        assert_eq!(
+            tracks[0].drum_rack_pads[1].name.as_deref(),
+            Some("snare_02.wav")
+        );
+        assert!(engine.0.is_empty());
     }
 
     #[test]
