@@ -391,15 +391,6 @@ pub(crate) fn command_held(modifiers: iced::keyboard::Modifiers, on_macos: bool)
 /// Compile-time host platform, passed to [`command_held`] in production.
 pub(crate) const ON_MACOS: bool = cfg!(target_os = "macos");
 
-pub(crate) fn truncate_end(text: &str, max_chars: usize) -> String {
-    if text.chars().count() <= max_chars {
-        text.to_string()
-    } else {
-        let head: String = text.chars().take(max_chars.saturating_sub(2)).collect();
-        format!("{head}..")
-    }
-}
-
 pub(crate) fn global_key_handler(
     key: iced::keyboard::Key,
     modifiers: iced::keyboard::Modifiers,

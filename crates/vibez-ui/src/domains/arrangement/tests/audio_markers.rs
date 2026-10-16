@@ -50,18 +50,23 @@ fn slice_to_drum_rack_builds_one_native_track_and_reconstruction_clip() {
             .is_some_and(|audio| Arc::ptr_eq(audio, &shared_audio))
             && pad.source == shared_source
     }));
-    assert!(loaded_pads.iter().all(|pad| pad.gain > 2.0));
+    use vibez_instruments::sampler::param;
+    // The clip's boost is more than a Sampler's 0 dB top.
+    assert!(loaded_pads
+        .iter()
+        .all(|pad| pad.param(param::VOLUME) == 1.0));
     assert!(loaded_pads.iter().all(|pad| {
-        pad.fade_in_ms == vibez_core::track::DRUM_PAD_DEFAULT_FADE_MS
-            && pad.fade_out_ms == vibez_core::track::DRUM_PAD_DEFAULT_FADE_MS
+        pad.param(param::ATTACK) == vibez_core::track::DRUM_PAD_DEFAULT_FADE_MS / 1000.0
+            && pad.param(param::RELEASE) == vibez_core::track::DRUM_PAD_DEFAULT_FADE_MS / 1000.0
     }));
     let source_frames = shared_audio.num_frames() as f32;
-    assert_eq!(loaded_pads[0].start, 0.0);
-    assert!((loaded_pads[0].end - 250.0 / source_frames).abs() < f32::EPSILON);
-    assert!((loaded_pads[1].start - 250.0 / source_frames).abs() < f32::EPSILON);
-    assert!((loaded_pads[1].end - 600.0 / source_frames).abs() < f32::EPSILON);
-    assert!((loaded_pads[2].start - 600.0 / source_frames).abs() < f32::EPSILON);
-    assert!((loaded_pads[2].end - 1_000.0 / source_frames).abs() < f32::EPSILON);
+    let region = |pad: &crate::state::UiDrumPad| (pad.param(param::START), pad.param(param::END));
+    assert_eq!(region(loaded_pads[0]).0, 0.0);
+    assert!((region(loaded_pads[0]).1 - 250.0 / source_frames).abs() < f32::EPSILON);
+    assert!((region(loaded_pads[1]).0 - 250.0 / source_frames).abs() < f32::EPSILON);
+    assert!((region(loaded_pads[1]).1 - 600.0 / source_frames).abs() < f32::EPSILON);
+    assert!((region(loaded_pads[2]).0 - 600.0 / source_frames).abs() < f32::EPSILON);
+    assert!((region(loaded_pads[2]).1 - 1_000.0 / source_frames).abs() < f32::EPSILON);
     assert_eq!(drum_track.note_clips.len(), 1);
     let note_clip = &drum_track.note_clips[0];
     assert_eq!(note_clip.position_beats, 1.0);
@@ -116,7 +121,10 @@ fn slice_to_drum_rack_turns_loop_wraps_into_distinct_flattened_pad_ranges() {
         .drum_rack_pads
         .iter()
         .filter(|pad| pad.source.is_some())
-        .map(|pad| (pad.start, pad.end))
+        .map(|pad| {
+            use vibez_instruments::sampler::param;
+            (pad.param(param::START), pad.param(param::END))
+        })
         .collect();
     assert_eq!(pads.len(), 6);
     let expected_frames = [

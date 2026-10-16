@@ -7,7 +7,7 @@ use iced::mouse;
 use iced::widget::{canvas, column, text};
 use iced::{Color, Element, Length, Rectangle, Renderer, Theme};
 
-use crate::message::{DrumPadParam, Message};
+use crate::message::Message;
 use crate::state::{AudioClipInspectorField, AudioClipRotaryField, UndoGestureId};
 use crate::theme;
 use crate::widgets::double_click::DoubleClick;
@@ -36,10 +36,6 @@ pub enum KnobTarget {
     Instrument,
     /// Any device a `DeviceSlot` names.
     Device(crate::domains::device_params::DeviceSlot),
-    DrumPad {
-        pad_index: usize,
-        param: DrumPadParam,
-    },
     /// Post-fader send amount into a bus.
     Send {
         bus_id: TrackId,
@@ -149,30 +145,6 @@ impl EffectKnobWidget {
         }
     }
 
-    /// Knob bound to a drum rack pad parameter.
-    #[allow(clippy::too_many_arguments)]
-    pub fn for_drum_pad(
-        track_id: TrackId,
-        pad_index: usize,
-        param: DrumPadParam,
-        value: f32,
-        min: f32,
-        max: f32,
-        default: f32,
-        arc_color: Color,
-    ) -> Self {
-        Self {
-            track_id,
-            target: KnobTarget::DrumPad { pad_index, param },
-            param_index: 0,
-            value,
-            min,
-            max,
-            default,
-            arc_color,
-        }
-    }
-
     fn immediate_value_message(&self, value: f32) -> Message {
         match self.target {
             KnobTarget::Effect(effect_id) | KnobTarget::GainDb(effect_id) => {
@@ -182,14 +154,6 @@ impl EffectKnobWidget {
                 Message::set_instrument_param(self.track_id, self.param_index, value)
             }
             KnobTarget::Device(slot) => slot.set(self.track_id, self.param_index, value),
-            KnobTarget::DrumPad { pad_index, param } => {
-                Message::Devices(crate::domains::devices::DevicesMsg::SetDrumPadParam {
-                    track_id: self.track_id,
-                    pad_index,
-                    param,
-                    value,
-                })
-            }
             KnobTarget::Send { bus_id } => Message::set_send(self.track_id, bus_id, value),
             KnobTarget::AudioClip { clip_id, field } => Message::Arrangement(
                 crate::domains::arrangement::ArrangementMsg::SetAudioClipRotaryValue {

@@ -271,43 +271,20 @@ pub struct UiDrumPad {
     /// Decoded audio kept on the UI side so offline bounce can re-seed a
     /// drum rack without a round-trip through the audio thread.
     pub audio: Option<Arc<DecodedAudio>>,
-    pub gain: f32,
-    pub pan: f32,
-    pub start: f32,
-    pub end: f32,
-    pub fade_in_ms: f32,
-    pub fade_out_ms: f32,
-    pub coarse_tune: i8,
-    pub fine_tune: f32,
-    pub one_shot: bool,
     pub choke_group: Option<u8>,
+    /// The pad's Sampler values, all of them.
     pub params: Vec<f32>,
 }
 
 impl Default for UiDrumPad {
     fn default() -> Self {
-        Self {
-            name: None,
-            source: None,
-            audio: None,
-            gain: 1.0,
-            pan: 0.0,
-            start: 0.0,
-            end: 1.0,
-            fade_in_ms: vibez_core::track::DRUM_PAD_DEFAULT_FADE_MS,
-            fade_out_ms: vibez_core::track::DRUM_PAD_DEFAULT_FADE_MS,
-            coarse_tune: 0,
-            fine_tune: 0.0,
-            one_shot: true,
-            choke_group: None,
-            params: Vec::new(),
-        }
+        Self::from_state(&DrumPadState::default())
     }
 }
 
 impl UiDrumPad {
     /// The pad's Sampler values, first worked out from the ones it was
-    /// saved with when it has none or fewer than the Sampler now has.
+    /// saved with when it has fewer than the Sampler now has.
     pub fn sampler_params_mut(&mut self) -> &mut Vec<f32> {
         if self.params.len() < vibez_instruments::sampler::param::COUNT {
             self.params = vibez_instruments::drum_rack::pad_params(&self.to_state()).to_vec();
@@ -315,24 +292,25 @@ impl UiDrumPad {
         &mut self.params
     }
 
+    pub fn param(&self, index: usize) -> f32 {
+        self.params.get(index).copied().unwrap_or_else(|| {
+            vibez_instruments::sampler::SAMPLER_PARAMS
+                .get(index)
+                .map_or(0.0, |descriptor| descriptor.default)
+        })
+    }
+
     pub fn to_state(&self) -> DrumPadState {
         DrumPadState {
             name: self.name.clone(),
             source: self.source.clone(),
-            gain: self.gain,
-            pan: self.pan,
-            start: self.start,
-            end: self.end,
-            fade_in_ms: self.fade_in_ms,
-            fade_out_ms: self.fade_out_ms,
-            coarse_tune: self.coarse_tune,
-            fine_tune: self.fine_tune,
-            one_shot: self.one_shot,
             choke_group: self.choke_group,
             params: self.params.clone(),
+            ..DrumPadState::default()
         }
     }
 
+    /// A pad as saved, its older settings translated to Sampler values.
     pub fn from_state(state: &DrumPadState) -> Self {
         Self {
             name: state
@@ -341,17 +319,8 @@ impl UiDrumPad {
                 .or_else(|| state.source.as_ref().map(MediaSourceRef::display_name)),
             source: state.source.clone(),
             audio: None,
-            gain: state.gain,
-            pan: state.pan,
-            start: state.start,
-            end: state.end,
-            fade_in_ms: state.fade_in_ms,
-            fade_out_ms: state.fade_out_ms,
-            coarse_tune: state.coarse_tune,
-            fine_tune: state.fine_tune,
-            one_shot: state.one_shot,
             choke_group: state.choke_group,
-            params: state.params.clone(),
+            params: vibez_instruments::drum_rack::pad_params(state).to_vec(),
         }
     }
 }

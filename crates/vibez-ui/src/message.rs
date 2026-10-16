@@ -43,18 +43,6 @@ impl std::fmt::Debug for ResidentSection {
 use crate::domains::audio_settings::{AudioDeviceChoice, AudioSampleRate};
 use crate::state::{AuditionImportInput, AuditionMode, SettingsTab, UndoGestureId};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DrumPadParam {
-    Gain,
-    Pan,
-    Start,
-    End,
-    FadeIn,
-    FadeOut,
-    CoarseTune,
-    FineTune,
-}
-
 /// Menus and dialogs whose lifecycle is owned by their overlay rather than
 /// inferred from unrelated application messages.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -1,17 +1,14 @@
 //! Split out of app.rs; inherent methods on [`super::App`].
 
 use iced::widget::{column, container, horizontal_space, mouse_area, row, scrollable, text};
-use iced::{Color, Element, Length, Theme};
+use iced::{Color, Element, Length};
 
 use vibez_core::id::TrackId;
-use vibez_core::track::MediaSourceRef;
 
-use crate::domains::browser::BrowserMsg;
 use crate::icons;
 use crate::message::Message;
 use crate::state::UiTrack;
 use crate::theme as th;
-use crate::widgets::device_chrome::section_label;
 use crate::widgets::effect_slot::{view_effect_slot, view_sidechain, DeviceBody};
 
 use super::*;
@@ -93,7 +90,8 @@ impl App {
         // effects do.
         let synth = crate::domains::synth::is_native_synth(track);
         let sampler = crate::domains::sampler::is_native_sampler(track);
-        if synth || sampler {
+        let drum_rack = crate::domains::sampler::is_native_drum_rack(track);
+        if synth || sampler || drum_rack {
             cards.push(None);
         } else if let Some((card, width)) = self.instrument_card(track_id, track, track_color) {
             cards.push(Some(card));
@@ -149,7 +147,7 @@ impl App {
                 self.state.transport.sample_rate,
             )));
         }
-        let shares = flexible.len() + usize::from(synth || sampler);
+        let shares = flexible.len() + usize::from(synth || sampler || drum_rack);
         if shares > 0 {
             let spacing = CHAIN_SPACING * cards.len().saturating_sub(1) as f32;
             let share = (available_width - used - spacing) / shares as f32;
@@ -167,6 +165,14 @@ impl App {
                     track,
                     track_color,
                     crate::widgets::sampler_device::card_width(share),
+                ));
+            }
+            if drum_rack {
+                cards[0] = Some(self.drum_rack_card(
+                    track_id,
+                    track,
+                    track_color,
+                    crate::widgets::drum_rack_device::card_width(share),
                 ));
             }
             for (position, effect, sidechain, kind) in flexible {
@@ -287,25 +293,9 @@ impl App {
                 crate::widgets::device_chrome::PLUGIN_CARD_W,
             ));
         }
-        let (card, width) = match track.instrument_kind {
-            Some(vibez_core::midi::InstrumentKind::DrumRack) => (
-                self.view_drum_rack_device(track_id, track, track_color),
-                drum_rack::DRUM_RACK_CARD_W,
-            ),
-            // The native synth and sampler are laid out with the flexible
-            // cards.
-            _ => return None,
-        };
-        let latency = crate::domains::device_latency::latency_label(
-            track.instrument_latency_samples,
-            self.state.transport.sample_rate,
-        );
-        Some((
-            column![card, text(latency).size(9).color(th::text_dim())]
-                .height(Length::Fill)
-                .into(),
-            width,
-        ))
+        // The native synth, sampler and drum rack are laid out with the
+        // flexible cards.
+        None
     }
 
     fn gain_device_body<'a>(
@@ -702,33 +692,6 @@ impl App {
         r
     }
 
-    /// Labeled section inside a device body, Ableton-style: a tiny
-    /// uppercase header above the section's controls.
-    pub(super) fn device_section<'a>(
-        label: &'static str,
-        content: Element<'a, Message>,
-    ) -> Element<'a, Message> {
-        column![section_label(label), content]
-            .spacing(6)
-            .align_x(iced::Alignment::Start)
-            .into()
-    }
-
-    /// Thin vertical rule separating device sections.
-    pub(super) fn device_divider() -> Element<'static, Message> {
-        crate::widgets::device_chrome::divider()
-    }
-
-    /// Standard device body: every card takes the section's height so the
-    /// chain lines up like a hardware rack, content held at the top.
-    pub(super) fn device_body(content: Element<'_, Message>) -> Element<'_, Message> {
-        container(content)
-            .padding([8, 10])
-            .height(Length::Fill)
-            .clip(true)
-            .into()
-    }
-
     /// Wrap card content in the standard device card container.
     pub(super) fn device_card(content: iced::widget::Column<'_, Message>) -> Element<'_, Message> {
         crate::widgets::device_chrome::card(content)
@@ -781,6 +744,3 @@ impl App {
         )
     }
 }
-
-#[path = "views_drum_rack.rs"]
-mod drum_rack;

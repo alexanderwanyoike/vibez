@@ -119,8 +119,17 @@ pub fn pitch_controls(pad: bool) -> &'static [usize] {
 }
 
 pub fn is_native_sampler(track: &crate::state::UiTrack) -> bool {
+    is_native(track, vibez_core::midi::InstrumentKind::Sampler)
+}
+
+/// A Drum Rack, whose pads are Samplers.
+pub fn is_native_drum_rack(track: &crate::state::UiTrack) -> bool {
+    is_native(track, vibez_core::midi::InstrumentKind::DrumRack)
+}
+
+fn is_native(track: &crate::state::UiTrack, kind: vibez_core::midi::InstrumentKind) -> bool {
     track.has_instrument
-        && track.instrument_kind == Some(vibez_core::midi::InstrumentKind::Sampler)
+        && track.instrument_kind == Some(kind)
         && track.plugin_instrument_name.is_none()
         && track.plugin_instrument_ref.is_none()
 }
