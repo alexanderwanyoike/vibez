@@ -16,6 +16,9 @@ pub enum ParamFormat {
     /// A Drive amount, stored 0..1, shown as the gain it puts into the
     /// shaper.
     PreGain,
+    /// A Reverb room size, stored 0..1, shown as the seconds its tail
+    /// takes to fall 60 dB.
+    DecayTime,
     Hertz,
     /// A whole divider of the device's sample rate, shown as the rate it
     /// leaves, or as a fraction when the sample rate is not known.
@@ -57,6 +60,7 @@ impl ParamFormat {
                 host_rate: Some(rate),
             } => Self::Hertz.format(rate as f32 / value.round().max(1.0)),
             Self::RateDivider { host_rate: None } => format!("1/{}", self.edit_text(value)),
+            Self::DecayTime => format!("{} s", self.edit_text(value)),
             Self::Amplitude { .. }
             | Self::Decibels
             | Self::PreGain
@@ -78,6 +82,7 @@ impl ParamFormat {
             Self::Amplitude { .. } if value <= 0.0 || !value.is_finite() => "-inf".into(),
             Self::Amplitude { .. } => format!("{:.1}", vibez_core::level::amplitude_to_db(value)),
             Self::Decibels => format!("{value:.1}"),
+            Self::DecayTime => format!("{:.1}", vibez_dsp::reverb::decay_seconds(value)),
             Self::PreGain => format!(
                 "{:.1}",
                 vibez_core::level::amplitude_to_db(vibez_dsp::drive::drive_gain(value))
@@ -130,6 +135,13 @@ impl ParamFormat {
                     .contains(&number)
                     .then(|| vibez_core::level::db_to_amplitude(number).clamp(min, max));
             }
+            Self::DecayTime => {
+                let range =
+                    vibez_dsp::reverb::decay_seconds(min)..=vibez_dsp::reverb::decay_seconds(max);
+                return range
+                    .contains(&number)
+                    .then(|| vibez_dsp::reverb::room_for_decay(number).clamp(min, max));
+            }
             Self::PreGain => {
                 let ceiling_db =
                     vibez_core::level::amplitude_to_db(vibez_dsp::drive::drive_gain(max));
@@ -177,6 +189,7 @@ pub fn param_format(
             floor_db: crate::domains::gain::MIN_GAIN_DB,
         },
         (EffectType::Drive, vibez_dsp::drive::param::AMOUNT) => ParamFormat::PreGain,
+        (EffectType::Reverb, vibez_dsp::reverb::param::ROOM_SIZE) => ParamFormat::DecayTime,
         (EffectType::Bitcrush, vibez_dsp::bitcrush::param::SR_REDUCE) => {
             ParamFormat::RateDivider { host_rate }
         }
