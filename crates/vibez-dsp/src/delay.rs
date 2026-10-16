@@ -1,8 +1,51 @@
+//! Admits Delay parameter edits and processes finite linear feedback echoes.
+//!
+//! Fractional delay times read with linear interpolation, the simplest of
+//! the fractional delays in Laakso, Valimaki, Karjalainen and Laine,
+//! "Splitting the Unit Delay", IEEE Signal Processing Magazine 13(1), 1996.
+
 use vibez_core::effect::{EffectType, ParamDescriptor};
 
 use crate::effect::AudioEffect;
 
-static DELAY_PARAMS: &[ParamDescriptor] = &[
+#[path = "delay_duck.rs"]
+mod duck;
+#[path = "delay_filter.rs"]
+mod filter;
+#[path = "delay_history.rs"]
+mod history;
+#[path = "delay_ramp.rs"]
+mod ramp;
+#[path = "delay_time.rs"]
+mod time;
+use duck::Duck;
+use filter::FeedbackFilters;
+use history::DelayHistory;
+use ramp::ScalarRamp;
+use time::DelayTime;
+
+pub mod param {
+    pub const TIME_MS: usize = 0;
+    pub const FEEDBACK: usize = 1;
+    pub const MIX: usize = 2;
+    pub const SYNC: usize = 3;
+    pub const LEFT_DIVISION: usize = 4;
+    pub const LEFT_MODIFIER: usize = 5;
+    pub const ROUTING: usize = 6;
+    pub const LINK: usize = 7;
+    pub const RIGHT_TIME_MS: usize = 8;
+    pub const RIGHT_DIVISION: usize = 9;
+    pub const RIGHT_MODIFIER: usize = 10;
+    pub const FEEDBACK_HP_ENABLED: usize = 11;
+    pub const FEEDBACK_HP_HZ: usize = 12;
+    pub const FEEDBACK_LP_ENABLED: usize = 13;
+    pub const FEEDBACK_LP_HZ: usize = 14;
+    pub const DUCK: usize = 15;
+    pub const TIME_CHANGE: usize = 16;
+    pub const COUNT: usize = 17;
+}
+
+pub static DELAY_PARAMS: &[ParamDescriptor] = &[
     ParamDescriptor {
         name: "Time",
         min: 1.0,
@@ -24,43 +67,249 @@ static DELAY_PARAMS: &[ParamDescriptor] = &[
         default: 0.3,
         unit: "",
     },
+    ParamDescriptor {
+        name: "Sync",
+        min: 0.0,
+        max: 1.0,
+        default: 0.0,
+        unit: "",
+    },
+    ParamDescriptor {
+        name: "Left Division",
+        min: 0.0,
+        max: 6.0,
+        default: 4.0,
+        unit: "",
+    },
+    ParamDescriptor {
+        name: "Left Modifier",
+        min: 0.0,
+        max: 2.0,
+        default: 0.0,
+        unit: "",
+    },
+    ParamDescriptor {
+        name: "Routing",
+        min: 0.0,
+        max: 1.0,
+        default: 0.0,
+        unit: "",
+    },
+    ParamDescriptor {
+        name: "L/R Link",
+        min: 0.0,
+        max: 1.0,
+        default: 1.0,
+        unit: "",
+    },
+    ParamDescriptor {
+        name: "Right Free Time",
+        min: 1.0,
+        max: 2000.0,
+        default: 500.0,
+        unit: "ms",
+    },
+    ParamDescriptor {
+        name: "Right Division",
+        min: 0.0,
+        max: 6.0,
+        default: 4.0,
+        unit: "",
+    },
+    ParamDescriptor {
+        name: "Right Modifier",
+        min: 0.0,
+        max: 2.0,
+        default: 0.0,
+        unit: "",
+    },
+    ParamDescriptor {
+        name: "Feedback HP Enabled",
+        min: 0.0,
+        max: 1.0,
+        default: 0.0,
+        unit: "",
+    },
+    ParamDescriptor {
+        name: "Feedback HP Frequency",
+        min: 20.0,
+        max: 1000.0,
+        default: 120.0,
+        unit: "Hz",
+    },
+    ParamDescriptor {
+        name: "Feedback LP Enabled",
+        min: 0.0,
+        max: 1.0,
+        default: 0.0,
+        unit: "",
+    },
+    ParamDescriptor {
+        name: "Feedback LP Frequency",
+        min: 1000.0,
+        max: 20000.0,
+        default: 8000.0,
+        unit: "Hz",
+    },
+    ParamDescriptor {
+        name: "Duck",
+        min: 0.0,
+        max: 1.0,
+        default: 0.0,
+        unit: "",
+    },
+    ParamDescriptor {
+        name: "Time Change",
+        min: 0.0,
+        max: 1.0,
+        default: 0.0,
+        unit: "",
+    },
 ];
 
 /// Stereo delay effect with feedback.
 pub struct DelayEffect {
-    time_ms: f32,
-    feedback: f32,
-    mix: f32,
-    sample_rate: f32,
-    buffer_l: Vec<f32>,
-    buffer_r: Vec<f32>,
-    write_pos: usize,
+    targets: [f32; param::COUNT],
+    history: DelayHistory,
+    timing: DelayTime,
+    mix: ScalarRamp,
+    feedback: ScalarRamp,
+    routing: ScalarRamp,
+    filters: FeedbackFilters,
+    duck: Duck,
 }
 
 impl DelayEffect {
     pub fn new(sample_rate: f32) -> Self {
-        // Max delay = 2 seconds
-        let max_samples = (sample_rate * 2.0) as usize;
+        let history = DelayHistory::new(sample_rate);
+        let filters = if history.is_valid() {
+            FeedbackFilters::new(
+                sample_rate,
+                DELAY_PARAMS[param::FEEDBACK_HP_HZ].default,
+                DELAY_PARAMS[param::FEEDBACK_LP_HZ].default,
+            )
+        } else {
+            FeedbackFilters::default()
+        };
+        let duck = if history.is_valid() {
+            Duck::new(sample_rate)
+        } else {
+            Duck::default()
+        };
         Self {
-            time_ms: 500.0,
-            feedback: 0.5,
-            mix: 0.3,
-            sample_rate,
-            buffer_l: vec![0.0; max_samples],
-            buffer_r: vec![0.0; max_samples],
-            write_pos: 0,
+            targets: std::array::from_fn(|index| DELAY_PARAMS[index].default),
+            history,
+            timing: DelayTime::new(),
+            mix: ScalarRamp::new(DELAY_PARAMS[param::MIX].default),
+            feedback: ScalarRamp::new(DELAY_PARAMS[param::FEEDBACK].default),
+            routing: ScalarRamp::new(DELAY_PARAMS[param::ROUTING].default),
+            filters,
+            duck,
         }
     }
 
-    fn delay_samples(&self) -> usize {
-        let samples = (self.time_ms * 0.001 * self.sample_rate) as usize;
-        samples.min(self.buffer_l.len() - 1).max(1)
+    fn finite_or_zero(sample: f32) -> f32 {
+        if sample.is_finite() {
+            sample
+        } else {
+            0.0
+        }
+    }
+
+    fn set_target(&mut self, index: usize, value: f32, automated: bool) -> bool {
+        if !value.is_finite() {
+            return false;
+        }
+        let Some(descriptor) = DELAY_PARAMS.get(index) else {
+            return false;
+        };
+        let target = match index {
+            param::SYNC | param::LINK | param::FEEDBACK_HP_ENABLED | param::FEEDBACK_LP_ENABLED => {
+                if value >= 0.5 {
+                    1.0
+                } else {
+                    0.0
+                }
+            }
+            param::LEFT_DIVISION
+            | param::LEFT_MODIFIER
+            | param::ROUTING
+            | param::RIGHT_DIVISION
+            | param::RIGHT_MODIFIER
+            | param::TIME_CHANGE => {
+                // Ordinals have one zero representation for stored/preset matching.
+                value.round().clamp(descriptor.min, descriptor.max) as u32 as f32
+            }
+            _ => value.clamp(descriptor.min, descriptor.max),
+        };
+        if !automated && self.targets[index].to_bits() == target.to_bits() {
+            return true;
+        }
+        self.targets[index] = target;
+        if index == param::MIX {
+            self.mix.edit(
+                target,
+                automated,
+                (self.history.sample_rate() as usize).div_ceil(100),
+            );
+        } else if index == param::FEEDBACK {
+            self.feedback.edit(
+                target,
+                automated,
+                (self.history.sample_rate() as usize).div_ceil(100),
+            );
+        } else if index == param::DUCK {
+            self.duck.edit(
+                target,
+                automated,
+                (self.history.sample_rate() as usize).div_ceil(100),
+            );
+        } else if index == param::ROUTING {
+            self.routing.edit(
+                target,
+                automated,
+                (self.history.sample_rate() as usize).div_ceil(50),
+            );
+        }
+        if self.history.is_valid() {
+            match index {
+                param::FEEDBACK_HP_ENABLED => self.filters.set_high_pass_enabled(
+                    target,
+                    automated,
+                    (self.history.sample_rate() as usize).div_ceil(100),
+                ),
+                param::FEEDBACK_LP_ENABLED => self.filters.set_low_pass_enabled(
+                    target,
+                    automated,
+                    (self.history.sample_rate() as usize).div_ceil(100),
+                ),
+                param::FEEDBACK_HP_HZ => self.filters.set_high_pass_hz(target, automated),
+                param::FEEDBACK_LP_HZ => self.filters.set_low_pass_hz(target, automated),
+                _ => {}
+            }
+        }
+        self.timing
+            .parameter_edited(index, &self.targets, self.history.sample_rate(), automated);
+        true
     }
 }
 
 impl AudioEffect for DelayEffect {
+    fn supports_level_meter(&self) -> bool {
+        true
+    }
+
+    fn set_audio_context(&mut self, context: vibez_core::audio_context::DeviceAudioContext) {
+        self.timing
+            .set_bpm(context.bpm, &self.targets, self.history.sample_rate());
+    }
+
     fn activation_sample_rate(&self) -> Option<u32> {
-        Some(self.sample_rate as u32)
+        self.history.activation_sample_rate()
+    }
+
+    fn processing_configuration_valid(&self) -> bool {
+        self.history.is_valid()
     }
 
     fn effect_type(&self) -> EffectType {
@@ -72,63 +321,93 @@ impl AudioEffect for DelayEffect {
     }
 
     fn set_param(&mut self, index: usize, value: f32) -> bool {
-        match index {
-            0 => {
-                self.time_ms = value.clamp(1.0, 2000.0);
-                true
-            }
-            1 => {
-                self.feedback = value.clamp(0.0, 0.95);
-                true
-            }
-            2 => {
-                self.mix = value.clamp(0.0, 1.0);
-                true
-            }
-            _ => false,
-        }
+        self.set_target(index, value, false)
+    }
+
+    fn set_automated_param(&mut self, index: usize, value: f32) -> bool {
+        self.set_target(index, value, true)
     }
 
     fn get_param(&self, index: usize) -> f32 {
-        match index {
-            0 => self.time_ms,
-            1 => self.feedback,
-            2 => self.mix,
-            _ => 0.0,
-        }
+        self.targets.get(index).copied().unwrap_or(0.0)
     }
 
     fn process(&mut self, buffer: &mut [f32], channels: usize) {
-        let ch = channels.clamp(1, 2);
+        if channels == 0 {
+            return;
+        }
+        if !self.history.is_valid() {
+            for frame in buffer.chunks_exact_mut(channels) {
+                for sample in frame.iter_mut().take(2) {
+                    if !sample.is_finite() {
+                        *sample = 0.0;
+                    }
+                }
+            }
+            return;
+        }
+
+        let ch = channels;
         let frames = buffer.len() / ch;
-        let delay = self.delay_samples();
-        let buf_len = self.buffer_l.len();
+        if frames == 0 {
+            return;
+        }
+        let sample_rate = self.history.sample_rate();
+        self.timing.begin_audio(&self.targets, sample_rate);
+        let fade_frames = (sample_rate as usize).div_ceil(50);
+        let use_glide = self.targets[param::TIME_CHANGE] >= 0.5;
 
         for frame in 0..frames {
-            let read_pos = (self.write_pos + buf_len - delay) % buf_len;
+            let [left, right] = self.timing.next_frame(fade_frames, sample_rate, use_glide);
+            let (delayed_l, delayed_r) = self.history.read(left, right);
+            let mix = self.mix.next_frame();
+            let feedback = self.feedback.next_frame();
+            let routing = self.routing.next_frame();
+            // Exact endpoints retain the original channel samples without extra blend rounding.
+            let (routed_l, routed_r) = if routing == 0.0 {
+                (delayed_l, delayed_r)
+            } else if routing == 1.0 {
+                (delayed_r, delayed_l)
+            } else {
+                let cross = f64::from(routing);
+                let own = 1.0 - cross;
+                (
+                    (f64::from(delayed_l) * own + f64::from(delayed_r) * cross) as f32,
+                    (f64::from(delayed_r) * own + f64::from(delayed_l) * cross) as f32,
+                )
+            };
+            let [filtered_l, filtered_r] = self.filters.process([routed_l, routed_r]);
 
-            // Left channel
-            let dry_l = buffer[frame * ch];
-            let delayed_l = self.buffer_l[read_pos];
-            self.buffer_l[self.write_pos] = dry_l + delayed_l * self.feedback;
-            buffer[frame * ch] = dry_l * (1.0 - self.mix) + delayed_l * self.mix;
-
-            // Right channel (or duplicate mono)
+            let dry_l = Self::finite_or_zero(buffer[frame * ch]);
+            // Missing mono input is zero, but its feedback continues while unobserved.
+            let dry_r = if ch >= 2 {
+                Self::finite_or_zero(buffer[frame * ch + 1])
+            } else {
+                0.0
+            };
+            let [wet_l, wet_r] = self.duck.process([dry_l, dry_r], [delayed_l, delayed_r]);
+            let write_l = Self::finite_or_zero(dry_l + filtered_l * feedback);
+            let write_r = Self::finite_or_zero(dry_r + filtered_r * feedback);
+            buffer[frame * ch] = Self::finite_or_zero(dry_l * (1.0 - mix) + wet_l * mix);
             if ch >= 2 {
-                let dry_r = buffer[frame * ch + 1];
-                let delayed_r = self.buffer_r[read_pos];
-                self.buffer_r[self.write_pos] = dry_r + delayed_r * self.feedback;
-                buffer[frame * ch + 1] = dry_r * (1.0 - self.mix) + delayed_r * self.mix;
+                buffer[frame * ch + 1] = Self::finite_or_zero(dry_r * (1.0 - mix) + wet_r * mix);
             }
 
-            self.write_pos = (self.write_pos + 1) % buf_len;
+            self.history.write_and_advance(write_l, write_r);
         }
     }
 
     fn reset(&mut self) {
-        self.buffer_l.fill(0.0);
-        self.buffer_r.fill(0.0);
-        self.write_pos = 0;
+        self.history.reset();
+        self.timing.reset(&self.targets, self.history.sample_rate());
+        self.mix.reset(self.targets[param::MIX]);
+        self.feedback.reset(self.targets[param::FEEDBACK]);
+        self.routing.reset(self.targets[param::ROUTING]);
+        self.filters.reset(
+            self.targets[param::FEEDBACK_HP_ENABLED],
+            self.targets[param::FEEDBACK_LP_ENABLED],
+        );
+        self.duck.reset(self.targets[param::DUCK]);
     }
 }
 
@@ -192,7 +471,8 @@ mod tests {
         assert!((fx.get_param(2) - 0.3).abs() < 1e-3);
         fx.set_param(0, 100.0);
         assert!((fx.get_param(0) - 100.0).abs() < 1e-3);
-        assert!(!fx.set_param(3, 1.0));
+        // Appended indices 3..16 are valid; the original three values stay unchanged.
+        assert!(!fx.set_param(17, 1.0));
     }
 
     #[test]
@@ -201,7 +481,31 @@ mod tests {
         let mut buf = vec![1.0; 100];
         fx.process(&mut buf, 2);
         fx.reset();
-        assert_eq!(fx.write_pos, 0);
-        assert!(fx.buffer_l.iter().all(|&s| s == 0.0));
+        assert_eq!(fx.history.write_position(), 0);
+        assert!(fx.history.left_samples().iter().all(|&s| s == 0.0));
     }
 }
+
+#[cfg(test)]
+#[path = "delay_legacy_reference_tests.rs"]
+mod legacy_reference_tests;
+
+#[cfg(test)]
+#[path = "delay_sync_timing_tests.rs"]
+mod sync_timing_tests;
+
+#[cfg(test)]
+#[path = "delay_link_tests.rs"]
+mod link_tests;
+
+#[cfg(test)]
+#[path = "delay_mono_history_tests.rs"]
+mod mono_history_tests;
+
+#[cfg(test)]
+#[path = "delay_exceptional_audio_tests.rs"]
+mod exceptional_audio_tests;
+
+#[cfg(test)]
+#[path = "delay_fractional_tests.rs"]
+mod fractional_tests;

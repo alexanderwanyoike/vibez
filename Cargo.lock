@@ -5237,6 +5237,7 @@ dependencies = [
 name = "vibez-dsp"
 version = "0.4.1"
 dependencies = [
+ "serde_json",
  "signalsmith-stretch",
  "vibez-core",
 ]
