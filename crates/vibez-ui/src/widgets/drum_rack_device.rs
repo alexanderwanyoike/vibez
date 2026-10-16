@@ -122,6 +122,8 @@ pub struct PadView<'a> {
     pub name: Option<&'a str>,
     pub note: String,
     pub audio: Option<&'a Arc<DecodedAudio>>,
+    /// Holds a sample, decoded or not.
+    pub filled: bool,
     pub region: (f32, f32),
     pub selected: bool,
     pub firing: bool,
@@ -221,7 +223,7 @@ impl canvas::Program<Message> for PadView<'_> {
     ) -> Vec<canvas::Geometry> {
         let size = bounds.size();
         let mut frame = canvas::Frame::new(renderer, size);
-        let filled = self.audio.is_some();
+        let filled = self.filled;
         let body = canvas::Path::rounded_rectangle(
             Point::new(0.5, 0.5),
             Size::new(size.width - 1.0, size.height - 1.0),
@@ -456,6 +458,7 @@ impl<'a> DrumRackView<'a> {
                 .map(vibez_core::midi::pitch_name)
                 .unwrap_or_default(),
             audio: pad.audio.as_ref(),
+            filled: pad.holds_sample(),
             region: (start, end),
             selected: index == self.selected,
             firing,
@@ -486,7 +489,7 @@ impl<'a> DrumRackView<'a> {
         }
         for bank in 0..DRUM_RACK_BANK_COUNT {
             let first = bank * DRUM_RACK_BANK_SIZE;
-            let filled = std::array::from_fn(|offset| self.pads[first + offset].audio.is_some());
+            let filled = std::array::from_fn(|offset| self.pads[first + offset].holds_sample());
             let selected = bank == current;
             let accent = self.accent;
             let map = canvas(BankView {
@@ -595,8 +598,7 @@ impl<'a> DrumRackView<'a> {
         );
         let clear = button(text("Clear").size(LABEL_SIZE))
             .on_press_maybe(
-                pad.audio
-                    .is_some()
+                pad.holds_sample()
                     .then(|| Message::clear_drum_rack_pad(track_id, pad_index)),
             )
             .padding([2, 10])

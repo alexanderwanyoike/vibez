@@ -292,6 +292,11 @@ impl UiDrumPad {
         &mut self.params
     }
 
+    /// Whether the pad names a sample, even one that has not decoded.
+    pub fn holds_sample(&self) -> bool {
+        self.source.is_some() || self.audio.is_some()
+    }
+
     pub fn param(&self, index: usize) -> f32 {
         self.params.get(index).copied().unwrap_or_else(|| {
             vibez_instruments::sampler::SAMPLER_PARAMS
