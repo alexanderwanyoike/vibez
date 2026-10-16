@@ -2143,6 +2143,89 @@ mod presentation_tests {
         }
     }
 
+    fn sampler_track() -> crate::state::ProjectTrack {
+        let mut track = crate::state::ProjectTrack::new(TrackId::new(), "Keys".into(), 0);
+        track.has_instrument = true;
+        track.instrument_kind = Some(InstrumentKind::Sampler);
+        track.instrument_params = vibez_instruments::sampler::SAMPLER_PARAMS
+            .iter()
+            .map(|descriptor| descriptor.default)
+            .collect();
+        track
+    }
+
+    #[test]
+    fn sampler_factory_presets_are_valid_distinct_and_start_from_init() {
+        let track = sampler_track();
+        let device = DeviceParams::instrument(&track).unwrap();
+        let presets = presets_for(device.kind);
+        assert!(presets.len() >= 6);
+        assert_eq!(presets[0].name(), "Init");
+        assert!(presets.iter().any(|preset| preset.name() == "Warm Rhodes"));
+        assert_eq!(prepare_updates(device, &presets[0]), Ok(Vec::new()));
+        for preset in &presets[1..] {
+            let mut applied = sampler_track();
+            for (index, value) in prepare_updates(device, preset).unwrap() {
+                applied.instrument_params[index] = value;
+            }
+            assert_ne!(
+                applied.instrument_params,
+                track.instrument_params,
+                "{}",
+                preset.name()
+            );
+            let captured = capture(DeviceParams::instrument(&applied).unwrap(), preset.name());
+            assert_eq!(captured.as_ref(), Ok(preset));
+        }
+        let mut names: Vec<_> = presets.iter().map(DevicePreset::name).collect();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(names.len(), presets.len(), "names are unique");
+    }
+
+    #[test]
+    fn a_sampler_preset_leaves_the_sample_s_own_points_alone() {
+        use vibez_instruments::sampler::param;
+        let mut track = sampler_track();
+        for (index, value) in [
+            (param::ROOT_NOTE, 48.0),
+            (param::START, 0.2),
+            (param::END, 0.8),
+            (param::LOOP_START, 0.3),
+            (param::LOOP_END, 0.7),
+        ] {
+            track.instrument_params[index] = value;
+        }
+        let device = DeviceParams::instrument(&track).unwrap();
+        for preset in presets_for(device.kind) {
+            for (index, _) in prepare_updates(device, &preset).unwrap() {
+                assert!(
+                    ![
+                        param::ROOT_NOTE,
+                        param::START,
+                        param::END,
+                        param::LOOP_START,
+                        param::LOOP_END
+                    ]
+                    .contains(&index),
+                    "{} moves {index}",
+                    preset.name()
+                );
+            }
+        }
+        let captured = capture(device, "Current").unwrap();
+        for key in ["root_note", "start", "end", "loop_start", "loop_end"] {
+            assert!(!captured.parameters().contains_key(key), "{key}");
+        }
+        for key in ["loop", "one_shot", "reverse", "filter_type", "key_low"] {
+            let mut parameters = captured.parameters().clone();
+            assert!(parameters.contains_key(key), "{key}");
+            parameters.insert(key.into(), 0.5);
+            let fractional = DevicePreset::new(captured.kind(), "Fractional", parameters).unwrap();
+            assert!(prepare_updates(device, &fractional).is_err(), "{key}");
+        }
+    }
+
     fn synth_track() -> crate::state::ProjectTrack {
         let mut track = crate::state::ProjectTrack::new(TrackId::new(), "Keys".into(), 0);
         track.has_instrument = true;
