@@ -5,6 +5,7 @@ use crate::bitcrush::BitcrushEffect;
 use crate::compressor::CompressorEffect;
 use crate::delay::DelayEffect;
 use crate::drive::DriveEffect;
+use crate::echo::EchoEffect;
 use crate::effect::AudioEffect;
 use crate::eq::EqEffect;
 use crate::filter::FilterEffect;
@@ -27,6 +28,7 @@ pub fn create_effect(effect_type: EffectType, sample_rate: f32) -> Box<dyn Audio
         EffectType::Gate => Box::new(GateEffect::new(sample_rate)),
         EffectType::Phaser => Box::new(PhaserEffect::new(sample_rate)),
         EffectType::Eq => Box::new(EqEffect::new(sample_rate)),
+        EffectType::Echo => Box::new(EchoEffect::new(sample_rate)),
     }
 }
 

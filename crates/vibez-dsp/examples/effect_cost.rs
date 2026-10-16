@@ -61,6 +61,26 @@ fn cases(effect: EffectType) -> Vec<(&'static str, Vec<(usize, f32)>)> {
                 ],
             ),
         ],
+        EffectType::Echo => {
+            use vibez_dsp::echo::{param, style};
+            vec![
+                ("defaults (Tape)", vec![]),
+                (
+                    "Diffuse, ping-pong, everything up",
+                    vec![
+                        (param::STYLE, style::DIFFUSE as f32),
+                        (param::MODE, 1.0),
+                        (param::CHARACTER, 1.0),
+                        (param::WEAR, 1.0),
+                        (param::WOW, 1.0),
+                        (param::FLUTTER, 1.0),
+                        (param::SATURATION, 1.0),
+                        (param::DIFFUSION, 1.0),
+                        (param::DUCK, 0.5),
+                    ],
+                ),
+            ]
+        }
         EffectType::Reverb => vec![
             ("defaults", vec![]),
             (

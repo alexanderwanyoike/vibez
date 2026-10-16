@@ -198,6 +198,30 @@ const DELAY_KEYS: [(usize, &str, bool); 17] = {
     ]
 };
 
+/// Every native Echo parameter.
+const ECHO_KEYS: [(usize, &str, bool); 17] = {
+    use vibez_dsp::echo::param::*;
+    [
+        (TIME_MS, "time_ms", false),
+        (SYNC, "sync", true),
+        (GRID, "grid", true),
+        (FEEDBACK, "feedback", false),
+        (MIX, "mix", false),
+        (MODE, "mode", true),
+        (CHARACTER, "character", false),
+        (TONE, "tone", false),
+        (STYLE, "tape_character", true),
+        (WEAR, "wear", false),
+        (WOW, "wow", false),
+        (FLUTTER, "flutter", false),
+        (SATURATION, "saturation", false),
+        (DIFFUSION, "diffusion", false),
+        (DUCK, "duck", false),
+        (LOW_CUT, "low_cut", false),
+        (HIGH_CUT, "high_cut", false),
+    ]
+};
+
 /// Every native Reverb parameter; its sync and freeze are choices.
 const REVERB_KEYS: [(usize, &str, bool); 10] = {
     use vibez_dsp::reverb::param::*;
@@ -411,6 +435,7 @@ fn parameter_keys(device: &DeviceParams) -> Result<Vec<PresetParam>, String> {
         EffectType::Drive => Ok(DRIVE_KEYS.to_vec()),
         EffectType::Bitcrush => Ok(BITCRUSH_KEYS.to_vec()),
         EffectType::Delay => Ok(DELAY_KEYS.to_vec()),
+        EffectType::Echo => Ok(ECHO_KEYS.to_vec()),
         EffectType::Reverb => Ok(REVERB_KEYS.to_vec()),
         EffectType::AutoPan => Ok(AUTO_PAN_KEYS.to_vec()),
         EffectType::Phaser => Ok(PHASER_KEYS.to_vec()),
@@ -749,6 +774,7 @@ pub fn factory_presets(effect_type: EffectType) -> Vec<DevicePreset> {
         EffectType::Drive => drive_factory_presets(),
         EffectType::Bitcrush => bitcrush_factory_presets(),
         EffectType::Delay => delay_factory_presets(),
+        EffectType::Echo => echo_factory_presets(),
         EffectType::Reverb => reverb_factory_presets(),
         EffectType::AutoPan => auto_pan_factory_presets(),
         EffectType::Phaser => phaser_factory_presets(),
@@ -1363,6 +1389,16 @@ fn bitcrush_factory_presets() -> Vec<DevicePreset> {
 }
 
 /// Sol's echoes, from a short slap to a long space.
+fn echo_factory_presets() -> Vec<DevicePreset> {
+    let presets: [(&str, &[(&str, f32)]); 1] = [("Init", &[])];
+    keyed_presets(
+        DevicePresetKind::Effect(EffectType::Echo),
+        &ECHO_KEYS,
+        vibez_dsp::echo::ECHO_PARAMS,
+        &presets,
+    )
+}
+
 fn delay_factory_presets() -> Vec<DevicePreset> {
     let presets: [(&str, &[(&str, f32)]); 8] = [
         ("Init", &[]),
