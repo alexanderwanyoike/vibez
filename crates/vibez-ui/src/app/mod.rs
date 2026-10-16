@@ -174,6 +174,7 @@ mod device_meters;
 mod device_panels;
 pub(crate) mod device_presets;
 mod drive_devices;
+mod drum_kits;
 mod drum_rack_devices;
 mod drum_rack_preparation;
 mod engine_events;

@@ -959,6 +959,26 @@ impl App {
             Message::DrumRackPadDecodeError(track_id, _pad_index, err) => {
                 return self.handle_drum_rack_pad_decode_error(track_id, _pad_index, err);
             }
+            Message::LoadFactoryDrumKit(track_id, kit) => {
+                return self.load_factory_drum_kit(track_id, kit);
+            }
+            Message::OpenDrumKit(track_id) => return self.open_drum_kit(track_id),
+            Message::DrumKitFolderSelected(track_id, folder) => {
+                return self.read_drum_kit(track_id, folder);
+            }
+            Message::DrumKitReady(track_id, result) => {
+                return self.apply_drum_kit(track_id, result);
+            }
+            Message::SaveDrumKit(track_id) => return self.choose_drum_kit_folder(track_id),
+            Message::DrumKitSaveSelected(track_id, folder) => {
+                return self.save_drum_kit(track_id, folder);
+            }
+            Message::DrumKitSaved(result) => {
+                self.state.status_text = match result {
+                    Ok(name) => format!("Saved kit {name}"),
+                    Err(error) => format!("Kit not saved: {error}"),
+                };
+            }
 
             // -- Sample browser --
             Message::ToggleAutoWarpOnImport => {

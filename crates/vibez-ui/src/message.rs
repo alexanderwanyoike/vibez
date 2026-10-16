@@ -177,6 +177,23 @@ pub enum Message {
     DrumRackPadFileSelected(TrackId, usize, Option<PathBuf>),
     DrumRackPadSampleDecoded(TrackId, usize, Arc<DecodedAudio>, String, MediaSourceRef),
     DrumRackPadDecodeError(TrackId, usize, String),
+    /// Drum Rack kits.
+    LoadFactoryDrumKit(TrackId, usize),
+    OpenDrumKit(TrackId),
+    DrumKitFolderSelected(TrackId, Option<PathBuf>),
+    DrumKitReady(
+        TrackId,
+        Result<
+            (
+                vibez_core::drum_kit::DrumKit,
+                Vec<crate::domains::drum_kits::KitSample>,
+            ),
+            String,
+        >,
+    ),
+    SaveDrumKit(TrackId),
+    DrumKitSaveSelected(TrackId, Option<PathBuf>),
+    DrumKitSaved(Result<String, String>),
 
     // Zoom / scroll
 

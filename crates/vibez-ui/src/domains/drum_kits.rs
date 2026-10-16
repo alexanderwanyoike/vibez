@@ -177,6 +177,9 @@ pub fn rack_pads(kit: &DrumKit, samples: &[KitSample]) -> Vec<UiDrumPad> {
     pads
 }
 
+/// A kit sample's file name and the audio it is written from.
+pub type SampleToWrite = (String, Arc<DecodedAudio>);
+
 /// A plain file name for a pad's sample, unique within the kit.
 fn sample_file(index: usize, name: &str) -> String {
     let stem: String = name
@@ -205,7 +208,7 @@ fn sample_file(index: usize, name: &str) -> String {
 pub fn kit_from_rack(
     name: &str,
     pads: &[UiDrumPad],
-) -> Result<(DrumKit, Vec<(String, Arc<DecodedAudio>)>), vibez_core::drum_kit::DrumKitError> {
+) -> Result<(DrumKit, Vec<SampleToWrite>), vibez_core::drum_kit::DrumKitError> {
     let mut kit_pads = Vec::new();
     let mut samples = Vec::new();
     for (index, pad) in pads.iter().enumerate().take(DRUM_RACK_PAD_COUNT) {
