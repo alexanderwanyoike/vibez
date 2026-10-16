@@ -242,6 +242,17 @@ impl<'a> Param<'a> {
         )
     }
 
+    /// A dropdown of this parameter's choices, `names[first..]`, each set as
+    /// its index.
+    pub fn choices(&self, names: &'static [&'static str], first: usize) -> Element<'a, Message> {
+        let (track_id, effect_id, index) = (self.track_id, self.effect.id, self.index);
+        let options: Vec<Named> = (first..names.len()).map(|n| Named(n, names[n])).collect();
+        let selected = chosen(self.value(), first, names.len());
+        dropdown(options, Named(selected, names[selected]), move |named| {
+            Message::set_effect_param(track_id, effect_id, index, named.0 as f32)
+        })
+    }
+
     /// Knob, name and value stacked, as most device controls read.
     pub fn column(&self, knob_size: f32) -> Element<'a, Message> {
         column![
@@ -276,6 +287,21 @@ impl<'a> Param<'a> {
 }
 
 /// A level meter under its heading.
+/// A choice and its name, for a dropdown.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Named(usize, &'static str);
+
+impl std::fmt::Display for Named {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.1)
+    }
+}
+
+/// The choice a stored value names: the nearest, within `first..count`.
+fn chosen(value: f32, first: usize, count: usize) -> usize {
+    (value.round().max(0.0) as usize).clamp(first, count - 1)
+}
+
 pub fn level_column<'a>(
     name: &'a str,
     levels: vibez_engine::metering::MeterValues,
@@ -468,6 +494,15 @@ pub fn vertical_rule<'a>() -> Element<'a, Message> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_stored_value_names_its_nearest_choice() {
+        assert_eq!(chosen(2.0, 0, 5), 2);
+        assert_eq!(chosen(0.4, 0, 5), 0);
+        assert_eq!(chosen(0.6, 0, 5), 1);
+        assert_eq!(chosen(9.0, 0, 5), 4);
+        assert_eq!(chosen(0.0, 1, 5), 1);
+    }
 
     #[test]
     fn knobs_grow_with_the_column_and_stay_aimable() {
