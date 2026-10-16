@@ -1,6 +1,6 @@
-//! What a native card with only an Advanced switch remembers besides its
-//! parameters: whether Advanced is open, and the levels the engine
-//! measured either side of the device.
+//! What a native card with an Advanced switch remembers besides its
+//! parameters: whether Advanced is open, which of its groups a narrow card
+//! shows, and the levels the engine measured either side of the device.
 
 use std::time::{Duration, Instant};
 
@@ -10,12 +10,14 @@ use vibez_engine::metering::MeterValues;
 #[derive(Debug, Clone)]
 pub enum CardMsg {
     ToggleAdvanced(EffectId),
+    /// Shows one of Advanced's groups on a card too narrow for all of them.
+    ShowAdvancedPage(EffectId, usize),
 }
 
 impl CardMsg {
     pub fn effect_id(&self) -> EffectId {
         match self {
-            Self::ToggleAdvanced(id) => *id,
+            Self::ToggleAdvanced(id) | Self::ShowAdvancedPage(id, _) => *id,
         }
     }
 }
@@ -23,6 +25,7 @@ impl CardMsg {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct CardPanelState {
     pub advanced: bool,
+    pub advanced_page: usize,
     pub input: MeterValues,
     pub output: MeterValues,
     pub last_meter_at: Option<Instant>,
@@ -32,6 +35,7 @@ impl CardPanelState {
     pub fn update(&mut self, message: CardMsg) {
         match message {
             CardMsg::ToggleAdvanced(_) => self.advanced = !self.advanced,
+            CardMsg::ShowAdvancedPage(_, page) => self.advanced_page = page,
         }
     }
 }
