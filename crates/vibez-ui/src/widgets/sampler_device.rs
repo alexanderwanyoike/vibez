@@ -12,9 +12,12 @@ use vibez_core::id::TrackId;
 use vibez_instruments::sampler::{filter_type, param};
 
 use crate::domains::device_params::DeviceParams;
+use crate::domains::device_params::DeviceSlot;
 use crate::domains::instrument_card::{InstrumentCardMsg, InstrumentPanel};
 use crate::domains::param_entry::ValueEntry;
-use crate::domains::sampler::{Mode, SamplerPage, FILTER_NAMES};
+use crate::domains::sampler::{
+    header_controls, pages, pitch_controls, Mode, SamplerPage, FILTER_NAMES,
+};
 use crate::domains::synth::{LFO_SHAPE_NAMES, LFO_TARGET_NAMES};
 use crate::message::Message;
 use crate::theme as th;
@@ -175,6 +178,10 @@ impl<'a> SamplerView<'a> {
         }
     }
 
+    fn on_pad(&self) -> bool {
+        matches!(self.device.slot, DeviceSlot::DrumPad(_))
+    }
+
     fn whole(&self, index: usize) -> usize {
         self.device.value(index).round().max(0.0) as usize
     }
@@ -191,7 +198,7 @@ impl<'a> SamplerView<'a> {
         ];
         if layout.section > 0.0 {
             let track_id = self.track_id;
-            let pages: Vec<(SamplerPage, &str)> = SamplerPage::ALL
+            let pages: Vec<(SamplerPage, &str)> = pages(self.on_pad())
                 .iter()
                 .map(|page| (*page, page.name()))
                 .collect();
@@ -248,7 +255,7 @@ impl<'a> SamplerView<'a> {
             header = header.push(heading(format!("{seconds:.3} s")));
         }
         if !layout.compact {
-            for index in [param::ROOT_NOTE, param::TUNE, param::VOLUME] {
+            for &index in header_controls(self.on_pad()) {
                 let param = self.param(index);
                 header = header.push(
                     row![heading(param.name()), param.value_entry()]
@@ -507,7 +514,7 @@ impl<'a> SamplerView<'a> {
                 layout,
                 heading("Pitch").into(),
                 None,
-                &[param::ROOT_NOTE, param::TUNE, param::FINE, param::GLIDE],
+                pitch_controls(self.on_pad()),
             ),
             SamplerPage::Filter if layout.compact && self.panel.filter_envelope => {
                 self.envelope(layout, true)

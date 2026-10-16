@@ -84,6 +84,21 @@ impl SamplerPage {
     }
 }
 
+/// The tabs a card shows.
+pub fn pages(_pad: bool) -> &'static [SamplerPage] {
+    &SamplerPage::ALL
+}
+
+/// The values typed beside the sample's name on a wide card.
+pub fn header_controls(_pad: bool) -> &'static [usize] {
+    &[param::ROOT_NOTE, param::TUNE, param::VOLUME]
+}
+
+/// The Pitch tab's controls.
+pub fn pitch_controls(_pad: bool) -> &'static [usize] {
+    &[param::ROOT_NOTE, param::TUNE, param::FINE, param::GLIDE]
+}
+
 pub fn is_native_sampler(track: &crate::state::UiTrack) -> bool {
     track.has_instrument
         && track.instrument_kind == Some(vibez_core::midi::InstrumentKind::Sampler)
@@ -106,6 +121,19 @@ mod tests {
             }
             assert_eq!(Mode::of(&params), mode);
         }
+    }
+
+    #[test]
+    fn a_pad_shows_no_zone_root_or_glide_and_both_show_pan() {
+        assert!(!pages(true).contains(&SamplerPage::Zones));
+        assert_eq!(pages(false), &SamplerPage::ALL);
+        for index in [param::ROOT_NOTE, param::GLIDE] {
+            assert!(!pitch_controls(true).contains(&index));
+            assert!(!header_controls(true).contains(&index));
+        }
+        assert!(pitch_controls(true).contains(&param::VELOCITY_AMOUNT));
+        assert!(header_controls(true).contains(&param::PAN));
+        assert!(header_controls(false).contains(&param::PAN));
     }
 
     #[test]
