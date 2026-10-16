@@ -291,10 +291,11 @@ pub struct DrumPadState {
     pub pan: f32,
     pub start: f32,
     pub end: f32,
-    /// Linear attack fade at the playable pad boundary, in milliseconds.
+    /// The pad's attack, in milliseconds.
     #[serde(default = "default_drum_pad_fade_ms")]
     pub fade_in_ms: f32,
-    /// Linear release fade used at the pad end, note-off and choke, in milliseconds.
+    /// The pad's release, in milliseconds, which a one-shot also fades out
+    /// over at its end.
     #[serde(default = "default_drum_pad_fade_ms")]
     pub fade_out_ms: f32,
     pub coarse_tune: i8,
@@ -302,7 +303,7 @@ pub struct DrumPadState {
     pub one_shot: bool,
     pub choke_group: Option<u8>,
     /// The pad's Sampler controls, by index. Pads saved before each pad was
-    /// a Sampler have none, and play from the fields above instead.
+    /// a Sampler have none; their gain through one-shot fields stand in.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub params: Vec<f32>,
 }
