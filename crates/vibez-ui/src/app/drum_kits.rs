@@ -154,6 +154,11 @@ impl App {
                 rack_pads(&kit, &samples),
             ),
         ));
+        // Shows the kit rather than a bank it may leave empty.
+        if let (Some(first), Some(track)) = (kit.pads.first(), self.state.find_track_mut(track_id))
+        {
+            track.selected_drum_pad = first.pad;
+        }
         self.state.status_text = if missing == 0 {
             format!("Loaded kit {}", kit.name)
         } else {
