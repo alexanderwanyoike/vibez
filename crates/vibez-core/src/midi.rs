@@ -4,6 +4,18 @@ use crate::clip_timeline::BeatClipTimeline;
 use crate::id::{ClipId, TrackId};
 use crate::perform::GrooveGrid;
 
+/// A pitch's name and octave, middle C (60) being "C4": "C4", "D#3".
+pub fn pitch_name(pitch: u8) -> String {
+    const NAMES: [&str; 12] = [
+        "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B",
+    ];
+    format!(
+        "{}{}",
+        NAMES[pitch as usize % 12],
+        i32::from(pitch / 12) - 1
+    )
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct MidiNote {
     pub pitch: u8,
@@ -257,5 +269,19 @@ mod tests {
         assert_eq!(all[0], InstrumentKind::SubtractiveSynth);
         assert_eq!(all[1], InstrumentKind::Sampler);
         assert_eq!(all[2], InstrumentKind::DrumRack);
+    }
+}
+
+#[cfg(test)]
+mod pitch_name_tests {
+    use super::*;
+
+    #[test]
+    fn every_octave_has_its_own_number() {
+        assert_eq!(pitch_name(60), "C4");
+        assert_eq!(pitch_name(61), "C#4");
+        assert_eq!(pitch_name(12), "C0");
+        assert_eq!(pitch_name(0), "C-1");
+        assert_eq!(pitch_name(127), "G9");
     }
 }

@@ -82,10 +82,10 @@ impl App {
             panel.reset_stale(now);
         }
         self.card_panels.retain_existing(state);
-        self.synth_panels.retain(|track_id, _| {
+        self.instrument_panels.retain(|track_id, _| {
             state
                 .find_track(*track_id)
-                .is_some_and(crate::domains::synth::is_native_synth)
+                .is_some_and(crate::domains::instrument_card::has_native_instrument)
         });
         for panel in self.card_panels.values_mut() {
             panel.reset_stale(now);

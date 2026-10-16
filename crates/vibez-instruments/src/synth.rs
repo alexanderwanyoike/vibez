@@ -46,8 +46,7 @@ pub fn lfo(shape: usize, phase: f64) -> f32 {
     }
 }
 
-/// The filter's gain in dB at `frequency`: the trapezoidal SVF is the
-/// analogue prototype at the prewarped frequency, so this is exact.
+/// The filter's gain in dB at `frequency` for the synth's settings.
 pub fn filter_response_db(params: &[f32], frequency: f32, sample_rate: f32) -> f32 {
     let value = |index: usize| {
         params
@@ -55,9 +54,28 @@ pub fn filter_response_db(params: &[f32], frequency: f32, sample_rate: f32) -> f
             .copied()
             .unwrap_or(SYNTH_PARAMS[index].default)
     };
+    svf_response_db(
+        value(param::FILTER_TYPE) as usize,
+        value(param::CUTOFF),
+        value(param::RESONANCE),
+        frequency,
+        sample_rate,
+    )
+}
+
+/// The gain in dB at `frequency` of one of the synth's filter types at a
+/// cutoff and Q: the trapezoidal SVF is the analogue prototype at the
+/// prewarped frequency, so this is exact.
+pub fn svf_response_db(
+    filter_type: usize,
+    cutoff: f32,
+    q: f32,
+    frequency: f32,
+    sample_rate: f32,
+) -> f32 {
     let nyquist = sample_rate * 0.5;
     let warp = |hz: f32| (std::f32::consts::PI * hz.min(nyquist * 0.999) / sample_rate).tan();
-    let cutoff = value(param::CUTOFF).min(sample_rate * 0.45);
+    let cutoff = cutoff.min(sample_rate * 0.45);
     let w = f64::from(warp(frequency) / warp(cutoff));
     let response = |q: f32| {
         let k = 1.0 / f64::from(q.max(0.05));
@@ -65,8 +83,8 @@ pub fn filter_response_db(params: &[f32], frequency: f32, sample_rate: f32) -> f
         let (re, im) = (1.0 - w * w, k * w);
         (re * re + im * im, k)
     };
-    let (denominator, k) = response(value(param::RESONANCE));
-    let power = match value(param::FILTER_TYPE) as usize {
+    let (denominator, k) = response(q);
+    let power = match filter_type {
         filter_type::LP24 => {
             let (second, _) = response(std::f32::consts::FRAC_1_SQRT_2);
             1.0 / (denominator * second)

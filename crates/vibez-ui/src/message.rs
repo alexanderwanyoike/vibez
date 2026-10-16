@@ -98,7 +98,7 @@ pub enum Message {
     Filter(crate::domains::filter::FilterMsg),
     Gate(crate::domains::gate::GateMsg),
     Card(crate::domains::device_card::CardMsg),
-    Synth(crate::domains::synth::SynthMsg),
+    InstrumentCard(crate::domains::instrument_card::InstrumentCardMsg),
     /// Typing a value into a built-in device parameter.
     ParamEntry(crate::domains::param_entry::EntryMsg),
     ApplyDevicePreset(

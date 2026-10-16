@@ -35,6 +35,8 @@ pub enum ParamFormat {
     /// Stored 0..1, shown 0..100 %.
     Percent,
     Ratio,
+    /// A MIDI note, shown and typed by name ("C4", "F#2") or number.
+    Note,
     Number {
         decimals: u8,
         unit: &'static str,
@@ -49,6 +51,7 @@ impl ParamFormat {
             "ms" => Self::Milliseconds,
             "s" => Self::Seconds,
             ":1" => Self::Ratio,
+            "note" => Self::Note,
             "" | "%" if descriptor.min == 0.0 && descriptor.max <= 1.0 => Self::Percent,
             unit @ ("deg" | "bit") => Self::Number { decimals: 0, unit },
             unit => Self::Number { decimals: 2, unit },
@@ -75,6 +78,7 @@ impl ParamFormat {
             Self::Milliseconds => format!("{} ms", self.edit_text(value)),
             Self::Percent => format!("{} %", self.edit_text(value)),
             Self::Ratio => format!("{} :1", self.edit_text(value)),
+            Self::Note => self.edit_text(value),
             Self::Number { unit: "", .. } => self.edit_text(value),
             Self::Number { unit, .. } => format!("{} {unit}", self.edit_text(value)),
         }
@@ -103,6 +107,7 @@ impl ParamFormat {
             Self::Seconds => format!("{value:.2}"),
             Self::Percent => format!("{:.0}", value * 100.0),
             Self::Ratio => format!("{value:.1}"),
+            Self::Note => vibez_core::midi::pitch_name(value.round().clamp(0.0, 127.0) as u8),
             Self::Number { decimals, .. } => format!("{value:.*}", decimals as usize),
         }
     }
@@ -121,6 +126,11 @@ impl ParamFormat {
     /// frequencies means kHz, and times are milliseconds unless "s" follows.
     pub fn parse(self, text: &str, min: f32, max: f32) -> Option<f32> {
         let text = text.trim().to_ascii_lowercase();
+        if matches!(self, Self::Note) {
+            if let Some(pitch) = note_from_name(&text) {
+                return (min..=max).contains(&pitch).then_some(pitch);
+            }
+        }
         if matches!(self, Self::Amplitude { .. }) && matches!(text.as_str(), "-inf" | "-∞") {
             return Some(0.0);
         }
@@ -189,6 +199,31 @@ pub fn param_format(
     host_rate: Option<u32>,
 ) -> ParamFormat {
     match (kind, index) {
+        (DevicePresetKind::Instrument(InstrumentKind::Sampler), index) => {
+            use vibez_instruments::sampler::param;
+            match index {
+                param::VOLUME => ParamFormat::Amplitude {
+                    floor_db: crate::domains::gain::MIN_GAIN_DB,
+                },
+                param::TUNE => ParamFormat::Number {
+                    decimals: 1,
+                    unit: "st",
+                },
+                param::FINE => ParamFormat::Number {
+                    decimals: 0,
+                    unit: "ct",
+                },
+                param::VELOCITY_LOW | param::VELOCITY_HIGH => ParamFormat::Number {
+                    decimals: 0,
+                    unit: "",
+                },
+                param::FILTER_ENV => ParamFormat::Number {
+                    decimals: 1,
+                    unit: "oct",
+                },
+                _ => ParamFormat::for_descriptor(descriptor),
+            }
+        }
         (DevicePresetKind::Instrument(InstrumentKind::SubtractiveSynth), index) => {
             use vibez_instruments::synth::param;
             match index {
@@ -237,6 +272,31 @@ pub fn param_format(
         }
         _ => ParamFormat::for_descriptor(descriptor),
     }
+}
+
+/// The MIDI note a name like "c4", "f#2" or "db-1" means.
+fn note_from_name(text: &str) -> Option<f32> {
+    let mut chars = text.chars();
+    let class = match chars.next()? {
+        'c' => 0,
+        'd' => 2,
+        'e' => 4,
+        'f' => 5,
+        'g' => 7,
+        'a' => 9,
+        'b' => 11,
+        _ => return None,
+    };
+    let rest = chars.as_str();
+    let (accidental, octave) = if let Some(octave) = rest.strip_prefix('#') {
+        (1, octave)
+    } else if let Some(octave) = rest.strip_prefix('b') {
+        (-1, octave)
+    } else {
+        (0, rest)
+    };
+    let octave: i32 = octave.trim().parse().ok()?;
+    Some(((octave + 1) * 12 + class + accidental) as f32)
 }
 
 #[derive(Debug, Clone)]
@@ -588,6 +648,26 @@ mod tests {
         assert_eq!(format(param::DETUNE, 0.26), "0.3 st");
         assert_eq!(format(param::VOICES, 8.0), "8");
         assert_eq!(format(param::CUTOFF, 2_400.0), "2.4 kHz");
+    }
+
+    #[test]
+    fn notes_read_and_type_by_name() {
+        let note = ParamFormat::Note;
+        assert_eq!(note.format(60.0), "C4");
+        assert_eq!(note.format(0.0), "C-1");
+        for (text, pitch) in [
+            ("C4", 60.0),
+            ("c#3", 49.0),
+            ("Db3", 49.0),
+            ("A-1", 9.0),
+            ("64", 64.0),
+        ] {
+            assert_eq!(note.parse(text, 0.0, 127.0), Some(pitch), "{text}");
+        }
+        for text in ["H2", "C", "C10", "oops"] {
+            assert_eq!(note.parse(text, 0.0, 127.0), None, "{text}");
+        }
+        assert_eq!(note.parse(&note.edit_text(61.0), 0.0, 127.0), Some(61.0));
     }
 
     fn begin(entry: &mut Option<ValueEntry>, index: usize) -> (TrackId, DeviceSlot) {

@@ -282,6 +282,50 @@ const SYNTH_KEYS: [&str; vibez_instruments::synth::param::COUNT] = [
     "filter_release",
 ];
 
+/// How a Sampler plays its sample. The root, trim and loop points belong
+/// to the sample itself, so a preset leaves them where they are.
+const SAMPLER_KEYS: [(usize, &str); 29] = {
+    use vibez_instruments::sampler::param::*;
+    [
+        (ATTACK, "attack"),
+        (DECAY, "decay"),
+        (SUSTAIN, "sustain"),
+        (RELEASE, "release"),
+        (LOOP, "loop"),
+        (ONE_SHOT, "one_shot"),
+        (VOLUME, "volume"),
+        (REVERSE, "reverse"),
+        (CROSSFADE, "crossfade"),
+        (TUNE, "tune"),
+        (FINE, "fine"),
+        (GLIDE, "glide"),
+        (KEY_LOW, "key_low"),
+        (KEY_HIGH, "key_high"),
+        (VELOCITY_LOW, "velocity_low"),
+        (VELOCITY_HIGH, "velocity_high"),
+        (VELOCITY_AMOUNT, "velocity_amount"),
+        (FILTER_TYPE, "filter_type"),
+        (CUTOFF, "cutoff"),
+        (RESONANCE, "resonance"),
+        (FILTER_ENV, "filter_env"),
+        (FILTER_ATTACK, "filter_attack"),
+        (FILTER_DECAY, "filter_decay"),
+        (FILTER_SUSTAIN, "filter_sustain"),
+        (FILTER_RELEASE, "filter_release"),
+        (LFO_SHAPE, "lfo_shape"),
+        (LFO_TARGET, "lfo_target"),
+        (LFO_RATE, "lfo_rate"),
+        (LFO_AMOUNT, "lfo_amount"),
+    ]
+};
+
+fn sampler_keys() -> Vec<PresetParam> {
+    SAMPLER_KEYS
+        .iter()
+        .map(|(index, key)| (*index, *key, vibez_instruments::sampler::is_whole(*index)))
+        .collect()
+}
+
 /// One stored parameter: its index, preset key and whether it only takes
 /// whole numbers, as switches and choices do.
 type PresetParam = (usize, &'static str, bool);
@@ -343,6 +387,9 @@ fn parameter_keys(device: &DeviceParams) -> Result<Vec<PresetParam>, String> {
         DevicePresetKind::Effect(effect_type) => effect_type,
         DevicePresetKind::Instrument(InstrumentKind::SubtractiveSynth) => {
             return Ok(synth_keys());
+        }
+        DevicePresetKind::Instrument(InstrumentKind::Sampler) => {
+            return Ok(sampler_keys());
         }
         DevicePresetKind::Instrument(_) => {
             return Err("Presets are not yet supported by this built-in device".into());
@@ -441,8 +488,109 @@ pub fn presets_for(kind: DevicePresetKind) -> Vec<DevicePreset> {
     match kind {
         DevicePresetKind::Effect(effect_type) => factory_presets(effect_type),
         DevicePresetKind::Instrument(InstrumentKind::SubtractiveSynth) => synth_factory_presets(),
+        DevicePresetKind::Instrument(InstrumentKind::Sampler) => sampler_factory_presets(),
         DevicePresetKind::Instrument(_) => Vec::new(),
     }
+}
+
+fn sampler_factory_presets() -> Vec<DevicePreset> {
+    use vibez_instruments::sampler::filter_type;
+    use vibez_instruments::synth::{lfo_shape, lfo_target};
+    let presets: [(&str, &[(&str, f32)]); 9] = [
+        ("Init", &[]),
+        (
+            "Warm Rhodes",
+            &[
+                ("attack", 0.012),
+                ("decay", 0.18),
+                ("sustain", 0.5),
+                ("release", 1.2),
+                ("volume", 0.7),
+                ("filter_type", filter_type::LP24 as f32),
+                ("cutoff", 3_200.0),
+                ("filter_env", 1.5),
+                ("filter_decay", 0.4),
+                ("velocity_amount", 0.7),
+            ],
+        ),
+        (
+            "Pluck",
+            &[
+                ("decay", 0.25),
+                ("sustain", 0.0),
+                ("release", 0.15),
+                ("filter_type", filter_type::LP12 as f32),
+                ("cutoff", 900.0),
+                ("resonance", 1.5),
+                ("filter_env", 3.0),
+                ("filter_decay", 0.15),
+            ],
+        ),
+        (
+            "Looped Pad",
+            &[
+                ("loop", 1.0),
+                ("crossfade", 40.0),
+                ("attack", 0.4),
+                ("release", 2.0),
+                ("filter_type", filter_type::LP12 as f32),
+                ("cutoff", 2_500.0),
+                ("lfo_rate", 0.3),
+                ("lfo_amount", 0.15),
+            ],
+        ),
+        (
+            "Reverse Swell",
+            &[("reverse", 1.0), ("attack", 1.0), ("release", 0.4)],
+        ),
+        (
+            "One-shot Hit",
+            &[
+                ("one_shot", 1.0),
+                ("release", 0.05),
+                ("velocity_amount", 0.6),
+            ],
+        ),
+        (
+            "Lo-Fi",
+            &[
+                ("filter_type", filter_type::LP12 as f32),
+                ("cutoff", 2_200.0),
+                ("resonance", 1.2),
+                ("fine", -15.0),
+                ("lfo_target", lfo_target::PITCH as f32),
+                ("lfo_rate", 0.7),
+                ("lfo_amount", 0.008),
+            ],
+        ),
+        (
+            "Wobble",
+            &[
+                ("loop", 1.0),
+                ("crossfade", 20.0),
+                ("filter_type", filter_type::LP24 as f32),
+                ("cutoff", 400.0),
+                ("resonance", 3.0),
+                ("lfo_rate", 3.0),
+                ("lfo_amount", 0.6),
+            ],
+        ),
+        (
+            "Tremolo",
+            &[
+                ("lfo_shape", lfo_shape::TRIANGLE as f32),
+                ("lfo_target", lfo_target::VOLUME as f32),
+                ("lfo_rate", 5.0),
+                ("lfo_amount", 0.5),
+            ],
+        ),
+    ];
+    keyed_presets(
+        DevicePresetKind::Instrument(InstrumentKind::Sampler),
+        &sampler_keys(),
+        vibez_instruments::sampler::SAMPLER_PARAMS,
+        &presets,
+    )
 }
 
 fn synth_keys() -> Vec<PresetParam> {
@@ -2140,6 +2288,89 @@ mod presentation_tests {
             parameters.insert(key.into(), 0.5);
             let fractional = DevicePreset::new(captured.kind(), "Fractional", parameters).unwrap();
             assert!(prepare_updates(&effect, &fractional).is_err(), "{key}");
+        }
+    }
+
+    fn sampler_track() -> crate::state::ProjectTrack {
+        let mut track = crate::state::ProjectTrack::new(TrackId::new(), "Keys".into(), 0);
+        track.has_instrument = true;
+        track.instrument_kind = Some(InstrumentKind::Sampler);
+        track.instrument_params = vibez_instruments::sampler::SAMPLER_PARAMS
+            .iter()
+            .map(|descriptor| descriptor.default)
+            .collect();
+        track
+    }
+
+    #[test]
+    fn sampler_factory_presets_are_valid_distinct_and_start_from_init() {
+        let track = sampler_track();
+        let device = DeviceParams::instrument(&track).unwrap();
+        let presets = presets_for(device.kind);
+        assert!(presets.len() >= 6);
+        assert_eq!(presets[0].name(), "Init");
+        assert!(presets.iter().any(|preset| preset.name() == "Warm Rhodes"));
+        assert_eq!(prepare_updates(device, &presets[0]), Ok(Vec::new()));
+        for preset in &presets[1..] {
+            let mut applied = sampler_track();
+            for (index, value) in prepare_updates(device, preset).unwrap() {
+                applied.instrument_params[index] = value;
+            }
+            assert_ne!(
+                applied.instrument_params,
+                track.instrument_params,
+                "{}",
+                preset.name()
+            );
+            let captured = capture(DeviceParams::instrument(&applied).unwrap(), preset.name());
+            assert_eq!(captured.as_ref(), Ok(preset));
+        }
+        let mut names: Vec<_> = presets.iter().map(DevicePreset::name).collect();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(names.len(), presets.len(), "names are unique");
+    }
+
+    #[test]
+    fn a_sampler_preset_leaves_the_sample_s_own_points_alone() {
+        use vibez_instruments::sampler::param;
+        let mut track = sampler_track();
+        for (index, value) in [
+            (param::ROOT_NOTE, 48.0),
+            (param::START, 0.2),
+            (param::END, 0.8),
+            (param::LOOP_START, 0.3),
+            (param::LOOP_END, 0.7),
+        ] {
+            track.instrument_params[index] = value;
+        }
+        let device = DeviceParams::instrument(&track).unwrap();
+        for preset in presets_for(device.kind) {
+            for (index, _) in prepare_updates(device, &preset).unwrap() {
+                assert!(
+                    ![
+                        param::ROOT_NOTE,
+                        param::START,
+                        param::END,
+                        param::LOOP_START,
+                        param::LOOP_END
+                    ]
+                    .contains(&index),
+                    "{} moves {index}",
+                    preset.name()
+                );
+            }
+        }
+        let captured = capture(device, "Current").unwrap();
+        for key in ["root_note", "start", "end", "loop_start", "loop_end"] {
+            assert!(!captured.parameters().contains_key(key), "{key}");
+        }
+        for key in ["loop", "one_shot", "reverse", "filter_type", "key_low"] {
+            let mut parameters = captured.parameters().clone();
+            assert!(parameters.contains_key(key), "{key}");
+            parameters.insert(key.into(), 0.5);
+            let fractional = DevicePreset::new(captured.kind(), "Fractional", parameters).unwrap();
+            assert!(prepare_updates(device, &fractional).is_err(), "{key}");
         }
     }
 

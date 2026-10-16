@@ -234,17 +234,7 @@ fn clamp_scroll_y(scroll_y: f32, canvas_height: f32) -> f32 {
     scroll_y.clamp(0.0, (content_height - visible).max(0.0))
 }
 
-/// Returns a pitch name like "C4", "D#3".
-pub(crate) fn pitch_name(pitch: u8) -> String {
-    const NAMES: [&str; 12] = [
-        "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B",
-    ];
-    format!(
-        "{}{}",
-        NAMES[pitch as usize % 12],
-        (pitch / 12).saturating_sub(1)
-    )
-}
+pub(crate) use vibez_core::midi::pitch_name;
 
 /// Drag action in progress.
 #[derive(Debug, Clone)]

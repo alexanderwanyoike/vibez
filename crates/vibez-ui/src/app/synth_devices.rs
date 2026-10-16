@@ -5,7 +5,6 @@ use iced::{Color, Element, Length};
 use vibez_core::id::TrackId;
 
 use crate::domains::device_params::DeviceParams;
-use crate::domains::synth::SynthMsg;
 use crate::message::Message;
 use crate::state::UiTrack;
 use crate::theme as th;
@@ -13,14 +12,6 @@ use crate::theme as th;
 use super::*;
 
 impl App {
-    pub(super) fn update_synth(&mut self, message: SynthMsg) -> Task<Message> {
-        self.synth_panels
-            .entry(message.track_id())
-            .or_default()
-            .update(message);
-        Task::none()
-    }
-
     /// The synth card at `width`, with its title and the latency line
     /// beneath it.
     pub(super) fn synth_card<'a>(
@@ -34,7 +25,7 @@ impl App {
             return Space::new(0, 0).into();
         };
         let panel = self
-            .synth_panels
+            .instrument_panels
             .get(&track_id)
             .copied()
             .unwrap_or_default();
@@ -78,7 +69,8 @@ impl App {
 mod tests {
     use super::super::*;
     use crate::domains::devices::DevicesMsg;
-    use crate::domains::synth::{SynthMsg, SynthPage};
+    use crate::domains::instrument_card::InstrumentCardMsg;
+    use crate::domains::synth::SynthPage;
     use crate::state::{DetailPanelTab, ProjectTrack};
     use vibez_core::id::TrackId;
     use vibez_core::midi::{InstrumentKind, TrackKind};
@@ -103,17 +95,26 @@ mod tests {
     #[test]
     fn a_synth_card_remembers_its_tab() {
         let (mut app, track) = synth_app();
-        let _ = app.update(Message::Synth(SynthMsg::ShowPage(track, SynthPage::Filter)));
+        let _ = app.update(Message::InstrumentCard(InstrumentCardMsg::ShowPage(
+            track,
+            SynthPage::Filter.index(),
+        )));
         app.poll_device_meters();
-        assert_eq!(app.synth_panels[&track].page, SynthPage::Filter);
+        assert_eq!(
+            app.instrument_panels[&track].page,
+            SynthPage::Filter.index()
+        );
     }
 
     #[test]
     fn a_removed_synth_forgets_its_panel() {
         let (mut app, track) = synth_app();
-        let _ = app.update(Message::Synth(SynthMsg::ShowPage(track, SynthPage::Filter)));
+        let _ = app.update(Message::InstrumentCard(InstrumentCardMsg::ShowPage(
+            track,
+            SynthPage::Filter.index(),
+        )));
         let _ = app.update(Message::Devices(DevicesMsg::RemoveTrackInstrument(track)));
         app.poll_device_meters();
-        assert!(!app.synth_panels.contains_key(&track));
+        assert!(!app.instrument_panels.contains_key(&track));
     }
 }
