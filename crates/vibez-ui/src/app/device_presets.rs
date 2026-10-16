@@ -167,6 +167,10 @@ impl App {
                 | DevicesMsg::SetTrackInstrument(track, _)
                 | DevicesMsg::RemoveTrackInstrument(track),
             ) => (*track, DeviceSlot::Instrument) == pending,
+            Message::Devices(
+                DevicesMsg::SetDrumPadParams(track, pad, _)
+                | DevicesMsg::ClearDrumRackPad(track, pad),
+            ) => (*track, DeviceSlot::DrumPad(*pad)) == pending,
             Message::ApplyDevicePreset(track, slot, _) => (*track, *slot) == pending,
             Message::Arrangement(
                 ArrangementMsg::RemoveTrack(track)

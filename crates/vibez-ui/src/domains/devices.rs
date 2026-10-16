@@ -130,6 +130,9 @@ impl DevicesMsg {
             DevicesMsg::SetInstrumentParams(track, updates) => {
                 (*track, DeviceSlot::Instrument, updates.clone())
             }
+            DevicesMsg::SetDrumPadParams(track, pad, updates) => {
+                (*track, DeviceSlot::DrumPad(*pad), updates.clone())
+            }
             _ => return None,
         };
         Some(ParamEdit {

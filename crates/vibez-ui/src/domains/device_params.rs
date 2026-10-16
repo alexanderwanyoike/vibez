@@ -69,7 +69,14 @@ impl<'a> DeviceParams<'a> {
                 .find(|effect| effect.id == id)
                 .map(Self::from),
             DeviceSlot::Instrument => Self::instrument(track),
-            DeviceSlot::DrumPad(_) => None,
+            DeviceSlot::DrumPad(pad) => track.drum_rack_pads.get(pad).map(|pad| Self {
+                slot,
+                kind: DevicePresetKind::Instrument(vibez_core::midi::InstrumentKind::Sampler),
+                params: &pad.params,
+                descriptors: vibez_instruments::sampler::SAMPLER_PARAMS,
+                bypass: false,
+                plugin: false,
+            }),
         }
     }
 
