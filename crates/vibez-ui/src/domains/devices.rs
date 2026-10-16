@@ -103,10 +103,10 @@ impl DevicesMsg {
     }
 }
 
-/// The effect and parameter values a parameter edit asks for.
+/// The device and parameter values a parameter edit asks for.
 pub struct ParamEdit {
     pub track_id: TrackId,
-    pub effect_id: EffectId,
+    pub slot: crate::domains::device_params::DeviceSlot,
     pub updates: Vec<(usize, f32)>,
 }
 
@@ -123,7 +123,7 @@ impl DevicesMsg {
         };
         Some(ParamEdit {
             track_id,
-            effect_id,
+            slot: crate::domains::device_params::DeviceSlot::Effect(effect_id),
             updates,
         })
     }
@@ -138,19 +138,17 @@ pub fn is_unchanged_param_edit(
     let Some(edit) = message.param_edit() else {
         return false;
     };
-    let Some(effect) = project.find(edit.track_id).and_then(|track| {
-        track
-            .effects
-            .iter()
-            .find(|effect| effect.id == edit.effect_id)
-    }) else {
+    let Some(device) = project
+        .find(edit.track_id)
+        .and_then(|track| crate::domains::device_params::DeviceParams::find(track, edit.slot))
+    else {
         return false;
     };
     edit.updates.iter().all(|&(index, value)| {
-        effect
+        device
             .descriptors
             .get(index)
-            .zip(effect.params.get(index))
+            .zip(device.params.get(index))
             .is_some_and(|(descriptor, current)| {
                 value.clamp(descriptor.min, descriptor.max) == *current
             })

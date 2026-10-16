@@ -6,9 +6,9 @@ use iced::widget::{button, canvas, column, container, pick_list, row, text, text
 use iced::{Alignment, Color, Element, Length, Theme};
 use vibez_core::id::TrackId;
 
+use crate::domains::device_params::{DeviceParams, DeviceSlot};
 use crate::domains::param_entry::{param_format, EntryMsg, ValueEntry};
 use crate::message::Message;
-use crate::state::UiEffect;
 use crate::theme as th;
 use crate::widgets::effect_knob::{EffectKnobWidget, KnobTarget};
 use crate::widgets::on_blur::on_blur;
@@ -45,7 +45,7 @@ pub fn heading<'a>(label: impl text::IntoFragment<'a>) -> text::Text<'a, Theme> 
 #[derive(Clone, Copy)]
 pub struct Param<'a> {
     pub track_id: TrackId,
-    pub effect: &'a UiEffect,
+    pub device: DeviceParams<'a>,
     pub index: usize,
     pub accent: Color,
     pub entry: Option<&'a ValueEntry>,
@@ -57,14 +57,14 @@ pub struct Param<'a> {
 impl<'a> Param<'a> {
     pub fn new(
         track_id: TrackId,
-        effect: &'a UiEffect,
+        device: impl Into<DeviceParams<'a>>,
         index: usize,
         accent: Color,
         entry: Option<&'a ValueEntry>,
     ) -> Self {
         Self {
             track_id,
-            effect,
+            device: device.into(),
             index,
             accent,
             entry,
@@ -94,32 +94,38 @@ impl<'a> Param<'a> {
     }
 
     fn value(&self) -> f32 {
-        self.effect
-            .params
-            .get(self.index)
-            .copied()
-            .or_else(|| self.descriptor().map(|d| d.default))
-            .unwrap_or(0.0)
+        self.device.value(self.index)
     }
 
     fn descriptor(&self) -> Option<&'static vibez_core::effect::ParamDescriptor> {
-        self.effect.descriptors.get(self.index)
+        self.device.descriptors.get(self.index)
     }
 
     pub fn knob(&self) -> EffectKnobWidget {
         let (min, max, default) = self
             .descriptor()
             .map_or((0.0, 1.0, 0.0), |d| (d.min, d.max, d.default));
-        let mut knob = EffectKnobWidget::new(
-            self.track_id,
-            self.effect.id,
-            self.index,
-            self.value(),
-            min,
-            max,
-            default,
-            self.accent,
-        );
+        let mut knob = match self.device.slot {
+            DeviceSlot::Effect(effect_id) => EffectKnobWidget::new(
+                self.track_id,
+                effect_id,
+                self.index,
+                self.value(),
+                min,
+                max,
+                default,
+                self.accent,
+            ),
+            DeviceSlot::Instrument => EffectKnobWidget::for_instrument(
+                self.track_id,
+                self.index,
+                self.value(),
+                min,
+                max,
+                default,
+                self.accent,
+            ),
+        };
         if let Some(target) = self.target {
             knob.target = target;
         }
@@ -137,16 +143,11 @@ impl<'a> Param<'a> {
         let Some(descriptor) = self.descriptor() else {
             return text("").into();
         };
-        let format = param_format(
-            self.effect.effect_type,
-            self.index,
-            descriptor,
-            self.host_rate,
-        );
+        let format = param_format(self.device.kind, self.index, descriptor, self.host_rate);
         let accent = self.accent;
         if let Some(entry) = self
             .entry
-            .filter(|entry| entry.is_for(self.effect.id, self.index))
+            .filter(|entry| entry.is_for(self.device.slot, self.index))
         {
             let invalid = entry.invalid;
             let field = text_input("", &entry.text)
@@ -174,7 +175,7 @@ impl<'a> Param<'a> {
         }
         let begin = Message::ParamEntry(EntryMsg::Begin {
             track_id: self.track_id,
-            effect_id: self.effect.id,
+            slot: self.device.slot,
             index: self.index,
             text: format.edit_text(self.value()),
         });
@@ -232,12 +233,9 @@ impl<'a> Param<'a> {
                 .wrapping(text::Wrapping::None)
                 .into(),
             on,
-            Message::set_effect_param(
-                self.track_id,
-                self.effect.id,
-                self.index,
-                if on { 0.0 } else { 1.0 },
-            ),
+            self.device
+                .slot
+                .set(self.track_id, self.index, if on { 0.0 } else { 1.0 }),
             self.accent,
         )
     }
@@ -245,11 +243,11 @@ impl<'a> Param<'a> {
     /// A dropdown of this parameter's choices, `names[first..]`, each set as
     /// its index.
     pub fn choices(&self, names: &'static [&'static str], first: usize) -> Element<'a, Message> {
-        let (track_id, effect_id, index) = (self.track_id, self.effect.id, self.index);
+        let (track_id, slot, index) = (self.track_id, self.device.slot, self.index);
         let options: Vec<Named> = (first..names.len()).map(|n| Named(n, names[n])).collect();
         let selected = chosen(self.value(), first, names.len());
         dropdown(options, Named(selected, names[selected]), move |named| {
-            Message::set_effect_param(track_id, effect_id, index, named.0 as f32)
+            slot.set(track_id, index, named.0 as f32)
         })
     }
 

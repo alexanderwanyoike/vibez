@@ -1,8 +1,11 @@
 //! Typed entry for built-in device parameters: how each value reads and
 //! what typed text means, with one entry open across all devices.
 
+use vibez_core::device_preset::DevicePresetKind;
 use vibez_core::effect::{EffectType, ParamDescriptor};
-use vibez_core::id::{EffectId, TrackId};
+use vibez_core::id::TrackId;
+
+use crate::domains::device_params::DeviceSlot;
 
 /// How a stored parameter value is shown and typed.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -179,23 +182,31 @@ impl ParamFormat {
 /// `host_rate` is the sample rate the device runs at, for values that read
 /// as a share of it.
 pub fn param_format(
-    effect_type: EffectType,
+    kind: DevicePresetKind,
     index: usize,
     descriptor: &ParamDescriptor,
     host_rate: Option<u32>,
 ) -> ParamFormat {
-    match (effect_type, index) {
-        (EffectType::Gain, vibez_dsp::gain::param::GAIN) => ParamFormat::Amplitude {
-            floor_db: crate::domains::gain::MIN_GAIN_DB,
-        },
-        (EffectType::Drive, vibez_dsp::drive::param::AMOUNT) => ParamFormat::PreGain,
-        (EffectType::Reverb, vibez_dsp::reverb::param::ROOM_SIZE) => ParamFormat::DecayTime,
-        (EffectType::Bitcrush, vibez_dsp::bitcrush::param::SR_REDUCE) => {
+    match (kind, index) {
+        (DevicePresetKind::Effect(EffectType::Gain), vibez_dsp::gain::param::GAIN) => {
+            ParamFormat::Amplitude {
+                floor_db: crate::domains::gain::MIN_GAIN_DB,
+            }
+        }
+        (DevicePresetKind::Effect(EffectType::Drive), vibez_dsp::drive::param::AMOUNT) => {
+            ParamFormat::PreGain
+        }
+        (DevicePresetKind::Effect(EffectType::Reverb), vibez_dsp::reverb::param::ROOM_SIZE) => {
+            ParamFormat::DecayTime
+        }
+        (DevicePresetKind::Effect(EffectType::Bitcrush), vibez_dsp::bitcrush::param::SR_REDUCE) => {
             ParamFormat::RateDivider { host_rate }
         }
-        (EffectType::Drive, vibez_dsp::drive::param::OUTPUT) => ParamFormat::Amplitude {
-            floor_db: crate::domains::gain::MIN_GAIN_DB,
-        },
+        (DevicePresetKind::Effect(EffectType::Drive), vibez_dsp::drive::param::OUTPUT) => {
+            ParamFormat::Amplitude {
+                floor_db: crate::domains::gain::MIN_GAIN_DB,
+            }
+        }
         _ => ParamFormat::for_descriptor(descriptor),
     }
 }
@@ -204,7 +215,7 @@ pub fn param_format(
 pub enum EntryMsg {
     Begin {
         track_id: TrackId,
-        effect_id: EffectId,
+        slot: DeviceSlot,
         index: usize,
         text: String,
     },
@@ -216,15 +227,15 @@ pub enum EntryMsg {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ValueEntry {
     pub track_id: TrackId,
-    pub effect_id: EffectId,
+    pub slot: DeviceSlot,
     pub index: usize,
     pub text: String,
     pub invalid: bool,
 }
 
 impl ValueEntry {
-    pub fn is_for(&self, effect_id: EffectId, index: usize) -> bool {
-        self.effect_id == effect_id && self.index == index
+    pub fn is_for(&self, slot: DeviceSlot, index: usize) -> bool {
+        self.slot == slot && self.index == index
     }
 }
 
@@ -233,7 +244,7 @@ pub enum EntryAction {
     None,
     SetParameter {
         track_id: TrackId,
-        effect_id: EffectId,
+        slot: DeviceSlot,
         index: usize,
         value: f32,
     },
@@ -250,13 +261,13 @@ pub fn update(
     match message {
         EntryMsg::Begin {
             track_id,
-            effect_id,
+            slot,
             index,
             text,
         } => {
             *entry = Some(ValueEntry {
                 track_id,
-                effect_id,
+                slot,
                 index,
                 text,
                 invalid: false,
@@ -282,7 +293,7 @@ pub fn update(
             if current != Some(value) {
                 return EntryAction::SetParameter {
                     track_id: open.track_id,
-                    effect_id: open.effect_id,
+                    slot: open.slot,
                     index: open.index,
                     value,
                 };
@@ -351,7 +362,7 @@ mod tests {
     fn the_drive_output_reads_in_decibels() {
         let index = vibez_dsp::drive::param::OUTPUT;
         let format = param_format(
-            EffectType::Drive,
+            DevicePresetKind::Effect(EffectType::Drive),
             index,
             &vibez_dsp::drive::DRIVE_PARAMS[index],
             None,
@@ -366,7 +377,7 @@ mod tests {
     fn the_drive_amount_reads_as_decibels_of_gain_into_the_shaper() {
         let index = vibez_dsp::drive::param::AMOUNT;
         let format = param_format(
-            EffectType::Drive,
+            DevicePresetKind::Effect(EffectType::Drive),
             index,
             &vibez_dsp::drive::DRIVE_PARAMS[index],
             None,
@@ -385,7 +396,7 @@ mod tests {
         use vibez_dsp::bitcrush::{param, BITCRUSH_PARAMS};
         let format = |index: usize, host_rate| {
             param_format(
-                EffectType::Bitcrush,
+                DevicePresetKind::Effect(EffectType::Bitcrush),
                 index,
                 &BITCRUSH_PARAMS[index],
                 host_rate,
@@ -417,7 +428,7 @@ mod tests {
     fn the_reverb_room_size_reads_as_its_decay_time() {
         use vibez_dsp::reverb::{decay_seconds, param, REVERB_PARAMS};
         let format = param_format(
-            EffectType::Reverb,
+            DevicePresetKind::Effect(EffectType::Reverb),
             param::ROOM_SIZE,
             &REVERB_PARAMS[param::ROOM_SIZE],
             None,
@@ -489,7 +500,7 @@ mod tests {
         );
         assert_eq!(
             param_format(
-                EffectType::Gain,
+                DevicePresetKind::Effect(EffectType::Gain),
                 vibez_dsp::gain::param::GAIN,
                 &descriptor(0.0, 2.0, ""),
                 None,
@@ -505,11 +516,13 @@ mod tests {
         let descriptors = vibez_dsp::gain::GainEffect::new().param_descriptors();
         let read = |index: usize, text: &str| {
             let descriptor = &descriptors[index];
-            param_format(EffectType::Gain, index, descriptor, None).parse(
-                text,
-                descriptor.min,
-                descriptor.max,
+            param_format(
+                DevicePresetKind::Effect(EffectType::Gain),
+                index,
+                descriptor,
+                None,
             )
+            .parse(text, descriptor.min, descriptor.max)
         };
         assert_eq!(read(param::GAIN, "0"), Some(1.0));
         assert!((read(param::GAIN, " -6.0 ").unwrap() - 0.501_187_2).abs() < 1e-6);
@@ -530,26 +543,29 @@ mod tests {
         }
     }
 
-    fn begin(entry: &mut Option<ValueEntry>, index: usize) -> (TrackId, EffectId) {
-        let (track_id, effect_id) = (TrackId::new(), EffectId::new());
+    fn begin(entry: &mut Option<ValueEntry>, index: usize) -> (TrackId, DeviceSlot) {
+        let (track_id, slot) = (
+            TrackId::new(),
+            DeviceSlot::Effect(vibez_core::id::EffectId::new()),
+        );
         update(
             entry,
             EntryMsg::Begin {
                 track_id,
-                effect_id,
+                slot,
                 index,
                 text: "1.0".into(),
             },
             |_| None,
             None,
         );
-        (track_id, effect_id)
+        (track_id, slot)
     }
 
     #[test]
     fn submitting_a_valid_entry_sets_the_parameter_and_closes_it() {
         let mut entry = None;
-        let (track_id, effect_id) = begin(&mut entry, 3);
+        let (track_id, slot) = begin(&mut entry, 3);
         update(&mut entry, EntryMsg::Edit("2.5".into()), |_| None, None);
         let action = update(
             &mut entry,
@@ -561,7 +577,7 @@ mod tests {
             action,
             EntryAction::SetParameter {
                 track_id,
-                effect_id,
+                slot,
                 index: 3,
                 value: 2.5
             }
@@ -593,7 +609,7 @@ mod tests {
     fn beginning_another_entry_replaces_the_open_one() {
         let mut entry = None;
         begin(&mut entry, 0);
-        let (_, effect_id) = begin(&mut entry, 2);
-        assert!(entry.as_ref().unwrap().is_for(effect_id, 2));
+        let (_, slot) = begin(&mut entry, 2);
+        assert!(entry.as_ref().unwrap().is_for(slot, 2));
     }
 }

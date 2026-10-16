@@ -1,5 +1,6 @@
 //! Connects typed device values to the parameter they edit.
 
+use crate::domains::device_params::DeviceParams;
 use crate::domains::devices::DevicesMsg;
 use crate::domains::param_entry::{param_format, update, EntryAction, EntryMsg};
 use crate::widgets::device_controls::entry_id;
@@ -10,25 +11,21 @@ use super::*;
 impl App {
     pub(super) fn update_param_entry(&mut self, message: EntryMsg) -> Task<Message> {
         let begins = matches!(message, EntryMsg::Begin { .. });
-        let effect = self.param_entry.as_ref().and_then(|entry| {
-            self.state
-                .find_track(entry.track_id)?
-                .effects
-                .iter()
-                .find(|effect| effect.id == entry.effect_id)
+        let device = self.param_entry.as_ref().and_then(|entry| {
+            DeviceParams::find(self.state.find_track(entry.track_id)?, entry.slot)
         });
-        if matches!(message, EntryMsg::Submit) && effect.is_none() {
+        if matches!(message, EntryMsg::Submit) && device.is_none() {
             self.param_entry = None;
             return Task::none();
         }
-        let current = effect
+        let current = device
             .zip(self.param_entry.as_ref())
-            .and_then(|(effect, entry)| effect.params.get(entry.index).copied());
+            .and_then(|(device, entry)| device.params.get(entry.index).copied());
         let host_rate = self.state.transport.sample_rate;
         let parse = |entry: &crate::domains::param_entry::ValueEntry| {
-            let effect = effect?;
-            let descriptor = effect.descriptors.get(entry.index)?;
-            param_format(effect.effect_type, entry.index, descriptor, Some(host_rate)).parse(
+            let device = device?;
+            let descriptor = device.descriptors.get(entry.index)?;
+            param_format(device.kind, entry.index, descriptor, Some(host_rate)).parse(
                 &entry.text,
                 descriptor.min,
                 descriptor.max,
@@ -37,10 +34,10 @@ impl App {
         match update(&mut self.param_entry, message, parse, current) {
             EntryAction::SetParameter {
                 track_id,
-                effect_id,
+                slot,
                 index,
                 value,
-            } => self.update(Message::set_effect_param(track_id, effect_id, index, value)),
+            } => self.update(slot.set(track_id, index, value)),
             EntryAction::None if begins => {
                 text_input::focus(entry_id()).chain(text_input::select_all(entry_id()))
             }
@@ -54,8 +51,7 @@ impl App {
             return;
         };
         if self.param_entry.as_ref().is_some_and(|entry| {
-            entry.effect_id == edit.effect_id
-                && edit.updates.iter().any(|(index, _)| *index == entry.index)
+            entry.slot == edit.slot && edit.updates.iter().any(|(index, _)| *index == entry.index)
         }) {
             self.param_entry = None;
         }
@@ -65,6 +61,7 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domains::device_params::DeviceSlot;
     use crate::state::{DetailPanelTab, ProjectTrack};
     use vibez_core::effect::EffectType;
     use vibez_core::id::{EffectId, TrackId};
@@ -88,7 +85,7 @@ mod tests {
     fn type_value(app: &mut App, track_id: TrackId, effect_id: EffectId, index: usize, text: &str) {
         let _ = app.update(Message::ParamEntry(EntryMsg::Begin {
             track_id,
-            effect_id,
+            slot: DeviceSlot::Effect(effect_id),
             index,
             text: String::new(),
         }));
@@ -152,7 +149,7 @@ mod tests {
         let (mut app, track, effect) = app_with(EffectType::Gain);
         let _ = app.update(Message::ParamEntry(EntryMsg::Begin {
             track_id: track,
-            effect_id: effect,
+            slot: DeviceSlot::Effect(effect),
             index: 0,
             text: "invalid".into(),
         }));
@@ -166,7 +163,7 @@ mod tests {
         let (mut app, track, effect) = app_with(EffectType::Filter);
         let _ = app.update(Message::ParamEntry(EntryMsg::Begin {
             track_id: track,
-            effect_id: effect,
+            slot: DeviceSlot::Effect(effect),
             index: 0,
             text: "500".into(),
         }));
@@ -179,7 +176,7 @@ mod tests {
         let (mut app, track, effect) = app_with(EffectType::Filter);
         let _ = app.update(Message::ParamEntry(EntryMsg::Begin {
             track_id: track,
-            effect_id: effect,
+            slot: DeviceSlot::Effect(effect),
             index: 0,
             text: "500".into(),
         }));
