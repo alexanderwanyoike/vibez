@@ -82,3 +82,7 @@ required-features = ["dev-gallery"]
 [[example]]
 name = "delay_device"
 required-features = ["dev-gallery"]
+
+[[example]]
+name = "reverb_device"
+required-features = ["dev-gallery"]
