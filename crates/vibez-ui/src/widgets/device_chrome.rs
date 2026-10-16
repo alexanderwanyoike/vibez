@@ -240,3 +240,38 @@ pub fn plugin_instrument_card<'a>(
         .width(Length::Fixed(PLUGIN_CARD_W)),
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const WIDTHS: CardWidths = CardWidths {
+        compact: 340.0,
+        medium: 520.0,
+        max: 1000.0,
+    };
+
+    #[test]
+    fn a_crowded_chain_keeps_each_device_at_medium_and_scrolls() {
+        assert_eq!(
+            WIDTHS.chain_width(120.0, 1600.0),
+            520.0,
+            "never squeezed to compact"
+        );
+        assert_eq!(
+            WIDTHS.chain_width(700.0, 1600.0),
+            700.0,
+            "takes a larger share"
+        );
+        assert_eq!(
+            WIDTHS.chain_width(5000.0, 6000.0),
+            1000.0,
+            "up to its maximum"
+        );
+    }
+
+    #[test]
+    fn a_section_too_narrow_for_medium_uses_compact() {
+        assert_eq!(WIDTHS.chain_width(120.0, 400.0), 340.0);
+    }
+}
