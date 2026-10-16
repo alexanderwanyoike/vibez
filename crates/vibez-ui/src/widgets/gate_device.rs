@@ -16,7 +16,7 @@ use crate::message::Message;
 use crate::state::UiEffect;
 use crate::theme as th;
 use crate::widgets::device_controls::{
-    disclosure, heading, level_column, rule, segmented, vertical_rule, Param, LABEL_SIZE,
+    disclosure, heading, level_column, plot_band, rule, segmented, vertical_rule, Param, LABEL_SIZE,
 };
 use crate::widgets::device_layout::{stack, KNOB_ROW_H};
 use crate::widgets::gate_display::GateHistory;
@@ -218,17 +218,14 @@ impl<'a> GateView<'a> {
         let mut content = row![
             level_column("Input", self.panel.input),
             level_column("Output", self.panel.output),
+            vertical_rule(),
             self.history(!layout.full),
         ]
         .spacing(8);
         if layout.full {
-            content = content.push(self.state());
+            content = content.push(vertical_rule()).push(self.state());
         }
-        container(content)
-            .padding([6.0, PAD])
-            .height(layout.plots)
-            .width(Length::Fill)
-            .into()
+        plot_band(content, layout.plots, PAD)
     }
 
     const MAIN: [usize; 5] = [
