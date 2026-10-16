@@ -158,6 +158,12 @@ impl Instrument for DrumRack {
         }
         pad.choke_group = state.choke_group;
     }
+
+    fn set_drum_pad_param(&mut self, pad_index: usize, index: usize, value: f32) {
+        if let Some(pad) = self.pads.get_mut(pad_index) {
+            pad.sampler.set_param(index, value);
+        }
+    }
 }
 
 #[cfg(test)]
