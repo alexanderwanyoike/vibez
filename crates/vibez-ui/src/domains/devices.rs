@@ -615,7 +615,35 @@ impl DevicesState {
                     };
                 }
             }
-            DevicesMsg::ReplaceDrumRackPads(..) => {}
+            DevicesMsg::ReplaceDrumRackPads(track_id, pads) => {
+                let Some(track) = find_track_mut(tracks, master, buses, track_id) else {
+                    return action;
+                };
+                track.drum_rack_pads = pads;
+                for (pad_index, pad) in track.drum_rack_pads.iter().enumerate() {
+                    // An emptied pad drops its old settings too, so a sample
+                    // dropped on it later plays as the card shows.
+                    engine.send(EngineCommand::SetDrumRackPadState {
+                        track_id,
+                        pad_index,
+                        state: pad.to_state(),
+                    });
+                    match &pad.audio {
+                        Some(audio) => {
+                            engine.send(EngineCommand::LoadDrumRackPadSample {
+                                track_id,
+                                pad_index,
+                                sample: std::sync::Arc::clone(audio),
+                                sample_name: pad.name.clone().unwrap_or_default(),
+                            });
+                        }
+                        None => engine.send(EngineCommand::ClearDrumRackPad {
+                            track_id,
+                            pad_index,
+                        }),
+                    }
+                }
+            }
             DevicesMsg::AuditionNote {
                 track_id,
                 pitch,
