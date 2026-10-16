@@ -1,6 +1,5 @@
 //! Gain control values and transient metering state, independent of rendering.
 
-use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
 use vibez_core::id::{EffectId, TrackId};
@@ -35,9 +34,11 @@ impl GainMsg {
     }
 }
 
+/// How far back the output history reaches.
+pub const HISTORY: Duration = Duration::from_secs(10);
+
 #[derive(Debug, Clone, Copy)]
 pub struct GainHistoryPoint {
-    pub at: Instant,
     pub peak: f32,
     pub rms: f32,
 }
@@ -48,7 +49,7 @@ pub struct GainPanelState {
     pub input: MeterValues,
     pub output: MeterValues,
     pub clip_latched: bool,
-    pub history: VecDeque<GainHistoryPoint>,
+    pub history: super::device_levels::ReadingHistory<GainHistoryPoint>,
     pub last_meter_at: Option<Instant>,
 }
 
@@ -65,17 +66,14 @@ impl GainPanelState {
         self.output = output;
         self.clip_latched |= output.peak_l >= 1.0 || output.peak_r >= 1.0;
         self.last_meter_at = Some(now);
-        while self.history.front().is_some_and(|point| {
-            self.history.len() >= 600
-                || now.saturating_duration_since(point.at) > Duration::from_secs(10)
-        }) {
-            self.history.pop_front();
-        }
-        self.history.push_back(GainHistoryPoint {
-            at: now,
-            peak: output.peak_l.max(output.peak_r),
-            rms: output.rms_l.max(output.rms_r),
-        });
+        self.history.push(
+            now,
+            GainHistoryPoint {
+                peak: output.peak_l.max(output.peak_r),
+                rms: output.rms_l.max(output.rms_r),
+            },
+            HISTORY,
+        );
     }
 
     pub fn clear_clip(&mut self) {
@@ -159,8 +157,8 @@ mod tests {
         assert!(panel.clip_latched);
         assert_eq!(panel.last_meter_at, Some(now));
         assert_eq!(panel.history.len(), 1);
-        let point = panel.history.front().unwrap();
-        assert_eq!(point.at, now);
+        let (at, point) = panel.history.iter().next().unwrap();
+        assert_eq!(*at, now);
         assert_eq!(point.peak, output.peak_l);
         assert_eq!(point.rms, output.rms_l);
 

@@ -20,6 +20,7 @@ pub(super) fn app() -> super::App {
         device_meters: Default::default(),
         compressor_devices: Default::default(),
         filter_panels: Default::default(),
+        gate_panels: Default::default(),
         gain_devices: Default::default(),
         eq_devices: Default::default(),
         param_entry: None,

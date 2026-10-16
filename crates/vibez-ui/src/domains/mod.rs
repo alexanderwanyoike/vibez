@@ -22,6 +22,7 @@ pub mod devices;
 pub mod eq;
 pub mod filter;
 pub mod gain;
+pub mod gate;
 pub mod param_entry;
 pub mod perform;
 pub mod piano_roll;

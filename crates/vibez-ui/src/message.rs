@@ -96,6 +96,7 @@ pub enum Message {
     Eq(crate::domains::eq::EqMsg),
     Compressor(crate::domains::compressor::CompressorMsg),
     Filter(crate::domains::filter::FilterMsg),
+    Gate(crate::domains::gate::GateMsg),
     /// Typing a value into a built-in device parameter.
     ParamEntry(crate::domains::param_entry::EntryMsg),
     ApplyDevicePreset(TrackId, EffectId, vibez_core::device_preset::DevicePreset),

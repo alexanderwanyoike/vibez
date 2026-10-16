@@ -18,6 +18,7 @@ use crate::widgets::compressor_display::{ReductionHistory, ReductionMeter, Trans
 use crate::widgets::device_controls::{
     disclosure, heading, rule, segmented, toggle, vertical_rule, Param, LABEL_SIZE,
 };
+use crate::widgets::device_layout::{stack, KNOB_ROW_H};
 use crate::widgets::level_meter::{self, LevelMeter};
 
 const PAD: f32 = 10.0;
@@ -25,8 +26,6 @@ const PRESET_ROW_H: f32 = 28.0;
 const KNOB: f32 = 32.0;
 const SMALL_KNOB: f32 = 18.0;
 const KNOB_COL_W: f32 = 68.0;
-const KNOB_ROW_H: f32 = 74.0;
-const LINE_H: f32 = 24.0;
 const PLOT_MIN_H: f32 = 72.0;
 const TABS_H: f32 = 22.0;
 /// Page tabs over one row of controls.
@@ -91,40 +90,18 @@ pub fn arrange(size: Size, advanced: bool) -> Arrangement {
         Knobs::Four
     };
     let groups_beside = size.width >= FULL_W;
-    let knob_row = if below >= KNOB_ROW_H {
-        KNOB_ROW_H
-    } else {
-        LINE_H
-    };
     let advanced_h = if groups_beside {
         KNOB_ROW_H
     } else {
         ADVANCED_H
     };
-    let stacked = 1.0 + advanced_h;
-    let advanced_only = advanced && below < PLOT_MIN_H + 1.0 + knob_row + stacked;
-    if advanced_only {
-        return Arrangement {
-            knobs,
-            plots: 0.0,
-            knob_row: 0.0,
-            advanced: Some(below),
-            advanced_only,
-            groups_beside,
-        };
-    }
-    let rest = below - knob_row - if advanced { stacked } else { 0.0 };
-    let plots = if rest >= PLOT_MIN_H + 1.0 {
-        rest - 1.0
-    } else {
-        0.0
-    };
+    let stack = stack(below, advanced.then_some(advanced_h), PLOT_MIN_H);
     Arrangement {
         knobs,
-        plots,
-        knob_row,
-        advanced: advanced.then_some(advanced_h),
-        advanced_only,
+        plots: stack.plots,
+        knob_row: stack.knob_row,
+        advanced: stack.advanced,
+        advanced_only: stack.advanced_only,
         groups_beside,
     }
 }
@@ -554,6 +531,7 @@ impl<'a> CompressorView<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::widgets::device_layout::LINE_H;
 
     fn used(layout: Arrangement) -> f32 {
         let mut used = PRESET_ROW_H + 1.0;

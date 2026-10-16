@@ -30,6 +30,7 @@ enum Flexible {
     Eq,
     Compressor,
     Filter,
+    Gate,
 }
 
 impl App {
@@ -107,6 +108,8 @@ impl App {
                 Some(Flexible::Compressor)
             } else if crate::domains::filter::is_native_filter(effect) {
                 Some(Flexible::Filter)
+            } else if crate::domains::gate::is_native_gate(effect) {
+                Some(Flexible::Gate)
             } else {
                 None
             };
@@ -154,6 +157,12 @@ impl App {
                         effect,
                         track_color,
                         crate::widgets::filter_device::card_width(share),
+                    ),
+                    Flexible::Gate => self.gate_device_body(
+                        track_id,
+                        effect,
+                        track_color,
+                        crate::widgets::gate_device::card_width(share),
                     ),
                 };
                 cards[position] = Some(view_effect_slot(
@@ -287,6 +296,38 @@ impl App {
                     effect,
                     accent,
                     crate::widgets::compressor_device::preset_bar_width(size),
+                ),
+                size,
+            )
+        });
+        DeviceBody {
+            content: content.into(),
+            width,
+            padding: iced::Padding::ZERO,
+        }
+    }
+
+    fn gate_device_body<'a>(
+        &'a self,
+        track_id: TrackId,
+        effect: &'a crate::state::UiEffect,
+        accent: Color,
+        width: f32,
+    ) -> DeviceBody<'a> {
+        let content = iced::widget::responsive(move |size| {
+            crate::widgets::gate_device::GateView {
+                track_id,
+                effect,
+                accent,
+                panel: self.gate_panels.panel(effect.id),
+                entry: self.param_entry.as_ref(),
+            }
+            .view(
+                self.view_device_preset_bar(
+                    track_id,
+                    effect,
+                    accent,
+                    crate::widgets::gate_device::preset_bar_width(size),
                 ),
                 size,
             )

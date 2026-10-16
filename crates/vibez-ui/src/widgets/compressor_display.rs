@@ -1,7 +1,6 @@
 //! The Compressor's plots: its static transfer curve from the DSP, the
 //! measured gain reduction over time, and the reduction meter.
 
-use std::collections::VecDeque;
 use std::time::Instant;
 
 use iced::mouse;
@@ -10,7 +9,8 @@ use iced::{Color, Point, Rectangle, Renderer, Size, Theme};
 use vibez_core::id::{EffectId, TrackId};
 use vibez_dsp::compressor::{param, static_transfer_db};
 
-use crate::domains::compressor::{ReductionPoint, HISTORY};
+use crate::domains::compressor::HISTORY;
+use crate::domains::device_levels::ReadingHistory;
 use crate::message::Message;
 use crate::state::UndoGestureId;
 use crate::theme as th;
@@ -270,7 +270,7 @@ impl canvas::Program<Message> for TransferPlot<'_> {
 
 /// Gain reduction over the last few seconds, deepest at the bottom.
 pub struct ReductionHistory<'a> {
-    pub points: &'a VecDeque<ReductionPoint>,
+    pub points: &'a ReadingHistory<f32>,
     pub now: Instant,
     pub accent: Color,
 }
@@ -322,8 +322,8 @@ impl canvas::Program<Message> for ReductionHistory<'_> {
         };
         if self.points.len() > 1 {
             let line = canvas::Path::new(|builder| {
-                for (index, point) in self.points.iter().enumerate() {
-                    let at = Point::new(x(point.at), y(point.db));
+                for (index, (at, db)) in self.points.iter().enumerate() {
+                    let at = Point::new(x(*at), y(*db));
                     if index == 0 {
                         builder.move_to(at);
                     } else {
