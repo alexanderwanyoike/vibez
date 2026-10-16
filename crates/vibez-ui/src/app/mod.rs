@@ -55,6 +55,7 @@ struct App {
     eq_devices: eq_devices::EqDevices,
     compressor_devices: compressor_devices::CompressorDevices,
     filter_panels: device_panels::DevicePanels<crate::domains::filter::FilterPanelState>,
+    gate_panels: device_panels::DevicePanels<crate::domains::gate::GatePanelState>,
     param_entry: Option<crate::domains::param_entry::ValueEntry>,
     device_presets: device_presets::DevicePresetRuntime,
     // Plugin GUI support
@@ -168,6 +169,7 @@ mod engine_events;
 mod eq_devices;
 mod filter_devices;
 mod gain_devices;
+mod gate_devices;
 mod keyboard;
 mod local_watcher;
 mod menu_lifecycle;
@@ -439,6 +441,7 @@ impl App {
             device_meters: Default::default(),
             compressor_devices: Default::default(),
             filter_panels: Default::default(),
+            gate_panels: Default::default(),
             gain_devices: Default::default(),
             eq_devices: eq_devices::EqDevices {
                 spectrum_rx: eq_spectrum_rx,

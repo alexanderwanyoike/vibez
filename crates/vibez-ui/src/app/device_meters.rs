@@ -12,6 +12,7 @@ use crate::domains::device_levels::MeteredPanel;
 use crate::domains::eq::is_native_eq;
 use crate::domains::filter::is_native_filter;
 use crate::domains::gain::is_native_gain;
+use crate::domains::gate::is_native_gate;
 use crate::state::{DetailPanelTab, UiEffect};
 
 use super::*;
@@ -22,6 +23,7 @@ enum Metered {
     Eq,
     Filter,
     Compressor,
+    Gate,
 }
 
 #[derive(Default)]
@@ -35,6 +37,7 @@ fn is_metered(effect: &UiEffect) -> bool {
         || is_native_eq(effect)
         || is_native_compressor(effect)
         || is_native_filter(effect)
+        || is_native_gate(effect)
 }
 
 impl App {
@@ -62,6 +65,10 @@ impl App {
         for panel in self.filter_panels.values_mut() {
             panel.reset_stale(now);
         }
+        self.gate_panels.retain_existing(state);
+        for panel in self.gate_panels.values_mut() {
+            panel.reset_stale(now);
+        }
     }
 
     /// Metering restarts under a new generation after undo or redo (which
@@ -81,6 +88,9 @@ impl App {
         for panel in self.filter_panels.values_mut() {
             panel.clear_readings();
         }
+        for panel in self.gate_panels.values_mut() {
+            panel.clear_readings();
+        }
         self.send_command(EngineCommand::SetEffectMeterChannel {
             track_id: self.device_meters.channel,
             generation: self.device_meters.generation,
@@ -94,6 +104,7 @@ impl App {
         self.eq_devices.panels.clear();
         self.compressor_devices.panels.clear();
         self.filter_panels.clear();
+        self.gate_panels.clear();
         self.send_command(EngineCommand::SetEffectMeterChannel {
             track_id: None,
             generation: self.device_meters.generation,
@@ -122,6 +133,8 @@ impl App {
             Some(Metered::Filter)
         } else if is_native_compressor(effect) {
             Some(Metered::Compressor)
+        } else if is_native_gate(effect) {
+            Some(Metered::Gate)
         } else {
             None
         }
@@ -157,6 +170,10 @@ impl App {
                 .panels
                 .entry(effect_id)
                 .accept_levels(input, output, now),
+            Some(Metered::Gate) => self
+                .gate_panels
+                .entry(effect_id)
+                .accept_levels(input, output, now),
             None => {}
         }
     }
@@ -168,11 +185,18 @@ impl App {
         generation: u64,
         meter: DynamicsMeter,
     ) {
-        if self.metered(track_id, effect_id, generation) == Some(Metered::Compressor) {
-            self.compressor_devices
+        let now = Instant::now();
+        match self.metered(track_id, effect_id, generation) {
+            Some(Metered::Compressor) => self
+                .compressor_devices
                 .panels
                 .entry(effect_id)
-                .accept_dynamics(meter, Instant::now());
+                .accept_dynamics(meter, now),
+            Some(Metered::Gate) => self
+                .gate_panels
+                .entry(effect_id)
+                .accept_dynamics(meter, now),
+            _ => {}
         }
     }
 }

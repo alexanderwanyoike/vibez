@@ -20,6 +20,8 @@ pub mod fader;
 pub mod filter_device;
 pub mod filter_display;
 pub mod gain_device;
+pub mod gate_device;
+pub mod gate_display;
 pub mod knob;
 pub mod level_meter;
 pub mod local_drag;
