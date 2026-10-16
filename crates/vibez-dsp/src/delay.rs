@@ -167,6 +167,13 @@ pub static DELAY_PARAMS: &[ParamDescriptor] = &[
     },
 ];
 
+/// Beats in a synced time: `division` counts from a 64th note up to a whole
+/// note, and `modifier` is straight, dotted or triplet.
+pub fn synced_beats(division: usize, modifier: usize) -> f64 {
+    let denominator = [64.0, 32.0, 16.0, 8.0, 4.0, 2.0, 1.0][division.min(6)];
+    (4.0 / denominator) * [1.0, 1.5, 2.0 / 3.0][modifier.min(2)]
+}
+
 /// Stereo delay effect with feedback.
 pub struct DelayEffect {
     targets: [f32; param::COUNT],

@@ -259,9 +259,9 @@ impl DelayTime {
         modifier: usize,
     ) -> f64 {
         if targets[param::SYNC] >= 0.5 {
-            let denominator = [64.0, 32.0, 16.0, 8.0, 4.0, 2.0, 1.0][targets[division] as usize];
-            let modifier = [1.0, 1.5, 2.0 / 3.0][targets[modifier] as usize];
-            (60.0 / self.bpm) * (4.0 / denominator) * modifier * f64::from(sample_rate)
+            (60.0 / self.bpm)
+                * super::synced_beats(targets[division] as usize, targets[modifier] as usize)
+                * f64::from(sample_rate)
         } else {
             f64::from(targets[time]) * f64::from(sample_rate) / 1000.0
         }
