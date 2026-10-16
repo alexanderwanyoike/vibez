@@ -1,8 +1,6 @@
 //! Split out of app.rs; inherent methods on [`super::App`].
 
-use iced::widget::{
-    button, canvas, column, container, horizontal_space, mouse_area, row, scrollable, text,
-};
+use iced::widget::{column, container, horizontal_space, mouse_area, row, scrollable, text};
 use iced::{Color, Element, Length, Theme};
 
 use vibez_core::id::TrackId;
@@ -19,7 +17,6 @@ use crate::widgets::effect_slot::{view_effect_slot, view_sidechain, DeviceBody};
 use super::*;
 
 const CHAIN_SPACING: f32 = 6.0;
-const SAMPLER_CARD_W: f32 = 560.0;
 const PLACEHOLDER_W: f32 = 120.0;
 
 /// Native devices that lay themselves out from the width they are given.
@@ -92,9 +89,11 @@ impl App {
         // device can take its share of whatever width the section has left.
         let mut cards: Vec<Option<Element<'a, Message>>> = Vec::new();
         let mut used = 0.0;
-        // The native synth takes a flexible share like the effects do.
+        // The native synth and sampler take a flexible share like the
+        // effects do.
         let synth = crate::domains::synth::is_native_synth(track);
-        if synth {
+        let sampler = crate::domains::sampler::is_native_sampler(track);
+        if synth || sampler {
             cards.push(None);
         } else if let Some((card, width)) = self.instrument_card(track_id, track, track_color) {
             cards.push(Some(card));
@@ -150,7 +149,7 @@ impl App {
                 self.state.transport.sample_rate,
             )));
         }
-        let shares = flexible.len() + usize::from(synth);
+        let shares = flexible.len() + usize::from(synth || sampler);
         if shares > 0 {
             let spacing = CHAIN_SPACING * cards.len().saturating_sub(1) as f32;
             let share = (available_width - used - spacing) / shares as f32;
@@ -160,6 +159,14 @@ impl App {
                     track,
                     track_color,
                     crate::widgets::synth_device::card_width(share),
+                ));
+            }
+            if sampler {
+                cards[0] = Some(self.sampler_card(
+                    track_id,
+                    track,
+                    track_color,
+                    crate::widgets::sampler_device::card_width(share),
                 ));
             }
             for (position, effect, sidechain, kind) in flexible {
@@ -281,15 +288,12 @@ impl App {
             ));
         }
         let (card, width) = match track.instrument_kind {
-            Some(vibez_core::midi::InstrumentKind::Sampler) => (
-                self.view_sampler_device(track_id, track, track_color),
-                SAMPLER_CARD_W,
-            ),
             Some(vibez_core::midi::InstrumentKind::DrumRack) => (
                 self.view_drum_rack_device(track_id, track, track_color),
                 drum_rack::DRUM_RACK_CARD_W,
             ),
-            // The native synth is laid out with the flexible cards.
+            // The native synth and sampler are laid out with the flexible
+            // cards.
             _ => return None,
         };
         let latency = crate::domains::device_latency::latency_label(
@@ -761,159 +765,6 @@ impl App {
             ),
             track_color,
         )
-    }
-
-    /// Sampler device card.
-    pub(super) fn view_sampler_device<'a>(
-        &'a self,
-        track_id: TrackId,
-        track: &'a UiTrack,
-        track_color: Color,
-    ) -> Element<'a, Message> {
-        use crate::widgets::effect_knob::{format_value, param_column, EffectKnobWidget};
-        let title = Self::device_title_bar(Self::device_title_row(
-            "Sampler",
-            track_color,
-            Some(Message::remove_track_instrument(track_id)),
-        ));
-
-        let descriptors = vibez_instruments::sampler::SAMPLER_PARAMS;
-        let value_of = |i: usize| {
-            track
-                .instrument_params
-                .get(i)
-                .copied()
-                .unwrap_or(descriptors[i].default)
-        };
-        let knob = |i: usize, label: &str| {
-            param_column(
-                EffectKnobWidget::for_instrument(
-                    track_id,
-                    i,
-                    value_of(i),
-                    descriptors[i].min,
-                    descriptors[i].max,
-                    descriptors[i].default,
-                    track_color,
-                ),
-                label.to_string(),
-                format_value(value_of(i), descriptors[i].unit),
-            )
-        };
-
-        // Long file names must not blow the section open; the
-        // waveform display defines the section width.
-        let sample_label = match &track.sample_name {
-            Some(name) => {
-                let display = if name.chars().count() > 24 {
-                    let head: String = name.chars().take(21).collect();
-                    format!("{head}...")
-                } else {
-                    name.clone()
-                };
-                text(display).size(10).color(th::text())
-            }
-            None => text("No Sample").size(10).color(th::text_muted()),
-        };
-        let load_btn = button(text("Load").size(9).color(th::text()))
-            .on_press(Message::LoadSamplerSample(track_id))
-            .padding([2, 8])
-            .style(|_theme: &Theme, status| {
-                let bg = match status {
-                    button::Status::Hovered => th::bg_hover(),
-                    _ => th::bg_dark(),
-                };
-                button::Style {
-                    background: Some(bg.into()),
-                    border: iced::Border {
-                        color: th::border(),
-                        width: 1.0,
-                        radius: 3.0.into(),
-                    },
-                    text_color: th::text(),
-                    ..Default::default()
-                }
-            });
-        let waveform: Element<'a, Message> = canvas(crate::widgets::mini_waveform::MiniWaveform {
-            audio: track.sample_audio.clone(),
-            color: track_color,
-            region: None,
-        })
-        .width(Length::Fixed(190.0))
-        .height(Length::Fixed(56.0))
-        .into();
-        let sample = column![
-            waveform,
-            row![sample_label, load_btn]
-                .spacing(8)
-                .align_y(iced::Alignment::Center)
-        ]
-        .spacing(5)
-        .width(Length::Fixed(190.0))
-        .align_x(iced::Alignment::Start);
-
-        let adsr: Element<'a, Message> = canvas(crate::widgets::mini_waveform::AdsrScope {
-            attack: value_of(1),
-            decay: value_of(2),
-            sustain: value_of(3),
-            release: value_of(4),
-            color: track_color,
-        })
-        .width(Length::Fixed(240.0))
-        .height(Length::Fixed(34.0))
-        .into();
-        let envelope = column![
-            adsr,
-            row![
-                knob(1, "Attack"),
-                knob(2, "Decay"),
-                knob(3, "Sustain"),
-                knob(4, "Release")
-            ]
-            .spacing(6)
-        ]
-        .spacing(5)
-        .align_x(iced::Alignment::Center);
-
-        let body = row![
-            Self::device_section("SAMPLE", sample.into()),
-            Self::device_divider(),
-            Self::device_section("TUNE", knob(0, "Root")),
-            Self::device_divider(),
-            Self::device_section("ENVELOPE", envelope.into()),
-        ]
-        .spacing(10)
-        .align_y(iced::Alignment::Start);
-
-        // Width = sample 190 + tune 56 + envelope 240 + dividers,
-        // spacing, padding. Fixed so the Fill title strip and card
-        // background actually render (Fill inside a shrink column
-        // collapses in iced).
-        let card = Self::device_card(
-            column![title, Self::device_body(body.into())].width(Length::Fixed(SAMPLER_CARD_W)),
-        );
-        let drop_target = matches!(
-            self.state.browser.drag_target,
-            Some(crate::state::BrowserDropTarget::Sampler { track_id: target }) if target == track_id
-        );
-        let card = container(card).style(move |_theme: &Theme| container::Style {
-            border: iced::Border {
-                color: if drop_target {
-                    th::accent()
-                } else {
-                    iced::Color::TRANSPARENT
-                },
-                width: if drop_target { 2.0 } else { 0.0 },
-                radius: 0.0.into(),
-            },
-            ..Default::default()
-        });
-        // The whole card accepts browser drops, like drum pads.
-        mouse_area(card)
-            .on_enter(Message::Browser(BrowserMsg::DragHoverSampler { track_id }))
-            .on_exit(Message::Browser(BrowserMsg::ClearDragTarget))
-            .on_release(Message::DropSampleOnSampler { track_id })
-            .into()
     }
 
     /// Placeholder card for MIDI tracks with no instrument attached.

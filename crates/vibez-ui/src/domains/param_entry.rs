@@ -199,6 +199,31 @@ pub fn param_format(
     host_rate: Option<u32>,
 ) -> ParamFormat {
     match (kind, index) {
+        (DevicePresetKind::Instrument(InstrumentKind::Sampler), index) => {
+            use vibez_instruments::sampler::param;
+            match index {
+                param::VOLUME => ParamFormat::Amplitude {
+                    floor_db: crate::domains::gain::MIN_GAIN_DB,
+                },
+                param::TUNE => ParamFormat::Number {
+                    decimals: 1,
+                    unit: "st",
+                },
+                param::FINE => ParamFormat::Number {
+                    decimals: 0,
+                    unit: "ct",
+                },
+                param::VELOCITY_LOW | param::VELOCITY_HIGH => ParamFormat::Number {
+                    decimals: 0,
+                    unit: "",
+                },
+                param::FILTER_ENV => ParamFormat::Number {
+                    decimals: 1,
+                    unit: "oct",
+                },
+                _ => ParamFormat::for_descriptor(descriptor),
+            }
+        }
         (DevicePresetKind::Instrument(InstrumentKind::SubtractiveSynth), index) => {
             use vibez_instruments::synth::param;
             match index {

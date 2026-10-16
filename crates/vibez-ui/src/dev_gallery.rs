@@ -2142,3 +2142,208 @@ pub fn run_synth() -> iced::Result {
     .font(crate::typography::PLEX_MONO_SEMIBOLD_BYTES)
     .run_with(|| (SynthGallery::new(), iced::Task::none()))
 }
+
+/// Native Sampler at each width tier, tab and height it adapts to, looping
+/// a generated electric-piano tone.
+struct SamplerGallery {
+    track: ProjectTrack,
+}
+
+impl SamplerGallery {
+    fn new() -> Self {
+        use vibez_instruments::sampler::{filter_type, param, SAMPLER_PARAMS};
+        let rate = 44_100.0f32;
+        let tone: Vec<f32> = (0..(rate * 8.4) as usize)
+            .map(|i| {
+                let t = i as f32 / rate;
+                let mut s = 0.0;
+                for (k, a) in [(1.0, 1.0), (2.0, 0.5), (3.0, 0.25), (4.0, 0.12)] {
+                    s += a
+                        * (std::f32::consts::TAU * 261.63 * k * t).sin()
+                        * (-t * (0.4 + k * 0.3)).exp();
+                }
+                s * 0.5 * (1.0 + 0.3 * (t * 37.0).sin() * (t * 3.1).sin())
+            })
+            .collect();
+        let mut track = ProjectTrack::new(TrackId::new(), "Keys".into(), 0);
+        track.kind = vibez_core::midi::TrackKind::Midi;
+        track.has_instrument = true;
+        track.instrument_kind = Some(vibez_core::midi::InstrumentKind::Sampler);
+        track.instrument_params = SAMPLER_PARAMS.iter().map(|d| d.default).collect();
+        for (index, value) in [
+            (param::START, 0.06),
+            (param::END, 0.9),
+            (param::LOOP, 1.0),
+            (param::LOOP_START, 0.4),
+            (param::LOOP_END, 0.68),
+            (param::CROSSFADE, 12.0),
+            (param::VOLUME, 0.7),
+            (param::ATTACK, 0.012),
+            (param::DECAY, 0.18),
+            (param::SUSTAIN, 0.5),
+            (param::RELEASE, 1.2),
+            (param::FILTER_TYPE, filter_type::LP24 as f32),
+            (param::CUTOFF, 3_200.0),
+            (param::FILTER_ENV, 1.5),
+        ] {
+            track.instrument_params[index] = value;
+        }
+        track.sample_name = Some("Rhodes_C3.wav".into());
+        track.sample_audio = Some(std::sync::Arc::new(
+            vibez_core::audio_buffer::DecodedAudio {
+                channels: vec![tone.clone(), tone],
+                sample_rate: rate as u32,
+            },
+        ));
+        Self { track }
+    }
+
+    fn scene<'a>(
+        &'a self,
+        label: &'static str,
+        card_width: f32,
+        section: (f32, f32),
+        panel: crate::domains::instrument_card::InstrumentPanel,
+    ) -> Element<'a, Message> {
+        let accent = th::track_color(0);
+        let track_id = self.track.id;
+        let track = &self.track;
+        let Some(device) = crate::domains::device_params::DeviceParams::instrument(track) else {
+            return text("no sampler").into();
+        };
+        let body = iced::widget::responsive(move |size| {
+            crate::widgets::sampler_device::SamplerView {
+                track_id,
+                device,
+                audio: track.sample_audio.as_ref(),
+                sample_name: track.sample_name.as_deref(),
+                accent,
+                panel,
+                entry: None,
+            }
+            .view(
+                crate::widgets::device_preset_bar::view(
+                    track_id,
+                    device,
+                    None,
+                    accent,
+                    crate::widgets::sampler_device::preset_bar_width(size),
+                ),
+                size,
+            )
+        });
+        let title = crate::widgets::device_chrome::title_bar(
+            row![
+                text("\u{25CF}").size(8).color(accent),
+                text("Sampler").size(11).color(th::text())
+            ]
+            .spacing(5)
+            .align_y(iced::Alignment::Center),
+        );
+        let card = crate::widgets::device_chrome::card(
+            column![title, body].width(Length::Fixed(card_width)),
+        );
+        column![
+            text(label).size(11).color(th::text_dim()),
+            container(row![card].height(Length::Fill))
+                .padding(8)
+                .width(section.0)
+                .height(section.1)
+                .style(|_theme: &Theme| container::Style {
+                    background: Some(th::bg_dark().into()),
+                    border: iced::Border {
+                        color: th::border(),
+                        width: 1.0,
+                        radius: 0.0.into(),
+                    },
+                    ..Default::default()
+                }),
+        ]
+        .spacing(4)
+        .into()
+    }
+
+    fn view(&self) -> Element<'_, Message> {
+        use crate::domains::instrument_card::InstrumentPanel;
+        use crate::domains::sampler::SamplerPage;
+        use crate::widgets::sampler_device::COMPACT_W;
+        let full = 1_100.0;
+        let medium = 760.0;
+        let page = |page: SamplerPage, filter_envelope: bool| InstrumentPanel {
+            page: page.index(),
+            filter_envelope,
+        };
+        container(
+            column![
+                self.scene(
+                    "Full, tall",
+                    full,
+                    (full + 16.0, 360.0),
+                    page(SamplerPage::Sample, false)
+                ),
+                row![
+                    self.scene(
+                        "Medium, Filter tab",
+                        medium,
+                        (medium + 16.0, 360.0),
+                        page(SamplerPage::Filter, false)
+                    ),
+                    self.scene(
+                        "Compact, Sample tab",
+                        COMPACT_W,
+                        (COMPACT_W + 16.0, 360.0),
+                        page(SamplerPage::Sample, false)
+                    ),
+                ]
+                .spacing(24),
+                row![
+                    self.scene(
+                        "Medium, Zones tab, short",
+                        medium,
+                        (medium + 16.0, 250.0),
+                        page(SamplerPage::Zones, false)
+                    ),
+                    self.scene(
+                        "Compact, Filter tab, envelope",
+                        COMPACT_W,
+                        (COMPACT_W + 16.0, 300.0),
+                        page(SamplerPage::Filter, true)
+                    ),
+                ]
+                .spacing(24),
+                self.scene(
+                    "Full, shortest",
+                    full,
+                    (full + 16.0, 120.0),
+                    page(SamplerPage::Sample, false)
+                ),
+            ]
+            .spacing(14),
+        )
+        .padding(16)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .style(|_theme: &Theme| container::Style {
+            background: Some(th::bg_surface().into()),
+            ..Default::default()
+        })
+        .into()
+    }
+}
+
+pub fn run_sampler() -> iced::Result {
+    iced::application(
+        "Sampler device gallery",
+        |_: &mut SamplerGallery, _: Message| {},
+        SamplerGallery::view,
+    )
+    .theme(|_| th::vibez_theme())
+    .antialiasing(true)
+    .window_size((1900.0, 1500.0))
+    .font(crate::icons::ICON_FONT_BYTES)
+    .font(crate::typography::PLEX_SANS_CONDENSED_MEDIUM_BYTES)
+    .font(crate::typography::PLEX_SANS_CONDENSED_SEMIBOLD_BYTES)
+    .font(crate::typography::PLEX_MONO_MEDIUM_BYTES)
+    .font(crate::typography::PLEX_MONO_SEMIBOLD_BYTES)
+    .run_with(|| (SamplerGallery::new(), iced::Task::none()))
+}
