@@ -68,6 +68,13 @@ fn cases(effect: EffectType) -> Vec<(&'static str, Vec<(usize, f32)>)> {
                 vec![(3, 24.0), (5, 0.6), (7, 120.0), (8, 9500.0)],
             ),
         ],
+        EffectType::AutoPan => vec![
+            ("defaults", vec![]),
+            (
+                "saw blend, tremolo, offset, smoothed, synced",
+                vec![(2, 3.5), (3, 1.0), (4, 90.0), (5, 0.3), (6, 0.4), (7, 5.0)],
+            ),
+        ],
         _ => vec![("defaults", vec![])],
     }
 }
