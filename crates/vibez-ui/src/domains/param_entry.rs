@@ -253,6 +253,30 @@ mod tests {
     }
 
     #[test]
+    fn slow_rates_percent_units_and_angles_read_sensibly() {
+        assert_eq!(ParamFormat::Hertz.format(0.25), "0.25 Hz");
+        assert_eq!(ParamFormat::Hertz.format(4.5), "4.50 Hz");
+        assert_eq!(ParamFormat::Hertz.format(42.0), "42 Hz");
+        assert_eq!(ParamFormat::Hertz.parse("0.25", 0.05, 20.0), Some(0.25));
+        let mix = ParamDescriptor {
+            name: "Mix",
+            min: 0.0,
+            max: 1.0,
+            default: 1.0,
+            unit: "%",
+        };
+        assert_eq!(ParamFormat::for_descriptor(&mix), ParamFormat::Percent);
+        let phase = ParamDescriptor {
+            name: "Stereo Phase",
+            min: 0.0,
+            max: 180.0,
+            default: 0.0,
+            unit: "deg",
+        };
+        assert_eq!(ParamFormat::for_descriptor(&phase).format(90.0), "90 deg");
+    }
+
+    #[test]
     fn typed_text_accepts_units_and_shorthand() {
         assert_eq!(
             ParamFormat::Hertz.parse("1.2k", 20.0, 20_000.0),
