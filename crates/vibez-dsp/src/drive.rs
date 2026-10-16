@@ -141,6 +141,12 @@ pub fn drive_gain(amount: f32) -> f32 {
     1.0 + amount * amount * 29.0
 }
 
+/// The amount that gives `gain` into the shaper; the inverse of
+/// [`drive_gain`].
+pub fn amount_for_gain(gain: f32) -> f32 {
+    ((gain - 1.0) / 29.0).max(0.0).sqrt()
+}
+
 /// A character's memoryless curve for `driven`, the input times the drive
 /// gain, scaled so that full drive peaks at unity.
 pub fn shape(character: usize, driven: f32, normalizer: f32) -> f32 {

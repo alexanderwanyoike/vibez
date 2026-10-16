@@ -1096,7 +1096,7 @@ impl DriveGallery {
         let mut effect = effect(EffectType::Drive, None, false, false, None, 0);
         effect.params = effect.descriptors.iter().map(|d| d.default).collect();
         effect.params[param::AMOUNT] =
-            ((vibez_core::level::db_to_amplitude(6.0) - 1.0) / 29.0).sqrt();
+            vibez_dsp::drive::amount_for_gain(vibez_core::level::db_to_amplitude(6.0));
         effect.params[param::TONE] = 0.55;
         effect.params[param::OUTPUT] = vibez_core::level::db_to_amplitude(-3.0);
         effect.params[param::MIX] = 0.8;

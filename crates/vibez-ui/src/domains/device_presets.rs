@@ -724,7 +724,8 @@ fn gate_factory_presets() -> Vec<DevicePreset> {
 /// shaper.
 fn drive_factory_presets() -> Vec<DevicePreset> {
     use vibez_dsp::drive::character::{HARD, SOFT, WARM};
-    let amount = |db: f32| ((vibez_core::level::db_to_amplitude(db) - 1.0) / 29.0).sqrt();
+    let amount =
+        |db: f32| vibez_dsp::drive::amount_for_gain(vibez_core::level::db_to_amplitude(db));
     let level = vibez_core::level::db_to_amplitude;
     let presets: [(&str, Vec<(&str, f32)>); 8] = [
         ("Init", vec![]),
