@@ -35,6 +35,17 @@ const FIXED_GAIN: f32 = 0.015;
 const SCALE_WET: f32 = 3.0;
 const STEREO_WIDTH: f32 = 1.0;
 
+/// Zero for a value too small to hear, so a fading tail stops instead of
+/// crawling through denormal numbers, which are many times slower to
+/// compute with. Freeverb's own `undenormalise` does the same.
+fn flush(value: f32) -> f32 {
+    if value.abs() < 1e-15 {
+        0.0
+    } else {
+        value
+    }
+}
+
 struct CombFilter {
     buffer: Vec<f32>,
     pos: usize,
@@ -58,8 +69,8 @@ impl CombFilter {
 
     fn process(&mut self, input: f32) -> f32 {
         let output = self.buffer[self.pos];
-        self.filter_store = output * self.damp2 + self.filter_store * self.damp1;
-        self.buffer[self.pos] = input + self.filter_store * self.feedback;
+        self.filter_store = flush(output * self.damp2 + self.filter_store * self.damp1);
+        self.buffer[self.pos] = flush(input + self.filter_store * self.feedback);
         self.pos = (self.pos + 1) % self.buffer.len();
         output
     }
@@ -87,7 +98,7 @@ impl AllPassFilter {
     fn process(&mut self, input: f32) -> f32 {
         let buffered = self.buffer[self.pos];
         let output = -input + buffered;
-        self.buffer[self.pos] = input + buffered * 0.5;
+        self.buffer[self.pos] = flush(input + buffered * 0.5);
         self.pos = (self.pos + 1) % self.buffer.len();
         output
     }
@@ -313,6 +324,23 @@ mod tests {
         for s in &silence {
             assert!(s.abs() < 1e-6);
         }
+    }
+
+    #[test]
+    fn a_fading_tail_reaches_silence_without_slow_denormal_numbers() {
+        let mut fx = ReverbEffect::new(48_000.0);
+        fx.set_param(2, 1.0);
+        let mut buf = vec![0.0_f32; 1024];
+        buf[0] = 1.0;
+        buf[1] = 1.0;
+        fx.process(&mut buf, 2);
+        let mut denormals = 0;
+        for _ in 0..(20 * 48_000 / 512) {
+            let mut silence = vec![0.0_f32; 1024];
+            fx.process(&mut silence, 2);
+            denormals += silence.iter().filter(|s| s.is_subnormal()).count();
+        }
+        assert_eq!(denormals, 0);
     }
 
     #[test]
