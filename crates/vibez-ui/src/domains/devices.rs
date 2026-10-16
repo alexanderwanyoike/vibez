@@ -66,6 +66,8 @@ pub enum DevicesMsg {
     SetDrumPadParams(TrackId, usize, Vec<(usize, f32)>),
     /// Names a pad; an empty name goes back to its sample's.
     RenameDrumPad(TrackId, usize, String),
+    /// Every pad at once, as a kit loads.
+    ReplaceDrumRackPads(TrackId, Vec<UiDrumPad>),
     /// Preview a pitch on a track's instrument. `on: false` releases.
     AuditionNote {
         track_id: TrackId,
@@ -613,6 +615,7 @@ impl DevicesState {
                     };
                 }
             }
+            DevicesMsg::ReplaceDrumRackPads(..) => {}
             DevicesMsg::AuditionNote {
                 track_id,
                 pitch,
@@ -989,6 +992,49 @@ mod tests {
             Some("snare_02.wav")
         );
         assert!(engine.0.is_empty());
+    }
+
+    #[test]
+    fn replacing_the_pads_loads_each_sounding_pad_and_clears_the_rest() {
+        let (mut tracks, track_id, _) = midi_track_with_effect();
+        tracks[0].drum_rack_pads = crate::state::default_drum_rack_pads();
+        let mut pads = crate::state::default_drum_rack_pads();
+        pads[2].name = Some("Snare".into());
+        pads[2].audio = Some(std::sync::Arc::new(
+            vibez_core::audio_buffer::DecodedAudio {
+                channels: vec![vec![0.5; 16]],
+                sample_rate: 44_100,
+            },
+        ));
+        let mut devices = DevicesState::default();
+        let mut engine = RecordingEngine::default();
+        devices.update(
+            DevicesMsg::ReplaceDrumRackPads(track_id, pads),
+            &mut engine,
+            &mut tracks,
+            &mut crate::state::new_master_track(),
+            &mut [],
+            DevicesCtx::default(),
+        );
+
+        assert_eq!(tracks[0].drum_rack_pads[2].name.as_deref(), Some("Snare"));
+        let loads = engine
+            .0
+            .iter()
+            .filter(|command| {
+                matches!(
+                    command,
+                    EngineCommand::LoadDrumRackPadSample { pad_index: 2, .. }
+                )
+            })
+            .count();
+        let clears = engine
+            .0
+            .iter()
+            .filter(|command| matches!(command, EngineCommand::ClearDrumRackPad { .. }))
+            .count();
+        assert_eq!(loads, 1);
+        assert_eq!(clears, vibez_core::track::DRUM_RACK_PAD_COUNT - 1);
     }
 
     #[test]
