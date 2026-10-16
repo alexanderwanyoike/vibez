@@ -68,6 +68,13 @@ fn cases(effect: EffectType) -> Vec<(&'static str, Vec<(usize, f32)>)> {
                 vec![(3, 24.0), (5, 0.6), (7, 120.0), (8, 9500.0)],
             ),
         ],
+        EffectType::Phaser => vec![
+            ("defaults", vec![]),
+            (
+                "12 stages, stereo 90 deg, triangle",
+                vec![(5, 4.0), (6, 90.0), (8, 1.0)],
+            ),
+        ],
         _ => vec![("defaults", vec![])],
     }
 }
