@@ -24,7 +24,7 @@ const END_FADE_SECONDS: f32 = 0.002;
 /// How fast continuous levels follow an edit, so a moved knob does not
 /// click or zip.
 const SMOOTHING_SECONDS: f32 = 0.005;
-const SMOOTHED: [usize; 3] = [param::VOLUME, param::CUTOFF, param::LFO_AMOUNT];
+const SMOOTHED: [usize; 4] = [param::VOLUME, param::CUTOFF, param::LFO_AMOUNT, param::PAN];
 
 /// The original names, which the older tests use.
 #[cfg(test)]
@@ -320,9 +320,12 @@ impl Instrument for Sampler {
                 1.0
             };
             let gain = c[param::VOLUME] * tremolo;
-            out[0] += left * gain;
+            // A balance, not equal power, so a centred sampler keeps its
+            // level.
+            let pan = c[param::PAN];
+            out[0] += left * gain * (1.0 - pan).min(1.0);
             if let Some(second) = out.get_mut(1) {
-                *second += right * gain;
+                *second += right * gain * (1.0 + pan).min(1.0);
             }
         }
     }
