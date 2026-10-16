@@ -170,6 +170,31 @@ const BITCRUSH_KEYS: [(usize, &str, bool); 9] = {
     ]
 };
 
+/// Every native Delay parameter; its sync, divisions, modifiers, routing,
+/// link, filter switches and time change are choices.
+const DELAY_KEYS: [(usize, &str, bool); 17] = {
+    use vibez_dsp::delay::param::*;
+    [
+        (TIME_MS, "time_ms", false),
+        (FEEDBACK, "feedback", false),
+        (MIX, "mix", false),
+        (SYNC, "sync", true),
+        (LEFT_DIVISION, "left_division", true),
+        (LEFT_MODIFIER, "left_modifier", true),
+        (ROUTING, "routing", true),
+        (LINK, "link", true),
+        (RIGHT_TIME_MS, "right_time_ms", false),
+        (RIGHT_DIVISION, "right_division", true),
+        (RIGHT_MODIFIER, "right_modifier", true),
+        (FEEDBACK_HP_ENABLED, "feedback_hp_enabled", true),
+        (FEEDBACK_HP_HZ, "feedback_hp_hz", false),
+        (FEEDBACK_LP_ENABLED, "feedback_lp_enabled", true),
+        (FEEDBACK_LP_HZ, "feedback_lp_hz", false),
+        (DUCK, "duck", false),
+        (TIME_CHANGE, "time_change", true),
+    ]
+};
+
 /// One stored parameter: its index, preset key and whether it only takes
 /// whole numbers, as switches and choices do.
 type PresetParam = (usize, &'static str, bool);
@@ -238,6 +263,7 @@ fn parameter_keys(effect: &UiEffect) -> Result<Vec<PresetParam>, String> {
         EffectType::Gate => Ok(GATE_KEYS.to_vec()),
         EffectType::Drive => Ok(DRIVE_KEYS.to_vec()),
         EffectType::Bitcrush => Ok(BITCRUSH_KEYS.to_vec()),
+        EffectType::Delay => Ok(DELAY_KEYS.to_vec()),
         _ => Err("Presets are not yet supported by this built-in device".into()),
     }
 }
@@ -317,6 +343,7 @@ pub fn factory_presets(effect_type: EffectType) -> Vec<DevicePreset> {
         EffectType::Gate => gate_factory_presets(),
         EffectType::Drive => drive_factory_presets(),
         EffectType::Bitcrush => bitcrush_factory_presets(),
+        EffectType::Delay => delay_factory_presets(),
         _ => Vec::new(),
     }
 }
@@ -919,6 +946,124 @@ fn bitcrush_factory_presets() -> Vec<DevicePreset> {
         EffectType::Bitcrush,
         &BITCRUSH_KEYS,
         vibez_dsp::bitcrush::BITCRUSH_PARAMS,
+        &presets,
+    )
+}
+
+/// Sol's echoes, from a short slap to a long space.
+fn delay_factory_presets() -> Vec<DevicePreset> {
+    let presets: [(&str, &[(&str, f32)]); 8] = [
+        ("Init", &[]),
+        (
+            "Dotted Bounce",
+            &[
+                ("feedback", 0.35),
+                ("mix", 0.22),
+                ("sync", 1.0),
+                ("left_division", 3.0),
+                ("left_modifier", 1.0),
+                ("right_division", 3.0),
+                ("right_modifier", 1.0),
+                ("feedback_hp_enabled", 1.0),
+                ("feedback_lp_enabled", 1.0),
+                ("duck", 0.2),
+            ],
+        ),
+        (
+            "Quarter Ping",
+            &[
+                ("feedback", 0.45),
+                ("mix", 0.25),
+                ("sync", 1.0),
+                ("routing", 1.0),
+                ("feedback_hp_enabled", 1.0),
+                ("feedback_hp_hz", 180.0),
+                ("feedback_lp_enabled", 1.0),
+                ("feedback_lp_hz", 7000.0),
+                ("duck", 0.35),
+            ],
+        ),
+        (
+            "Short Slap",
+            &[
+                ("time_ms", 90.0),
+                ("feedback", 0.1),
+                ("mix", 0.18),
+                ("right_time_ms", 90.0),
+                ("feedback_hp_enabled", 1.0),
+                ("feedback_lp_enabled", 1.0),
+                ("feedback_lp_hz", 10_000.0),
+            ],
+        ),
+        (
+            "Wide Eighths",
+            &[
+                ("feedback", 0.32),
+                ("mix", 0.2),
+                ("sync", 1.0),
+                ("left_division", 3.0),
+                ("link", 0.0),
+                ("right_division", 3.0),
+                ("right_modifier", 1.0),
+                ("feedback_hp_enabled", 1.0),
+                ("feedback_hp_hz", 150.0),
+                ("feedback_lp_enabled", 1.0),
+                ("feedback_lp_hz", 9000.0),
+                ("duck", 0.1),
+            ],
+        ),
+        (
+            "Triplet Taps",
+            &[
+                ("feedback", 0.4),
+                ("mix", 0.24),
+                ("sync", 1.0),
+                ("left_division", 3.0),
+                ("left_modifier", 2.0),
+                ("routing", 1.0),
+                ("right_division", 3.0),
+                ("right_modifier", 2.0),
+                ("feedback_hp_enabled", 1.0),
+                ("feedback_hp_hz", 160.0),
+                ("feedback_lp_enabled", 1.0),
+                ("duck", 0.15),
+            ],
+        ),
+        (
+            "Long Space",
+            &[
+                ("feedback", 0.65),
+                ("mix", 0.18),
+                ("sync", 1.0),
+                ("left_division", 6.0),
+                ("left_modifier", 1.0),
+                ("right_division", 6.0),
+                ("right_modifier", 1.0),
+                ("feedback_hp_enabled", 1.0),
+                ("feedback_hp_hz", 250.0),
+                ("feedback_lp_enabled", 1.0),
+                ("feedback_lp_hz", 4000.0),
+                ("duck", 0.45),
+            ],
+        ),
+        (
+            "Wet Return",
+            &[
+                ("time_ms", 250.0),
+                ("feedback", 0.25),
+                ("mix", 1.0),
+                ("right_time_ms", 250.0),
+                ("feedback_hp_enabled", 1.0),
+                ("feedback_hp_hz", 180.0),
+                ("feedback_lp_enabled", 1.0),
+                ("feedback_lp_hz", 6500.0),
+            ],
+        ),
+    ];
+    keyed_presets(
+        EffectType::Delay,
+        &DELAY_KEYS,
+        vibez_dsp::delay::DELAY_PARAMS,
         &presets,
     )
 }
