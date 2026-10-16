@@ -8,6 +8,7 @@ pub mod compressor_device;
 pub mod compressor_display;
 pub mod device_chrome;
 pub mod device_controls;
+pub mod device_layout;
 pub(crate) mod device_preset_bar;
 pub mod double_click;
 pub mod drag;
