@@ -5,6 +5,7 @@ pub mod automation;
 pub mod clip_timeline;
 pub mod constants;
 pub mod device_preset;
+pub mod drum_kit;
 pub mod effect;
 pub mod id;
 pub mod level;
