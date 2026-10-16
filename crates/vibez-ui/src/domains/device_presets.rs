@@ -212,6 +212,22 @@ const REVERB_KEYS: [(usize, &str, bool); 10] = {
     ]
 };
 
+const PHASER_KEYS: [(usize, &str, bool); 10] = {
+    use vibez_dsp::phaser::param::*;
+    [
+        (RATE, "rate", false),
+        (DEPTH, "depth", false),
+        (FEEDBACK, "feedback", false),
+        (MIX, "mix", false),
+        (CENTRE, "centre", false),
+        (STAGES, "stages", true),
+        (STEREO_PHASE, "stereo_phase", false),
+        (POLARITY, "polarity", true),
+        (SHAPE, "shape", true),
+        (SYNC, "sync", true),
+    ]
+};
+
 /// One stored parameter: its index, preset key and whether it only takes
 /// whole numbers, as switches and choices do.
 type PresetParam = (usize, &'static str, bool);
@@ -282,6 +298,7 @@ fn parameter_keys(effect: &UiEffect) -> Result<Vec<PresetParam>, String> {
         EffectType::Bitcrush => Ok(BITCRUSH_KEYS.to_vec()),
         EffectType::Delay => Ok(DELAY_KEYS.to_vec()),
         EffectType::Reverb => Ok(REVERB_KEYS.to_vec()),
+        EffectType::Phaser => Ok(PHASER_KEYS.to_vec()),
         _ => Err("Presets are not yet supported by this built-in device".into()),
     }
 }
@@ -363,6 +380,7 @@ pub fn factory_presets(effect_type: EffectType) -> Vec<DevicePreset> {
         EffectType::Bitcrush => bitcrush_factory_presets(),
         EffectType::Delay => delay_factory_presets(),
         EffectType::Reverb => reverb_factory_presets(),
+        EffectType::Phaser => phaser_factory_presets(),
         _ => Vec::new(),
     }
 }
@@ -1187,6 +1205,79 @@ fn reverb_factory_presets() -> Vec<DevicePreset> {
         EffectType::Reverb,
         &REVERB_KEYS,
         vibez_dsp::reverb::REVERB_PARAMS,
+        &presets,
+    )
+}
+
+fn phaser_factory_presets() -> Vec<DevicePreset> {
+    let presets: [(&str, &[(&str, f32)]); 8] = [
+        ("Init", &[]),
+        ("Slow Sweep", &[("depth", 0.6), ("stereo_phase", 90.0)]),
+        (
+            "Subtle Width",
+            &[
+                ("rate", 0.2),
+                ("depth", 0.35),
+                ("feedback", 0.1),
+                ("mix", 0.3),
+                ("stages", 0.0),
+                ("stereo_phase", 120.0),
+            ],
+        ),
+        (
+            "Jet",
+            &[
+                ("rate", 0.15),
+                ("depth", 0.9),
+                ("feedback", 0.8),
+                ("centre", 400.0),
+                ("stages", 3.0),
+            ],
+        ),
+        (
+            "Deep Twelve",
+            &[
+                ("rate", 0.1),
+                ("depth", 0.8),
+                ("feedback", 0.5),
+                ("centre", 300.0),
+                ("stages", 4.0),
+            ],
+        ),
+        (
+            "Hollow",
+            &[
+                ("rate", 1.0),
+                ("depth", 0.5),
+                ("feedback", 0.7),
+                ("centre", 1_200.0),
+                ("stages", 2.0),
+                ("polarity", 1.0),
+            ],
+        ),
+        (
+            "Quarter Swirl",
+            &[
+                ("depth", 0.5),
+                ("feedback", 0.4),
+                ("stereo_phase", 180.0),
+                ("sync", 4.0),
+            ],
+        ),
+        (
+            "Wobble",
+            &[
+                ("rate", 4.0),
+                ("depth", 0.4),
+                ("feedback", 0.2),
+                ("shape", 1.0),
+            ],
+        ),
+    ];
+    keyed_presets(
+        EffectType::Phaser,
+        &PHASER_KEYS,
+        vibez_dsp::phaser::PHASER_PARAMS,
         &presets,
     )
 }
