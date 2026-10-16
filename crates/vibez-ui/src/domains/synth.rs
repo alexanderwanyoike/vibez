@@ -72,30 +72,6 @@ impl SynthPanel {
     }
 }
 
-/// The concept's Soft Analog sound: a saw over a triangle an octave down
-/// through a gently resonant 24 dB low-pass, breathing with the LFO.
-pub const SOFT_ANALOG: &[(usize, f32)] = {
-    use vibez_instruments::synth::{filter_type, param, Waveform};
-    &[
-        (param::WAVEFORM, Waveform::Saw as usize as f32),
-        (param::WAVEFORM_2, Waveform::Triangle as usize as f32),
-        (param::OCTAVE_2, -1.0),
-        (param::LEVEL_2, 0.6),
-        (param::SUB, 0.25),
-        (param::NOISE, 0.063),
-        (param::FILTER_TYPE, filter_type::LP24 as f32),
-        (param::CUTOFF, 2_400.0),
-        (param::RESONANCE, 1.5),
-        (param::ATTACK, 0.012),
-        (param::DECAY, 0.24),
-        (param::SUSTAIN, 0.68),
-        (param::RELEASE, 0.42),
-        (param::LFO_RATE, 1.2),
-        (param::LFO_AMOUNT, 0.35),
-        (param::VOLUME, 0.5),
-    ]
-};
-
 pub fn is_native_synth(track: &crate::state::UiTrack) -> bool {
     track.has_instrument
         && track.instrument_kind == Some(vibez_core::midi::InstrumentKind::SubtractiveSynth)

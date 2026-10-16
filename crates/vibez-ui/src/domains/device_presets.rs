@@ -326,11 +326,7 @@ fn parameter_keys(device: &DeviceParams) -> Result<Vec<PresetParam>, String> {
     let effect_type = match device.kind {
         DevicePresetKind::Effect(effect_type) => effect_type,
         DevicePresetKind::Instrument(InstrumentKind::SubtractiveSynth) => {
-            return Ok(SYNTH_KEYS
-                .iter()
-                .enumerate()
-                .map(|(index, key)| (index, *key, vibez_instruments::synth::is_whole(index)))
-                .collect());
+            return Ok(synth_keys());
         }
         DevicePresetKind::Instrument(_) => {
             return Err("Presets are not yet supported by this built-in device".into());
@@ -428,8 +424,155 @@ pub fn prepare_updates<'a>(
 pub fn presets_for(kind: DevicePresetKind) -> Vec<DevicePreset> {
     match kind {
         DevicePresetKind::Effect(effect_type) => factory_presets(effect_type),
+        DevicePresetKind::Instrument(InstrumentKind::SubtractiveSynth) => synth_factory_presets(),
         DevicePresetKind::Instrument(_) => Vec::new(),
     }
+}
+
+fn synth_keys() -> Vec<PresetParam> {
+    SYNTH_KEYS
+        .iter()
+        .enumerate()
+        .map(|(index, key)| (index, *key, vibez_instruments::synth::is_whole(index)))
+        .collect()
+}
+
+fn synth_factory_presets() -> Vec<DevicePreset> {
+    use vibez_instruments::synth::{filter_type, lfo_shape, lfo_target, voice_mode, Waveform};
+    let wave = |waveform: Waveform| waveform as usize as f32;
+    let presets: [(&str, &[(&str, f32)]); 9] = [
+        ("Init", &[]),
+        (
+            "Soft Analog",
+            &[
+                ("waveform_2", wave(Waveform::Triangle)),
+                ("octave_2", -1.0),
+                ("level_2", 0.6),
+                ("sub", 0.25),
+                ("noise", 0.063),
+                ("filter_type", filter_type::LP24 as f32),
+                ("cutoff", 2_400.0),
+                ("resonance", 1.5),
+                ("attack", 0.012),
+                ("decay", 0.24),
+                ("sustain", 0.68),
+                ("release", 0.42),
+                ("lfo_amount", 0.35),
+                ("volume", 0.5),
+            ],
+        ),
+        (
+            "Pluck",
+            &[
+                ("filter_type", filter_type::LP24 as f32),
+                ("cutoff", 600.0),
+                ("resonance", 2.0),
+                ("filter_env", 3.5),
+                ("filter_decay", 0.18),
+                ("attack", 0.002),
+                ("decay", 0.35),
+                ("sustain", 0.0),
+                ("release", 0.2),
+            ],
+        ),
+        (
+            "Warm Bass",
+            &[
+                ("waveform_2", wave(Waveform::Square)),
+                ("octave_2", -1.0),
+                ("level_2", 0.4),
+                ("sub", 0.6),
+                ("filter_type", filter_type::LP24 as f32),
+                ("cutoff", 400.0),
+                ("resonance", 1.2),
+                ("filter_env", 2.0),
+                ("filter_decay", 0.25),
+                ("voice_mode", voice_mode::MONO as f32),
+                ("glide", 40.0),
+                ("attack", 0.003),
+                ("decay", 0.3),
+                ("sustain", 0.8),
+                ("release", 0.1),
+            ],
+        ),
+        (
+            "Legato Lead",
+            &[
+                ("waveform_2", wave(Waveform::Saw)),
+                ("detune_2", 0.12),
+                ("level_2", 0.8),
+                ("cutoff", 3_000.0),
+                ("resonance", 2.0),
+                ("voice_mode", voice_mode::LEGATO as f32),
+                ("glide", 80.0),
+                ("lfo_target", lfo_target::PITCH as f32),
+                ("lfo_rate", 5.5),
+                ("lfo_amount", 0.02),
+                ("release", 0.25),
+            ],
+        ),
+        (
+            "Slow Pad",
+            &[
+                ("waveform_2", wave(Waveform::Saw)),
+                ("detune_2", -0.1),
+                ("level_2", 1.0),
+                ("cutoff", 1_800.0),
+                ("attack", 0.8),
+                ("decay", 1.0),
+                ("sustain", 0.8),
+                ("release", 2.5),
+                ("lfo_rate", 0.3),
+                ("lfo_amount", 0.2),
+                ("volume", 0.5),
+            ],
+        ),
+        (
+            "Wobble Bass",
+            &[
+                ("sub", 0.5),
+                ("filter_type", filter_type::LP24 as f32),
+                ("cutoff", 300.0),
+                ("resonance", 4.0),
+                ("voice_mode", voice_mode::MONO as f32),
+                ("lfo_rate", 3.0),
+                ("lfo_amount", 0.6),
+            ],
+        ),
+        (
+            "Square Keys",
+            &[
+                ("waveform", wave(Waveform::Square)),
+                ("cutoff", 2_500.0),
+                ("filter_env", 1.5),
+                ("filter_decay", 0.4),
+                ("attack", 0.002),
+                ("decay", 0.6),
+                ("sustain", 0.3),
+            ],
+        ),
+        (
+            "Noise Sweep",
+            &[
+                ("waveform", wave(Waveform::Sine)),
+                ("noise", 1.0),
+                ("filter_type", filter_type::BP12 as f32),
+                ("cutoff", 800.0),
+                ("resonance", 5.0),
+                ("lfo_shape", lfo_shape::TRIANGLE as f32),
+                ("lfo_rate", 0.2),
+                ("lfo_amount", 0.7),
+                ("attack", 0.5),
+                ("release", 1.5),
+            ],
+        ),
+    ];
+    keyed_presets(
+        DevicePresetKind::Instrument(InstrumentKind::SubtractiveSynth),
+        &synth_keys(),
+        vibez_instruments::synth::SYNTH_PARAMS,
+        &presets,
+    )
 }
 
 pub fn factory_presets(effect_type: EffectType) -> Vec<DevicePreset> {

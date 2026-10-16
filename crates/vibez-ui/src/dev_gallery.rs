@@ -1828,19 +1828,32 @@ struct SynthGallery {
 
 impl SynthGallery {
     fn new() -> Self {
-        use vibez_instruments::synth::{filter_type, param, SYNTH_PARAMS};
+        use crate::domains::device_params::DeviceParams;
+        use vibez_core::device_preset::DevicePresetKind;
+        use vibez_core::midi::InstrumentKind;
         let mut track = ProjectTrack::new(TrackId::new(), "Keys".into(), 0);
         track.kind = vibez_core::midi::TrackKind::Midi;
         track.has_instrument = true;
-        track.instrument_kind = Some(vibez_core::midi::InstrumentKind::SubtractiveSynth);
-        track.instrument_params = SYNTH_PARAMS.iter().map(|d| d.default).collect();
-        for (index, value) in crate::domains::synth::SOFT_ANALOG {
-            track.instrument_params[*index] = *value;
+        track.instrument_kind = Some(InstrumentKind::SubtractiveSynth);
+        track.instrument_params = vibez_instruments::synth::SYNTH_PARAMS
+            .iter()
+            .map(|d| d.default)
+            .collect();
+        let soft_analog = crate::domains::device_presets::presets_for(
+            DevicePresetKind::Instrument(InstrumentKind::SubtractiveSynth),
+        )
+        .into_iter()
+        .find(|preset| preset.name() == "Soft Analog");
+        let updates = soft_analog.and_then(|preset| {
+            crate::domains::device_presets::prepare_updates(
+                DeviceParams::instrument(&track)?,
+                &preset,
+            )
+            .ok()
+        });
+        for (index, value) in updates.unwrap_or_default() {
+            track.instrument_params[index] = value;
         }
-        debug_assert_eq!(
-            track.instrument_params[param::FILTER_TYPE],
-            filter_type::LP24 as f32
-        );
         Self { track }
     }
 
