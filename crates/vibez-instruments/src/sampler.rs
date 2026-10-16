@@ -697,3 +697,7 @@ mod tests {
         assert_eq!(sampler.instrument_kind(), InstrumentKind::Sampler);
     }
 }
+
+#[cfg(test)]
+#[path = "sampler_quality_tests.rs"]
+mod quality_tests;
