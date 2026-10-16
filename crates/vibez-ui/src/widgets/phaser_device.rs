@@ -15,8 +15,7 @@ use crate::message::Message;
 use crate::state::UiEffect;
 use crate::theme as th;
 use crate::widgets::device_controls::{
-    disclosure, dropdown, heading, plot_band, rule, segmented, toggle, vertical_rule, Param,
-    LABEL_SIZE,
+    disclosure, heading, plot_band, rule, segmented, toggle, vertical_rule, Param, LABEL_SIZE,
 };
 use crate::widgets::device_layout::{stack, Stack, KNOB_ROW_H};
 use crate::widgets::phaser_display::{LfoPlot, ResponsePlot};
@@ -57,16 +56,6 @@ pub fn arrange(size: Size, advanced: bool) -> Stack {
     stack(below, advanced.then_some(KNOB_ROW_H), PLOT_MIN_H)
 }
 
-/// A choice and its name, for a dropdown.
-#[derive(Debug, Clone, Copy, PartialEq)]
-struct Named(usize, &'static str);
-
-impl std::fmt::Display for Named {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.1)
-    }
-}
-
 pub struct PhaserView<'a> {
     pub track_id: TrackId,
     pub effect: &'a UiEffect,
@@ -102,15 +91,6 @@ impl<'a> PhaserView<'a> {
     fn set(&self, index: usize) -> impl Fn(usize) -> Message {
         let (track_id, effect_id) = (self.track_id, self.effect.id);
         move |choice| Message::set_effect_param(track_id, effect_id, index, choice as f32)
-    }
-
-    fn choose(&self, index: usize, names: &[&'static str], first: usize) -> Element<'a, Message> {
-        let set = self.set(index);
-        let options: Vec<Named> = (first..names.len()).map(|n| Named(n, names[n])).collect();
-        let selected = self.choice(index).clamp(first, names.len() - 1);
-        dropdown(options, Named(selected, names[selected]), move |named| {
-            set(named.0)
-        })
     }
 
     pub fn view(self, preset_bar: Element<'a, Message>, size: Size) -> Element<'a, Message> {
@@ -205,7 +185,7 @@ impl<'a> PhaserView<'a> {
         let value: Element<'a, Message> = if sync == 0 {
             rate.value_entry()
         } else {
-            container(self.choose(param::SYNC, &SYNC_NAMES, 1))
+            container(self.param(param::SYNC).choices(&SYNC_NAMES, 1))
                 .width(DIVISION_W)
                 .into()
         };
@@ -277,8 +257,9 @@ impl<'a> PhaserView<'a> {
             self.set(param::STAGES),
             self.accent(),
         );
-        let polarity = container(self.choose(param::POLARITY, &POLARITY_NAMES, 0)).width(CHOICE_W);
-        let shape = container(self.choose(param::SHAPE, &SHAPE_NAMES, 0)).width(CHOICE_W);
+        let polarity =
+            container(self.param(param::POLARITY).choices(&POLARITY_NAMES, 0)).width(CHOICE_W);
+        let shape = container(self.param(param::SHAPE).choices(&SHAPE_NAMES, 0)).width(CHOICE_W);
         let content: Element<'a, Message> = if height < KNOB_ROW_H {
             // Controls leave from the end when the line runs out of room.
             let mut room = width - PAD * 2.0;
