@@ -15,7 +15,7 @@ use crate::state::UiEffect;
 use crate::theme as th;
 use crate::widgets::bitcrush_display::Scope;
 use crate::widgets::device_controls::{
-    disclosure, heading, level_column, rule, segmented, Param, LABEL_SIZE,
+    disclosure, heading, level_column, plot_band, rule, segmented, vertical_rule, Param, LABEL_SIZE,
 };
 use crate::widgets::device_layout::{stack, KNOB_ROW_H};
 
@@ -113,9 +113,10 @@ impl<'a> BitcrushView<'a> {
             text("Bitcrushed").size(LABEL_SIZE).color(self.accent()),
         ]
         .spacing(8);
-        container(
+        plot_band(
             row![
                 level_column("Input", self.panel.input),
+                vertical_rule(),
                 column![
                     row![heading("Waveform"), legend].align_y(Alignment::Center),
                     iced::widget::canvas(Scope {
@@ -129,14 +130,13 @@ impl<'a> BitcrushView<'a> {
                 ]
                 .spacing(2)
                 .width(Length::Fill),
+                vertical_rule(),
                 level_column("Output", self.panel.output),
             ]
             .spacing(8),
+            height,
+            PAD,
         )
-        .padding([6.0, PAD])
-        .height(height)
-        .width(Length::Fill)
-        .into()
     }
 
     const MAIN: [usize; 4] = [param::BITS, param::SR_REDUCE, param::DRIVE_DB, param::MIX];

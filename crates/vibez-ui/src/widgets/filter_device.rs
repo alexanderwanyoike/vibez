@@ -16,8 +16,8 @@ use crate::message::Message;
 use crate::state::UiEffect;
 use crate::theme as th;
 use crate::widgets::device_controls::{
-    disclosure, dropdown, heading, level_column, rule, segmented, toggle, vertical_rule, Param,
-    LABEL_SIZE, METER_W,
+    disclosure, dropdown, heading, level_column, plot_band, rule, segmented, toggle, vertical_rule,
+    Param, LABEL_SIZE, METER_W,
 };
 use crate::widgets::filter_display::{ModulationPreview, ResponsePlot};
 
@@ -362,24 +362,28 @@ impl<'a> FilterView<'a> {
             (TypePlace::Beside, true) => {
                 row![
                     self.type_column(),
+                    vertical_rule(),
                     self.response(),
+                    vertical_rule(),
                     level_column("Output", self.panel.output)
                 ]
             }
             (TypePlace::Beside, false) => {
                 row![
                     self.response(),
+                    vertical_rule(),
                     level_column("Output", self.panel.output),
+                    vertical_rule(),
                     self.type_panel()
                 ]
             }
-            _ => row![self.response(), level_column("Output", self.panel.output)],
+            _ => row![
+                self.response(),
+                vertical_rule(),
+                level_column("Output", self.panel.output)
+            ],
         };
-        container(content.spacing(8))
-            .padding([6.0, PAD])
-            .height(layout.plots)
-            .width(Length::Fill)
-            .into()
+        plot_band(content.spacing(8), layout.plots, PAD)
     }
 
     const MAIN: [usize; 4] = [param::CUTOFF, param::RESONANCE, param::DRIVE, param::MIX];
