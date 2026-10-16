@@ -4,6 +4,11 @@ pub mod drum_rack;
 pub(crate) mod envelope;
 pub mod sampler;
 pub mod synth;
+mod synth_envelope;
+mod synth_filter;
+pub mod synth_oscillator;
+pub mod synth_params;
+mod synth_voice;
 
 use std::sync::Arc;
 

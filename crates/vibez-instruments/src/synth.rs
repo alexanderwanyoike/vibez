@@ -1,196 +1,131 @@
+//! The subtractive synth: two band-limited oscillators, a sub and noise
+//! per voice into a resonant filter, with an envelope each for level and
+//! cutoff and one LFO. Poly takes a free voice for each note, or else the
+//! oldest; Mono and Legato play the last held note on one voice.
+
 use vibez_core::effect::ParamDescriptor;
 use vibez_core::midi::MidiNote;
 
-use crate::envelope::{Envelope, EnvelopeStage};
+use crate::synth_envelope::Times;
+use crate::synth_filter::Coefficients;
+pub use crate::synth_oscillator::Waveform;
+pub use crate::synth_params::{
+    filter_type, is_whole, lfo_shape, lfo_target, param, voice_mode, SYNTH_PARAMS,
+};
+use crate::synth_params::{LFO_CUTOFF_OCTAVES, LFO_PITCH_SEMITONES, MAX_VOICES};
+use crate::synth_voice::{Frame, Voice};
 
-/// Waveform shapes for the oscillator.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Waveform {
-    Sine,
-    Saw,
-    Square,
-    Triangle,
-}
-
-impl Waveform {
-    pub fn from_index(i: usize) -> Self {
-        match i {
-            0 => Waveform::Sine,
-            1 => Waveform::Saw,
-            2 => Waveform::Square,
-            3 => Waveform::Triangle,
-            _ => Waveform::Sine,
-        }
-    }
-}
-
-/// Synth parameter descriptors.
-pub static SYNTH_PARAMS: &[ParamDescriptor] = &[
-    ParamDescriptor {
-        name: "Waveform",
-        min: 0.0,
-        max: 3.0,
-        default: 1.0,
-        unit: "",
-    },
-    ParamDescriptor {
-        name: "Attack",
-        min: 0.001,
-        max: 2.0,
-        default: 0.01,
-        unit: "s",
-    },
-    ParamDescriptor {
-        name: "Decay",
-        min: 0.001,
-        max: 2.0,
-        default: 0.1,
-        unit: "s",
-    },
-    ParamDescriptor {
-        name: "Sustain",
-        min: 0.0,
-        max: 1.0,
-        default: 0.7,
-        unit: "",
-    },
-    ParamDescriptor {
-        name: "Release",
-        min: 0.001,
-        max: 5.0,
-        default: 0.3,
-        unit: "s",
-    },
-    ParamDescriptor {
-        name: "Filter Cutoff",
-        min: 20.0,
-        max: 20000.0,
-        default: 5000.0,
-        unit: "Hz",
-    },
-    ParamDescriptor {
-        name: "Filter Res",
-        min: 0.1,
-        max: 10.0,
-        default: 1.0,
-        unit: "Q",
-    },
-    ParamDescriptor {
-        name: "Volume",
-        min: 0.0,
-        max: 1.0,
-        default: 0.8,
-        unit: "",
-    },
+/// How fast continuous levels follow an edit, so a moved knob does not
+/// click or zip.
+const SMOOTHING_SECONDS: f32 = 0.005;
+/// Held notes Mono and Legato remember to fall back to.
+const HELD_NOTES: usize = 16;
+const SMOOTHED: [usize; 6] = [
+    param::CUTOFF,
+    param::VOLUME,
+    param::LEVEL_2,
+    param::SUB,
+    param::NOISE,
+    param::LFO_AMOUNT,
 ];
 
-const MAX_VOICES: usize = 8;
-
-/// Single synth voice with oscillator, envelope, and per-voice filter.
-#[derive(Debug, Clone)]
-struct Voice {
-    active: bool,
-    pitch: u8,
-    velocity: f32,
-    phase: f64,
-    phase_inc: f64,
-    envelope: Envelope,
-    // Per-voice one-pole low-pass filter state
-    filter_state: f32,
-}
-
-impl Voice {
-    fn new(sample_rate: f32) -> Self {
-        Self {
-            active: false,
-            pitch: 0,
-            velocity: 0.0,
-            phase: 0.0,
-            phase_inc: 0.0,
-            envelope: Envelope::new(sample_rate),
-            filter_state: 0.0,
-        }
-    }
-
-    fn note_on(&mut self, pitch: u8, velocity: u8, sample_rate: f32) {
-        self.active = true;
-        self.pitch = pitch;
-        self.velocity = velocity as f32 / 127.0;
-        let freq = 440.0 * 2.0_f64.powf((pitch as f64 - 69.0) / 12.0);
-        self.phase_inc = freq / sample_rate as f64;
-        self.envelope.trigger();
-    }
-
-    fn note_off(&mut self) {
-        self.envelope.release();
-    }
-
-    fn generate(&mut self, waveform: Waveform, cutoff_coeff: f32) -> f32 {
-        if !self.active {
-            return 0.0;
-        }
-
-        let env = self.envelope.tick();
-        if !self.envelope.is_active() {
-            self.active = false;
-            return 0.0;
-        }
-
-        let raw = match waveform {
-            Waveform::Sine => (self.phase * std::f64::consts::TAU).sin() as f32,
-            Waveform::Saw => (2.0 * self.phase - 1.0) as f32,
-            Waveform::Square => {
-                if self.phase < 0.5 {
-                    1.0
-                } else {
-                    -1.0
-                }
+/// The LFO, -1 to 1, at `phase` cycles.
+pub fn lfo(shape: usize, phase: f64) -> f32 {
+    let x = phase.rem_euclid(1.0) as f32;
+    match shape {
+        lfo_shape::TRIANGLE => triangle(x),
+        lfo_shape::SQUARE => {
+            if x < 0.5 {
+                1.0
+            } else {
+                -1.0
             }
-            Waveform::Triangle => (4.0 * (self.phase - 0.5).abs() - 1.0) as f32,
-        };
-
-        self.phase += self.phase_inc;
-        if self.phase >= 1.0 {
-            self.phase -= 1.0;
         }
-
-        // One-pole low-pass filter
-        let filtered = self.filter_state + cutoff_coeff * (raw - self.filter_state);
-        self.filter_state = filtered;
-
-        filtered * env * self.velocity
+        lfo_shape::SAW => 2.0 * x - 1.0,
+        _ => (std::f32::consts::TAU * x).sin(),
     }
 }
 
-/// 8-voice polyphonic subtractive synthesizer.
+/// A triangle in step with a sine: 0 rising at the cycle's start.
+fn triangle(x: f32) -> f32 {
+    4.0 * ((x - 0.25).rem_euclid(1.0) - 0.5).abs() - 1.0
+}
+
 pub struct SubtractiveSynth {
-    voices: Vec<Voice>,
+    voices: [Voice; MAX_VOICES],
     sample_rate: f32,
-    // Parameters
-    waveform: Waveform,
-    attack: f32,
-    decay: f32,
-    sustain: f32,
-    release: f32,
-    filter_cutoff: f32,
-    filter_resonance: f32,
-    volume: f32,
+    params: [f32; param::COUNT],
+    /// The smoothed controls' current values; the rest read `params`.
+    current: [f32; param::COUNT],
+    amp_times: Times,
+    filter_times: Times,
+    smoothing: f32,
+    started: bool,
+    /// Counts notes, so the oldest voice is the one with the smallest age.
+    age: u64,
+    /// Notes held down, oldest first, with their velocities.
+    held: [(u8, u8); HELD_NOTES],
+    held_count: usize,
+    last_pitch: Option<f32>,
+    lfo_phase: f64,
+    /// Each oscillator's frequency against the note's.
+    ratios: (f64, f64),
+    /// The cutoff and Q `coefficients` were worked out for.
+    filter_for: (f32, f32),
+    coefficients: Coefficients,
 }
 
 impl SubtractiveSynth {
     pub fn new(sample_rate: f32) -> Self {
-        Self {
-            voices: (0..MAX_VOICES).map(|_| Voice::new(sample_rate)).collect(),
+        let sample_rate = if sample_rate.is_finite() && sample_rate > 0.0 {
+            sample_rate
+        } else {
+            48_000.0
+        };
+        let params: [f32; param::COUNT] = std::array::from_fn(|index| SYNTH_PARAMS[index].default);
+        let mut synth = Self {
+            voices: [Voice::default(); MAX_VOICES],
             sample_rate,
-            waveform: Waveform::Saw,
-            attack: 0.01,
-            decay: 0.1,
-            sustain: 0.7,
-            release: 0.3,
-            filter_cutoff: 5000.0,
-            filter_resonance: 1.0,
-            volume: 0.8,
-        }
+            params,
+            current: params,
+            amp_times: Times::new(0.0, 0.0, 0.0, 0.0, sample_rate),
+            filter_times: Times::new(0.0, 0.0, 0.0, 0.0, sample_rate),
+            smoothing: 1.0 - (-1.0 / (SMOOTHING_SECONDS * sample_rate)).exp(),
+            started: false,
+            age: 0,
+            held: [(0, 0); HELD_NOTES],
+            held_count: 0,
+            last_pitch: None,
+            lfo_phase: 0.0,
+            ratios: (1.0, 1.0),
+            filter_for: (f32::NAN, f32::NAN),
+            coefficients: Coefficients::new(sample_rate, 1_000.0, 1.0),
+        };
+        synth.retime();
+        synth
+    }
+
+    fn retime(&mut self) {
+        let p = &self.params;
+        let ratio = |octave: usize, detune: usize| f64::from(p[octave] + p[detune] / 12.0).exp2();
+        self.ratios = (
+            ratio(param::OCTAVE, param::DETUNE),
+            ratio(param::OCTAVE_2, param::DETUNE_2),
+        );
+        self.amp_times = Times::new(
+            p[param::ATTACK],
+            p[param::DECAY],
+            p[param::SUSTAIN],
+            p[param::RELEASE],
+            self.sample_rate,
+        );
+        self.filter_times = Times::new(
+            p[param::FILTER_ATTACK],
+            p[param::FILTER_DECAY],
+            p[param::FILTER_SUSTAIN],
+            p[param::FILTER_RELEASE],
+            self.sample_rate,
+        );
     }
 
     pub fn param_descriptors(&self) -> &'static [ParamDescriptor] {
@@ -198,83 +133,189 @@ impl SubtractiveSynth {
     }
 
     pub fn set_param(&mut self, index: usize, value: f32) -> bool {
-        match index {
-            0 => {
-                self.waveform = Waveform::from_index(value.round() as usize);
-                true
-            }
-            1 => {
-                self.attack = value.clamp(0.001, 2.0);
-                true
-            }
-            2 => {
-                self.decay = value.clamp(0.001, 2.0);
-                true
-            }
-            3 => {
-                self.sustain = value.clamp(0.0, 1.0);
-                true
-            }
-            4 => {
-                self.release = value.clamp(0.001, 5.0);
-                true
-            }
-            5 => {
-                self.filter_cutoff = value.clamp(20.0, 20000.0);
-                true
-            }
-            6 => {
-                self.filter_resonance = value.clamp(0.1, 10.0);
-                true
-            }
-            7 => {
-                self.volume = value.clamp(0.0, 1.0);
-                true
-            }
-            _ => false,
+        let Some(descriptor) = SYNTH_PARAMS.get(index) else {
+            return false;
+        };
+        if !value.is_finite() {
+            return false;
         }
+        let value = if is_whole(index) {
+            value.round()
+        } else {
+            value
+        }
+        .clamp(descriptor.min, descriptor.max);
+        self.params[index] = value;
+        if !self.started || !SMOOTHED.contains(&index) {
+            self.current[index] = value;
+        }
+        self.retime();
+        true
     }
 
     pub fn get_param(&self, index: usize) -> f32 {
-        match index {
-            0 => self.waveform as u8 as f32,
-            1 => self.attack,
-            2 => self.decay,
-            3 => self.sustain,
-            4 => self.release,
-            5 => self.filter_cutoff,
-            6 => self.filter_resonance,
-            7 => self.volume,
-            _ => 0.0,
-        }
+        self.params.get(index).copied().unwrap_or(0.0)
+    }
+
+    fn choice(&self, index: usize) -> usize {
+        self.params[index] as usize
+    }
+
+    fn glide_frames(&self) -> u32 {
+        (self.params[param::GLIDE] / 1000.0 * self.sample_rate).round() as u32
     }
 
     pub fn note_on(&mut self, pitch: u8, velocity: u8) {
-        // Update envelopes on all voices first
-        for voice in &mut self.voices {
-            voice.envelope.attack = self.attack;
-            voice.envelope.decay = self.decay;
-            voice.envelope.sustain = self.sustain;
-            voice.envelope.release = self.release;
+        if velocity == 0 {
+            self.note_off(pitch);
+            return;
         }
+        self.age += 1;
+        self.forget(pitch);
+        if self.held_count == HELD_NOTES {
+            self.held.copy_within(1.., 0);
+            self.held_count -= 1;
+        }
+        self.held[self.held_count] = (pitch, velocity);
+        self.held_count += 1;
+        let from = self.last_pitch;
+        self.last_pitch = Some(f32::from(pitch));
+        let glide = self.glide_frames();
+        let mode = self.choice(param::VOICE_MODE);
+        if mode != voice_mode::POLY {
+            let voice = &mut self.voices[0];
+            let from = if voice.active() {
+                Some(voice.sounding())
+            } else {
+                from
+            };
+            let legato = mode == voice_mode::LEGATO && self.held_count > 1 && voice.active();
+            voice.start(pitch, velocity, self.age, from, glide, !legato);
+            return;
+        }
+        let count = self.choice(param::VOICES).clamp(1, MAX_VOICES);
+        let voices = &self.voices[..count];
+        let oldest = |candidates: &mut dyn Iterator<Item = usize>| {
+            candidates.min_by_key(|&index| voices[index].age)
+        };
+        let all = 0..count;
+        // A repeated note takes over its own voice rather than stacking.
+        let index = all
+            .clone()
+            .find(|&index| voices[index].active() && voices[index].pitch == pitch)
+            .or_else(|| all.clone().find(|&index| !voices[index].active()))
+            .or_else(|| oldest(&mut all.clone().filter(|&index| voices[index].released())))
+            .or_else(|| oldest(&mut all.clone()))
+            .unwrap_or(0);
+        self.voices[index].start(pitch, velocity, self.age, from, glide, true);
+    }
 
-        // Find free voice or steal oldest
-        let voice_idx = self.voices.iter().position(|v| !v.active).unwrap_or(0); // steal voice 0 if all active
-
-        self.voices[voice_idx].note_on(pitch, velocity, self.sample_rate);
+    fn forget(&mut self, pitch: u8) -> bool {
+        let Some(index) = self.held[..self.held_count]
+            .iter()
+            .position(|&(held, _)| held == pitch)
+        else {
+            return false;
+        };
+        self.held.copy_within(index + 1..self.held_count, index);
+        self.held_count -= 1;
+        true
     }
 
     pub fn note_off(&mut self, pitch: u8) {
+        let was_held = self.forget(pitch);
+        let mode = self.choice(param::VOICE_MODE);
+        if mode != voice_mode::POLY
+            && was_held
+            && self.voices[0].active()
+            && self.voices[0].pitch == pitch
+        {
+            // Back to the latest note still held.
+            if let Some(&(previous, velocity)) = self.held[..self.held_count].last() {
+                self.age += 1;
+                let from = Some(self.voices[0].sounding());
+                let glide = self.glide_frames();
+                self.voices[0].start(
+                    previous,
+                    velocity,
+                    self.age,
+                    from,
+                    glide,
+                    mode == voice_mode::MONO,
+                );
+                self.last_pitch = Some(f32::from(previous));
+                return;
+            }
+        }
         for voice in &mut self.voices {
-            if voice.active && voice.pitch == pitch {
-                voice.note_off();
+            if voice.active() && voice.pitch == pitch {
+                voice.release();
             }
         }
     }
 
-    /// Render notes from a clip into the given stereo interleaved buffer.
-    /// `start_beat` / `end_beat` define the time window.
-    /// `bpm` is beats per minute for time conversion.
+    fn frame(&mut self) -> f32 {
+        self.started = true;
+        for index in SMOOTHED {
+            self.current[index] += (self.params[index] - self.current[index]) * self.smoothing;
+        }
+        let filter_for = (self.current[param::CUTOFF], self.params[param::RESONANCE]);
+        if filter_for != self.filter_for {
+            self.filter_for = filter_for;
+            self.coefficients = Coefficients::new(self.sample_rate, filter_for.0, filter_for.1);
+        }
+        let p = &self.params;
+        let c = &self.current;
+        let modulation = if c[param::LFO_AMOUNT] == 0.0 {
+            0.0
+        } else {
+            lfo(self.choice(param::LFO_SHAPE), self.lfo_phase) * c[param::LFO_AMOUNT]
+        };
+        self.lfo_phase =
+            (self.lfo_phase + f64::from(p[param::LFO_RATE]) / f64::from(self.sample_rate)).fract();
+        let target = self.choice(param::LFO_TARGET);
+        let frame = Frame {
+            sample_rate: self.sample_rate,
+            waveform: Waveform::from_index(p[param::WAVEFORM] as usize),
+            waveform_2: Waveform::from_index(p[param::WAVEFORM_2] as usize),
+            ratio: self.ratios.0,
+            ratio_2: self.ratios.1,
+            level_2: c[param::LEVEL_2],
+            sub: c[param::SUB],
+            noise: c[param::NOISE],
+            filter_type: p[param::FILTER_TYPE] as usize,
+            cutoff: c[param::CUTOFF],
+            resonance: p[param::RESONANCE],
+            coefficients: self.coefficients,
+            filter_env: p[param::FILTER_ENV],
+            cutoff_octaves: if target == lfo_target::CUTOFF {
+                modulation * LFO_CUTOFF_OCTAVES
+            } else {
+                0.0
+            },
+            pitch_semitones: if target == lfo_target::PITCH {
+                modulation * LFO_PITCH_SEMITONES
+            } else {
+                0.0
+            },
+            amp_times: self.amp_times,
+            filter_times: self.filter_times,
+        };
+        let mut sum = 0.0;
+        for voice in &mut self.voices {
+            if voice.active() {
+                sum += voice.generate(&frame);
+            }
+        }
+        let tremolo = if target == lfo_target::VOLUME {
+            1.0 - c[param::LFO_AMOUNT] * 0.5 + modulation * 0.5
+        } else {
+            1.0
+        };
+        sum * c[param::VOLUME] * tremolo
+    }
+
+    /// Render notes from a clip into the given interleaved buffer.
     pub fn render_block(
         &mut self,
         buffer: &mut [f32],
@@ -283,75 +324,43 @@ impl SubtractiveSynth {
         start_beat: f64,
         bpm: f64,
     ) {
-        let ch = channels.clamp(1, 2);
-        let frames = buffer.len() / ch;
+        let channels = channels.max(1);
         let beats_per_sample = bpm / (60.0 * self.sample_rate as f64);
-
-        // Compute cutoff coefficient from frequency
-        let cutoff_coeff =
-            (2.0 * std::f32::consts::PI * self.filter_cutoff / self.sample_rate).clamp(0.0, 1.0);
-
-        for frame in 0..frames {
-            let current_beat = start_beat + frame as f64 * beats_per_sample;
-
-            // Trigger note-ons and note-offs
+        for (index, frame) in buffer.chunks_exact_mut(channels).enumerate() {
+            let beat = start_beat + index as f64 * beats_per_sample;
+            let previous = beat - beats_per_sample;
             for note in notes {
-                let note_on_beat = note.start_beat;
-                let note_off_beat = note.end_beat();
-                let prev_beat = current_beat - beats_per_sample;
-
-                if note_on_beat > prev_beat && note_on_beat <= current_beat {
+                if note.start_beat > previous && note.start_beat <= beat {
                     self.note_on(note.pitch, note.velocity);
                 }
-                if note_off_beat > prev_beat && note_off_beat <= current_beat {
+                if note.end_beat() > previous && note.end_beat() <= beat {
                     self.note_off(note.pitch);
                 }
             }
-
-            // Sum voices
-            let mut sample = 0.0_f32;
-            for voice in &mut self.voices {
-                sample += voice.generate(self.waveform, cutoff_coeff);
-            }
-            sample *= self.volume;
-
-            // Write to buffer
-            for c in 0..ch {
-                buffer[frame * ch + c] += sample;
+            let sample = self.frame();
+            for output in frame.iter_mut().take(2) {
+                *output += sample;
             }
         }
     }
 
-    /// Render a single frame (or small buffer slice) of audio into the buffer.
-    /// This assumes note_on/note_off have already been called for this frame.
+    /// Adds the synth's output to `buffer`; notes arrive through `note_on`
+    /// and `note_off` beforehand.
     pub fn render(&mut self, buffer: &mut [f32], channels: usize) {
-        let ch = channels.clamp(1, 2);
-        let frames = buffer.len() / ch;
-
-        let cutoff_coeff =
-            (2.0 * std::f32::consts::PI * self.filter_cutoff / self.sample_rate).clamp(0.0, 1.0);
-
-        for frame in 0..frames {
-            let mut sample = 0.0_f32;
-            for voice in &mut self.voices {
-                sample += voice.generate(self.waveform, cutoff_coeff);
-            }
-            sample *= self.volume;
-
-            for c in 0..ch {
-                buffer[frame * ch + c] += sample;
+        for frame in buffer.chunks_exact_mut(channels.max(1)) {
+            let sample = self.frame();
+            for output in frame.iter_mut().take(2) {
+                *output += sample;
             }
         }
     }
 
     pub fn reset(&mut self) {
-        for voice in &mut self.voices {
-            voice.active = false;
-            voice.envelope.stage = EnvelopeStage::Idle;
-            voice.envelope.level = 0.0;
-            voice.filter_state = 0.0;
-            voice.phase = 0.0;
-        }
+        self.voices = [Voice::default(); MAX_VOICES];
+        self.current = self.params;
+        self.held_count = 0;
+        self.last_pitch = None;
+        self.lfo_phase = 0.0;
     }
 }
 
@@ -396,6 +405,7 @@ impl crate::Instrument for SubtractiveSynth {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::envelope::{Envelope, EnvelopeStage};
 
     #[test]
     fn synth_silence_without_notes() {
@@ -519,7 +529,7 @@ mod tests {
         synth.note_on(60, 100);
         synth.reset();
         for voice in &synth.voices {
-            assert!(!voice.active);
+            assert!(!voice.active());
         }
     }
 
@@ -624,3 +634,11 @@ mod tests {
         assert_eq!(Waveform::from_index(99), Waveform::Sine); // fallback
     }
 }
+
+#[cfg(test)]
+#[path = "synth_quality_tests.rs"]
+mod quality_tests;
+
+#[cfg(test)]
+#[path = "synth_controls_tests.rs"]
+mod controls_tests;
