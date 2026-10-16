@@ -150,7 +150,7 @@ pub struct SamplerView<'a> {
     /// What the Load button asks for.
     pub load: Message,
     pub audio: Option<&'a Arc<DecodedAudio>>,
-    pub sample_name: Option<&'a str>,
+    pub sample_name: Option<String>,
     pub accent: Color,
     pub panel: InstrumentPanel,
     pub entry: Option<&'a ValueEntry>,
@@ -240,14 +240,18 @@ impl<'a> SamplerView<'a> {
         let length = self
             .audio
             .map(|audio| audio.num_frames() as f32 / audio.sample_rate.max(1) as f32);
-        let name = text(self.sample_name.unwrap_or("No sample"))
-            .size(LABEL_SIZE + 1.0)
-            .wrapping(text::Wrapping::None)
-            .color(if self.sample_name.is_some() {
-                th::text()
-            } else {
-                th::text_muted()
-            });
+        let name = text(
+            self.sample_name
+                .clone()
+                .unwrap_or_else(|| "No sample".into()),
+        )
+        .size(LABEL_SIZE + 1.0)
+        .wrapping(text::Wrapping::None)
+        .color(if self.sample_name.is_some() {
+            th::text()
+        } else {
+            th::text_muted()
+        });
         let mut header = row![container(name).width(Length::Fill).clip(true)]
             .spacing(10)
             .align_y(Alignment::Center);

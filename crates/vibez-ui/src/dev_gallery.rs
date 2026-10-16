@@ -2217,7 +2217,7 @@ impl SamplerGallery {
                 device,
                 load: Message::LoadSamplerSample(track_id),
                 audio: track.sample_audio.as_ref(),
-                sample_name: track.sample_name.as_deref(),
+                sample_name: track.sample_name.clone(),
                 accent,
                 panel,
                 entry: None,
