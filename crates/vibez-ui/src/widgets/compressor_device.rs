@@ -16,7 +16,8 @@ use crate::state::UiEffect;
 use crate::theme as th;
 use crate::widgets::compressor_display::{ReductionHistory, ReductionMeter, TransferPlot};
 use crate::widgets::device_controls::{
-    disclosure, heading, level_column, rule, segmented, vertical_rule, Param, LABEL_SIZE, METER_W,
+    disclosure, heading, level_column, plot_band, rule, segmented, vertical_rule, Param,
+    LABEL_SIZE, METER_W,
 };
 use crate::widgets::device_layout::{stack, KNOB_ROW_H};
 
@@ -233,25 +234,29 @@ impl<'a> CompressorView<'a> {
                     move |page| Message::Compressor(CompressorMsg::ShowPage(effect_id, page)),
                     self.accent(),
                 ),
-                row![container(shown).width(Length::Fill), self.reduction()].spacing(8),
+                row![
+                    container(shown).width(Length::Fill),
+                    vertical_rule(),
+                    self.reduction()
+                ]
+                .spacing(8),
             ]
             .spacing(4)
             .into()
         } else {
             row![
                 level_column("Input", self.panel.input),
+                vertical_rule(),
                 self.transfer(),
+                vertical_rule(),
                 container(self.history()).width(HISTORY_W),
+                vertical_rule(),
                 self.reduction(),
             ]
             .spacing(8)
             .into()
         };
-        container(content)
-            .padding([6.0, PAD])
-            .height(layout.plots)
-            .width(Length::Fill)
-            .into()
+        plot_band(content, layout.plots, PAD)
     }
 
     fn main_indices(knobs: Knobs) -> &'static [usize] {
