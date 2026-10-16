@@ -388,6 +388,19 @@ mod tests {
     }
 
     #[test]
+    fn a_unitless_share_below_one_reads_as_a_percentage() {
+        let feedback = descriptor(0.0, 0.95, "");
+        assert_eq!(ParamFormat::for_descriptor(&feedback), ParamFormat::Percent);
+        assert_eq!(
+            ParamFormat::for_descriptor(&descriptor(0.0, 2.0, "")),
+            ParamFormat::Number {
+                decimals: 2,
+                unit: ""
+            }
+        );
+    }
+
+    #[test]
     fn typed_text_accepts_units_and_shorthand() {
         assert_eq!(
             ParamFormat::Hertz.parse("1.2k", 20.0, 20_000.0),
