@@ -1819,3 +1819,177 @@ pub fn run_auto_pan() -> iced::Result {
     .font(crate::typography::PLEX_MONO_SEMIBOLD_BYTES)
     .run_with(|| (AutoPanGallery::new(), iced::Task::none()))
 }
+
+/// Native Subtractive Synth at each width tier, tab and height it adapts
+/// to, on the Soft Analog sound from the concept.
+struct SynthGallery {
+    track: ProjectTrack,
+}
+
+impl SynthGallery {
+    fn new() -> Self {
+        use vibez_instruments::synth::{filter_type, param, SYNTH_PARAMS};
+        let mut track = ProjectTrack::new(TrackId::new(), "Keys".into(), 0);
+        track.kind = vibez_core::midi::TrackKind::Midi;
+        track.has_instrument = true;
+        track.instrument_kind = Some(vibez_core::midi::InstrumentKind::SubtractiveSynth);
+        track.instrument_params = SYNTH_PARAMS.iter().map(|d| d.default).collect();
+        for (index, value) in crate::domains::synth::SOFT_ANALOG {
+            track.instrument_params[*index] = *value;
+        }
+        debug_assert_eq!(
+            track.instrument_params[param::FILTER_TYPE],
+            filter_type::LP24 as f32
+        );
+        Self { track }
+    }
+
+    fn scene<'a>(
+        &'a self,
+        label: &'static str,
+        card_width: f32,
+        section: (f32, f32),
+        panel: crate::domains::synth::SynthPanel,
+    ) -> Element<'a, Message> {
+        let accent = th::track_color(0);
+        let track_id = self.track.id;
+        let Some(device) = crate::domains::device_params::DeviceParams::instrument(&self.track)
+        else {
+            return text("no synth").into();
+        };
+        let body = iced::widget::responsive(move |size| {
+            crate::widgets::synth_device::SynthView {
+                track_id,
+                device,
+                accent,
+                panel,
+                entry: None,
+            }
+            .view(
+                crate::widgets::device_preset_bar::view(
+                    track_id,
+                    device,
+                    None,
+                    accent,
+                    crate::widgets::synth_device::preset_bar_width(size),
+                ),
+                size,
+            )
+        });
+        let title = crate::widgets::device_chrome::title_bar(
+            row![
+                text("\u{25CF}").size(8).color(accent),
+                text("Subtractive Synth").size(11).color(th::text())
+            ]
+            .spacing(5)
+            .align_y(iced::Alignment::Center),
+        );
+        let card = crate::widgets::device_chrome::card(
+            column![title, body].width(Length::Fixed(card_width)),
+        );
+        column![
+            text(label).size(11).color(th::text_dim()),
+            container(row![card].height(Length::Fill))
+                .padding(8)
+                .width(section.0)
+                .height(section.1)
+                .style(|_theme: &Theme| container::Style {
+                    background: Some(th::bg_dark().into()),
+                    border: iced::Border {
+                        color: th::border(),
+                        width: 1.0,
+                        radius: 0.0.into(),
+                    },
+                    ..Default::default()
+                }),
+        ]
+        .spacing(4)
+        .into()
+    }
+
+    fn view(&self) -> Element<'_, Message> {
+        use crate::domains::synth::{SynthPage, SynthPanel};
+        use crate::widgets::synth_device::{COMPACT_W, FULL_W};
+        let full = FULL_W + 40.0;
+        let medium = 760.0;
+        let page = |page: SynthPage| SynthPanel {
+            page,
+            filter_envelope: false,
+        };
+        container(
+            column![
+                self.scene(
+                    "Full, tall",
+                    full,
+                    (full + 16.0, 330.0),
+                    page(SynthPage::Oscillator)
+                ),
+                row![
+                    self.scene(
+                        "Medium, Filter tab",
+                        medium,
+                        (medium + 16.0, 330.0),
+                        page(SynthPage::Filter)
+                    ),
+                    self.scene(
+                        "Compact, Oscillator tab",
+                        COMPACT_W,
+                        (COMPACT_W + 16.0, 330.0),
+                        page(SynthPage::Oscillator)
+                    ),
+                ]
+                .spacing(24),
+                row![
+                    self.scene(
+                        "Medium, Modulation tab, short",
+                        medium,
+                        (medium + 16.0, 210.0),
+                        page(SynthPage::Modulation)
+                    ),
+                    self.scene(
+                        "Compact, Envelope tab, filter",
+                        COMPACT_W,
+                        (COMPACT_W + 16.0, 330.0),
+                        SynthPanel {
+                            page: SynthPage::Envelope,
+                            filter_envelope: true,
+                        }
+                    ),
+                ]
+                .spacing(24),
+                self.scene(
+                    "Full, shortest",
+                    full,
+                    (full + 16.0, 110.0),
+                    page(SynthPage::Oscillator)
+                ),
+            ]
+            .spacing(14),
+        )
+        .padding(16)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .style(|_theme: &Theme| container::Style {
+            background: Some(th::bg_surface().into()),
+            ..Default::default()
+        })
+        .into()
+    }
+}
+
+pub fn run_synth() -> iced::Result {
+    iced::application(
+        "Subtractive Synth device gallery",
+        |_: &mut SynthGallery, _: Message| {},
+        SynthGallery::view,
+    )
+    .theme(|_| th::vibez_theme())
+    .antialiasing(true)
+    .window_size((1900.0, 1400.0))
+    .font(crate::icons::ICON_FONT_BYTES)
+    .font(crate::typography::PLEX_SANS_CONDENSED_MEDIUM_BYTES)
+    .font(crate::typography::PLEX_SANS_CONDENSED_SEMIBOLD_BYTES)
+    .font(crate::typography::PLEX_MONO_MEDIUM_BYTES)
+    .font(crate::typography::PLEX_MONO_SEMIBOLD_BYTES)
+    .run_with(|| (SynthGallery::new(), iced::Task::none()))
+}

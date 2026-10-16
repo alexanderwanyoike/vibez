@@ -250,6 +250,7 @@ impl App {
             Message::Filter(message) => return self.update_filter(message),
             Message::Gate(message) => return self.update_gate(message),
             Message::Card(message) => return self.update_card(message),
+            Message::Synth(message) => return self.update_synth(message),
             Message::ParamEntry(message) => return self.update_param_entry(message),
             Message::DevicePreset(message) => return self.update_device_preset(message),
             Message::ApplyDevicePreset(track_id, slot, preset) => {
