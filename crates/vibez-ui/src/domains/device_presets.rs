@@ -1907,6 +1907,67 @@ mod presentation_tests {
         }
     }
 
+    fn synth_track() -> crate::state::ProjectTrack {
+        let mut track = crate::state::ProjectTrack::new(TrackId::new(), "Keys".into(), 0);
+        track.has_instrument = true;
+        track.instrument_kind = Some(InstrumentKind::SubtractiveSynth);
+        track.instrument_params = vibez_instruments::synth::SYNTH_PARAMS
+            .iter()
+            .map(|descriptor| descriptor.default)
+            .collect();
+        track
+    }
+
+    #[test]
+    fn synth_factory_presets_are_valid_distinct_and_start_from_init() {
+        let track = synth_track();
+        let device = DeviceParams::instrument(&track).unwrap();
+        let presets = presets_for(device.kind);
+        assert!(presets.len() >= 6);
+        assert_eq!(presets[0].name(), "Init");
+        assert!(presets.iter().any(|preset| preset.name() == "Soft Analog"));
+        assert_eq!(prepare_updates(device, &presets[0]), Ok(Vec::new()));
+        for preset in &presets[1..] {
+            let mut applied = synth_track();
+            for (index, value) in prepare_updates(device, preset).unwrap() {
+                applied.instrument_params[index] = value;
+            }
+            assert_ne!(
+                applied.instrument_params,
+                track.instrument_params,
+                "{}",
+                preset.name()
+            );
+            let captured = capture(DeviceParams::instrument(&applied).unwrap(), preset.name());
+            assert_eq!(captured.as_ref(), Ok(preset));
+        }
+        let mut names: Vec<_> = presets.iter().map(DevicePreset::name).collect();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(names.len(), presets.len(), "names are unique");
+    }
+
+    #[test]
+    fn synth_choices_in_a_preset_must_be_whole() {
+        let track = synth_track();
+        let device = DeviceParams::instrument(&track).unwrap();
+        let captured = capture(device, "Current").unwrap();
+        for key in [
+            "waveform",
+            "octave",
+            "filter_type",
+            "voice_mode",
+            "voices",
+            "lfo_target",
+        ] {
+            let mut parameters = captured.parameters().clone();
+            assert!(parameters.contains_key(key), "{key}");
+            parameters.insert(key.into(), 0.5);
+            let fractional = DevicePreset::new(captured.kind(), "Fractional", parameters).unwrap();
+            assert!(prepare_updates(device, &fractional).is_err(), "{key}");
+        }
+    }
+
     #[test]
     fn a_device_without_factory_presets_has_no_navigation() {
         let mut effect = gain();
