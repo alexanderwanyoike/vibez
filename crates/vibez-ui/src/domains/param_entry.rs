@@ -299,6 +299,23 @@ mod tests {
     }
 
     #[test]
+    fn the_drive_amount_reads_as_decibels_of_gain_into_the_shaper() {
+        let index = vibez_dsp::drive::param::AMOUNT;
+        let format = param_format(
+            EffectType::Drive,
+            index,
+            &vibez_dsp::drive::DRIVE_PARAMS[index],
+        );
+        assert_eq!(format.format(0.0), "0.0 dB");
+        assert_eq!(format.format(1.0), "29.5 dB");
+        let amount = format.parse("6 dB", 0.0, 1.0).unwrap();
+        let gain_db = vibez_core::level::amplitude_to_db(vibez_dsp::drive::drive_gain(amount));
+        assert!((gain_db - 6.0).abs() < 1e-3);
+        assert_eq!(format.parse("40", 0.0, 1.0), None);
+        assert_eq!(format.parse("-3", 0.0, 1.0), None);
+    }
+
+    #[test]
     fn typed_text_accepts_units_and_shorthand() {
         assert_eq!(
             ParamFormat::Hertz.parse("1.2k", 20.0, 20_000.0),
