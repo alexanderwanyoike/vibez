@@ -135,6 +135,24 @@ const GATE_KEYS: [(usize, &str, bool); 14] = {
     ]
 };
 
+/// Every native Drive parameter; its character, oversampling and filter
+/// switches are choices.
+const DRIVE_KEYS: [(usize, &str, bool); 10] = {
+    use vibez_dsp::drive::param::*;
+    [
+        (AMOUNT, "amount", false),
+        (TONE, "tone", false),
+        (OUTPUT, "output", false),
+        (MIX, "mix", false),
+        (CHARACTER, "character", true),
+        (QUALITY, "quality", true),
+        (PRE_HP_ENABLED, "pre_hp_enabled", true),
+        (PRE_HP_FREQUENCY, "pre_hp_frequency_hz", false),
+        (POST_LP_ENABLED, "post_lp_enabled", true),
+        (POST_LP_FREQUENCY, "post_lp_frequency_hz", false),
+    ]
+};
+
 /// One stored parameter: its index, preset key and whether it only takes
 /// whole numbers, as switches and choices do.
 type PresetParam = (usize, &'static str, bool);
@@ -201,6 +219,7 @@ fn parameter_keys(effect: &UiEffect) -> Result<Vec<PresetParam>, String> {
         EffectType::Compressor => Ok(COMPRESSOR_KEYS.to_vec()),
         EffectType::Filter => Ok(FILTER_KEYS.to_vec()),
         EffectType::Gate => Ok(GATE_KEYS.to_vec()),
+        EffectType::Drive => Ok(DRIVE_KEYS.to_vec()),
         _ => Err("Presets are not yet supported by this built-in device".into()),
     }
 }
@@ -278,6 +297,7 @@ pub fn factory_presets(effect_type: EffectType) -> Vec<DevicePreset> {
         EffectType::Compressor => compressor_factory_presets(),
         EffectType::Filter => filter_factory_presets(),
         EffectType::Gate => gate_factory_presets(),
+        EffectType::Drive => drive_factory_presets(),
         _ => Vec::new(),
     }
 }
@@ -696,6 +716,118 @@ fn gate_factory_presets() -> Vec<DevicePreset> {
         EffectType::Gate,
         &GATE_KEYS,
         vibez_dsp::gate::GATE_PARAMS,
+        &presets,
+    )
+}
+
+/// Sol's starting points, his drive amounts given as dB of gain into the
+/// shaper.
+fn drive_factory_presets() -> Vec<DevicePreset> {
+    use vibez_dsp::drive::character::{HARD, SOFT, WARM};
+    let amount = |db: f32| ((vibez_core::level::db_to_amplitude(db) - 1.0) / 29.0).sqrt();
+    let level = vibez_core::level::db_to_amplitude;
+    let presets: [(&str, Vec<(&str, f32)>); 8] = [
+        ("Init", vec![]),
+        (
+            "Warm Edge",
+            vec![
+                ("character", SOFT as f32),
+                ("amount", amount(6.0)),
+                ("tone", 0.55),
+                ("output", level(-3.0)),
+                ("mix", 0.8),
+            ],
+        ),
+        (
+            "Drum Bite",
+            vec![
+                ("character", WARM as f32),
+                ("amount", amount(16.0)),
+                ("tone", 0.6),
+                ("output", level(-6.0)),
+                ("mix", 0.7),
+                ("pre_hp_enabled", 1.0),
+                ("pre_hp_frequency_hz", 40.0),
+                ("post_lp_enabled", 1.0),
+                ("post_lp_frequency_hz", 16_000.0),
+            ],
+        ),
+        (
+            "Soft Bass",
+            vec![
+                ("character", SOFT as f32),
+                ("amount", amount(10.0)),
+                ("tone", 0.38),
+                ("output", level(-4.0)),
+                ("pre_hp_enabled", 1.0),
+                ("pre_hp_frequency_hz", 25.0),
+                ("post_lp_enabled", 1.0),
+                ("post_lp_frequency_hz", 8_000.0),
+            ],
+        ),
+        (
+            "Bright Percussion",
+            vec![
+                ("character", SOFT as f32),
+                ("amount", amount(12.0)),
+                ("tone", 0.65),
+                ("output", level(-5.0)),
+                ("mix", 0.6),
+                ("pre_hp_enabled", 1.0),
+                ("pre_hp_frequency_hz", 120.0),
+                ("post_lp_enabled", 1.0),
+                ("post_lp_frequency_hz", 18_000.0),
+            ],
+        ),
+        (
+            "Parallel Crunch",
+            vec![
+                ("character", HARD as f32),
+                ("amount", amount(24.0)),
+                ("tone", 0.55),
+                ("output", level(-8.0)),
+                ("mix", 0.35),
+                ("pre_hp_enabled", 1.0),
+                ("pre_hp_frequency_hz", 80.0),
+                ("post_lp_enabled", 1.0),
+                ("post_lp_frequency_hz", 10_000.0),
+            ],
+        ),
+        (
+            "Controlled Hard",
+            vec![
+                ("character", HARD as f32),
+                ("amount", amount(18.0)),
+                ("output", level(-6.0)),
+                ("pre_hp_enabled", 1.0),
+                ("pre_hp_frequency_hz", 40.0),
+                ("post_lp_enabled", 1.0),
+                ("post_lp_frequency_hz", 8_500.0),
+            ],
+        ),
+        (
+            "Edge Lead",
+            vec![
+                ("character", WARM as f32),
+                ("amount", amount(14.0)),
+                ("tone", 0.6),
+                ("output", level(-5.0)),
+                ("mix", 0.85),
+                ("pre_hp_enabled", 1.0),
+                ("pre_hp_frequency_hz", 100.0),
+                ("post_lp_enabled", 1.0),
+                ("post_lp_frequency_hz", 14_000.0),
+            ],
+        ),
+    ];
+    let presets: Vec<(&str, &[(&str, f32)])> = presets
+        .iter()
+        .map(|(name, changes)| (*name, changes.as_slice()))
+        .collect();
+    keyed_presets(
+        EffectType::Drive,
+        &DRIVE_KEYS,
+        vibez_dsp::drive::DRIVE_PARAMS,
         &presets,
     )
 }
