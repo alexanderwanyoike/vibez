@@ -306,6 +306,15 @@ impl Default for UiDrumPad {
 }
 
 impl UiDrumPad {
+    /// The pad's Sampler values, first worked out from the ones it was
+    /// saved with when it has none or fewer than the Sampler now has.
+    pub fn sampler_params_mut(&mut self) -> &mut Vec<f32> {
+        if self.params.len() < vibez_instruments::sampler::param::COUNT {
+            self.params = vibez_instruments::drum_rack::pad_params(&self.to_state()).to_vec();
+        }
+        &mut self.params
+    }
+
     pub fn to_state(&self) -> DrumPadState {
         DrumPadState {
             name: self.name.clone(),

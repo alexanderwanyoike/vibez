@@ -639,7 +639,27 @@ impl DevicesState {
                     action.status = Some(format!("Pad {} updated", pad_index + 1));
                 }
             }
-            DevicesMsg::SetDrumPadParams(..) => {}
+            DevicesMsg::SetDrumPadParams(track_id, pad_index, updates) => {
+                let Some(pad) = find_track_mut(tracks, master, buses, track_id)
+                    .and_then(|track| track.drum_rack_pads.get_mut(pad_index))
+                else {
+                    return action;
+                };
+                let params = pad.sampler_params_mut();
+                for &(index, value) in &updates {
+                    if let Some(slot) = params.get_mut(index) {
+                        *slot = value;
+                    }
+                }
+                for (param_index, value) in updates {
+                    engine.send(EngineCommand::SetDrumRackPadParam {
+                        track_id,
+                        pad_index,
+                        param_index,
+                        value,
+                    });
+                }
+            }
             DevicesMsg::AuditionNote {
                 track_id,
                 pitch,
