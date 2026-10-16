@@ -282,6 +282,20 @@ mod tests {
     }
 
     #[test]
+    fn the_drive_output_reads_in_decibels() {
+        let index = vibez_dsp::drive::param::OUTPUT;
+        let format = param_format(
+            EffectType::Drive,
+            index,
+            &vibez_dsp::drive::DRIVE_PARAMS[index],
+        );
+        assert_eq!(format.format(1.0), "0.0 dB");
+        assert_eq!(format.format(0.0), "-inf dB");
+        let half = format.parse("-6", 0.0, 2.0).unwrap();
+        assert!((half - 0.501).abs() < 1e-3);
+    }
+
+    #[test]
     fn typed_text_accepts_units_and_shorthand() {
         assert_eq!(
             ParamFormat::Hertz.parse("1.2k", 20.0, 20_000.0),
