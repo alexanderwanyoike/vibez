@@ -271,3 +271,17 @@ mod tests {
         assert_eq!(all[2], InstrumentKind::DrumRack);
     }
 }
+
+#[cfg(test)]
+mod pitch_name_tests {
+    use super::*;
+
+    #[test]
+    fn every_octave_has_its_own_number() {
+        assert_eq!(pitch_name(60), "C4");
+        assert_eq!(pitch_name(61), "C#4");
+        assert_eq!(pitch_name(12), "C0");
+        assert_eq!(pitch_name(0), "C-1");
+        assert_eq!(pitch_name(127), "G9");
+    }
+}
