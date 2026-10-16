@@ -4,6 +4,18 @@ use crate::clip_timeline::BeatClipTimeline;
 use crate::id::{ClipId, TrackId};
 use crate::perform::GrooveGrid;
 
+/// A pitch's name and octave, middle C (60) being "C4": "C4", "D#3".
+pub fn pitch_name(pitch: u8) -> String {
+    const NAMES: [&str; 12] = [
+        "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B",
+    ];
+    format!(
+        "{}{}",
+        NAMES[pitch as usize % 12],
+        (pitch / 12).saturating_sub(1)
+    )
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct MidiNote {
     pub pitch: u8,
