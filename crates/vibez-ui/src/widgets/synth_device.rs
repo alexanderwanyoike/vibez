@@ -91,13 +91,30 @@ pub fn arrange(size: Size) -> Layout {
     } else {
         TABS_H + 1.0
     };
-    let shared = if below - tabs_h >= HEADER_H + KNOB_ROW_H * 2.0 + 1.0 {
-        KNOB_ROW_H
-    } else {
-        LINE_H
+    let with_shared = |shared: f32| {
+        let room = below - tabs_h - shared - 1.0;
+        let knobs = if room >= HEADER_H + KNOB_ROW_H {
+            KNOB_ROW_H
+        } else {
+            LINE_H
+        };
+        let plot = room - HEADER_H - knobs;
+        Layout {
+            tier,
+            tabs: tier != Tier::Full,
+            sections: room,
+            plot: if plot >= PLOT_MIN_H { plot } else { 0.0 },
+            knobs,
+            shared,
+        }
     };
-    let room = below - tabs_h - shared - 1.0;
-    if room < HEADER_H + LINE_H {
+    // The plots matter more than the shared row's knobs, so that row folds
+    // onto a line first when it lets them in.
+    let mut layout = with_shared(KNOB_ROW_H);
+    if layout.plot == 0.0 {
+        layout = with_shared(LINE_H);
+    }
+    if layout.sections < HEADER_H + LINE_H {
         // Too short for any section, so their tabs would choose nothing.
         return Layout {
             tier,
@@ -105,23 +122,10 @@ pub fn arrange(size: Size) -> Layout {
             sections: 0.0,
             plot: 0.0,
             knobs: 0.0,
-            shared: shared.min(below),
+            shared: LINE_H.min(below),
         };
     }
-    let knobs = if room >= HEADER_H + KNOB_ROW_H {
-        KNOB_ROW_H
-    } else {
-        LINE_H
-    };
-    let plot = room - HEADER_H - knobs;
-    Layout {
-        tier,
-        tabs: tier != Tier::Full,
-        sections: room,
-        plot: if plot >= PLOT_MIN_H { plot } else { 0.0 },
-        knobs,
-        shared,
-    }
+    layout
 }
 
 pub struct SynthView<'a> {
@@ -529,5 +533,8 @@ mod tests {
         assert!(arrange(Size::new(MEDIUM_W, 360.0)).tabs);
         let tall = arrange(Size::new(COMPACT_W, 360.0));
         assert!(tall.plot > 0.0 && tall.knobs == KNOB_ROW_H && tall.shared == KNOB_ROW_H);
+        // A 360 px detail panel leaves a card about 250 px of body.
+        let panel = arrange(Size::new(MEDIUM_W, 250.0));
+        assert!(panel.plot > 0.0 && panel.knobs == KNOB_ROW_H, "{panel:?}");
     }
 }
