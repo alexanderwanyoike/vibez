@@ -110,6 +110,25 @@ fn held(scaled: f64, step: f64, rounding: u32) -> f32 {
     (code * step).clamp(-1.0, 1.0) as f32
 }
 
+/// What one sample becomes when these settings hold it, leaving out
+/// dither, which is random.
+pub fn crush(params: &[f32], sample: f32) -> f32 {
+    let value = |index: usize| {
+        params
+            .get(index)
+            .copied()
+            .unwrap_or(BITCRUSH_PARAMS[index].default)
+    };
+    let bits = value(param::BITS).clamp(2.0, 16.0) as u32;
+    let step = 2.0 / f64::from(1_u32 << bits);
+    let gain = 10.0_f64.powf(f64::from(value(param::DRIVE_DB)) / 20.0);
+    held(
+        f64::from(sample) * gain / step,
+        step,
+        value(param::ROUNDING) as u32,
+    )
+}
+
 /// Lo-fi effect: reduces bit depth and sample rate (sample-and-hold).
 pub struct BitcrushEffect {
     params: [f32; param::COUNT],
@@ -343,6 +362,19 @@ mod tests {
         for (a, b) in buf.iter().zip(orig.iter()) {
             assert!((a - b).abs() < 0.02, "quantized {a} vs {b}");
         }
+    }
+
+    #[test]
+    fn a_crushed_sample_lands_on_the_grid_after_drive() {
+        let mut params: Vec<f32> = BITCRUSH_PARAMS.iter().map(|d| d.default).collect();
+        params[param::BITS] = 3.0;
+        assert_eq!(crush(&params, 0.3), 0.25);
+        params[param::ROUNDING] = 1.0;
+        assert_eq!(crush(&params, 0.3), 0.25);
+        assert_eq!(crush(&params, -0.3), -0.5);
+        params[param::DRIVE_DB] = 20.0 * 2.0_f32.log10();
+        assert_eq!(crush(&params, 0.3), 0.5);
+        assert_eq!(crush(&params, 0.9), 1.0);
     }
 
     #[test]
