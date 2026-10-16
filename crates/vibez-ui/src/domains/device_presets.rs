@@ -212,6 +212,23 @@ const REVERB_KEYS: [(usize, &str, bool); 10] = {
     ]
 };
 
+/// Shape is stored as it is, since older projects can sit between two
+/// shapes.
+const AUTO_PAN_KEYS: [(usize, &str, bool); 9] = {
+    use vibez_dsp::auto_pan::param::*;
+    [
+        (RATE, "rate", false),
+        (DEPTH, "depth", false),
+        (SHAPE, "shape", false),
+        (MODE, "mode", true),
+        (PHASE, "phase", false),
+        (OFFSET, "offset", false),
+        (SMOOTHING, "smoothing", false),
+        (SYNC, "sync", true),
+        (RETRIGGER, "retrigger", true),
+    ]
+};
+
 /// One stored parameter: its index, preset key and whether it only takes
 /// whole numbers, as switches and choices do.
 type PresetParam = (usize, &'static str, bool);
@@ -282,6 +299,7 @@ fn parameter_keys(effect: &UiEffect) -> Result<Vec<PresetParam>, String> {
         EffectType::Bitcrush => Ok(BITCRUSH_KEYS.to_vec()),
         EffectType::Delay => Ok(DELAY_KEYS.to_vec()),
         EffectType::Reverb => Ok(REVERB_KEYS.to_vec()),
+        EffectType::AutoPan => Ok(AUTO_PAN_KEYS.to_vec()),
         _ => Err("Presets are not yet supported by this built-in device".into()),
     }
 }
@@ -363,6 +381,7 @@ pub fn factory_presets(effect_type: EffectType) -> Vec<DevicePreset> {
         EffectType::Bitcrush => bitcrush_factory_presets(),
         EffectType::Delay => delay_factory_presets(),
         EffectType::Reverb => reverb_factory_presets(),
+        EffectType::AutoPan => auto_pan_factory_presets(),
         _ => Vec::new(),
     }
 }
@@ -1187,6 +1206,72 @@ fn reverb_factory_presets() -> Vec<DevicePreset> {
         EffectType::Reverb,
         &REVERB_KEYS,
         vibez_dsp::reverb::REVERB_PARAMS,
+        &presets,
+    )
+}
+
+fn auto_pan_factory_presets() -> Vec<DevicePreset> {
+    use vibez_dsp::auto_pan::shape;
+    let presets: [(&str, &[(&str, f32)]); 8] = [
+        ("Init", &[]),
+        (
+            "Wide Eighths",
+            &[("depth", 0.75), ("smoothing", 0.05), ("sync", 5.0)],
+        ),
+        ("Gentle Drift", &[("rate", 0.25), ("depth", 0.4)]),
+        (
+            "Slow Circle",
+            &[
+                ("depth", 0.6),
+                ("phase", 90.0),
+                ("sync", 2.0),
+                ("retrigger", 1.0),
+            ],
+        ),
+        (
+            "Ping Sixteenths",
+            &[
+                ("depth", 1.0),
+                ("shape", shape::SQUARE as f32),
+                ("smoothing", 0.2),
+                ("sync", 6.0),
+                ("retrigger", 1.0),
+            ],
+        ),
+        (
+            "Quarter Chop",
+            &[
+                ("depth", 1.0),
+                ("shape", shape::SQUARE as f32),
+                ("mode", 1.0),
+                ("phase", 0.0),
+                ("smoothing", 0.1),
+                ("sync", 4.0),
+                ("retrigger", 1.0),
+            ],
+        ),
+        (
+            "Pump",
+            &[
+                ("depth", 0.8),
+                ("shape", shape::SAW_DOWN as f32),
+                ("mode", 1.0),
+                ("phase", 0.0),
+                ("offset", 0.5),
+                ("smoothing", 0.1),
+                ("sync", 4.0),
+                ("retrigger", 1.0),
+            ],
+        ),
+        (
+            "Tremolo",
+            &[("rate", 5.0), ("depth", 0.5), ("mode", 1.0), ("phase", 0.0)],
+        ),
+    ];
+    keyed_presets(
+        EffectType::AutoPan,
+        &AUTO_PAN_KEYS,
+        vibez_dsp::auto_pan::AUTO_PAN_PARAMS,
         &presets,
     )
 }
