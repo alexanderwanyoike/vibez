@@ -10,7 +10,7 @@ use vibez_core::effect::ParamDescriptor;
 use vibez_core::midi::InstrumentKind;
 use vibez_core::track::{drum_rack_pad_index, DrumPadState, DRUM_RACK_PAD_COUNT};
 
-use crate::sampler::{param, Sampler, PAD_NOTE, SAMPLER_PARAMS};
+use crate::sampler::{default_params, param, Sampler, PAD_NOTE};
 use crate::Instrument;
 
 const _: () = assert!(DRUM_RACK_PAD_COUNT <= u64::BITS as usize);
@@ -31,8 +31,7 @@ pub struct DrumRack {
 /// A pad's Sampler controls. Pads saved before each pad was a Sampler
 /// translate their gain, pan, trim, fades, tuning and mode.
 pub fn pad_params(state: &DrumPadState) -> [f32; param::COUNT] {
-    let mut params: [f32; param::COUNT] =
-        std::array::from_fn(|index| SAMPLER_PARAMS[index].default);
+    let mut params = default_params();
     if !state.params.is_empty() {
         for (slot, value) in params.iter_mut().zip(&state.params) {
             *slot = *value;

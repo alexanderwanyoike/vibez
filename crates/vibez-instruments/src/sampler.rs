@@ -42,6 +42,10 @@ const P_LOOP: usize = param::LOOP;
 #[cfg(test)]
 const P_ONE_SHOT: usize = param::ONE_SHOT;
 
+pub fn default_params() -> [f32; param::COUNT] {
+    std::array::from_fn(|index| SAMPLER_PARAMS[index].default)
+}
+
 /// Polyphonic sample-playback instrument.
 pub struct Sampler {
     voices: [SamplerVoice; MAX_VOICES],
@@ -71,8 +75,7 @@ impl Sampler {
         } else {
             48_000.0
         };
-        let params: [f32; param::COUNT] =
-            std::array::from_fn(|index| SAMPLER_PARAMS[index].default);
+        let params = default_params();
         let mut sampler = Self {
             voices: [SamplerVoice::default(); MAX_VOICES],
             sample_rate,
