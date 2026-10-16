@@ -20,6 +20,7 @@ pub mod device_levels;
 pub mod device_presets;
 pub mod devices;
 pub mod eq;
+pub mod filter;
 pub mod gain;
 pub mod param_entry;
 pub mod perform;

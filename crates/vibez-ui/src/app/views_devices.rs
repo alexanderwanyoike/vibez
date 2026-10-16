@@ -29,6 +29,7 @@ enum Flexible {
     Gain,
     Eq,
     Compressor,
+    Filter,
 }
 
 impl App {
@@ -104,6 +105,8 @@ impl App {
                 Some(Flexible::Eq)
             } else if crate::domains::compressor::is_native_compressor(effect) {
                 Some(Flexible::Compressor)
+            } else if crate::domains::filter::is_native_filter(effect) {
+                Some(Flexible::Filter)
             } else {
                 None
             };
@@ -145,6 +148,12 @@ impl App {
                         effect,
                         track_color,
                         crate::widgets::compressor_device::card_width(share),
+                    ),
+                    Flexible::Filter => self.filter_device_body(
+                        track_id,
+                        effect,
+                        track_color,
+                        crate::widgets::filter_device::card_width(share),
                     ),
                 };
                 cards[position] = Some(view_effect_slot(
@@ -278,6 +287,39 @@ impl App {
                     effect,
                     accent,
                     crate::widgets::compressor_device::preset_bar_width(size),
+                ),
+                size,
+            )
+        });
+        DeviceBody {
+            content: content.into(),
+            width,
+            padding: iced::Padding::ZERO,
+        }
+    }
+
+    fn filter_device_body<'a>(
+        &'a self,
+        track_id: TrackId,
+        effect: &'a crate::state::UiEffect,
+        accent: Color,
+        width: f32,
+    ) -> DeviceBody<'a> {
+        let content = iced::widget::responsive(move |size| {
+            crate::widgets::filter_device::FilterView {
+                track_id,
+                effect,
+                accent,
+                panel: self.filter_panels.panel(effect.id),
+                entry: self.param_entry.as_ref(),
+                sample_rate: self.state.transport.sample_rate as f32,
+            }
+            .view(
+                self.view_device_preset_bar(
+                    track_id,
+                    effect,
+                    accent,
+                    crate::widgets::filter_device::preset_bar_width(size),
                 ),
                 size,
             )

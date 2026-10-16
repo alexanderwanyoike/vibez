@@ -62,3 +62,7 @@ required-features = ["dev-gallery"]
 [[example]]
 name = "compressor_device"
 required-features = ["dev-gallery"]
+
+[[example]]
+name = "filter_device"
+required-features = ["dev-gallery"]
