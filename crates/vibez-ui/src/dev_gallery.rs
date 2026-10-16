@@ -1371,9 +1371,9 @@ pub fn run_bitcrush() -> iced::Result {
     .run_with(|| (BitcrushGallery::new(), iced::Task::none()))
 }
 
-/// Native Delay at each width tier and section height it adapts to, set
-/// like the concept's Dotted Bounce with an output level standing in for
-/// live audio.
+/// Native Delay at each width tier and section height it adapts to, on the
+/// Dotted Bounce preset as in the concept, with an output level standing in
+/// for live audio.
 struct DelayGallery {
     track: TrackId,
     effect: UiEffect,
@@ -1390,8 +1390,13 @@ impl DelayGallery {
         effect.params[param::SYNC] = 1.0;
         effect.params[param::LEFT_DIVISION] = 3.0;
         effect.params[param::LEFT_MODIFIER] = 1.0;
+        effect.params[param::RIGHT_DIVISION] = 3.0;
+        effect.params[param::RIGHT_MODIFIER] = 1.0;
         effect.params[param::FEEDBACK] = 0.35;
         effect.params[param::MIX] = 0.22;
+        effect.params[param::FEEDBACK_HP_ENABLED] = 1.0;
+        effect.params[param::FEEDBACK_LP_ENABLED] = 1.0;
+        effect.params[param::DUCK] = 0.2;
         let level = |db: f32| vibez_engine::metering::MeterValues {
             peak_l: vibez_core::level::db_to_amplitude(db),
             peak_r: vibez_core::level::db_to_amplitude(db - 0.5),
