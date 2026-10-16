@@ -78,12 +78,6 @@ impl CompressorPanelState {
         }
     }
 
-    pub fn accept_levels(&mut self, input: MeterValues, output: MeterValues, now: Instant) {
-        self.input = input;
-        self.output = output;
-        self.last_meter_at = Some(now);
-    }
-
     /// Records the deepest reduction since the last reading, so a short
     /// transient still shows in the history.
     pub fn accept_dynamics(&mut self, meter: DynamicsMeter, now: Instant) {
@@ -100,10 +94,16 @@ impl CompressorPanelState {
         }
         self.history.push_back(ReductionPoint { at: now, db });
     }
+}
 
-    /// Readings stop when audio stops reaching the compressor; a held value
-    /// would claim reduction that is no longer happening.
-    pub fn reset_stale(&mut self, now: Instant) {
+impl super::device_levels::MeteredPanel for CompressorPanelState {
+    fn accept_levels(&mut self, input: MeterValues, output: MeterValues, now: Instant) {
+        self.input = input;
+        self.output = output;
+        self.last_meter_at = Some(now);
+    }
+
+    fn reset_stale(&mut self, now: Instant) {
         if self
             .last_meter_at
             .is_some_and(|last| now.saturating_duration_since(last) >= Duration::from_millis(250))
@@ -112,7 +112,7 @@ impl CompressorPanelState {
         }
     }
 
-    pub fn clear_readings(&mut self) {
+    fn clear_readings(&mut self) {
         self.input = MeterValues::SILENT;
         self.output = MeterValues::SILENT;
         self.reduction_db = 0.0;
@@ -124,6 +124,7 @@ impl CompressorPanelState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domains::device_levels::MeteredPanel;
 
     fn reduction(left: f32, right: f32) -> DynamicsMeter {
         DynamicsMeter {

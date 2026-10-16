@@ -160,6 +160,7 @@ mod capture;
 mod compensation;
 mod compressor_devices;
 mod device_meters;
+mod device_panels;
 pub(crate) mod device_presets;
 mod drum_rack_preparation;
 mod engine_events;

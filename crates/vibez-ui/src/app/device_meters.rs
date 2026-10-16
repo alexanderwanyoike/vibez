@@ -7,6 +7,7 @@ use vibez_core::id::{EffectId, TrackId};
 use vibez_engine::metering::MeterValues;
 
 use crate::domains::compressor::is_native_compressor;
+use crate::domains::device_levels::MeteredPanel;
 use crate::domains::eq::is_native_eq;
 use crate::domains::gain::is_native_gain;
 use crate::state::{DetailPanelTab, UiEffect};
@@ -107,13 +108,11 @@ impl App {
             self.eq_devices
                 .panels
                 .entry(effect_id)
-                .or_default()
-                .accept_meter(input, output, Instant::now());
+                .accept_levels(input, output, Instant::now());
         } else if is_native_compressor(effect) {
             self.compressor_devices
                 .panels
                 .entry(effect_id)
-                .or_default()
                 .accept_levels(input, output, Instant::now());
         }
     }
