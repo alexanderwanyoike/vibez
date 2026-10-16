@@ -47,6 +47,20 @@ fn cases(effect: EffectType) -> Vec<(&'static str, Vec<(usize, f32)>)> {
                 vec![(0, 8.0), (1, 4.0), (3, 6.0), (5, 1.0), (6, 0.5), (7, 1.0)],
             ),
         ],
+        EffectType::Delay => vec![
+            ("defaults", vec![]),
+            (
+                "ping-pong, unlinked, both filters, duck",
+                vec![
+                    (6, 1.0),
+                    (7, 0.0),
+                    (8, 375.0),
+                    (11, 1.0),
+                    (13, 1.0),
+                    (15, 0.5),
+                ],
+            ),
+        ],
         _ => vec![("defaults", vec![])],
     }
 }
