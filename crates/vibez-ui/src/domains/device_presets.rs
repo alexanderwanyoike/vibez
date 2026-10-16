@@ -153,6 +153,23 @@ const DRIVE_KEYS: [(usize, &str, bool); 10] = {
     ]
 };
 
+/// Every native Bitcrush parameter; its rounding, dither and filter
+/// switches are choices.
+const BITCRUSH_KEYS: [(usize, &str, bool); 9] = {
+    use vibez_dsp::bitcrush::param::*;
+    [
+        (BITS, "bits", false),
+        (SR_REDUCE, "sr_reduce", false),
+        (MIX, "mix", false),
+        (DRIVE_DB, "drive_db", false),
+        (ROUNDING, "rounding", true),
+        (DITHER, "dither", true),
+        (JITTER, "jitter", false),
+        (POST_LP_ENABLED, "post_lp_enabled", true),
+        (POST_LP_HZ, "post_lp_frequency_hz", false),
+    ]
+};
+
 /// One stored parameter: its index, preset key and whether it only takes
 /// whole numbers, as switches and choices do.
 type PresetParam = (usize, &'static str, bool);
@@ -220,6 +237,7 @@ fn parameter_keys(effect: &UiEffect) -> Result<Vec<PresetParam>, String> {
         EffectType::Filter => Ok(FILTER_KEYS.to_vec()),
         EffectType::Gate => Ok(GATE_KEYS.to_vec()),
         EffectType::Drive => Ok(DRIVE_KEYS.to_vec()),
+        EffectType::Bitcrush => Ok(BITCRUSH_KEYS.to_vec()),
         _ => Err("Presets are not yet supported by this built-in device".into()),
     }
 }
@@ -298,6 +316,7 @@ pub fn factory_presets(effect_type: EffectType) -> Vec<DevicePreset> {
         EffectType::Filter => filter_factory_presets(),
         EffectType::Gate => gate_factory_presets(),
         EffectType::Drive => drive_factory_presets(),
+        EffectType::Bitcrush => bitcrush_factory_presets(),
         _ => Vec::new(),
     }
 }
@@ -829,6 +848,77 @@ fn drive_factory_presets() -> Vec<DevicePreset> {
         EffectType::Drive,
         &DRIVE_KEYS,
         vibez_dsp::drive::DRIVE_PARAMS,
+        &presets,
+    )
+}
+
+/// Sol's lo-fi starting points; the rates are dividers of the host rate.
+fn bitcrush_factory_presets() -> Vec<DevicePreset> {
+    let presets: [(&str, &[(&str, f32)]); 8] = [
+        ("Init", &[]),
+        (
+            "Crunchy 12",
+            &[
+                ("bits", 12.0),
+                ("sr_reduce", 4.0),
+                ("mix", 0.65),
+                ("drive_db", 2.0),
+            ],
+        ),
+        (
+            "Drum Crunch",
+            &[
+                ("bits", 8.0),
+                ("sr_reduce", 3.0),
+                ("mix", 0.55),
+                ("drive_db", 6.0),
+            ],
+        ),
+        (
+            "Dusty Bass",
+            &[
+                ("sr_reduce", 6.0),
+                ("mix", 0.7),
+                ("drive_db", 3.0),
+                ("post_lp_enabled", 1.0),
+                ("post_lp_frequency_hz", 3500.0),
+            ],
+        ),
+        (
+            "Pocket Sampler",
+            &[("bits", 8.0), ("sr_reduce", 4.0), ("dither", 1.0)],
+        ),
+        (
+            "Broken Clock",
+            &[
+                ("bits", 12.0),
+                ("sr_reduce", 8.0),
+                ("mix", 0.75),
+                ("drive_db", 2.0),
+                ("jitter", 0.35),
+                ("post_lp_enabled", 1.0),
+                ("post_lp_frequency_hz", 6000.0),
+            ],
+        ),
+        (
+            "Parallel Arcade",
+            &[
+                ("bits", 4.0),
+                ("sr_reduce", 10.0),
+                ("mix", 0.3),
+                ("drive_db", 8.0),
+                ("rounding", 2.0),
+            ],
+        ),
+        (
+            "Digital Air",
+            &[("bits", 6.0), ("mix", 0.2), ("dither", 1.0)],
+        ),
+    ];
+    keyed_presets(
+        EffectType::Bitcrush,
+        &BITCRUSH_KEYS,
+        vibez_dsp::bitcrush::BITCRUSH_PARAMS,
         &presets,
     )
 }
