@@ -1,6 +1,6 @@
 //! Owns sample-rate manual Delay scalar ramps and exact automation/reset targets.
 
-pub(super) struct ScalarRamp {
+pub(crate) struct ScalarRamp {
     current: f32,
     origin: f32,
     target: f32,
@@ -10,7 +10,7 @@ pub(super) struct ScalarRamp {
 }
 
 impl ScalarRamp {
-    pub(super) fn new(value: f32) -> Self {
+    pub(crate) fn new(value: f32) -> Self {
         Self {
             current: value,
             origin: value,
@@ -29,7 +29,7 @@ impl ScalarRamp {
         self.frames = 0;
     }
 
-    pub(super) fn edit(&mut self, target: f32, automated: bool, frames: usize) {
+    pub(crate) fn edit(&mut self, target: f32, automated: bool, frames: usize) {
         if !self.started || automated {
             self.snap(target);
             return;
@@ -40,7 +40,7 @@ impl ScalarRamp {
         self.frames = frames;
     }
 
-    pub(super) fn next_frame(&mut self) -> f32 {
+    pub(crate) fn next_frame(&mut self) -> f32 {
         self.started = true;
         if self.frame < self.frames {
             self.frame += 1;
@@ -56,7 +56,7 @@ impl ScalarRamp {
         self.current
     }
 
-    pub(super) fn reset(&mut self, target: f32) {
+    pub(crate) fn reset(&mut self, target: f32) {
         self.snap(target);
         self.started = false;
     }

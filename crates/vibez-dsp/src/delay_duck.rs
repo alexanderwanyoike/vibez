@@ -2,7 +2,7 @@
 
 use super::ramp::ScalarRamp;
 
-pub(super) struct Duck {
+pub(crate) struct Duck {
     amount: ScalarRamp,
     envelope: f64,
     attack: f64,
@@ -21,7 +21,7 @@ impl Default for Duck {
 }
 
 impl Duck {
-    pub(super) fn new(sample_rate: f32) -> Self {
+    pub(crate) fn new(sample_rate: f32) -> Self {
         let rate = f64::from(sample_rate);
         Self {
             attack: (-1.0 / (0.005 * rate)).exp(),
@@ -30,11 +30,11 @@ impl Duck {
         }
     }
 
-    pub(super) fn edit(&mut self, target: f32, automated: bool, frames: usize) {
+    pub(crate) fn edit(&mut self, target: f32, automated: bool, frames: usize) {
         self.amount.edit(target, automated, frames);
     }
 
-    pub(super) fn process(&mut self, input: [f32; 2], wet: [f32; 2]) -> [f32; 2] {
+    pub(crate) fn process(&mut self, input: [f32; 2], wet: [f32; 2]) -> [f32; 2] {
         let peak = f64::from(input[0].abs().max(input[1].abs()));
         let coefficient = if peak > self.envelope {
             self.attack
@@ -52,7 +52,7 @@ impl Duck {
         wet.map(|sample| (f64::from(sample) * gain) as f32)
     }
 
-    pub(super) fn reset(&mut self, target: f32) {
+    pub(crate) fn reset(&mut self, target: f32) {
         self.envelope = 0.0;
         self.amount.reset(target);
     }

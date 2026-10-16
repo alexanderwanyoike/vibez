@@ -9,13 +9,13 @@ use vibez_core::effect::{EffectType, ParamDescriptor};
 use crate::effect::AudioEffect;
 
 #[path = "delay_duck.rs"]
-mod duck;
+pub(crate) mod duck;
 #[path = "delay_filter.rs"]
-mod filter;
+pub(crate) mod filter;
 #[path = "delay_history.rs"]
 mod history;
 #[path = "delay_ramp.rs"]
-mod ramp;
+pub(crate) mod ramp;
 #[path = "delay_time.rs"]
 mod time;
 use duck::Duck;
