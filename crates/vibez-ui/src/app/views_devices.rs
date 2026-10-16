@@ -624,7 +624,8 @@ impl App {
         crate::widgets::device_chrome::title_bar(content)
     }
 
-    /// Standard device title row: colored dot, name, optional remove.
+    /// Standard device title row: colored dot, name, and the remove button
+    /// at the far right, where the effect cards keep theirs.
     pub(super) fn device_title_row(
         name: &str,
         track_color: Color,
@@ -632,11 +633,14 @@ impl App {
     ) -> iced::widget::Row<'_, Message> {
         let dot = text("\u{25CF}").size(8).color(track_color);
         let name = text(name.to_string()).size(11).color(th::text());
-        let mut r = row![dot, name].spacing(5).align_y(iced::Alignment::Center);
+        let mut r = row![dot, name]
+            .spacing(5)
+            .width(Length::Fill)
+            .align_y(iced::Alignment::Center);
         if let Some(msg) = remove {
             let remove_btn: Element<'_, Message> =
                 Self::device_icon_btn(icons::X, th::text_dim(), th::danger(), msg).into();
-            r = r.push(horizontal_space().width(Length::Fixed(12.0)));
+            r = r.push(horizontal_space());
             r = r.push(remove_btn);
         }
         r
