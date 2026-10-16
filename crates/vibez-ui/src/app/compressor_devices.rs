@@ -3,10 +3,9 @@
 
 use std::time::Instant;
 
-use vibez_core::effect::DynamicsMeter;
-use vibez_core::id::{EffectId, TrackId};
+use vibez_core::id::EffectId;
 
-use crate::domains::compressor::{is_native_compressor, CompressorMsg, CompressorPanelState};
+use crate::domains::compressor::{CompressorMsg, CompressorPanelState};
 use crate::domains::device_levels::MeteredPanel;
 
 use super::*;
@@ -39,32 +38,6 @@ impl App {
             panel.reset_stale(now);
         }
     }
-
-    pub(super) fn accept_device_dynamics(
-        &mut self,
-        track_id: TrackId,
-        effect_id: EffectId,
-        generation: u64,
-        meter: DynamicsMeter,
-    ) {
-        if self.device_meters.channel != Some(track_id)
-            || self.device_meters.generation != generation
-        {
-            return;
-        }
-        let is_compressor = self.state.find_track(track_id).is_some_and(|track| {
-            track
-                .effects
-                .iter()
-                .any(|effect| effect.id == effect_id && is_native_compressor(effect))
-        });
-        if is_compressor {
-            self.compressor_devices
-                .panels
-                .entry(effect_id)
-                .accept_dynamics(meter, Instant::now());
-        }
-    }
 }
 
 #[cfg(test)]
@@ -72,7 +45,9 @@ mod tests {
     use super::*;
     use crate::domains::devices::DevicesMsg;
     use crate::state::{DetailPanelTab, ProjectTrack};
+    use vibez_core::effect::DynamicsMeter;
     use vibez_core::effect::EffectType;
+    use vibez_core::id::TrackId;
     use vibez_engine::metering::MeterValues;
 
     fn compressor_app() -> (App, TrackId, EffectId) {
