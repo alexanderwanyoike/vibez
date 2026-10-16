@@ -1,5 +1,6 @@
 //! The Phaser before its new controls, kept to prove four-value projects
-//! still sound the same.
+//! still sound the same apart from the sweep, which now sits where its
+//! centre says rather than mirrored above hearing.
 
 mod original {
     use vibez_core::effect::{EffectType, ParamDescriptor};
@@ -71,7 +72,7 @@ mod original {
         /// All-pass coefficient for a break frequency in Hz.
         fn a1(f_hz: f32, sr: f32) -> f32 {
             let t = (std::f32::consts::PI * f_hz / sr).tan();
-            (t - 1.0) / (t + 1.0)
+            (1.0 - t) / (1.0 + t)
         }
     }
 

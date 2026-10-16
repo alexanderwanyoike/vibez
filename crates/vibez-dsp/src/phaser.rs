@@ -126,10 +126,13 @@ pub fn break_hz(params: &[f32], lfo: f32) -> f32 {
     value(params, param::CENTRE) * SWEEP_RATIO.powf(value(params, param::DEPTH) * lfo)
 }
 
-/// All-pass coefficient for a break frequency in Hz.
+/// All-pass coefficient for a break frequency in Hz, for stages of the
+/// form `y = -a x + z; z = x + a y`. With the opposite sign the break lands
+/// at the sample rate's half minus the frequency, above hearing for most
+/// of the sweep, which is where the original Phaser had it.
 fn coefficient(f_hz: f32, sr: f32) -> f32 {
     let t = (std::f32::consts::PI * f_hz.clamp(20.0, sr * 0.45) / sr).tan();
-    (t - 1.0) / (t + 1.0)
+    (1.0 - t) / (1.0 + t)
 }
 
 /// The phaser's gain in dB at `frequency` with the LFO at `lfo`: the dry
