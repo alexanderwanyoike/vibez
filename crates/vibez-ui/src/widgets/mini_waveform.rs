@@ -14,6 +14,26 @@ use crate::message::Message;
 use crate::theme;
 use vibez_core::audio_buffer::DecodedAudio;
 
+/// Each column's lowest and highest sample when `samples` is drawn
+/// `columns` wide.
+pub fn column_peaks(samples: &[f32], columns: usize) -> impl Iterator<Item = (f32, f32)> + '_ {
+    let per_column = (samples.len() / columns.max(1)).max(1);
+    (0..columns)
+        .map(move |col| col * per_column)
+        .take_while(move |begin| *begin < samples.len())
+        .map(move |begin| {
+            let end = (begin + per_column).min(samples.len());
+            // Stride within the column so huge files stay cheap.
+            let stride = ((end - begin) / 64).max(1);
+            samples[begin..end]
+                .iter()
+                .step_by(stride)
+                .fold((f32::MAX, f32::MIN), |(min, max), s| {
+                    (min.min(*s), max.max(*s))
+                })
+        })
+}
+
 /// Filled min/max waveform of a loaded sample, with an optional
 /// highlighted playback region (drum pad start/end trim). Rendering
 /// is cached and invalidated by a fingerprint of the audio pointer
@@ -107,28 +127,8 @@ impl canvas::Program<Message> for MiniWaveform {
             let mid = h / 2.0;
             let usable_h = h / 2.0 - 2.0;
             let columns = (w as usize).saturating_sub(4).max(1);
-            let per_column = (samples.len() / columns).max(1);
 
-            for col in 0..columns {
-                let begin = col * per_column;
-                if begin >= samples.len() {
-                    break;
-                }
-                let end = ((col + 1) * per_column).min(samples.len());
-                let mut min = f32::MAX;
-                let mut max = f32::MIN;
-                // Stride within the column so huge files stay cheap.
-                let stride = ((end - begin) / 64).max(1);
-                let mut i = begin;
-                while i < end {
-                    let s = samples[i];
-                    min = min.min(s);
-                    max = max.max(s);
-                    i += stride;
-                }
-                if min > max {
-                    continue;
-                }
+            for (col, (min, max)) in column_peaks(samples, columns).enumerate() {
                 let pos = col as f32 / columns as f32;
                 let in_region = pos >= region_start && pos <= region_end;
                 let color = if in_region {
