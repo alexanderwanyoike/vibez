@@ -1,19 +1,9 @@
-//! Native Drive cards on the visible device chain and their panel state.
-
-use crate::domains::drive::DriveMsg;
-
-use super::*;
-
-impl App {
-    pub(super) fn update_drive(&mut self, message: DriveMsg) -> Task<Message> {
-        self.drive_panels.entry(message.effect_id()).update(message);
-        Task::none()
-    }
-}
+//! Native Drive cards on the visible device chain.
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::super::*;
+    use crate::domains::device_card::CardMsg;
     use crate::domains::devices::DevicesMsg;
     use crate::state::{DetailPanelTab, ProjectTrack};
     use vibez_core::effect::EffectType;
@@ -49,9 +39,9 @@ mod tests {
             rms_r: 0.2,
         };
         app.accept_device_meter(track, effect, generation.wrapping_sub(1), level, level);
-        assert_eq!(app.drive_panels.panel(effect).input, MeterValues::SILENT);
+        assert_eq!(app.card_panels.panel(effect).input, MeterValues::SILENT);
         app.accept_device_meter(track, effect, generation, level, MeterValues::SILENT);
-        assert_eq!(app.drive_panels.panel(effect).input, level);
+        assert_eq!(app.card_panels.panel(effect).input, level);
     }
 
     #[test]
@@ -118,9 +108,9 @@ mod tests {
     #[test]
     fn a_removed_drive_forgets_its_panel() {
         let (mut app, track, effect) = drive_app();
-        let _ = app.update(Message::Drive(DriveMsg::ToggleAdvanced(effect)));
+        let _ = app.update(Message::Card(CardMsg::ToggleAdvanced(effect)));
         let _ = app.update(Message::Devices(DevicesMsg::RemoveEffect(track, effect)));
         app.poll_device_meters();
-        assert!(!app.drive_panels.contains(effect));
+        assert!(!app.card_panels.contains(effect));
     }
 }

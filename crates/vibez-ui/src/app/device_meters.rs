@@ -7,6 +7,7 @@ use vibez_core::effect::DynamicsMeter;
 use vibez_core::id::{EffectId, TrackId};
 use vibez_engine::metering::MeterValues;
 
+use crate::domains::bitcrush::is_native_bitcrush;
 use crate::domains::compressor::is_native_compressor;
 use crate::domains::device_levels::MeteredPanel;
 use crate::domains::drive::is_native_drive;
@@ -25,7 +26,8 @@ enum Metered {
     Filter,
     Compressor,
     Gate,
-    Drive,
+    /// A device whose card has only an Advanced switch.
+    Card,
 }
 
 #[derive(Default)]
@@ -41,6 +43,7 @@ fn is_metered(effect: &UiEffect) -> bool {
         || is_native_filter(effect)
         || is_native_gate(effect)
         || is_native_drive(effect)
+        || is_native_bitcrush(effect)
 }
 
 impl App {
@@ -72,8 +75,8 @@ impl App {
         for panel in self.gate_panels.values_mut() {
             panel.reset_stale(now);
         }
-        self.drive_panels.retain_existing(state);
-        for panel in self.drive_panels.values_mut() {
+        self.card_panels.retain_existing(state);
+        for panel in self.card_panels.values_mut() {
             panel.reset_stale(now);
         }
     }
@@ -98,7 +101,7 @@ impl App {
         for panel in self.gate_panels.values_mut() {
             panel.clear_readings();
         }
-        for panel in self.drive_panels.values_mut() {
+        for panel in self.card_panels.values_mut() {
             panel.clear_readings();
         }
         self.send_command(EngineCommand::SetEffectMeterChannel {
@@ -115,7 +118,7 @@ impl App {
         self.compressor_devices.panels.clear();
         self.filter_panels.clear();
         self.gate_panels.clear();
-        self.drive_panels.clear();
+        self.card_panels.clear();
         self.send_command(EngineCommand::SetEffectMeterChannel {
             track_id: None,
             generation: self.device_meters.generation,
@@ -146,8 +149,8 @@ impl App {
             Some(Metered::Compressor)
         } else if is_native_gate(effect) {
             Some(Metered::Gate)
-        } else if is_native_drive(effect) {
-            Some(Metered::Drive)
+        } else if is_native_drive(effect) || is_native_bitcrush(effect) {
+            Some(Metered::Card)
         } else {
             None
         }
@@ -187,8 +190,8 @@ impl App {
                 .gate_panels
                 .entry(effect_id)
                 .accept_levels(input, output, now),
-            Some(Metered::Drive) => self
-                .drive_panels
+            Some(Metered::Card) => self
+                .card_panels
                 .entry(effect_id)
                 .accept_levels(input, output, now),
             None => {}

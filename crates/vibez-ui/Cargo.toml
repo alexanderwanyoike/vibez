@@ -74,3 +74,7 @@ required-features = ["dev-gallery"]
 [[example]]
 name = "drive_device"
 required-features = ["dev-gallery"]
+
+[[example]]
+name = "bitcrush_device"
+required-features = ["dev-gallery"]

@@ -16,15 +16,14 @@ use crate::message::Message;
 use crate::state::UiEffect;
 use crate::theme as th;
 use crate::widgets::device_controls::{
-    disclosure, dropdown, heading, rule, segmented, toggle, vertical_rule, Param, LABEL_SIZE,
+    disclosure, dropdown, heading, level_column, rule, segmented, toggle, vertical_rule, Param,
+    LABEL_SIZE, METER_W,
 };
 use crate::widgets::filter_display::{ModulationPreview, ResponsePlot};
-use crate::widgets::level_meter::{self, LevelMeter};
 
 const PAD: f32 = 10.0;
 const PRESET_ROW_H: f32 = 28.0;
 const KNOB: f32 = 32.0;
-const SMALL_KNOB: f32 = 18.0;
 const KNOB_COL_W: f32 = 68.0;
 const KNOB_ROW_H: f32 = 74.0;
 const LINE_H: f32 = 24.0;
@@ -38,7 +37,6 @@ const TYPE_COLUMN_W: f32 = 100.0;
 /// The medium card's Type and Slope rows beside the plot.
 const TYPE_PANEL_H: f32 = 100.0;
 const TYPE_PANEL_W: f32 = 170.0;
-const OUTPUT_W: f32 = 58.0;
 const MODULATION_W: f32 = 520.0;
 const PREVIEW_MIN_H: f32 = 36.0;
 /// One labelled value and knob on a single-line row.
@@ -48,7 +46,7 @@ const LINE_TYPE_W: f32 = 160.0;
 
 pub const COMPACT_W: f32 = 420.0;
 /// The Type controls fit beside the plot.
-pub const MEDIUM_W: f32 = TYPE_PANEL_W + PLOT_MIN_W + OUTPUT_W + 2.0 * 8.0 + PAD * 2.0;
+pub const MEDIUM_W: f32 = TYPE_PANEL_W + PLOT_MIN_W + METER_W + 2.0 * 8.0 + PAD * 2.0;
 /// The main knobs and the modulation share one row, so nothing pages.
 pub const FULL_W: f32 = 4.0 * KNOB_COL_W + 1.0 + MODULATION_W + 2.0 * 8.0 + PAD * 2.0;
 pub const MAX_W: f32 = 1000.0;
@@ -359,29 +357,23 @@ impl<'a> FilterView<'a> {
         .into()
     }
 
-    fn output(&self) -> Element<'a, Message> {
-        column![
-            heading("Output"),
-            canvas(LevelMeter {
-                levels: self.panel.output
-            })
-            .width(level_meter::WIDTH)
-            .height(Length::Fill),
-        ]
-        .spacing(2)
-        .width(OUTPUT_W)
-        .into()
-    }
-
     fn plots(&self, layout: Arrangement) -> Element<'a, Message> {
         let content = match (layout.type_place, layout.full) {
             (TypePlace::Beside, true) => {
-                row![self.type_column(), self.response(), self.output()]
+                row![
+                    self.type_column(),
+                    self.response(),
+                    level_column("Output", self.panel.output)
+                ]
             }
             (TypePlace::Beside, false) => {
-                row![self.response(), self.output(), self.type_panel()]
+                row![
+                    self.response(),
+                    level_column("Output", self.panel.output),
+                    self.type_panel()
+                ]
             }
-            _ => row![self.response(), self.output()],
+            _ => row![self.response(), level_column("Output", self.panel.output)],
         };
         container(content.spacing(8))
             .padding([6.0, PAD])
@@ -391,30 +383,6 @@ impl<'a> FilterView<'a> {
     }
 
     const MAIN: [usize; 4] = [param::CUTOFF, param::RESONANCE, param::DRIVE, param::MIX];
-
-    fn value_knob(&self, index: usize) -> Element<'a, Message> {
-        let param = self.param(index);
-        row![
-            param.value_entry(),
-            canvas(param.knob()).width(SMALL_KNOB).height(SMALL_KNOB),
-        ]
-        .spacing(2)
-        .align_y(Alignment::Center)
-        .into()
-    }
-
-    fn line_item(&self, index: usize) -> Element<'a, Message> {
-        row![
-            text(self.param(index).name())
-                .size(LABEL_SIZE)
-                .color(th::text_dim())
-                .wrapping(text::Wrapping::None),
-            self.value_knob(index),
-        ]
-        .spacing(4)
-        .align_y(Alignment::Center)
-        .into()
-    }
 
     fn line(
         &self,
@@ -447,7 +415,7 @@ impl<'a> FilterView<'a> {
             // Cutoff comes first, so it stays while there is room for one.
             let fits = (room / LINE_ITEM_W).floor().max(0.0) as usize;
             for &index in Self::MAIN.iter().take(fits) {
-                content = content.push(self.line_item(index));
+                content = content.push(self.param(index).line_item());
             }
             return self.line(layout, layout.knob_row, content.into());
         }
@@ -535,7 +503,7 @@ impl<'a> FilterView<'a> {
                 SOURCE_NAMES.iter().copied().enumerate().collect();
             let content = row![
                 segmented(&sources, source, self.set(param::MOD_SOURCE), self.accent()),
-                self.line_item(param::DEPTH),
+                self.param(param::DEPTH).line_item(),
             ]
             .spacing(10)
             .align_y(Alignment::Center);
@@ -560,7 +528,7 @@ impl<'a> FilterView<'a> {
         if height < KNOB_ROW_H {
             let mut line = row![].spacing(10).align_y(Alignment::Center);
             for index in Self::ADVANCED {
-                line = line.push(self.line_item(index));
+                line = line.push(self.param(index).line_item());
             }
             return container(line)
                 .padding([0.0, PAD])

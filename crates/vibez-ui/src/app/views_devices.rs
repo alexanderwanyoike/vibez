@@ -32,6 +32,7 @@ enum Flexible {
     Filter,
     Gate,
     Drive,
+    Bitcrush,
 }
 
 impl App {
@@ -113,6 +114,8 @@ impl App {
                 Some(Flexible::Gate)
             } else if crate::domains::drive::is_native_drive(effect) {
                 Some(Flexible::Drive)
+            } else if crate::domains::bitcrush::is_native_bitcrush(effect) {
+                Some(Flexible::Bitcrush)
             } else {
                 None
             };
@@ -172,6 +175,12 @@ impl App {
                         effect,
                         track_color,
                         crate::widgets::drive_device::card_width(share),
+                    ),
+                    Flexible::Bitcrush => self.bitcrush_device_body(
+                        track_id,
+                        effect,
+                        track_color,
+                        crate::widgets::bitcrush_device::card_width(share),
                     ),
                 };
                 cards[position] = Some(view_effect_slot(
@@ -316,6 +325,39 @@ impl App {
         }
     }
 
+    fn bitcrush_device_body<'a>(
+        &'a self,
+        track_id: TrackId,
+        effect: &'a crate::state::UiEffect,
+        accent: Color,
+        width: f32,
+    ) -> DeviceBody<'a> {
+        let content = iced::widget::responsive(move |size| {
+            crate::widgets::bitcrush_device::BitcrushView {
+                track_id,
+                effect,
+                accent,
+                panel: self.card_panels.panel(effect.id),
+                entry: self.param_entry.as_ref(),
+                host_rate: self.state.transport.sample_rate,
+            }
+            .view(
+                self.view_device_preset_bar(
+                    track_id,
+                    effect,
+                    accent,
+                    crate::widgets::bitcrush_device::preset_bar_width(size),
+                ),
+                size,
+            )
+        });
+        DeviceBody {
+            content: content.into(),
+            width,
+            padding: iced::Padding::ZERO,
+        }
+    }
+
     fn drive_device_body<'a>(
         &'a self,
         track_id: TrackId,
@@ -328,7 +370,7 @@ impl App {
                 track_id,
                 effect,
                 accent,
-                panel: self.drive_panels.panel(effect.id),
+                panel: self.card_panels.panel(effect.id),
                 entry: self.param_entry.as_ref(),
             }
             .view(

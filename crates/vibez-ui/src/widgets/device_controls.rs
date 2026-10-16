@@ -21,6 +21,10 @@ pub const VALUE_SIZE: f32 = 11.0;
 pub const KNOB_TEXT_H: f32 = 34.0;
 pub const KNOB_MIN: f32 = 28.0;
 pub const KNOB_MAX: f32 = 56.0;
+/// The knob beside a value on a single-line row.
+pub const SMALL_KNOB: f32 = 18.0;
+/// A level meter with its scale, under a heading.
+pub const METER_W: f32 = 58.0;
 
 /// Only one value is typed into at a time, so every entry shares this id.
 pub fn entry_id() -> text_input::Id {
@@ -47,6 +51,7 @@ pub struct Param<'a> {
     pub entry: Option<&'a ValueEntry>,
     target: Option<KnobTarget>,
     label: Option<&'a str>,
+    host_rate: Option<u32>,
 }
 
 impl<'a> Param<'a> {
@@ -65,7 +70,15 @@ impl<'a> Param<'a> {
             entry,
             target: None,
             label: None,
+            host_rate: None,
         }
+    }
+
+    /// The sample rate the device runs at, for values that read as a
+    /// share of it.
+    pub fn host_rate(mut self, rate: u32) -> Self {
+        self.host_rate = Some(rate);
+        self
     }
 
     /// Replaces the knob's linear travel, as Gain does for its dB curve.
@@ -124,7 +137,12 @@ impl<'a> Param<'a> {
         let Some(descriptor) = self.descriptor() else {
             return text("").into();
         };
-        let format = param_format(self.effect.effect_type, self.index, descriptor);
+        let format = param_format(
+            self.effect.effect_type,
+            self.index,
+            descriptor,
+            self.host_rate,
+        );
         let accent = self.accent;
         if let Some(entry) = self
             .entry
@@ -180,6 +198,50 @@ impl<'a> Param<'a> {
         .into()
     }
 
+    /// The value with a small knob beside it.
+    pub fn value_knob(&self) -> Element<'a, Message> {
+        row![
+            self.value_entry(),
+            canvas(self.knob()).width(SMALL_KNOB).height(SMALL_KNOB),
+        ]
+        .spacing(2)
+        .align_y(Alignment::Center)
+        .into()
+    }
+
+    /// Name, value and small knob on one line, for the shortest cards.
+    pub fn line_item(&self) -> Element<'a, Message> {
+        row![
+            text(self.name())
+                .size(LABEL_SIZE)
+                .color(th::text_dim())
+                .wrapping(text::Wrapping::None),
+            self.value_knob(),
+        ]
+        .spacing(4)
+        .align_y(Alignment::Center)
+        .into()
+    }
+
+    /// A switch named `label`, lit while this parameter is on.
+    pub fn switch(&self, label: &'a str) -> Element<'a, Message> {
+        let on = self.value() >= 0.5;
+        toggle(
+            text(label)
+                .size(LABEL_SIZE)
+                .wrapping(text::Wrapping::None)
+                .into(),
+            on,
+            Message::set_effect_param(
+                self.track_id,
+                self.effect.id,
+                self.index,
+                if on { 0.0 } else { 1.0 },
+            ),
+            self.accent,
+        )
+    }
+
     /// Knob, name and value stacked, as most device controls read.
     pub fn column(&self, knob_size: f32) -> Element<'a, Message> {
         column![
@@ -211,6 +273,22 @@ impl<'a> Param<'a> {
         .align_y(Alignment::Center)
         .into()
     }
+}
+
+/// A level meter under its heading.
+pub fn level_column<'a>(
+    name: &'a str,
+    levels: vibez_engine::metering::MeterValues,
+) -> Element<'a, Message> {
+    column![
+        heading(name),
+        canvas(crate::widgets::level_meter::LevelMeter { levels })
+            .width(crate::widgets::level_meter::WIDTH)
+            .height(Length::Fill),
+    ]
+    .spacing(2)
+    .width(METER_W)
+    .into()
 }
 
 /// A small button that is lit with the track accent while `on`.

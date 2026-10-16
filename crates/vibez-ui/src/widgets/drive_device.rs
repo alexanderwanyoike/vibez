@@ -7,26 +7,25 @@ use iced::{Alignment, Color, Element, Length, Size};
 use vibez_core::id::TrackId;
 use vibez_dsp::drive::{character, param};
 
-use crate::domains::drive::{DriveMsg, DrivePanelState, CHARACTER_NAMES, QUALITY_NAMES};
+use crate::domains::device_card::{CardMsg, CardPanelState};
+use crate::domains::drive::{CHARACTER_NAMES, QUALITY_NAMES};
 use crate::domains::param_entry::ValueEntry;
 use crate::message::Message;
 use crate::state::UiEffect;
 use crate::theme as th;
 use crate::widgets::device_controls::{
-    disclosure, dropdown, heading, rule, segmented, toggle, vertical_rule, Param, LABEL_SIZE,
+    disclosure, dropdown, heading, level_column, rule, segmented, vertical_rule, Param, LABEL_SIZE,
+    METER_W,
 };
 use crate::widgets::device_layout::{stack, KNOB_ROW_H};
 use crate::widgets::drive_display::{TransferCurve, Waveform};
-use crate::widgets::level_meter::{self, LevelMeter};
 
 const PAD: f32 = 10.0;
 const PRESET_ROW_H: f32 = 28.0;
 const KNOB: f32 = 32.0;
-const SMALL_KNOB: f32 = 18.0;
 const KNOB_COL_W: f32 = 68.0;
 const PLOT_MIN_H: f32 = 72.0;
 const PLOT_MIN_W: f32 = 200.0;
-const METER_W: f32 = 58.0;
 const CHARACTER_W: f32 = 96.0;
 /// One labelled value and knob on a single-line knob row.
 const LINE_ITEM_W: f32 = 124.0;
@@ -84,7 +83,7 @@ pub struct DriveView<'a> {
     pub track_id: TrackId,
     pub effect: &'a UiEffect,
     pub accent: Color,
-    pub panel: &'a DrivePanelState,
+    pub panel: &'a CardPanelState,
     pub entry: Option<&'a ValueEntry>,
 }
 
@@ -111,28 +110,6 @@ impl<'a> DriveView<'a> {
             .max(0.0) as usize
     }
 
-    fn on(&self, index: usize) -> bool {
-        self.effect.params.get(index).copied().unwrap_or(0.0) >= 0.5
-    }
-
-    fn switch(&self, index: usize, label: &'a str) -> Element<'a, Message> {
-        let on = self.on(index);
-        toggle(
-            text(label)
-                .size(LABEL_SIZE)
-                .wrapping(text::Wrapping::None)
-                .into(),
-            on,
-            Message::set_effect_param(
-                self.track_id,
-                self.effect.id,
-                index,
-                if on { 0.0 } else { 1.0 },
-            ),
-            self.accent(),
-        )
-    }
-
     fn input_peak(&self) -> f32 {
         self.panel.input.peak_l.max(self.panel.input.peak_r)
     }
@@ -144,7 +121,7 @@ impl<'a> DriveView<'a> {
             Space::with_width(Length::Fill),
             disclosure(
                 self.panel.advanced,
-                Message::Drive(DriveMsg::ToggleAdvanced(self.effect.id)),
+                Message::Card(CardMsg::ToggleAdvanced(self.effect.id)),
                 self.accent(),
             )
         ]
@@ -172,25 +149,9 @@ impl<'a> DriveView<'a> {
         body.width(Length::Fill).height(Length::Fill).into()
     }
 
-    fn meter(
-        &self,
-        name: &'a str,
-        levels: vibez_engine::metering::MeterValues,
-    ) -> Element<'a, Message> {
-        column![
-            heading(name),
-            canvas(LevelMeter { levels })
-                .width(level_meter::WIDTH)
-                .height(Length::Fill),
-        ]
-        .spacing(2)
-        .width(METER_W)
-        .into()
-    }
-
     fn plots(&self, layout: Arrangement) -> Element<'a, Message> {
         let mut content = row![
-            self.meter("Input", self.panel.input),
+            level_column("Input", self.panel.input),
             column![
                 heading("Transfer curve (dB)"),
                 canvas(TransferCurve {
@@ -221,7 +182,7 @@ impl<'a> DriveView<'a> {
                 .width(Length::Fill),
             );
         }
-        container(content.push(self.meter("Output", self.panel.output)))
+        container(content.push(level_column("Output", self.panel.output)))
             .padding([6.0, PAD])
             .height(layout.plots)
             .width(Length::Fill)
@@ -229,30 +190,6 @@ impl<'a> DriveView<'a> {
     }
 
     const MAIN: [usize; 4] = [param::AMOUNT, param::TONE, param::OUTPUT, param::MIX];
-
-    fn value_knob(&self, index: usize) -> Element<'a, Message> {
-        let param = self.param(index);
-        row![
-            param.value_entry(),
-            canvas(param.knob()).width(SMALL_KNOB).height(SMALL_KNOB),
-        ]
-        .spacing(2)
-        .align_y(Alignment::Center)
-        .into()
-    }
-
-    fn line_item(&self, index: usize) -> Element<'a, Message> {
-        row![
-            text(self.param(index).name())
-                .size(LABEL_SIZE)
-                .color(th::text_dim())
-                .wrapping(text::Wrapping::None),
-            self.value_knob(index),
-        ]
-        .spacing(4)
-        .align_y(Alignment::Center)
-        .into()
-    }
 
     fn character(&self) -> Element<'a, Message> {
         let (track_id, effect_id) = (self.track_id, self.effect.id);
@@ -278,7 +215,7 @@ impl<'a> DriveView<'a> {
                 .into_iter()
                 .take(fits)
             {
-                line = line.push(self.line_item(index));
+                line = line.push(self.param(index).line_item());
             }
             let name = CHARACTER_NAMES[self.choice(param::CHARACTER).min(character::COUNT - 1)];
             return container(
@@ -340,15 +277,21 @@ impl<'a> DriveView<'a> {
     fn advanced(&self, height: f32) -> Element<'a, Message> {
         let filter = |enabled, frequency, label| -> Element<'a, Message> {
             if height < KNOB_ROW_H {
-                row![self.switch(enabled, label), self.value_knob(frequency)]
-                    .spacing(4)
-                    .align_y(Alignment::Center)
-                    .into()
+                row![
+                    self.param(enabled).switch(label),
+                    self.param(frequency).value_knob()
+                ]
+                .spacing(4)
+                .align_y(Alignment::Center)
+                .into()
             } else {
-                column![self.switch(enabled, label), self.value_knob(frequency)]
-                    .spacing(4)
-                    .align_x(Alignment::Center)
-                    .into()
+                column![
+                    self.param(enabled).switch(label),
+                    self.param(frequency).value_knob()
+                ]
+                .spacing(4)
+                .align_x(Alignment::Center)
+                .into()
             }
         };
         let oversampling: Element<'a, Message> = if height < KNOB_ROW_H {

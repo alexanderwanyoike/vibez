@@ -24,10 +24,11 @@ impl App {
         let current = effect
             .zip(self.param_entry.as_ref())
             .and_then(|(effect, entry)| effect.params.get(entry.index).copied());
+        let host_rate = self.state.transport.sample_rate;
         let parse = |entry: &crate::domains::param_entry::ValueEntry| {
             let effect = effect?;
             let descriptor = effect.descriptors.get(entry.index)?;
-            param_format(effect.effect_type, entry.index, descriptor).parse(
+            param_format(effect.effect_type, entry.index, descriptor, Some(host_rate)).parse(
                 &entry.text,
                 descriptor.min,
                 descriptor.max,
