@@ -139,6 +139,16 @@ pub struct FilterPlot {
     pub accent: Color,
 }
 
+/// The top of a filter plot's axis: 0 dB, as in the concept, unless a
+/// resonant peak rises above it, then the next 6 dB up.
+fn axis_top_db(peak_db: f32) -> f32 {
+    if peak_db <= 0.25 {
+        0.0
+    } else {
+        ((peak_db / 6.0).ceil() * 6.0).min(24.0)
+    }
+}
+
 impl canvas::Program<Message> for FilterPlot {
     type State = ();
 
@@ -150,15 +160,34 @@ impl canvas::Program<Message> for FilterPlot {
         bounds: Rectangle,
         _cursor: mouse::Cursor,
     ) -> Vec<canvas::Geometry> {
-        const TOP_DB: f32 = 12.0;
         const FLOOR_DB: f32 = -48.0;
         let mut frame = canvas::Frame::new(renderer, bounds.size());
         panel(&mut frame, bounds.size());
         let (plot, labels) = area(bounds.size(), true);
+        let steps = 160;
+        let response: Vec<f32> = (0..=steps)
+            .map(|step| {
+                let position = step as f32 / steps as f32;
+                self.filter_type.map_or(0.0, |kind| {
+                    svf_response_db(
+                        kind,
+                        self.cutoff,
+                        self.resonance,
+                        norm_to_freq(position),
+                        DISPLAY_RATE,
+                    )
+                })
+            })
+            .collect();
+        let top_db = axis_top_db(response.iter().copied().fold(f32::MIN, f32::max));
         let y = |db: f32| {
-            plot.y + plot.height * (TOP_DB - db.clamp(FLOOR_DB, TOP_DB)) / (TOP_DB - FLOOR_DB)
+            plot.y + plot.height * (top_db - db.clamp(FLOOR_DB, top_db)) / (top_db - FLOOR_DB)
         };
-        for db in [0.0f32, -12.0, -24.0, -36.0, -48.0] {
+        let mut levels = vec![0.0f32, -12.0, -24.0, -36.0, -48.0];
+        if top_db > 0.0 {
+            levels.insert(0, top_db);
+        }
+        for db in levels {
             frame.stroke(
                 &canvas::Path::line(
                     Point::new(plot.x, y(db)),
@@ -167,9 +196,14 @@ impl canvas::Program<Message> for FilterPlot {
                 canvas::Stroke::default().with_color(grid()).with_width(1.0),
             );
             if labels {
+                let text = if db > 0.0 {
+                    format!("+{db:.0}")
+                } else {
+                    format!("{db:.0}")
+                };
                 label(
                     &mut frame,
-                    format!("{db:.0}"),
+                    text,
                     Point::new(LABEL_W - 4.0, y(db)),
                     iced::alignment::Horizontal::Right,
                 );
@@ -195,22 +229,25 @@ impl canvas::Program<Message> for FilterPlot {
                 );
             }
         }
-        let steps = 160;
-        let points: Vec<Point> = (0..=steps)
-            .map(|step| {
-                let position = step as f32 / steps as f32;
-                let db = self.filter_type.map_or(0.0, |kind| {
-                    svf_response_db(
-                        kind,
-                        self.cutoff,
-                        self.resonance,
-                        norm_to_freq(position),
-                        DISPLAY_RATE,
-                    )
-                });
-                Point::new(plot.x + position * plot.width, y(db))
-            })
+        let points: Vec<Point> = response
+            .iter()
+            .enumerate()
+            .map(|(step, db)| Point::new(plot.x + plot.width * step as f32 / steps as f32, y(*db)))
             .collect();
+        if self.filter_type.is_none() {
+            // Off passes everything: a quiet flat line, named.
+            stroke(&mut frame, points.into_iter(), th::text_muted());
+            frame.fill_text(canvas::Text {
+                content: "Off".into(),
+                position: Point::new(plot.x + plot.width / 2.0, plot.y + plot.height * 0.55),
+                color: th::text_muted(),
+                size: 11.0.into(),
+                horizontal_alignment: iced::alignment::Horizontal::Center,
+                vertical_alignment: iced::alignment::Vertical::Center,
+                ..canvas::Text::default()
+            });
+            return vec![frame.into_geometry()];
+        }
         let area = canvas::Path::new(|builder| {
             builder.move_to(Point::new(plot.x, plot.y + plot.height));
             for point in &points {
@@ -222,7 +259,7 @@ impl canvas::Program<Message> for FilterPlot {
         frame.fill(
             &area,
             Color {
-                a: 0.18,
+                a: 0.1,
                 ..self.accent
             },
         );
@@ -348,6 +385,15 @@ impl canvas::Program<Message> for LfoPlot {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_filter_axis_tops_out_at_zero_unless_a_peak_rises_above() {
+        assert_eq!(axis_top_db(-3.0), 0.0);
+        assert_eq!(axis_top_db(0.1), 0.0, "a Butterworth corner is flat");
+        assert_eq!(axis_top_db(1.3), 6.0);
+        assert_eq!(axis_top_db(13.0), 18.0);
+        assert_eq!(axis_top_db(40.0), 24.0);
+    }
 
     #[test]
     fn every_envelope_stage_stays_visible_and_the_widths_fill_the_plot() {
