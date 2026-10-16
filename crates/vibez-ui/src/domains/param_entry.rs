@@ -130,6 +130,9 @@ pub fn param_format(
         (EffectType::Gain, vibez_dsp::gain::param::GAIN) => ParamFormat::Amplitude {
             floor_db: crate::domains::gain::MIN_GAIN_DB,
         },
+        (EffectType::Drive, vibez_dsp::drive::param::OUTPUT) => ParamFormat::Amplitude {
+            floor_db: crate::domains::gain::MIN_GAIN_DB,
+        },
         _ => ParamFormat::for_descriptor(descriptor),
     }
 }
