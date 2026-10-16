@@ -59,6 +59,9 @@ pub struct Sampler {
     lfo_phase: f64,
     filter_for: (f32, f32),
     coefficients: Coefficients,
+    /// Worked out on each edit, not each frame, as the engine renders one
+    /// frame at a time.
+    region: Option<Region>,
 }
 
 impl Sampler {
@@ -85,6 +88,7 @@ impl Sampler {
             lfo_phase: 0.0,
             filter_for: (f32::NAN, f32::NAN),
             coefficients: Coefficients::new(sample_rate, 1_000.0, 1.0),
+            region: None,
         };
         sampler.retime();
         sampler
@@ -114,7 +118,7 @@ impl Sampler {
 
     /// The part of the sample a note plays, from the trim, loop and
     /// direction controls.
-    fn region(&self) -> Option<Region> {
+    fn find_region(&self) -> Option<Region> {
         let sample = self.sample.as_ref()?;
         let frames = sample.num_frames() as f64;
         let at = |index: usize| f64::from(self.params[index]) * frames;
@@ -158,7 +162,7 @@ impl Sampler {
     /// oldest released one, else the oldest; `take_over` first reuses a
     /// voice already playing `pitch`.
     fn start(&mut self, pitch: u8, semitones: f32, velocity: u8, take_over: bool) {
-        let Some(region) = self.region() else {
+        let Some(region) = self.region else {
             return;
         };
         let p = &self.params;
@@ -204,6 +208,7 @@ impl Sampler {
     pub fn unload(&mut self) {
         self.sample = None;
         self.sample_name = None;
+        self.region = None;
         self.reset();
     }
 
@@ -254,6 +259,7 @@ impl Instrument for Sampler {
             self.current[index] = value;
         }
         self.retime();
+        self.region = self.find_region();
         true
     }
 
@@ -282,10 +288,7 @@ impl Instrument for Sampler {
     }
 
     fn render(&mut self, buffer: &mut [f32], channels: usize) {
-        let Some(audio) = self.sample.as_ref().map(Arc::clone) else {
-            return;
-        };
-        let Some(region) = self.region() else {
+        let Some(region) = self.region else {
             return;
         };
         if channels == 0 {
@@ -299,6 +302,9 @@ impl Instrument for Sampler {
             .fract();
             return;
         }
+        let Some(audio) = self.sample.as_ref().map(Arc::clone) else {
+            return;
+        };
         let base_speed = f64::from(audio.sample_rate.max(1)) / f64::from(self.sample_rate);
         for out in buffer.chunks_exact_mut(channels) {
             for index in SMOOTHED {
@@ -383,6 +389,7 @@ impl Instrument for Sampler {
     fn load_sample(&mut self, sample: Arc<DecodedAudio>, name: String) {
         self.sample = Some(sample);
         self.sample_name = Some(name);
+        self.region = self.find_region();
         self.reset();
     }
 
