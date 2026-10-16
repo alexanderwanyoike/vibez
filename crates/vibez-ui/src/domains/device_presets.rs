@@ -195,6 +195,23 @@ const DELAY_KEYS: [(usize, &str, bool); 17] = {
     ]
 };
 
+/// Every native Reverb parameter; its sync and freeze are choices.
+const REVERB_KEYS: [(usize, &str, bool); 10] = {
+    use vibez_dsp::reverb::param::*;
+    [
+        (ROOM_SIZE, "room_size", false),
+        (DAMPING, "damping", false),
+        (MIX, "mix", false),
+        (PREDELAY_MS, "predelay_ms", false),
+        (PREDELAY_SYNC, "predelay_sync", true),
+        (WIDTH, "width", false),
+        (DIFFUSION, "diffusion", false),
+        (LOW_CUT_HZ, "low_cut_hz", false),
+        (HIGH_CUT_HZ, "high_cut_hz", false),
+        (FREEZE, "freeze", true),
+    ]
+};
+
 /// One stored parameter: its index, preset key and whether it only takes
 /// whole numbers, as switches and choices do.
 type PresetParam = (usize, &'static str, bool);
@@ -264,6 +281,7 @@ fn parameter_keys(effect: &UiEffect) -> Result<Vec<PresetParam>, String> {
         EffectType::Drive => Ok(DRIVE_KEYS.to_vec()),
         EffectType::Bitcrush => Ok(BITCRUSH_KEYS.to_vec()),
         EffectType::Delay => Ok(DELAY_KEYS.to_vec()),
+        EffectType::Reverb => Ok(REVERB_KEYS.to_vec()),
         _ => Err("Presets are not yet supported by this built-in device".into()),
     }
 }
@@ -344,6 +362,7 @@ pub fn factory_presets(effect_type: EffectType) -> Vec<DevicePreset> {
         EffectType::Drive => drive_factory_presets(),
         EffectType::Bitcrush => bitcrush_factory_presets(),
         EffectType::Delay => delay_factory_presets(),
+        EffectType::Reverb => reverb_factory_presets(),
         _ => Vec::new(),
     }
 }
@@ -1068,6 +1087,110 @@ fn delay_factory_presets() -> Vec<DevicePreset> {
     )
 }
 
+/// Sol's spaces, his decay times given as the room sizes that reach them.
+fn reverb_factory_presets() -> Vec<DevicePreset> {
+    let room = vibez_dsp::reverb::room_for_decay;
+    let presets: [(&str, Vec<(&str, f32)>); 8] = [
+        ("Init", vec![]),
+        (
+            "Small Space",
+            vec![
+                ("room_size", room(0.45)),
+                ("damping", 0.25),
+                ("mix", 0.16),
+                ("predelay_ms", 5.0),
+                ("width", 0.65),
+                ("low_cut_hz", 100.0),
+                ("high_cut_hz", 14_000.0),
+            ],
+        ),
+        (
+            "Drum Room",
+            vec![
+                ("room_size", room(0.8)),
+                ("damping", 0.4),
+                ("mix", 0.18),
+                ("predelay_ms", 12.0),
+                ("width", 0.85),
+                ("diffusion", 0.75),
+                ("low_cut_hz", 150.0),
+                ("high_cut_hz", 11_000.0),
+            ],
+        ),
+        (
+            "Warm Hall",
+            vec![
+                ("room_size", room(2.4)),
+                ("damping", 0.6),
+                ("mix", 0.22),
+                ("predelay_ms", 24.0),
+                ("diffusion", 0.8),
+                ("low_cut_hz", 120.0),
+                ("high_cut_hz", 10_000.0),
+            ],
+        ),
+        (
+            "Clear Hall",
+            vec![
+                ("room_size", room(2.0)),
+                ("damping", 0.2),
+                ("mix", 0.2),
+                ("predelay_ms", 18.0),
+                ("diffusion", 0.75),
+                ("low_cut_hz", 80.0),
+                ("high_cut_hz", 18_000.0),
+            ],
+        ),
+        (
+            "Long Cloud",
+            vec![
+                ("room_size", room(8.0)),
+                ("damping", 0.55),
+                ("mix", 0.25),
+                ("predelay_ms", 40.0),
+                ("diffusion", 0.9),
+                ("low_cut_hz", 180.0),
+                ("high_cut_hz", 12_000.0),
+            ],
+        ),
+        (
+            "Wide Ambience",
+            vec![
+                ("room_size", room(1.3)),
+                ("damping", 0.3),
+                ("mix", 0.17),
+                ("predelay_ms", 8.0),
+                ("diffusion", 0.65),
+                ("low_cut_hz", 160.0),
+                ("high_cut_hz", 16_000.0),
+            ],
+        ),
+        (
+            "Vocal Air",
+            vec![
+                ("room_size", room(1.8)),
+                ("damping", 0.35),
+                ("mix", 0.18),
+                ("predelay_sync", 5.0),
+                ("width", 0.9),
+                ("diffusion", 0.8),
+                ("low_cut_hz", 180.0),
+                ("high_cut_hz", 15_000.0),
+            ],
+        ),
+    ];
+    let presets: Vec<(&str, &[(&str, f32)])> = presets
+        .iter()
+        .map(|(name, changes)| (*name, changes.as_slice()))
+        .collect();
+    keyed_presets(
+        EffectType::Reverb,
+        &REVERB_KEYS,
+        vibez_dsp::reverb::REVERB_PARAMS,
+        &presets,
+    )
+}
+
 /// Presets that start from the device's defaults and change the named keys.
 fn keyed_presets(
     effect_type: EffectType,
@@ -1591,7 +1714,7 @@ mod presentation_tests {
     #[test]
     fn a_device_without_factory_presets_has_no_navigation() {
         let mut effect = gain();
-        effect.effect_type = EffectType::Reverb;
+        effect.effect_type = EffectType::Phaser;
         let unsupported = presentation(&effect, None);
         assert!(unsupported.options.is_empty());
         assert!(unsupported.selected.is_none());
