@@ -302,7 +302,9 @@ impl Instrument for Sampler {
             .fract();
             return;
         }
-        let Some(audio) = self.sample.as_ref().map(Arc::clone) else {
+        // Moved out while the voices borrow `self`, and back after: cloning
+        // the Arc would cost two atomics every frame on every pad of a rack.
+        let Some(audio) = self.sample.take() else {
             return;
         };
         let base_speed = f64::from(audio.sample_rate.max(1)) / f64::from(self.sample_rate);
@@ -377,6 +379,7 @@ impl Instrument for Sampler {
                 *second += right * gain * (1.0 + pan).min(1.0);
             }
         }
+        self.sample = Some(audio);
     }
 
     fn reset(&mut self) {
