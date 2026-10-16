@@ -10,7 +10,7 @@ use vibez_core::effect::ParamDescriptor;
 use vibez_core::midi::InstrumentKind;
 use vibez_core::track::{drum_rack_pad_index, DrumPadState, DRUM_RACK_PAD_COUNT};
 
-use crate::sampler::{default_params, param, Sampler, PAD_NOTE};
+use crate::sampler::{default_params, param, Sampler, PAD_NOTE, SAMPLER_PARAMS};
 use crate::Instrument;
 
 const _: () = assert!(DRUM_RACK_PAD_COUNT <= u64::BITS as usize);
@@ -32,23 +32,26 @@ pub struct DrumRack {
 /// translate their gain, pan, trim, fades, tuning and mode.
 pub fn pad_params(state: &DrumPadState) -> [f32; param::COUNT] {
     let mut params = default_params();
-    if !state.params.is_empty() {
+    if state.params.is_empty() {
+        // Their equal-power pan held a centred pad 3 dB down; the Sampler's
+        // balance does not.
+        params[param::VOLUME] = state.gain * std::f32::consts::FRAC_1_SQRT_2;
+        params[param::PAN] = state.pan;
+        params[param::START] = state.start;
+        params[param::END] = state.end;
+        params[param::ATTACK] = state.fade_in_ms / 1000.0;
+        params[param::RELEASE] = state.fade_out_ms / 1000.0;
+        params[param::TUNE] = f32::from(state.coarse_tune);
+        params[param::FINE] = state.fine_tune;
+        params[param::ONE_SHOT] = f32::from(state.one_shot);
+    } else {
         for (slot, value) in params.iter_mut().zip(&state.params) {
             *slot = *value;
         }
-        return params;
     }
-    // Their equal-power pan held a centred pad 3 dB down; the Sampler's
-    // balance does not.
-    params[param::VOLUME] = state.gain * std::f32::consts::FRAC_1_SQRT_2;
-    params[param::PAN] = state.pan;
-    params[param::START] = state.start;
-    params[param::END] = state.end;
-    params[param::ATTACK] = state.fade_in_ms / 1000.0;
-    params[param::RELEASE] = state.fade_out_ms / 1000.0;
-    params[param::TUNE] = f32::from(state.coarse_tune);
-    params[param::FINE] = state.fine_tune;
-    params[param::ONE_SHOT] = f32::from(state.one_shot);
+    for (value, descriptor) in params.iter_mut().zip(SAMPLER_PARAMS) {
+        *value = value.clamp(descriptor.min, descriptor.max);
+    }
     params
 }
 
@@ -169,7 +172,6 @@ impl Instrument for DrumRack {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sampler::SAMPLER_PARAMS;
 
     fn make_test_audio(frames: usize, value: f32) -> Arc<DecodedAudio> {
         Arc::new(DecodedAudio {
