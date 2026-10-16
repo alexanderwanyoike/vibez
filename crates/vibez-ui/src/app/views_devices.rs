@@ -36,6 +36,7 @@ enum Flexible {
     Delay,
     Reverb,
     AutoPan,
+    Phaser,
 }
 
 impl App {
@@ -125,6 +126,8 @@ impl App {
                 Some(Flexible::Reverb)
             } else if crate::domains::auto_pan::is_native_auto_pan(effect) {
                 Some(Flexible::AutoPan)
+            } else if crate::domains::phaser::is_native_phaser(effect) {
+                Some(Flexible::Phaser)
             } else {
                 None
             };
@@ -202,6 +205,12 @@ impl App {
                         effect,
                         track_color,
                         crate::widgets::reverb_device::card_width(share),
+                    ),
+                    Flexible::Phaser => self.phaser_device_body(
+                        track_id,
+                        effect,
+                        track_color,
+                        crate::widgets::phaser_device::card_width(share),
                     ),
                     Flexible::AutoPan => self.auto_pan_device_body(
                         track_id,
@@ -374,6 +383,39 @@ impl App {
                     effect,
                     accent,
                     crate::widgets::reverb_device::preset_bar_width(size),
+                ),
+                size,
+            )
+        });
+        DeviceBody {
+            content: content.into(),
+            width,
+            padding: iced::Padding::ZERO,
+        }
+    }
+
+    fn phaser_device_body<'a>(
+        &'a self,
+        track_id: TrackId,
+        effect: &'a crate::state::UiEffect,
+        accent: Color,
+        width: f32,
+    ) -> DeviceBody<'a> {
+        let content = iced::widget::responsive(move |size| {
+            crate::widgets::phaser_device::PhaserView {
+                track_id,
+                effect,
+                accent,
+                panel: self.card_panels.panel(effect.id),
+                entry: self.param_entry.as_ref(),
+                bpm: self.state.transport.bpm,
+            }
+            .view(
+                self.view_device_preset_bar(
+                    track_id,
+                    effect,
+                    accent,
+                    crate::widgets::phaser_device::preset_bar_width(size),
                 ),
                 size,
             )
@@ -624,7 +666,8 @@ impl App {
         crate::widgets::device_chrome::title_bar(content)
     }
 
-    /// Standard device title row: colored dot, name, optional remove.
+    /// Standard device title row: colored dot, name, and the remove button
+    /// at the far right, where the effect cards keep theirs.
     pub(super) fn device_title_row(
         name: &str,
         track_color: Color,
@@ -632,11 +675,14 @@ impl App {
     ) -> iced::widget::Row<'_, Message> {
         let dot = text("\u{25CF}").size(8).color(track_color);
         let name = text(name.to_string()).size(11).color(th::text());
-        let mut r = row![dot, name].spacing(5).align_y(iced::Alignment::Center);
+        let mut r = row![dot, name]
+            .spacing(5)
+            .width(Length::Fill)
+            .align_y(iced::Alignment::Center);
         if let Some(msg) = remove {
             let remove_btn: Element<'_, Message> =
                 Self::device_icon_btn(icons::X, th::text_dim(), th::danger(), msg).into();
-            r = r.push(horizontal_space().width(Length::Fixed(12.0)));
+            r = r.push(horizontal_space());
             r = r.push(remove_btn);
         }
         r

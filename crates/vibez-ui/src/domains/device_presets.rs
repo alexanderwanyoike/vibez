@@ -215,6 +215,22 @@ const REVERB_KEYS: [(usize, &str, bool); 10] = {
     ]
 };
 
+const PHASER_KEYS: [(usize, &str, bool); 10] = {
+    use vibez_dsp::phaser::param::*;
+    [
+        (RATE, "rate", false),
+        (DEPTH, "depth", false),
+        (FEEDBACK, "feedback", false),
+        (MIX, "mix", false),
+        (CENTRE, "centre", false),
+        (STAGES, "stages", true),
+        (STEREO_PHASE, "stereo_phase", false),
+        (POLARITY, "polarity", true),
+        (SHAPE, "shape", true),
+        (SYNC, "sync", true),
+    ]
+};
+
 /// Shape is stored as it is, since older projects can sit between two
 /// shapes.
 const AUTO_PAN_KEYS: [(usize, &str, bool); 9] = {
@@ -354,7 +370,7 @@ fn parameter_keys(device: &DeviceParams) -> Result<Vec<PresetParam>, String> {
         EffectType::Delay => Ok(DELAY_KEYS.to_vec()),
         EffectType::Reverb => Ok(REVERB_KEYS.to_vec()),
         EffectType::AutoPan => Ok(AUTO_PAN_KEYS.to_vec()),
-        _ => Err("Presets are not yet supported by this built-in device".into()),
+        EffectType::Phaser => Ok(PHASER_KEYS.to_vec()),
     }
 }
 
@@ -444,7 +460,7 @@ pub fn factory_presets(effect_type: EffectType) -> Vec<DevicePreset> {
         EffectType::Delay => delay_factory_presets(),
         EffectType::Reverb => reverb_factory_presets(),
         EffectType::AutoPan => auto_pan_factory_presets(),
-        _ => Vec::new(),
+        EffectType::Phaser => phaser_factory_presets(),
     }
 }
 
@@ -1272,6 +1288,79 @@ fn reverb_factory_presets() -> Vec<DevicePreset> {
     )
 }
 
+fn phaser_factory_presets() -> Vec<DevicePreset> {
+    let presets: [(&str, &[(&str, f32)]); 8] = [
+        ("Init", &[]),
+        ("Slow Sweep", &[("depth", 0.6), ("stereo_phase", 90.0)]),
+        (
+            "Subtle Width",
+            &[
+                ("rate", 0.2),
+                ("depth", 0.35),
+                ("feedback", 0.1),
+                ("mix", 0.3),
+                ("stages", 0.0),
+                ("stereo_phase", 120.0),
+            ],
+        ),
+        (
+            "Jet",
+            &[
+                ("rate", 0.15),
+                ("depth", 0.9),
+                ("feedback", 0.8),
+                ("centre", 400.0),
+                ("stages", 3.0),
+            ],
+        ),
+        (
+            "Deep Twelve",
+            &[
+                ("rate", 0.1),
+                ("depth", 0.8),
+                ("feedback", 0.5),
+                ("centre", 300.0),
+                ("stages", 4.0),
+            ],
+        ),
+        (
+            "Hollow",
+            &[
+                ("rate", 1.0),
+                ("depth", 0.5),
+                ("feedback", 0.7),
+                ("centre", 1_200.0),
+                ("stages", 2.0),
+                ("polarity", 1.0),
+            ],
+        ),
+        (
+            "Quarter Swirl",
+            &[
+                ("depth", 0.5),
+                ("feedback", 0.4),
+                ("stereo_phase", 180.0),
+                ("sync", 4.0),
+            ],
+        ),
+        (
+            "Wobble",
+            &[
+                ("rate", 4.0),
+                ("depth", 0.4),
+                ("feedback", 0.2),
+                ("shape", 1.0),
+            ],
+        ),
+    ];
+    keyed_presets(
+        EffectType::Phaser,
+        &PHASER_KEYS,
+        vibez_dsp::phaser::PHASER_PARAMS,
+        &presets,
+    )
+}
+
 fn auto_pan_factory_presets() -> Vec<DevicePreset> {
     use vibez_dsp::auto_pan::shape;
     let presets: [(&str, &[(&str, f32)]); 8] = [
@@ -1907,14 +1996,52 @@ mod presentation_tests {
         }
     }
 
+    fn phaser() -> UiEffect {
+        let descriptors =
+            vibez_dsp::factory::create_effect(EffectType::Phaser, 44_100.0).param_descriptors();
+        UiEffect {
+            effect_type: EffectType::Phaser,
+            params: descriptors
+                .iter()
+                .map(|descriptor| descriptor.default)
+                .collect(),
+            descriptors,
+            ..gain()
+        }
+    }
+
     #[test]
-    fn a_device_without_factory_presets_has_no_navigation() {
-        let mut effect = gain();
-        effect.effect_type = EffectType::Phaser;
-        let unsupported = presentation(&effect, None);
-        assert!(unsupported.options.is_empty());
-        assert!(unsupported.selected.is_none());
-        assert!(unsupported.previous.is_none());
-        assert!(unsupported.next.is_none());
+    fn phaser_factory_presets_are_valid_distinct_and_start_from_init() {
+        let effect = phaser();
+        let presets = factory_presets(EffectType::Phaser);
+        assert!(presets.len() >= 6);
+        assert_eq!(presets[0].name(), "Init");
+        assert!(presets.iter().any(|preset| preset.name() == "Slow Sweep"));
+        assert_eq!(prepare_updates(&effect, &presets[0]), Ok(Vec::new()));
+        for preset in &presets[1..] {
+            let mut applied = phaser();
+            for (index, value) in prepare_updates(&effect, preset).unwrap() {
+                applied.params[index] = value;
+            }
+            assert_ne!(applied.params, effect.params, "{}", preset.name());
+            assert_eq!(capture(&applied, preset.name()).as_ref(), Ok(preset));
+        }
+        let mut names: Vec<_> = presets.iter().map(DevicePreset::name).collect();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(names.len(), presets.len(), "names are unique");
+    }
+
+    #[test]
+    fn phaser_choices_in_a_preset_must_be_whole() {
+        let effect = phaser();
+        let captured = capture(&effect, "Current").unwrap();
+        for key in ["stages", "polarity", "shape", "sync"] {
+            let mut parameters = captured.parameters().clone();
+            assert!(parameters.contains_key(key), "{key}");
+            parameters.insert(key.into(), 0.5);
+            let fractional = DevicePreset::new(captured.kind(), "Fractional", parameters).unwrap();
+            assert!(prepare_updates(&effect, &fractional).is_err(), "{key}");
+        }
     }
 }

@@ -16,8 +16,14 @@ serde = { workspace = true }
 [target.'cfg(not(target_os = "windows"))'.dependencies]
 cpal = { workspace = true }
 
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
+
 [target.'cfg(target_os = "windows")'.dependencies]
 cpal = { workspace = true, features = ["asio"] }
+
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+libc = "0.2"
 
 [dev-dependencies]
 vibez-dsp = { workspace = true }
