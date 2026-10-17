@@ -1,6 +1,7 @@
 //! Execute prepared stage buffers without callback graph searches or allocation.
 
 use super::*;
+use crate::events::{TrackMeterEvent, TrackNoteActivityEvent};
 use vibez_core::routing::{
     adapt_channels, EdgeKind, ExternalInputBlock, ExternalInputId, NodeStage,
 };
@@ -38,12 +39,8 @@ impl AudioEngine {
             }
             return;
         }
-        if let Some(max_frames) = self
-            .routing
-            .as_ref()
-            .map(|plan| plan.max_frames)
-            .filter(|max_frames| block.frames > *max_frames)
-        {
+        let max_frames = self.routing.max_frames;
+        if block.frames > max_frames {
             let mut offset = 0;
             while offset < block.frames {
                 let frames = (block.frames - offset).min(max_frames);
@@ -87,14 +84,10 @@ impl AudioEngine {
             self.render_hardware_routing(output, block, capture, idle, capture_audible_only);
             return;
         }
-        let Some(mut prepared) = self.routing.take() else {
-            return;
-        };
         let frames = block.frames;
         let channels = block.channels;
-        if frames > prepared.max_frames || !matches!(channels, 1 | 2) {
+        if !matches!(channels, 1 | 2) {
             output.fill(0.0);
-            self.routing = Some(prepared);
             return;
         }
         let len = frames * channels;
@@ -104,6 +97,7 @@ impl AudioEngine {
         let track_solo = any_solo(&self.tracks);
         let bus_solo = any_solo(&self.buses);
         let tempo = TempoMap::new(self.transport.bpm(), self.sample_rate);
+        let prepared = self.routing.as_mut();
         for channel in &mut prepared.channels {
             channel.bind(&self.tracks, &self.buses);
         }
@@ -145,82 +139,85 @@ impl AudioEngine {
             track_solo,
             bus_solo,
         );
-        for order_index in 0..prepared.graph.order.len() {
-            let index = prepared.graph.order[order_index];
-            let node = prepared.graph.nodes[index];
-            let channel_index = prepared.nodes[index].channel;
-            let binding = prepared.channels[channel_index].binding;
-            prepared.nodes[index].samples[..len].fill(0.0);
-            for incoming_index in 0..prepared.nodes[index].incoming.len() {
-                let edge_index = prepared.nodes[index].incoming[incoming_index];
-                let edge = prepared.graph.edges[edge_index];
-                prepared.edge_samples[edge_index][..len]
-                    .copy_from_slice(&prepared.nodes[edge.from].samples[..len]);
-                if matches!(edge.kind, EdgeKind::Send) {
-                    let source_channel = prepared.nodes[edge.from].channel;
-                    let track = prepared.channels[source_channel].binding.get(
-                        &self.tracks,
-                        &self.buses,
-                        &self.master,
-                    );
-                    let target = vibez_core::automation::AutomationTarget::Send {
-                        bus_id: node.channel,
-                    };
-                    let control = prepared
-                        .control_indices
-                        .get(&(prepared.graph.nodes[edge.from].channel, target))
-                        .map(|&index| &prepared.automation_controls[index]);
-                    let static_gain =
-                        track.map_or(0.0, |track| track.static_send_amount(node.channel));
-                    let lane = if control.is_none() {
-                        track.and_then(|track| {
-                            track
-                                .playback_source
-                                .automation
-                                .iter()
-                                .find(|lane| lane.target == target)
-                        })
-                    } else {
-                        None
-                    };
-                    let clock = &prepared.channel_clocks[source_channel];
-                    for frame in 0..frames {
-                        let gain = if let Some(control) = control {
-                            let value = control.values[frame];
-                            if value.is_nan() {
-                                static_gain
-                            } else {
-                                value
-                            }
-                        } else if let Some(lane) = lane {
-                            let position = clock.position(
-                                prepared.compensation.node_input_latency[edge.from],
-                                frame,
-                            );
-                            lane.value_at(position as f64 / tempo.samples_per_beat())
-                                .unwrap_or(static_gain)
-                        } else {
-                            static_gain
+        for order_index in 0..self.routing.graph.order.len() {
+            let index = self.routing.graph.order[order_index];
+            let node = self.routing.graph.nodes[index];
+            let channel_index = self.routing.nodes[index].channel;
+            let binding = self.routing.channels[channel_index].binding;
+            {
+                let prepared = self.routing.as_mut();
+                prepared.nodes[index].samples[..len].fill(0.0);
+                for incoming_index in 0..prepared.nodes[index].incoming.len() {
+                    let edge_index = prepared.nodes[index].incoming[incoming_index];
+                    let edge = prepared.graph.edges[edge_index];
+                    prepared.edge_samples[edge_index][..len]
+                        .copy_from_slice(&prepared.nodes[edge.from].samples[..len]);
+                    if matches!(edge.kind, EdgeKind::Send) {
+                        let source_channel = prepared.nodes[edge.from].channel;
+                        let track = prepared.channels[source_channel].binding.get(
+                            &self.tracks,
+                            &self.buses,
+                            &self.master,
+                        );
+                        let target = vibez_core::automation::AutomationTarget::Send {
+                            bus_id: node.channel,
                         };
-                        for sample in &mut prepared.edge_samples[edge_index]
-                            [frame * channels..(frame + 1) * channels]
-                        {
-                            *sample *= gain;
+                        let control = prepared
+                            .control_indices
+                            .get(&(prepared.graph.nodes[edge.from].channel, target))
+                            .map(|&index| &prepared.automation_controls[index]);
+                        let static_gain =
+                            track.map_or(0.0, |track| track.static_send_amount(node.channel));
+                        let lane = if control.is_none() {
+                            track.and_then(|track| {
+                                track
+                                    .playback_source
+                                    .automation
+                                    .iter()
+                                    .find(|lane| lane.target == target)
+                            })
+                        } else {
+                            None
+                        };
+                        let clock = &prepared.channel_clocks[source_channel];
+                        for frame in 0..frames {
+                            let gain = if let Some(control) = control {
+                                let value = control.values[frame];
+                                if value.is_nan() {
+                                    static_gain
+                                } else {
+                                    value
+                                }
+                            } else if let Some(lane) = lane {
+                                let position = clock.position(
+                                    prepared.compensation.node_input_latency[edge.from],
+                                    frame,
+                                );
+                                lane.value_at(position as f64 / tempo.samples_per_beat())
+                                    .unwrap_or(static_gain)
+                            } else {
+                                static_gain
+                            };
+                            for sample in &mut prepared.edge_samples[edge_index]
+                                [frame * channels..(frame + 1) * channels]
+                            {
+                                *sample *= gain;
+                            }
                         }
                     }
+                    prepared.compensation.delay_edge(
+                        edge_index,
+                        &mut prepared.edge_samples[edge_index][..len],
+                        channels,
+                    );
                 }
-                prepared.compensation.delay_edge(
-                    edge_index,
-                    &mut prepared.edge_samples[edge_index][..len],
-                    channels,
-                );
             }
-
             match node.stage {
                 NodeStage::Source => {
                     if self.is_device_recovering(node.channel, None) {
                         continue;
                     }
+                    let prepared = self.routing.as_mut();
                     let Some(track) =
                         binding.get_mut(&mut self.tracks, &mut self.buses, &mut self.master)
                     else {
@@ -265,7 +262,7 @@ impl AudioEngine {
                     let events = &mut self.event_tx;
                     let scheduled = &mut self.scheduled_presentation;
                     let presentation = &prepared.presentation;
-                    let performing = self.clock_domain == ClockDomain::Perform;
+                    let performing = self.clock_domain == ClockDomain::Perform || idle;
                     let mut presentation_overflow = false;
                     let mut repeated = |trigger: crate::note_repeat::NoteRepeatTrigger| {
                         if presentation_overflow {
@@ -396,13 +393,16 @@ impl AudioEngine {
                         self.fail_presentation();
                     }
                     if activity != 0 {
-                        let _ = self.event_tx.push(EngineEvent::TrackNoteActivity {
-                            track_id: id,
-                            triggered_notes: activity,
-                        });
+                        let _ = self.event_tx.push(EngineEvent::TrackNoteActivity(
+                            TrackNoteActivityEvent {
+                                track_id: id,
+                                triggered_notes: activity,
+                            },
+                        ));
                     }
                 }
                 NodeStage::Sum => {
+                    let prepared = self.routing.as_mut();
                     if binding
                         .get(&self.tracks, &self.buses, &self.master)
                         .is_none()
@@ -437,6 +437,7 @@ impl AudioEngine {
                 NodeStage::Effect(effect_id) => {
                     let recovery_bypass = self.recovering_effect_bypass(node.channel, effect_id);
                     let meter_generation = self.effect_meter.generation_for(node.channel);
+                    let prepared = self.routing.as_mut();
                     for incoming_index in 0..prepared.nodes[index].incoming.len() {
                         let edge_index = prepared.nodes[index].incoming[incoming_index];
                         if prepared.graph.edges[edge_index].kind != EdgeKind::Main {
@@ -641,6 +642,7 @@ impl AudioEngine {
                     }
                 }
                 NodeStage::AfterEffects | NodeStage::AfterFader => {
+                    let prepared = self.routing.as_mut();
                     if let Some(&edge_index) =
                         prepared.nodes[index].incoming.iter().find(|&&edge_index| {
                             prepared.graph.edges[edge_index].kind == EdgeKind::Main
@@ -731,11 +733,11 @@ impl AudioEngine {
                                 &prepared.nodes[index].samples[..len],
                                 channels,
                             );
-                            let _ = self.event_tx.push(EngineEvent::TrackMeter {
+                            let _ = self.event_tx.push(EngineEvent::TrackMeter(TrackMeterEvent {
                                 track_id: node.channel,
                                 peak_l: levels.peak_l,
                                 peak_r: levels.peak_r,
-                            });
+                            }));
                             if let Some(capture) = capture.as_deref_mut().filter(|capture| {
                                 capture.source_track_raw == node.channel.raw()
                                     && capture.samples.len() >= len
@@ -768,6 +770,7 @@ impl AudioEngine {
             }
         }
         {
+            let prepared = self.routing.as_mut();
             let performing = self.clock_domain == ClockDomain::Perform;
             let first = crate::compensation_clock::PresentationPosition {
                 arrange: if performing {
@@ -784,12 +787,12 @@ impl AudioEngine {
                 generation: prepared.compensation.generation,
             };
             prepared.presentation_start.get_or_insert(first);
+            // Stopped Note Repeat still advances Perform while Arrange stays fixed.
             prepared
                 .presentation
-                .record_clocks(first, frames, !performing && !idle, !idle);
+                .record_clocks(first, frames, !performing && !idle, true);
         }
         self.rendered_callback_frames += frames;
-        self.routing = Some(prepared);
     }
 }
 

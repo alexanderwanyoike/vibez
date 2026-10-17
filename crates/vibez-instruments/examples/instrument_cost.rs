@@ -130,18 +130,21 @@ fn run(kind: InstrumentKind, edits: &[(usize, f32)]) -> Duration {
         }
         let sample = sample();
         for pad in 0..16 {
-            instrument.load_drum_pad_sample(pad, Arc::clone(&sample), "noise.wav".into());
-            instrument.set_drum_pad_state(
-                pad,
-                DrumPadState {
-                    params: params.to_vec(),
-                    ..DrumPadState::default()
-                },
+            drop(instrument.load_drum_pad_sample(pad, Arc::clone(&sample), "noise.wav".into()));
+            drop(
+                instrument.set_drum_pad_state(
+                    pad,
+                    DrumPadState {
+                        params: params.to_vec(),
+                        ..DrumPadState::default()
+                    }
+                    .into(),
+                ),
             );
             instrument.note_on(DRUM_RACK_BASE_NOTE + pad as u8, 100);
         }
     } else {
-        instrument.load_sample(sample(), "noise.wav".into());
+        drop(instrument.load_sample(sample(), "noise.wav".into()));
         for &(index, value) in edits {
             instrument.set_param(index, value);
         }

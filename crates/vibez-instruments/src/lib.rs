@@ -1,11 +1,15 @@
 //! Instrument rendering and native ownership configuration.
 
 pub mod drum_rack;
-mod envelope;
+pub(crate) mod envelope;
 pub mod fm;
 pub mod fm_params;
 mod fm_voice;
+mod media_owners;
 mod poly;
+mod prepared_pad_state;
+pub use media_owners::InstrumentMediaOwners;
+pub use prepared_pad_state::PreparedDrumPadState;
 pub mod sampler;
 pub mod sampler_params;
 mod sampler_voice;
@@ -24,7 +28,6 @@ use std::sync::Arc;
 use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::effect::ParamDescriptor;
 use vibez_core::midi::InstrumentKind;
-use vibez_core::track::DrumPadState;
 
 use drum_rack::DrumRack;
 use fm::FmSynth;
@@ -113,22 +116,40 @@ pub trait Instrument: Send {
     }
 
     /// Load a sample into the instrument. No-op for non-sample instruments.
-    fn load_sample(&mut self, _sample: Arc<DecodedAudio>, _name: String) {}
+    #[must_use = "return displaced or rejected media to its owner thread"]
+    fn load_sample(&mut self, sample: Arc<DecodedAudio>, name: String) -> InstrumentMediaOwners {
+        InstrumentMediaOwners::incoming(sample, name)
+    }
 
     /// Load a sample into a drum-rack pad. No-op for non-drum-rack instruments.
+    #[must_use = "return displaced or rejected media to its owner thread"]
     fn load_drum_pad_sample(
         &mut self,
         _pad_index: usize,
-        _sample: Arc<DecodedAudio>,
-        _name: String,
-    ) {
+        sample: Arc<DecodedAudio>,
+        name: String,
+    ) -> InstrumentMediaOwners {
+        InstrumentMediaOwners::incoming(sample, name)
     }
 
     /// Clear a drum-rack pad. No-op for non-drum-rack instruments.
-    fn clear_drum_pad(&mut self, _pad_index: usize) {}
+    #[must_use = "return displaced media to its owner thread"]
+    fn clear_drum_pad(&mut self, _pad_index: usize) -> InstrumentMediaOwners {
+        InstrumentMediaOwners::default()
+    }
 
     /// Apply pad settings to a drum-rack pad. No-op for other instruments.
-    fn set_drum_pad_state(&mut self, _pad_index: usize, _state: DrumPadState) {}
+    #[must_use = "return displaced or rejected names to their owner thread"]
+    fn set_drum_pad_state(
+        &mut self,
+        _pad_index: usize,
+        state: PreparedDrumPadState,
+    ) -> InstrumentMediaOwners {
+        InstrumentMediaOwners {
+            sample: None,
+            name: state.name,
+        }
+    }
 
     /// Set one of a drum-rack pad's Sampler controls. No-op for other
     /// instruments.

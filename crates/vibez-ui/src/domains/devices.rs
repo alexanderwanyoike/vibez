@@ -246,11 +246,9 @@ fn sync_pad(
         .and_then(|track| track.drum_rack_pads.get(pad_index))
         .map(UiDrumPad::to_state);
     if let Some(state) = state {
-        engine.send(EngineCommand::SetDrumRackPadState {
-            track_id,
-            pad_index,
-            state,
-        });
+        engine.send(EngineCommand::set_drum_rack_pad_state(
+            track_id, pad_index, state,
+        ));
     }
 }
 
@@ -623,11 +621,11 @@ impl DevicesState {
                 for (pad_index, pad) in track.drum_rack_pads.iter().enumerate() {
                     // An emptied pad drops its old settings too, so a sample
                     // dropped on it later plays as the card shows.
-                    engine.send(EngineCommand::SetDrumRackPadState {
+                    engine.send(EngineCommand::set_drum_rack_pad_state(
                         track_id,
                         pad_index,
-                        state: pad.to_state(),
-                    });
+                        pad.to_state(),
+                    ));
                     match &pad.audio {
                         Some(audio) => {
                             engine.send(EngineCommand::LoadDrumRackPadSample {

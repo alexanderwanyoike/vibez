@@ -9,6 +9,9 @@ use crate::domains::perform::{
 use vibez_core::id::{ClipId, SectionId, TrackId};
 use vibez_core::perform::NoteRepeatRate;
 use vibez_engine::events::SourceRecordingPosition;
+use vibez_engine::events::{
+    InstrumentNoteInputEvent, NoteRepeatedEvent, SourceNoteInputEvent, SourceNoteRepeatedEvent,
+};
 
 #[test]
 fn source_observations_preserve_clip_section_and_arrange_takes_without_duplicates() {
@@ -51,7 +54,7 @@ fn source_observations_preserve_clip_section_and_arrange_takes_without_duplicate
     for (on, at, local) in [(true, 1024, 0), (false, 1040, 16)] {
         apply_performed_note(
             &mut state.perform,
-            EngineEvent::SourceNoteInput {
+            EngineEvent::SourceNoteInput(SourceNoteInputEvent {
                 track_id: track,
                 pitch: 60,
                 velocity: if on { 100 } else { 0 },
@@ -63,11 +66,11 @@ fn source_observations_preserve_clip_section_and_arrange_takes_without_duplicate
                     section_position_samples: Some(local),
                     canonical_section_position_samples: Some(local),
                 },
-            },
+            }),
         );
         apply_performed_note(
             &mut state.perform,
-            EngineEvent::InstrumentNoteInput {
+            EngineEvent::InstrumentNoteInput(InstrumentNoteInputEvent {
                 track_id: track,
                 pitch: 60,
                 velocity: if on { 100 } else { 0 },
@@ -75,12 +78,12 @@ fn source_observations_preserve_clip_section_and_arrange_takes_without_duplicate
                 effective_at_samples: at,
                 section_id: Some(section),
                 section_position_samples: Some(local),
-            },
+            }),
         );
     }
     apply_performed_note(
         &mut state.perform,
-        EngineEvent::SourceNoteRepeated {
+        EngineEvent::SourceNoteRepeated(SourceNoteRepeatedEvent {
             track_id: track,
             pitch: 62,
             velocity: 100,
@@ -92,11 +95,11 @@ fn source_observations_preserve_clip_section_and_arrange_takes_without_duplicate
                 section_position_samples: Some(72),
                 canonical_section_position_samples: Some(64),
             },
-        },
+        }),
     );
     apply_performed_note(
         &mut state.perform,
-        EngineEvent::NoteRepeated {
+        EngineEvent::NoteRepeated(NoteRepeatedEvent {
             track_id: track,
             pitch: 62,
             velocity: 100,
@@ -106,7 +109,7 @@ fn source_observations_preserve_clip_section_and_arrange_takes_without_duplicate
             section_id: Some(section),
             section_position_samples: Some(72),
             canonical_section_position_samples: Some(64),
-        },
+        }),
     );
     let clip_take = state
         .perform

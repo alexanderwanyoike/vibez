@@ -1,5 +1,9 @@
 //! Exclusive device handoff and applied-plan validation.
 
+use super::device_validation::DeviceValidationDecision;
+use super::handoff_observation::{
+    observe_handoff_request, observe_transferred_recovery, HandoffRequestFacts,
+};
 use super::*;
 use vibez_core::id::EffectId;
 
@@ -36,16 +40,6 @@ impl std::fmt::Debug for DeviceReconfiguration {
             .field("effect_id", &self.effect_id())
             .finish()
     }
-}
-
-#[derive(Clone, Copy)]
-pub(super) struct PendingDeviceReconfiguration {
-    pub handoff_id: u64,
-    pub track_id: TrackId,
-    pub effect_id: Option<EffectId>,
-    pub position: usize,
-    pub bypass: bool,
-    pub local_recovery: bool,
 }
 
 impl DeviceReconfiguration {
@@ -124,17 +118,9 @@ pub fn instrument_owner_identity(instrument: &dyn vibez_instruments::Instrument)
 }
 
 impl AudioEngine {
-    pub(super) fn project_processing_muted(&self) -> bool {
-        self.compensation_suspended
-            || self.graph_edit_pending
-            || !self.compensation_valid
-            || self.presentation_fault
-            || self.reconfiguration_pending()
-    }
-
     pub(super) fn is_device_recovering(&self, track: TrackId, effect: Option<EffectId>) -> bool {
-        self.pending_device_reconfiguration.is_some_and(|pending| {
-            pending.local_recovery && pending.track_id == track && pending.effect_id == effect
+        self.device_handoff.pending().is_some_and(|pending| {
+            pending.is_local_recovery() && pending.track_id == track && pending.effect_id == effect
         })
     }
 
@@ -143,9 +129,10 @@ impl AudioEngine {
         track: TrackId,
         effect: EffectId,
     ) -> Option<bool> {
-        self.pending_device_reconfiguration
+        self.device_handoff
+            .pending()
             .filter(|pending| {
-                pending.local_recovery
+                pending.is_local_recovery()
                     && pending.track_id == track
                     && pending.effect_id == Some(effect)
             })
@@ -153,8 +140,9 @@ impl AudioEngine {
     }
 
     pub(super) fn local_device_failure_pending(&self) -> bool {
-        self.pending_device_reconfiguration
-            .is_some_and(|pending| pending.local_recovery)
+        self.device_handoff
+            .pending()
+            .is_some_and(|pending| pending.is_local_recovery())
             || self
                 .tracks
                 .iter()
@@ -172,29 +160,11 @@ impl AudioEngine {
                 })
     }
 
-    pub(super) fn reconfiguration_pending(&self) -> bool {
-        self.tracks
-            .iter()
-            .chain(&self.buses)
-            .chain(std::iter::once(&self.master))
-            .any(|track| {
-                track.effects.iter().any(|slot| {
-                    slot.effect.reconfiguration_requested()
-                        && !slot.effect.processing_recovery_requested()
-                }) || track.instrument.as_ref().is_some_and(|instrument| {
-                    instrument.reconfiguration_requested()
-                        && !instrument.processing_recovery_requested()
-                })
-            })
-    }
-
     pub(super) fn validate_compensation(&mut self) {
-        if self.compensation_suspended || self.graph_edit_pending || !self.compensation_valid {
+        if self.device_handoff.is_suspended() || self.compensation_plan.blocks_processing() {
             return;
         }
-        let Some(routing) = self.routing.as_ref() else {
-            return;
-        };
+        let routing = &self.routing;
         let mut invalid = None;
         let mut local_failure = false;
         for (index, node) in routing.graph.nodes.iter().enumerate() {
@@ -211,129 +181,63 @@ impl AudioEngine {
                 // receiving paths keep their valid prepared alignment.
                 continue;
             };
-            let activation_rate = match node.stage {
-                vibez_core::routing::NodeStage::Source => track
-                    .instrument
-                    .as_ref()
-                    .and_then(|instrument| instrument.activation_sample_rate()),
-                vibez_core::routing::NodeStage::Effect(id) => track
-                    .effects
-                    .iter()
-                    .find(|slot| slot.id == id)
-                    .and_then(|slot| slot.effect.activation_sample_rate()),
-                _ => None,
-            };
-            if activation_rate.is_some_and(|rate| rate != self.sample_rate) {
-                invalid = Some((node.channel, match node.stage {vibez_core::routing::NodeStage::Effect(id) => Some(id), _ => None}, "Device was activated at a different sample rate; recreate the device or reopen the project"));
-                break;
-            }
-            let valid = match node.stage {
-                vibez_core::routing::NodeStage::Source => track
-                    .instrument
-                    .as_ref()
-                    .is_none_or(|instrument| instrument.processing_configuration_valid()),
-                vibez_core::routing::NodeStage::Effect(id) => track
-                    .effects
-                    .iter()
-                    .find(|slot| slot.id == id)
-                    .is_some_and(|slot| slot.effect.processing_configuration_valid()),
-                _ => true,
-            };
-            let recovering = match node.stage {
-                vibez_core::routing::NodeStage::Source => {
-                    self.is_device_recovering(node.channel, None)
-                        || track
-                            .instrument
-                            .as_ref()
-                            .is_some_and(|instrument| instrument.processing_failure_is_local())
+            match self
+                .observe_device_validation(track, *node, index)
+                .decision()
+            {
+                DeviceValidationDecision::Current => {}
+                DeviceValidationDecision::LocalRecovery => {
+                    local_failure = true;
                 }
-                vibez_core::routing::NodeStage::Effect(id) => {
-                    self.is_device_recovering(node.channel, Some(id))
-                        || track
-                            .effects
-                            .iter()
-                            .find(|slot| slot.id == id)
-                            .is_some_and(|slot| slot.effect.processing_failure_is_local())
+                DeviceValidationDecision::Invalid(reason) => {
+                    invalid = Some((
+                        node.channel,
+                        match node.stage {
+                            vibez_core::routing::NodeStage::Effect(id) => Some(id),
+                            _ => None,
+                        },
+                        reason,
+                    ));
+                    break;
                 }
-                _ => false,
-            };
-            if recovering {
-                local_failure = true;
-                continue;
-            }
-            if !valid {
-                invalid = Some((
-                    node.channel,
-                    match node.stage {
-                        vibez_core::routing::NodeStage::Effect(id) => Some(id),
-                        _ => None,
-                    },
-                    "Device processing configuration is unavailable or failed",
-                ));
-                break;
-            }
-            let (effect_id, actual) = match node.stage {
-                vibez_core::routing::NodeStage::Source => (
-                    None,
-                    Some(
-                        track
-                            .instrument
-                            .as_ref()
-                            .map_or(0, |instrument| instrument.latency_samples()),
-                    ),
-                ),
-                vibez_core::routing::NodeStage::Effect(id) => (
-                    Some(id),
-                    track
-                        .effects
-                        .iter()
-                        .find(|slot| slot.id == id)
-                        .map(|slot| slot.effect.latency_samples()),
-                ),
-                _ => continue,
-            };
-            if actual != Some(routing.device_latencies[index]) {
-                invalid = Some((
-                    node.channel,
-                    effect_id,
-                    "Device latency no longer matches the applied compensation plan",
-                ));
-                break;
             }
         }
-        if local_failure && !self.device_failure_capture_closed {
+        if self
+            .capture_lifecycle
+            .needs_first_local_close(local_failure)
+        {
             self.close_capture_for_device_failure();
         }
-        self.device_failure_capture_closed = local_failure;
+        self.capture_lifecycle.record_local_failure(local_failure);
         if let Some((track_id, effect_id, reason)) = invalid {
             self.close_capture_on_failure();
-            self.compensation_valid = false;
+            self.compensation_plan.invalidate_applied_plan();
             self.transport.stop();
             self.report_compensation_failure(track_id, effect_id, reason);
-            self.pending_playback_stop = true;
+            self.presentation_state.terminals.request_playback_stop();
             self.flush_presentation();
         }
     }
 
     pub(super) fn begin_device_reconfiguration(&mut self) {
-        if !self.compensation_valid
-            || self.pending_device_reconfiguration.is_some()
-            || self.compensation_suspended
-            || self.graph_edit_pending
+        if !self.compensation_plan.applied_plan_is_valid()
+            || self.device_handoff.pending().is_some()
+            || self.device_handoff.is_suspended()
+            || self.compensation_plan.awaiting_structural_plan()
         {
             return;
         }
-        let Some(handoff_id) = self.next_device_handoff.checked_add(1) else {
+        let Some(handoff_id) = self.device_handoff.candidate_identity() else {
             self.close_capture_on_failure();
             self.transport.stop();
-            self.pending_playback_stop = true;
+            self.presentation_state.terminals.request_playback_stop();
             self.flush_presentation();
             self.report_compensation_failure(
                 TrackId::MASTER,
                 None,
                 "Device handoff identity exhausted",
             );
-            self.compensation_valid = false;
+            self.compensation_plan.invalidate_applied_plan();
             return;
         };
         let mut requested = None;
@@ -343,78 +247,110 @@ impl AudioEngine {
             .chain(self.buses.iter_mut())
             .chain(std::iter::once(&mut self.master))
         {
-            if let Some(position) = track
-                .effects
-                .iter()
-                .position(|slot| slot.effect.reconfiguration_requested())
-            {
-                let mut slot = track.effects.remove(position);
-                slot.effect.stop_for_reconfiguration();
-                requested = Some(DeviceReconfiguration::Effect {
-                    handoff_id,
-                    reserved_effects: Vec::new(),
-                    track_id: track.id,
-                    position,
-                    slot,
-                });
-                break;
-            }
-            if track
-                .instrument
-                .as_ref()
-                .is_some_and(|instrument| instrument.reconfiguration_requested())
-            {
-                let mut instrument = track.instrument.take().unwrap();
-                instrument.stop_for_reconfiguration();
-                requested = Some(DeviceReconfiguration::Instrument {
-                    handoff_id,
-                    track_id: track.id,
-                    instrument,
-                });
-                break;
+            match observe_handoff_request(track) {
+                HandoffRequestFacts::Effect { position } => {
+                    let mut slot = track.effects.remove(position);
+                    slot.effect.stop_for_reconfiguration();
+                    requested = Some(DeviceReconfiguration::Effect {
+                        handoff_id,
+                        reserved_effects: Vec::new(),
+                        track_id: track.id,
+                        position,
+                        slot,
+                    });
+                    break;
+                }
+                HandoffRequestFacts::Instrument => {
+                    let mut instrument = track.instrument.take().unwrap();
+                    instrument.stop_for_reconfiguration();
+                    requested = Some(DeviceReconfiguration::Instrument {
+                        handoff_id,
+                        track_id: track.id,
+                        instrument,
+                    });
+                    break;
+                }
+                HandoffRequestFacts::None => {}
             }
         }
         if let Some(device) = requested {
-            self.next_device_handoff = handoff_id;
+            self.device_handoff.record_issued_identity(handoff_id);
             let (position, bypass) = match &device {
                 DeviceReconfiguration::Effect { position, slot, .. } => (*position, slot.bypass),
                 _ => (0, false),
             };
-            let local_recovery = device.processing_recovery_requested();
-            self.pending_device_reconfiguration = Some(PendingDeviceReconfiguration {
-                handoff_id,
-                track_id: device.track_id(),
-                effect_id: device.effect_id(),
-                position,
-                bypass,
-                local_recovery,
-            });
-            match self
+            let scope = observe_transferred_recovery(&device).scope();
+            self.device_handoff
+                .track_transfer(device_handoff::PendingDeviceReconfiguration {
+                    handoff_id,
+                    track_id: device.track_id(),
+                    effect_id: device.effect_id(),
+                    position,
+                    bypass,
+                    scope,
+                });
+            // rtrb returns the original literal input on Full. No other event
+            // variant, or independent retirement owner, exists on this path.
+            if let Err(rtrb::PushError::Full(EngineEvent::DeviceReconfiguration(device))) = self
                 .event_tx
                 .push(EngineEvent::DeviceReconfiguration(device))
             {
-                Ok(()) => self.compensation_suspended = !local_recovery,
-                Err(rtrb::PushError::Full(EngineEvent::DeviceReconfiguration(device))) => {
-                    let _ = self.restore_reconfigured_device(device);
-                }
-                Err(rtrb::PushError::Full(event)) => self.retire_event(event),
+                self.restore_unpublished_device(device);
+            } else {
+                self.device_handoff.publication_succeeded(scope);
             }
         }
     }
 
     pub(super) fn handoff_is_current(&self, device: &DeviceReconfiguration) -> bool {
-        self.pending_device_reconfiguration.is_some_and(|pending| {
+        self.device_handoff.pending().is_some_and(|pending| {
             pending.handoff_id == device.handoff_id()
                 && pending.track_id == device.track_id()
                 && pending.effect_id == device.effect_id()
         })
     }
 
-    pub(super) fn restore_reconfigured_device(&mut self, device: DeviceReconfiguration) -> bool {
-        let pending = self
-            .pending_device_reconfiguration
-            .take()
-            .expect("validated device handoff");
+    fn restore_unpublished_device(&mut self, device: DeviceReconfiguration) {
+        let pending = self.device_handoff.take_for_restoration();
+        // Issuance and this failed push share one callback frame. No command
+        // or UI owner can consume the exact slot just vacated above.
+        match device {
+            DeviceReconfiguration::Effect {
+                track_id, mut slot, ..
+            } => {
+                self.apply_pending_device_parameters(track_id, Some(slot.id), |index, value| {
+                    slot.effect.set_param(index, value)
+                });
+                let track = self
+                    .channel_mut(track_id)
+                    .expect("issuing channel still resident");
+                slot.bypass = pending.bypass;
+                track
+                    .effects
+                    .insert(pending.position.min(track.effects.len()), slot);
+            }
+            DeviceReconfiguration::Instrument {
+                track_id,
+                mut instrument,
+                ..
+            } => {
+                self.apply_pending_device_parameters(track_id, None, |index, value| {
+                    instrument.set_param(index, value)
+                });
+                let track = self
+                    .channel_mut(track_id)
+                    .expect("issuing channel still resident");
+                track.instrument = Some(instrument);
+            }
+        }
+    }
+
+    pub(super) fn restore_reconfigured_device(
+        &mut self,
+        device: DeviceReconfiguration,
+        allowance: &mut RetirementAllowance,
+    ) -> bool {
+        let pending = self.device_handoff.take_for_restoration();
         match device {
             DeviceReconfiguration::Effect {
                 track_id,
@@ -440,20 +376,24 @@ impl AudioEngine {
                             .effects
                             .insert(pending.position.min(track.effects.len()), slot);
                         if reserved_effects.capacity() > 0 {
-                            self.retire_event(EngineEvent::RetiredEffectStorage(
-                                RetiredEffectStorage(reserved_effects),
-                            ));
+                            self.retire_event(
+                                EngineEvent::RetiredEffectStorage(RetiredEffectStorage(
+                                    reserved_effects,
+                                )),
+                                allowance,
+                            );
                         }
                         return true;
                     }
                 }
                 if reserved_effects.capacity() > 0 {
-                    self.retire_event(EngineEvent::RetiredEffectStorage(RetiredEffectStorage(
-                        reserved_effects,
-                    )));
+                    self.retire_event(
+                        EngineEvent::RetiredEffectStorage(RetiredEffectStorage(reserved_effects)),
+                        allowance,
+                    );
                 }
-                self.dispose_effect(slot.effect);
-                self.compensation_valid = false;
+                self.dispose_effect(slot.effect, allowance);
+                self.compensation_plan.invalidate_applied_plan();
                 self.report_compensation_failure(
                     track_id,
                     pending.effect_id,
@@ -474,8 +414,8 @@ impl AudioEngine {
                         return true;
                     }
                 }
-                self.dispose_instrument(instrument);
-                self.compensation_valid = false;
+                self.dispose_instrument(instrument, allowance);
+                self.compensation_plan.invalidate_applied_plan();
                 self.report_compensation_failure(
                     track_id,
                     None,

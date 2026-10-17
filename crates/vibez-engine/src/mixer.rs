@@ -474,7 +474,7 @@ mod tests {
     fn single_clip_render() {
         let audio = make_test_audio(64, 0.5);
         let mut track = EngineTrack::new(TrackId::new());
-        track.playback_source.clips.push(EngineClip {
+        track.playback_source.push_audio_clip(EngineClip {
             id: ClipId::new(),
             audio,
             position: 0,
@@ -510,7 +510,7 @@ mod tests {
         });
 
         let mut track = EngineTrack::new(TrackId::new());
-        track.playback_source.clips.push(EngineClip {
+        track.playback_source.push_audio_clip(EngineClip {
             id: ClipId::new(),
             audio: audio.clone(),
             position: 0,
@@ -601,7 +601,7 @@ mod tests {
     fn clip_loop_renders_audio_past_source() {
         let audio = make_test_audio(100, 0.5);
         let mut track = EngineTrack::new(TrackId::new());
-        track.playback_source.clips.push(EngineClip {
+        track.playback_source.push_audio_clip(EngineClip {
             id: ClipId::new(),
             audio,
             position: 0,
@@ -643,7 +643,7 @@ mod tests {
         });
 
         let mut track = EngineTrack::new(TrackId::new());
-        track.playback_source.clips.push(EngineClip {
+        track.playback_source.push_audio_clip(EngineClip {
             id: ClipId::new(),
             audio: audio.clone(),
             position: 0,
@@ -692,7 +692,7 @@ mod tests {
         });
 
         let mut track = EngineTrack::new(TrackId::new());
-        track.playback_source.clips.push(EngineClip {
+        track.playback_source.push_audio_clip(EngineClip {
             id: ClipId::new(),
             audio: audio.clone(),
             position: 0,
@@ -741,7 +741,7 @@ mod tests {
             sample_rate: 44_100,
         });
         let mut track = EngineTrack::new(TrackId::new());
-        track.playback_source.clips.push(EngineClip {
+        track.playback_source.push_audio_clip(EngineClip {
             id: ClipId::new(),
             audio: Arc::clone(&audio),
             position: 0,
@@ -770,7 +770,7 @@ mod tests {
             sample_rate: 44_100,
         });
         let mut track = EngineTrack::new(TrackId::new());
-        track.playback_source.clips.push(EngineClip {
+        track.playback_source.push_audio_clip(EngineClip {
             id: ClipId::new(),
             audio,
             position: 0,
@@ -795,7 +795,7 @@ mod tests {
     fn clip_no_loop_silence_past_source() {
         let audio = make_test_audio(100, 0.5);
         let mut track = EngineTrack::new(TrackId::new());
-        track.playback_source.clips.push(EngineClip {
+        track.playback_source.push_audio_clip(EngineClip {
             id: ClipId::new(),
             audio,
             position: 0,
@@ -842,7 +842,7 @@ mod tests {
             sample_rate: 44_100,
         });
         let mut track = EngineTrack::new(TrackId::new());
-        track.playback_source.clips.push(EngineClip {
+        track.playback_source.push_audio_clip(EngineClip {
             id: ClipId::new(),
             audio: Arc::clone(&audio),
             position: 0,
@@ -901,7 +901,7 @@ mod tests {
             sample_rate: 44_100,
         });
         let mut track = EngineTrack::new(TrackId::new());
-        track.playback_source.clips.push(EngineClip {
+        track.playback_source.push_audio_clip(EngineClip {
             id: ClipId::new(),
             audio,
             position: 0,

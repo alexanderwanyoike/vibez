@@ -1,6 +1,7 @@
 //! Controlled Source automation clears absent values across actual timeline edits.
 
 use super::*;
+use crate::events::SourceNoteRepeatedEvent;
 use crate::playback_source::{PreparedPlaybackSource, PreparedSectionPlaybackSource};
 use vibez_core::{
     automation::{AutomationLane, AutomationPoint, AutomationTarget},
@@ -234,7 +235,7 @@ fn non_finite_swing_points_restore_the_manual_value_and_retire_replaced_storage(
     commands
         .push(EngineCommand::SetAutomationLane {
             track_id: id,
-            lane: edited,
+            insertion: crate::clip_insertion::PreparedAutomationLaneInsertion::new(edited),
         })
         .unwrap();
     assert_eq!(
@@ -271,7 +272,7 @@ fn prepared_and_new_send_automation_keep_sample_exact_ramps() {
         let bus = TrackId::new();
         let mut source = EngineTrack::new(track);
         source.sends.push((bus, 0.5));
-        source.playback_source.clips.push(EngineClip {
+        source.playback_source.push_audio_clip(EngineClip {
             id: ClipId::new(),
             audio: Arc::new(DecodedAudio {
                 channels: vec![vec![1.0; 128]; 2],
@@ -389,7 +390,8 @@ fn deleted_swing_changes_future_repeat_pairs_without_moving_the_inflight_pair() 
             (0, 0)
         );
         while let Ok(event) = events.pop() {
-            if let EngineEvent::SourceNoteRepeated { position, .. } = event {
+            if let EngineEvent::SourceNoteRepeated(SourceNoteRepeatedEvent { position, .. }) = event
+            {
                 at.push(position.effective_at_samples);
             }
         }

@@ -1,5 +1,7 @@
 //! Clip recording boundaries belong to the Perform clock; source ownership stays off the callback.
 
+use super::clip_launcher::ClipEventContext;
+use super::presentation_queue::PresentationAdmission;
 use super::*;
 use crate::playback_source::{PreparedClipPlayback, QueuedClipPlayback};
 use vibez_core::id::ClipId;
@@ -21,9 +23,10 @@ impl AudioEngine {
         prepared: Box<PreparedClipPlayback>,
         count_in_bars: u8,
         free_length: bool,
+        allowance: &mut RetirementAllowance,
     ) {
         if self.clip_record.is_some() || prepared.clip_id.is_none() {
-            self.clip_event(EngineEvent::ClipRequestRetired(prepared));
+            self.clip_event(EngineEvent::ClipRequestRetired(prepared), allowance);
             return;
         }
         let running = self.clip_performance && self.transport.is_playing();
@@ -32,15 +35,18 @@ impl AudioEngine {
             .iter()
             .any(|track| track.id == prepared.track_id)
         {
-            self.clip_event(EngineEvent::ClipRecordStopped {
-                clip_id: prepared.clip_id.expect("record target"),
-                at: self.performance_position,
-                started: false,
-            });
-            self.clip_event(EngineEvent::ClipRequestRetired(prepared));
+            self.clip_event(
+                EngineEvent::ClipRecordStopped {
+                    clip_id: prepared.clip_id.expect("record target"),
+                    at: self.performance_position,
+                    started: false,
+                },
+                allowance,
+            );
+            self.clip_event(EngineEvent::ClipRequestRetired(prepared), allowance);
             return;
         }
-        self.begin_clip_performance();
+        self.begin_clip_performance(allowance);
         let now = self.performance_position;
         let start = if running {
             self.next_grid_boundary(now, 4.0)
@@ -62,12 +68,15 @@ impl AudioEngine {
             started: false,
             prepared: Some(prepared),
         });
-        self.clip_event(EngineEvent::ClipRecordArmed {
-            clip_id,
-            track_id,
-            start,
-            output_start,
-        });
+        self.clip_event(
+            EngineEvent::ClipRecordArmed {
+                clip_id,
+                track_id,
+                start,
+                output_start,
+            },
+            allowance,
+        );
         self.apply_clip_record_boundary(now);
     }
 
@@ -92,7 +101,11 @@ impl AudioEngine {
         })
     }
 
-    pub(super) fn stop_clip_record(&mut self, immediate: bool) {
+    pub(super) fn stop_clip_record(
+        &mut self,
+        immediate: bool,
+        allowance: &mut RetirementAllowance,
+    ) {
         let now = self.performance_position;
         let stop = if immediate {
             now
@@ -104,40 +117,46 @@ impl AudioEngine {
         };
         record.stop = Some(record.stop.map_or(stop, |pending| pending.min(stop)));
         if immediate || !record.started {
-            self.finish_clip_record(now);
+            self.finish_clip_record(now, allowance);
         }
     }
 
-    fn finish_clip_record(&mut self, now: u64) {
-        let Some(mut record) = self.clip_record.take() else {
+    fn finish_clip_record(&mut self, now: u64, allowance: &mut RetirementAllowance) {
+        let Some(record) = self.clip_record.take() else {
             return;
         };
-        if let Some(prepared) = record.prepared.take() {
-            self.clip_event(EngineEvent::ClipRequestRetired(prepared));
+        let (retired, stopped) = finish_record_events(record, &mut self.tracks, now);
+        for event in [retired, Some(stopped)].into_iter().flatten() {
+            self.clip_event(event, allowance);
         }
-        if record.started && record.free_length {
-            if let Some(track) = self
-                .tracks
-                .iter_mut()
-                .find(|track| track.id == record.track_id)
-            {
-                if let Some(active) = track
-                    .active_clip
-                    .as_mut()
-                    .filter(|active| active.clip_id == record.clip_id)
-                {
-                    active.length = now.saturating_sub(record.start).max(1);
-                    active.position = 0;
-                    active.looping = true;
-                    track.flush_notes();
-                }
-            }
-        }
-        self.clip_event(EngineEvent::ClipRecordStopped {
-            clip_id: record.clip_id,
-            at: now,
-            started: record.started,
-        });
+    }
+
+    fn finish_clip_record_due(&mut self, now: u64) {
+        let Some(admission) = PresentationAdmission::<2>::new(
+            &mut self.event_tx,
+            &mut self.scheduled_presentation,
+            &mut self.presentation_state.terminals,
+        ) else {
+            return;
+        };
+        let Some(record) = self.clip_record.take() else {
+            return;
+        };
+        let (retired, stopped) = finish_record_events(record, &mut self.tracks, now);
+        let prefix = [retired, Some(stopped)];
+        let physical = self.output_position + self.rendered_callback_frames as u64;
+        admission.publish_clip(
+            prefix,
+            ClipEventContext {
+                routing: &self.routing,
+                physical,
+                through_request: &mut self.clip_through_request,
+                drops: &mut self.clip_event_drops,
+                resync_track: &mut self.clip_resync_track,
+            },
+            physical,
+            self.output_position,
+        );
     }
 
     pub(super) fn apply_clip_record_boundary(&mut self, now: u64) {
@@ -151,41 +170,76 @@ impl AudioEngine {
         if due && !self.presentation_room(4) {
             return;
         }
-        let Some(record) = &mut self.clip_record else {
+        let Some(record) = self.clip_record.as_ref() else {
             return;
         };
         if record.started {
             if record.stop.is_some_and(|stop| stop <= now) {
-                self.finish_clip_record(now);
+                self.finish_clip_record_due(now);
             }
             return;
         }
         if now < record.start {
             return;
         }
+        let Some(admission) = PresentationAdmission::<2>::new(
+            &mut self.event_tx,
+            &mut self.scheduled_presentation,
+            &mut self.presentation_state.terminals,
+        ) else {
+            return;
+        };
+        let record = self.clip_record.as_mut().expect("due recording");
         let clip_id = record.clip_id;
         let track_id = record.track_id;
         let prepared = record.prepared.take().expect("armed source");
-        if let Some(track) = self.tracks.iter_mut().find(|track| track.id == track_id) {
-            let retired = track.queued_clip.replace(QueuedClipPlayback {
-                pending_batch: false,
-                prepared,
-                effective_at: now,
-            });
-            if let Some(retired) = retired {
-                self.clip_event(EngineEvent::ClipRequestRetired(retired.prepared));
-            }
-        } else {
-            self.clip_event(EngineEvent::ClipRequestRetired(prepared));
-            self.finish_clip_record(now);
-            return;
+        let (retired, terminal, started) =
+            if let Some(track) = self.tracks.iter_mut().find(|track| track.id == track_id) {
+                let retired = track.queued_clip.replace(QueuedClipPlayback {
+                    pending_batch: false,
+                    prepared,
+                    effective_at: now,
+                });
+                record.started = true;
+                (
+                    retired.map(|retired| EngineEvent::ClipRequestRetired(retired.prepared)),
+                    EngineEvent::ClipRecordStarted { clip_id, at: now },
+                    true,
+                )
+            } else {
+                let record = self.clip_record.take().expect("record target");
+                let (_, stopped) = finish_record_events(record, &mut self.tracks, now);
+                (
+                    Some(EngineEvent::ClipRequestRetired(prepared)),
+                    stopped,
+                    false,
+                )
+            };
+        let physical = self.output_position + self.rendered_callback_frames as u64;
+        // The source fact precedes the nested track-sized packet, which may
+        // consume all remaining presentation room at this same boundary.
+        admission.publish_clip(
+            [retired, Some(terminal)],
+            ClipEventContext {
+                routing: &self.routing,
+                physical,
+                through_request: &mut self.clip_through_request,
+                drops: &mut self.clip_event_drops,
+                resync_track: &mut self.clip_resync_track,
+            },
+            physical,
+            self.output_position,
+        );
+        if started {
+            self.apply_clip_boundaries(now);
         }
-        self.clip_record.as_mut().expect("record target").started = true;
-        self.apply_clip_boundaries(now);
-        self.clip_event(EngineEvent::ClipRecordStarted { clip_id, at: now });
     }
 
-    pub(super) fn refresh_clip(&mut self, mut prepared: Box<PreparedClipPlayback>) {
+    pub(super) fn refresh_clip(
+        &mut self,
+        mut prepared: Box<PreparedClipPlayback>,
+        allowance: &mut RetirementAllowance,
+    ) {
         let recording_free = self
             .clip_record
             .as_ref()
@@ -218,21 +272,54 @@ impl AudioEngine {
             }
         }
         if let Some((track_id, position)) = refreshed {
-            self.clip_event(if prepared.request_id == 0 {
-                EngineEvent::ClipCaptureSource {
-                    track_id,
-                    position,
-                    effective_at_samples: self.performance_position,
-                }
-            } else {
-                EngineEvent::ClipSourceRefreshed {
-                    track_id,
-                    request_id: prepared.request_id,
-                    position,
-                    effective_at_samples: self.performance_position,
-                }
-            });
+            self.clip_event(
+                if prepared.request_id == 0 {
+                    EngineEvent::ClipCaptureSource {
+                        track_id,
+                        position,
+                        effective_at_samples: self.performance_position,
+                    }
+                } else {
+                    EngineEvent::ClipSourceRefreshed {
+                        track_id,
+                        request_id: prepared.request_id,
+                        position,
+                        effective_at_samples: self.performance_position,
+                    }
+                },
+                allowance,
+            );
         }
-        self.clip_event(EngineEvent::ClipRequestRetired(prepared));
+        self.clip_event(EngineEvent::ClipRequestRetired(prepared), allowance);
     }
+}
+
+fn finish_record_events(
+    mut record: ClipRecordRuntime,
+    tracks: &mut crate::mixer::ChannelList,
+    now: u64,
+) -> (Option<EngineEvent>, EngineEvent) {
+    let retired = record.prepared.take().map(EngineEvent::ClipRequestRetired);
+    if record.started && record.free_length {
+        if let Some(track) = tracks.iter_mut().find(|track| track.id == record.track_id) {
+            if let Some(active) = track
+                .active_clip
+                .as_mut()
+                .filter(|active| active.clip_id == record.clip_id)
+            {
+                active.length = now.saturating_sub(record.start).max(1);
+                active.position = 0;
+                active.looping = true;
+                track.flush_notes();
+            }
+        }
+    }
+    (
+        retired,
+        EngineEvent::ClipRecordStopped {
+            clip_id: record.clip_id,
+            at: now,
+            started: record.started,
+        },
+    )
 }
