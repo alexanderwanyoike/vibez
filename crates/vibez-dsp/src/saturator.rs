@@ -216,24 +216,52 @@ pub fn auto_gain(params: &[f32]) -> f32 {
     (input / output).sqrt().clamp(0.05, 20.0)
 }
 
-/// What these settings map a steady `input` to, leaving out the filters,
-/// DC removal and oversampling, which have memory.
+/// What a set of settings map a steady input to, leaving out the filters,
+/// DC removal and oversampling, which have memory. Built once so a plot
+/// works out Auto Gain once rather than for every point.
+pub struct Transfer {
+    drive: f32,
+    shape: usize,
+    amount: f32,
+    points: [f32; 3],
+    asymmetry: f32,
+    bias: f32,
+    gain: f32,
+    mix: f32,
+}
+
+impl Transfer {
+    pub fn new(params: &[f32]) -> Self {
+        Self {
+            drive: db_to_gain(value(params, param::DRIVE_DB)),
+            shape: value(params, param::SHAPE).round() as usize,
+            amount: value(params, param::CURVE),
+            points: points(params),
+            asymmetry: value(params, param::ASYMMETRY) * ASYMMETRY_REACH,
+            bias: value(params, param::BIAS) * BIAS_REACH,
+            gain: db_to_gain(value(params, param::OUTPUT_DB))
+                * if value(params, param::AUTO_GAIN) >= 0.5 {
+                    auto_gain(params)
+                } else {
+                    1.0
+                },
+            mix: value(params, param::MIX),
+        }
+    }
+
+    pub fn at(&self, input: f32) -> f32 {
+        let shaped = curve(
+            self.shape,
+            self.amount,
+            self.points,
+            lean(input * self.drive, self.asymmetry, self.bias),
+        );
+        (input * (1.0 - self.mix) + shaped * self.gain * self.mix).clamp(-64.0, 64.0)
+    }
+}
+
 pub fn transfer(params: &[f32], input: f32) -> f32 {
-    let drive = db_to_gain(value(params, param::DRIVE_DB));
-    let shaped = curve(
-        value(params, param::SHAPE).round() as usize,
-        value(params, param::CURVE),
-        points(params),
-        lean_of(params, input * drive),
-    );
-    let gain = db_to_gain(value(params, param::OUTPUT_DB))
-        * if value(params, param::AUTO_GAIN) >= 0.5 {
-            auto_gain(params)
-        } else {
-            1.0
-        };
-    let mix = value(params, param::MIX);
-    (input * (1.0 - mix) + shaped * gain * mix).clamp(-64.0, 64.0)
+    Transfer::new(params).at(input)
 }
 
 /// The level of each of the first `count` harmonics, in dB against the
@@ -241,21 +269,18 @@ pub fn transfer(params: &[f32], input: f32) -> f32 {
 pub fn harmonics_db(params: &[f32], count: usize) -> Vec<f32> {
     let steps = 1024;
     let level = 0.5;
-    let wave: Vec<f32> = (0..steps)
-        .map(|step| {
-            transfer(
-                params,
-                (std::f32::consts::TAU * step as f32 / steps as f32).sin() * level,
-            )
-        })
-        .collect();
+    let transfer = Transfer::new(params);
+    let (sines, cosines): (Vec<f32>, Vec<f32>) = (0..steps)
+        .map(|step| (std::f32::consts::TAU * step as f32 / steps as f32).sin_cos())
+        .unzip();
+    let wave: Vec<f32> = sines.iter().map(|sine| transfer.at(sine * level)).collect();
     (1..=count)
         .map(|harmonic| {
             let (mut re, mut im) = (0.0f32, 0.0f32);
             for (step, sample) in wave.iter().enumerate() {
-                let phase = std::f32::consts::TAU * (harmonic * step) as f32 / steps as f32;
-                re += sample * phase.cos();
-                im += sample * phase.sin();
+                let phase = harmonic * step % steps;
+                re += sample * cosines[phase];
+                im += sample * sines[phase];
             }
             let amplitude = 2.0 * (re * re + im * im).sqrt() / steps as f32;
             20.0 * (amplitude / level).max(1e-9).log10()
