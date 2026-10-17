@@ -740,6 +740,7 @@ fn wavetable_factory_presets() -> Vec<DevicePreset> {
         (
             "Supersaw",
             &[
+                ("osc_a_table", table::BASIC_SHAPES as f32),
                 ("osc_a_unison", 7.0),
                 ("osc_a_detune", 25.0),
                 ("osc_b_position", 0.66),

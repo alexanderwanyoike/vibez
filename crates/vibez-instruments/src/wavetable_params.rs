@@ -95,9 +95,10 @@ const fn descriptor(
 }
 
 const TABLES: f32 = (crate::wavetables::table::COUNT - 1) as f32;
+const HARMONIC: f32 = crate::wavetables::table::HARMONIC as f32;
 
 pub static WAVETABLE_PARAMS: &[ParamDescriptor] = &[
-    descriptor("Osc A Table", 0.0, TABLES, 0.0, ""),
+    descriptor("Osc A Table", 0.0, TABLES, HARMONIC, ""),
     descriptor("Osc A Position", 0.0, 1.0, 0.66, ""),
     descriptor("Osc A Warp", 0.0, 1.0, 0.0, ""),
     descriptor("Osc A Detune", 0.0, 50.0, 0.0, "ct"),
