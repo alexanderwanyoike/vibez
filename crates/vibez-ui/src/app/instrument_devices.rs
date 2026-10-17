@@ -1,11 +1,13 @@
 //! Native instruments on the device chain: their card's frame and tabs, and
 //! their controls, typed values and presets, which act as an effect's do.
 
-use iced::widget::{column, text, Column};
-use iced::{Color, Element, Length};
+use iced::widget::{column, text, Column, Space};
+use iced::{Color, Element, Length, Size};
 use vibez_core::id::TrackId;
 
-use crate::domains::instrument_card::InstrumentCardMsg;
+use crate::domains::device_params::DeviceParams;
+use crate::domains::instrument_card::{InstrumentCardMsg, InstrumentPanel};
+use crate::domains::param_entry::ValueEntry;
 use crate::message::Message;
 use crate::state::UiTrack;
 use crate::theme as th;
@@ -39,6 +41,52 @@ impl App {
             text(latency).size(9).color(th::text_dim())
         ]
         .height(Length::Fill)
+    }
+
+    /// A native instrument's card in the bands the tabbed cards share:
+    /// `view` builds its body from the instrument's controls, the card's
+    /// panel, any value being typed, the preset bar and the body's size.
+    pub(super) fn tabbed_instrument_card<'a>(
+        &'a self,
+        name: &'a str,
+        track_id: TrackId,
+        track: &'a UiTrack,
+        accent: Color,
+        width: f32,
+        view: impl Fn(
+                DeviceParams<'a>,
+                InstrumentPanel,
+                Option<&'a ValueEntry>,
+                Element<'a, Message>,
+                Size,
+            ) -> Element<'a, Message>
+            + 'a,
+    ) -> Element<'a, Message> {
+        let Some(device) = DeviceParams::instrument(track) else {
+            return Space::new(0, 0).into();
+        };
+        let panel = self
+            .instrument_panels
+            .get(&track_id)
+            .cloned()
+            .unwrap_or_default();
+        let body = iced::widget::responsive(move |size| {
+            let preset_bar = self.view_device_preset_bar(
+                track_id,
+                device,
+                accent,
+                crate::widgets::instrument_bands::preset_bar_width(size),
+            );
+            view(
+                device,
+                panel.clone(),
+                self.param_entry.as_ref(),
+                preset_bar,
+                size,
+            )
+        });
+        self.native_instrument_frame(name, track_id, track, accent, width, body.into())
+            .into()
     }
 
     pub(super) fn update_instrument_card(&mut self, message: InstrumentCardMsg) -> Task<Message> {
