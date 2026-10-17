@@ -33,6 +33,11 @@ const TABS_H: f32 = 24.0;
 const BANK_ROW_H: f32 = 24.0;
 /// The kit picker above the banks.
 const KIT_ROW_H: f32 = 26.0;
+/// Pads shorter than this on a Pads tab move the kit and banks beside the
+/// grid, so the grid gets the card's height.
+const RAIL_PAD_H: f32 = 40.0;
+/// The kit and banks column beside the grid.
+const RAIL_W: f32 = 160.0;
 /// The selected pad's name, note, choke group and Clear, above its Sampler.
 const STRIP_H: f32 = 30.0;
 /// The share of a side-by-side card the pads take.
@@ -88,6 +93,8 @@ pub struct Layout {
     pub side_by_side: bool,
     pub grid_w: f32,
     pub pad_h: f32,
+    /// The kit and banks sit in a column beside the grid, not above it.
+    pub rail: bool,
     /// The selected pad's Sampler body.
     pub sampler: Size,
 }
@@ -95,8 +102,16 @@ pub struct Layout {
 pub fn arrange(size: Size) -> Layout {
     let side_by_side = size.width >= SIDE_BY_SIDE_W;
     let tabs = if side_by_side { 0.0 } else { TABS_H + 1.0 };
-    let grid_h = (size.height - tabs - PAD * 2.0 - KIT_ROW_H - BANK_ROW_H - GAP * 2.0).max(0.0);
-    let pad_h = ((grid_h - GAP * 3.0) / 4.0).max(0.0);
+    let stacked_h = (size.height - tabs - PAD * 2.0 - KIT_ROW_H - BANK_ROW_H - GAP * 2.0).max(0.0);
+    let stacked_pad = ((stacked_h - GAP * 3.0) / 4.0).max(0.0);
+    let rail = !side_by_side
+        && stacked_pad < RAIL_PAD_H
+        && size.width - PAD * 2.0 - RAIL_W - GAP * 2.0 >= GRID_MIN_W;
+    let pad_h = if rail {
+        ((size.height - tabs - PAD * 2.0 - GAP * 3.0) / 4.0).max(0.0)
+    } else {
+        stacked_pad
+    };
     let shaped = pad_h * PAD_MAX_ASPECT * 4.0 + GAP * 3.0;
     let grid_w = if side_by_side {
         let room = size.width - PAD * 2.0 - 1.0 - SAMPLER_MIN_W;
@@ -104,6 +119,8 @@ pub fn arrange(size: Size) -> Layout {
             .min(shaped)
             .clamp(GRID_MIN_W, GRID_MAX_W)
             .min(room)
+    } else if rail {
+        size.width - PAD * 2.0 - RAIL_W - GAP * 2.0
     } else {
         let shaped = pad_h * TAB_PAD_MAX_ASPECT * 4.0 + GAP * 3.0;
         (size.width - PAD * 2.0).min(shaped.max(GRID_MIN_W))
@@ -117,6 +134,7 @@ pub fn arrange(size: Size) -> Layout {
         side_by_side,
         grid_w,
         pad_h,
+        rail,
         sampler: Size::new(sampler_w, (size.height - tabs - STRIP_H - 1.0).max(0.0)),
     }
 }
@@ -491,14 +509,34 @@ impl<'a> DrumRackView<'a> {
             }
             grid = grid.push(cells);
         }
+        let kit_w = if layout.rail { RAIL_W } else { layout.grid_w };
         let kit = container(crate::widgets::device_preset_bar::kit_bar(
             self.track_id,
             self.panel.kit.as_deref(),
             self.accent,
-            layout.grid_w,
+            kit_w,
         ))
         .height(KIT_ROW_H)
         .align_y(Alignment::Center);
+        if layout.rail {
+            let banks = column![
+                row![self.bank_button(0), self.bank_button(1)].spacing(GAP),
+                row![self.bank_button(2), self.bank_button(3)].spacing(GAP),
+            ]
+            .spacing(GAP);
+            let rail = column![
+                kit,
+                heading("Banks"),
+                banks,
+                heading(first_and_last(self.bank())),
+            ]
+            .spacing(GAP)
+            .width(RAIL_W);
+            return row![rail, grid.width(layout.grid_w).height(Length::Fill)]
+                .spacing(GAP * 2.0)
+                .height(Length::Fill)
+                .into();
+        }
         column![kit, self.banks(layout.grid_w), grid.height(Length::Fill)]
             .spacing(GAP)
             .width(layout.grid_w)
@@ -821,13 +859,12 @@ mod tests {
                 } else {
                     TABS_H + 1.0
                 };
-                let pads = tabs
-                    + PAD * 2.0
-                    + KIT_ROW_H
-                    + BANK_ROW_H
-                    + GAP * 2.0
-                    + layout.pad_h * 4.0
-                    + GAP * 3.0;
+                let above = if layout.rail {
+                    0.0
+                } else {
+                    KIT_ROW_H + BANK_ROW_H + GAP * 2.0
+                };
+                let pads = tabs + PAD * 2.0 + above + layout.pad_h * 4.0 + GAP * 3.0;
                 assert!(pads <= height + 0.01, "{context}");
                 assert!(
                     layout.grid_w >= GRID_MIN_W.min(width - PAD * 2.0),
@@ -838,6 +875,17 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn a_short_pads_tab_moves_the_kit_and_banks_beside_the_grid() {
+        let short = arrange(Size::new(460.0, 230.0));
+        assert!(!short.side_by_side && short.rail, "{short:?}");
+        assert!(short.grid_w >= GRID_MIN_W, "{short:?}");
+        let stacked = (230.0 - TABS_H - 1.0 - PAD * 2.0 - KIT_ROW_H - BANK_ROW_H - GAP * 5.0) / 4.0;
+        assert!(short.pad_h > stacked + 10.0, "{short:?}");
+        let tall = arrange(Size::new(460.0, 420.0));
+        assert!(!tall.rail, "{tall:?}");
     }
 
     #[test]
