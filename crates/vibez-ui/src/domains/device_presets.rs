@@ -2217,6 +2217,42 @@ mod presentation_tests {
         assert_eq!(names.len(), presets.len(), "names are unique");
     }
 
+    fn echo() -> UiEffect {
+        let descriptors =
+            vibez_dsp::factory::create_effect(EffectType::Echo, 44_100.0).param_descriptors();
+        UiEffect {
+            effect_type: EffectType::Echo,
+            params: descriptors
+                .iter()
+                .map(|descriptor| descriptor.default)
+                .collect(),
+            descriptors,
+            ..gain()
+        }
+    }
+
+    #[test]
+    fn echo_factory_presets_are_valid_distinct_and_start_from_init() {
+        let effect = echo();
+        let presets = factory_presets(EffectType::Echo);
+        assert!(presets.len() >= 6);
+        assert_eq!(presets[0].name(), "Init");
+        assert_eq!(prepare_updates(&effect, &presets[0]), Ok(Vec::new()));
+        assert!(presets.iter().any(|preset| preset.name() == "Worn Tape"));
+        for preset in &presets[1..] {
+            let mut applied = echo();
+            for (index, value) in prepare_updates(&effect, preset).unwrap() {
+                applied.params[index] = value;
+            }
+            assert_ne!(applied.params, effect.params, "{}", preset.name());
+            assert_eq!(capture(&applied, preset.name()).as_ref(), Ok(preset));
+        }
+        let mut names: Vec<_> = presets.iter().map(DevicePreset::name).collect();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(names.len(), presets.len(), "names are unique");
+    }
+
     #[test]
     fn delay_choices_in_a_preset_must_be_whole() {
         let effect = delay();
