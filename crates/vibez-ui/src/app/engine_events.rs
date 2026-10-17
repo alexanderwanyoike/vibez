@@ -210,6 +210,21 @@ impl App {
             while let Some(event) = self.event_rx.as_mut().and_then(|rx| rx.pop().ok()) {
                 apply_drum_pad_flash(&mut self.state.view, &event, std::time::Instant::now());
                 match event {
+                    EngineEvent::EffectMeter {
+                        track_id,
+                        effect_id,
+                        generation,
+                        input,
+                        output,
+                    } => {
+                        self.accept_device_meter(track_id, effect_id, generation, input, output);
+                    }
+                    EngineEvent::EffectDynamics {
+                        track_id,
+                        effect_id,
+                        generation,
+                        meter,
+                    } => self.accept_device_dynamics(track_id, effect_id, generation, meter),
                     EngineEvent::ClipInsertionStorageRequested(request) => request.fulfill(),
                     EngineEvent::ClipInsertionCompleted(completed) => {
                         if completed.outcome

@@ -226,4 +226,18 @@ impl AudioEngine {
         };
         self.retire_instrument_media(retired, allowance);
     }
+
+    pub(super) fn command_set_drum_rack_pad_param(
+        &mut self,
+        track_id: vibez_core::id::TrackId,
+        pad_index: usize,
+        param_index: usize,
+        value: f32,
+    ) {
+        if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
+            if let Some(ref mut instrument) = track.instrument {
+                instrument.set_drum_pad_param(pad_index, param_index, value);
+            }
+        }
+    }
 }

@@ -174,6 +174,7 @@ fn fixture(max_frames: usize, idle: bool) -> Fixture {
         id: effect,
         effect: Box::new(RequestProbe(Arc::clone(&trace))),
         bypass: false,
+        levels: Default::default(),
     });
     let mut channel = routing_channel(track);
     channel.effects.push(routing_effect(effect));

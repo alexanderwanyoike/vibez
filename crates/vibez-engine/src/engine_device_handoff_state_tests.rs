@@ -178,6 +178,7 @@ fn local_away_owner_and_resident_restart_keep_independent_gates() {
                     id: effects[index],
                     effect,
                     bypass: index == 0 && bypass,
+                    levels: Default::default(),
                 });
                 commands
                     .push(EngineCommand::AddTrack(Box::new(track)))

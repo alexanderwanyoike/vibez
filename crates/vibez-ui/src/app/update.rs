@@ -106,6 +106,12 @@ impl App {
             Message::UndoGesture { id, edit } => (*edit, Some(id)),
             message => (message, None),
         };
+        if let Message::Devices(edit) = &message {
+            self.discard_param_entry(edit);
+            if crate::domains::devices::is_unchanged_param_edit(&self.state.project_tracks, edit) {
+                return Task::none();
+            }
+        }
         let message =
             apply_project_track_deletion_policy(message, self.state.confirm_project_track_deletion);
         if self.state.perform.clip_record.is_active()
@@ -188,6 +194,7 @@ impl App {
             return Task::none();
         }
         let owns_project_transaction = self.begin_project_track_deletion_transaction(&message);
+        self.invalidate_device_preset_load(&message);
         let deferred_arrangement_project_edit = matches!(
             &message,
             Message::Arrangement(msg) if msg.defers_project_edit()
@@ -237,6 +244,18 @@ impl App {
         }
 
         match message {
+            Message::GainControl(message) => return self.update_gain_control(message),
+            Message::Eq(message) => return self.update_eq(message),
+            Message::Compressor(message) => return self.update_compressor(message),
+            Message::Filter(message) => return self.update_filter(message),
+            Message::Gate(message) => return self.update_gate(message),
+            Message::Card(message) => return self.update_card(message),
+            Message::InstrumentCard(message) => return self.update_instrument_card(message),
+            Message::ParamEntry(message) => return self.update_param_entry(message),
+            Message::DevicePreset(message) => return self.update_device_preset(message),
+            Message::ApplyDevicePreset(track_id, slot, preset) => {
+                return self.apply_device_preset(track_id, slot, preset);
+            }
             Message::SectionTimeline(_) => {
                 unreachable!("section timeline wrappers are removed before routing")
             }
@@ -939,6 +958,26 @@ impl App {
             }
             Message::DrumRackPadDecodeError(track_id, _pad_index, err) => {
                 return self.handle_drum_rack_pad_decode_error(track_id, _pad_index, err);
+            }
+            Message::LoadFactoryDrumKit(track_id, kit) => {
+                return self.load_factory_drum_kit(track_id, kit);
+            }
+            Message::OpenDrumKit(track_id) => return self.open_drum_kit(track_id),
+            Message::DrumKitFolderSelected(track_id, folder) => {
+                return self.read_drum_kit(track_id, folder);
+            }
+            Message::DrumKitReady(track_id, result) => {
+                return self.apply_drum_kit(track_id, result);
+            }
+            Message::SaveDrumKit(track_id) => return self.choose_drum_kit_folder(track_id),
+            Message::DrumKitSaveSelected(track_id, folder) => {
+                return self.save_drum_kit(track_id, folder);
+            }
+            Message::DrumKitSaved(result) => {
+                self.state.status_text = match result {
+                    Ok(name) => format!("Saved kit {name}"),
+                    Err(error) => format!("Kit not saved: {error}"),
+                };
             }
 
             // -- Sample browser --

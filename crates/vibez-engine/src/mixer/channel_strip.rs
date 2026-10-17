@@ -122,7 +122,7 @@ impl EngineTrack {
                             Some(d) => d.min + value * (d.max - d.min),
                             None => value,
                         };
-                        slot.effect.set_param(param_index, native);
+                        slot.effect.set_automated_param(param_index, native);
                     }
                 }
                 AutomationTarget::InstrumentParam { param_index } => {
@@ -205,7 +205,7 @@ impl EngineTrack {
                             .map_or(value, |descriptor| {
                                 descriptor.min + value * (descriptor.max - descriptor.min)
                             });
-                        slot.effect.set_param(param_index, native);
+                        slot.effect.set_automated_param(param_index, native);
                     }
                 }
                 AutomationTarget::InstrumentParam { param_index } => {
@@ -540,16 +540,18 @@ impl EngineTrack {
         )
     }
 
-    pub fn process_effects(&mut self, frames: usize, channels: usize) {
+    pub fn process_effects(
+        &mut self,
+        frames: usize,
+        channels: usize,
+        meter_generation: Option<u64>,
+    ) {
         let buf_size = frames * channels;
         if buf_size == 0 {
             return;
         }
         for slot in &mut self.effects {
-            if !slot.bypass {
-                slot.effect
-                    .process(&mut self.mix_buffer[..buf_size], channels);
-            }
+            slot.process(&mut self.mix_buffer[..buf_size], channels, meter_generation);
         }
     }
 }

@@ -1,13 +1,27 @@
 //! Instrument rendering and native ownership configuration.
 
 pub mod drum_rack;
+pub(crate) mod envelope;
+pub mod fm;
+pub mod fm_params;
+mod fm_voice;
 mod media_owners;
+mod poly;
 mod prepared_pad_state;
 pub use media_owners::InstrumentMediaOwners;
 pub use prepared_pad_state::PreparedDrumPadState;
-pub(crate) mod envelope;
 pub mod sampler;
+pub mod sampler_params;
+mod sampler_voice;
 pub mod synth;
+mod synth_filter;
+pub mod synth_oscillator;
+pub mod synth_params;
+mod synth_voice;
+pub mod wavetable;
+pub mod wavetable_params;
+mod wavetable_voice;
+pub mod wavetables;
 
 use std::sync::Arc;
 
@@ -16,8 +30,10 @@ use vibez_core::effect::ParamDescriptor;
 use vibez_core::midi::InstrumentKind;
 
 use drum_rack::DrumRack;
+use fm::FmSynth;
 use sampler::Sampler;
 use synth::SubtractiveSynth;
+use wavetable::WavetableSynth;
 
 /// Trait implemented by all instruments (synths, samplers, etc.).
 /// Parameter descriptors for an instrument kind, without building
@@ -25,6 +41,8 @@ use synth::SubtractiveSynth;
 pub fn descriptors_for(kind: InstrumentKind) -> &'static [ParamDescriptor] {
     match kind {
         InstrumentKind::SubtractiveSynth => synth::SYNTH_PARAMS,
+        InstrumentKind::WavetableSynth => wavetable::WAVETABLE_PARAMS,
+        InstrumentKind::FmSynth => fm::FM_PARAMS,
         InstrumentKind::Sampler => sampler::SAMPLER_PARAMS,
         // The drum rack has per-pad state, no top-level params.
         InstrumentKind::DrumRack => &[],
@@ -133,6 +151,10 @@ pub trait Instrument: Send {
         }
     }
 
+    /// Set one of a drum-rack pad's Sampler controls. No-op for other
+    /// instruments.
+    fn set_drum_pad_param(&mut self, _pad_index: usize, _index: usize, _value: f32) {}
+
     /// Sample name for UI display. None for non-sample instruments.
     fn sample_name(&self) -> Option<&str> {
         None
@@ -143,6 +165,8 @@ pub trait Instrument: Send {
 pub fn create_instrument(kind: InstrumentKind, sample_rate: f32) -> Box<dyn Instrument> {
     match kind {
         InstrumentKind::SubtractiveSynth => Box::new(SubtractiveSynth::new(sample_rate)),
+        InstrumentKind::WavetableSynth => Box::new(WavetableSynth::new(sample_rate)),
+        InstrumentKind::FmSynth => Box::new(FmSynth::new(sample_rate)),
         InstrumentKind::Sampler => Box::new(Sampler::new(sample_rate)),
         InstrumentKind::DrumRack => Box::new(DrumRack::new(sample_rate)),
     }

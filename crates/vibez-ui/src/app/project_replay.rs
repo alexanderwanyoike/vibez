@@ -90,6 +90,8 @@ impl App {
     }
 
     pub(super) fn apply_snapshot(&mut self, mut snapshot: crate::state::ProjectSnapshot) {
+        self.restart_device_metering();
+        self.cancel_device_preset_load();
         if clip_only_snapshot(&self.state, &snapshot) {
             self.state.perform.clips = snapshot.launcher_clips;
             self.state
@@ -314,7 +316,9 @@ impl App {
                         }
                     }
                 }
-                InstrumentKind::SubtractiveSynth => {}
+                InstrumentKind::SubtractiveSynth
+                | InstrumentKind::WavetableSynth
+                | InstrumentKind::FmSynth => {}
             }
         }
 

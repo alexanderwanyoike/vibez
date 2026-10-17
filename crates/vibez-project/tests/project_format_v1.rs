@@ -301,6 +301,7 @@ fn sliced_drum_rack_pads_and_reconstruction_notes_survive_reopen_with_one_media_
         fine_tune: 0.0,
         one_shot: true,
         choke_group: None,
+        params: Vec::new(),
     };
     let mut track = TrackInfo::new("Slices 1");
     track.kind = TrackKind::Midi;

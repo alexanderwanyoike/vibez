@@ -88,6 +88,8 @@ fn coverage(command: &EngineCommand) -> Coverage {
         | C::SetSend { .. }
         | C::SetSampleRate(_)
         | C::SetSpectrumTap(_)
+        | C::SetEffectSpectrumTap(_)
+        | C::SetEffectMeterChannel { .. }
         | C::RemoveEffect(..)
         | C::SetEffectParam { .. }
         | C::SetEffectBypass { .. }
@@ -106,6 +108,7 @@ fn coverage(command: &EngineCommand) -> Coverage {
         | C::LoadDrumRackPadSample { .. }
         | C::ClearDrumRackPad { .. }
         | C::SetDrumRackPadState { .. }
+        | C::SetDrumRackPadParam { .. }
         | C::SetArrangementRecording(_)
         | C::SetArrangementLoop(_)
         | C::SetArrangementLoopRegion { .. }
@@ -650,6 +653,20 @@ fn cases() -> Vec<Case> {
         case!("SetSpectrumTap", false, |f| C::SetSpectrumTap(Some(
             f.synth
         ))),
+        case!("SetEffectSpectrumTap", false, |f| {
+            C::SetEffectSpectrumTap(Some(crate::effect_spectrum::EffectSpectrumTarget {
+                track_id: f.synth,
+                effect_id: f.effect,
+                position: crate::effect_spectrum::EffectSpectrumPosition::Output,
+                generation: 1,
+            }))
+        }),
+        case!("SetEffectMeterChannel", false, |f| {
+            C::SetEffectMeterChannel {
+                track_id: Some(f.synth),
+                generation: 1,
+            }
+        }),
         case!("RemoveEffect", false, |f| C::RemoveEffect(
             f.synth, f.effect
         )),
@@ -749,6 +766,12 @@ fn cases() -> Vec<Case> {
             false,
             |f| C::set_drum_rack_pad_state(f.drums, 0, Default::default())
         ),
+        case!("SetDrumRackPadParam", false, |f| C::SetDrumRackPadParam {
+            track_id: f.drums,
+            pad_index: 0,
+            param_index: 0,
+            value: 0.5,
+        }),
         case!("SetArrangementRecording", false, |_| {
             C::SetArrangementRecording(true)
         }),

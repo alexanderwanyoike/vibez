@@ -81,6 +81,7 @@ fn returned_device_event_reconfigures_on_main_and_publishes_resume_or_reject_wit
                     track_id,
                     position: 0,
                     slot: vibez_engine::mixer::EffectSlot {
+                        levels: Default::default(),
                         id,
                         effect,
                         bypass: false,
@@ -192,6 +193,7 @@ fn queued_replacement_or_project_reset_revokes_old_event_before_main_activation(
             track_id,
             position: 0,
             slot: vibez_engine::mixer::EffectSlot {
+                levels: Default::default(),
                 id: effect_id,
                 effect,
                 bypass: false,

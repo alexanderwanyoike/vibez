@@ -203,6 +203,23 @@ pub enum EngineEvent {
     /// Per-track peak meter readings.
     TrackMeter(TrackMeterEvent),
 
+    /// Cosmetic readings at one insert's real input and output boundaries.
+    EffectMeter {
+        track_id: TrackId,
+        effect_id: vibez_core::id::EffectId,
+        generation: u64,
+        input: crate::metering::MeterValues,
+        output: crate::metering::MeterValues,
+    },
+
+    /// Wet gain-computer diagnostics, independent of makeup and parallel mix.
+    EffectDynamics {
+        track_id: TrackId,
+        effect_id: vibez_core::id::EffectId,
+        generation: u64,
+        meter: vibez_core::effect::DynamicsMeter,
+    },
+
     /// Drum Rack pitches triggered by resident MIDI clips during the latest
     /// audio block. One bit per MIDI pitch keeps device feedback bounded to
     /// one event per track and block, even when several notes land together.
@@ -387,6 +404,8 @@ impl EngineEvent {
             | Self::SidechainInputMeter { .. }
             | Self::Metering(_)
             | Self::TrackMeter(_)
+            | Self::EffectMeter { .. }
+            | Self::EffectDynamics { .. }
             | Self::TrackNoteActivity(_)
             | Self::ClipQueued { .. }
             | Self::ClipEventsDropped { .. }
@@ -453,6 +472,47 @@ impl PartialEq for EngineEvent {
             (Self::DisposeInstrument(left), Self::DisposeInstrument(right)) => left == right,
             (Self::PlaybackPosition(left), Self::PlaybackPosition(right)) => left == right,
             (Self::PerformancePosition(left), Self::PerformancePosition(right)) => left == right,
+            (
+                Self::EffectDynamics {
+                    track_id: left_track,
+                    effect_id: left_effect,
+                    generation: left_generation,
+                    meter: left_meter,
+                },
+                Self::EffectDynamics {
+                    track_id: right_track,
+                    effect_id: right_effect,
+                    generation: right_generation,
+                    meter: right_meter,
+                },
+            ) => {
+                left_track == right_track
+                    && left_effect == right_effect
+                    && left_generation == right_generation
+                    && left_meter == right_meter
+            }
+            (
+                Self::EffectMeter {
+                    track_id: left_track,
+                    effect_id: left_effect,
+                    generation: left_generation,
+                    input: left_input,
+                    output: left_output,
+                },
+                Self::EffectMeter {
+                    track_id: right_track,
+                    effect_id: right_effect,
+                    generation: right_generation,
+                    input: right_input,
+                    output: right_output,
+                },
+            ) => {
+                left_track == right_track
+                    && left_effect == right_effect
+                    && left_generation == right_generation
+                    && left_input == right_input
+                    && left_output == right_output
+            }
             (Self::RetiredNoteClip(left), Self::RetiredNoteClip(right)) => {
                 left.same_retired_owner(right)
             }

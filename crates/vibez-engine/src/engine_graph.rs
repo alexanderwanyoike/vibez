@@ -436,6 +436,7 @@ impl AudioEngine {
                 }
                 NodeStage::Effect(effect_id) => {
                     let recovery_bypass = self.recovering_effect_bypass(node.channel, effect_id);
+                    let meter_generation = self.effect_meter.generation_for(node.channel);
                     let prepared = self.routing.as_mut();
                     for incoming_index in 0..prepared.nodes[index].incoming.len() {
                         let edge_index = prepared.nodes[index].incoming[incoming_index];
@@ -490,6 +491,20 @@ impl AudioEngine {
                     let track =
                         binding.get_mut(&mut self.tracks, &mut self.buses, &mut self.master);
                     if let Some(track) = track {
+                        self.effect_spectrum.observe(
+                            node.channel,
+                            effect_id,
+                            crate::effect_spectrum::EffectSpectrumPosition::Input,
+                            &destination.samples[..len],
+                            channels,
+                        );
+                        track.observe_effect(
+                            effect_id,
+                            crate::mixer::MeterSide::Input,
+                            &destination.samples[..len],
+                            channels,
+                            meter_generation,
+                        );
                         prepared.bypass_samples[index][..len]
                             .copy_from_slice(&destination.samples[..len]);
                         prepared.bypass_delays[index]
@@ -501,6 +516,20 @@ impl AudioEngine {
                             } else {
                                 destination.samples[..len].fill(0.0);
                             }
+                            self.effect_spectrum.observe(
+                                node.channel,
+                                effect_id,
+                                crate::effect_spectrum::EffectSpectrumPosition::Output,
+                                &destination.samples[..len],
+                                channels,
+                            );
+                            track.observe_effect(
+                                effect_id,
+                                crate::mixer::MeterSide::Output,
+                                &destination.samples[..len],
+                                channels,
+                                meter_generation,
+                            );
                             continue;
                         }
                         let clock = Some(&prepared.channel_clocks[channel_index]);
@@ -596,6 +625,20 @@ impl AudioEngine {
                             }
                             offset = end;
                         }
+                        self.effect_spectrum.observe(
+                            node.channel,
+                            effect_id,
+                            crate::effect_spectrum::EffectSpectrumPosition::Output,
+                            &destination.samples[..len],
+                            channels,
+                        );
+                        track.observe_effect(
+                            effect_id,
+                            crate::mixer::MeterSide::Output,
+                            &destination.samples[..len],
+                            channels,
+                            meter_generation,
+                        );
                     }
                 }
                 NodeStage::AfterEffects | NodeStage::AfterFader => {

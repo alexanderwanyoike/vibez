@@ -1,3 +1,5 @@
+//! Effect identities, parameter metadata and native diagnostic snapshots.
+
 use serde::{Deserialize, Serialize};
 
 use crate::id::EffectId;
@@ -15,6 +17,9 @@ pub enum EffectType {
     Gate,
     Phaser,
     Eq,
+    Echo,
+    Saturator,
+    Limiter,
 }
 
 impl EffectType {
@@ -23,10 +28,13 @@ impl EffectType {
             EffectType::Gain => "Gain",
             EffectType::Filter => "Filter",
             EffectType::Delay => "Delay",
+            EffectType::Echo => "Echo",
             EffectType::Reverb => "Reverb",
             EffectType::Drive => "Drive",
+            EffectType::Saturator => "Saturator",
             EffectType::Bitcrush => "Bitcrush",
             EffectType::Compressor => "Compressor",
+            EffectType::Limiter => "Limiter",
             EffectType::AutoPan => "Auto-Pan",
             EffectType::Gate => "Gate",
             EffectType::Phaser => "Phaser",
@@ -40,15 +48,64 @@ impl EffectType {
             EffectType::Filter,
             EffectType::Eq,
             EffectType::Compressor,
+            EffectType::Limiter,
             EffectType::Gate,
             EffectType::Drive,
+            EffectType::Saturator,
             EffectType::Bitcrush,
             EffectType::Delay,
+            EffectType::Echo,
             EffectType::Reverb,
             EffectType::Phaser,
             EffectType::AutoPan,
         ]
     }
+}
+
+/// Output amplitude cannot identify these decisions when a detector is external or Mix is dry.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[repr(u8)]
+pub enum GatePhase {
+    #[default]
+    Closed = 1,
+    Hold = 2,
+    Open = 4,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GateMeter {
+    pub phase: GatePhase,
+    pub envelope_db: f32,
+    pub peak_envelope_db: f32,
+    pub open_threshold_db: f32,
+    pub close_threshold_db: f32,
+    pub hold_remaining_ms: f32,
+    /// Presence bits retain short decisions between observation windows, not sample-resolution segments.
+    pub phases_seen: u8,
+}
+
+impl Default for GateMeter {
+    fn default() -> Self {
+        Self {
+            phase: GatePhase::Closed,
+            envelope_db: -120.0,
+            peak_envelope_db: -120.0,
+            open_threshold_db: -40.0,
+            close_threshold_db: -40.0,
+            hold_remaining_ms: 0.0,
+            phases_seen: 0,
+        }
+    }
+}
+
+/// Attenuation is positive dB from the wet gain computer before makeup/mix.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct DynamicsMeter {
+    pub current_reduction_db: [f32; 2],
+    pub peak_reduction_db: [f32; 2],
+    /// Linear post-filter detector peaks accumulated since the last drain.
+    pub detector_peak: [f32; 2],
+    pub gate: Option<GateMeter>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -106,7 +163,7 @@ mod tests {
     #[test]
     fn effect_type_all() {
         let all = EffectType::all();
-        assert_eq!(all.len(), 11);
+        assert_eq!(all.len(), 14);
     }
 
     #[test]

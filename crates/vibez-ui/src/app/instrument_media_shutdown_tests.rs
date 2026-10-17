@@ -152,7 +152,8 @@ fn actual_app_shutdown_stops_engine_before_destroying_sample_guards_and_state_ca
         .unwrap();
     let mut output = [0.0; 16];
     engine.process_block(AudioProcessBlock::new(&mut output, 1));
-    assert_eq!(output, [0.25; 16]);
+    // A pad from legacy settings sits 3 dB down in a mono render.
+    assert_eq!(output, [0.25 * std::f32::consts::FRAC_1_SQRT_2; 16]);
     app.poll_engine_events();
     commands
         .push(EngineCommand::LoadDrumRackPadSample {
@@ -166,19 +167,20 @@ fn actual_app_shutdown_stops_engine_before_destroying_sample_guards_and_state_ca
         })
         .unwrap();
     engine.process_block(AudioProcessBlock::new(&mut output, 1));
-    assert_eq!(output, [0.25; 16]);
+    // A pad's new sample stops that pad's voices.
+    assert_eq!(output, [0.0; 16]);
     app.poll_engine_events();
     assert_eq!(
         old_sample.strong_count(),
-        3,
-        "old voice, actual App guard and state cache"
+        2,
+        "actual App guard and state cache"
     );
     assert!(observations.lock().unwrap().is_empty());
     app._stream = Some(AudioOutputStream::idle(engine));
     drop(app);
     assert_eq!(
         observations.lock().unwrap().as_slice(),
-        &[(owner_thread, 3)],
+        &[(owner_thread, 2)],
         "stream shutdown must precede both automatic state and guard destruction"
     );
     assert_eq!(old_sample.strong_count(), 0);

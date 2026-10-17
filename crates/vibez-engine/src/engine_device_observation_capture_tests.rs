@@ -210,6 +210,7 @@ fn fixture(playing: bool) -> Fixture {
             calls: Arc::clone(&calls),
         }),
         bypass: false,
+        levels: Default::default(),
     });
     source.playback_source.clips.push(constant_clip(4096, 0.25));
     let mut channel = routing_channel(track);

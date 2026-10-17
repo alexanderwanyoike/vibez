@@ -262,6 +262,14 @@ pub enum EngineCommand {
     /// spectrum analyser ring (`None` disables the tap).
     /// `TrackId::MASTER` taps the summed master bus.
     SetSpectrumTap(Option<TrackId>),
+    /// Selection generations distinguish queued samples after an insert or source changes.
+    SetEffectSpectrumTap(Option<crate::effect_spectrum::EffectSpectrumTarget>),
+    /// The generation prevents queued readings from a previous panel selection
+    /// from appearing after the UI returns to the same channel.
+    SetEffectMeterChannel {
+        track_id: Option<TrackId>,
+        generation: u64,
+    },
 
     // -- Effects --
     RemoveEffect(TrackId, EffectId),
@@ -347,6 +355,14 @@ pub enum EngineCommand {
         track_id: TrackId,
         pad_index: usize,
         state: vibez_instruments::PreparedDrumPadState,
+    },
+    /// One of a pad's Sampler controls, which unlike a whole pad state
+    /// frees nothing on the audio thread.
+    SetDrumRackPadParam {
+        track_id: TrackId,
+        pad_index: usize,
+        param_index: usize,
+        value: f32,
     },
 
     // -- Arrangement recording / loop --

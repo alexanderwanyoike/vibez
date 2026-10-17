@@ -109,6 +109,7 @@ fn stale_old_reply_preserves_new_token_metadata_parameters_and_applied_graph() {
                 id: effect_id,
                 effect: old,
                 bypass: false,
+                levels: Default::default(),
             });
             let mut healthy = EngineTrack::new(tracks[1]);
             healthy.pan = 0.5;

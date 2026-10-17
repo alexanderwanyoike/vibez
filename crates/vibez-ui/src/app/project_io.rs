@@ -32,6 +32,8 @@ fn plugin_instrument_for_replay(track: &TrackInfo) -> Option<vibez_core::effect:
 
 impl App {
     pub(super) fn clear_project_runtime(&mut self) {
+        self.reset_device_meters();
+        self.reset_device_presets();
         self.plugin_load_requests.reset();
         self.sidechain_sync_inputs = None;
         self.track_meter_peaks.clear();
@@ -197,7 +199,7 @@ impl App {
             );
             out.push(UiEffect {
                 reconfiguration_failed: false,
-                latency_samples: Some(0),
+                latency_samples: Some(fx.latency_samples()),
                 inactive_sidechains: effect_info.inactive_sidechains.clone(),
                 sidechains: effect_info.sidechains.clone(),
                 external_inputs: fx.external_inputs().to_vec(),
@@ -205,7 +207,7 @@ impl App {
                 id: effect_info.id,
                 effect_type: effect_info.effect_type,
                 bypass: effect_info.bypass,
-                params: effect_info.params.clone(),
+                params: restored_effect_params(&effect_info.params, fx.param_descriptors()),
                 descriptors: fx.param_descriptors(),
                 plugin_name: None,
                 has_plugin_gui: false,
@@ -518,7 +520,9 @@ impl App {
 
             if let Some(native) = &track_info.native_instrument {
                 match native {
-                    InstrumentStateInfo::SubtractiveSynth { params } => {
+                    InstrumentStateInfo::SubtractiveSynth { params }
+                    | InstrumentStateInfo::WavetableSynth { params }
+                    | InstrumentStateInfo::FmSynth { params } => {
                         track.instrument_params = params.clone();
                         for (idx, value) in params.iter().copied().enumerate() {
                             self.send_command(EngineCommand::SetInstrumentParam {
@@ -593,7 +597,7 @@ impl App {
                 let descriptors = fx.param_descriptors();
                 track.effects.push(UiEffect {
                     reconfiguration_failed: false,
-                    latency_samples: Some(0),
+                    latency_samples: Some(fx.latency_samples()),
                     inactive_sidechains: effect_info.inactive_sidechains.clone(),
                     sidechains: effect_info.sidechains.clone(),
                     external_inputs: fx.external_inputs().to_vec(),
@@ -601,7 +605,7 @@ impl App {
                     id: effect_info.id,
                     effect_type: effect_info.effect_type,
                     bypass: effect_info.bypass,
-                    params: effect_info.params.clone(),
+                    params: restored_effect_params(&effect_info.params, descriptors),
                     descriptors,
                     plugin_name: None,
                     has_plugin_gui: false,
@@ -926,6 +930,22 @@ fn first_remote_provenance_label(project: &Project) -> Option<String> {
             vibez_core::track::MediaProvenance::Remote { .. } => Some(provenance.display_label()),
             vibez_core::track::MediaProvenance::Local { .. } => None,
         })
+}
+
+fn restored_effect_params(
+    saved: &[f32],
+    descriptors: &[vibez_core::effect::ParamDescriptor],
+) -> Vec<f32> {
+    let mut params = saved.to_vec();
+    // Older projects lack appended controls; keep their existing values and
+    // make the same neutral defaults editable that the DSP already restored.
+    params.extend(
+        descriptors
+            .iter()
+            .skip(saved.len())
+            .map(|descriptor| descriptor.default),
+    );
+    params
 }
 
 fn expand_drum_rack_pads(pads: &[vibez_core::track::DrumPadState]) -> Vec<UiDrumPad> {

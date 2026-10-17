@@ -124,6 +124,7 @@ fn current_reject_admission_preserves_all_three_owners_with_zero_through_three_f
                 requested: Arc::clone(&requested),
                 drops: Arc::clone(&drops),
             }),
+            levels: Default::default(),
         });
         commands
             .push(EngineCommand::AddTrack(Box::new(channel)))
@@ -165,6 +166,7 @@ fn current_reject_admission_preserves_all_three_owners_with_zero_through_three_f
                     EffectType::Gain,
                     DEFAULT_SAMPLE_RATE as f32,
                 ),
+                levels: Default::default(),
             });
         }
         fill_ring(&mut engine);

@@ -23,6 +23,7 @@ impl AudioEngine {
             return;
         };
         let slot = EffectSlot {
+            levels: Default::default(),
             id: effect_id,
             effect,
             bypass: false,

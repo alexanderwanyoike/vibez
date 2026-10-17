@@ -95,6 +95,7 @@ impl Fixture {
             id: effect,
             effect: device,
             bypass: false,
+            levels: Default::default(),
         });
         let mut healthy = EngineTrack::new(tracks[1]);
         healthy

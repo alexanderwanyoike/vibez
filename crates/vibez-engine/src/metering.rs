@@ -1,3 +1,5 @@
+//! Allocation-free peak and RMS measurement of blocks and device observation windows.
+
 /// Metering values for a block of audio.
 ///
 /// All values are non-negative and represent absolute amplitude.
@@ -40,48 +42,82 @@ impl Default for MeterValues {
 ///
 /// This function is allocation-free and suitable for use in the audio thread.
 pub fn calculate_meters(data: &[f32], channels: usize) -> MeterValues {
-    if data.is_empty() || channels == 0 {
-        return MeterValues::SILENT;
-    }
+    let mut levels = LevelAccumulator::default();
+    levels.observe(data, channels);
+    levels.values(data.len().checked_div(channels).unwrap_or(0) as u64)
+}
 
-    let frames = data.len() / channels;
-    if frames == 0 {
-        return MeterValues::SILENT;
-    }
+#[derive(Default)]
+struct LevelAccumulator {
+    peak_l: f32,
+    peak_r: f32,
+    sum_sq_l: f64,
+    sum_sq_r: f64,
+}
 
-    let mut peak_l: f32 = 0.0;
-    let mut peak_r: f32 = 0.0;
-    let mut sum_sq_l: f64 = 0.0;
-    let mut sum_sq_r: f64 = 0.0;
-
-    for frame in 0..frames {
-        let base = frame * channels;
-
-        // Left channel (channel 0)
-        let l = data[base];
-        let abs_l = l.abs();
-        if abs_l > peak_l {
-            peak_l = abs_l;
+impl LevelAccumulator {
+    fn observe(&mut self, samples: &[f32], channels: usize) {
+        if channels == 0 {
+            return;
         }
-        sum_sq_l += (l as f64) * (l as f64);
-
-        // Right channel (channel 1, or channel 0 for mono)
-        let r = if channels >= 2 { data[base + 1] } else { l };
-        let abs_r = r.abs();
-        if abs_r > peak_r {
-            peak_r = abs_r;
+        for frame in samples.chunks_exact(channels) {
+            let left = frame[0];
+            let right = if channels > 1 { frame[1] } else { left };
+            self.peak_l = self.peak_l.max(left.abs());
+            self.peak_r = self.peak_r.max(right.abs());
+            self.sum_sq_l += f64::from(left).powi(2);
+            self.sum_sq_r += f64::from(right).powi(2);
         }
-        sum_sq_r += (r as f64) * (r as f64);
     }
 
-    let rms_l = (sum_sq_l / frames as f64).sqrt() as f32;
-    let rms_r = (sum_sq_r / frames as f64).sqrt() as f32;
+    fn values(&self, frames: u64) -> MeterValues {
+        if frames == 0 {
+            return MeterValues::SILENT;
+        }
+        MeterValues {
+            peak_l: self.peak_l,
+            peak_r: self.peak_r,
+            rms_l: (self.sum_sq_l / frames as f64).sqrt() as f32,
+            rms_r: (self.sum_sq_r / frames as f64).sqrt() as f32,
+        }
+    }
+}
 
-    MeterValues {
-        peak_l,
-        peak_r,
-        rms_l,
-        rms_r,
+/// Fixed-size state follows an insert through chain reordering and ownership
+/// handoffs without introducing a callback-side allocation.
+#[derive(Default)]
+pub struct EffectMeterState {
+    generation: Option<u64>,
+    input: LevelAccumulator,
+    output: LevelAccumulator,
+}
+
+impl EffectMeterState {
+    fn prepare(&mut self, generation: u64) {
+        if self.generation != Some(generation) {
+            *self = Self {
+                generation: Some(generation),
+                ..Self::default()
+            };
+        }
+    }
+
+    pub(crate) fn observe_input(&mut self, samples: &[f32], channels: usize, generation: u64) {
+        self.prepare(generation);
+        self.input.observe(samples, channels);
+    }
+
+    pub(crate) fn observe_output(&mut self, samples: &[f32], channels: usize, generation: u64) {
+        self.prepare(generation);
+        self.output.observe(samples, channels);
+    }
+
+    pub(crate) fn finish(&mut self, frames: u64, generation: u64) -> (MeterValues, MeterValues) {
+        self.prepare(generation);
+        let values = (self.input.values(frames), self.output.values(frames));
+        self.input = LevelAccumulator::default();
+        self.output = LevelAccumulator::default();
+        values
     }
 }
 

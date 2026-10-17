@@ -244,6 +244,7 @@ fn retained_parameter_capacity_coalesces_and_replays_every_entry() {
                 id: effect_id,
                 effect: owner,
                 bypass: false,
+                levels: Default::default(),
             });
             identity
         };

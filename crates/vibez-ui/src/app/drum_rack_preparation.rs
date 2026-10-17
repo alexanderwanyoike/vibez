@@ -197,6 +197,7 @@ mod tests {
                 fine_tune: 0.0,
                 one_shot: true,
                 choke_group: None,
+                params: Vec::new(),
             }],
         });
         let project = vibez_project::Project {

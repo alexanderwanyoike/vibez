@@ -70,7 +70,10 @@ fn assert_pad_load_fifo(
     assert_eq!(Some(sample_name.as_str()), canonical.name.as_deref());
 }
 
+/// `expected` is the pad's level before the 3 dB a pad from legacy
+/// settings sits down in a mono render.
 fn assert_level(engine: &mut AudioEngine, expected: f32) {
+    let expected = expected * std::f32::consts::FRAC_1_SQRT_2;
     let mut output = [0.0; 32];
     engine.process_block(AudioProcessBlock::new(&mut output, 2));
     assert!(
@@ -106,20 +109,22 @@ fn actual_drum_ui_clear_load_and_undo_preserve_fifo_media_audio_and_retired_guar
     );
     track.pan = 0.0;
     track.drum_rack_pads[0] = UiDrumPad {
-        name: Some("original.wav".into()),
-        source: Some(MediaSourceRef::LocalFile {
-            path: "/original/drum.wav".into(),
-        }),
         audio: Some(old),
-        gain: 0.5,
-        pan: -1.0,
-        start: 0.125,
-        end: 0.875,
-        fade_in_ms: 0.0,
-        fade_out_ms: 0.0,
-        one_shot: false,
-        choke_group: None,
-        ..UiDrumPad::default()
+        ..UiDrumPad::from_state(&vibez_core::track::DrumPadState {
+            name: Some("original.wav".into()),
+            source: Some(MediaSourceRef::LocalFile {
+                path: "/original/drum.wav".into(),
+            }),
+            gain: 0.5,
+            pan: -1.0,
+            start: 0.125,
+            end: 0.875,
+            fade_in_ms: 0.0,
+            fade_out_ms: 0.0,
+            one_shot: false,
+            choke_group: None,
+            ..vibez_core::track::DrumPadState::default()
+        })
     };
     let initial_state = track.drum_rack_pads[0].to_state();
     Arc::make_mut(&mut app.state.project_tracks)
@@ -173,12 +178,13 @@ fn actual_drum_ui_clear_load_and_undo_preserve_fifo_media_audio_and_retired_guar
     forward_ui_commands(&mut app, &mut observed, &mut engine_commands, |commands| {
         assert_pad_load_fifo(commands, track_id, &loaded_state, loaded_owner.as_ptr());
     });
-    assert_level(&mut engine, 0.125);
+    // A pad's new sample stops that pad's voices.
+    assert_level(&mut engine, 0.0);
     app.poll_engine_events();
     assert_eq!(
         old_owner.strong_count(),
-        4,
-        "old voice, Undo history, waveform cache and actual UI guard"
+        3,
+        "Undo history, waveform cache and actual UI guard"
     );
     app.send_command(EngineCommand::ExternalNoteOn {
         track_id,
@@ -186,7 +192,7 @@ fn actual_drum_ui_clear_load_and_undo_preserve_fifo_media_audio_and_retired_guar
         velocity: 127,
     });
     forward_ui_commands(&mut app, &mut observed, &mut engine_commands, |_| {});
-    assert_level(&mut engine, 0.375);
+    assert_level(&mut engine, 0.25);
 
     let _ =
         app.update_and_refresh_clips(Message::Devices(DevicesMsg::ClearDrumRackPad(track_id, 0)));
@@ -215,7 +221,7 @@ fn actual_drum_ui_clear_load_and_undo_preserve_fifo_media_audio_and_retired_guar
     );
     assert_eq!(
         app.state.find_track(track_id).unwrap().drum_rack_pads[0].to_state(),
-        DrumPadState::default()
+        UiDrumPad::default().to_state()
     );
 
     let _ = app.update_and_refresh_clips(Message::Project(ProjectMsg::Undo));

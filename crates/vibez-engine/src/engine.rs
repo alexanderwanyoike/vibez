@@ -84,6 +84,10 @@ pub struct AudioEngine {
     buses: crate::mixer::ChannelList,
     /// Which track streams samples to the UI spectrum analyser.
     spectrum_track: Option<TrackId>,
+    effect_spectrum: crate::effect_spectrum::EffectSpectrumTap,
+    effect_spectrum_rx: Option<Consumer<crate::effect_spectrum::EffectSpectrumSample>>,
+    effect_meter: effect_meters::EffectMeterTarget,
+    effect_meter_frames: u64,
     /// Producer side of the spectrum ring (mono samples).
     spectrum_tx: Producer<f32>,
     /// Consumer side, parked here until the UI takes it before the
@@ -236,6 +240,8 @@ impl AudioEngine {
         let (cmd_tx, cmd_rx) = RingBuffer::<EngineCommand>::new(RING_BUFFER_CAPACITY);
         let (event_tx, event_rx) = RingBuffer::<EngineEvent>::new(RING_BUFFER_CAPACITY);
         let (spectrum_tx, spectrum_rx) = RingBuffer::<f32>::new(SPECTRUM_RING_CAPACITY);
+        let (effect_spectrum, effect_spectrum_rx) =
+            crate::effect_spectrum::EffectSpectrumTap::new(SPECTRUM_RING_CAPACITY);
 
         let engine = Self {
             routing: crate::routing::PreparedRouting::prepare(
@@ -277,6 +283,10 @@ impl AudioEngine {
             master: Box::new(EngineTrack::new(TrackId::MASTER)),
             buses: Vec::with_capacity(crate::mixer::CHANNEL_CAPACITY),
             spectrum_track: None,
+            effect_spectrum,
+            effect_spectrum_rx: Some(effect_spectrum_rx),
+            effect_meter: effect_meters::EffectMeterTarget::default(),
+            effect_meter_frames: 0,
             spectrum_tx,
             spectrum_rx: Some(spectrum_rx),
             audition: AuditionBus::new(),
@@ -315,6 +325,14 @@ impl AudioEngine {
     /// thread; returns `None` if already taken.
     pub fn take_spectrum_consumer(&mut self) -> Option<Consumer<f32>> {
         self.spectrum_rx.take()
+    }
+
+    /// Take before moving the engine to its callback thread. This ring is
+    /// independent of the existing whole-channel spectrum consumer.
+    pub fn take_effect_spectrum_consumer(
+        &mut self,
+    ) -> Option<Consumer<crate::effect_spectrum::EffectSpectrumSample>> {
+        self.effect_spectrum_rx.take()
     }
 
     /// Process one audio callback worth of data.
@@ -591,6 +609,7 @@ impl AudioEngine {
         self.continue_capture_replay();
         self.flush_presentation();
         self.retire_section_capture_timing();
+        self.publish_effect_meters(frames);
 
         // Master metering event.
         let meters = metering::calculate_meters(output, channels);
@@ -844,6 +863,10 @@ mod compensation_clip_tests;
 #[path = "engine_graph_tests.rs"]
 mod graph_tests;
 
+#[cfg(test)]
+#[path = "engine_gain_meter_tests.rs"]
+mod gain_meter_tests;
+
 #[path = "engine_device_handoff.rs"]
 mod device_handoff;
 
@@ -884,6 +907,9 @@ mod instrument_commands;
 
 #[path = "engine_effect_commands.rs"]
 mod effect_commands;
+
+#[path = "engine_effect_meters.rs"]
+mod effect_meters;
 
 #[cfg(test)]
 #[path = "engine_bus_solo_tests.rs"]
@@ -1115,3 +1141,11 @@ mod retained_count_in_tests;
 #[cfg(test)]
 #[path = "engine_natural_playback_stop_pressure_tests.rs"]
 mod natural_playback_stop_pressure_tests;
+
+#[cfg(test)]
+#[path = "engine_effect_spectrum_tests.rs"]
+mod effect_spectrum_tests;
+
+#[cfg(test)]
+#[path = "engine_dynamics_meter_tests.rs"]
+mod dynamics_meter_tests;

@@ -88,16 +88,19 @@ fn full_publication_restores_same_box_and_consumes_identity_before_retry() {
                 id: effects[0],
                 effect: create_effect(EffectType::Gain, DEFAULT_SAMPLE_RATE as f32),
                 bypass: false,
+                levels: Default::default(),
             },
             EffectSlot {
                 id: effects[1],
                 effect: held,
                 bypass,
+                levels: Default::default(),
             },
             EffectSlot {
                 id: effects[2],
                 effect: create_effect(EffectType::Gain, DEFAULT_SAMPLE_RATE as f32),
                 bypass: false,
+                levels: Default::default(),
             },
         ];
         commands

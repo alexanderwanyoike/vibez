@@ -37,6 +37,7 @@ fn offline_rate_reuse_is_rejected_before_processing_and_retains_the_owner() {
     let effect = EffectId::new();
     let mut track = EngineTrack::new(id);
     track.effects.push(EffectSlot {
+        levels: Default::default(),
         id: effect,
         effect: Box::new(ActivatedAt48k),
         bypass: false,

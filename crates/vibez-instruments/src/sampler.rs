@@ -1,4 +1,7 @@
-//! Polyphonic pitched sample playback and its parameter state.
+//! The sampler: one loaded sample played across the keyboard by changing
+//! its speed, forwards or backwards, looping with a crossfade, through the
+//! synth's filter and envelopes, within a key and velocity zone. Eight
+//! voices, each new note taking a free voice or else the oldest.
 
 use std::sync::Arc;
 
@@ -6,198 +9,233 @@ use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::effect::ParamDescriptor;
 use vibez_core::midi::InstrumentKind;
 
-use crate::envelope::{Envelope, EnvelopeStage};
+use crate::envelope::Times;
+pub use crate::sampler_params::{filter_type, is_whole, param, SAMPLER_PARAMS};
+use crate::sampler_voice::{Frame, Region, SamplerVoice};
+use crate::synth::lfo;
+use crate::synth_filter::Coefficients;
+use crate::synth_params::{lfo_target, LFO_CUTOFF_OCTAVES, LFO_PITCH_SEMITONES};
 use crate::{Instrument, InstrumentMediaOwners};
 
-/// Sampler parameter descriptors.
-pub static SAMPLER_PARAMS: &[ParamDescriptor] = &[
-    ParamDescriptor {
-        name: "Root Note",
-        min: 0.0,
-        max: 127.0,
-        default: 60.0,
-        unit: "note",
-    },
-    ParamDescriptor {
-        name: "Attack",
-        min: 0.001,
-        max: 2.0,
-        default: 0.001,
-        unit: "s",
-    },
-    ParamDescriptor {
-        name: "Decay",
-        min: 0.001,
-        max: 2.0,
-        default: 0.1,
-        unit: "s",
-    },
-    ParamDescriptor {
-        name: "Sustain",
-        min: 0.0,
-        max: 1.0,
-        default: 1.0,
-        unit: "",
-    },
-    ParamDescriptor {
-        name: "Release",
-        min: 0.001,
-        max: 5.0,
-        default: 0.01,
-        unit: "s",
-    },
-    ParamDescriptor {
-        name: "Start",
-        min: 0.0,
-        max: 1.0,
-        default: 0.0,
-        unit: "",
-    },
-    ParamDescriptor {
-        name: "End",
-        min: 0.0,
-        max: 1.0,
-        default: 1.0,
-        unit: "",
-    },
-    ParamDescriptor {
-        name: "Loop",
-        min: 0.0,
-        max: 1.0,
-        default: 0.0,
-        unit: "",
-    },
-    ParamDescriptor {
-        name: "One-Shot",
-        min: 0.0,
-        max: 1.0,
-        default: 0.0,
-        unit: "",
-    },
-    ParamDescriptor {
-        name: "Volume",
-        min: 0.0,
-        max: 1.0,
-        default: 0.8,
-        unit: "",
-    },
-];
-
 const MAX_VOICES: usize = 8;
+/// The note a struck voice holds, which a pad's note-off releases.
+pub const PAD_NOTE: u8 = 60;
+/// A sample that stops before its loop or its own end fades out over this
+/// long, so stopping mid-sound does not click.
+const END_FADE_SECONDS: f32 = 0.002;
+/// How fast continuous levels follow an edit, so a moved knob does not
+/// click or zip.
+const SMOOTHING_SECONDS: f32 = 0.005;
+const SMOOTHED: [usize; 4] = [param::VOLUME, param::CUTOFF, param::LFO_AMOUNT, param::PAN];
 
-/// Parameter indices for the sampler.
-const P_ROOT_NOTE: usize = 0;
-const P_ATTACK: usize = 1;
-const P_DECAY: usize = 2;
-const P_SUSTAIN: usize = 3;
-const P_RELEASE: usize = 4;
-const P_START: usize = 5;
-const P_END: usize = 6;
-const P_LOOP: usize = 7;
-const P_ONE_SHOT: usize = 8;
-const P_VOLUME: usize = 9;
+/// The original names, which the older tests use.
+#[cfg(test)]
+const P_ROOT_NOTE: usize = param::ROOT_NOTE;
+#[cfg(test)]
+const P_RELEASE: usize = param::RELEASE;
+#[cfg(test)]
+const P_START: usize = param::START;
+#[cfg(test)]
+const P_END: usize = param::END;
+#[cfg(test)]
+const P_LOOP: usize = param::LOOP;
+#[cfg(test)]
+const P_ONE_SHOT: usize = param::ONE_SHOT;
 
-#[derive(Debug, Clone)]
-struct SamplerVoice {
-    active: bool,
-    pitch: u8,
-    velocity: f32,
-    position: f64,
-    speed: f64,
-    envelope: Envelope,
-    one_shot: bool,
-}
-
-impl SamplerVoice {
-    fn new(sample_rate: f32) -> Self {
-        Self {
-            active: false,
-            pitch: 0,
-            velocity: 0.0,
-            position: 0.0,
-            speed: 1.0,
-            envelope: Envelope::new(sample_rate),
-            one_shot: false,
-        }
-    }
+pub fn default_params() -> [f32; param::COUNT] {
+    std::array::from_fn(|index| SAMPLER_PARAMS[index].default)
 }
 
 /// Polyphonic sample-playback instrument.
-///
-/// Load an audio file, map it to a root note, and play it pitched across the
-/// keyboard via playback-speed shifting with ADSR envelope.
 pub struct Sampler {
-    voices: Vec<SamplerVoice>,
-    #[allow(dead_code)]
+    voices: [SamplerVoice; MAX_VOICES],
     sample_rate: f32,
     sample: Option<Arc<DecodedAudio>>,
     sample_name: Option<String>,
-    // Parameters
-    root_note: f32,
-    attack: f32,
-    decay: f32,
-    sustain: f32,
-    release: f32,
-    start: f32,
-    end: f32,
-    loop_enabled: bool,
-    one_shot: bool,
-    volume: f32,
+    params: [f32; param::COUNT],
+    /// The smoothed controls' current values; the rest read `params`.
+    current: [f32; param::COUNT],
+    amp_times: Times,
+    filter_times: Times,
+    smoothing: f32,
+    age: u64,
+    last_pitch: Option<f32>,
+    lfo_phase: f64,
+    filter_for: (f32, f32),
+    coefficients: Coefficients,
+    /// Worked out on each edit, not each frame, as the engine renders one
+    /// frame at a time.
+    region: Option<Region>,
 }
 
 impl Sampler {
     pub fn new(sample_rate: f32) -> Self {
-        Self {
-            voices: (0..MAX_VOICES)
-                .map(|_| SamplerVoice::new(sample_rate))
-                .collect(),
+        let sample_rate = if sample_rate.is_finite() && sample_rate > 0.0 {
+            sample_rate
+        } else {
+            48_000.0
+        };
+        let params = default_params();
+        let mut sampler = Self {
+            voices: [SamplerVoice::default(); MAX_VOICES],
             sample_rate,
             sample: None,
             sample_name: None,
-            root_note: 60.0,
-            attack: 0.001,
-            decay: 0.1,
-            sustain: 1.0,
-            release: 0.01,
-            start: 0.0,
-            end: 1.0,
-            loop_enabled: false,
-            one_shot: false,
-            volume: 0.8,
+            params,
+            current: params,
+            amp_times: Times::new(0.0, 0.0, 0.0, 0.0, sample_rate),
+            filter_times: Times::new(0.0, 0.0, 0.0, 0.0, sample_rate),
+            smoothing: 1.0 - (-1.0 / (SMOOTHING_SECONDS * sample_rate)).exp(),
+            age: 0,
+            last_pitch: None,
+            lfo_phase: 0.0,
+            filter_for: (f32::NAN, f32::NAN),
+            coefficients: Coefficients::new(sample_rate, 1_000.0, 1.0),
+            region: None,
+        };
+        sampler.retime();
+        sampler
+    }
+
+    fn retime(&mut self) {
+        let p = &self.params;
+        self.amp_times = Times::new(
+            p[param::ATTACK],
+            p[param::DECAY],
+            p[param::SUSTAIN],
+            p[param::RELEASE],
+            self.sample_rate,
+        );
+        self.filter_times = Times::new(
+            p[param::FILTER_ATTACK],
+            p[param::FILTER_DECAY],
+            p[param::FILTER_SUSTAIN],
+            p[param::FILTER_RELEASE],
+            self.sample_rate,
+        );
+    }
+
+    fn choice(&self, index: usize) -> usize {
+        self.params[index].round().max(0.0) as usize
+    }
+
+    /// The part of the sample a note plays, from the trim, loop and
+    /// direction controls.
+    fn find_region(&self) -> Option<Region> {
+        let sample = self.sample.as_ref()?;
+        let frames = sample.num_frames() as f64;
+        let at = |index: usize| f64::from(self.params[index]) * frames;
+        let (start, end) = (at(param::START), at(param::END));
+        if end - start < 1.0 {
+            return None;
+        }
+        let looped = (self.params[param::LOOP] >= 0.5).then(|| {
+            let loop_start = at(param::LOOP_START).clamp(start, end);
+            let loop_end = at(param::LOOP_END).clamp(start, end);
+            if loop_end - loop_start >= 2.0 {
+                (loop_start, loop_end)
+            } else {
+                (start, end)
+            }
+        });
+        let reverse = self.params[param::REVERSE] >= 0.5;
+        // The blend reads a loop's length beyond the loop, which must lie
+        // in the file.
+        let crossfade = looped.map_or(0.0, |(loop_start, loop_end)| {
+            let room = if reverse {
+                frames - loop_end
+            } else {
+                loop_start
+            };
+            (f64::from(self.params[param::CROSSFADE]) / 1000.0 * f64::from(sample.sample_rate))
+                .min(loop_end - loop_start)
+                .min(room)
+                .max(0.0)
+        });
+        Some(Region {
+            start,
+            end,
+            looped,
+            reverse,
+            crossfade,
+        })
+    }
+
+    /// Starts a voice `semitones` from the root, on a free voice, else the
+    /// oldest released one, else the oldest; `take_over` first reuses a
+    /// voice already playing `pitch`.
+    fn start(&mut self, pitch: u8, semitones: f32, velocity: u8, take_over: bool) {
+        let Some(region) = self.region else {
+            return;
+        };
+        let p = &self.params;
+        let amount = p[param::VELOCITY_AMOUNT];
+        let gain = 1.0 - amount + amount * f32::from(velocity) / 127.0;
+        let glide = (p[param::GLIDE] / 1000.0 * self.sample_rate).round() as u32;
+        let one_shot = p[param::ONE_SHOT] >= 0.5;
+        let from = self.last_pitch;
+        self.last_pitch = Some(semitones);
+        self.age += 1;
+        let voices = &self.voices;
+        let oldest = |candidates: &mut dyn Iterator<Item = usize>| {
+            candidates.min_by_key(|&index| voices[index].age)
+        };
+        let all = 0..MAX_VOICES;
+        let index = all
+            .clone()
+            .find(|&index| take_over && voices[index].active() && voices[index].pitch == pitch)
+            .or_else(|| all.clone().find(|&index| !voices[index].active()))
+            .or_else(|| oldest(&mut all.clone().filter(|&index| voices[index].released())))
+            .or_else(|| oldest(&mut all.clone()))
+            .unwrap_or(0);
+        self.voices[index].start(
+            pitch, semitones, gain, self.age, from, glide, one_shot, region,
+        );
+    }
+
+    /// Plays the sample at its root on a voice of its own, as a drum pad
+    /// is hit: repeated hits ring together rather than cutting each other.
+    pub fn strike(&mut self, velocity: u8) {
+        if velocity > 0 {
+            self.start(PAD_NOTE, 0.0, velocity, false);
         }
     }
 
-    /// Compute the start frame from the normalized start parameter.
-    fn start_frame(&self) -> usize {
-        if let Some(ref sample) = self.sample {
-            (self.start * sample.num_frames() as f32) as usize
-        } else {
-            0
+    /// Releases every voice, one-shots too, over the release time.
+    pub fn choke(&mut self) {
+        for voice in &mut self.voices {
+            voice.release();
         }
     }
 
-    /// Compute the end frame from the normalized end parameter.
-    fn end_frame(&self) -> usize {
-        if let Some(ref sample) = self.sample {
-            (self.end * sample.num_frames() as f32) as usize
-        } else {
-            0
+    /// Names the loaded sample, handing back the name it had.
+    pub fn rename(&mut self, name: Option<String>) -> Option<String> {
+        std::mem::replace(&mut self.sample_name, name)
+    }
+
+    /// Empties the sampler, handing back the sample and its name to be
+    /// dropped off the audio thread.
+    pub fn unload(&mut self) -> InstrumentMediaOwners {
+        self.region = None;
+        self.reset();
+        InstrumentMediaOwners {
+            sample: self.sample.take(),
+            name: self.sample_name.take(),
         }
     }
-}
 
-/// Linear interpolation sample read from audio data.
-fn read_sample(audio: &DecodedAudio, position: f64, channel: usize) -> f32 {
-    let num_channels = audio.num_channels();
-    if num_channels == 0 {
-        return 0.0;
+    /// Whether any voice is playing; a silent sampler has nothing to
+    /// smooth, so edits land at once.
+    pub fn sounding(&self) -> bool {
+        self.voices.iter().any(SamplerVoice::active)
     }
-    let ch = channel.min(num_channels - 1);
-    let idx = position as usize;
-    let frac = (position - idx as f64) as f32;
-    let s0 = audio.sample(ch, idx);
-    let s1 = audio.sample(ch, idx + 1);
-    s0 + frac * (s1 - s0)
+
+    fn in_zone(&self, pitch: u8, velocity: u8) -> bool {
+        let (pitch, velocity) = (f32::from(pitch), f32::from(velocity));
+        (self.params[param::KEY_LOW]..=self.params[param::KEY_HIGH]).contains(&pitch)
+            && (self.params[param::VELOCITY_LOW]..=self.params[param::VELOCITY_HIGH])
+                .contains(&velocity)
+    }
 }
 
 impl Instrument for Sampler {
@@ -214,190 +252,153 @@ impl Instrument for Sampler {
     }
 
     fn set_param(&mut self, index: usize, value: f32) -> bool {
-        match index {
-            P_ROOT_NOTE => {
-                self.root_note = value.clamp(0.0, 127.0);
-                true
-            }
-            P_ATTACK => {
-                self.attack = value.clamp(0.001, 2.0);
-                true
-            }
-            P_DECAY => {
-                self.decay = value.clamp(0.001, 2.0);
-                true
-            }
-            P_SUSTAIN => {
-                self.sustain = value.clamp(0.0, 1.0);
-                true
-            }
-            P_RELEASE => {
-                self.release = value.clamp(0.001, 5.0);
-                true
-            }
-            P_START => {
-                self.start = value.clamp(0.0, 1.0);
-                true
-            }
-            P_END => {
-                self.end = value.clamp(0.0, 1.0);
-                true
-            }
-            P_LOOP => {
-                self.loop_enabled = value >= 0.5;
-                true
-            }
-            P_ONE_SHOT => {
-                self.one_shot = value >= 0.5;
-                true
-            }
-            P_VOLUME => {
-                self.volume = value.clamp(0.0, 1.0);
-                true
-            }
-            _ => false,
+        let Some(descriptor) = SAMPLER_PARAMS.get(index) else {
+            return false;
+        };
+        if !value.is_finite() {
+            return false;
         }
+        let value = match index {
+            param::LOOP | param::ONE_SHOT | param::REVERSE => f32::from(value >= 0.5),
+            // The root keeps any fraction an older project stored.
+            param::ROOT_NOTE => value,
+            _ if is_whole(index) => value.round(),
+            _ => value,
+        }
+        .clamp(descriptor.min, descriptor.max);
+        self.params[index] = value;
+        if !SMOOTHED.contains(&index) || !self.sounding() {
+            self.current[index] = value;
+        }
+        self.retime();
+        self.region = self.find_region();
+        true
     }
 
     fn get_param(&self, index: usize) -> f32 {
-        match index {
-            P_ROOT_NOTE => self.root_note,
-            P_ATTACK => self.attack,
-            P_DECAY => self.decay,
-            P_SUSTAIN => self.sustain,
-            P_RELEASE => self.release,
-            P_START => self.start,
-            P_END => self.end,
-            P_LOOP => {
-                if self.loop_enabled {
-                    1.0
-                } else {
-                    0.0
-                }
-            }
-            P_ONE_SHOT => {
-                if self.one_shot {
-                    1.0
-                } else {
-                    0.0
-                }
-            }
-            P_VOLUME => self.volume,
-            _ => 0.0,
-        }
+        self.params.get(index).copied().unwrap_or(0.0)
     }
 
     fn note_on(&mut self, pitch: u8, velocity: u8) {
-        let speed = 2.0_f64.powf((pitch as f64 - self.root_note as f64) / 12.0);
-        let start_pos = self.start_frame() as f64;
-
-        // Update envelope params on all voices
-        for voice in &mut self.voices {
-            voice.envelope.attack = self.attack;
-            voice.envelope.decay = self.decay;
-            voice.envelope.sustain = self.sustain;
-            voice.envelope.release = self.release;
+        if velocity == 0 {
+            self.note_off(pitch);
+            return;
         }
-
-        // Find free voice or steal oldest
-        let voice_idx = self.voices.iter().position(|v| !v.active).unwrap_or(0);
-
-        let voice = &mut self.voices[voice_idx];
-        voice.active = true;
-        voice.pitch = pitch;
-        voice.velocity = velocity as f32 / 127.0;
-        voice.position = start_pos;
-        voice.speed = speed;
-        voice.one_shot = self.one_shot;
-        voice.envelope.trigger();
+        if !self.in_zone(pitch, velocity) {
+            return;
+        }
+        let semitones = f32::from(pitch) - self.params[param::ROOT_NOTE];
+        self.start(pitch, semitones, velocity, true);
     }
 
     fn note_off(&mut self, pitch: u8) {
         for voice in &mut self.voices {
-            if voice.active && voice.pitch == pitch && !voice.one_shot {
-                voice.envelope.release();
+            if voice.active() && voice.pitch == pitch && !voice.one_shot {
+                voice.release();
             }
         }
     }
 
     fn render(&mut self, buffer: &mut [f32], channels: usize) {
-        let audio = match self.sample {
-            Some(ref s) => Arc::clone(s),
-            None => return,
+        let Some(region) = self.region else {
+            return;
         };
-
-        let ch = channels.clamp(1, 2);
-        let frames = buffer.len() / ch;
-        let start_f = self.start_frame();
-        let end_f = self.end_frame();
-
-        if end_f <= start_f {
+        if channels == 0 {
             return;
         }
-
-        let loop_enabled = self.loop_enabled;
-        let volume = self.volume;
-
-        for frame in 0..frames {
-            let mut sample_l = 0.0_f32;
-            let mut sample_r = 0.0_f32;
-
-            for voice in &mut self.voices {
-                if !voice.active {
-                    continue;
-                }
-
-                let env = voice.envelope.tick();
-                if !voice.envelope.is_active() {
-                    voice.active = false;
-                    continue;
-                }
-
-                // Read interpolated sample
-                let sl = read_sample(&audio, voice.position, 0);
-                let sr = if ch >= 2 {
-                    read_sample(&audio, voice.position, 1)
-                } else {
-                    sl
-                };
-
-                let gain = env * voice.velocity * volume;
-                sample_l += sl * gain;
-                sample_r += sr * gain;
-
-                // Advance position
-                voice.position += voice.speed;
-
-                // Check end boundary
-                if voice.position >= end_f as f64 {
-                    if loop_enabled {
-                        // Wrap back to start
-                        let loop_len = (end_f - start_f) as f64;
-                        voice.position =
-                            start_f as f64 + (voice.position - start_f as f64) % loop_len;
+        if !self.sounding() {
+            self.current = self.params;
+            let frames = (buffer.len() / channels) as f64;
+            self.lfo_phase = (self.lfo_phase
+                + frames * f64::from(self.params[param::LFO_RATE]) / f64::from(self.sample_rate))
+            .fract();
+            return;
+        }
+        // Moved out while the voices borrow `self`, and back after: cloning
+        // the Arc would cost two atomics every frame on every pad of a rack.
+        let Some(audio) = self.sample.take() else {
+            return;
+        };
+        let base_speed = f64::from(audio.sample_rate.max(1)) / f64::from(self.sample_rate);
+        for out in buffer.chunks_exact_mut(channels) {
+            for index in SMOOTHED {
+                self.current[index] += (self.params[index] - self.current[index]) * self.smoothing;
+            }
+            let filter_for = (self.current[param::CUTOFF], self.params[param::RESONANCE]);
+            if filter_for != self.filter_for {
+                self.filter_for = filter_for;
+                self.coefficients = Coefficients::new(self.sample_rate, filter_for.0, filter_for.1);
+            }
+            let p = &self.params;
+            let c = &self.current;
+            let modulation = if c[param::LFO_AMOUNT] == 0.0 {
+                0.0
+            } else {
+                lfo(self.choice(param::LFO_SHAPE), self.lfo_phase) * c[param::LFO_AMOUNT]
+            };
+            self.lfo_phase = (self.lfo_phase
+                + f64::from(p[param::LFO_RATE]) / f64::from(self.sample_rate))
+            .fract();
+            let target = self.choice(param::LFO_TARGET);
+            let frame = Frame {
+                audio: &audio,
+                region,
+                base_speed,
+                offset_semitones: p[param::TUNE]
+                    + p[param::FINE] / 100.0
+                    + if target == lfo_target::PITCH {
+                        modulation * LFO_PITCH_SEMITONES
                     } else {
-                        // Sample finished
-                        voice.active = false;
-                        voice.envelope.stage = EnvelopeStage::Idle;
-                        voice.envelope.level = 0.0;
-                    }
+                        0.0
+                    },
+                end_fade_frames: f64::from(END_FADE_SECONDS * self.sample_rate),
+                one_shot_fade_frames: f64::from(
+                    END_FADE_SECONDS.max(p[param::RELEASE]) * self.sample_rate,
+                ),
+                filter_type: self.choice(param::FILTER_TYPE),
+                cutoff: c[param::CUTOFF],
+                resonance: p[param::RESONANCE],
+                sample_rate: self.sample_rate,
+                coefficients: self.coefficients,
+                filter_env: p[param::FILTER_ENV],
+                cutoff_octaves: if target == lfo_target::CUTOFF {
+                    modulation * LFO_CUTOFF_OCTAVES
+                } else {
+                    0.0
+                },
+                amp_times: self.amp_times,
+                filter_times: self.filter_times,
+            };
+            let (mut left, mut right) = (0.0f32, 0.0f32);
+            for voice in &mut self.voices {
+                if voice.active() {
+                    let (l, r) = voice.generate(&frame);
+                    left += l;
+                    right += r;
                 }
             }
-
-            buffer[frame * ch] += sample_l;
-            if ch >= 2 {
-                buffer[frame * ch + 1] += sample_r;
+            let tremolo = if target == lfo_target::VOLUME {
+                1.0 - c[param::LFO_AMOUNT] * 0.5 + modulation * 0.5
+            } else {
+                1.0
+            };
+            let gain = c[param::VOLUME] * tremolo;
+            // A balance, not equal power, so a centred sampler keeps its
+            // level.
+            let pan = c[param::PAN];
+            out[0] += left * gain * (1.0 - pan).min(1.0);
+            if let Some(second) = out.get_mut(1) {
+                *second += right * gain * (1.0 + pan).min(1.0);
             }
         }
+        self.sample = Some(audio);
     }
 
     fn reset(&mut self) {
-        for voice in &mut self.voices {
-            voice.active = false;
-            voice.envelope.stage = EnvelopeStage::Idle;
-            voice.envelope.level = 0.0;
-            voice.position = 0.0;
-        }
+        self.voices = [SamplerVoice::default(); MAX_VOICES];
+        self.current = self.params;
+        self.last_pitch = None;
+        self.lfo_phase = 0.0;
     }
 
     fn load_sample(&mut self, sample: Arc<DecodedAudio>, name: String) -> InstrumentMediaOwners {
@@ -405,6 +406,7 @@ impl Instrument for Sampler {
             sample: self.sample.replace(sample),
             name: self.sample_name.replace(name),
         };
+        self.region = self.find_region();
         self.reset();
         retired
     }
@@ -464,42 +466,36 @@ mod tests {
         );
     }
 
+    /// Rising zero crossings a second, for a sampler at 44.1 kHz.
+    fn frequency(sampler: &mut Sampler) -> f32 {
+        let mut buf = vec![0.0_f32; 44_100 * 2];
+        sampler.render(&mut buf, 2);
+        buf.chunks(2)
+            .map(|frame| frame[0])
+            .collect::<Vec<_>>()
+            .windows(2)
+            .filter(|pair| pair[0] <= 0.0 && pair[1] > 0.0)
+            .count() as f32
+    }
+
     #[test]
     fn pitch_shift_octave_up() {
         let mut sampler = Sampler::new(44100.0);
-        let sample = make_sine_sample(44100, 440.0, 44100);
+        let sample = make_sine_sample(88_200, 440.0, 44100);
         drop(sampler.load_sample(sample, "sine.wav".into()));
         sampler.set_param(P_ROOT_NOTE, 60.0);
-
-        // Play at pitch 72 (one octave up from root 60) → speed should be 2x
         sampler.note_on(72, 100);
-
-        // After rendering some frames, check the voice speed
-        assert!(
-            sampler
-                .voices
-                .iter()
-                .any(|v| v.active && (v.speed - 2.0).abs() < 1e-6),
-            "Octave up should have speed 2.0"
-        );
+        assert!((frequency(&mut sampler) - 880.0).abs() < 2.0);
     }
 
     #[test]
     fn original_pitch_at_root() {
         let mut sampler = Sampler::new(44100.0);
-        let sample = make_test_sample(44100, 0.5);
-        drop(sampler.load_sample(sample, "test.wav".into()));
+        let sample = make_sine_sample(88_200, 440.0, 44100);
+        drop(sampler.load_sample(sample, "sine.wav".into()));
         sampler.set_param(P_ROOT_NOTE, 60.0);
-
         sampler.note_on(60, 100);
-
-        assert!(
-            sampler
-                .voices
-                .iter()
-                .any(|v| v.active && (v.speed - 1.0).abs() < 1e-6),
-            "Root note should have speed 1.0"
-        );
+        assert!((frequency(&mut sampler) - 440.0).abs() < 2.0);
     }
 
     #[test]
@@ -513,7 +509,7 @@ mod tests {
         sampler.note_off(60);
 
         // Voice should still be active (one-shot ignores note_off)
-        let active_count = sampler.voices.iter().filter(|v| v.active).count();
+        let active_count = sampler.voices.iter().filter(|v| v.active()).count();
         assert_eq!(
             active_count, 1,
             "One-shot should keep voice active after note_off"
@@ -569,7 +565,7 @@ mod tests {
         sampler.render(&mut buf, 2);
 
         // Voice should still be active (looping)
-        let active = sampler.voices.iter().any(|v| v.active);
+        let active = sampler.voices.iter().any(|v| v.active());
         assert!(active, "Loop mode should keep voice active past sample end");
 
         // Should still produce sound
@@ -594,15 +590,16 @@ mod tests {
         // Set start=0.5, end=0.8 → frames 500..800
         sampler.set_param(P_START, 0.5);
         sampler.set_param(P_END, 0.8);
-
         sampler.note_on(60, 127);
 
-        // The voice position should start at frame 500
-        let voice = sampler.voices.iter().find(|v| v.active).unwrap();
+        // A hundred frames in, the play head reads frame 600.
+        let mut buf = vec![0.0_f32; 202];
+        sampler.render(&mut buf, 2);
+        let expected = 0.6 * 0.8;
         assert!(
-            (voice.position - 500.0).abs() < 1.0,
-            "Start position should be ~500, got {}",
-            voice.position
+            (buf[200] - expected).abs() < 0.02,
+            "{} vs {expected}",
+            buf[200]
         );
     }
 
@@ -616,7 +613,7 @@ mod tests {
         sampler.note_on(64, 100);
         sampler.note_on(67, 100);
 
-        let active_count = sampler.voices.iter().filter(|v| v.active).count();
+        let active_count = sampler.voices.iter().filter(|v| v.active()).count();
         assert_eq!(active_count, 3, "Should have 3 active voices");
 
         let mut buf = vec![0.0_f32; 512];
@@ -633,9 +630,11 @@ mod tests {
             let val = (desc.min + desc.max) / 2.0;
             assert!(sampler.set_param(idx, val));
             let got = sampler.get_param(idx);
-            // Boolean params snap to 0/1
-            if idx == P_LOOP || idx == P_ONE_SHOT {
+            // Switches snap to 0/1, and choices, notes and velocities to whole.
+            if idx == P_LOOP || idx == P_ONE_SHOT || idx == param::REVERSE {
                 assert!(got == 0.0 || got == 1.0);
+            } else if is_whole(idx) && idx != P_ROOT_NOTE {
+                assert_eq!(got, val.round());
             } else {
                 assert!(
                     (got - val).abs() < 0.01,
@@ -658,7 +657,7 @@ mod tests {
         sampler.note_on(60, 100);
         sampler.reset();
         for voice in &sampler.voices {
-            assert!(!voice.active);
+            assert!(!voice.active());
         }
     }
 
@@ -702,3 +701,11 @@ mod tests {
         assert_eq!(sampler.instrument_kind(), InstrumentKind::Sampler);
     }
 }
+
+#[cfg(test)]
+#[path = "sampler_quality_tests.rs"]
+mod quality_tests;
+
+#[cfg(test)]
+#[path = "sampler_controls_tests.rs"]
+mod controls_tests;

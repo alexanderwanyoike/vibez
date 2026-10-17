@@ -53,6 +53,7 @@ fn setup(
     for _ in 0..effects {
         let effect = EffectId::new();
         track.effects.push(EffectSlot {
+            levels: Default::default(),
             id: effect,
             effect: Box::new(CountingEffect {
                 calls: Arc::clone(&calls),

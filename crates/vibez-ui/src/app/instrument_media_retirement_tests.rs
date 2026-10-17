@@ -84,7 +84,7 @@ fn equal_audio_buffers_are_distinct_guards_and_ui_cache_owners_delay_reaping() {
 }
 
 #[test]
-fn thirty_two_sounding_retired_generations_do_not_block_note_off_or_stop_and_ui_reaping() {
+fn thirty_two_retired_generations_never_block_note_off_stop_or_ui_reaping() {
     use vibez_core::id::TrackId;
     use vibez_core::midi::InstrumentKind;
     use vibez_core::track::DrumPadState;
@@ -154,7 +154,8 @@ fn thirty_two_sounding_retired_generations_do_not_block_note_off_or_stop_and_ui_
             .unwrap();
         engine.process_block(AudioProcessBlock::new(&mut [], 1));
         app.poll_engine_events();
-        // Distinct generations fill every voice slot without letting any voice finish.
+        // Each load stops the last generation's voice, so its sample goes
+        // back to the UI with nothing else holding it.
         for generation in 0..32 {
             commands
                 .push(EngineCommand::ExternalNoteOn {
@@ -165,7 +166,10 @@ fn thirty_two_sounding_retired_generations_do_not_block_note_off_or_stop_and_ui_
                 .unwrap();
             let mut sounding = [0.0; 1];
             engine.process_block(AudioProcessBlock::new(&mut sounding, 1));
-            assert!((sounding[0] - (generation + 1) as f32 * 0.001).abs() < 1e-6);
+            assert!(
+                (sounding[0] - 0.001 * std::f32::consts::FRAC_1_SQRT_2).abs() < 1e-6,
+                "generation {generation}"
+            );
             let next = make_sample();
             if generation < 31 {
                 old_generations.push(Arc::downgrade(&next));
@@ -180,19 +184,10 @@ fn thirty_two_sounding_retired_generations_do_not_block_note_off_or_stop_and_ui_
                 .unwrap();
             engine.process_block(AudioProcessBlock::new(&mut [], 1));
             app.poll_engine_events();
+            assert!(old_generations[..=generation]
+                .iter()
+                .all(|sample| sample.strong_count() == 0));
         }
-        assert!(old_generations
-            .iter()
-            .all(|sample| sample.strong_count() == 2));
-        let mut sustained = [0.0; 16];
-        engine.process_block(AudioProcessBlock::new(&mut sustained, 1));
-        app.poll_engine_events();
-        assert!(sustained
-            .iter()
-            .all(|sample| (*sample - 0.032).abs() < 1e-6));
-        assert!(old_generations
-            .iter()
-            .all(|sample| sample.strong_count() == 2));
 
         commands
             .push(if stop {
@@ -213,31 +208,7 @@ fn thirty_two_sounding_retired_generations_do_not_block_note_off_or_stop_and_ui_
             "FIFO command after release must run"
         );
         assert_eq!(engine.transport().is_playing(), !stop);
-        if stop {
-            // Stop flushes scheduled notes; external live notes retain their existing behavior.
-            assert!(released.iter().all(|sample| (*sample - 0.032).abs() < 1e-6));
-            assert!(old_generations
-                .iter()
-                .all(|sample| sample.strong_count() == 2));
-            app.poll_engine_events();
-            assert!(old_generations
-                .iter()
-                .all(|sample| sample.strong_count() == 2));
-            commands
-                .push(EngineCommand::ExternalNoteOff {
-                    track_id: track,
-                    pitch: 36,
-                })
-                .unwrap();
-            engine.process_block(AudioProcessBlock::new(&mut released, 1));
-        }
-        assert_eq!(
-            released, [0.0; 16],
-            "NoteOff must not wait for voice completion"
-        );
-        assert!(old_generations
-            .iter()
-            .all(|sample| sample.strong_count() == 1));
+        assert_eq!(released, [0.0; 16]);
         app.poll_engine_events();
         assert!(old_generations
             .iter()
@@ -313,19 +284,22 @@ fn actual_pad_sync_prepares_all_source_names_and_preserves_canonical_media_and_s
             let canonical_audio = sample();
             let audio_pointer = Arc::as_ptr(&canonical_audio);
             let pad = UiDrumPad {
-                name: explicit.map(str::to_owned),
-                source: source.clone(),
                 audio: Some(canonical_audio),
-                gain: 0.37,
-                pan: -0.23,
-                start: 0.12,
-                end: 0.83,
-                fade_in_ms: -2.0,
-                fade_out_ms: 300.0,
-                coarse_tune: -7,
-                fine_tune: 31.25,
-                one_shot: false,
-                choke_group: Some(11),
+                ..UiDrumPad::from_state(&vibez_core::track::DrumPadState {
+                    name: explicit.map(str::to_owned),
+                    source: source.clone(),
+                    gain: 0.37,
+                    pan: -0.23,
+                    start: 0.12,
+                    end: 0.83,
+                    fade_in_ms: -2.0,
+                    fade_out_ms: 300.0,
+                    coarse_tune: -7,
+                    fine_tune: 31.25,
+                    one_shot: false,
+                    choke_group: Some(11),
+                    params: Vec::new(),
+                })
             };
             let canonical = pad.to_state();
             let serialized = serde_json::to_value(&canonical).unwrap();
@@ -346,16 +320,10 @@ fn actual_pad_sync_prepares_all_source_names_and_preserves_canonical_media_and_s
             assert_eq!(actual_track, track_id);
             assert_eq!(pad_index, 0);
             assert_eq!(state.name.as_deref(), explicit.or(fallback));
-            assert_eq!(state.gain, canonical.gain);
-            assert_eq!(state.pan, canonical.pan);
-            assert_eq!(state.start, canonical.start);
-            assert_eq!(state.end, canonical.end);
-            // Preparation preserves settings; the resident rack retains its existing fade clamp.
-            assert_eq!(state.fade_in_ms, canonical.fade_in_ms);
-            assert_eq!(state.fade_out_ms, canonical.fade_out_ms);
-            assert_eq!(state.coarse_tune, canonical.coarse_tune);
-            assert_eq!(state.fine_tune, canonical.fine_tune);
-            assert_eq!(state.one_shot, canonical.one_shot);
+            assert_eq!(
+                state.params,
+                vibez_instruments::drum_rack::pad_params(&canonical)
+            );
             assert_eq!(state.choke_group, canonical.choke_group);
             let actual = &app.state.find_track(track_id).unwrap().drum_rack_pads[0];
             assert_eq!(actual.to_state(), canonical);

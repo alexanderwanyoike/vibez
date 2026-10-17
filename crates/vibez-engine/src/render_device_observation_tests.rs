@@ -332,6 +332,7 @@ fn isolated_offline_segments_sample_validation_entry_and_post_process_at_distinc
             id: effect,
             effect: Box::new(Probe::new(2, mode, &facts, &trace)),
             bypass: false,
+            levels: Default::default(),
         });
         let mut channel = routing_channel(track);
         channel.effects.push(routing_effect(effect));

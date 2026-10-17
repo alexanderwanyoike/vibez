@@ -192,6 +192,7 @@ fn fixture() -> Fixture {
             id,
             effect: Box::new(probe(owner)),
             bypass: false,
+            levels: Default::default(),
         });
     }
     let mut second = EngineTrack::new(tracks[1]);
@@ -199,6 +200,7 @@ fn fixture() -> Fixture {
         id: effects[2],
         effect: Box::new(probe(4)),
         bypass: false,
+        levels: Default::default(),
     });
     let mut first_channel = routing_channel(tracks[0]);
     first_channel

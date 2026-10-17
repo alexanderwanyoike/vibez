@@ -171,6 +171,7 @@ fn fixture() -> Fixture {
                     trace: Arc::clone(&trace),
                 }),
                 bypass: false,
+                levels: Default::default(),
             });
             channel.effects.push(routing_effect(effect));
         }

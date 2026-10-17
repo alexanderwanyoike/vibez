@@ -50,3 +50,79 @@ objc2-foundation = { version = "0.3", default-features = false, features = ["std
 [[test]]
 name = "native_plugin_gui"
 harness = false
+
+[[example]]
+name = "gain_device"
+required-features = ["dev-gallery"]
+
+[[example]]
+name = "eq_device"
+required-features = ["dev-gallery"]
+
+[[example]]
+name = "compressor_device"
+required-features = ["dev-gallery"]
+
+[[example]]
+name = "filter_device"
+required-features = ["dev-gallery"]
+
+[[example]]
+name = "gate_device"
+required-features = ["dev-gallery"]
+
+[[example]]
+name = "drive_device"
+required-features = ["dev-gallery"]
+
+[[example]]
+name = "bitcrush_device"
+required-features = ["dev-gallery"]
+
+[[example]]
+name = "delay_device"
+required-features = ["dev-gallery"]
+
+[[example]]
+name = "echo_device"
+required-features = ["dev-gallery"]
+
+[[example]]
+name = "saturator_device"
+required-features = ["dev-gallery"]
+
+[[example]]
+name = "limiter_device"
+required-features = ["dev-gallery"]
+
+[[example]]
+name = "wavetable_device"
+required-features = ["dev-gallery"]
+
+[[example]]
+name = "fm_device"
+required-features = ["dev-gallery"]
+
+[[example]]
+name = "reverb_device"
+required-features = ["dev-gallery"]
+
+[[example]]
+name = "auto_pan_device"
+required-features = ["dev-gallery"]
+
+[[example]]
+name = "phaser_device"
+required-features = ["dev-gallery"]
+
+[[example]]
+name = "synth_device"
+required-features = ["dev-gallery"]
+
+[[example]]
+name = "sampler_device"
+required-features = ["dev-gallery"]
+
+[[example]]
+name = "drum_rack_device"
+required-features = ["dev-gallery"]

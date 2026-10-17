@@ -5,6 +5,15 @@ use vibez_core::effect::{EffectType, ParamDescriptor};
 use vibez_core::routing::{ExternalInputBlock, ExternalInputDescriptor};
 
 pub trait AudioEffect: Send {
+    fn take_dynamics_meter(&mut self) -> Option<vibez_core::effect::DynamicsMeter> {
+        None
+    }
+
+    /// Native devices opt in so hosted adapters cannot be mistaken for a
+    /// built-in merely because they share its fallback effect type.
+    fn supports_level_meter(&self) -> bool {
+        false
+    }
     fn external_inputs(&self) -> &[ExternalInputDescriptor] {
         &[]
     }
@@ -51,6 +60,11 @@ pub trait AudioEffect: Send {
     fn effect_type(&self) -> EffectType;
     fn param_descriptors(&self) -> &'static [ParamDescriptor];
     fn set_param(&mut self, index: usize, value: f32) -> bool;
+    /// Automation arrives already divided into control intervals by the
+    /// engine, so a device that smooths manual changes applies it directly.
+    fn set_automated_param(&mut self, index: usize, value: f32) -> bool {
+        self.set_param(index, value)
+    }
     fn get_param(&self, index: usize) -> f32;
     fn process(&mut self, buffer: &mut [f32], channels: usize);
     fn reset(&mut self);

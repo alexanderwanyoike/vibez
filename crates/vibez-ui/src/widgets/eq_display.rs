@@ -53,19 +53,9 @@ const BANDS: [Band; 4] = [
     Band {
         gain_i: 9,
         freq_i: 10,
-        q_i: Some(11),
+        q_i: None,
     },
 ];
-
-/// Band color from the current theme, by BANDS index (LF..HF).
-fn band_color(idx: usize) -> Color {
-    match idx {
-        0 => th::eq_lf(),
-        1 => th::eq_lmf(),
-        2 => th::eq_hmf(),
-        _ => th::eq_hf(),
-    }
-}
 
 pub struct EqDisplayWidget {
     pub track_id: TrackId,
@@ -77,6 +67,10 @@ pub struct EqDisplayWidget {
     /// Smoothed analyser bins in dB (FLOOR_DB..0), log-spaced.
     pub spectrum: Vec<f32>,
     pub spectrum_active: bool,
+    /// The owning track's colour, already muted when the EQ is bypassed.
+    pub accent: Color,
+    /// The band the card's controls edit.
+    pub selected: usize,
 }
 
 #[derive(Debug, Default)]
@@ -172,7 +166,13 @@ impl canvas::Program<Message> for EqDisplayWidget {
             a: 0.35,
             ..th::border()
         };
-        let labeled: [(f32, &str); 3] = [(100.0, "100"), (1_000.0, "1k"), (10_000.0, "10k")];
+        let labeled: [(f32, &str); 5] = [
+            (20.0, "20"),
+            (100.0, "100"),
+            (1_000.0, "1k"),
+            (10_000.0, "10k"),
+            (20_000.0, "20k"),
+        ];
         for f in [
             30.0, 50.0, 100.0, 200.0, 300.0, 500.0, 1e3, 2e3, 3e3, 5e3, 10e3,
         ] {
@@ -182,12 +182,23 @@ impl canvas::Program<Message> for EqDisplayWidget {
                 canvas::Stroke::default().with_color(grid).with_width(1.0),
             );
         }
-        for (f, label) in labeled {
+        // A short graph keeps its curve and nodes; the axis labels would
+        // only crowd the band names.
+        let labels = h >= 70.0;
+        for (f, label) in labeled.into_iter().filter(|_| labels) {
+            let x = (freq_to_norm(f) * w).clamp(3.0, w - 3.0);
             frame.fill_text(canvas::Text {
                 content: label.to_string(),
-                position: Point::new(freq_to_norm(f) * w + 3.0, h - 2.0),
+                position: Point::new(x, h - 2.0),
                 color: th::text_muted(),
-                size: 8.0.into(),
+                size: 9.0.into(),
+                horizontal_alignment: if f <= 20.0 {
+                    iced::alignment::Horizontal::Left
+                } else if f >= 20_000.0 {
+                    iced::alignment::Horizontal::Right
+                } else {
+                    iced::alignment::Horizontal::Center
+                },
                 vertical_alignment: iced::alignment::Vertical::Bottom,
                 ..canvas::Text::default()
             });
@@ -198,6 +209,19 @@ impl canvas::Program<Message> for EqDisplayWidget {
                 &canvas::Path::line(Point::new(0.0, y), Point::new(w, y)),
                 canvas::Stroke::default().with_color(grid).with_width(1.0),
             );
+        }
+        for (db, label) in [(12.0f32, "+12"), (0.0, "0"), (-12.0, "-12")]
+            .into_iter()
+            .filter(|_| labels)
+        {
+            frame.fill_text(canvas::Text {
+                content: label.to_string(),
+                position: Point::new(4.0, self.db_to_y(db, h) - 1.0),
+                color: th::text_muted(),
+                size: 9.0.into(),
+                vertical_alignment: iced::alignment::Vertical::Bottom,
+                ..canvas::Text::default()
+            });
         }
         // Unity line, slightly brighter.
         let y0 = self.db_to_y(0.0, h);
@@ -264,8 +288,8 @@ impl canvas::Program<Message> for EqDisplayWidget {
             frame.fill(
                 &fill,
                 Color {
-                    a: 0.10,
-                    ..th::accent()
+                    a: 0.14,
+                    ..self.accent
                 },
             );
         }
@@ -279,7 +303,7 @@ impl canvas::Program<Message> for EqDisplayWidget {
         let (curve_color, curve_w) = if self.bypass {
             (th::text_muted(), 1.5)
         } else {
-            (th::text(), 2.0)
+            (self.accent, 2.0)
         };
         frame.stroke(
             &curve,
@@ -295,13 +319,36 @@ impl canvas::Program<Message> for EqDisplayWidget {
         for (i, band) in BANDS.iter().enumerate() {
             let p = self.handle_pos(band, bounds);
             let engaged = state.drag == Some(i) || (state.drag.is_none() && state.hover == Some(i));
-            let color = if self.bypass {
-                th::text_muted()
+            let enabled = self.param(vibez_dsp::eq::param::ENABLE[i]) >= 0.5;
+            let color = if enabled {
+                self.accent
             } else {
-                band_color(i)
+                th::text_muted()
             };
+            let selected = i == self.selected;
             frame.fill(&canvas::Path::circle(p, HANDLE_R), color);
-            frame.fill(&canvas::Path::circle(p, HANDLE_R - 2.5), th::bg_dark());
+            if !selected {
+                frame.fill(&canvas::Path::circle(p, HANDLE_R - 2.5), th::bg_dark());
+            }
+            let above = p.y > 26.0;
+            // While engaged the value readout takes the label's place.
+            frame.fill_text(canvas::Text {
+                content: if engaged {
+                    String::new()
+                } else {
+                    crate::domains::eq::BAND_NAMES[i].to_string()
+                },
+                position: Point::new(p.x, if above { p.y - 9.0 } else { p.y + 9.0 }),
+                color: if selected { th::text() } else { th::text_dim() },
+                size: 9.0.into(),
+                horizontal_alignment: iced::alignment::Horizontal::Center,
+                vertical_alignment: if above {
+                    iced::alignment::Vertical::Bottom
+                } else {
+                    iced::alignment::Vertical::Top
+                },
+                ..canvas::Text::default()
+            });
             if engaged {
                 frame.stroke(
                     &canvas::Path::circle(p, HANDLE_R + 2.0),
@@ -402,7 +449,13 @@ impl canvas::Program<Message> for EqDisplayWidget {
                         }
                         state.drag = Some(band_idx);
                         state.undo_gesture = Some(UndoGestureId::new());
-                        return (canvas::event::Status::Captured, None);
+                        return (
+                            canvas::event::Status::Captured,
+                            Some(Message::Eq(crate::domains::eq::EqMsg::SelectBand(
+                                self.effect_id,
+                                band_idx,
+                            ))),
+                        );
                     }
                 }
             }
@@ -458,5 +511,61 @@ impl canvas::Program<Message> for EqDisplayWidget {
             _ => {}
         }
         (canvas::event::Status::Ignored, None)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use iced::widget::canvas::Program;
+    use vibez_dsp::effect::AudioEffect;
+
+    fn widget() -> EqDisplayWidget {
+        let eq = vibez_dsp::eq::EqEffect::new(48_000.0);
+        let descriptors = eq.param_descriptors();
+        EqDisplayWidget {
+            track_id: TrackId::new(),
+            effect_id: EffectId::new(),
+            params: descriptors.iter().map(|d| d.default).collect(),
+            descriptors,
+            bypass: false,
+            sample_rate: 48_000.0,
+            spectrum: vec![FLOOR_DB; DISPLAY_BINS],
+            spectrum_active: false,
+            accent: Color::WHITE,
+            selected: 0,
+        }
+    }
+
+    fn wheel_over_band(widget: &EqDisplayWidget, band: usize) -> Option<Message> {
+        let bounds = Rectangle::new(Point::ORIGIN, iced::Size::new(400.0, 160.0));
+        let handle = widget.handle_pos(&BANDS[band], bounds);
+        let (_, message) = widget.update(
+            &mut EqDisplayState::default(),
+            canvas::Event::Mouse(mouse::Event::WheelScrolled {
+                delta: mouse::ScrollDelta::Lines { x: 0.0, y: 1.0 },
+            }),
+            bounds,
+            mouse::Cursor::Available(handle),
+        );
+        message
+    }
+
+    #[test]
+    fn the_wheel_sets_q_on_the_mid_bands_and_leaves_the_shelves_alone() {
+        let widget = widget();
+        for (band, q) in [(1, 5), (2, 8)] {
+            assert!(matches!(
+                wheel_over_band(&widget, band),
+                Some(Message::Devices(crate::domains::devices::DevicesMsg::SetEffectParam(
+                    _, _, index, _
+                ))) if index == q
+            ));
+        }
+        assert!(wheel_over_band(&widget, 0).is_none());
+        assert!(
+            wheel_over_band(&widget, 3).is_none(),
+            "HF index 11 is its Bell switch, not a Q"
+        );
     }
 }

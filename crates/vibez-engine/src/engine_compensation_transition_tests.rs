@@ -137,6 +137,7 @@ fn reduced_repeat_coordinates_follow_arrange_history_across_loop_wrap() {
     engine.tracks.push(Box::new(dry_track));
     let mut delayed_track = EngineTrack::new(delayed);
     delayed_track.effects.push(EffectSlot {
+        levels: Default::default(),
         id: effect,
         bypass: false,
         effect: Box::new(DelayProbe::new(137)),
