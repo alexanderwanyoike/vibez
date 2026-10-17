@@ -49,6 +49,27 @@ pub fn stack(below: f32, advanced_h: Option<f32>, plot_min: f32) -> Stack {
     }
 }
 
+/// Splits controls `widths` wide into lines no wider than `width`, `gap`
+/// apart.
+pub fn pack(widths: &[f32], width: f32, gap: f32) -> Vec<std::ops::Range<usize>> {
+    let mut lines = Vec::new();
+    let (mut start, mut used) = (0, 0.0);
+    for (index, item) in widths.iter().enumerate() {
+        let gap = if index > start { gap } else { 0.0 };
+        if index > start && used + gap + item > width {
+            lines.push(start..index);
+            start = index;
+            used = *item;
+        } else {
+            used += gap + item;
+        }
+    }
+    if start < widths.len() {
+        lines.push(start..widths.len());
+    }
+    lines
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -88,5 +109,13 @@ mod tests {
         assert_eq!(closed.knob_row, KNOB_ROW_H);
         assert_eq!(closed.plots, 200.0 - KNOB_ROW_H - 1.0);
         assert_eq!(stack(40.0, None, PLOT_MIN).knob_row, LINE_H);
+    }
+
+    #[test]
+    fn lines_break_where_the_next_control_would_not_fit() {
+        assert_eq!(pack(&[100.0, 100.0, 100.0], 210.0, 10.0), vec![0..2, 2..3]);
+        assert_eq!(pack(&[100.0, 100.0], 210.0, 10.0), vec![0..2]);
+        // A control wider than the line still gets a line to itself.
+        assert_eq!(pack(&[300.0, 50.0], 210.0, 10.0), vec![0..1, 1..2]);
     }
 }
