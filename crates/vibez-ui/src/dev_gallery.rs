@@ -2781,7 +2781,7 @@ impl DrumRackGallery {
                     device,
                     None,
                     accent,
-                    crate::widgets::sampler_device::preset_bar_width(layout.sampler),
+                    crate::widgets::drum_rack_device::preset_bar_width(layout),
                 ),
                 size,
             )
@@ -2868,6 +2868,22 @@ impl DrumRackGallery {
                         COMPACT_W,
                         (COMPACT_W + 16.0, 220.0),
                         page(SamplerPage::Sample, false)
+                    ),
+                ]
+                .spacing(24),
+                // The section the 180 px minimum detail panel gives a card.
+                row![
+                    self.scene(
+                        "Full, minimum panel",
+                        full,
+                        (full + 16.0, 110.0),
+                        page(SamplerPage::Sample, false)
+                    ),
+                    self.scene(
+                        "Compact, minimum panel, Sampler",
+                        COMPACT_W,
+                        (COMPACT_W + 16.0, 110.0),
+                        page(SamplerPage::Sample, true)
                     ),
                 ]
                 .spacing(24),

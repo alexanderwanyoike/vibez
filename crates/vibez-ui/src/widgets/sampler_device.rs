@@ -36,7 +36,9 @@ const SAMPLE_HEADER_H: f32 = 24.0;
 /// The compact card's mode, reverse and crossfade line.
 const MODE_LINE_H: f32 = 28.0;
 const WAVE_MIN_H: f32 = 44.0;
-const WAVE_ALONE_MIN_H: f32 = 20.0;
+/// What `plot_band` keeps clear above and below the sample.
+const BAND_PAD: f32 = 6.0;
+const WAVE_ALONE_MIN_H: f32 = 16.0;
 /// A section's name and its choice, above its plot.
 const HEADER_H: f32 = 26.0;
 const KNOB: f32 = 30.0;
@@ -72,6 +74,9 @@ pub struct Layout {
     /// rather than above them.
     pub beside: bool,
     pub sample: f32,
+    /// A compact card's playback line sits under the sample; the shortest
+    /// leave it out rather than cut it.
+    pub mode_line: bool,
     /// Zero when there is no room for the waveform.
     pub wave: f32,
     /// Zero when the sections do not fit.
@@ -83,7 +88,7 @@ pub struct Layout {
 pub fn arrange(size: Size) -> Layout {
     let compact = size.width < MEDIUM_W;
     let below = (size.height - PRESET_ROW_H - 1.0).max(0.0);
-    let header = SAMPLE_HEADER_H + if compact { MODE_LINE_H } else { 0.0 };
+    let header = BAND_PAD * 2.0 + SAMPLE_HEADER_H + if compact { MODE_LINE_H } else { 0.0 };
     let sample_min = header + WAVE_MIN_H;
     let tabs = TABS_H + 1.0;
     let knobs = if below >= sample_min + 1.0 + tabs + HEADER_H + KNOB_ROW_H {
@@ -95,10 +100,17 @@ pub fn arrange(size: Size) -> Layout {
     if rest < sample_min {
         // No room for a section, so the sample takes the body.
         let sample = below;
+        let mode_line = compact && sample >= header;
+        let header = if compact && !mode_line {
+            header - MODE_LINE_H
+        } else {
+            header
+        };
         return Layout {
             compact,
             beside: false,
             sample,
+            mode_line,
             // Alone, the waveform may be thinner than beside a section:
             // still the sample, still its markers to drag.
             wave: if sample - header >= WAVE_ALONE_MIN_H {
@@ -120,6 +132,7 @@ pub fn arrange(size: Size) -> Layout {
             compact,
             beside: true,
             sample,
+            mode_line: false,
             wave: sample - header,
             section: HEADER_H + row,
             plot: if row >= PLOT_MIN_H { row } else { 0.0 },
@@ -137,11 +150,42 @@ pub fn arrange(size: Size) -> Layout {
         compact,
         beside: false,
         sample,
+        mode_line: true,
         wave: sample - header,
         section: HEADER_H + plot + knobs,
         plot,
         knobs,
     }
+}
+
+/// A control beside a wide card's sample.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Side {
+    Mode,
+    /// The mode's choice without its name, where the name has no room.
+    ModeAlone,
+    Reverse,
+    Crossfade,
+}
+
+/// The controls beside the sample that fit `room`, each joining while the
+/// band has room for it; the mode comes first, losing its name before it
+/// loses its place.
+fn side_rows(mut room: f32) -> Vec<Side> {
+    let mode = if room >= SIDE_MODE_H {
+        (Side::Mode, SIDE_MODE_H)
+    } else {
+        (Side::ModeAlone, LINE_H)
+    };
+    let mut rows = Vec::new();
+    for (row, height) in [mode, (Side::Reverse, LINE_H), (Side::Crossfade, LINE_H)] {
+        if height > room {
+            break;
+        }
+        room -= height + SIDE_GAP;
+        rows.push(row);
+    }
+    rows
 }
 
 pub struct SamplerView<'a> {
@@ -307,30 +351,23 @@ impl<'a> SamplerView<'a> {
             );
         }
         if layout.compact {
-            left = left.push(
-                container(self.playback_line())
-                    .height(MODE_LINE_H)
-                    .align_y(Alignment::Center),
-            );
+            if layout.mode_line {
+                left = left.push(
+                    container(self.playback_line())
+                        .height(MODE_LINE_H)
+                        .align_y(Alignment::Center),
+                );
+            }
             return plot_band(left.width(Length::Fill), layout.sample, PAD);
         }
-        // Each row joins while the band has room for it.
-        let mut room = layout.sample - PAD;
         let mut side = column![].spacing(SIDE_GAP).width(SIDE_W);
-        let rows: [(Element<'a, Message>, f32); 3] = [
-            (
-                column![heading("Mode"), self.mode()].spacing(4).into(),
-                SIDE_MODE_H,
-            ),
-            (self.param(param::REVERSE).switch("Reverse"), LINE_H),
-            (self.param(param::CROSSFADE).line_item(), LINE_H),
-        ];
-        for (control, height) in rows {
-            if height > room {
-                break;
-            }
-            room -= height + SIDE_GAP;
-            side = side.push(control);
+        for row in side_rows(layout.sample - PAD) {
+            side = side.push(match row {
+                Side::Mode => column![heading("Mode"), self.mode()].spacing(4).into(),
+                Side::ModeAlone => self.mode(),
+                Side::Reverse => self.param(param::REVERSE).switch("Reverse"),
+                Side::Crossfade => self.param(param::CROSSFADE).line_item(),
+            });
         }
         plot_band(
             row![left.width(Length::Fill), vertical_rule(), side].spacing(8),
@@ -587,6 +624,46 @@ mod tests {
                 assert!(used <= height + 0.01, "{context}");
             }
         }
+    }
+
+    /// The playback line under a compact card's sample.
+    fn mode_line(layout: Layout) -> f32 {
+        if layout.mode_line {
+            MODE_LINE_H
+        } else {
+            0.0
+        }
+    }
+
+    /// The body an instrument card gets in the 180 px minimum detail
+    /// panel, measured in the app.
+    const MINIMUM_BODY_H: f32 = 68.0;
+
+    #[test]
+    fn the_sample_band_holds_everything_it_shows() {
+        for width in [COMPACT_W, MEDIUM_W, MAX_W] {
+            for height in (MINIMUM_BODY_H as usize..=520)
+                .step_by(2)
+                .map(|height| height as f32)
+            {
+                let layout = arrange(Size::new(width, height));
+                // `plot_band` keeps 6 px clear above and below.
+                let shown = 12.0 + SAMPLE_HEADER_H + layout.wave + mode_line(layout);
+                assert!(
+                    shown <= layout.sample + 0.01,
+                    "{width}x{height}: {layout:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_side_column_is_never_left_empty_while_a_line_fits() {
+        // The wide card's sample band at the minimum panel.
+        let room = arrange(Size::new(MEDIUM_W, MINIMUM_BODY_H)).sample - PAD;
+        assert!(room >= LINE_H, "{room}");
+        assert!(!side_rows(room).is_empty());
+        assert!(side_rows(LINE_H - 1.0).is_empty());
     }
 
     #[test]
