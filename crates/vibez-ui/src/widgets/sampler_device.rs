@@ -36,7 +36,9 @@ const SAMPLE_HEADER_H: f32 = 24.0;
 /// The compact card's mode, reverse and crossfade line.
 const MODE_LINE_H: f32 = 28.0;
 const WAVE_MIN_H: f32 = 44.0;
-const WAVE_ALONE_MIN_H: f32 = 20.0;
+/// What `plot_band` keeps clear above and below the sample.
+const BAND_PAD: f32 = 6.0;
+const WAVE_ALONE_MIN_H: f32 = 16.0;
 /// A section's name and its choice, above its plot.
 const HEADER_H: f32 = 26.0;
 const KNOB: f32 = 30.0;
@@ -72,6 +74,9 @@ pub struct Layout {
     /// rather than above them.
     pub beside: bool,
     pub sample: f32,
+    /// A compact card's playback line sits under the sample; the shortest
+    /// leave it out rather than cut it.
+    pub mode_line: bool,
     /// Zero when there is no room for the waveform.
     pub wave: f32,
     /// Zero when the sections do not fit.
@@ -83,7 +88,7 @@ pub struct Layout {
 pub fn arrange(size: Size) -> Layout {
     let compact = size.width < MEDIUM_W;
     let below = (size.height - PRESET_ROW_H - 1.0).max(0.0);
-    let header = SAMPLE_HEADER_H + if compact { MODE_LINE_H } else { 0.0 };
+    let header = BAND_PAD * 2.0 + SAMPLE_HEADER_H + if compact { MODE_LINE_H } else { 0.0 };
     let sample_min = header + WAVE_MIN_H;
     let tabs = TABS_H + 1.0;
     let knobs = if below >= sample_min + 1.0 + tabs + HEADER_H + KNOB_ROW_H {
@@ -95,10 +100,17 @@ pub fn arrange(size: Size) -> Layout {
     if rest < sample_min {
         // No room for a section, so the sample takes the body.
         let sample = below;
+        let mode_line = compact && sample >= header;
+        let header = if compact && !mode_line {
+            header - MODE_LINE_H
+        } else {
+            header
+        };
         return Layout {
             compact,
             beside: false,
             sample,
+            mode_line,
             // Alone, the waveform may be thinner than beside a section:
             // still the sample, still its markers to drag.
             wave: if sample - header >= WAVE_ALONE_MIN_H {
@@ -120,6 +132,7 @@ pub fn arrange(size: Size) -> Layout {
             compact,
             beside: true,
             sample,
+            mode_line: false,
             wave: sample - header,
             section: HEADER_H + row,
             plot: if row >= PLOT_MIN_H { row } else { 0.0 },
@@ -137,6 +150,7 @@ pub fn arrange(size: Size) -> Layout {
         compact,
         beside: false,
         sample,
+        mode_line: true,
         wave: sample - header,
         section: HEADER_H + plot + knobs,
         plot,
@@ -307,11 +321,13 @@ impl<'a> SamplerView<'a> {
             );
         }
         if layout.compact {
-            left = left.push(
-                container(self.playback_line())
-                    .height(MODE_LINE_H)
-                    .align_y(Alignment::Center),
-            );
+            if layout.mode_line {
+                left = left.push(
+                    container(self.playback_line())
+                        .height(MODE_LINE_H)
+                        .align_y(Alignment::Center),
+                );
+            }
             return plot_band(left.width(Length::Fill), layout.sample, PAD);
         }
         // Each row joins while the band has room for it.
@@ -591,7 +607,7 @@ mod tests {
 
     /// The playback line under a compact card's sample.
     fn mode_line(layout: Layout) -> f32 {
-        if layout.compact {
+        if layout.mode_line {
             MODE_LINE_H
         } else {
             0.0
