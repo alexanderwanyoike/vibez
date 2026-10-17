@@ -302,6 +302,18 @@ pub fn param_format(
                 _ => ParamFormat::for_descriptor(descriptor),
             }
         }
+        (DevicePresetKind::Effect(EffectType::Saturator), index) => {
+            use crate::domains::saturator::*;
+            use vibez_dsp::saturator::param;
+            match index {
+                param::BIAS | param::ASYMMETRY => ParamFormat::Percent,
+                param::SHAPE => ParamFormat::Names(&SHAPE_NAMES),
+                param::PRE_FILTER => ParamFormat::Names(&PRE_FILTER_NAMES),
+                param::POST_FILTER => ParamFormat::Names(&POST_FILTER_NAMES),
+                param::QUALITY => ParamFormat::Names(&QUALITY_NAMES),
+                _ => ParamFormat::for_descriptor(descriptor),
+            }
+        }
         (DevicePresetKind::Effect(EffectType::Echo), vibez_dsp::echo::param::GRID) => {
             ParamFormat::Names(&crate::domains::echo::GRID_NAMES)
         }

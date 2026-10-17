@@ -1655,6 +1655,190 @@ pub fn run_echo() -> iced::Result {
     .run_with(|| (EchoGallery::new(), iced::Task::none()))
 }
 
+/// Native Saturator at each width tier and section height it adapts to, on
+/// its defaults, with an input level standing in for live audio, and at the
+/// height the default detail panel gives it.
+struct SaturatorGallery {
+    track: TrackId,
+    effect: UiEffect,
+    closed: crate::domains::device_card::CardPanelState,
+    open: crate::domains::device_card::CardPanelState,
+    spectrum: crate::domains::device_card::CardPanelState,
+}
+
+impl SaturatorGallery {
+    fn new() -> Self {
+        use crate::domains::device_card::CardPanelState;
+        let mut effect = effect(EffectType::Saturator, None, false, false, None, 0);
+        effect.params = effect.descriptors.iter().map(|d| d.default).collect();
+        let level = |db: f32| vibez_engine::metering::MeterValues {
+            peak_l: vibez_core::level::db_to_amplitude(db),
+            peak_r: vibez_core::level::db_to_amplitude(db - 0.5),
+            rms_l: vibez_core::level::db_to_amplitude(db - 6.0),
+            rms_r: vibez_core::level::db_to_amplitude(db - 6.5),
+        };
+        let closed = CardPanelState {
+            input: level(-4.0),
+            output: level(-6.0),
+            last_meter_at: Some(std::time::Instant::now()),
+            ..Default::default()
+        };
+        Self {
+            track: TrackId::new(),
+            effect,
+            open: CardPanelState {
+                advanced: true,
+                ..closed.clone()
+            },
+            spectrum: CardPanelState {
+                plot: crate::domains::saturator::SPECTRUM_PLOT,
+                ..closed.clone()
+            },
+            closed,
+        }
+    }
+
+    fn scene<'a>(
+        &'a self,
+        label: &'static str,
+        card_width: f32,
+        section: (f32, f32),
+        panel: &'a crate::domains::device_card::CardPanelState,
+    ) -> Element<'a, Message> {
+        let accent = th::track_color(0);
+        let effect = &self.effect;
+        let track = self.track;
+        let body = iced::widget::responsive(move |size| {
+            crate::widgets::saturator_device::SaturatorView {
+                track_id: track,
+                effect,
+                accent,
+                panel,
+                entry: None,
+            }
+            .view(
+                crate::widgets::device_preset_bar::view(
+                    track,
+                    effect,
+                    None,
+                    accent,
+                    crate::widgets::saturator_device::preset_bar_width(size),
+                ),
+                size,
+            )
+        });
+        framed_card(
+            label,
+            card_width,
+            section,
+            track,
+            effect,
+            accent,
+            body.into(),
+        )
+    }
+
+    fn view(&self) -> Element<'_, Message> {
+        use crate::widgets::saturator_device::{COMPACT_W, FULL_W, MEDIUM_W};
+        // Sections the default 280 px and minimum 180 px detail panels
+        // give a card, measured against the app.
+        let (default, minimum) = (240.0, 140.0);
+        let (closed, open, spectrum) = (&self.closed, &self.open, &self.spectrum);
+        let wide = 1_150.0;
+        container(
+            column![
+                row![
+                    self.scene("Expanded, Advanced open", wide, (wide + 16.0, 400.0), open),
+                    self.scene(
+                        "Compact, tall",
+                        COMPACT_W + 40.0,
+                        (COMPACT_W + 56.0, 400.0),
+                        closed
+                    ),
+                ]
+                .spacing(24),
+                row![
+                    self.scene(
+                        "Medium, tall",
+                        MEDIUM_W + 60.0,
+                        (MEDIUM_W + 76.0, 330.0),
+                        closed
+                    ),
+                    self.scene(
+                        "Full, default panel",
+                        FULL_W,
+                        (FULL_W + 16.0, default),
+                        closed
+                    ),
+                ]
+                .spacing(24),
+                row![
+                    self.scene(
+                        "Medium, default panel, Advanced",
+                        MEDIUM_W,
+                        (MEDIUM_W + 16.0, default),
+                        open
+                    ),
+                    self.scene(
+                        "Compact, default panel, Spectrum",
+                        460.0,
+                        (476.0, default),
+                        spectrum
+                    ),
+                    self.scene(
+                        "Compact, default panel, Advanced",
+                        COMPACT_W,
+                        (COMPACT_W + 16.0, default),
+                        open
+                    ),
+                ]
+                .spacing(24),
+                row![
+                    self.scene(
+                        "Full, minimum panel",
+                        FULL_W,
+                        (FULL_W + 16.0, minimum),
+                        closed
+                    ),
+                    self.scene(
+                        "Compact, minimum panel",
+                        COMPACT_W,
+                        (COMPACT_W + 16.0, minimum),
+                        closed
+                    ),
+                ]
+                .spacing(24),
+            ]
+            .spacing(16),
+        )
+        .padding(16)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .style(|_theme: &Theme| container::Style {
+            background: Some(th::bg_surface().into()),
+            ..Default::default()
+        })
+        .into()
+    }
+}
+
+pub fn run_saturator() -> iced::Result {
+    iced::application(
+        "Saturator device gallery",
+        |_: &mut SaturatorGallery, _: Message| {},
+        SaturatorGallery::view,
+    )
+    .theme(|_| th::vibez_theme())
+    .antialiasing(true)
+    .window_size((1900.0, 1500.0))
+    .font(crate::icons::ICON_FONT_BYTES)
+    .font(crate::typography::PLEX_SANS_CONDENSED_MEDIUM_BYTES)
+    .font(crate::typography::PLEX_SANS_CONDENSED_SEMIBOLD_BYTES)
+    .font(crate::typography::PLEX_MONO_MEDIUM_BYTES)
+    .font(crate::typography::PLEX_MONO_SEMIBOLD_BYTES)
+    .run_with(|| (SaturatorGallery::new(), iced::Task::none()))
+}
+
 /// Native Reverb at each width tier and section height it adapts to, on the
 /// Warm Hall preset as in the concept, with an output level standing in for
 /// live audio.

@@ -47,6 +47,8 @@ pub mod reverb_device;
 pub mod reverb_display;
 pub mod sampler_device;
 pub mod sampler_display;
+pub mod saturator_device;
+pub mod saturator_display;
 pub mod swing_knob;
 pub mod synth_device;
 pub mod synth_display;
