@@ -1,6 +1,6 @@
 //! What a native card with an Advanced switch remembers besides its
-//! parameters: whether Advanced is open, which of its groups a narrow card
-//! shows, and the levels the engine measured either side of the device.
+//! parameters: whether Advanced is open, which of its groups and plots a
+//! narrow card shows, and the levels the engine measured either side of the device.
 
 use std::time::{Duration, Instant};
 
@@ -12,12 +12,14 @@ pub enum CardMsg {
     ToggleAdvanced(EffectId),
     /// Shows one of Advanced's groups on a card too narrow for all of them.
     ShowAdvancedPage(EffectId, usize),
+    /// Shows one of the plots on a card too narrow for all of them.
+    ShowPlot(EffectId, usize),
 }
 
 impl CardMsg {
     pub fn effect_id(&self) -> EffectId {
         match self {
-            Self::ToggleAdvanced(id) | Self::ShowAdvancedPage(id, _) => *id,
+            Self::ToggleAdvanced(id) | Self::ShowAdvancedPage(id, _) | Self::ShowPlot(id, _) => *id,
         }
     }
 }
@@ -26,6 +28,7 @@ impl CardMsg {
 pub struct CardPanelState {
     pub advanced: bool,
     pub advanced_page: usize,
+    pub plot: usize,
     pub input: MeterValues,
     pub output: MeterValues,
     pub last_meter_at: Option<Instant>,
@@ -36,6 +39,7 @@ impl CardPanelState {
         match message {
             CardMsg::ToggleAdvanced(_) => self.advanced = !self.advanced,
             CardMsg::ShowAdvancedPage(_, page) => self.advanced_page = page,
+            CardMsg::ShowPlot(_, plot) => self.plot = plot,
         }
     }
 }

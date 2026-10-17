@@ -39,6 +39,7 @@ pub mod piano_roll;
 pub mod project;
 pub mod reverb;
 pub mod sampler;
+pub mod saturator;
 pub mod sidechain;
 pub mod synth;
 pub mod timeline_editor;

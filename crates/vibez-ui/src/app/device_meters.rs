@@ -19,6 +19,7 @@ use crate::domains::filter::is_native_filter;
 use crate::domains::gain::is_native_gain;
 use crate::domains::gate::is_native_gate;
 use crate::domains::reverb::is_native_reverb;
+use crate::domains::saturator::is_native_saturator;
 use crate::state::{DetailPanelTab, UiEffect};
 
 use super::*;
@@ -47,6 +48,7 @@ fn is_metered(effect: &UiEffect) -> bool {
         || is_native_filter(effect)
         || is_native_gate(effect)
         || is_native_drive(effect)
+        || is_native_saturator(effect)
         || is_native_bitcrush(effect)
         || is_native_delay(effect)
         || is_native_echo(effect)
@@ -163,6 +165,7 @@ impl App {
         } else if is_native_gate(effect) {
             Some(Metered::Gate)
         } else if is_native_drive(effect)
+            || is_native_saturator(effect)
             || is_native_bitcrush(effect)
             || is_native_delay(effect)
             || is_native_echo(effect)

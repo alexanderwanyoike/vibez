@@ -25,6 +25,7 @@ enum Flexible {
     Filter,
     Gate,
     Drive,
+    Saturator,
     Bitcrush,
     Delay,
     Echo,
@@ -119,6 +120,8 @@ impl App {
                 Some(Flexible::Gate)
             } else if crate::domains::drive::is_native_drive(effect) {
                 Some(Flexible::Drive)
+            } else if crate::domains::saturator::is_native_saturator(effect) {
+                Some(Flexible::Saturator)
             } else if crate::domains::bitcrush::is_native_bitcrush(effect) {
                 Some(Flexible::Bitcrush)
             } else if crate::domains::delay::is_native_delay(effect) {
@@ -215,6 +218,12 @@ impl App {
                         effect,
                         track_color,
                         crate::widgets::drive_device::card_width(share),
+                    ),
+                    Flexible::Saturator => self.saturator_device_body(
+                        track_id,
+                        effect,
+                        track_color,
+                        crate::widgets::saturator_device::card_width(share),
                     ),
                     Flexible::Bitcrush => self.bitcrush_device_body(
                         track_id,
@@ -528,6 +537,38 @@ impl App {
                     effect,
                     accent,
                     crate::widgets::echo_device::preset_bar_width(size),
+                ),
+                size,
+            )
+        });
+        DeviceBody {
+            content: content.into(),
+            width,
+            padding: iced::Padding::ZERO,
+        }
+    }
+
+    fn saturator_device_body<'a>(
+        &'a self,
+        track_id: TrackId,
+        effect: &'a crate::state::UiEffect,
+        accent: Color,
+        width: f32,
+    ) -> DeviceBody<'a> {
+        let content = iced::widget::responsive(move |size| {
+            crate::widgets::saturator_device::SaturatorView {
+                track_id,
+                effect,
+                accent,
+                panel: self.card_panels.panel(effect.id),
+                entry: self.param_entry.as_ref(),
+            }
+            .view(
+                self.view_device_preset_bar(
+                    track_id,
+                    effect,
+                    accent,
+                    crate::widgets::saturator_device::preset_bar_width(size),
                 ),
                 size,
             )

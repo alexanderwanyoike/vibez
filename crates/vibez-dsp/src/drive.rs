@@ -14,7 +14,7 @@ use vibez_core::effect::{EffectType, ParamDescriptor};
 
 use crate::butterworth_filter::ButterworthFilter;
 use crate::effect::AudioEffect;
-use crate::oversampling::Stage;
+use crate::oversampled::{rates, Delay, Fade, Path, LATENCY, X2_PAD};
 
 pub mod param {
     pub const AMOUNT: usize = 0;
@@ -38,28 +38,9 @@ pub mod character {
     pub const COUNT: usize = 4;
 }
 
-pub mod quality {
-    pub const X1: usize = 0;
-    pub const X2: usize = 1;
-    pub const X4: usize = 2;
-    pub const COUNT: usize = 3;
-}
+pub use crate::oversampled::quality;
+pub use crate::oversampled::{LATENCY_SAMPLES, RAMP_FRAMES};
 
-/// Halfband sizes: the first stage needs a narrow transition, the second,
-/// working on a signal already band-limited to a quarter of its rate, does not.
-const K1: usize = 15;
-const T1: usize = K1 + 1;
-const K2: usize = 7;
-const T2: usize = K2 + 1;
-const BETA1: f64 = 7.0;
-const BETA2: f64 = 6.0;
-/// The 4x path: the first stage's round trip, then the second's, made a
-/// whole number of host samples by one extra sample at twice the rate.
-pub const LATENCY_SAMPLES: u32 = (K1 + K2.div_ceil(2)) as u32;
-const LATENCY: usize = LATENCY_SAMPLES as usize;
-/// The 2x path is short of the 4x path's delay by this much.
-const X2_PAD: usize = LATENCY - K1;
-pub const RAMP_FRAMES: u32 = 512;
 const TONE_SPLIT_HZ: f64 = 1000.0;
 
 pub static DRIVE_PARAMS: &[ParamDescriptor] = &[
@@ -186,90 +167,6 @@ fn finite(sample: f32) -> f32 {
         sample
     } else {
         0.0
-    }
-}
-
-/// Weights for a choice, moving from one option to another over
-/// [`RAMP_FRAMES`] so a switch never clicks.
-#[derive(Clone, Copy)]
-struct Fade<const N: usize> {
-    weights: [f32; N],
-    steps: [f32; N],
-    remaining: u32,
-}
-
-impl<const N: usize> Fade<N> {
-    fn at(choice: usize) -> Self {
-        Self {
-            weights: std::array::from_fn(|index| f32::from(index == choice)),
-            steps: [0.0; N],
-            remaining: 0,
-        }
-    }
-
-    fn toward(&mut self, choice: usize) {
-        self.steps = std::array::from_fn(|index| {
-            (f32::from(index == choice) - self.weights[index]) / RAMP_FRAMES as f32
-        });
-        self.remaining = RAMP_FRAMES;
-    }
-
-    fn advance(&mut self) {
-        if self.remaining == 0 {
-            return;
-        }
-        self.remaining -= 1;
-        if self.remaining == 0 {
-            self.weights = self.weights.map(f32::round);
-        } else {
-            for (weight, step) in self.weights.iter_mut().zip(self.steps) {
-                *weight += step;
-            }
-        }
-    }
-}
-
-/// Stereo frames delayed by `N`.
-#[derive(Clone, Copy)]
-struct Delay<const N: usize> {
-    frames: [[f32; 2]; N],
-    position: usize,
-}
-
-impl<const N: usize> Delay<N> {
-    const EMPTY: Self = Self {
-        frames: [[0.0; 2]; N],
-        position: 0,
-    };
-
-    fn push(&mut self, frame: [f32; 2]) -> [f32; 2] {
-        let out = std::mem::replace(&mut self.frames[self.position], frame);
-        self.position = (self.position + 1) % N;
-        out
-    }
-}
-
-/// The newer curves at one rate, with that rate's filter state.
-struct Path {
-    first: Stage<K1, T1>,
-    second: Stage<K2, T2>,
-    /// The second stage's extra sample at twice the host rate.
-    held: [f32; 2],
-}
-
-impl Path {
-    fn new() -> Self {
-        Self {
-            first: Stage::new(BETA1),
-            second: Stage::new(BETA2),
-            held: [0.0; 2],
-        }
-    }
-
-    fn reset(&mut self) {
-        self.first.reset();
-        self.second.reset();
-        self.held = [0.0; 2];
     }
 }
 
@@ -474,7 +371,7 @@ impl AudioEffect for DriveEffect {
 
             let mut dry = [0.0; 2];
             let mut classic = [0.0; 2];
-            let mut rates = [[0.0; 2]; quality::COUNT];
+            let mut rates_by = [[0.0; 2]; quality::COUNT];
             for c in 0..ch {
                 dry[c] = finite(frame[c]);
                 let input = if pre > 0.0 {
@@ -494,31 +391,17 @@ impl AudioEffect for DriveEffect {
                     continue;
                 }
                 let curves = |driven: f32| Self::curves(&characters, driven * gain, normalizer);
-                if qualities[quality::X1] > 0.0 {
-                    rates[quality::X1][c] = curves(input);
-                }
-                if qualities[quality::X2] > 0.0 {
-                    let stage = &mut self.paths[0].first;
-                    let pair = stage.up(c, input).map(curves);
-                    rates[quality::X2][c] = stage.down(c, pair);
-                }
-                if qualities[quality::X4] > 0.0 {
-                    let path = &mut self.paths[1];
-                    let doubled = path.first.up(c, input);
-                    let shaped = doubled.map(|sample| {
-                        let pair = path.second.up(c, sample).map(curves);
-                        path.second.down(c, pair)
-                    });
-                    let held = std::mem::replace(&mut path.held[c], shaped[1]);
-                    rates[quality::X4][c] = path.first.down(c, [held, shaped[0]]);
+                let shaped = rates(&mut self.paths, c, input, &qualities, curves);
+                for (rate, sample) in shaped.into_iter().enumerate() {
+                    rates_by[rate][c] = sample;
                 }
             }
 
             let dry = self.dry.push(dry);
             let classic = self.classic.push(classic);
-            let x1 = self.x1.push(rates[quality::X1]);
-            let x2 = self.x2.push(rates[quality::X2]);
-            let x4 = rates[quality::X4];
+            let x1 = self.x1.push(rates_by[quality::X1]);
+            let x2 = self.x2.push(rates_by[quality::X2]);
+            let x4 = rates_by[quality::X4];
             if self.tone_gain.0 != tone {
                 self.tone_gain = (tone, 10.0_f64.powf(-6.0 * (tone as f64 * 2.0 - 1.0) / 20.0));
             }

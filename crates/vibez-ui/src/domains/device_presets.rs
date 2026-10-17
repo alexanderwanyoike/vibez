@@ -222,6 +222,28 @@ const ECHO_KEYS: [(usize, &str, bool); 17] = {
     ]
 };
 
+/// Every native Saturator parameter.
+const SATURATOR_KEYS: [(usize, &str, bool); 15] = {
+    use vibez_dsp::saturator::param::*;
+    [
+        (DRIVE_DB, "drive_db", false),
+        (BIAS, "bias", false),
+        (OUTPUT_DB, "output_db", false),
+        (MIX, "mix", false),
+        (AUTO_GAIN, "auto_gain", true),
+        (SHAPE, "shape", true),
+        (CURVE, "curve", false),
+        (ASYMMETRY, "asymmetry", false),
+        (PRE_FILTER, "pre_filter", true),
+        (POST_FILTER, "post_filter", true),
+        (DC_REMOVAL, "dc_removal", true),
+        (QUALITY, "quality", true),
+        (CUSTOM_LOW, "custom_low_db", false),
+        (CUSTOM_MID, "custom_mid_db", false),
+        (CUSTOM_HIGH, "custom_high_db", false),
+    ]
+};
+
 /// Every native Reverb parameter; its sync and freeze are choices.
 const REVERB_KEYS: [(usize, &str, bool); 10] = {
     use vibez_dsp::reverb::param::*;
@@ -436,6 +458,7 @@ fn parameter_keys(device: &DeviceParams) -> Result<Vec<PresetParam>, String> {
         EffectType::Bitcrush => Ok(BITCRUSH_KEYS.to_vec()),
         EffectType::Delay => Ok(DELAY_KEYS.to_vec()),
         EffectType::Echo => Ok(ECHO_KEYS.to_vec()),
+        EffectType::Saturator => Ok(SATURATOR_KEYS.to_vec()),
         EffectType::Reverb => Ok(REVERB_KEYS.to_vec()),
         EffectType::AutoPan => Ok(AUTO_PAN_KEYS.to_vec()),
         EffectType::Phaser => Ok(PHASER_KEYS.to_vec()),
@@ -775,6 +798,7 @@ pub fn factory_presets(effect_type: EffectType) -> Vec<DevicePreset> {
         EffectType::Bitcrush => bitcrush_factory_presets(),
         EffectType::Delay => delay_factory_presets(),
         EffectType::Echo => echo_factory_presets(),
+        EffectType::Saturator => saturator_factory_presets(),
         EffectType::Reverb => reverb_factory_presets(),
         EffectType::AutoPan => auto_pan_factory_presets(),
         EffectType::Phaser => phaser_factory_presets(),
@@ -1480,6 +1504,90 @@ fn echo_factory_presets() -> Vec<DevicePreset> {
         DevicePresetKind::Effect(EffectType::Echo),
         &ECHO_KEYS,
         vibez_dsp::echo::ECHO_PARAMS,
+        &presets,
+    )
+}
+
+fn saturator_factory_presets() -> Vec<DevicePreset> {
+    let presets: [(&str, &[(&str, f32)]); 8] = [
+        ("Init", &[]),
+        (
+            "Soft Harmonics",
+            &[
+                ("drive_db", 9.0),
+                ("curve", 0.6),
+                ("auto_gain", 1.0),
+                ("output_db", 0.0),
+            ],
+        ),
+        (
+            "Warm Tube",
+            &[
+                ("shape", 1.0),
+                ("drive_db", 12.0),
+                ("asymmetry", 0.2),
+                ("auto_gain", 1.0),
+                ("output_db", 0.0),
+                ("post_filter", 3.0),
+            ],
+        ),
+        (
+            "Even Glow",
+            &[
+                ("shape", 1.0),
+                ("drive_db", 6.0),
+                ("bias", 0.3),
+                ("mix", 0.6),
+                ("output_db", 0.0),
+            ],
+        ),
+        (
+            "Bass Grit",
+            &[
+                ("drive_db", 18.0),
+                ("curve", 1.0),
+                ("pre_filter", 2.0),
+                ("post_filter", 4.0),
+                ("mix", 0.7),
+                ("auto_gain", 1.0),
+                ("output_db", 0.0),
+            ],
+        ),
+        (
+            "Hard Clip",
+            &[
+                ("drive_db", 24.0),
+                ("curve", 1.0),
+                ("auto_gain", 1.0),
+                ("output_db", -1.0),
+            ],
+        ),
+        (
+            "Wavefolder",
+            &[
+                ("shape", 2.0),
+                ("drive_db", 9.0),
+                ("curve", 0.5),
+                ("post_filter", 2.0),
+                ("output_db", -4.0),
+            ],
+        ),
+        (
+            "Crushed Custom",
+            &[
+                ("shape", 3.0),
+                ("drive_db", 12.0),
+                ("custom_low_db", -12.0),
+                ("custom_mid_db", 3.0),
+                ("custom_high_db", 4.0),
+                ("output_db", -6.0),
+            ],
+        ),
+    ];
+    keyed_presets(
+        DevicePresetKind::Effect(EffectType::Saturator),
+        &SATURATOR_KEYS,
+        vibez_dsp::saturator::SATURATOR_PARAMS,
         &presets,
     )
 }
@@ -2326,6 +2434,40 @@ mod presentation_tests {
         assert!(presets.iter().any(|preset| preset.name() == "Worn Tape"));
         for preset in &presets[1..] {
             let mut applied = echo();
+            for (index, value) in prepare_updates(&effect, preset).unwrap() {
+                applied.params[index] = value;
+            }
+            assert_ne!(applied.params, effect.params, "{}", preset.name());
+            assert_eq!(capture(&applied, preset.name()).as_ref(), Ok(preset));
+        }
+        let mut names: Vec<_> = presets.iter().map(DevicePreset::name).collect();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(names.len(), presets.len(), "names are unique");
+    }
+
+    #[test]
+    fn saturator_factory_presets_are_valid_distinct_and_start_from_init() {
+        let descriptors =
+            vibez_dsp::factory::create_effect(EffectType::Saturator, 44_100.0).param_descriptors();
+        let saturator = || UiEffect {
+            effect_type: EffectType::Saturator,
+            params: descriptors
+                .iter()
+                .map(|descriptor| descriptor.default)
+                .collect(),
+            descriptors,
+            ..gain()
+        };
+        let effect = saturator();
+        let presets = factory_presets(EffectType::Saturator);
+        assert_eq!(presets[0].name(), "Init");
+        assert_eq!(prepare_updates(&effect, &presets[0]), Ok(Vec::new()));
+        assert!(presets
+            .iter()
+            .any(|preset| preset.name() == "Soft Harmonics"));
+        for preset in &presets[1..] {
+            let mut applied = saturator();
             for (index, value) in prepare_updates(&effect, preset).unwrap() {
                 applied.params[index] = value;
             }
