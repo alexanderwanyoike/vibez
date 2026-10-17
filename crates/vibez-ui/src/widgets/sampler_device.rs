@@ -589,6 +589,37 @@ mod tests {
         }
     }
 
+    /// The playback line under a compact card's sample.
+    fn mode_line(layout: Layout) -> f32 {
+        if layout.compact {
+            MODE_LINE_H
+        } else {
+            0.0
+        }
+    }
+
+    /// The body an instrument card gets in the 180 px minimum detail
+    /// panel, measured in the app.
+    const MINIMUM_BODY_H: f32 = 68.0;
+
+    #[test]
+    fn the_sample_band_holds_everything_it_shows() {
+        for width in [COMPACT_W, MEDIUM_W, MAX_W] {
+            for height in (MINIMUM_BODY_H as usize..=520)
+                .step_by(2)
+                .map(|height| height as f32)
+            {
+                let layout = arrange(Size::new(width, height));
+                // `plot_band` keeps 6 px clear above and below.
+                let shown = 12.0 + SAMPLE_HEADER_H + layout.wave + mode_line(layout);
+                assert!(
+                    shown <= layout.sample + 0.01,
+                    "{width}x{height}: {layout:?}"
+                );
+            }
+        }
+    }
+
     #[test]
     fn the_shortest_card_still_shows_the_waveform() {
         let shortest = arrange(Size::new(MAX_W, 82.0));
