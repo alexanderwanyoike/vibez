@@ -30,6 +30,8 @@ pub mod eq_display;
 pub mod fader;
 pub mod filter_device;
 pub mod filter_display;
+pub mod fm_device;
+pub mod fm_display;
 pub mod gain_device;
 pub mod gate_device;
 pub mod gate_display;

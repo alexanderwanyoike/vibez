@@ -3367,3 +3367,181 @@ pub fn run_drum_rack() -> iced::Result {
     .font(crate::typography::PLEX_MONO_SEMIBOLD_BYTES)
     .run_with(|| (DrumRackGallery::new(), iced::Task::none()))
 }
+
+/// Native FM Synth at each width tier, tab and height it adapts to, on the
+/// concept's Bell Keys with Operator B shown, with scenes at the bodies the
+/// default and minimum detail panels give an instrument card.
+struct FmGallery {
+    track: ProjectTrack,
+}
+
+impl FmGallery {
+    fn new() -> Self {
+        use crate::domains::device_params::DeviceParams;
+        use vibez_core::device_preset::DevicePresetKind;
+        use vibez_core::midi::InstrumentKind;
+        let mut track = ProjectTrack::new(TrackId::new(), "Keys".into(), 0);
+        track.kind = vibez_core::midi::TrackKind::Midi;
+        track.has_instrument = true;
+        track.instrument_kind = Some(InstrumentKind::FmSynth);
+        track.instrument_params = vibez_instruments::fm::FM_PARAMS
+            .iter()
+            .map(|d| d.default)
+            .collect();
+        let bell_keys = crate::domains::device_presets::presets_for(DevicePresetKind::Instrument(
+            InstrumentKind::FmSynth,
+        ))
+        .into_iter()
+        .find(|preset| preset.name() == "Bell Keys");
+        let updates = bell_keys.and_then(|preset| {
+            crate::domains::device_presets::prepare_updates(
+                DeviceParams::instrument(&track)?,
+                &preset,
+            )
+            .ok()
+        });
+        for (index, value) in updates.unwrap_or_default() {
+            track.instrument_params[index] = value;
+        }
+        Self { track }
+    }
+
+    fn scene<'a>(
+        &'a self,
+        label: &'static str,
+        card_width: f32,
+        section: (f32, f32),
+        page: crate::domains::fm::FmPage,
+    ) -> Element<'a, Message> {
+        let accent = th::track_color(0);
+        let track_id = self.track.id;
+        let panel = crate::domains::instrument_card::InstrumentPanel {
+            page: page.index(),
+            oscillator: 1,
+            ..Default::default()
+        };
+        tabbed_scene(
+            label,
+            "FM Synth",
+            &self.track,
+            card_width,
+            section,
+            move |device, preset_bar, size| {
+                crate::widgets::fm_device::FmView {
+                    track_id,
+                    device,
+                    accent,
+                    panel: panel.clone(),
+                    entry: None,
+                }
+                .view(preset_bar, size)
+            },
+        )
+    }
+
+    fn view(&self) -> Element<'_, Message> {
+        use crate::domains::fm::FmPage;
+        use crate::widgets::fm_device::{COMPACT_W, FULL_W};
+        let full = FULL_W + 40.0;
+        let medium = 760.0;
+        // Sections that give a card the bodies the default 280 px and
+        // minimum 180 px detail panels do.
+        let (default, minimum) = (210.0, 110.0);
+        container(
+            column![
+                row![
+                    self.scene(
+                        "Full, tall (overview)",
+                        full,
+                        (full + 16.0, 430.0),
+                        FmPage::Overview
+                    ),
+                    self.scene(
+                        "Compact, Operators tab",
+                        COMPACT_W,
+                        (COMPACT_W + 16.0, 330.0),
+                        FmPage::Operators
+                    ),
+                ]
+                .spacing(24),
+                row![
+                    self.scene(
+                        "Full, Overview tab, default panel",
+                        full,
+                        (full + 16.0, default),
+                        FmPage::Overview
+                    ),
+                    self.scene(
+                        "Compact, Overview tab, default panel",
+                        COMPACT_W,
+                        (COMPACT_W + 16.0, default),
+                        FmPage::Overview
+                    ),
+                ]
+                .spacing(24),
+                row![
+                    self.scene(
+                        "Medium, Operators tab, default panel",
+                        medium,
+                        (medium + 16.0, default),
+                        FmPage::Operators
+                    ),
+                    self.scene(
+                        "Medium, Envelopes tab, default panel",
+                        medium,
+                        (medium + 16.0, default),
+                        FmPage::Envelopes
+                    ),
+                ]
+                .spacing(24),
+                row![
+                    self.scene(
+                        "Compact, Modulation tab, default panel",
+                        COMPACT_W,
+                        (COMPACT_W + 16.0, default),
+                        FmPage::Modulation
+                    ),
+                    self.scene(
+                        "Full, minimum panel",
+                        full,
+                        (full + 16.0, minimum),
+                        FmPage::Overview
+                    ),
+                ]
+                .spacing(24),
+                self.scene(
+                    "Compact, Envelopes tab, minimum panel",
+                    COMPACT_W,
+                    (COMPACT_W + 16.0, minimum),
+                    FmPage::Envelopes
+                ),
+            ]
+            .spacing(14),
+        )
+        .padding(16)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .style(|_theme: &Theme| container::Style {
+            background: Some(th::bg_surface().into()),
+            ..Default::default()
+        })
+        .into()
+    }
+}
+
+pub fn run_fm() -> iced::Result {
+    iced::application(
+        "FM Synth device gallery",
+        |_: &mut FmGallery, _: Message| {},
+        FmGallery::view,
+    )
+    .theme(|_| th::vibez_theme())
+    .antialiasing(true)
+    .window_size((1900.0, 1500.0))
+    .font(crate::icons::ICON_FONT_BYTES)
+    .font(crate::typography::PLEX_SANS_CONDENSED_MEDIUM_BYTES)
+    .font(crate::typography::PLEX_SANS_CONDENSED_SEMIBOLD_BYTES)
+    .font(crate::typography::PLEX_MONO_MEDIUM_BYTES)
+    .font(crate::typography::PLEX_MONO_SEMIBOLD_BYTES)
+    .run_with(|| (FmGallery::new(), iced::Task::none()))
+}
