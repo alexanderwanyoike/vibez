@@ -254,6 +254,32 @@ impl<'a> Param<'a> {
         .into()
     }
 
+    /// The value with its unit, as [`Self::value_entry`] shows it.
+    pub fn value_text(&self) -> String {
+        self.descriptor().map_or(String::new(), |descriptor| {
+            param_format(self.device.kind, self.index, descriptor, self.host_rate)
+                .format(self.value())
+        })
+    }
+
+    /// How wide the value sets, its button's padding included.
+    pub fn value_width(&self) -> f32 {
+        text_width(
+            &self.value_text(),
+            VALUE_SIZE,
+            crate::typography::PERFORM_TECH,
+        ) + 4.0
+    }
+
+    /// How wide [`Self::line_item`] sets with the value it shows now.
+    pub fn line_width(&self) -> f32 {
+        text_width(self.name(), LABEL_SIZE, iced::Font::DEFAULT)
+            + 4.0
+            + self.value_width()
+            + 2.0
+            + SMALL_KNOB
+    }
+
     /// A switch named `label`, lit while this parameter is on.
     pub fn switch(&self, label: &'a str) -> Element<'a, Message> {
         let on = self.value() >= 0.5;
@@ -343,6 +369,11 @@ pub fn level_column<'a>(
     .spacing(2)
     .width(METER_W)
     .into()
+}
+
+/// How wide a [`toggle`] around `label` sets.
+pub fn switch_width(label: &str) -> f32 {
+    text_width(label, LABEL_SIZE, iced::Font::DEFAULT) + 14.0
 }
 
 /// A small button that is lit with the track accent while `on`.
