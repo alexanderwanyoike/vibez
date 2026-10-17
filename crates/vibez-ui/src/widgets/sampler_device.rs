@@ -499,9 +499,9 @@ impl<'a> SamplerView<'a> {
         let track_id = self.track_id;
         segmented(
             &[(false, "Filter"), (true, "Envelope")],
-            self.panel.filter_envelope,
+            self.panel.second_envelope,
             move |envelope| {
-                Message::InstrumentCard(InstrumentCardMsg::ShowFilterEnvelope(track_id, envelope))
+                Message::InstrumentCard(InstrumentCardMsg::ShowSecondEnvelope(track_id, envelope))
             },
             self.accent,
         )
@@ -557,7 +557,7 @@ impl<'a> SamplerView<'a> {
                 None,
                 pitch_controls(self.on_pad()),
             ),
-            SamplerPage::Filter if layout.compact && self.panel.filter_envelope => {
+            SamplerPage::Filter if layout.compact && self.panel.second_envelope => {
                 self.envelope(layout, true)
             }
             SamplerPage::Filter if layout.compact => self.filter(layout),

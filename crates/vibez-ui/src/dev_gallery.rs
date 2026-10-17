@@ -2619,7 +2619,7 @@ impl SynthGallery {
                         (COMPACT_W + 16.0, 330.0),
                         InstrumentPanel {
                             page: SynthPage::Envelope.index(),
-                            filter_envelope: true,
+                            second_envelope: true,
                             ..Default::default()
                         }
                     ),
@@ -2789,9 +2789,9 @@ impl SamplerGallery {
         use crate::widgets::sampler_device::COMPACT_W;
         let full = 1_100.0;
         let medium = 760.0;
-        let page = |page: SamplerPage, filter_envelope: bool| InstrumentPanel {
+        let page = |page: SamplerPage, second_envelope: bool| InstrumentPanel {
             page: page.index(),
-            filter_envelope,
+            second_envelope,
             ..Default::default()
         };
         container(

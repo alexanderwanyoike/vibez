@@ -1,6 +1,6 @@
 //! What a native instrument card remembers besides its parameters: which
 //! of its sections a card too narrow for all of them shows, whether its
-//! envelope shows the level's or the filter's, and a Drum Rack pad's name
+//! envelope shows the level's or its second one, and a Drum Rack pad's name
 //! while it is typed.
 
 use vibez_core::id::TrackId;
@@ -9,8 +9,9 @@ use vibez_core::id::TrackId;
 pub enum InstrumentCardMsg {
     /// Shows the section at this place in the card's own list of tabs.
     ShowPage(TrackId, usize),
-    /// Shows the filter's envelope instead of the level's, or back.
-    ShowFilterEnvelope(TrackId, bool),
+    /// Shows the second envelope (the filter's, on the Subtractive Synth and
+    /// Sampler) instead of the level's, or back.
+    ShowSecondEnvelope(TrackId, bool),
     /// Shows a narrow Drum Rack's selected pad instead of its pads, or back.
     ShowPadSampler(TrackId, bool),
     /// A pad's name as typed so far.
@@ -23,7 +24,7 @@ impl InstrumentCardMsg {
     pub fn track_id(&self) -> TrackId {
         match self {
             Self::ShowPage(id, _)
-            | Self::ShowFilterEnvelope(id, _)
+            | Self::ShowSecondEnvelope(id, _)
             | Self::ShowPadSampler(id, _)
             | Self::EditPadName(id, ..)
             | Self::CommitPadName(id) => *id,
@@ -34,7 +35,7 @@ impl InstrumentCardMsg {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct InstrumentPanel {
     pub page: usize,
-    pub filter_envelope: bool,
+    pub second_envelope: bool,
     pub pad_sampler: bool,
     /// The pad being named and its name so far.
     pub pad_name: Option<(usize, String)>,
@@ -47,7 +48,7 @@ impl InstrumentPanel {
     pub fn update(&mut self, message: InstrumentCardMsg) -> Option<(usize, String)> {
         match message {
             InstrumentCardMsg::ShowPage(_, page) => self.page = page,
-            InstrumentCardMsg::ShowFilterEnvelope(_, filter) => self.filter_envelope = filter,
+            InstrumentCardMsg::ShowSecondEnvelope(_, filter) => self.second_envelope = filter,
             InstrumentCardMsg::ShowPadSampler(_, sampler) => self.pad_sampler = sampler,
             InstrumentCardMsg::EditPadName(_, pad, name) => self.pad_name = Some((pad, name)),
             InstrumentCardMsg::CommitPadName(_) => return self.pad_name.take(),
@@ -81,9 +82,9 @@ mod tests {
         let mut panel = InstrumentPanel::default();
         let track = TrackId::new();
         panel.update(InstrumentCardMsg::ShowPage(track, 2));
-        panel.update(InstrumentCardMsg::ShowFilterEnvelope(track, true));
+        panel.update(InstrumentCardMsg::ShowSecondEnvelope(track, true));
         assert_eq!(panel.page, 2);
-        assert!(panel.filter_envelope);
+        assert!(panel.second_envelope);
     }
 
     #[test]
