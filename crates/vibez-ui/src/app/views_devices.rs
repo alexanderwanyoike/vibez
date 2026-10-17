@@ -184,8 +184,9 @@ impl App {
             )));
         }
         let shares = flexible.len() + usize::from(flexible_instrument);
+        let spacing = CHAIN_SPACING * cards.len().saturating_sub(1) as f32;
+        let mut chain_width = used + spacing;
         if shares > 0 {
-            let spacing = CHAIN_SPACING * cards.len().saturating_sub(1) as f32;
             let share = (available_width - used - spacing) / shares as f32;
             let instrument_width = if synth {
                 crate::widgets::synth_device::card_width(share)
@@ -198,6 +199,9 @@ impl App {
             } else {
                 crate::widgets::drum_rack_device::card_width(share)
             };
+            if flexible_instrument {
+                chain_width += instrument_width;
+            }
             if synth {
                 cards[0] = Some(self.synth_card(track_id, track, track_color, instrument_width));
             }
@@ -217,6 +221,7 @@ impl App {
             }
             for (position, effect, sidechain, kind) in flexible {
                 let width = kind.card_width(share, available_width);
+                chain_width += width;
                 let body = match kind {
                     Flexible::Gain => self.gain_device_body(track_id, effect, track_color, width),
                     Flexible::Eq => self.eq_device_body(track_id, effect, track_color, width),
@@ -263,19 +268,21 @@ impl App {
             .spacing(CHAIN_SPACING)
             .height(Length::Fill);
 
-        // Only a chain wider than the section scrolls, behind a bar that
-        // appears only then: scrollbar spacing would show it permanently.
         // Built with its direction: the default vertical check rejects the
         // full-height cards before a later `.direction` could apply.
-        scrollable::Scrollable::with_direction(
-            devices_row,
-            scrollable::Direction::Horizontal(
-                scrollable::Scrollbar::new().width(7).scroller_width(7),
-            ),
-        )
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .into()
+        let bar = scrollable::Scrollbar::new()
+            .width(crate::widgets::device_chrome::CHAIN_BAR_W)
+            .scroller_width(crate::widgets::device_chrome::CHAIN_BAR_W);
+        let bar =
+            if crate::widgets::device_chrome::chain_bar_room(chain_width, available_width) > 0.0 {
+                bar.spacing(crate::widgets::device_chrome::CHAIN_BAR_GAP)
+            } else {
+                bar
+            };
+        scrollable::Scrollable::with_direction(devices_row, scrollable::Direction::Horizontal(bar))
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
     }
 
     /// The channel's instrument card and its width, or the placeholder that

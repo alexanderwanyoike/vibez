@@ -213,14 +213,19 @@ fn editor_button<'a>(gui_key: Option<PluginGuiKey>) -> Element<'a, Message> {
     .into()
 }
 
-/// The device chain's scrollbar.
+/// The device chain's scrollbar, and the gap it keeps from the cards.
 pub const CHAIN_BAR_W: f32 = 7.0;
+pub const CHAIN_BAR_GAP: f32 = 3.0;
 
 /// The room a chain `chain_width` wide keeps beneath its cards for the
-/// scrollbar in a section `available` wide.
+/// scrollbar in a section `available` wide: only one that overflows shows
+/// the bar, so only it gives up the height, and its bar never covers them.
 pub fn chain_bar_room(chain_width: f32, available: f32) -> f32 {
-    let _ = (chain_width, available);
-    0.0
+    if chain_width > available + 0.5 {
+        CHAIN_BAR_W + CHAIN_BAR_GAP
+    } else {
+        0.0
+    }
 }
 
 /// Card for a hosted CLAP or VST3 instrument, matching hosted effects.
