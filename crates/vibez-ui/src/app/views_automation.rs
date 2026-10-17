@@ -355,6 +355,7 @@ impl App {
         if let Some(kind) = track.instrument_kind {
             let instrument_name = match kind {
                 vibez_core::midi::InstrumentKind::SubtractiveSynth => "Synth",
+                vibez_core::midi::InstrumentKind::WavetableSynth => "Wavetable",
                 vibez_core::midi::InstrumentKind::Sampler => "Sampler",
                 vibez_core::midi::InstrumentKind::DrumRack => "Drum Rack",
             };

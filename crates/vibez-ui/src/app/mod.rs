@@ -193,6 +193,7 @@ mod sampler_devices;
 mod synth_devices;
 mod tasks;
 mod tracked_request;
+mod wavetable_devices;
 
 pub(crate) use audio_tasks::*;
 use drum_rack_preparation::*;

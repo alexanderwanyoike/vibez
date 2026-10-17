@@ -216,7 +216,7 @@ impl<'a> SynthView<'a> {
                 vertical_rule(),
                 self.filter(layout),
                 vertical_rule(),
-                self.envelope(layout, self.panel.filter_envelope, true),
+                self.envelope(layout, self.panel.second_envelope, true),
             ]
             .spacing(10)
             .into(),
@@ -235,7 +235,7 @@ impl<'a> SynthView<'a> {
             .spacing(10)
             .into(),
             (Tier::Compact, SynthPage::Envelope) => {
-                self.envelope(layout, self.panel.filter_envelope, true)
+                self.envelope(layout, self.panel.second_envelope, true)
             }
             (Tier::Compact, page) => self.page(layout, page),
         };
@@ -374,7 +374,7 @@ impl<'a> SynthView<'a> {
                 segmented(
                     &[(false, "Amp"), (true, "Filter")],
                     filter,
-                    move |filter| Message::InstrumentCard(InstrumentCardMsg::ShowFilterEnvelope(
+                    move |filter| Message::InstrumentCard(InstrumentCardMsg::ShowSecondEnvelope(
                         track_id, filter
                     )),
                     self.accent,

@@ -81,6 +81,9 @@ impl App {
             Some(InstrumentKind::SubtractiveSynth) => Some(InstrumentStateInfo::SubtractiveSynth {
                 params: track.instrument_params.clone(),
             }),
+            Some(InstrumentKind::WavetableSynth) => Some(InstrumentStateInfo::WavetableSynth {
+                params: track.instrument_params.clone(),
+            }),
             Some(InstrumentKind::Sampler) => Some(InstrumentStateInfo::Sampler {
                 params: track.instrument_params.clone(),
                 source: track.sample_source.clone(),

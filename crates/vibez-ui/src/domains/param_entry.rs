@@ -287,6 +287,31 @@ pub fn param_format(
                 _ => ParamFormat::for_descriptor(descriptor),
             }
         }
+        (DevicePresetKind::Instrument(InstrumentKind::WavetableSynth), index) => {
+            use crate::domains::wavetable::{
+                DEST_NAMES, FILTER_NAMES, LFO_SHAPE_NAMES, TABLE_NAMES,
+            };
+            use vibez_instruments::wavetable::param;
+            use vibez_instruments::wavetable_params::osc;
+            let whole = |unit| ParamFormat::Number { decimals: 0, unit };
+            if index < param::FILTER_TYPE {
+                return match index % osc::COUNT {
+                    osc::TABLE => ParamFormat::Names(&TABLE_NAMES),
+                    osc::DETUNE => whole("ct"),
+                    osc::UNISON => whole(""),
+                    osc::OCTAVE => whole("oct"),
+                    _ => ParamFormat::for_descriptor(descriptor),
+                };
+            }
+            match index {
+                param::FILTER_TYPE => ParamFormat::Names(&FILTER_NAMES),
+                param::LFO_SHAPE => ParamFormat::Names(&LFO_SHAPE_NAMES),
+                param::LFO_DEST | param::ENV2_DEST => ParamFormat::Names(&DEST_NAMES),
+                param::ENV2_AMOUNT => ParamFormat::Percent,
+                param::VOICES => whole(""),
+                _ => ParamFormat::for_descriptor(descriptor),
+            }
+        }
         (DevicePresetKind::Instrument(InstrumentKind::SubtractiveSynth), index) => {
             use vibez_instruments::synth::param;
             match index {

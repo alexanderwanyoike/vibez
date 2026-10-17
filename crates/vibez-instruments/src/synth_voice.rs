@@ -59,6 +59,24 @@ pub struct Voice {
     moved: Option<(Coefficients, u8)>,
 }
 
+impl crate::poly::PolyVoice for Voice {
+    fn pitch(&self) -> u8 {
+        self.pitch
+    }
+
+    fn age(&self) -> u64 {
+        self.age
+    }
+
+    fn active(&self) -> bool {
+        self.amp.active()
+    }
+
+    fn released(&self) -> bool {
+        self.amp.released()
+    }
+}
+
 impl Voice {
     /// Starts `pitch`, gliding from `from` over `glide_frames` when given.
     /// The oscillators keep their phase and the envelopes their level, so
@@ -104,10 +122,6 @@ impl Voice {
 
     pub fn active(&self) -> bool {
         self.amp.active()
-    }
-
-    pub fn released(&self) -> bool {
-        self.amp.released()
     }
 
     /// The pitch the voice is sounding now, in semitones.

@@ -5257,6 +5257,7 @@ dependencies = [
 name = "vibez-instruments"
 version = "0.4.1"
 dependencies = [
+ "rustfft",
  "vibez-core",
 ]
 

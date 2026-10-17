@@ -46,6 +46,7 @@ pub mod synth;
 pub mod timeline_editor;
 pub mod transport;
 pub mod view;
+pub mod wavetable;
 
 use vibez_engine::commands::EngineCommand;
 

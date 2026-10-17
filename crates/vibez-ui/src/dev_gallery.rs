@@ -2619,7 +2619,7 @@ impl SynthGallery {
                         (COMPACT_W + 16.0, 330.0),
                         InstrumentPanel {
                             page: SynthPage::Envelope.index(),
-                            filter_envelope: true,
+                            second_envelope: true,
                             ..Default::default()
                         }
                     ),
@@ -2660,6 +2660,222 @@ pub fn run_synth() -> iced::Result {
     .font(crate::typography::PLEX_MONO_MEDIUM_BYTES)
     .font(crate::typography::PLEX_MONO_SEMIBOLD_BYTES)
     .run_with(|| (SynthGallery::new(), iced::Task::none()))
+}
+
+/// Native Wavetable Synth at each width tier, tab and height it adapts to,
+/// on the concept's Glass Motion, with scenes at the bodies the default and
+/// minimum detail panels give an instrument card.
+struct WavetableGallery {
+    track: ProjectTrack,
+}
+
+impl WavetableGallery {
+    fn new() -> Self {
+        use crate::domains::device_params::DeviceParams;
+        use vibez_core::device_preset::DevicePresetKind;
+        use vibez_core::midi::InstrumentKind;
+        let mut track = ProjectTrack::new(TrackId::new(), "Pads".into(), 0);
+        track.kind = vibez_core::midi::TrackKind::Midi;
+        track.has_instrument = true;
+        track.instrument_kind = Some(InstrumentKind::WavetableSynth);
+        track.instrument_params = vibez_instruments::wavetable::WAVETABLE_PARAMS
+            .iter()
+            .map(|d| d.default)
+            .collect();
+        let glass_motion = crate::domains::device_presets::presets_for(
+            DevicePresetKind::Instrument(InstrumentKind::WavetableSynth),
+        )
+        .into_iter()
+        .find(|preset| preset.name() == "Glass Motion");
+        let updates = glass_motion.and_then(|preset| {
+            crate::domains::device_presets::prepare_updates(
+                DeviceParams::instrument(&track)?,
+                &preset,
+            )
+            .ok()
+        });
+        for (index, value) in updates.unwrap_or_default() {
+            track.instrument_params[index] = value;
+        }
+        Self { track }
+    }
+
+    fn scene<'a>(
+        &'a self,
+        label: &'static str,
+        card_width: f32,
+        section: (f32, f32),
+        panel: crate::domains::instrument_card::InstrumentPanel,
+    ) -> Element<'a, Message> {
+        let accent = th::track_color(0);
+        let track_id = self.track.id;
+        let Some(device) = crate::domains::device_params::DeviceParams::instrument(&self.track)
+        else {
+            return text("no wavetable").into();
+        };
+        let body = iced::widget::responsive(move |size| {
+            crate::widgets::wavetable_device::WavetableView {
+                track_id,
+                device,
+                accent,
+                panel: panel.clone(),
+                entry: None,
+            }
+            .view(
+                crate::widgets::device_preset_bar::view(
+                    track_id,
+                    device,
+                    None,
+                    accent,
+                    crate::widgets::wavetable_device::preset_bar_width(size),
+                ),
+                size,
+            )
+        });
+        let title = crate::widgets::device_chrome::title_bar(
+            row![
+                text("\u{25CF}").size(8).color(accent),
+                text("Wavetable Synth").size(11).color(th::text())
+            ]
+            .spacing(5)
+            .align_y(iced::Alignment::Center),
+        );
+        let card = crate::widgets::device_chrome::card(
+            column![title, body].width(Length::Fixed(card_width)),
+        );
+        column![
+            text(label).size(11).color(th::text_dim()),
+            container(row![card].height(Length::Fill))
+                .padding(8)
+                .width(section.0)
+                .height(section.1)
+                .style(|_theme: &Theme| container::Style {
+                    background: Some(th::bg_dark().into()),
+                    border: iced::Border {
+                        color: th::border(),
+                        width: 1.0,
+                        radius: 0.0.into(),
+                    },
+                    ..Default::default()
+                }),
+        ]
+        .spacing(4)
+        .into()
+    }
+
+    fn view(&self) -> Element<'_, Message> {
+        use crate::domains::instrument_card::InstrumentPanel;
+        use crate::domains::wavetable::WavetablePage;
+        use crate::widgets::wavetable_device::{COMPACT_W, FULL_W};
+        let full = FULL_W + 40.0;
+        let medium = 760.0;
+        // Sections that give a card the bodies the default 280 px and
+        // minimum 180 px detail panels do.
+        let (default, minimum) = (210.0, 110.0);
+        let page = |page: WavetablePage| InstrumentPanel {
+            page: page.index(),
+            ..Default::default()
+        };
+        container(
+            column![
+                row![
+                    self.scene(
+                        "Full, tall (overview)",
+                        full,
+                        (full + 16.0, 430.0),
+                        page(WavetablePage::Oscillators)
+                    ),
+                    self.scene(
+                        "Compact, Filter tab",
+                        COMPACT_W,
+                        (COMPACT_W + 16.0, 330.0),
+                        page(WavetablePage::Filter)
+                    ),
+                ]
+                .spacing(24),
+                row![
+                    self.scene(
+                        "Medium, Oscillators tab",
+                        medium,
+                        (medium + 16.0, 330.0),
+                        page(WavetablePage::Oscillators)
+                    ),
+                    self.scene(
+                        "Medium, Envelopes tab, default panel",
+                        medium,
+                        (medium + 16.0, default),
+                        page(WavetablePage::Envelopes)
+                    ),
+                ]
+                .spacing(24),
+                row![
+                    self.scene(
+                        "Full, Oscillators tab, default panel",
+                        full,
+                        (full + 16.0, default),
+                        page(WavetablePage::Oscillators)
+                    ),
+                    self.scene(
+                        "Compact, Osc B, default panel",
+                        COMPACT_W,
+                        (COMPACT_W + 16.0, default),
+                        InstrumentPanel {
+                            second_oscillator: true,
+                            ..Default::default()
+                        }
+                    ),
+                ]
+                .spacing(24),
+                row![
+                    self.scene(
+                        "Compact, Modulation tab, default panel",
+                        COMPACT_W,
+                        (COMPACT_W + 16.0, default),
+                        page(WavetablePage::Modulation)
+                    ),
+                    self.scene(
+                        "Full, minimum panel",
+                        full,
+                        (full + 16.0, minimum),
+                        page(WavetablePage::Oscillators)
+                    ),
+                ]
+                .spacing(24),
+                self.scene(
+                    "Compact, Envelopes tab, minimum panel",
+                    COMPACT_W,
+                    (COMPACT_W + 16.0, minimum),
+                    page(WavetablePage::Envelopes)
+                ),
+            ]
+            .spacing(14),
+        )
+        .padding(16)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .style(|_theme: &Theme| container::Style {
+            background: Some(th::bg_surface().into()),
+            ..Default::default()
+        })
+        .into()
+    }
+}
+
+pub fn run_wavetable() -> iced::Result {
+    iced::application(
+        "Wavetable Synth device gallery",
+        |_: &mut WavetableGallery, _: Message| {},
+        WavetableGallery::view,
+    )
+    .theme(|_| th::vibez_theme())
+    .antialiasing(true)
+    .window_size((1900.0, 1500.0))
+    .font(crate::icons::ICON_FONT_BYTES)
+    .font(crate::typography::PLEX_SANS_CONDENSED_MEDIUM_BYTES)
+    .font(crate::typography::PLEX_SANS_CONDENSED_SEMIBOLD_BYTES)
+    .font(crate::typography::PLEX_MONO_MEDIUM_BYTES)
+    .font(crate::typography::PLEX_MONO_SEMIBOLD_BYTES)
+    .run_with(|| (WavetableGallery::new(), iced::Task::none()))
 }
 
 /// Native Sampler at each width tier, tab and height it adapts to, looping
@@ -2789,9 +3005,9 @@ impl SamplerGallery {
         use crate::widgets::sampler_device::COMPACT_W;
         let full = 1_100.0;
         let medium = 760.0;
-        let page = |page: SamplerPage, filter_envelope: bool| InstrumentPanel {
+        let page = |page: SamplerPage, second_envelope: bool| InstrumentPanel {
             page: page.index(),
-            filter_envelope,
+            second_envelope,
             ..Default::default()
         };
         container(

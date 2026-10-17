@@ -6,3 +6,4 @@ license.workspace = true
 
 [dependencies]
 vibez-core = { workspace = true }
+rustfft = { workspace = true }

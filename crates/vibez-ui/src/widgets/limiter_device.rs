@@ -19,7 +19,7 @@ use crate::theme as th;
 use crate::widgets::device_controls::{
     disclosure, heading, plot_band, rule, switch_width, vertical_rule, Param, LABEL_SIZE, METER_W,
 };
-use crate::widgets::device_layout::{KNOB_ROW_H, LINE_H};
+use crate::widgets::device_layout::{pack, KNOB_ROW_H, LINE_H};
 use crate::widgets::limiter_display::{HistoryPlot, ReductionMeter};
 
 const PAD: f32 = 10.0;
@@ -148,26 +148,6 @@ pub fn arrange(size: Size, advanced: bool, lines: Lines) -> Arrangement {
     }
 }
 
-/// Splits controls `widths` wide into lines no wider than `width`.
-pub fn pack(widths: &[f32], width: f32) -> Vec<std::ops::Range<usize>> {
-    let mut lines = Vec::new();
-    let (mut start, mut used) = (0, 0.0);
-    for (index, item) in widths.iter().enumerate() {
-        let gap = if index > start { LINE_GAP } else { 0.0 };
-        if index > start && used + gap + item > width {
-            lines.push(start..index);
-            start = index;
-            used = *item;
-        } else {
-            used += gap + item;
-        }
-    }
-    if start < widths.len() {
-        lines.push(start..widths.len());
-    }
-    lines
-}
-
 pub struct LimiterView<'a> {
     pub track_id: TrackId,
     pub effect: &'a UiEffect,
@@ -261,9 +241,9 @@ impl<'a> LimiterView<'a> {
         let advanced = self.widths(&self.advanced_controls(false));
         let all: Vec<f32> = main.iter().chain(&advanced).copied().collect();
         Lines {
-            main: pack(&main, width).len(),
-            advanced: pack(&advanced, width).len(),
-            all: pack(&all, width).len(),
+            main: pack(&main, width, LINE_GAP).len(),
+            advanced: pack(&advanced, width, LINE_GAP).len(),
+            all: pack(&all, width, LINE_GAP).len(),
         }
     }
 
@@ -290,7 +270,7 @@ impl<'a> LimiterView<'a> {
         ];
         if layout.advanced_only {
             // What the closed card's line could not hold leads Advanced.
-            let shown = pack(&self.widths(&self.main_controls(false)), inner)
+            let shown = pack(&self.widths(&self.main_controls(false)), inner, LINE_GAP)
                 .first()
                 .map_or(0, |line| line.end);
             let mut controls: Vec<Control<'a>> =
@@ -346,7 +326,7 @@ impl<'a> LimiterView<'a> {
         height: f32,
         width: f32,
     ) -> Element<'a, Message> {
-        let lines = pack(&self.widths(&controls), width);
+        let lines = pack(&self.widths(&controls), width, LINE_GAP);
         let fits = (((height + 1.0) / (LINE_H + 1.0)) as usize).max(1);
         let mut column = column![].spacing(1);
         for line in lines.into_iter().take(fits) {
@@ -515,9 +495,9 @@ mod tests {
             .copied()
             .collect();
         Lines {
-            main: pack(&MAIN_WIDTHS, inner).len(),
-            advanced: pack(&ADVANCED_WIDTHS, inner).len(),
-            all: pack(&all, inner).len(),
+            main: pack(&MAIN_WIDTHS, inner, LINE_GAP).len(),
+            advanced: pack(&ADVANCED_WIDTHS, inner, LINE_GAP).len(),
+            all: pack(&all, inner, LINE_GAP).len(),
         }
     }
 
@@ -542,14 +522,6 @@ mod tests {
             used += layout.extra + 1.0;
         }
         used
-    }
-
-    #[test]
-    fn lines_break_where_the_next_control_would_not_fit() {
-        assert_eq!(pack(&[100.0, 100.0, 100.0], 210.0), vec![0..2, 2..3]);
-        assert_eq!(pack(&[100.0, 100.0], 210.0), vec![0..2]);
-        // A control wider than the line still gets a line to itself.
-        assert_eq!(pack(&[300.0, 50.0], 210.0), vec![0..1, 1..2]);
     }
 
     #[test]

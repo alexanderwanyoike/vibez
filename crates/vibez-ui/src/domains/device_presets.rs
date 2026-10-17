@@ -311,6 +311,44 @@ const AUTO_PAN_KEYS: [(usize, &str, bool); 9] = {
 
 /// Every Subtractive Synth control. Shapes, types, modes and counts are
 /// whole.
+/// Every Wavetable Synth parameter, in index order.
+const WAVETABLE_KEYS: [&str; vibez_instruments::wavetable::param::COUNT] = [
+    "osc_a_table",
+    "osc_a_position",
+    "osc_a_warp",
+    "osc_a_detune",
+    "osc_a_unison",
+    "osc_a_level",
+    "osc_a_octave",
+    "osc_b_table",
+    "osc_b_position",
+    "osc_b_warp",
+    "osc_b_detune",
+    "osc_b_unison",
+    "osc_b_level",
+    "osc_b_octave",
+    "filter_type",
+    "cutoff",
+    "resonance",
+    "drive",
+    "attack",
+    "decay",
+    "sustain",
+    "release",
+    "lfo_shape",
+    "lfo_rate",
+    "lfo_amount",
+    "lfo_destination",
+    "env2_attack",
+    "env2_decay",
+    "env2_sustain",
+    "env2_release",
+    "env2_amount",
+    "env2_destination",
+    "voices",
+    "output_db",
+];
+
 const SYNTH_KEYS: [&str; vibez_instruments::synth::param::COUNT] = [
     "waveform",
     "attack",
@@ -452,6 +490,9 @@ fn parameter_keys(device: &DeviceParams) -> Result<Vec<PresetParam>, String> {
         DevicePresetKind::Instrument(InstrumentKind::Sampler) => {
             return Ok(sampler_keys());
         }
+        DevicePresetKind::Instrument(InstrumentKind::WavetableSynth) => {
+            return Ok(wavetable_keys());
+        }
         DevicePresetKind::Instrument(_) => {
             return Err("Presets are not yet supported by this built-in device".into());
         }
@@ -553,6 +594,7 @@ pub fn presets_for(kind: DevicePresetKind) -> Vec<DevicePreset> {
         DevicePresetKind::Effect(effect_type) => factory_presets(effect_type),
         DevicePresetKind::Instrument(InstrumentKind::SubtractiveSynth) => synth_factory_presets(),
         DevicePresetKind::Instrument(InstrumentKind::Sampler) => sampler_factory_presets(),
+        DevicePresetKind::Instrument(InstrumentKind::WavetableSynth) => wavetable_factory_presets(),
         DevicePresetKind::Instrument(_) => Vec::new(),
     }
 }
@@ -653,6 +695,137 @@ fn sampler_factory_presets() -> Vec<DevicePreset> {
         DevicePresetKind::Instrument(InstrumentKind::Sampler),
         &sampler_keys(),
         vibez_instruments::sampler::SAMPLER_PARAMS,
+        &presets,
+    )
+}
+
+fn wavetable_keys() -> Vec<PresetParam> {
+    WAVETABLE_KEYS
+        .iter()
+        .enumerate()
+        .map(|(index, key)| (index, *key, vibez_instruments::wavetable::is_whole(index)))
+        .collect()
+}
+
+fn wavetable_factory_presets() -> Vec<DevicePreset> {
+    use vibez_instruments::wavetable::{dest, filter_type, lfo_shape};
+    use vibez_instruments::wavetables::table;
+    let presets: [(&str, &[(&str, f32)]); 8] = [
+        ("Init", &[]),
+        (
+            "Glass Motion",
+            &[
+                ("osc_a_table", table::HARMONIC as f32),
+                ("osc_a_position", 0.42),
+                ("osc_a_warp", 0.18),
+                ("osc_a_detune", 9.0),
+                ("osc_a_unison", 4.0),
+                ("osc_b_table", table::BASIC_SHAPES as f32),
+                ("osc_b_position", 0.42),
+                ("osc_b_warp", 0.18),
+                ("osc_b_detune", 9.0),
+                ("osc_b_unison", 4.0),
+                ("osc_b_level", 0.5),
+                ("cutoff", 2_400.0),
+                ("resonance", 0.32),
+                ("drive", 0.06),
+                ("decay", 0.28),
+                ("sustain", 0.62),
+                ("release", 0.76),
+                ("lfo_amount", 0.24),
+                ("env2_amount", 0.46),
+                ("env2_destination", dest::CUTOFF as f32),
+            ],
+        ),
+        (
+            "Supersaw",
+            &[
+                ("osc_a_table", table::BASIC_SHAPES as f32),
+                ("osc_a_unison", 7.0),
+                ("osc_a_detune", 25.0),
+                ("osc_b_position", 0.66),
+                ("osc_b_table", table::BASIC_SHAPES as f32),
+                ("osc_b_octave", -1.0),
+                ("osc_b_level", 0.4),
+                ("cutoff", 6_000.0),
+                ("release", 0.5),
+            ],
+        ),
+        (
+            "Vowel Pad",
+            &[
+                ("osc_a_table", table::FORMANT as f32),
+                ("osc_a_position", 0.2),
+                ("osc_a_unison", 3.0),
+                ("osc_a_detune", 12.0),
+                ("lfo_shape", lfo_shape::TRIANGLE as f32),
+                ("lfo_rate", 0.2),
+                ("lfo_amount", 0.6),
+                ("lfo_destination", dest::OSC_A_POSITION as f32),
+                ("attack", 0.6),
+                ("release", 1.8),
+            ],
+        ),
+        (
+            "Pluck",
+            &[
+                ("osc_a_table", table::HARMONIC as f32),
+                ("osc_a_position", 0.8),
+                ("cutoff", 400.0),
+                ("resonance", 0.25),
+                ("sustain", 0.0),
+                ("decay", 0.6),
+                ("release", 0.4),
+                ("env2_amount", 0.8),
+                ("env2_decay", 0.25),
+            ],
+        ),
+        (
+            "Sync Bass",
+            &[
+                ("osc_a_table", table::SYNC as f32),
+                ("osc_a_position", 0.35),
+                ("osc_a_octave", -1.0),
+                ("filter_type", filter_type::LP24 as f32),
+                ("cutoff", 1_200.0),
+                ("drive", 0.3),
+                ("env2_amount", 0.5),
+                ("env2_destination", dest::OSC_A_POSITION as f32),
+                ("voices", 1.0),
+            ],
+        ),
+        (
+            "Bell",
+            &[
+                ("osc_a_table", table::HARMONIC as f32),
+                ("osc_a_position", 0.3),
+                ("osc_a_warp", 0.5),
+                ("osc_b_table", table::HARMONIC as f32),
+                ("osc_b_position", 0.7),
+                ("osc_b_octave", 2.0),
+                ("osc_b_level", 0.3),
+                ("sustain", 0.0),
+                ("decay", 1.8),
+                ("release", 1.8),
+            ],
+        ),
+        (
+            "Pulse Lead",
+            &[
+                ("osc_a_table", table::PULSE as f32),
+                ("osc_a_position", 0.3),
+                ("lfo_rate", 5.0),
+                ("lfo_amount", 0.15),
+                ("lfo_destination", dest::OSC_A_POSITION as f32),
+                ("cutoff", 5_000.0),
+                ("voices", 1.0),
+            ],
+        ),
+    ];
+    keyed_presets(
+        DevicePresetKind::Instrument(InstrumentKind::WavetableSynth),
+        &wavetable_keys(),
+        vibez_instruments::wavetable::WAVETABLE_PARAMS,
         &presets,
     )
 }
@@ -2770,6 +2943,45 @@ mod presentation_tests {
             .map(|descriptor| descriptor.default)
             .collect();
         track
+    }
+
+    fn wavetable_track() -> crate::state::ProjectTrack {
+        let mut track = crate::state::ProjectTrack::new(TrackId::new(), "Pads".into(), 0);
+        track.has_instrument = true;
+        track.instrument_kind = Some(InstrumentKind::WavetableSynth);
+        track.instrument_params = vibez_instruments::wavetable::WAVETABLE_PARAMS
+            .iter()
+            .map(|descriptor| descriptor.default)
+            .collect();
+        track
+    }
+
+    #[test]
+    fn wavetable_factory_presets_are_valid_distinct_and_start_from_init() {
+        let track = wavetable_track();
+        let device = DeviceParams::instrument(&track).unwrap();
+        let presets = presets_for(device.kind);
+        assert_eq!(presets[0].name(), "Init");
+        assert!(presets.iter().any(|preset| preset.name() == "Glass Motion"));
+        assert_eq!(prepare_updates(device, &presets[0]), Ok(Vec::new()));
+        for preset in &presets[1..] {
+            let mut applied = wavetable_track();
+            for (index, value) in prepare_updates(device, preset).unwrap() {
+                applied.instrument_params[index] = value;
+            }
+            assert_ne!(
+                applied.instrument_params,
+                track.instrument_params,
+                "{}",
+                preset.name()
+            );
+            let captured = capture(DeviceParams::instrument(&applied).unwrap(), preset.name());
+            assert_eq!(captured.as_ref(), Ok(preset));
+        }
+        let mut names: Vec<_> = presets.iter().map(DevicePreset::name).collect();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(names.len(), presets.len(), "names are unique");
     }
 
     #[test]
