@@ -213,6 +213,16 @@ fn editor_button<'a>(gui_key: Option<PluginGuiKey>) -> Element<'a, Message> {
     .into()
 }
 
+/// The device chain's scrollbar.
+pub const CHAIN_BAR_W: f32 = 7.0;
+
+/// The room a chain `chain_width` wide keeps beneath its cards for the
+/// scrollbar in a section `available` wide.
+pub fn chain_bar_room(chain_width: f32, available: f32) -> f32 {
+    let _ = (chain_width, available);
+    0.0
+}
+
 /// Card for a hosted CLAP or VST3 instrument, matching hosted effects.
 pub fn plugin_instrument_card<'a>(
     track_id: vibez_core::id::TrackId,
@@ -259,6 +269,13 @@ mod tests {
         expanded: 760.0,
         max: 1000.0,
     };
+
+    #[test]
+    fn only_an_overflowing_chain_keeps_room_for_its_scrollbar() {
+        assert_eq!(chain_bar_room(900.0, 1000.0), 0.0);
+        assert_eq!(chain_bar_room(1000.0, 1000.0), 0.0);
+        assert!(chain_bar_room(1200.0, 1000.0) > CHAIN_BAR_W);
+    }
 
     #[test]
     fn a_crowded_chain_keeps_each_device_expanded_and_scrolls() {
