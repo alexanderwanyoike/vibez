@@ -11,6 +11,7 @@ mod synth_filter;
 pub mod synth_oscillator;
 pub mod synth_params;
 mod synth_voice;
+pub mod wavetables;
 
 use std::sync::Arc;
 
