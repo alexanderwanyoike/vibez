@@ -13,6 +13,7 @@ pub use crate::wavetable_params::{
     dest, filter_type, is_whole, lfo_shape, param, resonance_q, WAVETABLE_PARAMS,
 };
 use crate::wavetable_params::{osc, MAX_UNISON, MAX_VOICES};
+pub use crate::wavetable_voice::Warp;
 use crate::wavetable_voice::{Frame, OscFrame, Voice};
 use crate::wavetables::{table, tables};
 

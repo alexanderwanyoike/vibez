@@ -94,7 +94,8 @@ impl App {
         let synth = crate::domains::synth::is_native_synth(track);
         let sampler = crate::domains::sampler::is_native_sampler(track);
         let drum_rack = crate::domains::sampler::is_native_drum_rack(track);
-        if synth || sampler || drum_rack {
+        let wavetable = crate::domains::wavetable::is_native_wavetable(track);
+        if synth || sampler || drum_rack || wavetable {
             cards.push(None);
         } else if let Some((card, width)) = self.instrument_card(track_id, track, track_color) {
             cards.push(Some(card));
@@ -156,7 +157,7 @@ impl App {
                 self.state.transport.sample_rate,
             )));
         }
-        let shares = flexible.len() + usize::from(synth || sampler || drum_rack);
+        let shares = flexible.len() + usize::from(synth || sampler || drum_rack || wavetable);
         if shares > 0 {
             let spacing = CHAIN_SPACING * cards.len().saturating_sub(1) as f32;
             let share = (available_width - used - spacing) / shares as f32;
@@ -174,6 +175,14 @@ impl App {
                     track,
                     track_color,
                     crate::widgets::sampler_device::card_width(share),
+                ));
+            }
+            if wavetable {
+                cards[0] = Some(self.wavetable_card(
+                    track_id,
+                    track,
+                    track_color,
+                    crate::widgets::wavetable_device::card_width(share),
                 ));
             }
             if drum_rack {

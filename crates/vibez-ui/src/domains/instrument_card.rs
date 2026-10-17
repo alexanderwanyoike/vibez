@@ -12,6 +12,12 @@ pub enum InstrumentCardMsg {
     /// Shows the second envelope (the filter's, on the Subtractive Synth and
     /// Sampler) instead of the level's, or back.
     ShowSecondEnvelope(TrackId, bool),
+    /// Shows a narrow Wavetable Synth's second oscillator instead of its
+    /// first, or back.
+    ShowSecondOscillator(TrackId, bool),
+    /// Shows the part of its controls the shortest Wavetable Synth card
+    /// sets on its one line.
+    ShowLinePart(TrackId, usize),
     /// Shows a narrow Drum Rack's selected pad instead of its pads, or back.
     ShowPadSampler(TrackId, bool),
     /// A pad's name as typed so far.
@@ -25,6 +31,8 @@ impl InstrumentCardMsg {
         match self {
             Self::ShowPage(id, _)
             | Self::ShowSecondEnvelope(id, _)
+            | Self::ShowSecondOscillator(id, _)
+            | Self::ShowLinePart(id, _)
             | Self::ShowPadSampler(id, _)
             | Self::EditPadName(id, ..)
             | Self::CommitPadName(id) => *id,
@@ -36,6 +44,8 @@ impl InstrumentCardMsg {
 pub struct InstrumentPanel {
     pub page: usize,
     pub second_envelope: bool,
+    pub second_oscillator: bool,
+    pub line_part: usize,
     pub pad_sampler: bool,
     /// The pad being named and its name so far.
     pub pad_name: Option<(usize, String)>,
@@ -48,7 +58,9 @@ impl InstrumentPanel {
     pub fn update(&mut self, message: InstrumentCardMsg) -> Option<(usize, String)> {
         match message {
             InstrumentCardMsg::ShowPage(_, page) => self.page = page,
-            InstrumentCardMsg::ShowSecondEnvelope(_, filter) => self.second_envelope = filter,
+            InstrumentCardMsg::ShowSecondEnvelope(_, second) => self.second_envelope = second,
+            InstrumentCardMsg::ShowSecondOscillator(_, second) => self.second_oscillator = second,
+            InstrumentCardMsg::ShowLinePart(_, part) => self.line_part = part,
             InstrumentCardMsg::ShowPadSampler(_, sampler) => self.pad_sampler = sampler,
             InstrumentCardMsg::EditPadName(_, pad, name) => self.pad_name = Some((pad, name)),
             InstrumentCardMsg::CommitPadName(_) => return self.pad_name.take(),
