@@ -608,6 +608,47 @@ impl<'a> DrumRackView<'a> {
             .into()
     }
 
+    /// A bank's letter and map of its filled pads, choosing it.
+    fn bank_button(&self, bank: usize) -> Element<'a, Message> {
+        let current = self.bank();
+        let first = bank * DRUM_RACK_BANK_SIZE;
+        let filled = std::array::from_fn(|offset| self.pads[first + offset].holds_sample());
+        let selected = bank == current;
+        let accent = self.accent;
+        let map = canvas(BankView {
+            letter: char::from(b'A' + bank as u8),
+            filled,
+            selected,
+            firing: self.banks_firing[bank],
+            accent,
+        })
+        .width(30.0)
+        .height(BANK_ROW_H - 6.0);
+        button(map)
+            .on_press(Message::Devices(DevicesMsg::SelectDrumRackBank(
+                self.track_id,
+                bank,
+            )))
+            .padding([1, 4])
+            .style(move |_theme: &Theme, status| button::Style {
+                background: Some(
+                    if matches!(status, button::Status::Hovered | button::Status::Pressed) {
+                        th::bg_hover()
+                    } else {
+                        th::perform_inset()
+                    }
+                    .into(),
+                ),
+                border: iced::Border {
+                    color: if selected { accent } else { th::border() },
+                    width: 1.0,
+                    radius: FACE_RADIUS.into(),
+                },
+                ..Default::default()
+            })
+            .into()
+    }
+
     fn banks(&self, width: f32) -> Element<'a, Message> {
         let current = self.bank();
         let labelled = width >= LABELLED_BANKS_W;
@@ -616,47 +657,7 @@ impl<'a> DrumRackView<'a> {
             strip = strip.push(heading("Banks"));
         }
         for bank in 0..DRUM_RACK_BANK_COUNT {
-            let first = bank * DRUM_RACK_BANK_SIZE;
-            let filled = std::array::from_fn(|offset| self.pads[first + offset].holds_sample());
-            let selected = bank == current;
-            let accent = self.accent;
-            let map = canvas(BankView {
-                letter: char::from(b'A' + bank as u8),
-                filled,
-                selected,
-                firing: self.banks_firing[bank],
-                accent,
-            })
-            .width(30.0)
-            .height(BANK_ROW_H - 6.0);
-            strip = strip.push(
-                button(map)
-                    .on_press(Message::Devices(DevicesMsg::SelectDrumRackBank(
-                        self.track_id,
-                        bank,
-                    )))
-                    .padding([1, 4])
-                    .style(move |_theme: &Theme, status| button::Style {
-                        background:
-                            Some(
-                                if matches!(
-                                    status,
-                                    button::Status::Hovered | button::Status::Pressed
-                                ) {
-                                    th::bg_hover()
-                                } else {
-                                    th::perform_inset()
-                                }
-                                .into(),
-                            ),
-                        border: iced::Border {
-                            color: if selected { accent } else { th::border() },
-                            width: 1.0,
-                            radius: FACE_RADIUS.into(),
-                        },
-                        ..Default::default()
-                    }),
-            );
+            strip = strip.push(self.bank_button(bank));
         }
         if labelled {
             strip = strip
