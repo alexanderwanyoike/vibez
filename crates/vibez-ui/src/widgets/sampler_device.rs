@@ -653,6 +653,15 @@ mod tests {
     }
 
     #[test]
+    fn the_side_column_is_never_left_empty_while_a_line_fits() {
+        // The wide card's sample band at the minimum panel.
+        let room = arrange(Size::new(MEDIUM_W, MINIMUM_BODY_H)).sample - PAD;
+        assert!(room >= LINE_H, "{room}");
+        assert!(!side_rows(room).is_empty());
+        assert!(side_rows(LINE_H - 1.0).is_empty());
+    }
+
+    #[test]
     fn the_shortest_card_still_shows_the_waveform() {
         let shortest = arrange(Size::new(MAX_W, 82.0));
         assert_eq!(shortest.section, 0.0);
