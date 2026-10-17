@@ -29,6 +29,7 @@ fn pulse(track_id: TrackId) -> EngineCommand {
         signal[sample] = 1.0;
     }
     EngineCommand::AddClip {
+        insertion: crate::clip_insertion::PreparedClipInsertion::new(),
         track_id,
         clip_id: ClipId::new(),
         audio: Arc::new(DecodedAudio {

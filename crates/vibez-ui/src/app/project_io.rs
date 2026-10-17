@@ -1,4 +1,4 @@
-//! Split out of app.rs; inherent methods on [`super::App`].
+//! Project persistence and loaded project runtime preparation.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -544,11 +544,11 @@ impl App {
                         track.drum_rack_pads = expand_drum_rack_pads(pads);
                         track.selected_drum_pad = 0;
                         for (pad_index, pad) in pads.iter().cloned().enumerate() {
-                            self.send_command(EngineCommand::SetDrumRackPadState {
-                                track_id: track_info.id,
+                            self.send_command(EngineCommand::set_drum_rack_pad_state(
+                                track_info.id,
                                 pad_index,
-                                state: pad,
-                            });
+                                pad,
+                            ));
                         }
                     }
                 }
@@ -557,7 +557,9 @@ impl App {
             for lane in &automation {
                 self.send_command(EngineCommand::SetAutomationLane {
                     track_id: track_info.id,
-                    lane: lane.clone(),
+                    insertion: vibez_engine::clip_insertion::PreparedAutomationLaneInsertion::new(
+                        lane.clone(),
+                    ),
                 });
             }
 
@@ -682,7 +684,9 @@ impl App {
             for lane in &automation {
                 self.send_command(EngineCommand::SetAutomationLane {
                     track_id: TrackId::MASTER,
-                    lane: lane.clone(),
+                    insertion: vibez_engine::clip_insertion::PreparedAutomationLaneInsertion::new(
+                        lane.clone(),
+                    ),
                 });
             }
         }
@@ -713,7 +717,9 @@ impl App {
             for lane in &automation {
                 self.send_command(EngineCommand::SetAutomationLane {
                     track_id: bus_info.id,
-                    lane: lane.clone(),
+                    insertion: vibez_engine::clip_insertion::PreparedAutomationLaneInsertion::new(
+                        lane.clone(),
+                    ),
                 });
             }
             Arc::make_mut(&mut self.state.project_tracks)
@@ -730,6 +736,7 @@ impl App {
                     .info
                     .resolved_start_marker(clip.audio.num_frames() as u64);
                 self.send_command(EngineCommand::AddClip {
+                    insertion: vibez_engine::clip_insertion::PreparedClipInsertion::new(),
                     track_id: clip.info.track_id,
                     clip_id: clip.info.id,
                     audio: Arc::clone(&clip.audio),
@@ -758,21 +765,23 @@ impl App {
         for note_clip in &loaded.project.arrange.note_clips {
             let start_marker_beats = note_clip.resolved_start_marker_beats();
             self.send_command(EngineCommand::AddNoteClip {
-                start_marker_beats,
                 track_id: note_clip.track_id,
-                clip_id: note_clip.id,
-                position_beats: note_clip.position_beats,
-                duration_beats: note_clip.duration_beats,
-                loop_enabled: note_clip.loop_enabled,
-                loop_start_beats: note_clip.loop_start_beats,
-                loop_end_beats: note_clip.loop_end_beats,
-                groove_grid: note_clip.groove_grid,
+                insertion: vibez_engine::clip_insertion::PreparedNoteClipInsertion::new(
+                    note_clip.id,
+                    note_clip.position_beats,
+                    note_clip.duration_beats,
+                    start_marker_beats,
+                    note_clip.loop_enabled,
+                    note_clip.loop_start_beats,
+                    note_clip.loop_end_beats,
+                    note_clip.groove_grid,
+                ),
             });
             for note in &note_clip.notes {
                 self.send_command(EngineCommand::AddNote {
                     track_id: note_clip.track_id,
                     clip_id: note_clip.id,
-                    note: *note,
+                    insertion: vibez_engine::clip_insertion::PreparedNoteInsertion::new(*note),
                 });
             }
             if self.state.find_track(note_clip.track_id).is_some() {
@@ -816,11 +825,11 @@ impl App {
                     slot.audio = Some(Arc::clone(&pad.audio));
                 }
             }
-            self.send_command(EngineCommand::SetDrumRackPadState {
-                track_id: pad.track_id,
-                pad_index: pad.pad_index,
-                state: pad.state,
-            });
+            self.send_command(EngineCommand::set_drum_rack_pad_state(
+                pad.track_id,
+                pad.pad_index,
+                pad.state,
+            ));
             self.send_command(EngineCommand::LoadDrumRackPadSample {
                 track_id: pad.track_id,
                 pad_index: pad.pad_index,

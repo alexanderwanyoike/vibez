@@ -1,7 +1,9 @@
 //! Section owners survive a blocked UI until their original allocation can be retired there.
 
 use super::*;
+use crate::events::SectionRecordStoppedEvent;
 use crate::playback_source::{EngineClip, PreparedPlaybackSource, PreparedSectionPlaybackSource};
+use graph_test_support::{graph_engine, routing_channel};
 use std::sync::{Arc, Weak};
 use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::id::ClipId;
@@ -51,8 +53,9 @@ fn setup() -> (
     rtrb::Consumer<EngineEvent>,
     TrackId,
 ) {
-    let (mut engine, mut commands, mut events) = AudioEngine::new();
     let track_id = TrackId::new();
+    let (mut engine, mut commands, mut events) =
+        graph_engine(&[routing_channel(track_id), routing_channel(TrackId::MASTER)]);
     commands.push(EngineCommand::SetSampleRate(8)).unwrap();
     commands.push(EngineCommand::SetBpm(120.0)).unwrap();
     commands.push(EngineCommand::add_track(track_id)).unwrap();
@@ -135,13 +138,13 @@ fn stopped_section_record_retains_original_count_in_owner_until_ui_delivery() {
     process_without_memory_operations(&mut engine);
 
     let retired = std::iter::from_fn(|| events.pop().ok()).find_map(|event| match event {
-        EngineEvent::SectionRecordStopped {
+        EngineEvent::SectionRecordStopped(SectionRecordStoppedEvent {
             section_id: actual,
             track_id: actual_track,
             started,
             retired,
             ..
-        } if actual == section_id => {
+        }) if actual == section_id => {
             assert_eq!(actual_track, track_id);
             assert!(!started);
             retired

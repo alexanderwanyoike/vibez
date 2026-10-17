@@ -3,14 +3,14 @@
 use super::*;
 
 impl AudioEngine {
-    pub(super) fn command_stop(&mut self) {
+    pub(super) fn command_stop(&mut self, allowance: &mut RetirementAllowance) {
         let capture_needs_closure = self.capture_needs_closure();
         self.cancel_presentation();
         self.stop_section_record();
         if capture_needs_closure {
-            self.stop_heard_capture();
+            self.stop_heard_capture(allowance);
         }
-        self.clear_clip_performance();
+        self.clear_clip_performance(allowance);
         self.transport.stop();
         self.arrangement_recording = false;
         self.clock_domain = ClockDomain::Arrange;
@@ -29,18 +29,18 @@ impl AudioEngine {
         if let Some(anchor) = self.stopped_note_repeat_anchor {
             self.reanchor_note_repeats(anchor, self.performance_position);
         }
-        self.present_event(EngineEvent::PlaybackStopped);
+        self.present_event(EngineEvent::PlaybackStopped, allowance);
     }
 
-    pub(super) fn command_play(&mut self) {
+    pub(super) fn command_play(&mut self, allowance: &mut RetirementAllowance) {
         let capture_needs_closure = self.capture_needs_closure();
         self.cancel_presentation();
         if capture_needs_closure {
-            self.stop_heard_capture();
+            self.stop_heard_capture(allowance);
         }
-        self.pending_playback_stop = false;
-        self.compensation_plan_fade = 0;
-        self.presentation_fault = false;
+        self.presentation_state.terminals.cancel_playback_stop();
+        self.output_gate.clear_plan_morph();
+        self.presentation_state.resume();
         if !self.transport.is_playing() {
             for track in self
                 .tracks
@@ -53,11 +53,9 @@ impl AudioEngine {
                 }
             }
         }
-        if let Some(routing) = self.routing.as_mut() {
-            routing.clear_history();
-        }
+        self.routing.clear_history();
         let was_clip_performance = self.clip_performance;
-        self.clear_clip_performance();
+        self.clear_clip_performance(allowance);
         self.clock_domain = ClockDomain::Arrange;
         if !self.arrangement_recording {
             self.transport
@@ -76,22 +74,22 @@ impl AudioEngine {
             } else {
                 EngineEvent::AuditionStarted
             };
-            self.present_event(event);
+            self.present_event(event, allowance);
         }
         self.performance_position = self.transport.position();
         self.stopped_note_repeat_anchor = None;
         let anchor = self.playing_note_repeat_anchor();
         self.reanchor_note_repeats(anchor, self.performance_position);
         if was_clip_performance {
-            self.clip_event(EngineEvent::PlaybackStarted);
+            self.clip_event(EngineEvent::PlaybackStarted, allowance);
         } else {
-            self.present_event(EngineEvent::PlaybackStarted);
+            self.present_event(EngineEvent::PlaybackStarted, allowance);
         }
     }
 
-    pub(super) fn command_seek(&mut self, pos: u64) {
+    pub(super) fn command_seek(&mut self, pos: u64, allowance: &mut RetirementAllowance) {
         if self.clock_domain == ClockDomain::Arrange && self.capture_needs_closure() {
-            self.stop_heard_capture();
+            self.stop_heard_capture(allowance);
         }
         self.transport.seek(pos);
         for track in &mut self.tracks {

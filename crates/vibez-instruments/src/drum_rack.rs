@@ -1,14 +1,17 @@
+//! Polyphonic drum pad playback with captured per-voice sample settings.
+
 use std::sync::Arc;
 
 use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::effect::ParamDescriptor;
 use vibez_core::midi::InstrumentKind;
 use vibez_core::track::{
-    drum_rack_pad_index, DrumPadState, DRUM_PAD_DEFAULT_FADE_MS, DRUM_PAD_MAX_FADE_MS,
-    DRUM_RACK_PAD_COUNT,
+    drum_rack_pad_index, DRUM_PAD_DEFAULT_FADE_MS, DRUM_PAD_MAX_FADE_MS, DRUM_RACK_PAD_COUNT,
 };
 
-use crate::Instrument;
+use crate::{Instrument, InstrumentMediaOwners, PreparedDrumPadState};
+#[cfg(test)]
+use vibez_core::track::DrumPadState;
 
 const MAX_VOICES: usize = 32;
 
@@ -52,7 +55,7 @@ struct Voice {
     active: bool,
     pad_index: usize,
     pitch: u8,
-    sample: Arc<DecodedAudio>,
+    sample: Option<Arc<DecodedAudio>>,
     position: f64,
     end_frame: usize,
     rendered_frames: usize,
@@ -74,10 +77,7 @@ impl Voice {
             active: false,
             pad_index: 0,
             pitch: 0,
-            sample: Arc::new(DecodedAudio {
-                channels: Vec::new(),
-                sample_rate: 44_100,
-            }),
+            sample: None,
             position: 0.0,
             end_frame: 0,
             rendered_frames: 0,
@@ -186,6 +186,7 @@ fn release_fade_gain(voice: &Voice) -> f32 {
 fn begin_release(voice: &mut Voice) {
     if voice.fade_out_frames == 0 {
         voice.active = false;
+        voice.sample = None;
     } else if voice.release_remaining.is_none() {
         voice.release_remaining = Some(voice.fade_out_frames);
     }
@@ -271,7 +272,7 @@ impl Instrument for DrumRack {
             active: true,
             pad_index,
             pitch,
-            sample,
+            sample: Some(sample),
             position: start_frame as f64,
             end_frame,
             rendered_frames: 0,
@@ -317,18 +318,23 @@ impl Instrument for DrumRack {
 
                 if voice.position >= voice.end_frame as f64 {
                     voice.active = false;
+                    voice.sample = None;
                     continue;
                 }
 
+                let sample = voice
+                    .sample
+                    .as_ref()
+                    .expect("active drum voice owns its sample");
                 let envelope = boundary_fade_gain(voice) * release_fade_gain(voice);
-                let mono = read_sample(&voice.sample, voice.position, 0)
+                let mono = read_sample(sample, voice.position, 0)
                     * voice.gain
                     * voice.velocity_gain
                     * envelope;
                 let (pan_l, pan_r) = equal_power_pan(voice.pan);
 
                 if channels >= 2 {
-                    let right = read_sample(&voice.sample, voice.position, 1)
+                    let right = read_sample(sample, voice.position, 1)
                         * voice.gain
                         * voice.velocity_gain
                         * envelope;
@@ -347,10 +353,12 @@ impl Instrument for DrumRack {
                     *remaining = remaining.saturating_sub(1);
                     if *remaining == 0 {
                         voice.active = false;
+                        voice.sample = None;
                     }
                 }
                 if voice.position >= voice.end_frame as f64 {
                     voice.active = false;
+                    voice.sample = None;
                 }
             }
         }
@@ -359,29 +367,48 @@ impl Instrument for DrumRack {
     fn reset(&mut self) {
         for voice in &mut self.voices {
             voice.active = false;
+            voice.sample = None;
         }
     }
 
-    fn load_drum_pad_sample(&mut self, pad_index: usize, sample: Arc<DecodedAudio>, name: String) {
-        if let Some(pad) = self.pads.get_mut(pad_index) {
-            pad.sample = Some(sample);
-            pad.sample_name = Some(name);
+    fn load_drum_pad_sample(
+        &mut self,
+        pad_index: usize,
+        sample: Arc<DecodedAudio>,
+        name: String,
+    ) -> InstrumentMediaOwners {
+        match self.pads.get_mut(pad_index) {
+            Some(pad) => InstrumentMediaOwners {
+                sample: pad.sample.replace(sample),
+                name: pad.sample_name.replace(name),
+            },
+            None => InstrumentMediaOwners::incoming(sample, name),
         }
     }
 
-    fn clear_drum_pad(&mut self, pad_index: usize) {
-        if let Some(pad) = self.pads.get_mut(pad_index) {
-            pad.sample = None;
-            pad.sample_name = None;
-        }
+    fn clear_drum_pad(&mut self, pad_index: usize) -> InstrumentMediaOwners {
+        let retired = self
+            .pads
+            .get_mut(pad_index)
+            .map(|pad| InstrumentMediaOwners {
+                sample: pad.sample.take(),
+                name: pad.sample_name.take(),
+            })
+            .unwrap_or_default();
         for voice in &mut self.voices {
-            if voice.active && voice.pad_index == pad_index {
+            if voice.pad_index == pad_index {
                 voice.active = false;
+                voice.sample = None;
             }
         }
+        retired
     }
 
-    fn set_drum_pad_state(&mut self, pad_index: usize, state: DrumPadState) {
+    fn set_drum_pad_state(
+        &mut self,
+        pad_index: usize,
+        state: PreparedDrumPadState,
+    ) -> InstrumentMediaOwners {
         if let Some(pad) = self.pads.get_mut(pad_index) {
             pad.gain = state.gain;
             pad.pan = state.pan;
@@ -393,9 +420,15 @@ impl Instrument for DrumRack {
             pad.fine_tune = state.fine_tune;
             pad.one_shot = state.one_shot;
             pad.choke_group = state.choke_group;
-            pad.sample_name = state
-                .name
-                .or_else(|| state.source.as_ref().map(|source| source.display_name()));
+            InstrumentMediaOwners {
+                sample: None,
+                name: std::mem::replace(&mut pad.sample_name, state.name),
+            }
+        } else {
+            InstrumentMediaOwners {
+                sample: None,
+                name: state.name,
+            }
         }
     }
 }
@@ -414,7 +447,7 @@ mod tests {
     #[test]
     fn rack_renders_loaded_pad() {
         let mut rack = DrumRack::new(44_100.0);
-        rack.load_drum_pad_sample(0, make_test_audio(64, 0.5), "kick.wav".into());
+        drop(rack.load_drum_pad_sample(0, make_test_audio(64, 0.5), "kick.wav".into()));
         rack.note_on(36, 127);
 
         let mut buffer = vec![0.0; 128];
@@ -426,7 +459,7 @@ mod tests {
     #[test]
     fn rack_ignores_unmapped_note() {
         let mut rack = DrumRack::new(44_100.0);
-        rack.load_drum_pad_sample(0, make_test_audio(64, 0.5), "kick.wav".into());
+        drop(rack.load_drum_pad_sample(0, make_test_audio(64, 0.5), "kick.wav".into()));
         rack.note_on(12, 127);
 
         let mut buffer = vec![0.0; 128];
@@ -438,7 +471,7 @@ mod tests {
     #[test]
     fn rack_renders_a_pad_from_a_later_bank() {
         let mut rack = DrumRack::new(44_100.0);
-        rack.load_drum_pad_sample(20, make_test_audio(64, 0.5), "bank-two.wav".into());
+        drop(rack.load_drum_pad_sample(20, make_test_audio(64, 0.5), "bank-two.wav".into()));
         rack.note_on(56, 127);
 
         let mut buffer = vec![0.0; 128];
@@ -450,14 +483,17 @@ mod tests {
     #[test]
     fn pad_fades_start_and_end_at_silence() {
         let mut rack = DrumRack::new(1_000.0);
-        rack.load_drum_pad_sample(0, make_test_audio(10, 1.0), "click.wav".into());
-        rack.set_drum_pad_state(
-            0,
-            DrumPadState {
-                fade_in_ms: 3.0,
-                fade_out_ms: 3.0,
-                ..DrumPadState::default()
-            },
+        drop(rack.load_drum_pad_sample(0, make_test_audio(10, 1.0), "click.wav".into()));
+        drop(
+            rack.set_drum_pad_state(
+                0,
+                DrumPadState {
+                    fade_in_ms: 3.0,
+                    fade_out_ms: 3.0,
+                    ..DrumPadState::default()
+                }
+                .into(),
+            ),
         );
         rack.note_on(36, 127);
 
@@ -473,15 +509,18 @@ mod tests {
     #[test]
     fn pad_fade_out_releases_a_gated_voice_without_a_step() {
         let mut rack = DrumRack::new(1_000.0);
-        rack.load_drum_pad_sample(0, make_test_audio(20, 1.0), "gate.wav".into());
-        rack.set_drum_pad_state(
-            0,
-            DrumPadState {
-                fade_in_ms: 0.0,
-                fade_out_ms: 3.0,
-                one_shot: false,
-                ..DrumPadState::default()
-            },
+        drop(rack.load_drum_pad_sample(0, make_test_audio(20, 1.0), "gate.wav".into()));
+        drop(
+            rack.set_drum_pad_state(
+                0,
+                DrumPadState {
+                    fade_in_ms: 0.0,
+                    fade_out_ms: 3.0,
+                    one_shot: false,
+                    ..DrumPadState::default()
+                }
+                .into(),
+            ),
         );
         rack.note_on(36, 127);
         let mut attack = vec![0.0; 2];
@@ -500,17 +539,20 @@ mod tests {
     #[test]
     fn choke_group_uses_the_pad_fade_out_instead_of_cutting_immediately() {
         let mut rack = DrumRack::new(1_000.0);
-        rack.load_drum_pad_sample(0, make_test_audio(20, 1.0), "open.wav".into());
-        rack.load_drum_pad_sample(1, make_test_audio(20, 0.0), "closed.wav".into());
+        drop(rack.load_drum_pad_sample(0, make_test_audio(20, 1.0), "open.wav".into()));
+        drop(rack.load_drum_pad_sample(1, make_test_audio(20, 0.0), "closed.wav".into()));
         for pad_index in [0, 1] {
-            rack.set_drum_pad_state(
-                pad_index,
-                DrumPadState {
-                    fade_in_ms: 0.0,
-                    fade_out_ms: 3.0,
-                    choke_group: Some(1),
-                    ..DrumPadState::default()
-                },
+            drop(
+                rack.set_drum_pad_state(
+                    pad_index,
+                    DrumPadState {
+                        fade_in_ms: 0.0,
+                        fade_out_ms: 3.0,
+                        choke_group: Some(1),
+                        ..DrumPadState::default()
+                    }
+                    .into(),
+                ),
             );
         }
         rack.note_on(36, 127);

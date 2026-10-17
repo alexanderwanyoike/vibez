@@ -50,10 +50,10 @@ fn instrument_replacement_with_unchanged_timing_does_not_wait_for_a_topology_edi
         commands.push(command).unwrap();
         engine.process(&mut [0.0; 16], 2);
         assert!(
-            !engine.graph_edit_pending,
+            !engine.compensation_plan.awaiting_structural_plan(),
             "instrument identity is not graph topology"
         );
-        assert!(engine.compensation_valid);
+        assert!(engine.compensation_plan.applied_plan_is_valid());
     }
 }
 
@@ -72,14 +72,16 @@ fn reject_worst_case_retirement_is_reserved_before_command_ownership_is_popped()
         });
     }
     engine.tracks.push(Box::new(channel));
-    engine.pending_device_reconfiguration = Some(reconfiguration::PendingDeviceReconfiguration {
-        local_recovery: false,
-        handoff_id: 7,
-        track_id: track,
-        effect_id: Some(effect),
-        position: 0,
-        bypass: false,
-    });
+    engine
+        .device_handoff
+        .track_transfer(device_handoff::PendingDeviceReconfiguration {
+            scope: device_handoff::RecoveryScope::ProjectRestart,
+            handoff_id: 7,
+            track_id: track,
+            effect_id: Some(effect),
+            position: 0,
+            bypass: false,
+        });
     let reserved_effects = Vec::with_capacity(1);
     let device = reconfiguration::DeviceReconfiguration::Effect {
         handoff_id: 7,
@@ -94,9 +96,8 @@ fn reject_worst_case_retirement_is_reserved_before_command_ownership_is_popped()
     };
     while engine.event_tx.push(EngineEvent::PlaybackStopped).is_ok() {}
     for _ in 0..engine.pending_retirements.capacity() - 2 {
-        engine
-            .pending_retirements
-            .push(EngineEvent::PlaybackStopped);
+        let mut allowance = engine.pending_retirements.reserve(1).unwrap();
+        engine.retire_event(EngineEvent::PlaybackStopped, &mut allowance);
     }
     let capacity = engine.pending_retirements.capacity();
     commands
@@ -162,7 +163,8 @@ fn parameter_edits_while_main_holds_the_owner_are_coalesced_and_restored_without
         }),
     });
     engine.tracks.push(Box::new(channel));
-    engine.routing = Some(routing(track, Some(effect)));
+    engine.routing = routing(track, Some(effect));
+    engine.project_routing_published = true;
     engine.begin_device_reconfiguration();
     let EngineEvent::DeviceReconfiguration(mut device) = events.pop().unwrap() else {
         panic!("owner");
@@ -181,7 +183,10 @@ fn parameter_edits_while_main_holds_the_owner_are_coalesced_and_restored_without
         crate::retirement::tests::allocations(|| engine.drain_commands()),
         (0, 0)
     );
-    assert_eq!(engine.pending_device_parameters, [(0, 0.75), (1, 0.5)]);
+    assert_eq!(
+        engine.device_handoff.retained_parameters(),
+        [(0, 0.75), (1, 0.5)]
+    );
     device.reconfigure_on_main_thread().unwrap();
     commands
         .push(EngineCommand::ResumeDeviceReconfiguration {
@@ -195,7 +200,7 @@ fn parameter_edits_while_main_holds_the_owner_are_coalesced_and_restored_without
     );
     assert_eq!(engine.tracks[0].effects[0].effect.get_param(0), 0.75);
     assert_eq!(engine.tracks[0].effects[0].effect.get_param(1), 0.5);
-    assert!(engine.pending_device_parameters.is_empty());
+    assert!(engine.device_handoff.retained_parameters().is_empty());
 }
 
 #[test]
@@ -240,7 +245,7 @@ fn parameter_intents_do_not_cross_a_replaced_device_lifetime() {
         })
         .unwrap();
     engine.drain_commands();
-    assert!(engine.pending_device_parameters.is_empty());
+    assert!(engine.device_handoff.retained_parameters().is_empty());
     commands
         .push(EngineCommand::ResumeDeviceReconfiguration {
             device,

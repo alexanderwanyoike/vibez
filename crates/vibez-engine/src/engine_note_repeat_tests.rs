@@ -1,7 +1,11 @@
+//! Public note repeat preserves engine-clock scheduling and matching note releases.
+
 use super::*;
+use crate::events::NoteRepeatedEvent;
 use crate::playback_source::{
     EngineNoteClip, PreparedPlaybackSource, PreparedSectionPlaybackSource,
 };
+use graph_test_support::{graph_engine, routing_channel};
 use vibez_core::automation::{AutomationLane, AutomationPoint, AutomationTarget};
 use vibez_core::id::{ClipId, SectionId, TrackId};
 use vibez_core::midi::{InstrumentKind, MidiNote};
@@ -13,8 +17,9 @@ fn repeat_engine() -> (
     rtrb::Consumer<EngineEvent>,
     TrackId,
 ) {
-    let (mut engine, mut commands, events) = AudioEngine::new();
     let track_id = TrackId::new();
+    let (mut engine, mut commands, events) =
+        graph_engine(&[routing_channel(track_id), routing_channel(TrackId::MASTER)]);
     commands.push(EngineCommand::SetSampleRate(100)).unwrap();
     commands.push(EngineCommand::SetBpm(60.0)).unwrap();
     commands.push(EngineCommand::add_track(track_id)).unwrap();
@@ -34,10 +39,10 @@ fn repeat_engine() -> (
 fn repeat_timestamps(events: &mut rtrb::Consumer<EngineEvent>) -> Vec<u64> {
     let mut timestamps = Vec::new();
     while let Ok(event) = events.pop() {
-        if let EngineEvent::NoteRepeated {
+        if let EngineEvent::NoteRepeated(NoteRepeatedEvent {
             effective_at_samples,
             ..
-        } = event
+        }) = event
         {
             timestamps.push(effective_at_samples);
         }
@@ -48,11 +53,11 @@ fn repeat_timestamps(events: &mut rtrb::Consumer<EngineEvent>) -> Vec<u64> {
 fn repeat_events(events: &mut rtrb::Consumer<EngineEvent>) -> Vec<(u8, u64)> {
     let mut repeated = Vec::new();
     while let Ok(event) = events.pop() {
-        if let EngineEvent::NoteRepeated {
+        if let EngineEvent::NoteRepeated(NoteRepeatedEvent {
             pitch,
             effective_at_samples,
             ..
-        } = event
+        }) = event
         {
             repeated.push((pitch, effective_at_samples));
         }
@@ -69,8 +74,9 @@ fn stopped_repeat_engine_at(
     rtrb::Consumer<EngineEvent>,
     TrackId,
 ) {
-    let (mut engine, mut commands, mut events) = AudioEngine::new();
     let track_id = TrackId::new();
+    let (mut engine, mut commands, mut events) =
+        graph_engine(&[routing_channel(track_id), routing_channel(TrackId::MASTER)]);
     commands.push(EngineCommand::SetSampleRate(96)).unwrap();
     commands.push(EngineCommand::SetBpm(60.0)).unwrap();
     commands
@@ -290,7 +296,10 @@ fn track_swing_automation_shapes_future_note_repeat_pairs() {
         .push(EngineCommand::SetProjectSwing(SwingAmount::new(0.56)))
         .unwrap();
     commands
-        .push(EngineCommand::SetAutomationLane { track_id, lane })
+        .push(EngineCommand::SetAutomationLane {
+            track_id,
+            insertion: crate::clip_insertion::PreparedAutomationLaneInsertion::new(lane),
+        })
         .unwrap();
     engine.process(&mut [0.0; 2], 2);
     commands
@@ -332,7 +341,10 @@ fn track_swing_automation_waits_for_the_next_note_repeat_pair() {
         curve: 0.0,
     });
     commands
-        .push(EngineCommand::SetAutomationLane { track_id, lane })
+        .push(EngineCommand::SetAutomationLane {
+            track_id,
+            insertion: crate::clip_insertion::PreparedAutomationLaneInsertion::new(lane),
+        })
         .unwrap();
     engine.process(&mut [0.0; 140 * 2], 2);
 
@@ -423,8 +435,9 @@ fn clip_engine(
     swing: SwingAmount,
     groove_grid: GrooveGrid,
 ) -> (AudioEngine, rtrb::Producer<EngineCommand>) {
-    let (engine, mut commands, _events) = AudioEngine::new();
     let track_id = TrackId::new();
+    let (engine, mut commands, _events) =
+        graph_engine(&[routing_channel(track_id), routing_channel(TrackId::MASTER)]);
     let clip_id = ClipId::new();
     commands.push(EngineCommand::SetSampleRate(8_000)).unwrap();
     commands.push(EngineCommand::SetBpm(120.0)).unwrap();
@@ -442,26 +455,28 @@ fn clip_engine(
     commands
         .push(EngineCommand::AddNoteClip {
             track_id,
-            clip_id,
-            position_beats: 0.0,
-            duration_beats: 1.0,
-            start_marker_beats: 0.0,
-            loop_enabled: false,
-            loop_start_beats: 0.0,
-            loop_end_beats: 0.0,
-            groove_grid,
+            insertion: crate::clip_insertion::PreparedNoteClipInsertion::new(
+                clip_id,
+                0.0,
+                1.0,
+                0.0,
+                false,
+                0.0,
+                0.0,
+                groove_grid,
+            ),
         })
         .unwrap();
     commands
         .push(EngineCommand::AddNote {
             track_id,
             clip_id,
-            note: MidiNote {
+            insertion: crate::clip_insertion::PreparedNoteInsertion::new(MidiNote {
                 pitch: 60,
                 velocity: 100,
                 start_beat: 0.25,
                 duration_beats: 0.25,
-            },
+            }),
         })
         .unwrap();
     commands.push(EngineCommand::Play).unwrap();
@@ -492,8 +507,9 @@ fn swing_changes_opted_in_clip_playback_without_rewriting_notes() {
 }
 
 fn render_prepared_section_with_swing(swing: SwingAmount) -> Vec<f32> {
-    let (mut engine, mut commands, _events) = AudioEngine::new();
     let track_id = TrackId::new();
+    let (mut engine, mut commands, _events) =
+        graph_engine(&[routing_channel(track_id), routing_channel(TrackId::MASTER)]);
     let prepared = PreparedSectionPlaybackSource::new(
         SectionId::new(),
         1.0,

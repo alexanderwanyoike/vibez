@@ -1,6 +1,7 @@
 //! Running monitoring changes retain audio already waiting on direct paths.
 
 use super::*;
+use crate::events::{NoteRepeatedEvent, SourceNoteRepeatedEvent};
 use crate::test_support::DelayProbe;
 use vibez_core::id::{ClipId, EffectId};
 use vibez_core::routing::*;
@@ -40,6 +41,7 @@ fn running_reduced_monitoring_changes_never_refill_or_drop_constant_audio() {
         commands.push(EngineCommand::add_track(id)).unwrap();
         commands
             .push(EngineCommand::AddClip {
+                insertion: crate::clip_insertion::PreparedClipInsertion::new(),
                 track_id: id,
                 clip_id: ClipId::new(),
                 audio: Arc::new(DecodedAudio {
@@ -93,7 +95,7 @@ fn running_reduced_monitoring_changes_never_refill_or_drop_constant_audio() {
             (0, 0)
         );
         assert!(output.iter().all(|&sample| (sample - steady).abs() < 1e-7));
-        assert_eq!(engine.compensation_plan_fade, 0);
+        assert_eq!(engine.output_gate.remaining_morph_frames(), 0);
         assert!(engine.transport.is_playing());
         while events.pop().is_ok() {}
     }
@@ -102,8 +104,8 @@ fn running_reduced_monitoring_changes_never_refill_or_drop_constant_audio() {
 #[test]
 fn prepared_plan_change_blends_to_new_audio_without_a_silent_wait() {
     let (mut engine, _, _) = AudioEngine::new();
-    engine.last_mix_frame = [0.5; 2];
-    engine.compensation_plan_fade = 64;
+    engine.apply_compensation_transition(&mut [0.5; 2], 2, false);
+    engine.output_gate.morph_after_plan_change();
     let mut output = [0.25; 512];
     engine.apply_compensation_transition(&mut output, 2, false);
     assert_eq!(output[0], 0.5);
@@ -165,10 +167,10 @@ fn reduced_repeat_coordinates_follow_arrange_history_across_loop_wrap() {
         },
         137,
     )];
-    engine.routing = Some(
+    engine.routing =
         crate::routing::PreparedRouting::prepare_compensated(&channels, 512, &reports, &[dry], 1)
-            .unwrap(),
-    );
+            .unwrap();
+    engine.project_routing_published = true;
     engine.transport.play();
     engine.process(&mut [0.0; 1000], 2);
     while events.pop().is_ok() {}
@@ -186,13 +188,13 @@ fn reduced_repeat_coordinates_follow_arrange_history_across_loop_wrap() {
     let mut raw = Vec::new();
     while let Ok(event) = events.pop() {
         match event {
-            EngineEvent::SourceNoteRepeated { position, .. } => {
+            EngineEvent::SourceNoteRepeated(SourceNoteRepeatedEvent { position, .. }) => {
                 raw.push(position.effective_at_samples)
             }
-            EngineEvent::NoteRepeated {
+            EngineEvent::NoteRepeated(NoteRepeatedEvent {
                 effective_at_samples,
                 ..
-            } => heard.push(effective_at_samples),
+            }) => heard.push(effective_at_samples),
             _ => {}
         }
     }
@@ -216,6 +218,7 @@ fn midrun_bypass_and_unbypass_keep_the_current_delayed_audio_without_stale_wet_i
     let signal: Vec<_> = (0..4096).map(|sample| sample as f32 / 4096.0).collect();
     commands
         .push(EngineCommand::AddClip {
+            insertion: crate::clip_insertion::PreparedClipInsertion::new(),
             track_id: track,
             clip_id: ClipId::new(),
             audio: Arc::new(DecodedAudio {
@@ -313,7 +316,7 @@ fn midrun_bypass_and_unbypass_keep_the_current_delayed_audio_without_stale_wet_i
 #[test]
 fn awaiting_main_thread_preparation_fades_out_and_retains_the_resume_fade() {
     let (mut engine, _, _) = AudioEngine::new();
-    engine.last_mix_frame = [0.5; 2];
+    engine.apply_compensation_transition(&mut [0.5; 2], 2, false);
     let mut paused = [0.0; 256];
     engine.apply_compensation_transition(&mut paused, 2, true);
     assert_eq!(paused[0], 0.5);
@@ -326,9 +329,9 @@ fn awaiting_main_thread_preparation_fades_out_and_retains_the_resume_fade() {
         .collect::<Vec<_>>()
         .windows(2)
         .all(|pair| (pair[1] - pair[0]).abs() <= 0.5 / 64.0));
-    assert_eq!(engine.compensation_fade_in, 64);
+    assert_eq!(engine.output_gate.remaining_resume_frames(), 64);
     engine.apply_compensation_transition(&mut paused, 2, true);
-    assert_eq!(engine.compensation_fade_in, 64);
+    assert_eq!(engine.output_gate.remaining_resume_frames(), 64);
     let mut resumed = [0.5; 256];
     engine.apply_compensation_transition(&mut resumed, 2, false);
     assert_eq!(resumed[0], 0.0);

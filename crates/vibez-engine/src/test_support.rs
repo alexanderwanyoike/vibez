@@ -116,3 +116,26 @@ impl Instrument for DelayProbeInstrument {
         self.delay.reset();
     }
 }
+
+#[cfg(test)]
+pub(crate) fn fulfill_insertion_setup(
+    engine: &mut crate::engine::AudioEngine,
+    events: &mut rtrb::Consumer<crate::events::EngineEvent>,
+) {
+    engine.process_block(crate::engine::AudioProcessBlock::new(&mut [], 2));
+    loop {
+        let mut fulfilled = false;
+        while let Ok(event) = events.pop() {
+            if let crate::events::EngineEvent::ClipInsertionStorageRequested(request) = event {
+                request.fulfill();
+                fulfilled = true;
+            }
+        }
+        if !fulfilled {
+            break;
+        }
+        // Bulk native fixtures must finish preparation without consuming any
+        // musical samples or discarding an insertion queued before Play.
+        engine.process_block(crate::engine::AudioProcessBlock::new(&mut [], 2));
+    }
+}

@@ -50,14 +50,14 @@ impl EngineEvent {
         // Notice coordinates are supplied independently: presentation mapping
         // must never move the Source take behind its own recording boundary.
         (
-            Self::SourceNoteRepeated {
+            Self::SourceNoteRepeated(SourceNoteRepeatedEvent {
                 track_id,
                 pitch: trigger.pitch,
                 velocity: trigger.velocity,
                 rate: trigger.rate,
                 position: source,
-            },
-            Self::NoteRepeated {
+            }),
+            Self::NoteRepeated(NoteRepeatedEvent {
                 track_id,
                 pitch: trigger.pitch,
                 velocity: trigger.velocity,
@@ -67,58 +67,7 @@ impl EngineEvent {
                 section_id: notice.section_id,
                 section_position_samples: notice.section_position_samples,
                 canonical_section_position_samples: notice.canonical_section_position_samples,
-            },
+            }),
         )
     }
-}
-
-#[derive(PartialEq, Eq)]
-enum SourcePayload<'a> {
-    Input(
-        &'a TrackId,
-        &'a u8,
-        &'a u8,
-        &'a bool,
-        &'a SourceRecordingPosition,
-    ),
-    Repeat(
-        &'a TrackId,
-        &'a u8,
-        &'a u8,
-        &'a NoteRepeatRate,
-        &'a SourceRecordingPosition,
-    ),
-}
-
-fn source_payload(event: &EngineEvent) -> Option<SourcePayload<'_>> {
-    // Exhaustive fields force schema changes through this projection; derived
-    // equality then compares every projected value without a separate list.
-    match event {
-        EngineEvent::SourceNoteInput {
-            track_id,
-            pitch,
-            velocity,
-            on,
-            position,
-        } => Some(SourcePayload::Input(
-            track_id, pitch, velocity, on, position,
-        )),
-        EngineEvent::SourceNoteRepeated {
-            track_id,
-            pitch,
-            velocity,
-            rate,
-            position,
-        } => Some(SourcePayload::Repeat(
-            track_id, pitch, velocity, rate, position,
-        )),
-        _ => None,
-    }
-}
-
-pub(super) fn source_eq(left: &EngineEvent, right: &EngineEvent) -> bool {
-    let (Some(left), Some(right)) = (source_payload(left), source_payload(right)) else {
-        return false;
-    };
-    left == right
 }

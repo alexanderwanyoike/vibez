@@ -7,6 +7,7 @@ impl AudioEngine {
         &mut self,
         track_id: vibez_core::id::TrackId,
         effect_id: vibez_core::id::EffectId,
+        allowance: &mut RetirementAllowance,
     ) {
         let removed = self.channel_mut(track_id).and_then(|track| {
             track
@@ -16,7 +17,7 @@ impl AudioEngine {
                 .map(|pos| track.effects.remove(pos))
         });
         if let Some(slot) = removed {
-            self.dispose_effect(slot.effect);
+            self.dispose_effect(slot.effect, allowance);
         }
     }
 

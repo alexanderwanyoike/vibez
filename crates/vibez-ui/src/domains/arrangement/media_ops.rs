@@ -272,6 +272,7 @@ impl TimelineEditorState {
         {
             engine.send(EngineCommand::RemoveClip(track_id, clip_id));
             engine.send(EngineCommand::AddClip {
+                insertion: vibez_engine::clip_insertion::PreparedClipInsertion::new(),
                 track_id,
                 clip_id,
                 audio,
@@ -324,6 +325,7 @@ impl TimelineEditorState {
         self.discard_audio_clip_inspector_edits_for(old_clip_id);
 
         engine.send(EngineCommand::AddClip {
+            insertion: vibez_engine::clip_insertion::PreparedClipInsertion::new(),
             track_id,
             clip_id: success.new_clip_id,
             audio: Arc::clone(&success.new_audio),
@@ -505,6 +507,7 @@ impl TimelineEditorState {
         // Add joined clip
         let new_id = ClipId::new();
         engine.send(EngineCommand::AddClip {
+            insertion: vibez_engine::clip_insertion::PreparedClipInsertion::new(),
             track_id,
             clip_id: new_id,
             audio: Arc::clone(&joined_audio),
@@ -619,21 +622,23 @@ impl TimelineEditorState {
         // Add joined clip
         let new_id = ClipId::new();
         engine.send(EngineCommand::AddNoteClip {
-            start_marker_beats: 0.0,
             track_id,
-            clip_id: new_id,
-            position_beats: start_pos,
-            duration_beats: total_duration,
-            loop_enabled: joined_loop_enabled,
-            loop_start_beats: 0.0,
-            loop_end_beats: total_duration,
-            groove_grid: vibez_core::perform::GrooveGrid::Off,
+            insertion: vibez_engine::clip_insertion::PreparedNoteClipInsertion::new(
+                new_id,
+                start_pos,
+                total_duration,
+                0.0,
+                joined_loop_enabled,
+                0.0,
+                total_duration,
+                vibez_core::perform::GrooveGrid::Off,
+            ),
         });
         for note in &merged_notes {
             engine.send(EngineCommand::AddNote {
                 track_id,
                 clip_id: new_id,
-                note: *note,
+                insertion: vibez_engine::clip_insertion::PreparedNoteInsertion::new(*note),
             });
         }
         if let Some(track) = self.find_content_mut(track_id) {
@@ -685,6 +690,7 @@ impl TimelineEditorState {
         }
         for clip in &fragments {
             engine.send(EngineCommand::AddClip {
+                insertion: vibez_engine::clip_insertion::PreparedClipInsertion::new(),
                 track_id,
                 clip_id: clip.id,
                 audio: Arc::clone(&clip.audio),
@@ -720,21 +726,23 @@ impl TimelineEditorState {
         }
         for clip in &fragments {
             engine.send(EngineCommand::AddNoteClip {
-                start_marker_beats: clip.start_marker_beats,
                 track_id,
-                clip_id: clip.id,
-                position_beats: clip.position_beats,
-                duration_beats: clip.duration_beats,
-                loop_enabled: clip.loop_enabled,
-                loop_start_beats: clip.loop_start_beats,
-                loop_end_beats: clip.loop_end_beats,
-                groove_grid: clip.groove_grid,
+                insertion: vibez_engine::clip_insertion::PreparedNoteClipInsertion::new(
+                    clip.id,
+                    clip.position_beats,
+                    clip.duration_beats,
+                    clip.start_marker_beats,
+                    clip.loop_enabled,
+                    clip.loop_start_beats,
+                    clip.loop_end_beats,
+                    clip.groove_grid,
+                ),
             });
             for note in &clip.notes {
                 engine.send(EngineCommand::AddNote {
                     track_id,
                     clip_id: clip.id,
-                    note: *note,
+                    insertion: vibez_engine::clip_insertion::PreparedNoteInsertion::new(*note),
                 });
             }
         }

@@ -1,3 +1,5 @@
+//! Caller-thread construction and graph rendering for isolated offline projects.
+
 use super::*;
 
 pub(crate) struct OfflineRoutingSetup {
@@ -27,7 +29,8 @@ impl AudioEngine {
         {
             channel.set_manual_mute(channel.mute, true);
         }
-        engine.routing = Some(setup.routing);
+        engine.routing = setup.routing;
+        engine.project_routing_published = true;
         engine
     }
 
@@ -46,7 +49,7 @@ impl AudioEngine {
                 samples,
             }
         });
-        if !self.compensation_valid {
+        if !self.compensation_plan.applied_plan_is_valid() {
             return;
         }
         self.render_routing_graph(
@@ -66,59 +69,7 @@ impl AudioEngine {
     }
 
     pub(crate) fn offline_compensation_failure(&self) -> Option<String> {
-        for track in self
-            .tracks
-            .iter()
-            .chain(&self.buses)
-            .chain(std::iter::once(&self.master))
-        {
-            if let Some(rate) = track
-                .instrument
-                .as_ref()
-                .and_then(|instrument| instrument.activation_sample_rate())
-                .filter(|rate| *rate != self.sample_rate)
-            {
-                return Some(format!(
-                    "Instrument on channel {} was activated at {rate} Hz but Bounce requests {} Hz",
-                    track.id.raw(),
-                    self.sample_rate
-                ));
-            }
-            if track.instrument.as_ref().is_some_and(|instrument| {
-                instrument.reconfiguration_requested()
-                    || !instrument.processing_configuration_valid()
-            }) {
-                return Some(format!(
-                    "Instrument on channel {} requires a valid processing configuration during Bounce",
-                    track.id.raw()
-                ));
-            }
-            for slot in &track.effects {
-                if let Some(rate) = slot
-                    .effect
-                    .activation_sample_rate()
-                    .filter(|rate| *rate != self.sample_rate)
-                {
-                    return Some(format!(
-                        "Effect {} on channel {} was activated at {rate} Hz but Bounce requests {} Hz",
-                        slot.id.raw(), track.id.raw(), self.sample_rate
-                    ));
-                }
-                if slot.effect.reconfiguration_requested()
-                    || !slot.effect.processing_configuration_valid()
-                {
-                    return Some(format!(
-                        "Effect {} on channel {} requires a valid processing configuration during Bounce",
-                        slot.id.raw(),
-                        track.id.raw()
-                    ));
-                }
-            }
-        }
-        if !self.compensation_valid {
-            return Some("Applied audio configuration became invalid during Bounce".into());
-        }
-        None
+        self.observe_offline_configuration().failure()
     }
 
     pub(crate) fn take_offline_channels(

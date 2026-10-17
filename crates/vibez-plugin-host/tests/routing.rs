@@ -1,3 +1,5 @@
+//! Hosted plugin inputs preserve public routing and detector signal semantics.
+
 mod support;
 #[global_allocator]
 static ALLOCATOR: support::allocation::AllocationCounter = support::allocation::AllocationCounter;
@@ -11,6 +13,7 @@ use vibez_plugin_host::wrappers::effect::PluginEffectWrapper;
 
 fn clip(track_id: TrackId, left: f32, right: f32) -> EngineCommand {
     EngineCommand::AddClip {
+        insertion: vibez_engine::clip_insertion::PreparedClipInsertion::new(),
         track_id,
         clip_id: ClipId::new(),
         audio: std::sync::Arc::new(DecodedAudio {
@@ -220,26 +223,30 @@ fn loaded_instrument_formats_trigger_other_formats_on_the_exact_note_frames() {
             commands
                 .push(EngineCommand::AddNoteClip {
                     track_id: ghost,
-                    clip_id: note_clip,
-                    position_beats: 0.0,
-                    duration_beats: 1.0,
-                    start_marker_beats: 0.0,
-                    loop_enabled: false,
-                    loop_start_beats: 0.0,
-                    loop_end_beats: 0.0,
-                    groove_grid: Default::default(),
+                    insertion: vibez_engine::clip_insertion::PreparedNoteClipInsertion::new(
+                        note_clip,
+                        0.0,
+                        1.0,
+                        0.0,
+                        false,
+                        0.0,
+                        0.0,
+                        Default::default(),
+                    ),
                 })
                 .unwrap();
             commands
                 .push(EngineCommand::AddNote {
                     track_id: ghost,
                     clip_id: note_clip,
-                    note: vibez_core::midi::MidiNote {
-                        pitch: 60,
-                        velocity: 100,
-                        start_beat: 3.0 / 24000.0,
-                        duration_beats: 4.0 / 24000.0,
-                    },
+                    insertion: vibez_engine::clip_insertion::PreparedNoteInsertion::new(
+                        vibez_core::midi::MidiNote {
+                            pitch: 60,
+                            velocity: 100,
+                            start_beat: 3.0 / 24000.0,
+                            duration_beats: 4.0 / 24000.0,
+                        },
+                    ),
                 })
                 .unwrap();
             commands
@@ -350,26 +357,30 @@ fn all_instrument_source_formats_feed_builtins_and_hosted_receivers() {
             commands
                 .push(EngineCommand::AddNoteClip {
                     track_id: ghost,
-                    clip_id: note_clip,
-                    position_beats: 0.0,
-                    duration_beats: 1.0,
-                    start_marker_beats: 0.0,
-                    loop_enabled: false,
-                    loop_start_beats: 0.0,
-                    loop_end_beats: 0.0,
-                    groove_grid: Default::default(),
+                    insertion: vibez_engine::clip_insertion::PreparedNoteClipInsertion::new(
+                        note_clip,
+                        0.0,
+                        1.0,
+                        0.0,
+                        false,
+                        0.0,
+                        0.0,
+                        Default::default(),
+                    ),
                 })
                 .unwrap();
             commands
                 .push(EngineCommand::AddNote {
                     track_id: ghost,
                     clip_id: note_clip,
-                    note: vibez_core::midi::MidiNote {
-                        pitch: 60,
-                        velocity: 127,
-                        start_beat: 0.0,
-                        duration_beats: 1.0,
-                    },
+                    insertion: vibez_engine::clip_insertion::PreparedNoteInsertion::new(
+                        vibez_core::midi::MidiNote {
+                            pitch: 60,
+                            velocity: 127,
+                            start_beat: 0.0,
+                            duration_beats: 1.0,
+                        },
+                    ),
                 })
                 .unwrap();
             commands

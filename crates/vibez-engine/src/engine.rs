@@ -1,6 +1,11 @@
+//! Real-time project playback, prepared ownership and callback clock coordination.
+
+use crate::events::{MeteringEvent, SectionPlaybackPositionEvent};
+use crate::retirement_queue::{RetirementAllowance, RetirementQueue};
 use std::sync::Arc;
 
 use rtrb::{Consumer, Producer, RingBuffer};
+#[cfg(test)]
 use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::constants::RING_BUFFER_CAPACITY;
 use vibez_core::id::{SectionId, TrackId};
@@ -13,8 +18,7 @@ use crate::engine_audition::{audition_fade_frames, next_audition_boundary, Audit
 use crate::events::EngineEvent;
 use crate::metering;
 use crate::mixer::{
-    any_solo, equal_power_pan, EffectSlot, EngineClip, EngineNoteClip, EngineTrack,
-    InstrumentRenderContext,
+    any_solo, equal_power_pan, EffectSlot, EngineClip, EngineTrack, InstrumentRenderContext,
 };
 use crate::note_repeat::{NoteRepeatClock, NoteRepeatStart};
 use crate::playback_source::{calculate_total_length, PreparedSectionPlaybackSource};
@@ -48,38 +52,27 @@ pub const DEFAULT_SAMPLE_RATE: u32 = 44_100;
 /// ```
 pub struct AudioEngine {
     scheduled_presentation: Vec<presentation_queue::ScheduledPresentation>,
-    empty_capture_offsets: Arc<[(TrackId, u32)]>,
     section_capture_timing: Vec<presentation::SectionCaptureTiming>,
     capture_replay: Option<presentation::CaptureReplay>,
-    pending_capture_stop: Option<u64>,
-    capture_active: bool,
-    pending_playback_stop: bool,
+    presentation_state: presentation_state::PresentationState,
+    capture_lifecycle: capture_lifecycle::CaptureLifecycle,
     pending_source_cleanup: bool,
-    presentation_fault: bool,
-    presentation_overflow_owner: Option<EngineEvent>,
-    pending_compensation_failure: Option<(TrackId, Option<vibez_core::id::EffectId>, &'static str)>,
     compensation_callback_heard_start: u64,
     capture_clip_positions: Vec<(TrackId, u64, u64)>,
-    compensation_suspended: bool,
-    device_failure_capture_closed: bool,
-    next_device_handoff: u64,
-    pending_device_reconfiguration: Option<reconfiguration::PendingDeviceReconfiguration>,
-    pending_device_parameters: Vec<(usize, f32)>,
-    graph_edit_pending: bool,
-    compensation_valid: bool,
-    compensation_fade_out: u32,
-    compensation_fade_in: u32,
-    compensation_plan_fade: u32,
-    last_mix_frame: [f32; 2],
-    was_project_muted: bool,
-    routing: Option<Box<crate::routing::PreparedRouting>>,
+    device_handoff: device_handoff::DeviceHandoffState,
+    compensation_plan: compensation_plan::CompensationPlanState,
+    output_gate: output_gate::OutputGate,
+    routing: Box<crate::routing::PreparedRouting>,
+    project_routing_published: bool,
+    // The first publication has no public retirement event. Keep its bounded
+    // bootstrap owner until the engine returns to the caller for teardown.
+    bootstrap_routing: Option<Box<crate::routing::PreparedRouting>>,
     retired_routing: Option<Box<crate::routing::PreparedRouting>>,
-    pub(super) pending_retirements: Vec<EngineEvent>,
+    pub(super) pending_retirements: RetirementQueue,
+    pending_clip_insertion: Option<Box<crate::clip_insertion::PreparedClipInsertion>>,
     pub(super) pending_bus_cleanup: Option<(TrackId, usize)>,
     pub(super) channel_retirement: Arc<crate::retirement::ChannelRetirementPool>,
     transport: Transport,
-    /// Legacy single-audio field for backward compatibility.
-    audio: Option<Arc<DecodedAudio>>,
     /// Multi-track state.
     tracks: crate::mixer::ChannelList,
     /// The master bus: a track-shaped channel (gain + effect chain,
@@ -115,6 +108,7 @@ pub struct AudioEngine {
     queued_section: Option<QueuedSectionPlayback>,
     pending_section_record: Option<section_record::PendingSectionRecord>,
     active_section_record: Option<section_record::ActiveSectionRecord>,
+    pending_section_record_stop: Option<crate::events::SectionRecordStoppedEvent>,
     /// When a transition lands partway through the current callback, only
     /// these frames advance the newly active Section's local playhead.
     section_advance_override: Option<u64>,
@@ -150,6 +144,13 @@ struct ActiveSectionPlayback {
 struct QueuedSectionPlayback {
     prepared: Box<PreparedSectionPlaybackSource>,
     effective_at_samples: u64,
+    phase: SectionQueuePhase,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SectionQueuePhase {
+    Waiting,
+    Returning,
 }
 
 #[derive(Clone, Copy)]
@@ -237,44 +238,41 @@ impl AudioEngine {
         let (spectrum_tx, spectrum_rx) = RingBuffer::<f32>::new(SPECTRUM_RING_CAPACITY);
 
         let engine = Self {
-            routing: None,
+            routing: crate::routing::PreparedRouting::prepare(
+                &[vibez_core::routing::RoutingChannel {
+                    id: TrackId::MASTER,
+                    is_bus: true,
+                    effects: vec![],
+                    sends: vec![],
+                }],
+                crate::routing::MAX_BLOCK_FRAMES,
+            )
+            .expect("static master routing is valid"),
+            project_routing_published: false,
+            bootstrap_routing: None,
             scheduled_presentation: Vec::with_capacity(
                 presentation_queue::PRESENTATION_EVENT_CAPACITY,
             ),
-            empty_capture_offsets: Arc::from([]),
             section_capture_timing: Vec::with_capacity(
                 presentation_queue::PRESENTATION_EVENT_CAPACITY,
             ),
             capture_replay: None,
-            pending_capture_stop: None,
-            capture_active: false,
-            pending_playback_stop: false,
+            presentation_state: presentation_state::PresentationState::default(),
+            capture_lifecycle: capture_lifecycle::CaptureLifecycle::default(),
             pending_source_cleanup: false,
-            presentation_fault: false,
-            presentation_overflow_owner: None,
-            pending_compensation_failure: None,
             compensation_callback_heard_start: 0,
             capture_clip_positions: Vec::with_capacity(
                 presentation_queue::PRESENTATION_EVENT_CAPACITY,
             ),
-            compensation_suspended: false,
-            device_failure_capture_closed: false,
-            next_device_handoff: 0,
-            pending_device_reconfiguration: None,
-            pending_device_parameters: Vec::with_capacity(2048),
-            graph_edit_pending: false,
-            compensation_valid: true,
-            compensation_fade_out: 0,
-            compensation_fade_in: 0,
-            compensation_plan_fade: 0,
-            last_mix_frame: [0.0; 2],
-            was_project_muted: false,
+            device_handoff: device_handoff::DeviceHandoffState::default(),
+            compensation_plan: compensation_plan::CompensationPlanState::default(),
+            output_gate: output_gate::OutputGate::default(),
             retired_routing: None,
             pending_bus_cleanup: None,
-            pending_retirements: Vec::with_capacity(crate::retirement::RETIREMENT_CAPACITY),
+            pending_retirements: RetirementQueue::new(),
+            pending_clip_insertion: None,
             channel_retirement: crate::retirement::ChannelRetirementPool::new(),
             transport: Transport::new(),
-            audio: None,
             tracks: Vec::with_capacity(crate::mixer::CHANNEL_CAPACITY),
             master: Box::new(EngineTrack::new(TrackId::MASTER)),
             buses: Vec::with_capacity(crate::mixer::CHANNEL_CAPACITY),
@@ -296,6 +294,7 @@ impl AudioEngine {
             queued_section: None,
             pending_section_record: None,
             active_section_record: None,
+            pending_section_record_stop: None,
             section_advance_override: None,
             arrangement_audio_length: None,
             arrangement_recording: false,
@@ -327,9 +326,8 @@ impl AudioEngine {
     /// This method is **lock-free and allocation-free**.  It:
     /// 1. Drains all pending commands from the ring buffer.
     /// 2. Zeros the output buffer.
-    /// 3. If tracks exist: renders each → applies gain/pan → sums into output.
-    /// 4. Otherwise: falls back to legacy single-audio path.
-    /// 5. Sends metering and position events to the UI thread.
+    /// 3. Renders project sources, effects and channels.
+    /// 4. Sends metering and position events to the UI thread.
     #[cfg(test)]
     fn process(&mut self, output: &mut [f32], channels: usize) {
         self.process_block(AudioProcessBlock::new(output, channels));
@@ -376,123 +374,14 @@ impl AudioEngine {
             capture.samples.fill(0.0);
         }
 
-        // Bus mixes accumulate from track sends during rendering;
-        // start each block from silence.
-        if self.routing.is_none() {
-            for bus in &mut self.buses {
-                bus.clear_buffer(frames, channels);
-            }
-        }
+        self.process_multitrack(
+            output,
+            frames,
+            channels,
+            live_input,
+            track_output_capture.as_mut(),
+        );
 
-        if !self.tracks.is_empty() || self.routing.is_some() {
-            // ---- 3. Multi-track rendering path --------------------------
-            self.process_multitrack(
-                output,
-                frames,
-                channels,
-                live_input,
-                track_output_capture.as_mut(),
-            );
-        } else {
-            // ---- 4. Legacy single-audio path ----------------------------
-            self.process_legacy(output, frames, channels);
-        }
-
-        if self.routing.is_none() {
-            // ---- 4.3 Buses: each return processes its send mix through
-            // its chain (always, so queued plugin params deliver and
-            // tails ring out) and sums into the mix ahead of the master.
-            let block_beat = if self.transport.is_playing() {
-                let bpm = self.transport.bpm();
-                if bpm > 0.0 {
-                    Some(self.effective_position() as f64 * bpm / (self.sample_rate as f64 * 60.0))
-                } else {
-                    None
-                }
-            } else {
-                None
-            };
-            let has_bus_solo = any_solo(&self.buses);
-            for bus_idx in 0..self.buses.len() {
-                let bus = &mut self.buses[bus_idx];
-                let (bus_auto_gain, bus_auto_pan) = match block_beat {
-                    Some(beat) => bus.apply_automation(beat),
-                    None => (None, None),
-                };
-                let buf_size = frames * channels;
-                if bus.mix_buffer.len() < buf_size {
-                    bus.clear_buffer(frames, channels);
-                }
-                for slot in &mut bus.effects {
-                    if !slot.bypass {
-                        slot.effect
-                            .process(&mut bus.mix_buffer[..buf_size], channels);
-                    }
-                }
-                if self.spectrum_track == Some(bus.id) {
-                    push_spectrum(&mut self.spectrum_tx, &bus.mix_buffer[..buf_size], channels);
-                }
-
-                let mut peak_l = 0.0f32;
-                let mut peak_r = 0.0f32;
-                if !bus.mute && (!has_bus_solo || bus.solo) {
-                    let gain = bus_auto_gain.unwrap_or(bus.gain);
-                    // Balance, not equal-power: the send mix is already
-                    // panned stereo, center must pass at unity.
-                    let (pan_l, pan_r) = crate::mixer::balance_pan(bus_auto_pan.unwrap_or(bus.pan));
-                    for frame in 0..frames {
-                        for ch in 0..channels {
-                            let idx = frame * channels + ch;
-                            let sample = bus.mix_buffer[idx] * gain;
-                            let panned = if channels >= 2 {
-                                if ch == 0 {
-                                    sample * pan_l
-                                } else if ch == 1 {
-                                    sample * pan_r
-                                } else {
-                                    sample
-                                }
-                            } else {
-                                sample
-                            };
-                            output[idx] += panned;
-                            if ch == 0 {
-                                peak_l = peak_l.max(panned.abs());
-                            } else if ch == 1 {
-                                peak_r = peak_r.max(panned.abs());
-                            }
-                        }
-                    }
-                }
-                let bus_id = bus.id;
-                let _ = self.event_tx.push(EngineEvent::TrackMeter {
-                    track_id: bus_id,
-                    peak_l,
-                    peak_r,
-                });
-            }
-
-            // ---- 4.4 Master bus: effect chain + gain over the summed mix.
-            // Runs whether or not the transport is playing so queued
-            // plugin params are delivered and tails ring out, matching
-            // the per-track idle behavior.
-            let (master_auto_gain, _) = match block_beat {
-                Some(beat) => self.master.apply_automation(beat),
-                None => (None, None),
-            };
-            for slot in &mut self.master.effects {
-                if !slot.bypass {
-                    slot.effect.process(output, channels);
-                }
-            }
-            let master_gain = master_auto_gain.unwrap_or(self.master.gain);
-            if (master_gain - 1.0).abs() > f32::EPSILON {
-                output.iter_mut().for_each(|s| *s *= master_gain);
-            }
-            if self.spectrum_track == Some(self.master.id) {
-                push_spectrum(&mut self.spectrum_tx, output, channels);
-            }
-        }
         self.validate_compensation();
         let project_muted = self.project_processing_muted();
         if project_muted {
@@ -553,16 +442,14 @@ impl AudioEngine {
                             .saturating_sub(advanced.saturating_sub(section.length_samples));
                     }
                 }
-                let presented = self
-                    .routing
-                    .as_ref()
-                    .filter(|routing| routing.compensation.output_latency > 0)
-                    .and_then(|routing| {
-                        routing
+                let presented = (self.routing.compensation.output_latency > 0)
+                    .then(|| {
+                        self.routing
                             .presentation
                             .audible()
-                            .or(routing.presentation_start)
-                    });
+                            .or(self.routing.presentation_start)
+                    })
+                    .flatten();
                 let (section_id, position_samples) = presented
                     .and_then(|position| {
                         position
@@ -580,10 +467,12 @@ impl AudioEngine {
                             })
                     })
                     .unwrap_or((section.section_id, section.position_samples));
-                let _ = self.event_tx.push(EngineEvent::SectionPlaybackPosition {
-                    section_id,
-                    position_samples,
-                });
+                let _ = self.event_tx.push(EngineEvent::SectionPlaybackPosition(
+                    SectionPlaybackPositionEvent {
+                        section_id,
+                        position_samples,
+                    },
+                ));
             }
         }
         if section_ended {
@@ -593,7 +482,12 @@ impl AudioEngine {
         }
         // A queued Section owns the next boundary: the finished one-shot
         // stays silent on the Perform clock until the queue takes over.
-        if section_ended && self.queued_section.is_none() {
+        if section_ended
+            && !self
+                .queued_section
+                .as_ref()
+                .is_some_and(|queued| queued.phase == SectionQueuePhase::Waiting)
+        {
             self.stop_section_record();
             self.apply_end_of_section_track_mutes_at_queued_boundary();
             self.cancel_queued_track_mutes();
@@ -603,9 +497,9 @@ impl AudioEngine {
                     .saturating_sub(section_end_boundary) as usize,
             );
             self.section_capture_stopped(section_end_boundary);
-            self.capture_active = false;
-            self.present_event_after(
-                EngineEvent::PerformanceCaptureStopped {
+            self.capture_lifecycle.end();
+            self.present_cancelable_stop_after(
+                presentation_queue::CancelableStop::Performance {
                     effective_at_samples: section_end_boundary,
                 },
                 self.mix_latency(),
@@ -616,7 +510,7 @@ impl AudioEngine {
                 self.performance_position
                     .saturating_sub(section_end_boundary) as usize,
             );
-            self.present_event_after(EngineEvent::PlaybackStopped, self.mix_latency());
+            self.present_natural_playback_stop_after(self.mix_latency());
             self.rendered_callback_frames = rendered;
             self.active_section = None;
             self.clock_domain = ClockDomain::Arrange;
@@ -642,17 +536,19 @@ impl AudioEngine {
         self.split_wrap_handled = false;
 
         // Position event.
-        let audible = self
-            .routing
-            .as_ref()
-            .filter(|routing| routing.compensation.output_latency > 0)
-            .and_then(|routing| {
-                routing
+        let audible = (self.routing.compensation.output_latency > 0)
+            .then(|| {
+                self.routing
                     .presentation
                     .audible()
                     .map(|position| (position, true))
-                    .or_else(|| routing.presentation_start.map(|position| (position, false)))
-            });
+                    .or_else(|| {
+                        self.routing
+                            .presentation_start
+                            .map(|position| (position, false))
+                    })
+            })
+            .flatten();
         let audible_arrange = audible.map_or(new_pos, |(position, advanced)| {
             position
                 .arrange
@@ -675,16 +571,14 @@ impl AudioEngine {
         }
 
         if self.active_section.is_none() {
-            if let Some(position) = self
-                .routing
-                .as_ref()
-                .and_then(|routing| routing.presentation.audible())
-            {
+            if let Some(position) = self.routing.presentation.audible() {
                 if let Some((section_id, local)) = position.section_id.zip(position.section) {
-                    let _ = self.event_tx.push(EngineEvent::SectionPlaybackPosition {
-                        section_id,
-                        position_samples: local.saturating_add(1).min(position.section_length),
-                    });
+                    let _ = self.event_tx.push(EngineEvent::SectionPlaybackPosition(
+                        SectionPlaybackPositionEvent {
+                            section_id,
+                            position_samples: local.saturating_add(1).min(position.section_length),
+                        },
+                    ));
                     let _ = self.event_tx.push(EngineEvent::PerformancePosition(
                         position.perform.saturating_add(1),
                     ));
@@ -700,22 +594,17 @@ impl AudioEngine {
 
         // Master metering event.
         let meters = metering::calculate_meters(output, channels);
-        let _ = self.event_tx.push(EngineEvent::Metering {
+        let _ = self.event_tx.push(EngineEvent::Metering(MeteringEvent {
             peak_l: meters.peak_l,
             peak_r: meters.peak_r,
             rms_l: meters.rms_l,
             rms_r: meters.rms_r,
-        });
+        }));
     }
 
     /// Read the current transport (for inspection / testing).
     pub fn transport(&self) -> &Transport {
         &self.transport
-    }
-
-    /// Read the currently loaded audio (for inspection / testing).
-    pub fn audio(&self) -> Option<&Arc<DecodedAudio>> {
-        self.audio.as_ref()
     }
 
     /// Read the tracks (for inspection / testing).
@@ -834,12 +723,68 @@ pub(crate) mod section_record;
 mod clip_record;
 
 #[cfg(test)]
+#[path = "engine_graph_callback_tests.rs"]
+mod graph_callback_tests;
+
+#[cfg(test)]
+#[path = "engine_default_routing_tests.rs"]
+mod default_routing_tests;
+
+#[cfg(test)]
+#[path = "engine_compensation_state_test_support.rs"]
+mod compensation_state_test_support;
+
+#[cfg(test)]
+#[path = "engine_compensation_gate_state_tests.rs"]
+mod compensation_gate_state_tests;
+
+#[cfg(test)]
+#[path = "engine_presentation_state_tests.rs"]
+mod presentation_state_tests;
+
+#[cfg(test)]
+#[path = "engine_compensation_state_tests.rs"]
+mod compensation_state_tests;
+
+#[cfg(test)]
+#[path = "engine_device_handoff_state_tests.rs"]
+mod device_handoff_state_tests;
+
+#[cfg(test)]
+#[path = "engine_device_handoff_full_tests.rs"]
+mod device_handoff_full_tests;
+
+#[cfg(test)]
+#[path = "engine_device_handoff_stale_tests.rs"]
+mod device_handoff_stale_tests;
+
+#[cfg(test)]
+#[path = "engine_device_handoff_parameter_tests.rs"]
+mod device_handoff_parameter_tests;
+
+#[cfg(test)]
+#[path = "engine_graph_test_support.rs"]
+mod graph_test_support;
+
+#[cfg(test)]
+#[path = "engine_graph_harness_tests.rs"]
+mod graph_harness_tests;
+
+#[cfg(test)]
+#[path = "engine_stopped_repeat_clock_tests.rs"]
+mod stopped_repeat_clock_tests;
+
+#[cfg(test)]
 #[path = "engine_tests.rs"]
 mod tests;
 
 #[cfg(test)]
 #[path = "engine_stuck_note_tests.rs"]
 mod stuck_note_tests;
+
+#[cfg(test)]
+#[path = "engine_note_edit_allocation_tests.rs"]
+mod note_edit_allocation_tests;
 
 #[cfg(test)]
 #[path = "engine_mute_automation_tests.rs"]
@@ -899,17 +844,38 @@ mod compensation_clip_tests;
 #[path = "engine_graph_tests.rs"]
 mod graph_tests;
 
+#[path = "engine_device_handoff.rs"]
+mod device_handoff;
+
 #[path = "engine_reconfiguration_edits.rs"]
 mod reconfiguration_edits;
 
 #[path = "engine_reconfiguration.rs"]
 pub mod reconfiguration;
 
+#[path = "engine_device_observation.rs"]
+mod device_observation;
+
+#[path = "engine_device_validation.rs"]
+mod device_validation;
+
+#[path = "engine_handoff_observation.rs"]
+mod handoff_observation;
+
+#[path = "engine_capture_lifecycle.rs"]
+mod capture_lifecycle;
+
 #[path = "engine_capture_commands.rs"]
 mod capture_commands;
 
+#[path = "engine_capture_admission.rs"]
+mod capture_admission;
+
 #[path = "engine_compensation_commands.rs"]
 mod compensation_commands;
+
+#[path = "engine_compensation_plan.rs"]
+mod compensation_plan;
 
 #[path = "engine_device_commands.rs"]
 mod device_commands;
@@ -926,6 +892,9 @@ mod bus_solo_tests;
 #[path = "engine_offline_routing.rs"]
 mod offline_routing;
 pub(crate) use offline_routing::OfflineRoutingSetup;
+
+#[path = "engine_offline_observation.rs"]
+mod offline_observation;
 
 #[cfg(test)]
 #[path = "engine_compensation_stop_tests.rs"]
@@ -956,8 +925,40 @@ mod presentation_runtime_tests;
 mod time_domain_tests;
 
 #[cfg(test)]
+#[path = "engine_instrument_media_retirement_tests.rs"]
+mod instrument_media_retirement_tests;
+
+#[cfg(test)]
 #[path = "engine_command_allocation_tests.rs"]
 mod command_allocation_tests;
+
+#[cfg(test)]
+#[path = "engine_clip_removal_source_tests.rs"]
+mod clip_removal_source_tests;
+
+#[cfg(test)]
+#[path = "engine_clip_removal_owner_tests.rs"]
+mod clip_removal_owner_tests;
+
+#[cfg(test)]
+#[path = "engine_clip_removal_retirement_tests.rs"]
+mod clip_removal_retirement_tests;
+
+#[cfg(test)]
+#[path = "engine_clip_audio_retirement_tests.rs"]
+mod clip_audio_retirement_tests;
+
+#[cfg(test)]
+#[path = "engine_warp_marker_retirement_tests.rs"]
+mod warp_marker_retirement_tests;
+
+#[cfg(test)]
+#[path = "engine_track_reorder_tests.rs"]
+mod track_reorder_tests;
+
+#[cfg(test)]
+#[path = "engine_send_capacity_tests.rs"]
+mod send_capacity_tests;
 
 #[cfg(test)]
 #[path = "engine_compensation_presentation_tests.rs"]
@@ -965,6 +966,11 @@ mod compensation_presentation_tests;
 
 #[path = "engine_compensation_transition.rs"]
 mod compensation_transition;
+#[path = "engine_output_gate.rs"]
+mod output_gate;
+
+#[path = "engine_clip_insertion.rs"]
+mod clip_insertion;
 
 #[cfg(test)]
 #[path = "engine_compensation_transition_tests.rs"]
@@ -983,6 +989,12 @@ mod transport_commands;
 
 #[path = "engine_presentation_queue.rs"]
 mod presentation_queue;
+
+#[path = "engine_terminal_notifications.rs"]
+mod terminal_notifications;
+
+#[path = "engine_presentation_state.rs"]
+mod presentation_state;
 
 #[path = "engine_clip_batch.rs"]
 mod clip_batch;
@@ -1010,3 +1022,96 @@ mod automation_review_tests;
 #[cfg(test)]
 #[path = "engine_automation_retirement_tests.rs"]
 mod automation_retirement_tests;
+
+#[cfg(test)]
+#[path = "engine_device_observation_tests.rs"]
+mod device_observation_tests;
+
+#[cfg(test)]
+#[path = "engine_device_observation_scan_tests.rs"]
+mod device_observation_scan_tests;
+
+#[cfg(test)]
+#[path = "engine_device_observation_validation_tests.rs"]
+mod device_observation_validation_tests;
+
+#[cfg(test)]
+#[path = "engine_device_observation_capture_tests.rs"]
+mod device_observation_capture_tests;
+
+#[cfg(test)]
+#[path = "engine_capture_lifecycle_admission_tests.rs"]
+mod capture_lifecycle_admission_tests;
+
+#[cfg(test)]
+#[path = "engine_capture_lifecycle_episode_tests.rs"]
+mod capture_lifecycle_episode_tests;
+
+#[cfg(test)]
+#[path = "engine_capture_start_rearm_tests.rs"]
+mod capture_start_rearm_tests;
+
+#[cfg(test)]
+#[path = "engine_capture_start_rearm_control_tests.rs"]
+mod capture_start_rearm_control_tests;
+
+#[cfg(test)]
+#[path = "engine_capture_start_rearm_pressure_tests.rs"]
+mod capture_start_rearm_pressure_tests;
+
+#[cfg(test)]
+#[path = "engine_capture_lifecycle_recovery_tests.rs"]
+mod capture_lifecycle_recovery_tests;
+
+#[cfg(test)]
+#[path = "engine_capture_lifecycle_pressure_tests.rs"]
+mod capture_lifecycle_pressure_tests;
+
+#[cfg(test)]
+#[path = "engine_capture_lifecycle_transport_tests.rs"]
+mod capture_lifecycle_transport_tests;
+
+#[cfg(test)]
+#[path = "engine_capture_lifecycle_rebase_tests.rs"]
+mod capture_lifecycle_rebase_tests;
+
+#[cfg(test)]
+#[path = "engine_automation_lane_insertion_tests.rs"]
+mod automation_lane_insertion_tests;
+
+#[cfg(test)]
+#[path = "engine_automation_lane_fifo_tests.rs"]
+mod automation_lane_fifo_tests;
+
+#[cfg(test)]
+#[path = "engine_retirement_pressure_tests.rs"]
+mod retirement_pressure_tests;
+
+#[cfg(test)]
+#[path = "engine_retirement_admission_tests.rs"]
+mod retirement_admission_tests;
+
+#[cfg(test)]
+#[path = "engine_unload_routed_pressure_tests.rs"]
+mod unload_routed_pressure_tests;
+
+#[cfg(test)]
+#[path = "engine_section_activation_pressure_tests.rs"]
+mod section_activation_pressure_tests;
+
+#[cfg(test)]
+#[path = "engine_clip_record_pressure_tests.rs"]
+mod clip_record_pressure_tests;
+#[cfg(test)]
+#[path = "engine_resumed_record_pressure_tests.rs"]
+mod resumed_record_pressure_tests;
+#[cfg(test)]
+#[path = "engine_resumed_section_rejection_tests.rs"]
+mod resumed_section_rejection_tests;
+#[cfg(test)]
+#[path = "engine_retained_count_in_tests.rs"]
+mod retained_count_in_tests;
+
+#[cfg(test)]
+#[path = "engine_natural_playback_stop_pressure_tests.rs"]
+mod natural_playback_stop_pressure_tests;

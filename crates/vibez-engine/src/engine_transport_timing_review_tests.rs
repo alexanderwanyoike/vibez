@@ -91,6 +91,7 @@ fn stop_then_seek_preserves_a_musical_tail_with_zero_processing_latency() {
 
 fn source(track: TrackId) -> EngineCommand {
     EngineCommand::AddClip {
+        insertion: crate::clip_insertion::PreparedClipInsertion::new(),
         track_id: track,
         clip_id: ClipId::new(),
         audio: Arc::new(DecodedAudio {
@@ -338,7 +339,7 @@ fn structural_zero_delay_insert_keeps_existing_parallel_audio_continuous() {
         output.iter().all(|&sample| (sample - steady).abs() < 1e-7),
         "structural edit gated the mix"
     );
-    assert_eq!(engine.compensation_plan_fade, 0);
+    assert_eq!(engine.output_gate.remaining_morph_frames(), 0);
 }
 
 #[test]
@@ -364,7 +365,7 @@ fn play_after_one_shot_source_end_cannot_receive_the_old_heard_stop() {
             !started
                 || !matches!(
                     event,
-                    EngineEvent::PlaybackStopped | EngineEvent::SectionTransitioned { .. }
+                    EngineEvent::PlaybackStopped | EngineEvent::SectionTransitioned(_)
                 ),
             "old heard state followed Play"
         );
@@ -385,7 +386,7 @@ fn restarting_before_the_heard_section_end_closes_the_old_capture_first() {
     engine.process(&mut [0.0; 128], 2);
     let mut recording = false;
     while let Ok(event) = events.pop() {
-        if matches!(event, EngineEvent::PerformanceCaptureStarted { .. }) {
+        if matches!(event, EngineEvent::PerformanceCaptureStarted(_)) {
             recording = true;
         }
     }
@@ -414,7 +415,7 @@ fn restarting_before_the_heard_section_end_closes_the_old_capture_first() {
                 playing = true;
             }
             EngineEvent::SectionCaptureSource { .. }
-            | EngineEvent::SectionTransitioned { .. }
+            | EngineEvent::SectionTransitioned(_)
             | EngineEvent::PlaybackStopped => {
                 assert!(!playing, "old Section lifetime survived Play")
             }
