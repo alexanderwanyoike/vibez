@@ -78,7 +78,7 @@ impl Cutoff {
     }
 }
 
-pub(super) struct FeedbackFilters {
+pub(crate) struct FeedbackFilters {
     channels: [ChannelState; 2],
     high_pass_enabled: ScalarRamp,
     low_pass_enabled: ScalarRamp,
@@ -99,7 +99,7 @@ impl Default for FeedbackFilters {
 }
 
 impl FeedbackFilters {
-    pub(super) fn new(sample_rate: f32, high_pass_hz: f32, low_pass_hz: f32) -> Self {
+    pub(crate) fn new(sample_rate: f32, high_pass_hz: f32, low_pass_hz: f32) -> Self {
         Self {
             high_pass_cutoff: Cutoff::new(high_pass_hz, sample_rate),
             low_pass_cutoff: Cutoff::new(low_pass_hz, sample_rate),
@@ -107,19 +107,19 @@ impl FeedbackFilters {
         }
     }
 
-    pub(super) fn set_high_pass_enabled(&mut self, target: f32, automated: bool, frames: usize) {
+    pub(crate) fn set_high_pass_enabled(&mut self, target: f32, automated: bool, frames: usize) {
         self.high_pass_enabled.edit(target, automated, frames);
     }
 
-    pub(super) fn set_low_pass_enabled(&mut self, target: f32, automated: bool, frames: usize) {
+    pub(crate) fn set_low_pass_enabled(&mut self, target: f32, automated: bool, frames: usize) {
         self.low_pass_enabled.edit(target, automated, frames);
     }
 
-    pub(super) fn set_high_pass_hz(&mut self, hertz: f32, automated: bool) {
+    pub(crate) fn set_high_pass_hz(&mut self, hertz: f32, automated: bool) {
         self.high_pass_cutoff.edit(hertz, automated);
     }
 
-    pub(super) fn set_low_pass_hz(&mut self, hertz: f32, automated: bool) {
+    pub(crate) fn set_low_pass_hz(&mut self, hertz: f32, automated: bool) {
         self.low_pass_cutoff.edit(hertz, automated);
     }
 
@@ -153,7 +153,7 @@ impl FeedbackFilters {
         }
     }
 
-    pub(super) fn process(&mut self, input: [f32; 2]) -> [f32; 2] {
+    pub(crate) fn process(&mut self, input: [f32; 2]) -> [f32; 2] {
         let high_pass = self.high_pass_enabled.next_frame();
         let low_pass = self.low_pass_enabled.next_frame();
         let high_pass_g = self.high_pass_cutoff.next_frame();
@@ -168,7 +168,7 @@ impl FeedbackFilters {
         })
     }
 
-    pub(super) fn reset(&mut self, high_pass: f32, low_pass: f32) {
+    pub(crate) fn reset(&mut self, high_pass: f32, low_pass: f32) {
         self.channels = Default::default();
         self.high_pass_enabled.reset(high_pass);
         self.low_pass_enabled.reset(low_pass);

@@ -39,6 +39,8 @@ pub enum ParamFormat {
     Note,
     /// Stored -1..1, shown as the mixer shows pan ("C", "L50", "R30").
     Pan,
+    /// A choice stored as its place in this list, shown and typed by name.
+    Names(&'static [&'static str]),
     Number {
         decimals: u8,
         unit: &'static str,
@@ -80,7 +82,7 @@ impl ParamFormat {
             Self::Milliseconds => format!("{} ms", self.edit_text(value)),
             Self::Percent => format!("{} %", self.edit_text(value)),
             Self::Ratio => format!("{} :1", self.edit_text(value)),
-            Self::Note | Self::Pan => self.edit_text(value),
+            Self::Note | Self::Pan | Self::Names(_) => self.edit_text(value),
             Self::Number { unit: "", .. } => self.edit_text(value),
             Self::Number { unit, .. } => format!("{} {unit}", self.edit_text(value)),
         }
@@ -110,6 +112,11 @@ impl ParamFormat {
             Self::Percent => format!("{:.0}", value * 100.0),
             Self::Ratio => format!("{value:.1}"),
             Self::Note => vibez_core::midi::pitch_name(value.round().clamp(0.0, 127.0) as u8),
+            Self::Names(names) => names
+                .get(value.round().max(0.0) as usize)
+                .copied()
+                .unwrap_or_default()
+                .to_string(),
             Self::Pan => match (value * 100.0).round() {
                 side if side < 0.0 => format!("L{:.0}", -side),
                 side if side > 0.0 => format!("R{side:.0}"),
@@ -140,6 +147,13 @@ impl ParamFormat {
         }
         if matches!(self, Self::Pan) {
             return parse_pan(&text).filter(|value| (min..=max).contains(value));
+        }
+        if let Self::Names(names) = self {
+            return names
+                .iter()
+                .position(|name| name.to_ascii_lowercase() == text)
+                .map(|index| index as f32)
+                .filter(|value| (min..=max).contains(value));
         }
         if matches!(self, Self::Amplitude { .. }) && matches!(text.as_str(), "-inf" | "-∞") {
             return Some(0.0);
@@ -287,6 +301,9 @@ pub fn param_format(
                 },
                 _ => ParamFormat::for_descriptor(descriptor),
             }
+        }
+        (DevicePresetKind::Effect(EffectType::Echo), vibez_dsp::echo::param::GRID) => {
+            ParamFormat::Names(&crate::domains::echo::GRID_NAMES)
         }
         (DevicePresetKind::Effect(EffectType::Gain), vibez_dsp::gain::param::GAIN) => {
             ParamFormat::Amplitude {
@@ -685,6 +702,15 @@ mod tests {
         assert_eq!(format(param::DETUNE, 0.26), "0.3 st");
         assert_eq!(format(param::VOICES, 8.0), "8");
         assert_eq!(format(param::CUTOFF, 2_400.0), "2.4 kHz");
+    }
+
+    #[test]
+    fn a_named_choice_reads_and_types_by_name() {
+        let names = ParamFormat::Names(&["1/8", "1/4 D", "1/2"]);
+        assert_eq!(names.format(1.0), "1/4 D");
+        assert_eq!(names.parse("1/4 d", 0.0, 2.0), Some(1.0));
+        assert_eq!(names.parse("1/2", 0.0, 2.0), Some(2.0));
+        assert_eq!(names.parse("1/16", 0.0, 2.0), None);
     }
 
     #[test]

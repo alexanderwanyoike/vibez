@@ -13,6 +13,7 @@ use crate::domains::compressor::is_native_compressor;
 use crate::domains::delay::is_native_delay;
 use crate::domains::device_levels::MeteredPanel;
 use crate::domains::drive::is_native_drive;
+use crate::domains::echo::is_native_echo;
 use crate::domains::eq::is_native_eq;
 use crate::domains::filter::is_native_filter;
 use crate::domains::gain::is_native_gain;
@@ -48,6 +49,7 @@ fn is_metered(effect: &UiEffect) -> bool {
         || is_native_drive(effect)
         || is_native_bitcrush(effect)
         || is_native_delay(effect)
+        || is_native_echo(effect)
         || is_native_reverb(effect)
         || is_native_auto_pan(effect)
 }
@@ -163,6 +165,7 @@ impl App {
         } else if is_native_drive(effect)
             || is_native_bitcrush(effect)
             || is_native_delay(effect)
+            || is_native_echo(effect)
             || is_native_reverb(effect)
             || is_native_auto_pan(effect)
         {

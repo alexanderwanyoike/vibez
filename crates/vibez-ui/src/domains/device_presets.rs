@@ -198,6 +198,30 @@ const DELAY_KEYS: [(usize, &str, bool); 17] = {
     ]
 };
 
+/// Every native Echo parameter.
+const ECHO_KEYS: [(usize, &str, bool); 17] = {
+    use vibez_dsp::echo::param::*;
+    [
+        (TIME_MS, "time_ms", false),
+        (SYNC, "sync", true),
+        (GRID, "grid", true),
+        (FEEDBACK, "feedback", false),
+        (MIX, "mix", false),
+        (MODE, "mode", true),
+        (CHARACTER, "character", false),
+        (TONE, "tone", false),
+        (STYLE, "tape_character", true),
+        (WEAR, "wear", false),
+        (WOW, "wow", false),
+        (FLUTTER, "flutter", false),
+        (SATURATION, "saturation", false),
+        (DIFFUSION, "diffusion", false),
+        (DUCK, "duck", false),
+        (LOW_CUT, "low_cut", false),
+        (HIGH_CUT, "high_cut", false),
+    ]
+};
+
 /// Every native Reverb parameter; its sync and freeze are choices.
 const REVERB_KEYS: [(usize, &str, bool); 10] = {
     use vibez_dsp::reverb::param::*;
@@ -411,6 +435,7 @@ fn parameter_keys(device: &DeviceParams) -> Result<Vec<PresetParam>, String> {
         EffectType::Drive => Ok(DRIVE_KEYS.to_vec()),
         EffectType::Bitcrush => Ok(BITCRUSH_KEYS.to_vec()),
         EffectType::Delay => Ok(DELAY_KEYS.to_vec()),
+        EffectType::Echo => Ok(ECHO_KEYS.to_vec()),
         EffectType::Reverb => Ok(REVERB_KEYS.to_vec()),
         EffectType::AutoPan => Ok(AUTO_PAN_KEYS.to_vec()),
         EffectType::Phaser => Ok(PHASER_KEYS.to_vec()),
@@ -749,6 +774,7 @@ pub fn factory_presets(effect_type: EffectType) -> Vec<DevicePreset> {
         EffectType::Drive => drive_factory_presets(),
         EffectType::Bitcrush => bitcrush_factory_presets(),
         EffectType::Delay => delay_factory_presets(),
+        EffectType::Echo => echo_factory_presets(),
         EffectType::Reverb => reverb_factory_presets(),
         EffectType::AutoPan => auto_pan_factory_presets(),
         EffectType::Phaser => phaser_factory_presets(),
@@ -1363,6 +1389,101 @@ fn bitcrush_factory_presets() -> Vec<DevicePreset> {
 }
 
 /// Sol's echoes, from a short slap to a long space.
+fn echo_factory_presets() -> Vec<DevicePreset> {
+    let presets: [(&str, &[(&str, f32)]); 8] = [
+        ("Init", &[]),
+        (
+            "Worn Tape",
+            &[
+                ("character", 0.55),
+                ("tone", 0.4),
+                ("wear", 0.45),
+                ("wow", 0.2),
+                ("flutter", 0.12),
+                ("saturation", 0.25),
+                ("high_cut", 4500.0),
+            ],
+        ),
+        (
+            "Clean Slap",
+            &[
+                ("tape_character", 0.0),
+                ("sync", 0.0),
+                ("time_ms", 110.0),
+                ("feedback", 0.15),
+                ("mix", 0.2),
+                ("low_cut", 120.0),
+                ("high_cut", 12000.0),
+            ],
+        ),
+        (
+            "Dub Space",
+            &[
+                ("mode", 1.0),
+                ("feedback", 0.7),
+                ("mix", 0.3),
+                ("tone", 0.35),
+                ("saturation", 0.3),
+                ("duck", 0.35),
+                ("low_cut", 250.0),
+                ("high_cut", 3500.0),
+            ],
+        ),
+        (
+            "Diffuse Wash",
+            &[
+                ("tape_character", 2.0),
+                ("grid", 16.0),
+                ("feedback", 0.65),
+                ("character", 0.6),
+                ("diffusion", 0.7),
+                ("mix", 0.35),
+                ("high_cut", 7000.0),
+            ],
+        ),
+        (
+            "Cassette Eighths",
+            &[
+                ("grid", 10.0),
+                ("feedback", 0.4),
+                ("character", 0.6),
+                ("wear", 0.6),
+                ("wow", 0.35),
+                ("flutter", 0.2),
+                ("saturation", 0.4),
+                ("high_cut", 3800.0),
+            ],
+        ),
+        (
+            "Ping-Pong Sixteenths",
+            &[
+                ("tape_character", 0.0),
+                ("mode", 1.0),
+                ("grid", 7.0),
+                ("feedback", 0.45),
+                ("mix", 0.22),
+            ],
+        ),
+        (
+            "Ducked Vocal",
+            &[
+                ("grid", 12.0),
+                ("feedback", 0.35),
+                ("duck", 0.7),
+                ("mix", 0.3),
+                ("low_cut", 300.0),
+                ("high_cut", 8000.0),
+            ],
+        ),
+    ];
+    keyed_presets(
+        DevicePresetKind::Effect(EffectType::Echo),
+        &ECHO_KEYS,
+        vibez_dsp::echo::ECHO_PARAMS,
+        &presets,
+    )
+}
+
 fn delay_factory_presets() -> Vec<DevicePreset> {
     let presets: [(&str, &[(&str, f32)]); 8] = [
         ("Init", &[]),
@@ -2169,6 +2290,42 @@ mod presentation_tests {
         assert_eq!(prepare_updates(&effect, &presets[0]), Ok(Vec::new()));
         for preset in &presets[1..] {
             let mut applied = delay();
+            for (index, value) in prepare_updates(&effect, preset).unwrap() {
+                applied.params[index] = value;
+            }
+            assert_ne!(applied.params, effect.params, "{}", preset.name());
+            assert_eq!(capture(&applied, preset.name()).as_ref(), Ok(preset));
+        }
+        let mut names: Vec<_> = presets.iter().map(DevicePreset::name).collect();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(names.len(), presets.len(), "names are unique");
+    }
+
+    fn echo() -> UiEffect {
+        let descriptors =
+            vibez_dsp::factory::create_effect(EffectType::Echo, 44_100.0).param_descriptors();
+        UiEffect {
+            effect_type: EffectType::Echo,
+            params: descriptors
+                .iter()
+                .map(|descriptor| descriptor.default)
+                .collect(),
+            descriptors,
+            ..gain()
+        }
+    }
+
+    #[test]
+    fn echo_factory_presets_are_valid_distinct_and_start_from_init() {
+        let effect = echo();
+        let presets = factory_presets(EffectType::Echo);
+        assert!(presets.len() >= 6);
+        assert_eq!(presets[0].name(), "Init");
+        assert_eq!(prepare_updates(&effect, &presets[0]), Ok(Vec::new()));
+        assert!(presets.iter().any(|preset| preset.name() == "Worn Tape"));
+        for preset in &presets[1..] {
+            let mut applied = echo();
             for (index, value) in prepare_updates(&effect, preset).unwrap() {
                 applied.params[index] = value;
             }

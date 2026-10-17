@@ -5,6 +5,7 @@ pub mod compensation_delay;
 pub mod compressor;
 pub mod delay;
 pub mod drive;
+pub mod echo;
 pub mod effect;
 pub mod eq;
 pub mod factory;
