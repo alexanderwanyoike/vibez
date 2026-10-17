@@ -2597,7 +2597,7 @@ impl DrumRackGallery {
                     device,
                     None,
                     accent,
-                    crate::widgets::sampler_device::preset_bar_width(layout.sampler),
+                    crate::widgets::drum_rack_device::preset_bar_width(layout),
                 ),
                 size,
             )

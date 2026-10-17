@@ -1,6 +1,8 @@
 //! Native Drum Rack body: a bank of sixteen pads beside the selected pad,
 //! which is a Sampler and shows as the Sampler's own body. Narrow cards show
-//! the pads or the pad's Sampler behind tabs.
+//! the pads or the pad's Sampler behind tabs, and the shortest put the tabs,
+//! kit and banks on one line over two rows of pads, or the tabs into the
+//! Sampler's preset row.
 
 use std::cell::Cell;
 use std::sync::Arc;
@@ -70,6 +72,18 @@ const MARQUEE_GAP: f32 = 24.0;
 const BEZEL: f32 = 2.0;
 const FACE_RADIUS: f32 = 5.0;
 const BEZEL_RADIUS: f32 = 7.0;
+/// Pads shorter than this would rather lay out in fewer, longer rows.
+const FULL_PAD_MIN_H: f32 = 16.0;
+/// The shortest a pad gets and still shows its name.
+const PAD_MIN_H: f32 = 14.0;
+/// Below this a pad drops its bezel gap and sets its name smaller.
+const TINY_PAD_H: f32 = 18.0;
+/// The Sampler's preset row over its sample line.
+const SAMPLER_MIN_H: f32 = 28.0 + 1.0 + 24.0;
+/// The short card's line of tabs, kit and banks.
+const SHORT_HEADER_H: f32 = 26.0;
+const SHORT_PAD_V: f32 = 4.0;
+const BANK_W: f32 = 40.0;
 const CHOKES: [(Option<u8>, &str); 5] = [
     (None, "Off"),
     (Some(1), "1"),
@@ -95,6 +109,11 @@ pub struct Layout {
     pub pad_h: f32,
     /// The kit and banks sit in a column beside the grid, not above it.
     pub rail: bool,
+    /// Too short for the pad strip: the tabs, kit and banks share one line
+    /// over the pads, and the tabs move into the Sampler's preset row.
+    pub short: bool,
+    /// Rows of pads, four of four or, when short, two of eight or one.
+    pub rows: usize,
     /// The selected pad's Sampler body.
     pub sampler: Size,
 }
@@ -130,12 +149,52 @@ pub fn arrange(size: Size) -> Layout {
     } else {
         size.width
     };
+    let sampler = Size::new(sampler_w, (size.height - tabs - STRIP_H - 1.0).max(0.0));
+    if pad_h >= FULL_PAD_MIN_H && sampler.height >= SAMPLER_MIN_H {
+        return Layout {
+            side_by_side,
+            grid_w,
+            pad_h,
+            rail,
+            short: false,
+            rows: 4,
+            sampler,
+        };
+    }
+    let area = (size.height - SHORT_HEADER_H - 1.0 - SHORT_PAD_V * 2.0).max(0.0);
+    let row_h = |rows: usize| (area - GAP * (rows - 1) as f32) / rows as f32;
+    let rows = if row_h(4) >= FULL_PAD_MIN_H {
+        4
+    } else if row_h(2) >= PAD_MIN_H {
+        2
+    } else {
+        1
+    };
     Layout {
-        side_by_side,
-        grid_w,
-        pad_h,
-        rail,
-        sampler: Size::new(sampler_w, (size.height - tabs - STRIP_H - 1.0).max(0.0)),
+        side_by_side: false,
+        grid_w: size.width - PAD * 2.0,
+        pad_h: row_h(rows).max(0.0),
+        rail: false,
+        short: true,
+        rows,
+        sampler: size,
+    }
+}
+
+/// The "Pads" and "Sampler" tabs' width, as `tabs` sets them.
+fn pad_tabs_width() -> f32 {
+    let measure = |label| text_width(label, LABEL_SIZE + 1.0, iced::Font::DEFAULT);
+    measure("Pads") + measure("Sampler") + 14.0
+}
+
+/// The width the selected pad's preset bar gets.
+pub fn preset_bar_width(layout: Layout) -> f32 {
+    let bar = crate::widgets::sampler_device::preset_bar_width(layout.sampler);
+    if layout.short {
+        // The tabs share the short card's preset row.
+        bar - pad_tabs_width() - 10.0
+    } else {
+        bar
     }
 }
 
@@ -283,7 +342,13 @@ impl canvas::Program<Message> for PadView<'_> {
             frame.fill(&face, th::with_alpha(th::text(), 0.05));
         }
         let small = size.height < SMALL_PAD_H;
-        let size_px = if small { LABEL_SIZE } else { LABEL_SIZE + 1.0 };
+        let size_px = if size.height < TINY_PAD_H {
+            LABEL_SIZE - 1.0
+        } else if small {
+            LABEL_SIZE
+        } else {
+            LABEL_SIZE + 1.0
+        };
         let note_px = LABEL_SIZE - 1.0;
         let inset = if size.width < NOTE_PAD_W { 5.0 } else { 7.0 };
         let mut room = size.width - inset * 2.0;
@@ -452,8 +517,23 @@ impl<'a> DrumRackView<'a> {
         (self.selected / DRUM_RACK_BANK_SIZE).min(DRUM_RACK_BANK_COUNT - 1)
     }
 
+    fn pad_tabs(&self) -> Element<'a, Message> {
+        let track_id = self.track_id;
+        tabs(
+            &[(false, "Pads"), (true, "Sampler")],
+            self.panel.pad_sampler,
+            move |sampler| {
+                Message::InstrumentCard(InstrumentCardMsg::ShowPadSampler(track_id, sampler))
+            },
+            self.accent,
+        )
+    }
+
     pub fn view(self, preset_bar: Element<'a, Message>, size: Size) -> Element<'a, Message> {
         let layout = arrange(size);
+        if layout.short {
+            return self.short(preset_bar, layout);
+        }
         if layout.side_by_side {
             return row![
                 container(self.pads(layout))
@@ -466,19 +546,10 @@ impl<'a> DrumRackView<'a> {
             .height(Length::Fill)
             .into();
         }
-        let track_id = self.track_id;
-        let options = [(false, "Pads"), (true, "Sampler")];
-        let strip = container(tabs(
-            &options,
-            self.panel.pad_sampler,
-            move |sampler| {
-                Message::InstrumentCard(InstrumentCardMsg::ShowPadSampler(track_id, sampler))
-            },
-            self.accent,
-        ))
-        .padding([0.0, PAD])
-        .height(TABS_H)
-        .align_y(Alignment::Center);
+        let strip = container(self.pad_tabs())
+            .padding([0.0, PAD])
+            .height(TABS_H)
+            .align_y(Alignment::Center);
         let shown = if self.panel.pad_sampler {
             self.editor(preset_bar, layout)
         } else {
@@ -492,23 +563,78 @@ impl<'a> DrumRackView<'a> {
         column![strip, rule(), shown].height(Length::Fill).into()
     }
 
-    fn pads(&self, layout: Layout) -> Element<'a, Message> {
-        let bank = self.bank();
-        let first = bank * DRUM_RACK_BANK_SIZE;
+    /// The short card: the tabs, kit and banks on one line over the pads,
+    /// or the tabs in the selected pad's preset row over its Sampler.
+    fn short(self, preset_bar: Element<'a, Message>, layout: Layout) -> Element<'a, Message> {
+        if self.panel.pad_sampler {
+            let pad = &self.pads[self.selected];
+            let preset_row = row![self.pad_tabs(), preset_bar]
+                .spacing(10)
+                .align_y(Alignment::Center);
+            return SamplerView {
+                track_id: self.track_id,
+                device: self.device,
+                load: Message::LoadDrumRackPadSample(self.track_id, self.selected),
+                audio: pad.audio.as_ref(),
+                sample_name: pad.source.as_ref().map(|source| source.display_name()),
+                accent: self.accent,
+                panel: self.panel.clone(),
+                entry: self.entry,
+            }
+            .view(preset_row.into(), layout.sampler);
+        }
+        let banks_w = BANK_W * DRUM_RACK_BANK_COUNT as f32 + GAP * 3.0;
+        let kit_w = (layout.grid_w - pad_tabs_width() - banks_w - 20.0).clamp(150.0, 300.0);
+        let mut banks = row![].spacing(GAP);
+        for bank in 0..DRUM_RACK_BANK_COUNT {
+            banks = banks.push(self.bank_button(bank));
+        }
+        let header = row![
+            self.pad_tabs(),
+            crate::widgets::device_preset_bar::kit_bar(
+                self.track_id,
+                self.panel.kit.as_deref(),
+                self.accent,
+                kit_w,
+            ),
+            iced::widget::horizontal_space(),
+            banks,
+        ]
+        .spacing(10)
+        .align_y(Alignment::Center);
+        column![
+            container(header)
+                .padding([0.0, PAD])
+                .height(SHORT_HEADER_H)
+                .align_y(Alignment::Center),
+            rule(),
+            container(self.grid(layout))
+                .padding([SHORT_PAD_V, PAD])
+                .height(Length::Fill),
+        ]
+        .height(Length::Fill)
+        .into()
+    }
+
+    /// The bank's pads in `layout.rows` rows, its lowest at the bottom left
+    /// as on a pad controller.
+    fn grid(&self, layout: Layout) -> iced::widget::Column<'a, Message> {
+        let first = self.bank() * DRUM_RACK_BANK_SIZE;
+        let columns = DRUM_RACK_BANK_SIZE / layout.rows;
         let mut grid = column![].spacing(GAP);
-        // The bank's lowest pads sit at the bottom, as on a pad controller.
-        for pad_row in (0..4).rev() {
+        for pad_row in (0..layout.rows).rev() {
             let mut cells = row![].spacing(GAP).height(Length::FillPortion(1));
-            for pad_column in 0..4 {
-                let offset = pad_row * 4 + pad_column;
-                cells = cells.push(self.pad(
-                    first + offset,
-                    self.firing[offset],
-                    layout.pad_h < SMALL_PAD_H,
-                ));
+            for pad_column in 0..columns {
+                let offset = pad_row * columns + pad_column;
+                cells = cells.push(self.pad(first + offset, self.firing[offset], layout.pad_h));
             }
             grid = grid.push(cells);
         }
+        grid
+    }
+
+    fn pads(&self, layout: Layout) -> Element<'a, Message> {
+        let grid = self.grid(layout);
         let kit_w = if layout.rail { RAIL_W } else { layout.grid_w };
         let kit = container(crate::widgets::device_preset_bar::kit_bar(
             self.track_id,
@@ -544,7 +670,9 @@ impl<'a> DrumRackView<'a> {
             .into()
     }
 
-    fn pad(&self, index: usize, firing: bool, small: bool) -> Element<'a, Message> {
+    fn pad(&self, index: usize, firing: bool, pad_h: f32) -> Element<'a, Message> {
+        let small = pad_h < SMALL_PAD_H;
+        let tiny = pad_h < TINY_PAD_H;
         let pad = &self.pads[index];
         let (start, end) = (pad.param(param::START), pad.param(param::END));
         let view = PadView {
@@ -605,7 +733,13 @@ impl<'a> DrumRackView<'a> {
             },
         );
         let bezel = container(face)
-            .padding(if small { 1.0 } else { BEZEL })
+            .padding(if tiny {
+                0.0
+            } else if small {
+                1.0
+            } else {
+                BEZEL
+            })
             .width(Length::FillPortion(1))
             .height(Length::Fill)
             .style(move |_theme: &Theme| container::Style {
@@ -851,7 +985,10 @@ mod tests {
             900.0,
             MAX_W,
         ] {
-            for height in (120..=520).step_by(4).map(|height| height as f32) {
+            for height in (MINIMUM_BODY_H as usize..=520)
+                .step_by(2)
+                .map(|height| height as f32)
+            {
                 let layout = arrange(Size::new(width, height));
                 let context = format!("{width}x{height}: {layout:?}");
                 let tabs = if layout.side_by_side {
@@ -859,12 +996,15 @@ mod tests {
                 } else {
                     TABS_H + 1.0
                 };
-                let above = if layout.rail {
-                    0.0
+                let rows = layout.rows as f32;
+                let pads = if layout.short {
+                    SHORT_HEADER_H + 1.0 + SHORT_PAD_V * 2.0
+                } else if layout.rail {
+                    tabs + PAD * 2.0
                 } else {
-                    KIT_ROW_H + BANK_ROW_H + GAP * 2.0
-                };
-                let pads = tabs + PAD * 2.0 + above + layout.pad_h * 4.0 + GAP * 3.0;
+                    tabs + PAD * 2.0 + KIT_ROW_H + BANK_ROW_H + GAP * 2.0
+                } + layout.pad_h * rows
+                    + GAP * (rows - 1.0);
                 assert!(pads <= height + 0.01, "{context}");
                 assert!(
                     layout.grid_w >= GRID_MIN_W.min(width - PAD * 2.0),
@@ -873,6 +1013,7 @@ mod tests {
                 if layout.side_by_side {
                     assert!(layout.sampler.width >= SAMPLER_MIN_W - 0.01, "{context}");
                 }
+                assert_eq!(DRUM_RACK_BANK_SIZE % layout.rows, 0, "{context}");
             }
         }
     }
@@ -906,6 +1047,18 @@ mod tests {
         assert!(short.pad_h > stacked + 10.0, "{short:?}");
         let tall = arrange(Size::new(460.0, 420.0));
         assert!(!tall.rail, "{tall:?}");
+    }
+
+    #[test]
+    fn the_minimum_panel_shows_two_rows_of_pads_and_the_default_the_full_card() {
+        for width in [COMPACT_W, 460.0, SIDE_BY_SIDE_W] {
+            let minimum = arrange(Size::new(width, MINIMUM_BODY_H));
+            assert!(minimum.short && minimum.rows == 2, "{width}: {minimum:?}");
+            // The default 280 px panel's body keeps the strip and the grid.
+            let default = arrange(Size::new(width, 168.0));
+            assert!(!default.short && default.rows == 4, "{width}: {default:?}");
+        }
+        assert!(arrange(Size::new(SIDE_BY_SIDE_W, 168.0)).side_by_side);
     }
 
     #[test]
