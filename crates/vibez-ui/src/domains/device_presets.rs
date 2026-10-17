@@ -244,6 +244,21 @@ const SATURATOR_KEYS: [(usize, &str, bool); 15] = {
     ]
 };
 
+/// Every native Limiter parameter.
+const LIMITER_KEYS: [(usize, &str, bool); 8] = {
+    use vibez_dsp::limiter::param::*;
+    [
+        (INPUT_DB, "input_db", false),
+        (CEILING_DB, "ceiling_db", false),
+        (RELEASE_MS, "release_ms", false),
+        (STYLE, "style", true),
+        (LOOKAHEAD_MS, "lookahead_ms", false),
+        (STEREO_LINK, "stereo_link", false),
+        (QUALITY, "quality", true),
+        (TRUE_PEAK, "true_peak", true),
+    ]
+};
+
 /// Every native Reverb parameter; its sync and freeze are choices.
 const REVERB_KEYS: [(usize, &str, bool); 10] = {
     use vibez_dsp::reverb::param::*;
@@ -458,6 +473,7 @@ fn parameter_keys(device: &DeviceParams) -> Result<Vec<PresetParam>, String> {
         EffectType::Bitcrush => Ok(BITCRUSH_KEYS.to_vec()),
         EffectType::Delay => Ok(DELAY_KEYS.to_vec()),
         EffectType::Echo => Ok(ECHO_KEYS.to_vec()),
+        EffectType::Limiter => Ok(LIMITER_KEYS.to_vec()),
         EffectType::Saturator => Ok(SATURATOR_KEYS.to_vec()),
         EffectType::Reverb => Ok(REVERB_KEYS.to_vec()),
         EffectType::AutoPan => Ok(AUTO_PAN_KEYS.to_vec()),
@@ -798,6 +814,7 @@ pub fn factory_presets(effect_type: EffectType) -> Vec<DevicePreset> {
         EffectType::Bitcrush => bitcrush_factory_presets(),
         EffectType::Delay => delay_factory_presets(),
         EffectType::Echo => echo_factory_presets(),
+        EffectType::Limiter => limiter_factory_presets(),
         EffectType::Saturator => saturator_factory_presets(),
         EffectType::Reverb => reverb_factory_presets(),
         EffectType::AutoPan => auto_pan_factory_presets(),
@@ -1588,6 +1605,43 @@ fn saturator_factory_presets() -> Vec<DevicePreset> {
         DevicePresetKind::Effect(EffectType::Saturator),
         &SATURATOR_KEYS,
         vibez_dsp::saturator::SATURATOR_PARAMS,
+        &presets,
+    )
+}
+
+fn limiter_factory_presets() -> Vec<DevicePreset> {
+    let presets: [(&str, &[(&str, f32)]); 7] = [
+        ("Init", &[]),
+        ("Transparent Ceiling", &[("input_db", 3.0)]),
+        (
+            "Streaming Master",
+            &[("input_db", 4.0), ("lookahead_ms", 3.0)],
+        ),
+        (
+            "Punchy Drums",
+            &[
+                ("style", 1.0),
+                ("input_db", 6.0),
+                ("release_ms", 60.0),
+                ("lookahead_ms", 1.0),
+                ("stereo_link", 0.6),
+            ],
+        ),
+        ("Loud Master", &[("style", 2.0), ("input_db", 8.0)]),
+        (
+            "Safety Clip",
+            &[
+                ("ceiling_db", -0.3),
+                ("lookahead_ms", 0.5),
+                ("release_ms", 30.0),
+            ],
+        ),
+        ("Gentle Bus", &[("input_db", 2.0), ("release_ms", 300.0)]),
+    ];
+    keyed_presets(
+        DevicePresetKind::Effect(EffectType::Limiter),
+        &LIMITER_KEYS,
+        vibez_dsp::limiter::LIMITER_PARAMS,
         &presets,
     )
 }
@@ -2468,6 +2522,40 @@ mod presentation_tests {
             .any(|preset| preset.name() == "Soft Harmonics"));
         for preset in &presets[1..] {
             let mut applied = saturator();
+            for (index, value) in prepare_updates(&effect, preset).unwrap() {
+                applied.params[index] = value;
+            }
+            assert_ne!(applied.params, effect.params, "{}", preset.name());
+            assert_eq!(capture(&applied, preset.name()).as_ref(), Ok(preset));
+        }
+        let mut names: Vec<_> = presets.iter().map(DevicePreset::name).collect();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(names.len(), presets.len(), "names are unique");
+    }
+
+    #[test]
+    fn limiter_factory_presets_are_valid_distinct_and_start_from_init() {
+        let descriptors =
+            vibez_dsp::factory::create_effect(EffectType::Limiter, 44_100.0).param_descriptors();
+        let limiter = || UiEffect {
+            effect_type: EffectType::Limiter,
+            params: descriptors
+                .iter()
+                .map(|descriptor| descriptor.default)
+                .collect(),
+            descriptors,
+            ..gain()
+        };
+        let effect = limiter();
+        let presets = factory_presets(EffectType::Limiter);
+        assert_eq!(presets[0].name(), "Init");
+        assert_eq!(prepare_updates(&effect, &presets[0]), Ok(Vec::new()));
+        assert!(presets
+            .iter()
+            .any(|preset| preset.name() == "Transparent Ceiling"));
+        for preset in &presets[1..] {
+            let mut applied = limiter();
             for (index, value) in prepare_updates(&effect, preset).unwrap() {
                 applied.params[index] = value;
             }

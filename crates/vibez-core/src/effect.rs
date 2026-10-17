@@ -19,6 +19,7 @@ pub enum EffectType {
     Eq,
     Echo,
     Saturator,
+    Limiter,
 }
 
 impl EffectType {
@@ -33,6 +34,7 @@ impl EffectType {
             EffectType::Saturator => "Saturator",
             EffectType::Bitcrush => "Bitcrush",
             EffectType::Compressor => "Compressor",
+            EffectType::Limiter => "Limiter",
             EffectType::AutoPan => "Auto-Pan",
             EffectType::Gate => "Gate",
             EffectType::Phaser => "Phaser",
@@ -46,6 +48,7 @@ impl EffectType {
             EffectType::Filter,
             EffectType::Eq,
             EffectType::Compressor,
+            EffectType::Limiter,
             EffectType::Gate,
             EffectType::Drive,
             EffectType::Saturator,
@@ -160,7 +163,7 @@ mod tests {
     #[test]
     fn effect_type_all() {
         let all = EffectType::all();
-        assert_eq!(all.len(), 13);
+        assert_eq!(all.len(), 14);
     }
 
     #[test]
