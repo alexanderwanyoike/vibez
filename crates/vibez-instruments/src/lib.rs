@@ -2,6 +2,9 @@
 
 pub mod drum_rack;
 mod envelope;
+pub mod fm;
+pub mod fm_params;
+mod fm_voice;
 mod poly;
 pub mod sampler;
 pub mod sampler_params;
@@ -24,6 +27,7 @@ use vibez_core::midi::InstrumentKind;
 use vibez_core::track::DrumPadState;
 
 use drum_rack::DrumRack;
+use fm::FmSynth;
 use sampler::Sampler;
 use synth::SubtractiveSynth;
 use wavetable::WavetableSynth;
@@ -35,6 +39,7 @@ pub fn descriptors_for(kind: InstrumentKind) -> &'static [ParamDescriptor] {
     match kind {
         InstrumentKind::SubtractiveSynth => synth::SYNTH_PARAMS,
         InstrumentKind::WavetableSynth => wavetable::WAVETABLE_PARAMS,
+        InstrumentKind::FmSynth => fm::FM_PARAMS,
         InstrumentKind::Sampler => sampler::SAMPLER_PARAMS,
         // The drum rack has per-pad state, no top-level params.
         InstrumentKind::DrumRack => &[],
@@ -140,6 +145,7 @@ pub fn create_instrument(kind: InstrumentKind, sample_rate: f32) -> Box<dyn Inst
     match kind {
         InstrumentKind::SubtractiveSynth => Box::new(SubtractiveSynth::new(sample_rate)),
         InstrumentKind::WavetableSynth => Box::new(WavetableSynth::new(sample_rate)),
+        InstrumentKind::FmSynth => Box::new(FmSynth::new(sample_rate)),
         InstrumentKind::Sampler => Box::new(Sampler::new(sample_rate)),
         InstrumentKind::DrumRack => Box::new(DrumRack::new(sample_rate)),
     }

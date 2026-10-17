@@ -338,6 +338,9 @@ pub enum InstrumentStateInfo {
     WavetableSynth {
         params: Vec<f32>,
     },
+    FmSynth {
+        params: Vec<f32>,
+    },
     Sampler {
         params: Vec<f32>,
         source: Option<MediaSourceRef>,
@@ -548,6 +551,17 @@ impl ClipInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_fm_synth_s_state_survives_a_save() {
+        let state = InstrumentStateInfo::FmSynth {
+            params: vec![2.0, 0.0, -6.0],
+        };
+        let json = serde_json::to_value(&state).unwrap();
+        assert_eq!(json["kind"], "fm_synth");
+        let loaded: InstrumentStateInfo = serde_json::from_value(json).unwrap();
+        assert_eq!(loaded, state);
+    }
 
     #[test]
     fn a_wavetable_synth_s_state_survives_a_save() {

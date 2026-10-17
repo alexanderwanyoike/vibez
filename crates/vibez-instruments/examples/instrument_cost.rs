@@ -3,8 +3,8 @@
 //! runs. Run with
 //! `cargo run --release -p vibez-instruments --example instrument_cost -- Sampler`
 //! (`DrumRack` for the rack, which holds sixteen looping pads instead,
-//! `Wavetable` for the Wavetable Synth, or no argument for the Subtractive
-//! Synth).
+//! `Wavetable` for the Wavetable Synth, `Fm` for the FM Synth, or no
+//! argument for the Subtractive Synth).
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::midi::InstrumentKind;
 use vibez_core::track::{DrumPadState, DRUM_RACK_BASE_NOTE};
-use vibez_instruments::{drum_rack, sampler, synth, wavetable};
+use vibez_instruments::{drum_rack, fm, sampler, synth, wavetable};
 
 /// Settings worth timing for each instrument: (label, parameter edits).
 fn cases(kind: InstrumentKind) -> Vec<(&'static str, Vec<(usize, f32)>)> {
@@ -56,6 +56,24 @@ fn cases(kind: InstrumentKind) -> Vec<(&'static str, Vec<(usize, f32)>)> {
                         (param::ENV2_AMOUNT, 0.5),
                         (param::ENV2_DEST, dest::CUTOFF as f32),
                     ],
+                ),
+            ]
+        }
+        InstrumentKind::FmSynth => {
+            use fm::{op, param};
+            vec![
+                ("defaults", vec![]),
+                (
+                    "all four operators sounding, feedback on each, Motion on brightness",
+                    (0..fm::OPERATORS)
+                        .flat_map(|operator| {
+                            [
+                                (param::of(operator, op::LEVEL), -6.0),
+                                (param::of(operator, op::FEEDBACK), 0.5),
+                            ]
+                        })
+                        .chain([(param::MOTION, 0.4)])
+                        .collect(),
                 ),
             ]
         }
@@ -145,6 +163,7 @@ fn main() {
         Some("Sampler") => InstrumentKind::Sampler,
         Some("DrumRack") => InstrumentKind::DrumRack,
         Some("Wavetable") => InstrumentKind::WavetableSynth,
+        Some("Fm") => InstrumentKind::FmSynth,
         _ => InstrumentKind::SubtractiveSynth,
     };
     for (label, edits) in cases(kind) {
