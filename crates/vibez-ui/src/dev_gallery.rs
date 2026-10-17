@@ -2662,6 +2662,70 @@ pub fn run_synth() -> iced::Result {
     .run_with(|| (SynthGallery::new(), iced::Task::none()))
 }
 
+/// A tabbed instrument card titled `name` in a section `section` big,
+/// under `label`: `body` builds the card's body from the track's controls,
+/// a preset bar and the body's size.
+fn tabbed_scene<'a>(
+    label: &'static str,
+    name: &'static str,
+    track: &'a ProjectTrack,
+    card_width: f32,
+    section: (f32, f32),
+    body: impl Fn(
+            crate::domains::device_params::DeviceParams<'a>,
+            Element<'a, Message>,
+            iced::Size,
+        ) -> Element<'a, Message>
+        + 'a,
+) -> Element<'a, Message> {
+    let accent = th::track_color(0);
+    let track_id = track.id;
+    let Some(device) = crate::domains::device_params::DeviceParams::instrument(track) else {
+        return text("no instrument").into();
+    };
+    let body = iced::widget::responsive(move |size| {
+        body(
+            device,
+            crate::widgets::device_preset_bar::view(
+                track_id,
+                device,
+                None,
+                accent,
+                crate::widgets::instrument_bands::preset_bar_width(size),
+            ),
+            size,
+        )
+    });
+    let title = crate::widgets::device_chrome::title_bar(
+        row![
+            text("\u{25CF}").size(8).color(accent),
+            text(name).size(11).color(th::text())
+        ]
+        .spacing(5)
+        .align_y(iced::Alignment::Center),
+    );
+    let card =
+        crate::widgets::device_chrome::card(column![title, body].width(Length::Fixed(card_width)));
+    column![
+        text(label).size(11).color(th::text_dim()),
+        container(row![card].height(Length::Fill))
+            .padding(8)
+            .width(section.0)
+            .height(section.1)
+            .style(|_theme: &Theme| container::Style {
+                background: Some(th::bg_dark().into()),
+                border: iced::Border {
+                    color: th::border(),
+                    width: 1.0,
+                    radius: 0.0.into(),
+                },
+                ..Default::default()
+            }),
+    ]
+    .spacing(4)
+    .into()
+}
+
 /// Native Wavetable Synth at each width tier, tab and height it adapts to,
 /// on the concept's Glass Motion, with scenes at the bodies the default and
 /// minimum detail panels give an instrument card.
@@ -2709,58 +2773,23 @@ impl WavetableGallery {
     ) -> Element<'a, Message> {
         let accent = th::track_color(0);
         let track_id = self.track.id;
-        let Some(device) = crate::domains::device_params::DeviceParams::instrument(&self.track)
-        else {
-            return text("no wavetable").into();
-        };
-        let body = iced::widget::responsive(move |size| {
-            crate::widgets::wavetable_device::WavetableView {
-                track_id,
-                device,
-                accent,
-                panel: panel.clone(),
-                entry: None,
-            }
-            .view(
-                crate::widgets::device_preset_bar::view(
+        tabbed_scene(
+            label,
+            "Wavetable Synth",
+            &self.track,
+            card_width,
+            section,
+            move |device, preset_bar, size| {
+                crate::widgets::wavetable_device::WavetableView {
                     track_id,
                     device,
-                    None,
                     accent,
-                    crate::widgets::wavetable_device::preset_bar_width(size),
-                ),
-                size,
-            )
-        });
-        let title = crate::widgets::device_chrome::title_bar(
-            row![
-                text("\u{25CF}").size(8).color(accent),
-                text("Wavetable Synth").size(11).color(th::text())
-            ]
-            .spacing(5)
-            .align_y(iced::Alignment::Center),
-        );
-        let card = crate::widgets::device_chrome::card(
-            column![title, body].width(Length::Fixed(card_width)),
-        );
-        column![
-            text(label).size(11).color(th::text_dim()),
-            container(row![card].height(Length::Fill))
-                .padding(8)
-                .width(section.0)
-                .height(section.1)
-                .style(|_theme: &Theme| container::Style {
-                    background: Some(th::bg_dark().into()),
-                    border: iced::Border {
-                        color: th::border(),
-                        width: 1.0,
-                        radius: 0.0.into(),
-                    },
-                    ..Default::default()
-                }),
-        ]
-        .spacing(4)
-        .into()
+                    panel: panel.clone(),
+                    entry: None,
+                }
+                .view(preset_bar, size)
+            },
+        )
     }
 
     fn view(&self) -> Element<'_, Message> {
