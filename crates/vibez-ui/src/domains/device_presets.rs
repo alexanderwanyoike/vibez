@@ -2851,28 +2851,31 @@ mod presentation_tests {
         }
     }
 
-    fn sampler_track() -> crate::state::ProjectTrack {
+    /// A track holding the native `kind` at its defaults.
+    fn instrument_track(kind: InstrumentKind) -> crate::state::ProjectTrack {
         let mut track = crate::state::ProjectTrack::new(TrackId::new(), "Keys".into(), 0);
         track.has_instrument = true;
-        track.instrument_kind = Some(InstrumentKind::Sampler);
-        track.instrument_params = vibez_instruments::sampler::SAMPLER_PARAMS
+        track.instrument_kind = Some(kind);
+        track.instrument_params = vibez_instruments::descriptors_for(kind)
             .iter()
             .map(|descriptor| descriptor.default)
             .collect();
         track
     }
 
-    #[test]
-    fn sampler_factory_presets_are_valid_distinct_and_start_from_init() {
-        let track = sampler_track();
+    /// `kind`'s factory presets start from Init and include `named`; each
+    /// of the others changes something and survives being captured again,
+    /// and no two share a name.
+    fn assert_instrument_presets(kind: InstrumentKind, named: &str) {
+        let track = instrument_track(kind);
         let device = DeviceParams::instrument(&track).unwrap();
         let presets = presets_for(device.kind);
         assert!(presets.len() >= 6);
         assert_eq!(presets[0].name(), "Init");
-        assert!(presets.iter().any(|preset| preset.name() == "Warm Rhodes"));
+        assert!(presets.iter().any(|preset| preset.name() == named));
         assert_eq!(prepare_updates(device, &presets[0]), Ok(Vec::new()));
         for preset in &presets[1..] {
-            let mut applied = sampler_track();
+            let mut applied = instrument_track(kind);
             for (index, value) in prepare_updates(device, preset).unwrap() {
                 applied.instrument_params[index] = value;
             }
@@ -2892,9 +2895,14 @@ mod presentation_tests {
     }
 
     #[test]
+    fn sampler_factory_presets_are_valid_distinct_and_start_from_init() {
+        assert_instrument_presets(InstrumentKind::Sampler, "Warm Rhodes");
+    }
+
+    #[test]
     fn a_sampler_preset_leaves_the_sample_s_own_points_alone() {
         use vibez_instruments::sampler::param;
-        let mut track = sampler_track();
+        let mut track = instrument_track(InstrumentKind::Sampler);
         for (index, value) in [
             (param::ROOT_NOTE, 48.0),
             (param::START, 0.2),
@@ -2934,88 +2942,19 @@ mod presentation_tests {
         }
     }
 
-    fn synth_track() -> crate::state::ProjectTrack {
-        let mut track = crate::state::ProjectTrack::new(TrackId::new(), "Keys".into(), 0);
-        track.has_instrument = true;
-        track.instrument_kind = Some(InstrumentKind::SubtractiveSynth);
-        track.instrument_params = vibez_instruments::synth::SYNTH_PARAMS
-            .iter()
-            .map(|descriptor| descriptor.default)
-            .collect();
-        track
-    }
-
-    fn wavetable_track() -> crate::state::ProjectTrack {
-        let mut track = crate::state::ProjectTrack::new(TrackId::new(), "Pads".into(), 0);
-        track.has_instrument = true;
-        track.instrument_kind = Some(InstrumentKind::WavetableSynth);
-        track.instrument_params = vibez_instruments::wavetable::WAVETABLE_PARAMS
-            .iter()
-            .map(|descriptor| descriptor.default)
-            .collect();
-        track
-    }
-
     #[test]
     fn wavetable_factory_presets_are_valid_distinct_and_start_from_init() {
-        let track = wavetable_track();
-        let device = DeviceParams::instrument(&track).unwrap();
-        let presets = presets_for(device.kind);
-        assert_eq!(presets[0].name(), "Init");
-        assert!(presets.iter().any(|preset| preset.name() == "Glass Motion"));
-        assert_eq!(prepare_updates(device, &presets[0]), Ok(Vec::new()));
-        for preset in &presets[1..] {
-            let mut applied = wavetable_track();
-            for (index, value) in prepare_updates(device, preset).unwrap() {
-                applied.instrument_params[index] = value;
-            }
-            assert_ne!(
-                applied.instrument_params,
-                track.instrument_params,
-                "{}",
-                preset.name()
-            );
-            let captured = capture(DeviceParams::instrument(&applied).unwrap(), preset.name());
-            assert_eq!(captured.as_ref(), Ok(preset));
-        }
-        let mut names: Vec<_> = presets.iter().map(DevicePreset::name).collect();
-        names.sort_unstable();
-        names.dedup();
-        assert_eq!(names.len(), presets.len(), "names are unique");
+        assert_instrument_presets(InstrumentKind::WavetableSynth, "Glass Motion");
     }
 
     #[test]
     fn synth_factory_presets_are_valid_distinct_and_start_from_init() {
-        let track = synth_track();
-        let device = DeviceParams::instrument(&track).unwrap();
-        let presets = presets_for(device.kind);
-        assert!(presets.len() >= 6);
-        assert_eq!(presets[0].name(), "Init");
-        assert!(presets.iter().any(|preset| preset.name() == "Soft Analog"));
-        assert_eq!(prepare_updates(device, &presets[0]), Ok(Vec::new()));
-        for preset in &presets[1..] {
-            let mut applied = synth_track();
-            for (index, value) in prepare_updates(device, preset).unwrap() {
-                applied.instrument_params[index] = value;
-            }
-            assert_ne!(
-                applied.instrument_params,
-                track.instrument_params,
-                "{}",
-                preset.name()
-            );
-            let captured = capture(DeviceParams::instrument(&applied).unwrap(), preset.name());
-            assert_eq!(captured.as_ref(), Ok(preset));
-        }
-        let mut names: Vec<_> = presets.iter().map(DevicePreset::name).collect();
-        names.sort_unstable();
-        names.dedup();
-        assert_eq!(names.len(), presets.len(), "names are unique");
+        assert_instrument_presets(InstrumentKind::SubtractiveSynth, "Soft Analog");
     }
 
     #[test]
     fn synth_choices_in_a_preset_must_be_whole() {
-        let track = synth_track();
+        let track = instrument_track(InstrumentKind::SubtractiveSynth);
         let device = DeviceParams::instrument(&track).unwrap();
         let captured = capture(device, "Current").unwrap();
         for key in [
