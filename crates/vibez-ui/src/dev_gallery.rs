@@ -2820,7 +2820,7 @@ impl WavetableGallery {
                         COMPACT_W,
                         (COMPACT_W + 16.0, default),
                         InstrumentPanel {
-                            second_oscillator: true,
+                            oscillator: 1,
                             ..Default::default()
                         }
                     ),

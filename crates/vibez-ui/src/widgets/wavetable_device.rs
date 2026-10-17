@@ -263,7 +263,7 @@ impl<'a> WavetableView<'a> {
 
     /// The oscillator a narrow card shows.
     fn shown_osc(&self) -> usize {
-        usize::from(self.panel.second_oscillator)
+        self.panel.oscillator.min(1)
     }
 
     fn osc_group(&self, osc: usize, switch: bool) -> Group<'a> {
@@ -274,12 +274,10 @@ impl<'a> WavetableView<'a> {
         let switch = switch.then(|| {
             let track_id = self.track_id;
             segmented(
-                &[(false, "Osc A"), (true, "Osc B")],
-                osc == 1,
-                move |second| {
-                    Message::InstrumentCard(InstrumentCardMsg::ShowSecondOscillator(
-                        track_id, second,
-                    ))
+                &[(0, "Osc A"), (1, "Osc B")],
+                osc,
+                move |osc| {
+                    Message::InstrumentCard(InstrumentCardMsg::ShowOscillator(track_id, osc))
                 },
                 self.accent,
             )
