@@ -299,3 +299,12 @@ fn reset_silences_everything() {
     synth.reset();
     assert!(play(&mut synth, 2_400).iter().all(|s| *s == 0.0));
 }
+
+#[test]
+fn a_new_synth_starts_on_the_smooth_harmonic_table() {
+    let synth = WavetableSynth::new(RATE);
+    assert_eq!(
+        synth.get_param(param::of(0, osc::TABLE)),
+        crate::wavetables::table::HARMONIC as f32
+    );
+}
