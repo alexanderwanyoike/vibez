@@ -1,15 +1,15 @@
 //! The Wavetable Synth's table plot, as the concept draws it: every frame a
-//! thin wave across the full width, stacked down the plot from the first
-//! to the last, the frame Position plays drawn bold where it sits in the
-//! stack as Warp bends it, and Position marked across with a dot where it
-//! meets that wave.
+//! thin wave of two cycles across the full width, stacked down the plot
+//! from the first to the last, the frame Position plays drawn bold where it
+//! sits in the stack as Warp bends it, and Position marked across with a
+//! dot where it meets that wave.
 
 use iced::alignment::Horizontal;
 use iced::mouse;
 use iced::widget::canvas;
 use iced::{Color, Point, Rectangle, Renderer, Size, Theme};
 use vibez_instruments::wavetable::Warp;
-use vibez_instruments::wavetables::{tables, FRAMES};
+use vibez_instruments::wavetables::{tables, FRAMES, LEVELS};
 
 use crate::message::Message;
 use crate::theme as th;
@@ -17,10 +17,15 @@ use crate::widgets::device_controls::LABEL_SIZE;
 
 const LABEL_H: f32 = 14.0;
 /// Each wave swings this share of the plot's height either way of its
-/// place in the stack.
-const SWING: f32 = 0.16;
+/// place in the stack, enough for neighbours to cross.
+const SWING: f32 = 0.2;
+const CYCLES: f32 = 2.0;
+/// The stack behind the played frame reads from a level of few harmonics,
+/// so the hard edges of saws and squares do not line up into a wall; the
+/// played frame keeps every harmonic.
+const STACK_LEVEL: usize = LEVELS - 2;
 /// The thinnest the stack lines get apart before some are left out.
-const LINE_SPACING: f32 = 3.0;
+const LINE_SPACING: f32 = 6.0;
 
 pub struct WavetablePlot {
     pub table: usize,
@@ -78,13 +83,14 @@ impl canvas::Program<Message> for WavetablePlot {
         let place = |through: f32| top + span * through;
         let columns = (plot.width as usize / 2).max(16);
         let warp = Warp::new(self.warp);
+        let phase_at = |across: f32| warp.apply((across * CYCLES).fract()).min(0.9999);
         let wave = |through: f32, read: &dyn Fn(f32) -> f32| {
             canvas::Path::new(|builder| {
                 for column in 0..=columns {
-                    let phase = column as f32 / columns as f32;
+                    let across = column as f32 / columns as f32;
                     let at = Point::new(
-                        plot.x + plot.width * phase,
-                        place(through) - swing * read(warp.apply(phase).min(0.9999)),
+                        plot.x + plot.width * across,
+                        place(through) - swing * read(phase_at(across)),
                     );
                     if column == 0 {
                         builder.move_to(at);
@@ -97,8 +103,8 @@ impl canvas::Program<Message> for WavetablePlot {
         let shown = ((span / LINE_SPACING) as usize).clamp(2, FRAMES);
         for line in 0..shown {
             let through = line as f32 / (shown - 1) as f32;
-            let samples = table.frame((through * (FRAMES - 1) as f32).round() as usize);
-            let read = |phase: f32| samples[(phase * samples.len() as f32) as usize];
+            let frames = table.at(through, STACK_LEVEL);
+            let read = |phase: f32| frames.read(phase);
             frame.stroke(
                 &wave(through, &read),
                 canvas::Stroke::default()
@@ -108,8 +114,15 @@ impl canvas::Program<Message> for WavetablePlot {
         }
         let position = self.position.clamp(0.0, 1.0);
         let read = |phase: f32| table.read(position, phase, 0);
+        let played = wave(position, &read);
         frame.stroke(
-            &wave(position, &read),
+            &played,
+            canvas::Stroke::default()
+                .with_color(th::with_alpha(self.accent, 0.22))
+                .with_width(7.0),
+        );
+        frame.stroke(
+            &played,
             canvas::Stroke::default()
                 .with_color(self.accent)
                 .with_width(2.5),
@@ -124,7 +137,7 @@ impl canvas::Program<Message> for WavetablePlot {
                 .with_color(self.accent)
                 .with_width(1.5),
         );
-        let meeting = place(position) - swing * read(warp.apply(position).min(0.9999));
+        let meeting = place(position) - swing * read(phase_at(position));
         frame.fill(
             &canvas::Path::circle(Point::new(across, meeting), 4.5),
             self.accent,
