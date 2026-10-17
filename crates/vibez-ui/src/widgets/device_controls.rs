@@ -36,6 +36,23 @@ pub fn knob_size(height: f32) -> f32 {
     (height - KNOB_TEXT_H).clamp(KNOB_MIN, KNOB_MAX)
 }
 
+/// How wide `content` sets in `font` at `size`.
+pub fn text_width(content: &str, size: f32, font: iced::Font) -> f32 {
+    use iced::advanced::text::Paragraph as _;
+    <iced::Renderer as iced::advanced::text::Renderer>::Paragraph::with_text(iced::advanced::Text {
+        content,
+        bounds: iced::Size::INFINITY,
+        size: size.into(),
+        line_height: Default::default(),
+        font,
+        horizontal_alignment: iced::alignment::Horizontal::Left,
+        vertical_alignment: iced::alignment::Vertical::Top,
+        shaping: iced::widget::text::Shaping::Advanced,
+        wrapping: iced::widget::text::Wrapping::None,
+    })
+    .min_width()
+}
+
 /// A group heading inside a device body, such as "Input" or "Output (dB)".
 pub fn heading<'a>(label: impl text::IntoFragment<'a>) -> text::Text<'a, Theme> {
     text(label).size(HEADING_SIZE).color(th::text_dim())

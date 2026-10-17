@@ -24,7 +24,9 @@ use crate::domains::param_entry::ValueEntry;
 use crate::message::Message;
 use crate::state::UiDrumPad;
 use crate::theme as th;
-use crate::widgets::device_controls::{heading, rule, segmented, tabs, vertical_rule, LABEL_SIZE};
+use crate::widgets::device_controls::{
+    heading, rule, segmented, tabs, text_width, vertical_rule, LABEL_SIZE,
+};
 use crate::widgets::mini_waveform::column_peaks;
 use crate::widgets::on_blur::on_blur;
 use crate::widgets::sampler_device::SamplerView;
@@ -196,23 +198,6 @@ pub fn preset_bar_width(layout: Layout) -> f32 {
     } else {
         bar
     }
-}
-
-/// How wide `content` sets in `font` at `size`.
-fn text_width(content: &str, size: f32, font: iced::Font) -> f32 {
-    use iced::advanced::text::Paragraph as _;
-    <Renderer as iced::advanced::text::Renderer>::Paragraph::with_text(iced::advanced::Text {
-        content,
-        bounds: Size::INFINITY,
-        size: size.into(),
-        line_height: Default::default(),
-        font,
-        horizontal_alignment: iced::alignment::Horizontal::Left,
-        vertical_alignment: iced::alignment::Vertical::Top,
-        shaping: iced::widget::text::Shaping::Advanced,
-        wrapping: iced::widget::text::Wrapping::None,
-    })
-    .min_width()
 }
 
 /// A name cut to what fits `width`, ending in an ellipsis when it was cut.
