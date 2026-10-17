@@ -1390,7 +1390,92 @@ fn bitcrush_factory_presets() -> Vec<DevicePreset> {
 
 /// Sol's echoes, from a short slap to a long space.
 fn echo_factory_presets() -> Vec<DevicePreset> {
-    let presets: [(&str, &[(&str, f32)]); 1] = [("Init", &[])];
+    let presets: [(&str, &[(&str, f32)]); 8] = [
+        ("Init", &[]),
+        (
+            "Worn Tape",
+            &[
+                ("character", 0.55),
+                ("tone", 0.4),
+                ("wear", 0.45),
+                ("wow", 0.2),
+                ("flutter", 0.12),
+                ("saturation", 0.25),
+                ("high_cut", 4500.0),
+            ],
+        ),
+        (
+            "Clean Slap",
+            &[
+                ("tape_character", 0.0),
+                ("sync", 0.0),
+                ("time_ms", 110.0),
+                ("feedback", 0.15),
+                ("mix", 0.2),
+                ("low_cut", 120.0),
+                ("high_cut", 12000.0),
+            ],
+        ),
+        (
+            "Dub Space",
+            &[
+                ("mode", 1.0),
+                ("feedback", 0.7),
+                ("mix", 0.3),
+                ("tone", 0.35),
+                ("saturation", 0.3),
+                ("duck", 0.35),
+                ("low_cut", 250.0),
+                ("high_cut", 3500.0),
+            ],
+        ),
+        (
+            "Diffuse Wash",
+            &[
+                ("tape_character", 2.0),
+                ("grid", 16.0),
+                ("feedback", 0.65),
+                ("character", 0.6),
+                ("diffusion", 0.7),
+                ("mix", 0.35),
+                ("high_cut", 7000.0),
+            ],
+        ),
+        (
+            "Cassette Eighths",
+            &[
+                ("grid", 10.0),
+                ("feedback", 0.4),
+                ("character", 0.6),
+                ("wear", 0.6),
+                ("wow", 0.35),
+                ("flutter", 0.2),
+                ("saturation", 0.4),
+                ("high_cut", 3800.0),
+            ],
+        ),
+        (
+            "Ping-Pong Sixteenths",
+            &[
+                ("tape_character", 0.0),
+                ("mode", 1.0),
+                ("grid", 7.0),
+                ("feedback", 0.45),
+                ("mix", 0.22),
+            ],
+        ),
+        (
+            "Ducked Vocal",
+            &[
+                ("grid", 12.0),
+                ("feedback", 0.35),
+                ("duck", 0.7),
+                ("mix", 0.3),
+                ("low_cut", 300.0),
+                ("high_cut", 8000.0),
+            ],
+        ),
+    ];
     keyed_presets(
         DevicePresetKind::Effect(EffectType::Echo),
         &ECHO_KEYS,
