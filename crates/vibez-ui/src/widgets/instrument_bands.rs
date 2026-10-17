@@ -117,6 +117,15 @@ pub fn used_height(form: Form) -> f32 {
 pub trait PlotKind: Copy {
     /// The card's centrepiece takes more of the band and may grow wider.
     fn centrepiece(self) -> bool;
+
+    /// How much of a band the plot claims, against a knob's one.
+    fn weight(self) -> f32 {
+        if self.centrepiece() {
+            10.0
+        } else {
+            4.0
+        }
+    }
 }
 
 /// How a group's knobs are set: a grid so many across, or on lines.
@@ -309,12 +318,7 @@ pub trait BandCard<'a> {
         let content = height - HEADER_H - 4.0;
         let rules = (groups.len().saturating_sub(1)) as f32 * (1.0 + GROUP_GAP * 2.0);
         let weight = |group: &Group<'a, Self::Plot>| {
-            group.knobs.len() as f32
-                + match group.plot {
-                    Some(plot) if plot.centrepiece() => 10.0,
-                    Some(_) => 4.0,
-                    None => 0.0,
-                }
+            group.knobs.len() as f32 + group.plot.map_or(0.0, PlotKind::weight)
         };
         let fixed_widths: Vec<f32> = groups
             .iter()
