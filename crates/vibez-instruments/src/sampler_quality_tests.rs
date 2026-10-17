@@ -13,7 +13,7 @@ const RATE: f32 = 48_000.0;
 
 fn sampler_with(audio: DecodedAudio, edits: &[(usize, f32)]) -> Sampler {
     let mut sampler = Sampler::new(RATE);
-    sampler.load_sample(Arc::new(audio), "test.wav".into());
+    drop(sampler.load_sample(Arc::new(audio), "test.wav".into()));
     for &(index, value) in edits {
         sampler.set_param(index, value);
     }

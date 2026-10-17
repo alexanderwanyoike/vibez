@@ -81,29 +81,4 @@ impl EffectSpectrumTap {
             }
         }
     }
-
-    pub(crate) fn process_slot(
-        &mut self,
-        track_id: TrackId,
-        slot: &mut crate::mixer::EffectSlot,
-        samples: &mut [f32],
-        channels: usize,
-        meter_generation: Option<u64>,
-    ) {
-        self.observe(
-            track_id,
-            slot.id,
-            EffectSpectrumPosition::Input,
-            samples,
-            channels,
-        );
-        slot.process(samples, channels, meter_generation);
-        self.observe(
-            track_id,
-            slot.id,
-            EffectSpectrumPosition::Output,
-            samples,
-            channels,
-        );
-    }
 }

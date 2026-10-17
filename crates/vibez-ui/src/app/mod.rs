@@ -1,3 +1,5 @@
+//! Application lifecycle, domain dispatch and engine-event consumer composition.
+
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -41,6 +43,7 @@ struct App {
     cmd_tx: crate::domains::EngineCommandQueue,
     event_rx: Option<Consumer<EngineEvent>>,
     _stream: Option<AudioOutputStream>,
+    sample_retirement: sample_retirement::SampleRetirement,
     input_bridge: Arc<vibez_audio_io::audio_input::AudioInputBridge>,
     /// Open only while one Audio Track is armed or explicitly monitors input.
     _input_stream: Option<vibez_audio_io::audio_input::AudioInputStream>,
@@ -257,6 +260,17 @@ mod views_transient_analysis;
 mod views_transport;
 mod window_policy;
 
+mod sample_retirement;
+
+#[cfg(test)]
+mod instrument_media_retirement_tests;
+
+#[cfg(test)]
+mod instrument_media_shutdown_tests;
+
+#[cfg(test)]
+mod instrument_media_ui_flow_tests;
+
 #[cfg(test)]
 mod project_format_v1_tests;
 
@@ -267,6 +281,8 @@ impl Drop for App {
         if let Some(manager) = self.plugin_window_manager.as_mut() {
             manager.close_all();
         }
+        // Guards must outlive every callback and the engine's last voice owners.
+        drop(self._stream.take());
     }
 }
 
@@ -452,6 +468,7 @@ impl App {
             cmd_tx: crate::domains::EngineCommandQueue::new(cmd_tx),
             event_rx: Some(event_rx),
             _stream: Some(output_stream),
+            sample_retirement: Default::default(),
             input_bridge,
             _input_stream: None,
             plugin_effect_rx,
@@ -762,6 +779,9 @@ mod views_clip_launcher;
 mod clip_project_tests;
 
 #[cfg(test)]
+mod note_clip_insertion_tests;
+
+#[cfg(test)]
 mod compensation_persistence_tests;
 #[cfg(test)]
 mod gain_persistence_tests;
@@ -792,3 +812,6 @@ mod compensation_selection_tests;
 mod undo_replay_routing_tests;
 
 mod midi_input;
+
+#[cfg(test)]
+mod clip_insertion_tests;

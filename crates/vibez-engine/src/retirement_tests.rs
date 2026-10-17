@@ -1,3 +1,5 @@
+//! Callback allocation counters and bounded retirement tests retain channel and lane owners.
+
 use super::*;
 use crate::{
     commands::EngineCommand,
@@ -205,7 +207,7 @@ fn bus_automation_cleanup_retires_point_storage_without_callback_destruction() {
     commands
         .push(EngineCommand::SetAutomationLane {
             track_id: track,
-            lane,
+            insertion: crate::clip_insertion::PreparedAutomationLaneInsertion::new(lane),
         })
         .unwrap();
     engine.process_block(AudioProcessBlock::new(&mut [], 2));

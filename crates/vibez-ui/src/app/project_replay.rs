@@ -256,7 +256,9 @@ impl App {
             for lane in &content.automation {
                 self.send_command(EngineCommand::SetAutomationLane {
                     track_id: track.id,
-                    lane: lane.clone(),
+                    insertion: vibez_engine::clip_insertion::PreparedAutomationLaneInsertion::new(
+                        lane.clone(),
+                    ),
                 });
             }
             return;
@@ -299,11 +301,11 @@ impl App {
                 }
                 InstrumentKind::DrumRack => {
                     for (pad_index, pad) in track.drum_rack_pads.iter().enumerate() {
-                        self.send_command(EngineCommand::SetDrumRackPadState {
-                            track_id: track.id,
+                        self.send_command(EngineCommand::set_drum_rack_pad_state(
+                            track.id,
                             pad_index,
-                            state: pad.to_state(),
-                        });
+                            pad.to_state(),
+                        ));
                         if let Some(audio) = &pad.audio {
                             self.send_command(EngineCommand::LoadDrumRackPadSample {
                                 track_id: track.id,
@@ -323,7 +325,9 @@ impl App {
         for lane in &content.automation {
             self.send_command(EngineCommand::SetAutomationLane {
                 track_id: track.id,
-                lane: lane.clone(),
+                insertion: vibez_engine::clip_insertion::PreparedAutomationLaneInsertion::new(
+                    lane.clone(),
+                ),
             });
         }
 
@@ -339,6 +343,7 @@ impl App {
 
         for clip in &content.clips {
             self.send_command(EngineCommand::AddClip {
+                insertion: vibez_engine::clip_insertion::PreparedClipInsertion::new(),
                 track_id: track.id,
                 clip_id: clip.id,
                 audio: Arc::clone(&clip.audio),
@@ -358,21 +363,23 @@ impl App {
 
         for clip in &content.note_clips {
             self.send_command(EngineCommand::AddNoteClip {
-                start_marker_beats: clip.start_marker_beats,
                 track_id: track.id,
-                clip_id: clip.id,
-                position_beats: clip.position_beats,
-                duration_beats: clip.duration_beats,
-                loop_enabled: clip.loop_enabled,
-                loop_start_beats: clip.loop_start_beats,
-                loop_end_beats: clip.loop_end_beats,
-                groove_grid: clip.groove_grid,
+                insertion: vibez_engine::clip_insertion::PreparedNoteClipInsertion::new(
+                    clip.id,
+                    clip.position_beats,
+                    clip.duration_beats,
+                    clip.start_marker_beats,
+                    clip.loop_enabled,
+                    clip.loop_start_beats,
+                    clip.loop_end_beats,
+                    clip.groove_grid,
+                ),
             });
             for note in &clip.notes {
                 self.send_command(EngineCommand::AddNote {
                     track_id: track.id,
                     clip_id: clip.id,
-                    note: *note,
+                    insertion: vibez_engine::clip_insertion::PreparedNoteInsertion::new(*note),
                 });
             }
         }
@@ -395,7 +402,9 @@ impl App {
         for lane in &automation {
             self.send_command(EngineCommand::SetAutomationLane {
                 track_id: bus.id,
-                lane: lane.clone(),
+                insertion: vibez_engine::clip_insertion::PreparedAutomationLaneInsertion::new(
+                    lane.clone(),
+                ),
             });
         }
     }

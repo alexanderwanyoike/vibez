@@ -1,3 +1,5 @@
+//! Public routing graphs preserve audible, detector and capture signal paths.
+
 use super::*;
 use vibez_core::effect::EffectType;
 use vibez_core::id::{ClipId, EffectId};
@@ -296,6 +298,7 @@ fn clip_bus_and_master_automation_advance_on_perform_clock() {
 
 fn clip(id: TrackId, value: f32) -> EngineCommand {
     EngineCommand::AddClip {
+        insertion: crate::clip_insertion::PreparedClipInsertion::new(),
         track_id: id,
         clip_id: ClipId::new(),
         audio: Arc::new(DecodedAudio {
@@ -459,7 +462,7 @@ fn live_route_swap_retains_effect_state_and_missing_sources_supply_silence() {
     engine.process(&mut output, 2);
     assert!(engine.transport().is_playing());
     assert_eq!(engine.tracks()[0].effects[0].id, effect);
-    let routing = engine.routing.as_ref().unwrap();
+    let routing = engine.routing.as_ref();
     let input = routing
         .nodes
         .iter()
@@ -638,7 +641,8 @@ fn master_receives_a_muted_prefader_source() {
 fn saturated_meter_ring_retains_and_eventually_returns_old_plans() {
     let (mut engine, mut commands, mut events) = AudioEngine::new();
     engine.routing =
-        Some(crate::routing::PreparedRouting::prepare(&[channel(TrackId::MASTER)], 8).unwrap());
+        crate::routing::PreparedRouting::prepare(&[channel(TrackId::MASTER)], 8).unwrap();
+    engine.project_routing_published = true;
     while engine
         .event_tx
         .push(EngineEvent::PlaybackPosition(0))
@@ -655,11 +659,11 @@ fn saturated_meter_ring_retains_and_eventually_returns_old_plans() {
         ))
         .unwrap();
     engine.process(&mut [], 2);
-    assert_eq!(engine.routing.as_ref().unwrap().max_frames, 16);
+    assert_eq!(engine.routing.as_ref().max_frames, 16);
     assert_eq!(engine.retired_routing.as_ref().unwrap().max_frames, 8);
     while events.pop().is_ok() {}
     engine.process(&mut [], 2);
-    assert_eq!(engine.routing.as_ref().unwrap().max_frames, 32);
+    assert_eq!(engine.routing.as_ref().max_frames, 32);
     assert!(engine.retired_routing.is_none());
     let mut returned = Vec::new();
     while let Ok(event) = events.pop() {
@@ -688,7 +692,7 @@ fn prepared_send_edges_follow_automation_without_mutating_manual_sends() {
     commands
         .push(EngineCommand::SetAutomationLane {
             track_id: source,
-            lane,
+            insertion: crate::clip_insertion::PreparedAutomationLaneInsertion::new(lane),
         })
         .unwrap();
     let mut source_model = channel(source);
@@ -827,7 +831,6 @@ fn live_selected_output_capture_remains_silent_when_solo_excludes_its_source() {
     let input = engine
         .routing
         .as_ref()
-        .unwrap()
         .nodes
         .iter()
         .flat_map(|node| &node.inputs)

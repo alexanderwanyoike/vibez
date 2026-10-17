@@ -1,4 +1,5 @@
 use super::*;
+use crate::events::TrackMuteChangedEvent;
 use vibez_core::id::TrackId;
 use vibez_core::perform::TrackMuteQuantization;
 
@@ -22,11 +23,11 @@ fn mute_change_reports_engine_effective_state_and_sample_time() {
 
     assert!(matches!(
         event_rx.pop(),
-        Ok(EngineEvent::TrackMuteChanged {
+        Ok(EngineEvent::TrackMuteChanged(TrackMuteChangedEvent {
             track_id: event_track,
             muted: true,
             effective_at_samples: 4,
-        }) if event_track == track_id
+        })) if event_track == track_id
     ));
 }
 
@@ -52,11 +53,11 @@ fn one_beat_mute_becomes_effective_at_the_exact_engine_boundary() {
     engine.process(&mut [0.0; 7], 1);
 
     let effective = std::iter::from_fn(|| event_rx.pop().ok()).find_map(|event| match event {
-        EngineEvent::TrackMuteChanged {
+        EngineEvent::TrackMuteChanged(TrackMuteChangedEvent {
             track_id: event_track,
             muted,
             effective_at_samples,
-        } if event_track == track_id => Some((muted, effective_at_samples)),
+        }) if event_track == track_id => Some((muted, effective_at_samples)),
         _ => None,
     });
     assert_eq!(effective, Some((true, 4)));
@@ -94,10 +95,10 @@ fn second_quantized_gesture_cancels_without_changing_effective_mute() {
     )));
     assert!(!events.iter().any(|event| matches!(
         event,
-        EngineEvent::TrackMuteChanged {
+        EngineEvent::TrackMuteChanged(TrackMuteChangedEvent {
             track_id: event_track,
             ..
-        } if *event_track == track_id
+        }) if *event_track == track_id
     )));
     assert!(!engine.tracks()[0].mute);
 }
@@ -120,11 +121,11 @@ fn quantized_choice_applies_immediately_while_stopped() {
     let events: Vec<_> = std::iter::from_fn(|| event_rx.pop().ok()).collect();
     assert!(events.iter().any(|event| matches!(
         event,
-        EngineEvent::TrackMuteChanged {
+        EngineEvent::TrackMuteChanged(TrackMuteChangedEvent {
             track_id: event_track,
             muted: true,
             effective_at_samples: 0,
-        } if *event_track == track_id
+        }) if *event_track == track_id
     )));
     assert!(!events
         .iter()
@@ -155,11 +156,11 @@ fn one_bar_mute_uses_the_next_bar_boundary() {
     assert!(
         std::iter::from_fn(|| event_rx.pop().ok()).any(|event| matches!(
             event,
-            EngineEvent::TrackMuteChanged {
+            EngineEvent::TrackMuteChanged(TrackMuteChangedEvent {
                 track_id: event_track,
                 muted: true,
                 effective_at_samples: 16,
-            } if event_track == track_id
+            }) if event_track == track_id
         ))
     );
 }
@@ -195,11 +196,11 @@ fn one_bar_mute_at_an_arrangement_loop_end_applies_on_the_wrap() {
     assert!(
         std::iter::from_fn(|| event_rx.pop().ok()).any(|event| matches!(
             event,
-            EngineEvent::TrackMuteChanged {
+            EngineEvent::TrackMuteChanged(TrackMuteChangedEvent {
                 track_id: event_track,
                 muted: true,
                 effective_at_samples: 16,
-            } if event_track == track_id
+            }) if event_track == track_id
         )),
         "the loop wrap is the next traversable bar boundary"
     );
@@ -261,7 +262,7 @@ fn quantized_mute_on_a_boundary_still_reports_deferred_ownership_before_effectiv
         .filter(|event| {
             matches!(
                 event,
-                EngineEvent::TrackMuteQueued { .. } | EngineEvent::TrackMuteChanged { .. }
+                EngineEvent::TrackMuteQueued { .. } | EngineEvent::TrackMuteChanged(_)
             )
         })
         .collect();
@@ -273,11 +274,11 @@ fn quantized_mute_on_a_boundary_still_reports_deferred_ownership_before_effectiv
                 muted: true,
                 effective_at_samples: 4,
             },
-            EngineEvent::TrackMuteChanged {
+            EngineEvent::TrackMuteChanged(TrackMuteChangedEvent {
                 track_id: changed_track,
                 muted: true,
                 effective_at_samples: 4,
-            }
+            })
         ] if *queued_track == track_id && *changed_track == track_id
     ));
 }
@@ -312,7 +313,7 @@ fn immediate_mixer_mute_cancels_a_pending_pad_change_before_applying() {
         .filter(|event| {
             matches!(
                 event,
-                EngineEvent::TrackMuteQueueCancelled { .. } | EngineEvent::TrackMuteChanged { .. }
+                EngineEvent::TrackMuteQueueCancelled { .. } | EngineEvent::TrackMuteChanged(_)
             )
         })
         .collect();
@@ -322,11 +323,11 @@ fn immediate_mixer_mute_cancels_a_pending_pad_change_before_applying() {
             EngineEvent::TrackMuteQueueCancelled {
                 track_id: cancelled_track,
             },
-            EngineEvent::TrackMuteChanged {
+            EngineEvent::TrackMuteChanged(TrackMuteChangedEvent {
                 track_id: changed_track,
                 muted: true,
                 ..
-            }
+            })
         ] if *cancelled_track == track_id && *changed_track == track_id
     ));
 }

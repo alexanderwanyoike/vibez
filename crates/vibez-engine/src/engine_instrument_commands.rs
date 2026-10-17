@@ -3,10 +3,14 @@
 use super::*;
 
 impl AudioEngine {
-    pub(super) fn command_remove_track_instrument(&mut self, track_id: vibez_core::id::TrackId) {
+    pub(super) fn command_remove_track_instrument(
+        &mut self,
+        track_id: vibez_core::id::TrackId,
+        allowance: &mut RetirementAllowance,
+    ) {
         if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
             if let Some(instrument) = track.instrument.take() {
-                self.dispose_instrument(instrument);
+                self.dispose_instrument(instrument, allowance);
             }
         }
     }
@@ -50,43 +54,13 @@ impl AudioEngine {
         }
     }
 
-    // Explicit fields keep the public command dispatch compiler checked.
-    #[allow(clippy::too_many_arguments)]
-    pub(super) fn command_add_note_clip(
-        &mut self,
-        track_id: vibez_core::id::TrackId,
-        clip_id: vibez_core::id::ClipId,
-        position_beats: f64,
-        duration_beats: f64,
-        start_marker_beats: f64,
-        loop_enabled: bool,
-        loop_start_beats: f64,
-        loop_end_beats: f64,
-        groove_grid: vibez_core::perform::GrooveGrid,
-    ) {
-        if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
-            track.playback_source.note_clips.push(EngineNoteClip::new(
-                clip_id,
-                position_beats,
-                duration_beats,
-                Vec::new(),
-                start_marker_beats,
-                loop_enabled,
-                loop_start_beats,
-                loop_end_beats,
-                groove_grid,
-            ));
-        }
-        self.recalculate_audio_length();
-    }
-
     pub(super) fn command_remove_note_clip(
         &mut self,
         track_id: vibez_core::id::TrackId,
         clip_id: vibez_core::id::ClipId,
     ) {
         if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
-            track.playback_source.note_clips.retain(|c| c.id != clip_id);
+            track.playback_source.remove_note_clips(clip_id);
             // Sounding notes get their note-offs from the
             // clip's schedule; without the clip they hang
             // forever.
@@ -112,24 +86,6 @@ impl AudioEngine {
             }
         }
         self.recalculate_audio_length();
-    }
-
-    pub(super) fn command_add_note(
-        &mut self,
-        track_id: vibez_core::id::TrackId,
-        clip_id: vibez_core::id::ClipId,
-        note: vibez_core::midi::MidiNote,
-    ) {
-        if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
-            if let Some(clip) = track
-                .playback_source
-                .note_clips
-                .iter_mut()
-                .find(|c| c.id == clip_id)
-            {
-                clip.push_note(note);
-            }
-        }
     }
 
     pub(super) fn command_remove_note(
@@ -189,11 +145,27 @@ impl AudioEngine {
         track_id: vibez_core::id::TrackId,
         sample: std::sync::Arc<vibez_core::audio_buffer::DecodedAudio>,
         sample_name: String,
+        allowance: &mut RetirementAllowance,
     ) {
-        if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
-            if let Some(ref mut instrument) = track.instrument {
-                instrument.load_sample(sample, sample_name);
-            }
+        let retired = match self
+            .tracks
+            .iter_mut()
+            .find(|track| track.id == track_id)
+            .and_then(|track| track.instrument.as_mut())
+        {
+            Some(instrument) => instrument.load_sample(sample, sample_name),
+            None => vibez_instruments::InstrumentMediaOwners::incoming(sample, sample_name),
+        };
+        self.retire_instrument_media(retired, allowance);
+    }
+
+    fn retire_instrument_media(
+        &mut self,
+        retired: vibez_instruments::InstrumentMediaOwners,
+        allowance: &mut RetirementAllowance,
+    ) {
+        if !retired.is_empty() {
+            self.retire_event(EngineEvent::RetiredInstrumentMedia(retired), allowance);
         }
     }
 
@@ -203,37 +175,56 @@ impl AudioEngine {
         pad_index: usize,
         sample: std::sync::Arc<vibez_core::audio_buffer::DecodedAudio>,
         sample_name: String,
+        allowance: &mut RetirementAllowance,
     ) {
-        if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
-            if let Some(ref mut instrument) = track.instrument {
-                instrument.load_drum_pad_sample(pad_index, sample, sample_name);
-            }
-        }
+        let retired = match self
+            .tracks
+            .iter_mut()
+            .find(|track| track.id == track_id)
+            .and_then(|track| track.instrument.as_mut())
+        {
+            Some(instrument) => instrument.load_drum_pad_sample(pad_index, sample, sample_name),
+            None => vibez_instruments::InstrumentMediaOwners::incoming(sample, sample_name),
+        };
+        self.retire_instrument_media(retired, allowance);
     }
 
     pub(super) fn command_clear_drum_rack_pad(
         &mut self,
         track_id: vibez_core::id::TrackId,
         pad_index: usize,
+        allowance: &mut RetirementAllowance,
     ) {
-        if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
-            if let Some(ref mut instrument) = track.instrument {
-                instrument.clear_drum_pad(pad_index);
-            }
-        }
+        let retired = self
+            .tracks
+            .iter_mut()
+            .find(|track| track.id == track_id)
+            .and_then(|track| track.instrument.as_mut())
+            .map(|instrument| instrument.clear_drum_pad(pad_index))
+            .unwrap_or_default();
+        self.retire_instrument_media(retired, allowance);
     }
 
     pub(super) fn command_set_drum_rack_pad_state(
         &mut self,
         track_id: vibez_core::id::TrackId,
         pad_index: usize,
-        state: vibez_core::track::DrumPadState,
+        state: vibez_instruments::PreparedDrumPadState,
+        allowance: &mut RetirementAllowance,
     ) {
-        if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
-            if let Some(ref mut instrument) = track.instrument {
-                instrument.set_drum_pad_state(pad_index, state);
-            }
-        }
+        let retired = match self
+            .tracks
+            .iter_mut()
+            .find(|track| track.id == track_id)
+            .and_then(|track| track.instrument.as_mut())
+        {
+            Some(instrument) => instrument.set_drum_pad_state(pad_index, state),
+            None => vibez_instruments::InstrumentMediaOwners {
+                sample: None,
+                name: state.name,
+            },
+        };
+        self.retire_instrument_media(retired, allowance);
     }
 
     pub(super) fn command_set_drum_rack_pad_param(

@@ -49,7 +49,33 @@ pub struct EngineClip {
     pub warp_markers: WarpMarkers,
 }
 
+impl std::fmt::Debug for EngineClip {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("EngineClip")
+            .field("id", &self.id)
+            .field("position", &self.position)
+            .field("duration", &self.duration)
+            .finish()
+    }
+}
+
 impl EngineClip {
+    pub(crate) fn same_retired_owner(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.audio, &other.audio)
+            && std::ptr::eq(self.warp_markers.as_slice(), other.warp_markers.as_slice())
+            && self.id == other.id
+            && self.position == other.position
+            && self.source_offset == other.source_offset
+            && self.start_marker == other.start_marker
+            && self.duration == other.duration
+            && self.loop_enabled == other.loop_enabled
+            && self.loop_start == other.loop_start
+            && self.loop_end == other.loop_end
+            && self.linear_gain == other.linear_gain
+            && self.fades == other.fades
+            && self.playback_direction == other.playback_direction
+    }
     pub fn timeline(&self) -> FrameClipTimeline {
         FrameClipTimeline::new(
             self.start_marker,
@@ -102,10 +128,98 @@ pub struct EngineNoteClip {
     pub loop_end_beats: f64,
     pub groove_grid: GrooveGrid,
     next_same_pitch_start_beats: Vec<Option<f64>>,
+    note_sort_indices: Vec<usize>,
     groove_latch: Cell<Option<(i64, vibez_core::perform::SwingAmount)>>,
 }
 
+impl std::fmt::Debug for EngineNoteClip {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("EngineNoteClip")
+            .field("id", &self.id)
+            .field("note_count", &self.notes.len())
+            .finish()
+    }
+}
+
+pub(crate) struct NoteInsertionStorage {
+    notes: Vec<MidiNote>,
+    clamps: Vec<Option<f64>>,
+    sort_indices: Vec<usize>,
+}
+
+impl NoteInsertionStorage {
+    pub(crate) fn new(capacity: usize) -> Self {
+        Self {
+            notes: Vec::with_capacity(capacity),
+            clamps: Vec::with_capacity(capacity),
+            sort_indices: Vec::with_capacity(capacity),
+        }
+    }
+
+    pub(crate) fn install_if_needed(&mut self, clip: &mut EngineNoteClip) -> bool {
+        assert_eq!(clip.notes.len(), clip.next_same_pitch_start_beats.len());
+        assert_eq!(clip.notes.len(), clip.note_sort_indices.len());
+        let required = clip
+            .notes
+            .len()
+            .checked_add(1)
+            .expect("note length overflow");
+        if clip.notes.capacity() >= required
+            && clip.next_same_pitch_start_beats.capacity() >= required
+            && clip.note_sort_indices.capacity() >= required
+        {
+            return true;
+        }
+        if self.notes.capacity() < required
+            || self.clamps.capacity() < required
+            || self.sort_indices.capacity() < required
+        {
+            return false;
+        }
+        // Clamp changes affect sounding notes, so no cache mutation precedes
+        // complete capacity admission for all three arrays and the original delta.
+        assert!(self.notes.is_empty() && self.clamps.is_empty() && self.sort_indices.is_empty());
+        self.notes.append(&mut clip.notes);
+        self.clamps.append(&mut clip.next_same_pitch_start_beats);
+        self.sort_indices.append(&mut clip.note_sort_indices);
+        std::mem::swap(&mut self.notes, &mut clip.notes);
+        std::mem::swap(&mut self.clamps, &mut clip.next_same_pitch_start_beats);
+        std::mem::swap(&mut self.sort_indices, &mut clip.note_sort_indices);
+        true
+    }
+}
+
 impl EngineNoteClip {
+    #[cfg(test)]
+    pub(crate) fn retirement_storage(&self) -> [usize; 3] {
+        [
+            self.notes.as_ptr() as usize,
+            self.next_same_pitch_start_beats.as_ptr() as usize,
+            self.note_sort_indices.as_ptr() as usize,
+        ]
+    }
+
+    pub(crate) fn same_retired_owner(&self, other: &Self) -> bool {
+        self.id == other.id
+            && self.position_beats == other.position_beats
+            && self.duration_beats == other.duration_beats
+            && std::ptr::eq(self.notes.as_slice(), other.notes.as_slice())
+            && std::ptr::eq(
+                self.next_same_pitch_start_beats.as_slice(),
+                other.next_same_pitch_start_beats.as_slice(),
+            )
+            && std::ptr::eq(
+                self.note_sort_indices.as_slice(),
+                other.note_sort_indices.as_slice(),
+            )
+            && self.start_marker_beats == other.start_marker_beats
+            && self.loop_enabled == other.loop_enabled
+            && self.loop_start_beats == other.loop_start_beats
+            && self.loop_end_beats == other.loop_end_beats
+            && self.groove_grid == other.groove_grid
+            && self.groove_latch == other.groove_latch
+    }
     pub(crate) fn same_pitch_schedule(&self, other: &Self, pitch: u8) -> bool {
         self.position_beats == other.position_beats
             && self.duration_beats == other.duration_beats
@@ -139,7 +253,13 @@ impl EngineNoteClip {
         loop_end_beats: f64,
         groove_grid: GrooveGrid,
     ) -> Self {
-        let next_same_pitch_start_beats = build_next_same_pitch_start_beats(&notes);
+        let mut next_same_pitch_start_beats = Vec::with_capacity(notes.len());
+        let mut note_sort_indices = Vec::with_capacity(notes.len());
+        rebuild_next_same_pitch_start_beats(
+            &notes,
+            &mut note_sort_indices,
+            &mut next_same_pitch_start_beats,
+        );
         Self {
             id,
             position_beats,
@@ -151,6 +271,7 @@ impl EngineNoteClip {
             loop_end_beats,
             groove_grid,
             next_same_pitch_start_beats,
+            note_sort_indices,
             groove_latch: Cell::new(None),
         }
     }
@@ -194,6 +315,7 @@ impl EngineNoteClip {
         }
         self.notes.push(note);
         self.next_same_pitch_start_beats.push(next_same_pitch_start);
+        self.note_sort_indices.push(self.notes.len() - 1);
     }
 
     pub(crate) fn remove_note(&mut self, note_index: usize) -> bool {
@@ -215,7 +337,11 @@ impl EngineNoteClip {
     }
 
     fn rebuild_note_end_clamps(&mut self) {
-        self.next_same_pitch_start_beats = build_next_same_pitch_start_beats(&self.notes);
+        rebuild_next_same_pitch_start_beats(
+            &self.notes,
+            &mut self.note_sort_indices,
+            &mut self.next_same_pitch_start_beats,
+        );
     }
 
     pub fn reset_groove_latch(&self) {
@@ -244,13 +370,19 @@ impl EngineNoteClip {
     }
 }
 
-/// Precompute note-off clamps away from the realtime render loop. Notes retain
-/// their caller-visible order; only the temporary index list is sorted.
-fn build_next_same_pitch_start_beats(notes: &[MidiNote]) -> Vec<Option<f64>> {
-    let mut by_descending_start: Vec<_> = (0..notes.len()).collect();
-    by_descending_start
-        .sort_by(|left, right| notes[*right].start_beat.total_cmp(&notes[*left].start_beat));
-    let mut result = vec![None; notes.len()];
+fn rebuild_next_same_pitch_start_beats(
+    notes: &[MidiNote],
+    by_descending_start: &mut Vec<usize>,
+    result: &mut Vec<Option<f64>>,
+) {
+    by_descending_start.clear();
+    by_descending_start.extend(0..notes.len());
+    // Equal-start notes share one group, so its internal order cannot affect
+    // clamps. Unstable sorting avoids allocating stable-sort scratch.
+    by_descending_start.sort_unstable_by(|left, right| {
+        notes[*right].start_beat.total_cmp(&notes[*left].start_beat)
+    });
+    result.resize(notes.len(), None);
     let mut next_by_pitch = [None; 256];
     let mut group_start = 0;
     while group_start < by_descending_start.len() {
@@ -272,7 +404,6 @@ fn build_next_same_pitch_start_beats(notes: &[MidiNote]) -> Vec<Option<f64>> {
         }
         group_start = group_end;
     }
-    result
 }
 
 /// Map a raw timeline frame through the active Arrange loop.
@@ -298,6 +429,8 @@ pub struct PreparedPlaybackSource {
     pub clips: Vec<EngineClip>,
     pub note_clips: Vec<EngineNoteClip>,
     pub automation: Vec<AutomationLane>,
+    pub(crate) removed_audio_clips: Vec<EngineClip>,
+    pub(crate) removed_note_clips: Vec<EngineNoteClip>,
 }
 
 /// One Project Track's resident content for a prepared Section.
@@ -366,11 +499,66 @@ impl PreparedPlaybackSource {
         note_clips: Vec<EngineNoteClip>,
         automation: Vec<AutomationLane>,
     ) -> Self {
+        let removed_audio_clips = Vec::with_capacity(clips.len());
+        let removed_note_clips = Vec::with_capacity(note_clips.len());
         Self {
             clips,
             note_clips,
             automation,
+            removed_audio_clips,
+            removed_note_clips,
         }
+    }
+
+    pub(crate) fn push_audio_clip(&mut self, clip: EngineClip) {
+        // Off-callback construction prepares the matching future removal owner.
+        let required = self.clips.len() + 1;
+        if self.removed_audio_clips.capacity() < required {
+            self.removed_audio_clips
+                .reserve(required - self.removed_audio_clips.len());
+        }
+        self.clips.push(clip);
+    }
+
+    pub(crate) fn remove_audio_clips(&mut self, id: ClipId) {
+        assert!(self.removed_audio_clips.is_empty());
+        assert!(self.removed_audio_clips.capacity() >= self.clips.len());
+        for clip in self.clips.extract_if(.., |clip| clip.id == id) {
+            self.removed_audio_clips.push(clip);
+        }
+    }
+
+    pub(crate) fn push_note_clip(&mut self, clip: EngineNoteClip) {
+        let required = self.note_clips.len() + 1;
+        if self.removed_note_clips.capacity() < required {
+            self.removed_note_clips
+                .reserve(required - self.removed_note_clips.len());
+        }
+        self.note_clips.push(clip);
+    }
+
+    pub(crate) fn remove_note_clips(&mut self, id: ClipId) {
+        assert!(self.removed_note_clips.is_empty());
+        assert!(self.removed_note_clips.capacity() >= self.note_clips.len());
+        for clip in self.note_clips.extract_if(.., |clip| clip.id == id) {
+            self.removed_note_clips.push(clip);
+        }
+    }
+
+    pub(crate) fn pop_removed_note_clip(&mut self) -> Option<EngineNoteClip> {
+        self.removed_note_clips.pop()
+    }
+
+    pub(crate) fn has_removed_note_clips(&self) -> bool {
+        !self.removed_note_clips.is_empty()
+    }
+
+    pub(crate) fn pop_removed_audio_clip(&mut self) -> Option<EngineClip> {
+        self.removed_audio_clips.pop()
+    }
+
+    pub(crate) fn has_removed_audio_clips(&self) -> bool {
+        !self.removed_audio_clips.is_empty()
     }
 
     pub fn set_clip_playback_direction(
@@ -383,10 +571,16 @@ impl PreparedPlaybackSource {
         }
     }
 
-    pub fn set_clip_warp_markers(&mut self, clip_id: ClipId, warp_markers: WarpMarkers) {
+    #[must_use = "retire the displaced or rejected marker owner outside the audio callback"]
+    pub fn set_clip_warp_markers(
+        &mut self,
+        clip_id: ClipId,
+        mut warp_markers: WarpMarkers,
+    ) -> WarpMarkers {
         if let Some(clip) = self.clips.iter_mut().find(|clip| clip.id == clip_id) {
-            clip.warp_markers = warp_markers;
+            std::mem::swap(&mut clip.warp_markers, &mut warp_markers);
         }
+        warp_markers
     }
 
     /// Render this resident source into a caller-owned channel buffer.
@@ -539,6 +733,14 @@ pub(crate) struct QueuedClipPlayback {
 }
 
 #[cfg(test)]
+#[path = "playback_source_note_value_insertion_tests.rs"]
+pub(crate) mod note_value_insertion_tests;
+
+#[cfg(test)]
+#[path = "playback_source_note_insertion_tests.rs"]
+pub(crate) mod note_insertion_tests;
+
+#[cfg(test)]
 mod tests {
     use std::sync::Arc;
 
@@ -625,7 +827,7 @@ mod tests {
         };
 
         let mut existing_path = EngineTrack::new(TrackId::new());
-        existing_path.playback_source.clips.push(clip());
+        existing_path.playback_source.push_audio_clip(clip());
         let mut prepared_path = EngineTrack::with_playback_source(
             TrackId::new(),
             PreparedPlaybackSource::new(vec![clip()], Vec::new(), Vec::new()),
@@ -905,3 +1107,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "playback_source_automation_lane_construction_tests.rs"]
+pub(crate) mod automation_lane_construction_tests;

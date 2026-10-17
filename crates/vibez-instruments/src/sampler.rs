@@ -15,7 +15,7 @@ use crate::sampler_voice::{Frame, Region, SamplerVoice};
 use crate::synth::lfo;
 use crate::synth_filter::Coefficients;
 use crate::synth_params::{lfo_target, LFO_CUTOFF_OCTAVES, LFO_PITCH_SEMITONES};
-use crate::Instrument;
+use crate::{Instrument, InstrumentMediaOwners};
 
 const MAX_VOICES: usize = 8;
 /// The note a struck voice holds, which a pad's note-off releases.
@@ -208,11 +208,20 @@ impl Sampler {
         }
     }
 
-    pub fn unload(&mut self) {
-        self.sample = None;
-        self.sample_name = None;
+    /// Names the loaded sample, handing back the name it had.
+    pub fn rename(&mut self, name: Option<String>) -> Option<String> {
+        std::mem::replace(&mut self.sample_name, name)
+    }
+
+    /// Empties the sampler, handing back the sample and its name to be
+    /// dropped off the audio thread.
+    pub fn unload(&mut self) -> InstrumentMediaOwners {
         self.region = None;
         self.reset();
+        InstrumentMediaOwners {
+            sample: self.sample.take(),
+            name: self.sample_name.take(),
+        }
     }
 
     /// Whether any voice is playing; a silent sampler has nothing to
@@ -392,11 +401,14 @@ impl Instrument for Sampler {
         self.lfo_phase = 0.0;
     }
 
-    fn load_sample(&mut self, sample: Arc<DecodedAudio>, name: String) {
-        self.sample = Some(sample);
-        self.sample_name = Some(name);
+    fn load_sample(&mut self, sample: Arc<DecodedAudio>, name: String) -> InstrumentMediaOwners {
+        let retired = InstrumentMediaOwners {
+            sample: self.sample.replace(sample),
+            name: self.sample_name.replace(name),
+        };
         self.region = self.find_region();
         self.reset();
+        retired
     }
 
     fn sample_name(&self) -> Option<&str> {
@@ -442,7 +454,7 @@ mod tests {
     fn produces_sound_with_sample() {
         let mut sampler = Sampler::new(44100.0);
         let sample = make_test_sample(44100, 0.5);
-        sampler.load_sample(sample, "test.wav".into());
+        drop(sampler.load_sample(sample, "test.wav".into()));
         sampler.note_on(60, 100);
 
         let mut buf = vec![0.0_f32; 512];
@@ -470,7 +482,7 @@ mod tests {
     fn pitch_shift_octave_up() {
         let mut sampler = Sampler::new(44100.0);
         let sample = make_sine_sample(88_200, 440.0, 44100);
-        sampler.load_sample(sample, "sine.wav".into());
+        drop(sampler.load_sample(sample, "sine.wav".into()));
         sampler.set_param(P_ROOT_NOTE, 60.0);
         sampler.note_on(72, 100);
         assert!((frequency(&mut sampler) - 880.0).abs() < 2.0);
@@ -480,7 +492,7 @@ mod tests {
     fn original_pitch_at_root() {
         let mut sampler = Sampler::new(44100.0);
         let sample = make_sine_sample(88_200, 440.0, 44100);
-        sampler.load_sample(sample, "sine.wav".into());
+        drop(sampler.load_sample(sample, "sine.wav".into()));
         sampler.set_param(P_ROOT_NOTE, 60.0);
         sampler.note_on(60, 100);
         assert!((frequency(&mut sampler) - 440.0).abs() < 2.0);
@@ -490,7 +502,7 @@ mod tests {
     fn one_shot_ignores_note_off() {
         let mut sampler = Sampler::new(44100.0);
         let sample = make_test_sample(44100, 0.5);
-        sampler.load_sample(sample, "test.wav".into());
+        drop(sampler.load_sample(sample, "test.wav".into()));
         sampler.set_param(P_ONE_SHOT, 1.0);
 
         sampler.note_on(60, 100);
@@ -517,7 +529,7 @@ mod tests {
     fn sustain_mode_releases_on_note_off() {
         let mut sampler = Sampler::new(44100.0);
         let sample = make_test_sample(44100, 0.5);
-        sampler.load_sample(sample, "test.wav".into());
+        drop(sampler.load_sample(sample, "test.wav".into()));
         sampler.set_param(P_RELEASE, 0.001); // very short release
 
         sampler.note_on(60, 100);
@@ -543,7 +555,7 @@ mod tests {
         let mut sampler = Sampler::new(44100.0);
         // Short sample: 100 frames
         let sample = make_test_sample(100, 0.5);
-        sampler.load_sample(sample, "short.wav".into());
+        drop(sampler.load_sample(sample, "short.wav".into()));
         sampler.set_param(P_LOOP, 1.0);
 
         sampler.note_on(60, 100);
@@ -573,7 +585,7 @@ mod tests {
             channels: vec![data.clone(), data],
             sample_rate: 44100,
         });
-        sampler.load_sample(sample, "ramp.wav".into());
+        drop(sampler.load_sample(sample, "ramp.wav".into()));
 
         // Set start=0.5, end=0.8 → frames 500..800
         sampler.set_param(P_START, 0.5);
@@ -595,7 +607,7 @@ mod tests {
     fn polyphony() {
         let mut sampler = Sampler::new(44100.0);
         let sample = make_test_sample(44100, 0.5);
-        sampler.load_sample(sample, "test.wav".into());
+        drop(sampler.load_sample(sample, "test.wav".into()));
 
         sampler.note_on(60, 100);
         sampler.note_on(64, 100);
@@ -641,7 +653,7 @@ mod tests {
     fn reset_clears_voices() {
         let mut sampler = Sampler::new(44100.0);
         let sample = make_test_sample(44100, 0.5);
-        sampler.load_sample(sample, "test.wav".into());
+        drop(sampler.load_sample(sample, "test.wav".into()));
         sampler.note_on(60, 100);
         sampler.reset();
         for voice in &sampler.voices {
@@ -654,8 +666,8 @@ mod tests {
         let mut sampler_loud = Sampler::new(44100.0);
         let mut sampler_soft = Sampler::new(44100.0);
         let sample = make_test_sample(44100, 0.5);
-        sampler_loud.load_sample(sample.clone(), "test.wav".into());
-        sampler_soft.load_sample(sample, "test.wav".into());
+        drop(sampler_loud.load_sample(sample.clone(), "test.wav".into()));
+        drop(sampler_soft.load_sample(sample, "test.wav".into()));
 
         sampler_loud.note_on(60, 127);
         sampler_soft.note_on(60, 32);
@@ -679,7 +691,7 @@ mod tests {
         assert!(sampler.sample_name().is_none());
 
         let sample = make_test_sample(100, 0.5);
-        sampler.load_sample(sample, "kick.wav".into());
+        drop(sampler.load_sample(sample, "kick.wav".into()));
         assert_eq!(sampler.sample_name(), Some("kick.wav"));
     }
 

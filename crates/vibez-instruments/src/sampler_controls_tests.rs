@@ -32,7 +32,7 @@ fn ramp(frames: usize) -> Arc<DecodedAudio> {
 
 fn sampler(sample: Arc<DecodedAudio>, edits: &[(usize, f32)]) -> Sampler {
     let mut sampler = Sampler::new(RATE);
-    sampler.load_sample(sample, "test.wav".into());
+    drop(sampler.load_sample(sample, "test.wav".into()));
     for &(index, value) in edits {
         sampler.set_param(index, value);
     }

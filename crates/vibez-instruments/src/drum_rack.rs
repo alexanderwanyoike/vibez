@@ -11,7 +11,7 @@ use vibez_core::midi::InstrumentKind;
 use vibez_core::track::{drum_rack_pad_index, DrumPadState, DRUM_RACK_PAD_COUNT};
 
 use crate::sampler::{default_params, param, Sampler, PAD_NOTE, SAMPLER_PARAMS};
-use crate::Instrument;
+use crate::{Instrument, InstrumentMediaOwners, PreparedDrumPadState};
 
 const _: () = assert!(DRUM_RACK_PAD_COUNT <= u64::BITS as usize);
 
@@ -68,7 +68,7 @@ impl DrumRack {
             live: 0,
         };
         for index in 0..DRUM_RACK_PAD_COUNT {
-            rack.set_drum_pad_state(index, DrumPadState::default());
+            drop(rack.set_drum_pad_state(index, DrumPadState::default().into()));
         }
         rack
     }
@@ -140,26 +140,44 @@ impl Instrument for DrumRack {
         self.live = 0;
     }
 
-    fn load_drum_pad_sample(&mut self, pad_index: usize, sample: Arc<DecodedAudio>, name: String) {
-        if let Some(pad) = self.pads.get_mut(pad_index) {
-            pad.sampler.load_sample(sample, name);
+    fn load_drum_pad_sample(
+        &mut self,
+        pad_index: usize,
+        sample: Arc<DecodedAudio>,
+        name: String,
+    ) -> InstrumentMediaOwners {
+        match self.pads.get_mut(pad_index) {
+            Some(pad) => pad.sampler.load_sample(sample, name),
+            None => InstrumentMediaOwners::incoming(sample, name),
         }
     }
 
-    fn clear_drum_pad(&mut self, pad_index: usize) {
-        if let Some(pad) = self.pads.get_mut(pad_index) {
-            pad.sampler.unload();
-        }
+    fn clear_drum_pad(&mut self, pad_index: usize) -> InstrumentMediaOwners {
+        self.pads
+            .get_mut(pad_index)
+            .map(|pad| pad.sampler.unload())
+            .unwrap_or_default()
     }
 
-    fn set_drum_pad_state(&mut self, pad_index: usize, state: DrumPadState) {
+    fn set_drum_pad_state(
+        &mut self,
+        pad_index: usize,
+        state: PreparedDrumPadState,
+    ) -> InstrumentMediaOwners {
         let Some(pad) = self.pads.get_mut(pad_index) else {
-            return;
+            return InstrumentMediaOwners {
+                sample: None,
+                name: state.name,
+            };
         };
-        for (index, value) in pad_params(&state).into_iter().enumerate() {
+        for (index, value) in state.params.into_iter().enumerate() {
             pad.sampler.set_param(index, value);
         }
         pad.choke_group = state.choke_group;
+        InstrumentMediaOwners {
+            sample: None,
+            name: pad.sampler.rename(state.name),
+        }
     }
 
     fn set_drum_pad_param(&mut self, pad_index: usize, index: usize, value: f32) {
@@ -172,6 +190,10 @@ impl Instrument for DrumRack {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn set_pad(rack: &mut DrumRack, pad_index: usize, state: DrumPadState) {
+        drop(rack.set_drum_pad_state(pad_index, state.into()));
+    }
 
     fn make_test_audio(frames: usize, value: f32) -> Arc<DecodedAudio> {
         Arc::new(DecodedAudio {
@@ -193,7 +215,7 @@ mod tests {
             channels: vec![vec![0.5; 4_800], vec![0.5; 4_800]],
             sample_rate: 24_000,
         });
-        rack.load_drum_pad_sample(0, sample, "slow.wav".into());
+        drop(rack.load_drum_pad_sample(0, sample, "slow.wav".into()));
         rack.note_on(36, 127);
 
         let sounding = rendered(&mut rack, 12_000)
@@ -207,10 +229,11 @@ mod tests {
     #[test]
     fn hits_on_one_pad_never_cut_another_pad_off() {
         let mut rack = DrumRack::new(48_000.0);
-        rack.load_drum_pad_sample(0, make_test_audio(96_000, 0.5), "pad.wav".into());
-        rack.load_drum_pad_sample(1, make_test_audio(96_000, 0.0), "silent.wav".into());
+        drop(rack.load_drum_pad_sample(0, make_test_audio(96_000, 0.5), "pad.wav".into()));
+        drop(rack.load_drum_pad_sample(1, make_test_audio(96_000, 0.0), "silent.wav".into()));
         for pad_index in [0, 1] {
-            rack.set_drum_pad_state(
+            set_pad(
+                &mut rack,
                 pad_index,
                 DrumPadState {
                     one_shot: false,
@@ -231,7 +254,7 @@ mod tests {
     #[test]
     fn rack_renders_loaded_pad() {
         let mut rack = DrumRack::new(44_100.0);
-        rack.load_drum_pad_sample(0, make_test_audio(64, 0.5), "kick.wav".into());
+        drop(rack.load_drum_pad_sample(0, make_test_audio(64, 0.5), "kick.wav".into()));
         rack.note_on(36, 127);
 
         let mut buffer = vec![0.0; 128];
@@ -243,7 +266,7 @@ mod tests {
     #[test]
     fn rack_ignores_unmapped_note() {
         let mut rack = DrumRack::new(44_100.0);
-        rack.load_drum_pad_sample(0, make_test_audio(64, 0.5), "kick.wav".into());
+        drop(rack.load_drum_pad_sample(0, make_test_audio(64, 0.5), "kick.wav".into()));
         rack.note_on(12, 127);
 
         let mut buffer = vec![0.0; 128];
@@ -255,7 +278,7 @@ mod tests {
     #[test]
     fn rack_renders_a_pad_from_a_later_bank() {
         let mut rack = DrumRack::new(44_100.0);
-        rack.load_drum_pad_sample(20, make_test_audio(64, 0.5), "bank-two.wav".into());
+        drop(rack.load_drum_pad_sample(20, make_test_audio(64, 0.5), "bank-two.wav".into()));
         rack.note_on(56, 127);
 
         let mut buffer = vec![0.0; 128];
@@ -267,8 +290,9 @@ mod tests {
     #[test]
     fn a_kit_saved_before_pads_were_samplers_keeps_its_level_and_fades() {
         let mut rack = DrumRack::new(48_000.0);
-        rack.load_drum_pad_sample(0, make_test_audio(4_800, 0.5), "click.wav".into());
-        rack.set_drum_pad_state(
+        drop(rack.load_drum_pad_sample(0, make_test_audio(4_800, 0.5), "click.wav".into()));
+        set_pad(
+            &mut rack,
             0,
             DrumPadState {
                 fade_in_ms: 3.0,
@@ -290,8 +314,9 @@ mod tests {
     #[test]
     fn a_gated_pad_releases_over_its_fade_out() {
         let mut rack = DrumRack::new(48_000.0);
-        rack.load_drum_pad_sample(0, make_test_audio(48_000, 1.0), "gate.wav".into());
-        rack.set_drum_pad_state(
+        drop(rack.load_drum_pad_sample(0, make_test_audio(48_000, 1.0), "gate.wav".into()));
+        set_pad(
+            &mut rack,
             0,
             DrumPadState {
                 fade_out_ms: 10.0,
@@ -314,10 +339,11 @@ mod tests {
     #[test]
     fn a_choke_group_releases_the_other_pad_over_its_fade_out() {
         let mut rack = DrumRack::new(48_000.0);
-        rack.load_drum_pad_sample(0, make_test_audio(48_000, 1.0), "open.wav".into());
-        rack.load_drum_pad_sample(1, make_test_audio(48_000, 0.0), "closed.wav".into());
+        drop(rack.load_drum_pad_sample(0, make_test_audio(48_000, 1.0), "open.wav".into()));
+        drop(rack.load_drum_pad_sample(1, make_test_audio(48_000, 0.0), "closed.wav".into()));
         for pad_index in [0, 1] {
-            rack.set_drum_pad_state(
+            set_pad(
+                &mut rack,
                 pad_index,
                 DrumPadState {
                     fade_out_ms: 10.0,
@@ -340,11 +366,12 @@ mod tests {
     #[test]
     fn a_pad_plays_its_own_sampler_controls() {
         let mut rack = DrumRack::new(48_000.0);
-        rack.load_drum_pad_sample(0, make_test_audio(4_800, 0.5), "kick.wav".into());
+        drop(rack.load_drum_pad_sample(0, make_test_audio(4_800, 0.5), "kick.wav".into()));
         let mut params = pad_params(&DrumPadState::default());
         params[param::VOLUME] = 0.5;
         params[param::PAN] = -1.0;
-        rack.set_drum_pad_state(
+        set_pad(
+            &mut rack,
             0,
             DrumPadState {
                 params: params.to_vec(),
@@ -363,7 +390,7 @@ mod tests {
     #[test]
     fn one_pad_control_changes_alone() {
         let mut rack = DrumRack::new(48_000.0);
-        rack.load_drum_pad_sample(0, make_test_audio(4_800, 0.5), "kick.wav".into());
+        drop(rack.load_drum_pad_sample(0, make_test_audio(4_800, 0.5), "kick.wav".into()));
         rack.set_drum_pad_param(0, param::PAN, -1.0);
         rack.note_on(36, 127);
 

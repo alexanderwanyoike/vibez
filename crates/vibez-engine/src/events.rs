@@ -1,8 +1,16 @@
+//! Engine notifications, clock domains and identity-preserving ownership returns.
+
+use std::sync::Arc;
+use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::id::{ClipId, SectionId, TrackId};
 use vibez_core::perform::NoteRepeatRate;
 
 #[path = "event_recording.rs"]
 mod recording;
+
+#[path = "event_payloads.rs"]
+mod payloads;
+pub use payloads::*;
 
 use crate::playback_source::{PreparedClipPlayback, PreparedSectionPlaybackSource};
 
@@ -13,14 +21,8 @@ pub enum AutomationGesturePhase {
     End,
 }
 
-/// Events sent from the audio engine back to the UI thread (via rtrb).
-///
-/// These are pushed by the engine inside the real-time audio callback and
-/// consumed on the UI thread to update the interface.  Because they are
-/// produced in the audio callback, every variant must be trivially cheap to
-/// construct (no allocations, no locks).
-/// Unique device ownership transferred to the UI without allocating a holder
-/// or locking on the processing thread.
+/// Returns unique ownership to the UI without allocating a holder in the callback.
+/// Equality follows owner identity rather than device or source content.
 pub struct DisposalCell<T: ?Sized>(Box<T>);
 impl<T: ?Sized> DisposalCell<T> {
     pub fn new(device: Box<T>) -> Self {
@@ -30,6 +32,14 @@ impl<T: ?Sized> DisposalCell<T> {
         self.0
     }
 }
+impl<T: ?Sized> std::ops::Deref for DisposalCell<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 impl<T: ?Sized> PartialEq for DisposalCell<T> {
     fn eq(&self, other: &Self) -> bool {
         std::ptr::eq(self.0.as_ref(), other.0.as_ref())
@@ -95,8 +105,11 @@ pub(crate) struct RepeatNoticePosition {
     pub(crate) canonical_section_position_samples: Option<u64>,
 }
 
+/// Engine-to-UI events must remain cheap to construct in the audio callback.
 #[derive(Debug)]
 pub enum EngineEvent {
+    ClipInsertionStorageRequested(crate::clip_insertion::ClipInsertionStorageRequest),
+    ClipInsertionCompleted(crate::clip_insertion::CompletedClipInsertion),
     PresentationCancelled,
     DeviceReconfigurationRetired {
         device: crate::engine::reconfiguration::DeviceReconfiguration,
@@ -119,6 +132,12 @@ pub enum EngineEvent {
     RetiredEffectStorage(crate::engine::reconfiguration::RetiredEffectStorage),
     RetiredChannel(crate::retirement::RetiredChannel),
     RetiredAutomationLane(vibez_core::automation::AutomationLane),
+    RetiredAudioBuffer(Arc<DecodedAudio>),
+    RetiredAudioClip(crate::playback_source::EngineClip),
+    RetiredNoteClip(crate::playback_source::EngineNoteClip),
+    RetiredWarpMarkers(vibez_core::warp_marker::WarpMarkers),
+    RetiredTrackOrder(Vec<TrackId>),
+    RetiredInstrumentMedia(vibez_instruments::InstrumentMediaOwners),
     RoutingRetired(Box<crate::routing::PreparedRouting>),
     SidechainInputMeter {
         effect_id: vibez_core::id::EffectId,
@@ -179,19 +198,10 @@ pub enum EngineEvent {
     },
 
     /// Peak and RMS meter readings for the most recent audio buffer.
-    Metering {
-        peak_l: f32,
-        peak_r: f32,
-        rms_l: f32,
-        rms_r: f32,
-    },
+    Metering(MeteringEvent),
 
     /// Per-track peak meter readings.
-    TrackMeter {
-        track_id: TrackId,
-        peak_l: f32,
-        peak_r: f32,
-    },
+    TrackMeter(TrackMeterEvent),
 
     /// Cosmetic readings at one insert's real input and output boundaries.
     EffectMeter {
@@ -213,19 +223,12 @@ pub enum EngineEvent {
     /// Drum Rack pitches triggered by resident MIDI clips during the latest
     /// audio block. One bit per MIDI pitch keeps device feedback bounded to
     /// one event per track and block, even when several notes land together.
-    TrackNoteActivity {
-        track_id: TrackId,
-        triggered_notes: u128,
-    },
+    TrackNoteActivity(TrackNoteActivityEvent),
 
     /// A track mute command became effective in the audio engine at this
     /// active engine-clock sample. This is the authoritative event Capture
     /// consumes.
-    TrackMuteChanged {
-        track_id: TrackId,
-        muted: bool,
-        effective_at_samples: u64,
-    },
+    TrackMuteChanged(TrackMuteChangedEvent),
     /// A live Track Mute is waiting for an engine-owned musical boundary.
     TrackMuteQueued {
         track_id: TrackId,
@@ -238,60 +241,20 @@ pub enum EngineEvent {
     },
     /// A manual control took precedence over automation, or automation
     /// was explicitly re-enabled.
-    AutomationOverrideChanged {
-        track_id: TrackId,
-        target: vibez_core::automation::AutomationTarget,
-        overridden: bool,
-    },
+    AutomationOverrideChanged(AutomationOverrideChangedEvent),
     /// One engine-effective point in a live automation gesture. `End` carries
     /// the baseline value that became audible again at the release boundary.
-    AutomationGestureChanged {
-        track_id: TrackId,
-        target: vibez_core::automation::AutomationTarget,
-        normalized_value: f32,
-        phase: AutomationGesturePhase,
-        effective_at_samples: u64,
-    },
+    AutomationGestureChanged(AutomationGestureChangedEvent),
 
     /// Source takes can close before delayed audio reaches output, so their
     /// recorder feed must retain delivery coordinates independently of Capture.
-    SourceNoteRepeated {
-        track_id: TrackId,
-        pitch: u8,
-        velocity: u8,
-        rate: NoteRepeatRate,
-        position: SourceRecordingPosition,
-    },
-    SourceNoteInput {
-        track_id: TrackId,
-        pitch: u8,
-        velocity: u8,
-        on: bool,
-        position: SourceRecordingPosition,
-    },
+    SourceNoteRepeated(SourceNoteRepeatedEvent),
+    SourceNoteInput(SourceNoteInputEvent),
     /// Capture follows the heard retrigger while source takes use SourceNoteRepeated.
-    NoteRepeated {
-        track_id: TrackId,
-        pitch: u8,
-        velocity: u8,
-        rate: NoteRepeatRate,
-        effective_at_samples: u64,
-        canonical_at_samples: u64,
-        section_id: Option<SectionId>,
-        section_position_samples: Option<u64>,
-        canonical_section_position_samples: Option<u64>,
-    },
+    NoteRepeated(NoteRepeatedEvent),
 
     /// Capture follows the heard input while source takes use SourceNoteInput.
-    InstrumentNoteInput {
-        track_id: TrackId,
-        pitch: u8,
-        velocity: u8,
-        on: bool,
-        effective_at_samples: u64,
-        section_id: Option<SectionId>,
-        section_position_samples: Option<u64>,
-    },
+    InstrumentNoteInput(InstrumentNoteInputEvent),
 
     /// The UI aligns input-buffer timestamps to this engine-owned output boundary.
     ClipRecordArmed {
@@ -313,40 +276,18 @@ pub enum EngineEvent {
     },
 
     /// Section Record is waiting for an engine-owned musical boundary.
-    SectionRecordArmed {
-        section_id: SectionId,
-        track_id: TrackId,
-        effective_at_samples: u64,
-        section_position_samples: u64,
-    },
+    SectionRecordArmed(SectionRecordArmedEvent),
 
     /// Section Record crossed its boundary and now accepts timestamped input.
-    SectionRecordStarted {
-        section_id: SectionId,
-        track_id: TrackId,
-        effective_at_samples: u64,
-        section_position_samples: u64,
-    },
+    SectionRecordStarted(SectionRecordStartedEvent),
 
     /// Section Record stopped. A cancelled count-in returns its resident owner
     /// so it is dropped on the UI thread, never in the audio callback.
-    SectionRecordStopped {
-        section_id: SectionId,
-        track_id: TrackId,
-        effective_at_samples: u64,
-        section_position_samples: u64,
-        started: bool,
-        retired: Option<Box<PreparedSectionPlaybackSource>>,
-    },
+    SectionRecordStopped(SectionRecordStoppedEvent),
 
     /// Capture into Arrange began on this exact engine boundary. An already
     /// active Section includes its exact local playhead for a mid-loop start.
-    PerformanceCaptureStarted {
-        offsets: std::sync::Arc<[(TrackId, u32)]>,
-        effective_at_samples: u64,
-        section_id: Option<SectionId>,
-        section_position_samples: Option<u64>,
-    },
+    PerformanceCaptureStarted(PerformanceCaptureStartedEvent),
 
     /// Capture into Arrange stopped on this exact engine boundary.
     PerformanceCaptureStopped {
@@ -355,11 +296,7 @@ pub enum EngineEvent {
 
     /// A resident Section is queued for this exact transport sample.
     /// Re-queueing returns the displaced resident owner for UI-thread drop.
-    SectionQueued {
-        section_id: SectionId,
-        effective_at_samples: u64,
-        retired: Option<Box<PreparedSectionPlaybackSource>>,
-    },
+    SectionQueued(SectionQueuedEvent),
 
     /// A queued resident owner was cancelled by transport stop.
     SectionQueueCancelled {
@@ -379,28 +316,15 @@ pub enum EngineEvent {
     },
     /// A resident Section became active at this exact transport sample.
     /// `retired` carries displaced sources to the UI thread for destruction.
-    SectionTransitioned {
-        section_id: SectionId,
-        effective_at_samples: u64,
-        retired: Box<PreparedSectionPlaybackSource>,
-    },
+    SectionTransitioned(SectionTransitionedEvent),
 
     /// A Section source refresh was consumed by the engine. `applied` is
     /// false when that Section stopped or changed before the command arrived.
     /// In both cases `retired` returns ownership to the UI thread.
-    SectionSourceRefreshed {
-        section_id: SectionId,
-        applied: bool,
-        effective_at_samples: u64,
-        section_position_samples: Option<u64>,
-        retired: Box<PreparedSectionPlaybackSource>,
-    },
+    SectionSourceRefreshed(SectionSourceRefreshedEvent),
 
     /// Current engine-owned local Section playhead.
-    SectionPlaybackPosition {
-        section_id: SectionId,
-        position_samples: u64,
-    },
+    SectionPlaybackPosition(SectionPlaybackPositionEvent),
 
     /// Playback has started (transport entered playing state).
     PlaybackStarted,
@@ -432,32 +356,34 @@ pub enum TimeDomain {
 impl EngineEvent {
     pub fn time_domain(&self) -> TimeDomain {
         match self {
-            Self::SourceNoteInput { .. }
-            | Self::SourceNoteRepeated { .. }
+            Self::SourceNoteInput(_)
+            | Self::SourceNoteRepeated(_)
             | Self::ClipRecordArmed { .. }
             | Self::ClipRecordStarted { .. }
             | Self::ClipRecordStopped { .. }
-            | Self::SectionRecordArmed { .. }
-            | Self::SectionRecordStarted { .. }
-            | Self::SectionRecordStopped { .. } => TimeDomain::Source,
+            | Self::SectionRecordArmed(_)
+            | Self::SectionRecordStarted(_)
+            | Self::SectionRecordStopped(_) => TimeDomain::Source,
             Self::PlaybackPosition(_)
             | Self::PerformancePosition(_)
-            | Self::SectionPlaybackPosition { .. }
+            | Self::SectionPlaybackPosition(_)
             | Self::PlaybackStarted
             | Self::PlaybackStopped
             | Self::ClipTransitioned { .. }
             | Self::ClipSourceRefreshed { .. }
             | Self::ClipCaptureSource { .. }
-            | Self::SectionTransitioned { .. }
+            | Self::SectionTransitioned(_)
             | Self::SectionCaptureSource { .. }
             | Self::SectionCaptureStopped { .. }
-            | Self::PerformanceCaptureStarted { .. }
+            | Self::PerformanceCaptureStarted(_)
             | Self::PerformanceCaptureStopped { .. }
-            | Self::TrackMuteChanged { .. }
-            | Self::AutomationGestureChanged { .. }
-            | Self::InstrumentNoteInput { .. }
-            | Self::NoteRepeated { .. } => TimeDomain::Heard,
+            | Self::TrackMuteChanged(_)
+            | Self::AutomationGestureChanged(_)
+            | Self::InstrumentNoteInput(_)
+            | Self::NoteRepeated(_) => TimeDomain::Heard,
             Self::PresentationCancelled
+            | Self::ClipInsertionStorageRequested(_)
+            | Self::ClipInsertionCompleted(_)
             | Self::DeviceReconfigurationRetired { .. }
             | Self::DeviceReconfiguration(_)
             | Self::CompensationFailed { .. }
@@ -466,15 +392,21 @@ impl EngineEvent {
             | Self::RetiredEffectStorage(_)
             | Self::RetiredChannel(_)
             | Self::RetiredAutomationLane(_)
+            | Self::RetiredNoteClip(_)
+            | Self::RetiredAudioClip(_)
+            | Self::RetiredAudioBuffer(_)
+            | Self::RetiredWarpMarkers(_)
+            | Self::RetiredTrackOrder(_)
+            | Self::RetiredInstrumentMedia(_)
             | Self::RoutingRetired(_)
             | Self::DisposeEffect(_)
             | Self::DisposeInstrument(_)
             | Self::SidechainInputMeter { .. }
-            | Self::Metering { .. }
-            | Self::TrackMeter { .. }
+            | Self::Metering(_)
+            | Self::TrackMeter(_)
             | Self::EffectMeter { .. }
             | Self::EffectDynamics { .. }
-            | Self::TrackNoteActivity { .. }
+            | Self::TrackNoteActivity(_)
             | Self::ClipQueued { .. }
             | Self::ClipEventsDropped { .. }
             | Self::ClipStateResynced(_)
@@ -482,11 +414,11 @@ impl EngineEvent {
             | Self::ClipBatchRetired(_)
             | Self::TrackMuteQueued { .. }
             | Self::TrackMuteQueueCancelled { .. }
-            | Self::AutomationOverrideChanged { .. }
-            | Self::SectionQueued { .. }
+            | Self::AutomationOverrideChanged(_)
+            | Self::SectionQueued(_)
             | Self::SectionQueueCancelled { .. }
             | Self::CaptureTimingRetired(_)
-            | Self::SectionSourceRefreshed { .. }
+            | Self::SectionSourceRefreshed(_)
             | Self::AuditionStopped
             | Self::AuditionQueued
             | Self::AuditionStarted
@@ -498,9 +430,43 @@ impl EngineEvent {
 impl PartialEq for EngineEvent {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (Self::SourceNoteInput { .. }, Self::SourceNoteInput { .. })
-            | (Self::SourceNoteRepeated { .. }, Self::SourceNoteRepeated { .. }) => {
-                recording::source_eq(self, other)
+            (
+                Self::ClipInsertionStorageRequested(left),
+                Self::ClipInsertionStorageRequested(right),
+            ) => left == right,
+            (Self::ClipInsertionCompleted(left), Self::ClipInsertionCompleted(right)) => {
+                left == right
+            }
+            (Self::SourceNoteInput(left), Self::SourceNoteInput(right)) => left == right,
+            (Self::SourceNoteRepeated(left), Self::SourceNoteRepeated(right)) => left == right,
+            (Self::Metering(left), Self::Metering(right)) => left == right,
+            (Self::TrackMeter(left), Self::TrackMeter(right)) => left == right,
+            (Self::TrackNoteActivity(left), Self::TrackNoteActivity(right)) => left == right,
+            (Self::TrackMuteChanged(left), Self::TrackMuteChanged(right)) => left == right,
+            (Self::AutomationOverrideChanged(left), Self::AutomationOverrideChanged(right)) => {
+                left == right
+            }
+            (Self::AutomationGestureChanged(left), Self::AutomationGestureChanged(right)) => {
+                left == right
+            }
+            (Self::NoteRepeated(left), Self::NoteRepeated(right)) => left == right,
+            (Self::InstrumentNoteInput(left), Self::InstrumentNoteInput(right)) => left == right,
+            (Self::SectionRecordArmed(left), Self::SectionRecordArmed(right)) => left == right,
+            (Self::SectionRecordStarted(left), Self::SectionRecordStarted(right)) => left == right,
+            (Self::PerformanceCaptureStarted(left), Self::PerformanceCaptureStarted(right)) => {
+                left == right
+            }
+            (Self::SectionPlaybackPosition(left), Self::SectionPlaybackPosition(right)) => {
+                left == right
+            }
+            (Self::SectionRecordStopped(left), Self::SectionRecordStopped(right)) => left == right,
+            (Self::SectionQueued(left), Self::SectionQueued(right)) => left == right,
+            (Self::SectionTransitioned(left), Self::SectionTransitioned(right)) => left == right,
+            (Self::SectionSourceRefreshed(left), Self::SectionSourceRefreshed(right)) => {
+                left == right
+            }
+            (Self::RetiredInstrumentMedia(left), Self::RetiredInstrumentMedia(right)) => {
+                left == right
             }
             (Self::DisposeEffect(left), Self::DisposeEffect(right)) => left == right,
             (Self::DisposeInstrument(left), Self::DisposeInstrument(right)) => left == right,
@@ -547,230 +513,17 @@ impl PartialEq for EngineEvent {
                     && left_input == right_input
                     && left_output == right_output
             }
-            (
-                Self::Metering {
-                    peak_l: left_peak_l,
-                    peak_r: left_peak_r,
-                    rms_l: left_rms_l,
-                    rms_r: left_rms_r,
-                },
-                Self::Metering {
-                    peak_l: right_peak_l,
-                    peak_r: right_peak_r,
-                    rms_l: right_rms_l,
-                    rms_r: right_rms_r,
-                },
-            ) => {
-                left_peak_l == right_peak_l
-                    && left_peak_r == right_peak_r
-                    && left_rms_l == right_rms_l
-                    && left_rms_r == right_rms_r
+            (Self::RetiredNoteClip(left), Self::RetiredNoteClip(right)) => {
+                left.same_retired_owner(right)
             }
-            (
-                Self::TrackMeter {
-                    track_id: left_track,
-                    peak_l: left_peak_l,
-                    peak_r: left_peak_r,
-                },
-                Self::TrackMeter {
-                    track_id: right_track,
-                    peak_l: right_peak_l,
-                    peak_r: right_peak_r,
-                },
-            ) => {
-                left_track == right_track
-                    && left_peak_l == right_peak_l
-                    && left_peak_r == right_peak_r
+            (Self::RetiredAudioClip(left), Self::RetiredAudioClip(right)) => {
+                left.same_retired_owner(right)
             }
-            (
-                Self::TrackNoteActivity {
-                    track_id: left_track,
-                    triggered_notes: left_notes,
-                },
-                Self::TrackNoteActivity {
-                    track_id: right_track,
-                    triggered_notes: right_notes,
-                },
-            ) => left_track == right_track && left_notes == right_notes,
-            (
-                Self::TrackMuteChanged {
-                    track_id: left_track,
-                    muted: left_muted,
-                    effective_at_samples: left_effective,
-                },
-                Self::TrackMuteChanged {
-                    track_id: right_track,
-                    muted: right_muted,
-                    effective_at_samples: right_effective,
-                },
-            ) => {
-                left_track == right_track
-                    && left_muted == right_muted
-                    && left_effective == right_effective
+            (Self::RetiredAudioBuffer(left), Self::RetiredAudioBuffer(right)) => {
+                Arc::ptr_eq(left, right)
             }
-            (
-                Self::AutomationOverrideChanged {
-                    track_id: left_track,
-                    target: left_target,
-                    overridden: left_overridden,
-                },
-                Self::AutomationOverrideChanged {
-                    track_id: right_track,
-                    target: right_target,
-                    overridden: right_overridden,
-                },
-            ) => {
-                left_track == right_track
-                    && left_target == right_target
-                    && left_overridden == right_overridden
-            }
-            (
-                Self::AutomationGestureChanged {
-                    track_id: left_track,
-                    target: left_target,
-                    normalized_value: left_value,
-                    phase: left_phase,
-                    effective_at_samples: left_effective,
-                },
-                Self::AutomationGestureChanged {
-                    track_id: right_track,
-                    target: right_target,
-                    normalized_value: right_value,
-                    phase: right_phase,
-                    effective_at_samples: right_effective,
-                },
-            ) => {
-                left_track == right_track
-                    && left_target == right_target
-                    && left_value == right_value
-                    && left_phase == right_phase
-                    && left_effective == right_effective
-            }
-            (
-                Self::NoteRepeated {
-                    track_id: left_track,
-                    pitch: left_pitch,
-                    velocity: left_velocity,
-                    rate: left_rate,
-                    effective_at_samples: left_effective,
-                    canonical_at_samples: left_canonical,
-                    section_id: left_section,
-                    section_position_samples: left_position,
-                    canonical_section_position_samples: left_canonical_position,
-                },
-                Self::NoteRepeated {
-                    track_id: right_track,
-                    pitch: right_pitch,
-                    velocity: right_velocity,
-                    rate: right_rate,
-                    effective_at_samples: right_effective,
-                    canonical_at_samples: right_canonical,
-                    section_id: right_section,
-                    section_position_samples: right_position,
-                    canonical_section_position_samples: right_canonical_position,
-                },
-            ) => {
-                left_track == right_track
-                    && left_pitch == right_pitch
-                    && left_velocity == right_velocity
-                    && left_rate == right_rate
-                    && left_effective == right_effective
-                    && left_canonical == right_canonical
-                    && left_section == right_section
-                    && left_position == right_position
-                    && left_canonical_position == right_canonical_position
-            }
-            (
-                Self::InstrumentNoteInput {
-                    track_id: lt,
-                    pitch: lp,
-                    velocity: lv,
-                    on: lo,
-                    effective_at_samples: le,
-                    section_id: ls,
-                    section_position_samples: lsp,
-                },
-                Self::InstrumentNoteInput {
-                    track_id: rt,
-                    pitch: rp,
-                    velocity: rv,
-                    on: ro,
-                    effective_at_samples: re,
-                    section_id: rs,
-                    section_position_samples: rsp,
-                },
-            ) => lt == rt && lp == rp && lv == rv && lo == ro && le == re && ls == rs && lsp == rsp,
-            (
-                Self::SectionRecordArmed {
-                    section_id: ls,
-                    track_id: lt,
-                    effective_at_samples: le,
-                    section_position_samples: lp,
-                },
-                Self::SectionRecordArmed {
-                    section_id: rs,
-                    track_id: rt,
-                    effective_at_samples: re,
-                    section_position_samples: rp,
-                },
-            )
-            | (
-                Self::SectionRecordStarted {
-                    section_id: ls,
-                    track_id: lt,
-                    effective_at_samples: le,
-                    section_position_samples: lp,
-                },
-                Self::SectionRecordStarted {
-                    section_id: rs,
-                    track_id: rt,
-                    effective_at_samples: re,
-                    section_position_samples: rp,
-                },
-            ) => ls == rs && lt == rt && le == re && lp == rp,
-            (
-                Self::SectionRecordStopped {
-                    section_id: ls,
-                    track_id: lt,
-                    effective_at_samples: le,
-                    section_position_samples: lp,
-                    started: lstarted,
-                    retired: lr,
-                },
-                Self::SectionRecordStopped {
-                    section_id: rs,
-                    track_id: rt,
-                    effective_at_samples: re,
-                    section_position_samples: rp,
-                    started: rstarted,
-                    retired: rr,
-                },
-            ) => {
-                ls == rs
-                    && lt == rt
-                    && le == re
-                    && lp == rp
-                    && lstarted == rstarted
-                    && match (lr, rr) {
-                        (Some(left), Some(right)) => std::ptr::eq(left.as_ref(), right.as_ref()),
-                        (None, None) => true,
-                        _ => false,
-                    }
-            }
-            (
-                Self::PerformanceCaptureStarted {
-                    offsets: lo,
-                    effective_at_samples: le,
-                    section_id: ls,
-                    section_position_samples: lp,
-                },
-                Self::PerformanceCaptureStarted {
-                    offsets: ro,
-                    effective_at_samples: re,
-                    section_id: rs,
-                    section_position_samples: rp,
-                },
-            ) => le == re && ls == rs && lp == rp && lo == ro,
+            (Self::RetiredWarpMarkers(left), Self::RetiredWarpMarkers(right)) => left == right,
+            (Self::RetiredTrackOrder(left), Self::RetiredTrackOrder(right)) => left == right,
             (
                 Self::PerformanceCaptureStopped {
                     effective_at_samples: left,
@@ -780,81 +533,9 @@ impl PartialEq for EngineEvent {
                 },
             ) => left == right,
             (
-                Self::SectionQueued {
-                    section_id: left_section,
-                    effective_at_samples: left_effective,
-                    retired: left_retired,
-                },
-                Self::SectionQueued {
-                    section_id: right_section,
-                    effective_at_samples: right_effective,
-                    retired: right_retired,
-                },
-            ) => {
-                left_section == right_section
-                    && left_effective == right_effective
-                    && match (left_retired, right_retired) {
-                        (Some(left), Some(right)) => std::ptr::eq(left.as_ref(), right.as_ref()),
-                        (None, None) => true,
-                        _ => false,
-                    }
-            }
-            (
-                Self::SectionQueueCancelled {
-                    retired: left_retired,
-                },
-                Self::SectionQueueCancelled {
-                    retired: right_retired,
-                },
-            ) => std::ptr::eq(left_retired.as_ref(), right_retired.as_ref()),
-            (
-                Self::SectionTransitioned {
-                    section_id: left_section,
-                    effective_at_samples: left_effective,
-                    retired: left_retired,
-                },
-                Self::SectionTransitioned {
-                    section_id: right_section,
-                    effective_at_samples: right_effective,
-                    retired: right_retired,
-                },
-            ) => {
-                left_section == right_section
-                    && left_effective == right_effective
-                    && std::ptr::eq(left_retired.as_ref(), right_retired.as_ref())
-            }
-            (
-                Self::SectionPlaybackPosition {
-                    section_id: left_section,
-                    position_samples: left_position,
-                },
-                Self::SectionPlaybackPosition {
-                    section_id: right_section,
-                    position_samples: right_position,
-                },
-            ) => left_section == right_section && left_position == right_position,
-            (
-                Self::SectionSourceRefreshed {
-                    section_id: left_section,
-                    applied: left_applied,
-                    effective_at_samples: left_effective,
-                    section_position_samples: left_position,
-                    retired: left_retired,
-                },
-                Self::SectionSourceRefreshed {
-                    section_id: right_section,
-                    applied: right_applied,
-                    effective_at_samples: right_effective,
-                    section_position_samples: right_position,
-                    retired: right_retired,
-                },
-            ) => {
-                left_section == right_section
-                    && left_applied == right_applied
-                    && left_effective == right_effective
-                    && left_position == right_position
-                    && std::ptr::eq(left_retired.as_ref(), right_retired.as_ref())
-            }
+                Self::SectionQueueCancelled { retired: left },
+                Self::SectionQueueCancelled { retired: right },
+            ) => std::ptr::eq(left.as_ref(), right.as_ref()),
             (Self::ClipEventsDropped { total: left }, Self::ClipEventsDropped { total: right }) => {
                 left == right
             }
@@ -866,47 +547,121 @@ impl PartialEq for EngineEvent {
             | (Self::AuditionQueued, Self::AuditionQueued)
             | (Self::AuditionStarted, Self::AuditionStarted) => true,
             (Self::AuditionPosition(left), Self::AuditionPosition(right)) => left == right,
+            // Ownership and failure notifications retain their existing non-comparable policy.
             _ => false,
         }
     }
 }
 
 #[cfg(test)]
+#[path = "event_equality_tests.rs"]
+mod equality_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn retired_instrument_media_contract_preserves_identity_value_time_and_debug() {
+        use std::sync::Arc;
+        use vibez_core::audio_buffer::DecodedAudio;
+        use vibez_instruments::InstrumentMediaOwners;
+
+        let sample = Arc::new(DecodedAudio {
+            channels: vec![vec![0.12597656; 64]],
+            sample_rate: 48_000,
+        });
+        let equal_content = Arc::new((*sample).clone());
+        let cases = [
+            (None, None),
+            (None, Some("")),
+            (None, Some("same-name.wav")),
+            (Some(&sample), None),
+            (Some(&sample), Some("")),
+            (Some(&sample), Some("same-name.wav")),
+            (Some(&sample), Some("different-name.wav")),
+            (Some(&equal_content), Some("same-name.wav")),
+        ];
+        let event = |audio: Option<&Arc<DecodedAudio>>, name: Option<&str>| {
+            EngineEvent::RetiredInstrumentMedia(InstrumentMediaOwners {
+                sample: audio.map(Arc::clone),
+                name: name.map(str::to_owned),
+            })
+        };
+        for (left_index, &(left_audio, left_name)) in cases.iter().enumerate() {
+            let left = event(left_audio, left_name);
+            assert_eq!(left.time_domain(), TimeDomain::Untimed);
+            assert_ne!(left, EngineEvent::PlaybackStopped);
+            for (right_index, &(right_audio, right_name)) in cases.iter().enumerate() {
+                let right = event(right_audio, right_name);
+                assert_eq!(
+                    left == right,
+                    left_index == right_index,
+                    "left={left_index}, right={right_index}"
+                );
+                if left_index == right_index {
+                    if let (
+                        EngineEvent::RetiredInstrumentMedia(left),
+                        EngineEvent::RetiredInstrumentMedia(right),
+                    ) = (&left, &right)
+                    {
+                        if let (Some(left_name), Some(right_name)) = (&left.name, &right.name) {
+                            if !left_name.is_empty() {
+                                assert_ne!(
+                                    left_name.as_ptr(),
+                                    right_name.as_ptr(),
+                                    "equal names use independent storage"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        let debug = format!("{:?}", event(Some(&sample), Some("debug-name.wav")));
+        assert!(debug.contains("RetiredInstrumentMedia"));
+        assert!(debug.contains("InstrumentMediaOwners"));
+        assert!(debug.contains(&format!("{:p}", Arc::as_ptr(&sample))));
+        assert!(debug.contains("debug-name.wav"));
+        assert!(!debug.contains("channels"));
+        assert!(!debug.contains("sample_rate"));
+        assert!(!debug.contains(&format!("{:?}", sample.channels[0][0])));
+    }
 
     #[test]
     fn event_variants_are_constructible() {
         let _pos = EngineEvent::PlaybackPosition(44_100);
         let _performance_pos = EngineEvent::PerformancePosition(22_050);
-        let _meter = EngineEvent::Metering {
+        let _meter = EngineEvent::Metering(MeteringEvent {
             peak_l: 0.8,
             peak_r: 0.75,
             rms_l: 0.5,
             rms_r: 0.45,
-        };
-        let _track_meter = EngineEvent::TrackMeter {
+        });
+        let _track_meter = EngineEvent::TrackMeter(TrackMeterEvent {
             track_id: TrackId::new(),
             peak_l: 0.5,
             peak_r: 0.4,
-        };
-        let _track_mute = EngineEvent::TrackMuteChanged {
+        });
+        let _track_mute = EngineEvent::TrackMuteChanged(TrackMuteChangedEvent {
             track_id: TrackId::new(),
             muted: true,
             effective_at_samples: 44_100,
-        };
-        let _automation_override = EngineEvent::AutomationOverrideChanged {
-            track_id: TrackId::new(),
-            target: vibez_core::automation::AutomationTarget::TrackMute,
-            overridden: true,
-        };
-        let _automation_gesture = EngineEvent::AutomationGestureChanged {
-            track_id: TrackId::new(),
-            target: vibez_core::automation::AutomationTarget::TrackPan,
-            normalized_value: 0.75,
-            phase: AutomationGesturePhase::Begin,
-            effective_at_samples: 44_100,
-        };
+        });
+        let _automation_override =
+            EngineEvent::AutomationOverrideChanged(AutomationOverrideChangedEvent {
+                track_id: TrackId::new(),
+                target: vibez_core::automation::AutomationTarget::TrackMute,
+                overridden: true,
+            });
+        let _automation_gesture =
+            EngineEvent::AutomationGestureChanged(AutomationGestureChangedEvent {
+                track_id: TrackId::new(),
+                target: vibez_core::automation::AutomationTarget::TrackPan,
+                normalized_value: 0.75,
+                phase: AutomationGesturePhase::Begin,
+                effective_at_samples: 44_100,
+            });
         let _started = EngineEvent::PlaybackStarted;
         let _stopped = EngineEvent::PlaybackStopped;
         let _audition_stopped = EngineEvent::AuditionStopped;
@@ -925,12 +680,12 @@ mod tests {
             .push(EngineEvent::PerformancePosition(256))
             .unwrap();
         producer
-            .push(EngineEvent::Metering {
+            .push(EngineEvent::Metering(MeteringEvent {
                 peak_l: 0.9,
                 peak_r: 0.85,
                 rms_l: 0.6,
                 rms_r: 0.55,
-            })
+            }))
             .unwrap();
         producer.push(EngineEvent::PlaybackStopped).unwrap();
 
@@ -948,12 +703,12 @@ mod tests {
         ));
 
         match consumer.pop().unwrap() {
-            EngineEvent::Metering {
+            EngineEvent::Metering(MeteringEvent {
                 peak_l,
                 peak_r,
                 rms_l,
                 rms_r,
-            } => {
+            }) => {
                 assert!((peak_l - 0.9).abs() < f32::EPSILON);
                 assert!((peak_r - 0.85).abs() < f32::EPSILON);
                 assert!((rms_l - 0.6).abs() < f32::EPSILON);
@@ -974,19 +729,19 @@ mod tests {
         let tid = TrackId::new();
 
         producer
-            .push(EngineEvent::TrackMeter {
+            .push(EngineEvent::TrackMeter(TrackMeterEvent {
                 track_id: tid,
                 peak_l: 0.7,
                 peak_r: 0.6,
-            })
+            }))
             .unwrap();
 
         match consumer.pop().unwrap() {
-            EngineEvent::TrackMeter {
+            EngineEvent::TrackMeter(TrackMeterEvent {
                 track_id,
                 peak_l,
                 peak_r,
-            } => {
+            }) => {
                 assert_eq!(track_id, tid);
                 assert!((peak_l - 0.7).abs() < f32::EPSILON);
                 assert!((peak_r - 0.6).abs() < f32::EPSILON);
@@ -997,12 +752,12 @@ mod tests {
 
     #[test]
     fn event_debug() {
-        let event = EngineEvent::Metering {
+        let event = EngineEvent::Metering(MeteringEvent {
             peak_l: 1.0,
             peak_r: 0.0,
             rms_l: 0.5,
             rms_r: 0.5,
-        };
+        });
         let debug = format!("{event:?}");
         assert!(debug.contains("Metering"));
     }
