@@ -1,11 +1,46 @@
-//! Native instruments on the device chain: their card's tabs, and their
-//! controls, typed values and presets, which act as an effect's do.
+//! Native instruments on the device chain: their card's frame and tabs, and
+//! their controls, typed values and presets, which act as an effect's do.
+
+use iced::widget::{column, text, Column};
+use iced::{Color, Element, Length};
+use vibez_core::id::TrackId;
 
 use crate::domains::instrument_card::InstrumentCardMsg;
+use crate::message::Message;
+use crate::state::UiTrack;
+use crate::theme as th;
 
 use super::*;
 
 impl App {
+    /// A native instrument's card `width` wide around `body`: its title,
+    /// with the button that takes the instrument off, and the latency line
+    /// beneath.
+    pub(super) fn native_instrument_frame<'a>(
+        &'a self,
+        name: &'a str,
+        track_id: TrackId,
+        track: &'a UiTrack,
+        accent: Color,
+        width: f32,
+        body: Element<'a, Message>,
+    ) -> Column<'a, Message> {
+        let title = Self::device_title_bar(Self::device_title_row(
+            name,
+            accent,
+            Some(Message::remove_track_instrument(track_id)),
+        ));
+        let latency = crate::domains::device_latency::latency_label(
+            track.instrument_latency_samples,
+            self.state.transport.sample_rate,
+        );
+        column![
+            Self::device_card(column![title, body].width(Length::Fixed(width))),
+            text(latency).size(9).color(th::text_dim())
+        ]
+        .height(Length::Fill)
+    }
+
     pub(super) fn update_instrument_card(&mut self, message: InstrumentCardMsg) -> Task<Message> {
         let track_id = message.track_id();
         let named = self

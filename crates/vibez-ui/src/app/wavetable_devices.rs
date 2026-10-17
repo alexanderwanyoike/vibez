@@ -1,13 +1,12 @@
 //! Native Wavetable Synth cards on the visible device chain.
 
-use iced::widget::{column, text, Space};
-use iced::{Color, Element, Length};
+use iced::widget::Space;
+use iced::{Color, Element};
 use vibez_core::id::TrackId;
 
 use crate::domains::device_params::DeviceParams;
 use crate::message::Message;
 use crate::state::UiTrack;
-use crate::theme as th;
 
 use super::*;
 
@@ -47,20 +46,14 @@ impl App {
                 size,
             )
         });
-        let title = Self::device_title_bar(Self::device_title_row(
+        self.native_instrument_frame(
             "Wavetable Synth",
+            track_id,
+            track,
             accent,
-            Some(Message::remove_track_instrument(track_id)),
-        ));
-        let latency = crate::domains::device_latency::latency_label(
-            track.instrument_latency_samples,
-            self.state.transport.sample_rate,
-        );
-        column![
-            Self::device_card(column![title, body].width(Length::Fixed(width))),
-            text(latency).size(9).color(th::text_dim())
-        ]
-        .height(Length::Fill)
+            width,
+            body.into(),
+        )
         .into()
     }
 }

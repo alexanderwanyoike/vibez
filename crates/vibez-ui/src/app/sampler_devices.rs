@@ -1,14 +1,13 @@
 //! Native Sampler cards on the visible device chain.
 
-use iced::widget::{column, mouse_area, text, Space};
-use iced::{Color, Element, Length};
+use iced::widget::{mouse_area, Space};
+use iced::{Color, Element};
 use vibez_core::id::TrackId;
 
 use crate::domains::browser::BrowserMsg;
 use crate::domains::device_params::DeviceParams;
 use crate::message::Message;
 use crate::state::UiTrack;
-use crate::theme as th;
 
 use super::*;
 
@@ -51,20 +50,8 @@ impl App {
                 size,
             )
         });
-        let title = Self::device_title_bar(Self::device_title_row(
-            "Sampler",
-            accent,
-            Some(Message::remove_track_instrument(track_id)),
-        ));
-        let latency = crate::domains::device_latency::latency_label(
-            track.instrument_latency_samples,
-            self.state.transport.sample_rate,
-        );
-        let card = column![
-            Self::device_card(column![title, body].width(Length::Fixed(width))),
-            text(latency).size(9).color(th::text_dim())
-        ]
-        .height(Length::Fill);
+        let card =
+            self.native_instrument_frame("Sampler", track_id, track, accent, width, body.into());
         // A sample dragged in from the browser loads onto the card.
         mouse_area(card)
             .on_enter(Message::Browser(BrowserMsg::DragHoverSampler { track_id }))
