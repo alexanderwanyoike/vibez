@@ -105,7 +105,7 @@ pub static WAVETABLE_PARAMS: &[ParamDescriptor] = &[
     descriptor("Osc A Unison", 1.0, MAX_UNISON as f32, 1.0, ""),
     descriptor("Osc A Level", 0.0, 1.0, 0.8, ""),
     descriptor("Osc A Octave", -3.0, 3.0, 0.0, "oct"),
-    descriptor("Osc B Table", 0.0, TABLES, 1.0, ""),
+    descriptor("Osc B Table", 0.0, TABLES, HARMONIC, ""),
     descriptor("Osc B Position", 0.0, 1.0, 0.3, ""),
     descriptor("Osc B Warp", 0.0, 1.0, 0.0, ""),
     descriptor("Osc B Detune", 0.0, 50.0, 0.0, "ct"),
