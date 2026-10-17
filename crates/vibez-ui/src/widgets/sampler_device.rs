@@ -162,19 +162,23 @@ pub fn arrange(size: Size) -> Layout {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Side {
     Mode,
+    /// The mode's choice without its name, where the name has no room.
+    ModeAlone,
     Reverse,
     Crossfade,
 }
 
 /// The controls beside the sample that fit `room`, each joining while the
-/// band has room for it.
+/// band has room for it; the mode comes first, losing its name before it
+/// loses its place.
 fn side_rows(mut room: f32) -> Vec<Side> {
+    let mode = if room >= SIDE_MODE_H {
+        (Side::Mode, SIDE_MODE_H)
+    } else {
+        (Side::ModeAlone, LINE_H)
+    };
     let mut rows = Vec::new();
-    for (row, height) in [
-        (Side::Mode, SIDE_MODE_H),
-        (Side::Reverse, LINE_H),
-        (Side::Crossfade, LINE_H),
-    ] {
+    for (row, height) in [mode, (Side::Reverse, LINE_H), (Side::Crossfade, LINE_H)] {
         if height > room {
             break;
         }
@@ -360,6 +364,7 @@ impl<'a> SamplerView<'a> {
         for row in side_rows(layout.sample - PAD) {
             side = side.push(match row {
                 Side::Mode => column![heading("Mode"), self.mode()].spacing(4).into(),
+                Side::ModeAlone => self.mode(),
                 Side::Reverse => self.param(param::REVERSE).switch("Reverse"),
                 Side::Crossfade => self.param(param::CROSSFADE).line_item(),
             });
