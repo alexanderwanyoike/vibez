@@ -22,6 +22,7 @@ enum Flexible {
     Gain,
     Eq,
     Compressor,
+    Limiter,
     Filter,
     Gate,
     Drive,
@@ -114,6 +115,8 @@ impl App {
                 Some(Flexible::Eq)
             } else if crate::domains::compressor::is_native_compressor(effect) {
                 Some(Flexible::Compressor)
+            } else if crate::domains::limiter::is_native_limiter(effect) {
+                Some(Flexible::Limiter)
             } else if crate::domains::filter::is_native_filter(effect) {
                 Some(Flexible::Filter)
             } else if crate::domains::gate::is_native_gate(effect) {
@@ -200,6 +203,12 @@ impl App {
                         effect,
                         track_color,
                         crate::widgets::compressor_device::card_width(share),
+                    ),
+                    Flexible::Limiter => self.limiter_device_body(
+                        track_id,
+                        effect,
+                        track_color,
+                        crate::widgets::limiter_device::card_width(share),
                     ),
                     Flexible::Filter => self.filter_device_body(
                         track_id,
@@ -504,6 +513,40 @@ impl App {
                     effect,
                     accent,
                     crate::widgets::delay_device::preset_bar_width(size),
+                ),
+                size,
+            )
+        });
+        DeviceBody {
+            content: content.into(),
+            width,
+            padding: iced::Padding::ZERO,
+        }
+    }
+
+    fn limiter_device_body<'a>(
+        &'a self,
+        track_id: TrackId,
+        effect: &'a crate::state::UiEffect,
+        accent: Color,
+        width: f32,
+    ) -> DeviceBody<'a> {
+        let now = std::time::Instant::now();
+        let content = iced::widget::responsive(move |size| {
+            crate::widgets::limiter_device::LimiterView {
+                track_id,
+                effect,
+                accent,
+                panel: self.card_panels.panel(effect.id),
+                entry: self.param_entry.as_ref(),
+                now,
+            }
+            .view(
+                self.view_device_preset_bar(
+                    track_id,
+                    effect,
+                    accent,
+                    crate::widgets::limiter_device::preset_bar_width(size),
                 ),
                 size,
             )

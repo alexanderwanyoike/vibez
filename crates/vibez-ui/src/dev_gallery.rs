@@ -1839,6 +1839,208 @@ pub fn run_saturator() -> iced::Result {
     .run_with(|| (SaturatorGallery::new(), iced::Task::none()))
 }
 
+/// Native Limiter at each width tier and section height it adapts to, on
+/// Transparent Ceiling, with twelve seconds of drum hits pushed into the
+/// ceiling standing in for live audio.
+struct LimiterGallery {
+    track: TrackId,
+    effect: UiEffect,
+    closed: crate::domains::device_card::CardPanelState,
+    open: crate::domains::device_card::CardPanelState,
+    spectrum: crate::domains::device_card::CardPanelState,
+}
+
+impl LimiterGallery {
+    fn new() -> Self {
+        use crate::domains::device_card::CardPanelState;
+        let mut effect = effect(EffectType::Limiter, None, false, false, None, 0);
+        effect.params = effect.descriptors.iter().map(|d| d.default).collect();
+        let level = |db: f32| vibez_engine::metering::MeterValues {
+            peak_l: vibez_core::level::db_to_amplitude(db),
+            peak_r: vibez_core::level::db_to_amplitude(db - 0.5),
+            rms_l: vibez_core::level::db_to_amplitude(db - 6.0),
+            rms_r: vibez_core::level::db_to_amplitude(db - 6.5),
+        };
+        effect.params[vibez_dsp::limiter::param::INPUT_DB] = 3.0;
+        let now = std::time::Instant::now();
+        let mut dynamics = crate::domains::device_levels::ReadingHistory::default();
+        for step in (0..600).rev() {
+            let at = now - std::time::Duration::from_millis(step * 20);
+            let beat = (step % 25) as f32;
+            let hit = (-beat / 3.0).exp();
+            let wobble = ((step * 37 % 11) as f32 - 5.0) * 0.8;
+            dynamics.push(
+                at,
+                crate::domains::device_card::DynamicsReading {
+                    input_db: -14.0 + 14.0 * hit + wobble,
+                    reduction_db: (3.5 * hit - 0.4).max(0.0),
+                },
+                crate::domains::device_card::DYNAMICS_HISTORY,
+            );
+        }
+        let closed = CardPanelState {
+            input: level(-2.0),
+            output: level(-1.2),
+            reduction_db: 2.6,
+            dynamics,
+            last_meter_at: Some(now),
+            ..Default::default()
+        };
+        Self {
+            track: TrackId::new(),
+            effect,
+            open: CardPanelState {
+                advanced: true,
+                ..closed.clone()
+            },
+            spectrum: closed.clone(),
+            closed,
+        }
+    }
+
+    fn scene<'a>(
+        &'a self,
+        label: &'static str,
+        card_width: f32,
+        section: (f32, f32),
+        panel: &'a crate::domains::device_card::CardPanelState,
+    ) -> Element<'a, Message> {
+        let accent = th::track_color(0);
+        let effect = &self.effect;
+        let track = self.track;
+        let body = iced::widget::responsive(move |size| {
+            crate::widgets::limiter_device::LimiterView {
+                track_id: track,
+                effect,
+                accent,
+                panel,
+                entry: None,
+                now: panel.last_meter_at.unwrap_or_else(std::time::Instant::now),
+            }
+            .view(
+                crate::widgets::device_preset_bar::view(
+                    track,
+                    effect,
+                    None,
+                    accent,
+                    crate::widgets::limiter_device::preset_bar_width(size),
+                ),
+                size,
+            )
+        });
+        framed_card(
+            label,
+            card_width,
+            section,
+            track,
+            effect,
+            accent,
+            body.into(),
+        )
+    }
+
+    fn view(&self) -> Element<'_, Message> {
+        use crate::widgets::limiter_device::{COMPACT_W, FULL_W, MEDIUM_W};
+        // Sections the default 280 px and minimum 180 px detail panels
+        // give a card, measured against the app.
+        let (default, minimum) = (240.0, 140.0);
+        let (closed, open, spectrum) = (&self.closed, &self.open, &self.spectrum);
+        let wide = 1_150.0;
+        container(
+            column![
+                row![
+                    self.scene("Expanded, Advanced open", wide, (wide + 16.0, 400.0), open),
+                    self.scene(
+                        "Compact, tall",
+                        COMPACT_W + 40.0,
+                        (COMPACT_W + 56.0, 400.0),
+                        closed
+                    ),
+                ]
+                .spacing(24),
+                row![
+                    self.scene(
+                        "Medium, tall",
+                        MEDIUM_W + 60.0,
+                        (MEDIUM_W + 76.0, 330.0),
+                        closed
+                    ),
+                    self.scene(
+                        "Full, default panel",
+                        FULL_W,
+                        (FULL_W + 16.0, default),
+                        closed
+                    ),
+                ]
+                .spacing(24),
+                row![
+                    self.scene(
+                        "Medium, default panel, Advanced",
+                        MEDIUM_W,
+                        (MEDIUM_W + 16.0, default),
+                        open
+                    ),
+                    self.scene("Compact, default panel", 460.0, (476.0, default), spectrum),
+                    self.scene(
+                        "Compact, default panel, Advanced",
+                        COMPACT_W,
+                        (COMPACT_W + 16.0, default),
+                        open
+                    ),
+                ]
+                .spacing(24),
+                row![
+                    self.scene(
+                        "Compact, minimum panel",
+                        COMPACT_W,
+                        (COMPACT_W + 16.0, minimum),
+                        closed
+                    ),
+                    self.scene(
+                        "Compact, minimum panel, Advanced",
+                        COMPACT_W,
+                        (COMPACT_W + 16.0, minimum),
+                        open
+                    ),
+                    self.scene(
+                        "Medium, minimum panel, Advanced",
+                        MEDIUM_W,
+                        (MEDIUM_W + 16.0, minimum),
+                        open
+                    ),
+                ]
+                .spacing(24),
+            ]
+            .spacing(16),
+        )
+        .padding(16)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .style(|_theme: &Theme| container::Style {
+            background: Some(th::bg_surface().into()),
+            ..Default::default()
+        })
+        .into()
+    }
+}
+
+pub fn run_limiter() -> iced::Result {
+    iced::application(
+        "Limiter device gallery",
+        |_: &mut LimiterGallery, _: Message| {},
+        LimiterGallery::view,
+    )
+    .theme(|_| th::vibez_theme())
+    .antialiasing(true)
+    .window_size((1900.0, 1500.0))
+    .font(crate::icons::ICON_FONT_BYTES)
+    .font(crate::typography::PLEX_SANS_CONDENSED_MEDIUM_BYTES)
+    .font(crate::typography::PLEX_SANS_CONDENSED_SEMIBOLD_BYTES)
+    .font(crate::typography::PLEX_MONO_MEDIUM_BYTES)
+    .font(crate::typography::PLEX_MONO_SEMIBOLD_BYTES)
+    .run_with(|| (LimiterGallery::new(), iced::Task::none()))
+}
+
 /// Native Reverb at each width tier and section height it adapts to, on the
 /// Warm Hall preset as in the concept, with an output level standing in for
 /// live audio.

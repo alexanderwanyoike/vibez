@@ -32,6 +32,7 @@ pub mod filter;
 pub mod gain;
 pub mod gate;
 pub mod instrument_card;
+pub mod limiter;
 pub mod param_entry;
 pub mod perform;
 pub mod phaser;

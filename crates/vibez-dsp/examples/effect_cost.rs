@@ -103,6 +103,24 @@ fn cases(effect: EffectType) -> Vec<(&'static str, Vec<(usize, f32)>)> {
                 ),
             ]
         }
+        EffectType::Limiter => {
+            use vibez_dsp::limiter::{param, style};
+            vec![
+                ("defaults (Transparent, true peak, 4x)", vec![]),
+                (
+                    "Loud, +12 dB in, 5 ms, auto release",
+                    vec![
+                        (param::STYLE, style::LOUD as f32),
+                        (param::INPUT_DB, 12.0),
+                        (param::LOOKAHEAD_MS, 5.0),
+                    ],
+                ),
+                (
+                    "1x, no true peak",
+                    vec![(param::QUALITY, 0.0), (param::TRUE_PEAK, 0.0)],
+                ),
+            ]
+        }
         EffectType::Reverb => vec![
             ("defaults", vec![]),
             (

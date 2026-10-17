@@ -30,6 +30,11 @@ pub enum ParamFormat {
         host_rate: Option<u32>,
     },
     Milliseconds,
+    /// Milliseconds, where values below `auto_below` read and type as
+    /// "Auto".
+    AutoMilliseconds {
+        auto_below: f32,
+    },
     /// Stored in seconds, shown in milliseconds below one second.
     Seconds,
     /// Stored 0..1, shown 0..100 %.
@@ -80,6 +85,8 @@ impl ParamFormat {
                 format!("{} {}", self.edit_text(value), self.unit(value))
             }
             Self::Milliseconds => format!("{} ms", self.edit_text(value)),
+            Self::AutoMilliseconds { auto_below } if value < auto_below => "Auto".into(),
+            Self::AutoMilliseconds { .. } => Self::Milliseconds.format(value),
             Self::Percent => format!("{} %", self.edit_text(value)),
             Self::Ratio => format!("{} :1", self.edit_text(value)),
             Self::Note | Self::Pan | Self::Names(_) => self.edit_text(value),
@@ -107,6 +114,8 @@ impl ParamFormat {
             } => Self::Hertz.edit_text(rate as f32 / value.round().max(1.0)),
             Self::RateDivider { host_rate: None } => format!("{:.0}", value.round()),
             Self::Milliseconds => format!("{value:.1}"),
+            Self::AutoMilliseconds { auto_below } if value < auto_below => "Auto".into(),
+            Self::AutoMilliseconds { .. } => Self::Milliseconds.edit_text(value),
             Self::Seconds if value < 1.0 => format!("{:.0}", value * 1000.0),
             Self::Seconds => format!("{value:.2}"),
             Self::Percent => format!("{:.0}", value * 100.0),
@@ -154,6 +163,9 @@ impl ParamFormat {
                 .position(|name| name.to_ascii_lowercase() == text)
                 .map(|index| index as f32)
                 .filter(|value| (min..=max).contains(value));
+        }
+        if matches!(self, Self::AutoMilliseconds { .. }) && text == "auto" {
+            return Some(min);
         }
         if matches!(self, Self::Amplitude { .. }) && matches!(text.as_str(), "-inf" | "-∞") {
             return Some(0.0);
@@ -314,6 +326,16 @@ pub fn param_format(
                 _ => ParamFormat::for_descriptor(descriptor),
             }
         }
+        (DevicePresetKind::Effect(EffectType::Limiter), index) => {
+            use vibez_dsp::limiter::{param, AUTO_RELEASE_BELOW_MS};
+            match index {
+                param::RELEASE_MS => ParamFormat::AutoMilliseconds {
+                    auto_below: AUTO_RELEASE_BELOW_MS,
+                },
+                param::STYLE => ParamFormat::Names(&crate::domains::limiter::STYLE_NAMES),
+                _ => ParamFormat::for_descriptor(descriptor),
+            }
+        }
         (DevicePresetKind::Effect(EffectType::Echo), vibez_dsp::echo::param::GRID) => {
             ParamFormat::Names(&crate::domains::echo::GRID_NAMES)
         }
@@ -471,6 +493,17 @@ mod tests {
             default: min,
             unit,
         }
+    }
+
+    #[test]
+    fn an_auto_release_reads_and_types_as_auto() {
+        let format = ParamFormat::AutoMilliseconds { auto_below: 1.0 };
+        assert_eq!(format.format(0.0), "Auto");
+        assert_eq!(format.edit_text(0.5), "Auto");
+        assert_eq!(format.format(120.0), "120.0 ms");
+        assert_eq!(format.parse("auto", 0.0, 500.0), Some(0.0));
+        assert_eq!(format.parse("80 ms", 0.0, 500.0), Some(80.0));
+        assert_eq!(format.parse("900", 0.0, 500.0), None);
     }
 
     #[test]

@@ -18,6 +18,7 @@ use crate::domains::eq::is_native_eq;
 use crate::domains::filter::is_native_filter;
 use crate::domains::gain::is_native_gain;
 use crate::domains::gate::is_native_gate;
+use crate::domains::limiter::is_native_limiter;
 use crate::domains::reverb::is_native_reverb;
 use crate::domains::saturator::is_native_saturator;
 use crate::state::{DetailPanelTab, UiEffect};
@@ -45,6 +46,7 @@ fn is_metered(effect: &UiEffect) -> bool {
     is_native_gain(effect)
         || is_native_eq(effect)
         || is_native_compressor(effect)
+        || is_native_limiter(effect)
         || is_native_filter(effect)
         || is_native_gate(effect)
         || is_native_drive(effect)
@@ -165,6 +167,7 @@ impl App {
         } else if is_native_gate(effect) {
             Some(Metered::Gate)
         } else if is_native_drive(effect)
+            || is_native_limiter(effect)
             || is_native_saturator(effect)
             || is_native_bitcrush(effect)
             || is_native_delay(effect)
@@ -236,6 +239,10 @@ impl App {
                 .accept_dynamics(meter, now),
             Some(Metered::Gate) => self
                 .gate_panels
+                .entry(effect_id)
+                .accept_dynamics(meter, now),
+            Some(Metered::Card) => self
+                .card_panels
                 .entry(effect_id)
                 .accept_dynamics(meter, now),
             _ => {}

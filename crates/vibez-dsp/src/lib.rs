@@ -12,6 +12,7 @@ pub mod factory;
 pub mod filter;
 pub mod gain;
 pub mod gate;
+pub mod limiter;
 mod oversampled;
 pub mod oversampling;
 pub mod phaser;

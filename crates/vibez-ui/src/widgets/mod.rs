@@ -35,6 +35,8 @@ pub mod gate_device;
 pub mod gate_display;
 pub mod knob;
 pub mod level_meter;
+pub mod limiter_device;
+pub mod limiter_display;
 pub mod local_drag;
 pub mod mini_waveform;
 pub mod mixer_strip;
