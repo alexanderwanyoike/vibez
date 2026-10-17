@@ -24,10 +24,10 @@ const KEY_HEIGHT: f32 = 16.0;
 /// Height of the ruler strip at the top.
 const RULER_HEIGHT: f32 = 30.0;
 
-/// Lowest MIDI note displayed (C2 = 36).
-const LOW_NOTE: u8 = 36;
-/// Highest MIDI note displayed (C7 = 96).
-const HIGH_NOTE: u8 = 96;
+/// The full MIDI range, as the pads play it: C-1 = 0 up to G9 = 127, the
+/// upper bound exclusive.
+const LOW_NOTE: u8 = 0;
+const HIGH_NOTE: u8 = 128;
 /// Total number of note rows.
 const NUM_ROWS: u8 = HIGH_NOTE - LOW_NOTE;
 
