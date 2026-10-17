@@ -31,9 +31,6 @@ const CHOICE_W: f32 = 110.0;
 pub const LINE_GAP: f32 = 8.0;
 const GROUP_GAP: f32 = 10.0;
 const PLOT_MIN_W: f32 = 110.0;
-const PLOT_MAX_W: f32 = 300.0;
-/// A card's centrepiece may grow further.
-const CENTREPIECE_MAX_W: f32 = 460.0;
 /// Below these a plot no longer reads well enough to keep knobs beside it.
 const CENTREPIECE_GOOD_W: f32 = 220.0;
 const PLOT_GOOD_W: f32 = 150.0;
@@ -430,15 +427,17 @@ pub trait BandCard<'a> {
             .width(width)
             .into();
         };
-        let (comfortable, largest) = if plot.centrepiece() {
-            (CENTREPIECE_GOOD_W, CENTREPIECE_MAX_W)
+        let comfortable = if plot.centrepiece() {
+            CENTREPIECE_GOOD_W
         } else {
-            (PLOT_GOOD_W, PLOT_MAX_W)
+            PLOT_GOOD_W
         };
+        // The plot takes whatever its knobs leave, so none of the group's
+        // width goes spare.
         let beside = |area: Option<f32>| {
             area.map(|area| {
                 let gap = if knobs.is_empty() { 0.0 } else { GROUP_GAP };
-                ((width - area - gap).min(largest), area)
+                (width - area - gap, area)
             })
         };
         let with_grid = beside(least_width(&widths, content, true));
