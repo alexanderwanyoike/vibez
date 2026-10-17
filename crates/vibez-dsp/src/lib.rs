@@ -16,4 +16,5 @@ mod oversampled;
 pub mod oversampling;
 pub mod phaser;
 pub mod reverb;
+pub mod saturator;
 pub mod time_stretch;

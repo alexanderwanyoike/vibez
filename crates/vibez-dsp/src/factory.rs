@@ -13,6 +13,7 @@ use crate::gain::GainEffect;
 use crate::gate::GateEffect;
 use crate::phaser::PhaserEffect;
 use crate::reverb::ReverbEffect;
+use crate::saturator::SaturatorEffect;
 
 /// Create an effect instance from its type.
 pub fn create_effect(effect_type: EffectType, sample_rate: f32) -> Box<dyn AudioEffect> {
@@ -29,6 +30,7 @@ pub fn create_effect(effect_type: EffectType, sample_rate: f32) -> Box<dyn Audio
         EffectType::Phaser => Box::new(PhaserEffect::new(sample_rate)),
         EffectType::Eq => Box::new(EqEffect::new(sample_rate)),
         EffectType::Echo => Box::new(EchoEffect::new(sample_rate)),
+        EffectType::Saturator => Box::new(SaturatorEffect::new(sample_rate)),
     }
 }
 

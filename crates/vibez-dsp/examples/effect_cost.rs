@@ -81,6 +81,28 @@ fn cases(effect: EffectType) -> Vec<(&'static str, Vec<(usize, f32)>)> {
                 ),
             ]
         }
+        EffectType::Saturator => {
+            use vibez_dsp::saturator::{param, shape};
+            vec![
+                ("defaults (Soft, 4x)", vec![]),
+                (
+                    "Custom, auto gain, bias, both filters",
+                    vec![
+                        (param::SHAPE, shape::CUSTOM as f32),
+                        (param::DRIVE_DB, 24.0),
+                        (param::BIAS, 0.4),
+                        (param::ASYMMETRY, 0.5),
+                        (param::AUTO_GAIN, 1.0),
+                        (param::PRE_FILTER, 3.0),
+                        (param::POST_FILTER, 3.0),
+                    ],
+                ),
+                (
+                    "Fold at 1x",
+                    vec![(param::SHAPE, shape::FOLD as f32), (param::QUALITY, 0.0)],
+                ),
+            ]
+        }
         EffectType::Reverb => vec![
             ("defaults", vec![]),
             (
