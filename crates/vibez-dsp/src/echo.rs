@@ -130,7 +130,7 @@ const MAX_SECONDS: f32 = 6.0;
 const GLIDE_SECONDS: f64 = 0.12;
 /// Wow and flutter at full depth, in ms of head travel, and their rates.
 const WOW_MS: f64 = 4.0;
-const WOW_HZ: f64 = 0.28;
+pub const WOW_HZ: f64 = 0.28;
 const DRIFT_HZ: f64 = 0.17;
 const FLUTTER_MS: f64 = 0.35;
 const FLUTTER_HZ: f64 = 6.3;
@@ -170,7 +170,7 @@ pub fn echo_time_ms(params: &[f32], bpm: f64) -> f64 {
 }
 
 /// What the style and Character leave of an advanced control.
-fn effective(params: &[f32], index: usize) -> f32 {
+pub fn effective(params: &[f32], index: usize) -> f32 {
     let weights = style_weights(value(params, param::STYLE).round() as usize);
     let weight = match index {
         param::WEAR => weights[0],
@@ -199,17 +199,14 @@ pub fn echo_taps_db(params: &[f32], count: usize) -> Vec<f32> {
         .collect()
 }
 
-/// How far wow and flutter move the play head `seconds` in, as a share of
-/// their full depth, for the card's plot.
-pub fn head_motion(params: &[f32], seconds: f64) -> f32 {
+/// How far wow and flutter have moved the play head `seconds` in, in ms.
+pub fn head_travel_ms(params: &[f32], seconds: f64) -> f64 {
     let wow = f64::from(effective(params, param::WOW));
     let flutter = f64::from(effective(params, param::FLUTTER));
-    let travel = wow
-        * WOW_MS
+    wow * WOW_MS
         * (0.75 * (std::f64::consts::TAU * WOW_HZ * seconds).sin()
             + 0.25 * (std::f64::consts::TAU * DRIFT_HZ * seconds).sin())
-        + flutter * FLUTTER_MS * (std::f64::consts::TAU * FLUTTER_HZ * seconds).sin();
-    (travel / (WOW_MS + FLUTTER_MS)) as f32
+        + flutter * FLUTTER_MS * (std::f64::consts::TAU * FLUTTER_HZ * seconds).sin()
 }
 
 /// One channel of the tape: a ring the record head writes and the play head

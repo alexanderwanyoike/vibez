@@ -302,6 +302,9 @@ pub fn param_format(
                 _ => ParamFormat::for_descriptor(descriptor),
             }
         }
+        (DevicePresetKind::Effect(EffectType::Echo), vibez_dsp::echo::param::GRID) => {
+            ParamFormat::Names(&crate::domains::echo::GRID_NAMES)
+        }
         (DevicePresetKind::Effect(EffectType::Gain), vibez_dsp::gain::param::GAIN) => {
             ParamFormat::Amplitude {
                 floor_db: crate::domains::gain::MIN_GAIN_DB,
