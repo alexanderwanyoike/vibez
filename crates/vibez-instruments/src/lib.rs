@@ -2,6 +2,7 @@
 
 pub mod drum_rack;
 mod envelope;
+mod poly;
 pub mod sampler;
 pub mod sampler_params;
 mod sampler_voice;

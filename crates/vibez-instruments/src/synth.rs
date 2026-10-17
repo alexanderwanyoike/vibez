@@ -244,19 +244,7 @@ impl SubtractiveSynth {
             return;
         }
         let count = self.choice(param::VOICES).clamp(1, MAX_VOICES);
-        let voices = &self.voices[..count];
-        let oldest = |candidates: &mut dyn Iterator<Item = usize>| {
-            candidates.min_by_key(|&index| voices[index].age)
-        };
-        let all = 0..count;
-        // A repeated note takes over its own voice rather than stacking.
-        let index = all
-            .clone()
-            .find(|&index| voices[index].active() && voices[index].pitch == pitch)
-            .or_else(|| all.clone().find(|&index| !voices[index].active()))
-            .or_else(|| oldest(&mut all.clone().filter(|&index| voices[index].released())))
-            .or_else(|| oldest(&mut all.clone()))
-            .unwrap_or(0);
+        let index = crate::poly::choose(&self.voices[..count], pitch);
         self.voices[index].start(pitch, velocity, self.age, from, glide, true);
     }
 
