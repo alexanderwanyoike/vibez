@@ -158,6 +158,32 @@ pub fn arrange(size: Size) -> Layout {
     }
 }
 
+/// A control beside a wide card's sample.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Side {
+    Mode,
+    Reverse,
+    Crossfade,
+}
+
+/// The controls beside the sample that fit `room`, each joining while the
+/// band has room for it.
+fn side_rows(mut room: f32) -> Vec<Side> {
+    let mut rows = Vec::new();
+    for (row, height) in [
+        (Side::Mode, SIDE_MODE_H),
+        (Side::Reverse, LINE_H),
+        (Side::Crossfade, LINE_H),
+    ] {
+        if height > room {
+            break;
+        }
+        room -= height + SIDE_GAP;
+        rows.push(row);
+    }
+    rows
+}
+
 pub struct SamplerView<'a> {
     pub track_id: TrackId,
     pub device: DeviceParams<'a>,
@@ -330,23 +356,13 @@ impl<'a> SamplerView<'a> {
             }
             return plot_band(left.width(Length::Fill), layout.sample, PAD);
         }
-        // Each row joins while the band has room for it.
-        let mut room = layout.sample - PAD;
         let mut side = column![].spacing(SIDE_GAP).width(SIDE_W);
-        let rows: [(Element<'a, Message>, f32); 3] = [
-            (
-                column![heading("Mode"), self.mode()].spacing(4).into(),
-                SIDE_MODE_H,
-            ),
-            (self.param(param::REVERSE).switch("Reverse"), LINE_H),
-            (self.param(param::CROSSFADE).line_item(), LINE_H),
-        ];
-        for (control, height) in rows {
-            if height > room {
-                break;
-            }
-            room -= height + SIDE_GAP;
-            side = side.push(control);
+        for row in side_rows(layout.sample - PAD) {
+            side = side.push(match row {
+                Side::Mode => column![heading("Mode"), self.mode()].spacing(4).into(),
+                Side::Reverse => self.param(param::REVERSE).switch("Reverse"),
+                Side::Crossfade => self.param(param::CROSSFADE).line_item(),
+            });
         }
         plot_band(
             row![left.width(Length::Fill), vertical_rule(), side].spacing(8),
