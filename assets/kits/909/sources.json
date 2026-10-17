@@ -1,0 +1,74 @@
+{
+  "kick": {
+    "original": "26496__altemark__bd10.wav",
+    "source": "https://freesound.org/people/altemark/sounds/26496/",
+    "license": "CC-BY-4.0",
+    "author": "Janne G:son Berg; edited and uploaded by altemark",
+    "license_url": "https://creativecommons.org/licenses/by/4.0/",
+    "sha256": "418c2baf6fecaf063c0f24d34f0c682aefd9de16825aa9f6d5ac97d12c48d64c"
+  },
+  "snare": {
+    "original": "26674__altemark__sn01.wav",
+    "source": "https://freesound.org/people/altemark/sounds/26674/",
+    "license": "CC-BY-4.0",
+    "author": "Janne G:son Berg; edited and uploaded by altemark",
+    "license_url": "https://creativecommons.org/licenses/by/4.0/",
+    "sha256": "ef4a265dba6cbe1d9b8ef282f372fbafd5c15ba75fbfeb28c8102a102b687457"
+  },
+  "low-tom": {
+    "original": "26599__altemark__lt04.wav",
+    "source": "https://freesound.org/people/altemark/sounds/26599/",
+    "license": "CC-BY-4.0",
+    "author": "Janne G:son Berg; edited and uploaded by altemark",
+    "license_url": "https://creativecommons.org/licenses/by/4.0/",
+    "sha256": "3436891470eda8a4ac0b0e5420d66908dba11f9f4785fc359ffa4574b791ea94"
+  },
+  "high-tom": {
+    "original": "26583__altemark__ht10.wav",
+    "source": "https://freesound.org/people/altemark/sounds/26583/",
+    "license": "CC-BY-4.0",
+    "author": "Janne G:son Berg; edited and uploaded by altemark",
+    "license_url": "https://creativecommons.org/licenses/by/4.0/",
+    "sha256": "b3a03c516312f12ae03d8ddb8a4d497d157ed52ea697a4ef4a60d35d5ad586ef"
+  },
+  "rim": {
+    "original": "26672__altemark__rs03.wav",
+    "source": "https://freesound.org/people/altemark/sounds/26672/",
+    "license": "CC-BY-4.0",
+    "author": "Janne G:son Berg; edited and uploaded by altemark",
+    "license_url": "https://creativecommons.org/licenses/by/4.0/",
+    "sha256": "d7c7dee23774f1fed7dd26d71b3df8125cf8ac91d9bbee1555b648ca357a9876"
+  },
+  "clap": {
+    "original": "26562__altemark__clp11.wav",
+    "source": "https://freesound.org/people/altemark/sounds/26562/",
+    "license": "CC-BY-4.0",
+    "author": "Janne G:son Berg; edited and uploaded by altemark",
+    "license_url": "https://creativecommons.org/licenses/by/4.0/",
+    "sha256": "fd7cf066d898561558ed662e4cd052f2956f12d6bc84a76b55f7e99240bfddba"
+  },
+  "closed": {
+    "original": "26531__altemark__ch12.wav",
+    "source": "https://freesound.org/people/altemark/sounds/26531/",
+    "license": "CC-BY-4.0",
+    "author": "Janne G:son Berg; edited and uploaded by altemark",
+    "license_url": "https://creativecommons.org/licenses/by/4.0/",
+    "sha256": "1003cc4ebd334503e7cd88e8969395e877806bcc3cbea18e515c557d10ad93d0"
+  },
+  "open": {
+    "original": "26644__altemark__oh02.wav",
+    "source": "https://freesound.org/people/altemark/sounds/26644/",
+    "license": "CC-BY-4.0",
+    "author": "Janne G:son Berg; edited and uploaded by altemark",
+    "license_url": "https://creativecommons.org/licenses/by/4.0/",
+    "sha256": "a104a78e2708b9af88a48895341b16b182d7516d5ed7e68ce0d343f211b01e86"
+  },
+  "ride": {
+    "original": "26658__altemark__ride01.wav",
+    "source": "https://freesound.org/people/altemark/sounds/26658/",
+    "license": "CC-BY-4.0",
+    "author": "Janne G:son Berg; edited and uploaded by altemark",
+    "license_url": "https://creativecommons.org/licenses/by/4.0/",
+    "sha256": "aec13f415807857798b2bcf787a9dc06edd177aee58bb1ca6fd2e9f991d192dc"
+  }
+}

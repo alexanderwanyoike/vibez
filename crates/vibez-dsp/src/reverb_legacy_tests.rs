@@ -1,0 +1,305 @@
+//! The Reverb before its new controls, kept to prove three-value projects
+//! still sound the same.
+
+mod original {
+    use vibez_core::effect::{EffectType, ParamDescriptor};
+
+    use crate::effect::AudioEffect;
+
+    static REVERB_PARAMS: &[ParamDescriptor] = &[
+        ParamDescriptor {
+            name: "Room Size",
+            min: 0.0,
+            max: 1.0,
+            default: 0.5,
+            unit: "",
+        },
+        ParamDescriptor {
+            name: "Damping",
+            min: 0.0,
+            max: 1.0,
+            default: 0.5,
+            unit: "",
+        },
+        ParamDescriptor {
+            name: "Mix",
+            min: 0.0,
+            max: 1.0,
+            default: 0.3,
+            unit: "",
+        },
+    ];
+
+    // Freeverb-style comb filter delay lengths (in samples at 44100 Hz)
+    const COMB_LENGTHS: [usize; 8] = [1116, 1188, 1277, 1356, 1422, 1491, 1557, 1617];
+    const ALLPASS_LENGTHS: [usize; 4] = [556, 441, 341, 225];
+
+    // Freeverb tuning constants
+    const FIXED_GAIN: f32 = 0.015;
+    const SCALE_WET: f32 = 3.0;
+    const STEREO_WIDTH: f32 = 1.0;
+
+    struct CombFilter {
+        buffer: Vec<f32>,
+        pos: usize,
+        feedback: f32,
+        damp1: f32,
+        damp2: f32,
+        filter_store: f32,
+    }
+
+    impl CombFilter {
+        fn new(size: usize) -> Self {
+            Self {
+                buffer: vec![0.0; size],
+                pos: 0,
+                feedback: 0.5,
+                damp1: 0.5,
+                damp2: 0.5,
+                filter_store: 0.0,
+            }
+        }
+
+        fn process(&mut self, input: f32) -> f32 {
+            let output = self.buffer[self.pos];
+            self.filter_store = output * self.damp2 + self.filter_store * self.damp1;
+            self.buffer[self.pos] = input + self.filter_store * self.feedback;
+            self.pos = (self.pos + 1) % self.buffer.len();
+            output
+        }
+
+        fn reset(&mut self) {
+            self.buffer.fill(0.0);
+            self.filter_store = 0.0;
+            self.pos = 0;
+        }
+    }
+
+    struct AllPassFilter {
+        buffer: Vec<f32>,
+        pos: usize,
+    }
+
+    impl AllPassFilter {
+        fn new(size: usize) -> Self {
+            Self {
+                buffer: vec![0.0; size],
+                pos: 0,
+            }
+        }
+
+        fn process(&mut self, input: f32) -> f32 {
+            let buffered = self.buffer[self.pos];
+            let output = -input + buffered;
+            self.buffer[self.pos] = input + buffered * 0.5;
+            self.pos = (self.pos + 1) % self.buffer.len();
+            output
+        }
+
+        fn reset(&mut self) {
+            self.buffer.fill(0.0);
+            self.pos = 0;
+        }
+    }
+
+    /// Freeverb-inspired stereo reverb.
+    pub struct ReverbEffect {
+        sample_rate: f32,
+        room_size: f32,
+        damping: f32,
+        mix: f32,
+        combs_l: Vec<CombFilter>,
+        combs_r: Vec<CombFilter>,
+        allpasses_l: Vec<AllPassFilter>,
+        allpasses_r: Vec<AllPassFilter>,
+    }
+
+    impl ReverbEffect {
+        pub fn new(sample_rate: f32) -> Self {
+            let scale = sample_rate / 44100.0;
+            let combs_l: Vec<CombFilter> = COMB_LENGTHS
+                .iter()
+                .map(|&len| CombFilter::new(((len as f32) * scale) as usize))
+                .collect();
+            let combs_r: Vec<CombFilter> = COMB_LENGTHS
+                .iter()
+                .map(|&len| CombFilter::new(((len as f32) * scale + 23.0) as usize))
+                .collect();
+            let allpasses_l: Vec<AllPassFilter> = ALLPASS_LENGTHS
+                .iter()
+                .map(|&len| AllPassFilter::new(((len as f32) * scale) as usize))
+                .collect();
+            let allpasses_r: Vec<AllPassFilter> = ALLPASS_LENGTHS
+                .iter()
+                .map(|&len| AllPassFilter::new(((len as f32) * scale + 23.0) as usize))
+                .collect();
+
+            let mut reverb = Self {
+                sample_rate,
+                room_size: 0.5,
+                damping: 0.5,
+                mix: 0.3,
+                combs_l,
+                combs_r,
+                allpasses_l,
+                allpasses_r,
+            };
+            reverb.update_combs();
+            reverb
+        }
+
+        fn update_combs(&mut self) {
+            let feedback = self.room_size * 0.28 + 0.7;
+            let damp1 = self.damping * 0.4;
+            let damp2 = 1.0 - damp1;
+
+            for comb in self.combs_l.iter_mut().chain(self.combs_r.iter_mut()) {
+                comb.feedback = feedback;
+                comb.damp1 = damp1;
+                comb.damp2 = damp2;
+            }
+        }
+    }
+
+    impl AudioEffect for ReverbEffect {
+        fn activation_sample_rate(&self) -> Option<u32> {
+            Some(self.sample_rate as u32)
+        }
+        fn effect_type(&self) -> EffectType {
+            EffectType::Reverb
+        }
+
+        fn param_descriptors(&self) -> &'static [ParamDescriptor] {
+            REVERB_PARAMS
+        }
+
+        fn set_param(&mut self, index: usize, value: f32) -> bool {
+            match index {
+                0 => {
+                    self.room_size = value.clamp(0.0, 1.0);
+                    self.update_combs();
+                    true
+                }
+                1 => {
+                    self.damping = value.clamp(0.0, 1.0);
+                    self.update_combs();
+                    true
+                }
+                2 => {
+                    self.mix = value.clamp(0.0, 1.0);
+                    true
+                }
+                _ => false,
+            }
+        }
+
+        fn get_param(&self, index: usize) -> f32 {
+            match index {
+                0 => self.room_size,
+                1 => self.damping,
+                2 => self.mix,
+                _ => 0.0,
+            }
+        }
+
+        fn process(&mut self, buffer: &mut [f32], channels: usize) {
+            let ch = channels.clamp(1, 2);
+            let frames = buffer.len() / ch;
+
+            // Freeverb wet gain with stereo width cross-feed
+            let wet1 = self.mix * SCALE_WET * (STEREO_WIDTH * 0.5 + 0.5);
+            let wet2 = self.mix * SCALE_WET * ((1.0 - STEREO_WIDTH) * 0.5);
+            let dry = 1.0 - self.mix;
+
+            for frame in 0..frames {
+                let dry_l = buffer[frame * ch];
+                let dry_r = if ch >= 2 {
+                    buffer[frame * ch + 1]
+                } else {
+                    dry_l
+                };
+
+                // Attenuate input before comb filters (critical Freeverb tuning)
+                let input = (dry_l + dry_r) * FIXED_GAIN;
+
+                let mut wet_l = 0.0_f32;
+                let mut wet_r = 0.0_f32;
+
+                for comb in &mut self.combs_l {
+                    wet_l += comb.process(input);
+                }
+                for comb in &mut self.combs_r {
+                    wet_r += comb.process(input);
+                }
+
+                for ap in &mut self.allpasses_l {
+                    wet_l = ap.process(wet_l);
+                }
+                for ap in &mut self.allpasses_r {
+                    wet_r = ap.process(wet_r);
+                }
+
+                buffer[frame * ch] = dry_l * dry + wet_l * wet1 + wet_r * wet2;
+                if ch >= 2 {
+                    buffer[frame * ch + 1] = dry_r * dry + wet_r * wet1 + wet_l * wet2;
+                }
+            }
+        }
+
+        fn reset(&mut self) {
+            for comb in self.combs_l.iter_mut().chain(self.combs_r.iter_mut()) {
+                comb.reset();
+            }
+            for ap in self
+                .allpasses_l
+                .iter_mut()
+                .chain(self.allpasses_r.iter_mut())
+            {
+                ap.reset();
+            }
+        }
+    }
+}
+
+use crate::effect::AudioEffect;
+
+fn burst(frames: usize) -> Vec<f32> {
+    let mut seed = 0x2545_f491_u32;
+    (0..frames * 2)
+        .map(|index| {
+            seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            let noise = (seed >> 9) as f32 / (1u32 << 23) as f32 * 2.0 - 1.0;
+            if index < 4_000 {
+                noise * 0.8
+            } else {
+                0.0
+            }
+        })
+        .collect()
+}
+
+#[test]
+fn three_value_projects_sound_as_they_did() {
+    for rate in [44_100.0, 48_000.0] {
+        for controls in [[0.5, 0.5, 0.3], [0.9, 0.1, 1.0], [0.0, 1.0, 0.6]] {
+            let mut before = original::ReverbEffect::new(rate);
+            let mut after = super::ReverbEffect::new(rate);
+            for (index, value) in controls.into_iter().enumerate() {
+                before.set_param(index, value);
+                after.set_param(index, value);
+            }
+            let input = burst(24_000);
+            let (mut old, mut new) = (input.clone(), input);
+            for (old, new) in old.chunks_mut(256).zip(new.chunks_mut(256)) {
+                before.process(old, 2);
+                after.process(new, 2);
+            }
+            for (index, (a, b)) in old.iter().zip(&new).enumerate() {
+                assert!(
+                    (a - b).abs() <= 1e-6,
+                    "{rate} {controls:?} sample {index}: {a} vs {b}"
+                );
+            }
+        }
+    }
+}

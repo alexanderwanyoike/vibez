@@ -15,21 +15,20 @@ use crate::message::Message;
 use crate::state::UiEffect;
 use crate::theme as th;
 use crate::widgets::compressor_display::{ReductionHistory, ReductionMeter, TransferPlot};
-use crate::widgets::device_controls::{heading, segmented, toggle, Param, LABEL_SIZE};
-use crate::widgets::level_meter::{self, LevelMeter};
+use crate::widgets::device_controls::{
+    disclosure, heading, level_column, plot_band, rule, segmented, vertical_rule, Param,
+    LABEL_SIZE, METER_W,
+};
+use crate::widgets::device_layout::{stack, KNOB_ROW_H};
 
 const PAD: f32 = 10.0;
 const PRESET_ROW_H: f32 = 28.0;
 const KNOB: f32 = 32.0;
-const SMALL_KNOB: f32 = 18.0;
 const KNOB_COL_W: f32 = 68.0;
-const KNOB_ROW_H: f32 = 74.0;
-const LINE_H: f32 = 24.0;
 const PLOT_MIN_H: f32 = 72.0;
 const TABS_H: f32 = 22.0;
 /// Page tabs over one row of controls.
 const ADVANCED_H: f32 = TABS_H + 4.0 + KNOB_ROW_H;
-const INPUT_W: f32 = 58.0;
 const GR_W: f32 = 64.0;
 const HISTORY_W: f32 = 190.0;
 const TRANSFER_MIN_W: f32 = 220.0;
@@ -42,7 +41,7 @@ const LINE_READOUT_W: f32 = 80.0;
 pub const COMPACT_W: f32 = 420.0;
 /// Seven knobs, and the curve and history side by side.
 pub const MEDIUM_W: f32 =
-    INPUT_W + TRANSFER_MIN_W + HISTORY_W + GR_W + 3.0 * 8.0 + PAD * 2.0 + 30.0;
+    METER_W + TRANSFER_MIN_W + HISTORY_W + GR_W + 3.0 * 8.0 + PAD * 2.0 + 30.0;
 /// Every knob, Auto included, and both advanced groups side by side.
 pub const FULL_W: f32 = GROUP_W * 2.0 + 1.0 + PAD * 2.0 + 8.0;
 pub const MAX_W: f32 = 1000.0;
@@ -89,40 +88,18 @@ pub fn arrange(size: Size, advanced: bool) -> Arrangement {
         Knobs::Four
     };
     let groups_beside = size.width >= FULL_W;
-    let knob_row = if below >= KNOB_ROW_H {
-        KNOB_ROW_H
-    } else {
-        LINE_H
-    };
     let advanced_h = if groups_beside {
         KNOB_ROW_H
     } else {
         ADVANCED_H
     };
-    let stacked = 1.0 + advanced_h;
-    let advanced_only = advanced && below < PLOT_MIN_H + 1.0 + knob_row + stacked;
-    if advanced_only {
-        return Arrangement {
-            knobs,
-            plots: 0.0,
-            knob_row: 0.0,
-            advanced: Some(below),
-            advanced_only,
-            groups_beside,
-        };
-    }
-    let rest = below - knob_row - if advanced { stacked } else { 0.0 };
-    let plots = if rest >= PLOT_MIN_H + 1.0 {
-        rest - 1.0
-    } else {
-        0.0
-    };
+    let stack = stack(below, advanced.then_some(advanced_h), PLOT_MIN_H);
     Arrangement {
         knobs,
-        plots,
-        knob_row,
-        advanced: advanced.then_some(advanced_h),
-        advanced_only,
+        plots: stack.plots,
+        knob_row: stack.knob_row,
+        advanced: stack.advanced,
+        advanced_only: stack.advanced_only,
         groups_beside,
     }
 }
@@ -150,28 +127,6 @@ impl<'a> CompressorView<'a> {
 
     fn param(&self, index: usize) -> Param<'a> {
         Param::new(self.track_id, self.effect, index, self.accent(), self.entry)
-    }
-
-    fn on(&self, index: usize) -> bool {
-        self.effect.params.get(index).copied().unwrap_or(0.0) >= 0.5
-    }
-
-    fn switch(&self, index: usize, label: &'a str) -> Element<'a, Message> {
-        let on = self.on(index);
-        toggle(
-            text(label)
-                .size(LABEL_SIZE)
-                .wrapping(text::Wrapping::None)
-                .into(),
-            on,
-            Message::set_effect_param(
-                self.track_id,
-                self.effect.id,
-                index,
-                if on { 0.0 } else { 1.0 },
-            ),
-            self.accent(),
-        )
     }
 
     pub fn view(self, preset_bar: Element<'a, Message>, size: Size) -> Element<'a, Message> {
@@ -265,20 +220,6 @@ impl<'a> CompressorView<'a> {
         .into()
     }
 
-    fn input(&self) -> Element<'a, Message> {
-        column![
-            heading("Input"),
-            canvas(LevelMeter {
-                levels: self.panel.input
-            })
-            .width(level_meter::WIDTH)
-            .height(Length::Fill),
-        ]
-        .spacing(2)
-        .width(INPUT_W)
-        .into()
-    }
-
     fn plots(&self, layout: Arrangement) -> Element<'a, Message> {
         let content: Element<'a, Message> = if layout.knobs == Knobs::Four {
             let effect_id = self.effect.id;
@@ -293,25 +234,29 @@ impl<'a> CompressorView<'a> {
                     move |page| Message::Compressor(CompressorMsg::ShowPage(effect_id, page)),
                     self.accent(),
                 ),
-                row![container(shown).width(Length::Fill), self.reduction()].spacing(8),
+                row![
+                    container(shown).width(Length::Fill),
+                    vertical_rule(),
+                    self.reduction()
+                ]
+                .spacing(8),
             ]
             .spacing(4)
             .into()
         } else {
             row![
-                self.input(),
+                level_column("Input", self.panel.input),
+                vertical_rule(),
                 self.transfer(),
+                vertical_rule(),
                 container(self.history()).width(HISTORY_W),
+                vertical_rule(),
                 self.reduction(),
             ]
             .spacing(8)
             .into()
         };
-        container(content)
-            .padding([6.0, PAD])
-            .height(layout.plots)
-            .width(Length::Fill)
-            .into()
+        plot_band(content, layout.plots, PAD)
     }
 
     fn main_indices(knobs: Knobs) -> &'static [usize] {
@@ -334,17 +279,6 @@ impl<'a> CompressorView<'a> {
         }
     }
 
-    fn value_knob(&self, index: usize) -> Element<'a, Message> {
-        let param = self.param(index);
-        row![
-            param.value_entry(),
-            canvas(param.knob()).width(SMALL_KNOB).height(SMALL_KNOB),
-        ]
-        .spacing(2)
-        .align_y(Alignment::Center)
-        .into()
-    }
-
     fn knob_row(&self, layout: Arrangement, width: f32) -> Element<'a, Message> {
         let indices = Self::main_indices(layout.knobs);
         if layout.knob_row < KNOB_ROW_H {
@@ -360,7 +294,7 @@ impl<'a> CompressorView<'a> {
                         text(self.param(index).name())
                             .size(LABEL_SIZE)
                             .color(th::text_dim()),
-                        self.value_knob(index),
+                        self.param(index).value_knob(),
                     ]
                     .spacing(4)
                     .align_y(Alignment::Center),
@@ -382,10 +316,13 @@ impl<'a> CompressorView<'a> {
         for &index in indices {
             if index == param::KNEE && layout.knobs == Knobs::All {
                 knobs = knobs.push(
-                    column![heading("Auto"), self.switch(param::AUTO_RELEASE, "Auto")]
-                        .spacing(4)
-                        .width(Length::Fill)
-                        .align_x(Alignment::Center),
+                    column![
+                        heading("Auto"),
+                        self.param(param::AUTO_RELEASE).switch("Auto")
+                    ]
+                    .spacing(4)
+                    .width(Length::Fill)
+                    .align_x(Alignment::Center),
                 );
             }
             knobs = knobs.push(
@@ -412,16 +349,19 @@ impl<'a> CompressorView<'a> {
         }
         if layout.knobs != Knobs::All {
             group = group.push(
-                column![heading("Release"), self.switch(param::AUTO_RELEASE, "Auto")]
-                    .spacing(4)
-                    .align_x(Alignment::Center),
+                column![
+                    heading("Release"),
+                    self.param(param::AUTO_RELEASE).switch("Auto")
+                ]
+                .spacing(4)
+                .align_x(Alignment::Center),
             );
         }
         group
             .push(
                 column![
-                    self.switch(param::RANGE_ENABLED, "Range"),
-                    self.value_knob(param::RANGE),
+                    self.param(param::RANGE_ENABLED).switch("Range"),
+                    self.param(param::RANGE).value_knob(),
                 ]
                 .spacing(4)
                 .align_x(Alignment::Center),
@@ -431,10 +371,13 @@ impl<'a> CompressorView<'a> {
 
     fn detector_group(&self) -> Element<'a, Message> {
         let filter = |enabled, frequency, label| -> Element<'a, Message> {
-            column![self.switch(enabled, label), self.value_knob(frequency)]
-                .spacing(4)
-                .align_x(Alignment::Center)
-                .into()
+            column![
+                self.param(enabled).switch(label),
+                self.param(frequency).value_knob()
+            ]
+            .spacing(4)
+            .align_x(Alignment::Center)
+            .into()
         };
         let mode = self
             .effect
@@ -463,8 +406,8 @@ impl<'a> CompressorView<'a> {
             ]
             .spacing(4),
             column![
-                self.switch(param::STEREO_LINK, "Link"),
-                self.switch(param::DETECTOR_LISTEN, "Listen"),
+                self.param(param::STEREO_LINK).switch("Link"),
+                self.param(param::DETECTOR_LISTEN).switch("Listen"),
             ]
             .spacing(4),
         ]
@@ -524,15 +467,15 @@ impl<'a> CompressorView<'a> {
     fn advanced_line(&self) -> Element<'a, Message> {
         match self.panel.advanced_page {
             AdvancedPage::Dynamics => row![
-                self.value_knob(param::KNEE),
-                self.value_knob(param::MAKEUP),
-                self.value_knob(param::MIX),
-                self.switch(param::AUTO_RELEASE, "Auto"),
+                self.param(param::KNEE).value_knob(),
+                self.param(param::MAKEUP).value_knob(),
+                self.param(param::MIX).value_knob(),
+                self.param(param::AUTO_RELEASE).switch("Auto"),
             ],
             AdvancedPage::Detector => row![
-                self.switch(param::HP_ENABLED, "Low cut"),
-                self.value_knob(param::HP_FREQUENCY),
-                self.switch(param::STEREO_LINK, "Link"),
+                self.param(param::HP_ENABLED).switch("Low cut"),
+                self.param(param::HP_FREQUENCY).value_knob(),
+                self.param(param::STEREO_LINK).switch("Link"),
             ],
         }
         .spacing(8)
@@ -541,45 +484,18 @@ impl<'a> CompressorView<'a> {
     }
 
     fn disclosure(&self) -> Element<'a, Message> {
-        let open = self.panel.advanced;
-        toggle(
-            row![
-                text(if open { "\u{25BE}" } else { "\u{25B8}" })
-                    .size(9)
-                    .color(th::text_dim()),
-                text("Advanced").size(LABEL_SIZE).color(th::text()),
-            ]
-            .spacing(4)
-            .align_y(Alignment::Center)
-            .into(),
-            open,
+        disclosure(
+            self.panel.advanced,
             Message::Compressor(CompressorMsg::ToggleAdvanced(self.effect.id)),
             self.accent(),
         )
     }
 }
 
-fn vertical_rule<'a>() -> Element<'a, Message> {
-    container(Space::new(1.0, Length::Fill))
-        .style(|_| container::Style {
-            background: Some(th::divider().into()),
-            ..Default::default()
-        })
-        .into()
-}
-
-fn rule<'a>() -> Element<'a, Message> {
-    container(Space::new(Length::Fill, 1.0))
-        .style(|_| container::Style {
-            background: Some(th::divider().into()),
-            ..Default::default()
-        })
-        .into()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::widgets::device_layout::LINE_H;
 
     fn used(layout: Arrangement) -> f32 {
         let mut used = PRESET_ROW_H + 1.0;

@@ -94,7 +94,11 @@ impl canvas::Program<Message> for LevelMeter {
         .enumerate()
         {
             let x = channel as f32 * (BAR_W + BAR_GAP);
-            frame.fill_rectangle(Point::new(x, 1.0), Size::new(BAR_W, height), th::bg_dark());
+            frame.fill_rectangle(
+                Point::new(x, 1.0),
+                Size::new(BAR_W, height),
+                th::fader_track(),
+            );
             let level_db = amplitude_to_db(rms);
             for (from, to, color) in [
                 (f32::NEG_INFINITY, YELLOW_FROM_DB, th::meter_green()),

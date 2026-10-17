@@ -291,16 +291,21 @@ pub struct DrumPadState {
     pub pan: f32,
     pub start: f32,
     pub end: f32,
-    /// Linear attack fade at the playable pad boundary, in milliseconds.
+    /// The pad's attack, in milliseconds.
     #[serde(default = "default_drum_pad_fade_ms")]
     pub fade_in_ms: f32,
-    /// Linear release fade used at the pad end, note-off and choke, in milliseconds.
+    /// The pad's release, in milliseconds, which a one-shot also fades out
+    /// over at its end.
     #[serde(default = "default_drum_pad_fade_ms")]
     pub fade_out_ms: f32,
     pub coarse_tune: i8,
     pub fine_tune: f32,
     pub one_shot: bool,
     pub choke_group: Option<u8>,
+    /// The pad's Sampler controls, by index. Pads saved before each pad was
+    /// a Sampler have none; their gain through one-shot fields stand in.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub params: Vec<f32>,
 }
 
 impl Default for DrumPadState {
@@ -318,6 +323,7 @@ impl Default for DrumPadState {
             fine_tune: 0.0,
             one_shot: true,
             choke_group: None,
+            params: Vec::new(),
         }
     }
 }
@@ -327,6 +333,12 @@ impl Default for DrumPadState {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum InstrumentStateInfo {
     SubtractiveSynth {
+        params: Vec<f32>,
+    },
+    WavetableSynth {
+        params: Vec<f32>,
+    },
+    FmSynth {
         params: Vec<f32>,
     },
     Sampler {
@@ -539,6 +551,28 @@ impl ClipInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_fm_synth_s_state_survives_a_save() {
+        let state = InstrumentStateInfo::FmSynth {
+            params: vec![2.0, 0.0, -6.0],
+        };
+        let json = serde_json::to_value(&state).unwrap();
+        assert_eq!(json["kind"], "fm_synth");
+        let loaded: InstrumentStateInfo = serde_json::from_value(json).unwrap();
+        assert_eq!(loaded, state);
+    }
+
+    #[test]
+    fn a_wavetable_synth_s_state_survives_a_save() {
+        let state = InstrumentStateInfo::WavetableSynth {
+            params: vec![1.0, 0.42, 0.18],
+        };
+        let json = serde_json::to_value(&state).unwrap();
+        assert_eq!(json["kind"], "wavetable_synth");
+        let loaded: InstrumentStateInfo = serde_json::from_value(json).unwrap();
+        assert_eq!(loaded, state);
+    }
 
     #[test]
     fn clip_property_value_objects_enforce_the_inspector_ranges() {
@@ -905,5 +939,21 @@ mod tests {
 
         assert_eq!(pad.fade_in_ms, DRUM_PAD_DEFAULT_FADE_MS);
         assert_eq!(pad.fade_out_ms, DRUM_PAD_DEFAULT_FADE_MS);
+        assert!(pad.params.is_empty());
+    }
+
+    #[test]
+    fn drum_pad_sampler_controls_round_trip() {
+        let pad = DrumPadState {
+            params: vec![60.0, 0.003],
+            ..DrumPadState::default()
+        };
+
+        let json = serde_json::to_string(&pad).unwrap();
+
+        assert_eq!(serde_json::from_str::<DrumPadState>(&json).unwrap(), pad);
+        assert!(!serde_json::to_string(&DrumPadState::default())
+            .unwrap()
+            .contains("params"));
     }
 }

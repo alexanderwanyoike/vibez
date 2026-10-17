@@ -2,7 +2,6 @@
 //! Advanced is open, which plot a compact card shows, and the levels and
 //! gain reduction the engine measured.
 
-use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
 use vibez_core::effect::DynamicsMeter;
@@ -11,7 +10,6 @@ use vibez_engine::metering::MeterValues;
 
 /// How far back the reduction history reaches.
 pub const HISTORY: Duration = Duration::from_secs(5);
-const HISTORY_POINTS: usize = 600;
 
 pub fn is_native_compressor(effect: &crate::state::UiEffect) -> bool {
     effect.effect_type == vibez_core::effect::EffectType::Compressor
@@ -49,13 +47,6 @@ impl CompressorMsg {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct ReductionPoint {
-    pub at: Instant,
-    /// Decibels of reduction, zero when the compressor is idle.
-    pub db: f32,
-}
-
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct CompressorPanelState {
     pub advanced: bool,
@@ -65,7 +56,8 @@ pub struct CompressorPanelState {
     pub output: MeterValues,
     /// Decibels of reduction now, the larger of the two channels.
     pub reduction_db: f32,
-    pub history: VecDeque<ReductionPoint>,
+    /// Decibels of reduction, zero when the compressor is idle.
+    pub history: super::device_levels::ReadingHistory<f32>,
     pub last_meter_at: Option<Instant>,
 }
 
@@ -78,12 +70,6 @@ impl CompressorPanelState {
         }
     }
 
-    pub fn accept_levels(&mut self, input: MeterValues, output: MeterValues, now: Instant) {
-        self.input = input;
-        self.output = output;
-        self.last_meter_at = Some(now);
-    }
-
     /// Records the deepest reduction since the last reading, so a short
     /// transient still shows in the history.
     pub fn accept_dynamics(&mut self, meter: DynamicsMeter, now: Instant) {
@@ -92,18 +78,18 @@ impl CompressorPanelState {
             .max(0.0);
         self.reduction_db = db;
         self.last_meter_at = Some(now);
-        while self.history.front().is_some_and(|point| {
-            self.history.len() >= HISTORY_POINTS
-                || now.saturating_duration_since(point.at) > HISTORY
-        }) {
-            self.history.pop_front();
-        }
-        self.history.push_back(ReductionPoint { at: now, db });
+        self.history.push(now, db, HISTORY);
+    }
+}
+
+impl super::device_levels::MeteredPanel for CompressorPanelState {
+    fn accept_levels(&mut self, input: MeterValues, output: MeterValues, now: Instant) {
+        self.input = input;
+        self.output = output;
+        self.last_meter_at = Some(now);
     }
 
-    /// Readings stop when audio stops reaching the compressor; a held value
-    /// would claim reduction that is no longer happening.
-    pub fn reset_stale(&mut self, now: Instant) {
+    fn reset_stale(&mut self, now: Instant) {
         if self
             .last_meter_at
             .is_some_and(|last| now.saturating_duration_since(last) >= Duration::from_millis(250))
@@ -112,7 +98,7 @@ impl CompressorPanelState {
         }
     }
 
-    pub fn clear_readings(&mut self) {
+    fn clear_readings(&mut self) {
         self.input = MeterValues::SILENT;
         self.output = MeterValues::SILENT;
         self.reduction_db = 0.0;
@@ -124,6 +110,7 @@ impl CompressorPanelState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domains::device_levels::MeteredPanel;
 
     fn reduction(left: f32, right: f32) -> DynamicsMeter {
         DynamicsMeter {
@@ -141,7 +128,10 @@ mod tests {
         for step in 1..=800 {
             panel.accept_dynamics(reduction(1.0, 0.0), now + Duration::from_millis(step));
         }
-        assert_eq!(panel.history.len(), HISTORY_POINTS);
+        assert_eq!(
+            panel.history.len(),
+            crate::domains::device_levels::MAX_READINGS
+        );
         panel.accept_dynamics(reduction(0.0, 0.0), now + Duration::from_secs(10));
         assert_eq!(
             panel.history.len(),

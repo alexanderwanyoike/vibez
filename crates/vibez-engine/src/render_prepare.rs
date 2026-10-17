@@ -48,7 +48,9 @@ pub(super) fn channel(
         let mut instrument = vibez_instruments::create_instrument(kind, req.sample_rate as f32);
         if let Some(state) = &info.native_instrument {
             match state {
-                InstrumentStateInfo::SubtractiveSynth { params } => {
+                InstrumentStateInfo::SubtractiveSynth { params }
+                | InstrumentStateInfo::WavetableSynth { params }
+                | InstrumentStateInfo::FmSynth { params } => {
                     for (index, value) in params.iter().enumerate() {
                         instrument.set_param(index, *value);
                     }

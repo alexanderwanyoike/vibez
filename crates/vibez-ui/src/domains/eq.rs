@@ -76,16 +76,16 @@ impl EqPanelState {
             EqMsg::ToggleAdvanced(_) => self.advanced = !self.advanced,
         }
     }
+}
 
-    pub fn accept_meter(&mut self, input: MeterValues, output: MeterValues, now: Instant) {
+impl super::device_levels::MeteredPanel for EqPanelState {
+    fn accept_levels(&mut self, input: MeterValues, output: MeterValues, now: Instant) {
         self.input = input;
         self.output = output;
         self.last_meter_at = Some(now);
     }
 
-    /// Readings stop when audio stops reaching the EQ; a held level would
-    /// claim signal that is no longer there.
-    pub fn reset_stale(&mut self, now: Instant) {
+    fn reset_stale(&mut self, now: Instant) {
         if self
             .last_meter_at
             .is_some_and(|last| now.saturating_duration_since(last) >= Duration::from_millis(250))
@@ -94,7 +94,7 @@ impl EqPanelState {
         }
     }
 
-    pub fn clear_readings(&mut self) {
+    fn clear_readings(&mut self) {
         self.input = MeterValues::SILENT;
         self.output = MeterValues::SILENT;
         self.last_meter_at = None;

@@ -1,26 +1,19 @@
 //! Split out of app.rs; inherent methods on [`super::App`].
 
-use iced::widget::{
-    button, canvas, column, container, horizontal_space, mouse_area, row, scrollable, text,
-};
-use iced::{Color, Element, Length, Theme};
+use iced::widget::{column, container, horizontal_space, mouse_area, row, scrollable, text};
+use iced::{Color, Element, Length};
 
 use vibez_core::id::TrackId;
-use vibez_core::track::MediaSourceRef;
 
-use crate::domains::browser::BrowserMsg;
 use crate::icons;
 use crate::message::Message;
 use crate::state::UiTrack;
 use crate::theme as th;
-use crate::widgets::device_chrome::section_label;
 use crate::widgets::effect_slot::{view_effect_slot, view_sidechain, DeviceBody};
 
 use super::*;
 
 const CHAIN_SPACING: f32 = 6.0;
-const SYNTH_CARD_W: f32 = 570.0;
-const SAMPLER_CARD_W: f32 = 560.0;
 const PLACEHOLDER_W: f32 = 120.0;
 
 /// Native devices that lay themselves out from the width they are given.
@@ -29,6 +22,17 @@ enum Flexible {
     Gain,
     Eq,
     Compressor,
+    Limiter,
+    Filter,
+    Gate,
+    Drive,
+    Saturator,
+    Bitcrush,
+    Delay,
+    Echo,
+    Reverb,
+    AutoPan,
+    Phaser,
 }
 
 impl App {
@@ -85,7 +89,17 @@ impl App {
         // device can take its share of whatever width the section has left.
         let mut cards: Vec<Option<Element<'a, Message>>> = Vec::new();
         let mut used = 0.0;
-        if let Some((card, width)) = self.instrument_card(track_id, track, track_color) {
+        // The native synth and sampler take a flexible share like the
+        // effects do.
+        let synth = crate::domains::synth::is_native_synth(track);
+        let sampler = crate::domains::sampler::is_native_sampler(track);
+        let drum_rack = crate::domains::sampler::is_native_drum_rack(track);
+        let wavetable = crate::domains::wavetable::is_native_wavetable(track);
+        let fm = crate::domains::fm::is_native_fm(track);
+        let flexible_instrument = synth || sampler || drum_rack || wavetable || fm;
+        if flexible_instrument {
+            cards.push(None);
+        } else if let Some((card, width)) = self.instrument_card(track_id, track, track_color) {
             cards.push(Some(card));
             used += width;
         }
@@ -104,6 +118,28 @@ impl App {
                 Some(Flexible::Eq)
             } else if crate::domains::compressor::is_native_compressor(effect) {
                 Some(Flexible::Compressor)
+            } else if crate::domains::limiter::is_native_limiter(effect) {
+                Some(Flexible::Limiter)
+            } else if crate::domains::filter::is_native_filter(effect) {
+                Some(Flexible::Filter)
+            } else if crate::domains::gate::is_native_gate(effect) {
+                Some(Flexible::Gate)
+            } else if crate::domains::drive::is_native_drive(effect) {
+                Some(Flexible::Drive)
+            } else if crate::domains::saturator::is_native_saturator(effect) {
+                Some(Flexible::Saturator)
+            } else if crate::domains::bitcrush::is_native_bitcrush(effect) {
+                Some(Flexible::Bitcrush)
+            } else if crate::domains::delay::is_native_delay(effect) {
+                Some(Flexible::Delay)
+            } else if crate::domains::echo::is_native_echo(effect) {
+                Some(Flexible::Echo)
+            } else if crate::domains::reverb::is_native_reverb(effect) {
+                Some(Flexible::Reverb)
+            } else if crate::domains::auto_pan::is_native_auto_pan(effect) {
+                Some(Flexible::AutoPan)
+            } else if crate::domains::phaser::is_native_phaser(effect) {
+                Some(Flexible::Phaser)
             } else {
                 None
             };
@@ -123,9 +159,50 @@ impl App {
                 self.state.transport.sample_rate,
             )));
         }
-        if !flexible.is_empty() {
+        let shares = flexible.len() + usize::from(flexible_instrument);
+        if shares > 0 {
             let spacing = CHAIN_SPACING * cards.len().saturating_sub(1) as f32;
-            let share = (available_width - used - spacing) / flexible.len() as f32;
+            let share = (available_width - used - spacing) / shares as f32;
+            if synth {
+                cards[0] = Some(self.synth_card(
+                    track_id,
+                    track,
+                    track_color,
+                    crate::widgets::synth_device::card_width(share),
+                ));
+            }
+            if sampler {
+                cards[0] = Some(self.sampler_card(
+                    track_id,
+                    track,
+                    track_color,
+                    crate::widgets::sampler_device::card_width(share),
+                ));
+            }
+            if wavetable {
+                cards[0] = Some(self.wavetable_card(
+                    track_id,
+                    track,
+                    track_color,
+                    crate::widgets::wavetable_device::card_width(share),
+                ));
+            }
+            if fm {
+                cards[0] = Some(self.fm_card(
+                    track_id,
+                    track,
+                    track_color,
+                    crate::widgets::fm_device::card_width(share),
+                ));
+            }
+            if drum_rack {
+                cards[0] = Some(self.drum_rack_card(
+                    track_id,
+                    track,
+                    track_color,
+                    crate::widgets::drum_rack_device::card_width(share),
+                ));
+            }
             for (position, effect, sidechain, kind) in flexible {
                 let body = match kind {
                     Flexible::Gain => self.gain_device_body(
@@ -146,6 +223,72 @@ impl App {
                         track_color,
                         crate::widgets::compressor_device::WIDTHS
                             .chain_width(share, available_width),
+                    ),
+                    Flexible::Limiter => self.limiter_device_body(
+                        track_id,
+                        effect,
+                        track_color,
+                        crate::widgets::limiter_device::card_width(share),
+                    ),
+                    Flexible::Filter => self.filter_device_body(
+                        track_id,
+                        effect,
+                        track_color,
+                        crate::widgets::filter_device::card_width(share),
+                    ),
+                    Flexible::Gate => self.gate_device_body(
+                        track_id,
+                        effect,
+                        track_color,
+                        crate::widgets::gate_device::card_width(share),
+                    ),
+                    Flexible::Drive => self.drive_device_body(
+                        track_id,
+                        effect,
+                        track_color,
+                        crate::widgets::drive_device::card_width(share),
+                    ),
+                    Flexible::Saturator => self.saturator_device_body(
+                        track_id,
+                        effect,
+                        track_color,
+                        crate::widgets::saturator_device::card_width(share),
+                    ),
+                    Flexible::Bitcrush => self.bitcrush_device_body(
+                        track_id,
+                        effect,
+                        track_color,
+                        crate::widgets::bitcrush_device::card_width(share),
+                    ),
+                    Flexible::Delay => self.delay_device_body(
+                        track_id,
+                        effect,
+                        track_color,
+                        crate::widgets::delay_device::card_width(share),
+                    ),
+                    Flexible::Echo => self.echo_device_body(
+                        track_id,
+                        effect,
+                        track_color,
+                        crate::widgets::echo_device::card_width(share),
+                    ),
+                    Flexible::Reverb => self.reverb_device_body(
+                        track_id,
+                        effect,
+                        track_color,
+                        crate::widgets::reverb_device::card_width(share),
+                    ),
+                    Flexible::Phaser => self.phaser_device_body(
+                        track_id,
+                        effect,
+                        track_color,
+                        crate::widgets::phaser_device::card_width(share),
+                    ),
+                    Flexible::AutoPan => self.auto_pan_device_body(
+                        track_id,
+                        effect,
+                        track_color,
+                        crate::widgets::auto_pan_device::card_width(share),
                     ),
                 };
                 cards[position] = Some(view_effect_slot(
@@ -197,30 +340,9 @@ impl App {
                 crate::widgets::device_chrome::PLUGIN_CARD_W,
             ));
         }
-        let (card, width) = match track.instrument_kind {
-            Some(vibez_core::midi::InstrumentKind::Sampler) => (
-                self.view_sampler_device(track_id, track, track_color),
-                SAMPLER_CARD_W,
-            ),
-            Some(vibez_core::midi::InstrumentKind::DrumRack) => (
-                self.view_drum_rack_device(track_id, track, track_color),
-                drum_rack::DRUM_RACK_CARD_W,
-            ),
-            _ => (
-                self.view_synth_device(track_id, track, track_color),
-                SYNTH_CARD_W,
-            ),
-        };
-        let latency = crate::domains::device_latency::latency_label(
-            track.instrument_latency_samples,
-            self.state.transport.sample_rate,
-        );
-        Some((
-            column![card, text(latency).size(9).color(th::text_dim())]
-                .height(Length::Fill)
-                .into(),
-            width,
-        ))
+        // The native synth, sampler and drum rack are laid out with the
+        // flexible cards.
+        None
     }
 
     fn gain_device_body<'a>(
@@ -290,6 +412,367 @@ impl App {
         }
     }
 
+    fn reverb_device_body<'a>(
+        &'a self,
+        track_id: TrackId,
+        effect: &'a crate::state::UiEffect,
+        accent: Color,
+        width: f32,
+    ) -> DeviceBody<'a> {
+        let content = iced::widget::responsive(move |size| {
+            crate::widgets::reverb_device::ReverbView {
+                track_id,
+                effect,
+                accent,
+                panel: self.card_panels.panel(effect.id),
+                entry: self.param_entry.as_ref(),
+                bpm: self.state.transport.bpm,
+            }
+            .view(
+                self.view_device_preset_bar(
+                    track_id,
+                    effect,
+                    accent,
+                    crate::widgets::reverb_device::preset_bar_width(size),
+                ),
+                size,
+            )
+        });
+        DeviceBody {
+            content: content.into(),
+            width,
+            padding: iced::Padding::ZERO,
+        }
+    }
+
+    fn phaser_device_body<'a>(
+        &'a self,
+        track_id: TrackId,
+        effect: &'a crate::state::UiEffect,
+        accent: Color,
+        width: f32,
+    ) -> DeviceBody<'a> {
+        let content = iced::widget::responsive(move |size| {
+            crate::widgets::phaser_device::PhaserView {
+                track_id,
+                effect,
+                accent,
+                panel: self.card_panels.panel(effect.id),
+                entry: self.param_entry.as_ref(),
+                bpm: self.state.transport.bpm,
+            }
+            .view(
+                self.view_device_preset_bar(
+                    track_id,
+                    effect,
+                    accent,
+                    crate::widgets::phaser_device::preset_bar_width(size),
+                ),
+                size,
+            )
+        });
+        DeviceBody {
+            content: content.into(),
+            width,
+            padding: iced::Padding::ZERO,
+        }
+    }
+
+    fn auto_pan_device_body<'a>(
+        &'a self,
+        track_id: TrackId,
+        effect: &'a crate::state::UiEffect,
+        accent: Color,
+        width: f32,
+    ) -> DeviceBody<'a> {
+        let content = iced::widget::responsive(move |size| {
+            crate::widgets::auto_pan_device::AutoPanView {
+                track_id,
+                effect,
+                accent,
+                panel: self.card_panels.panel(effect.id),
+                entry: self.param_entry.as_ref(),
+                bpm: self.state.transport.bpm,
+            }
+            .view(
+                self.view_device_preset_bar(
+                    track_id,
+                    effect,
+                    accent,
+                    crate::widgets::auto_pan_device::preset_bar_width(size),
+                ),
+                size,
+            )
+        });
+        DeviceBody {
+            content: content.into(),
+            width,
+            padding: iced::Padding::ZERO,
+        }
+    }
+
+    fn delay_device_body<'a>(
+        &'a self,
+        track_id: TrackId,
+        effect: &'a crate::state::UiEffect,
+        accent: Color,
+        width: f32,
+    ) -> DeviceBody<'a> {
+        let content = iced::widget::responsive(move |size| {
+            crate::widgets::delay_device::DelayView {
+                track_id,
+                effect,
+                accent,
+                panel: self.card_panels.panel(effect.id),
+                entry: self.param_entry.as_ref(),
+                bpm: self.state.transport.bpm,
+            }
+            .view(
+                self.view_device_preset_bar(
+                    track_id,
+                    effect,
+                    accent,
+                    crate::widgets::delay_device::preset_bar_width(size),
+                ),
+                size,
+            )
+        });
+        DeviceBody {
+            content: content.into(),
+            width,
+            padding: iced::Padding::ZERO,
+        }
+    }
+
+    fn limiter_device_body<'a>(
+        &'a self,
+        track_id: TrackId,
+        effect: &'a crate::state::UiEffect,
+        accent: Color,
+        width: f32,
+    ) -> DeviceBody<'a> {
+        let now = std::time::Instant::now();
+        let content = iced::widget::responsive(move |size| {
+            crate::widgets::limiter_device::LimiterView {
+                track_id,
+                effect,
+                accent,
+                panel: self.card_panels.panel(effect.id),
+                entry: self.param_entry.as_ref(),
+                now,
+            }
+            .view(
+                self.view_device_preset_bar(
+                    track_id,
+                    effect,
+                    accent,
+                    crate::widgets::limiter_device::preset_bar_width(size),
+                ),
+                size,
+            )
+        });
+        DeviceBody {
+            content: content.into(),
+            width,
+            padding: iced::Padding::ZERO,
+        }
+    }
+
+    fn echo_device_body<'a>(
+        &'a self,
+        track_id: TrackId,
+        effect: &'a crate::state::UiEffect,
+        accent: Color,
+        width: f32,
+    ) -> DeviceBody<'a> {
+        let content = iced::widget::responsive(move |size| {
+            crate::widgets::echo_device::EchoView {
+                track_id,
+                effect,
+                accent,
+                panel: self.card_panels.panel(effect.id),
+                entry: self.param_entry.as_ref(),
+                bpm: self.state.transport.bpm,
+            }
+            .view(
+                self.view_device_preset_bar(
+                    track_id,
+                    effect,
+                    accent,
+                    crate::widgets::echo_device::preset_bar_width(size),
+                ),
+                size,
+            )
+        });
+        DeviceBody {
+            content: content.into(),
+            width,
+            padding: iced::Padding::ZERO,
+        }
+    }
+
+    fn saturator_device_body<'a>(
+        &'a self,
+        track_id: TrackId,
+        effect: &'a crate::state::UiEffect,
+        accent: Color,
+        width: f32,
+    ) -> DeviceBody<'a> {
+        let content = iced::widget::responsive(move |size| {
+            crate::widgets::saturator_device::SaturatorView {
+                track_id,
+                effect,
+                accent,
+                panel: self.card_panels.panel(effect.id),
+                entry: self.param_entry.as_ref(),
+            }
+            .view(
+                self.view_device_preset_bar(
+                    track_id,
+                    effect,
+                    accent,
+                    crate::widgets::saturator_device::preset_bar_width(size),
+                ),
+                size,
+            )
+        });
+        DeviceBody {
+            content: content.into(),
+            width,
+            padding: iced::Padding::ZERO,
+        }
+    }
+
+    fn bitcrush_device_body<'a>(
+        &'a self,
+        track_id: TrackId,
+        effect: &'a crate::state::UiEffect,
+        accent: Color,
+        width: f32,
+    ) -> DeviceBody<'a> {
+        let content = iced::widget::responsive(move |size| {
+            crate::widgets::bitcrush_device::BitcrushView {
+                track_id,
+                effect,
+                accent,
+                panel: self.card_panels.panel(effect.id),
+                entry: self.param_entry.as_ref(),
+                host_rate: self.state.transport.sample_rate,
+            }
+            .view(
+                self.view_device_preset_bar(
+                    track_id,
+                    effect,
+                    accent,
+                    crate::widgets::bitcrush_device::preset_bar_width(size),
+                ),
+                size,
+            )
+        });
+        DeviceBody {
+            content: content.into(),
+            width,
+            padding: iced::Padding::ZERO,
+        }
+    }
+
+    fn drive_device_body<'a>(
+        &'a self,
+        track_id: TrackId,
+        effect: &'a crate::state::UiEffect,
+        accent: Color,
+        width: f32,
+    ) -> DeviceBody<'a> {
+        let content = iced::widget::responsive(move |size| {
+            crate::widgets::drive_device::DriveView {
+                track_id,
+                effect,
+                accent,
+                panel: self.card_panels.panel(effect.id),
+                entry: self.param_entry.as_ref(),
+            }
+            .view(
+                self.view_device_preset_bar(
+                    track_id,
+                    effect,
+                    accent,
+                    crate::widgets::drive_device::preset_bar_width(size),
+                ),
+                size,
+            )
+        });
+        DeviceBody {
+            content: content.into(),
+            width,
+            padding: iced::Padding::ZERO,
+        }
+    }
+
+    fn gate_device_body<'a>(
+        &'a self,
+        track_id: TrackId,
+        effect: &'a crate::state::UiEffect,
+        accent: Color,
+        width: f32,
+    ) -> DeviceBody<'a> {
+        let content = iced::widget::responsive(move |size| {
+            crate::widgets::gate_device::GateView {
+                track_id,
+                effect,
+                accent,
+                panel: self.gate_panels.panel(effect.id),
+                entry: self.param_entry.as_ref(),
+            }
+            .view(
+                self.view_device_preset_bar(
+                    track_id,
+                    effect,
+                    accent,
+                    crate::widgets::gate_device::preset_bar_width(size),
+                ),
+                size,
+            )
+        });
+        DeviceBody {
+            content: content.into(),
+            width,
+            padding: iced::Padding::ZERO,
+        }
+    }
+
+    fn filter_device_body<'a>(
+        &'a self,
+        track_id: TrackId,
+        effect: &'a crate::state::UiEffect,
+        accent: Color,
+        width: f32,
+    ) -> DeviceBody<'a> {
+        let content = iced::widget::responsive(move |size| {
+            crate::widgets::filter_device::FilterView {
+                track_id,
+                effect,
+                accent,
+                panel: self.filter_panels.panel(effect.id),
+                entry: self.param_entry.as_ref(),
+                sample_rate: self.state.transport.sample_rate as f32,
+            }
+            .view(
+                self.view_device_preset_bar(
+                    track_id,
+                    effect,
+                    accent,
+                    crate::widgets::filter_device::preset_bar_width(size),
+                ),
+                size,
+            )
+        });
+        DeviceBody {
+            content: content.into(),
+            width,
+            padding: iced::Padding::ZERO,
+        }
+    }
+
     fn eq_device_body<'a>(
         &'a self,
         track_id: TrackId,
@@ -333,7 +816,8 @@ impl App {
         crate::widgets::device_chrome::title_bar(content)
     }
 
-    /// Standard device title row: colored dot, name, optional remove.
+    /// Standard device title row: colored dot, name, and the remove button
+    /// at the far right, where the effect cards keep theirs.
     pub(super) fn device_title_row(
         name: &str,
         track_color: Color,
@@ -341,41 +825,17 @@ impl App {
     ) -> iced::widget::Row<'_, Message> {
         let dot = text("\u{25CF}").size(8).color(track_color);
         let name = text(name.to_string()).size(11).color(th::text());
-        let mut r = row![dot, name].spacing(5).align_y(iced::Alignment::Center);
+        let mut r = row![dot, name]
+            .spacing(5)
+            .width(Length::Fill)
+            .align_y(iced::Alignment::Center);
         if let Some(msg) = remove {
             let remove_btn: Element<'_, Message> =
                 Self::device_icon_btn(icons::X, th::text_dim(), th::danger(), msg).into();
-            r = r.push(horizontal_space().width(Length::Fixed(12.0)));
+            r = r.push(horizontal_space());
             r = r.push(remove_btn);
         }
         r
-    }
-
-    /// Labeled section inside a device body, Ableton-style: a tiny
-    /// uppercase header above the section's controls.
-    pub(super) fn device_section<'a>(
-        label: &'static str,
-        content: Element<'a, Message>,
-    ) -> Element<'a, Message> {
-        column![section_label(label), content]
-            .spacing(6)
-            .align_x(iced::Alignment::Start)
-            .into()
-    }
-
-    /// Thin vertical rule separating device sections.
-    pub(super) fn device_divider() -> Element<'static, Message> {
-        crate::widgets::device_chrome::divider()
-    }
-
-    /// Standard device body: every card takes the section's height so the
-    /// chain lines up like a hardware rack, content held at the top.
-    pub(super) fn device_body(content: Element<'_, Message>) -> Element<'_, Message> {
-        container(content)
-            .padding([8, 10])
-            .height(Length::Fill)
-            .clip(true)
-            .into()
     }
 
     /// Wrap card content in the standard device card container.
@@ -416,288 +876,6 @@ impl App {
         )
     }
 
-    /// Synth device card for instrument tracks.
-    pub(super) fn view_synth_device<'a>(
-        &'a self,
-        track_id: TrackId,
-        track: &'a UiTrack,
-        track_color: Color,
-    ) -> Element<'a, Message> {
-        use crate::widgets::effect_knob::{format_value, param_column, EffectKnobWidget};
-        let title = Self::device_title_bar(Self::device_title_row(
-            "Synth",
-            track_color,
-            Some(Message::remove_track_instrument(track_id)),
-        ));
-
-        let descriptors = vibez_instruments::synth::SYNTH_PARAMS;
-        let value_of = |i: usize| {
-            track
-                .instrument_params
-                .get(i)
-                .copied()
-                .unwrap_or(descriptors[i].default)
-        };
-        let knob = |i: usize, label: &str| {
-            param_column(
-                EffectKnobWidget::for_instrument(
-                    track_id,
-                    i,
-                    value_of(i),
-                    descriptors[i].min,
-                    descriptors[i].max,
-                    descriptors[i].default,
-                    track_color,
-                ),
-                label.to_string(),
-                format_value(value_of(i), descriptors[i].unit),
-            )
-        };
-
-        // OSC section: 2x2 waveform selector grid.
-        let wave_value = value_of(0).round() as usize;
-        let wave_btn = |i: usize, label: &'static str| {
-            let active = wave_value == i;
-            button(
-                text(label)
-                    .size(9)
-                    .width(Length::Fixed(30.0))
-                    .align_x(iced::Alignment::Center)
-                    .color(if active {
-                        th::bg_dark()
-                    } else {
-                        th::text_dim()
-                    }),
-            )
-            .on_press(Message::set_instrument_param(track_id, 0, i as f32))
-            .padding([3, 4])
-            .style(move |_theme: &Theme, _status| button::Style {
-                background: Some(if active { th::accent() } else { th::bg_dark() }.into()),
-                text_color: if active {
-                    th::bg_dark()
-                } else {
-                    th::text_dim()
-                },
-                border: iced::Border {
-                    color: if active { th::accent() } else { th::border() },
-                    width: 1.0,
-                    radius: 3.0.into(),
-                },
-                ..Default::default()
-            })
-        };
-        let scope: Element<'a, Message> = canvas(crate::widgets::mini_waveform::OscScope {
-            waveform_index: wave_value,
-            color: track_color,
-        })
-        .width(Length::Fixed(66.0))
-        .height(Length::Fixed(38.0))
-        .into();
-        let osc = column![
-            scope,
-            row![wave_btn(0, "Sin"), wave_btn(1, "Saw")].spacing(3),
-            row![wave_btn(2, "Sqr"), wave_btn(3, "Tri")].spacing(3),
-        ]
-        .spacing(3)
-        .align_x(iced::Alignment::Center);
-
-        let adsr: Element<'a, Message> = canvas(crate::widgets::mini_waveform::AdsrScope {
-            attack: value_of(1),
-            decay: value_of(2),
-            sustain: value_of(3),
-            release: value_of(4),
-            color: track_color,
-        })
-        .width(Length::Fixed(240.0))
-        .height(Length::Fixed(34.0))
-        .into();
-        let envelope = column![
-            adsr,
-            row![
-                knob(1, "Attack"),
-                knob(2, "Decay"),
-                knob(3, "Sustain"),
-                knob(4, "Release")
-            ]
-            .spacing(6)
-        ]
-        .spacing(5)
-        .align_x(iced::Alignment::Center);
-
-        let body = row![
-            Self::device_section("OSC", osc.into()),
-            Self::device_divider(),
-            Self::device_section("ENVELOPE", envelope.into()),
-            Self::device_divider(),
-            Self::device_section(
-                "FILTER",
-                row![knob(5, "Cutoff"), knob(6, "Res")].spacing(6).into()
-            ),
-            Self::device_divider(),
-            Self::device_section("OUT", knob(7, "Volume")),
-        ]
-        .spacing(10)
-        .align_y(iced::Alignment::Start);
-
-        // OSC 66 + envelope 240 + filter 118 + out 56 + chrome.
-        Self::device_card(
-            column![title, Self::device_body(body.into())].width(Length::Fixed(SYNTH_CARD_W)),
-        )
-    }
-
-    /// Sampler device card.
-    pub(super) fn view_sampler_device<'a>(
-        &'a self,
-        track_id: TrackId,
-        track: &'a UiTrack,
-        track_color: Color,
-    ) -> Element<'a, Message> {
-        use crate::widgets::effect_knob::{format_value, param_column, EffectKnobWidget};
-        let title = Self::device_title_bar(Self::device_title_row(
-            "Sampler",
-            track_color,
-            Some(Message::remove_track_instrument(track_id)),
-        ));
-
-        let descriptors = vibez_instruments::sampler::SAMPLER_PARAMS;
-        let value_of = |i: usize| {
-            track
-                .instrument_params
-                .get(i)
-                .copied()
-                .unwrap_or(descriptors[i].default)
-        };
-        let knob = |i: usize, label: &str| {
-            param_column(
-                EffectKnobWidget::for_instrument(
-                    track_id,
-                    i,
-                    value_of(i),
-                    descriptors[i].min,
-                    descriptors[i].max,
-                    descriptors[i].default,
-                    track_color,
-                ),
-                label.to_string(),
-                format_value(value_of(i), descriptors[i].unit),
-            )
-        };
-
-        // Long file names must not blow the section open; the
-        // waveform display defines the section width.
-        let sample_label = match &track.sample_name {
-            Some(name) => {
-                let display = if name.chars().count() > 24 {
-                    let head: String = name.chars().take(21).collect();
-                    format!("{head}...")
-                } else {
-                    name.clone()
-                };
-                text(display).size(10).color(th::text())
-            }
-            None => text("No Sample").size(10).color(th::text_muted()),
-        };
-        let load_btn = button(text("Load").size(9).color(th::text()))
-            .on_press(Message::LoadSamplerSample(track_id))
-            .padding([2, 8])
-            .style(|_theme: &Theme, status| {
-                let bg = match status {
-                    button::Status::Hovered => th::bg_hover(),
-                    _ => th::bg_dark(),
-                };
-                button::Style {
-                    background: Some(bg.into()),
-                    border: iced::Border {
-                        color: th::border(),
-                        width: 1.0,
-                        radius: 3.0.into(),
-                    },
-                    text_color: th::text(),
-                    ..Default::default()
-                }
-            });
-        let waveform: Element<'a, Message> = canvas(crate::widgets::mini_waveform::MiniWaveform {
-            audio: track.sample_audio.clone(),
-            color: track_color,
-            region: None,
-        })
-        .width(Length::Fixed(190.0))
-        .height(Length::Fixed(56.0))
-        .into();
-        let sample = column![
-            waveform,
-            row![sample_label, load_btn]
-                .spacing(8)
-                .align_y(iced::Alignment::Center)
-        ]
-        .spacing(5)
-        .width(Length::Fixed(190.0))
-        .align_x(iced::Alignment::Start);
-
-        let adsr: Element<'a, Message> = canvas(crate::widgets::mini_waveform::AdsrScope {
-            attack: value_of(1),
-            decay: value_of(2),
-            sustain: value_of(3),
-            release: value_of(4),
-            color: track_color,
-        })
-        .width(Length::Fixed(240.0))
-        .height(Length::Fixed(34.0))
-        .into();
-        let envelope = column![
-            adsr,
-            row![
-                knob(1, "Attack"),
-                knob(2, "Decay"),
-                knob(3, "Sustain"),
-                knob(4, "Release")
-            ]
-            .spacing(6)
-        ]
-        .spacing(5)
-        .align_x(iced::Alignment::Center);
-
-        let body = row![
-            Self::device_section("SAMPLE", sample.into()),
-            Self::device_divider(),
-            Self::device_section("TUNE", knob(0, "Root")),
-            Self::device_divider(),
-            Self::device_section("ENVELOPE", envelope.into()),
-        ]
-        .spacing(10)
-        .align_y(iced::Alignment::Start);
-
-        // Width = sample 190 + tune 56 + envelope 240 + dividers,
-        // spacing, padding. Fixed so the Fill title strip and card
-        // background actually render (Fill inside a shrink column
-        // collapses in iced).
-        let card = Self::device_card(
-            column![title, Self::device_body(body.into())].width(Length::Fixed(SAMPLER_CARD_W)),
-        );
-        let drop_target = matches!(
-            self.state.browser.drag_target,
-            Some(crate::state::BrowserDropTarget::Sampler { track_id: target }) if target == track_id
-        );
-        let card = container(card).style(move |_theme: &Theme| container::Style {
-            border: iced::Border {
-                color: if drop_target {
-                    th::accent()
-                } else {
-                    iced::Color::TRANSPARENT
-                },
-                width: if drop_target { 2.0 } else { 0.0 },
-                radius: 0.0.into(),
-            },
-            ..Default::default()
-        });
-        // The whole card accepts browser drops, like drum pads.
-        mouse_area(card)
-            .on_enter(Message::Browser(BrowserMsg::DragHoverSampler { track_id }))
-            .on_exit(Message::Browser(BrowserMsg::ClearDragTarget))
-            .on_release(Message::DropSampleOnSampler { track_id })
-            .into()
-    }
-
     /// Placeholder card for MIDI tracks with no instrument attached.
     pub(super) fn view_add_instrument_placeholder(&self) -> Element<'_, Message> {
         let title = Self::device_title_bar(text("No Instrument").size(11).color(th::text_dim()));
@@ -712,6 +890,3 @@ impl App {
         )
     }
 }
-
-#[path = "views_drum_rack.rs"]
-mod drum_rack;

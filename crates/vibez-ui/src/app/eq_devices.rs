@@ -1,8 +1,6 @@
 //! Native EQ cards on the visible device chain: their panel state and the
 //! analyser that listens to one EQ's own input or output.
 
-use std::collections::HashMap;
-
 use rtrb::Consumer;
 use vibez_core::id::{EffectId, TrackId};
 use vibez_engine::effect_spectrum::{
@@ -17,8 +15,7 @@ use super::*;
 
 #[derive(Default)]
 pub(super) struct EqDevices {
-    pub panels: HashMap<EffectId, EqPanelState>,
-    pub empty_panel: EqPanelState,
+    pub panels: super::device_panels::DevicePanels<EqPanelState>,
     /// The EQ the analyser listens to: the last one touched, else the first.
     pub focus: Option<EffectId>,
     pub spectrum_rx: Option<Consumer<EffectSpectrumSample>>,
@@ -29,7 +26,7 @@ pub(super) struct EqDevices {
 
 impl EqDevices {
     pub fn panel(&self, effect_id: EffectId) -> &EqPanelState {
-        self.panels.get(&effect_id).unwrap_or(&self.empty_panel)
+        self.panels.panel(effect_id)
     }
 
     /// Analyser bins for this EQ's card, when it is the one being listened to.
@@ -41,11 +38,7 @@ impl EqDevices {
 impl App {
     pub(super) fn update_eq(&mut self, message: EqMsg) -> Task<Message> {
         let effect_id = message.effect_id();
-        self.eq_devices
-            .panels
-            .entry(effect_id)
-            .or_default()
-            .update(message);
+        self.eq_devices.panels.entry(effect_id).update(message);
         self.eq_devices.focus = Some(effect_id);
         Task::none()
     }
@@ -66,7 +59,7 @@ impl App {
 
     pub(super) fn poll_eq_devices(&mut self) {
         let state = &self.state;
-        self.eq_devices.panels.retain(|id, _| state.has_effect(*id));
+        self.eq_devices.panels.retain_existing(state);
         if self
             .eq_devices
             .focus
@@ -185,7 +178,7 @@ mod tests {
         let _ = app.update(Message::Eq(EqMsg::ToggleAdvanced(first)));
         let _ = app.update(Message::Devices(DevicesMsg::RemoveEffect(track, first)));
         app.poll_eq_devices();
-        assert!(!app.eq_devices.panels.contains_key(&first));
+        assert!(!app.eq_devices.panels.contains(first));
         assert_eq!(app.eq_devices.focus, None);
     }
 

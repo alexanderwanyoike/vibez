@@ -54,6 +54,13 @@ struct App {
     gain_devices: gain_devices::GainDevices,
     eq_devices: eq_devices::EqDevices,
     compressor_devices: compressor_devices::CompressorDevices,
+    filter_panels: device_panels::DevicePanels<crate::domains::filter::FilterPanelState>,
+    gate_panels: device_panels::DevicePanels<crate::domains::gate::GatePanelState>,
+    card_panels: device_panels::DevicePanels<crate::domains::device_card::CardPanelState>,
+    instrument_panels: std::collections::HashMap<
+        vibez_core::id::TrackId,
+        crate::domains::instrument_card::InstrumentPanel,
+    >,
     param_entry: Option<crate::domains::param_entry::ValueEntry>,
     device_presets: device_presets::DevicePresetRuntime,
     // Plugin GUI support
@@ -155,22 +162,39 @@ mod audio_recording;
 mod audio_settings;
 mod audio_take_finalization;
 mod audio_tasks;
+mod auto_pan_devices;
+mod bitcrush_devices;
 mod bounce;
 mod capture;
+mod card_devices;
 mod compensation;
 mod compressor_devices;
+mod delay_devices;
 mod device_meters;
+mod device_panels;
 pub(crate) mod device_presets;
+mod drive_devices;
+mod drum_kits;
+mod drum_rack_devices;
 mod drum_rack_preparation;
 mod engine_events;
 mod eq_devices;
+mod filter_devices;
+mod fm_devices;
 mod gain_devices;
+mod gate_devices;
+mod instrument_devices;
 mod keyboard;
 mod local_watcher;
 mod menu_lifecycle;
 mod param_entry;
+mod phaser_devices;
+mod reverb_devices;
+mod sampler_devices;
+mod synth_devices;
 mod tasks;
 mod tracked_request;
+mod wavetable_devices;
 
 pub(crate) use audio_tasks::*;
 use drum_rack_preparation::*;
@@ -435,6 +459,10 @@ impl App {
             plugin_load_requests: Default::default(),
             device_meters: Default::default(),
             compressor_devices: Default::default(),
+            filter_panels: Default::default(),
+            gate_panels: Default::default(),
+            card_panels: Default::default(),
+            instrument_panels: Default::default(),
             gain_devices: Default::default(),
             eq_devices: eq_devices::EqDevices {
                 spectrum_rx: eq_spectrum_rx,

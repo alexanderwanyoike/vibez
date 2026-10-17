@@ -5,13 +5,16 @@ use crate::bitcrush::BitcrushEffect;
 use crate::compressor::CompressorEffect;
 use crate::delay::DelayEffect;
 use crate::drive::DriveEffect;
+use crate::echo::EchoEffect;
 use crate::effect::AudioEffect;
 use crate::eq::EqEffect;
 use crate::filter::FilterEffect;
 use crate::gain::GainEffect;
 use crate::gate::GateEffect;
+use crate::limiter::LimiterEffect;
 use crate::phaser::PhaserEffect;
 use crate::reverb::ReverbEffect;
+use crate::saturator::SaturatorEffect;
 
 /// Create an effect instance from its type.
 pub fn create_effect(effect_type: EffectType, sample_rate: f32) -> Box<dyn AudioEffect> {
@@ -20,13 +23,16 @@ pub fn create_effect(effect_type: EffectType, sample_rate: f32) -> Box<dyn Audio
         EffectType::Filter => Box::new(FilterEffect::new(sample_rate)),
         EffectType::Delay => Box::new(DelayEffect::new(sample_rate)),
         EffectType::Reverb => Box::new(ReverbEffect::new(sample_rate)),
-        EffectType::Drive => Box::new(DriveEffect::new()),
-        EffectType::Bitcrush => Box::new(BitcrushEffect::new()),
+        EffectType::Drive => Box::new(DriveEffect::new(sample_rate)),
+        EffectType::Bitcrush => Box::new(BitcrushEffect::with_sample_rate(sample_rate)),
         EffectType::Compressor => Box::new(CompressorEffect::new(sample_rate)),
         EffectType::AutoPan => Box::new(AutoPanEffect::new(sample_rate)),
         EffectType::Gate => Box::new(GateEffect::new(sample_rate)),
         EffectType::Phaser => Box::new(PhaserEffect::new(sample_rate)),
         EffectType::Eq => Box::new(EqEffect::new(sample_rate)),
+        EffectType::Echo => Box::new(EchoEffect::new(sample_rate)),
+        EffectType::Limiter => Box::new(LimiterEffect::new(sample_rate)),
+        EffectType::Saturator => Box::new(SaturatorEffect::new(sample_rate)),
     }
 }
 

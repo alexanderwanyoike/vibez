@@ -1,25 +1,23 @@
 //! Native Compressor cards on the visible device chain: their panel state
 //! and the gain reduction the engine measures for them.
 
-use std::collections::HashMap;
 use std::time::Instant;
 
-use vibez_core::effect::DynamicsMeter;
-use vibez_core::id::{EffectId, TrackId};
+use vibez_core::id::EffectId;
 
-use crate::domains::compressor::{is_native_compressor, CompressorMsg, CompressorPanelState};
+use crate::domains::compressor::{CompressorMsg, CompressorPanelState};
+use crate::domains::device_levels::MeteredPanel;
 
 use super::*;
 
 #[derive(Default)]
 pub(super) struct CompressorDevices {
-    pub panels: HashMap<EffectId, CompressorPanelState>,
-    pub empty_panel: CompressorPanelState,
+    pub panels: super::device_panels::DevicePanels<CompressorPanelState>,
 }
 
 impl CompressorDevices {
     pub fn panel(&self, effect_id: EffectId) -> &CompressorPanelState {
-        self.panels.get(&effect_id).unwrap_or(&self.empty_panel)
+        self.panels.panel(effect_id)
     }
 }
 
@@ -28,46 +26,16 @@ impl App {
         self.compressor_devices
             .panels
             .entry(message.effect_id())
-            .or_default()
             .update(message);
         Task::none()
     }
 
     pub(super) fn poll_compressor_devices(&mut self) {
         let state = &self.state;
-        self.compressor_devices
-            .panels
-            .retain(|id, _| state.has_effect(*id));
+        self.compressor_devices.panels.retain_existing(state);
         let now = Instant::now();
         for panel in self.compressor_devices.panels.values_mut() {
             panel.reset_stale(now);
-        }
-    }
-
-    pub(super) fn accept_device_dynamics(
-        &mut self,
-        track_id: TrackId,
-        effect_id: EffectId,
-        generation: u64,
-        meter: DynamicsMeter,
-    ) {
-        if self.device_meters.channel != Some(track_id)
-            || self.device_meters.generation != generation
-        {
-            return;
-        }
-        let is_compressor = self.state.find_track(track_id).is_some_and(|track| {
-            track
-                .effects
-                .iter()
-                .any(|effect| effect.id == effect_id && is_native_compressor(effect))
-        });
-        if is_compressor {
-            self.compressor_devices
-                .panels
-                .entry(effect_id)
-                .or_default()
-                .accept_dynamics(meter, Instant::now());
         }
     }
 }
@@ -77,7 +45,9 @@ mod tests {
     use super::*;
     use crate::domains::devices::DevicesMsg;
     use crate::state::{DetailPanelTab, ProjectTrack};
+    use vibez_core::effect::DynamicsMeter;
     use vibez_core::effect::EffectType;
+    use vibez_core::id::TrackId;
     use vibez_engine::metering::MeterValues;
 
     fn compressor_app() -> (App, TrackId, EffectId) {
@@ -128,6 +98,6 @@ mod tests {
         let _ = app.update(Message::Compressor(CompressorMsg::ToggleAdvanced(effect)));
         let _ = app.update(Message::Devices(DevicesMsg::RemoveEffect(track, effect)));
         app.poll_compressor_devices();
-        assert!(!app.compressor_devices.panels.contains_key(&effect));
+        assert!(!app.compressor_devices.panels.contains(effect));
     }
 }

@@ -3,15 +3,38 @@
 
 use std::time::Instant;
 
+use vibez_core::effect::DynamicsMeter;
 use vibez_core::id::{EffectId, TrackId};
 use vibez_engine::metering::MeterValues;
 
+use crate::domains::auto_pan::is_native_auto_pan;
+use crate::domains::bitcrush::is_native_bitcrush;
 use crate::domains::compressor::is_native_compressor;
+use crate::domains::delay::is_native_delay;
+use crate::domains::device_levels::MeteredPanel;
+use crate::domains::drive::is_native_drive;
+use crate::domains::echo::is_native_echo;
 use crate::domains::eq::is_native_eq;
+use crate::domains::filter::is_native_filter;
 use crate::domains::gain::is_native_gain;
+use crate::domains::gate::is_native_gate;
+use crate::domains::limiter::is_native_limiter;
+use crate::domains::reverb::is_native_reverb;
+use crate::domains::saturator::is_native_saturator;
 use crate::state::{DetailPanelTab, UiEffect};
 
 use super::*;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Metered {
+    Gain,
+    Eq,
+    Filter,
+    Compressor,
+    Gate,
+    /// A device whose card has only an Advanced switch.
+    Card,
+}
 
 #[derive(Default)]
 pub(super) struct DeviceMeters {
@@ -20,7 +43,19 @@ pub(super) struct DeviceMeters {
 }
 
 fn is_metered(effect: &UiEffect) -> bool {
-    is_native_gain(effect) || is_native_eq(effect) || is_native_compressor(effect)
+    is_native_gain(effect)
+        || is_native_eq(effect)
+        || is_native_compressor(effect)
+        || is_native_limiter(effect)
+        || is_native_filter(effect)
+        || is_native_gate(effect)
+        || is_native_drive(effect)
+        || is_native_saturator(effect)
+        || is_native_bitcrush(effect)
+        || is_native_delay(effect)
+        || is_native_echo(effect)
+        || is_native_reverb(effect)
+        || is_native_auto_pan(effect)
 }
 
 impl App {
@@ -43,6 +78,24 @@ impl App {
             panel.reset_stale(now);
         }
         self.poll_compressor_devices();
+        let state = &self.state;
+        self.filter_panels.retain_existing(state);
+        for panel in self.filter_panels.values_mut() {
+            panel.reset_stale(now);
+        }
+        self.gate_panels.retain_existing(state);
+        for panel in self.gate_panels.values_mut() {
+            panel.reset_stale(now);
+        }
+        self.card_panels.retain_existing(state);
+        self.instrument_panels.retain(|track_id, _| {
+            state
+                .find_track(*track_id)
+                .is_some_and(crate::domains::instrument_card::has_native_instrument)
+        });
+        for panel in self.card_panels.values_mut() {
+            panel.reset_stale(now);
+        }
     }
 
     /// Metering restarts under a new generation after undo or redo (which
@@ -59,6 +112,15 @@ impl App {
         for panel in self.compressor_devices.panels.values_mut() {
             panel.clear_readings();
         }
+        for panel in self.filter_panels.values_mut() {
+            panel.clear_readings();
+        }
+        for panel in self.gate_panels.values_mut() {
+            panel.clear_readings();
+        }
+        for panel in self.card_panels.values_mut() {
+            panel.clear_readings();
+        }
         self.send_command(EngineCommand::SetEffectMeterChannel {
             track_id: self.device_meters.channel,
             generation: self.device_meters.generation,
@@ -71,10 +133,52 @@ impl App {
         self.gain_devices.panels.clear();
         self.eq_devices.panels.clear();
         self.compressor_devices.panels.clear();
+        self.filter_panels.clear();
+        self.gate_panels.clear();
+        self.card_panels.clear();
         self.send_command(EngineCommand::SetEffectMeterChannel {
             track_id: None,
             generation: self.device_meters.generation,
         });
+    }
+
+    /// Which native device a reading is for, if it belongs to the
+    /// visible chain's current metering.
+    fn metered(&self, track_id: TrackId, effect_id: EffectId, generation: u64) -> Option<Metered> {
+        if self.device_meters.channel != Some(track_id)
+            || self.device_meters.generation != generation
+        {
+            return None;
+        }
+        let effect = self
+            .state
+            .find_track(track_id)?
+            .effects
+            .iter()
+            .find(|effect| effect.id == effect_id)?;
+        if is_native_gain(effect) {
+            Some(Metered::Gain)
+        } else if is_native_eq(effect) {
+            Some(Metered::Eq)
+        } else if is_native_filter(effect) {
+            Some(Metered::Filter)
+        } else if is_native_compressor(effect) {
+            Some(Metered::Compressor)
+        } else if is_native_gate(effect) {
+            Some(Metered::Gate)
+        } else if is_native_drive(effect)
+            || is_native_limiter(effect)
+            || is_native_saturator(effect)
+            || is_native_bitcrush(effect)
+            || is_native_delay(effect)
+            || is_native_echo(effect)
+            || is_native_reverb(effect)
+            || is_native_auto_pan(effect)
+        {
+            Some(Metered::Card)
+        } else {
+            None
+        }
     }
 
     pub(super) fn accept_device_meter(
@@ -85,36 +189,63 @@ impl App {
         input: MeterValues,
         output: MeterValues,
     ) {
-        if self.device_meters.channel != Some(track_id)
-            || self.device_meters.generation != generation
-        {
-            return;
+        let now = Instant::now();
+        match self.metered(track_id, effect_id, generation) {
+            Some(Metered::Gain) => self
+                .gain_devices
+                .panels
+                .entry(effect_id)
+                .or_default()
+                .accept_meter(input, output, now),
+            Some(Metered::Eq) => self
+                .eq_devices
+                .panels
+                .entry(effect_id)
+                .accept_levels(input, output, now),
+            Some(Metered::Filter) => self
+                .filter_panels
+                .entry(effect_id)
+                .accept_levels(input, output, now),
+            Some(Metered::Compressor) => self
+                .compressor_devices
+                .panels
+                .entry(effect_id)
+                .accept_levels(input, output, now),
+            Some(Metered::Gate) => self
+                .gate_panels
+                .entry(effect_id)
+                .accept_levels(input, output, now),
+            Some(Metered::Card) => self
+                .card_panels
+                .entry(effect_id)
+                .accept_levels(input, output, now),
+            None => {}
         }
-        let Some(effect) = self
-            .state
-            .find_track(track_id)
-            .and_then(|track| track.effects.iter().find(|effect| effect.id == effect_id))
-        else {
-            return;
-        };
-        if is_native_gain(effect) {
-            self.gain_devices
+    }
+
+    pub(super) fn accept_device_dynamics(
+        &mut self,
+        track_id: TrackId,
+        effect_id: EffectId,
+        generation: u64,
+        meter: DynamicsMeter,
+    ) {
+        let now = Instant::now();
+        match self.metered(track_id, effect_id, generation) {
+            Some(Metered::Compressor) => self
+                .compressor_devices
                 .panels
                 .entry(effect_id)
-                .or_default()
-                .accept_meter(input, output, Instant::now());
-        } else if is_native_eq(effect) {
-            self.eq_devices
-                .panels
+                .accept_dynamics(meter, now),
+            Some(Metered::Gate) => self
+                .gate_panels
                 .entry(effect_id)
-                .or_default()
-                .accept_meter(input, output, Instant::now());
-        } else if is_native_compressor(effect) {
-            self.compressor_devices
-                .panels
+                .accept_dynamics(meter, now),
+            Some(Metered::Card) => self
+                .card_panels
                 .entry(effect_id)
-                .or_default()
-                .accept_levels(input, output, Instant::now());
+                .accept_dynamics(meter, now),
+            _ => {}
         }
     }
 }

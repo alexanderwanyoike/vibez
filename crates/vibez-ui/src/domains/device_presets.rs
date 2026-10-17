@@ -2,14 +2,17 @@
 
 use vibez_core::device_preset::{DevicePreset, DevicePresetKind};
 use vibez_core::effect::EffectType;
-use vibez_core::id::{EffectId, TrackId};
+use vibez_core::id::TrackId;
+use vibez_core::midi::InstrumentKind;
 
+use crate::domains::device_params::{DeviceParams, DeviceSlot};
+#[cfg(test)]
 use crate::state::UiEffect;
 
 #[derive(Debug, Clone)]
 pub enum DevicePresetMsg {
-    Load(TrackId, EffectId),
-    Save(TrackId, EffectId),
+    Load(TrackId, DeviceSlot),
+    Save(TrackId, DeviceSlot),
     Loaded(PresetLoadRequest, Result<Option<DevicePreset>, String>),
     Saved(PresetSaveRequest, Result<Option<DevicePreset>, String>),
 }
@@ -18,7 +21,7 @@ pub enum DevicePresetMsg {
 pub struct PresetSaveRequest {
     pub token: u64,
     pub track_id: TrackId,
-    pub effect_id: EffectId,
+    pub slot: DeviceSlot,
     pub preset: DevicePreset,
 }
 
@@ -26,7 +29,7 @@ pub struct PresetSaveRequest {
 pub struct PresetLoadRequest {
     pub token: u64,
     pub track_id: TrackId,
-    pub effect_id: EffectId,
+    pub slot: DeviceSlot,
     pub expected: DevicePreset,
 }
 
@@ -92,7 +95,388 @@ const COMPRESSOR_KEYS: [(usize, &str, bool); 16] = {
     ]
 };
 
-/// One stored parameter: its index, preset key and whether it is a switch.
+/// Every native Filter parameter; its type, slope, source and sync are
+/// choices.
+const FILTER_KEYS: [(usize, &str, bool); 13] = {
+    use vibez_dsp::filter::param::*;
+    [
+        (CUTOFF, "cutoff_hz", false),
+        (RESONANCE, "resonance_q", false),
+        (MODE, "mode", true),
+        (SLOPE, "slope", true),
+        (DRIVE, "drive_db", false),
+        (MIX, "mix", false),
+        (MOD_SOURCE, "mod_source", true),
+        (RATE, "rate_hz", false),
+        (DEPTH, "depth_octaves", false),
+        (SYNC, "sync", true),
+        (STEREO_PHASE, "stereo_phase_degrees", false),
+        (ENV_ATTACK, "envelope_attack_ms", false),
+        (ENV_RELEASE, "envelope_release_ms", false),
+    ]
+};
+
+/// Native Gate parameters a preset stores: everything but detector
+/// audition, which is a listening aid rather than part of the sound.
+const GATE_KEYS: [(usize, &str, bool); 14] = {
+    use vibez_dsp::gate::param::*;
+    [
+        (THRESHOLD, "threshold_db", false),
+        (ATTACK, "attack_ms", false),
+        (RELEASE, "release_ms", false),
+        (HOLD, "hold_ms", false),
+        (HYSTERESIS, "hysteresis_db", false),
+        (RANGE_ENABLED, "range_enabled", true),
+        (RANGE, "range_db", false),
+        (MODE, "mode", true),
+        (EXPANSION_RATIO, "expansion_ratio", false),
+        (HP_ENABLED, "hp_enabled", true),
+        (HP_FREQUENCY, "hp_frequency_hz", false),
+        (LP_ENABLED, "lp_enabled", true),
+        (LP_FREQUENCY, "lp_frequency_hz", false),
+        (MIX, "mix", false),
+    ]
+};
+
+/// Every native Drive parameter; its character, oversampling and filter
+/// switches are choices.
+const DRIVE_KEYS: [(usize, &str, bool); 10] = {
+    use vibez_dsp::drive::param::*;
+    [
+        (AMOUNT, "amount", false),
+        (TONE, "tone", false),
+        (OUTPUT, "output", false),
+        (MIX, "mix", false),
+        (CHARACTER, "character", true),
+        (QUALITY, "quality", true),
+        (PRE_HP_ENABLED, "pre_hp_enabled", true),
+        (PRE_HP_FREQUENCY, "pre_hp_frequency_hz", false),
+        (POST_LP_ENABLED, "post_lp_enabled", true),
+        (POST_LP_FREQUENCY, "post_lp_frequency_hz", false),
+    ]
+};
+
+/// Every native Bitcrush parameter; its rounding, dither and filter
+/// switches are choices.
+const BITCRUSH_KEYS: [(usize, &str, bool); 9] = {
+    use vibez_dsp::bitcrush::param::*;
+    [
+        (BITS, "bits", false),
+        (SR_REDUCE, "sr_reduce", false),
+        (MIX, "mix", false),
+        (DRIVE_DB, "drive_db", false),
+        (ROUNDING, "rounding", true),
+        (DITHER, "dither", true),
+        (JITTER, "jitter", false),
+        (POST_LP_ENABLED, "post_lp_enabled", true),
+        (POST_LP_HZ, "post_lp_frequency_hz", false),
+    ]
+};
+
+/// Every native Delay parameter; its sync, divisions, modifiers, routing,
+/// link, filter switches and time change are choices.
+const DELAY_KEYS: [(usize, &str, bool); 17] = {
+    use vibez_dsp::delay::param::*;
+    [
+        (TIME_MS, "time_ms", false),
+        (FEEDBACK, "feedback", false),
+        (MIX, "mix", false),
+        (SYNC, "sync", true),
+        (LEFT_DIVISION, "left_division", true),
+        (LEFT_MODIFIER, "left_modifier", true),
+        (ROUTING, "routing", true),
+        (LINK, "link", true),
+        (RIGHT_TIME_MS, "right_time_ms", false),
+        (RIGHT_DIVISION, "right_division", true),
+        (RIGHT_MODIFIER, "right_modifier", true),
+        (FEEDBACK_HP_ENABLED, "feedback_hp_enabled", true),
+        (FEEDBACK_HP_HZ, "feedback_hp_hz", false),
+        (FEEDBACK_LP_ENABLED, "feedback_lp_enabled", true),
+        (FEEDBACK_LP_HZ, "feedback_lp_hz", false),
+        (DUCK, "duck", false),
+        (TIME_CHANGE, "time_change", true),
+    ]
+};
+
+/// Every native Echo parameter.
+const ECHO_KEYS: [(usize, &str, bool); 17] = {
+    use vibez_dsp::echo::param::*;
+    [
+        (TIME_MS, "time_ms", false),
+        (SYNC, "sync", true),
+        (GRID, "grid", true),
+        (FEEDBACK, "feedback", false),
+        (MIX, "mix", false),
+        (MODE, "mode", true),
+        (CHARACTER, "character", false),
+        (TONE, "tone", false),
+        (STYLE, "tape_character", true),
+        (WEAR, "wear", false),
+        (WOW, "wow", false),
+        (FLUTTER, "flutter", false),
+        (SATURATION, "saturation", false),
+        (DIFFUSION, "diffusion", false),
+        (DUCK, "duck", false),
+        (LOW_CUT, "low_cut", false),
+        (HIGH_CUT, "high_cut", false),
+    ]
+};
+
+/// Every native Saturator parameter.
+const SATURATOR_KEYS: [(usize, &str, bool); 15] = {
+    use vibez_dsp::saturator::param::*;
+    [
+        (DRIVE_DB, "drive_db", false),
+        (BIAS, "bias", false),
+        (OUTPUT_DB, "output_db", false),
+        (MIX, "mix", false),
+        (AUTO_GAIN, "auto_gain", true),
+        (SHAPE, "shape", true),
+        (CURVE, "curve", false),
+        (ASYMMETRY, "asymmetry", false),
+        (PRE_FILTER, "pre_filter", true),
+        (POST_FILTER, "post_filter", true),
+        (DC_REMOVAL, "dc_removal", true),
+        (QUALITY, "quality", true),
+        (CUSTOM_LOW, "custom_low_db", false),
+        (CUSTOM_MID, "custom_mid_db", false),
+        (CUSTOM_HIGH, "custom_high_db", false),
+    ]
+};
+
+/// Every native Limiter parameter.
+const LIMITER_KEYS: [(usize, &str, bool); 8] = {
+    use vibez_dsp::limiter::param::*;
+    [
+        (INPUT_DB, "input_db", false),
+        (CEILING_DB, "ceiling_db", false),
+        (RELEASE_MS, "release_ms", false),
+        (STYLE, "style", true),
+        (LOOKAHEAD_MS, "lookahead_ms", false),
+        (STEREO_LINK, "stereo_link", false),
+        (QUALITY, "quality", true),
+        (TRUE_PEAK, "true_peak", true),
+    ]
+};
+
+/// Every native Reverb parameter; its sync and freeze are choices.
+const REVERB_KEYS: [(usize, &str, bool); 10] = {
+    use vibez_dsp::reverb::param::*;
+    [
+        (ROOM_SIZE, "room_size", false),
+        (DAMPING, "damping", false),
+        (MIX, "mix", false),
+        (PREDELAY_MS, "predelay_ms", false),
+        (PREDELAY_SYNC, "predelay_sync", true),
+        (WIDTH, "width", false),
+        (DIFFUSION, "diffusion", false),
+        (LOW_CUT_HZ, "low_cut_hz", false),
+        (HIGH_CUT_HZ, "high_cut_hz", false),
+        (FREEZE, "freeze", true),
+    ]
+};
+
+const PHASER_KEYS: [(usize, &str, bool); 10] = {
+    use vibez_dsp::phaser::param::*;
+    [
+        (RATE, "rate", false),
+        (DEPTH, "depth", false),
+        (FEEDBACK, "feedback", false),
+        (MIX, "mix", false),
+        (CENTRE, "centre", false),
+        (STAGES, "stages", true),
+        (STEREO_PHASE, "stereo_phase", false),
+        (POLARITY, "polarity", true),
+        (SHAPE, "shape", true),
+        (SYNC, "sync", true),
+    ]
+};
+
+/// Shape is stored as it is, since older projects can sit between two
+/// shapes.
+const AUTO_PAN_KEYS: [(usize, &str, bool); 9] = {
+    use vibez_dsp::auto_pan::param::*;
+    [
+        (RATE, "rate", false),
+        (DEPTH, "depth", false),
+        (SHAPE, "shape", false),
+        (MODE, "mode", true),
+        (PHASE, "phase", false),
+        (OFFSET, "offset", false),
+        (SMOOTHING, "smoothing", false),
+        (SYNC, "sync", true),
+        (RETRIGGER, "retrigger", true),
+    ]
+};
+
+/// Every Subtractive Synth control. Shapes, types, modes and counts are
+/// whole.
+/// Every FM Synth parameter, in index order.
+const FM_KEYS: [&str; vibez_instruments::fm::param::COUNT] = [
+    "op_a_ratio",
+    "op_a_fine",
+    "op_a_level",
+    "op_a_feedback",
+    "op_a_key_track",
+    "op_a_attack",
+    "op_a_decay",
+    "op_a_sustain",
+    "op_a_release",
+    "op_b_ratio",
+    "op_b_fine",
+    "op_b_level",
+    "op_b_feedback",
+    "op_b_key_track",
+    "op_b_attack",
+    "op_b_decay",
+    "op_b_sustain",
+    "op_b_release",
+    "op_c_ratio",
+    "op_c_fine",
+    "op_c_level",
+    "op_c_feedback",
+    "op_c_key_track",
+    "op_c_attack",
+    "op_c_decay",
+    "op_c_sustain",
+    "op_c_release",
+    "op_d_ratio",
+    "op_d_fine",
+    "op_d_level",
+    "op_d_feedback",
+    "op_d_key_track",
+    "op_d_attack",
+    "op_d_decay",
+    "op_d_sustain",
+    "op_d_release",
+    "algorithm",
+    "brightness",
+    "decay",
+    "motion",
+    "lfo_shape",
+    "lfo_rate",
+    "lfo_destination",
+    "velocity",
+    "voices",
+    "volume",
+];
+
+/// Every Wavetable Synth parameter, in index order.
+const WAVETABLE_KEYS: [&str; vibez_instruments::wavetable::param::COUNT] = [
+    "osc_a_table",
+    "osc_a_position",
+    "osc_a_warp",
+    "osc_a_detune",
+    "osc_a_unison",
+    "osc_a_level",
+    "osc_a_octave",
+    "osc_b_table",
+    "osc_b_position",
+    "osc_b_warp",
+    "osc_b_detune",
+    "osc_b_unison",
+    "osc_b_level",
+    "osc_b_octave",
+    "filter_type",
+    "cutoff",
+    "resonance",
+    "drive",
+    "attack",
+    "decay",
+    "sustain",
+    "release",
+    "lfo_shape",
+    "lfo_rate",
+    "lfo_amount",
+    "lfo_destination",
+    "env2_attack",
+    "env2_decay",
+    "env2_sustain",
+    "env2_release",
+    "env2_amount",
+    "env2_destination",
+    "voices",
+    "output_db",
+];
+
+const SYNTH_KEYS: [&str; vibez_instruments::synth::param::COUNT] = [
+    "waveform",
+    "attack",
+    "decay",
+    "sustain",
+    "release",
+    "cutoff",
+    "resonance",
+    "volume",
+    "octave",
+    "detune",
+    "waveform_2",
+    "octave_2",
+    "detune_2",
+    "level_2",
+    "sub",
+    "noise",
+    "filter_type",
+    "voice_mode",
+    "voices",
+    "glide",
+    "lfo_shape",
+    "lfo_target",
+    "lfo_rate",
+    "lfo_amount",
+    "filter_env",
+    "filter_attack",
+    "filter_decay",
+    "filter_sustain",
+    "filter_release",
+];
+
+/// How a Sampler plays its sample. The root, trim and loop points belong
+/// to the sample itself, so a preset leaves them where they are.
+const SAMPLER_KEYS: [(usize, &str); 29] = {
+    use vibez_instruments::sampler::param::*;
+    [
+        (ATTACK, "attack"),
+        (DECAY, "decay"),
+        (SUSTAIN, "sustain"),
+        (RELEASE, "release"),
+        (LOOP, "loop"),
+        (ONE_SHOT, "one_shot"),
+        (VOLUME, "volume"),
+        (REVERSE, "reverse"),
+        (CROSSFADE, "crossfade"),
+        (TUNE, "tune"),
+        (FINE, "fine"),
+        (GLIDE, "glide"),
+        (KEY_LOW, "key_low"),
+        (KEY_HIGH, "key_high"),
+        (VELOCITY_LOW, "velocity_low"),
+        (VELOCITY_HIGH, "velocity_high"),
+        (VELOCITY_AMOUNT, "velocity_amount"),
+        (FILTER_TYPE, "filter_type"),
+        (CUTOFF, "cutoff"),
+        (RESONANCE, "resonance"),
+        (FILTER_ENV, "filter_env"),
+        (FILTER_ATTACK, "filter_attack"),
+        (FILTER_DECAY, "filter_decay"),
+        (FILTER_SUSTAIN, "filter_sustain"),
+        (FILTER_RELEASE, "filter_release"),
+        (LFO_SHAPE, "lfo_shape"),
+        (LFO_TARGET, "lfo_target"),
+        (LFO_RATE, "lfo_rate"),
+        (LFO_AMOUNT, "lfo_amount"),
+    ]
+};
+
+fn sampler_keys() -> Vec<PresetParam> {
+    SAMPLER_KEYS
+        .iter()
+        .map(|(index, key)| (*index, *key, vibez_instruments::sampler::is_whole(*index)))
+        .collect()
+}
+
+/// One stored parameter: its index, preset key and whether it only takes
+/// whole numbers, as switches and choices do.
 type PresetParam = (usize, &'static str, bool);
 
 pub struct PresetPresentation {
@@ -103,12 +487,16 @@ pub struct PresetPresentation {
     pub next: Option<DevicePreset>,
 }
 
-pub fn presentation(effect: &UiEffect, remembered: Option<&DevicePreset>) -> PresetPresentation {
-    let presets = factory_presets(effect.effect_type);
+pub fn presentation<'a>(
+    device: impl Into<DeviceParams<'a>>,
+    remembered: Option<&DevicePreset>,
+) -> PresetPresentation {
+    let device = device.into();
+    let presets = presets_for(device.kind);
     let selected = remembered.cloned().or_else(|| {
         presets
             .iter()
-            .find(|preset| prepare_updates(effect, preset).is_ok_and(|updates| updates.is_empty()))
+            .find(|preset| prepare_updates(device, preset).is_ok_and(|updates| updates.is_empty()))
             .cloned()
     });
     let position = selected
@@ -129,7 +517,7 @@ pub fn presentation(effect: &UiEffect, remembered: Option<&DevicePreset>) -> Pre
     let previous = adjacent(false);
     let next = adjacent(true);
     let modified = selected.as_ref().is_some_and(|preset| {
-        prepare_updates(effect, preset).map_or(true, |updates| !updates.is_empty())
+        prepare_updates(device, preset).map_or(true, |updates| !updates.is_empty())
     });
     PresetPresentation {
         options: presets,
@@ -140,34 +528,66 @@ pub fn presentation(effect: &UiEffect, remembered: Option<&DevicePreset>) -> Pre
     }
 }
 
-fn parameter_keys(effect: &UiEffect) -> Result<Vec<PresetParam>, String> {
-    if effect.plugin_ref.is_some() || effect.plugin_name.is_some() {
+fn parameter_keys(device: &DeviceParams) -> Result<Vec<PresetParam>, String> {
+    if device.plugin {
         return Err("Use the plugin's own preset controls for this device".into());
     }
-    match effect.effect_type {
+    let effect_type = match device.kind {
+        DevicePresetKind::Effect(effect_type) => effect_type,
+        DevicePresetKind::Instrument(InstrumentKind::SubtractiveSynth) => {
+            return Ok(synth_keys());
+        }
+        DevicePresetKind::Instrument(InstrumentKind::Sampler) => {
+            return Ok(sampler_keys());
+        }
+        DevicePresetKind::Instrument(InstrumentKind::WavetableSynth) => {
+            return Ok(wavetable_keys());
+        }
+        DevicePresetKind::Instrument(InstrumentKind::FmSynth) => {
+            return Ok(fm_keys());
+        }
+        DevicePresetKind::Instrument(_) => {
+            return Err("Presets are not yet supported by this built-in device".into());
+        }
+    };
+    match effect_type {
         EffectType::Gain => Ok(GAIN_KEYS
             .iter()
             .enumerate()
             .map(|(index, key)| {
-                let switch = vibez_dsp::gain::param::POLARITY.contains(&index);
-                (index, *key, switch)
+                let whole = vibez_dsp::gain::param::POLARITY.contains(&index);
+                (index, *key, whole)
             })
             .collect()),
         EffectType::Eq => Ok(EQ_KEYS.to_vec()),
         EffectType::Compressor => Ok(COMPRESSOR_KEYS.to_vec()),
-        _ => Err("Presets are not yet supported by this built-in device".into()),
+        EffectType::Filter => Ok(FILTER_KEYS.to_vec()),
+        EffectType::Gate => Ok(GATE_KEYS.to_vec()),
+        EffectType::Drive => Ok(DRIVE_KEYS.to_vec()),
+        EffectType::Bitcrush => Ok(BITCRUSH_KEYS.to_vec()),
+        EffectType::Delay => Ok(DELAY_KEYS.to_vec()),
+        EffectType::Echo => Ok(ECHO_KEYS.to_vec()),
+        EffectType::Limiter => Ok(LIMITER_KEYS.to_vec()),
+        EffectType::Saturator => Ok(SATURATOR_KEYS.to_vec()),
+        EffectType::Reverb => Ok(REVERB_KEYS.to_vec()),
+        EffectType::AutoPan => Ok(AUTO_PAN_KEYS.to_vec()),
+        EffectType::Phaser => Ok(PHASER_KEYS.to_vec()),
     }
 }
 
-pub fn capture(effect: &UiEffect, name: &str) -> Result<DevicePreset, String> {
-    let parameters = parameter_keys(effect)?
+pub fn capture<'a>(
+    device: impl Into<DeviceParams<'a>>,
+    name: &str,
+) -> Result<DevicePreset, String> {
+    let device = device.into();
+    let parameters = parameter_keys(&device)?
         .into_iter()
         .map(|(index, key, _)| {
-            let descriptor = effect
+            let descriptor = device
                 .descriptors
                 .get(index)
                 .ok_or_else(|| "The device's parameters are unavailable".to_string())?;
-            let value = effect
+            let value = device
                 .params
                 .get(index)
                 .copied()
@@ -175,44 +595,40 @@ pub fn capture(effect: &UiEffect, name: &str) -> Result<DevicePreset, String> {
             Ok((key.to_owned(), value))
         })
         .collect::<Result<_, String>>()?;
-    DevicePreset::new(
-        DevicePresetKind::Effect(effect.effect_type),
-        name,
-        parameters,
-    )
-    .map_err(|error| error.to_string())
+    DevicePreset::new(device.kind, name, parameters).map_err(|error| error.to_string())
 }
 
-pub fn prepare_updates(
-    effect: &UiEffect,
+pub fn prepare_updates<'a>(
+    device: impl Into<DeviceParams<'a>>,
     preset: &DevicePreset,
 ) -> Result<Vec<(usize, f32)>, String> {
-    let keys = parameter_keys(effect)?;
-    if preset.kind() != DevicePresetKind::Effect(effect.effect_type) {
+    let device = device.into();
+    let keys = parameter_keys(&device)?;
+    if preset.kind() != device.kind {
         return Err("This preset belongs to a different device".into());
     }
     if preset.parameters().len() != keys.len() {
         return Err("The preset does not contain this device's complete parameter set".into());
     }
     let mut updates = Vec::new();
-    for (index, key, switch) in keys {
+    for (index, key, whole) in keys {
         let value = *preset
             .parameters()
             .get(key)
             .ok_or_else(|| format!("The preset is missing parameter {key}"))?;
-        let descriptor = effect
+        let descriptor = device
             .descriptors
             .get(index)
             .ok_or_else(|| "The device's parameters are unavailable".to_string())?;
         if !value.is_finite()
             || !(descriptor.min..=descriptor.max).contains(&value)
-            || (switch && value != 0.0 && value != 1.0)
+            || (whole && value.fract() != 0.0)
         {
             return Err(format!(
                 "Preset parameter {key} is outside its supported range"
             ));
         }
-        if effect
+        if device
             .params
             .get(index)
             .copied()
@@ -225,12 +641,575 @@ pub fn prepare_updates(
     Ok(updates)
 }
 
+/// Every built-in device's factory presets, by kind.
+pub fn presets_for(kind: DevicePresetKind) -> Vec<DevicePreset> {
+    match kind {
+        DevicePresetKind::Effect(effect_type) => factory_presets(effect_type),
+        DevicePresetKind::Instrument(InstrumentKind::SubtractiveSynth) => synth_factory_presets(),
+        DevicePresetKind::Instrument(InstrumentKind::Sampler) => sampler_factory_presets(),
+        DevicePresetKind::Instrument(InstrumentKind::WavetableSynth) => wavetable_factory_presets(),
+        DevicePresetKind::Instrument(InstrumentKind::FmSynth) => fm_factory_presets(),
+        DevicePresetKind::Instrument(_) => Vec::new(),
+    }
+}
+
+fn sampler_factory_presets() -> Vec<DevicePreset> {
+    use vibez_instruments::sampler::filter_type;
+    use vibez_instruments::synth::{lfo_shape, lfo_target};
+    let presets: [(&str, &[(&str, f32)]); 9] = [
+        ("Init", &[]),
+        (
+            "Warm Rhodes",
+            &[
+                ("attack", 0.012),
+                ("decay", 0.18),
+                ("sustain", 0.5),
+                ("release", 1.2),
+                ("volume", 0.7),
+                ("filter_type", filter_type::LP24 as f32),
+                ("cutoff", 3_200.0),
+                ("filter_env", 1.5),
+                ("filter_decay", 0.4),
+                ("velocity_amount", 0.7),
+            ],
+        ),
+        (
+            "Pluck",
+            &[
+                ("decay", 0.25),
+                ("sustain", 0.0),
+                ("release", 0.15),
+                ("filter_type", filter_type::LP12 as f32),
+                ("cutoff", 900.0),
+                ("resonance", 1.5),
+                ("filter_env", 3.0),
+                ("filter_decay", 0.15),
+            ],
+        ),
+        (
+            "Looped Pad",
+            &[
+                ("loop", 1.0),
+                ("crossfade", 40.0),
+                ("attack", 0.4),
+                ("release", 2.0),
+                ("filter_type", filter_type::LP12 as f32),
+                ("cutoff", 2_500.0),
+                ("lfo_rate", 0.3),
+                ("lfo_amount", 0.15),
+            ],
+        ),
+        (
+            "Reverse Swell",
+            &[("reverse", 1.0), ("attack", 1.0), ("release", 0.4)],
+        ),
+        (
+            "One-shot Hit",
+            &[
+                ("one_shot", 1.0),
+                ("release", 0.05),
+                ("velocity_amount", 0.6),
+            ],
+        ),
+        (
+            "Lo-Fi",
+            &[
+                ("filter_type", filter_type::LP12 as f32),
+                ("cutoff", 2_200.0),
+                ("resonance", 1.2),
+                ("fine", -15.0),
+                ("lfo_target", lfo_target::PITCH as f32),
+                ("lfo_rate", 0.7),
+                ("lfo_amount", 0.008),
+            ],
+        ),
+        (
+            "Wobble",
+            &[
+                ("loop", 1.0),
+                ("crossfade", 20.0),
+                ("filter_type", filter_type::LP24 as f32),
+                ("cutoff", 400.0),
+                ("resonance", 3.0),
+                ("lfo_rate", 3.0),
+                ("lfo_amount", 0.6),
+            ],
+        ),
+        (
+            "Tremolo",
+            &[
+                ("lfo_shape", lfo_shape::TRIANGLE as f32),
+                ("lfo_target", lfo_target::VOLUME as f32),
+                ("lfo_rate", 5.0),
+                ("lfo_amount", 0.5),
+            ],
+        ),
+    ];
+    keyed_presets(
+        DevicePresetKind::Instrument(InstrumentKind::Sampler),
+        &sampler_keys(),
+        vibez_instruments::sampler::SAMPLER_PARAMS,
+        &presets,
+    )
+}
+
+fn wavetable_keys() -> Vec<PresetParam> {
+    WAVETABLE_KEYS
+        .iter()
+        .enumerate()
+        .map(|(index, key)| (index, *key, vibez_instruments::wavetable::is_whole(index)))
+        .collect()
+}
+
+fn wavetable_factory_presets() -> Vec<DevicePreset> {
+    use vibez_instruments::wavetable::{dest, filter_type, lfo_shape};
+    use vibez_instruments::wavetables::table;
+    let presets: [(&str, &[(&str, f32)]); 8] = [
+        ("Init", &[]),
+        (
+            "Glass Motion",
+            &[
+                ("osc_a_table", table::HARMONIC as f32),
+                ("osc_a_position", 0.42),
+                ("osc_a_warp", 0.18),
+                ("osc_a_detune", 9.0),
+                ("osc_a_unison", 4.0),
+                ("osc_b_table", table::BASIC_SHAPES as f32),
+                ("osc_b_position", 0.42),
+                ("osc_b_warp", 0.18),
+                ("osc_b_detune", 9.0),
+                ("osc_b_unison", 4.0),
+                ("osc_b_level", 0.5),
+                ("cutoff", 2_400.0),
+                ("resonance", 0.32),
+                ("drive", 0.06),
+                ("decay", 0.28),
+                ("sustain", 0.62),
+                ("release", 0.76),
+                ("lfo_amount", 0.24),
+                ("env2_amount", 0.46),
+                ("env2_destination", dest::CUTOFF as f32),
+            ],
+        ),
+        (
+            "Supersaw",
+            &[
+                ("osc_a_table", table::BASIC_SHAPES as f32),
+                ("osc_a_unison", 7.0),
+                ("osc_a_detune", 25.0),
+                ("osc_b_position", 0.66),
+                ("osc_b_table", table::BASIC_SHAPES as f32),
+                ("osc_b_octave", -1.0),
+                ("osc_b_level", 0.4),
+                ("cutoff", 6_000.0),
+                ("release", 0.5),
+            ],
+        ),
+        (
+            "Vowel Pad",
+            &[
+                ("osc_a_table", table::FORMANT as f32),
+                ("osc_a_position", 0.2),
+                ("osc_a_unison", 3.0),
+                ("osc_a_detune", 12.0),
+                ("lfo_shape", lfo_shape::TRIANGLE as f32),
+                ("lfo_rate", 0.2),
+                ("lfo_amount", 0.6),
+                ("lfo_destination", dest::OSC_A_POSITION as f32),
+                ("attack", 0.6),
+                ("release", 1.8),
+            ],
+        ),
+        (
+            "Pluck",
+            &[
+                ("osc_a_table", table::HARMONIC as f32),
+                ("osc_a_position", 0.8),
+                ("cutoff", 400.0),
+                ("resonance", 0.25),
+                ("sustain", 0.0),
+                ("decay", 0.6),
+                ("release", 0.4),
+                ("env2_amount", 0.8),
+                ("env2_decay", 0.25),
+            ],
+        ),
+        (
+            "Sync Bass",
+            &[
+                ("osc_a_table", table::SYNC as f32),
+                ("osc_a_position", 0.35),
+                ("osc_a_octave", -1.0),
+                ("filter_type", filter_type::LP24 as f32),
+                ("cutoff", 1_200.0),
+                ("drive", 0.3),
+                ("env2_amount", 0.5),
+                ("env2_destination", dest::OSC_A_POSITION as f32),
+                ("voices", 1.0),
+            ],
+        ),
+        (
+            "Bell",
+            &[
+                ("osc_a_table", table::HARMONIC as f32),
+                ("osc_a_position", 0.3),
+                ("osc_a_warp", 0.5),
+                ("osc_b_table", table::HARMONIC as f32),
+                ("osc_b_position", 0.7),
+                ("osc_b_octave", 2.0),
+                ("osc_b_level", 0.3),
+                ("sustain", 0.0),
+                ("decay", 1.8),
+                ("release", 1.8),
+            ],
+        ),
+        (
+            "Pulse Lead",
+            &[
+                ("osc_a_table", table::PULSE as f32),
+                ("osc_a_position", 0.3),
+                ("lfo_rate", 5.0),
+                ("lfo_amount", 0.15),
+                ("lfo_destination", dest::OSC_A_POSITION as f32),
+                ("cutoff", 5_000.0),
+                ("voices", 1.0),
+            ],
+        ),
+    ];
+    keyed_presets(
+        DevicePresetKind::Instrument(InstrumentKind::WavetableSynth),
+        &wavetable_keys(),
+        vibez_instruments::wavetable::WAVETABLE_PARAMS,
+        &presets,
+    )
+}
+
+fn fm_keys() -> Vec<PresetParam> {
+    FM_KEYS
+        .iter()
+        .enumerate()
+        .map(|(index, key)| (index, *key, vibez_instruments::fm::is_whole(index)))
+        .collect()
+}
+
+fn fm_factory_presets() -> Vec<DevicePreset> {
+    use vibez_instruments::fm::{dest, lfo_shape};
+    let presets: [(&str, &[(&str, f32)]); 8] = [
+        ("Init", &[]),
+        (
+            "Bell Keys",
+            &[
+                ("op_a_decay", 1.6),
+                ("op_a_sustain", 0.0),
+                ("op_a_release", 0.9),
+                ("op_b_ratio", 2.0),
+                ("op_b_level", -6.0),
+                ("op_b_key_track", 0.5),
+                ("op_b_attack", 0.15),
+                ("op_b_decay", 0.5),
+                ("op_b_sustain", 0.0),
+                ("op_c_ratio", 3.0),
+                ("op_c_level", -12.0),
+                ("op_c_decay", 0.4),
+                ("op_c_sustain", 0.0),
+                ("op_d_level", -18.0),
+                ("op_d_feedback", 0.3),
+                ("op_d_decay", 0.3),
+                ("op_d_sustain", 0.0),
+                ("brightness", 0.68),
+                ("decay", 0.35),
+                ("motion", 0.42),
+                ("lfo_rate", 0.4),
+            ],
+        ),
+        (
+            "Electric Piano",
+            &[
+                ("algorithm", 4.0),
+                ("op_a_decay", 2.5),
+                ("op_a_sustain", 0.15),
+                ("op_a_release", 0.4),
+                ("op_b_level", -14.0),
+                ("op_b_decay", 1.0),
+                ("op_b_sustain", 0.0),
+                ("op_c_level", -8.0),
+                ("op_c_decay", 2.5),
+                ("op_c_sustain", 0.15),
+                ("op_c_release", 0.4),
+                ("op_d_ratio", 14.0),
+                ("op_d_level", -26.0),
+                ("op_d_decay", 0.3),
+                ("op_d_sustain", 0.0),
+                ("velocity", 0.8),
+            ],
+        ),
+        (
+            "FM Bass",
+            &[
+                ("op_a_decay", 0.8),
+                ("op_a_sustain", 0.6),
+                ("op_a_release", 0.1),
+                ("op_b_level", -6.0),
+                ("op_b_feedback", 0.4),
+                ("op_b_decay", 0.25),
+                ("op_b_sustain", 0.1),
+                ("brightness", 0.6),
+                ("voices", 1.0),
+            ],
+        ),
+        (
+            "Brass",
+            &[
+                ("op_a_attack", 0.05),
+                ("op_a_sustain", 0.9),
+                ("op_a_release", 0.25),
+                ("op_b_level", -8.0),
+                ("op_b_feedback", 0.3),
+                ("op_b_attack", 0.08),
+                ("op_b_decay", 0.3),
+                ("op_b_sustain", 0.6),
+                ("motion", 0.1),
+                ("lfo_destination", dest::PITCH as f32),
+            ],
+        ),
+        (
+            "Pluck",
+            &[
+                ("algorithm", 1.0),
+                ("op_a_decay", 0.4),
+                ("op_a_sustain", 0.0),
+                ("op_b_ratio", 2.0),
+                ("op_b_level", -10.0),
+                ("op_b_decay", 0.15),
+                ("op_b_sustain", 0.0),
+                ("op_c_ratio", 5.0),
+                ("op_c_level", -24.0),
+                ("op_c_decay", 0.08),
+                ("op_c_sustain", 0.0),
+            ],
+        ),
+        (
+            "Organ",
+            &[
+                ("algorithm", 7.0),
+                ("op_a_ratio", 0.5),
+                ("op_a_sustain", 1.0),
+                ("op_a_release", 0.1),
+                ("op_b_level", -3.0),
+                ("op_b_sustain", 1.0),
+                ("op_b_release", 0.1),
+                ("op_c_ratio", 2.0),
+                ("op_c_level", -6.0),
+                ("op_c_sustain", 1.0),
+                ("op_c_release", 0.1),
+                ("op_d_ratio", 3.0),
+                ("op_d_level", -9.0),
+                ("op_d_sustain", 1.0),
+                ("op_d_release", 0.1),
+                ("motion", 0.12),
+                ("lfo_rate", 6.0),
+                ("lfo_destination", dest::VOLUME as f32),
+            ],
+        ),
+        (
+            "Metal Pad",
+            &[
+                ("algorithm", 5.0),
+                ("op_a_attack", 0.8),
+                ("op_a_sustain", 0.8),
+                ("op_a_release", 2.0),
+                ("op_b_fine", 0.01),
+                ("op_b_level", -3.0),
+                ("op_b_attack", 0.8),
+                ("op_b_sustain", 0.8),
+                ("op_b_release", 2.0),
+                ("op_c_ratio", 2.0),
+                ("op_c_level", -6.0),
+                ("op_c_attack", 0.8),
+                ("op_c_sustain", 0.8),
+                ("op_c_release", 2.0),
+                ("op_d_ratio", 3.5),
+                ("op_d_fine", 0.07),
+                ("op_d_level", -12.0),
+                ("op_d_attack", 1.5),
+                ("op_d_sustain", 0.8),
+                ("op_d_release", 2.0),
+                ("motion", 0.3),
+                ("lfo_rate", 0.3),
+                ("lfo_shape", lfo_shape::TRIANGLE as f32),
+            ],
+        ),
+    ];
+    keyed_presets(
+        DevicePresetKind::Instrument(InstrumentKind::FmSynth),
+        &fm_keys(),
+        vibez_instruments::fm::FM_PARAMS,
+        &presets,
+    )
+}
+
+fn synth_keys() -> Vec<PresetParam> {
+    SYNTH_KEYS
+        .iter()
+        .enumerate()
+        .map(|(index, key)| (index, *key, vibez_instruments::synth::is_whole(index)))
+        .collect()
+}
+
+fn synth_factory_presets() -> Vec<DevicePreset> {
+    use vibez_instruments::synth::{filter_type, lfo_shape, lfo_target, voice_mode, Waveform};
+    let wave = |waveform: Waveform| waveform as usize as f32;
+    let presets: [(&str, &[(&str, f32)]); 9] = [
+        ("Init", &[]),
+        (
+            "Soft Analog",
+            &[
+                ("waveform_2", wave(Waveform::Triangle)),
+                ("octave_2", -1.0),
+                ("level_2", 0.6),
+                ("sub", 0.25),
+                ("noise", 0.063),
+                ("filter_type", filter_type::LP24 as f32),
+                ("cutoff", 2_400.0),
+                ("resonance", 1.5),
+                ("attack", 0.012),
+                ("decay", 0.24),
+                ("sustain", 0.68),
+                ("release", 0.42),
+                ("lfo_amount", 0.35),
+                ("volume", 0.5),
+            ],
+        ),
+        (
+            "Pluck",
+            &[
+                ("filter_type", filter_type::LP24 as f32),
+                ("cutoff", 600.0),
+                ("resonance", 2.0),
+                ("filter_env", 3.5),
+                ("filter_decay", 0.18),
+                ("attack", 0.002),
+                ("decay", 0.35),
+                ("sustain", 0.0),
+                ("release", 0.2),
+            ],
+        ),
+        (
+            "Warm Bass",
+            &[
+                ("waveform_2", wave(Waveform::Square)),
+                ("octave_2", -1.0),
+                ("level_2", 0.4),
+                ("sub", 0.6),
+                ("filter_type", filter_type::LP24 as f32),
+                ("cutoff", 400.0),
+                ("resonance", 1.2),
+                ("filter_env", 2.0),
+                ("filter_decay", 0.25),
+                ("voice_mode", voice_mode::MONO as f32),
+                ("glide", 40.0),
+                ("attack", 0.003),
+                ("decay", 0.3),
+                ("sustain", 0.8),
+                ("release", 0.1),
+            ],
+        ),
+        (
+            "Legato Lead",
+            &[
+                ("waveform_2", wave(Waveform::Saw)),
+                ("detune_2", 0.12),
+                ("level_2", 0.8),
+                ("cutoff", 3_000.0),
+                ("resonance", 2.0),
+                ("voice_mode", voice_mode::LEGATO as f32),
+                ("glide", 80.0),
+                ("lfo_target", lfo_target::PITCH as f32),
+                ("lfo_rate", 5.5),
+                ("lfo_amount", 0.02),
+                ("release", 0.25),
+            ],
+        ),
+        (
+            "Slow Pad",
+            &[
+                ("waveform_2", wave(Waveform::Saw)),
+                ("detune_2", -0.1),
+                ("level_2", 1.0),
+                ("cutoff", 1_800.0),
+                ("attack", 0.8),
+                ("decay", 1.0),
+                ("sustain", 0.8),
+                ("release", 2.5),
+                ("lfo_rate", 0.3),
+                ("lfo_amount", 0.2),
+                ("volume", 0.5),
+            ],
+        ),
+        (
+            "Wobble Bass",
+            &[
+                ("sub", 0.5),
+                ("filter_type", filter_type::LP24 as f32),
+                ("cutoff", 300.0),
+                ("resonance", 4.0),
+                ("voice_mode", voice_mode::MONO as f32),
+                ("lfo_rate", 3.0),
+                ("lfo_amount", 0.6),
+            ],
+        ),
+        (
+            "Square Keys",
+            &[
+                ("waveform", wave(Waveform::Square)),
+                ("cutoff", 2_500.0),
+                ("filter_env", 1.5),
+                ("filter_decay", 0.4),
+                ("attack", 0.002),
+                ("decay", 0.6),
+                ("sustain", 0.3),
+            ],
+        ),
+        (
+            "Noise Sweep",
+            &[
+                ("waveform", wave(Waveform::Sine)),
+                ("noise", 1.0),
+                ("filter_type", filter_type::BP12 as f32),
+                ("cutoff", 800.0),
+                ("resonance", 5.0),
+                ("lfo_shape", lfo_shape::TRIANGLE as f32),
+                ("lfo_rate", 0.2),
+                ("lfo_amount", 0.7),
+                ("attack", 0.5),
+                ("release", 1.5),
+            ],
+        ),
+    ];
+    keyed_presets(
+        DevicePresetKind::Instrument(InstrumentKind::SubtractiveSynth),
+        &synth_keys(),
+        vibez_instruments::synth::SYNTH_PARAMS,
+        &presets,
+    )
+}
+
 pub fn factory_presets(effect_type: EffectType) -> Vec<DevicePreset> {
     match effect_type {
         EffectType::Gain => gain_factory_presets(),
         EffectType::Eq => eq_factory_presets(),
         EffectType::Compressor => compressor_factory_presets(),
-        _ => Vec::new(),
+        EffectType::Filter => filter_factory_presets(),
+        EffectType::Gate => gate_factory_presets(),
+        EffectType::Drive => drive_factory_presets(),
+        EffectType::Bitcrush => bitcrush_factory_presets(),
+        EffectType::Delay => delay_factory_presets(),
+        EffectType::Echo => echo_factory_presets(),
+        EffectType::Limiter => limiter_factory_presets(),
+        EffectType::Saturator => saturator_factory_presets(),
+        EffectType::Reverb => reverb_factory_presets(),
+        EffectType::AutoPan => auto_pan_factory_presets(),
+        EffectType::Phaser => phaser_factory_presets(),
     }
 }
 
@@ -366,7 +1345,12 @@ fn eq_factory_presets() -> Vec<DevicePreset> {
             ],
         ),
     ];
-    keyed_presets(EffectType::Eq, &EQ_KEYS, vibez_dsp::eq::EQ_PARAMS, &presets)
+    keyed_presets(
+        DevicePresetKind::Effect(EffectType::Eq),
+        &EQ_KEYS,
+        vibez_dsp::eq::EQ_PARAMS,
+        &presets,
+    )
 }
 
 /// Starting points for common dynamics jobs, after Sol's tuning.
@@ -466,16 +1450,956 @@ fn compressor_factory_presets() -> Vec<DevicePreset> {
         ),
     ];
     keyed_presets(
-        EffectType::Compressor,
+        DevicePresetKind::Effect(EffectType::Compressor),
         &COMPRESSOR_KEYS,
         vibez_dsp::compressor::COMPRESSOR_PARAMS,
         &presets,
     )
 }
 
+/// Sol's starting points, with Gentle Sweep moving as its name and the
+/// concept say.
+fn filter_factory_presets() -> Vec<DevicePreset> {
+    let presets: [(&str, &[(&str, f32)]); 8] = [
+        ("Init", &[]),
+        (
+            "Gentle Sweep",
+            &[
+                ("cutoff_hz", 1200.0),
+                ("slope", 1.0),
+                ("mod_source", 1.0),
+                ("sync", 3.0),
+                ("depth_octaves", 1.1),
+            ],
+        ),
+        (
+            "Subsonic Cut",
+            &[("cutoff_hz", 80.0), ("mode", 1.0), ("slope", 1.0)],
+        ),
+        (
+            "Telephone",
+            &[
+                ("resonance_q", 0.5),
+                ("mode", 2.0),
+                ("drive_db", 2.0),
+                ("mix", 0.8),
+            ],
+        ),
+        (
+            "Resonant Edge",
+            &[("cutoff_hz", 2200.0), ("resonance_q", 3.0)],
+        ),
+        (
+            "Hum Notch",
+            &[
+                ("cutoff_hz", 50.0),
+                ("resonance_q", 5.0),
+                ("mode", 3.0),
+                ("slope", 1.0),
+            ],
+        ),
+        (
+            "Envelope Wah",
+            &[
+                ("cutoff_hz", 400.0),
+                ("resonance_q", 1.0),
+                ("slope", 1.0),
+                ("mod_source", 2.0),
+                ("depth_octaves", 3.0),
+                ("envelope_release_ms", 200.0),
+            ],
+        ),
+        (
+            "Stereo Eighths",
+            &[
+                ("cutoff_hz", 1800.0),
+                ("resonance_q", 0.9),
+                ("slope", 1.0),
+                ("mod_source", 1.0),
+                ("depth_octaves", 2.0),
+                ("sync", 4.0),
+                ("stereo_phase_degrees", 90.0),
+            ],
+        ),
+    ];
+    keyed_presets(
+        DevicePresetKind::Effect(EffectType::Filter),
+        &FILTER_KEYS,
+        vibez_dsp::filter::FILTER_PARAMS,
+        &presets,
+    )
+}
+
+/// Sol's starting points for drums, vocals and keyed gating.
+fn gate_factory_presets() -> Vec<DevicePreset> {
+    let presets: [(&str, &[(&str, f32)]); 8] = [
+        ("Init", &[]),
+        (
+            "Tight Drums",
+            &[
+                ("threshold_db", -32.0),
+                ("hold_ms", 60.0),
+                ("release_ms", 120.0),
+                ("hysteresis_db", 6.0),
+                ("range_enabled", 1.0),
+                ("range_db", 60.0),
+            ],
+        ),
+        (
+            "Gentle Cleanup",
+            &[
+                ("threshold_db", -48.0),
+                ("attack_ms", 3.0),
+                ("hold_ms", 30.0),
+                ("release_ms", 180.0),
+                ("hysteresis_db", 4.0),
+                ("range_enabled", 1.0),
+                ("range_db", 18.0),
+            ],
+        ),
+        (
+            "Snare Body",
+            &[
+                ("threshold_db", -28.0),
+                ("attack_ms", 0.5),
+                ("hold_ms", 85.0),
+                ("release_ms", 170.0),
+                ("hysteresis_db", 5.0),
+                ("hp_enabled", 1.0),
+                ("hp_frequency_hz", 160.0),
+                ("lp_enabled", 1.0),
+                ("lp_frequency_hz", 6000.0),
+                ("range_enabled", 1.0),
+                ("range_db", 48.0),
+            ],
+        ),
+        (
+            "Short Percussion",
+            &[
+                ("threshold_db", -34.0),
+                ("attack_ms", 0.2),
+                ("hold_ms", 12.0),
+                ("release_ms", 35.0),
+                ("hysteresis_db", 3.0),
+                ("range_enabled", 1.0),
+                ("range_db", 72.0),
+            ],
+        ),
+        (
+            "Vocal Expander",
+            &[
+                ("threshold_db", -42.0),
+                ("attack_ms", 4.0),
+                ("hold_ms", 35.0),
+                ("release_ms", 210.0),
+                ("hysteresis_db", 2.0),
+                ("mode", 1.0),
+                ("expansion_ratio", 2.0),
+                ("range_enabled", 1.0),
+                ("range_db", 15.0),
+                ("hp_enabled", 1.0),
+                ("hp_frequency_hz", 100.0),
+            ],
+        ),
+        (
+            "External Trigger",
+            &[
+                ("threshold_db", -24.0),
+                ("attack_ms", 0.2),
+                ("hold_ms", 45.0),
+                ("release_ms", 90.0),
+                ("hysteresis_db", 4.0),
+                ("hp_enabled", 1.0),
+                ("hp_frequency_hz", 40.0),
+                ("lp_enabled", 1.0),
+                ("lp_frequency_hz", 1800.0),
+            ],
+        ),
+        (
+            "Soft Floor",
+            &[
+                ("threshold_db", -38.0),
+                ("attack_ms", 8.0),
+                ("hold_ms", 20.0),
+                ("release_ms", 250.0),
+                ("hysteresis_db", 5.0),
+                ("range_enabled", 1.0),
+                ("range_db", 12.0),
+            ],
+        ),
+    ];
+    keyed_presets(
+        DevicePresetKind::Effect(EffectType::Gate),
+        &GATE_KEYS,
+        vibez_dsp::gate::GATE_PARAMS,
+        &presets,
+    )
+}
+
+/// Sol's starting points, his drive amounts given as dB of gain into the
+/// shaper.
+fn drive_factory_presets() -> Vec<DevicePreset> {
+    use vibez_dsp::drive::character::{HARD, SOFT, WARM};
+    let amount =
+        |db: f32| vibez_dsp::drive::amount_for_gain(vibez_core::level::db_to_amplitude(db));
+    let level = vibez_core::level::db_to_amplitude;
+    let presets: [(&str, Vec<(&str, f32)>); 8] = [
+        ("Init", vec![]),
+        (
+            "Warm Edge",
+            vec![
+                ("character", SOFT as f32),
+                ("amount", amount(6.0)),
+                ("tone", 0.55),
+                ("output", level(-3.0)),
+                ("mix", 0.8),
+            ],
+        ),
+        (
+            "Drum Bite",
+            vec![
+                ("character", WARM as f32),
+                ("amount", amount(16.0)),
+                ("tone", 0.6),
+                ("output", level(-6.0)),
+                ("mix", 0.7),
+                ("pre_hp_enabled", 1.0),
+                ("pre_hp_frequency_hz", 40.0),
+                ("post_lp_enabled", 1.0),
+                ("post_lp_frequency_hz", 16_000.0),
+            ],
+        ),
+        (
+            "Soft Bass",
+            vec![
+                ("character", SOFT as f32),
+                ("amount", amount(10.0)),
+                ("tone", 0.38),
+                ("output", level(-4.0)),
+                ("pre_hp_enabled", 1.0),
+                ("pre_hp_frequency_hz", 25.0),
+                ("post_lp_enabled", 1.0),
+                ("post_lp_frequency_hz", 8_000.0),
+            ],
+        ),
+        (
+            "Bright Percussion",
+            vec![
+                ("character", SOFT as f32),
+                ("amount", amount(12.0)),
+                ("tone", 0.65),
+                ("output", level(-5.0)),
+                ("mix", 0.6),
+                ("pre_hp_enabled", 1.0),
+                ("pre_hp_frequency_hz", 120.0),
+                ("post_lp_enabled", 1.0),
+                ("post_lp_frequency_hz", 18_000.0),
+            ],
+        ),
+        (
+            "Parallel Crunch",
+            vec![
+                ("character", HARD as f32),
+                ("amount", amount(24.0)),
+                ("tone", 0.55),
+                ("output", level(-8.0)),
+                ("mix", 0.35),
+                ("pre_hp_enabled", 1.0),
+                ("pre_hp_frequency_hz", 80.0),
+                ("post_lp_enabled", 1.0),
+                ("post_lp_frequency_hz", 10_000.0),
+            ],
+        ),
+        (
+            "Controlled Hard",
+            vec![
+                ("character", HARD as f32),
+                ("amount", amount(18.0)),
+                ("output", level(-6.0)),
+                ("pre_hp_enabled", 1.0),
+                ("pre_hp_frequency_hz", 40.0),
+                ("post_lp_enabled", 1.0),
+                ("post_lp_frequency_hz", 8_500.0),
+            ],
+        ),
+        (
+            "Edge Lead",
+            vec![
+                ("character", WARM as f32),
+                ("amount", amount(14.0)),
+                ("tone", 0.6),
+                ("output", level(-5.0)),
+                ("mix", 0.85),
+                ("pre_hp_enabled", 1.0),
+                ("pre_hp_frequency_hz", 100.0),
+                ("post_lp_enabled", 1.0),
+                ("post_lp_frequency_hz", 14_000.0),
+            ],
+        ),
+    ];
+    let presets: Vec<(&str, &[(&str, f32)])> = presets
+        .iter()
+        .map(|(name, changes)| (*name, changes.as_slice()))
+        .collect();
+    keyed_presets(
+        DevicePresetKind::Effect(EffectType::Drive),
+        &DRIVE_KEYS,
+        vibez_dsp::drive::DRIVE_PARAMS,
+        &presets,
+    )
+}
+
+/// Sol's lo-fi starting points; the rates are dividers of the host rate.
+fn bitcrush_factory_presets() -> Vec<DevicePreset> {
+    let presets: [(&str, &[(&str, f32)]); 8] = [
+        ("Init", &[]),
+        (
+            "Crunchy 12",
+            &[
+                ("bits", 12.0),
+                ("sr_reduce", 4.0),
+                ("mix", 0.65),
+                ("drive_db", 2.0),
+            ],
+        ),
+        (
+            "Drum Crunch",
+            &[
+                ("bits", 8.0),
+                ("sr_reduce", 3.0),
+                ("mix", 0.55),
+                ("drive_db", 6.0),
+            ],
+        ),
+        (
+            "Dusty Bass",
+            &[
+                ("sr_reduce", 6.0),
+                ("mix", 0.7),
+                ("drive_db", 3.0),
+                ("post_lp_enabled", 1.0),
+                ("post_lp_frequency_hz", 3500.0),
+            ],
+        ),
+        (
+            "Pocket Sampler",
+            &[("bits", 8.0), ("sr_reduce", 4.0), ("dither", 1.0)],
+        ),
+        (
+            "Broken Clock",
+            &[
+                ("bits", 12.0),
+                ("sr_reduce", 8.0),
+                ("mix", 0.75),
+                ("drive_db", 2.0),
+                ("jitter", 0.35),
+                ("post_lp_enabled", 1.0),
+                ("post_lp_frequency_hz", 6000.0),
+            ],
+        ),
+        (
+            "Parallel Arcade",
+            &[
+                ("bits", 4.0),
+                ("sr_reduce", 10.0),
+                ("mix", 0.3),
+                ("drive_db", 8.0),
+                ("rounding", 2.0),
+            ],
+        ),
+        (
+            "Digital Air",
+            &[("bits", 6.0), ("mix", 0.2), ("dither", 1.0)],
+        ),
+    ];
+    keyed_presets(
+        DevicePresetKind::Effect(EffectType::Bitcrush),
+        &BITCRUSH_KEYS,
+        vibez_dsp::bitcrush::BITCRUSH_PARAMS,
+        &presets,
+    )
+}
+
+/// Sol's echoes, from a short slap to a long space.
+fn echo_factory_presets() -> Vec<DevicePreset> {
+    let presets: [(&str, &[(&str, f32)]); 8] = [
+        ("Init", &[]),
+        (
+            "Worn Tape",
+            &[
+                ("character", 0.55),
+                ("tone", 0.4),
+                ("wear", 0.45),
+                ("wow", 0.2),
+                ("flutter", 0.12),
+                ("saturation", 0.25),
+                ("high_cut", 4500.0),
+            ],
+        ),
+        (
+            "Clean Slap",
+            &[
+                ("tape_character", 0.0),
+                ("sync", 0.0),
+                ("time_ms", 110.0),
+                ("feedback", 0.15),
+                ("mix", 0.2),
+                ("low_cut", 120.0),
+                ("high_cut", 12000.0),
+            ],
+        ),
+        (
+            "Dub Space",
+            &[
+                ("mode", 1.0),
+                ("feedback", 0.7),
+                ("mix", 0.3),
+                ("tone", 0.35),
+                ("saturation", 0.3),
+                ("duck", 0.35),
+                ("low_cut", 250.0),
+                ("high_cut", 3500.0),
+            ],
+        ),
+        (
+            "Diffuse Wash",
+            &[
+                ("tape_character", 2.0),
+                ("grid", 16.0),
+                ("feedback", 0.65),
+                ("character", 0.6),
+                ("diffusion", 0.7),
+                ("mix", 0.35),
+                ("high_cut", 7000.0),
+            ],
+        ),
+        (
+            "Cassette Eighths",
+            &[
+                ("grid", 10.0),
+                ("feedback", 0.4),
+                ("character", 0.6),
+                ("wear", 0.6),
+                ("wow", 0.35),
+                ("flutter", 0.2),
+                ("saturation", 0.4),
+                ("high_cut", 3800.0),
+            ],
+        ),
+        (
+            "Ping-Pong Sixteenths",
+            &[
+                ("tape_character", 0.0),
+                ("mode", 1.0),
+                ("grid", 7.0),
+                ("feedback", 0.45),
+                ("mix", 0.22),
+            ],
+        ),
+        (
+            "Ducked Vocal",
+            &[
+                ("grid", 12.0),
+                ("feedback", 0.35),
+                ("duck", 0.7),
+                ("mix", 0.3),
+                ("low_cut", 300.0),
+                ("high_cut", 8000.0),
+            ],
+        ),
+    ];
+    keyed_presets(
+        DevicePresetKind::Effect(EffectType::Echo),
+        &ECHO_KEYS,
+        vibez_dsp::echo::ECHO_PARAMS,
+        &presets,
+    )
+}
+
+fn saturator_factory_presets() -> Vec<DevicePreset> {
+    let presets: [(&str, &[(&str, f32)]); 8] = [
+        ("Init", &[]),
+        (
+            "Soft Harmonics",
+            &[
+                ("drive_db", 9.0),
+                ("curve", 0.6),
+                ("auto_gain", 1.0),
+                ("output_db", 0.0),
+            ],
+        ),
+        (
+            "Warm Tube",
+            &[
+                ("shape", 1.0),
+                ("drive_db", 12.0),
+                ("asymmetry", 0.2),
+                ("auto_gain", 1.0),
+                ("output_db", 0.0),
+                ("post_filter", 3.0),
+            ],
+        ),
+        (
+            "Even Glow",
+            &[
+                ("shape", 1.0),
+                ("drive_db", 6.0),
+                ("bias", 0.3),
+                ("mix", 0.6),
+                ("output_db", 0.0),
+            ],
+        ),
+        (
+            "Bass Grit",
+            &[
+                ("drive_db", 18.0),
+                ("curve", 1.0),
+                ("pre_filter", 2.0),
+                ("post_filter", 4.0),
+                ("mix", 0.7),
+                ("auto_gain", 1.0),
+                ("output_db", 0.0),
+            ],
+        ),
+        (
+            "Hard Clip",
+            &[
+                ("drive_db", 24.0),
+                ("curve", 1.0),
+                ("auto_gain", 1.0),
+                ("output_db", -1.0),
+            ],
+        ),
+        (
+            "Wavefolder",
+            &[
+                ("shape", 2.0),
+                ("drive_db", 9.0),
+                ("curve", 0.5),
+                ("post_filter", 2.0),
+                ("output_db", -4.0),
+            ],
+        ),
+        (
+            "Crushed Custom",
+            &[
+                ("shape", 3.0),
+                ("drive_db", 12.0),
+                ("custom_low_db", -12.0),
+                ("custom_mid_db", 3.0),
+                ("custom_high_db", 4.0),
+                ("output_db", -6.0),
+            ],
+        ),
+    ];
+    keyed_presets(
+        DevicePresetKind::Effect(EffectType::Saturator),
+        &SATURATOR_KEYS,
+        vibez_dsp::saturator::SATURATOR_PARAMS,
+        &presets,
+    )
+}
+
+fn limiter_factory_presets() -> Vec<DevicePreset> {
+    let presets: [(&str, &[(&str, f32)]); 7] = [
+        ("Init", &[]),
+        ("Transparent Ceiling", &[("input_db", 3.0)]),
+        (
+            "Streaming Master",
+            &[("input_db", 4.0), ("lookahead_ms", 3.0)],
+        ),
+        (
+            "Punchy Drums",
+            &[
+                ("style", 1.0),
+                ("input_db", 6.0),
+                ("release_ms", 60.0),
+                ("lookahead_ms", 1.0),
+                ("stereo_link", 0.6),
+            ],
+        ),
+        ("Loud Master", &[("style", 2.0), ("input_db", 8.0)]),
+        (
+            "Safety Clip",
+            &[
+                ("ceiling_db", -0.3),
+                ("lookahead_ms", 0.5),
+                ("release_ms", 30.0),
+            ],
+        ),
+        ("Gentle Bus", &[("input_db", 2.0), ("release_ms", 300.0)]),
+    ];
+    keyed_presets(
+        DevicePresetKind::Effect(EffectType::Limiter),
+        &LIMITER_KEYS,
+        vibez_dsp::limiter::LIMITER_PARAMS,
+        &presets,
+    )
+}
+
+fn delay_factory_presets() -> Vec<DevicePreset> {
+    let presets: [(&str, &[(&str, f32)]); 8] = [
+        ("Init", &[]),
+        (
+            "Dotted Bounce",
+            &[
+                ("feedback", 0.35),
+                ("mix", 0.22),
+                ("sync", 1.0),
+                ("left_division", 3.0),
+                ("left_modifier", 1.0),
+                ("right_division", 3.0),
+                ("right_modifier", 1.0),
+                ("feedback_hp_enabled", 1.0),
+                ("feedback_lp_enabled", 1.0),
+                ("duck", 0.2),
+            ],
+        ),
+        (
+            "Quarter Ping",
+            &[
+                ("feedback", 0.45),
+                ("mix", 0.25),
+                ("sync", 1.0),
+                ("routing", 1.0),
+                ("feedback_hp_enabled", 1.0),
+                ("feedback_hp_hz", 180.0),
+                ("feedback_lp_enabled", 1.0),
+                ("feedback_lp_hz", 7000.0),
+                ("duck", 0.35),
+            ],
+        ),
+        (
+            "Short Slap",
+            &[
+                ("time_ms", 90.0),
+                ("feedback", 0.1),
+                ("mix", 0.18),
+                ("right_time_ms", 90.0),
+                ("feedback_hp_enabled", 1.0),
+                ("feedback_lp_enabled", 1.0),
+                ("feedback_lp_hz", 10_000.0),
+            ],
+        ),
+        (
+            "Wide Eighths",
+            &[
+                ("feedback", 0.32),
+                ("mix", 0.2),
+                ("sync", 1.0),
+                ("left_division", 3.0),
+                ("link", 0.0),
+                ("right_division", 3.0),
+                ("right_modifier", 1.0),
+                ("feedback_hp_enabled", 1.0),
+                ("feedback_hp_hz", 150.0),
+                ("feedback_lp_enabled", 1.0),
+                ("feedback_lp_hz", 9000.0),
+                ("duck", 0.1),
+            ],
+        ),
+        (
+            "Triplet Taps",
+            &[
+                ("feedback", 0.4),
+                ("mix", 0.24),
+                ("sync", 1.0),
+                ("left_division", 3.0),
+                ("left_modifier", 2.0),
+                ("routing", 1.0),
+                ("right_division", 3.0),
+                ("right_modifier", 2.0),
+                ("feedback_hp_enabled", 1.0),
+                ("feedback_hp_hz", 160.0),
+                ("feedback_lp_enabled", 1.0),
+                ("duck", 0.15),
+            ],
+        ),
+        (
+            "Long Space",
+            &[
+                ("feedback", 0.65),
+                ("mix", 0.18),
+                ("sync", 1.0),
+                ("left_division", 6.0),
+                ("left_modifier", 1.0),
+                ("right_division", 6.0),
+                ("right_modifier", 1.0),
+                ("feedback_hp_enabled", 1.0),
+                ("feedback_hp_hz", 250.0),
+                ("feedback_lp_enabled", 1.0),
+                ("feedback_lp_hz", 4000.0),
+                ("duck", 0.45),
+            ],
+        ),
+        (
+            "Wet Return",
+            &[
+                ("time_ms", 250.0),
+                ("feedback", 0.25),
+                ("mix", 1.0),
+                ("right_time_ms", 250.0),
+                ("feedback_hp_enabled", 1.0),
+                ("feedback_hp_hz", 180.0),
+                ("feedback_lp_enabled", 1.0),
+                ("feedback_lp_hz", 6500.0),
+            ],
+        ),
+    ];
+    keyed_presets(
+        DevicePresetKind::Effect(EffectType::Delay),
+        &DELAY_KEYS,
+        vibez_dsp::delay::DELAY_PARAMS,
+        &presets,
+    )
+}
+
+/// Sol's spaces, his decay times given as the room sizes that reach them.
+fn reverb_factory_presets() -> Vec<DevicePreset> {
+    let room = vibez_dsp::reverb::room_for_decay;
+    let presets: [(&str, Vec<(&str, f32)>); 8] = [
+        ("Init", vec![]),
+        (
+            "Small Space",
+            vec![
+                ("room_size", room(0.45)),
+                ("damping", 0.25),
+                ("mix", 0.16),
+                ("predelay_ms", 5.0),
+                ("width", 0.65),
+                ("low_cut_hz", 100.0),
+                ("high_cut_hz", 14_000.0),
+            ],
+        ),
+        (
+            "Drum Room",
+            vec![
+                ("room_size", room(0.8)),
+                ("damping", 0.4),
+                ("mix", 0.18),
+                ("predelay_ms", 12.0),
+                ("width", 0.85),
+                ("diffusion", 0.75),
+                ("low_cut_hz", 150.0),
+                ("high_cut_hz", 11_000.0),
+            ],
+        ),
+        (
+            "Warm Hall",
+            vec![
+                ("room_size", room(2.4)),
+                ("damping", 0.6),
+                ("mix", 0.22),
+                ("predelay_ms", 24.0),
+                ("diffusion", 0.8),
+                ("low_cut_hz", 120.0),
+                ("high_cut_hz", 10_000.0),
+            ],
+        ),
+        (
+            "Clear Hall",
+            vec![
+                ("room_size", room(2.0)),
+                ("damping", 0.2),
+                ("mix", 0.2),
+                ("predelay_ms", 18.0),
+                ("diffusion", 0.75),
+                ("low_cut_hz", 80.0),
+                ("high_cut_hz", 18_000.0),
+            ],
+        ),
+        (
+            "Long Cloud",
+            vec![
+                ("room_size", room(8.0)),
+                ("damping", 0.55),
+                ("mix", 0.25),
+                ("predelay_ms", 40.0),
+                ("diffusion", 0.9),
+                ("low_cut_hz", 180.0),
+                ("high_cut_hz", 12_000.0),
+            ],
+        ),
+        (
+            "Wide Ambience",
+            vec![
+                ("room_size", room(1.3)),
+                ("damping", 0.3),
+                ("mix", 0.17),
+                ("predelay_ms", 8.0),
+                ("diffusion", 0.65),
+                ("low_cut_hz", 160.0),
+                ("high_cut_hz", 16_000.0),
+            ],
+        ),
+        (
+            "Vocal Air",
+            vec![
+                ("room_size", room(1.8)),
+                ("damping", 0.35),
+                ("mix", 0.18),
+                ("predelay_sync", 5.0),
+                ("width", 0.9),
+                ("diffusion", 0.8),
+                ("low_cut_hz", 180.0),
+                ("high_cut_hz", 15_000.0),
+            ],
+        ),
+    ];
+    let presets: Vec<(&str, &[(&str, f32)])> = presets
+        .iter()
+        .map(|(name, changes)| (*name, changes.as_slice()))
+        .collect();
+    keyed_presets(
+        DevicePresetKind::Effect(EffectType::Reverb),
+        &REVERB_KEYS,
+        vibez_dsp::reverb::REVERB_PARAMS,
+        &presets,
+    )
+}
+
+fn phaser_factory_presets() -> Vec<DevicePreset> {
+    let presets: [(&str, &[(&str, f32)]); 8] = [
+        ("Init", &[]),
+        ("Slow Sweep", &[("depth", 0.6), ("stereo_phase", 90.0)]),
+        (
+            "Subtle Width",
+            &[
+                ("rate", 0.2),
+                ("depth", 0.35),
+                ("feedback", 0.1),
+                ("mix", 0.3),
+                ("stages", 0.0),
+                ("stereo_phase", 120.0),
+            ],
+        ),
+        (
+            "Jet",
+            &[
+                ("rate", 0.15),
+                ("depth", 0.9),
+                ("feedback", 0.8),
+                ("centre", 400.0),
+                ("stages", 3.0),
+            ],
+        ),
+        (
+            "Deep Twelve",
+            &[
+                ("rate", 0.1),
+                ("depth", 0.8),
+                ("feedback", 0.5),
+                ("centre", 300.0),
+                ("stages", 4.0),
+            ],
+        ),
+        (
+            "Hollow",
+            &[
+                ("rate", 1.0),
+                ("depth", 0.5),
+                ("feedback", 0.7),
+                ("centre", 1_200.0),
+                ("stages", 2.0),
+                ("polarity", 1.0),
+            ],
+        ),
+        (
+            "Quarter Swirl",
+            &[
+                ("depth", 0.5),
+                ("feedback", 0.4),
+                ("stereo_phase", 180.0),
+                ("sync", 4.0),
+            ],
+        ),
+        (
+            "Wobble",
+            &[
+                ("rate", 4.0),
+                ("depth", 0.4),
+                ("feedback", 0.2),
+                ("shape", 1.0),
+            ],
+        ),
+    ];
+    keyed_presets(
+        DevicePresetKind::Effect(EffectType::Phaser),
+        &PHASER_KEYS,
+        vibez_dsp::phaser::PHASER_PARAMS,
+        &presets,
+    )
+}
+
+fn auto_pan_factory_presets() -> Vec<DevicePreset> {
+    use vibez_dsp::auto_pan::shape;
+    let presets: [(&str, &[(&str, f32)]); 8] = [
+        ("Init", &[]),
+        (
+            "Wide Eighths",
+            &[("depth", 0.75), ("smoothing", 0.05), ("sync", 5.0)],
+        ),
+        ("Gentle Drift", &[("rate", 0.25), ("depth", 0.4)]),
+        (
+            "Slow Circle",
+            &[
+                ("depth", 0.6),
+                ("phase", 90.0),
+                ("sync", 2.0),
+                ("retrigger", 1.0),
+            ],
+        ),
+        (
+            "Ping Sixteenths",
+            &[
+                ("depth", 1.0),
+                ("shape", shape::SQUARE as f32),
+                ("smoothing", 0.2),
+                ("sync", 6.0),
+                ("retrigger", 1.0),
+            ],
+        ),
+        (
+            "Quarter Chop",
+            &[
+                ("depth", 1.0),
+                ("shape", shape::SQUARE as f32),
+                ("mode", 1.0),
+                ("phase", 0.0),
+                ("smoothing", 0.1),
+                ("sync", 4.0),
+                ("retrigger", 1.0),
+            ],
+        ),
+        (
+            "Pump",
+            &[
+                ("depth", 0.8),
+                ("shape", shape::SAW_DOWN as f32),
+                ("mode", 1.0),
+                ("phase", 0.0),
+                ("offset", 0.5),
+                ("smoothing", 0.1),
+                ("sync", 4.0),
+                ("retrigger", 1.0),
+            ],
+        ),
+        (
+            "Tremolo",
+            &[("rate", 5.0), ("depth", 0.5), ("mode", 1.0), ("phase", 0.0)],
+        ),
+    ];
+    keyed_presets(
+        DevicePresetKind::Effect(EffectType::AutoPan),
+        &AUTO_PAN_KEYS,
+        vibez_dsp::auto_pan::AUTO_PAN_PARAMS,
+        &presets,
+    )
+}
+
 /// Presets that start from the device's defaults and change the named keys.
 fn keyed_presets(
-    effect_type: EffectType,
+    kind: DevicePresetKind,
     keys: &[PresetParam],
     descriptors: &[vibez_core::effect::ParamDescriptor],
     presets: &[(&str, &[(&str, f32)])],
@@ -499,8 +2423,7 @@ fn keyed_presets(
                     ((*key).to_owned(), value)
                 })
                 .collect();
-            DevicePreset::new(DevicePresetKind::Effect(effect_type), *name, parameters)
-                .expect("Factory preset values are valid")
+            DevicePreset::new(kind, *name, parameters).expect("Factory preset values are valid")
         })
         .collect()
 }
@@ -696,14 +2619,629 @@ mod presentation_tests {
         assert_eq!(prepare_updates(&effect, &captured), Ok(Vec::new()));
     }
 
+    fn filter() -> UiEffect {
+        let descriptors =
+            vibez_dsp::factory::create_effect(EffectType::Filter, 44_100.0).param_descriptors();
+        UiEffect {
+            effect_type: EffectType::Filter,
+            params: descriptors
+                .iter()
+                .map(|descriptor| descriptor.default)
+                .collect(),
+            descriptors,
+            ..gain()
+        }
+    }
+
     #[test]
-    fn a_device_without_factory_presets_has_no_navigation() {
-        let mut effect = gain();
-        effect.effect_type = EffectType::Reverb;
-        let unsupported = presentation(&effect, None);
-        assert!(unsupported.options.is_empty());
-        assert!(unsupported.selected.is_none());
-        assert!(unsupported.previous.is_none());
-        assert!(unsupported.next.is_none());
+    fn filter_factory_presets_are_valid_distinct_and_start_from_init() {
+        let effect = filter();
+        let presets = factory_presets(EffectType::Filter);
+        assert!(presets.len() >= 6);
+        assert_eq!(presets[0].name(), "Init");
+        assert_eq!(prepare_updates(&effect, &presets[0]), Ok(Vec::new()));
+        for preset in &presets[1..] {
+            let mut applied = filter();
+            for (index, value) in prepare_updates(&effect, preset).unwrap() {
+                applied.params[index] = value;
+            }
+            assert_ne!(applied.params, effect.params, "{}", preset.name());
+            assert_eq!(capture(&applied, preset.name()).as_ref(), Ok(preset));
+        }
+        let mut names: Vec<_> = presets.iter().map(DevicePreset::name).collect();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(names.len(), presets.len(), "names are unique");
+    }
+
+    #[test]
+    fn filter_choices_in_a_preset_must_be_whole() {
+        use vibez_dsp::filter::param;
+        let effect = filter();
+        let captured = capture(&effect, "Current").unwrap();
+        for key in ["mode", "slope", "mod_source", "sync"] {
+            let mut parameters = captured.parameters().clone();
+            assert!(parameters.contains_key(key), "{key}");
+            parameters.insert(key.into(), 0.5);
+            let fractional = DevicePreset::new(captured.kind(), "Fractional", parameters).unwrap();
+            assert!(prepare_updates(&effect, &fractional).is_err(), "{key}");
+        }
+        let mut parameters = captured.parameters().clone();
+        parameters.insert("sync".into(), 7.0);
+        let synced = DevicePreset::new(captured.kind(), "Synced", parameters).unwrap();
+        assert_eq!(
+            prepare_updates(&effect, &synced),
+            Ok(vec![(param::SYNC, 7.0)])
+        );
+    }
+
+    fn gate() -> UiEffect {
+        let descriptors =
+            vibez_dsp::factory::create_effect(EffectType::Gate, 44_100.0).param_descriptors();
+        UiEffect {
+            effect_type: EffectType::Gate,
+            params: descriptors
+                .iter()
+                .map(|descriptor| descriptor.default)
+                .collect(),
+            descriptors,
+            ..gain()
+        }
+    }
+
+    #[test]
+    fn gate_factory_presets_are_valid_distinct_and_start_from_init() {
+        let effect = gate();
+        let presets = factory_presets(EffectType::Gate);
+        assert!(presets.len() >= 6);
+        assert_eq!(presets[0].name(), "Init");
+        assert_eq!(prepare_updates(&effect, &presets[0]), Ok(Vec::new()));
+        for preset in &presets[1..] {
+            let mut applied = gate();
+            for (index, value) in prepare_updates(&effect, preset).unwrap() {
+                applied.params[index] = value;
+            }
+            assert_ne!(applied.params, effect.params, "{}", preset.name());
+            assert_eq!(capture(&applied, preset.name()).as_ref(), Ok(preset));
+        }
+        let mut names: Vec<_> = presets.iter().map(DevicePreset::name).collect();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(names.len(), presets.len(), "names are unique");
+    }
+
+    #[test]
+    fn gate_presets_leave_detector_audition_alone() {
+        let listen = vibez_dsp::gate::param::DETECTOR_LISTEN;
+        let mut effect = gate();
+        effect.params[listen] = 1.0;
+        let captured = capture(&effect, "Auditioning").unwrap();
+        effect.params[listen] = 0.0;
+        assert_eq!(prepare_updates(&effect, &captured), Ok(Vec::new()));
+        let mut parameters = captured.parameters().clone();
+        parameters.insert("mode".into(), 0.5);
+        let half = DevicePreset::new(captured.kind(), "Half", parameters).unwrap();
+        assert!(prepare_updates(&effect, &half).is_err());
+    }
+
+    fn drive() -> UiEffect {
+        let descriptors =
+            vibez_dsp::factory::create_effect(EffectType::Drive, 44_100.0).param_descriptors();
+        UiEffect {
+            effect_type: EffectType::Drive,
+            params: descriptors
+                .iter()
+                .map(|descriptor| descriptor.default)
+                .collect(),
+            descriptors,
+            ..gain()
+        }
+    }
+
+    #[test]
+    fn drive_factory_presets_are_valid_distinct_and_start_from_init() {
+        let effect = drive();
+        let presets = factory_presets(EffectType::Drive);
+        assert!(presets.len() >= 6);
+        assert_eq!(presets[0].name(), "Init");
+        assert_eq!(prepare_updates(&effect, &presets[0]), Ok(Vec::new()));
+        for preset in &presets[1..] {
+            let mut applied = drive();
+            for (index, value) in prepare_updates(&effect, preset).unwrap() {
+                applied.params[index] = value;
+            }
+            assert_ne!(applied.params, effect.params, "{}", preset.name());
+            assert_eq!(capture(&applied, preset.name()).as_ref(), Ok(preset));
+        }
+        let mut names: Vec<_> = presets.iter().map(DevicePreset::name).collect();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(names.len(), presets.len(), "names are unique");
+    }
+
+    #[test]
+    fn drive_choices_in_a_preset_must_be_whole() {
+        let effect = drive();
+        let captured = capture(&effect, "Current").unwrap();
+        for key in ["character", "quality", "pre_hp_enabled", "post_lp_enabled"] {
+            let mut parameters = captured.parameters().clone();
+            assert!(parameters.contains_key(key), "{key}");
+            parameters.insert(key.into(), 0.5);
+            let fractional = DevicePreset::new(captured.kind(), "Fractional", parameters).unwrap();
+            assert!(prepare_updates(&effect, &fractional).is_err(), "{key}");
+        }
+    }
+
+    fn bitcrush() -> UiEffect {
+        let descriptors =
+            vibez_dsp::factory::create_effect(EffectType::Bitcrush, 44_100.0).param_descriptors();
+        UiEffect {
+            effect_type: EffectType::Bitcrush,
+            params: descriptors
+                .iter()
+                .map(|descriptor| descriptor.default)
+                .collect(),
+            descriptors,
+            ..gain()
+        }
+    }
+
+    #[test]
+    fn bitcrush_factory_presets_are_valid_distinct_and_start_from_init() {
+        let effect = bitcrush();
+        let presets = factory_presets(EffectType::Bitcrush);
+        assert!(presets.len() >= 6);
+        assert_eq!(presets[0].name(), "Init");
+        assert_eq!(prepare_updates(&effect, &presets[0]), Ok(Vec::new()));
+        for preset in &presets[1..] {
+            let mut applied = bitcrush();
+            for (index, value) in prepare_updates(&effect, preset).unwrap() {
+                applied.params[index] = value;
+            }
+            assert_ne!(applied.params, effect.params, "{}", preset.name());
+            assert_eq!(capture(&applied, preset.name()).as_ref(), Ok(preset));
+        }
+        let mut names: Vec<_> = presets.iter().map(DevicePreset::name).collect();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(names.len(), presets.len(), "names are unique");
+    }
+
+    #[test]
+    fn bitcrush_switches_in_a_preset_must_be_whole() {
+        let effect = bitcrush();
+        let captured = capture(&effect, "Current").unwrap();
+        for key in ["rounding", "dither", "post_lp_enabled"] {
+            let mut parameters = captured.parameters().clone();
+            assert!(parameters.contains_key(key), "{key}");
+            parameters.insert(key.into(), 0.5);
+            let fractional = DevicePreset::new(captured.kind(), "Fractional", parameters).unwrap();
+            assert!(prepare_updates(&effect, &fractional).is_err(), "{key}");
+        }
+    }
+
+    fn delay() -> UiEffect {
+        let descriptors =
+            vibez_dsp::factory::create_effect(EffectType::Delay, 44_100.0).param_descriptors();
+        UiEffect {
+            effect_type: EffectType::Delay,
+            params: descriptors
+                .iter()
+                .map(|descriptor| descriptor.default)
+                .collect(),
+            descriptors,
+            ..gain()
+        }
+    }
+
+    #[test]
+    fn delay_factory_presets_are_valid_distinct_and_start_from_init() {
+        let effect = delay();
+        let presets = factory_presets(EffectType::Delay);
+        assert!(presets.len() >= 6);
+        assert_eq!(presets[0].name(), "Init");
+        assert_eq!(prepare_updates(&effect, &presets[0]), Ok(Vec::new()));
+        for preset in &presets[1..] {
+            let mut applied = delay();
+            for (index, value) in prepare_updates(&effect, preset).unwrap() {
+                applied.params[index] = value;
+            }
+            assert_ne!(applied.params, effect.params, "{}", preset.name());
+            assert_eq!(capture(&applied, preset.name()).as_ref(), Ok(preset));
+        }
+        let mut names: Vec<_> = presets.iter().map(DevicePreset::name).collect();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(names.len(), presets.len(), "names are unique");
+    }
+
+    fn echo() -> UiEffect {
+        let descriptors =
+            vibez_dsp::factory::create_effect(EffectType::Echo, 44_100.0).param_descriptors();
+        UiEffect {
+            effect_type: EffectType::Echo,
+            params: descriptors
+                .iter()
+                .map(|descriptor| descriptor.default)
+                .collect(),
+            descriptors,
+            ..gain()
+        }
+    }
+
+    #[test]
+    fn echo_factory_presets_are_valid_distinct_and_start_from_init() {
+        let effect = echo();
+        let presets = factory_presets(EffectType::Echo);
+        assert!(presets.len() >= 6);
+        assert_eq!(presets[0].name(), "Init");
+        assert_eq!(prepare_updates(&effect, &presets[0]), Ok(Vec::new()));
+        assert!(presets.iter().any(|preset| preset.name() == "Worn Tape"));
+        for preset in &presets[1..] {
+            let mut applied = echo();
+            for (index, value) in prepare_updates(&effect, preset).unwrap() {
+                applied.params[index] = value;
+            }
+            assert_ne!(applied.params, effect.params, "{}", preset.name());
+            assert_eq!(capture(&applied, preset.name()).as_ref(), Ok(preset));
+        }
+        let mut names: Vec<_> = presets.iter().map(DevicePreset::name).collect();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(names.len(), presets.len(), "names are unique");
+    }
+
+    #[test]
+    fn saturator_factory_presets_are_valid_distinct_and_start_from_init() {
+        let descriptors =
+            vibez_dsp::factory::create_effect(EffectType::Saturator, 44_100.0).param_descriptors();
+        let saturator = || UiEffect {
+            effect_type: EffectType::Saturator,
+            params: descriptors
+                .iter()
+                .map(|descriptor| descriptor.default)
+                .collect(),
+            descriptors,
+            ..gain()
+        };
+        let effect = saturator();
+        let presets = factory_presets(EffectType::Saturator);
+        assert_eq!(presets[0].name(), "Init");
+        assert_eq!(prepare_updates(&effect, &presets[0]), Ok(Vec::new()));
+        assert!(presets
+            .iter()
+            .any(|preset| preset.name() == "Soft Harmonics"));
+        for preset in &presets[1..] {
+            let mut applied = saturator();
+            for (index, value) in prepare_updates(&effect, preset).unwrap() {
+                applied.params[index] = value;
+            }
+            assert_ne!(applied.params, effect.params, "{}", preset.name());
+            assert_eq!(capture(&applied, preset.name()).as_ref(), Ok(preset));
+        }
+        let mut names: Vec<_> = presets.iter().map(DevicePreset::name).collect();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(names.len(), presets.len(), "names are unique");
+    }
+
+    #[test]
+    fn limiter_factory_presets_are_valid_distinct_and_start_from_init() {
+        let descriptors =
+            vibez_dsp::factory::create_effect(EffectType::Limiter, 44_100.0).param_descriptors();
+        let limiter = || UiEffect {
+            effect_type: EffectType::Limiter,
+            params: descriptors
+                .iter()
+                .map(|descriptor| descriptor.default)
+                .collect(),
+            descriptors,
+            ..gain()
+        };
+        let effect = limiter();
+        let presets = factory_presets(EffectType::Limiter);
+        assert_eq!(presets[0].name(), "Init");
+        assert_eq!(prepare_updates(&effect, &presets[0]), Ok(Vec::new()));
+        assert!(presets
+            .iter()
+            .any(|preset| preset.name() == "Transparent Ceiling"));
+        for preset in &presets[1..] {
+            let mut applied = limiter();
+            for (index, value) in prepare_updates(&effect, preset).unwrap() {
+                applied.params[index] = value;
+            }
+            assert_ne!(applied.params, effect.params, "{}", preset.name());
+            assert_eq!(capture(&applied, preset.name()).as_ref(), Ok(preset));
+        }
+        let mut names: Vec<_> = presets.iter().map(DevicePreset::name).collect();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(names.len(), presets.len(), "names are unique");
+    }
+
+    #[test]
+    fn delay_choices_in_a_preset_must_be_whole() {
+        let effect = delay();
+        let captured = capture(&effect, "Current").unwrap();
+        for key in ["sync", "left_division", "routing", "link", "time_change"] {
+            let mut parameters = captured.parameters().clone();
+            assert!(parameters.contains_key(key), "{key}");
+            parameters.insert(key.into(), 0.5);
+            let fractional = DevicePreset::new(captured.kind(), "Fractional", parameters).unwrap();
+            assert!(prepare_updates(&effect, &fractional).is_err(), "{key}");
+        }
+    }
+
+    fn reverb() -> UiEffect {
+        let descriptors =
+            vibez_dsp::factory::create_effect(EffectType::Reverb, 44_100.0).param_descriptors();
+        UiEffect {
+            effect_type: EffectType::Reverb,
+            params: descriptors
+                .iter()
+                .map(|descriptor| descriptor.default)
+                .collect(),
+            descriptors,
+            ..gain()
+        }
+    }
+
+    #[test]
+    fn reverb_factory_presets_are_valid_distinct_and_start_from_init() {
+        let effect = reverb();
+        let presets = factory_presets(EffectType::Reverb);
+        assert!(presets.len() >= 6);
+        assert_eq!(presets[0].name(), "Init");
+        assert_eq!(prepare_updates(&effect, &presets[0]), Ok(Vec::new()));
+        for preset in &presets[1..] {
+            let mut applied = reverb();
+            for (index, value) in prepare_updates(&effect, preset).unwrap() {
+                applied.params[index] = value;
+            }
+            assert_ne!(applied.params, effect.params, "{}", preset.name());
+            assert_eq!(capture(&applied, preset.name()).as_ref(), Ok(preset));
+        }
+        let mut names: Vec<_> = presets.iter().map(DevicePreset::name).collect();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(names.len(), presets.len(), "names are unique");
+    }
+
+    #[test]
+    fn reverb_choices_in_a_preset_must_be_whole() {
+        let effect = reverb();
+        let captured = capture(&effect, "Current").unwrap();
+        for key in ["predelay_sync", "freeze"] {
+            let mut parameters = captured.parameters().clone();
+            assert!(parameters.contains_key(key), "{key}");
+            parameters.insert(key.into(), 0.5);
+            let fractional = DevicePreset::new(captured.kind(), "Fractional", parameters).unwrap();
+            assert!(prepare_updates(&effect, &fractional).is_err(), "{key}");
+        }
+    }
+
+    fn auto_pan() -> UiEffect {
+        let descriptors =
+            vibez_dsp::factory::create_effect(EffectType::AutoPan, 44_100.0).param_descriptors();
+        UiEffect {
+            effect_type: EffectType::AutoPan,
+            params: descriptors
+                .iter()
+                .map(|descriptor| descriptor.default)
+                .collect(),
+            descriptors,
+            ..gain()
+        }
+    }
+
+    #[test]
+    fn auto_pan_factory_presets_are_valid_distinct_and_start_from_init() {
+        let effect = auto_pan();
+        let presets = factory_presets(EffectType::AutoPan);
+        assert!(presets.len() >= 6);
+        assert_eq!(presets[0].name(), "Init");
+        assert!(presets.iter().any(|preset| preset.name() == "Wide Eighths"));
+        assert_eq!(prepare_updates(&effect, &presets[0]), Ok(Vec::new()));
+        for preset in &presets[1..] {
+            let mut applied = auto_pan();
+            for (index, value) in prepare_updates(&effect, preset).unwrap() {
+                applied.params[index] = value;
+            }
+            assert_ne!(applied.params, effect.params, "{}", preset.name());
+            assert_eq!(capture(&applied, preset.name()).as_ref(), Ok(preset));
+        }
+        let mut names: Vec<_> = presets.iter().map(DevicePreset::name).collect();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(names.len(), presets.len(), "names are unique");
+    }
+
+    #[test]
+    fn auto_pan_choices_in_a_preset_must_be_whole() {
+        let effect = auto_pan();
+        let captured = capture(&effect, "Current").unwrap();
+        for key in ["mode", "sync", "retrigger"] {
+            let mut parameters = captured.parameters().clone();
+            assert!(parameters.contains_key(key), "{key}");
+            parameters.insert(key.into(), 0.5);
+            let fractional = DevicePreset::new(captured.kind(), "Fractional", parameters).unwrap();
+            assert!(prepare_updates(&effect, &fractional).is_err(), "{key}");
+        }
+    }
+
+    /// A track holding the native `kind` at its defaults.
+    fn instrument_track(kind: InstrumentKind) -> crate::state::ProjectTrack {
+        let mut track = crate::state::ProjectTrack::new(TrackId::new(), "Keys".into(), 0);
+        track.has_instrument = true;
+        track.instrument_kind = Some(kind);
+        track.instrument_params = vibez_instruments::descriptors_for(kind)
+            .iter()
+            .map(|descriptor| descriptor.default)
+            .collect();
+        track
+    }
+
+    /// `kind`'s factory presets start from Init and include `named`; each
+    /// of the others changes something and survives being captured again,
+    /// and no two share a name.
+    fn assert_instrument_presets(kind: InstrumentKind, named: &str) {
+        let track = instrument_track(kind);
+        let device = DeviceParams::instrument(&track).unwrap();
+        let presets = presets_for(device.kind);
+        assert!(presets.len() >= 6);
+        assert_eq!(presets[0].name(), "Init");
+        assert!(presets.iter().any(|preset| preset.name() == named));
+        assert_eq!(prepare_updates(device, &presets[0]), Ok(Vec::new()));
+        for preset in &presets[1..] {
+            let mut applied = instrument_track(kind);
+            for (index, value) in prepare_updates(device, preset).unwrap() {
+                applied.instrument_params[index] = value;
+            }
+            assert_ne!(
+                applied.instrument_params,
+                track.instrument_params,
+                "{}",
+                preset.name()
+            );
+            let captured = capture(DeviceParams::instrument(&applied).unwrap(), preset.name());
+            assert_eq!(captured.as_ref(), Ok(preset));
+        }
+        let mut names: Vec<_> = presets.iter().map(DevicePreset::name).collect();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(names.len(), presets.len(), "names are unique");
+    }
+
+    #[test]
+    fn sampler_factory_presets_are_valid_distinct_and_start_from_init() {
+        assert_instrument_presets(InstrumentKind::Sampler, "Warm Rhodes");
+    }
+
+    #[test]
+    fn a_sampler_preset_leaves_the_sample_s_own_points_alone() {
+        use vibez_instruments::sampler::param;
+        let mut track = instrument_track(InstrumentKind::Sampler);
+        for (index, value) in [
+            (param::ROOT_NOTE, 48.0),
+            (param::START, 0.2),
+            (param::END, 0.8),
+            (param::LOOP_START, 0.3),
+            (param::LOOP_END, 0.7),
+        ] {
+            track.instrument_params[index] = value;
+        }
+        let device = DeviceParams::instrument(&track).unwrap();
+        for preset in presets_for(device.kind) {
+            for (index, _) in prepare_updates(device, &preset).unwrap() {
+                assert!(
+                    ![
+                        param::ROOT_NOTE,
+                        param::START,
+                        param::END,
+                        param::LOOP_START,
+                        param::LOOP_END
+                    ]
+                    .contains(&index),
+                    "{} moves {index}",
+                    preset.name()
+                );
+            }
+        }
+        let captured = capture(device, "Current").unwrap();
+        for key in ["root_note", "start", "end", "loop_start", "loop_end"] {
+            assert!(!captured.parameters().contains_key(key), "{key}");
+        }
+        for key in ["loop", "one_shot", "reverse", "filter_type", "key_low"] {
+            let mut parameters = captured.parameters().clone();
+            assert!(parameters.contains_key(key), "{key}");
+            parameters.insert(key.into(), 0.5);
+            let fractional = DevicePreset::new(captured.kind(), "Fractional", parameters).unwrap();
+            assert!(prepare_updates(device, &fractional).is_err(), "{key}");
+        }
+    }
+
+    #[test]
+    fn fm_factory_presets_are_valid_distinct_and_start_from_init() {
+        assert_instrument_presets(InstrumentKind::FmSynth, "Bell Keys");
+    }
+
+    #[test]
+    fn wavetable_factory_presets_are_valid_distinct_and_start_from_init() {
+        assert_instrument_presets(InstrumentKind::WavetableSynth, "Glass Motion");
+    }
+
+    #[test]
+    fn synth_factory_presets_are_valid_distinct_and_start_from_init() {
+        assert_instrument_presets(InstrumentKind::SubtractiveSynth, "Soft Analog");
+    }
+
+    #[test]
+    fn synth_choices_in_a_preset_must_be_whole() {
+        let track = instrument_track(InstrumentKind::SubtractiveSynth);
+        let device = DeviceParams::instrument(&track).unwrap();
+        let captured = capture(device, "Current").unwrap();
+        for key in [
+            "waveform",
+            "octave",
+            "filter_type",
+            "voice_mode",
+            "voices",
+            "lfo_target",
+        ] {
+            let mut parameters = captured.parameters().clone();
+            assert!(parameters.contains_key(key), "{key}");
+            parameters.insert(key.into(), 0.5);
+            let fractional = DevicePreset::new(captured.kind(), "Fractional", parameters).unwrap();
+            assert!(prepare_updates(device, &fractional).is_err(), "{key}");
+        }
+    }
+
+    fn phaser() -> UiEffect {
+        let descriptors =
+            vibez_dsp::factory::create_effect(EffectType::Phaser, 44_100.0).param_descriptors();
+        UiEffect {
+            effect_type: EffectType::Phaser,
+            params: descriptors
+                .iter()
+                .map(|descriptor| descriptor.default)
+                .collect(),
+            descriptors,
+            ..gain()
+        }
+    }
+
+    #[test]
+    fn phaser_factory_presets_are_valid_distinct_and_start_from_init() {
+        let effect = phaser();
+        let presets = factory_presets(EffectType::Phaser);
+        assert!(presets.len() >= 6);
+        assert_eq!(presets[0].name(), "Init");
+        assert!(presets.iter().any(|preset| preset.name() == "Slow Sweep"));
+        assert_eq!(prepare_updates(&effect, &presets[0]), Ok(Vec::new()));
+        for preset in &presets[1..] {
+            let mut applied = phaser();
+            for (index, value) in prepare_updates(&effect, preset).unwrap() {
+                applied.params[index] = value;
+            }
+            assert_ne!(applied.params, effect.params, "{}", preset.name());
+            assert_eq!(capture(&applied, preset.name()).as_ref(), Ok(preset));
+        }
+        let mut names: Vec<_> = presets.iter().map(DevicePreset::name).collect();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(names.len(), presets.len(), "names are unique");
+    }
+
+    #[test]
+    fn phaser_choices_in_a_preset_must_be_whole() {
+        let effect = phaser();
+        let captured = capture(&effect, "Current").unwrap();
+        for key in ["stages", "polarity", "shape", "sync"] {
+            let mut parameters = captured.parameters().clone();
+            assert!(parameters.contains_key(key), "{key}");
+            parameters.insert(key.into(), 0.5);
+            let fractional = DevicePreset::new(captured.kind(), "Fractional", parameters).unwrap();
+            assert!(prepare_updates(&effect, &fractional).is_err(), "{key}");
+        }
     }
 }
