@@ -35,6 +35,30 @@ enum Flexible {
     Phaser,
 }
 
+impl Flexible {
+    /// The card's width given a `share` of a chain `available` wide.
+    fn card_width(self, share: f32, available: f32) -> f32 {
+        match self {
+            Self::Gain => crate::widgets::gain_device::WIDTHS.chain_width(share, available),
+            Self::Eq => crate::widgets::eq_device::WIDTHS.chain_width(share, available),
+            Self::Compressor => {
+                crate::widgets::compressor_device::WIDTHS.chain_width(share, available)
+            }
+            Self::Limiter => crate::widgets::limiter_device::card_width(share),
+            Self::Filter => crate::widgets::filter_device::card_width(share),
+            Self::Gate => crate::widgets::gate_device::card_width(share),
+            Self::Drive => crate::widgets::drive_device::card_width(share),
+            Self::Saturator => crate::widgets::saturator_device::card_width(share),
+            Self::Bitcrush => crate::widgets::bitcrush_device::card_width(share),
+            Self::Delay => crate::widgets::delay_device::card_width(share),
+            Self::Echo => crate::widgets::echo_device::card_width(share),
+            Self::Reverb => crate::widgets::reverb_device::card_width(share),
+            Self::Phaser => crate::widgets::phaser_device::card_width(share),
+            Self::AutoPan => crate::widgets::auto_pan_device::card_width(share),
+        }
+    }
+}
+
 impl App {
     /// Build the device chain for the detail panel.
     pub(super) fn view_device_chain<'a>(
@@ -160,135 +184,75 @@ impl App {
             )));
         }
         let shares = flexible.len() + usize::from(flexible_instrument);
+        let spacing = CHAIN_SPACING * cards.len().saturating_sub(1) as f32;
+        let mut chain_width = used + spacing;
         if shares > 0 {
-            let spacing = CHAIN_SPACING * cards.len().saturating_sub(1) as f32;
             let share = (available_width - used - spacing) / shares as f32;
+            let instrument_width = if synth {
+                crate::widgets::synth_device::card_width(share)
+            } else if sampler {
+                crate::widgets::sampler_device::card_width(share)
+            } else if wavetable {
+                crate::widgets::wavetable_device::card_width(share)
+            } else if fm {
+                crate::widgets::fm_device::card_width(share)
+            } else {
+                crate::widgets::drum_rack_device::card_width(share)
+            };
+            if flexible_instrument {
+                chain_width += instrument_width;
+            }
             if synth {
-                cards[0] = Some(self.synth_card(
-                    track_id,
-                    track,
-                    track_color,
-                    crate::widgets::synth_device::card_width(share),
-                ));
+                cards[0] = Some(self.synth_card(track_id, track, track_color, instrument_width));
             }
             if sampler {
-                cards[0] = Some(self.sampler_card(
-                    track_id,
-                    track,
-                    track_color,
-                    crate::widgets::sampler_device::card_width(share),
-                ));
+                cards[0] = Some(self.sampler_card(track_id, track, track_color, instrument_width));
             }
             if wavetable {
-                cards[0] = Some(self.wavetable_card(
-                    track_id,
-                    track,
-                    track_color,
-                    crate::widgets::wavetable_device::card_width(share),
-                ));
+                cards[0] =
+                    Some(self.wavetable_card(track_id, track, track_color, instrument_width));
             }
             if fm {
-                cards[0] = Some(self.fm_card(
-                    track_id,
-                    track,
-                    track_color,
-                    crate::widgets::fm_device::card_width(share),
-                ));
+                cards[0] = Some(self.fm_card(track_id, track, track_color, instrument_width));
             }
             if drum_rack {
-                cards[0] = Some(self.drum_rack_card(
-                    track_id,
-                    track,
-                    track_color,
-                    crate::widgets::drum_rack_device::card_width(share),
-                ));
+                cards[0] =
+                    Some(self.drum_rack_card(track_id, track, track_color, instrument_width));
             }
             for (position, effect, sidechain, kind) in flexible {
+                let width = kind.card_width(share, available_width);
+                chain_width += width;
                 let body = match kind {
-                    Flexible::Gain => self.gain_device_body(
-                        track_id,
-                        effect,
-                        track_color,
-                        crate::widgets::gain_device::card_width(share),
-                    ),
-                    Flexible::Eq => self.eq_device_body(
-                        track_id,
-                        effect,
-                        track_color,
-                        crate::widgets::eq_device::card_width(share),
-                    ),
-                    Flexible::Compressor => self.compressor_device_body(
-                        track_id,
-                        effect,
-                        track_color,
-                        crate::widgets::compressor_device::card_width(share),
-                    ),
-                    Flexible::Limiter => self.limiter_device_body(
-                        track_id,
-                        effect,
-                        track_color,
-                        crate::widgets::limiter_device::card_width(share),
-                    ),
-                    Flexible::Filter => self.filter_device_body(
-                        track_id,
-                        effect,
-                        track_color,
-                        crate::widgets::filter_device::card_width(share),
-                    ),
-                    Flexible::Gate => self.gate_device_body(
-                        track_id,
-                        effect,
-                        track_color,
-                        crate::widgets::gate_device::card_width(share),
-                    ),
-                    Flexible::Drive => self.drive_device_body(
-                        track_id,
-                        effect,
-                        track_color,
-                        crate::widgets::drive_device::card_width(share),
-                    ),
-                    Flexible::Saturator => self.saturator_device_body(
-                        track_id,
-                        effect,
-                        track_color,
-                        crate::widgets::saturator_device::card_width(share),
-                    ),
-                    Flexible::Bitcrush => self.bitcrush_device_body(
-                        track_id,
-                        effect,
-                        track_color,
-                        crate::widgets::bitcrush_device::card_width(share),
-                    ),
-                    Flexible::Delay => self.delay_device_body(
-                        track_id,
-                        effect,
-                        track_color,
-                        crate::widgets::delay_device::card_width(share),
-                    ),
-                    Flexible::Echo => self.echo_device_body(
-                        track_id,
-                        effect,
-                        track_color,
-                        crate::widgets::echo_device::card_width(share),
-                    ),
-                    Flexible::Reverb => self.reverb_device_body(
-                        track_id,
-                        effect,
-                        track_color,
-                        crate::widgets::reverb_device::card_width(share),
-                    ),
-                    Flexible::Phaser => self.phaser_device_body(
-                        track_id,
-                        effect,
-                        track_color,
-                        crate::widgets::phaser_device::card_width(share),
-                    ),
-                    Flexible::AutoPan => self.auto_pan_device_body(
-                        track_id,
-                        effect,
-                        track_color,
-                        crate::widgets::auto_pan_device::card_width(share),
-                    ),
+                    Flexible::Gain => self.gain_device_body(track_id, effect, track_color, width),
+                    Flexible::Eq => self.eq_device_body(track_id, effect, track_color, width),
+                    Flexible::Compressor => {
+                        self.compressor_device_body(track_id, effect, track_color, width)
+                    }
+                    Flexible::Limiter => {
+                        self.limiter_device_body(track_id, effect, track_color, width)
+                    }
+                    Flexible::Filter => {
+                        self.filter_device_body(track_id, effect, track_color, width)
+                    }
+                    Flexible::Gate => self.gate_device_body(track_id, effect, track_color, width),
+                    Flexible::Drive => self.drive_device_body(track_id, effect, track_color, width),
+                    Flexible::Saturator => {
+                        self.saturator_device_body(track_id, effect, track_color, width)
+                    }
+                    Flexible::Bitcrush => {
+                        self.bitcrush_device_body(track_id, effect, track_color, width)
+                    }
+                    Flexible::Delay => self.delay_device_body(track_id, effect, track_color, width),
+                    Flexible::Echo => self.echo_device_body(track_id, effect, track_color, width),
+                    Flexible::Reverb => {
+                        self.reverb_device_body(track_id, effect, track_color, width)
+                    }
+                    Flexible::Phaser => {
+                        self.phaser_device_body(track_id, effect, track_color, width)
+                    }
+                    Flexible::AutoPan => {
+                        self.auto_pan_device_body(track_id, effect, track_color, width)
+                    }
                 };
                 cards[position] = Some(view_effect_slot(
                     track_id,
@@ -304,19 +268,21 @@ impl App {
             .spacing(CHAIN_SPACING)
             .height(Length::Fill);
 
-        // Only a chain wider than the section scrolls, behind a hairline that
-        // appears only then: scrollbar spacing would show it permanently.
         // Built with its direction: the default vertical check rejects the
         // full-height cards before a later `.direction` could apply.
-        scrollable::Scrollable::with_direction(
-            devices_row,
-            scrollable::Direction::Horizontal(
-                scrollable::Scrollbar::new().width(3).scroller_width(3),
-            ),
-        )
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .into()
+        let bar = scrollable::Scrollbar::new()
+            .width(crate::widgets::device_chrome::CHAIN_BAR_W)
+            .scroller_width(crate::widgets::device_chrome::CHAIN_BAR_W);
+        let bar =
+            if crate::widgets::device_chrome::chain_bar_room(chain_width, available_width) > 0.0 {
+                bar.spacing(crate::widgets::device_chrome::CHAIN_BAR_GAP)
+            } else {
+                bar
+            };
+        scrollable::Scrollable::with_direction(devices_row, scrollable::Direction::Horizontal(bar))
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
     }
 
     /// The channel's instrument card and its width, or the placeholder that
