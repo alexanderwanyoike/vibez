@@ -715,11 +715,12 @@ fn wavetable_factory_presets() -> Vec<DevicePreset> {
         (
             "Glass Motion",
             &[
+                ("osc_a_table", table::HARMONIC as f32),
                 ("osc_a_position", 0.42),
                 ("osc_a_warp", 0.18),
                 ("osc_a_detune", 9.0),
                 ("osc_a_unison", 4.0),
-                ("osc_b_table", table::HARMONIC as f32),
+                ("osc_b_table", table::BASIC_SHAPES as f32),
                 ("osc_b_position", 0.42),
                 ("osc_b_warp", 0.18),
                 ("osc_b_detune", 9.0),
