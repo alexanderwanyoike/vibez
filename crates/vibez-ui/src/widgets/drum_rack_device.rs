@@ -877,6 +877,26 @@ mod tests {
         }
     }
 
+    /// The body the card gets in the 180 px minimum detail panel, measured
+    /// in the app.
+    const MINIMUM_BODY_H: f32 = 68.0;
+    /// A pad still showing a name.
+    const USABLE_PAD_H: f32 = 14.0;
+    /// The Sampler's preset row over its sample line.
+    const USABLE_SAMPLER_H: f32 = 28.0 + 1.0 + 24.0;
+
+    #[test]
+    fn every_panel_height_keeps_usable_pads_and_sampler() {
+        for width in [COMPACT_W, 460.0, SIDE_BY_SIDE_W, 900.0, MAX_W] {
+            for height in (MINIMUM_BODY_H as usize..=520).step_by(2).map(|h| h as f32) {
+                let layout = arrange(Size::new(width, height));
+                let context = format!("{width}x{height}: {layout:?}");
+                assert!(layout.pad_h >= USABLE_PAD_H, "{context}");
+                assert!(layout.sampler.height >= USABLE_SAMPLER_H, "{context}");
+            }
+        }
+    }
+
     #[test]
     fn a_short_pads_tab_moves_the_kit_and_banks_beside_the_grid() {
         let short = arrange(Size::new(460.0, 230.0));
