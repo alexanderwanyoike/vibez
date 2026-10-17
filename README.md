@@ -164,6 +164,4 @@ compatible with Vibez's GPL-3.0-or-later licence. The release build downloads
 one checksum-pinned copy from Steinberg's official SDK endpoint. ASIO is a
 trademark of Steinberg Media Technologies GmbH.
 
-## For Mum
-
-This one's for you Mum 🥲 I miss you.
+<sub>This one's for you Mum 🥲 I miss you.</sub>
