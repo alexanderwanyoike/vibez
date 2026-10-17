@@ -55,6 +55,9 @@ of Arrange applies to it unchanged:
   macOS uses CoreAudio and Linux uses ALSA
 - **Warping** with automatic BPM detection and high-quality time stretching
   through Signalsmith Stretch. Warped clips follow the project BPM
+- **Audio clip editing** with fades and crossfades on curves, reverse,
+  transient detection, and slicing at transients or Warp markers, including
+  straight into a Drum Rack
 - **Piano roll** with draw and select modes, multi-note editing, velocity,
   quantize, and adaptive snap grids
 - **Automation** for track, device and plugin parameters, on tracks, buses,
@@ -71,9 +74,12 @@ selected one.
 - **Channel strips** with a four-band EQ, pan, fader, metering, mute and solo
 - **Buses, returns and sends**, and a real master channel rather than a
   summing shortcut
-- **Built-in instruments**: subtractive synth, sampler, and a 16-pad drum rack
-- **Built-in effects**: filter, delay, reverb, drive, bitcrush, compressor,
-  auto-pan, gate, phaser, and gain
+- **Built-in instruments**: subtractive synth, sampler, and a drum rack with
+  four banks of 16 pads. Coming in v0.5.0: a wavetable synth, an FM synth, a
+  Sampler on every drum pad, and 808 and 909 kits
+- **Built-in effects**: EQ, filter, delay, reverb, drive, bitcrush, compressor,
+  auto-pan, gate, phaser, and gain. Coming in v0.5.0: echo, saturator and a
+  true-peak limiter
 - **Plugin hosting**: VST3 and CLAP instruments and effects with native GUIs,
   sandboxed plugin scanning, and state persisted in your project
 
@@ -90,7 +96,8 @@ selected one.
 
 ## Status
 
-v0.5.0, and still early. Linux is the primary development platform; macOS and
+v0.5.0 is in testing on `dev`; the latest release is v0.4.1. Still early.
+Linux is the primary development platform; macOS and
 Windows build and pass CI on every change but get less hands-on testing.
 Projects save to a self-contained versioned `.vzp` container, but breaking
 format changes are still possible: treat this as a working alpha rather than a
@@ -164,6 +171,4 @@ compatible with Vibez's GPL-3.0-or-later licence. The release build downloads
 one checksum-pinned copy from Steinberg's official SDK endpoint. ASIO is a
 trademark of Steinberg Media Technologies GmbH.
 
-## For Mum
-
-This one's for you Mum 🥲 I miss you.
+<sub>This one's for you Mum 🥲 I miss you.</sub>
