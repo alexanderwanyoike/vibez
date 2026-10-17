@@ -521,7 +521,8 @@ impl App {
             if let Some(native) = &track_info.native_instrument {
                 match native {
                     InstrumentStateInfo::SubtractiveSynth { params }
-                    | InstrumentStateInfo::WavetableSynth { params } => {
+                    | InstrumentStateInfo::WavetableSynth { params }
+                    | InstrumentStateInfo::FmSynth { params } => {
                         track.instrument_params = params.clone();
                         for (idx, value) in params.iter().copied().enumerate() {
                             self.send_command(EngineCommand::SetInstrumentParam {

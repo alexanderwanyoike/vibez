@@ -12,9 +12,9 @@ pub enum InstrumentCardMsg {
     /// Shows the second envelope (the filter's, on the Subtractive Synth and
     /// Sampler) instead of the level's, or back.
     ShowSecondEnvelope(TrackId, bool),
-    /// Shows a narrow Wavetable Synth's second oscillator instead of its
-    /// first, or back.
-    ShowSecondOscillator(TrackId, bool),
+    /// Shows the oscillator or operator at this place, the first being 0,
+    /// on a card too narrow for all of them.
+    ShowOscillator(TrackId, usize),
     /// Shows the part of its controls the shortest Wavetable Synth card
     /// sets on its one line.
     ShowLinePart(TrackId, usize),
@@ -31,7 +31,7 @@ impl InstrumentCardMsg {
         match self {
             Self::ShowPage(id, _)
             | Self::ShowSecondEnvelope(id, _)
-            | Self::ShowSecondOscillator(id, _)
+            | Self::ShowOscillator(id, _)
             | Self::ShowLinePart(id, _)
             | Self::ShowPadSampler(id, _)
             | Self::EditPadName(id, ..)
@@ -44,7 +44,7 @@ impl InstrumentCardMsg {
 pub struct InstrumentPanel {
     pub page: usize,
     pub second_envelope: bool,
-    pub second_oscillator: bool,
+    pub oscillator: usize,
     pub line_part: usize,
     pub pad_sampler: bool,
     /// The pad being named and its name so far.
@@ -59,7 +59,7 @@ impl InstrumentPanel {
         match message {
             InstrumentCardMsg::ShowPage(_, page) => self.page = page,
             InstrumentCardMsg::ShowSecondEnvelope(_, second) => self.second_envelope = second,
-            InstrumentCardMsg::ShowSecondOscillator(_, second) => self.second_oscillator = second,
+            InstrumentCardMsg::ShowOscillator(_, oscillator) => self.oscillator = oscillator,
             InstrumentCardMsg::ShowLinePart(_, part) => self.line_part = part,
             InstrumentCardMsg::ShowPadSampler(_, sampler) => self.pad_sampler = sampler,
             InstrumentCardMsg::EditPadName(_, pad, name) => self.pad_name = Some((pad, name)),

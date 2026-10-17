@@ -29,6 +29,7 @@ pub mod drum_kits;
 pub mod echo;
 pub mod eq;
 pub mod filter;
+pub mod fm;
 pub mod gain;
 pub mod gate;
 pub mod instrument_card;

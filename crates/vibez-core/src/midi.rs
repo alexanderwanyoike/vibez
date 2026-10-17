@@ -77,6 +77,7 @@ pub enum InstrumentKind {
     Sampler,
     DrumRack,
     WavetableSynth,
+    FmSynth,
 }
 
 impl InstrumentKind {
@@ -86,6 +87,7 @@ impl InstrumentKind {
             InstrumentKind::Sampler => "Sampler",
             InstrumentKind::DrumRack => "Drum Rack",
             InstrumentKind::WavetableSynth => "Wavetable Synth",
+            InstrumentKind::FmSynth => "FM Synth",
         }
     }
 
@@ -93,6 +95,7 @@ impl InstrumentKind {
         &[
             InstrumentKind::SubtractiveSynth,
             InstrumentKind::WavetableSynth,
+            InstrumentKind::FmSynth,
             InstrumentKind::Sampler,
             InstrumentKind::DrumRack,
         ]
@@ -268,11 +271,12 @@ mod tests {
     #[test]
     fn instrument_kind_all() {
         let all = InstrumentKind::all();
-        assert_eq!(all.len(), 4);
+        assert_eq!(all.len(), 5);
         assert_eq!(all[0], InstrumentKind::SubtractiveSynth);
         assert_eq!(all[1], InstrumentKind::WavetableSynth);
-        assert_eq!(all[2], InstrumentKind::Sampler);
-        assert_eq!(all[3], InstrumentKind::DrumRack);
+        assert_eq!(all[2], InstrumentKind::FmSynth);
+        assert_eq!(all[3], InstrumentKind::Sampler);
+        assert_eq!(all[4], InstrumentKind::DrumRack);
     }
 }
 

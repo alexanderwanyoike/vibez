@@ -314,7 +314,9 @@ impl App {
                         }
                     }
                 }
-                InstrumentKind::SubtractiveSynth | InstrumentKind::WavetableSynth => {}
+                InstrumentKind::SubtractiveSynth
+                | InstrumentKind::WavetableSynth
+                | InstrumentKind::FmSynth => {}
             }
         }
 

@@ -311,6 +311,56 @@ const AUTO_PAN_KEYS: [(usize, &str, bool); 9] = {
 
 /// Every Subtractive Synth control. Shapes, types, modes and counts are
 /// whole.
+/// Every FM Synth parameter, in index order.
+const FM_KEYS: [&str; vibez_instruments::fm::param::COUNT] = [
+    "op_a_ratio",
+    "op_a_fine",
+    "op_a_level",
+    "op_a_feedback",
+    "op_a_key_track",
+    "op_a_attack",
+    "op_a_decay",
+    "op_a_sustain",
+    "op_a_release",
+    "op_b_ratio",
+    "op_b_fine",
+    "op_b_level",
+    "op_b_feedback",
+    "op_b_key_track",
+    "op_b_attack",
+    "op_b_decay",
+    "op_b_sustain",
+    "op_b_release",
+    "op_c_ratio",
+    "op_c_fine",
+    "op_c_level",
+    "op_c_feedback",
+    "op_c_key_track",
+    "op_c_attack",
+    "op_c_decay",
+    "op_c_sustain",
+    "op_c_release",
+    "op_d_ratio",
+    "op_d_fine",
+    "op_d_level",
+    "op_d_feedback",
+    "op_d_key_track",
+    "op_d_attack",
+    "op_d_decay",
+    "op_d_sustain",
+    "op_d_release",
+    "algorithm",
+    "brightness",
+    "decay",
+    "motion",
+    "lfo_shape",
+    "lfo_rate",
+    "lfo_destination",
+    "velocity",
+    "voices",
+    "volume",
+];
+
 /// Every Wavetable Synth parameter, in index order.
 const WAVETABLE_KEYS: [&str; vibez_instruments::wavetable::param::COUNT] = [
     "osc_a_table",
@@ -493,6 +543,9 @@ fn parameter_keys(device: &DeviceParams) -> Result<Vec<PresetParam>, String> {
         DevicePresetKind::Instrument(InstrumentKind::WavetableSynth) => {
             return Ok(wavetable_keys());
         }
+        DevicePresetKind::Instrument(InstrumentKind::FmSynth) => {
+            return Ok(fm_keys());
+        }
         DevicePresetKind::Instrument(_) => {
             return Err("Presets are not yet supported by this built-in device".into());
         }
@@ -595,6 +648,7 @@ pub fn presets_for(kind: DevicePresetKind) -> Vec<DevicePreset> {
         DevicePresetKind::Instrument(InstrumentKind::SubtractiveSynth) => synth_factory_presets(),
         DevicePresetKind::Instrument(InstrumentKind::Sampler) => sampler_factory_presets(),
         DevicePresetKind::Instrument(InstrumentKind::WavetableSynth) => wavetable_factory_presets(),
+        DevicePresetKind::Instrument(InstrumentKind::FmSynth) => fm_factory_presets(),
         DevicePresetKind::Instrument(_) => Vec::new(),
     }
 }
@@ -826,6 +880,170 @@ fn wavetable_factory_presets() -> Vec<DevicePreset> {
         DevicePresetKind::Instrument(InstrumentKind::WavetableSynth),
         &wavetable_keys(),
         vibez_instruments::wavetable::WAVETABLE_PARAMS,
+        &presets,
+    )
+}
+
+fn fm_keys() -> Vec<PresetParam> {
+    FM_KEYS
+        .iter()
+        .enumerate()
+        .map(|(index, key)| (index, *key, vibez_instruments::fm::is_whole(index)))
+        .collect()
+}
+
+fn fm_factory_presets() -> Vec<DevicePreset> {
+    use vibez_instruments::fm::{dest, lfo_shape};
+    let presets: [(&str, &[(&str, f32)]); 8] = [
+        ("Init", &[]),
+        (
+            "Bell Keys",
+            &[
+                ("op_a_decay", 1.6),
+                ("op_a_sustain", 0.0),
+                ("op_a_release", 0.9),
+                ("op_b_ratio", 2.0),
+                ("op_b_level", -6.0),
+                ("op_b_key_track", 0.5),
+                ("op_b_attack", 0.15),
+                ("op_b_decay", 0.5),
+                ("op_b_sustain", 0.0),
+                ("op_c_ratio", 3.0),
+                ("op_c_level", -12.0),
+                ("op_c_decay", 0.4),
+                ("op_c_sustain", 0.0),
+                ("op_d_level", -18.0),
+                ("op_d_feedback", 0.3),
+                ("op_d_decay", 0.3),
+                ("op_d_sustain", 0.0),
+                ("brightness", 0.68),
+                ("decay", 0.35),
+                ("motion", 0.42),
+                ("lfo_rate", 0.4),
+            ],
+        ),
+        (
+            "Electric Piano",
+            &[
+                ("algorithm", 4.0),
+                ("op_a_decay", 2.5),
+                ("op_a_sustain", 0.15),
+                ("op_a_release", 0.4),
+                ("op_b_level", -14.0),
+                ("op_b_decay", 1.0),
+                ("op_b_sustain", 0.0),
+                ("op_c_level", -8.0),
+                ("op_c_decay", 2.5),
+                ("op_c_sustain", 0.15),
+                ("op_c_release", 0.4),
+                ("op_d_ratio", 14.0),
+                ("op_d_level", -26.0),
+                ("op_d_decay", 0.3),
+                ("op_d_sustain", 0.0),
+                ("velocity", 0.8),
+            ],
+        ),
+        (
+            "FM Bass",
+            &[
+                ("op_a_decay", 0.8),
+                ("op_a_sustain", 0.6),
+                ("op_a_release", 0.1),
+                ("op_b_level", -6.0),
+                ("op_b_feedback", 0.4),
+                ("op_b_decay", 0.25),
+                ("op_b_sustain", 0.1),
+                ("brightness", 0.6),
+                ("voices", 1.0),
+            ],
+        ),
+        (
+            "Brass",
+            &[
+                ("op_a_attack", 0.05),
+                ("op_a_sustain", 0.9),
+                ("op_a_release", 0.25),
+                ("op_b_level", -8.0),
+                ("op_b_feedback", 0.3),
+                ("op_b_attack", 0.08),
+                ("op_b_decay", 0.3),
+                ("op_b_sustain", 0.6),
+                ("motion", 0.1),
+                ("lfo_destination", dest::PITCH as f32),
+            ],
+        ),
+        (
+            "Pluck",
+            &[
+                ("algorithm", 1.0),
+                ("op_a_decay", 0.4),
+                ("op_a_sustain", 0.0),
+                ("op_b_ratio", 2.0),
+                ("op_b_level", -10.0),
+                ("op_b_decay", 0.15),
+                ("op_b_sustain", 0.0),
+                ("op_c_ratio", 5.0),
+                ("op_c_level", -24.0),
+                ("op_c_decay", 0.08),
+                ("op_c_sustain", 0.0),
+            ],
+        ),
+        (
+            "Organ",
+            &[
+                ("algorithm", 7.0),
+                ("op_a_ratio", 0.5),
+                ("op_a_sustain", 1.0),
+                ("op_a_release", 0.1),
+                ("op_b_level", -3.0),
+                ("op_b_sustain", 1.0),
+                ("op_b_release", 0.1),
+                ("op_c_ratio", 2.0),
+                ("op_c_level", -6.0),
+                ("op_c_sustain", 1.0),
+                ("op_c_release", 0.1),
+                ("op_d_ratio", 3.0),
+                ("op_d_level", -9.0),
+                ("op_d_sustain", 1.0),
+                ("op_d_release", 0.1),
+                ("motion", 0.12),
+                ("lfo_rate", 6.0),
+                ("lfo_destination", dest::VOLUME as f32),
+            ],
+        ),
+        (
+            "Metal Pad",
+            &[
+                ("algorithm", 5.0),
+                ("op_a_attack", 0.8),
+                ("op_a_sustain", 0.8),
+                ("op_a_release", 2.0),
+                ("op_b_fine", 0.01),
+                ("op_b_level", -3.0),
+                ("op_b_attack", 0.8),
+                ("op_b_sustain", 0.8),
+                ("op_b_release", 2.0),
+                ("op_c_ratio", 2.0),
+                ("op_c_level", -6.0),
+                ("op_c_attack", 0.8),
+                ("op_c_sustain", 0.8),
+                ("op_c_release", 2.0),
+                ("op_d_ratio", 3.5),
+                ("op_d_fine", 0.07),
+                ("op_d_level", -12.0),
+                ("op_d_attack", 1.5),
+                ("op_d_sustain", 0.8),
+                ("op_d_release", 2.0),
+                ("motion", 0.3),
+                ("lfo_rate", 0.3),
+                ("lfo_shape", lfo_shape::TRIANGLE as f32),
+            ],
+        ),
+    ];
+    keyed_presets(
+        DevicePresetKind::Instrument(InstrumentKind::FmSynth),
+        &fm_keys(),
+        vibez_instruments::fm::FM_PARAMS,
         &presets,
     )
 }
@@ -2851,28 +3069,31 @@ mod presentation_tests {
         }
     }
 
-    fn sampler_track() -> crate::state::ProjectTrack {
+    /// A track holding the native `kind` at its defaults.
+    fn instrument_track(kind: InstrumentKind) -> crate::state::ProjectTrack {
         let mut track = crate::state::ProjectTrack::new(TrackId::new(), "Keys".into(), 0);
         track.has_instrument = true;
-        track.instrument_kind = Some(InstrumentKind::Sampler);
-        track.instrument_params = vibez_instruments::sampler::SAMPLER_PARAMS
+        track.instrument_kind = Some(kind);
+        track.instrument_params = vibez_instruments::descriptors_for(kind)
             .iter()
             .map(|descriptor| descriptor.default)
             .collect();
         track
     }
 
-    #[test]
-    fn sampler_factory_presets_are_valid_distinct_and_start_from_init() {
-        let track = sampler_track();
+    /// `kind`'s factory presets start from Init and include `named`; each
+    /// of the others changes something and survives being captured again,
+    /// and no two share a name.
+    fn assert_instrument_presets(kind: InstrumentKind, named: &str) {
+        let track = instrument_track(kind);
         let device = DeviceParams::instrument(&track).unwrap();
         let presets = presets_for(device.kind);
         assert!(presets.len() >= 6);
         assert_eq!(presets[0].name(), "Init");
-        assert!(presets.iter().any(|preset| preset.name() == "Warm Rhodes"));
+        assert!(presets.iter().any(|preset| preset.name() == named));
         assert_eq!(prepare_updates(device, &presets[0]), Ok(Vec::new()));
         for preset in &presets[1..] {
-            let mut applied = sampler_track();
+            let mut applied = instrument_track(kind);
             for (index, value) in prepare_updates(device, preset).unwrap() {
                 applied.instrument_params[index] = value;
             }
@@ -2892,9 +3113,14 @@ mod presentation_tests {
     }
 
     #[test]
+    fn sampler_factory_presets_are_valid_distinct_and_start_from_init() {
+        assert_instrument_presets(InstrumentKind::Sampler, "Warm Rhodes");
+    }
+
+    #[test]
     fn a_sampler_preset_leaves_the_sample_s_own_points_alone() {
         use vibez_instruments::sampler::param;
-        let mut track = sampler_track();
+        let mut track = instrument_track(InstrumentKind::Sampler);
         for (index, value) in [
             (param::ROOT_NOTE, 48.0),
             (param::START, 0.2),
@@ -2934,88 +3160,24 @@ mod presentation_tests {
         }
     }
 
-    fn synth_track() -> crate::state::ProjectTrack {
-        let mut track = crate::state::ProjectTrack::new(TrackId::new(), "Keys".into(), 0);
-        track.has_instrument = true;
-        track.instrument_kind = Some(InstrumentKind::SubtractiveSynth);
-        track.instrument_params = vibez_instruments::synth::SYNTH_PARAMS
-            .iter()
-            .map(|descriptor| descriptor.default)
-            .collect();
-        track
-    }
-
-    fn wavetable_track() -> crate::state::ProjectTrack {
-        let mut track = crate::state::ProjectTrack::new(TrackId::new(), "Pads".into(), 0);
-        track.has_instrument = true;
-        track.instrument_kind = Some(InstrumentKind::WavetableSynth);
-        track.instrument_params = vibez_instruments::wavetable::WAVETABLE_PARAMS
-            .iter()
-            .map(|descriptor| descriptor.default)
-            .collect();
-        track
+    #[test]
+    fn fm_factory_presets_are_valid_distinct_and_start_from_init() {
+        assert_instrument_presets(InstrumentKind::FmSynth, "Bell Keys");
     }
 
     #[test]
     fn wavetable_factory_presets_are_valid_distinct_and_start_from_init() {
-        let track = wavetable_track();
-        let device = DeviceParams::instrument(&track).unwrap();
-        let presets = presets_for(device.kind);
-        assert_eq!(presets[0].name(), "Init");
-        assert!(presets.iter().any(|preset| preset.name() == "Glass Motion"));
-        assert_eq!(prepare_updates(device, &presets[0]), Ok(Vec::new()));
-        for preset in &presets[1..] {
-            let mut applied = wavetable_track();
-            for (index, value) in prepare_updates(device, preset).unwrap() {
-                applied.instrument_params[index] = value;
-            }
-            assert_ne!(
-                applied.instrument_params,
-                track.instrument_params,
-                "{}",
-                preset.name()
-            );
-            let captured = capture(DeviceParams::instrument(&applied).unwrap(), preset.name());
-            assert_eq!(captured.as_ref(), Ok(preset));
-        }
-        let mut names: Vec<_> = presets.iter().map(DevicePreset::name).collect();
-        names.sort_unstable();
-        names.dedup();
-        assert_eq!(names.len(), presets.len(), "names are unique");
+        assert_instrument_presets(InstrumentKind::WavetableSynth, "Glass Motion");
     }
 
     #[test]
     fn synth_factory_presets_are_valid_distinct_and_start_from_init() {
-        let track = synth_track();
-        let device = DeviceParams::instrument(&track).unwrap();
-        let presets = presets_for(device.kind);
-        assert!(presets.len() >= 6);
-        assert_eq!(presets[0].name(), "Init");
-        assert!(presets.iter().any(|preset| preset.name() == "Soft Analog"));
-        assert_eq!(prepare_updates(device, &presets[0]), Ok(Vec::new()));
-        for preset in &presets[1..] {
-            let mut applied = synth_track();
-            for (index, value) in prepare_updates(device, preset).unwrap() {
-                applied.instrument_params[index] = value;
-            }
-            assert_ne!(
-                applied.instrument_params,
-                track.instrument_params,
-                "{}",
-                preset.name()
-            );
-            let captured = capture(DeviceParams::instrument(&applied).unwrap(), preset.name());
-            assert_eq!(captured.as_ref(), Ok(preset));
-        }
-        let mut names: Vec<_> = presets.iter().map(DevicePreset::name).collect();
-        names.sort_unstable();
-        names.dedup();
-        assert_eq!(names.len(), presets.len(), "names are unique");
+        assert_instrument_presets(InstrumentKind::SubtractiveSynth, "Soft Analog");
     }
 
     #[test]
     fn synth_choices_in_a_preset_must_be_whole() {
-        let track = synth_track();
+        let track = instrument_track(InstrumentKind::SubtractiveSynth);
         let device = DeviceParams::instrument(&track).unwrap();
         let captured = capture(device, "Current").unwrap();
         for key in [

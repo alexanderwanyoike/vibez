@@ -49,7 +49,8 @@ pub(super) fn channel(
         if let Some(state) = &info.native_instrument {
             match state {
                 InstrumentStateInfo::SubtractiveSynth { params }
-                | InstrumentStateInfo::WavetableSynth { params } => {
+                | InstrumentStateInfo::WavetableSynth { params }
+                | InstrumentStateInfo::FmSynth { params } => {
                     for (index, value) in params.iter().enumerate() {
                         instrument.set_param(index, *value);
                     }

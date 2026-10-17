@@ -100,6 +100,10 @@ name = "wavetable_device"
 required-features = ["dev-gallery"]
 
 [[example]]
+name = "fm_device"
+required-features = ["dev-gallery"]
+
+[[example]]
 name = "reverb_device"
 required-features = ["dev-gallery"]
 

@@ -2662,6 +2662,70 @@ pub fn run_synth() -> iced::Result {
     .run_with(|| (SynthGallery::new(), iced::Task::none()))
 }
 
+/// A tabbed instrument card titled `name` in a section `section` big,
+/// under `label`: `body` builds the card's body from the track's controls,
+/// a preset bar and the body's size.
+fn tabbed_scene<'a>(
+    label: &'static str,
+    name: &'static str,
+    track: &'a ProjectTrack,
+    card_width: f32,
+    section: (f32, f32),
+    body: impl Fn(
+            crate::domains::device_params::DeviceParams<'a>,
+            Element<'a, Message>,
+            iced::Size,
+        ) -> Element<'a, Message>
+        + 'a,
+) -> Element<'a, Message> {
+    let accent = th::track_color(0);
+    let track_id = track.id;
+    let Some(device) = crate::domains::device_params::DeviceParams::instrument(track) else {
+        return text("no instrument").into();
+    };
+    let body = iced::widget::responsive(move |size| {
+        body(
+            device,
+            crate::widgets::device_preset_bar::view(
+                track_id,
+                device,
+                None,
+                accent,
+                crate::widgets::instrument_bands::preset_bar_width(size),
+            ),
+            size,
+        )
+    });
+    let title = crate::widgets::device_chrome::title_bar(
+        row![
+            text("\u{25CF}").size(8).color(accent),
+            text(name).size(11).color(th::text())
+        ]
+        .spacing(5)
+        .align_y(iced::Alignment::Center),
+    );
+    let card =
+        crate::widgets::device_chrome::card(column![title, body].width(Length::Fixed(card_width)));
+    column![
+        text(label).size(11).color(th::text_dim()),
+        container(row![card].height(Length::Fill))
+            .padding(8)
+            .width(section.0)
+            .height(section.1)
+            .style(|_theme: &Theme| container::Style {
+                background: Some(th::bg_dark().into()),
+                border: iced::Border {
+                    color: th::border(),
+                    width: 1.0,
+                    radius: 0.0.into(),
+                },
+                ..Default::default()
+            }),
+    ]
+    .spacing(4)
+    .into()
+}
+
 /// Native Wavetable Synth at each width tier, tab and height it adapts to,
 /// on the concept's Glass Motion, with scenes at the bodies the default and
 /// minimum detail panels give an instrument card.
@@ -2709,58 +2773,23 @@ impl WavetableGallery {
     ) -> Element<'a, Message> {
         let accent = th::track_color(0);
         let track_id = self.track.id;
-        let Some(device) = crate::domains::device_params::DeviceParams::instrument(&self.track)
-        else {
-            return text("no wavetable").into();
-        };
-        let body = iced::widget::responsive(move |size| {
-            crate::widgets::wavetable_device::WavetableView {
-                track_id,
-                device,
-                accent,
-                panel: panel.clone(),
-                entry: None,
-            }
-            .view(
-                crate::widgets::device_preset_bar::view(
+        tabbed_scene(
+            label,
+            "Wavetable Synth",
+            &self.track,
+            card_width,
+            section,
+            move |device, preset_bar, size| {
+                crate::widgets::wavetable_device::WavetableView {
                     track_id,
                     device,
-                    None,
                     accent,
-                    crate::widgets::wavetable_device::preset_bar_width(size),
-                ),
-                size,
-            )
-        });
-        let title = crate::widgets::device_chrome::title_bar(
-            row![
-                text("\u{25CF}").size(8).color(accent),
-                text("Wavetable Synth").size(11).color(th::text())
-            ]
-            .spacing(5)
-            .align_y(iced::Alignment::Center),
-        );
-        let card = crate::widgets::device_chrome::card(
-            column![title, body].width(Length::Fixed(card_width)),
-        );
-        column![
-            text(label).size(11).color(th::text_dim()),
-            container(row![card].height(Length::Fill))
-                .padding(8)
-                .width(section.0)
-                .height(section.1)
-                .style(|_theme: &Theme| container::Style {
-                    background: Some(th::bg_dark().into()),
-                    border: iced::Border {
-                        color: th::border(),
-                        width: 1.0,
-                        radius: 0.0.into(),
-                    },
-                    ..Default::default()
-                }),
-        ]
-        .spacing(4)
-        .into()
+                    panel: panel.clone(),
+                    entry: None,
+                }
+                .view(preset_bar, size)
+            },
+        )
     }
 
     fn view(&self) -> Element<'_, Message> {
@@ -2820,7 +2849,7 @@ impl WavetableGallery {
                         COMPACT_W,
                         (COMPACT_W + 16.0, default),
                         InstrumentPanel {
-                            second_oscillator: true,
+                            oscillator: 1,
                             ..Default::default()
                         }
                     ),
@@ -3337,4 +3366,182 @@ pub fn run_drum_rack() -> iced::Result {
     .font(crate::typography::PLEX_MONO_MEDIUM_BYTES)
     .font(crate::typography::PLEX_MONO_SEMIBOLD_BYTES)
     .run_with(|| (DrumRackGallery::new(), iced::Task::none()))
+}
+
+/// Native FM Synth at each width tier, tab and height it adapts to, on the
+/// concept's Bell Keys with Operator B shown, with scenes at the bodies the
+/// default and minimum detail panels give an instrument card.
+struct FmGallery {
+    track: ProjectTrack,
+}
+
+impl FmGallery {
+    fn new() -> Self {
+        use crate::domains::device_params::DeviceParams;
+        use vibez_core::device_preset::DevicePresetKind;
+        use vibez_core::midi::InstrumentKind;
+        let mut track = ProjectTrack::new(TrackId::new(), "Keys".into(), 0);
+        track.kind = vibez_core::midi::TrackKind::Midi;
+        track.has_instrument = true;
+        track.instrument_kind = Some(InstrumentKind::FmSynth);
+        track.instrument_params = vibez_instruments::fm::FM_PARAMS
+            .iter()
+            .map(|d| d.default)
+            .collect();
+        let bell_keys = crate::domains::device_presets::presets_for(DevicePresetKind::Instrument(
+            InstrumentKind::FmSynth,
+        ))
+        .into_iter()
+        .find(|preset| preset.name() == "Bell Keys");
+        let updates = bell_keys.and_then(|preset| {
+            crate::domains::device_presets::prepare_updates(
+                DeviceParams::instrument(&track)?,
+                &preset,
+            )
+            .ok()
+        });
+        for (index, value) in updates.unwrap_or_default() {
+            track.instrument_params[index] = value;
+        }
+        Self { track }
+    }
+
+    fn scene<'a>(
+        &'a self,
+        label: &'static str,
+        card_width: f32,
+        section: (f32, f32),
+        page: crate::domains::fm::FmPage,
+    ) -> Element<'a, Message> {
+        let accent = th::track_color(0);
+        let track_id = self.track.id;
+        let panel = crate::domains::instrument_card::InstrumentPanel {
+            page: page.index(),
+            oscillator: 1,
+            ..Default::default()
+        };
+        tabbed_scene(
+            label,
+            "FM Synth",
+            &self.track,
+            card_width,
+            section,
+            move |device, preset_bar, size| {
+                crate::widgets::fm_device::FmView {
+                    track_id,
+                    device,
+                    accent,
+                    panel: panel.clone(),
+                    entry: None,
+                }
+                .view(preset_bar, size)
+            },
+        )
+    }
+
+    fn view(&self) -> Element<'_, Message> {
+        use crate::domains::fm::FmPage;
+        use crate::widgets::fm_device::{COMPACT_W, FULL_W};
+        let full = FULL_W + 40.0;
+        let medium = 760.0;
+        // Sections that give a card the bodies the default 280 px and
+        // minimum 180 px detail panels do.
+        let (default, minimum) = (210.0, 110.0);
+        container(
+            column![
+                row![
+                    self.scene(
+                        "Full, tall (overview)",
+                        full,
+                        (full + 16.0, 430.0),
+                        FmPage::Overview
+                    ),
+                    self.scene(
+                        "Compact, Operators tab",
+                        COMPACT_W,
+                        (COMPACT_W + 16.0, 330.0),
+                        FmPage::Operators
+                    ),
+                ]
+                .spacing(24),
+                row![
+                    self.scene(
+                        "Full, Overview tab, default panel",
+                        full,
+                        (full + 16.0, default),
+                        FmPage::Overview
+                    ),
+                    self.scene(
+                        "Compact, Overview tab, default panel",
+                        COMPACT_W,
+                        (COMPACT_W + 16.0, default),
+                        FmPage::Overview
+                    ),
+                ]
+                .spacing(24),
+                row![
+                    self.scene(
+                        "Medium, Operators tab, default panel",
+                        medium,
+                        (medium + 16.0, default),
+                        FmPage::Operators
+                    ),
+                    self.scene(
+                        "Medium, Envelopes tab, default panel",
+                        medium,
+                        (medium + 16.0, default),
+                        FmPage::Envelopes
+                    ),
+                ]
+                .spacing(24),
+                row![
+                    self.scene(
+                        "Compact, Modulation tab, default panel",
+                        COMPACT_W,
+                        (COMPACT_W + 16.0, default),
+                        FmPage::Modulation
+                    ),
+                    self.scene(
+                        "Full, minimum panel",
+                        full,
+                        (full + 16.0, minimum),
+                        FmPage::Overview
+                    ),
+                ]
+                .spacing(24),
+                self.scene(
+                    "Compact, Envelopes tab, minimum panel",
+                    COMPACT_W,
+                    (COMPACT_W + 16.0, minimum),
+                    FmPage::Envelopes
+                ),
+            ]
+            .spacing(14),
+        )
+        .padding(16)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .style(|_theme: &Theme| container::Style {
+            background: Some(th::bg_surface().into()),
+            ..Default::default()
+        })
+        .into()
+    }
+}
+
+pub fn run_fm() -> iced::Result {
+    iced::application(
+        "FM Synth device gallery",
+        |_: &mut FmGallery, _: Message| {},
+        FmGallery::view,
+    )
+    .theme(|_| th::vibez_theme())
+    .antialiasing(true)
+    .window_size((1900.0, 1500.0))
+    .font(crate::icons::ICON_FONT_BYTES)
+    .font(crate::typography::PLEX_SANS_CONDENSED_MEDIUM_BYTES)
+    .font(crate::typography::PLEX_SANS_CONDENSED_SEMIBOLD_BYTES)
+    .font(crate::typography::PLEX_MONO_MEDIUM_BYTES)
+    .font(crate::typography::PLEX_MONO_SEMIBOLD_BYTES)
+    .run_with(|| (FmGallery::new(), iced::Task::none()))
 }

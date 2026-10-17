@@ -287,6 +287,29 @@ pub fn param_format(
                 _ => ParamFormat::for_descriptor(descriptor),
             }
         }
+        (DevicePresetKind::Instrument(InstrumentKind::FmSynth), index) => {
+            use crate::domains::fm::{ALGORITHM_NAMES, DEST_NAMES, LFO_SHAPE_NAMES};
+            use vibez_instruments::fm::{op, param};
+            if index < param::ALGORITHM {
+                return match index % op::COUNT {
+                    op::RATIO | op::FINE => ParamFormat::Number {
+                        decimals: 2,
+                        unit: "",
+                    },
+                    _ => ParamFormat::for_descriptor(descriptor),
+                };
+            }
+            match index {
+                param::ALGORITHM => ParamFormat::Names(&ALGORITHM_NAMES),
+                param::LFO_SHAPE => ParamFormat::Names(&LFO_SHAPE_NAMES),
+                param::LFO_DEST => ParamFormat::Names(&DEST_NAMES),
+                param::VOICES => ParamFormat::Number {
+                    decimals: 0,
+                    unit: "",
+                },
+                _ => ParamFormat::for_descriptor(descriptor),
+            }
+        }
         (DevicePresetKind::Instrument(InstrumentKind::WavetableSynth), index) => {
             use crate::domains::wavetable::{
                 DEST_NAMES, FILTER_NAMES, LFO_SHAPE_NAMES, TABLE_NAMES,

@@ -180,6 +180,7 @@ mod drum_rack_preparation;
 mod engine_events;
 mod eq_devices;
 mod filter_devices;
+mod fm_devices;
 mod gain_devices;
 mod gate_devices;
 mod instrument_devices;
