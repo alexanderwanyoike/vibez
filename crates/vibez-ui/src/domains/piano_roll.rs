@@ -274,15 +274,17 @@ impl PianoRollState {
                     groove_grid: vibez_core::perform::GrooveGrid::Off,
                 });
                 engine.send(EngineCommand::AddNoteClip {
-                    start_marker_beats: 0.0,
                     track_id,
-                    clip_id,
-                    position_beats,
-                    duration_beats,
-                    loop_enabled: true,
-                    loop_start_beats: 0.0,
-                    loop_end_beats: duration_beats,
-                    groove_grid: vibez_core::perform::GrooveGrid::Off,
+                    insertion: vibez_engine::clip_insertion::PreparedNoteClipInsertion::new(
+                        clip_id,
+                        position_beats,
+                        duration_beats,
+                        0.0,
+                        true,
+                        0.0,
+                        duration_beats,
+                        vibez_core::perform::GrooveGrid::Off,
+                    ),
                 });
                 // Auto-select the new note clip for piano roll editing
                 action.select_note_clip = Some((track_id, clip_id));
@@ -313,7 +315,7 @@ impl PianoRollState {
                 engine.send(EngineCommand::AddNote {
                     track_id,
                     clip_id,
-                    note,
+                    insertion: vibez_engine::clip_insertion::PreparedNoteInsertion::new(note),
                 });
             }
             PianoRollMsg::RemoveNote(track_id, clip_id, note_index) => {
@@ -564,7 +566,9 @@ impl PianoRollState {
                             engine.send(EngineCommand::AddNote {
                                 track_id,
                                 clip_id,
-                                note: *note,
+                                insertion: vibez_engine::clip_insertion::PreparedNoteInsertion::new(
+                                    *note,
+                                ),
                             });
                         }
                         // The engine clip must grow too, or playback
@@ -626,21 +630,25 @@ impl PianoRollState {
                 if let Some((pos, dur, notes, groove_grid)) = sync_data {
                     engine.send(EngineCommand::RemoveNoteClip(track_id, clip_id));
                     engine.send(EngineCommand::AddNoteClip {
-                        start_marker_beats: 0.0,
                         track_id,
-                        clip_id,
-                        position_beats: pos,
-                        duration_beats: dur,
-                        loop_enabled: false,
-                        loop_start_beats: 0.0,
-                        loop_end_beats: 0.0,
-                        groove_grid,
+                        insertion: vibez_engine::clip_insertion::PreparedNoteClipInsertion::new(
+                            clip_id,
+                            pos,
+                            dur,
+                            0.0,
+                            false,
+                            0.0,
+                            0.0,
+                            groove_grid,
+                        ),
                     });
                     for note in &notes {
                         engine.send(EngineCommand::AddNote {
                             track_id,
                             clip_id,
-                            note: *note,
+                            insertion: vibez_engine::clip_insertion::PreparedNoteInsertion::new(
+                                *note,
+                            ),
                         });
                     }
                 }
@@ -697,21 +705,25 @@ impl PianoRollState {
                 {
                     engine.send(EngineCommand::RemoveNoteClip(track_id, clip_id));
                     engine.send(EngineCommand::AddNoteClip {
-                        start_marker_beats,
                         track_id,
-                        clip_id,
-                        position_beats: pos,
-                        duration_beats: dur,
-                        loop_enabled,
-                        loop_start_beats,
-                        loop_end_beats,
-                        groove_grid,
+                        insertion: vibez_engine::clip_insertion::PreparedNoteClipInsertion::new(
+                            clip_id,
+                            pos,
+                            dur,
+                            start_marker_beats,
+                            loop_enabled,
+                            loop_start_beats,
+                            loop_end_beats,
+                            groove_grid,
+                        ),
                     });
                     for note in &notes {
                         engine.send(EngineCommand::AddNote {
                             track_id,
                             clip_id,
-                            note: *note,
+                            insertion: vibez_engine::clip_insertion::PreparedNoteInsertion::new(
+                                *note,
+                            ),
                         });
                     }
                 }

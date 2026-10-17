@@ -11,9 +11,7 @@ impl AudioEngine {
         idle: bool,
         capture_audible_only: bool,
     ) {
-        let Some(plan) = self.routing.as_mut() else {
-            return;
-        };
+        let plan = &mut self.routing;
         let mut stereo = std::mem::take(&mut plan.layout_output);
         let mut input = std::mem::take(&mut plan.layout_input);
         let mut selected = std::mem::take(&mut plan.layout_capture);
@@ -71,10 +69,8 @@ impl AudioEngine {
                 }
             }
         }
-        if let Some(plan) = self.routing.as_mut() {
-            plan.layout_output = stereo;
-            plan.layout_input = input;
-            plan.layout_capture = selected;
-        }
+        self.routing.layout_output = stereo;
+        self.routing.layout_input = input;
+        self.routing.layout_capture = selected;
     }
 }

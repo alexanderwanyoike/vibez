@@ -1,4 +1,10 @@
+//! Compensated routing preserves alignment across prepared graph and device edits.
+
 use super::*;
+use crate::events::{
+    InstrumentNoteInputEvent, PerformanceCaptureStartedEvent, SectionTransitionedEvent,
+    SourceNoteInputEvent,
+};
 use crate::test_support::DelayProbe;
 use vibez_core::effect::{EffectType, ParamDescriptor};
 use vibez_core::id::{ClipId, EffectId};
@@ -28,6 +34,7 @@ fn pulse_clip(track_id: TrackId, amplitude: f32) -> EngineCommand {
         samples[onset] = amplitude;
     }
     EngineCommand::AddClip {
+        insertion: crate::clip_insertion::PreparedClipInsertion::new(),
         track_id,
         clip_id: ClipId::new(),
         audio: Arc::new(DecodedAudio {
@@ -170,6 +177,17 @@ impl AudioEffect for ChangingDelay {
     }
 }
 
+pub(super) fn changing_delay(
+    initial: u32,
+    pending: Arc<std::sync::atomic::AtomicU32>,
+) -> Box<dyn AudioEffect> {
+    Box::new(ChangingDelay {
+        inner: DelayProbe::with_report(initial, initial),
+        pending,
+        stopped: false,
+    })
+}
+
 #[test]
 fn coordinated_latency_changes_keep_transport_running_and_regain_alignment() {
     use std::sync::atomic::{AtomicU32, Ordering};
@@ -193,11 +211,7 @@ fn coordinated_latency_changes_keep_transport_running_and_regain_alignment() {
         .push(EngineCommand::InsertEffect {
             track_id: delayed,
             effect_id: effect,
-            effect: Box::new(ChangingDelay {
-                inner: DelayProbe::with_report(137, 137),
-                pending: pending.clone(),
-                stopped: false,
-            }),
+            effect: changing_delay(137, Arc::clone(&pending)),
             position: None,
         })
         .unwrap();
@@ -254,10 +268,7 @@ fn coordinated_latency_changes_keep_transport_running_and_regain_alignment() {
             assert!(output.iter().all(|sample| sample.abs() < 1e-7));
             while events.pop().is_ok() {}
         }
-        assert_eq!(
-            engine.routing.as_ref().unwrap().compensation.generation,
-            generation
-        );
+        assert_eq!(engine.routing.as_ref().compensation.generation, generation);
     }
     pending.store(
         crate::compensation::MAX_DEVICE_LATENCY + 1,
@@ -322,7 +333,7 @@ fn structural_effect_edit_can_wait_for_plan_in_a_later_callback() {
         .unwrap();
     engine.process(&mut block, 2);
     assert!(engine.transport.is_playing());
-    assert!(engine.graph_edit_pending);
+    assert!(engine.compensation_plan.awaiting_structural_plan());
     assert!(block.iter().all(|&value| value == 0.0));
     assert!(
         !std::iter::from_fn(|| events.pop().ok()).any(|event| matches!(
@@ -339,8 +350,8 @@ fn structural_effect_edit_can_wait_for_plan_in_a_later_callback() {
         .unwrap();
     engine.process(&mut block, 2);
     assert!(engine.transport.is_playing());
-    assert!(!engine.graph_edit_pending);
-    assert!(engine.compensation_valid);
+    assert!(!engine.compensation_plan.awaiting_structural_plan());
+    assert!(engine.compensation_plan.applied_plan_is_valid());
 }
 
 #[test]
@@ -402,7 +413,7 @@ fn automation_target_addition_and_point_edit_preserve_running_delay_history() {
     commands
         .push(EngineCommand::SetAutomationLane {
             track_id: track,
-            lane: lane.clone(),
+            insertion: crate::clip_insertion::PreparedAutomationLaneInsertion::new(lane.clone()),
         })
         .unwrap();
     commands
@@ -424,12 +435,12 @@ fn automation_target_addition_and_point_edit_preserve_running_delay_history() {
         .unwrap();
     engine.process(&mut block, 2);
     assert!(block.iter().all(|&value| (value - before).abs() < 1e-6));
-    assert_eq!(engine.compensation_plan_fade, 0);
+    assert_eq!(engine.output_gate.remaining_morph_frames(), 0);
     lane.points[0].value = 0.25;
     commands
         .push(EngineCommand::SetAutomationLane {
             track_id: track,
-            lane,
+            insertion: crate::clip_insertion::PreparedAutomationLaneInsertion::new(lane),
         })
         .unwrap();
     engine.process(&mut block, 2);
@@ -530,18 +541,18 @@ fn reduced_monitoring_capture_uses_the_same_heard_section_identity_and_local_clo
         .unwrap();
     engine.process(&mut [0.0; 2], 2);
     let immediate: Vec<_> = std::iter::from_fn(|| events.pop().ok()).collect();
-    assert!(immediate.iter().any(|event|matches!(event,EngineEvent::SourceNoteInput {position,..} if position.effective_at_samples==1024 && position.section_id==Some(new) && position.section_position_samples==Some(0))));
+    assert!(immediate.iter().any(|event|matches!(event,EngineEvent::SourceNoteInput(SourceNoteInputEvent {position,..}) if position.effective_at_samples==1024 && position.section_id==Some(new) && position.section_position_samples==Some(0))));
     assert!(!immediate.iter().any(
-        |event| matches!(event,EngineEvent::SectionTransitioned{section_id,..} if *section_id==new)
+        |event| matches!(event,EngineEvent::SectionTransitioned(SectionTransitionedEvent {section_id,..}) if *section_id==new)
     ));
-    assert!(immediate.iter().any(|event| matches!(event,EngineEvent::PerformanceCaptureStarted{effective_at_samples:503,section_id:Some(id),section_position_samples:Some(503),..} if *id==old)));
+    assert!(immediate.iter().any(|event| matches!(event,EngineEvent::PerformanceCaptureStarted(PerformanceCaptureStartedEvent {effective_at_samples:503,section_id:Some(id),section_position_samples:Some(503),..}) if *id==old)));
     for _ in 0..3 {
         engine.process(&mut [0.0; 128], 2);
     }
     let notes: Vec<_> = std::iter::from_fn(|| events.pop().ok()).collect();
-    assert!(notes.iter().any(|event| matches!(event,EngineEvent::InstrumentNoteInput{effective_at_samples:640,section_id:Some(id),section_position_samples:Some(128),..} if *id==old)));
+    assert!(notes.iter().any(|event| matches!(event,EngineEvent::InstrumentNoteInput(InstrumentNoteInputEvent {effective_at_samples:640,section_id:Some(id),section_position_samples:Some(128),..}) if *id==old)));
     assert!(!notes.iter().any(
-        |event| matches!(event,EngineEvent::SectionTransitioned{section_id,..} if *section_id==new)
+        |event| matches!(event,EngineEvent::SectionTransitioned(SectionTransitionedEvent {section_id,..}) if *section_id==new)
     ));
     assert!(notes.iter().any(|event| matches!(event, EngineEvent::SectionCaptureSource {section_id,effective_at_samples:1024,offsets,..} if *section_id==new && offsets.as_ref()==[(track,384)])));
     commands
@@ -549,12 +560,12 @@ fn reduced_monitoring_capture_uses_the_same_heard_section_identity_and_local_clo
         .unwrap();
     engine.process(&mut [0.0; 2], 2);
     let restarted: Vec<_> = std::iter::from_fn(|| events.pop().ok()).collect();
-    assert!(restarted.iter().any(|event| matches!(event,EngineEvent::PerformanceCaptureStarted{effective_at_samples:696,section_id:Some(id),section_position_samples:Some(184),..} if *id==old)));
+    assert!(restarted.iter().any(|event| matches!(event,EngineEvent::PerformanceCaptureStarted(PerformanceCaptureStartedEvent {effective_at_samples:696,section_id:Some(id),section_position_samples:Some(184),..}) if *id==old)));
     assert!(restarted.iter().any(|event| matches!(event,EngineEvent::SectionCaptureSource{section_id,effective_at_samples:1024,offsets,..} if *section_id==new && offsets.as_ref()==[(track,384)])));
     for _ in 0..6 {
         engine.process(&mut [0.0; 128], 2);
     }
-    assert!(std::iter::from_fn(|| events.pop().ok()).any(|event| matches!(event,EngineEvent::SectionTransitioned{section_id,effective_at_samples:1024,..} if section_id==new)));
+    assert!(std::iter::from_fn(|| events.pop().ok()).any(|event| matches!(event,EngineEvent::SectionTransitioned(SectionTransitionedEvent {section_id,effective_at_samples:1024,..}) if section_id==new)));
 }
 
 #[test]
@@ -696,7 +707,7 @@ fn changed_rate_keeps_native_owners_but_rejects_their_old_configuration_even_aft
         commands.push(EngineCommand::SetSampleRate(48000)).unwrap();
         engine.process(&mut [0.0; 128], 2);
         assert!(!engine.transport.is_playing());
-        assert!(!engine.compensation_valid);
+        assert!(!engine.compensation_plan.applied_plan_is_valid());
         assert!(std::iter::from_fn(||events.pop().ok()).any(|event|matches!(event,EngineEvent::CompensationInvalid{track_id,reason,..} if track_id==track && reason.contains("sample rate"))));
         let channel = engine
             .tracks
@@ -711,7 +722,7 @@ fn changed_rate_keeps_native_owners_but_rejects_their_old_configuration_even_aft
         commands.push(EngineCommand::SetRouting(make())).unwrap();
         commands.push(EngineCommand::Play).unwrap();
         engine.process(&mut [0.0; 128], 2);
-        assert!(!engine.compensation_valid);
+        assert!(!engine.compensation_plan.applied_plan_is_valid());
         assert!(!engine.transport.is_playing());
     }
 }
@@ -734,13 +745,25 @@ fn capture_replay_with_more_than_retirement_capacity_resumes_without_callback_me
         },
         521,
     )];
-    engine.routing = Some(
+    engine.routing =
         crate::routing::PreparedRouting::prepare_compensated(&channels, 64, &reports, &[fast], 1)
-            .unwrap(),
-    );
+            .unwrap();
+    engine.project_routing_published = true;
     engine.output_position = 1000;
     for index in 0..40 {
-        engine.section_capture_source(SectionId::new(), index, 0, false);
+        {
+            let mut retirement_allowance = engine
+                .pending_retirements
+                .reserve(2)
+                .expect("fixture admits its original owner-return budget");
+            engine.section_capture_source(
+                SectionId::new(),
+                index,
+                0,
+                false,
+                &mut retirement_allowance,
+            )
+        };
     }
     while events.pop().is_ok() {}
     while engine
@@ -771,7 +794,7 @@ fn capture_replay_with_more_than_retirement_capacity_resumes_without_callback_me
         while let Ok(event) = events.pop() {
             match event {
                 EngineEvent::SectionCaptureSource { .. } => replayed += 1,
-                EngineEvent::PerformanceCaptureStarted { .. } => starts += 1,
+                EngineEvent::PerformanceCaptureStarted(_) => starts += 1,
                 _ => {}
             }
         }
@@ -858,9 +881,9 @@ fn short_one_shot_section_drains_last_content_before_its_heard_stop_notification
         rendered.extend(output);
         while let Ok(event) = events.pop() {
             match event {
-                EngineEvent::SectionTransitioned { section_id, .. } if section_id == section => {
-                    transitioned = Some((block + 1) * 64)
-                }
+                EngineEvent::SectionTransitioned(SectionTransitionedEvent {
+                    section_id, ..
+                }) if section_id == section => transitioned = Some((block + 1) * 64),
                 EngineEvent::PlaybackStopped => stopped = Some((block + 1) * 64),
                 _ => {}
             }

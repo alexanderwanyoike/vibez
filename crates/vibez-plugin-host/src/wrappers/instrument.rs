@@ -1,9 +1,11 @@
+//! Hosted plugin adapter for the native instrument interface.
+
 use std::sync::Arc;
 
 use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::effect::ParamDescriptor;
 use vibez_core::midi::InstrumentKind;
-use vibez_instruments::Instrument;
+use vibez_instruments::{Instrument, InstrumentMediaOwners};
 
 use crate::instance::PluginInstance;
 
@@ -131,8 +133,8 @@ impl Instrument for PluginInstrumentWrapper {
         self.inner.stop_processing();
     }
 
-    fn load_sample(&mut self, _sample: Arc<DecodedAudio>, _name: String) {
-        // Not applicable for external plugins
+    fn load_sample(&mut self, sample: Arc<DecodedAudio>, name: String) -> InstrumentMediaOwners {
+        InstrumentMediaOwners::incoming(sample, name)
     }
 
     fn sample_name(&self) -> Option<&str> {

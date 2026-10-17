@@ -1,3 +1,5 @@
+//! Compensation recovery failures preserve transport stop and Capture event ordering.
+
 use super::*;
 use crate::playback_source::{PreparedPlaybackSource, PreparedSectionPlaybackSource};
 use crate::test_support::DelayProbe;
@@ -98,7 +100,7 @@ fn stop_and_unload_retire_delayed_sources_without_resurrecting_playing_state() {
             .any(|event| matches!(event, EngineEvent::PlaybackStopped)));
         assert!(!notifications.iter().any(|event| matches!(
             event,
-            EngineEvent::SectionTransitioned { .. } | EngineEvent::SectionCaptureSource { .. }
+            EngineEvent::SectionTransitioned(_) | EngineEvent::SectionCaptureSource { .. }
         )));
         assert!(notifications
             .iter()
@@ -134,15 +136,16 @@ fn invalid_configuration_and_rejected_updates_close_capture_at_the_heard_stop_bo
             }
             _ => {
                 let slot = engine.tracks[0].effects.remove(0);
-                engine.pending_device_reconfiguration =
-                    Some(reconfiguration::PendingDeviceReconfiguration {
-                        local_recovery: false,
+                engine.device_handoff.track_transfer(
+                    device_handoff::PendingDeviceReconfiguration {
+                        scope: device_handoff::RecoveryScope::ProjectRestart,
                         handoff_id: 1,
                         track_id: track,
                         effect_id: Some(effect),
                         position: 0,
                         bypass: slot.bypass,
-                    });
+                    },
+                );
                 commands
                     .push(EngineCommand::RejectDeviceReconfiguration {
                         device: reconfiguration::DeviceReconfiguration::Effect {
@@ -182,11 +185,14 @@ fn failure_capture_stop_survives_a_full_ui_event_ring() {
         crate::retirement::tests::allocations(|| engine.process(&mut [0.0; 128], 2)),
         (0, 0)
     );
-    assert_eq!(engine.pending_capture_stop, Some(expected));
+    assert_eq!(
+        engine.presentation_state.terminals.capture_stop(),
+        Some(expected)
+    );
     while events.pop().is_ok() {}
     engine.process(&mut [0.0; 128], 2);
     let delivered: Vec<_> = std::iter::from_fn(|| events.pop().ok()).collect();
     assert!(delivered.iter().any(|event| matches!(event,EngineEvent::PerformanceCaptureStopped{effective_at_samples} if *effective_at_samples==expected)));
     assert!(delivered.iter().any(|event| matches!(event,EngineEvent::CompensationInvalid{reason,..} if reason.contains("latency"))));
-    assert_eq!(engine.pending_capture_stop, None);
+    assert_eq!(engine.presentation_state.terminals.capture_stop(), None);
 }

@@ -101,7 +101,8 @@ fn setup(
         engine.transport.play();
     }
     engine.tracks.push(Box::new(track));
-    engine.routing = Some(routing);
+    engine.routing = routing;
+    engine.project_routing_published = true;
     (engine, calls, parameters)
 }
 

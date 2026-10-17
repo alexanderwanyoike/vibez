@@ -1,3 +1,5 @@
+//! Hosted plugin latency participates in the public compensated engine mix.
+
 mod support;
 #[global_allocator]
 static ALLOCATOR: support::allocation::AllocationCounter = support::allocation::AllocationCounter;
@@ -51,6 +53,7 @@ fn pulses(track_id: TrackId, amplitude: f32) -> EngineCommand {
         samples[onset] = amplitude;
     }
     EngineCommand::AddClip {
+        insertion: vibez_engine::clip_insertion::PreparedClipInsertion::new(),
         track_id,
         clip_id: ClipId::new(),
         audio: Arc::new(DecodedAudio {

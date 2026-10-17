@@ -14,6 +14,7 @@ pub(super) fn app() -> super::App {
         spectrum_rx: None,
         spectrum_tap: None,
         _stream: None,
+        sample_retirement: Default::default(),
         input_bridge: std::sync::Arc::new(Default::default()),
         _input_stream: None,
         plugin_effect_rx,

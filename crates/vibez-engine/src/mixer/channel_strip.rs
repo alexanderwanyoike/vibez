@@ -37,7 +37,7 @@ impl EngineTrack {
             automation_swing_offset: None,
             mix_buffer: Vec::with_capacity(crate::routing::MAX_BLOCK_FRAMES * 2),
             effects: Vec::with_capacity(super::DEVICE_CHAIN_CAPACITY),
-            sends: Vec::new(),
+            sends: Vec::with_capacity(super::CHANNEL_CAPACITY),
             instrument: None,
             timed_note_ons: Vec::with_capacity(SCHEDULED_NOTES_PER_BLOCK),
             timed_note_offs: Vec::with_capacity(SCHEDULED_NOTES_PER_BLOCK),
@@ -45,6 +45,20 @@ impl EngineTrack {
             active_notes: 0,
             pending_note_activity: 0,
             suppress_source_notes: false,
+        }
+    }
+
+    pub(crate) fn set_send(&mut self, bus_id: TrackId, amount: f32) {
+        let can_insert =
+            self.sends.len() < super::CHANNEL_CAPACITY && self.sends.len() < self.sends.capacity();
+        match self.sends.iter_mut().find(|(id, _)| *id == bus_id) {
+            Some(send) => send.1 = amount,
+            // Each admitted return channel needs at most one slot. Invalid
+            // target lists cannot grow callback-owned storage beyond that bound.
+            None if can_insert => {
+                self.sends.push((bus_id, amount));
+            }
+            None => {}
         }
     }
 
@@ -122,11 +136,7 @@ impl EngineTrack {
                 }
                 AutomationTarget::PluginParam { .. } => {}
                 AutomationTarget::Send { bus_id } if stage.is_none() => {
-                    // Send range is native 0..1, so write the value in place.
-                    match self.sends.iter_mut().find(|(b, _)| *b == bus_id) {
-                        Some(send) => send.1 = value,
-                        None => self.sends.push((bus_id, value)),
-                    }
+                    self.set_send(bus_id, value);
                 }
                 AutomationTarget::TrackGain
                 | AutomationTarget::TrackPan

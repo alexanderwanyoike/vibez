@@ -56,6 +56,13 @@ impl EngineCommand {
             // and the owned rejection cause in the same command.
             Self::RejectDeviceReconfiguration { .. } => 3,
             Self::ResumeDeviceReconfiguration { .. } => 2,
+            Self::ReplaceClipAudio { .. } | Self::ReplaceClipBuffer { .. } => 1,
+            Self::SetClipWarpMarkers { .. } => 1,
+            Self::ReorderTracks(_) => 1,
+            Self::LoadSamplerSample { .. }
+            | Self::LoadDrumRackPadSample { .. }
+            | Self::ClearDrumRackPad { .. }
+            | Self::SetDrumRackPadState { .. } => 1,
             _ => 2,
         }
     }

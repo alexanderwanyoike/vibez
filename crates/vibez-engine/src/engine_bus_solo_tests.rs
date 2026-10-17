@@ -43,6 +43,7 @@ fn channel(id: TrackId) -> RoutingChannel {
 }
 fn clip(track: TrackId, value: f32) -> EngineCommand {
     EngineCommand::AddClip {
+        insertion: crate::clip_insertion::PreparedClipInsertion::new(),
         track_id: track,
         clip_id: ClipId::new(),
         audio: Arc::new(DecodedAudio {
@@ -246,8 +247,8 @@ fn send_levels_cross_zero_without_replacing_the_prepared_graph() {
     commands.push(EngineCommand::Play).unwrap();
     let mut output = [0.0; 128];
     engine.process(&mut output, 2);
-    let identity = std::ptr::from_ref(engine.routing.as_deref().unwrap());
-    let edges = engine.routing.as_ref().unwrap().graph.edges.clone();
+    let identity = std::ptr::from_ref(engine.routing.as_ref());
+    let edges = engine.routing.as_ref().graph.edges.clone();
     for amount in [0.5, 0.0, 1.0, 0.0] {
         while events.pop().is_ok() {}
         commands
@@ -261,11 +262,8 @@ fn send_levels_cross_zero_without_replacing_the_prepared_graph() {
             crate::retirement::tests::allocations(|| engine.process(&mut output, 2)),
             (0, 0)
         );
-        assert_eq!(
-            std::ptr::from_ref(engine.routing.as_deref().unwrap()),
-            identity
-        );
-        assert_eq!(engine.routing.as_ref().unwrap().graph.edges, edges);
+        assert_eq!(std::ptr::from_ref(engine.routing.as_ref()), identity);
+        assert_eq!(engine.routing.as_ref().graph.edges, edges);
         let expected = (1.0 + amount) * std::f32::consts::FRAC_1_SQRT_2;
         assert!(output
             .iter()
