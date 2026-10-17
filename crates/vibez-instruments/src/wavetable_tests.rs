@@ -5,6 +5,12 @@ const RATE: f32 = 48_000.0;
 
 fn synth(edits: &[(usize, f32)]) -> WavetableSynth {
     let mut synth = WavetableSynth::new(RATE);
+    // The tests reason about Basic Shapes' sine, saw and square, whichever
+    // table a new synth starts on.
+    synth.set_param(
+        param::of(0, osc::TABLE),
+        crate::wavetables::table::BASIC_SHAPES as f32,
+    );
     for &(index, value) in edits {
         synth.set_param(index, value);
     }
