@@ -335,6 +335,9 @@ pub enum InstrumentStateInfo {
     SubtractiveSynth {
         params: Vec<f32>,
     },
+    WavetableSynth {
+        params: Vec<f32>,
+    },
     Sampler {
         params: Vec<f32>,
         source: Option<MediaSourceRef>,
@@ -545,6 +548,17 @@ impl ClipInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_wavetable_synth_s_state_survives_a_save() {
+        let state = InstrumentStateInfo::WavetableSynth {
+            params: vec![1.0, 0.42, 0.18],
+        };
+        let json = serde_json::to_value(&state).unwrap();
+        assert_eq!(json["kind"], "wavetable_synth");
+        let loaded: InstrumentStateInfo = serde_json::from_value(json).unwrap();
+        assert_eq!(loaded, state);
+    }
 
     #[test]
     fn clip_property_value_objects_enforce_the_inspector_ranges() {

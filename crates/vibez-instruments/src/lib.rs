@@ -11,6 +11,9 @@ mod synth_filter;
 pub mod synth_oscillator;
 pub mod synth_params;
 mod synth_voice;
+pub mod wavetable;
+pub mod wavetable_params;
+mod wavetable_voice;
 pub mod wavetables;
 
 use std::sync::Arc;
@@ -23,6 +26,7 @@ use vibez_core::track::DrumPadState;
 use drum_rack::DrumRack;
 use sampler::Sampler;
 use synth::SubtractiveSynth;
+use wavetable::WavetableSynth;
 
 /// Trait implemented by all instruments (synths, samplers, etc.).
 /// Parameter descriptors for an instrument kind, without building
@@ -30,6 +34,7 @@ use synth::SubtractiveSynth;
 pub fn descriptors_for(kind: InstrumentKind) -> &'static [ParamDescriptor] {
     match kind {
         InstrumentKind::SubtractiveSynth => synth::SYNTH_PARAMS,
+        InstrumentKind::WavetableSynth => wavetable::WAVETABLE_PARAMS,
         InstrumentKind::Sampler => sampler::SAMPLER_PARAMS,
         // The drum rack has per-pad state, no top-level params.
         InstrumentKind::DrumRack => &[],
@@ -134,6 +139,7 @@ pub trait Instrument: Send {
 pub fn create_instrument(kind: InstrumentKind, sample_rate: f32) -> Box<dyn Instrument> {
     match kind {
         InstrumentKind::SubtractiveSynth => Box::new(SubtractiveSynth::new(sample_rate)),
+        InstrumentKind::WavetableSynth => Box::new(WavetableSynth::new(sample_rate)),
         InstrumentKind::Sampler => Box::new(Sampler::new(sample_rate)),
         InstrumentKind::DrumRack => Box::new(DrumRack::new(sample_rate)),
     }

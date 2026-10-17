@@ -19,6 +19,7 @@ use rustfft::FftPlanner;
 
 /// Samples in one cycle of a frame.
 pub const TABLE_SIZE: usize = 1024;
+const _: () = assert!(TABLE_SIZE.is_power_of_two());
 /// Frames Position morphs through.
 pub const FRAMES: usize = 64;
 /// Band-limited copies of each frame, the first with every harmonic a
@@ -53,23 +54,48 @@ impl Wavetable {
         self.cycle(frame.min(FRAMES - 1), 0)
     }
 
+    /// The two frames `position` (0 to 1) falls between at `level`, ready
+    /// to read at any phase.
+    pub fn at(&self, position: f32, level: usize) -> Frames<'_> {
+        let place = position.clamp(0.0, 1.0) * (FRAMES - 1) as f32;
+        let first = (place as usize).min(FRAMES - 2);
+        let level = level.min(LEVELS - 1);
+        Frames {
+            first: self.cycle(first, level),
+            second: self.cycle(first + 1, level),
+            between: place - first as f32,
+        }
+    }
+
     /// The table at `position` through its frames (0 to 1) and `phase`
     /// through the cycle (0 to 1), from `level`.
     pub fn read(&self, position: f32, phase: f32, level: usize) -> f32 {
-        let place = position.clamp(0.0, 1.0) * (FRAMES - 1) as f32;
-        let first = (place as usize).min(FRAMES - 2);
-        let between = place - first as f32;
-        let level = level.min(LEVELS - 1);
-        let at = phase.rem_euclid(1.0) * TABLE_SIZE as f32;
-        let index = (at as usize).min(TABLE_SIZE - 1);
-        let fraction = at - index as f32;
-        let next = (index + 1) % TABLE_SIZE;
+        self.at(position, level).read(phase.rem_euclid(1.0))
+    }
+}
+
+/// Two neighbouring frames and how far between them a position lies.
+pub struct Frames<'a> {
+    first: &'a [f32],
+    second: &'a [f32],
+    between: f32,
+}
+
+impl Frames<'_> {
+    /// The frames at `phase` through the cycle, from 0 up to 1.
+    pub fn read(&self, phase: f32) -> f32 {
+        let at = phase * TABLE_SIZE as f32;
+        // The table size is a power of two, so masking wraps a phase of
+        // exactly 1 back to the cycle's start.
+        let index = (at as usize) & (TABLE_SIZE - 1);
+        let fraction = at - at.floor();
+        let next = (index + 1) & (TABLE_SIZE - 1);
         let sample = |cycle: &[f32]| cycle[index] + fraction * (cycle[next] - cycle[index]);
-        let a = sample(self.cycle(first, level));
-        if between <= 0.0 {
+        let a = sample(self.first);
+        if self.between <= 0.0 {
             return a;
         }
-        a + between * (sample(self.cycle(first + 1, level)) - a)
+        a + self.between * (sample(self.second) - a)
     }
 }
 

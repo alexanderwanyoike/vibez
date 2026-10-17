@@ -2,8 +2,9 @@
 //! for 20 s, one frame at a time as the engine renders it, best of five
 //! runs. Run with
 //! `cargo run --release -p vibez-instruments --example instrument_cost -- Sampler`
-//! (`DrumRack` for the rack, which holds sixteen looping pads instead, or no
-//! argument for the Subtractive Synth).
+//! (`DrumRack` for the rack, which holds sixteen looping pads instead,
+//! `Wavetable` for the Wavetable Synth, or no argument for the Subtractive
+//! Synth).
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -11,7 +12,7 @@ use std::time::{Duration, Instant};
 use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::midi::InstrumentKind;
 use vibez_core::track::{DrumPadState, DRUM_RACK_BASE_NOTE};
-use vibez_instruments::{drum_rack, sampler, synth};
+use vibez_instruments::{drum_rack, sampler, synth, wavetable};
 
 /// Settings worth timing for each instrument: (label, parameter edits).
 fn cases(kind: InstrumentKind) -> Vec<(&'static str, Vec<(usize, f32)>)> {
@@ -31,6 +32,29 @@ fn cases(kind: InstrumentKind) -> Vec<(&'static str, Vec<(usize, f32)>)> {
                         (param::FILTER_ENV, 2.0),
                         (param::FILTER_SUSTAIN, 0.4),
                         (param::LFO_AMOUNT, 0.3),
+                    ],
+                ),
+            ]
+        }
+        InstrumentKind::WavetableSynth => {
+            use vibez_instruments::wavetable_params::osc;
+            use wavetable::{dest, param};
+            vec![
+                ("defaults", vec![]),
+                (
+                    "both oscillators at 8 unison, warp, LP24, drive, LFO on position, Env 2 on cutoff",
+                    vec![
+                        (param::of(0, osc::UNISON), 8.0),
+                        (param::of(0, osc::DETUNE), 20.0),
+                        (param::of(0, osc::WARP), 0.4),
+                        (param::of(1, osc::LEVEL), 0.6),
+                        (param::of(1, osc::UNISON), 8.0),
+                        (param::of(1, osc::DETUNE), 15.0),
+                        (param::CUTOFF, 3_000.0),
+                        (param::DRIVE, 0.3),
+                        (param::LFO_AMOUNT, 0.3),
+                        (param::ENV2_AMOUNT, 0.5),
+                        (param::ENV2_DEST, dest::CUTOFF as f32),
                     ],
                 ),
             ]
@@ -120,6 +144,7 @@ fn main() {
     let kind = match std::env::args().nth(1).as_deref() {
         Some("Sampler") => InstrumentKind::Sampler,
         Some("DrumRack") => InstrumentKind::DrumRack,
+        Some("Wavetable") => InstrumentKind::WavetableSynth,
         _ => InstrumentKind::SubtractiveSynth,
     };
     for (label, edits) in cases(kind) {
