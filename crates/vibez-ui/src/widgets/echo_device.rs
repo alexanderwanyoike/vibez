@@ -28,7 +28,8 @@ const PAD: f32 = 10.0;
 const PRESET_ROW_H: f32 = 28.0;
 const KNOB: f32 = 32.0;
 const KNOB_COL_W: f32 = 64.0;
-const PLOT_MIN_H: f32 = 72.0;
+/// Below 60 px the plot drops its axis labels, still worth its room.
+const PLOT_MIN_H: f32 = 40.0;
 const TABS_H: f32 = 22.0;
 /// Page tabs over one row of controls.
 const PAGED_H: f32 = TABS_H + 4.0 + KNOB_ROW_H;
@@ -332,6 +333,16 @@ impl<'a> EchoView<'a> {
         plot_band(content, height, PAD)
     }
 
+    /// A knob taking its share of a row's width, so a row of them spreads
+    /// across the card rather than bunching at one side.
+    fn spread(&self, param: Param<'a>) -> Element<'a, Message> {
+        container(param.column(KNOB))
+            .width(Length::Fill)
+            .max_width(110.0)
+            .align_x(Alignment::Center)
+            .into()
+    }
+
     fn knob(&self, param: Param<'a>) -> Element<'a, Message> {
         container(param.column(KNOB))
             .width(KNOB_COL_W)
@@ -354,19 +365,17 @@ impl<'a> EchoView<'a> {
                 .center_y(height)
                 .into();
         }
-        let mut knobs = row![self.knob(self.time())].spacing(10);
+        let mut knobs = row![self.spread(self.time())].spacing(6);
         for index in main {
             // A compact card keeps Tone for its Tone & Motion page.
             if tier == Tier::Compact && index == param::TONE {
                 continue;
             }
-            knobs = knobs.push(self.knob(self.param(index)));
+            knobs = knobs.push(self.spread(self.param(index)));
         }
-        let mut content = row![container(knobs)
-            .width(Length::Fill)
-            .align_x(Alignment::Start)]
-        .spacing(12)
-        .align_y(Alignment::Center);
+        let mut content = row![knobs.width(Length::Fill)]
+            .spacing(12)
+            .align_y(Alignment::Center);
         if tier != Tier::Compact {
             content = content
                 .push(vertical_rule())
@@ -475,9 +484,9 @@ impl<'a> EchoView<'a> {
                 knobs.push(column![heading("Tape Character"), self.tape_character()].spacing(4));
         }
         for index in controls {
-            knobs = knobs.push(self.knob(self.param(index)));
+            knobs = knobs.push(self.spread(self.param(index)));
         }
-        container(column![tabs, knobs.align_y(Alignment::Center)].spacing(4))
+        container(column![tabs, knobs.width(Length::Fill).align_y(Alignment::Center)].spacing(4))
             .padding([4.0, PAD])
             .height(height)
             .into()
