@@ -1,3 +1,5 @@
+//! Application lifecycle, domain dispatch and engine-event consumer composition.
+
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -40,13 +42,8 @@ struct App {
     edge_shortcuts: EdgeShortcutState,
     cmd_tx: crate::domains::EngineCommandQueue,
     event_rx: Option<Consumer<EngineEvent>>,
-    /// Post-effects mono samples from the engine's spectrum tap,
-    /// feeding the EQ analyser.
-    spectrum_rx: Option<Consumer<f32>>,
-    /// Track the engine tap currently points at, so tick can retarget
-    /// it when the selection moves.
-    spectrum_tap: Option<vibez_core::id::TrackId>,
     _stream: Option<AudioOutputStream>,
+    sample_retirement: sample_retirement::SampleRetirement,
     input_bridge: Arc<vibez_audio_io::audio_input::AudioInputBridge>,
     /// Open only while one Audio Track is armed or explicitly monitors input.
     _input_stream: Option<vibez_audio_io::audio_input::AudioInputStream>,
@@ -56,6 +53,19 @@ struct App {
     plugin_instrument_rx: std::sync::mpsc::Receiver<PluginInstrumentLoadResult>,
     plugin_instrument_tx: std::sync::mpsc::Sender<PluginInstrumentLoadResult>,
     plugin_load_requests: plugin_load_requests::PluginLoadRequests,
+    device_meters: device_meters::DeviceMeters,
+    gain_devices: gain_devices::GainDevices,
+    eq_devices: eq_devices::EqDevices,
+    compressor_devices: compressor_devices::CompressorDevices,
+    filter_panels: device_panels::DevicePanels<crate::domains::filter::FilterPanelState>,
+    gate_panels: device_panels::DevicePanels<crate::domains::gate::GatePanelState>,
+    card_panels: device_panels::DevicePanels<crate::domains::device_card::CardPanelState>,
+    instrument_panels: std::collections::HashMap<
+        vibez_core::id::TrackId,
+        crate::domains::instrument_card::InstrumentPanel,
+    >,
+    param_entry: Option<crate::domains::param_entry::ValueEntry>,
+    device_presets: device_presets::DevicePresetRuntime,
     // Plugin GUI support
     plugin_window_manager: Option<PluginWindowManager>,
     plugin_gui_raw_ptrs: std::collections::HashMap<PluginGuiKey, PluginRawPtr>,
@@ -155,16 +165,39 @@ mod audio_recording;
 mod audio_settings;
 mod audio_take_finalization;
 mod audio_tasks;
+mod auto_pan_devices;
+mod bitcrush_devices;
 mod bounce;
 mod capture;
+mod card_devices;
 mod compensation;
+mod compressor_devices;
+mod delay_devices;
+mod device_meters;
+mod device_panels;
+pub(crate) mod device_presets;
+mod drive_devices;
+mod drum_kits;
+mod drum_rack_devices;
 mod drum_rack_preparation;
 mod engine_events;
+mod eq_devices;
+mod filter_devices;
+mod fm_devices;
+mod gain_devices;
+mod gate_devices;
+mod instrument_devices;
 mod keyboard;
 mod local_watcher;
 mod menu_lifecycle;
+mod param_entry;
+mod phaser_devices;
+mod reverb_devices;
+mod sampler_devices;
+mod synth_devices;
 mod tasks;
 mod tracked_request;
+mod wavetable_devices;
 
 pub(crate) use audio_tasks::*;
 use drum_rack_preparation::*;
@@ -227,6 +260,17 @@ mod views_transient_analysis;
 mod views_transport;
 mod window_policy;
 
+mod sample_retirement;
+
+#[cfg(test)]
+mod instrument_media_retirement_tests;
+
+#[cfg(test)]
+mod instrument_media_shutdown_tests;
+
+#[cfg(test)]
+mod instrument_media_ui_flow_tests;
+
 #[cfg(test)]
 mod project_format_v1_tests;
 
@@ -237,13 +281,15 @@ impl Drop for App {
         if let Some(manager) = self.plugin_window_manager.as_mut() {
             manager.close_all();
         }
+        // Guards must outlive every callback and the engine's last voice owners.
+        drop(self._stream.take());
     }
 }
 
 impl App {
     fn new() -> (Self, Task<Message>) {
         let (mut engine, cmd_tx, event_rx) = AudioEngine::new();
-        let spectrum_rx = engine.take_spectrum_consumer();
+        let eq_spectrum_rx = engine.take_effect_spectrum_consumer();
         let ui_settings = UiSettings::load();
         // Read before the settings are picked apart below, and clamped
         // here rather than at the render site so a hand-edited ui.json
@@ -421,14 +467,26 @@ impl App {
             edge_shortcuts: EdgeShortcutState::default(),
             cmd_tx: crate::domains::EngineCommandQueue::new(cmd_tx),
             event_rx: Some(event_rx),
-            spectrum_rx,
-            spectrum_tap: None,
             _stream: Some(output_stream),
+            sample_retirement: Default::default(),
             input_bridge,
             _input_stream: None,
             plugin_effect_rx,
             plugin_effect_tx,
             plugin_load_requests: Default::default(),
+            device_meters: Default::default(),
+            compressor_devices: Default::default(),
+            filter_panels: Default::default(),
+            gate_panels: Default::default(),
+            card_panels: Default::default(),
+            instrument_panels: Default::default(),
+            gain_devices: Default::default(),
+            eq_devices: eq_devices::EqDevices {
+                spectrum_rx: eq_spectrum_rx,
+                ..Default::default()
+            },
+            param_entry: None,
+            device_presets: Default::default(),
             sidechain_sync_inputs: None,
             track_meter_peaks: Default::default(),
             plugin_instrument_rx,
@@ -562,6 +620,28 @@ impl App {
 
     fn send_command(&mut self, cmd: EngineCommand) {
         crate::domains::EngineHandle::send(&mut self.cmd_tx, cmd);
+    }
+
+    fn insert_built_in_effect(
+        &mut self,
+        track_id: vibez_core::id::TrackId,
+        effect_id: vibez_core::id::EffectId,
+        effect_type: vibez_core::effect::EffectType,
+    ) {
+        crate::domains::EngineHandle::insert_built_in_effect(
+            &mut self.cmd_tx,
+            track_id,
+            effect_id,
+            effect_type,
+        );
+    }
+
+    fn set_built_in_instrument(
+        &mut self,
+        track_id: vibez_core::id::TrackId,
+        kind: vibez_core::midi::InstrumentKind,
+    ) {
+        crate::domains::EngineHandle::set_built_in_instrument(&mut self.cmd_tx, track_id, kind);
     }
 
     fn mark_project_dirty(&mut self) {
@@ -699,7 +779,12 @@ mod views_clip_launcher;
 mod clip_project_tests;
 
 #[cfg(test)]
+mod note_clip_insertion_tests;
+
+#[cfg(test)]
 mod compensation_persistence_tests;
+#[cfg(test)]
+mod gain_persistence_tests;
 
 #[cfg(test)]
 mod plugin_load_tests;
@@ -727,3 +812,6 @@ mod compensation_selection_tests;
 mod undo_replay_routing_tests;
 
 mod midi_input;
+
+#[cfg(test)]
+mod clip_insertion_tests;

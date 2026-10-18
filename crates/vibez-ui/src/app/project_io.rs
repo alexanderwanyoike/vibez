@@ -1,4 +1,4 @@
-//! Split out of app.rs; inherent methods on [`super::App`].
+//! Project persistence and loaded project runtime preparation.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -32,6 +32,8 @@ fn plugin_instrument_for_replay(track: &TrackInfo) -> Option<vibez_core::effect:
 
 impl App {
     pub(super) fn clear_project_runtime(&mut self) {
+        self.reset_device_meters();
+        self.reset_device_presets();
         self.plugin_load_requests.reset();
         self.sidechain_sync_inputs = None;
         self.track_meter_peaks.clear();
@@ -197,7 +199,7 @@ impl App {
             );
             out.push(UiEffect {
                 reconfiguration_failed: false,
-                latency_samples: Some(0),
+                latency_samples: Some(fx.latency_samples()),
                 inactive_sidechains: effect_info.inactive_sidechains.clone(),
                 sidechains: effect_info.sidechains.clone(),
                 external_inputs: fx.external_inputs().to_vec(),
@@ -205,18 +207,13 @@ impl App {
                 id: effect_info.id,
                 effect_type: effect_info.effect_type,
                 bypass: effect_info.bypass,
-                params: effect_info.params.clone(),
+                params: restored_effect_params(&effect_info.params, fx.param_descriptors()),
                 descriptors: fx.param_descriptors(),
                 plugin_name: None,
                 has_plugin_gui: false,
                 plugin_ref: None,
             });
-            self.send_command(EngineCommand::AddEffect {
-                track_id: chan_id,
-                effect_id: effect_info.id,
-                effect_type: effect_info.effect_type,
-                position: None,
-            });
+            self.insert_built_in_effect(chan_id, effect_info.id, effect_info.effect_type);
             for (idx, value) in effect_info.params.iter().copied().enumerate() {
                 self.send_command(EngineCommand::SetEffectParam {
                     track_id: chan_id,
@@ -501,16 +498,10 @@ impl App {
 
             match track.kind {
                 TrackKind::Audio => {
-                    self.send_command(EngineCommand::AddTrack(
-                        track_info.id,
-                        track_info.name.clone(),
-                    ));
+                    self.send_command(EngineCommand::add_track(track_info.id));
                 }
                 TrackKind::Midi | TrackKind::Instrument(_) => {
-                    self.send_command(EngineCommand::AddMidiTrack(
-                        track_info.id,
-                        track_info.name.clone(),
-                    ));
+                    self.send_command(EngineCommand::add_track(track_info.id));
                 }
             }
 
@@ -524,12 +515,14 @@ impl App {
             ));
 
             if let Some(kind) = track_info.instrument {
-                self.send_command(EngineCommand::SetTrackInstrument(track_info.id, kind));
+                self.set_built_in_instrument(track_info.id, kind);
             }
 
             if let Some(native) = &track_info.native_instrument {
                 match native {
-                    InstrumentStateInfo::SubtractiveSynth { params } => {
+                    InstrumentStateInfo::SubtractiveSynth { params }
+                    | InstrumentStateInfo::WavetableSynth { params }
+                    | InstrumentStateInfo::FmSynth { params } => {
                         track.instrument_params = params.clone();
                         for (idx, value) in params.iter().copied().enumerate() {
                             self.send_command(EngineCommand::SetInstrumentParam {
@@ -555,11 +548,11 @@ impl App {
                         track.drum_rack_pads = expand_drum_rack_pads(pads);
                         track.selected_drum_pad = 0;
                         for (pad_index, pad) in pads.iter().cloned().enumerate() {
-                            self.send_command(EngineCommand::SetDrumRackPadState {
-                                track_id: track_info.id,
+                            self.send_command(EngineCommand::set_drum_rack_pad_state(
+                                track_info.id,
                                 pad_index,
-                                state: pad,
-                            });
+                                pad,
+                            ));
                         }
                     }
                 }
@@ -568,7 +561,9 @@ impl App {
             for lane in &automation {
                 self.send_command(EngineCommand::SetAutomationLane {
                     track_id: track_info.id,
-                    lane: lane.clone(),
+                    insertion: vibez_engine::clip_insertion::PreparedAutomationLaneInsertion::new(
+                        lane.clone(),
+                    ),
                 });
             }
 
@@ -602,7 +597,7 @@ impl App {
                 let descriptors = fx.param_descriptors();
                 track.effects.push(UiEffect {
                     reconfiguration_failed: false,
-                    latency_samples: Some(0),
+                    latency_samples: Some(fx.latency_samples()),
                     inactive_sidechains: effect_info.inactive_sidechains.clone(),
                     sidechains: effect_info.sidechains.clone(),
                     external_inputs: fx.external_inputs().to_vec(),
@@ -610,18 +605,13 @@ impl App {
                     id: effect_info.id,
                     effect_type: effect_info.effect_type,
                     bypass: effect_info.bypass,
-                    params: effect_info.params.clone(),
+                    params: restored_effect_params(&effect_info.params, descriptors),
                     descriptors,
                     plugin_name: None,
                     has_plugin_gui: false,
                     plugin_ref: None,
                 });
-                self.send_command(EngineCommand::AddEffect {
-                    track_id: track_info.id,
-                    effect_id: effect_info.id,
-                    effect_type: effect_info.effect_type,
-                    position: None,
-                });
+                self.insert_built_in_effect(track_info.id, effect_info.id, effect_info.effect_type);
                 for (idx, value) in effect_info.params.iter().copied().enumerate() {
                     self.send_command(EngineCommand::SetEffectParam {
                         track_id: track_info.id,
@@ -665,12 +655,7 @@ impl App {
                     has_plugin_gui: false,
                     plugin_ref: None,
                 });
-                self.send_command(EngineCommand::AddEffect {
-                    track_id: track_info.id,
-                    effect_id,
-                    effect_type: EffectType::Eq,
-                    position: None,
-                });
+                self.insert_built_in_effect(track_info.id, effect_id, EffectType::Eq);
             }
 
             let project_tracks = Arc::make_mut(&mut self.state.project_tracks);
@@ -703,7 +688,9 @@ impl App {
             for lane in &automation {
                 self.send_command(EngineCommand::SetAutomationLane {
                     track_id: TrackId::MASTER,
-                    lane: lane.clone(),
+                    insertion: vibez_engine::clip_insertion::PreparedAutomationLaneInsertion::new(
+                        lane.clone(),
+                    ),
                 });
             }
         }
@@ -712,7 +699,7 @@ impl App {
         // Return buses: recreate each channel, then its chain; sends
         // were restored with their tracks above.
         for bus_info in &loaded.project.buses {
-            self.send_command(EngineCommand::AddBus(bus_info.id, bus_info.name.clone()));
+            self.send_command(EngineCommand::add_bus(bus_info.id));
             let mut bus =
                 ProjectTrack::new(bus_info.id, bus_info.name.clone(), bus_info.color_index);
             bus.gain = bus_info.gain;
@@ -734,7 +721,9 @@ impl App {
             for lane in &automation {
                 self.send_command(EngineCommand::SetAutomationLane {
                     track_id: bus_info.id,
-                    lane: lane.clone(),
+                    insertion: vibez_engine::clip_insertion::PreparedAutomationLaneInsertion::new(
+                        lane.clone(),
+                    ),
                 });
             }
             Arc::make_mut(&mut self.state.project_tracks)
@@ -751,6 +740,7 @@ impl App {
                     .info
                     .resolved_start_marker(clip.audio.num_frames() as u64);
                 self.send_command(EngineCommand::AddClip {
+                    insertion: vibez_engine::clip_insertion::PreparedClipInsertion::new(),
                     track_id: clip.info.track_id,
                     clip_id: clip.info.id,
                     audio: Arc::clone(&clip.audio),
@@ -779,21 +769,23 @@ impl App {
         for note_clip in &loaded.project.arrange.note_clips {
             let start_marker_beats = note_clip.resolved_start_marker_beats();
             self.send_command(EngineCommand::AddNoteClip {
-                start_marker_beats,
                 track_id: note_clip.track_id,
-                clip_id: note_clip.id,
-                position_beats: note_clip.position_beats,
-                duration_beats: note_clip.duration_beats,
-                loop_enabled: note_clip.loop_enabled,
-                loop_start_beats: note_clip.loop_start_beats,
-                loop_end_beats: note_clip.loop_end_beats,
-                groove_grid: note_clip.groove_grid,
+                insertion: vibez_engine::clip_insertion::PreparedNoteClipInsertion::new(
+                    note_clip.id,
+                    note_clip.position_beats,
+                    note_clip.duration_beats,
+                    start_marker_beats,
+                    note_clip.loop_enabled,
+                    note_clip.loop_start_beats,
+                    note_clip.loop_end_beats,
+                    note_clip.groove_grid,
+                ),
             });
             for note in &note_clip.notes {
                 self.send_command(EngineCommand::AddNote {
                     track_id: note_clip.track_id,
                     clip_id: note_clip.id,
-                    note: *note,
+                    insertion: vibez_engine::clip_insertion::PreparedNoteInsertion::new(*note),
                 });
             }
             if self.state.find_track(note_clip.track_id).is_some() {
@@ -837,11 +829,11 @@ impl App {
                     slot.audio = Some(Arc::clone(&pad.audio));
                 }
             }
-            self.send_command(EngineCommand::SetDrumRackPadState {
-                track_id: pad.track_id,
-                pad_index: pad.pad_index,
-                state: pad.state,
-            });
+            self.send_command(EngineCommand::set_drum_rack_pad_state(
+                pad.track_id,
+                pad.pad_index,
+                pad.state,
+            ));
             self.send_command(EngineCommand::LoadDrumRackPadSample {
                 track_id: pad.track_id,
                 pad_index: pad.pad_index,
@@ -938,6 +930,22 @@ fn first_remote_provenance_label(project: &Project) -> Option<String> {
             vibez_core::track::MediaProvenance::Remote { .. } => Some(provenance.display_label()),
             vibez_core::track::MediaProvenance::Local { .. } => None,
         })
+}
+
+fn restored_effect_params(
+    saved: &[f32],
+    descriptors: &[vibez_core::effect::ParamDescriptor],
+) -> Vec<f32> {
+    let mut params = saved.to_vec();
+    // Older projects lack appended controls; keep their existing values and
+    // make the same neutral defaults editable that the DSP already restored.
+    params.extend(
+        descriptors
+            .iter()
+            .skip(saved.len())
+            .map(|descriptor| descriptor.default),
+    );
+    params
 }
 
 fn expand_drum_rack_pads(pads: &[vibez_core::track::DrumPadState]) -> Vec<UiDrumPad> {

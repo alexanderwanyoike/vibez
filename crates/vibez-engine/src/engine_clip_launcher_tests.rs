@@ -1,5 +1,8 @@
+//! Clip launcher phase and ownership through prepared routing.
+
 use super::*;
 use crate::playback_source::{EngineClip, PreparedClipPlayback, PreparedPlaybackSource};
+use graph_test_support::{graph_engine, routing_channel};
 use vibez_core::id::ClipId;
 use vibez_core::perform::MusicalBoundary;
 
@@ -57,14 +60,18 @@ fn setup() -> (
     TrackId,
     TrackId,
 ) {
-    let (mut engine, mut commands, events) = AudioEngine::new();
     let a = TrackId::new();
     let b = TrackId::new();
+    let (mut engine, mut commands, events) = graph_engine(&[
+        routing_channel(a),
+        routing_channel(b),
+        routing_channel(TrackId::MASTER),
+    ]);
     for command in [
         EngineCommand::SetSampleRate(8),
         EngineCommand::SetBpm(120.0),
-        EngineCommand::AddTrack(a, "A".into()),
-        EngineCommand::AddTrack(b, "B".into()),
+        EngineCommand::add_track(a),
+        EngineCommand::add_track(b),
     ] {
         commands.push(command).unwrap();
     }
@@ -260,7 +267,7 @@ fn midi_replacement_flushes_only_its_track_and_preserves_sustained_notes_elsewhe
     let log = Arc::new(Mutex::new(Vec::new()));
     for track in [a, b] {
         commands
-            .push(EngineCommand::SetPluginInstrument {
+            .push(EngineCommand::SetInstrument {
                 track_id: track,
                 instrument: Box::new(Notes(Arc::clone(&log))),
             })
@@ -269,7 +276,7 @@ fn midi_replacement_flushes_only_its_track_and_preserves_sustained_notes_elsewhe
     let note = |track, pitch, request_id| {
         let mut prepared = clip(track, request_id, &[0.0; 16], true);
         prepared.source.clips.clear();
-        prepared.source.note_clips.push(EngineNoteClip::new(
+        prepared.source.push_note_clip(EngineNoteClip::new(
             prepared.clip_id.unwrap(),
             0.0,
             4.0,
@@ -850,4 +857,123 @@ fn clip_mute_point_uses_its_local_position_after_the_first_callback() {
     assert_eq!(output[4], 1.0);
     assert_eq!(output[5], 63.0 / 64.0);
     assert_eq!(output[15], 53.0 / 64.0);
+}
+
+#[test]
+fn record_source_start_precedes_its_same_boundary_transition_and_keeps_real_audio() {
+    let (mut engine, mut commands, mut events, record_track, other_track) = setup();
+    launch(
+        &mut commands,
+        vec![clip(other_track, 10, &[0.25; 64], true)],
+        MusicalBoundary::Immediate,
+    );
+    let mut first = [0.0];
+    engine.process(&mut first, 1);
+    assert_eq!(first, [0.25]);
+    assert_eq!(engine.performance_position, 1);
+    while events.pop().is_ok() {}
+
+    let prepared = clip(record_track, 11, &[0.5; 32], true);
+    let id = prepared.clip_id.unwrap();
+    let original = std::ptr::from_ref(prepared.as_ref()) as usize;
+    let audio = Arc::downgrade(&prepared.source.clips[0].audio);
+    commands
+        .push(EngineCommand::ArmClipRecord {
+            free_length: false,
+            prepared,
+            count_in_bars: 0,
+        })
+        .unwrap();
+    let mut output = [0.0; 17];
+    assert_eq!(
+        crate::retirement::tests::allocations(|| engine.process(&mut output, 1)),
+        (0, 0)
+    );
+    for (index, actual) in output.iter().enumerate() {
+        let expected = if index >= 15 {
+            0.75
+        } else {
+            0.25 + if index == 0 {
+                0.32
+            } else if index.is_multiple_of(4) {
+                0.22
+            } else {
+                0.0
+            }
+        };
+        assert_eq!(*actual, expected, "frame {index}");
+    }
+    assert_eq!(engine.performance_position, 18);
+    let active = engine.tracks[0].active_clip.unwrap();
+    assert_eq!((active.clip_id, active.position), (id, 2));
+    assert_eq!(audio.strong_count(), 1);
+    let delivered: Vec<_> = std::iter::from_fn(|| events.pop().ok()).collect();
+    let mut facts = Vec::new();
+    for event in &delivered {
+        match event {
+            EngineEvent::ClipRecordArmed {
+                clip_id,
+                start: 16,
+                output_start: 16,
+                ..
+            } if *clip_id == id => facts.push("armed"),
+            EngineEvent::ClipRecordStarted { clip_id, at: 16 } if *clip_id == id => {
+                assert_eq!(event.time_domain(), crate::events::TimeDomain::Source);
+                facts.push("started");
+            }
+            EngineEvent::ClipTransitioned {
+                track_id,
+                clip_id: Some(clip_id),
+                request_id: 11,
+                effective_at_samples: 16,
+                retired: Some(retired),
+            } if *track_id == record_track && *clip_id == id => {
+                assert_eq!(std::ptr::from_ref(retired.as_ref()) as usize, original);
+                facts.push("transitioned");
+            }
+            _ => {}
+        }
+    }
+    assert_eq!(facts, ["armed", "started", "transitioned"]);
+    drop(delivered);
+
+    commands
+        .push(EngineCommand::StopClipRecord { immediate: true })
+        .unwrap();
+    let mut after_record_stop = [0.0];
+    assert_eq!(
+        crate::retirement::tests::allocations(|| engine.process(&mut after_record_stop, 1)),
+        (0, 0)
+    );
+    assert_eq!(after_record_stop, [0.75]);
+    assert!(engine.clip_record.is_none());
+    assert!(engine.transport().is_playing());
+    assert!(
+        std::iter::from_fn(|| events.pop().ok()).any(|event| matches!(event,
+            EngineEvent::ClipRecordStopped { clip_id, at: 18, started: true } if clip_id == id
+        ))
+    );
+    while events.pop().is_ok() {}
+    assert_eq!(audio.strong_count(), 1);
+
+    launch(
+        &mut commands,
+        vec![stop(record_track)],
+        MusicalBoundary::Immediate,
+    );
+    let mut after_clip_stop = [0.0];
+    assert_eq!(
+        crate::retirement::tests::allocations(|| engine.process(&mut after_clip_stop, 1)),
+        (0, 0)
+    );
+    assert_eq!(after_clip_stop, [0.25]);
+    assert!(engine.tracks[0].active_clip.is_none());
+    let returned: Vec<_> = std::iter::from_fn(|| events.pop().ok()).collect();
+    assert_eq!(returned.iter().filter(|event| matches!(event,
+        EngineEvent::ClipTransitioned { track_id, clip_id: None, retired: Some(retired), .. }
+            if *track_id == record_track && retired.source.clips.iter().any(|clip| Arc::as_ptr(&clip.audio) == audio.as_ptr())
+    )).count(), 1);
+    assert_eq!(audio.strong_count(), 1);
+    drop(returned);
+    assert_eq!(audio.strong_count(), 0);
 }

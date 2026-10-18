@@ -53,6 +53,7 @@ fn setup(
     for _ in 0..effects {
         let effect = EffectId::new();
         track.effects.push(EffectSlot {
+            levels: Default::default(),
             id: effect,
             effect: Box::new(CountingEffect {
                 calls: Arc::clone(&calls),
@@ -100,8 +101,9 @@ fn setup(
         routing.configure_automation(&[(id, target)]).unwrap();
         engine.transport.play();
     }
-    engine.tracks.push(track);
-    engine.routing = Some(routing);
+    engine.tracks.push(Box::new(track));
+    engine.routing = routing;
+    engine.project_routing_published = true;
     (engine, calls, parameters)
 }
 

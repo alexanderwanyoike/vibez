@@ -6,6 +6,7 @@ use vibez_core::{
     id::{EffectId, TrackId},
     routing::{ExternalInputId, RoutingGraph, SidechainAssignment, SourceTap},
 };
+use vibez_engine::events::{MeteringEvent, TrackMeterEvent};
 
 #[test]
 fn dormant_send_keeps_its_graph_connection_without_republishing_for_level_edits() {
@@ -128,19 +129,19 @@ fn metered_ticks_and_mouse_messages_do_not_rebuild_the_project_routing_model() {
     app.event_rx = Some(consumer);
     for _ in 0..20 {
         events
-            .push(EngineEvent::TrackMeter {
+            .push(EngineEvent::TrackMeter(TrackMeterEvent {
                 track_id: id,
                 peak_l: 0.8,
                 peak_r: 0.5,
-            })
+            }))
             .unwrap();
         events
-            .push(EngineEvent::Metering {
+            .push(EngineEvent::Metering(MeteringEvent {
                 peak_l: 0.6,
                 peak_r: 0.4,
                 rms_l: 0.3,
                 rms_r: 0.2,
-            })
+            }))
             .unwrap();
         app.poll_engine_events();
         let _ = app.update_and_refresh_clips(Message::View(
@@ -323,13 +324,13 @@ fn timing_reactivation_refreshes_choices_and_persists_restored_feedback_silence(
         .contains_key(&(effect_id, ExternalInputId(0))));
     let (producer, mut consumer) = rtrb::RingBuffer::new(8);
     app.cmd_tx = crate::domains::EngineCommandQueue::new(producer);
-    app.send_command(EngineCommand::AddPluginEffect {
+    app.send_command(EngineCommand::InsertEffect {
         track_id,
         effect_id,
         effect: vibez_dsp::factory::create_effect(EffectType::Compressor, 44_100.0),
         position: None,
     });
-    let EngineCommand::AddPluginEffect { effect, .. } = consumer.pop().unwrap() else {
+    let EngineCommand::InsertEffect { effect, .. } = consumer.pop().unwrap() else {
         panic!("device creation")
     };
     app.reconfigure_device_timing(
@@ -339,6 +340,7 @@ fn timing_reactivation_refreshes_choices_and_persists_restored_feedback_silence(
             track_id,
             position: 0,
             slot: vibez_engine::mixer::EffectSlot {
+                levels: Default::default(),
                 id: effect_id,
                 effect,
                 bypass: false,

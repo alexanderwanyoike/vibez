@@ -1,3 +1,5 @@
+//! Prepare channel strips and resident content for offline rendering.
+
 use super::*;
 use crate::mixer::{EngineClip, EngineNoteClip};
 use vibez_core::effect::EffectInfo;
@@ -14,7 +16,7 @@ pub(super) fn channel(
     channel.gain = info.gain;
     channel.pan = info.pan;
     channel.swing_offset = info.swing_offset;
-    channel.sends = info.sends.clone();
+    channel.sends.extend_from_slice(&info.sends);
     let selected = dependencies::selected_track(req.mode);
     channel.set_manual_mute(
         if selected == Some(info.id) {
@@ -48,7 +50,9 @@ pub(super) fn channel(
         let mut instrument = vibez_instruments::create_instrument(kind, req.sample_rate as f32);
         if let Some(state) = &info.native_instrument {
             match state {
-                InstrumentStateInfo::SubtractiveSynth { params } => {
+                InstrumentStateInfo::SubtractiveSynth { params }
+                | InstrumentStateInfo::WavetableSynth { params }
+                | InstrumentStateInfo::FmSynth { params } => {
                     for (index, value) in params.iter().enumerate() {
                         instrument.set_param(index, *value);
                     }
@@ -58,14 +62,18 @@ pub(super) fn channel(
                         instrument.set_param(index, *value);
                     }
                     if let Some((audio, name)) = req.sampler_audio.get(&info.id) {
-                        instrument.load_sample(Arc::clone(audio), name.clone());
+                        drop(instrument.load_sample(Arc::clone(audio), name.clone()));
                     }
                 }
                 InstrumentStateInfo::DrumRack { pads } => {
                     for (index, pad) in pads.iter().enumerate() {
-                        instrument.set_drum_pad_state(index, pad.clone());
+                        drop(instrument.set_drum_pad_state(index, pad.clone().into()));
                         if let Some((audio, name)) = req.drum_pad_audio.get(&(info.id, index)) {
-                            instrument.load_drum_pad_sample(index, Arc::clone(audio), name.clone());
+                            drop(instrument.load_drum_pad_sample(
+                                index,
+                                Arc::clone(audio),
+                                name.clone(),
+                            ));
                         }
                     }
                 }
@@ -96,7 +104,7 @@ pub(super) fn channel(
             continue;
         }
         if let Some(audio) = req.clip_audio.get(&clip.id) {
-            channel.playback_source.clips.push(EngineClip {
+            channel.playback_source.push_audio_clip(EngineClip {
                 id: clip.id,
                 audio: Arc::clone(audio),
                 position: clip.position,
@@ -123,7 +131,7 @@ pub(super) fn channel(
         if selected == Some(info.id) && !clip_included(clip.id, req.mode, true) {
             continue;
         }
-        channel.playback_source.note_clips.push(EngineNoteClip::new(
+        channel.playback_source.push_note_clip(EngineNoteClip::new(
             clip.id,
             clip.position_beats,
             clip.duration_beats,
@@ -169,6 +177,7 @@ fn effects(
                 )
             };
             Some(EffectSlot {
+                levels: Default::default(),
                 id: info.id,
                 effect,
                 bypass: info.bypass,
@@ -191,8 +200,8 @@ fn clip_included(id: ClipId, mode: BounceMode, note: bool) -> bool {
 pub(super) fn return_plugins(
     req: &BounceRequest,
     plugins: &mut OfflinePlugins,
-    tracks: &mut [EngineTrack],
-    buses: &mut [EngineTrack],
+    tracks: &mut [Box<EngineTrack>],
+    buses: &mut [Box<EngineTrack>],
     master: &mut EngineTrack,
 ) {
     let ids: HashSet<_> = dependencies::all_channels(req)
@@ -203,6 +212,7 @@ pub(super) fn return_plugins(
     for channel in tracks
         .iter_mut()
         .chain(buses.iter_mut())
+        .map(|channel| &mut **channel)
         .chain(std::iter::once(master))
     {
         if dependencies::all_channels(req)
@@ -226,3 +236,7 @@ pub(super) fn return_plugins(
         }
     }
 }
+
+#[cfg(test)]
+#[path = "render_note_insertion_tests.rs"]
+mod note_insertion_tests;

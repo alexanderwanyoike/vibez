@@ -224,25 +224,21 @@ fn independently_installed_instruments_feed_engine_sidechain_inputs() {
         };
         let (mut engine, mut commands, mut events) = AudioEngine::new();
         commands.push(EngineCommand::SetSampleRate(48000)).unwrap();
+        commands.push(EngineCommand::add_track(source)).unwrap();
+        commands.push(EngineCommand::add_track(receiver)).unwrap();
         commands
-            .push(EngineCommand::AddMidiTrack(source, "Surge".into()))
-            .unwrap();
-        commands
-            .push(EngineCommand::AddTrack(receiver, "Receiver".into()))
-            .unwrap();
-        commands
-            .push(EngineCommand::SetPluginInstrument {
+            .push(EngineCommand::SetInstrument {
                 track_id: source,
                 instrument: Box::new(PluginInstrumentWrapper::new(plugin)),
             })
             .unwrap();
         commands
-            .push(EngineCommand::AddEffect {
-                track_id: receiver,
-                effect_id: effect,
-                effect_type: vibez_core::effect::EffectType::Gate,
-                position: None,
-            })
+            .push(EngineCommand::insert_built_in_effect(
+                receiver,
+                effect,
+                vibez_core::effect::EffectType::Gate,
+                48000,
+            ))
             .unwrap();
         commands
             .push(EngineCommand::SetTrackMute(source, true))

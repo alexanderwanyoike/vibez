@@ -46,11 +46,9 @@ fn setup() -> (
     let effect = EffectId::new();
     let valid = Arc::new(AtomicBool::new(true));
     commands.push(EngineCommand::SetSampleRate(48000)).unwrap();
+    commands.push(EngineCommand::add_track(track)).unwrap();
     commands
-        .push(EngineCommand::AddTrack(track, "Probe".into()))
-        .unwrap();
-    commands
-        .push(EngineCommand::AddPluginEffect {
+        .push(EngineCommand::InsertEffect {
             track_id: track,
             effect_id: effect,
             effect: Box::new(ConfigurationProbe(Arc::clone(&valid))),
@@ -110,7 +108,7 @@ fn active_configuration_or_rate_failure_closes_capture_at_actual_source_time() {
             }
         )));
         assert!(collected.iter().any(|event| matches!(event, EngineEvent::CompensationInvalid {effect_id: Some(id), ..} if *id == effect)));
-        assert!(!engine.compensation_valid);
+        assert!(!engine.compensation_plan.applied_plan_is_valid());
     }
 }
 
@@ -123,8 +121,14 @@ fn full_event_ring_retains_source_capture_stop_and_named_failure_before_metering
         crate::retirement::tests::allocations(|| engine.process(&mut [0.0; 16], 2)),
         (0, 0)
     );
-    assert_eq!(engine.pending_capture_stop, Some(500));
-    assert_eq!(engine.pending_compensation_failure.unwrap().1, Some(effect));
+    assert_eq!(
+        engine.presentation_state.terminals.capture_stop(),
+        Some(500)
+    );
+    assert_eq!(
+        engine.presentation_state.terminals.failure().unwrap().1,
+        Some(effect)
+    );
     while events.pop().is_ok() {}
     engine.process(&mut [0.0; 16], 2);
     assert!(matches!(
@@ -151,7 +155,7 @@ fn invalid_configuration_cannot_start_a_new_silent_capture() {
     let events: Vec<_> = std::iter::from_fn(|| events.pop().ok()).collect();
     assert!(!events
         .iter()
-        .any(|event| matches!(event, EngineEvent::PerformanceCaptureStarted { .. })));
+        .any(|event| matches!(event, EngineEvent::PerformanceCaptureStarted(_))));
     assert!(events.iter().any(|event| matches!(
         event,
         EngineEvent::CompensationInvalid {
@@ -190,7 +194,7 @@ fn global_configuration_failure_retains_stopped_acknowledgement_under_backpressu
 #[test]
 fn exhausted_handoff_closes_source_capture_and_retains_original_cause_and_stop() {
     let (mut engine, _, mut events, _, _) = setup();
-    engine.next_device_handoff = u64::MAX;
+    engine.device_handoff.exhaust_identity_for_test();
     engine.transport.play();
     while engine.event_tx.push(EngineEvent::PlaybackStarted).is_ok() {}
     assert_eq!(
@@ -198,12 +202,15 @@ fn exhausted_handoff_closes_source_capture_and_retains_original_cause_and_stop()
         (0, 0)
     );
     assert!(!engine.transport.is_playing());
-    assert_eq!(engine.pending_capture_stop, Some(500));
     assert_eq!(
-        engine.pending_compensation_failure.unwrap().2,
+        engine.presentation_state.terminals.capture_stop(),
+        Some(500)
+    );
+    assert_eq!(
+        engine.presentation_state.terminals.failure().unwrap().2,
         "Device handoff identity exhausted"
     );
-    assert!(engine.pending_playback_stop);
+    assert!(engine.presentation_state.terminals.playback_stop_pending());
     while events.pop().is_ok() {}
     engine.flush_presentation();
     assert!(matches!(

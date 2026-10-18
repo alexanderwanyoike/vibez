@@ -578,6 +578,7 @@ impl App {
         let duration = audio.num_frames() as u64;
 
         self.send_command(EngineCommand::AddClip {
+            insertion: vibez_engine::clip_insertion::PreparedClipInsertion::new(),
             track_id,
             clip_id,
             audio: Arc::clone(&audio),

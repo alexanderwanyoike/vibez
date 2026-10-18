@@ -116,7 +116,7 @@ fn a_plugin_reloading_into_its_retained_slot_keeps_the_project_audible() {
 
     // Undo and project open retain the slot, so the routing model is already
     // final when the loaded instance arrives.
-    app.send_command(EngineCommand::AddPluginEffect {
+    app.send_command(EngineCommand::InsertEffect {
         track_id,
         effect_id,
         effect: vibez_dsp::factory::create_effect(EffectType::Gain, 44_100.0),
@@ -128,4 +128,32 @@ fn a_plugin_reloading_into_its_retained_slot_keeps_the_project_audible() {
         settled_level(&mut engine) > 0.1,
         "a reloaded plugin must not leave the project muted"
     );
+}
+
+#[test]
+fn unchanged_routing_undo_redo_266_keeps_exact_mixer_level_and_playback() {
+    let mut app = super::test_support::app();
+    let (mut engine, commands, _events) = AudioEngine::new();
+    app.cmd_tx = crate::domains::EngineCommandQueue::new(commands);
+    playing_project(&mut app, &mut engine);
+    let routing = app.state.devices.last_routing.clone();
+    let original_gain = app.state.project_tracks.tracks[0].gain;
+    let original_level = settled_level(&mut engine);
+    app.push_undo_snapshot(None);
+    Arc::make_mut(&mut app.state.project_tracks).tracks[0].gain = 0.5;
+    for (message, gain) in [
+        (ProjectMsg::Undo, original_gain),
+        (ProjectMsg::Redo, 0.5),
+        (ProjectMsg::Undo, original_gain),
+    ] {
+        let _ = app.update_and_refresh_clips(Message::Project(message));
+        assert_eq!(app.state.devices.last_routing, routing);
+        let level = settled_level(&mut engine);
+        let expected = original_level * gain / original_gain;
+        assert!(
+            (level - expected).abs() < 1e-7,
+            "gain={gain}: {level} != {expected}"
+        );
+        assert!(engine.transport().is_playing());
+    }
 }

@@ -1,5 +1,8 @@
 //! Audio-thread handlers for manual automation ownership and live gestures.
 
+use crate::events::{
+    AutomationGestureChangedEvent, AutomationOverrideChangedEvent, TrackMuteChangedEvent,
+};
 use vibez_core::automation::AutomationTarget;
 use vibez_core::id::{EffectId, TrackId};
 use vibez_core::perform::SwingOffset;
@@ -8,40 +11,15 @@ use vibez_core::perform::TrackMuteQuantization;
 use crate::events::{AutomationGesturePhase, EngineEvent};
 use crate::mixer::{PlaybackTimeline, QueuedTrackMute};
 
-use super::{presentation_queue, AudioEngine};
+use super::presentation_queue::{PresentationAdmission, ScheduledPresentation};
+use super::{presentation_queue, AudioEngine, ClockDomain, RetirementAllowance};
 
 impl AudioEngine {
-    pub(super) fn set_automation_lane(
-        &mut self,
-        track_id: TrackId,
-        lane: vibez_core::automation::AutomationLane,
-    ) {
-        let retired = if let Some(track) = self.channel_mut(track_id) {
-            if let Some(index) = track
-                .playback_source
-                .automation
-                .iter()
-                .position(|existing| existing.id == lane.id)
-            {
-                Some(std::mem::replace(
-                    &mut track.playback_source.automation[index],
-                    lane,
-                ))
-            } else {
-                track.playback_source.automation.push(lane);
-                None
-            }
-        } else {
-            Some(lane)
-        };
-        if let Some(lane) = retired {
-            self.retire_event(EngineEvent::RetiredAutomationLane(lane));
-        }
-    }
     pub(super) fn remove_automation_lane(
         &mut self,
         track_id: TrackId,
         lane_id: vibez_core::id::LaneId,
+        allowance: &mut RetirementAllowance,
     ) {
         let retired = self.channel_mut(track_id).and_then(|track| {
             track
@@ -52,7 +30,7 @@ impl AudioEngine {
                 .map(|index| track.playback_source.automation.remove(index))
         });
         if let Some(lane) = retired {
-            self.retire_event(EngineEvent::RetiredAutomationLane(lane));
+            self.retire_event(EngineEvent::RetiredAutomationLane(lane), allowance);
         }
     }
 
@@ -88,26 +66,35 @@ impl AudioEngine {
         }
     }
 
-    pub(super) fn set_track_mute(&mut self, id: TrackId, muted: bool) {
+    pub(super) fn set_track_mute(
+        &mut self,
+        id: TrackId,
+        muted: bool,
+        allowance: &mut RetirementAllowance,
+    ) {
         let effective_at_samples = self.effective_position();
         let cancelled = self
             .channel_mut(id)
             .is_some_and(|track| track.queued_mute.take().is_some());
         if cancelled {
-            self.present_event(EngineEvent::TrackMuteQueueCancelled { track_id: id });
+            self.present_event(
+                EngineEvent::TrackMuteQueueCancelled { track_id: id },
+                allowance,
+            );
         }
-        self.apply_track_mute_at(id, muted, effective_at_samples);
+        self.apply_track_mute_at_reserved(id, muted, effective_at_samples, allowance);
     }
 
-    fn apply_track_mute_at(&mut self, id: TrackId, muted: bool, effective_at_samples: u64) {
+    fn apply_track_mute_at_reserved(
+        &mut self,
+        id: TrackId,
+        muted: bool,
+        effective_at_samples: u64,
+        allowance: &mut RetirementAllowance,
+    ) {
         let playing = self.transport.is_playing();
         let (changed, override_changed) = if let Some(track) = self.channel_mut(id) {
-            track.queued_mute = None;
-            let target = AutomationTarget::TrackMute;
-            let override_changed =
-                track.has_automation_target(target) && track.set_automation_override(target, true);
-            track.set_manual_mute(muted, !playing);
-            (true, override_changed)
+            (true, apply_manual_mute_state(track, muted, playing))
         } else {
             (false, false)
         };
@@ -121,20 +108,93 @@ impl AudioEngine {
                 at_target.saturating_sub(now - effective_at_samples)
             };
             self.present_event_after(
-                EngineEvent::TrackMuteChanged {
+                EngineEvent::TrackMuteChanged(TrackMuteChangedEvent {
                     track_id: id,
                     muted,
                     effective_at_samples: mapped,
-                },
+                }),
                 self.automation_presentation_delay(id, target),
+                allowance,
             );
         }
         if override_changed {
-            self.present_event(EngineEvent::AutomationOverrideChanged {
+            self.present_event(
+                EngineEvent::AutomationOverrideChanged(AutomationOverrideChangedEvent {
+                    track_id: id,
+                    target: AutomationTarget::TrackMute,
+                    overridden: true,
+                }),
+                allowance,
+            );
+        }
+    }
+
+    fn apply_track_mute_at(&mut self, id: TrackId, muted: bool, effective_at_samples: u64) {
+        let Some(admission) = PresentationAdmission::<2>::new(
+            &mut self.event_tx,
+            &mut self.scheduled_presentation,
+            &mut self.presentation_state.terminals,
+        ) else {
+            return;
+        };
+        let playing = self.transport.is_playing();
+        let (changed, override_changed) =
+            if let Some(track) = self.tracks.iter_mut().find(|track| track.id == id) {
+                (true, apply_manual_mute_state(track, muted, playing))
+            } else {
+                (false, false)
+            };
+        let admission = if changed {
+            let target = AutomationTarget::TrackMute;
+            let now = match self.clock_domain {
+                ClockDomain::Arrange => self.transport.position(),
+                ClockDomain::Perform => self.performance_position,
+            };
+            let at_target = super::clock::target_automation_position_fields(
+                &self.routing,
+                &self.transport,
+                self.clock_domain,
+                self.performance_position,
+                self.active_section,
+                id,
+                target,
+            );
+            let mapped = if effective_at_samples >= now {
+                at_target.saturating_add(effective_at_samples - now)
+            } else {
+                at_target.saturating_sub(now - effective_at_samples)
+            };
+            let event = EngineEvent::TrackMuteChanged(TrackMuteChangedEvent {
+                track_id: id,
+                muted,
+                effective_at_samples: mapped,
+            });
+            let delay =
+                super::clock::automation_presentation_delay_fields(&self.routing, id, target);
+            let now = self.output_position + self.rendered_callback_frames as u64;
+            admission.advance(
+                Some(ScheduledPresentation {
+                    due: now.saturating_add(delay as u64),
+                    event,
+                }),
+                now,
+                self.output_position,
+            )
+        } else {
+            admission.advance(None, 0, 0)
+        };
+        if override_changed {
+            let event = EngineEvent::AutomationOverrideChanged(AutomationOverrideChangedEvent {
                 track_id: id,
                 target: AutomationTarget::TrackMute,
                 overridden: true,
             });
+            let now = self.output_position + self.rendered_callback_frames as u64;
+            admission.publish(
+                [Some(ScheduledPresentation { due: now, event })],
+                now,
+                self.output_position,
+            );
         }
     }
 
@@ -143,10 +203,11 @@ impl AudioEngine {
         track_id: TrackId,
         muted: bool,
         quantization: TrackMuteQuantization,
+        allowance: &mut RetirementAllowance,
     ) {
         let now = self.effective_position();
         if quantization == TrackMuteQuantization::Immediate || !self.transport.is_playing() {
-            self.apply_track_mute_at(track_id, muted, now);
+            self.apply_track_mute_at_reserved(track_id, muted, now, allowance);
             return;
         }
 
@@ -154,7 +215,7 @@ impl AudioEngine {
             return;
         };
         if track.queued_mute.take().is_some() {
-            self.present_event(EngineEvent::TrackMuteQueueCancelled { track_id });
+            self.present_event(EngineEvent::TrackMuteQueueCancelled { track_id }, allowance);
             return;
         }
 
@@ -174,12 +235,15 @@ impl AudioEngine {
                 .unwrap_or(now)
         };
         if effective_at_samples <= now {
-            self.present_event(EngineEvent::TrackMuteQueued {
-                track_id,
-                muted,
-                effective_at_samples: now,
-            });
-            self.apply_track_mute_at(track_id, muted, now);
+            self.present_event(
+                EngineEvent::TrackMuteQueued {
+                    track_id,
+                    muted,
+                    effective_at_samples: now,
+                },
+                allowance,
+            );
+            self.apply_track_mute_at_reserved(track_id, muted, now, allowance);
             return;
         }
         let Some(track) = self.channel_mut(track_id) else {
@@ -190,11 +254,14 @@ impl AudioEngine {
             effective_at_samples,
             end_of_section: quantization == TrackMuteQuantization::EndOfSection,
         });
-        self.present_event(EngineEvent::TrackMuteQueued {
-            track_id,
-            muted,
-            effective_at_samples,
-        });
+        self.present_event(
+            EngineEvent::TrackMuteQueued {
+                track_id,
+                muted,
+                effective_at_samples,
+            },
+            allowance,
+        );
     }
 
     pub(super) fn next_track_mute_boundary(&self) -> Option<u64> {
@@ -257,10 +324,24 @@ impl AudioEngine {
                 self.pending_source_cleanup = true;
                 return;
             }
+            let Some(admission) = PresentationAdmission::<1>::new(
+                &mut self.event_tx,
+                &mut self.scheduled_presentation,
+                &mut self.presentation_state.terminals,
+            ) else {
+                self.pending_source_cleanup = true;
+                return;
+            };
             self.tracks[index].queued_mute = None;
-            self.present_event(EngineEvent::TrackMuteQueueCancelled {
+            let event = EngineEvent::TrackMuteQueueCancelled {
                 track_id: self.tracks[index].id,
-            });
+            };
+            let now = self.output_position + self.rendered_callback_frames as u64;
+            admission.publish(
+                [Some(ScheduledPresentation { due: now, event })],
+                now,
+                self.output_position,
+            );
         }
     }
 
@@ -269,16 +350,20 @@ impl AudioEngine {
         track_id: TrackId,
         target: AutomationTarget,
         overridden: bool,
+        allowance: &mut RetirementAllowance,
     ) {
         let changed = self
             .channel_mut(track_id)
             .is_some_and(|track| track.set_automation_override(target, overridden));
         if changed {
-            self.present_event(EngineEvent::AutomationOverrideChanged {
-                track_id,
-                target,
-                overridden,
-            });
+            self.present_event(
+                EngineEvent::AutomationOverrideChanged(AutomationOverrideChangedEvent {
+                    track_id,
+                    target,
+                    overridden,
+                }),
+                allowance,
+            );
         }
     }
 
@@ -288,10 +373,11 @@ impl AudioEngine {
         target: AutomationTarget,
         normalized_value: f32,
         begin: bool,
+        allowance: &mut RetirementAllowance,
     ) {
-        self.set_automation_override(track_id, target, true);
+        self.set_automation_override(track_id, target, true, allowance);
         self.present_event_after(
-            EngineEvent::AutomationGestureChanged {
+            EngineEvent::AutomationGestureChanged(AutomationGestureChangedEvent {
                 track_id,
                 target,
                 normalized_value: normalized_value.clamp(0.0, 1.0),
@@ -301,12 +387,18 @@ impl AudioEngine {
                     AutomationGesturePhase::Update
                 },
                 effective_at_samples: self.target_automation_position(track_id, target),
-            },
+            }),
             self.automation_presentation_delay(track_id, target),
+            allowance,
         );
     }
 
-    pub(super) fn end_automation_gesture(&mut self, track_id: TrackId, target: AutomationTarget) {
+    pub(super) fn end_automation_gesture(
+        &mut self,
+        track_id: TrackId,
+        target: AutomationTarget,
+        allowance: &mut RetirementAllowance,
+    ) {
         let section_active = self.active_section.is_some();
         let beat = if let Some(active) = self.active_section {
             self.samples_to_automation_beat(active.position_samples)
@@ -352,17 +444,18 @@ impl AudioEngine {
                         })
                 }
             });
-        self.set_automation_override(track_id, target, false);
+        self.set_automation_override(track_id, target, false, allowance);
         if let Some(normalized_value) = normalized_value {
             self.present_event_after(
-                EngineEvent::AutomationGestureChanged {
+                EngineEvent::AutomationGestureChanged(AutomationGestureChangedEvent {
                     track_id,
                     target,
                     normalized_value,
                     phase: AutomationGesturePhase::End,
                     effective_at_samples: self.target_automation_position(track_id, target),
-                },
+                }),
                 self.automation_presentation_delay(track_id, target),
+                allowance,
             );
         }
     }
@@ -375,4 +468,17 @@ impl AudioEngine {
             0.0
         }
     }
+}
+
+fn apply_manual_mute_state(
+    track: &mut crate::mixer::EngineTrack,
+    muted: bool,
+    playing: bool,
+) -> bool {
+    track.queued_mute = None;
+    let target = AutomationTarget::TrackMute;
+    let override_changed =
+        track.has_automation_target(target) && track.set_automation_override(target, true);
+    track.set_manual_mute(muted, !playing);
+    override_changed
 }

@@ -1,0 +1,699 @@
+//! Native Gain body: dB gain, stereo trim and polarity, metered on both sides.
+
+use std::time::Instant;
+
+use iced::mouse;
+use iced::widget::{button, canvas, column, container, row, text, tooltip, Space};
+use iced::{Alignment, Color, Element, Length, Point, Rectangle, Renderer, Size, Theme};
+use vibez_core::id::TrackId;
+use vibez_dsp::gain::param;
+use vibez_engine::metering::MeterValues;
+
+use crate::domains::gain::{GainHistoryPoint, GainMsg, GainPanelState};
+use crate::domains::param_entry::ValueEntry;
+use crate::message::Message;
+use crate::state::UiEffect;
+use crate::theme as th;
+use crate::widgets::device_controls::{heading, rule, vertical_rule, Param};
+use crate::widgets::effect_knob::KnobTarget;
+use crate::widgets::level_meter::{self, LevelMeter};
+
+const PAD: f32 = 10.0;
+const COLUMN_W: f32 = 104.0;
+/// Meters plus readouts wide enough for "-48.0" without wrapping.
+const METER_COLUMN_W: f32 = 118.0;
+const HISTORY_MIN_W: f32 = 210.0;
+/// Below this the history is too short to read and is left out.
+const HISTORY_MIN_H: f32 = 64.0;
+/// Input, Gain and Output side by side.
+pub const COMPACT_W: f32 = METER_COLUMN_W * 2.0 + COLUMN_W + 2.0 + PAD * 2.0;
+/// Adds the output level history.
+pub const MEDIUM_W: f32 = COMPACT_W + 1.0 + HISTORY_MIN_W;
+pub const MAX_W: f32 = 820.0;
+/// Short trims put their knob beside the value, so Advanced needs this much
+/// more width before it fits beside the meters of a short card.
+const SHORT_BESIDE_W: f32 = COMPACT_W + 1.0 + 270.0;
+
+const PRESET_ROW_H: f32 = 28.0;
+const FOOTER_H: f32 = 22.0;
+const MAIN_MAX_H: f32 = 150.0;
+const MAIN_MIN_H: f32 = 92.0;
+const ADVANCED_H: f32 = 76.0;
+
+pub const WIDTHS: crate::widgets::device_chrome::CardWidths =
+    crate::widgets::device_chrome::CardWidths {
+        compact: COMPACT_W,
+        medium: MEDIUM_W,
+        expanded: MEDIUM_W,
+        max: MAX_W,
+    };
+
+/// How the body divides its measured height. Advanced either stacks under
+/// the main controls or takes their place; the body never scrolls.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Arrangement {
+    /// Advanced and its toggle share the preset row.
+    Short {
+        main: f32,
+    },
+    Normal {
+        main: f32,
+    },
+    WithAdvanced {
+        main: f32,
+    },
+    /// Wide but short: Advanced takes the history's place beside the meters.
+    AdvancedBeside {
+        main: f32,
+    },
+    AdvancedOnly {
+        main: f32,
+    },
+}
+
+pub fn arrange(size: Size, advanced: bool) -> Arrangement {
+    let below_preset = (size.height - PRESET_ROW_H - 1.0).max(0.0);
+    let beside = size.width >= MEDIUM_W;
+    if below_preset < MAIN_MIN_H + 1.0 + FOOTER_H {
+        let main = below_preset;
+        return match (advanced, size.width >= SHORT_BESIDE_W) {
+            (false, _) => Arrangement::Short { main },
+            (true, true) => Arrangement::AdvancedBeside { main },
+            (true, false) => Arrangement::AdvancedOnly { main },
+        };
+    }
+    let main_area = below_preset - FOOTER_H - 1.0;
+    if !advanced {
+        return Arrangement::Normal {
+            main: main_area.min(MAIN_MAX_H),
+        };
+    }
+    if main_area >= MAIN_MIN_H + 1.0 + ADVANCED_H {
+        Arrangement::WithAdvanced {
+            main: (main_area - 1.0 - ADVANCED_H).min(MAIN_MAX_H),
+        }
+    } else if beside {
+        Arrangement::AdvancedBeside {
+            main: main_area.min(MAIN_MAX_H),
+        }
+    } else {
+        Arrangement::AdvancedOnly { main: main_area }
+    }
+}
+
+/// Whether the body is too short for a footer, so Advanced joins the preset row.
+fn footer_fits(height: f32) -> bool {
+    height - PRESET_ROW_H - 1.0 >= MAIN_MIN_H + 1.0 + FOOTER_H
+}
+
+/// Width left for the preset bar in a body of this size.
+pub fn preset_bar_width(size: Size) -> f32 {
+    let disclosure = if footer_fits(size.height) { 0.0 } else { 86.0 };
+    size.width - PAD * 2.0 - disclosure
+}
+
+pub fn view<'a>(
+    track_id: TrackId,
+    effect: &'a UiEffect,
+    accent: Color,
+    state: &'a GainPanelState,
+    entry: Option<&'a ValueEntry>,
+    preset_bar: Element<'a, Message>,
+    size: Size,
+) -> Element<'a, Message> {
+    let control_accent = if effect.bypass {
+        th::text_muted()
+    } else {
+        accent
+    };
+    let with_footer = footer_fits(size.height);
+    let mut top = row![preset_bar].spacing(6).align_y(Alignment::Center);
+    if !with_footer {
+        top = top
+            .push(Space::with_width(Length::Fill))
+            .push(disclosure(effect, state.advanced));
+    }
+    let mut body = column![
+        container(top)
+            .padding([0.0, PAD])
+            .height(PRESET_ROW_H)
+            .align_y(Alignment::Center),
+        rule(),
+    ];
+    let main =
+        |height, side| main_controls(track_id, effect, state, entry, control_accent, side, height);
+    let advanced =
+        |height| advanced_controls(track_id, effect, entry, control_accent, height, false);
+    let history = if size.width >= MEDIUM_W {
+        Side::History
+    } else {
+        Side::Empty
+    };
+    body = match arrange(size, state.advanced) {
+        Arrangement::Short { main: height } | Arrangement::Normal { main: height } => {
+            body.push(main(height, history))
+        }
+        Arrangement::AdvancedBeside { main: height } => body.push(main(height, Side::Advanced)),
+        Arrangement::WithAdvanced { main: height } => body
+            .push(main(height, history))
+            .push(rule())
+            .push(advanced(ADVANCED_H)),
+        Arrangement::AdvancedOnly { main: height } => body.push(advanced(height)),
+    };
+    if with_footer {
+        body = body
+            .push(Space::with_height(Length::Fill))
+            .push(rule())
+            .push(
+                container(disclosure(effect, state.advanced))
+                    .padding([0.0, PAD - 4.0])
+                    .height(FOOTER_H)
+                    .align_y(Alignment::Center),
+            );
+    }
+    body.width(Length::Fill).height(Length::Fill).into()
+}
+
+/// What the main row shows beside the meters when the card is wide.
+#[derive(Clone, Copy)]
+enum Side {
+    Empty,
+    History,
+    Advanced,
+}
+
+fn main_controls<'a>(
+    track_id: TrackId,
+    effect: &'a UiEffect,
+    state: &'a GainPanelState,
+    entry: Option<&'a ValueEntry>,
+    accent: Color,
+    side: Side,
+    height: f32,
+) -> Element<'a, Message> {
+    let inner = (height - 12.0).max(40.0);
+    let mut main = row![
+        meter_column("Input", state.input, None, inner),
+        vertical_rule(),
+        gain_column(track_id, effect, entry, accent, inner),
+        vertical_rule(),
+        meter_column(
+            "Output",
+            state.output,
+            Some((effect.id, state.clip_latched)),
+            inner
+        ),
+    ]
+    .height(inner);
+    if matches!(side, Side::Advanced) {
+        main = main.push(vertical_rule()).push(advanced_controls(
+            track_id, effect, entry, accent, inner, true,
+        ));
+    } else if matches!(side, Side::History) && inner >= HISTORY_MIN_H {
+        main = main.push(vertical_rule()).push(
+            column![
+                heading("Output history"),
+                canvas(LevelHistory {
+                    points: &state.history,
+                    now: state.last_meter_at.unwrap_or_else(Instant::now),
+                    accent,
+                })
+                .width(Length::Fill)
+                .height(Length::Fill),
+            ]
+            .spacing(4)
+            .padding([0.0, 8.0])
+            .width(Length::Fill),
+        );
+    }
+    container(main)
+        .padding([6.0, PAD])
+        .height(height)
+        .width(Length::Fill)
+        .into()
+}
+
+fn meter_column<'a>(
+    label: &'static str,
+    levels: MeterValues,
+    clip: Option<(vibez_core::id::EffectId, bool)>,
+    height: f32,
+) -> Element<'a, Message> {
+    let mut title = row![heading(label)].spacing(6).align_y(Alignment::Center);
+    if let Some((effect_id, latched)) = clip {
+        let clip_label = text("\u{25CF} Clip")
+            .size(crate::widgets::device_controls::LABEL_SIZE)
+            .color(if latched {
+                th::meter_red()
+            } else {
+                th::text_muted()
+            });
+        title = title.push(Space::with_width(Length::Fill)).push(tooltip(
+            button(clip_label)
+                .on_press(Message::GainControl(GainMsg::ClearClip(effect_id)))
+                .padding(0)
+                .style(|_, _| button::Style::default()),
+            text("Click to reset").size(9),
+            tooltip::Position::Top,
+        ));
+    }
+    let readouts = column![
+        text("Peak").size(9).color(th::text_dim()),
+        readout("L", levels.peak_l),
+        readout("R", levels.peak_r),
+    ]
+    .spacing(2);
+    column![
+        title,
+        row![
+            canvas(LevelMeter { levels })
+                .width(level_meter::WIDTH)
+                .height(Length::Fill),
+            readouts,
+        ]
+        .spacing(10)
+        .height(Length::Fill),
+    ]
+    .spacing(4)
+    .padding([0.0, 6.0])
+    .width(METER_COLUMN_W)
+    .height(height)
+    .into()
+}
+
+fn readout<'a>(channel: &'static str, peak: f32) -> Element<'a, Message> {
+    row![
+        text(channel).size(9).color(th::text_dim()),
+        text(db_text(peak))
+            .size(10)
+            .font(crate::typography::PERFORM_TECH)
+            .wrapping(iced::widget::text::Wrapping::None)
+            .color(th::text()),
+    ]
+    .spacing(4)
+    .into()
+}
+
+fn gain_column<'a>(
+    track_id: TrackId,
+    effect: &'a UiEffect,
+    entry: Option<&'a ValueEntry>,
+    accent: Color,
+    height: f32,
+) -> Element<'a, Message> {
+    let gain = Param::new(track_id, effect, param::GAIN, accent, entry)
+        .knob_target(KnobTarget::GainDb(effect.id));
+    let unity = small_button(
+        "Unity",
+        Message::set_effect_param(track_id, effect.id, param::GAIN, 1.0),
+        accent,
+        false,
+    );
+    let stacked = height >= 104.0;
+    let knob_size = (height - 60.0).clamp(28.0, 64.0);
+    let knob = canvas(gain.knob()).width(knob_size).height(knob_size);
+    let controls: Element<'a, Message> = if stacked {
+        column![knob, gain.value_entry(), unity]
+            .spacing(4)
+            .align_x(Alignment::Center)
+            .into()
+    } else {
+        row![
+            knob,
+            column![gain.value_entry(), unity]
+                .spacing(3)
+                .align_x(Alignment::Center),
+        ]
+        .spacing(4)
+        .align_y(Alignment::Center)
+        .into()
+    };
+    column![heading("Gain"), controls]
+        .spacing(4)
+        .align_x(Alignment::Center)
+        .width(COLUMN_W)
+        .height(height)
+        .into()
+}
+
+fn advanced_controls<'a>(
+    track_id: TrackId,
+    effect: &'a UiEffect,
+    entry: Option<&'a ValueEntry>,
+    accent: Color,
+    height: f32,
+    beside: bool,
+) -> Element<'a, Message> {
+    let roomy = height >= 70.0;
+    let trims = row![
+        trim_control(
+            Param::new(track_id, effect, param::TRIM[0], accent, entry),
+            "L trim",
+            roomy
+        ),
+        trim_control(
+            Param::new(track_id, effect, param::TRIM[1], accent, entry),
+            "R trim",
+            roomy
+        ),
+    ]
+    .spacing(10);
+    // Beside the meters there is room for the trims and two short toggles,
+    // not for a labelled pair.
+    let polarity: Element<'a, Message> = if beside {
+        column![
+            heading("Polarity"),
+            row![
+                phase_toggle(track_id, effect, param::POLARITY[0], "\u{00D8} L", accent),
+                phase_toggle(track_id, effect, param::POLARITY[1], "\u{00D8} R", accent),
+            ]
+            .spacing(4),
+        ]
+        .spacing(4)
+        .align_x(Alignment::Center)
+        .into()
+    } else {
+        row![
+            polarity_control(track_id, effect, param::POLARITY[0], "L polarity", accent),
+            polarity_control(track_id, effect, param::POLARITY[1], "R polarity", accent),
+        ]
+        .spacing(10)
+        .into()
+    };
+    container(
+        row![trims, vertical_rule(), polarity]
+            .spacing(if beside { 10 } else { 14 })
+            .align_y(Alignment::Center),
+    )
+    .padding([4.0, if beside { 6.0 } else { PAD }])
+    .height(height)
+    .align_y(Alignment::Center)
+    .into()
+}
+
+fn trim_control<'a>(trim: Param<'a>, label: &'static str, roomy: bool) -> Element<'a, Message> {
+    let size = if roomy { 36.0 } else { 26.0 };
+    let knob = canvas(trim.knob()).width(size).height(size);
+    if roomy {
+        column![heading(label), knob, trim.value_entry()]
+            .spacing(3)
+            .align_x(Alignment::Center)
+            .into()
+    } else {
+        row![knob, column![heading(label), trim.value_entry()].spacing(2)]
+            .spacing(4)
+            .align_y(Alignment::Center)
+            .into()
+    }
+}
+
+fn polarity_control<'a>(
+    track_id: TrackId,
+    effect: &UiEffect,
+    index: usize,
+    label: &'static str,
+    accent: Color,
+) -> Element<'a, Message> {
+    let inverted = effect.params.get(index).copied().unwrap_or(0.0) >= 0.5;
+    column![
+        heading(label),
+        small_button(
+            if inverted {
+                "\u{00D8} Inverted"
+            } else {
+                "Normal"
+            },
+            Message::set_effect_param(track_id, effect.id, index, if inverted { 0.0 } else { 1.0 }),
+            accent,
+            inverted,
+        ),
+    ]
+    .spacing(4)
+    .align_x(Alignment::Center)
+    .into()
+}
+
+fn phase_toggle<'a>(
+    track_id: TrackId,
+    effect: &UiEffect,
+    index: usize,
+    label: &'static str,
+    accent: Color,
+) -> Element<'a, Message> {
+    let inverted = effect.params.get(index).copied().unwrap_or(0.0) >= 0.5;
+    small_button(
+        label,
+        Message::set_effect_param(track_id, effect.id, index, if inverted { 0.0 } else { 1.0 }),
+        accent,
+        inverted,
+    )
+}
+
+fn disclosure<'a>(effect: &UiEffect, open: bool) -> Element<'a, Message> {
+    button(
+        row![
+            text(if open { "\u{25BE}" } else { "\u{25B8}" })
+                .size(9)
+                .color(th::text_dim()),
+            text("Advanced").size(10).color(th::text()),
+        ]
+        .spacing(4)
+        .align_y(Alignment::Center),
+    )
+    .on_press(Message::GainControl(GainMsg::ToggleAdvanced(effect.id)))
+    .padding([2, 4])
+    .style(|_theme: &Theme, status| button::Style {
+        background: matches!(status, button::Status::Hovered | button::Status::Pressed)
+            .then(|| th::bg_hover().into()),
+        border: iced::Border {
+            radius: 3.0.into(),
+            ..Default::default()
+        },
+        ..Default::default()
+    })
+    .into()
+}
+
+fn small_button<'a>(
+    label: &'static str,
+    message: Message,
+    accent: Color,
+    active: bool,
+) -> Element<'a, Message> {
+    button(text(label).size(9))
+        .on_press(message)
+        .padding([2, 8])
+        .style(move |_theme: &Theme, status| button::Style {
+            background: Some(
+                if matches!(status, button::Status::Hovered | button::Status::Pressed) {
+                    th::bg_hover().into()
+                } else {
+                    th::bg_dark().into()
+                },
+            ),
+            text_color: if active { accent } else { th::text() },
+            border: iced::Border {
+                color: if active { accent } else { th::border() },
+                width: 1.0,
+                radius: 3.0.into(),
+            },
+            ..Default::default()
+        })
+        .into()
+}
+
+fn db_text(amplitude: f32) -> String {
+    if amplitude <= 0.0 || !amplitude.is_finite() {
+        "-inf".into()
+    } else {
+        format!("{:.1}", vibez_core::level::amplitude_to_db(amplitude))
+    }
+}
+
+struct LevelHistory<'a> {
+    points: &'a crate::domains::device_levels::ReadingHistory<GainHistoryPoint>,
+    now: Instant,
+    accent: Color,
+}
+
+impl canvas::Program<Message> for LevelHistory<'_> {
+    type State = ();
+
+    fn draw(
+        &self,
+        _: &(),
+        renderer: &Renderer,
+        _: &Theme,
+        bounds: Rectangle,
+        _: mouse::Cursor,
+    ) -> Vec<canvas::Geometry> {
+        let mut frame = canvas::Frame::new(renderer, bounds.size());
+        let left = 22.0;
+        let width = (bounds.width - left).max(1.0);
+        let height = (bounds.height - 12.0).max(1.0);
+        let y_of = |db: f32| height * level_meter::scale_position(db);
+        frame.fill_rectangle(
+            Point::new(left, 0.0),
+            Size::new(width, height),
+            th::bg_dark(),
+        );
+        for &db in level_meter::scale_marks(height) {
+            let y = y_of(db);
+            frame.stroke(
+                &canvas::Path::line(Point::new(left, y), Point::new(left + width, y)),
+                canvas::Stroke::default()
+                    .with_color(th::divider())
+                    .with_width(1.0),
+            );
+            level_meter::draw_scale_label(&mut frame, db, Point::new(left - 4.0, y));
+        }
+        for second in (2..10).step_by(2) {
+            let x = left + second as f32 / crate::domains::gain::HISTORY.as_secs_f32() * width;
+            frame.stroke(
+                &canvas::Path::line(Point::new(x, 0.0), Point::new(x, height)),
+                canvas::Stroke::default()
+                    .with_color(th::divider())
+                    .with_width(1.0),
+            );
+        }
+        for peak in [true, false] {
+            let path = canvas::Path::new(|builder| {
+                let mut started = false;
+                for (at, point) in self.points.iter() {
+                    let age = self.now.saturating_duration_since(*at).as_secs_f32();
+                    if age > crate::domains::gain::HISTORY.as_secs_f32() {
+                        continue;
+                    }
+                    let value = if peak { point.peak } else { point.rms };
+                    let db = vibez_core::level::amplitude_to_db(value);
+                    // Silence is the absence of a line, not a line on the floor.
+                    if db <= level_meter::FLOOR_DB {
+                        started = false;
+                        continue;
+                    }
+                    let position = Point::new(
+                        left + (1.0 - age / crate::domains::gain::HISTORY.as_secs_f32()) * width,
+                        y_of(db),
+                    );
+                    if started {
+                        builder.line_to(position);
+                    } else {
+                        builder.move_to(position);
+                        started = true;
+                    }
+                }
+            });
+            frame.stroke(
+                &path,
+                canvas::Stroke::default()
+                    .with_color(th::with_alpha(self.accent, if peak { 0.35 } else { 1.0 }))
+                    .with_width(if peak { 1.0 } else { 1.5 }),
+            );
+        }
+        // The legend draws each line's own stroke beside its name.
+        let mut x = left;
+        for (label, peak) in [("RMS", false), ("Peak", true)] {
+            let y = bounds.height - 4.0;
+            frame.stroke(
+                &canvas::Path::line(Point::new(x, y), Point::new(x + 10.0, y)),
+                canvas::Stroke::default()
+                    .with_color(th::with_alpha(self.accent, if peak { 0.35 } else { 1.0 }))
+                    .with_width(if peak { 1.0 } else { 1.5 }),
+            );
+            frame.fill_text(canvas::Text {
+                content: label.into(),
+                position: Point::new(x + 13.0, bounds.height),
+                color: th::text_dim(),
+                size: 8.0.into(),
+                vertical_alignment: iced::alignment::Vertical::Bottom,
+                ..canvas::Text::default()
+            });
+            x += 46.0;
+        }
+        frame.fill_text(canvas::Text {
+            content: "10 s".into(),
+            position: Point::new(bounds.width, bounds.height),
+            color: th::text_dim(),
+            size: 8.0.into(),
+            horizontal_alignment: iced::alignment::Horizontal::Right,
+            vertical_alignment: iced::alignment::Vertical::Bottom,
+            ..canvas::Text::default()
+        });
+        vec![frame.into_geometry()]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_supported_size_fits_its_controls_without_scrolling() {
+        for width in [COMPACT_W, MEDIUM_W] {
+            for height in (60..=400).step_by(4).map(|height| height as f32) {
+                let footer = if footer_fits(height) {
+                    1.0 + FOOTER_H
+                } else {
+                    0.0
+                };
+                for advanced in [false, true] {
+                    let used = match arrange(Size::new(width, height), advanced) {
+                        Arrangement::Short { main } => PRESET_ROW_H + 1.0 + main,
+                        Arrangement::Normal { main }
+                        | Arrangement::AdvancedBeside { main }
+                        | Arrangement::AdvancedOnly { main } => PRESET_ROW_H + 1.0 + main + footer,
+                        Arrangement::WithAdvanced { main } => {
+                            PRESET_ROW_H + 1.0 + main + 1.0 + ADVANCED_H + footer
+                        }
+                    };
+                    assert!(used <= height + 0.01, "{width}x{height} {advanced}: {used}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn advanced_stacks_when_it_fits_and_otherwise_keeps_the_meters_in_view() {
+        let compact = |height| Size::new(COMPACT_W, height);
+        let medium = |height| Size::new(MEDIUM_W, height);
+        assert!(matches!(
+            arrange(medium(400.0), true),
+            Arrangement::WithAdvanced { main } if main == MAIN_MAX_H
+        ));
+        assert!(matches!(
+            arrange(medium(200.0), true),
+            Arrangement::AdvancedBeside { .. }
+        ));
+        assert!(
+            matches!(
+                arrange(medium(100.0), true),
+                Arrangement::AdvancedOnly { .. }
+            ),
+            "short trims are too wide to sit beside the meters of a medium card"
+        );
+        assert!(matches!(
+            arrange(Size::new(SHORT_BESIDE_W, 100.0), true),
+            Arrangement::AdvancedBeside { .. }
+        ));
+        assert!(matches!(
+            arrange(compact(200.0), true),
+            Arrangement::AdvancedOnly { .. }
+        ));
+        assert!(matches!(
+            arrange(compact(200.0), false),
+            Arrangement::Normal { .. }
+        ));
+        assert!(matches!(
+            arrange(compact(100.0), false),
+            Arrangement::Short { .. }
+        ));
+    }
+
+    #[test]
+    fn card_width_is_compact_until_the_history_fits() {
+        assert_eq!(WIDTHS.card_width(200.0), COMPACT_W);
+        assert_eq!(WIDTHS.card_width(MEDIUM_W - 1.0), COMPACT_W);
+        assert_eq!(WIDTHS.card_width(MEDIUM_W), MEDIUM_W);
+        assert_eq!(WIDTHS.card_width(4000.0), MAX_W);
+    }
+}

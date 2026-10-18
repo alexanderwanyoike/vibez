@@ -15,6 +15,7 @@
 //! management, and file dialogs. Their cross-domain needs surface as
 //! [`DevicesAction`] fields instead.
 
+use crate::domains::device_params::DeviceSlot;
 use vibez_core::effect::EffectType;
 use vibez_core::id::{EffectId, TrackId};
 use vibez_core::midi::InstrumentKind;
@@ -22,7 +23,6 @@ use vibez_engine::commands::EngineCommand;
 use vibez_plugin_host::gui::PluginGuiKey;
 
 use super::EngineHandle;
-use crate::message::DrumPadParam;
 use crate::state::{DeviceContextMenu, DeviceMenuCategory, ProjectTrack, UiDrumPad, UiEffect};
 
 /// Messages the devices domain handles.
@@ -52,25 +52,22 @@ pub enum DevicesMsg {
     SetTrackInstrument(TrackId, InstrumentKind),
     RemoveTrackInstrument(TrackId),
     SetInstrumentParam(TrackId, usize, f32),
+    /// Several instrument values as one edit, as a preset applies them.
+    SetInstrumentParams(TrackId, Vec<(usize, f32)>),
     SelectDrumRackPad(TrackId, usize),
     SelectDrumRackBank(TrackId, usize),
     ClearDrumRackPad(TrackId, usize),
-    SetDrumPadParam {
-        track_id: TrackId,
-        pad_index: usize,
-        param: DrumPadParam,
-        value: f32,
-    },
-    SetDrumPadOneShot {
-        track_id: TrackId,
-        pad_index: usize,
-        one_shot: bool,
-    },
     SetDrumPadChokeGroup {
         track_id: TrackId,
         pad_index: usize,
         choke_group: Option<u8>,
     },
+    /// Several of a pad's Sampler values as one edit.
+    SetDrumPadParams(TrackId, usize, Vec<(usize, f32)>),
+    /// Names a pad; an empty name goes back to its sample's.
+    RenameDrumPad(TrackId, usize, String),
+    /// Every pad at once, as a kit loads.
+    ReplaceDrumRackPads(TrackId, Vec<UiDrumPad>),
     /// Preview a pitch on a track's instrument. `on: false` releases.
     AuditionNote {
         track_id: TrackId,
@@ -103,6 +100,67 @@ impl DevicesMsg {
     }
 }
 
+/// The device and parameter values a parameter edit asks for.
+pub struct ParamEdit {
+    pub track_id: TrackId,
+    pub slot: DeviceSlot,
+    pub updates: Vec<(usize, f32)>,
+}
+
+impl DevicesMsg {
+    pub fn param_edit(&self) -> Option<ParamEdit> {
+        let (track_id, slot, updates) = match self {
+            DevicesMsg::SetEffectParam(track, effect, index, value) => {
+                (*track, DeviceSlot::Effect(*effect), vec![(*index, *value)])
+            }
+            DevicesMsg::SetEffectParams(track, effect, updates) => {
+                (*track, DeviceSlot::Effect(*effect), updates.clone())
+            }
+            DevicesMsg::SetInstrumentParam(track, index, value) => {
+                (*track, DeviceSlot::Instrument, vec![(*index, *value)])
+            }
+            DevicesMsg::SetInstrumentParams(track, updates) => {
+                (*track, DeviceSlot::Instrument, updates.clone())
+            }
+            DevicesMsg::SetDrumPadParams(track, pad, updates) => {
+                (*track, DeviceSlot::DrumPad(*pad), updates.clone())
+            }
+            _ => return None,
+        };
+        Some(ParamEdit {
+            track_id,
+            slot,
+            updates,
+        })
+    }
+}
+
+/// An edit that leaves every value as it is once clamped to its range is no
+/// change (PATTERNS §7). Checked before project state is copied for writing.
+pub fn is_unchanged_param_edit(
+    project: &crate::state::ProjectTracksState,
+    message: &DevicesMsg,
+) -> bool {
+    let Some(edit) = message.param_edit() else {
+        return false;
+    };
+    let Some(device) = project
+        .find(edit.track_id)
+        .and_then(|track| crate::domains::device_params::DeviceParams::find(track, edit.slot))
+    else {
+        return false;
+    };
+    edit.updates.iter().all(|&(index, value)| {
+        device
+            .descriptors
+            .get(index)
+            .zip(device.params.get(index))
+            .is_some_and(|(descriptor, current)| {
+                value.clamp(descriptor.min, descriptor.max) == *current
+            })
+    })
+}
+
 /// Cross-domain effects requested by a devices update. A struct
 /// rather than an enum because several can occur at once.
 #[derive(Debug, Default, PartialEq)]
@@ -130,6 +188,26 @@ pub struct DevicesState {
 }
 
 /// Default parameter values for a freshly added native instrument.
+/// Stores instrument values. A track saved before its instrument gained
+/// controls holds fewer values; the missing ones take their defaults first,
+/// so edits to the newer controls are kept.
+fn store_instrument_values(track: &mut crate::state::ProjectTrack, updates: &[(usize, f32)]) {
+    let descriptors = track
+        .instrument_kind
+        .map_or(&[][..], vibez_instruments::descriptors_for);
+    for &(index, value) in updates {
+        let stored = track.instrument_params.len();
+        if index >= stored && index < descriptors.len() {
+            track
+                .instrument_params
+                .extend(descriptors[stored..].iter().map(|d| d.default));
+        }
+        if let Some(slot) = track.instrument_params.get_mut(index) {
+            *slot = value;
+        }
+    }
+}
+
 pub fn default_instrument_params(kind: InstrumentKind, sample_rate: f32) -> Vec<f32> {
     let instrument = vibez_instruments::create_instrument(kind, sample_rate);
     instrument
@@ -168,13 +246,13 @@ fn sync_pad(
         .and_then(|track| track.drum_rack_pads.get(pad_index))
         .map(UiDrumPad::to_state);
     if let Some(state) = state {
-        engine.send(EngineCommand::SetDrumRackPadState {
-            track_id,
-            pad_index,
-            state,
-        });
+        engine.send(EngineCommand::set_drum_rack_pad_state(
+            track_id, pad_index, state,
+        ));
     }
 }
+
+pub const DEVICE_CHAIN_FULL: &str = "This channel's device chain is full";
 
 #[derive(Default)]
 pub struct DevicesCtx<'a> {
@@ -230,6 +308,13 @@ impl DevicesState {
                 }));
             }
             DevicesMsg::AddEffect(track_id, effect_type) => {
+                if find_track_mut(tracks, master, buses, track_id)
+                    .is_some_and(|track| !track.has_device_room())
+                {
+                    self.context_menu = None;
+                    action.status = Some(DEVICE_CHAIN_FULL.to_string());
+                    return action;
+                }
                 let effect_id = EffectId::new();
                 let fx = vibez_dsp::factory::create_effect(effect_type, sample_rate as f32);
                 let descriptors = fx.param_descriptors();
@@ -238,7 +323,7 @@ impl DevicesState {
                 if let Some(track) = find_track_mut(tracks, master, buses, track_id) {
                     track.effects.push(UiEffect {
                         reconfiguration_failed: false,
-                        latency_samples: Some(0),
+                        latency_samples: Some(fx.latency_samples()),
                         inactive_sidechains: Default::default(),
                         sidechains: Default::default(),
                         external_inputs: fx.external_inputs().to_vec(),
@@ -253,12 +338,7 @@ impl DevicesState {
                         plugin_ref: None,
                     });
                 }
-                engine.send(EngineCommand::AddEffect {
-                    track_id,
-                    effect_id,
-                    effect_type,
-                    position: None,
-                });
+                engine.insert_built_in_effect(track_id, effect_id, effect_type);
                 self.context_menu = None;
                 action.status = Some(format!("Added {} effect", effect_type.name()));
             }
@@ -376,7 +456,7 @@ impl DevicesState {
                     track.plugin_instrument_descriptors = &[];
                     track.has_plugin_instrument_gui = false;
                 }
-                engine.send(EngineCommand::SetTrackInstrument(track_id, instrument_kind));
+                engine.set_built_in_instrument(track_id, instrument_kind);
                 for (param_index, value) in instrument_params.into_iter().enumerate() {
                     engine.send(EngineCommand::SetInstrumentParam {
                         track_id,
@@ -412,9 +492,7 @@ impl DevicesState {
             }
             DevicesMsg::SetInstrumentParam(track_id, param_index, value) => {
                 if let Some(track) = find_track_mut(tracks, master, buses, track_id) {
-                    if param_index < track.instrument_params.len() {
-                        track.instrument_params[param_index] = value;
-                    }
+                    store_instrument_values(track, &[(param_index, value)]);
                 }
                 engine.send(EngineCommand::SetInstrumentParam {
                     track_id,
@@ -422,6 +500,18 @@ impl DevicesState {
                     value,
                 });
                 action.status = Some(format!("Param {param_index} = {value:.2}"));
+            }
+            DevicesMsg::SetInstrumentParams(track_id, updates) => {
+                if let Some(track) = find_track_mut(tracks, master, buses, track_id) {
+                    store_instrument_values(track, &updates);
+                }
+                for (param_index, value) in updates {
+                    engine.send(EngineCommand::SetInstrumentParam {
+                        track_id,
+                        param_index,
+                        value,
+                    });
+                }
             }
             DevicesMsg::SelectDrumRackPad(track_id, pad_index) => {
                 // Audition the pad like Ableton: hear it on click.
@@ -471,60 +561,6 @@ impl DevicesState {
                 });
                 action.status = Some(format!("Cleared pad {}", pad_index + 1));
             }
-            DevicesMsg::SetDrumPadParam {
-                track_id,
-                pad_index,
-                param,
-                value,
-            } => {
-                let mut changed = false;
-                if let Some(track) = find_track_mut(tracks, master, buses, track_id) {
-                    if let Some(pad) = track.drum_rack_pads.get_mut(pad_index) {
-                        match param {
-                            DrumPadParam::Gain => pad.gain = value.clamp(0.0, 2.0),
-                            DrumPadParam::Pan => pad.pan = value.clamp(-1.0, 1.0),
-                            DrumPadParam::Start => pad.start = value.clamp(0.0, 1.0),
-                            DrumPadParam::End => pad.end = value.clamp(0.0, 1.0),
-                            DrumPadParam::FadeIn => {
-                                pad.fade_in_ms =
-                                    value.clamp(0.0, vibez_core::track::DRUM_PAD_MAX_FADE_MS);
-                            }
-                            DrumPadParam::FadeOut => {
-                                pad.fade_out_ms =
-                                    value.clamp(0.0, vibez_core::track::DRUM_PAD_MAX_FADE_MS);
-                            }
-                            DrumPadParam::CoarseTune => {
-                                pad.coarse_tune = value.clamp(-24.0, 24.0).round() as i8;
-                            }
-                            DrumPadParam::FineTune => {
-                                pad.fine_tune = value.clamp(-100.0, 100.0);
-                            }
-                        }
-                        changed = true;
-                    }
-                }
-                if changed {
-                    sync_pad(tracks, track_id, pad_index, engine);
-                    action.status = Some(format!("Pad {} updated", pad_index + 1));
-                }
-            }
-            DevicesMsg::SetDrumPadOneShot {
-                track_id,
-                pad_index,
-                one_shot,
-            } => {
-                let mut changed = false;
-                if let Some(track) = find_track_mut(tracks, master, buses, track_id) {
-                    if let Some(pad) = track.drum_rack_pads.get_mut(pad_index) {
-                        pad.one_shot = one_shot;
-                        changed = true;
-                    }
-                }
-                if changed {
-                    sync_pad(tracks, track_id, pad_index, engine);
-                    action.status = Some(format!("Pad {} updated", pad_index + 1));
-                }
-            }
             DevicesMsg::SetDrumPadChokeGroup {
                 track_id,
                 pad_index,
@@ -540,6 +576,70 @@ impl DevicesState {
                 if changed {
                     sync_pad(tracks, track_id, pad_index, engine);
                     action.status = Some(format!("Pad {} updated", pad_index + 1));
+                }
+            }
+            DevicesMsg::SetDrumPadParams(track_id, pad_index, updates) => {
+                let Some(pad) = find_track_mut(tracks, master, buses, track_id)
+                    .and_then(|track| track.drum_rack_pads.get_mut(pad_index))
+                else {
+                    return action;
+                };
+                let params = pad.sampler_params_mut();
+                for &(index, value) in &updates {
+                    if let Some(slot) = params.get_mut(index) {
+                        *slot = value;
+                    }
+                }
+                for (param_index, value) in updates {
+                    engine.send(EngineCommand::SetDrumRackPadParam {
+                        track_id,
+                        pad_index,
+                        param_index,
+                        value,
+                    });
+                }
+            }
+            DevicesMsg::RenameDrumPad(track_id, pad_index, name) => {
+                if let Some(pad) = find_track_mut(tracks, master, buses, track_id)
+                    .and_then(|track| track.drum_rack_pads.get_mut(pad_index))
+                {
+                    let name = name.trim();
+                    pad.name = if name.is_empty() {
+                        pad.source
+                            .as_ref()
+                            .map(vibez_core::track::MediaSourceRef::display_name)
+                    } else {
+                        Some(name.to_string())
+                    };
+                }
+            }
+            DevicesMsg::ReplaceDrumRackPads(track_id, pads) => {
+                let Some(track) = find_track_mut(tracks, master, buses, track_id) else {
+                    return action;
+                };
+                track.drum_rack_pads = pads;
+                for (pad_index, pad) in track.drum_rack_pads.iter().enumerate() {
+                    // An emptied pad drops its old settings too, so a sample
+                    // dropped on it later plays as the card shows.
+                    engine.send(EngineCommand::set_drum_rack_pad_state(
+                        track_id,
+                        pad_index,
+                        pad.to_state(),
+                    ));
+                    match &pad.audio {
+                        Some(audio) => {
+                            engine.send(EngineCommand::LoadDrumRackPadSample {
+                                track_id,
+                                pad_index,
+                                sample: std::sync::Arc::clone(audio),
+                                sample_name: pad.name.clone().unwrap_or_default(),
+                            });
+                        }
+                        None => engine.send(EngineCommand::ClearDrumRackPad {
+                            track_id,
+                            pad_index,
+                        }),
+                    }
                 }
             }
             DevicesMsg::AuditionNote {
@@ -630,6 +730,36 @@ mod tests {
             plugin_ref: None,
         });
         (vec![track], track_id, effect_id)
+    }
+
+    #[test]
+    fn a_full_device_chain_refuses_another_device_without_reaching_the_engine() {
+        let (mut tracks, track_id, _) = midi_track_with_effect();
+        let template = tracks[0].effects[0].clone();
+        while tracks[0].has_device_room() {
+            let mut effect = template.clone();
+            effect.id = EffectId::new();
+            tracks[0].effects.push(effect);
+        }
+        let mut devices = DevicesState::default();
+        let mut engine = RecordingEngine::default();
+        let action = devices.update(
+            DevicesMsg::AddEffect(track_id, EffectType::Reverb),
+            &mut engine,
+            &mut tracks,
+            &mut crate::state::new_master_track(),
+            &mut [],
+            DevicesCtx {
+                sample_rate: 44_100,
+                ..Default::default()
+            },
+        );
+        assert_eq!(
+            tracks[0].effects.len(),
+            vibez_engine::mixer::DEVICE_CHAIN_CAPACITY
+        );
+        assert!(engine.0.is_empty());
+        assert_eq!(action.status.as_deref(), Some(DEVICE_CHAIN_FULL));
     }
 
     #[test]
@@ -818,18 +948,22 @@ mod tests {
     }
 
     #[test]
-    fn pad_param_edit_syncs_full_pad_state() {
+    fn a_pad_edit_keeps_the_values_an_older_pad_was_saved_with() {
+        use vibez_instruments::sampler::param;
         let (mut tracks, track_id, _) = midi_track_with_effect();
         tracks[0].drum_rack_pads = (0..16).map(|_| UiDrumPad::default()).collect();
+        tracks[0].drum_rack_pads[2] = UiDrumPad::from_state(&vibez_core::track::DrumPadState {
+            coarse_tune: 5,
+            ..Default::default()
+        });
+        // As saved by an older Sampler with fewer controls.
+        tracks[0].drum_rack_pads[2]
+            .params
+            .truncate(param::LFO_AMOUNT);
         let mut devices = DevicesState::default();
         let mut engine = RecordingEngine::default();
         devices.update(
-            DevicesMsg::SetDrumPadParam {
-                track_id,
-                pad_index: 0,
-                param: DrumPadParam::Gain,
-                value: 5.0,
-            },
+            DevicesMsg::SetDrumPadParams(track_id, 2, vec![(param::PAN, -0.5)]),
             &mut engine,
             &mut tracks,
             &mut crate::state::new_master_track(),
@@ -839,39 +973,94 @@ mod tests {
                 ..Default::default()
             },
         );
-        assert_eq!(tracks[0].drum_rack_pads[0].gain, 2.0); // clamped
-        assert!(matches!(
-            engine.0[0],
-            EngineCommand::SetDrumRackPadState { .. }
-        ));
 
-        devices.update(
-            DevicesMsg::SetDrumPadParam {
-                track_id,
-                pad_index: 0,
-                param: DrumPadParam::FadeOut,
-                value: 500.0,
+        let params = &tracks[0].drum_rack_pads[2].params;
+        assert_eq!(params.len(), param::COUNT);
+        assert_eq!(params[param::PAN], -0.5);
+        assert_eq!(params[param::TUNE], 5.0, "the saved tuning carried over");
+        assert!(matches!(
+            engine.0[..],
+            [EngineCommand::SetDrumRackPadParam {
+                pad_index: 2,
+                param_index: param::PAN,
+                value,
+                ..
+            }] if value == -0.5
+        ));
+    }
+
+    #[test]
+    fn renaming_a_pad_keeps_a_name_and_an_empty_one_falls_back_to_the_sample() {
+        let (mut tracks, track_id, _) = midi_track_with_effect();
+        tracks[0].drum_rack_pads = (0..16).map(|_| UiDrumPad::default()).collect();
+        tracks[0].drum_rack_pads[1].source = Some(vibez_core::track::MediaSourceRef::LocalFile {
+            path: "/kits/snare_02.wav".into(),
+        });
+        let mut devices = DevicesState::default();
+        let mut engine = RecordingEngine::default();
+        let mut rename = |tracks: &mut Vec<ProjectTrack>, name: &str| {
+            devices.update(
+                DevicesMsg::RenameDrumPad(track_id, 1, name.into()),
+                &mut engine,
+                tracks,
+                &mut crate::state::new_master_track(),
+                &mut [],
+                DevicesCtx::default(),
+            );
+        };
+        rename(&mut tracks, "  Snare  ");
+        let renamed = tracks[0].drum_rack_pads[1].name.clone();
+        rename(&mut tracks, "   ");
+
+        assert_eq!(renamed.as_deref(), Some("Snare"));
+        assert_eq!(
+            tracks[0].drum_rack_pads[1].name.as_deref(),
+            Some("snare_02.wav")
+        );
+        assert!(engine.0.is_empty());
+    }
+
+    #[test]
+    fn replacing_the_pads_loads_each_sounding_pad_and_clears_the_rest() {
+        let (mut tracks, track_id, _) = midi_track_with_effect();
+        tracks[0].drum_rack_pads = crate::state::default_drum_rack_pads();
+        let mut pads = crate::state::default_drum_rack_pads();
+        pads[2].name = Some("Snare".into());
+        pads[2].audio = Some(std::sync::Arc::new(
+            vibez_core::audio_buffer::DecodedAudio {
+                channels: vec![vec![0.5; 16]],
+                sample_rate: 44_100,
             },
+        ));
+        let mut devices = DevicesState::default();
+        let mut engine = RecordingEngine::default();
+        devices.update(
+            DevicesMsg::ReplaceDrumRackPads(track_id, pads),
             &mut engine,
             &mut tracks,
             &mut crate::state::new_master_track(),
             &mut [],
-            DevicesCtx {
-                sample_rate: 44_100,
-                ..Default::default()
-            },
+            DevicesCtx::default(),
         );
-        assert_eq!(
-            tracks[0].drum_rack_pads[0].fade_out_ms,
-            vibez_core::track::DRUM_PAD_MAX_FADE_MS
-        );
-        assert!(matches!(
-            engine.0[1],
-            EngineCommand::SetDrumRackPadState {
-                ref state,
-                ..
-            } if state.fade_out_ms == vibez_core::track::DRUM_PAD_MAX_FADE_MS
-        ));
+
+        assert_eq!(tracks[0].drum_rack_pads[2].name.as_deref(), Some("Snare"));
+        let loads = engine
+            .0
+            .iter()
+            .filter(|command| {
+                matches!(
+                    command,
+                    EngineCommand::LoadDrumRackPadSample { pad_index: 2, .. }
+                )
+            })
+            .count();
+        let clears = engine
+            .0
+            .iter()
+            .filter(|command| matches!(command, EngineCommand::ClearDrumRackPad { .. }))
+            .count();
+        assert_eq!(loads, 1);
+        assert_eq!(clears, vibez_core::track::DRUM_RACK_PAD_COUNT - 1);
     }
 
     #[test]

@@ -7,6 +7,9 @@ use vibez_core::constants::{DEFAULT_TRACK_GAIN, DEFAULT_TRACK_PAN};
 #[cfg(test)]
 thread_local! { static SEND_SCAN_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }
 
+/// Note events one block schedules before its scratch would grow.
+const SCHEDULED_NOTES_PER_BLOCK: usize = 128;
+
 impl EngineTrack {
     pub fn new(id: TrackId) -> Self {
         Self::with_playback_source(id, ArrangementPlaybackSource::prepare_empty())
@@ -32,16 +35,30 @@ impl EngineTrack {
             solo: false,
             swing_offset: None,
             automation_swing_offset: None,
-            mix_buffer: Vec::new(),
-            effects: Vec::new(),
-            sends: Vec::new(),
+            mix_buffer: Vec::with_capacity(crate::routing::MAX_BLOCK_FRAMES * 2),
+            effects: Vec::with_capacity(super::DEVICE_CHAIN_CAPACITY),
+            sends: Vec::with_capacity(super::CHANNEL_CAPACITY),
             instrument: None,
-            timed_note_ons: Vec::new(),
-            timed_note_offs: Vec::new(),
+            timed_note_ons: Vec::with_capacity(SCHEDULED_NOTES_PER_BLOCK),
+            timed_note_offs: Vec::with_capacity(SCHEDULED_NOTES_PER_BLOCK),
             note_repeats: TrackNoteRepeats::default(),
             active_notes: 0,
             pending_note_activity: 0,
             suppress_source_notes: false,
+        }
+    }
+
+    pub(crate) fn set_send(&mut self, bus_id: TrackId, amount: f32) {
+        let can_insert =
+            self.sends.len() < super::CHANNEL_CAPACITY && self.sends.len() < self.sends.capacity();
+        match self.sends.iter_mut().find(|(id, _)| *id == bus_id) {
+            Some(send) => send.1 = amount,
+            // Each admitted return channel needs at most one slot. Invalid
+            // target lists cannot grow callback-owned storage beyond that bound.
+            None if can_insert => {
+                self.sends.push((bus_id, amount));
+            }
+            None => {}
         }
     }
 
@@ -105,7 +122,7 @@ impl EngineTrack {
                             Some(d) => d.min + value * (d.max - d.min),
                             None => value,
                         };
-                        slot.effect.set_param(param_index, native);
+                        slot.effect.set_automated_param(param_index, native);
                     }
                 }
                 AutomationTarget::InstrumentParam { param_index } => {
@@ -119,11 +136,7 @@ impl EngineTrack {
                 }
                 AutomationTarget::PluginParam { .. } => {}
                 AutomationTarget::Send { bus_id } if stage.is_none() => {
-                    // Send range is native 0..1, so write the value in place.
-                    match self.sends.iter_mut().find(|(b, _)| *b == bus_id) {
-                        Some(send) => send.1 = value,
-                        None => self.sends.push((bus_id, value)),
-                    }
+                    self.set_send(bus_id, value);
                 }
                 AutomationTarget::TrackGain
                 | AutomationTarget::TrackPan
@@ -192,7 +205,7 @@ impl EngineTrack {
                             .map_or(value, |descriptor| {
                                 descriptor.min + value * (descriptor.max - descriptor.min)
                             });
-                        slot.effect.set_param(param_index, native);
+                        slot.effect.set_automated_param(param_index, native);
                     }
                 }
                 AutomationTarget::InstrumentParam { param_index } => {
@@ -527,16 +540,18 @@ impl EngineTrack {
         )
     }
 
-    pub fn process_effects(&mut self, frames: usize, channels: usize) {
+    pub fn process_effects(
+        &mut self,
+        frames: usize,
+        channels: usize,
+        meter_generation: Option<u64>,
+    ) {
         let buf_size = frames * channels;
         if buf_size == 0 {
             return;
         }
         for slot in &mut self.effects {
-            if !slot.bypass {
-                slot.effect
-                    .process(&mut self.mix_buffer[..buf_size], channels);
-            }
+            slot.process(&mut self.mix_buffer[..buf_size], channels, meter_generation);
         }
     }
 }

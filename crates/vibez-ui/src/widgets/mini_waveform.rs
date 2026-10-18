@@ -14,6 +14,26 @@ use crate::message::Message;
 use crate::theme;
 use vibez_core::audio_buffer::DecodedAudio;
 
+/// Each column's lowest and highest sample when `samples` is drawn
+/// `columns` wide.
+pub fn column_peaks(samples: &[f32], columns: usize) -> impl Iterator<Item = (f32, f32)> + '_ {
+    let per_column = (samples.len() / columns.max(1)).max(1);
+    (0..columns)
+        .map(move |col| col * per_column)
+        .take_while(move |begin| *begin < samples.len())
+        .map(move |begin| {
+            let end = (begin + per_column).min(samples.len());
+            // Stride within the column so huge files stay cheap.
+            let stride = ((end - begin) / 64).max(1);
+            samples[begin..end]
+                .iter()
+                .step_by(stride)
+                .fold((f32::MAX, f32::MIN), |(min, max), s| {
+                    (min.min(*s), max.max(*s))
+                })
+        })
+}
+
 /// Filled min/max waveform of a loaded sample, with an optional
 /// highlighted playback region (drum pad start/end trim). Rendering
 /// is cached and invalidated by a fingerprint of the audio pointer
@@ -107,28 +127,8 @@ impl canvas::Program<Message> for MiniWaveform {
             let mid = h / 2.0;
             let usable_h = h / 2.0 - 2.0;
             let columns = (w as usize).saturating_sub(4).max(1);
-            let per_column = (samples.len() / columns).max(1);
 
-            for col in 0..columns {
-                let begin = col * per_column;
-                if begin >= samples.len() {
-                    break;
-                }
-                let end = ((col + 1) * per_column).min(samples.len());
-                let mut min = f32::MAX;
-                let mut max = f32::MIN;
-                // Stride within the column so huge files stay cheap.
-                let stride = ((end - begin) / 64).max(1);
-                let mut i = begin;
-                while i < end {
-                    let s = samples[i];
-                    min = min.min(s);
-                    max = max.max(s);
-                    i += stride;
-                }
-                if min > max {
-                    continue;
-                }
+            for (col, (min, max)) in column_peaks(samples, columns).enumerate() {
                 let pos = col as f32 / columns as f32;
                 let in_region = pos >= region_start && pos <= region_end;
                 let color = if in_region {
@@ -166,142 +166,5 @@ impl canvas::Program<Message> for MiniWaveform {
         });
 
         vec![geometry]
-    }
-}
-
-/// One analytic cycle of the synth's selected oscillator shape.
-pub struct OscScope {
-    pub waveform_index: usize,
-    pub color: Color,
-}
-
-impl canvas::Program<Message> for OscScope {
-    type State = ();
-
-    fn draw(
-        &self,
-        _state: &Self::State,
-        renderer: &Renderer,
-        _theme: &Theme,
-        bounds: Rectangle,
-        _cursor: mouse::Cursor,
-    ) -> Vec<canvas::Geometry> {
-        let mut frame = canvas::Frame::new(renderer, bounds.size());
-        let w = frame.width();
-        let h = frame.height();
-
-        let bg =
-            canvas::Path::rounded_rectangle(iced::Point::ORIGIN, iced::Size::new(w, h), 3.0.into());
-        frame.fill(&bg, theme::display_bg());
-
-        let mid = h / 2.0;
-        let amp = h / 2.0 - 4.0;
-        let points = 96;
-        let shape = |phase: f32| -> f32 {
-            match self.waveform_index {
-                0 => (phase * std::f32::consts::TAU).sin(),
-                1 => 1.0 - 2.0 * phase, // saw
-                2 => {
-                    if phase < 0.5 {
-                        1.0
-                    } else {
-                        -1.0
-                    }
-                }
-                _ => {
-                    // triangle
-                    if phase < 0.25 {
-                        4.0 * phase
-                    } else if phase < 0.75 {
-                        2.0 - 4.0 * phase
-                    } else {
-                        4.0 * phase - 4.0
-                    }
-                }
-            }
-        };
-
-        let path = canvas::Path::new(|b| {
-            for i in 0..=points {
-                let phase = i as f32 / points as f32;
-                let x = 3.0 + phase * (w - 6.0);
-                let y = mid - shape(phase) * amp;
-                if i == 0 {
-                    b.move_to(iced::Point::new(x, y));
-                } else {
-                    b.line_to(iced::Point::new(x, y));
-                }
-            }
-        });
-        frame.stroke(
-            &path,
-            canvas::Stroke::default()
-                .with_color(self.color)
-                .with_width(1.5),
-        );
-
-        vec![frame.into_geometry()]
-    }
-}
-
-/// ADSR envelope curve: attack rise, decay to the sustain plateau,
-/// release tail. Time segments share the width proportionally with a
-/// fixed plateau so short envelopes stay readable.
-pub struct AdsrScope {
-    pub attack: f32,
-    pub decay: f32,
-    pub sustain: f32,
-    pub release: f32,
-    pub color: Color,
-}
-
-impl canvas::Program<Message> for AdsrScope {
-    type State = ();
-
-    fn draw(
-        &self,
-        _state: &Self::State,
-        renderer: &Renderer,
-        _theme: &Theme,
-        bounds: Rectangle,
-        _cursor: mouse::Cursor,
-    ) -> Vec<canvas::Geometry> {
-        let mut frame = canvas::Frame::new(renderer, bounds.size());
-        let w = frame.width();
-        let h = frame.height();
-
-        let bg =
-            canvas::Path::rounded_rectangle(iced::Point::ORIGIN, iced::Size::new(w, h), 3.0.into());
-        frame.fill(&bg, theme::display_bg());
-
-        let pad = 3.0;
-        let top = pad;
-        let bottom = h - pad;
-        let usable_w = w - pad * 2.0;
-        let sustain_y = bottom - self.sustain.clamp(0.0, 1.0) * (bottom - top);
-
-        // Time-proportional widths with a fixed sustain plateau.
-        let total_t = (self.attack + self.decay + self.release).max(0.001);
-        let plateau = usable_w * 0.22;
-        let time_w = usable_w - plateau;
-        let ax = pad + time_w * (self.attack / total_t);
-        let dx = ax + time_w * (self.decay / total_t);
-        let sx = dx + plateau;
-
-        let path = canvas::Path::new(|b| {
-            b.move_to(iced::Point::new(pad, bottom));
-            b.line_to(iced::Point::new(ax, top));
-            b.line_to(iced::Point::new(dx, sustain_y));
-            b.line_to(iced::Point::new(sx, sustain_y));
-            b.line_to(iced::Point::new(pad + usable_w, bottom));
-        });
-        frame.stroke(
-            &path,
-            canvas::Stroke::default()
-                .with_color(self.color)
-                .with_width(1.5),
-        );
-
-        vec![frame.into_geometry()]
     }
 }

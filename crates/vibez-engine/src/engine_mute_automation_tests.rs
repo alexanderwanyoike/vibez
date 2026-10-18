@@ -1,3 +1,6 @@
+//! Manual and automated Track Mute preserve engine-timed playback and Capture.
+
+use crate::events::AutomationGestureChangedEvent;
 use std::sync::Arc;
 
 use vibez_core::audio_buffer::DecodedAudio;
@@ -6,6 +9,7 @@ use vibez_core::id::{ClipId, SectionId, TrackId};
 
 use super::*;
 use crate::playback_source::{EngineClip, PreparedPlaybackSource, PreparedSectionPlaybackSource};
+use graph_test_support::{graph_engine, routing_channel};
 
 fn constant_audio(frames: usize) -> Arc<DecodedAudio> {
     Arc::new(DecodedAudio {
@@ -17,11 +21,10 @@ fn constant_audio(frames: usize) -> Arc<DecodedAudio> {
 fn add_constant_track(commands: &mut rtrb::Producer<EngineCommand>, track_id: TrackId) {
     commands.push(EngineCommand::SetSampleRate(100)).unwrap();
     commands.push(EngineCommand::SetBpm(60.0)).unwrap();
-    commands
-        .push(EngineCommand::AddTrack(track_id, "Mute automation".into()))
-        .unwrap();
+    commands.push(EngineCommand::add_track(track_id)).unwrap();
     commands
         .push(EngineCommand::AddClip {
+            insertion: crate::clip_insertion::PreparedClipInsertion::new(),
             track_id,
             clip_id: ClipId::new(),
             audio: constant_audio(256),
@@ -42,8 +45,9 @@ fn add_constant_track(commands: &mut rtrb::Producer<EngineCommand>, track_id: Tr
 
 #[test]
 fn mute_step_inside_buffer_starts_the_shared_ramp_at_its_exact_sample() {
-    let (mut engine, mut commands, _events) = AudioEngine::new();
     let track_id = TrackId::new();
+    let (mut engine, mut commands, _events) =
+        graph_engine(&[routing_channel(track_id), routing_channel(TrackId::MASTER)]);
     add_constant_track(&mut commands, track_id);
     let mut lane = AutomationLane::new(AutomationTarget::TrackMute);
     lane.insert_point(AutomationPoint {
@@ -52,7 +56,10 @@ fn mute_step_inside_buffer_starts_the_shared_ramp_at_its_exact_sample() {
         curve: 0.0,
     });
     commands
-        .push(EngineCommand::SetAutomationLane { track_id, lane })
+        .push(EngineCommand::SetAutomationLane {
+            track_id,
+            insertion: crate::clip_insertion::PreparedAutomationLaneInsertion::new(lane),
+        })
         .unwrap();
     commands.push(EngineCommand::Play).unwrap();
 
@@ -71,8 +78,9 @@ fn mute_step_inside_buffer_starts_the_shared_ramp_at_its_exact_sample() {
 
 #[test]
 fn manual_mute_override_holds_until_automation_is_reenabled() {
-    let (mut engine, mut commands, _events) = AudioEngine::new();
     let track_id = TrackId::new();
+    let (mut engine, mut commands, _events) =
+        graph_engine(&[routing_channel(track_id), routing_channel(TrackId::MASTER)]);
     add_constant_track(&mut commands, track_id);
     let mut lane = AutomationLane::new(AutomationTarget::TrackMute);
     lane.insert_point(AutomationPoint {
@@ -81,7 +89,10 @@ fn manual_mute_override_holds_until_automation_is_reenabled() {
         curve: 0.0,
     });
     commands
-        .push(EngineCommand::SetAutomationLane { track_id, lane })
+        .push(EngineCommand::SetAutomationLane {
+            track_id,
+            insertion: crate::clip_insertion::PreparedAutomationLaneInsertion::new(lane),
+        })
         .unwrap();
     commands.push(EngineCommand::Play).unwrap();
     let mut output = vec![0.0; 80 * 2];
@@ -116,8 +127,9 @@ fn manual_mute_override_holds_until_automation_is_reenabled() {
 
 #[test]
 fn live_pan_gesture_overrides_arrange_baseline_then_yields_back() {
-    let (mut engine, mut commands, mut events) = AudioEngine::new();
     let track_id = TrackId::new();
+    let (mut engine, mut commands, mut events) =
+        graph_engine(&[routing_channel(track_id), routing_channel(TrackId::MASTER)]);
     add_constant_track(&mut commands, track_id);
     let mut lane = AutomationLane::new(AutomationTarget::TrackPan);
     lane.insert_point(AutomationPoint {
@@ -126,7 +138,10 @@ fn live_pan_gesture_overrides_arrange_baseline_then_yields_back() {
         curve: 0.0,
     });
     commands
-        .push(EngineCommand::SetAutomationLane { track_id, lane })
+        .push(EngineCommand::SetAutomationLane {
+            track_id,
+            insertion: crate::clip_insertion::PreparedAutomationLaneInsertion::new(lane),
+        })
         .unwrap();
     commands.push(EngineCommand::Play).unwrap();
     let mut output = vec![0.0; 16 * 2];
@@ -160,11 +175,11 @@ fn live_pan_gesture_overrides_arrange_baseline_then_yields_back() {
 
     let gestures: Vec<_> = std::iter::from_fn(|| events.pop().ok())
         .filter_map(|event| match event {
-            EngineEvent::AutomationGestureChanged {
+            EngineEvent::AutomationGestureChanged(AutomationGestureChangedEvent {
                 phase,
                 normalized_value,
                 ..
-            } => Some((phase, normalized_value)),
+            }) => Some((phase, normalized_value)),
             _ => None,
         })
         .collect();
@@ -179,13 +194,12 @@ fn live_pan_gesture_overrides_arrange_baseline_then_yields_back() {
 
 #[test]
 fn perform_gesture_uses_the_active_section_lane_not_arrange_automation() {
-    let (mut engine, mut commands, _events) = AudioEngine::new();
     let track_id = TrackId::new();
+    let (mut engine, mut commands, _events) =
+        graph_engine(&[routing_channel(track_id), routing_channel(TrackId::MASTER)]);
     commands.push(EngineCommand::SetSampleRate(100)).unwrap();
     commands.push(EngineCommand::SetBpm(60.0)).unwrap();
-    commands
-        .push(EngineCommand::AddTrack(track_id, "Section pan".into()))
-        .unwrap();
+    commands.push(EngineCommand::add_track(track_id)).unwrap();
     let mut section_pan = AutomationLane::new(AutomationTarget::TrackPan);
     section_pan.insert_point(AutomationPoint {
         beat: 0.0,

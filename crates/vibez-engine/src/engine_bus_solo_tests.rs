@@ -43,6 +43,7 @@ fn channel(id: TrackId) -> RoutingChannel {
 }
 fn clip(track: TrackId, value: f32) -> EngineCommand {
     EngineCommand::AddClip {
+        insertion: crate::clip_insertion::PreparedClipInsertion::new(),
         track_id: track,
         clip_id: ClipId::new(),
         audio: Arc::new(DecodedAudio {
@@ -74,13 +75,9 @@ fn kick_and_bass_solo_keep_the_audible_bus_return_without_ghost_snare_leakage() 
         let gate = EffectId::new();
         let bus_fx = EffectId::new();
         for track in [kick, bass, snare] {
-            commands
-                .push(EngineCommand::AddTrack(track, "Track".into()))
-                .unwrap();
+            commands.push(EngineCommand::add_track(track)).unwrap();
         }
-        commands
-            .push(EngineCommand::AddBus(drums, "Drums".into()))
-            .unwrap();
+        commands.push(EngineCommand::add_bus(drums)).unwrap();
         for (track, value) in [(kick, 0.05), (bass, 0.2), (snare, 1.0)] {
             commands.push(clip(track, value)).unwrap();
         }
@@ -100,12 +97,12 @@ fn kick_and_bass_solo_keep_the_audible_bus_return_without_ghost_snare_leakage() 
             .push(EngineCommand::SetTrackSolo(bass, bass_solo))
             .unwrap();
         commands
-            .push(EngineCommand::AddEffect {
-                track_id: bass,
-                effect_id: gate,
-                effect_type: EffectType::Gate,
-                position: None,
-            })
+            .push(EngineCommand::insert_built_in_effect(
+                bass,
+                gate,
+                EffectType::Gate,
+                crate::engine::DEFAULT_SAMPLE_RATE,
+            ))
             .unwrap();
         commands
             .push(EngineCommand::SetEffectParam {
@@ -117,7 +114,7 @@ fn kick_and_bass_solo_keep_the_audible_bus_return_without_ghost_snare_leakage() 
             .unwrap();
         let processed = Arc::new(AtomicUsize::new(0));
         commands
-            .push(EngineCommand::AddPluginEffect {
+            .push(EngineCommand::InsertEffect {
                 track_id: drums,
                 effect_id: bus_fx,
                 effect: Box::new(BusProcessor(Arc::clone(&processed))),
@@ -223,12 +220,8 @@ fn send_levels_cross_zero_without_replacing_the_prepared_graph() {
     let (mut engine, mut commands, mut events) = AudioEngine::new();
     let source = TrackId::new();
     let bus = TrackId::new();
-    commands
-        .push(EngineCommand::AddTrack(source, "Source".into()))
-        .unwrap();
-    commands
-        .push(EngineCommand::AddBus(bus, "Bus".into()))
-        .unwrap();
+    commands.push(EngineCommand::add_track(source)).unwrap();
+    commands.push(EngineCommand::add_bus(bus)).unwrap();
     commands.push(clip(source, 1.0)).unwrap();
     commands
         .push(EngineCommand::SetSend {
@@ -254,8 +247,8 @@ fn send_levels_cross_zero_without_replacing_the_prepared_graph() {
     commands.push(EngineCommand::Play).unwrap();
     let mut output = [0.0; 128];
     engine.process(&mut output, 2);
-    let identity = std::ptr::from_ref(engine.routing.as_deref().unwrap());
-    let edges = engine.routing.as_ref().unwrap().graph.edges.clone();
+    let identity = std::ptr::from_ref(engine.routing.as_ref());
+    let edges = engine.routing.as_ref().graph.edges.clone();
     for amount in [0.5, 0.0, 1.0, 0.0] {
         while events.pop().is_ok() {}
         commands
@@ -269,11 +262,8 @@ fn send_levels_cross_zero_without_replacing_the_prepared_graph() {
             crate::retirement::tests::allocations(|| engine.process(&mut output, 2)),
             (0, 0)
         );
-        assert_eq!(
-            std::ptr::from_ref(engine.routing.as_deref().unwrap()),
-            identity
-        );
-        assert_eq!(engine.routing.as_ref().unwrap().graph.edges, edges);
+        assert_eq!(std::ptr::from_ref(engine.routing.as_ref()), identity);
+        assert_eq!(engine.routing.as_ref().graph.edges, edges);
         let expected = (1.0 + amount) * std::f32::consts::FRAC_1_SQRT_2;
         assert!(output
             .iter()
@@ -289,13 +279,9 @@ fn ordinary_bus_delay_tail_survives_solo_without_a_selected_track_send() {
     let bus = TrackId::new();
     let effect = EffectId::new();
     for track in [source, selected] {
-        commands
-            .push(EngineCommand::AddTrack(track, "Track".into()))
-            .unwrap();
+        commands.push(EngineCommand::add_track(track)).unwrap();
     }
-    commands
-        .push(EngineCommand::AddBus(bus, "Delay return".into()))
-        .unwrap();
+    commands.push(EngineCommand::add_bus(bus)).unwrap();
     let mut pulse = clip(source, 0.0);
     if let EngineCommand::AddClip { audio, .. } = &mut pulse {
         for channel in &mut Arc::get_mut(audio).unwrap().channels {
@@ -311,12 +297,12 @@ fn ordinary_bus_delay_tail_survives_solo_without_a_selected_track_send() {
         })
         .unwrap();
     commands
-        .push(EngineCommand::AddEffect {
-            track_id: bus,
-            effect_id: effect,
-            effect_type: EffectType::Delay,
-            position: None,
-        })
+        .push(EngineCommand::insert_built_in_effect(
+            bus,
+            effect,
+            EffectType::Delay,
+            crate::engine::DEFAULT_SAMPLE_RATE,
+        ))
         .unwrap();
     for (param_index, value) in [(0, 1.0), (1, 0.5), (2, 1.0)] {
         commands
@@ -367,10 +353,16 @@ fn ordinary_bus_delay_tail_survives_solo_without_a_selected_track_send() {
         )),
         (0, 0)
     );
-    assert!(
-        output[12 * 2] > 0.7,
-        "44-frame echo was cut off by unrelated track solo"
-    );
+    // One millisecond at 44.1 kHz splits the return across frames 44 and 45.
+    for (frame, weight) in [(12, 0.9), (13, 0.1)] {
+        let expected = weight * std::f32::consts::FRAC_1_SQRT_2;
+        for channel in 0..2 {
+            assert!(
+                (output[frame * 2 + channel] - expected).abs() < 1e-5,
+                "fractional return at frame {frame} was cut off by unrelated track solo"
+            );
+        }
+    }
     assert_eq!(output, capture, "the audible return must remain capturable");
     assert!(engine.tracks[1].sends.is_empty());
 }

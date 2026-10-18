@@ -90,6 +90,8 @@ impl App {
     }
 
     pub(super) fn apply_snapshot(&mut self, mut snapshot: crate::state::ProjectSnapshot) {
+        self.restart_device_metering();
+        self.cancel_device_preset_load();
         if clip_only_snapshot(&self.state, &snapshot) {
             self.state.perform.clips = snapshot.launcher_clips;
             self.state
@@ -254,17 +256,19 @@ impl App {
             for lane in &content.automation {
                 self.send_command(EngineCommand::SetAutomationLane {
                     track_id: track.id,
-                    lane: lane.clone(),
+                    insertion: vibez_engine::clip_insertion::PreparedAutomationLaneInsertion::new(
+                        lane.clone(),
+                    ),
                 });
             }
             return;
         }
         match track.kind {
             TrackKind::Audio => {
-                self.send_command(EngineCommand::AddTrack(track.id, track.name.clone()));
+                self.send_command(EngineCommand::add_track(track.id));
             }
             TrackKind::Midi | TrackKind::Instrument(_) => {
-                self.send_command(EngineCommand::AddMidiTrack(track.id, track.name.clone()));
+                self.send_command(EngineCommand::add_track(track.id));
             }
         }
         self.send_command(EngineCommand::SetTrackGain(track.id, track.gain));
@@ -277,7 +281,7 @@ impl App {
         ));
 
         if let Some(kind) = track.instrument_kind {
-            self.send_command(EngineCommand::SetTrackInstrument(track.id, kind));
+            self.set_built_in_instrument(track.id, kind);
             for (idx, value) in track.instrument_params.iter().copied().enumerate() {
                 self.send_command(EngineCommand::SetInstrumentParam {
                     track_id: track.id,
@@ -297,11 +301,11 @@ impl App {
                 }
                 InstrumentKind::DrumRack => {
                     for (pad_index, pad) in track.drum_rack_pads.iter().enumerate() {
-                        self.send_command(EngineCommand::SetDrumRackPadState {
-                            track_id: track.id,
+                        self.send_command(EngineCommand::set_drum_rack_pad_state(
+                            track.id,
                             pad_index,
-                            state: pad.to_state(),
-                        });
+                            pad.to_state(),
+                        ));
                         if let Some(audio) = &pad.audio {
                             self.send_command(EngineCommand::LoadDrumRackPadSample {
                                 track_id: track.id,
@@ -312,14 +316,18 @@ impl App {
                         }
                     }
                 }
-                InstrumentKind::SubtractiveSynth => {}
+                InstrumentKind::SubtractiveSynth
+                | InstrumentKind::WavetableSynth
+                | InstrumentKind::FmSynth => {}
             }
         }
 
         for lane in &content.automation {
             self.send_command(EngineCommand::SetAutomationLane {
                 track_id: track.id,
-                lane: lane.clone(),
+                insertion: vibez_engine::clip_insertion::PreparedAutomationLaneInsertion::new(
+                    lane.clone(),
+                ),
             });
         }
 
@@ -335,6 +343,7 @@ impl App {
 
         for clip in &content.clips {
             self.send_command(EngineCommand::AddClip {
+                insertion: vibez_engine::clip_insertion::PreparedClipInsertion::new(),
                 track_id: track.id,
                 clip_id: clip.id,
                 audio: Arc::clone(&clip.audio),
@@ -354,21 +363,23 @@ impl App {
 
         for clip in &content.note_clips {
             self.send_command(EngineCommand::AddNoteClip {
-                start_marker_beats: clip.start_marker_beats,
                 track_id: track.id,
-                clip_id: clip.id,
-                position_beats: clip.position_beats,
-                duration_beats: clip.duration_beats,
-                loop_enabled: clip.loop_enabled,
-                loop_start_beats: clip.loop_start_beats,
-                loop_end_beats: clip.loop_end_beats,
-                groove_grid: clip.groove_grid,
+                insertion: vibez_engine::clip_insertion::PreparedNoteClipInsertion::new(
+                    clip.id,
+                    clip.position_beats,
+                    clip.duration_beats,
+                    clip.start_marker_beats,
+                    clip.loop_enabled,
+                    clip.loop_start_beats,
+                    clip.loop_end_beats,
+                    clip.groove_grid,
+                ),
             });
             for note in &clip.notes {
                 self.send_command(EngineCommand::AddNote {
                     track_id: track.id,
                     clip_id: clip.id,
-                    note: *note,
+                    insertion: vibez_engine::clip_insertion::PreparedNoteInsertion::new(*note),
                 });
             }
         }
@@ -382,7 +393,7 @@ impl App {
             .arrange_content(bus.id)
             .map(|content| content.automation.clone())
             .unwrap_or_default();
-        self.send_command(EngineCommand::AddBus(bus.id, bus.name.clone()));
+        self.send_command(EngineCommand::add_bus(bus.id));
         self.send_command(EngineCommand::SetTrackGain(bus.id, bus.gain));
         self.send_command(EngineCommand::SetTrackPan(bus.id, bus.pan));
         self.send_command(EngineCommand::SetTrackMute(bus.id, bus.mute));
@@ -391,7 +402,9 @@ impl App {
         for lane in &automation {
             self.send_command(EngineCommand::SetAutomationLane {
                 track_id: bus.id,
-                lane: lane.clone(),
+                insertion: vibez_engine::clip_insertion::PreparedAutomationLaneInsertion::new(
+                    lane.clone(),
+                ),
             });
         }
     }
@@ -404,12 +417,7 @@ impl App {
             if effect.plugin_ref.is_some() {
                 continue;
             }
-            self.send_command(EngineCommand::AddEffect {
-                track_id: track.id,
-                effect_id: effect.id,
-                effect_type: effect.effect_type,
-                position: None,
-            });
+            self.insert_built_in_effect(track.id, effect.id, effect.effect_type);
             for (idx, value) in effect.params.iter().copied().enumerate() {
                 self.send_command(EngineCommand::SetEffectParam {
                     track_id: track.id,

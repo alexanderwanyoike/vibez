@@ -127,12 +127,13 @@ fn assert_handoff_failure_cause(backpressured: bool) {
     let effect = EffectId::new();
     let mut track = EngineTrack::new(id);
     track.effects.push(EffectSlot {
+        levels: Default::default(),
         id: effect,
         effect: Box::new(EffectProbe(true)),
         bypass: false,
     });
-    engine.tracks.push(track);
-    engine.next_device_handoff = u64::MAX;
+    engine.tracks.push(Box::new(track));
+    engine.device_handoff.exhaust_identity_for_test();
     commands
         .push(EngineCommand::SetRouting(plan(id, &[effect], 1)))
         .unwrap();
@@ -145,8 +146,8 @@ fn assert_handoff_failure_cause(backpressured: bool) {
         crate::retirement::tests::allocations(|| engine.process(&mut output, 2)),
         (0, 0),
     );
-    assert!(!engine.compensation_valid);
-    assert!(engine.pending_device_reconfiguration.is_none());
+    assert!(!engine.compensation_plan.applied_plan_is_valid());
+    assert!(engine.device_handoff.pending().is_none());
     let mut causes = Vec::new();
     let mut drain = |events: &mut Consumer<EngineEvent>| {
         while let Ok(event) = events.pop() {
@@ -182,20 +183,19 @@ fn delayed_effect_return_cannot_resurrect_owner_into_reopened_same_id_channel() 
     let effect = EffectId::new();
     let mut track = EngineTrack::new(id);
     track.effects.push(EffectSlot {
+        levels: Default::default(),
         id: effect,
         effect: Box::new(EffectProbe(true)),
         bypass: false,
     });
-    engine.tracks.push(track);
+    engine.tracks.push(Box::new(track));
     let device = handed_off(&mut engine, &mut events);
     commands.push(EngineCommand::RemoveTrack(id)).unwrap();
-    commands
-        .push(EngineCommand::AddTrack(id, "Reopened".into()))
-        .unwrap();
+    commands.push(EngineCommand::add_track(id)).unwrap();
     let ids = [effect, EffectId::new(), EffectId::new(), EffectId::new()];
     for &effect_id in &ids {
         commands
-            .push(EngineCommand::AddPluginEffect {
+            .push(EngineCommand::InsertEffect {
                 track_id: id,
                 effect_id,
                 effect: Box::new(EffectProbe(false)),
@@ -221,7 +221,7 @@ fn delayed_effect_return_cannot_resurrect_owner_into_reopened_same_id_channel() 
         "old owner was inserted into the reopened channel"
     );
     assert_eq!(engine.tracks[0].effects[0].effect.get_param(0), 2.0);
-    assert_eq!(engine.routing.as_ref().unwrap().compensation.generation, 22);
+    assert_eq!(engine.routing.as_ref().compensation.generation, 22);
     assert_eq!(
         allocation_counts,
         (0, 0),
@@ -240,10 +240,10 @@ fn delayed_instrument_return_keeps_replacement_and_does_not_drop_it_in_callback(
         requested: true,
         drops: old_drops,
     }));
-    engine.tracks.push(track);
+    engine.tracks.push(Box::new(track));
     let device = handed_off(&mut engine, &mut events);
     commands
-        .push(EngineCommand::SetPluginInstrument {
+        .push(EngineCommand::SetInstrument {
             track_id: id,
             instrument: Box::new(InstrumentProbe {
                 requested: false,
@@ -271,7 +271,7 @@ fn delayed_instrument_return_keeps_replacement_and_does_not_drop_it_in_callback(
         engine.tracks[0].instrument.as_ref().unwrap().get_param(0),
         2.0
     );
-    assert_eq!(engine.routing.as_ref().unwrap().compensation.generation, 22);
+    assert_eq!(engine.routing.as_ref().compensation.generation, 22);
     assert_eq!(allocation_counts, (0, 0));
 }
 
@@ -283,12 +283,13 @@ fn stopped_effect_retains_bypass_and_reorder_edits_when_owner_returns() {
     let mut track = EngineTrack::new(track_id);
     for (index, id) in ids.into_iter().enumerate() {
         track.effects.push(EffectSlot {
+            levels: Default::default(),
             id,
             effect: Box::new(EffectProbe(index == 1)),
             bypass: false,
         });
     }
-    engine.tracks.push(track);
+    engine.tracks.push(Box::new(track));
     let device = handed_off(&mut engine, &mut events);
     commands
         .push(EngineCommand::SetEffectBypass {
@@ -330,11 +331,12 @@ fn stale_reject_with_full_event_ring_retains_device_reason_and_current_plan() {
     let effect = EffectId::new();
     let mut track = EngineTrack::new(id);
     track.effects.push(EffectSlot {
+        levels: Default::default(),
         id: effect,
         effect: Box::new(EffectProbe(true)),
         bypass: false,
     });
-    engine.tracks.push(track);
+    engine.tracks.push(Box::new(track));
     let device = handed_off(&mut engine, &mut events);
     commands
         .push(EngineCommand::RemoveEffect(id, effect))
@@ -354,10 +356,10 @@ fn stale_reject_with_full_event_ring_retains_device_reason_and_current_plan() {
         crate::retirement::tests::allocations(|| engine.drain_commands()),
         (0, 0)
     );
-    assert_eq!(engine.routing.as_ref().unwrap().compensation.generation, 22);
-    assert!(engine.compensation_valid);
+    assert_eq!(engine.routing.as_ref().compensation.generation, 22);
+    assert!(engine.compensation_plan.applied_plan_is_valid());
     assert!(matches!(
-        engine.pending_retirements.last(),
+        engine.pending_retirements.as_slice().last(),
         Some(EngineEvent::DeviceReconfigurationRetired {
             reason: Some(_),
             ..
@@ -380,19 +382,20 @@ fn additions_around_held_slot_use_logical_order_and_main_reserved_capacity() {
         track.effects = Vec::with_capacity(4);
         for (index, id) in ids.into_iter().enumerate() {
             track.effects.push(EffectSlot {
+                levels: Default::default(),
                 id,
                 effect: Box::new(EffectProbe(index == 1)),
                 bypass: false,
             });
         }
-        engine.tracks.push(track);
+        engine.tracks.push(Box::new(track));
         let mut device = handed_off(&mut engine, &mut events);
         let added = EffectId::new();
         let mut expected = ids.to_vec();
         expected.insert(position.unwrap_or(expected.len()), added);
         device.prepare_effect_storage(expected.len());
         commands
-            .push(EngineCommand::AddPluginEffect {
+            .push(EngineCommand::InsertEffect {
                 track_id,
                 effect_id: added,
                 effect: Box::new(EffectProbe(false)),
@@ -417,8 +420,8 @@ fn additions_around_held_slot_use_logical_order_and_main_reserved_capacity() {
                 .collect::<Vec<_>>(),
             expected
         );
-        assert!(engine.compensation_valid);
-        assert!(!engine.compensation_suspended);
+        assert!(engine.compensation_plan.applied_plan_is_valid());
+        assert!(!engine.device_handoff.is_suspended());
         assert!(std::iter::from_fn(|| events.pop().ok())
             .any(|event| matches!(event, EngineEvent::RetiredEffectStorage(_))));
     }

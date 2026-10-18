@@ -1,6 +1,7 @@
 //! Capture timestamp regressions at the public engine command/event seam.
 
 use super::*;
+use crate::events::PerformanceCaptureStartedEvent;
 
 use vibez_core::id::{SectionId, TrackId};
 
@@ -20,12 +21,12 @@ fn empty_section(section_id: SectionId, track_id: TrackId) -> Box<PreparedSectio
 
 fn capture_started(events: &mut rtrb::Consumer<EngineEvent>) -> Option<(u64, SectionId, u64)> {
     std::iter::from_fn(|| events.pop().ok()).find_map(|event| match event {
-        EngineEvent::PerformanceCaptureStarted {
+        EngineEvent::PerformanceCaptureStarted(PerformanceCaptureStartedEvent {
             effective_at_samples,
             section_id: Some(section_id),
             section_position_samples: Some(section_position_samples),
             ..
-        } => Some((effective_at_samples, section_id, section_position_samples)),
+        }) => Some((effective_at_samples, section_id, section_position_samples)),
         _ => None,
     })
 }
@@ -38,9 +39,7 @@ fn section_rehearsal_advances_capture_time_without_moving_arrange_cursor() {
     commands.push(EngineCommand::SetSampleRate(8)).unwrap();
     commands.push(EngineCommand::SetBpm(120.0)).unwrap();
     commands.push(EngineCommand::Seek(40)).unwrap();
-    commands
-        .push(EngineCommand::AddTrack(track_id, "Audio".into()))
-        .unwrap();
+    commands.push(EngineCommand::add_track(track_id)).unwrap();
     commands
         .push(EngineCommand::LaunchSection(empty_section(
             section_id, track_id,
@@ -90,9 +89,7 @@ fn transport_stop_ends_capture_and_section_playback_at_one_boundary() {
     let track_id = TrackId::new();
     let section_id = SectionId::new();
     commands.push(EngineCommand::SetSampleRate(8)).unwrap();
-    commands
-        .push(EngineCommand::AddTrack(track_id, "Audio".into()))
-        .unwrap();
+    commands.push(EngineCommand::add_track(track_id)).unwrap();
     commands
         .push(EngineCommand::LaunchSection(empty_section(
             section_id, track_id,
@@ -128,9 +125,7 @@ fn stopping_perform_returns_to_the_exact_arrange_cursor_without_repair() {
     let section_id = SectionId::new();
     commands.push(EngineCommand::SetSampleRate(8)).unwrap();
     commands.push(EngineCommand::Seek(40)).unwrap();
-    commands
-        .push(EngineCommand::AddTrack(track_id, "Audio".into()))
-        .unwrap();
+    commands.push(EngineCommand::add_track(track_id)).unwrap();
     commands
         .push(EngineCommand::LaunchSection(empty_section(
             section_id, track_id,
@@ -150,9 +145,7 @@ fn moving_the_arrange_cursor_during_perform_does_not_retime_performance_events()
     let track_id = TrackId::new();
     let section_id = SectionId::new();
     commands.push(EngineCommand::SetSampleRate(8)).unwrap();
-    commands
-        .push(EngineCommand::AddTrack(track_id, "Audio".into()))
-        .unwrap();
+    commands.push(EngineCommand::add_track(track_id)).unwrap();
     commands
         .push(EngineCommand::LaunchSection(empty_section(
             section_id, track_id,
@@ -170,4 +163,24 @@ fn moving_the_arrange_cursor_during_perform_does_not_retime_performance_events()
 
     assert_eq!(engine.transport().position(), 40);
     assert_eq!(capture_started(&mut events), Some((5, section_id, 5)));
+}
+
+#[test]
+fn arrange_seek_and_stop_without_capture_announce_no_capture_stop() {
+    let (mut engine, mut commands, mut events) = AudioEngine::new();
+    commands.push(EngineCommand::Play).unwrap();
+    engine.process(&mut [0.0; 7], 1);
+    while events.pop().is_ok() {}
+
+    commands.push(EngineCommand::Seek(3)).unwrap();
+    commands.push(EngineCommand::Stop).unwrap();
+    for _ in 0..4 {
+        engine.process(&mut [0.0; 3], 1);
+    }
+
+    assert!(
+        !std::iter::from_fn(|| events.pop().ok())
+            .any(|event| matches!(event, EngineEvent::PerformanceCaptureStopped { .. })),
+        "no Capture was running"
+    );
 }

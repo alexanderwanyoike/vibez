@@ -19,7 +19,7 @@ fn replacing_and_removing_lanes_retains_point_storage_without_callback_destructi
         source.automation.push(lane.clone());
         engine
             .tracks
-            .push(EngineTrack::with_playback_source(id, source));
+            .push(Box::new(EngineTrack::with_playback_source(id, source)));
         // The actual resident owner, not the incoming replacement, is returned.
         let points = engine.tracks[0].playback_source.automation[0]
             .points
@@ -27,9 +27,14 @@ fn replacing_and_removing_lanes_retains_point_storage_without_callback_destructi
         engine.process(&mut [0.0; 16], 2);
         while events.pop().is_ok() {}
         while engine.event_tx.push(EngineEvent::PlaybackStarted).is_ok() {}
+        let insertion = crate::clip_insertion::PreparedAutomationLaneInsertion::new(lane);
+        let operation = insertion.id();
         commands
             .push(if replace {
-                EngineCommand::SetAutomationLane { track_id: id, lane }
+                EngineCommand::SetAutomationLane {
+                    track_id: id,
+                    insertion,
+                }
             } else {
                 EngineCommand::RemoveAutomationLane {
                     track_id: id,
@@ -41,12 +46,28 @@ fn replacing_and_removing_lanes_retains_point_storage_without_callback_destructi
             crate::retirement::tests::allocations(|| engine.process(&mut [0.0; 16], 2)),
             (0, 0)
         );
-        assert_eq!(engine.pending_retirements.len(), 1);
+        assert_eq!(engine.pending_retirements.len(), 1 + usize::from(replace));
         while events.pop().is_ok() {}
         assert_eq!(
             crate::retirement::tests::allocations(|| engine.flush_retirements()),
             (0, 0)
         );
+        if replace {
+            let EngineEvent::ClipInsertionCompleted(completed) = events.pop().unwrap() else {
+                panic!("LIFO retirement publishes the added control before its old lane owner");
+            };
+            assert_eq!(completed.id(), operation);
+            assert_eq!(completed.track_id, id);
+            assert_eq!(
+                completed.target,
+                crate::clip_insertion::ClipInsertionTarget::AutomationLane(lane_id)
+            );
+            assert_eq!(
+                completed.outcome,
+                crate::clip_insertion::ClipInsertionOutcome::Applied
+            );
+            drop(completed);
+        }
         let returned = events.pop().unwrap();
         let EngineEvent::RetiredAutomationLane(owner) = returned else {
             panic!("lane owner not returned")

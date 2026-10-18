@@ -368,23 +368,6 @@ kbd {
 .build { margin-top: 34px; border-top: 1px solid var(--line); padding-top: 26px; }
 .build p { color: var(--dim); max-width: 70ch; }
 
-.memorial {
-  border-top: 1px solid var(--line); padding: 54px 0;
-  display: grid; gap: 20px; align-items: end;
-}
-@media (min-width: 760px) {
-  .memorial { grid-template-columns: minmax(0, 1fr) minmax(320px, .72fr); gap: 56px; }
-}
-.memorial .hint { color: var(--kick); }
-.memorial .hint i { background: var(--kick); }
-.memorial h2 { max-width: 18ch; }
-.memorial-copy { color: var(--dim); max-width: 48ch; }
-.memorial-copy p { margin: 0 0 14px; }
-.memorial-link {
-  color: var(--text); text-underline-offset: 4px; text-decoration-color: var(--kick);
-}
-.memorial-link:hover { color: var(--kick); }
-
 footer {
   border-top: 1px solid var(--line); padding: 26px 0 70px;
   font-family: var(--mono); font-size: 12px; color: var(--dimmer);
@@ -392,6 +375,7 @@ footer {
 }
 footer a { color: var(--dim); }
 footer a:hover { color: var(--text); }
+footer .for-mum { flex-basis: 100%; }
 </style>
 </head>
 <body>
@@ -730,8 +714,7 @@ footer a:hover { color: var(--text); }
       </div>
       <p class="lede">
         vibez is free software, released under the GPL and developed in public. It is still alpha
-        software. Project files can change between releases, and some common audio editing tools
-        are not ready yet.
+        software. Project files can change between releases, and some features are still partial.
       </p>
       <div class="hgrid">
         <div class="hcell">
@@ -744,7 +727,7 @@ footer a:hover { color: var(--text); }
         </div>
         <div class="hcell">
           <span class="tag miss">Not yet</span>
-          <p><b>Some audio editing.</b> Fades, crossfades, reverse, slicing and transient editing are not in this release.</p>
+          <p><b>Signed builds.</b> The macOS and Windows builds are not code signed or notarised yet, so both will warn you the first time.</p>
         </div>
       </div>
     </section>
@@ -768,9 +751,9 @@ footer a:hover { color: var(--text); }
           </header>
           <p class="arch">x86_64</p>
           <div class="dllinks">
-            <a class="dllink primary" href="https://github.com/alexanderwanyoike/vibez/releases/download/__VERSION__/vibez-__VERSION__-linux-x86_64.AppImage"><span>AppImage</span><span class="sz">13 MB</span></a>
-            <a class="dllink" href="https://github.com/alexanderwanyoike/vibez/releases/download/__VERSION__/vibez-__VERSION__-linux-x86_64.deb"><span>.deb</span><span class="sz">8 MB</span></a>
-            <a class="dllink" href="https://github.com/alexanderwanyoike/vibez/releases/download/__VERSION__/vibez-__VERSION__-linux-x86_64.tar.gz"><span>.tar.gz</span><span class="sz">13 MB</span></a>
+            <a class="dllink primary" href="https://github.com/alexanderwanyoike/vibez/releases/download/__VERSION__/vibez-__VERSION__-linux-x86_64.AppImage"><span>AppImage</span><span class="sz">14 MB</span></a>
+            <a class="dllink" href="https://github.com/alexanderwanyoike/vibez/releases/download/__VERSION__/vibez-__VERSION__-linux-x86_64.deb"><span>.deb</span><span class="sz">9 MB</span></a>
+            <a class="dllink" href="https://github.com/alexanderwanyoike/vibez/releases/download/__VERSION__/vibez-__VERSION__-linux-x86_64.tar.gz"><span>.tar.gz</span><span class="sz">14 MB</span></a>
           </div>
           <p class="dlnote">
             Make the AppImage executable first:
@@ -786,8 +769,8 @@ footer a:hover { color: var(--text); }
           </header>
           <p class="arch">Apple silicon and Intel</p>
           <div class="dllinks">
-            <a class="dllink primary" href="https://github.com/alexanderwanyoike/vibez/releases/download/__VERSION__/vibez-__VERSION__-macos-arm64.dmg"><span>Apple silicon</span><span class="sz">10 MB</span></a>
-            <a class="dllink" href="https://github.com/alexanderwanyoike/vibez/releases/download/__VERSION__/vibez-__VERSION__-macos-x86_64.dmg"><span>Intel</span><span class="sz">11 MB</span></a>
+            <a class="dllink primary" href="https://github.com/alexanderwanyoike/vibez/releases/download/__VERSION__/vibez-__VERSION__-macos-arm64.dmg"><span>Apple silicon</span><span class="sz">11 MB</span></a>
+            <a class="dllink" href="https://github.com/alexanderwanyoike/vibez/releases/download/__VERSION__/vibez-__VERSION__-macos-x86_64.dmg"><span>Intel</span><span class="sz">12 MB</span></a>
           </div>
           <p class="dlnote">
             vibez is not notarised with Apple, so macOS will refuse to open it. After dragging it
@@ -806,7 +789,7 @@ footer a:hover { color: var(--text); }
           <p class="arch">x86_64</p>
           <div class="dllinks">
             <a class="dllink primary" href="https://github.com/alexanderwanyoike/vibez/releases/download/__VERSION__/vibez-__VERSION__-windows-x86_64-setup.exe"><span>Installer</span><span class="sz">9 MB</span></a>
-            <a class="dllink" href="https://github.com/alexanderwanyoike/vibez/releases/download/__VERSION__/vibez-__VERSION__-windows-x86_64.zip"><span>Portable .zip</span><span class="sz">10 MB</span></a>
+            <a class="dllink" href="https://github.com/alexanderwanyoike/vibez/releases/download/__VERSION__/vibez-__VERSION__-windows-x86_64.zip"><span>Portable .zip</span><span class="sz">11 MB</span></a>
           </div>
           <p class="dlnote">
             The installer is unsigned, so SmartScreen will show a blue warning. Choose
@@ -831,25 +814,12 @@ cd vibez &amp;&amp; cargo run --release</code>
       </div>
     </section>
 
-    <section class="memorial" aria-labelledby="memorial-title">
-      <div>
-        <p class="hint"><i></i> In memory</p>
-        <h2 id="memorial-title">This one's for you Mum 🥲</h2>
-      </div>
-      <div class="memorial-copy">
-        <p>I miss you.</p>
-        <p>
-          If you'd like to help my family give Mum a good send-off, you can
-          <a class="memorial-link" href="https://gofund.me/52cc80b1b">donate to her GoFundMe</a>.
-        </p>
-      </div>
-    </section>
-
     <footer>
       <span>GPL-3.0-or-later</span>
       <a href="https://github.com/alexanderwanyoike/vibez">Source</a>
       <a href="https://github.com/alexanderwanyoike/vibez/releases/tag/__VERSION__">Release notes</a>
       <a href="https://github.com/alexanderwanyoike/vibez/blob/main/docs/ARCHITECTURE.md">Architecture</a>
+      <span class="for-mum">This one's for you Mum 🥲 I miss you.</span>
     </footer>
   </div>
 </main>

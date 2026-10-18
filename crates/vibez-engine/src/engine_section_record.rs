@@ -1,6 +1,10 @@
 //! Engine-clock ownership for Section Record arm/start/stop boundaries.
 
+use super::presentation_queue::{PresentationAdmission, ScheduledPresentation};
 use super::*;
+use crate::events::{
+    SectionRecordArmedEvent, SectionRecordStartedEvent, SectionRecordStoppedEvent,
+};
 
 pub(super) struct PendingSectionRecord {
     pub(super) section_id: SectionId,
@@ -51,12 +55,13 @@ impl AudioEngine {
         prepared: Option<Box<PreparedSectionPlaybackSource>>,
         count_in_bars: u8,
         replace_existing: bool,
+        allowance: &mut RetirementAllowance,
     ) {
         if self.pending_section_record.is_some() || self.active_section_record.is_some() {
             return;
         }
         self.cancel_section_queue();
-        self.begin_performance_clock();
+        self.begin_performance_clock(allowance);
 
         let now = self.performance_position;
         let count_in_beat_samples = self.section_length_samples(1.0);
@@ -96,7 +101,7 @@ impl AudioEngine {
                 if !self.transport.is_playing() {
                     self.transport.play();
                     self.stopped_note_repeat_anchor = None;
-                    self.present_event(EngineEvent::PlaybackStarted);
+                    self.present_event(EngineEvent::PlaybackStarted, allowance);
                 }
                 let count_in_start_samples = self.performance_position;
                 (
@@ -117,16 +122,23 @@ impl AudioEngine {
             count_in_beat_samples,
             replace_existing,
         });
-        self.present_event(EngineEvent::SectionRecordArmed {
-            section_id,
-            track_id,
-            effective_at_samples,
-            section_position_samples,
-        });
+        self.present_event(
+            EngineEvent::SectionRecordArmed(SectionRecordArmedEvent {
+                section_id,
+                track_id,
+                effective_at_samples,
+                section_position_samples,
+            }),
+            allowance,
+        );
         self.start_section_record_if_due(self.performance_position);
     }
 
     pub(super) fn stop_section_record(&mut self) {
+        // The preceding stop keeps this recording slot until its handoff succeeds.
+        if self.pending_section_record_stop.is_some() {
+            return;
+        }
         let now = self.performance_position;
         let local = self
             .active_section
@@ -145,15 +157,49 @@ impl AudioEngine {
             } else {
                 return;
             };
-        let event = EngineEvent::SectionRecordStopped {
+        self.pending_section_record_stop = Some(SectionRecordStoppedEvent {
             section_id,
             track_id,
             effective_at_samples: now,
             section_position_samples: local,
             started,
-            retired,
-        };
-        self.present_event(event);
+            retired: retired.map(crate::events::DisposalCell::new),
+        });
+        self.flush_section_record_stop();
+    }
+
+    pub(crate) fn flush_section_record_stop(&mut self) -> bool {
+        if self.pending_section_record_stop.is_none() {
+            return true;
+        }
+        self.flush_presentation();
+        if !self.presentation_return_has_room() {
+            // Preserve the original failure boundary even when an earlier
+            // lifetime still owns the inline discovery slot.
+            self.fail_presentation();
+            if !self.presentation_return_has_room() {
+                return false;
+            }
+        }
+        let mut allowance = self.pending_retirements.reserve(1);
+        let stopped = self
+            .pending_section_record_stop
+            .take()
+            .expect("one retained Section recording stop");
+        let now = self.output_position + self.rendered_callback_frames as u64;
+        // This literal remains SectionRecordStopped through cancellation. The
+        // typed slot survives a failed handoff without owning a waiting credit.
+        if let Err(EngineEvent::SectionRecordStopped(stopped)) =
+            self.try_present_event_at(EngineEvent::SectionRecordStopped(stopped), now)
+        {
+            if let Some(allowance) = allowance.as_mut() {
+                self.retire_event(EngineEvent::SectionRecordStopped(stopped), allowance);
+            } else {
+                self.pending_section_record_stop = Some(stopped);
+                return false;
+            }
+        }
+        true
     }
 
     pub(super) fn start_section_record_if_due(&mut self, through_sample: u64) {
@@ -167,10 +213,18 @@ impl AudioEngine {
         let mut pending = self.pending_section_record.take().expect("due recording");
         if let Some(prepared) = pending.prepared.take() {
             self.activate_section(prepared, pending.effective_at_samples);
-            if self.presentation_fault {
+            if self.presentation_state.is_faulted() {
                 return;
             }
         }
+        let Some(admission) = PresentationAdmission::<1>::new(
+            &mut self.event_tx,
+            &mut self.scheduled_presentation,
+            &mut self.presentation_state.terminals,
+        ) else {
+            self.pending_section_record = Some(pending);
+            return;
+        };
         self.active_section_record = Some(ActiveSectionRecord {
             section_id: pending.section_id,
             track_id: pending.track_id,
@@ -178,12 +232,18 @@ impl AudioEngine {
             replace_first_pass: pending.replace_existing,
             replace_source_flushed: false,
         });
-        self.present_event(EngineEvent::SectionRecordStarted {
+        let event = EngineEvent::SectionRecordStarted(SectionRecordStartedEvent {
             section_id: pending.section_id,
             track_id: pending.track_id,
             effective_at_samples: pending.effective_at_samples,
             section_position_samples: pending.section_position_samples,
         });
+        let now = self.output_position + self.rendered_callback_frames as u64;
+        admission.publish(
+            [Some(ScheduledPresentation { due: now, event })],
+            now,
+            self.output_position,
+        );
     }
 
     /// A stopped-start count-in may end inside an audio callback. Render the
@@ -236,7 +296,10 @@ impl AudioEngine {
         }
         self.start_section_record_if_due(timing.boundary);
         let frames_after = frames - frames_before;
-        let Some(section) = self.active_section.filter(|_| !self.presentation_fault) else {
+        let Some(section) = self
+            .active_section
+            .filter(|_| !self.presentation_state.is_faulted())
+        else {
             output[frames_before * channels..].fill(0.0);
             return true;
         };

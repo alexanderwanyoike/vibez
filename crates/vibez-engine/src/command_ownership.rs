@@ -26,26 +26,17 @@ impl EngineCommand {
     pub fn device_owner_invalidation(&self) -> DeviceOwnerInvalidation {
         match self {
             Self::UnloadAudio => DeviceOwnerInvalidation::All,
-            Self::RemoveTrack(id)
-            | Self::RemoveBus(id)
-            | Self::AddTrack(id, _)
-            | Self::AddBus(id, _)
-            | Self::AddMidiTrack(id, _)
-            | Self::AddInstrumentTrack(id, _, _) => DeviceOwnerInvalidation::Channel(*id),
-            Self::RemoveEffect(track, effect)
-            | Self::AddEffect {
-                track_id: track,
-                effect_id: effect,
-                ..
+            Self::RemoveTrack(id) | Self::RemoveBus(id) => DeviceOwnerInvalidation::Channel(*id),
+            Self::AddTrack(channel) | Self::AddBus(channel) => {
+                DeviceOwnerInvalidation::Channel(channel.id)
             }
-            | Self::AddPluginEffect {
+            Self::RemoveEffect(track, effect)
+            | Self::InsertEffect {
                 track_id: track,
                 effect_id: effect,
                 ..
             } => DeviceOwnerInvalidation::Effect(*track, *effect),
-            Self::SetPluginInstrument { track_id, .. }
-            | Self::SetTrackInstrument(track_id, ..)
-            | Self::RemoveTrackInstrument(track_id) => {
+            Self::SetInstrument { track_id, .. } | Self::RemoveTrackInstrument(track_id) => {
                 DeviceOwnerInvalidation::Instrument(*track_id)
             }
             _ => DeviceOwnerInvalidation::None,
@@ -56,10 +47,7 @@ impl EngineCommand {
     pub fn edits_effect_chain(&self) -> bool {
         matches!(
             self,
-            Self::AddEffect { .. }
-                | Self::RemoveEffect(..)
-                | Self::MoveEffect { .. }
-                | Self::AddPluginEffect { .. }
+            Self::RemoveEffect(..) | Self::MoveEffect { .. } | Self::InsertEffect { .. }
         )
     }
     pub(crate) fn retirement_reserve(&self) -> usize {
@@ -68,6 +56,13 @@ impl EngineCommand {
             // and the owned rejection cause in the same command.
             Self::RejectDeviceReconfiguration { .. } => 3,
             Self::ResumeDeviceReconfiguration { .. } => 2,
+            Self::ReplaceClipAudio { .. } | Self::ReplaceClipBuffer { .. } => 1,
+            Self::SetClipWarpMarkers { .. } => 1,
+            Self::ReorderTracks(_) => 1,
+            Self::LoadSamplerSample { .. }
+            | Self::LoadDrumRackPadSample { .. }
+            | Self::ClearDrumRackPad { .. }
+            | Self::SetDrumRackPadState { .. } => 1,
             _ => 2,
         }
     }

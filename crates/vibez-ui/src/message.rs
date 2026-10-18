@@ -43,18 +43,6 @@ impl std::fmt::Debug for ResidentSection {
 use crate::domains::audio_settings::{AudioDeviceChoice, AudioSampleRate};
 use crate::state::{AuditionImportInput, AuditionMode, SettingsTab, UndoGestureId};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DrumPadParam {
-    Gain,
-    Pan,
-    Start,
-    End,
-    FadeIn,
-    FadeOut,
-    CoarseTune,
-    FineTune,
-}
-
 /// Menus and dialogs whose lifecycle is owned by their overlay rather than
 /// inferred from unrelated application messages.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -92,6 +80,21 @@ pub enum Message {
     Transport(crate::domains::transport::TransportMsg),
     /// Devices domain (effect chain, instruments, drum pads, menu).
     Devices(crate::domains::devices::DevicesMsg),
+    GainControl(crate::domains::gain::GainMsg),
+    Eq(crate::domains::eq::EqMsg),
+    Compressor(crate::domains::compressor::CompressorMsg),
+    Filter(crate::domains::filter::FilterMsg),
+    Gate(crate::domains::gate::GateMsg),
+    Card(crate::domains::device_card::CardMsg),
+    InstrumentCard(crate::domains::instrument_card::InstrumentCardMsg),
+    /// Typing a value into a built-in device parameter.
+    ParamEntry(crate::domains::param_entry::EntryMsg),
+    ApplyDevicePreset(
+        TrackId,
+        crate::domains::device_params::DeviceSlot,
+        vibez_core::device_preset::DevicePreset,
+    ),
+    DevicePreset(crate::domains::device_presets::DevicePresetMsg),
     /// Arrangement domain (tracks, selection; clips arriving next).
     Arrangement(crate::domains::arrangement::ArrangementMsg),
     SetDrumRackSliceMarkers(crate::domains::arrangement::AudioSliceMarkers),
@@ -174,6 +177,23 @@ pub enum Message {
     DrumRackPadFileSelected(TrackId, usize, Option<PathBuf>),
     DrumRackPadSampleDecoded(TrackId, usize, Arc<DecodedAudio>, String, MediaSourceRef),
     DrumRackPadDecodeError(TrackId, usize, String),
+    /// Drum Rack kits.
+    LoadFactoryDrumKit(TrackId, usize),
+    OpenDrumKit(TrackId),
+    DrumKitFolderSelected(TrackId, Option<PathBuf>),
+    DrumKitReady(
+        TrackId,
+        Result<
+            (
+                vibez_core::drum_kit::DrumKit,
+                Vec<crate::domains::drum_kits::KitSample>,
+            ),
+            String,
+        >,
+    ),
+    SaveDrumKit(TrackId),
+    DrumKitSaveSelected(TrackId, Option<PathBuf>),
+    DrumKitSaved(Result<String, String>),
 
     // Zoom / scroll
 

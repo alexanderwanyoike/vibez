@@ -38,6 +38,7 @@ fn channel(id: TrackId, effect: Option<EffectId>) -> RoutingChannel {
 
 fn clip(track: TrackId, value: f32) -> EngineCommand {
     EngineCommand::AddClip {
+        insertion: vibez_engine::clip_insertion::PreparedClipInsertion::new(),
         track_id: track,
         clip_id: ClipId::new(),
         audio: Arc::new(DecodedAudio {
@@ -55,6 +56,25 @@ fn clip(track: TrackId, value: f32) -> EngineCommand {
         fades: Default::default(),
         playback_direction: Default::default(),
         warp_markers: Default::default(),
+    }
+}
+
+fn continuing_recovery_events(
+    engine: &AudioEngine,
+    events: impl Iterator<Item = EngineEvent>,
+    capture_stops: &mut usize,
+) {
+    assert!(engine.transport().is_playing());
+    for event in events {
+        match event {
+            EngineEvent::PerformanceCaptureStopped { .. } => *capture_stops += 1,
+            EngineEvent::PlaybackStopped
+            | EngineEvent::CompensationInvalid { .. }
+            | EngineEvent::DeviceReconfiguration(_) => {
+                panic!("local recovery changed global readiness: {event:?}")
+            }
+            _ => {}
+        }
     }
 }
 
@@ -98,13 +118,13 @@ fn main_thread_recovery_keeps_other_delayed_branch_audible_and_silences_the_abse
                 assert!(plugin.load_state(&bytes));
                 plugin.reconfigure_on_main_thread().unwrap();
                 commands
-                    .push(EngineCommand::AddTrack(tracks[index], "Constant".into()))
+                    .push(EngineCommand::add_track(tracks[index]))
                     .unwrap();
                 commands
                     .push(clip(tracks[index], if index == 0 { 0.4 } else { 0.2 }))
                     .unwrap();
                 commands
-                    .push(EngineCommand::AddPluginEffect {
+                    .push(EngineCommand::InsertEffect {
                         track_id: tracks[index],
                         effect_id: effects[index],
                         effect: Box::new(PluginEffectWrapper::new(plugin)),
@@ -128,6 +148,10 @@ fn main_thread_recovery_keeps_other_delayed_branch_audible_and_silences_the_abse
                         || engine.process_block(AudioProcessBlock::new(&mut output, 2))
                     ),
                     (0, 0)
+                );
+                assert!(
+                    engine.transport().is_playing(),
+                    "{format} local failure must keep transport running"
                 );
                 while let Ok(event) = events.pop() {
                     match event {
@@ -187,7 +211,11 @@ fn main_thread_recovery_keeps_other_delayed_branch_audible_and_silences_the_abse
                         (0, 0)
                     );
                     bypassed.extend_from_slice(&output);
-                    while events.pop().is_ok() {}
+                    continuing_recovery_events(
+                        &engine,
+                        std::iter::from_fn(|| events.pop().ok()),
+                        &mut capture_stops,
+                    );
                 }
                 for (frame, pair) in bypassed.as_chunks::<2>().0.iter().enumerate() {
                     for channel in 0..2 {
@@ -218,8 +246,13 @@ fn main_thread_recovery_keeps_other_delayed_branch_audible_and_silences_the_abse
                     (0, 0)
                 );
                 recovered.extend_from_slice(&output);
-                while events.pop().is_ok() {}
+                continuing_recovery_events(
+                    &engine,
+                    std::iter::from_fn(|| events.pop().ok()),
+                    &mut capture_stops,
+                );
             }
+            assert_eq!(capture_stops, 1, "one local failure closes Capture once");
             for (frame, pair) in recovered.as_chunks::<2>().0.iter().enumerate() {
                 for channel in 0..2 {
                     let expected = healthy[channel]
@@ -253,7 +286,7 @@ fn owner_commands_for_missing_targets_retire_on_main_without_callback_destructio
         };
         let (engine, mut commands, mut events) = AudioEngine::new();
         commands
-            .push(EngineCommand::AddPluginEffect {
+            .push(EngineCommand::InsertEffect {
                 track_id: TrackId::new(),
                 effect_id: EffectId::new(),
                 effect: Box::new(PluginEffectWrapper::new(fixture.load(format, 64))),
@@ -261,7 +294,7 @@ fn owner_commands_for_missing_targets_retire_on_main_without_callback_destructio
             })
             .unwrap();
         commands
-            .push(EngineCommand::SetPluginInstrument {
+            .push(EngineCommand::SetInstrument {
                 track_id: TrackId::new(),
                 instrument: Box::new(vibez_plugin_host::PluginInstrumentWrapper::new(
                     fixture.load_instrument(format, 64),

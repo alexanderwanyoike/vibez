@@ -1,3 +1,5 @@
+//! Hosted plugin inputs preserve public routing and detector signal semantics.
+
 mod support;
 #[global_allocator]
 static ALLOCATOR: support::allocation::AllocationCounter = support::allocation::AllocationCounter;
@@ -11,6 +13,7 @@ use vibez_plugin_host::wrappers::effect::PluginEffectWrapper;
 
 fn clip(track_id: TrackId, left: f32, right: f32) -> EngineCommand {
     EngineCommand::AddClip {
+        insertion: vibez_engine::clip_insertion::PreparedClipInsertion::new(),
         track_id,
         clip_id: ClipId::new(),
         audio: std::sync::Arc::new(DecodedAudio {
@@ -105,9 +108,7 @@ fn production_engine_routes_two_independent_plugin_inputs_without_audible_source
         let (mut engine, mut commands, mut events) = AudioEngine::new();
         commands.push(EngineCommand::SetSampleRate(48000)).unwrap();
         for track in [receiver, source_stereo, source_mono] {
-            commands
-                .push(EngineCommand::AddTrack(track, "Fixture".into()))
-                .unwrap();
+            commands.push(EngineCommand::add_track(track)).unwrap();
         }
         for (track, left, right) in [
             (receiver, 0.1, 0.1),
@@ -122,7 +123,7 @@ fn production_engine_routes_two_independent_plugin_inputs_without_audible_source
                 .unwrap();
         }
         commands
-            .push(EngineCommand::AddPluginEffect {
+            .push(EngineCommand::InsertEffect {
                 track_id: receiver,
                 effect_id: effect,
                 effect: Box::new(PluginEffectWrapper::new(plugin)),
@@ -210,15 +211,11 @@ fn loaded_instrument_formats_trigger_other_formats_on_the_exact_note_frames() {
             let note_clip = ClipId::new();
             let (mut engine, mut commands, _events) = AudioEngine::new();
             commands.push(EngineCommand::SetSampleRate(48000)).unwrap();
-            commands
-                .push(EngineCommand::AddTrack(bass, "Bass".into()))
-                .unwrap();
-            commands
-                .push(EngineCommand::AddMidiTrack(ghost, "Pulse".into()))
-                .unwrap();
+            commands.push(EngineCommand::add_track(bass)).unwrap();
+            commands.push(EngineCommand::add_track(ghost)).unwrap();
             commands.push(clip(bass, 0.1, 0.1)).unwrap();
             commands
-                .push(EngineCommand::SetPluginInstrument {
+                .push(EngineCommand::SetInstrument {
                     track_id: ghost,
                     instrument: Box::new(PluginInstrumentWrapper::new(source)),
                 })
@@ -226,33 +223,37 @@ fn loaded_instrument_formats_trigger_other_formats_on_the_exact_note_frames() {
             commands
                 .push(EngineCommand::AddNoteClip {
                     track_id: ghost,
-                    clip_id: note_clip,
-                    position_beats: 0.0,
-                    duration_beats: 1.0,
-                    start_marker_beats: 0.0,
-                    loop_enabled: false,
-                    loop_start_beats: 0.0,
-                    loop_end_beats: 0.0,
-                    groove_grid: Default::default(),
+                    insertion: vibez_engine::clip_insertion::PreparedNoteClipInsertion::new(
+                        note_clip,
+                        0.0,
+                        1.0,
+                        0.0,
+                        false,
+                        0.0,
+                        0.0,
+                        Default::default(),
+                    ),
                 })
                 .unwrap();
             commands
                 .push(EngineCommand::AddNote {
                     track_id: ghost,
                     clip_id: note_clip,
-                    note: vibez_core::midi::MidiNote {
-                        pitch: 60,
-                        velocity: 100,
-                        start_beat: 3.0 / 24000.0,
-                        duration_beats: 4.0 / 24000.0,
-                    },
+                    insertion: vibez_engine::clip_insertion::PreparedNoteInsertion::new(
+                        vibez_core::midi::MidiNote {
+                            pitch: 60,
+                            velocity: 100,
+                            start_beat: 3.0 / 24000.0,
+                            duration_beats: 4.0 / 24000.0,
+                        },
+                    ),
                 })
                 .unwrap();
             commands
                 .push(EngineCommand::SetTrackMute(ghost, true))
                 .unwrap();
             commands
-                .push(EngineCommand::AddPluginEffect {
+                .push(EngineCommand::InsertEffect {
                     track_id: bass,
                     effect_id: effect,
                     effect: Box::new(PluginEffectWrapper::new(receiving)),
@@ -310,9 +311,7 @@ fn all_instrument_source_formats_feed_builtins_and_hosted_receivers() {
             let note_clip = ClipId::new();
             let (mut engine, mut commands, _events) = AudioEngine::new();
             commands.push(EngineCommand::SetSampleRate(48000)).unwrap();
-            commands
-                .push(EngineCommand::AddTrack(bass, "Bass".into()))
-                .unwrap();
+            commands.push(EngineCommand::add_track(bass)).unwrap();
             let mut main = clip(bass, 0.01, 0.01);
             if let EngineCommand::AddClip {
                 audio, duration, ..
@@ -326,11 +325,12 @@ fn all_instrument_source_formats_feed_builtins_and_hosted_receivers() {
             }
             commands.push(main).unwrap();
             if source_format == "builtin" {
+                commands.push(EngineCommand::add_track(ghost)).unwrap();
                 commands
-                    .push(EngineCommand::AddInstrumentTrack(
+                    .push(EngineCommand::set_built_in_instrument(
                         ghost,
-                        "Sampler".into(),
                         InstrumentKind::Sampler,
+                        48000,
                     ))
                     .unwrap();
                 commands
@@ -344,11 +344,9 @@ fn all_instrument_source_formats_feed_builtins_and_hosted_receivers() {
                     })
                     .unwrap();
             } else {
+                commands.push(EngineCommand::add_track(ghost)).unwrap();
                 commands
-                    .push(EngineCommand::AddMidiTrack(ghost, "Instrument".into()))
-                    .unwrap();
-                commands
-                    .push(EngineCommand::SetPluginInstrument {
+                    .push(EngineCommand::SetInstrument {
                         track_id: ghost,
                         instrument: Box::new(PluginInstrumentWrapper::new(
                             fixture.load_instrument(source_format, 4096),
@@ -359,26 +357,30 @@ fn all_instrument_source_formats_feed_builtins_and_hosted_receivers() {
             commands
                 .push(EngineCommand::AddNoteClip {
                     track_id: ghost,
-                    clip_id: note_clip,
-                    position_beats: 0.0,
-                    duration_beats: 1.0,
-                    start_marker_beats: 0.0,
-                    loop_enabled: false,
-                    loop_start_beats: 0.0,
-                    loop_end_beats: 0.0,
-                    groove_grid: Default::default(),
+                    insertion: vibez_engine::clip_insertion::PreparedNoteClipInsertion::new(
+                        note_clip,
+                        0.0,
+                        1.0,
+                        0.0,
+                        false,
+                        0.0,
+                        0.0,
+                        Default::default(),
+                    ),
                 })
                 .unwrap();
             commands
                 .push(EngineCommand::AddNote {
                     track_id: ghost,
                     clip_id: note_clip,
-                    note: vibez_core::midi::MidiNote {
-                        pitch: 60,
-                        velocity: 127,
-                        start_beat: 0.0,
-                        duration_beats: 1.0,
-                    },
+                    insertion: vibez_engine::clip_insertion::PreparedNoteInsertion::new(
+                        vibez_core::midi::MidiNote {
+                            pitch: 60,
+                            velocity: 127,
+                            start_beat: 0.0,
+                            duration_beats: 1.0,
+                        },
+                    ),
                 })
                 .unwrap();
             commands
@@ -396,12 +398,9 @@ fn all_instrument_source_formats_feed_builtins_and_hosted_receivers() {
                 let device = vibez_dsp::factory::create_effect(kind, 48000.0);
                 let inputs = device.external_inputs().to_vec();
                 commands
-                    .push(EngineCommand::AddEffect {
-                        track_id: bass,
-                        effect_id: effect,
-                        effect_type: kind,
-                        position: None,
-                    })
+                    .push(EngineCommand::insert_built_in_effect(
+                        bass, effect, kind, 48000,
+                    ))
                     .unwrap();
                 commands
                     .push(EngineCommand::SetEffectParam {
@@ -416,7 +415,7 @@ fn all_instrument_source_formats_feed_builtins_and_hosted_receivers() {
                 let device = fixture.load(receiver_format, 4096);
                 let inputs = device.external_inputs().to_vec();
                 commands
-                    .push(EngineCommand::AddPluginEffect {
+                    .push(EngineCommand::InsertEffect {
                         track_id: bass,
                         effect_id: effect,
                         effect: Box::new(PluginEffectWrapper::new(device)),
@@ -484,9 +483,7 @@ fn source_taps_apply_effects_fader_and_pan_only_at_the_requested_stage() {
             let (mut engine, mut commands, mut events) = AudioEngine::new();
             commands.push(EngineCommand::SetSampleRate(48000)).unwrap();
             for track in [bass, ghost] {
-                commands
-                    .push(EngineCommand::AddTrack(track, "Track".into()))
-                    .unwrap();
+                commands.push(EngineCommand::add_track(track)).unwrap();
             }
             commands.push(clip(bass, 0.1, 0.1)).unwrap();
             commands.push(clip(ghost, 1.0, 1.0)).unwrap();
@@ -500,12 +497,12 @@ fn source_taps_apply_effects_fader_and_pan_only_at_the_requested_stage() {
                 .push(EngineCommand::SetTrackSolo(bass, true))
                 .unwrap();
             commands
-                .push(EngineCommand::AddEffect {
-                    track_id: ghost,
-                    effect_id: gain_effect,
-                    effect_type: EffectType::Gain,
-                    position: None,
-                })
+                .push(EngineCommand::insert_built_in_effect(
+                    ghost,
+                    gain_effect,
+                    EffectType::Gain,
+                    48000,
+                ))
                 .unwrap();
             commands
                 .push(EngineCommand::SetEffectParam {
@@ -516,7 +513,7 @@ fn source_taps_apply_effects_fader_and_pan_only_at_the_requested_stage() {
                 })
                 .unwrap();
             commands
-                .push(EngineCommand::AddPluginEffect {
+                .push(EngineCommand::InsertEffect {
                     track_id: bass,
                     effect_id: effect,
                     effect: Box::new(PluginEffectWrapper::new(plugin)),
@@ -757,13 +754,9 @@ fn loadable_bus_effect_has_one_shared_solo_sum_and_an_audible_return_capture() {
             let inputs = plugin.external_inputs().to_vec();
             commands.push(EngineCommand::SetSampleRate(48000)).unwrap();
             for id in [kick, bass, ghost] {
-                commands
-                    .push(EngineCommand::AddTrack(id, "Track".into()))
-                    .unwrap();
+                commands.push(EngineCommand::add_track(id)).unwrap();
             }
-            commands
-                .push(EngineCommand::AddBus(bus, "Drums".into()))
-                .unwrap();
+            commands.push(EngineCommand::add_bus(bus)).unwrap();
             for (id, value) in [(kick, 0.05), (bass, 0.2), (ghost, 1.0)] {
                 commands.push(clip(id, value, value)).unwrap();
             }
@@ -783,12 +776,12 @@ fn loadable_bus_effect_has_one_shared_solo_sum_and_an_audible_return_capture() {
                 .push(EngineCommand::SetTrackSolo(bass, bass_solo))
                 .unwrap();
             commands
-                .push(EngineCommand::AddEffect {
-                    track_id: bass,
-                    effect_id: gate,
-                    effect_type: EffectType::Gate,
-                    position: None,
-                })
+                .push(EngineCommand::insert_built_in_effect(
+                    bass,
+                    gate,
+                    EffectType::Gate,
+                    48000,
+                ))
                 .unwrap();
             for (param_index, value) in [(0, -20.0), (1, 0.1)] {
                 commands
@@ -801,7 +794,7 @@ fn loadable_bus_effect_has_one_shared_solo_sum_and_an_audible_return_capture() {
                     .unwrap();
             }
             commands
-                .push(EngineCommand::AddPluginEffect {
+                .push(EngineCommand::InsertEffect {
                     track_id: bus,
                     effect_id: bus_fx,
                     effect: Box::new(PluginEffectWrapper::new(plugin)),

@@ -597,9 +597,6 @@ pub struct AppState {
     pub peak_r: f32,
     /// Smoothed audio callback work as a percentage of its buffer deadline.
     pub audio_cpu_load_percent: f32,
-    /// Spectrum analyser fed by the engine's per-track tap (follows
-    /// the selected track); drawn behind the channel EQ curve.
-    pub spectrum: crate::spectrum::SpectrumState,
 
     pub status_text: String,
     /// Active project-export completion percentage.
@@ -673,7 +670,6 @@ impl Default for AppState {
             peak_l: 0.0,
             peak_r: 0.0,
             audio_cpu_load_percent: 0.0,
-            spectrum: crate::spectrum::SpectrumState::default(),
             status_text: "Ready — Add a track to get started".to_string(),
             export_progress: None,
             audio_stream_health: AudioStreamHealth::default(),
@@ -892,6 +888,17 @@ impl AppState {
 
     pub fn find_track(&self, id: TrackId) -> Option<&ProjectTrack> {
         self.project_tracks.find(id)
+    }
+
+    /// Whether any channel, bus or the master still holds this effect.
+    pub fn has_effect(&self, id: vibez_core::id::EffectId) -> bool {
+        let project = &self.project_tracks;
+        project
+            .tracks
+            .iter()
+            .chain(&project.buses)
+            .chain(std::iter::once(&project.master))
+            .any(|track| track.effects.iter().any(|effect| effect.id == id))
     }
 
     pub fn find_track_mut(&mut self, id: TrackId) -> Option<&mut ProjectTrack> {

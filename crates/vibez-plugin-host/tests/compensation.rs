@@ -1,3 +1,5 @@
+//! Hosted plugin latency participates in the public compensated engine mix.
+
 mod support;
 #[global_allocator]
 static ALLOCATOR: support::allocation::AllocationCounter = support::allocation::AllocationCounter;
@@ -51,6 +53,7 @@ fn pulses(track_id: TrackId, amplitude: f32) -> EngineCommand {
         samples[onset] = amplitude;
     }
     EngineCommand::AddClip {
+        insertion: vibez_engine::clip_insertion::PreparedClipInsertion::new(),
         track_id,
         clip_id: ClipId::new(),
         audio: Arc::new(DecodedAudio {
@@ -83,13 +86,13 @@ fn mixed_loadable_effects_cancel_after_exact_parallel_compensation() {
             commands.push(EngineCommand::SetSampleRate(48000)).unwrap();
             for index in 0..2 {
                 commands
-                    .push(EngineCommand::AddTrack(tracks[index], "Pulse".into()))
+                    .push(EngineCommand::add_track(tracks[index]))
                     .unwrap();
                 commands
                     .push(pulses(tracks[index], if index == 0 { 1.0 } else { -1.0 }))
                     .unwrap();
                 commands
-                    .push(EngineCommand::AddPluginEffect {
+                    .push(EngineCommand::InsertEffect {
                         track_id: tracks[index],
                         effect_id: effects[index],
                         effect: Box::new(PluginEffectWrapper::new(delay(
@@ -166,12 +169,10 @@ fn loaded_instrument_latency_joins_the_same_compensated_mix() {
             instrument.reconfigure_on_main_thread().unwrap();
             commands.push(EngineCommand::SetSampleRate(48000)).unwrap();
             for id in [audio_track, instrument_track] {
-                commands
-                    .push(EngineCommand::AddTrack(id, "Controlled".into()))
-                    .unwrap();
+                commands.push(EngineCommand::add_track(id)).unwrap();
             }
             commands
-                .push(EngineCommand::SetPluginInstrument {
+                .push(EngineCommand::SetInstrument {
                     track_id: instrument_track,
                     instrument: Box::new(vibez_plugin_host::PluginInstrumentWrapper::new(
                         instrument,
@@ -187,7 +188,7 @@ fn loaded_instrument_latency_joins_the_same_compensated_mix() {
             }
             commands.push(audio).unwrap();
             commands
-                .push(EngineCommand::AddPluginEffect {
+                .push(EngineCommand::InsertEffect {
                     track_id: audio_track,
                     effect_id: effect,
                     effect: Box::new(PluginEffectWrapper::new(delay(
@@ -270,17 +271,15 @@ fn delayed_loadable_one_shot_notes_release_at_an_exact_callback_boundary_and_dra
             instrument.load_state(&state);
             instrument.reconfigure_on_main_thread().unwrap();
             commands.push(EngineCommand::SetSampleRate(48000)).unwrap();
+            commands.push(EngineCommand::add_track(track)).unwrap();
             commands
-                .push(EngineCommand::AddMidiTrack(track, "One shot".into()))
-                .unwrap();
-            commands
-                .push(EngineCommand::SetPluginInstrument {
+                .push(EngineCommand::SetInstrument {
                     track_id: track,
                     instrument: Box::new(PluginInstrumentWrapper::new(instrument)),
                 })
                 .unwrap();
             commands
-                .push(EngineCommand::AddPluginEffect {
+                .push(EngineCommand::InsertEffect {
                     track_id: track,
                     effect_id: effect,
                     effect: Box::new(PluginEffectWrapper::new(delay(

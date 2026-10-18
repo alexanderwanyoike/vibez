@@ -1,3 +1,5 @@
+//! Native rotary controls with parameter-specific scaling and undo gestures.
+
 use std::time::{Duration, Instant};
 
 use iced::keyboard;
@@ -5,7 +7,7 @@ use iced::mouse;
 use iced::widget::{canvas, column, text};
 use iced::{Color, Element, Length, Rectangle, Renderer, Theme};
 
-use crate::message::{DrumPadParam, Message};
+use crate::message::Message;
 use crate::state::{AudioClipInspectorField, AudioClipRotaryField, UndoGestureId};
 use crate::theme;
 use crate::widgets::double_click::DoubleClick;
@@ -30,11 +32,10 @@ const DOUBLE_CLICK_MS: u64 = 300;
 #[derive(Clone, Copy)]
 pub enum KnobTarget {
     Effect(EffectId),
+    GainDb(EffectId),
     Instrument,
-    DrumPad {
-        pad_index: usize,
-        param: DrumPadParam,
-    },
+    /// Any device a `DeviceSlot` names.
+    Device(crate::domains::device_params::DeviceSlot),
     /// Post-fader send amount into a bus.
     Send {
         bus_id: TrackId,
@@ -144,46 +145,15 @@ impl EffectKnobWidget {
         }
     }
 
-    /// Knob bound to a drum rack pad parameter.
-    #[allow(clippy::too_many_arguments)]
-    pub fn for_drum_pad(
-        track_id: TrackId,
-        pad_index: usize,
-        param: DrumPadParam,
-        value: f32,
-        min: f32,
-        max: f32,
-        default: f32,
-        arc_color: Color,
-    ) -> Self {
-        Self {
-            track_id,
-            target: KnobTarget::DrumPad { pad_index, param },
-            param_index: 0,
-            value,
-            min,
-            max,
-            default,
-            arc_color,
-        }
-    }
-
     fn immediate_value_message(&self, value: f32) -> Message {
         match self.target {
-            KnobTarget::Effect(effect_id) => {
+            KnobTarget::Effect(effect_id) | KnobTarget::GainDb(effect_id) => {
                 Message::set_effect_param(self.track_id, effect_id, self.param_index, value)
             }
             KnobTarget::Instrument => {
                 Message::set_instrument_param(self.track_id, self.param_index, value)
             }
-            KnobTarget::DrumPad { pad_index, param } => {
-                Message::Devices(crate::domains::devices::DevicesMsg::SetDrumPadParam {
-                    track_id: self.track_id,
-                    pad_index,
-                    param,
-                    value,
-                })
-            }
+            KnobTarget::Device(slot) => slot.set(self.track_id, self.param_index, value),
             KnobTarget::Send { bus_id } => Message::set_send(self.track_id, bus_id, value),
             KnobTarget::AudioClip { clip_id, field } => Message::Arrangement(
                 crate::domains::arrangement::ArrangementMsg::SetAudioClipRotaryValue {
@@ -247,6 +217,9 @@ impl EffectKnobWidget {
 
     /// Normalize value to 0.0..1.0 range.
     fn normalized(&self) -> f32 {
+        if matches!(self.target, KnobTarget::GainDb(_)) {
+            return crate::domains::gain::knob_position(self.value);
+        }
         let range = self.max - self.min;
         if range <= 0.0 {
             0.0
@@ -257,6 +230,9 @@ impl EffectKnobWidget {
 
     /// Denormalize from 0.0..1.0 to actual value range.
     fn denormalize(&self, n: f32) -> f32 {
+        if matches!(self.target, KnobTarget::GainDb(_)) {
+            return crate::domains::gain::knob_amplitude(n).clamp(self.min, self.max);
+        }
         self.min + n.clamp(0.0, 1.0) * (self.max - self.min)
     }
 }
@@ -537,6 +513,30 @@ fn build_arc(center: iced::Point, radius: f32, start: f32, end: f32) -> canvas::
 mod tests {
     use super::*;
     use crate::domains::arrangement::ArrangementMsg;
+
+    #[test]
+    fn gain_decibel_knob_keeps_unity_centered_and_emits_native_amplitude() {
+        let track_id = TrackId::new();
+        let effect_id = EffectId::new();
+        let mut knob =
+            EffectKnobWidget::new(track_id, effect_id, 0, 1.0, 0.0, 2.0, 1.0, Color::WHITE);
+        knob.target = KnobTarget::GainDb(effect_id);
+        assert_eq!(knob.normalized(), 0.5);
+        assert!((knob.denormalize(0.25) - 0.031_622_775).abs() < 1e-6);
+        assert!((knob.denormalize(0.75) - 2.0_f32.sqrt()).abs() < 1e-6);
+        assert_eq!(knob.denormalize(0.0), 0.0);
+        assert_eq!(knob.denormalize(0.5), 1.0);
+        assert!((knob.denormalize(1.0) - 2.0).abs() < 1e-6);
+        knob.value = 0.031_622_775;
+        assert!((knob.normalized() - 0.25).abs() < 1e-6);
+        assert!(matches!(
+            knob.drag_value_message(knob.denormalize(0.25)),
+            Message::Devices(crate::domains::devices::DevicesMsg::SetEffectParam(
+                actual_track, actual_effect, 0, value,
+            )) if actual_track == track_id && actual_effect == effect_id
+                && (value - 0.031_622_775).abs() < 1e-6
+        ));
+    }
 
     fn clip_knob(field: AudioClipRotaryField) -> EffectKnobWidget {
         EffectKnobWidget::for_audio_clip(

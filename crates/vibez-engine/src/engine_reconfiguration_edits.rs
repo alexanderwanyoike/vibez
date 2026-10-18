@@ -4,7 +4,7 @@ use super::*;
 
 impl AudioEngine {
     pub(super) fn retain_device_parameter(&mut self, command: &EngineCommand) -> bool {
-        let Some(pending) = self.pending_device_reconfiguration else {
+        let Some(pending) = self.device_handoff.pending() else {
             return false;
         };
         let parameter = match command {
@@ -28,15 +28,9 @@ impl AudioEngine {
         let Some((index, value)) = parameter else {
             return false;
         };
-        if let Some(previous) = self
-            .pending_device_parameters
-            .iter_mut()
-            .find(|(id, _)| *id == index)
+        if let device_handoff::ParameterRetention::Full =
+            self.device_handoff.retain_parameter(index, value)
         {
-            previous.1 = value;
-        } else if self.pending_device_parameters.len() < self.pending_device_parameters.capacity() {
-            self.pending_device_parameters.push((index, value));
-        } else {
             // Match the hosted parameter event bound without blocking the
             // returning owner behind its own queued edits.
             self.report_compensation_failure(
@@ -52,14 +46,9 @@ impl AudioEngine {
         &mut self,
         track: TrackId,
         effect: Option<vibez_core::id::EffectId>,
-        mut set: impl FnMut(usize, f32) -> bool,
+        set: impl FnMut(usize, f32) -> bool,
     ) {
-        let mut rejected = false;
-        for &(index, value) in &self.pending_device_parameters {
-            rejected |= !set(index, value);
-        }
-        self.pending_device_parameters.clear();
-        if rejected {
+        if self.device_handoff.apply_retained_parameters(set) {
             self.report_compensation_failure(
                 track,
                 effect,
@@ -69,7 +58,7 @@ impl AudioEngine {
     }
 
     pub(super) fn prepare_device_edit(&mut self, command: &mut EngineCommand) {
-        let Some(mut pending) = self.pending_device_reconfiguration else {
+        let Some(mut pending) = self.device_handoff.pending() else {
             return;
         };
         let invalid = command
@@ -88,13 +77,7 @@ impl AudioEngine {
                     }
                 }
             }
-            EngineCommand::AddEffect {
-                track_id,
-                effect_id,
-                position,
-                ..
-            }
-            | EngineCommand::AddPluginEffect {
+            EngineCommand::InsertEffect {
                 track_id,
                 effect_id,
                 position,
@@ -143,11 +126,10 @@ impl AudioEngine {
             _ => {}
         }
         if invalid {
-            self.pending_device_reconfiguration = None;
-            self.pending_device_parameters.clear();
-            self.compensation_suspended = false;
+            self.device_handoff.cancel_pending();
+            self.device_handoff.clear_suspension();
         } else {
-            self.pending_device_reconfiguration = Some(pending);
+            self.device_handoff.retain_edited_target(pending);
         }
     }
 }

@@ -1,6 +1,11 @@
 //! Section Record boundary regressions at the public command/event seam.
 
 use super::*;
+use crate::events::{
+    InstrumentNoteInputEvent, NoteRepeatedEvent, SectionRecordArmedEvent,
+    SectionRecordStartedEvent, SectionRecordStoppedEvent,
+};
+use graph_test_support::{graph_engine, routing_channel};
 
 use crate::playback_source::{
     EngineClip, EngineNoteClip, PreparedPlaybackSource, PreparedSectionPlaybackSource,
@@ -84,16 +89,16 @@ fn source(
 fn record_events(events: &mut rtrb::Consumer<EngineEvent>) -> Vec<(bool, u64, u64)> {
     std::iter::from_fn(|| events.pop().ok())
         .filter_map(|event| match event {
-            EngineEvent::SectionRecordArmed {
+            EngineEvent::SectionRecordArmed(SectionRecordArmedEvent {
                 effective_at_samples,
                 section_position_samples,
                 ..
-            } => Some((false, effective_at_samples, section_position_samples)),
-            EngineEvent::SectionRecordStarted {
+            }) => Some((false, effective_at_samples, section_position_samples)),
+            EngineEvent::SectionRecordStarted(SectionRecordStartedEvent {
                 effective_at_samples,
                 section_position_samples,
                 ..
-            } => Some((true, effective_at_samples, section_position_samples)),
+            }) => Some((true, effective_at_samples, section_position_samples)),
             _ => None,
         })
         .collect()
@@ -102,15 +107,14 @@ fn record_events(events: &mut rtrb::Consumer<EngineEvent>) -> Vec<(bool, u64, u6
 #[test]
 fn stopped_count_in_variants_activate_section_at_exact_boundary() {
     for (count_in_bars, boundary) in [(0, 0), (1, 16), (2, 32)] {
-        let (mut engine, mut commands, mut events) = AudioEngine::new();
         let track_id = TrackId::new();
+        let (mut engine, mut commands, mut events) =
+            graph_engine(&[routing_channel(track_id), routing_channel(TrackId::MASTER)]);
         let section_id = SectionId::new();
         commands.push(EngineCommand::SetSampleRate(8)).unwrap();
         commands.push(EngineCommand::SetBpm(120.0)).unwrap();
         commands.push(EngineCommand::Seek(40)).unwrap();
-        commands
-            .push(EngineCommand::AddTrack(track_id, "Audio".into()))
-            .unwrap();
+        commands.push(EngineCommand::add_track(track_id)).unwrap();
         commands
             .push(EngineCommand::ArmSectionRecord {
                 section_id,
@@ -148,14 +152,13 @@ fn stopped_count_in_variants_activate_section_at_exact_boundary() {
 
 #[test]
 fn stopped_count_in_ignores_the_idle_performance_clock_before_transport_reset() {
-    let (mut engine, mut commands, mut events) = AudioEngine::new();
     let track_id = TrackId::new();
+    let (mut engine, mut commands, mut events) =
+        graph_engine(&[routing_channel(track_id), routing_channel(TrackId::MASTER)]);
     let section_id = SectionId::new();
     commands.push(EngineCommand::SetSampleRate(8)).unwrap();
     commands.push(EngineCommand::SetBpm(120.0)).unwrap();
-    commands
-        .push(EngineCommand::AddTrack(track_id, "Audio".into()))
-        .unwrap();
+    commands.push(EngineCommand::add_track(track_id)).unwrap();
 
     engine.process(&mut [0.0; 40], 1);
     commands
@@ -185,8 +188,9 @@ fn stopped_count_in_ignores_the_idle_performance_clock_before_transport_reset() 
 
 #[test]
 fn stopped_count_in_does_not_play_arrangement_content() {
-    let (mut engine, mut commands, _events) = AudioEngine::new();
     let track_id = TrackId::new();
+    let (mut engine, mut commands, _events) =
+        graph_engine(&[routing_channel(track_id), routing_channel(TrackId::MASTER)]);
     let section_id = SectionId::new();
     let arrangement_audio = Arc::new(DecodedAudio {
         channels: vec![vec![0.5; 128]],
@@ -194,11 +198,10 @@ fn stopped_count_in_does_not_play_arrangement_content() {
     });
     commands.push(EngineCommand::SetSampleRate(8)).unwrap();
     commands.push(EngineCommand::SetBpm(120.0)).unwrap();
-    commands
-        .push(EngineCommand::AddTrack(track_id, "Audio".into()))
-        .unwrap();
+    commands.push(EngineCommand::add_track(track_id)).unwrap();
     commands
         .push(EngineCommand::AddClip {
+            insertion: crate::clip_insertion::PreparedClipInsertion::new(),
             track_id,
             clip_id: ClipId::new(),
             audio: arrangement_audio,
@@ -247,18 +250,18 @@ fn stopped_count_in_does_not_play_arrangement_content() {
 
 #[test]
 fn stopped_count_in_keeps_live_instrument_monitoring() {
-    let (mut engine, mut commands, _events) = AudioEngine::new();
     let track_id = TrackId::new();
+    let (mut engine, mut commands, _events) =
+        graph_engine(&[routing_channel(track_id), routing_channel(TrackId::MASTER)]);
     let section_id = SectionId::new();
     commands.push(EngineCommand::SetSampleRate(8_000)).unwrap();
     commands.push(EngineCommand::SetBpm(120.0)).unwrap();
+    commands.push(EngineCommand::add_track(track_id)).unwrap();
     commands
-        .push(EngineCommand::AddMidiTrack(track_id, "MIDI".into()))
-        .unwrap();
-    commands
-        .push(EngineCommand::SetTrackInstrument(
+        .push(EngineCommand::set_built_in_instrument(
             track_id,
             InstrumentKind::SubtractiveSynth,
+            8_000,
         ))
         .unwrap();
     commands
@@ -289,14 +292,13 @@ fn stopped_count_in_keeps_live_instrument_monitoring() {
 
 #[test]
 fn stopped_count_in_click_accents_each_bar_and_clicks_each_beat() {
-    let (mut engine, mut commands, _events) = AudioEngine::new();
     let track_id = TrackId::new();
+    let (mut engine, mut commands, _events) =
+        graph_engine(&[routing_channel(track_id), routing_channel(TrackId::MASTER)]);
     let section_id = SectionId::new();
     commands.push(EngineCommand::SetSampleRate(8_000)).unwrap();
     commands.push(EngineCommand::SetBpm(120.0)).unwrap();
-    commands
-        .push(EngineCommand::AddTrack(track_id, "Audio".into()))
-        .unwrap();
+    commands.push(EngineCommand::add_track(track_id)).unwrap();
     commands
         .push(EngineCommand::ArmSectionRecord {
             section_id,
@@ -322,14 +324,13 @@ fn stopped_count_in_click_accents_each_bar_and_clicks_each_beat() {
 
 #[test]
 fn playing_arm_uses_next_section_bar_without_restart() {
-    let (mut engine, mut commands, mut events) = AudioEngine::new();
     let track_id = TrackId::new();
+    let (mut engine, mut commands, mut events) =
+        graph_engine(&[routing_channel(track_id), routing_channel(TrackId::MASTER)]);
     let section_id = SectionId::new();
     commands.push(EngineCommand::SetSampleRate(8)).unwrap();
     commands.push(EngineCommand::SetBpm(120.0)).unwrap();
-    commands
-        .push(EngineCommand::AddTrack(track_id, "Audio".into()))
-        .unwrap();
+    commands.push(EngineCommand::add_track(track_id)).unwrap();
     commands
         .push(EngineCommand::LaunchSection(source(
             section_id, track_id, 0.5,
@@ -361,14 +362,13 @@ fn playing_arm_uses_next_section_bar_without_restart() {
 
 #[test]
 fn note_at_block_start_boundary_is_reported_after_recording_starts() {
-    let (mut engine, mut commands, mut events) = AudioEngine::new();
     let track_id = TrackId::new();
+    let (mut engine, mut commands, mut events) =
+        graph_engine(&[routing_channel(track_id), routing_channel(TrackId::MASTER)]);
     let section_id = SectionId::new();
     commands.push(EngineCommand::SetSampleRate(8)).unwrap();
     commands.push(EngineCommand::SetBpm(120.0)).unwrap();
-    commands
-        .push(EngineCommand::AddMidiTrack(track_id, "MIDI".into()))
-        .unwrap();
+    commands.push(EngineCommand::add_track(track_id)).unwrap();
     commands
         .push(EngineCommand::LaunchSection(source(
             section_id, track_id, 0.0,
@@ -400,16 +400,16 @@ fn note_at_block_start_boundary_is_reported_after_recording_starts() {
 
     let boundary_events: Vec<_> = std::iter::from_fn(|| events.pop().ok())
         .filter_map(|event| match event {
-            EngineEvent::SectionRecordStarted {
+            EngineEvent::SectionRecordStarted(SectionRecordStartedEvent {
                 effective_at_samples,
                 ..
-            } => Some(("record-started", effective_at_samples)),
-            EngineEvent::InstrumentNoteInput {
+            }) => Some(("record-started", effective_at_samples)),
+            EngineEvent::InstrumentNoteInput(InstrumentNoteInputEvent {
                 pitch: 42,
                 on: true,
                 effective_at_samples,
                 ..
-            } => Some(("note-on", effective_at_samples)),
+            }) => Some(("note-on", effective_at_samples)),
             _ => None,
         })
         .collect();
@@ -422,14 +422,13 @@ fn note_at_block_start_boundary_is_reported_after_recording_starts() {
 
 #[test]
 fn stop_reports_the_engine_timestamp_and_local_playhead() {
-    let (mut engine, mut commands, mut events) = AudioEngine::new();
     let track_id = TrackId::new();
+    let (mut engine, mut commands, mut events) =
+        graph_engine(&[routing_channel(track_id), routing_channel(TrackId::MASTER)]);
     let section_id = SectionId::new();
     commands.push(EngineCommand::SetSampleRate(8)).unwrap();
     commands.push(EngineCommand::SetBpm(120.0)).unwrap();
-    commands
-        .push(EngineCommand::AddTrack(track_id, "Audio".into()))
-        .unwrap();
+    commands.push(EngineCommand::add_track(track_id)).unwrap();
     commands
         .push(EngineCommand::ArmSectionRecord {
             section_id,
@@ -445,12 +444,12 @@ fn stop_reports_the_engine_timestamp_and_local_playhead() {
     engine.process(&mut [0.0], 1);
 
     let stopped = std::iter::from_fn(|| events.pop().ok()).find_map(|event| match event {
-        EngineEvent::SectionRecordStopped {
+        EngineEvent::SectionRecordStopped(SectionRecordStoppedEvent {
             effective_at_samples,
             section_position_samples,
             started,
             ..
-        } => Some((effective_at_samples, section_position_samples, started)),
+        }) => Some((effective_at_samples, section_position_samples, started)),
         _ => None,
     });
     assert_eq!(stopped, Some((5, 5, true)));
@@ -458,21 +457,21 @@ fn stop_reports_the_engine_timestamp_and_local_playhead() {
 
 #[test]
 fn repeated_note_reports_swung_truth_and_straight_canonical_position() {
-    let (mut engine, mut commands, mut events) = AudioEngine::new();
     let track_id = TrackId::new();
+    let (mut engine, mut commands, mut events) =
+        graph_engine(&[routing_channel(track_id), routing_channel(TrackId::MASTER)]);
     let section_id = SectionId::new();
     commands.push(EngineCommand::SetSampleRate(96)).unwrap();
     commands.push(EngineCommand::SetBpm(60.0)).unwrap();
     commands
         .push(EngineCommand::SetProjectSwing(SwingAmount::new(0.75)))
         .unwrap();
+    commands.push(EngineCommand::add_track(track_id)).unwrap();
     commands
-        .push(EngineCommand::AddMidiTrack(track_id, "Hats".into()))
-        .unwrap();
-    commands
-        .push(EngineCommand::SetTrackInstrument(
+        .push(EngineCommand::set_built_in_instrument(
             track_id,
             InstrumentKind::SubtractiveSynth,
+            96,
         ))
         .unwrap();
     commands
@@ -496,14 +495,14 @@ fn repeated_note_reports_swung_truth_and_straight_canonical_position() {
     engine.process(&mut vec![0.0; 40 * 2], 2);
 
     let repeated = std::iter::from_fn(|| events.pop().ok()).find_map(|event| match event {
-        EngineEvent::NoteRepeated {
+        EngineEvent::NoteRepeated(NoteRepeatedEvent {
             effective_at_samples,
             canonical_at_samples,
             section_position_samples,
             canonical_section_position_samples,
             rate,
             ..
-        } if effective_at_samples > 0 => Some((
+        }) if effective_at_samples > 0 => Some((
             effective_at_samples,
             canonical_at_samples,
             section_position_samples,
@@ -520,17 +519,16 @@ fn repeated_note_reports_swung_truth_and_straight_canonical_position() {
 
 #[test]
 fn replace_silences_resident_notes_only_until_the_first_section_wrap() {
-    let (mut engine, mut commands, _events) = AudioEngine::new();
     let track_id = TrackId::new();
+    let (mut engine, mut commands, _events) =
+        graph_engine(&[routing_channel(track_id), routing_channel(TrackId::MASTER)]);
     let section_id = SectionId::new();
     let note_events = Arc::new(Mutex::new(Vec::new()));
     commands.push(EngineCommand::SetSampleRate(8)).unwrap();
     commands.push(EngineCommand::SetBpm(120.0)).unwrap();
+    commands.push(EngineCommand::add_track(track_id)).unwrap();
     commands
-        .push(EngineCommand::AddMidiTrack(track_id, "MIDI".into()))
-        .unwrap();
-    commands
-        .push(EngineCommand::SetPluginInstrument {
+        .push(EngineCommand::SetInstrument {
             track_id,
             instrument: Box::new(NoteLogInstrument(Arc::clone(&note_events))),
         })
@@ -607,17 +605,16 @@ fn replace_silences_resident_notes_only_until_the_first_section_wrap() {
 
 #[test]
 fn replace_keeps_live_input_and_note_repeat_audible() {
-    let (mut engine, mut commands, _events) = AudioEngine::new();
     let track_id = TrackId::new();
+    let (mut engine, mut commands, _events) =
+        graph_engine(&[routing_channel(track_id), routing_channel(TrackId::MASTER)]);
     let section_id = SectionId::new();
     let note_events = Arc::new(Mutex::new(Vec::new()));
     commands.push(EngineCommand::SetSampleRate(8)).unwrap();
     commands.push(EngineCommand::SetBpm(120.0)).unwrap();
+    commands.push(EngineCommand::add_track(track_id)).unwrap();
     commands
-        .push(EngineCommand::AddMidiTrack(track_id, "MIDI".into()))
-        .unwrap();
-    commands
-        .push(EngineCommand::SetPluginInstrument {
+        .push(EngineCommand::SetInstrument {
             track_id,
             instrument: Box::new(NoteLogInstrument(Arc::clone(&note_events))),
         })

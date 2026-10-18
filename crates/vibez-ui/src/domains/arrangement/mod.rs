@@ -33,6 +33,9 @@ mod slice_to_drum_rack;
 mod slicing;
 pub(crate) use slicing::slice_region_count;
 
+pub const PROJECT_TRACKS_FULL: &str = "This project has no room for another track";
+pub const PROJECT_BUSES_FULL: &str = "This project has no room for another return";
+
 /// Every channel carries a flat SSL-style EQ. Also used for the master
 /// bus, which is why it is crate-visible.
 pub(crate) fn attach_channel_eq(engine: &mut impl EngineHandle, track: &mut ProjectTrack) {
@@ -55,12 +58,7 @@ pub(crate) fn attach_channel_eq(engine: &mut impl EngineHandle, track: &mut Proj
         has_plugin_gui: false,
         plugin_ref: None,
     });
-    engine.send(EngineCommand::AddEffect {
-        track_id: track.id,
-        effect_id,
-        effect_type,
-        position: None,
-    });
+    engine.insert_built_in_effect(track.id, effect_id, effect_type);
 }
 
 impl ProjectTracksState {
@@ -76,29 +74,32 @@ impl ProjectTracksState {
         }
     }
 
-    /// Create one numbered Project Track with the standard channel strip.
+    /// Create one numbered Project Track with the standard channel strip, or
+    /// `None` when the project already holds `CHANNEL_CAPACITY` tracks.
     /// Callers remain responsible for adding its timeline lane and selecting it.
     pub(crate) fn add_numbered_track(
         &mut self,
         prefix: &str,
         kind: TrackKind,
         engine: &mut impl EngineHandle,
-    ) -> TrackId {
+    ) -> Option<TrackId> {
+        if self.tracks.len() >= vibez_engine::mixer::CHANNEL_CAPACITY {
+            return None;
+        }
         let track_number = self.next_unique_track_number(prefix);
         self.next_track_number = track_number + 1;
         let id = TrackId::new();
         let name = format!("{prefix} {track_number}");
         let color_index = (track_number.wrapping_sub(1) % 8) as u8;
+        engine.send(EngineCommand::add_track(id));
         let mut track = if kind.is_midi() {
-            engine.send(EngineCommand::AddMidiTrack(id, name.clone()));
             ProjectTrack::new_instrument(id, name, kind, color_index)
         } else {
-            engine.send(EngineCommand::AddTrack(id, name.clone()));
             ProjectTrack::new(id, name, color_index)
         };
         attach_channel_eq(engine, &mut track);
         self.tracks.push(track);
-        id
+        Some(id)
     }
 
     fn move_track(&mut self, track_id: TrackId, up: bool, engine: &mut impl EngineHandle) {
@@ -397,21 +398,25 @@ impl TimelineEditorState {
                         engine.send(EngineCommand::RemoveNoteClip(source_track, clip_id));
                         // Add to engine target track
                         engine.send(EngineCommand::AddNoteClip {
-                            start_marker_beats: clip.start_marker_beats,
                             track_id: target_track,
-                            clip_id,
-                            position_beats: clip.position_beats,
-                            duration_beats: clip.duration_beats,
-                            loop_enabled: clip.loop_enabled,
-                            loop_start_beats: clip.loop_start_beats,
-                            loop_end_beats: clip.loop_end_beats,
-                            groove_grid: clip.groove_grid,
+                            insertion: vibez_engine::clip_insertion::PreparedNoteClipInsertion::new(
+                                clip_id,
+                                clip.position_beats,
+                                clip.duration_beats,
+                                clip.start_marker_beats,
+                                clip.loop_enabled,
+                                clip.loop_start_beats,
+                                clip.loop_end_beats,
+                                clip.groove_grid,
+                            ),
                         });
                         for note in &clip.notes {
                             engine.send(EngineCommand::AddNote {
                                 track_id: target_track,
                                 clip_id,
-                                note: *note,
+                                insertion: vibez_engine::clip_insertion::PreparedNoteInsertion::new(
+                                    *note,
+                                ),
                             });
                         }
                         // Add to UI target track
@@ -443,6 +448,7 @@ impl TimelineEditorState {
                         engine.send(EngineCommand::RemoveClip(source_track, clip_id));
                         // Add to engine target track
                         engine.send(EngineCommand::AddClip {
+                            insertion: vibez_engine::clip_insertion::PreparedClipInsertion::new(),
                             track_id: target_track,
                             clip_id,
                             audio: Arc::clone(&clip.audio),
@@ -530,6 +536,7 @@ impl TimelineEditorState {
                                 });
                                 if let Some(duplicate) = duplicate {
                                     engine.send(EngineCommand::AddClip {
+                                        insertion: vibez_engine::clip_insertion::PreparedClipInsertion::new(),
                                         track_id: *track_id,
                                         clip_id: duplicate.id,
                                         audio: Arc::clone(&duplicate.audio),
@@ -572,21 +579,23 @@ impl TimelineEditorState {
                                     });
                                 if let Some(duplicate) = duplicate {
                                     engine.send(EngineCommand::AddNoteClip {
-                                        start_marker_beats: duplicate.start_marker_beats,
                                         track_id: *track_id,
-                                        clip_id: duplicate.id,
-                                        position_beats: duplicate.position_beats,
-                                        duration_beats: duplicate.duration_beats,
-                                        loop_enabled: duplicate.loop_enabled,
-                                        loop_start_beats: duplicate.loop_start_beats,
-                                        loop_end_beats: duplicate.loop_end_beats,
-                                        groove_grid: duplicate.groove_grid,
+                                        insertion: vibez_engine::clip_insertion::PreparedNoteClipInsertion::new(
+                                            duplicate.id,
+                                            duplicate.position_beats,
+                                            duplicate.duration_beats,
+                                            duplicate.start_marker_beats,
+                                            duplicate.loop_enabled,
+                                            duplicate.loop_start_beats,
+                                            duplicate.loop_end_beats,
+                                            duplicate.groove_grid,
+                                        ),
                                     });
                                     for note in &duplicate.notes {
                                         engine.send(EngineCommand::AddNote {
                                             track_id: *track_id,
                                             clip_id: duplicate.id,
-                                            note: *note,
+                                            insertion: vibez_engine::clip_insertion::PreparedNoteInsertion::new(*note),
                                         });
                                     }
                                     let new_id = duplicate.id;
@@ -759,21 +768,25 @@ impl TimelineEditorState {
                         track.note_clips.push(new_clip);
                     }
                     engine.send(EngineCommand::AddNoteClip {
-                        start_marker_beats,
                         track_id,
-                        clip_id: new_clip_id,
-                        position_beats: pos,
-                        duration_beats: dur,
-                        loop_enabled,
-                        loop_start_beats: loop_start,
-                        loop_end_beats: loop_end,
-                        groove_grid,
+                        insertion: vibez_engine::clip_insertion::PreparedNoteClipInsertion::new(
+                            new_clip_id,
+                            pos,
+                            dur,
+                            start_marker_beats,
+                            loop_enabled,
+                            loop_start,
+                            loop_end,
+                            groove_grid,
+                        ),
                     });
                     for note in &notes {
                         engine.send(EngineCommand::AddNote {
                             track_id,
                             clip_id: new_clip_id,
-                            note: *note,
+                            insertion: vibez_engine::clip_insertion::PreparedNoteInsertion::new(
+                                *note,
+                            ),
                         });
                     }
                     self.selected_note_clip = Some((track_id, new_clip_id));

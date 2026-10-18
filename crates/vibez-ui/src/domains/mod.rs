@@ -11,18 +11,43 @@ use std::collections::VecDeque;
 pub mod arrangement;
 pub mod audio_recording;
 pub mod audio_settings;
+pub mod auto_pan;
 pub mod automation;
+pub mod bitcrush;
 pub mod browser;
 pub mod compensation;
+pub mod compressor;
+pub mod delay;
+pub mod device_card;
 pub mod device_latency;
+pub mod device_levels;
+pub mod device_params;
+pub mod device_presets;
 pub mod devices;
+pub mod drive;
+pub mod drum_kits;
+pub mod echo;
+pub mod eq;
+pub mod filter;
+pub mod fm;
+pub mod gain;
+pub mod gate;
+pub mod instrument_card;
+pub mod limiter;
+pub mod param_entry;
 pub mod perform;
+pub mod phaser;
 pub mod piano_roll;
 pub mod project;
+pub mod reverb;
+pub mod sampler;
+pub mod saturator;
 pub mod sidechain;
+pub mod synth;
 pub mod timeline_editor;
 pub mod transport;
 pub mod view;
+pub mod wavetable;
 
 use vibez_engine::commands::EngineCommand;
 
@@ -31,6 +56,32 @@ use vibez_engine::commands::EngineCommand;
 /// and assert on the exact commands a message produced.
 pub trait EngineHandle {
     fn send(&mut self, cmd: EngineCommand);
+    /// The rate the engine will run at when it drains the next command.
+    fn sample_rate(&self) -> u32;
+
+    fn insert_built_in_effect(
+        &mut self,
+        track_id: vibez_core::id::TrackId,
+        effect_id: vibez_core::id::EffectId,
+        effect_type: vibez_core::effect::EffectType,
+    ) {
+        let command = EngineCommand::insert_built_in_effect(
+            track_id,
+            effect_id,
+            effect_type,
+            self.sample_rate(),
+        );
+        self.send(command);
+    }
+
+    fn set_built_in_instrument(
+        &mut self,
+        track_id: vibez_core::id::TrackId,
+        kind: vibez_core::midi::InstrumentKind,
+    ) {
+        let command = EngineCommand::set_built_in_instrument(track_id, kind, self.sample_rate());
+        self.send(command);
+    }
 }
 
 /// Ordered UI-side delivery for the bounded real-time engine queue.
@@ -39,7 +90,6 @@ pub trait EngineHandle {
 /// than fit in one audio callback's ring buffer. Overflow stays on the UI
 /// thread and is retried on later ticks; new commands join the back of the
 /// same queue so transport actions cannot overtake unfinished project sync.
-#[derive(Default)]
 pub struct EngineCommandQueue {
     producer: Option<rtrb::Producer<EngineCommand>>,
     pending: VecDeque<EngineCommand>,
@@ -48,15 +98,26 @@ pub struct EngineCommandQueue {
         usize,
     >,
     effect_chain_edited: bool,
+    sample_rate: u32,
+}
+
+impl Default for EngineCommandQueue {
+    fn default() -> Self {
+        Self {
+            producer: None,
+            pending: VecDeque::new(),
+            device_owners: Default::default(),
+            effect_chain_edited: false,
+            sample_rate: vibez_engine::engine::DEFAULT_SAMPLE_RATE,
+        }
+    }
 }
 
 impl EngineCommandQueue {
     pub fn new(producer: rtrb::Producer<EngineCommand>) -> Self {
         Self {
             producer: Some(producer),
-            pending: VecDeque::new(),
-            device_owners: Default::default(),
-            effect_chain_edited: false,
+            ..Self::default()
         }
     }
 
@@ -85,7 +146,7 @@ impl EngineCommandQueue {
                 .retain(|(track, effect), _| !invalidation.matches(*track, *effect));
         }
         match command {
-            EngineCommand::AddPluginEffect {
+            EngineCommand::InsertEffect {
                 track_id,
                 effect_id,
                 effect,
@@ -96,7 +157,7 @@ impl EngineCommandQueue {
                     effect_owner_identity(&**effect),
                 );
             }
-            EngineCommand::SetPluginInstrument {
+            EngineCommand::SetInstrument {
                 track_id,
                 instrument,
             } => {
@@ -130,11 +191,18 @@ impl EngineCommandQueue {
 }
 
 impl EngineHandle for EngineCommandQueue {
+    fn sample_rate(&self) -> u32 {
+        self.sample_rate
+    }
+
     fn send(&mut self, cmd: EngineCommand) {
         // Lifetime changes take effect in the UI even when the command ring is
         // full; a delayed native handoff cannot reactivate a replaced owner.
         self.record_device_owner(&cmd);
         self.effect_chain_edited |= cmd.edits_effect_chain();
+        if let EngineCommand::SetSampleRate(rate) = &cmd {
+            self.sample_rate = *rate;
+        }
         let Some(producer) = self.producer.as_mut() else {
             return;
         };
@@ -155,6 +223,9 @@ impl EngineHandle for EngineTx<'_> {
     fn send(&mut self, cmd: EngineCommand) {
         self.0.send(cmd);
     }
+    fn sample_rate(&self) -> u32 {
+        self.0.sample_rate()
+    }
 }
 
 /// Editor target whose content is not currently resident in the audio engine.
@@ -167,11 +238,39 @@ pub struct DiscardingEngine;
 
 impl EngineHandle for DiscardingEngine {
     fn send(&mut self, _cmd: EngineCommand) {}
+    fn sample_rate(&self) -> u32 {
+        vibez_engine::engine::DEFAULT_SAMPLE_RATE
+    }
 }
 
 #[cfg(test)]
 mod engine_command_queue_tests {
     use super::*;
+
+    #[test]
+    fn built_in_devices_use_the_rate_last_forwarded_to_the_engine() {
+        let (producer, mut consumer) = rtrb::RingBuffer::new(4);
+        let mut queue = EngineCommandQueue::new(producer);
+        assert_eq!(
+            queue.sample_rate(),
+            vibez_engine::engine::DEFAULT_SAMPLE_RATE
+        );
+        queue.send(EngineCommand::SetSampleRate(96_000));
+        assert_eq!(queue.sample_rate(), 96_000);
+        queue.insert_built_in_effect(
+            vibez_core::id::TrackId::new(),
+            vibez_core::id::EffectId::new(),
+            vibez_core::effect::EffectType::Reverb,
+        );
+        assert!(matches!(
+            consumer.pop(),
+            Ok(EngineCommand::SetSampleRate(96_000))
+        ));
+        let Ok(EngineCommand::InsertEffect { effect, .. }) = consumer.pop() else {
+            panic!("expected a constructed built-in device");
+        };
+        assert_eq!(effect.effect_type(), vibez_core::effect::EffectType::Reverb);
+    }
 
     #[test]
     fn overflow_and_new_commands_keep_fifo_order_across_flushes() {
@@ -204,6 +303,9 @@ pub mod test_support {
     impl EngineHandle for RecordingEngine {
         fn send(&mut self, cmd: EngineCommand) {
             self.0.push(cmd);
+        }
+        fn sample_rate(&self) -> u32 {
+            vibez_engine::engine::DEFAULT_SAMPLE_RATE
         }
     }
 }

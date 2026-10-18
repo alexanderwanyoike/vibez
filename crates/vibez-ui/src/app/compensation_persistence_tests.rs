@@ -1,3 +1,5 @@
+//! Verifies persistence of compensation settings and plugin reconfiguration outcomes.
+
 use super::*;
 use vibez_core::{
     effect::{EffectInfo, EffectType},
@@ -70,13 +72,13 @@ fn failed_restart_invalidates_cached_latency_without_removing_the_insert() {
         .push(track);
     let (producer, mut consumer) = rtrb::RingBuffer::new(8);
     app.cmd_tx = crate::domains::EngineCommandQueue::new(producer);
-    app.send_command(EngineCommand::AddPluginEffect {
+    app.send_command(EngineCommand::InsertEffect {
         track_id,
         effect_id: id,
         effect: Box::new(FailedRestart),
         position: None,
     });
-    let EngineCommand::AddPluginEffect { effect, .. } = consumer.pop().unwrap() else {
+    let EngineCommand::InsertEffect { effect, .. } = consumer.pop().unwrap() else {
         panic!("device creation")
     };
     app.reconfigure_device_timing(
@@ -86,6 +88,7 @@ fn failed_restart_invalidates_cached_latency_without_removing_the_insert() {
             track_id,
             position: 0,
             slot: vibez_engine::mixer::EffectSlot {
+                levels: Default::default(),
                 id,
                 effect,
                 bypass: false,

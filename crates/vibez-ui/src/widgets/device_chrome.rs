@@ -15,11 +15,45 @@ pub const PLUGIN_CARD_W: f32 = 196.0;
 /// queried while building the view, so names are fitted by estimate.
 const TITLE_CHAR_W: f32 = 6.2;
 
+/// The widths a native device lays itself out for.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CardWidths {
+    pub compact: f32,
+    pub medium: f32,
+    pub expanded: f32,
+    pub max: f32,
+}
+
+impl CardWidths {
+    /// Compact until the medium layout fits, then everything offered up to
+    /// the maximum.
+    pub fn card_width(self, available: f32) -> f32 {
+        if available >= self.medium {
+            available.min(self.max)
+        } else {
+            self.compact
+        }
+    }
+
+    /// Width in a device chain: the share the other cards leave, but never
+    /// squeezed below the widest layout the section could show. A crowded
+    /// chain scrolls instead.
+    pub fn chain_width(self, share: f32, section: f32) -> f32 {
+        if section >= self.expanded {
+            self.card_width(share.max(self.expanded))
+        } else if section >= self.medium {
+            self.card_width(share.max(self.medium))
+        } else {
+            self.compact
+        }
+    }
+}
+
 /// Thin vertical rule separating sections inside a device body.
 pub fn divider() -> Element<'static, Message> {
     container(text(""))
         .width(Length::Fixed(1.0))
-        .height(Length::Fixed(th::DEVICE_BODY_H - 12.0))
+        .height(Length::Fill)
         .style(|_theme: &Theme| container::Style {
             background: Some(th::divider().into()),
             ..Default::default()
@@ -31,7 +65,7 @@ pub fn divider() -> Element<'static, Message> {
 pub fn section_label<'a>(label: impl ToString) -> Element<'a, Message> {
     text(label.to_string().to_uppercase())
         .size(8)
-        .color(th::text_muted())
+        .color(th::text_dim())
         .into()
 }
 
@@ -51,6 +85,7 @@ pub fn title_bar<'a>(
 /// Raised, bordered container wrapping a whole device card.
 pub fn card<'a>(content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
     container(content)
+        .height(Length::Fill)
         .style(|_theme: &Theme| container::Style {
             background: Some(th::bg_elevated().into()),
             border: iced::Border {
@@ -129,7 +164,7 @@ pub fn plugin_face<'a>(
     )
     .padding([8, 10])
     .width(Length::Fill)
-    .height(Length::Fixed(th::DEVICE_BODY_H))
+    .height(Length::Fill)
     .into()
 }
 
@@ -178,6 +213,21 @@ fn editor_button<'a>(gui_key: Option<PluginGuiKey>) -> Element<'a, Message> {
     .into()
 }
 
+/// The device chain's scrollbar, and the gap it keeps from the cards.
+pub const CHAIN_BAR_W: f32 = 7.0;
+pub const CHAIN_BAR_GAP: f32 = 3.0;
+
+/// The room a chain `chain_width` wide keeps beneath its cards for the
+/// scrollbar in a section `available` wide: only one that overflows shows
+/// the bar, so only it gives up the height, and its bar never covers them.
+pub fn chain_bar_room(chain_width: f32, available: f32) -> f32 {
+    if chain_width > available + 0.5 {
+        CHAIN_BAR_W + CHAIN_BAR_GAP
+    } else {
+        0.0
+    }
+}
+
 /// Card for a hosted CLAP or VST3 instrument, matching hosted effects.
 pub fn plugin_instrument_card<'a>(
     track_id: vibez_core::id::TrackId,
@@ -212,4 +262,52 @@ pub fn plugin_instrument_card<'a>(
         ]
         .width(Length::Fixed(PLUGIN_CARD_W)),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const WIDTHS: CardWidths = CardWidths {
+        compact: 340.0,
+        medium: 520.0,
+        expanded: 760.0,
+        max: 1000.0,
+    };
+
+    #[test]
+    fn only_an_overflowing_chain_keeps_room_for_its_scrollbar() {
+        assert_eq!(chain_bar_room(900.0, 1000.0), 0.0);
+        assert_eq!(chain_bar_room(1000.0, 1000.0), 0.0);
+        assert!(chain_bar_room(1200.0, 1000.0) > CHAIN_BAR_W);
+    }
+
+    #[test]
+    fn a_crowded_chain_keeps_each_device_expanded_and_scrolls() {
+        assert_eq!(
+            WIDTHS.chain_width(120.0, 1600.0),
+            760.0,
+            "never squeezed below expanded"
+        );
+        assert_eq!(
+            WIDTHS.chain_width(900.0, 1600.0),
+            900.0,
+            "takes a larger share"
+        );
+        assert_eq!(
+            WIDTHS.chain_width(5000.0, 6000.0),
+            1000.0,
+            "up to its maximum"
+        );
+    }
+
+    #[test]
+    fn a_section_too_narrow_for_expanded_uses_medium() {
+        assert_eq!(WIDTHS.chain_width(120.0, 600.0), 520.0);
+    }
+
+    #[test]
+    fn a_section_too_narrow_for_medium_uses_compact() {
+        assert_eq!(WIDTHS.chain_width(120.0, 400.0), 340.0);
+    }
 }

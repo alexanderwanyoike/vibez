@@ -1,6 +1,7 @@
 //! Deterministic render-read fixtures for opt-in MIDI clip Groove.
 
 use super::*;
+use graph_test_support::{graph_engine, routing_channel};
 use std::sync::{Arc, Mutex};
 use vibez_core::automation::{AutomationLane, AutomationPoint, AutomationTarget};
 use vibez_core::id::{ClipId, TrackId};
@@ -77,8 +78,9 @@ fn render_events(
     notes: &[MidiNote],
     frames: usize,
 ) -> Vec<TimedEvent> {
-    let (mut engine, mut commands, _events) = AudioEngine::new();
     let track_id = TrackId::new();
+    let (mut engine, mut commands, mut insertion_events) =
+        graph_engine(&[routing_channel(track_id), routing_channel(TrackId::MASTER)]);
     let clip_id = ClipId::new();
     let events = Arc::new(Mutex::new(Vec::new()));
     commands.push(EngineCommand::SetSampleRate(96)).unwrap();
@@ -86,11 +88,9 @@ fn render_events(
     commands
         .push(EngineCommand::SetProjectSwing(swing))
         .unwrap();
+    commands.push(EngineCommand::add_track(track_id)).unwrap();
     commands
-        .push(EngineCommand::AddMidiTrack(track_id, "Groove probe".into()))
-        .unwrap();
-    commands
-        .push(EngineCommand::SetPluginInstrument {
+        .push(EngineCommand::SetInstrument {
             track_id,
             instrument: Box::new(TimedSpy {
                 events: Arc::clone(&events),
@@ -110,20 +110,25 @@ fn render_events(
             curve: 0.0,
         });
         commands
-            .push(EngineCommand::SetAutomationLane { track_id, lane })
+            .push(EngineCommand::SetAutomationLane {
+                track_id,
+                insertion: crate::clip_insertion::PreparedAutomationLaneInsertion::new(lane),
+            })
             .unwrap();
     }
     commands
         .push(EngineCommand::AddNoteClip {
-            start_marker_beats: 0.0,
             track_id,
-            clip_id,
-            position_beats: 0.0,
-            duration_beats,
-            loop_enabled: looping,
-            loop_start_beats: 0.0,
-            loop_end_beats,
-            groove_grid: grid,
+            insertion: crate::clip_insertion::PreparedNoteClipInsertion::new(
+                clip_id,
+                0.0,
+                duration_beats,
+                0.0,
+                looping,
+                0.0,
+                loop_end_beats,
+                grid,
+            ),
         })
         .unwrap();
     for note in notes {
@@ -131,11 +136,12 @@ fn render_events(
             .push(EngineCommand::AddNote {
                 track_id,
                 clip_id,
-                note: *note,
+                insertion: crate::clip_insertion::PreparedNoteInsertion::new(*note),
             })
             .unwrap();
     }
     commands.push(EngineCommand::Play).unwrap();
+    crate::test_support::fulfill_insertion_setup(&mut engine, &mut insertion_events);
     engine.process(&mut vec![0.0; frames * 2], 2);
     let rendered = events.lock().unwrap().clone();
     rendered
@@ -152,17 +158,16 @@ fn midpoint_note(start_beat: f64) -> MidiNote {
 
 #[test]
 fn midi_start_plays_once_then_returns_to_loop_start() {
-    let (mut engine, mut commands, _events) = AudioEngine::new();
     let track_id = TrackId::new();
+    let (mut engine, mut commands, mut insertion_events) =
+        graph_engine(&[routing_channel(track_id), routing_channel(TrackId::MASTER)]);
     let clip_id = ClipId::new();
     let events = Arc::new(Mutex::new(Vec::new()));
     commands.push(EngineCommand::SetSampleRate(96)).unwrap();
     commands.push(EngineCommand::SetBpm(60.0)).unwrap();
+    commands.push(EngineCommand::add_track(track_id)).unwrap();
     commands
-        .push(EngineCommand::AddMidiTrack(track_id, "Start probe".into()))
-        .unwrap();
-    commands
-        .push(EngineCommand::SetPluginInstrument {
+        .push(EngineCommand::SetInstrument {
             track_id,
             instrument: Box::new(TimedSpy {
                 events: Arc::clone(&events),
@@ -172,14 +177,16 @@ fn midi_start_plays_once_then_returns_to_loop_start() {
     commands
         .push(EngineCommand::AddNoteClip {
             track_id,
-            clip_id,
-            position_beats: 0.0,
-            duration_beats: 4.0,
-            start_marker_beats: 2.0,
-            loop_enabled: true,
-            loop_start_beats: 1.0,
-            loop_end_beats: 3.0,
-            groove_grid: GrooveGrid::Off,
+            insertion: crate::clip_insertion::PreparedNoteClipInsertion::new(
+                clip_id,
+                0.0,
+                4.0,
+                2.0,
+                true,
+                1.0,
+                3.0,
+                GrooveGrid::Off,
+            ),
         })
         .unwrap();
     for (pitch, start_beat) in [(62, 2.0), (61, 1.0)] {
@@ -187,16 +194,17 @@ fn midi_start_plays_once_then_returns_to_loop_start() {
             .push(EngineCommand::AddNote {
                 track_id,
                 clip_id,
-                note: MidiNote {
+                insertion: crate::clip_insertion::PreparedNoteInsertion::new(MidiNote {
                     pitch,
                     velocity: 100,
                     start_beat,
                     duration_beats: 0.1,
-                },
+                }),
             })
             .unwrap();
     }
     commands.push(EngineCommand::Play).unwrap();
+    crate::test_support::fulfill_insertion_setup(&mut engine, &mut insertion_events);
     engine.process(&mut vec![0.0; 300 * 2], 2);
 
     let events = events.lock().unwrap();
@@ -207,32 +215,36 @@ fn midi_start_plays_once_then_returns_to_loop_start() {
 
 #[test]
 fn dense_recorded_groove_schedules_each_note_once_per_audio_block() {
-    let (mut engine, mut commands, _events) = AudioEngine::new();
     let track_id = TrackId::new();
+    let (mut engine, mut commands, mut insertion_events) =
+        graph_engine(&[routing_channel(track_id), routing_channel(TrackId::MASTER)]);
     let clip_id = ClipId::new();
     commands.push(EngineCommand::SetSampleRate(44_100)).unwrap();
     commands.push(EngineCommand::SetBpm(128.0)).unwrap();
     commands
         .push(EngineCommand::SetProjectSwing(SwingAmount::new(0.59)))
         .unwrap();
+    commands.push(EngineCommand::add_track(track_id)).unwrap();
     commands
-        .push(EngineCommand::AddInstrumentTrack(
+        .push(EngineCommand::set_built_in_instrument(
             track_id,
-            "Recorded groove".into(),
             InstrumentKind::SubtractiveSynth,
+            44_100,
         ))
         .unwrap();
     commands
         .push(EngineCommand::AddNoteClip {
             track_id,
-            clip_id,
-            position_beats: 0.0,
-            duration_beats: 8.0,
-            start_marker_beats: 0.0,
-            loop_enabled: false,
-            loop_start_beats: 0.0,
-            loop_end_beats: 0.0,
-            groove_grid: GrooveGrid::Sixteenth,
+            insertion: crate::clip_insertion::PreparedNoteClipInsertion::new(
+                clip_id,
+                0.0,
+                8.0,
+                0.0,
+                false,
+                0.0,
+                0.0,
+                GrooveGrid::Sixteenth,
+            ),
         })
         .unwrap();
     for index in 0..29 {
@@ -240,17 +252,18 @@ fn dense_recorded_groove_schedules_each_note_once_per_audio_block() {
             .push(EngineCommand::AddNote {
                 track_id,
                 clip_id,
-                note: MidiNote {
+                insertion: crate::clip_insertion::PreparedNoteInsertion::new(MidiNote {
                     pitch: 48 + (index % 8) as u8,
                     velocity: 100,
                     start_beat: index as f64 * 0.25,
                     duration_beats: 0.2,
-                },
+                }),
             })
             .unwrap();
     }
     commands.push(EngineCommand::Play).unwrap();
 
+    crate::test_support::fulfill_insertion_setup(&mut engine, &mut insertion_events);
     crate::playback_source::reset_audio_thread_note_end_lookups();
     engine.process(&mut vec![0.0; 236 * 2], 2);
 

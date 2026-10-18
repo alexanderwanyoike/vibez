@@ -1,213 +1,77 @@
+//! The drum rack: 64 pads from note 36 up, each a full Sampler playing its
+//! sample at its root. Hits on a pad ring on that pad's own voices, so one
+//! pad never cuts another; a pad in a choke group releases the group's
+//! pads first, as a closed hat stops an open one.
+
 use std::sync::Arc;
 
 use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::effect::ParamDescriptor;
 use vibez_core::midi::InstrumentKind;
-use vibez_core::track::{
-    drum_rack_pad_index, DrumPadState, DRUM_PAD_DEFAULT_FADE_MS, DRUM_PAD_MAX_FADE_MS,
-    DRUM_RACK_PAD_COUNT,
-};
+use vibez_core::track::{drum_rack_pad_index, DrumPadState, DRUM_RACK_PAD_COUNT};
 
-use crate::Instrument;
+use crate::sampler::{default_params, param, Sampler, PAD_NOTE, SAMPLER_PARAMS};
+use crate::{Instrument, InstrumentMediaOwners, PreparedDrumPadState};
 
-const MAX_VOICES: usize = 32;
+const _: () = assert!(DRUM_RACK_PAD_COUNT <= u64::BITS as usize);
 
-#[derive(Debug, Clone)]
 struct Pad {
-    sample: Option<Arc<DecodedAudio>>,
-    sample_name: Option<String>,
-    gain: f32,
-    pan: f32,
-    start: f32,
-    end: f32,
-    fade_in_ms: f32,
-    fade_out_ms: f32,
-    coarse_tune: i8,
-    fine_tune: f32,
-    one_shot: bool,
+    sampler: Sampler,
     choke_group: Option<u8>,
-}
-
-impl Default for Pad {
-    fn default() -> Self {
-        Self {
-            sample: None,
-            sample_name: None,
-            gain: 1.0,
-            pan: 0.0,
-            start: 0.0,
-            end: 1.0,
-            fade_in_ms: DRUM_PAD_DEFAULT_FADE_MS,
-            fade_out_ms: DRUM_PAD_DEFAULT_FADE_MS,
-            coarse_tune: 0,
-            fine_tune: 0.0,
-            one_shot: true,
-            choke_group: None,
-        }
-    }
-}
-
-#[derive(Clone)]
-struct Voice {
-    active: bool,
-    pad_index: usize,
-    pitch: u8,
-    sample: Arc<DecodedAudio>,
-    position: f64,
-    end_frame: usize,
-    rendered_frames: usize,
-    total_frames: usize,
-    fade_in_frames: usize,
-    fade_out_frames: usize,
-    release_remaining: Option<usize>,
-    speed: f64,
-    gain: f32,
-    pan: f32,
-    one_shot: bool,
-    choke_group: Option<u8>,
-    velocity_gain: f32,
-}
-
-impl Voice {
-    fn inactive() -> Self {
-        Self {
-            active: false,
-            pad_index: 0,
-            pitch: 0,
-            sample: Arc::new(DecodedAudio {
-                channels: Vec::new(),
-                sample_rate: 44_100,
-            }),
-            position: 0.0,
-            end_frame: 0,
-            rendered_frames: 0,
-            total_frames: 0,
-            fade_in_frames: 0,
-            fade_out_frames: 0,
-            release_remaining: None,
-            speed: 1.0,
-            gain: 0.0,
-            pan: 0.0,
-            one_shot: true,
-            choke_group: None,
-            velocity_gain: 0.0,
-        }
-    }
 }
 
 pub struct DrumRack {
-    #[allow(dead_code)]
     sample_rate: f32,
     pads: Vec<Pad>,
-    voices: Vec<Voice>,
+    /// One bit for each pad that may be sounding, so a render skips the
+    /// rest.
+    live: u64,
+}
+
+/// A pad's Sampler controls. Pads saved before each pad was a Sampler
+/// translate their gain, pan, trim, fades, tuning and mode.
+pub fn pad_params(state: &DrumPadState) -> [f32; param::COUNT] {
+    let mut params = default_params();
+    if state.params.is_empty() {
+        // Their equal-power pan held a centred pad 3 dB down; the Sampler's
+        // balance does not.
+        params[param::VOLUME] = state.gain * std::f32::consts::FRAC_1_SQRT_2;
+        params[param::PAN] = state.pan;
+        params[param::START] = state.start;
+        params[param::END] = state.end;
+        params[param::ATTACK] = state.fade_in_ms / 1000.0;
+        params[param::RELEASE] = state.fade_out_ms / 1000.0;
+        params[param::TUNE] = f32::from(state.coarse_tune);
+        params[param::FINE] = state.fine_tune;
+        params[param::ONE_SHOT] = f32::from(state.one_shot);
+    } else {
+        for (slot, value) in params.iter_mut().zip(&state.params) {
+            *slot = *value;
+        }
+    }
+    for (value, descriptor) in params.iter_mut().zip(SAMPLER_PARAMS) {
+        *value = value.clamp(descriptor.min, descriptor.max);
+    }
+    params
 }
 
 impl DrumRack {
     pub fn new(sample_rate: f32) -> Self {
-        Self {
+        let mut rack = Self {
             sample_rate,
-            pads: (0..DRUM_RACK_PAD_COUNT).map(|_| Pad::default()).collect(),
-            voices: (0..MAX_VOICES).map(|_| Voice::inactive()).collect(),
+            pads: (0..DRUM_RACK_PAD_COUNT)
+                .map(|_| Pad {
+                    sampler: Sampler::new(sample_rate),
+                    choke_group: None,
+                })
+                .collect(),
+            live: 0,
+        };
+        for index in 0..DRUM_RACK_PAD_COUNT {
+            drop(rack.set_drum_pad_state(index, DrumPadState::default().into()));
         }
+        rack
     }
-
-    fn pitch_to_pad(pitch: u8) -> Option<usize> {
-        drum_rack_pad_index(pitch)
-    }
-
-    fn frame_range(pad: &Pad, sample: &DecodedAudio) -> Option<(usize, usize)> {
-        let frames = sample.num_frames();
-        if frames == 0 {
-            return None;
-        }
-        let start = ((pad.start.clamp(0.0, 1.0)) * frames as f32) as usize;
-        let mut end = ((pad.end.clamp(0.0, 1.0)) * frames as f32) as usize;
-        if end <= start {
-            end = (start + 1).min(frames);
-        }
-        if start >= end || start >= frames {
-            return None;
-        }
-        Some((start, end.min(frames)))
-    }
-
-    fn take_voice_slot(&mut self) -> &mut Voice {
-        if let Some(index) = self.voices.iter().position(|voice| !voice.active) {
-            return &mut self.voices[index];
-        }
-        &mut self.voices[0]
-    }
-
-    fn fade_frames(&self, milliseconds: f32) -> usize {
-        (milliseconds.clamp(0.0, DRUM_PAD_MAX_FADE_MS) * self.sample_rate / 1_000.0).round()
-            as usize
-    }
-}
-
-fn fit_boundary_fades(total_frames: usize, fade_in: usize, fade_out: usize) -> (usize, usize) {
-    let available = total_frames.saturating_sub(1);
-    let requested = fade_in.saturating_add(fade_out);
-    if requested <= available || requested == 0 {
-        return (fade_in, fade_out);
-    }
-
-    let scale = available as f64 / requested as f64;
-    let scaled_in = (fade_in as f64 * scale).round() as usize;
-    (scaled_in, available.saturating_sub(scaled_in))
-}
-
-fn boundary_fade_gain(voice: &Voice) -> f32 {
-    let fade_in = if voice.fade_in_frames == 0 {
-        1.0
-    } else {
-        voice.rendered_frames as f32 / voice.fade_in_frames as f32
-    };
-    let remaining_after = voice
-        .total_frames
-        .saturating_sub(voice.rendered_frames.saturating_add(1));
-    let fade_out = if voice.fade_out_frames == 0 {
-        1.0
-    } else {
-        remaining_after as f32 / voice.fade_out_frames as f32
-    };
-    fade_in.min(fade_out).clamp(0.0, 1.0)
-}
-
-fn release_fade_gain(voice: &Voice) -> f32 {
-    let Some(remaining) = voice.release_remaining else {
-        return 1.0;
-    };
-    if voice.fade_out_frames <= 1 {
-        return 0.0;
-    }
-    (remaining.saturating_sub(1) as f32 / (voice.fade_out_frames - 1) as f32).clamp(0.0, 1.0)
-}
-
-fn begin_release(voice: &mut Voice) {
-    if voice.fade_out_frames == 0 {
-        voice.active = false;
-    } else if voice.release_remaining.is_none() {
-        voice.release_remaining = Some(voice.fade_out_frames);
-    }
-}
-
-fn read_sample(audio: &DecodedAudio, position: f64, channel: usize) -> f32 {
-    let num_channels = audio.num_channels();
-    if num_channels == 0 {
-        return 0.0;
-    }
-    let ch = channel.min(num_channels - 1);
-    let idx = position as usize;
-    let frac = (position - idx as f64) as f32;
-    let s0 = audio.sample(ch, idx);
-    let s1 = audio.sample(ch, idx + 1);
-    s0 + frac * (s1 - s0)
-}
-
-fn equal_power_pan(pan: f32) -> (f32, f32) {
-    let pan = ((pan.clamp(-1.0, 1.0)) + 1.0) * 0.5;
-    let angle = pan * std::f32::consts::FRAC_PI_2;
-    (angle.cos(), angle.sin())
 }
 
 impl Instrument for DrumRack {
@@ -232,170 +96,93 @@ impl Instrument for DrumRack {
     }
 
     fn note_on(&mut self, pitch: u8, velocity: u8) {
-        let Some(pad_index) = Self::pitch_to_pad(pitch) else {
+        if velocity == 0 {
+            self.note_off(pitch);
+            return;
+        }
+        let Some(index) = drum_rack_pad_index(pitch) else {
             return;
         };
-        let Some(sample) = self.pads[pad_index].sample.clone() else {
-            return;
-        };
-        let Some((start_frame, end_frame)) = Self::frame_range(&self.pads[pad_index], &sample)
-        else {
-            return;
-        };
-        let gain = self.pads[pad_index].gain.max(0.0);
-        let pan = self.pads[pad_index].pan;
-        let coarse_tune = self.pads[pad_index].coarse_tune;
-        let fine_tune = self.pads[pad_index].fine_tune;
-        let one_shot = self.pads[pad_index].one_shot;
-        let choke_group = self.pads[pad_index].choke_group;
-        let fade_in_frames = self.fade_frames(self.pads[pad_index].fade_in_ms);
-        let fade_out_frames = self.fade_frames(self.pads[pad_index].fade_out_ms);
-
-        if let Some(group) = choke_group {
-            for voice in &mut self.voices {
-                if voice.active && voice.choke_group == Some(group) {
-                    begin_release(voice);
+        if let Some(group) = self.pads[index].choke_group {
+            for pad in &mut self.pads {
+                if pad.choke_group == Some(group) {
+                    pad.sampler.choke();
                 }
             }
         }
-
-        let semitones = coarse_tune as f32 + fine_tune / 100.0;
-        let speed = 2.0_f64.powf(semitones as f64 / 12.0);
-        let velocity_gain = (velocity as f32 / 127.0).clamp(0.0, 1.0);
-        let total_frames = ((end_frame - start_frame) as f64 / speed).ceil() as usize;
-        let (fade_in_frames, fade_out_frames) =
-            fit_boundary_fades(total_frames, fade_in_frames, fade_out_frames);
-
-        let voice = self.take_voice_slot();
-        *voice = Voice {
-            active: true,
-            pad_index,
-            pitch,
-            sample,
-            position: start_frame as f64,
-            end_frame,
-            rendered_frames: 0,
-            total_frames,
-            fade_in_frames,
-            fade_out_frames,
-            release_remaining: None,
-            speed,
-            gain,
-            pan,
-            one_shot,
-            choke_group,
-            velocity_gain,
-        };
+        self.pads[index].sampler.strike(velocity);
+        self.live |= 1 << index;
     }
 
     fn note_off(&mut self, pitch: u8) {
-        let Some(pad_index) = Self::pitch_to_pad(pitch) else {
-            return;
-        };
-        for voice in &mut self.voices {
-            if voice.active
-                && voice.pad_index == pad_index
-                && voice.pitch == pitch
-                && !voice.one_shot
-            {
-                begin_release(voice);
-            }
+        if let Some(index) = drum_rack_pad_index(pitch) {
+            self.pads[index].sampler.note_off(PAD_NOTE);
         }
     }
 
     fn render(&mut self, buffer: &mut [f32], channels: usize) {
-        if channels == 0 {
-            return;
-        }
-        let frames = buffer.len() / channels;
-        for frame in 0..frames {
-            let frame_offset = frame * channels;
-            for voice in &mut self.voices {
-                if !voice.active {
-                    continue;
-                }
-
-                if voice.position >= voice.end_frame as f64 {
-                    voice.active = false;
-                    continue;
-                }
-
-                let envelope = boundary_fade_gain(voice) * release_fade_gain(voice);
-                let mono = read_sample(&voice.sample, voice.position, 0)
-                    * voice.gain
-                    * voice.velocity_gain
-                    * envelope;
-                let (pan_l, pan_r) = equal_power_pan(voice.pan);
-
-                if channels >= 2 {
-                    let right = read_sample(&voice.sample, voice.position, 1)
-                        * voice.gain
-                        * voice.velocity_gain
-                        * envelope;
-                    buffer[frame_offset] += mono * pan_l;
-                    buffer[frame_offset + 1] += right * pan_r;
-                    for ch in 2..channels {
-                        buffer[frame_offset + ch] += mono;
-                    }
-                } else {
-                    buffer[frame_offset] += mono;
-                }
-
-                voice.position += voice.speed;
-                voice.rendered_frames = voice.rendered_frames.saturating_add(1);
-                if let Some(remaining) = voice.release_remaining.as_mut() {
-                    *remaining = remaining.saturating_sub(1);
-                    if *remaining == 0 {
-                        voice.active = false;
-                    }
-                }
-                if voice.position >= voice.end_frame as f64 {
-                    voice.active = false;
-                }
+        let mut live = self.live;
+        while live != 0 {
+            let index = live.trailing_zeros() as usize;
+            live &= live - 1;
+            let sampler = &mut self.pads[index].sampler;
+            sampler.render(buffer, channels);
+            if !sampler.sounding() {
+                self.live &= !(1 << index);
             }
         }
     }
 
     fn reset(&mut self) {
-        for voice in &mut self.voices {
-            voice.active = false;
+        for pad in &mut self.pads {
+            pad.sampler.reset();
+        }
+        self.live = 0;
+    }
+
+    fn load_drum_pad_sample(
+        &mut self,
+        pad_index: usize,
+        sample: Arc<DecodedAudio>,
+        name: String,
+    ) -> InstrumentMediaOwners {
+        match self.pads.get_mut(pad_index) {
+            Some(pad) => pad.sampler.load_sample(sample, name),
+            None => InstrumentMediaOwners::incoming(sample, name),
         }
     }
 
-    fn load_drum_pad_sample(&mut self, pad_index: usize, sample: Arc<DecodedAudio>, name: String) {
-        if let Some(pad) = self.pads.get_mut(pad_index) {
-            pad.sample = Some(sample);
-            pad.sample_name = Some(name);
+    fn clear_drum_pad(&mut self, pad_index: usize) -> InstrumentMediaOwners {
+        self.pads
+            .get_mut(pad_index)
+            .map(|pad| pad.sampler.unload())
+            .unwrap_or_default()
+    }
+
+    fn set_drum_pad_state(
+        &mut self,
+        pad_index: usize,
+        state: PreparedDrumPadState,
+    ) -> InstrumentMediaOwners {
+        let Some(pad) = self.pads.get_mut(pad_index) else {
+            return InstrumentMediaOwners {
+                sample: None,
+                name: state.name,
+            };
+        };
+        for (index, value) in state.params.into_iter().enumerate() {
+            pad.sampler.set_param(index, value);
+        }
+        pad.choke_group = state.choke_group;
+        InstrumentMediaOwners {
+            sample: None,
+            name: pad.sampler.rename(state.name),
         }
     }
 
-    fn clear_drum_pad(&mut self, pad_index: usize) {
+    fn set_drum_pad_param(&mut self, pad_index: usize, index: usize, value: f32) {
         if let Some(pad) = self.pads.get_mut(pad_index) {
-            pad.sample = None;
-            pad.sample_name = None;
-        }
-        for voice in &mut self.voices {
-            if voice.active && voice.pad_index == pad_index {
-                voice.active = false;
-            }
-        }
-    }
-
-    fn set_drum_pad_state(&mut self, pad_index: usize, state: DrumPadState) {
-        if let Some(pad) = self.pads.get_mut(pad_index) {
-            pad.gain = state.gain;
-            pad.pan = state.pan;
-            pad.start = state.start;
-            pad.end = state.end;
-            pad.fade_in_ms = state.fade_in_ms.clamp(0.0, DRUM_PAD_MAX_FADE_MS);
-            pad.fade_out_ms = state.fade_out_ms.clamp(0.0, DRUM_PAD_MAX_FADE_MS);
-            pad.coarse_tune = state.coarse_tune;
-            pad.fine_tune = state.fine_tune;
-            pad.one_shot = state.one_shot;
-            pad.choke_group = state.choke_group;
-            pad.sample_name = state
-                .name
-                .or_else(|| state.source.as_ref().map(|source| source.display_name()));
+            pad.sampler.set_param(index, value);
         }
     }
 }
@@ -404,6 +191,10 @@ impl Instrument for DrumRack {
 mod tests {
     use super::*;
 
+    fn set_pad(rack: &mut DrumRack, pad_index: usize, state: DrumPadState) {
+        drop(rack.set_drum_pad_state(pad_index, state.into()));
+    }
+
     fn make_test_audio(frames: usize, value: f32) -> Arc<DecodedAudio> {
         Arc::new(DecodedAudio {
             channels: vec![vec![value; frames], vec![value; frames]],
@@ -411,10 +202,59 @@ mod tests {
         })
     }
 
+    fn rendered(rack: &mut DrumRack, frames: usize) -> Vec<f32> {
+        let mut buffer = vec![0.0; frames * 2];
+        rack.render(&mut buffer, 2);
+        buffer.chunks(2).map(|frame| frame[0]).collect()
+    }
+
+    #[test]
+    fn pad_plays_its_sample_at_the_file_rate() {
+        let mut rack = DrumRack::new(48_000.0);
+        let sample = Arc::new(DecodedAudio {
+            channels: vec![vec![0.5; 4_800], vec![0.5; 4_800]],
+            sample_rate: 24_000,
+        });
+        drop(rack.load_drum_pad_sample(0, sample, "slow.wav".into()));
+        rack.note_on(36, 127);
+
+        let sounding = rendered(&mut rack, 12_000)
+            .iter()
+            .filter(|sample| sample.abs() > 1e-6)
+            .count();
+
+        assert!((9_400..=9_700).contains(&sounding), "{sounding} frames");
+    }
+
+    #[test]
+    fn hits_on_one_pad_never_cut_another_pad_off() {
+        let mut rack = DrumRack::new(48_000.0);
+        drop(rack.load_drum_pad_sample(0, make_test_audio(96_000, 0.5), "pad.wav".into()));
+        drop(rack.load_drum_pad_sample(1, make_test_audio(96_000, 0.0), "silent.wav".into()));
+        for pad_index in [0, 1] {
+            set_pad(
+                &mut rack,
+                pad_index,
+                DrumPadState {
+                    one_shot: false,
+                    ..DrumPadState::default()
+                },
+            );
+        }
+        rack.note_on(36, 127);
+        for _ in 0..32 {
+            rack.note_on(37, 127);
+        }
+
+        let after = rendered(&mut rack, 4_800);
+
+        assert!(after[4_799].abs() > 0.1, "the held pad stopped");
+    }
+
     #[test]
     fn rack_renders_loaded_pad() {
         let mut rack = DrumRack::new(44_100.0);
-        rack.load_drum_pad_sample(0, make_test_audio(64, 0.5), "kick.wav".into());
+        drop(rack.load_drum_pad_sample(0, make_test_audio(64, 0.5), "kick.wav".into()));
         rack.note_on(36, 127);
 
         let mut buffer = vec![0.0; 128];
@@ -426,7 +266,7 @@ mod tests {
     #[test]
     fn rack_ignores_unmapped_note() {
         let mut rack = DrumRack::new(44_100.0);
-        rack.load_drum_pad_sample(0, make_test_audio(64, 0.5), "kick.wav".into());
+        drop(rack.load_drum_pad_sample(0, make_test_audio(64, 0.5), "kick.wav".into()));
         rack.note_on(12, 127);
 
         let mut buffer = vec![0.0; 128];
@@ -438,7 +278,7 @@ mod tests {
     #[test]
     fn rack_renders_a_pad_from_a_later_bank() {
         let mut rack = DrumRack::new(44_100.0);
-        rack.load_drum_pad_sample(20, make_test_audio(64, 0.5), "bank-two.wav".into());
+        drop(rack.load_drum_pad_sample(20, make_test_audio(64, 0.5), "bank-two.wav".into()));
         rack.note_on(56, 127);
 
         let mut buffer = vec![0.0; 128];
@@ -448,10 +288,11 @@ mod tests {
     }
 
     #[test]
-    fn pad_fades_start_and_end_at_silence() {
-        let mut rack = DrumRack::new(1_000.0);
-        rack.load_drum_pad_sample(0, make_test_audio(10, 1.0), "click.wav".into());
-        rack.set_drum_pad_state(
+    fn a_kit_saved_before_pads_were_samplers_keeps_its_level_and_fades() {
+        let mut rack = DrumRack::new(48_000.0);
+        drop(rack.load_drum_pad_sample(0, make_test_audio(4_800, 0.5), "click.wav".into()));
+        set_pad(
+            &mut rack,
             0,
             DrumPadState {
                 fade_in_ms: 3.0,
@@ -461,69 +302,119 @@ mod tests {
         );
         rack.note_on(36, 127);
 
-        let mut buffer = vec![0.0; 10];
-        rack.render(&mut buffer, 1);
+        let out = rendered(&mut rack, 6_000);
 
-        assert_eq!(buffer[0], 0.0);
-        assert!(buffer[1] > buffer[0]);
-        assert_eq!(buffer[9], 0.0);
-        assert!(buffer[8] > buffer[9]);
+        let centred = 0.5 * std::f32::consts::FRAC_1_SQRT_2;
+        let last = out.iter().rposition(|sample| *sample > 0.0).unwrap();
+        assert!(out[0] < 0.01 * centred, "no fade in");
+        assert!((out[2_400] - centred).abs() < 1e-3, "{}", out[2_400]);
+        assert!(out[last] < 0.01 * centred, "no fade out");
     }
 
     #[test]
-    fn pad_fade_out_releases_a_gated_voice_without_a_step() {
-        let mut rack = DrumRack::new(1_000.0);
-        rack.load_drum_pad_sample(0, make_test_audio(20, 1.0), "gate.wav".into());
-        rack.set_drum_pad_state(
+    fn a_gated_pad_releases_over_its_fade_out() {
+        let mut rack = DrumRack::new(48_000.0);
+        drop(rack.load_drum_pad_sample(0, make_test_audio(48_000, 1.0), "gate.wav".into()));
+        set_pad(
+            &mut rack,
             0,
             DrumPadState {
-                fade_in_ms: 0.0,
-                fade_out_ms: 3.0,
+                fade_out_ms: 10.0,
                 one_shot: false,
                 ..DrumPadState::default()
             },
         );
         rack.note_on(36, 127);
-        let mut attack = vec![0.0; 2];
-        rack.render(&mut attack, 1);
+        let held = rendered(&mut rack, 480);
         rack.note_off(36);
 
-        let mut release = vec![0.0; 4];
-        rack.render(&mut release, 1);
+        let release = rendered(&mut rack, 960);
 
-        assert!(release[0] > release[1]);
-        assert!(release[1] > release[2]);
-        assert_eq!(release[2], 0.0);
-        assert_eq!(release[3], 0.0);
+        assert!(release[0] > 0.9 * held[479], "the release stepped");
+        assert!(release.windows(2).all(|pair| pair[1] <= pair[0]));
+        assert!(release[480] < 0.002, "{}", release[480]);
+        assert_eq!(release[959], 0.0);
     }
 
     #[test]
-    fn choke_group_uses_the_pad_fade_out_instead_of_cutting_immediately() {
-        let mut rack = DrumRack::new(1_000.0);
-        rack.load_drum_pad_sample(0, make_test_audio(20, 1.0), "open.wav".into());
-        rack.load_drum_pad_sample(1, make_test_audio(20, 0.0), "closed.wav".into());
+    fn a_choke_group_releases_the_other_pad_over_its_fade_out() {
+        let mut rack = DrumRack::new(48_000.0);
+        drop(rack.load_drum_pad_sample(0, make_test_audio(48_000, 1.0), "open.wav".into()));
+        drop(rack.load_drum_pad_sample(1, make_test_audio(48_000, 0.0), "closed.wav".into()));
         for pad_index in [0, 1] {
-            rack.set_drum_pad_state(
+            set_pad(
+                &mut rack,
                 pad_index,
                 DrumPadState {
-                    fade_in_ms: 0.0,
-                    fade_out_ms: 3.0,
+                    fade_out_ms: 10.0,
                     choke_group: Some(1),
                     ..DrumPadState::default()
                 },
             );
         }
         rack.note_on(36, 127);
-        let mut attack = vec![0.0; 2];
-        rack.render(&mut attack, 1);
+        let open = rendered(&mut rack, 480);
 
         rack.note_on(37, 127);
-        let mut release = vec![0.0; 4];
-        rack.render(&mut release, 1);
+        let choked = rendered(&mut rack, 960);
 
-        assert!(release[0] > release[1]);
-        assert!(release[1] > release[2]);
-        assert_eq!(release[2], 0.0);
-        assert_eq!(release[3], 0.0);
+        assert!(choked[0] > 0.9 * open[479], "the choke stepped");
+        assert!(choked[480] < 0.002, "{}", choked[480]);
+        assert_eq!(choked[959], 0.0);
+    }
+
+    #[test]
+    fn a_pad_plays_its_own_sampler_controls() {
+        let mut rack = DrumRack::new(48_000.0);
+        drop(rack.load_drum_pad_sample(0, make_test_audio(4_800, 0.5), "kick.wav".into()));
+        let mut params = pad_params(&DrumPadState::default());
+        params[param::VOLUME] = 0.5;
+        params[param::PAN] = -1.0;
+        set_pad(
+            &mut rack,
+            0,
+            DrumPadState {
+                params: params.to_vec(),
+                ..DrumPadState::default()
+            },
+        );
+        rack.note_on(36, 127);
+
+        let mut buffer = vec![0.0; 2 * 2_400];
+        rack.render(&mut buffer, 2);
+
+        assert!((buffer[2 * 2_000] - 0.25).abs() < 1e-3);
+        assert_eq!(buffer[2 * 2_000 + 1], 0.0);
+    }
+
+    #[test]
+    fn one_pad_control_changes_alone() {
+        let mut rack = DrumRack::new(48_000.0);
+        drop(rack.load_drum_pad_sample(0, make_test_audio(4_800, 0.5), "kick.wav".into()));
+        rack.set_drum_pad_param(0, param::PAN, -1.0);
+        rack.note_on(36, 127);
+
+        let mut buffer = vec![0.0; 2 * 2_400];
+        rack.render(&mut buffer, 2);
+
+        assert!(buffer[2 * 2_000] > 0.3);
+        assert_eq!(buffer[2 * 2_000 + 1], 0.0);
+    }
+
+    #[test]
+    fn translated_pad_values_stay_in_the_samplers_ranges() {
+        let loud = pad_params(&DrumPadState {
+            gain: 2.0,
+            fade_in_ms: 0.0,
+            ..DrumPadState::default()
+        });
+        let stored = pad_params(&DrumPadState {
+            params: vec![60.0, 9.0],
+            ..DrumPadState::default()
+        });
+
+        assert_eq!(loud[param::VOLUME], 1.0);
+        assert_eq!(loud[param::ATTACK], SAMPLER_PARAMS[param::ATTACK].min);
+        assert_eq!(stored[param::ATTACK], SAMPLER_PARAMS[param::ATTACK].max);
     }
 }

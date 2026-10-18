@@ -62,13 +62,13 @@ fn returned_device_event_reconfigures_on_main_and_publishes_resume_or_reject_wit
         };
         let (commands, mut consumer) = rtrb::RingBuffer::new(8);
         app.cmd_tx = crate::domains::EngineCommandQueue::new(commands);
-        app.send_command(EngineCommand::AddPluginEffect {
+        app.send_command(EngineCommand::InsertEffect {
             track_id,
             effect_id: id,
             effect,
             position: None,
         });
-        let EngineCommand::AddPluginEffect { effect, .. } = consumer.pop().unwrap() else {
+        let EngineCommand::InsertEffect { effect, .. } = consumer.pop().unwrap() else {
             panic!("device creation")
         };
         let (mut events, receiver) = rtrb::RingBuffer::new(8);
@@ -81,6 +81,7 @@ fn returned_device_event_reconfigures_on_main_and_publishes_resume_or_reject_wit
                     track_id,
                     position: 0,
                     slot: vibez_engine::mixer::EffectSlot {
+                        levels: Default::default(),
                         id,
                         effect,
                         bypass: false,
@@ -177,13 +178,13 @@ fn queued_replacement_or_project_reset_revokes_old_event_before_main_activation(
         let restarts = Arc::new(AtomicUsize::new(0));
         let (producer, mut consumer) = rtrb::RingBuffer::new(1);
         app.cmd_tx = crate::domains::EngineCommandQueue::new(producer);
-        app.send_command(EngineCommand::AddPluginEffect {
+        app.send_command(EngineCommand::InsertEffect {
             track_id,
             effect_id,
             effect: Box::new(RestartProbe(Arc::clone(&restarts))),
             position: None,
         });
-        let EngineCommand::AddPluginEffect { effect, .. } = consumer.pop().unwrap() else {
+        let EngineCommand::InsertEffect { effect, .. } = consumer.pop().unwrap() else {
             panic!("initial owner")
         };
         let device = DeviceReconfiguration::Effect {
@@ -192,6 +193,7 @@ fn queued_replacement_or_project_reset_revokes_old_event_before_main_activation(
             track_id,
             position: 0,
             slot: vibez_engine::mixer::EffectSlot {
+                levels: Default::default(),
                 id: effect_id,
                 effect,
                 bypass: false,
@@ -199,7 +201,7 @@ fn queued_replacement_or_project_reset_revokes_old_event_before_main_activation(
         };
         app.send_command(EngineCommand::Play);
         if replace {
-            app.send_command(EngineCommand::AddPluginEffect {
+            app.send_command(EngineCommand::InsertEffect {
                 track_id,
                 effect_id,
                 effect: Box::new(RestartProbe(Arc::new(AtomicUsize::new(0)))),

@@ -23,6 +23,12 @@ impl EngineHandle for TimelineResultEngine<'_> {
             queue.send(command);
         }
     }
+    fn sample_rate(&self) -> u32 {
+        match self {
+            Self::Arrange(queue) => queue.sample_rate(),
+            Self::NonResident => vibez_engine::engine::DEFAULT_SAMPLE_RATE,
+        }
+    }
 }
 
 impl App {

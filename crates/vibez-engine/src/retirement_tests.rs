@@ -1,3 +1,5 @@
+//! Callback allocation counters and bounded retirement tests retain channel and lane owners.
+
 use super::*;
 use crate::{
     commands::EngineCommand,
@@ -105,11 +107,9 @@ fn source_and_effect_removal_stop_on_audio_and_drop_on_ui_without_callback_alloc
         let stop_on_audio = Arc::new(AtomicBool::new(false));
         let drops = Arc::new(AtomicUsize::new(0));
         let drop_on_audio = Arc::new(AtomicBool::new(false));
+        commands.push(EngineCommand::add_track(track)).unwrap();
         commands
-            .push(EngineCommand::AddTrack(track, "Source".into()))
-            .unwrap();
-        commands
-            .push(EngineCommand::AddPluginEffect {
+            .push(EngineCommand::InsertEffect {
                 track_id: track,
                 effect_id: effect,
                 effect: Box::new(Probe {
@@ -154,9 +154,7 @@ fn source_and_effect_removal_stop_on_audio_and_drop_on_ui_without_callback_alloc
 fn full_event_ring_keeps_channel_owner_until_retirement_can_be_delivered() {
     let (mut engine, mut commands, mut events) = AudioEngine::new();
     let track = TrackId::new();
-    commands
-        .push(EngineCommand::AddTrack(track, "Source".into()))
-        .unwrap();
+    commands.push(EngineCommand::add_track(track)).unwrap();
     engine.process_block(AudioProcessBlock::new(&mut [], 2));
     while engine
         .event_tx
@@ -198,12 +196,8 @@ fn bus_automation_cleanup_retires_point_storage_without_callback_destruction() {
     let (mut engine, mut commands, mut events) = AudioEngine::new();
     let track = TrackId::new();
     let bus = TrackId::new();
-    commands
-        .push(EngineCommand::AddTrack(track, "Track".into()))
-        .unwrap();
-    commands
-        .push(EngineCommand::AddBus(bus, "Bus".into()))
-        .unwrap();
+    commands.push(EngineCommand::add_track(track)).unwrap();
+    commands.push(EngineCommand::add_bus(bus)).unwrap();
     let mut lane = AutomationLane::new(AutomationTarget::Send { bus_id: bus });
     lane.points.push(AutomationPoint {
         beat: 0.0,
@@ -213,7 +207,7 @@ fn bus_automation_cleanup_retires_point_storage_without_callback_destruction() {
     commands
         .push(EngineCommand::SetAutomationLane {
             track_id: track,
-            lane,
+            insertion: crate::clip_insertion::PreparedAutomationLaneInsertion::new(lane),
         })
         .unwrap();
     engine.process_block(AudioProcessBlock::new(&mut [], 2));

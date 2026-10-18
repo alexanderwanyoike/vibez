@@ -29,6 +29,7 @@ fn pulse(track_id: TrackId) -> EngineCommand {
         signal[sample] = 1.0;
     }
     EngineCommand::AddClip {
+        insertion: crate::clip_insertion::PreparedClipInsertion::new(),
         track_id,
         clip_id: ClipId::new(),
         audio: Arc::new(DecodedAudio {
@@ -64,15 +65,11 @@ fn send_run(reported: u32) -> Vec<f32> {
     let bus = TrackId::new();
     let insert = EffectId::new();
     let return_fx = EffectId::new();
-    commands
-        .push(EngineCommand::AddTrack(track, "Pulse".into()))
-        .unwrap();
-    commands
-        .push(EngineCommand::AddBus(bus, "Return".into()))
-        .unwrap();
+    commands.push(EngineCommand::add_track(track)).unwrap();
+    commands.push(EngineCommand::add_bus(bus)).unwrap();
     commands.push(pulse(track)).unwrap();
     commands
-        .push(EngineCommand::AddPluginEffect {
+        .push(EngineCommand::InsertEffect {
             track_id: track,
             effect_id: insert,
             effect: Box::new(DelayProbe::new(137)),
@@ -80,7 +77,7 @@ fn send_run(reported: u32) -> Vec<f32> {
         })
         .unwrap();
     commands
-        .push(EngineCommand::AddPluginEffect {
+        .push(EngineCommand::InsertEffect {
             track_id: bus,
             effect_id: return_fx,
             effect: Box::new(DelayProbe::with_report(521, reported)),
@@ -178,13 +175,11 @@ fn detector_run(reported: u32) -> Vec<f32> {
         channels: 2,
     };
     for id in [source, target] {
-        commands
-            .push(EngineCommand::AddTrack(id, "Pulse".into()))
-            .unwrap();
+        commands.push(EngineCommand::add_track(id)).unwrap();
         commands.push(pulse(id)).unwrap();
     }
     commands
-        .push(EngineCommand::AddPluginEffect {
+        .push(EngineCommand::InsertEffect {
             track_id: source,
             effect_id: latency,
             effect: Box::new(DelayProbe::with_report(521, reported)),
@@ -192,7 +187,7 @@ fn detector_run(reported: u32) -> Vec<f32> {
         })
         .unwrap();
     commands
-        .push(EngineCommand::AddPluginEffect {
+        .push(EngineCommand::InsertEffect {
             track_id: target,
             effect_id: detector,
             effect: Box::new(Difference {

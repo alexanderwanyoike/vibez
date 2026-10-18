@@ -116,11 +116,14 @@ pub fn accepts_effect_load(
     device: &vibez_core::effect::PluginDeviceInfo,
 ) -> bool {
     track.is_some_and(|track| {
-        !restoring_slot
-            || track
+        if restoring_slot {
+            track
                 .effects
                 .iter()
                 .any(|slot| slot.id == effect_id && slot.plugin_ref.as_ref() == Some(device))
+        } else {
+            track.has_device_room()
+        }
     })
 }
 
@@ -269,6 +272,22 @@ mod tests {
         assert!(!accepts_effect_load(Some(track), id, true, &device));
         assert!(accepts_effect_load(Some(track), id, false, &device));
         assert!(!accepts_effect_load(None, id, false, &device));
+    }
+
+    #[test]
+    fn a_new_plugin_load_needs_room_in_the_device_chain() {
+        let device = plugin_device("compressor");
+        let id = vibez_core::id::EffectId::new();
+        let mut track = crate::state::ProjectTrack::new(TrackId::new(), "Full".into(), 0);
+        let template = effect(Some(device.clone()));
+        while track.has_device_room() {
+            let mut slot = template.clone();
+            slot.id = vibez_core::id::EffectId::new();
+            track.effects.push(slot);
+        }
+        assert!(!accepts_effect_load(Some(&track), id, false, &device));
+        track.effects.pop();
+        assert!(accepts_effect_load(Some(&track), id, false, &device));
     }
 
     #[test]

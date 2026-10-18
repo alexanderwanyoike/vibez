@@ -1,4 +1,7 @@
+//! Offline plugin rendering matches the equivalent prepared live-engine signal.
+
 use super::*;
+use vibez_core::routing::{RoutingChannel, RoutingEffect};
 
 struct EchoPluginEffect {
     delay: [f32; 1024],
@@ -70,10 +73,11 @@ fn sampler_echo_fixture() -> (BounceRequest, Vec<Command>) {
         params: Vec::new(),
         source: None,
     });
-    commands.push(Command::AddInstrumentTrack(
+    commands.push(Command::add_track(tid));
+    commands.push(Command::set_built_in_instrument(
         tid,
-        "Vox".into(),
         InstrumentKind::Sampler,
+        request.sample_rate,
     ));
     commands.push(Command::LoadSamplerSample {
         track_id: tid,
@@ -106,20 +110,22 @@ fn sampler_echo_fixture() -> (BounceRequest, Vec<Command>) {
     };
     commands.push(Command::AddNoteClip {
         track_id: tid,
-        clip_id: clip.id,
-        position_beats: clip.position_beats,
-        duration_beats: clip.duration_beats,
-        start_marker_beats: 0.0,
-        loop_enabled: false,
-        loop_start_beats: 0.0,
-        loop_end_beats: 0.0,
-        groove_grid: clip.groove_grid,
+        insertion: crate::clip_insertion::PreparedNoteClipInsertion::new(
+            clip.id,
+            clip.position_beats,
+            clip.duration_beats,
+            0.0,
+            false,
+            0.0,
+            0.0,
+            clip.groove_grid,
+        ),
     });
     for note in &clip.notes {
         commands.push(Command::AddNote {
             track_id: tid,
             clip_id: clip.id,
-            note: *note,
+            insertion: crate::clip_insertion::PreparedNoteInsertion::new(*note),
         });
     }
     request.note_clips.push(clip);
@@ -131,7 +137,7 @@ fn audio_echo_fixture() -> (BounceRequest, Vec<Command>) {
     let tid = request.tracks[0].id;
     let sample = audio_of(128, 0.5);
     let mut commands = Vec::new();
-    commands.push(Command::AddTrack(tid, "Vox".into()));
+    commands.push(Command::add_track(tid));
     for position in [0, 1536] {
         let clip = ClipInfo {
             id: ClipId::new(),
@@ -157,6 +163,9 @@ fn audio_echo_fixture() -> (BounceRequest, Vec<Command>) {
             warped_to_bpm: None,
         };
         commands.push(Command::AddClip {
+            insertion: crate::clip_insertion::PreparedClipInsertion::with_capacity(
+                request.audio_clips.len() + 1,
+            ),
             track_id: tid,
             clip_id: clip.id,
             audio: Arc::clone(&sample),
@@ -195,17 +204,41 @@ fn assert_export_preserves_insert_echo(
         plugin: Some(plugin_device("Echo")),
     });
     let (mut engine, mut commands, mut events) = AudioEngine::new();
+    let channels = [
+        RoutingChannel {
+            id: tid,
+            is_bus: false,
+            sends: vec![],
+            effects: vec![RoutingEffect {
+                id: effect_id,
+                inputs: vec![],
+                assignments: vec![],
+                inactive_inputs: vec![],
+            }],
+        },
+        RoutingChannel {
+            id: TrackId::MASTER,
+            is_bus: true,
+            sends: vec![],
+            effects: vec![],
+        },
+    ];
     commands.push(Command::SetBpm(request.bpm)).unwrap();
     for command in setup_commands {
         commands.push(command).unwrap();
     }
     commands
-        .push(Command::AddPluginEffect {
+        .push(Command::InsertEffect {
             track_id: tid,
             effect_id,
             effect: Box::new(EchoPluginEffect::new()),
             position: None,
         })
+        .unwrap();
+    commands
+        .push(Command::SetRouting(
+            crate::routing::PreparedRouting::prepare(&channels, BLOCK_FRAMES).unwrap(),
+        ))
         .unwrap();
     // Recording mode disables end-of-content auto-stop without looping.
     // This lets the live path cover the export range after the last hit;
@@ -214,6 +247,7 @@ fn assert_export_preserves_insert_echo(
         .push(Command::SetArrangementRecording(true))
         .unwrap();
     commands.push(Command::Play).unwrap();
+    crate::test_support::fulfill_insertion_setup(&mut engine, &mut events);
     let mut live = vec![0.0; request.range_samples.1 as usize * CHANNELS];
     for block in live.chunks_mut(BLOCK_FRAMES * 2) {
         engine.process_block(AudioProcessBlock::new(block, 2));

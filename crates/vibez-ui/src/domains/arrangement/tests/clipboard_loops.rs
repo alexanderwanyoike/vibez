@@ -1,3 +1,5 @@
+//! Timeline copy and duplication preserve clip offsets, loops and playback geometry.
+
 use super::*;
 
 #[test]
@@ -367,16 +369,46 @@ fn duplicate_preserves_audio_and_midi_loop_settings() {
         } if (*linear_gain - vibez_core::track::ClipGainDb::new(-4.0).unwrap().linear()).abs()
             < f32::EPSILON
     )));
-    assert!(engine.0.iter().any(|command| matches!(
-        command,
-        EngineCommand::AddNoteClip {
-            start_marker_beats: 0.0,
-            loop_enabled: true,
-            loop_start_beats: 0.0,
-            loop_end_beats: 4.0,
-            ..
+    let (mut playback, mut commands, mut events) = vibez_engine::engine::AudioEngine::new();
+    for track_id in [audio_tid, midi_tid] {
+        commands.push(EngineCommand::add_track(track_id)).unwrap();
+    }
+    for command in engine.0 {
+        commands.push(command).unwrap();
+    }
+    playback.process_block(vibez_engine::engine::AudioProcessBlock::new(&mut [], 2));
+    loop {
+        let mut fulfilled = false;
+        while let Ok(event) = events.pop() {
+            if let vibez_engine::events::EngineEvent::ClipInsertionStorageRequested(request) = event
+            {
+                request.fulfill();
+                fulfilled = true;
+            }
         }
-    )));
+        if !fulfilled {
+            break;
+        }
+        playback.process_block(vibez_engine::engine::AudioProcessBlock::new(&mut [], 2));
+    }
+    let copied = playback
+        .tracks()
+        .iter()
+        .find(|track| track.id == midi_tid)
+        .unwrap()
+        .playback_source
+        .note_clips
+        .iter()
+        .find(|clip| clip.id == midi_copy.id)
+        .unwrap();
+    assert_eq!(copied.start_marker_beats, 0.0);
+    assert!(copied.loop_enabled);
+    assert_eq!(copied.loop_start_beats, 0.0);
+    assert_eq!(copied.loop_end_beats, 4.0);
+    assert_eq!(copied.position_beats, midi_copy.position_beats);
+    assert_eq!(copied.duration_beats, midi_copy.duration_beats);
+    assert_eq!(copied.groove_grid, midi_copy.groove_grid);
+    assert_eq!(copied.notes, midi_copy.notes);
 }
 
 #[test]

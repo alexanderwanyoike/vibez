@@ -1,6 +1,15 @@
-/// ADSR envelope stages.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) enum EnvelopeStage {
+//! The instruments' ADSR: a straight attack, then decay and release that fall
+//! exponentially and reach -60 dB of their distance in exactly their time,
+//! the way analogue envelopes and most soft synths read their knobs.
+
+/// -60 dB, where a decay or release counts as done.
+const DONE: f32 = 0.001;
+/// Below this a released voice is silent and stops.
+const SILENT: f32 = 0.0001;
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum Stage {
+    #[default]
     Idle,
     Attack,
     Decay,
@@ -8,77 +17,85 @@ pub(crate) enum EnvelopeStage {
     Release,
 }
 
-/// Per-voice ADSR envelope.
-#[derive(Debug, Clone)]
-pub(crate) struct Envelope {
-    pub stage: EnvelopeStage,
-    pub level: f32,
-    pub attack: f32,
-    pub decay: f32,
-    pub sustain: f32,
-    pub release: f32,
-    pub sample_rate: f32,
+/// Each stage's per-sample step, worked out once when a time changes.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Times {
+    attack_step: f32,
+    decay_falloff: f32,
+    sustain: f32,
+    release_falloff: f32,
+}
+
+impl Times {
+    pub fn new(attack: f32, decay: f32, sustain: f32, release: f32, sample_rate: f32) -> Self {
+        Self {
+            attack_step: 1.0 / (attack * sample_rate).max(1.0),
+            decay_falloff: falloff(decay, sample_rate),
+            sustain: sustain.clamp(0.0, 1.0),
+            release_falloff: falloff(release, sample_rate),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Envelope {
+    stage: Stage,
+    level: f32,
+}
+
+/// The per-sample multiplier that brings a distance down to -60 dB in
+/// `seconds`.
+fn falloff(seconds: f32, sample_rate: f32) -> f32 {
+    DONE.powf(1.0 / (seconds * sample_rate).max(1.0))
 }
 
 impl Envelope {
-    pub fn new(sample_rate: f32) -> Self {
-        Self {
-            stage: EnvelopeStage::Idle,
-            level: 0.0,
-            attack: 0.01,
-            decay: 0.1,
-            sustain: 0.7,
-            release: 0.3,
-            sample_rate,
-        }
-    }
-
+    /// Starts again from wherever the level is, so a retrigger never clicks.
     pub fn trigger(&mut self) {
-        self.stage = EnvelopeStage::Attack;
-        // Don't reset level — allows retriggering without clicks
+        self.stage = Stage::Attack;
     }
 
     pub fn release(&mut self) {
-        if self.stage != EnvelopeStage::Idle {
-            self.stage = EnvelopeStage::Release;
+        if self.stage != Stage::Idle {
+            self.stage = Stage::Release;
         }
     }
 
-    pub fn is_active(&self) -> bool {
-        self.stage != EnvelopeStage::Idle
+    pub fn active(&self) -> bool {
+        self.stage != Stage::Idle
     }
 
-    pub fn tick(&mut self) -> f32 {
+    pub fn released(&self) -> bool {
+        matches!(self.stage, Stage::Release | Stage::Idle)
+    }
+
+    pub fn tick(&mut self, times: &Times) -> f32 {
         match self.stage {
-            EnvelopeStage::Idle => 0.0,
-            EnvelopeStage::Attack => {
-                let rate = 1.0 / (self.attack * self.sample_rate).max(1.0);
-                self.level += rate;
+            Stage::Idle => return 0.0,
+            Stage::Attack => {
+                self.level += times.attack_step;
                 if self.level >= 1.0 {
                     self.level = 1.0;
-                    self.stage = EnvelopeStage::Decay;
+                    self.stage = Stage::Decay;
                 }
-                self.level
             }
-            EnvelopeStage::Decay => {
-                let rate = 1.0 / (self.decay * self.sample_rate).max(1.0);
-                self.level -= rate * (1.0 - self.sustain);
-                if self.level <= self.sustain {
-                    self.level = self.sustain;
-                    self.stage = EnvelopeStage::Sustain;
+            Stage::Decay => {
+                let sustain = times.sustain;
+                self.level = sustain + (self.level - sustain) * times.decay_falloff;
+                if (self.level - sustain).abs() <= DONE * (1.0 - sustain).max(DONE) {
+                    self.level = sustain;
+                    self.stage = Stage::Sustain;
                 }
-                self.level
             }
-            EnvelopeStage::Sustain => self.sustain,
-            EnvelopeStage::Release => {
-                let rate = 1.0 / (self.release * self.sample_rate).max(1.0);
-                self.level -= rate * self.level.max(0.001);
-                if self.level <= 0.001 {
+            Stage::Sustain => self.level = times.sustain,
+            Stage::Release => {
+                self.level *= times.release_falloff;
+                if self.level < SILENT {
                     self.level = 0.0;
-                    self.stage = EnvelopeStage::Idle;
+                    self.stage = Stage::Idle;
                 }
-                self.level
             }
         }
+        self.level
     }
 }

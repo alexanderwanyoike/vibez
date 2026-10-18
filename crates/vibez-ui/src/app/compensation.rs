@@ -83,7 +83,7 @@ impl App {
             let generation = generation.ok_or("Compensation plan generation overflow")?;
             let mut prepared = vibez_engine::routing::PreparedRouting::prepare_compensated(
                 &channels,
-                4096,
+                vibez_engine::routing::MAX_BLOCK_FRAMES,
                 &timing.reports,
                 &timing.reduced_tracks,
                 generation,

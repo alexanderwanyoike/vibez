@@ -37,6 +37,7 @@ fn offline_rate_reuse_is_rejected_before_processing_and_retains_the_owner() {
     let effect = EffectId::new();
     let mut track = EngineTrack::new(id);
     track.effects.push(EffectSlot {
+        levels: Default::default(),
         id: effect,
         effect: Box::new(ActivatedAt48k),
         bypass: false,
@@ -64,14 +65,18 @@ fn offline_rate_reuse_is_rejected_before_processing_and_retains_the_owner() {
         sample_rate: 44_100,
         bpm: 120.0,
         swing: SwingAmount::STRAIGHT,
-        tracks: vec![track],
+        tracks: vec![Box::new(track)],
         buses: vec![],
         master: EngineTrack::new(TrackId::MASTER),
         routing: crate::routing::PreparedRouting::prepare(&model, 16).unwrap(),
     });
+    assert_eq!(engine.pending_retirements.reserved(), 0);
+    assert!(engine.pending_retirements.len() <= 32);
     let mut output = [0.0; 16];
     engine.render_offline_routing_segment(0, &mut output, None);
-    assert!(!engine.compensation_valid);
+    assert_eq!(engine.pending_retirements.reserved(), 0);
+    assert!(engine.pending_retirements.len() <= 32);
+    assert!(!engine.compensation_plan.applied_plan_is_valid());
     let error = engine
         .offline_compensation_failure()
         .expect("invalid rate must fail Bounce");
@@ -80,6 +85,8 @@ fn offline_rate_reuse_is_rejected_before_processing_and_retains_the_owner() {
         "{error}"
     );
     let (tracks, _, _) = engine.take_offline_channels();
+    assert_eq!(engine.pending_retirements.reserved(), 0);
+    assert!(engine.pending_retirements.len() <= 32);
     assert_eq!(tracks[0].effects.len(), 1);
     assert_eq!(
         tracks[0].effects[0].effect.activation_sample_rate(),

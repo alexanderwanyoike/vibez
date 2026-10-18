@@ -1,6 +1,7 @@
 //! Controlled Source automation clears absent values across actual timeline edits.
 
 use super::*;
+use crate::events::SourceNoteRepeatedEvent;
 use crate::playback_source::{PreparedPlaybackSource, PreparedSectionPlaybackSource};
 use vibez_core::{
     automation::{AutomationLane, AutomationPoint, AutomationTarget},
@@ -8,6 +9,7 @@ use vibez_core::{
     perform::{SwingAmount, SwingOffset},
     routing::*,
 };
+use vibez_instruments::create_instrument;
 
 fn swing_lane() -> AutomationLane {
     let mut lane = AutomationLane::new(AutomationTarget::TrackSwingOffset);
@@ -34,7 +36,7 @@ fn setup(
     source.automation.push(lane);
     engine
         .tracks
-        .push(EngineTrack::with_playback_source(id, source));
+        .push(Box::new(EngineTrack::with_playback_source(id, source)));
     let channels = [
         RoutingChannel {
             id,
@@ -149,7 +151,7 @@ fn graph_control_visits_are_linear_in_configured_controls_not_channels_times_con
     let mut channels = Vec::new();
     let mut targets = Vec::new();
     for &id in &ids {
-        engine.tracks.push(EngineTrack::new(id));
+        engine.tracks.push(Box::new(EngineTrack::new(id)));
         channels.push(RoutingChannel {
             id,
             is_bus: false,
@@ -187,8 +189,8 @@ fn static_send_gains_do_not_scan_automation_per_audio_frame() {
     let bus = TrackId::new();
     let mut source = EngineTrack::new(track);
     source.sends.push((bus, 0.5));
-    engine.tracks.push(source);
-    engine.buses.push(EngineTrack::new(bus));
+    engine.tracks.push(Box::new(source));
+    engine.buses.push(Box::new(EngineTrack::new(bus)));
     let channels = [
         RoutingChannel {
             id: track,
@@ -233,7 +235,7 @@ fn non_finite_swing_points_restore_the_manual_value_and_retire_replaced_storage(
     commands
         .push(EngineCommand::SetAutomationLane {
             track_id: id,
-            lane: edited,
+            insertion: crate::clip_insertion::PreparedAutomationLaneInsertion::new(edited),
         })
         .unwrap();
     assert_eq!(
@@ -270,7 +272,7 @@ fn prepared_and_new_send_automation_keep_sample_exact_ramps() {
         let bus = TrackId::new();
         let mut source = EngineTrack::new(track);
         source.sends.push((bus, 0.5));
-        source.playback_source.clips.push(EngineClip {
+        source.playback_source.push_audio_clip(EngineClip {
             id: ClipId::new(),
             audio: Arc::new(DecodedAudio {
                 channels: vec![vec![1.0; 128]; 2],
@@ -300,8 +302,8 @@ fn prepared_and_new_send_automation_keep_sample_exact_ramps() {
             }
             source.playback_source.automation.push(lane);
         }
-        engine.tracks.push(source);
-        engine.buses.push(EngineTrack::new(bus));
+        engine.tracks.push(Box::new(source));
+        engine.buses.push(Box::new(EngineTrack::new(bus)));
         let channels = [
             RoutingChannel {
                 id: track,
@@ -388,7 +390,8 @@ fn deleted_swing_changes_future_repeat_pairs_without_moving_the_inflight_pair() 
             (0, 0)
         );
         while let Ok(event) = events.pop() {
-            if let EngineEvent::SourceNoteRepeated { position, .. } = event {
+            if let EngineEvent::SourceNoteRepeated(SourceNoteRepeatedEvent { position, .. }) = event
+            {
                 at.push(position.effective_at_samples);
             }
         }

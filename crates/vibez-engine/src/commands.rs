@@ -1,3 +1,5 @@
+//! Prepared ownership and parameter commands delivered to the real-time engine.
+
 use std::sync::Arc;
 use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::effect::EffectType;
@@ -101,20 +103,19 @@ pub enum EngineCommand {
     StartPerformanceCapture,
     /// Mark the exact engine boundary where Capture into Arrange stops.
     StopPerformanceCapture,
-    /// Load decoded audio into the engine for playback (legacy single-file).
-    LoadAudio(Arc<DecodedAudio>),
-    /// Remove any loaded audio from the engine (legacy single-file).
+    /// Stop playback and clear the active Perform and Capture lifecycle.
     UnloadAudio,
 
     // -- Multi-track commands --
-    /// Add a new track with the given ID and name.
-    AddTrack(TrackId, String),
+    /// A project track prepared by [`EngineCommand::add_track`].
+    AddTrack(Box<crate::mixer::EngineTrack>),
     /// Remove a track by ID.
     RemoveTrack(TrackId),
     /// Reorder tracks to match the given ID order.
     ReorderTracks(Vec<TrackId>),
     /// Add a clip to a track.
     AddClip {
+        insertion: Box<crate::clip_insertion::PreparedClipInsertion>,
         track_id: TrackId,
         clip_id: ClipId,
         audio: Arc<DecodedAudio>,
@@ -197,11 +198,11 @@ pub enum EngineCommand {
     },
     /// Set the gain for a track.
     SetTrackGain(TrackId, f32),
-    /// Upsert one automation lane (whole-lane replace; points are
-    /// built on the UI thread).
+    /// Upsert one whole lane with its storage prepared off callback.
+    /// Native consumers must fulfill storage requests for FIFO progress.
     SetAutomationLane {
         track_id: TrackId,
-        lane: vibez_core::automation::AutomationLane,
+        insertion: crate::clip_insertion::PreparedAutomationLaneInsertion,
     },
     RemoveAutomationLane {
         track_id: TrackId,
@@ -244,7 +245,8 @@ pub enum EngineCommand {
 
     // -- Busses (return channels) --
     /// Add a bus: a mixer-only channel fed by per-track sends.
-    AddBus(TrackId, String),
+    /// A return channel prepared by [`EngineCommand::add_bus`].
+    AddBus(Box<crate::mixer::EngineTrack>),
     /// Remove a bus and every send pointing at it.
     RemoveBus(TrackId),
     /// Set a track's post-fader send amount into a bus (0.0 = off).
@@ -260,14 +262,16 @@ pub enum EngineCommand {
     /// spectrum analyser ring (`None` disables the tap).
     /// `TrackId::MASTER` taps the summed master bus.
     SetSpectrumTap(Option<TrackId>),
+    /// Selection generations distinguish queued samples after an insert or source changes.
+    SetEffectSpectrumTap(Option<crate::effect_spectrum::EffectSpectrumTarget>),
+    /// The generation prevents queued readings from a previous panel selection
+    /// from appearing after the UI returns to the same channel.
+    SetEffectMeterChannel {
+        track_id: Option<TrackId>,
+        generation: u64,
+    },
 
     // -- Effects --
-    AddEffect {
-        track_id: TrackId,
-        effect_id: EffectId,
-        effect_type: EffectType,
-        position: Option<usize>,
-    },
     RemoveEffect(TrackId, EffectId),
     SetEffectParam {
         track_id: TrackId,
@@ -287,11 +291,6 @@ pub enum EngineCommand {
     },
 
     // -- Instrument tracks --
-    AddInstrumentTrack(TrackId, String, InstrumentKind),
-    /// Add a bare MIDI track (no synth attached).
-    AddMidiTrack(TrackId, String),
-    /// Attach an instrument to a track.
-    SetTrackInstrument(TrackId, InstrumentKind),
     /// Remove the instrument from a track.
     RemoveTrackInstrument(TrackId),
     /// Set note clip duration (for halve/double).
@@ -307,14 +306,7 @@ pub enum EngineCommand {
     },
     AddNoteClip {
         track_id: TrackId,
-        clip_id: ClipId,
-        position_beats: f64,
-        duration_beats: f64,
-        start_marker_beats: f64,
-        loop_enabled: bool,
-        loop_start_beats: f64,
-        loop_end_beats: f64,
-        groove_grid: GrooveGrid,
+        insertion: crate::clip_insertion::PreparedNoteClipInsertion,
     },
     RemoveNoteClip(TrackId, ClipId),
     /// Move a note clip to a new beat position on the timeline.
@@ -326,7 +318,7 @@ pub enum EngineCommand {
     AddNote {
         track_id: TrackId,
         clip_id: ClipId,
-        note: MidiNote,
+        insertion: crate::clip_insertion::PreparedNoteInsertion,
     },
     RemoveNote {
         track_id: TrackId,
@@ -362,7 +354,15 @@ pub enum EngineCommand {
     SetDrumRackPadState {
         track_id: TrackId,
         pad_index: usize,
-        state: DrumPadState,
+        state: vibez_instruments::PreparedDrumPadState,
+    },
+    /// One of a pad's Sampler controls, which unlike a whole pad state
+    /// frees nothing on the audio thread.
+    SetDrumRackPadParam {
+        track_id: TrackId,
+        pad_index: usize,
+        param_index: usize,
+        value: f32,
     },
 
     // -- Arrangement recording / loop --
@@ -453,7 +453,7 @@ pub enum EngineCommand {
 
     // -- External plugins --
     /// Add a pre-loaded external plugin effect to a track.
-    AddPluginEffect {
+    InsertEffect {
         track_id: TrackId,
         effect_id: EffectId,
         effect: Box<dyn AudioEffect>,
@@ -469,10 +469,63 @@ pub enum EngineCommand {
         velocity: u8,
         on: bool,
     },
-    SetPluginInstrument {
+    SetInstrument {
         track_id: TrackId,
         instrument: Box<dyn Instrument>,
     },
+}
+
+impl EngineCommand {
+    /// Resolve names and destroy unused media metadata on the sending thread.
+    pub fn set_drum_rack_pad_state(
+        track_id: TrackId,
+        pad_index: usize,
+        state: DrumPadState,
+    ) -> Self {
+        Self::SetDrumRackPadState {
+            track_id,
+            pad_index,
+            state: state.into(),
+        }
+    }
+
+    /// Constructs the device on the caller's thread: building one allocates,
+    /// which the audio callback must never do.
+    pub fn insert_built_in_effect(
+        track_id: TrackId,
+        effect_id: EffectId,
+        effect_type: EffectType,
+        sample_rate: u32,
+    ) -> Self {
+        Self::InsertEffect {
+            track_id,
+            effect_id,
+            effect: vibez_dsp::factory::create_effect(effect_type, sample_rate as f32),
+            position: None,
+        }
+    }
+
+    /// See [`EngineCommand::insert_built_in_effect`].
+    pub fn add_track(track_id: TrackId) -> Self {
+        Self::AddTrack(Box::new(crate::mixer::EngineTrack::new(track_id)))
+    }
+
+    /// See [`EngineCommand::insert_built_in_effect`].
+    pub fn add_bus(bus_id: TrackId) -> Self {
+        Self::AddBus(Box::new(crate::mixer::EngineTrack::new(bus_id)))
+    }
+
+    /// See [`EngineCommand::insert_built_in_effect`].
+    pub fn set_built_in_instrument(
+        track_id: TrackId,
+        kind: InstrumentKind,
+        sample_rate: u32,
+    ) -> Self {
+        Self::SetInstrument {
+            track_id,
+            instrument: vibez_instruments::create_instrument(kind, sample_rate as f32),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -486,11 +539,6 @@ mod tests {
         let _seek = EngineCommand::Seek(44_100);
         let _bpm = EngineCommand::SetBpm(140.0);
 
-        let audio = Arc::new(DecodedAudio {
-            channels: vec![vec![0.0; 100], vec![0.0; 100]],
-            sample_rate: 44_100,
-        });
-        let _load = EngineCommand::LoadAudio(audio);
         let _unload = EngineCommand::UnloadAudio;
     }
 
@@ -503,9 +551,10 @@ mod tests {
             sample_rate: 44_100,
         });
 
-        let _add_track = EngineCommand::AddTrack(tid, "Track 1".into());
+        let _add_track = EngineCommand::add_track(tid);
         let _remove_track = EngineCommand::RemoveTrack(tid);
         let _add_clip = EngineCommand::AddClip {
+            insertion: crate::clip_insertion::PreparedClipInsertion::new(),
             track_id: tid,
             clip_id: cid,
             audio,
@@ -580,22 +629,26 @@ mod tests {
     }
 
     #[test]
-    fn load_audio_shares_arc() {
+    fn replacement_clip_buffer_shares_arc() {
         let audio = Arc::new(DecodedAudio {
             channels: vec![vec![1.0, 2.0]],
             sample_rate: 48_000,
         });
-        let cmd = EngineCommand::LoadAudio(Arc::clone(&audio));
+        let cmd = EngineCommand::ReplaceClipBuffer {
+            track_id: TrackId::new(),
+            clip_id: ClipId::new(),
+            audio: Arc::clone(&audio),
+        };
 
         // The Arc should have 2 strong references now.
         assert_eq!(Arc::strong_count(&audio), 2);
 
         match cmd {
-            EngineCommand::LoadAudio(a) => {
+            EngineCommand::ReplaceClipBuffer { audio: a, .. } => {
                 assert_eq!(a.num_frames(), 2);
                 assert_eq!(a.sample_rate, 48_000);
             }
-            _ => panic!("expected LoadAudio"),
+            _ => panic!("expected ReplaceClipBuffer"),
         }
     }
 }
