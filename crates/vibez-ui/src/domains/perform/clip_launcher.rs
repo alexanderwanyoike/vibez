@@ -361,6 +361,30 @@ impl PerformState {
         stop
     }
 
+    /// Empties the cell for `source` once its track can hold it, returning
+    /// the stop the replaced clip needs, or why it cannot (`None` for a
+    /// track that no longer exists).
+    fn clear_cell_for(
+        &mut self,
+        source: &LauncherClip,
+        track_id: TrackId,
+        row: u32,
+        tracks: &[crate::state::ProjectTrack],
+    ) -> Result<Option<ClipLaunchRequest>, Option<&'static str>> {
+        let track = tracks
+            .iter()
+            .find(|track| track.id == track_id)
+            .ok_or(None)?;
+        if let Some(status) = source.refused_by(track) {
+            return Err(Some(status));
+        }
+        Ok(self
+            .clips
+            .at(track_id, row)
+            .map(|clip| clip.id)
+            .and_then(|occupant| self.remove_launcher_clip(occupant)))
+    }
+
     pub(super) fn update_clips(&mut self, msg: ClipMsg, ctx: PerformCtx<'_>) -> PerformAction {
         if self.layout != PerformLayout::Clips || !ctx.workspace_visible {
             return PerformAction::default();
@@ -423,22 +447,19 @@ impl PerformState {
                 let Some(source) = self.clips.by_id(id).cloned() else {
                     return PerformAction::default();
                 };
-                let Some(track) = ctx.project_tracks.iter().find(|track| track.id == track_id)
-                else {
-                    return PerformAction::default();
-                };
                 if (source.track_id, source.row) == (track_id, row) {
                     return PerformAction::default();
                 }
-                if let Some(status) = source.refused_by(track) {
-                    return PerformAction {
-                        status: Some(status),
-                        ..Default::default()
-                    };
-                }
-                if let Some(occupant) = self.clips.at(track_id, row).map(|clip| clip.id) {
-                    clip_launch = self.remove_launcher_clip(occupant);
-                }
+                clip_launch = match self.clear_cell_for(&source, track_id, row, ctx.project_tracks)
+                {
+                    Ok(stop) => stop,
+                    Err(status) => {
+                        return PerformAction {
+                            status,
+                            ..Default::default()
+                        }
+                    }
+                };
                 let placed = if !copy && track_id == source.track_id {
                     if let Some(clip) = Arc::make_mut(&mut self.clips).by_id_mut(id) {
                         clip.row = row;
@@ -470,25 +491,25 @@ impl PerformState {
                 clip_launch = self.remove_launcher_clip(id);
             }
             ClipMsg::Paste => {
-                let (Some(source), Some((track_id, row))) =
-                    (self.clip_editor.clipboard.as_ref(), self.clip_editor.slot)
+                let Some((source, (track_id, row))) = self
+                    .clip_editor
+                    .clipboard
+                    .clone()
+                    .zip(self.clip_editor.slot)
                 else {
                     return PerformAction::default();
                 };
-                let Some(track) = ctx.project_tracks.iter().find(|track| track.id == track_id)
-                else {
-                    return PerformAction::default();
+                clip_launch = match self.clear_cell_for(&source, track_id, row, ctx.project_tracks)
+                {
+                    Ok(stop) => stop,
+                    Err(status) => {
+                        return PerformAction {
+                            status,
+                            ..Default::default()
+                        }
+                    }
                 };
-                if let Some(status) = source.refused_by(track) {
-                    return PerformAction {
-                        status: Some(status),
-                        ..Default::default()
-                    };
-                }
                 let copy = source.copied_to(track_id, row);
-                if let Some(occupant) = self.clips.at(track_id, row).map(|clip| clip.id) {
-                    clip_launch = self.remove_launcher_clip(occupant);
-                }
                 let id = copy.id;
                 Arc::make_mut(&mut self.clips).clips.push(copy);
                 selected = self.select_launcher_clip(id);
