@@ -387,27 +387,9 @@ impl PerformState {
                 else {
                     return PerformAction::default();
                 };
-                let id = ClipId::new();
-                let mut timeline = (*source.timeline).clone();
-                for content in timeline.by_track.values_mut() {
-                    for clip in &mut content.clips {
-                        clip.id = id;
-                        clip.fades = clip.fades.unlinked();
-                    }
-                    for clip in &mut content.note_clips {
-                        clip.id = id;
-                        clip.selected_notes.clear();
-                    }
-                    for lane in &mut content.automation {
-                        lane.id = vibez_core::id::LaneId::new();
-                    }
-                }
-                Arc::make_mut(&mut self.clips).clips.push(LauncherClip {
-                    id,
-                    track_id,
-                    row,
-                    timeline: Arc::new(timeline),
-                });
+                let copy = source.copied_to(row);
+                let id = copy.id;
+                Arc::make_mut(&mut self.clips).clips.push(copy);
                 selected = self.select_launcher_clip(id);
                 if row < self.clip_editor.first_row || row >= self.clip_editor.first_row + 4 {
                     self.clip_editor.first_row = row;
@@ -456,6 +438,32 @@ impl PerformState {
 }
 
 impl LauncherClip {
+    /// An independent copy in `row`: its own id, so editing either never
+    /// changes the other.
+    pub fn copied_to(&self, row: u32) -> LauncherClip {
+        let id = ClipId::new();
+        let mut timeline = (*self.timeline).clone();
+        for content in timeline.by_track.values_mut() {
+            for clip in &mut content.clips {
+                clip.id = id;
+                clip.fades = clip.fades.unlinked();
+            }
+            for clip in &mut content.note_clips {
+                clip.id = id;
+                clip.selected_notes.clear();
+            }
+            for lane in &mut content.automation {
+                lane.id = vibez_core::id::LaneId::new();
+            }
+        }
+        LauncherClip {
+            id,
+            track_id: self.track_id,
+            row,
+            timeline: Arc::new(timeline),
+        }
+    }
+
     pub fn length_and_loop(&self, samples_per_beat: f64) -> (u64, bool) {
         match self.part() {
             Some(SlotPart::Audio(clip)) => (clip.duration.max(1), clip.loop_enabled),
