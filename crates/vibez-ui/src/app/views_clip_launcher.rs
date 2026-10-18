@@ -462,6 +462,8 @@ impl App {
                     let slot_cell = button(
                         canvas(crate::widgets::clip_slot::ClipSlot {
                             clip: slot,
+                            cell: (track.id, slot_row),
+                            drag_source: self.state.perform.clip_editor.dragging,
                             empty_action: empty_action.clone(),
                             color: track_color,
                             key,

@@ -222,3 +222,63 @@ fn paste_refuses_a_cell_on_a_track_of_the_other_kind() {
     assert!(state.clips.at(audio, 0).is_none());
     assert!(action.status.is_some());
 }
+
+#[test]
+fn dropping_a_clip_moves_it_and_a_command_drop_copies_it() {
+    let tracks = tracks(2);
+    let (a, b) = (tracks[0].id, tracks[1].id);
+    let mut state = launcher();
+    let id = create(&mut state, &tracks, a, 0);
+    let drop = |track_id, row, copy| ClipMsg::Drop {
+        clip: id,
+        track_id,
+        row,
+        copy,
+    };
+
+    send(&mut state, &tracks, ClipMsg::BeginDrag(id));
+    assert_eq!(state.clip_editor.dragging, Some(id));
+    send(&mut state, &tracks, drop(a, 3, false));
+    assert_eq!(state.clip_editor.dragging, None);
+    assert_eq!(
+        state.clips.at(a, 3).map(|clip| clip.id),
+        Some(id),
+        "a move along its own track keeps the clip, so it keeps playing"
+    );
+    assert!(state.clips.at(a, 0).is_none());
+    assert_eq!(state.clip_editor.slot, Some((a, 3)));
+
+    send(&mut state, &tracks, drop(a, 1, true));
+    assert_eq!(state.clips.at(a, 3).map(|clip| clip.id), Some(id));
+    assert!(state.clips.at(a, 1).is_some_and(|clip| clip.id != id));
+
+    send(&mut state, &tracks, drop(b, 0, false));
+    assert!(state.clips.by_id(id).is_none());
+    let moved = state.clips.at(b, 0).unwrap();
+    assert!(moved.timeline.get(b).is_some());
+    assert_eq!(state.clip_editor.selected, Some(moved.id));
+}
+
+#[test]
+fn a_drop_onto_a_track_of_the_other_kind_leaves_the_clip_where_it_was() {
+    let mut tracks = tracks(2);
+    tracks[1].kind = vibez_core::midi::TrackKind::Audio;
+    let (midi, audio) = (tracks[0].id, tracks[1].id);
+    let mut state = launcher();
+    let id = create(&mut state, &tracks, midi, 0);
+
+    send(&mut state, &tracks, ClipMsg::BeginDrag(id));
+    let action = send(
+        &mut state,
+        &tracks,
+        ClipMsg::Drop {
+            clip: id,
+            track_id: audio,
+            row: 0,
+            copy: false,
+        },
+    );
+    assert!(action.status.is_some());
+    assert_eq!(state.clips.at(midi, 0).map(|clip| clip.id), Some(id));
+    assert_eq!(state.clip_editor.dragging, None);
+}

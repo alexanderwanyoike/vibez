@@ -92,6 +92,7 @@ pub struct ClipEditor {
     /// The cell paste targets: the selected clip's, or an empty one.
     pub slot: Option<(TrackId, u32)>,
     pub clipboard: Option<LauncherClip>,
+    pub dragging: Option<ClipId>,
     pub editor: TimelineEditorState,
     pub first_track: usize,
     pub first_row: u32,
@@ -207,16 +208,34 @@ pub enum ClipMsg {
     LaunchRow(u32),
     StopAll,
 
-    CreateMidi { track_id: TrackId, row: u32 },
+    CreateMidi {
+        track_id: TrackId,
+        row: u32,
+    },
     Select(ClipId),
-    SelectSlot { track_id: TrackId, row: u32 },
+    SelectSlot {
+        track_id: TrackId,
+        row: u32,
+    },
     Delete(ClipId),
     ToggleLoop(ClipId),
     Duplicate(ClipId),
     Copy,
     Cut,
     Paste,
-    MoveWindow { tracks: i32, rows: i32 },
+    BeginDrag(ClipId),
+    EndDrag,
+    /// `copy` leaves the dragged clip where it was.
+    Drop {
+        clip: ClipId,
+        track_id: TrackId,
+        row: u32,
+        copy: bool,
+    },
+    MoveWindow {
+        tracks: i32,
+        rows: i32,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -391,6 +410,7 @@ impl PerformState {
                 }
             }
             ClipMsg::Select(id) => selected = self.select_launcher_clip(id),
+            ClipMsg::BeginDrag(_) | ClipMsg::EndDrag | ClipMsg::Drop { .. } => {}
             ClipMsg::Copy => {
                 self.clip_editor.clipboard = self
                     .clip_editor

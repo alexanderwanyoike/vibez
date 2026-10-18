@@ -14,6 +14,9 @@ use crate::typography::{PERFORM_LABEL, PERFORM_TECH};
 
 pub struct ClipSlot<'a> {
     pub clip: Option<&'a LauncherClip>,
+    pub cell: (vibez_core::id::TrackId, u32),
+    /// The clip being dragged across the launcher, from any cell.
+    pub drag_source: Option<vibez_core::id::ClipId>,
     pub empty_action: Message,
     pub color: Color,
     pub key: &'a str,
@@ -539,6 +542,8 @@ mod empty_cell_tests {
         let track = vibez_core::id::TrackId::new();
         let slot = ClipSlot {
             clip: None,
+            cell: (track, 2),
+            drag_source: None,
             empty_action: Message::Perform(PerformMsg::Clips(ClipMsg::CreateMidi {
                 track_id: track,
                 row: 2,
@@ -565,5 +570,114 @@ mod empty_cell_tests {
         assert!(
             matches!(message, Some(Message::Perform(PerformMsg::Clips(ClipMsg::CreateMidi {track_id, row: 2}))) if track_id == track)
         );
+    }
+}
+
+#[cfg(test)]
+mod drag_tests {
+    use super::*;
+    use crate::domains::perform::{ClipMsg, PerformMsg};
+    use iced::widget::canvas::Program;
+    use vibez_core::id::{ClipId, TrackId};
+
+    fn slot(
+        clip: Option<&LauncherClip>,
+        cell: (TrackId, u32),
+        drag_source: Option<ClipId>,
+    ) -> ClipSlot<'_> {
+        ClipSlot {
+            clip,
+            cell,
+            drag_source,
+            empty_action: Message::Perform(PerformMsg::Clips(ClipMsg::StopAll)),
+            color: Color::WHITE,
+            key: "",
+            selected: false,
+            recording: false,
+            audio_recording: None,
+            playing: false,
+            progress: None,
+            queued: false,
+            compact: false,
+        }
+    }
+
+    fn mouse(event: mouse::Event) -> canvas::Event {
+        canvas::Event::Mouse(event)
+    }
+
+    #[test]
+    fn dragging_a_clip_past_a_few_pixels_starts_a_drag_that_release_ends() {
+        let track = TrackId::new();
+        let clip = crate::domains::perform::clip_record::empty_midi_clip(
+            ClipId::new(),
+            track,
+            0,
+            "Pattern 1".into(),
+            4.0,
+        );
+        let source = slot(Some(&clip), (track, 0), None);
+        let mut state = ClipSlotState::default();
+        let bounds = Rectangle::new(Point::ORIGIN, Size::new(150.0, 72.0));
+        let at = |x, y| mouse::Cursor::Available(Point::new(x, y));
+        let press = mouse(mouse::Event::ButtonPressed(mouse::Button::Left));
+        source.update(&mut state, press, bounds, at(70.0, 40.0));
+        let nudge = mouse(mouse::Event::CursorMoved {
+            position: Point::new(72.0, 41.0),
+        });
+        assert!(source
+            .update(&mut state, nudge, bounds, at(72.0, 41.0))
+            .1
+            .is_none());
+        let away = mouse(mouse::Event::CursorMoved {
+            position: Point::new(200.0, 40.0),
+        });
+        assert!(matches!(
+            source.update(&mut state, away, bounds, at(200.0, 40.0)).1,
+            Some(Message::Perform(PerformMsg::Clips(ClipMsg::BeginDrag(id)))) if id == clip.id
+        ));
+        let release = mouse(mouse::Event::ButtonReleased(mouse::Button::Left));
+        assert!(matches!(
+            source
+                .update(&mut state, release, bounds, at(200.0, 40.0))
+                .1,
+            Some(Message::Perform(PerformMsg::Clips(ClipMsg::EndDrag)))
+        ));
+    }
+
+    #[test]
+    fn releasing_a_drag_over_another_cell_drops_there_and_command_copies() {
+        let (track, dragged) = (TrackId::new(), ClipId::new());
+        let bounds = Rectangle::new(Point::ORIGIN, Size::new(150.0, 72.0));
+        let inside = mouse::Cursor::Available(Point::new(70.0, 40.0));
+        let release = mouse(mouse::Event::ButtonReleased(mouse::Button::Left));
+        let command = if crate::app::ON_MACOS {
+            iced::keyboard::Modifiers::LOGO
+        } else {
+            iced::keyboard::Modifiers::CTRL
+        };
+        for (modifiers, copy) in [(iced::keyboard::Modifiers::empty(), false), (command, true)] {
+            let target = slot(None, (track, 2), Some(dragged));
+            let mut state = ClipSlotState::default();
+            target.update(
+                &mut state,
+                canvas::Event::Keyboard(iced::keyboard::Event::ModifiersChanged(modifiers)),
+                bounds,
+                inside,
+            );
+            let dropped = target.update(&mut state, release.clone(), bounds, inside).1;
+            assert!(
+                matches!(
+                    dropped,
+                    Some(Message::Perform(PerformMsg::Clips(ClipMsg::Drop {
+                        clip,
+                        track_id,
+                        row: 2,
+                        copy: copied,
+                    }))) if clip == dragged && track_id == track && copied == copy
+                ),
+                "{modifiers:?} drops with copy {copy}"
+            );
+        }
     }
 }
