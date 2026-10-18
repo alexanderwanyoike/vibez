@@ -41,7 +41,13 @@ pub struct ClipSlotState {
     double_click: crate::widgets::double_click::DoubleClick,
     fingerprint: Cell<u64>,
     source: RefCell<Option<Arc<crate::state::ArrangementTimeline>>>,
+    press: Option<Point>,
+    dragging: bool,
+    modifiers: iced::keyboard::Modifiers,
 }
+
+/// How far a press travels before it drags rather than clicks.
+const DRAG_START: f32 = 6.0;
 
 fn label(
     frame: &mut canvas::Frame,
@@ -123,10 +129,60 @@ impl canvas::Program<Message> for ClipSlot<'_> {
         bounds: Rectangle,
         cursor: mouse::Cursor,
     ) -> (canvas::event::Status, Option<Message>) {
+        use crate::domains::perform::{ClipMsg, PerformMsg};
+        match event {
+            canvas::Event::Keyboard(iced::keyboard::Event::ModifiersChanged(modifiers)) => {
+                state.modifiers = modifiers;
+            }
+            canvas::Event::Mouse(mouse::Event::CursorMoved { position }) => {
+                if let (Some(clip), Some(press)) = (self.clip, state.press) {
+                    if !state.dragging && press.distance(position) > DRAG_START {
+                        state.dragging = true;
+                        return (
+                            canvas::event::Status::Captured,
+                            Some(Message::Perform(PerformMsg::Clips(ClipMsg::BeginDrag(
+                                clip.id,
+                            )))),
+                        );
+                    }
+                }
+            }
+            canvas::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
+                state.press = None;
+                // Ignored, so the cell's button under this canvas still
+                // sees its own release and resets.
+                if std::mem::take(&mut state.dragging) {
+                    return (
+                        canvas::event::Status::Ignored,
+                        Some(Message::Perform(PerformMsg::Clips(ClipMsg::EndDrag))),
+                    );
+                }
+                if let Some(source) = self.drag_source.filter(|_| cursor.is_over(bounds)) {
+                    if self.clip.is_none_or(|clip| clip.id != source) {
+                        return (
+                            canvas::event::Status::Captured,
+                            Some(Message::Perform(PerformMsg::Clips(ClipMsg::Drop {
+                                clip: source,
+                                track_id: self.cell.0,
+                                row: self.cell.1,
+                                copy: crate::app::command_held(
+                                    state.modifiers,
+                                    crate::app::ON_MACOS,
+                                ),
+                            }))),
+                        );
+                    }
+                }
+            }
+            _ => {}
+        }
         if matches!(
             event,
             canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
         ) {
+            if self.clip.is_some() && cursor.is_over(bounds) {
+                state.press = cursor.position();
+            }
             if let Some(point) = cursor.position_in(bounds) {
                 let title = point.y < 25.0 && point.x >= 6.0 && point.x < bounds.width - 48.0;
                 if self.clip.is_none() || title {
@@ -170,6 +226,10 @@ impl canvas::Program<Message> for ClipSlot<'_> {
         cursor: mouse::Cursor,
     ) -> Vec<canvas::Geometry> {
         let hovered = cursor.is_over(bounds);
+        let drop_target = hovered
+            && self
+                .drag_source
+                .is_some_and(|source| self.clip.is_none_or(|clip| clip.id != source));
         let mut hash = DefaultHasher::new();
         self.clip
             .map(|c| Arc::as_ptr(&c.timeline) as usize)
@@ -182,6 +242,7 @@ impl canvas::Program<Message> for ClipSlot<'_> {
             self.playing,
             self.queued,
             hovered,
+            drop_target,
             th::epoch(),
         )
             .hash(&mut hash);
@@ -214,6 +275,14 @@ impl canvas::Program<Message> for ClipSlot<'_> {
                     .with_color(divider)
                     .with_width(1.0),
             );
+            if drop_target {
+                frame.stroke(
+                    &canvas::Path::rectangle(Point::new(1.5, 1.5), Size::new(w - 3.0, h - 3.0)),
+                    canvas::Stroke::default()
+                        .with_color(th::accent())
+                        .with_width(2.0),
+                );
+            }
             let Some(slot) = self.clip else {
                 label(frame, self.key, w - 22.0, 6.0, 10.0, th::text_dim(), true);
                 if self.selected {
