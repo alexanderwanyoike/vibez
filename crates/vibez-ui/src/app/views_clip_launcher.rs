@@ -608,7 +608,7 @@ impl App {
                             .width(Length::Fill)
                         )
                         .align_bottom(Length::Fill)
-                        .padding([3, 5]),
+                        .padding(crate::widgets::clip_slot::FILM_INSET + 1.0),
                     ]
                     .into();
                     let cell: Element<'_, Message> = if let Some(clip) = slot {
@@ -622,7 +622,7 @@ impl App {
                                 false,
                             ))
                             .align_right(Length::Fill)
-                            .padding([3, 5])
+                            .padding(crate::widgets::clip_slot::FILM_INSET + 1.0)
                         ]
                         .into()
                     } else {
@@ -647,9 +647,28 @@ impl App {
                 grid = grid.push(lane);
             }
             workspace = workspace.push(
-                scrollable(container(grid).padding([0, 12]).width(Length::Fill))
-                    .width(Length::Fill)
-                    .height(Length::Fill),
+                scrollable(
+                    container(container(grid).padding(2).width(Length::Fill).style(|_| {
+                        container::Style {
+                            background: Some(
+                                iced::gradient::Linear::new(std::f32::consts::PI)
+                                    .add_stop(0.0, th::blend(th::bg_dark(), th::text(), 0.012))
+                                    .add_stop(1.0, th::darken(th::bg_dark(), 0.82))
+                                    .into(),
+                            ),
+                            border: iced::Border {
+                                color: th::with_alpha(th::text(), 0.05),
+                                width: 1.0,
+                                radius: 4.0.into(),
+                            },
+                            ..Default::default()
+                        }
+                    }))
+                    .padding([0, 12])
+                    .width(Length::Fill),
+                )
+                .width(Length::Fill)
+                .height(Length::Fill),
             );
         }
         let footer = row![
@@ -694,7 +713,7 @@ impl App {
                 .padding(0)
                 .on_press(Message::Perform(action))
                 .style(move |_, status| button::Style {
-                    background: Some(Color::BLACK.into()),
+                    background: None,
                     text_color: if recording
                         || matches!(status, button::Status::Hovered | button::Status::Pressed)
                     {
