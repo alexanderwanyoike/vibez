@@ -250,14 +250,14 @@ impl ClipMsg {
     pub const fn marks_dirty(&self) -> bool {
         matches!(
             self,
-            Self::CreateMidi { .. }
-                | Self::Delete(_)
-                | Self::Duplicate(_)
-                | Self::ToggleLoop(_)
-                | Self::Cut
-                | Self::Paste
-                | Self::Drop { .. }
+            Self::CreateMidi { .. } | Self::Delete(_) | Self::Duplicate(_) | Self::ToggleLoop(_)
         )
+    }
+
+    /// Edits that may change nothing: an empty clipboard, an empty cell, a
+    /// track of the other kind. The app records them only once they have.
+    pub const fn defers_project_edit(&self) -> bool {
+        matches!(self, Self::Cut | Self::Paste | Self::Drop { .. })
     }
 }
 

@@ -623,7 +623,17 @@ impl App {
                 }
             }
             Message::Perform(msg) => {
-                return self.route_perform_message(msg);
+                if !msg.defers_project_edit() {
+                    return self.route_perform_message(msg);
+                }
+                let (snapshot, clips) =
+                    (self.take_snapshot(), Arc::clone(&self.state.perform.clips));
+                let task = self.route_perform_message(msg);
+                if !Arc::ptr_eq(&clips, &self.state.perform.clips) {
+                    self.state.project.history.push_edit(snapshot, undo_gesture);
+                    self.mark_project_dirty();
+                }
+                return task;
             }
             Message::SectionResidencyReady {
                 request_id,

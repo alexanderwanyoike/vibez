@@ -290,6 +290,10 @@ pub enum PerformMsg {
 }
 
 impl PerformMsg {
+    pub const fn defers_project_edit(&self) -> bool {
+        matches!(self, Self::Clips(msg) if msg.defers_project_edit())
+    }
+
     pub const fn marks_dirty(&self) -> bool {
         if let Self::Clips(msg) = self {
             return msg.marks_dirty();
