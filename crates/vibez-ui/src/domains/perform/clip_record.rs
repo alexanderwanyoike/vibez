@@ -69,7 +69,7 @@ impl PerformState {
                         || session.stop.is_some()
                     {
                         return PerformAction {
-                            section_record_status: Some("Finish the current Clip take first"),
+                            status: Some("Finish the current Clip take first"),
                             ..Default::default()
                         };
                     }

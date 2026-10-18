@@ -40,7 +40,7 @@ impl PerformState {
             SectionRecordMsg::Toggle => {
                 let Some(track_id) = self.instrument_target() else {
                     return PerformAction {
-                        section_record_status: Some("Choose an Instrument Target before recording"),
+                        status: Some("Choose an Instrument Target before recording"),
                         ..PerformAction::default()
                     };
                 };
@@ -51,7 +51,7 @@ impl PerformState {
                 };
                 let Some(section_id) = section_id else {
                     return PerformAction {
-                        section_record_status: Some(if self.section_record.transport_playing {
+                        status: Some(if self.section_record.transport_playing {
                             "Section Record requires a playing Section"
                         } else {
                             "Select a Section before recording"

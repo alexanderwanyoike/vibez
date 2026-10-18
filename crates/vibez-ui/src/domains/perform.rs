@@ -341,7 +341,7 @@ pub struct PerformAction {
     pub capture: Option<CaptureAction>,
     pub section_record: Option<SectionRecordAction>,
     pub clip_record: Option<clip_record::ClipRecordAction>,
-    pub section_record_status: Option<&'static str>,
+    pub status: Option<&'static str>,
 }
 
 impl PerformState {
