@@ -212,6 +212,9 @@ pub enum ClipMsg {
     Delete(ClipId),
     ToggleLoop(ClipId),
     Duplicate(ClipId),
+    Copy,
+    Cut,
+    Paste,
     MoveWindow { tracks: i32, rows: i32 },
 }
 
@@ -360,6 +363,7 @@ impl PerformState {
                 }
             }
             ClipMsg::Select(id) => selected = self.select_launcher_clip(id),
+            ClipMsg::Copy | ClipMsg::Cut | ClipMsg::Paste => {}
             ClipMsg::SelectSlot { track_id, row } => {
                 if let Some(id) = self.clips.at(track_id, row).map(|clip| clip.id) {
                     selected = self.select_launcher_clip(id);
