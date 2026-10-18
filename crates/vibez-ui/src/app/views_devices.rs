@@ -35,6 +35,46 @@ enum Flexible {
     Phaser,
 }
 
+/// A built-in instrument whose card takes a flexible share like the
+/// effects do.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum NativeInstrument {
+    Synth,
+    Sampler,
+    DrumRack,
+    Wavetable,
+    Fm,
+}
+
+impl NativeInstrument {
+    fn of(track: &UiTrack) -> Option<Self> {
+        if crate::domains::synth::is_native_synth(track) {
+            Some(Self::Synth)
+        } else if crate::domains::sampler::is_native_sampler(track) {
+            Some(Self::Sampler)
+        } else if crate::domains::sampler::is_native_drum_rack(track) {
+            Some(Self::DrumRack)
+        } else if crate::domains::wavetable::is_native_wavetable(track) {
+            Some(Self::Wavetable)
+        } else if crate::domains::fm::is_native_fm(track) {
+            Some(Self::Fm)
+        } else {
+            None
+        }
+    }
+
+    /// The card's width given a `share` of a chain `available` wide.
+    fn card_width(self, share: f32, _available: f32) -> f32 {
+        match self {
+            Self::Synth => crate::widgets::synth_device::card_width(share),
+            Self::Sampler => crate::widgets::sampler_device::card_width(share),
+            Self::DrumRack => crate::widgets::drum_rack_device::card_width(share),
+            Self::Wavetable => crate::widgets::wavetable_device::card_width(share),
+            Self::Fm => crate::widgets::fm_device::card_width(share),
+        }
+    }
+}
+
 impl Flexible {
     /// The card's width given a `share` of a chain `available` wide.
     fn card_width(self, share: f32, available: f32) -> f32 {
@@ -119,15 +159,8 @@ impl App {
         // device can take its share of whatever width the section has left.
         let mut cards: Vec<Option<Element<'a, Message>>> = Vec::new();
         let mut used = 0.0;
-        // The native synth and sampler take a flexible share like the
-        // effects do.
-        let synth = crate::domains::synth::is_native_synth(track);
-        let sampler = crate::domains::sampler::is_native_sampler(track);
-        let drum_rack = crate::domains::sampler::is_native_drum_rack(track);
-        let wavetable = crate::domains::wavetable::is_native_wavetable(track);
-        let fm = crate::domains::fm::is_native_fm(track);
-        let flexible_instrument = synth || sampler || drum_rack || wavetable || fm;
-        if flexible_instrument {
+        let native = NativeInstrument::of(track);
+        if native.is_some() {
             cards.push(None);
         } else if let Some((card, width)) = self.instrument_card(track_id, track, track_color) {
             cards.push(Some(card));
@@ -189,41 +222,27 @@ impl App {
                 self.state.transport.sample_rate,
             )));
         }
-        let shares = flexible.len() + usize::from(flexible_instrument);
+        let shares = flexible.len() + usize::from(native.is_some());
         let spacing = CHAIN_SPACING * cards.len().saturating_sub(1) as f32;
         let mut chain_width = used + spacing;
         if shares > 0 {
             let share = (available_width - used - spacing) / shares as f32;
-            let instrument_width = if synth {
-                crate::widgets::synth_device::card_width(share)
-            } else if sampler {
-                crate::widgets::sampler_device::card_width(share)
-            } else if wavetable {
-                crate::widgets::wavetable_device::card_width(share)
-            } else if fm {
-                crate::widgets::fm_device::card_width(share)
-            } else {
-                crate::widgets::drum_rack_device::card_width(share)
-            };
-            if flexible_instrument {
-                chain_width += instrument_width;
-            }
-            if synth {
-                cards[0] = Some(self.synth_card(track_id, track, track_color, instrument_width));
-            }
-            if sampler {
-                cards[0] = Some(self.sampler_card(track_id, track, track_color, instrument_width));
-            }
-            if wavetable {
-                cards[0] =
-                    Some(self.wavetable_card(track_id, track, track_color, instrument_width));
-            }
-            if fm {
-                cards[0] = Some(self.fm_card(track_id, track, track_color, instrument_width));
-            }
-            if drum_rack {
-                cards[0] =
-                    Some(self.drum_rack_card(track_id, track, track_color, instrument_width));
+            if let Some(native) = native {
+                let width = native.card_width(share, available_width);
+                chain_width += width;
+                cards[0] = Some(match native {
+                    NativeInstrument::Synth => self.synth_card(track_id, track, track_color, width),
+                    NativeInstrument::Sampler => {
+                        self.sampler_card(track_id, track, track_color, width)
+                    }
+                    NativeInstrument::DrumRack => {
+                        self.drum_rack_card(track_id, track, track_color, width)
+                    }
+                    NativeInstrument::Wavetable => {
+                        self.wavetable_card(track_id, track, track_color, width)
+                    }
+                    NativeInstrument::Fm => self.fm_card(track_id, track, track_color, width),
+                });
             }
             for (position, effect, sidechain, kind) in flexible {
                 let width = kind.card_width(share, available_width);

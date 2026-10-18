@@ -57,6 +57,15 @@ pub const COMPACT_W: f32 = 440.0;
 pub const MEDIUM_W: f32 = 680.0;
 pub const MAX_W: f32 = 1_300.0;
 
+/// The widths this card lays itself out for; it is at its fullest once past compact.
+pub const WIDTHS: crate::widgets::device_chrome::CardWidths =
+    crate::widgets::device_chrome::CardWidths {
+        compact: COMPACT_W,
+        medium: MEDIUM_W,
+        expanded: MEDIUM_W,
+        max: MAX_W,
+    };
+
 pub fn card_width(available: f32) -> f32 {
     available.clamp(COMPACT_W, MAX_W)
 }

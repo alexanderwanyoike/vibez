@@ -36,6 +36,25 @@ pub const COMPACT_W: f32 = 420.0;
 pub const WAVEFORM_W: f32 = METER_W * 2.0 + PLOT_MIN_W * 2.0 + 3.0 * 8.0 + PAD * 2.0;
 pub const MAX_W: f32 = 1000.0;
 
+/// Every line control fits beside Character, and the waveforms show.
+pub const FULL_W: f32 = {
+    let line = PAD * 2.0 + LINE_CHARACTER_W + 4.0 * LINE_ITEM_W;
+    if line > WAVEFORM_W {
+        line
+    } else {
+        WAVEFORM_W
+    }
+};
+
+/// The widths this card lays itself out for.
+pub const WIDTHS: crate::widgets::device_chrome::CardWidths =
+    crate::widgets::device_chrome::CardWidths {
+        compact: COMPACT_W,
+        medium: COMPACT_W,
+        expanded: FULL_W,
+        max: MAX_W,
+    };
+
 pub fn card_width(available: f32) -> f32 {
     if available >= COMPACT_W {
         available.min(MAX_W)
