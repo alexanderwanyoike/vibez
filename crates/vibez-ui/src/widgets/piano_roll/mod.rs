@@ -236,6 +236,15 @@ fn clamp_scroll_y(scroll_y: f32, canvas_height: f32) -> f32 {
 
 pub(crate) use vibez_core::midi::pitch_name;
 
+/// Up and Down move selected notes a semitone, or an octave with Shift.
+fn semitone_step(modifiers: iced::keyboard::Modifiers) -> i8 {
+    if modifiers.shift() {
+        12
+    } else {
+        1
+    }
+}
+
 /// A note as it stood when a move began.
 #[derive(Debug, Clone, Copy)]
 struct MovedNote {
@@ -899,6 +908,7 @@ impl canvas::Program<Message> for PianoRollWidget {
             }
             canvas::Event::Keyboard(iced::keyboard::Event::KeyPressed {
                 key: iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowUp),
+                modifiers,
                 ..
             }) if !self.reserve_arrow_keys => {
                 if let Some(ref clip_data) = self.clip {
@@ -909,7 +919,7 @@ impl canvas::Program<Message> for PianoRollWidget {
                                 track_id: self.track_id,
                                 clip_id: clip_data.clip_id,
                                 delta_beats: 0.0,
-                                delta_semitones: 1,
+                                delta_semitones: semitone_step(modifiers),
                             })),
                         );
                     }
@@ -917,6 +927,7 @@ impl canvas::Program<Message> for PianoRollWidget {
             }
             canvas::Event::Keyboard(iced::keyboard::Event::KeyPressed {
                 key: iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowDown),
+                modifiers,
                 ..
             }) if !self.reserve_arrow_keys => {
                 if let Some(ref clip_data) = self.clip {
@@ -927,7 +938,7 @@ impl canvas::Program<Message> for PianoRollWidget {
                                 track_id: self.track_id,
                                 clip_id: clip_data.clip_id,
                                 delta_beats: 0.0,
-                                delta_semitones: -1,
+                                delta_semitones: -semitone_step(modifiers),
                             })),
                         );
                     }
