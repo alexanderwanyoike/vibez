@@ -313,6 +313,28 @@ impl PerformState {
         Some(clip.track_id)
     }
 
+    /// Removes the clip, returning the stop its track needs when the clip
+    /// was playing or about to.
+    fn remove_launcher_clip(&mut self, id: ClipId) -> Option<ClipLaunchRequest> {
+        let stop = self.clips.by_id(id).and_then(|clip| {
+            (self
+                .clip_editor
+                .playing
+                .get(&clip.track_id)
+                .is_some_and(|active| active.id == id)
+                || self.clip_editor.queued.get(&clip.track_id) == Some(&Some(id)))
+            .then_some(ClipLaunchRequest::Stop(clip.track_id))
+        });
+        Arc::make_mut(&mut self.clips)
+            .clips
+            .retain(|clip| clip.id != id);
+        if self.clip_editor.selected == Some(id) {
+            self.clip_editor.selected = None;
+            self.clip_editor.editor = Default::default();
+        }
+        stop
+    }
+
     pub(super) fn update_clips(&mut self, msg: ClipMsg, ctx: PerformCtx<'_>) -> PerformAction {
         if self.layout != PerformLayout::Clips || !ctx.workspace_visible {
             return PerformAction::default();
@@ -416,26 +438,7 @@ impl PerformState {
                     self.clip_editor.first_row = row;
                 }
             }
-            ClipMsg::Delete(id) => {
-                if let Some(clip) = self.clips.by_id(id) {
-                    if self
-                        .clip_editor
-                        .playing
-                        .get(&clip.track_id)
-                        .is_some_and(|active| active.id == id)
-                        || self.clip_editor.queued.get(&clip.track_id) == Some(&Some(id))
-                    {
-                        clip_launch = Some(ClipLaunchRequest::Stop(clip.track_id));
-                    }
-                }
-                Arc::make_mut(&mut self.clips)
-                    .clips
-                    .retain(|clip| clip.id != id);
-                if self.clip_editor.selected == Some(id) {
-                    self.clip_editor.selected = None;
-                    self.clip_editor.editor = Default::default();
-                }
-            }
+            ClipMsg::Delete(id) => clip_launch = self.remove_launcher_clip(id),
             ClipMsg::MoveWindow { tracks, rows } => {
                 self.clip_editor.first_track = self
                     .clip_editor
