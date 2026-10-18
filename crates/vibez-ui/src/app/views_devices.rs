@@ -17,7 +17,7 @@ const CHAIN_SPACING: f32 = 6.0;
 const PLACEHOLDER_W: f32 = 120.0;
 
 /// Native devices that lay themselves out from the width they are given.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 enum Flexible {
     Gain,
     Eq,
@@ -888,5 +888,98 @@ impl App {
                 .width(Length::Fixed(PLACEHOLDER_W))
                 .align_x(iced::Alignment::Center),
         )
+    }
+}
+
+#[cfg(test)]
+mod width_tests {
+    use super::{Flexible, NativeInstrument};
+    use crate::widgets::device_chrome::CardWidths;
+
+    const EFFECTS: [(Flexible, CardWidths); 14] = [
+        (Flexible::Gain, crate::widgets::gain_device::WIDTHS),
+        (Flexible::Eq, crate::widgets::eq_device::WIDTHS),
+        (
+            Flexible::Compressor,
+            crate::widgets::compressor_device::WIDTHS,
+        ),
+        (Flexible::Limiter, crate::widgets::limiter_device::WIDTHS),
+        (Flexible::Filter, crate::widgets::filter_device::WIDTHS),
+        (Flexible::Gate, crate::widgets::gate_device::WIDTHS),
+        (Flexible::Drive, crate::widgets::drive_device::WIDTHS),
+        (
+            Flexible::Saturator,
+            crate::widgets::saturator_device::WIDTHS,
+        ),
+        (Flexible::Bitcrush, crate::widgets::bitcrush_device::WIDTHS),
+        (Flexible::Delay, crate::widgets::delay_device::WIDTHS),
+        (Flexible::Echo, crate::widgets::echo_device::WIDTHS),
+        (Flexible::Reverb, crate::widgets::reverb_device::WIDTHS),
+        (Flexible::Phaser, crate::widgets::phaser_device::WIDTHS),
+        (Flexible::AutoPan, crate::widgets::auto_pan_device::WIDTHS),
+    ];
+
+    const INSTRUMENTS: [(NativeInstrument, CardWidths); 5] = [
+        (
+            NativeInstrument::Synth,
+            crate::widgets::synth_device::WIDTHS,
+        ),
+        (
+            NativeInstrument::Sampler,
+            crate::widgets::sampler_device::WIDTHS,
+        ),
+        (
+            NativeInstrument::DrumRack,
+            crate::widgets::drum_rack_device::WIDTHS,
+        ),
+        (
+            NativeInstrument::Wavetable,
+            crate::widgets::instrument_bands::WIDTHS,
+        ),
+        (
+            NativeInstrument::Fm,
+            crate::widgets::instrument_bands::WIDTHS,
+        ),
+    ];
+
+    /// A device's name, its width for a share of a section, and its table.
+    type Device = (String, Box<dyn Fn(f32, f32) -> f32>, CardWidths);
+
+    fn every_device() -> Vec<Device> {
+        let mut all: Vec<Device> = Vec::new();
+        for (kind, widths) in EFFECTS {
+            all.push((
+                format!("{kind:?}"),
+                Box::new(move |s, a| kind.card_width(s, a)),
+                widths,
+            ));
+        }
+        for (kind, widths) in INSTRUMENTS {
+            all.push((
+                format!("{kind:?}"),
+                Box::new(move |s, a| kind.card_width(s, a)),
+                widths,
+            ));
+        }
+        all
+    }
+
+    #[test]
+    fn a_crowded_chain_keeps_every_device_expanded_and_scrolls() {
+        for (name, width, widths) in every_device() {
+            assert!(
+                width(100.0, 1_900.0) >= widths.expanded,
+                "{name}: {} under {}",
+                width(100.0, 1_900.0),
+                widths.expanded
+            );
+        }
+    }
+
+    #[test]
+    fn a_roomy_chain_still_lets_every_device_grow_to_its_maximum() {
+        for (name, width, widths) in every_device() {
+            assert_eq!(width(5_000.0, 5_000.0), widths.max, "{name}");
+        }
     }
 }
