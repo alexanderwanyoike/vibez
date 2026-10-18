@@ -198,7 +198,9 @@ impl super::App {
                     }
                     return iced::Task::none();
                 }
-                if modifiers.is_empty() || modifiers == iced::keyboard::Modifiers::SHIFT {
+                if (modifiers.is_empty() || modifiers == iced::keyboard::Modifiers::SHIFT)
+                    && !self.piano_roll_has_selected_notes()
+                {
                     let movement = clip_window_movement(
                         key,
                         modifiers,

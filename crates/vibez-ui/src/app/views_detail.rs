@@ -138,6 +138,21 @@ impl App {
         Some((track_id, clip_id))
     }
 
+    /// Whether the open piano roll has notes selected: the arrow keys then
+    /// move them, ahead of anything else that wants the arrows.
+    pub(super) fn piano_roll_has_selected_notes(&self) -> bool {
+        self.visible_piano_roll_clip()
+            .and_then(|(track_id, clip_id)| {
+                let content = self.state.active_timeline_content(track_id)?;
+                content
+                    .note_clips
+                    .iter()
+                    .find(|clip| clip.id == clip_id)
+                    .map(|clip| !clip.selected_notes.is_empty())
+            })
+            .unwrap_or(false)
+    }
+
     fn midi_clip_editor_visible(&self) -> bool {
         self.visible_piano_roll_clip().is_some()
     }
@@ -386,7 +401,8 @@ impl App {
         piano_widget.reserve_arrow_keys = self.state.view.workspace
             == crate::state::Workspace::Perform
             && self.state.perform.layout == vibez_project::PerformLayout::Clips
-            && self.state.perform.mode == crate::domains::perform::PerformMode::Sections;
+            && self.state.perform.mode == crate::domains::perform::PerformMode::Sections
+            && !self.piano_roll_has_selected_notes();
         let piano_canvas: Element<'_, Message> = canvas(piano_widget)
             .width(Length::Fill)
             .height(Length::Fill)
