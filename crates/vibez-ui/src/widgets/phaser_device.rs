@@ -58,14 +58,6 @@ pub const WIDTHS: crate::widgets::device_chrome::CardWidths =
         max: MAX_W,
     };
 
-pub fn card_width(available: f32) -> f32 {
-    if available >= COMPACT_W {
-        available.min(MAX_W)
-    } else {
-        COMPACT_W
-    }
-}
-
 pub fn preset_bar_width(size: Size) -> f32 {
     size.width - PAD * 2.0 - 90.0
 }

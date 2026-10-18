@@ -64,38 +64,39 @@ impl NativeInstrument {
     }
 
     /// The card's width given a `share` of a chain `available` wide.
-    fn card_width(self, share: f32, _available: f32) -> f32 {
+    fn card_width(self, share: f32, available: f32) -> f32 {
+        use crate::widgets::*;
         match self {
-            Self::Synth => crate::widgets::synth_device::card_width(share),
-            Self::Sampler => crate::widgets::sampler_device::card_width(share),
-            Self::DrumRack => crate::widgets::drum_rack_device::card_width(share),
-            Self::Wavetable => crate::widgets::wavetable_device::card_width(share),
-            Self::Fm => crate::widgets::fm_device::card_width(share),
+            Self::Synth => synth_device::WIDTHS,
+            Self::Sampler => sampler_device::WIDTHS,
+            Self::DrumRack => drum_rack_device::WIDTHS,
+            Self::Wavetable | Self::Fm => instrument_bands::WIDTHS,
         }
+        .chain_width(share, available)
     }
 }
 
 impl Flexible {
     /// The card's width given a `share` of a chain `available` wide.
     fn card_width(self, share: f32, available: f32) -> f32 {
+        use crate::widgets::*;
         match self {
-            Self::Gain => crate::widgets::gain_device::WIDTHS.chain_width(share, available),
-            Self::Eq => crate::widgets::eq_device::WIDTHS.chain_width(share, available),
-            Self::Compressor => {
-                crate::widgets::compressor_device::WIDTHS.chain_width(share, available)
-            }
-            Self::Limiter => crate::widgets::limiter_device::card_width(share),
-            Self::Filter => crate::widgets::filter_device::card_width(share),
-            Self::Gate => crate::widgets::gate_device::card_width(share),
-            Self::Drive => crate::widgets::drive_device::card_width(share),
-            Self::Saturator => crate::widgets::saturator_device::card_width(share),
-            Self::Bitcrush => crate::widgets::bitcrush_device::card_width(share),
-            Self::Delay => crate::widgets::delay_device::card_width(share),
-            Self::Echo => crate::widgets::echo_device::card_width(share),
-            Self::Reverb => crate::widgets::reverb_device::card_width(share),
-            Self::Phaser => crate::widgets::phaser_device::card_width(share),
-            Self::AutoPan => crate::widgets::auto_pan_device::card_width(share),
+            Self::Gain => gain_device::WIDTHS,
+            Self::Eq => eq_device::WIDTHS,
+            Self::Compressor => compressor_device::WIDTHS,
+            Self::Limiter => limiter_device::WIDTHS,
+            Self::Filter => filter_device::WIDTHS,
+            Self::Gate => gate_device::WIDTHS,
+            Self::Drive => drive_device::WIDTHS,
+            Self::Saturator => saturator_device::WIDTHS,
+            Self::Bitcrush => bitcrush_device::WIDTHS,
+            Self::Delay => delay_device::WIDTHS,
+            Self::Echo => echo_device::WIDTHS,
+            Self::Reverb => reverb_device::WIDTHS,
+            Self::Phaser => phaser_device::WIDTHS,
+            Self::AutoPan => auto_pan_device::WIDTHS,
         }
+        .chain_width(share, available)
     }
 }
 

@@ -60,14 +60,6 @@ pub const WIDTHS: crate::widgets::device_chrome::CardWidths =
         max: MAX_W,
     };
 
-pub fn card_width(available: f32) -> f32 {
-    if available >= COMPACT_W.max(MEDIUM_W) {
-        available.min(MAX_W)
-    } else {
-        COMPACT_W
-    }
-}
-
 pub fn preset_bar_width(size: Size) -> f32 {
     size.width - PAD * 2.0 - 90.0
 }
@@ -648,8 +640,8 @@ mod tests {
 
     #[test]
     fn card_width_is_compact_until_the_type_fits_beside_the_plot() {
-        assert_eq!(card_width(300.0), COMPACT_W);
-        assert_eq!(card_width(MEDIUM_W), MEDIUM_W);
-        assert_eq!(card_width(5000.0), MAX_W);
+        assert_eq!(WIDTHS.card_width(300.0), COMPACT_W);
+        assert_eq!(WIDTHS.card_width(MEDIUM_W), MEDIUM_W);
+        assert_eq!(WIDTHS.card_width(5000.0), MAX_W);
     }
 }

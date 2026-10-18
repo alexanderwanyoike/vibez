@@ -18,7 +18,7 @@ use crate::widgets::device_controls::{segmented, Param, LABEL_SIZE, VALUE_SIZE};
 use crate::widgets::device_layout::KNOB_ROW_H;
 use crate::widgets::fm_display::{AlgorithmPlot, ScopePlot};
 pub use crate::widgets::instrument_bands::{
-    card_width, preset_bar_width, Form, COMPACT_W, FULL_W, MAX_W, MEDIUM_W,
+    preset_bar_width, Form, COMPACT_W, FULL_W, MAX_W, MEDIUM_W,
 };
 use crate::widgets::instrument_bands::{
     BandCard, Group, PlotKind, Tier, BAND_PAD, HEADER_H, STRIP_H,

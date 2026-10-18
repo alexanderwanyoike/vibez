@@ -108,10 +108,6 @@ pub const WIDTHS: crate::widgets::device_chrome::CardWidths =
         max: MAX_W,
     };
 
-pub fn card_width(available: f32) -> f32 {
-    available.clamp(COMPACT_W, MAX_W)
-}
-
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Layout {
     /// The pads sit beside the Sampler rather than behind a tab.
