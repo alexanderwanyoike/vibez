@@ -89,6 +89,8 @@ pub struct ClipEditor {
     pub running: bool,
     pub started_at: HashMap<TrackId, u64>,
     pub selected: Option<ClipId>,
+    /// The cell paste targets: the selected clip's, or an empty one.
+    pub slot: Option<(TrackId, u32)>,
     pub editor: TimelineEditorState,
     pub first_track: usize,
     pub first_row: u32,
@@ -206,6 +208,7 @@ pub enum ClipMsg {
 
     CreateMidi { track_id: TrackId, row: u32 },
     Select(ClipId),
+    SelectSlot { track_id: TrackId, row: u32 },
     Delete(ClipId),
     ToggleLoop(ClipId),
     Duplicate(ClipId),
@@ -356,6 +359,7 @@ impl PerformState {
                 }
             }
             ClipMsg::Select(id) => selected = self.select_launcher_clip(id),
+            ClipMsg::SelectSlot { .. } => {}
             ClipMsg::CreateMidi { track_id, row } => {
                 if self.clips.at(track_id, row).is_some()
                     || !ctx
@@ -497,3 +501,7 @@ impl LauncherClip {
 #[cfg(test)]
 #[path = "clip_launcher_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "clip_launcher_edit_tests.rs"]
+mod edit_tests;
