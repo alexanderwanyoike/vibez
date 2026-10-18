@@ -444,9 +444,12 @@ impl PerformState {
                 }
             }
             PerformMsg::ToggleRecord => {
-                if self.layout == vibez_project::PerformLayout::Sections {
-                    return self.update_section_record(SectionRecordMsg::Toggle);
-                }
+                return match self.layout {
+                    vibez_project::PerformLayout::Sections => {
+                        self.update_section_record(SectionRecordMsg::Toggle)
+                    }
+                    vibez_project::PerformLayout::Clips => self.toggle_clip_record(),
+                };
             }
             PerformMsg::SelectMode(mode) => {
                 if ctx.workspace_visible {
