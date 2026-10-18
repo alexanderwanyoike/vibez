@@ -256,6 +256,7 @@ impl ClipMsg {
                 | Self::ToggleLoop(_)
                 | Self::Cut
                 | Self::Paste
+                | Self::Drop { .. }
         )
     }
 }
@@ -410,7 +411,50 @@ impl PerformState {
                 }
             }
             ClipMsg::Select(id) => selected = self.select_launcher_clip(id),
-            ClipMsg::BeginDrag(_) | ClipMsg::EndDrag | ClipMsg::Drop { .. } => {}
+            ClipMsg::BeginDrag(id) => self.clip_editor.dragging = Some(id),
+            ClipMsg::EndDrag => self.clip_editor.dragging = None,
+            ClipMsg::Drop {
+                clip: id,
+                track_id,
+                row,
+                copy,
+            } => {
+                self.clip_editor.dragging = None;
+                let Some(source) = self.clips.by_id(id).cloned() else {
+                    return PerformAction::default();
+                };
+                let Some(track) = ctx.project_tracks.iter().find(|track| track.id == track_id)
+                else {
+                    return PerformAction::default();
+                };
+                if (source.track_id, source.row) == (track_id, row) {
+                    return PerformAction::default();
+                }
+                if let Some(status) = source.refused_by(track) {
+                    return PerformAction {
+                        status: Some(status),
+                        ..Default::default()
+                    };
+                }
+                if let Some(occupant) = self.clips.at(track_id, row).map(|clip| clip.id) {
+                    clip_launch = self.remove_launcher_clip(occupant);
+                }
+                let placed = if !copy && track_id == source.track_id {
+                    if let Some(clip) = Arc::make_mut(&mut self.clips).by_id_mut(id) {
+                        clip.row = row;
+                    }
+                    id
+                } else {
+                    let placed = source.copied_to(track_id, row);
+                    let placed_id = placed.id;
+                    Arc::make_mut(&mut self.clips).clips.push(placed);
+                    if !copy {
+                        clip_launch = self.remove_launcher_clip(id).or(clip_launch);
+                    }
+                    placed_id
+                };
+                selected = self.select_launcher_clip(placed);
+            }
             ClipMsg::Copy => {
                 self.clip_editor.clipboard = self
                     .clip_editor
