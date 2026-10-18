@@ -87,18 +87,23 @@ impl App {
         };
         let message = if self.state.view.workspace == crate::state::Workspace::Perform
             && self.state.perform.layout == vibez_project::PerformLayout::Clips
-            && matches!(
-                &message,
+        {
+            use crate::domains::perform::ClipMsg;
+            let launcher = |msg| Message::Perform(PerformMsg::Clips(msg));
+            match message {
                 Message::Arrangement(
-                    ArrangementMsg::DuplicateSelectedClip | ArrangementMsg::DuplicateNoteClip(..)
-                )
-            ) {
-            let Some(id) = self.state.perform.clip_editor.selected else {
-                return Task::none();
-            };
-            Message::Perform(PerformMsg::Clips(
-                crate::domains::perform::ClipMsg::Duplicate(id),
-            ))
+                    ArrangementMsg::DuplicateSelectedClip | ArrangementMsg::DuplicateNoteClip(..),
+                ) => {
+                    let Some(id) = self.state.perform.clip_editor.selected else {
+                        return Task::none();
+                    };
+                    launcher(ClipMsg::Duplicate(id))
+                }
+                Message::Arrangement(ArrangementMsg::CopySelectedClips) => launcher(ClipMsg::Copy),
+                Message::Arrangement(ArrangementMsg::CutSelectedClips) => launcher(ClipMsg::Cut),
+                Message::Arrangement(ArrangementMsg::PasteClips) => launcher(ClipMsg::Paste),
+                message => message,
+            }
         } else {
             message
         };

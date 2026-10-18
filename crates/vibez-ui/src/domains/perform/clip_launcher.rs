@@ -91,6 +91,7 @@ pub struct ClipEditor {
     pub selected: Option<ClipId>,
     /// The cell paste targets: the selected clip's, or an empty one.
     pub slot: Option<(TrackId, u32)>,
+    pub clipboard: Option<LauncherClip>,
     pub editor: TimelineEditorState,
     pub first_track: usize,
     pub first_row: u32,
@@ -230,7 +231,12 @@ impl ClipMsg {
     pub const fn marks_dirty(&self) -> bool {
         matches!(
             self,
-            Self::CreateMidi { .. } | Self::Delete(_) | Self::Duplicate(_) | Self::ToggleLoop(_)
+            Self::CreateMidi { .. }
+                | Self::Delete(_)
+                | Self::Duplicate(_)
+                | Self::ToggleLoop(_)
+                | Self::Cut
+                | Self::Paste
         )
     }
 }
@@ -385,7 +391,44 @@ impl PerformState {
                 }
             }
             ClipMsg::Select(id) => selected = self.select_launcher_clip(id),
-            ClipMsg::Copy | ClipMsg::Cut | ClipMsg::Paste => {}
+            ClipMsg::Copy => {
+                self.clip_editor.clipboard = self
+                    .clip_editor
+                    .selected
+                    .and_then(|id| self.clips.by_id(id))
+                    .cloned();
+            }
+            ClipMsg::Cut => {
+                let Some(id) = self.clip_editor.selected else {
+                    return PerformAction::default();
+                };
+                self.clip_editor.clipboard = self.clips.by_id(id).cloned();
+                clip_launch = self.remove_launcher_clip(id);
+            }
+            ClipMsg::Paste => {
+                let (Some(source), Some((track_id, row))) =
+                    (self.clip_editor.clipboard.as_ref(), self.clip_editor.slot)
+                else {
+                    return PerformAction::default();
+                };
+                let Some(track) = ctx.project_tracks.iter().find(|track| track.id == track_id)
+                else {
+                    return PerformAction::default();
+                };
+                if let Some(status) = source.refused_by(track) {
+                    return PerformAction {
+                        status: Some(status),
+                        ..Default::default()
+                    };
+                }
+                let copy = source.copied_to(track_id, row);
+                if let Some(occupant) = self.clips.at(track_id, row).map(|clip| clip.id) {
+                    clip_launch = self.remove_launcher_clip(occupant);
+                }
+                let id = copy.id;
+                Arc::make_mut(&mut self.clips).clips.push(copy);
+                selected = self.select_launcher_clip(id);
+            }
             ClipMsg::SelectSlot { track_id, row } => {
                 if let Some(id) = self.clips.at(track_id, row).map(|clip| clip.id) {
                     selected = self.select_launcher_clip(id);
@@ -430,7 +473,7 @@ impl PerformState {
                 else {
                     return PerformAction::default();
                 };
-                let copy = source.copied_to(row);
+                let copy = source.copied_to(track_id, row);
                 let id = copy.id;
                 Arc::make_mut(&mut self.clips).clips.push(copy);
                 selected = self.select_launcher_clip(id);
@@ -462,11 +505,19 @@ impl PerformState {
 }
 
 impl LauncherClip {
-    /// An independent copy in `row`: its own id, so editing either never
-    /// changes the other.
-    pub fn copied_to(&self, row: u32) -> LauncherClip {
+    /// An independent copy in `track_id`'s `row`: its own id, so editing
+    /// either never changes the other.
+    pub fn copied_to(&self, track_id: TrackId, row: u32) -> LauncherClip {
         let id = ClipId::new();
         let mut timeline = (*self.timeline).clone();
+        if track_id != self.track_id {
+            if let Some(mut content) = timeline.by_track.remove(&self.track_id) {
+                content
+                    .automation
+                    .retain(|lane| lane.target.on_every_track());
+                timeline.by_track.insert(track_id, content);
+            }
+        }
         for content in timeline.by_track.values_mut() {
             for clip in &mut content.clips {
                 clip.id = id;
@@ -482,9 +533,20 @@ impl LauncherClip {
         }
         LauncherClip {
             id,
-            track_id: self.track_id,
+            track_id,
             row,
             timeline: Arc::new(timeline),
+        }
+    }
+
+    /// Why `track` cannot hold this clip, if it cannot.
+    pub fn refused_by(&self, track: &crate::state::ProjectTrack) -> Option<&'static str> {
+        match self.part()? {
+            SlotPart::Midi(_) if !track.kind.is_midi() => Some("A MIDI clip needs a MIDI track"),
+            SlotPart::Audio(_) if track.kind.is_midi() => {
+                Some("An audio clip needs an audio track")
+            }
+            _ => None,
         }
     }
 
