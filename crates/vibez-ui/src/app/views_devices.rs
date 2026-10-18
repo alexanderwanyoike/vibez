@@ -82,9 +82,15 @@ impl App {
             self.device_chain_row(track_id, track, track_color, size.width)
         });
 
+        // The chain keeps the room under its cards itself, for its scrollbar.
         let content = column![header, chain]
             .spacing(6)
-            .padding(8)
+            .padding(iced::Padding {
+                top: 8.0,
+                right: 8.0,
+                bottom: 0.0,
+                left: 8.0,
+            })
             .width(Length::Fill)
             .height(Length::Fill);
 
@@ -270,19 +276,29 @@ impl App {
 
         // Built with its direction: the default vertical check rejects the
         // full-height cards before a later `.direction` could apply.
+        use crate::widgets::device_chrome::{
+            chain_bar_room, CHAIN_BAR_GAP, CHAIN_BAR_W, CHAIN_PAD_BELOW,
+        };
+        let overflows = chain_bar_room(chain_width, available_width) > 0.0;
         let bar = scrollable::Scrollbar::new()
-            .width(crate::widgets::device_chrome::CHAIN_BAR_W)
-            .scroller_width(crate::widgets::device_chrome::CHAIN_BAR_W);
-        let bar =
-            if crate::widgets::device_chrome::chain_bar_room(chain_width, available_width) > 0.0 {
-                bar.spacing(crate::widgets::device_chrome::CHAIN_BAR_GAP)
-            } else {
-                bar
-            };
-        scrollable::Scrollable::with_direction(devices_row, scrollable::Direction::Horizontal(bar))
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into()
+            .width(CHAIN_BAR_W)
+            .scroller_width(CHAIN_BAR_W);
+        let bar = if overflows {
+            bar.spacing(CHAIN_BAR_GAP)
+        } else {
+            bar
+        };
+        let chain = scrollable::Scrollable::with_direction(
+            devices_row,
+            scrollable::Direction::Horizontal(bar),
+        )
+        .width(Length::Fill)
+        .height(Length::Fill);
+        if overflows {
+            chain.into()
+        } else {
+            column![chain, iced::widget::Space::with_height(CHAIN_PAD_BELOW)].into()
+        }
     }
 
     /// The channel's instrument card and its width, or the placeholder that
