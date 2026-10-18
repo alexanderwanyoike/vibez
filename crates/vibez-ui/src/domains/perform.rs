@@ -225,6 +225,8 @@ pub enum PerformMsg {
     Capture(CaptureMsg),
     SectionRecord(SectionRecordMsg),
     ClipRecord(clip_record::ClipRecordMsg),
+    /// Record in whichever layout is showing.
+    ToggleRecord,
     SelectMode(PerformMode),
     FocusEditor(PerformEditorFocus),
     BeginKeyRebind(PadPosition),
@@ -439,6 +441,11 @@ impl PerformState {
             PerformMsg::SectionRecord(msg) => {
                 if self.layout == vibez_project::PerformLayout::Sections {
                     return self.update_section_record(msg);
+                }
+            }
+            PerformMsg::ToggleRecord => {
+                if self.layout == vibez_project::PerformLayout::Sections {
+                    return self.update_section_record(SectionRecordMsg::Toggle);
                 }
             }
             PerformMsg::SelectMode(mode) => {
