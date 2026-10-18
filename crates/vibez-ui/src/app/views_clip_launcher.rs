@@ -429,9 +429,8 @@ impl App {
                                     && session.working.row == slot_row
                             });
                     let slot = self.state.perform.clips.at(track.id, slot_row);
-                    let selected = slot.is_some_and(|clip| {
-                        self.state.perform.clip_editor.selected == Some(clip.id)
-                    });
+                    let selected =
+                        self.state.perform.clip_editor.slot == Some((track.id, slot_row));
                     let in_window = column_index < 4 && offset < 4;
                     let key = if keyboard_active && in_window {
                         self.state
@@ -456,10 +455,10 @@ impl App {
                             row: slot_row,
                         }
                     };
-                    let message = slot.map_or(
-                        Message::Perform(PerformMsg::Clips(ClipMsg::StopTrack(track.id))),
-                        |clip| Message::Perform(PerformMsg::Clips(ClipMsg::Select(clip.id))),
-                    );
+                    let message = Message::Perform(PerformMsg::Clips(ClipMsg::SelectSlot {
+                        track_id: track.id,
+                        row: slot_row,
+                    }));
                     let slot_cell = button(
                         canvas(crate::widgets::clip_slot::ClipSlot {
                             clip: slot,

@@ -213,6 +213,14 @@ impl canvas::Program<Message> for ClipSlot<'_> {
             );
             let Some(slot) = self.clip else {
                 label(frame, self.key, w - 22.0, 6.0, 10.0, th::text_dim(), true);
+                if self.selected {
+                    frame.stroke(
+                        &canvas::Path::rectangle(Point::new(1.0, 1.0), Size::new(w - 2.0, h - 2.0)),
+                        canvas::Stroke::default()
+                            .with_color(th::text_dim())
+                            .with_width(1.5),
+                    );
+                }
                 return;
             };
             let ink = self.color;

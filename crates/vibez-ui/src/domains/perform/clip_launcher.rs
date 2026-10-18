@@ -286,6 +286,7 @@ impl PerformState {
     pub fn select_launcher_clip(&mut self, id: ClipId) -> Option<TrackId> {
         let clip = self.clips.by_id(id)?;
         self.clip_editor.selected = Some(id);
+        self.clip_editor.slot = Some((clip.track_id, clip.row));
         let mut editor = TimelineEditorState {
             timeline: Arc::clone(&clip.timeline),
             selected_track: Some(clip.track_id),
@@ -359,7 +360,19 @@ impl PerformState {
                 }
             }
             ClipMsg::Select(id) => selected = self.select_launcher_clip(id),
-            ClipMsg::SelectSlot { .. } => {}
+            ClipMsg::SelectSlot { track_id, row } => {
+                if let Some(id) = self.clips.at(track_id, row).map(|clip| clip.id) {
+                    selected = self.select_launcher_clip(id);
+                } else {
+                    self.clip_editor.selected = None;
+                    self.clip_editor.slot = Some((track_id, row));
+                    self.clip_editor.editor = Default::default();
+                    return PerformAction {
+                        select_project_track: Some(track_id),
+                        ..Default::default()
+                    };
+                }
+            }
             ClipMsg::CreateMidi { track_id, row } => {
                 if self.clips.at(track_id, row).is_some()
                     || !ctx
