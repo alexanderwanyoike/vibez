@@ -356,3 +356,17 @@ fn controller_navigation_never_nudges_selected_notes() {
         }
     }
 }
+
+#[test]
+fn the_piano_roll_reaches_every_note_the_pads_can_play() {
+    let height = 400.0;
+    let mut widget = PianoRollWidget::empty(TrackId::new(), 0.0, Color::WHITE);
+    widget.scroll_y = clamp_scroll_y(f32::MAX, height);
+    assert_eq!(widget.y_to_pitch(height - 1.0), 0, "the bottom row is C-1");
+    widget.scroll_y = clamp_scroll_y(0.0, height);
+    assert_eq!(
+        widget.y_to_pitch(RULER_HEIGHT + 1.0),
+        127,
+        "the top row is G9"
+    );
+}
