@@ -280,10 +280,23 @@ impl App {
                 if self.state.view.workspace == crate::state::Workspace::Perform
                     && self.state.perform.layout == vibez_project::PerformLayout::Clips
                     && !self.state.transport.playing
-                    && matches!(msg, crate::domains::transport::TransportMsg::TogglePlayback)
+                    && matches!(
+                        msg,
+                        crate::domains::transport::TransportMsg::TogglePlayback
+                            | crate::domains::transport::TransportMsg::Play
+                    )
                 {
                     self.state.perform.clip_editor.running = true;
                     self.send_command(vibez_engine::commands::EngineCommand::BeginClipPerformance);
+                    let resume = std::mem::take(&mut self.state.perform.clip_editor.resume);
+                    for clip in resume.into_values() {
+                        // A clip deleted while stopped has nothing to resume.
+                        if self.state.perform.clips.by_id(clip).is_some() {
+                            self.launch_clips(crate::domains::perform::ClipLaunchRequest::Clip(
+                                clip,
+                            ));
+                        }
+                    }
                     return Task::none();
                 }
                 if self.place_focused_section_playhead(&msg) {
