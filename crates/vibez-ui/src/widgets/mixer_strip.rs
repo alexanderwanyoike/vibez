@@ -401,6 +401,21 @@ fn name_display<'a>(
     .into()
 }
 
+/// Send rows on every strip, whatever the number of buses; more buses are
+/// reached by flipping the bank, like aux banks on a desk.
+pub const SENDS_PER_BANK: usize = 4;
+
+/// How many banks `buses` buses fill; an empty desk still has one.
+pub fn send_banks(buses: usize) -> usize {
+    1
+}
+
+/// The buses on `bank`'s rows, top to bottom, with `None` for rows past the
+/// last bus. A bank past the last shows the last.
+pub fn bank_buses(buses: &[ProjectTrack], bank: usize) -> [Option<&ProjectTrack>; SENDS_PER_BANK] {
+    [None; SENDS_PER_BANK]
+}
+
 /// Send section on a track strip: one knob per bus, bus-colored,
 /// wrapped three to a row under a SENDS header.
 fn view_sends<'a>(
@@ -621,6 +636,29 @@ fn format_gain_db(gain: f32) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_send_bank_shows_four_buses_and_clamps_past_the_last() {
+        let buses: Vec<_> = (0..6)
+            .map(|index| ProjectTrack::new(TrackId::new(), format!("Bus {index}"), 0))
+            .collect();
+        let names = |bank| bank_buses(&buses, bank).map(|bus| bus.map(|bus| bus.name.clone()));
+        let named = |name: &str| Some(name.to_string());
+        assert_eq!(
+            names(0),
+            [
+                named("Bus 0"),
+                named("Bus 1"),
+                named("Bus 2"),
+                named("Bus 3")
+            ]
+        );
+        assert_eq!(names(1), [named("Bus 4"), named("Bus 5"), None, None]);
+        assert_eq!(names(7), names(1), "a bank past the last shows the last");
+        assert_eq!(send_banks(0), 1);
+        assert_eq!(send_banks(4), 1);
+        assert_eq!(send_banks(5), 2);
+    }
     use vibez_core::automation::{AutomationLane, AutomationPoint, AutomationTarget};
     use vibez_core::id::TrackId;
 
