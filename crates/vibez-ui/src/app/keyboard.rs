@@ -198,7 +198,9 @@ impl super::App {
                     }
                     return iced::Task::none();
                 }
-                if modifiers.is_empty() || modifiers == iced::keyboard::Modifiers::SHIFT {
+                if (modifiers.is_empty() || modifiers == iced::keyboard::Modifiers::SHIFT)
+                    && !self.piano_roll_has_selected_notes()
+                {
                     let movement = clip_window_movement(
                         key,
                         modifiers,
@@ -1001,6 +1003,82 @@ mod clip_browser_focus_tests {
         assert_eq!(
             clip_window_movement(&Key::Named(Named::ArrowRight), Modifiers::SHIFT, false),
             Some((4, 0))
+        );
+    }
+}
+
+#[cfg(test)]
+mod clip_editor_note_key_tests {
+    use crate::domains::perform::{ClipMsg, PerformMsg};
+    use crate::domains::piano_roll::PianoRollMsg;
+    use crate::message::Message;
+    use crate::state::{DetailPanelTab, Workspace};
+    use iced::keyboard::key::{Code, Named, Physical};
+    use iced::keyboard::{Event, Key, Location, Modifiers};
+    use std::sync::Arc;
+    use vibez_core::id::TrackId;
+
+    fn down() -> Event {
+        Event::KeyPressed {
+            key: Key::Named(Named::ArrowDown),
+            modified_key: Key::Named(Named::ArrowDown),
+            physical_key: Physical::Code(Code::ArrowDown),
+            location: Location::Standard,
+            modifiers: Modifiers::empty(),
+            text: None,
+        }
+    }
+
+    #[test]
+    fn arrows_move_the_clip_editors_selected_notes_rather_than_the_launcher() {
+        let mut app = super::super::test_support::app();
+        app.state.view.workspace = Workspace::Perform;
+        app.state.perform.layout = vibez_project::PerformLayout::Clips;
+        app.state.view.detail_panel_tab = DetailPanelTab::Clip;
+        let track = TrackId::new();
+        let mut project_track = crate::state::ProjectTrack::new(track, "Keys".into(), 0);
+        project_track.kind = vibez_core::midi::TrackKind::Midi;
+        Arc::make_mut(&mut app.state.project_tracks)
+            .tracks
+            .push(project_track);
+        let _ = app.update(Message::Perform(PerformMsg::Clips(ClipMsg::CreateMidi {
+            track_id: track,
+            row: 0,
+        })));
+        let clip = app
+            .state
+            .perform
+            .clip_editor
+            .selected
+            .expect("a new clip opens");
+        let _ = app.update(Message::PianoRoll(PianoRollMsg::AddNote {
+            track_id: track,
+            clip_id: clip,
+            pitch: 60,
+            start_beat: 0.0,
+            duration_beats: 1.0,
+        }));
+        let _ = app.update(Message::PianoRoll(PianoRollMsg::SelectNote(
+            track,
+            clip,
+            Some(0),
+            false,
+        )));
+        assert!(app.visible_piano_roll_clip().is_some());
+
+        let _ = app.handle_keyboard_input(down(), std::time::Instant::now());
+        assert_eq!(
+            app.state.perform.clip_editor.first_row, 0,
+            "with notes selected, the arrows are the clip editor's"
+        );
+
+        let _ = app.update(Message::PianoRoll(PianoRollMsg::SelectNote(
+            track, clip, None, false,
+        )));
+        let _ = app.handle_keyboard_input(down(), std::time::Instant::now());
+        assert_eq!(
+            app.state.perform.clip_editor.first_row, 1,
+            "with none selected, the arrows still move the launcher"
         );
     }
 }
