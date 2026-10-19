@@ -14,6 +14,9 @@ use crate::widgets::mixer_strip::{view_mixer_strip, MixerStripView, StripRole};
 
 use super::*;
 
+/// The desk's own padding round the strips, above and below.
+const DESK_PADDING: f32 = 32.0;
+
 impl App {
     pub(super) fn view_mixer(&self) -> Element<'_, Message> {
         if self.state.project_tracks.tracks.is_empty() {
@@ -33,10 +36,45 @@ impl App {
                 .into();
         }
 
-        // ── Channel strips, buses, pinned master ──
+        // Strips fill the room they get, but never shrink below a usable
+        // fader; on a short window the desk scrolls up and down instead.
+        let desk = iced::widget::responsive(move |size| {
+            let minimum = crate::widgets::mixer_strip::min_strip_height(
+                self.state.project_tracks.buses.len(),
+            );
+            iced::widget::Scrollable::with_direction(
+                self.view_desk((size.height - DESK_PADDING).max(minimum)),
+                iced::widget::scrollable::Direction::Vertical(
+                    iced::widget::scrollable::Scrollbar::new(),
+                ),
+            )
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
+        });
+
+        mouse_area(
+            container(desk)
+                .width(Length::Fill)
+                .height(Length::FillPortion(5))
+                .style(|_theme: &Theme| container::Style {
+                    background: Some(th::bg_dark().into()),
+                    ..Default::default()
+                }),
+        )
+        .on_right_press(Message::View(ViewMsg::ShowContextMenu {
+            x: self.state.view.cursor_x,
+            y: self.state.view.cursor_y,
+            target: ContextMenuTarget::ArrangementEmpty,
+        }))
+        .into()
+    }
+
+    /// The strips, returns and master at `height`.
+    fn view_desk(&self, height: f32) -> Element<'_, Message> {
         let playhead_beat = self.state.position_beats();
         let buses = &self.state.project_tracks.buses;
-        let mut strips = row![].spacing(4).padding(8).height(Length::Fill);
+        let mut strips = row![].spacing(4).padding(8);
 
         for track in &self.state.project_tracks.tracks {
             let selected = self.channel_selected(track.id);
@@ -53,6 +91,7 @@ impl App {
                     selected,
                     click: self.channel_click(track.id),
                     editing_name: self.state.view.editing_track_name == Some(track.id),
+                    height,
                     edit_text: &self.state.view.edit_name_text,
                     playhead_beat,
                     automation: self
@@ -67,7 +106,7 @@ impl App {
 
         // Returns live on the right, next to the master: new buses
         // appear where the "+ Bus" pillar sits, growing toward it.
-        let mut right_group = row![].spacing(4).padding(8).height(Length::Fill);
+        let mut right_group = row![].spacing(4).padding(8);
         for bus in buses {
             let selected = self.channel_selected(bus.id);
             right_group = right_group.push(view_mixer_strip(
@@ -83,6 +122,7 @@ impl App {
                     selected,
                     click: self.channel_click(bus.id),
                     editing_name: self.state.view.editing_track_name == Some(bus.id),
+                    height,
                     edit_text: &self.state.view.edit_name_text,
                     playhead_beat,
                     automation: self
@@ -123,7 +163,7 @@ impl App {
         });
         right_group = right_group.push(
             container(add_bus_btn)
-                .height(Length::Fill)
+                .height(Length::Fixed(height))
                 .align_y(iced::Alignment::Center),
         );
 
@@ -143,6 +183,7 @@ impl App {
                 selected: master_selected,
                 click: self.channel_click(vibez_core::id::TrackId::MASTER),
                 editing_name: false,
+                height,
                 edit_text: &self.state.view.edit_name_text,
                 playhead_beat,
                 automation: self
@@ -152,33 +193,13 @@ impl App {
                     .unwrap_or(&[]),
             },
         ))
-        .padding(8)
-        .height(Length::Fill);
+        .padding(8);
 
         let mixer_row = row![strips, horizontal_space(), right_group, master_strip]
             .spacing(4)
-            .padding([8, 4])
-            .height(Length::Fill);
+            .padding([8, 4]);
 
-        let mixer_content = container(mixer_row)
-            .width(Length::Fill)
-            .height(Length::Fill);
-
-        mouse_area(
-            container(mixer_content)
-                .width(Length::Fill)
-                .height(Length::FillPortion(5))
-                .style(|_theme: &Theme| container::Style {
-                    background: Some(th::bg_dark().into()),
-                    ..Default::default()
-                }),
-        )
-        .on_right_press(Message::View(ViewMsg::ShowContextMenu {
-            x: self.state.view.cursor_x,
-            y: self.state.view.cursor_y,
-            target: ContextMenuTarget::ArrangementEmpty,
-        }))
-        .into()
+        mixer_row.into()
     }
 }
 

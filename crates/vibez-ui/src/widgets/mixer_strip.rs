@@ -24,6 +24,8 @@ pub enum StripRole {
     Master,
 }
 
+const STRIP_W: f32 = 110.0;
+
 /// Per-render inputs that are not part of the project-owned channel itself.
 pub struct MixerStripView<'a> {
     pub peaks: (f32, f32),
@@ -34,6 +36,27 @@ pub struct MixerStripView<'a> {
     pub edit_text: &'a str,
     pub playhead_beat: f64,
     pub automation: &'a [vibez_core::automation::AutomationLane],
+    /// The strip's height; the fader takes what the other sections leave.
+    pub height: f32,
+}
+
+/// Everything on a strip but its fader, measured on the real desk.
+const SECTIONS_H: f32 = 500.0;
+/// One row of send knobs, and the SENDS legend above them.
+const SEND_ROW_H: f32 = 30.0;
+const SENDS_LEGEND_H: f32 = 14.0;
+/// The shortest fader worth having; below it the desk scrolls instead.
+const MIN_FADER_H: f32 = 220.0;
+
+/// The shortest a strip can be while keeping a usable fader, with `buses`
+/// send knobs on each track strip.
+pub fn min_strip_height(buses: usize) -> f32 {
+    let sends = if buses == 0 {
+        0.0
+    } else {
+        SENDS_LEGEND_H + buses.div_ceil(3) as f32 * SEND_ROW_H
+    };
+    SECTIONS_H + sends + MIN_FADER_H
 }
 
 /// Render a single mixer channel strip. `buses` drives the send
@@ -105,8 +128,8 @@ pub fn view_mixer_strip<'a>(
     // Pan knob (bigger)
     let knob = KnobWidget::new(track.id, track.pan, track_color);
     let knob_canvas: Element<'_, Message> = canvas(knob)
-        .width(Length::Fixed(36.0))
-        .height(Length::Fixed(36.0))
+        .width(Length::Fixed(40.0))
+        .height(Length::Fixed(40.0))
         .into();
 
     let pan_label = text(format_pan(track.pan)).size(10).color(th::text_dim());
@@ -285,12 +308,12 @@ pub fn view_mixer_strip<'a>(
     }
     .spacing(4)
     .padding(8)
-    .width(Length::Fixed(94.0))
+    .width(Length::Fixed(STRIP_W))
     .height(Length::Fill)
     .align_x(iced::Alignment::Center);
 
     let body = container(strip)
-        .height(Length::Fill)
+        .height(Length::Fixed(view.height))
         .style(move |_theme: &Theme| container::Style {
             background: Some(th::bg_surface().into()),
             border: iced::Border {
@@ -474,7 +497,7 @@ fn view_strip_eq(track: &ProjectTrack) -> Element<'_, Message> {
         if i > 0 {
             bands = bands.push(
                 container(text(""))
-                    .width(Length::Fixed(74.0))
+                    .width(Length::Fill)
                     .height(Length::Fixed(1.0))
                     .style(|_theme: &Theme| container::Style {
                         background: Some(
@@ -541,19 +564,19 @@ fn view_eq_band<'a>(
     };
     let gain_col = column![
         row![
-            text(label).size(8).color(color),
-            text("dB").size(7).color(dim)
+            text(label).size(10).color(color),
+            text("dB").size(8).color(dim)
         ]
         .spacing(3)
         .align_y(iced::Alignment::Center),
-        knob(gain_i, 26.0),
+        knob(gain_i, 34.0),
     ]
     .spacing(1)
     .align_x(iced::Alignment::Center);
 
     let third_el: Element<'a, Message> = if bell_toggle {
         let bell_on = eq.params.get(third_i).copied().unwrap_or(0.0) >= 0.5;
-        button(text("BELL").size(6).color(if bell_on {
+        button(text("BELL").size(8).color(if bell_on {
             th::bg_dark()
         } else {
             th::text_dim()
@@ -585,7 +608,7 @@ fn view_eq_band<'a>(
         })
         .into()
     } else {
-        column![text("Q").size(7).color(dim), knob(third_i, 22.0)]
+        column![text("Q").size(8).color(dim), knob(third_i, 28.0)]
             .spacing(1)
             .align_x(iced::Alignment::Center)
             .into()
@@ -597,9 +620,9 @@ fn view_eq_band<'a>(
         } else {
             "Hz"
         })
-        .size(7)
+        .size(8)
         .color(dim),
-        knob(freq_i, 22.0),
+        knob(freq_i, 28.0),
     ]
     .spacing(1)
     .align_x(iced::Alignment::Center);
@@ -610,7 +633,7 @@ fn view_eq_band<'a>(
             .align_x(iced::Alignment::Center),
         column![text("").size(6), freq_col].align_x(iced::Alignment::Center),
     ]
-    .spacing(9)
+    .spacing(12)
     .align_y(iced::Alignment::Start)
     .into()
 }
