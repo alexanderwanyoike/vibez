@@ -131,6 +131,8 @@ pub struct ViewState {
     /// Modifier keys held now, for mouse clicks that change meaning with
     /// them.
     pub held_modifiers: iced::keyboard::Modifiers,
+    /// The bank of buses the mixer's send rows show.
+    pub mixer_send_bank: usize,
 }
 impl Default for ViewState {
     fn default() -> Self {
@@ -160,6 +162,7 @@ impl Default for ViewState {
             edit_name_text: String::new(),
             drum_pad_flash_until: HashMap::new(),
             held_modifiers: iced::keyboard::Modifiers::empty(),
+            mixer_send_bank: 0,
         }
     }
 }
