@@ -83,19 +83,77 @@ pub(crate) fn fit(text: &str, width: f32, size: f32) -> String {
     }
 }
 
+/// The grid is glass: each cell is a well sunk into it, and a clip is a
+/// film laid inside the well, so glass shows around every clip.
+const WELL_INSET: f32 = 2.0;
+pub(crate) const FILM_INSET: f32 = WELL_INSET + 4.0;
+const FILM_RADIUS: f32 = 3.0;
+const HEADER_H: f32 = 18.0;
+/// Room along the film's bottom for the cell's buttons.
+const BUTTON_ROOM: f32 = 21.0;
+
+fn inset(size: Size, by: f32) -> Rectangle {
+    Rectangle::new(
+        Point::new(by, by),
+        Size::new(
+            (size.width - 2.0 * by).max(1.0),
+            (size.height - 2.0 * by).max(1.0),
+        ),
+    )
+}
+
+fn rounded(area: Rectangle, radius: impl Into<iced::border::Radius>) -> canvas::Path {
+    canvas::Path::rounded_rectangle(area.position(), area.size(), radius.into())
+}
+
+fn vertical(area: Rectangle, top: Color, bottom: Color) -> canvas::Fill {
+    canvas::gradient::Linear::new(
+        Point::new(area.x, area.y),
+        Point::new(area.x, area.y + area.height),
+    )
+    .add_stop(0.0, top)
+    .add_stop(1.0, bottom)
+    .into()
+}
+
+fn film_base() -> Color {
+    th::darken(th::bg_dark(), 0.47)
+}
+
+/// The film tinted toward its track colour. Opaque on purpose: the renderer
+/// blends alpha in linear light, which makes a faint alpha tint read about
+/// twice as strong as the same tint mixed here.
+fn tint(ink: Color, amount: f32) -> Color {
+    th::blend(film_base(), ink, amount)
+}
+
+/// In a short cell the title shares the film's one line with the thumbnail.
+fn tight_title_width(film_width: f32, has_key: bool) -> f32 {
+    let key_space = if has_key { 22.0 } else { 0.0 };
+    (film_width * 0.42)
+        .max(25.0)
+        .min((film_width - 38.0 - key_space).max(0.0))
+}
+
 fn thumbnail_plot(size: Size, compact: bool, has_key: bool) -> Rectangle {
-    let (w, h) = (size.width, size.height);
-    if compact && h < 44.0 {
-        let key_space = if has_key { 22.0 } else { 0.0 };
-        let title_width = (w * 0.42).max(25.0).min((w - 50.0 - key_space).max(0.0));
+    let film = inset(size, FILM_INSET);
+    if compact && size.height < 44.0 {
+        let title_width = tight_title_width(film.width, has_key);
         Rectangle::new(
-            Point::new(title_width + 26.0, 5.0),
-            Size::new((w - title_width - 76.0).max(1.0), (h - 10.0).max(1.0)),
+            Point::new(film.x + title_width + 20.0, film.y + 3.0),
+            Size::new(
+                (film.width - title_width - 70.0).max(1.0),
+                (film.height - 6.0).max(1.0),
+            ),
         )
     } else {
+        let top = film.y + HEADER_H + 2.0;
         Rectangle::new(
-            Point::new(9.0, 28.0),
-            Size::new((w - 18.0).max(1.0), (h - 51.0).max(3.0)),
+            Point::new(film.x + 7.0, top),
+            Size::new(
+                (film.width - 14.0).max(1.0),
+                (film.y + film.height - BUTTON_ROOM - top).max(3.0),
+            ),
         )
     }
 }
@@ -262,65 +320,147 @@ impl canvas::Program<Message> for ClipSlot<'_> {
             if w < 8.0 || h < 8.0 {
                 return;
             }
-            let paper = Color::BLACK;
-            frame.fill_rectangle(Point::ORIGIN, Size::new(w, h), paper);
-            let divider = if hovered {
-                Color::from_rgb8(70, 70, 70)
-            } else {
-                Color::from_rgb8(35, 35, 35)
-            };
-            frame.stroke(
-                &canvas::Path::rectangle(Point::new(0.5, 0.5), Size::new(w - 1.0, h - 1.0)),
-                canvas::Stroke::default()
-                    .with_color(divider)
-                    .with_width(1.0),
+            let size = Size::new(w, h);
+            let well = inset(size, WELL_INSET);
+            let well_path = rounded(well, FILM_RADIUS);
+            frame.fill(
+                &well_path,
+                th::with_alpha(Color::BLACK, if hovered { 0.28 } else { 0.38 }),
+            );
+            frame.fill_rectangle(
+                Point::new(well.x + FILM_RADIUS, well.y),
+                Size::new((well.width - 2.0 * FILM_RADIUS).max(0.0), 1.0),
+                th::with_alpha(Color::BLACK, 0.65),
             );
             if drop_target {
                 frame.stroke(
-                    &canvas::Path::rectangle(Point::new(1.5, 1.5), Size::new(w - 3.0, h - 3.0)),
+                    &well_path,
                     canvas::Stroke::default()
                         .with_color(th::accent())
-                        .with_width(2.0),
+                        .with_width(1.5),
+                );
+                let ghost = rounded(inset(size, FILM_INSET), FILM_RADIUS);
+                frame.fill(&ghost, th::with_alpha(th::accent(), 0.035));
+                frame.stroke(
+                    &ghost,
+                    canvas::Stroke {
+                        line_dash: canvas::LineDash {
+                            segments: &[4.0, 3.0],
+                            offset: 0,
+                        },
+                        ..canvas::Stroke::default()
+                            .with_color(th::with_alpha(th::accent(), 0.7))
+                            .with_width(1.0)
+                    },
                 );
             }
             let Some(slot) = self.clip else {
-                label(frame, self.key, w - 22.0, 6.0, 10.0, th::text_dim(), true);
-                if self.selected {
+                label(
+                    frame,
+                    self.key,
+                    w - 22.0 - WELL_INSET,
+                    6.0,
+                    10.0,
+                    th::text_dim(),
+                    true,
+                );
+                if self.selected && !drop_target {
                     frame.stroke(
-                        &canvas::Path::rectangle(Point::new(1.0, 1.0), Size::new(w - 2.0, h - 2.0)),
+                        &well_path,
                         canvas::Stroke::default()
                             .with_color(th::text_dim())
-                            .with_width(1.5),
+                            .with_width(1.0),
                     );
                 }
                 return;
             };
-            let ink = self.color;
+            let ink = if self.recording {
+                th::danger()
+            } else {
+                self.color
+            };
+            let tight = self.compact && h < 44.0;
+            let film = inset(size, FILM_INSET);
+            let film_path = rounded(film, FILM_RADIUS);
+            frame.fill(
+                &rounded(
+                    Rectangle {
+                        y: film.y + 2.0,
+                        ..film
+                    },
+                    FILM_RADIUS,
+                ),
+                th::with_alpha(Color::BLACK, 0.6),
+            );
+            frame.fill(&film_path, vertical(film, tint(ink, 0.17), tint(ink, 0.07)));
+            let (band_top, band_bottom) = if self.playing {
+                (0.63, 0.42)
+            } else {
+                (0.48, 0.31)
+            };
+            let r = FILM_RADIUS;
+            let (header, corners) = if tight {
+                (
+                    Rectangle {
+                        width: tight_title_width(film.width, !self.key.is_empty()) + 6.0,
+                        ..film
+                    },
+                    iced::border::Radius {
+                        top_left: r,
+                        top_right: 0.0,
+                        bottom_right: 0.0,
+                        bottom_left: r,
+                    },
+                )
+            } else {
+                (
+                    Rectangle {
+                        height: HEADER_H,
+                        ..film
+                    },
+                    iced::border::Radius {
+                        top_left: r,
+                        top_right: r,
+                        bottom_right: 0.0,
+                        bottom_left: 0.0,
+                    },
+                )
+            };
+            frame.fill(
+                &rounded(header, corners),
+                vertical(header, tint(ink, band_top), tint(ink, band_bottom)),
+            );
+            if !tight {
+                frame.fill_rectangle(
+                    Point::new(film.x, film.y + HEADER_H - 1.0),
+                    Size::new(film.width, 1.0),
+                    tint(ink, 0.55),
+                );
+            }
+            frame.stroke(
+                &film_path,
+                canvas::Stroke::default()
+                    .with_color(tint(ink, if self.playing { 0.8 } else { 0.4 }))
+                    .with_width(1.0),
+            );
             frame.fill_rectangle(
-                Point::ORIGIN,
-                Size::new(w, if self.playing { 4.0 } else { 2.0 }),
-                if self.recording {
-                    th::danger()
-                } else {
-                    self.color
-                },
+                Point::new(film.x + r, film.y),
+                Size::new((film.width - 2.0 * r).max(0.0), 1.0),
+                tint(ink, if self.playing { 1.0 } else { 0.85 }),
             );
             if self.selected {
-                let edge =
-                    canvas::Path::rectangle(Point::new(1.0, 1.0), Size::new(w - 2.0, h - 2.0));
                 frame.stroke(
-                    &edge,
+                    &rounded(inset(size, FILM_INSET - 2.0), r + 1.0),
                     canvas::Stroke::default()
                         .with_color(th::text())
                         .with_width(1.5),
                 );
             }
-            let tight = self.compact && h < 44.0;
             let key_space = if self.key.is_empty() { 0.0 } else { 22.0 };
             let title_width = if tight {
-                (w * 0.42).max(25.0).min((w - 50.0 - key_space).max(0.0))
+                tight_title_width(film.width, !self.key.is_empty())
             } else {
-                w - 50.0 - key_space
+                w - 50.0 - key_space - 2.0 * FILM_INSET
             };
             label(
                 frame,
@@ -333,14 +473,22 @@ impl canvas::Program<Message> for ClipSlot<'_> {
                     title_width - 12.0,
                     if tight { 10.0 } else { 12.0 },
                 ),
-                8.0,
-                6.0,
+                film.x + 6.0,
+                film.y + if tight { 4.0 } else { 3.0 },
                 if tight { 10.0 } else { 12.0 },
                 th::text(),
                 false,
             );
             if !self.key.is_empty() {
-                label(frame, self.key, w - 43.0, 6.0, 10.0, ink, true);
+                label(
+                    frame,
+                    self.key,
+                    w - 45.0,
+                    film.y + 4.0,
+                    10.0,
+                    th::with_alpha(th::text(), 0.75),
+                    true,
+                );
             }
             let plot = thumbnail_plot(bounds.size(), self.compact, !self.key.is_empty());
             let Some(content) = slot.timeline.get(slot.track_id) else {
@@ -440,7 +588,7 @@ impl canvas::Program<Message> for ClipSlot<'_> {
             let width = plot.width as usize;
             let height = plot.height;
             let mut overlay = canvas::Frame::new(renderer, bounds.size());
-            overlay.fill_rectangle(plot.position(), plot.size(), Color::BLACK);
+            overlay.fill_rectangle(plot.position(), plot.size(), film_base());
             for x in 0..width {
                 let local = x as u64 * duration / width as u64;
                 let pass = elapsed.saturating_sub(local + 1) / duration;
@@ -463,15 +611,26 @@ impl canvas::Program<Message> for ClipSlot<'_> {
         }
         if self.progress.is_some() || self.queued {
             let mut overlay = canvas::Frame::new(renderer, bounds.size());
+            let film = inset(bounds.size(), FILM_INSET);
             if let Some(progress) = self.progress {
+                let played = (film.width - 2.0) * progress.clamp(0.0, 1.0);
                 overlay.fill_rectangle(
-                    Point::new(0.0, bounds.height - 2.0),
-                    Size::new(bounds.width * progress.clamp(0.0, 1.0), 2.0),
-                    self.color,
+                    Point::new(film.x + 1.0, film.y + 1.0),
+                    Size::new(played, film.height - 2.0),
+                    th::with_alpha(self.color, 0.07),
+                );
+                overlay.fill_rectangle(
+                    Point::new(film.x + 1.0 + played, film.y + 1.0),
+                    Size::new(1.0, film.height - 2.0),
+                    th::with_alpha(self.color, 0.7),
                 );
             }
             if self.queued {
-                overlay.fill_rectangle(Point::ORIGIN, Size::new(bounds.width, 2.0), th::text());
+                overlay.fill_rectangle(
+                    Point::new(film.x + FILM_RADIUS, film.y),
+                    Size::new((film.width - 2.0 * FILM_RADIUS).max(0.0), 2.0),
+                    th::text(),
+                );
             }
             geometry.push(overlay.into_geometry());
         }
@@ -559,6 +718,23 @@ impl canvas::Program<Message> for LauncherTrackName<'_> {
 mod tests {
     use super::*;
     use vibez_core::clip_timeline::BeatClipTimeline;
+
+    #[test]
+    fn the_thumbnail_sits_inside_the_film_between_its_header_and_buttons() {
+        for height in [48.0, 56.0, 64.0, 72.0] {
+            let size = Size::new(240.0, height);
+            let film = inset(size, FILM_INSET);
+            let plot = thumbnail_plot(size, false, true);
+            assert!(plot.x >= film.x && plot.x + plot.width <= film.x + film.width);
+            assert!(plot.y >= film.y + HEADER_H, "{height}: below the header");
+            if height >= 64.0 {
+                assert!(
+                    plot.y + plot.height <= film.y + film.height - BUTTON_ROOM,
+                    "{height}: clear of the buttons"
+                );
+            }
+        }
+    }
 
     #[test]
     fn dense_loop_preview_spans_the_whole_clip_with_bounded_work() {
