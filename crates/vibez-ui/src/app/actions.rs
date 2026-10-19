@@ -121,7 +121,7 @@ impl App {
         if action.focus_clip_tab {
             self.state.view.detail_panel_tab = crate::state::DetailPanelTab::Clip;
         }
-        if let Some(status) = action.section_record_status {
+        if let Some(status) = action.status {
             self.state.status_text = status.into();
         }
         if let Some(record_action) = action.clip_record {

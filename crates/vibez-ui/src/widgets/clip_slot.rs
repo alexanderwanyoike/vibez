@@ -14,6 +14,9 @@ use crate::typography::{PERFORM_LABEL, PERFORM_TECH};
 
 pub struct ClipSlot<'a> {
     pub clip: Option<&'a LauncherClip>,
+    pub cell: (vibez_core::id::TrackId, u32),
+    /// The clip being dragged across the launcher, from any cell.
+    pub drag_source: Option<vibez_core::id::ClipId>,
     pub empty_action: Message,
     pub color: Color,
     pub key: &'a str,
@@ -38,7 +41,13 @@ pub struct ClipSlotState {
     double_click: crate::widgets::double_click::DoubleClick,
     fingerprint: Cell<u64>,
     source: RefCell<Option<Arc<crate::state::ArrangementTimeline>>>,
+    press: Option<Point>,
+    dragging: bool,
+    modifiers: iced::keyboard::Modifiers,
 }
+
+/// How far a press travels before it drags rather than clicks.
+const DRAG_START: f32 = 6.0;
 
 fn label(
     frame: &mut canvas::Frame,
@@ -120,10 +129,60 @@ impl canvas::Program<Message> for ClipSlot<'_> {
         bounds: Rectangle,
         cursor: mouse::Cursor,
     ) -> (canvas::event::Status, Option<Message>) {
+        use crate::domains::perform::{ClipMsg, PerformMsg};
+        match event {
+            canvas::Event::Keyboard(iced::keyboard::Event::ModifiersChanged(modifiers)) => {
+                state.modifiers = modifiers;
+            }
+            canvas::Event::Mouse(mouse::Event::CursorMoved { position }) => {
+                if let (Some(clip), Some(press)) = (self.clip, state.press) {
+                    if !state.dragging && press.distance(position) > DRAG_START {
+                        state.dragging = true;
+                        return (
+                            canvas::event::Status::Captured,
+                            Some(Message::Perform(PerformMsg::Clips(ClipMsg::BeginDrag(
+                                clip.id,
+                            )))),
+                        );
+                    }
+                }
+            }
+            canvas::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
+                state.press = None;
+                // Ignored, so the cell's button under this canvas still
+                // sees its own release and resets.
+                if std::mem::take(&mut state.dragging) {
+                    return (
+                        canvas::event::Status::Ignored,
+                        Some(Message::Perform(PerformMsg::Clips(ClipMsg::EndDrag))),
+                    );
+                }
+                if let Some(source) = self.drag_source.filter(|_| cursor.is_over(bounds)) {
+                    if self.clip.is_none_or(|clip| clip.id != source) {
+                        return (
+                            canvas::event::Status::Captured,
+                            Some(Message::Perform(PerformMsg::Clips(ClipMsg::Drop {
+                                clip: source,
+                                track_id: self.cell.0,
+                                row: self.cell.1,
+                                copy: crate::app::command_held(
+                                    state.modifiers,
+                                    crate::app::ON_MACOS,
+                                ),
+                            }))),
+                        );
+                    }
+                }
+            }
+            _ => {}
+        }
         if matches!(
             event,
             canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
         ) {
+            if self.clip.is_some() && cursor.is_over(bounds) {
+                state.press = cursor.position();
+            }
             if let Some(point) = cursor.position_in(bounds) {
                 let title = point.y < 25.0 && point.x >= 6.0 && point.x < bounds.width - 48.0;
                 if self.clip.is_none() || title {
@@ -167,6 +226,10 @@ impl canvas::Program<Message> for ClipSlot<'_> {
         cursor: mouse::Cursor,
     ) -> Vec<canvas::Geometry> {
         let hovered = cursor.is_over(bounds);
+        let drop_target = hovered
+            && self
+                .drag_source
+                .is_some_and(|source| self.clip.is_none_or(|clip| clip.id != source));
         let mut hash = DefaultHasher::new();
         self.clip
             .map(|c| Arc::as_ptr(&c.timeline) as usize)
@@ -179,6 +242,7 @@ impl canvas::Program<Message> for ClipSlot<'_> {
             self.playing,
             self.queued,
             hovered,
+            drop_target,
             th::epoch(),
         )
             .hash(&mut hash);
@@ -211,8 +275,24 @@ impl canvas::Program<Message> for ClipSlot<'_> {
                     .with_color(divider)
                     .with_width(1.0),
             );
+            if drop_target {
+                frame.stroke(
+                    &canvas::Path::rectangle(Point::new(1.5, 1.5), Size::new(w - 3.0, h - 3.0)),
+                    canvas::Stroke::default()
+                        .with_color(th::accent())
+                        .with_width(2.0),
+                );
+            }
             let Some(slot) = self.clip else {
                 label(frame, self.key, w - 22.0, 6.0, 10.0, th::text_dim(), true);
+                if self.selected {
+                    frame.stroke(
+                        &canvas::Path::rectangle(Point::new(1.0, 1.0), Size::new(w - 2.0, h - 2.0)),
+                        canvas::Stroke::default()
+                            .with_color(th::text_dim())
+                            .with_width(1.5),
+                    );
+                }
                 return;
             };
             let ink = self.color;
@@ -531,6 +611,8 @@ mod empty_cell_tests {
         let track = vibez_core::id::TrackId::new();
         let slot = ClipSlot {
             clip: None,
+            cell: (track, 2),
+            drag_source: None,
             empty_action: Message::Perform(PerformMsg::Clips(ClipMsg::CreateMidi {
                 track_id: track,
                 row: 2,
@@ -557,5 +639,114 @@ mod empty_cell_tests {
         assert!(
             matches!(message, Some(Message::Perform(PerformMsg::Clips(ClipMsg::CreateMidi {track_id, row: 2}))) if track_id == track)
         );
+    }
+}
+
+#[cfg(test)]
+mod drag_tests {
+    use super::*;
+    use crate::domains::perform::{ClipMsg, PerformMsg};
+    use iced::widget::canvas::Program;
+    use vibez_core::id::{ClipId, TrackId};
+
+    fn slot(
+        clip: Option<&LauncherClip>,
+        cell: (TrackId, u32),
+        drag_source: Option<ClipId>,
+    ) -> ClipSlot<'_> {
+        ClipSlot {
+            clip,
+            cell,
+            drag_source,
+            empty_action: Message::Perform(PerformMsg::Clips(ClipMsg::StopAll)),
+            color: Color::WHITE,
+            key: "",
+            selected: false,
+            recording: false,
+            audio_recording: None,
+            playing: false,
+            progress: None,
+            queued: false,
+            compact: false,
+        }
+    }
+
+    fn mouse(event: mouse::Event) -> canvas::Event {
+        canvas::Event::Mouse(event)
+    }
+
+    #[test]
+    fn dragging_a_clip_past_a_few_pixels_starts_a_drag_that_release_ends() {
+        let track = TrackId::new();
+        let clip = crate::domains::perform::clip_record::empty_midi_clip(
+            ClipId::new(),
+            track,
+            0,
+            "Pattern 1".into(),
+            4.0,
+        );
+        let source = slot(Some(&clip), (track, 0), None);
+        let mut state = ClipSlotState::default();
+        let bounds = Rectangle::new(Point::ORIGIN, Size::new(150.0, 72.0));
+        let at = |x, y| mouse::Cursor::Available(Point::new(x, y));
+        let press = mouse(mouse::Event::ButtonPressed(mouse::Button::Left));
+        source.update(&mut state, press, bounds, at(70.0, 40.0));
+        let nudge = mouse(mouse::Event::CursorMoved {
+            position: Point::new(72.0, 41.0),
+        });
+        assert!(source
+            .update(&mut state, nudge, bounds, at(72.0, 41.0))
+            .1
+            .is_none());
+        let away = mouse(mouse::Event::CursorMoved {
+            position: Point::new(200.0, 40.0),
+        });
+        assert!(matches!(
+            source.update(&mut state, away, bounds, at(200.0, 40.0)).1,
+            Some(Message::Perform(PerformMsg::Clips(ClipMsg::BeginDrag(id)))) if id == clip.id
+        ));
+        let release = mouse(mouse::Event::ButtonReleased(mouse::Button::Left));
+        assert!(matches!(
+            source
+                .update(&mut state, release, bounds, at(200.0, 40.0))
+                .1,
+            Some(Message::Perform(PerformMsg::Clips(ClipMsg::EndDrag)))
+        ));
+    }
+
+    #[test]
+    fn releasing_a_drag_over_another_cell_drops_there_and_command_copies() {
+        let (track, dragged) = (TrackId::new(), ClipId::new());
+        let bounds = Rectangle::new(Point::ORIGIN, Size::new(150.0, 72.0));
+        let inside = mouse::Cursor::Available(Point::new(70.0, 40.0));
+        let release = mouse(mouse::Event::ButtonReleased(mouse::Button::Left));
+        let command = if crate::app::ON_MACOS {
+            iced::keyboard::Modifiers::LOGO
+        } else {
+            iced::keyboard::Modifiers::CTRL
+        };
+        for (modifiers, copy) in [(iced::keyboard::Modifiers::empty(), false), (command, true)] {
+            let target = slot(None, (track, 2), Some(dragged));
+            let mut state = ClipSlotState::default();
+            target.update(
+                &mut state,
+                canvas::Event::Keyboard(iced::keyboard::Event::ModifiersChanged(modifiers)),
+                bounds,
+                inside,
+            );
+            let dropped = target.update(&mut state, release.clone(), bounds, inside).1;
+            assert!(
+                matches!(
+                    dropped,
+                    Some(Message::Perform(PerformMsg::Clips(ClipMsg::Drop {
+                        clip,
+                        track_id,
+                        row: 2,
+                        copy: copied,
+                    }))) if clip == dragged && track_id == track && copied == copy
+                ),
+                "{modifiers:?} drops with copy {copy}"
+            );
+        }
     }
 }

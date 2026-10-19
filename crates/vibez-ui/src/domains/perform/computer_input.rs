@@ -121,7 +121,7 @@ impl PerformState {
             capture: None,
             section_record: None,
             clip_record: None,
-            section_record_status: None,
+            status: None,
         }
     }
 }
