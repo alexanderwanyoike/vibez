@@ -53,7 +53,7 @@ pub struct MixerStripView<'a> {
 /// Everything on a strip but its fader, measured on the real desk.
 const SECTIONS_H: f32 = 560.0;
 /// One row of send knobs, and the SENDS legend above them.
-const SEND_ROW_H: f32 = 30.0;
+const SEND_ROW_H: f32 = 36.0;
 /// The sends section: its legend and a full bank of rows. Returns and the
 /// master leave the same room so every fader lines up.
 const SENDS_H: f32 = 16.0 + SENDS_PER_BANK as f32 * (SEND_ROW_H + 4.0);
@@ -470,8 +470,8 @@ fn view_sends<'a>(
                     .color(th::text())
                     .width(Length::Fill),
                     canvas(EffectKnobWidget::for_send(track.id, bus.id, amount, colour))
-                        .width(Length::Fixed(28.0))
-                        .height(Length::Fixed(28.0)),
+                        .width(Length::Fixed(34.0))
+                        .height(Length::Fixed(34.0)),
                 ]
                 .spacing(5)
                 .height(SEND_ROW_H)
