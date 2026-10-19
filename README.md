@@ -46,7 +46,7 @@ you can edit afterwards. Captured material keeps no reference back to its
 Sections, so editing a Section later never rewrites a take you already
 recorded.
 
-![A captured performance written into the Arrangement](docs/arrange-capture.png)
+![A captured performance written into the Arrangement, with a channel EQ below](docs/arrange-capture.png)
 
 Everything Capture writes is material you could have drawn by hand, so the rest
 of Arrange applies to it unchanged:
