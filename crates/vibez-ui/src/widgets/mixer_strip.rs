@@ -373,6 +373,7 @@ fn name_display<'a>(
                     },
                 ))
                 .padding(0)
+                .width(Length::Fill)
                 .style(|_: &Theme, _| button::Style {
                     background: None,
                     text_color: console::DISPLAY_TEXT,
