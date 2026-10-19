@@ -122,6 +122,9 @@ impl ArrangementState {
                 return self.remove_project_track(project_tracks, track_id, engine);
             }
             ArrangementMsg::SelectTrack(track_id) => self.selected_track = Some(track_id),
+            ArrangementMsg::ToggleChannelSelection(_)
+            | ArrangementMsg::SelectChannelRange(_)
+            | ArrangementMsg::SelectAllChannels => {}
             ArrangementMsg::RenameTrack(track_id, new_name) => {
                 if let Some(track) = project_tracks.find_mut(track_id) {
                     track.name = new_name;

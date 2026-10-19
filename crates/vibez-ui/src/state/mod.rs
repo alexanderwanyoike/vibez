@@ -543,6 +543,9 @@ impl std::ops::DerefMut for TimelineEditorState {
 pub struct ArrangementState {
     pub(crate) editor: TimelineEditorState,
     pub pending_project_track_deletion: Option<TrackId>,
+    /// Mixer channels selected together, in mixer order. A fader, pan,
+    /// send, mute or solo moved on one of them moves them all.
+    pub selected_channels: Vec<TrackId>,
 }
 impl std::ops::Deref for ArrangementState {
     type Target = TimelineEditorState;

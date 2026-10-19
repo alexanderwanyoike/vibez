@@ -57,6 +57,7 @@ fn add_audio_clip(
 
 mod audio_inspector;
 mod audio_markers;
+mod channel_selection;
 mod clipboard_loops;
 mod crossfades;
 mod note_clips;
