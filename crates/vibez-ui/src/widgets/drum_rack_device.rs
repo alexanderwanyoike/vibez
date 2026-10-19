@@ -99,9 +99,14 @@ pub const COMPACT_W: f32 = crate::widgets::sampler_device::COMPACT_W;
 pub const SIDE_BY_SIDE_W: f32 = GRID_MIN_W + PAD * 2.0 + 1.0 + SAMPLER_MIN_W;
 pub const MAX_W: f32 = 1_600.0;
 
-pub fn card_width(available: f32) -> f32 {
-    available.clamp(COMPACT_W, MAX_W)
-}
+/// The widths this card lays itself out for; it is at its fullest with the pads beside the Sampler.
+pub const WIDTHS: crate::widgets::device_chrome::CardWidths =
+    crate::widgets::device_chrome::CardWidths {
+        compact: COMPACT_W,
+        medium: COMPACT_W,
+        expanded: SIDE_BY_SIDE_W,
+        max: MAX_W,
+    };
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Layout {
