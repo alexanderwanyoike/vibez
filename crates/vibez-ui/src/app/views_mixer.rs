@@ -1,7 +1,7 @@
 //! Mixer workspace view: channel strips for tracks and buses.
 //! Split from views_shell.rs; inherent methods on [`super::App`].
 
-use iced::widget::{button, center, column, container, horizontal_space, mouse_area, row, text};
+use iced::widget::{button, center, column, container, mouse_area, row, text};
 use iced::{Element, Length, Theme};
 
 use crate::domains::view::ViewMsg;
@@ -13,6 +13,9 @@ use crate::theme as th;
 use crate::widgets::mixer_strip::{view_mixer_strip, MixerStripView, StripRole};
 
 use super::*;
+
+/// The desk's own padding round the strips, above and below.
+const DESK_PADDING: f32 = 32.0;
 
 impl App {
     pub(super) fn view_mixer(&self) -> Element<'_, Message> {
@@ -33,12 +36,47 @@ impl App {
                 .into();
         }
 
-        // ── Channel strips, buses, pinned master ──
+        // Strips fill the room they get, but never shrink below a usable
+        // fader; on a short window the desk scrolls up and down instead.
+        let desk = iced::widget::responsive(move |size| {
+            let minimum = crate::widgets::mixer_strip::min_strip_height(
+                self.state.project_tracks.buses.len(),
+            );
+            iced::widget::Scrollable::with_direction(
+                self.view_desk((size.height - DESK_PADDING).max(minimum)),
+                iced::widget::scrollable::Direction::Vertical(
+                    iced::widget::scrollable::Scrollbar::new(),
+                ),
+            )
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
+        });
+
+        mouse_area(
+            container(desk)
+                .width(Length::Fill)
+                .height(Length::FillPortion(5))
+                .style(|_theme: &Theme| container::Style {
+                    background: Some(th::bg_dark().into()),
+                    ..Default::default()
+                }),
+        )
+        .on_right_press(Message::View(ViewMsg::ShowContextMenu {
+            x: self.state.view.cursor_x,
+            y: self.state.view.cursor_y,
+            target: ContextMenuTarget::ArrangementEmpty,
+        }))
+        .into()
+    }
+
+    /// The strips, returns and master at `height`.
+    fn view_desk(&self, height: f32) -> Element<'_, Message> {
         let playhead_beat = self.state.position_beats();
         let buses = &self.state.project_tracks.buses;
-        let mut strips = row![].spacing(4).padding(8).height(Length::Fill);
+        let mut strips = row![].spacing(4).padding(8);
 
-        for track in &self.state.project_tracks.tracks {
+        for (index, track) in self.state.project_tracks.tracks.iter().enumerate() {
             let selected = self.channel_selected(track.id);
             let strip = view_mixer_strip(
                 track,
@@ -52,7 +90,9 @@ impl App {
                         .unwrap_or_default(),
                     selected,
                     click: self.channel_click(track.id),
+                    number: format!("{:02}", index + 1),
                     editing_name: self.state.view.editing_track_name == Some(track.id),
+                    height,
                     edit_text: &self.state.view.edit_name_text,
                     playhead_beat,
                     automation: self
@@ -67,8 +107,8 @@ impl App {
 
         // Returns live on the right, next to the master: new buses
         // appear where the "+ Bus" pillar sits, growing toward it.
-        let mut right_group = row![].spacing(4).padding(8).height(Length::Fill);
-        for bus in buses {
+        let mut right_group = row![].spacing(4).padding(8);
+        for (index, bus) in buses.iter().enumerate() {
             let selected = self.channel_selected(bus.id);
             right_group = right_group.push(view_mixer_strip(
                 bus,
@@ -82,7 +122,9 @@ impl App {
                         .unwrap_or_default(),
                     selected,
                     click: self.channel_click(bus.id),
+                    number: format!("R{}", index + 1),
                     editing_name: self.state.view.editing_track_name == Some(bus.id),
+                    height,
                     edit_text: &self.state.view.edit_name_text,
                     playhead_beat,
                     automation: self
@@ -123,7 +165,7 @@ impl App {
         });
         right_group = right_group.push(
             container(add_bus_btn)
-                .height(Length::Fill)
+                .height(Length::Fixed(height))
                 .align_y(iced::Alignment::Center),
         );
 
@@ -142,7 +184,9 @@ impl App {
                     .unwrap_or_default(),
                 selected: master_selected,
                 click: self.channel_click(vibez_core::id::TrackId::MASTER),
+                number: "M".into(),
                 editing_name: false,
+                height,
                 edit_text: &self.state.view.edit_name_text,
                 playhead_beat,
                 automation: self
@@ -152,33 +196,22 @@ impl App {
                     .unwrap_or(&[]),
             },
         ))
-        .padding(8)
-        .height(Length::Fill);
+        .padding(8);
 
-        let mixer_row = row![strips, horizontal_space(), right_group, master_strip]
-            .spacing(4)
-            .padding([8, 4])
-            .height(Length::Fill);
-
-        let mixer_content = container(mixer_row)
-            .width(Length::Fill)
-            .height(Length::Fill);
-
-        mouse_area(
-            container(mixer_content)
-                .width(Length::Fill)
-                .height(Length::FillPortion(5))
-                .style(|_theme: &Theme| container::Style {
-                    background: Some(th::bg_dark().into()),
-                    ..Default::default()
-                }),
+        // Tracks scroll sideways once they outgrow the window; the returns
+        // and the master stay pinned on the right like a desk's.
+        let channels = iced::widget::Scrollable::with_direction(
+            strips,
+            iced::widget::scrollable::Direction::Horizontal(
+                iced::widget::scrollable::Scrollbar::new(),
+            ),
         )
-        .on_right_press(Message::View(ViewMsg::ShowContextMenu {
-            x: self.state.view.cursor_x,
-            y: self.state.view.cursor_y,
-            target: ContextMenuTarget::ArrangementEmpty,
-        }))
-        .into()
+        .width(Length::Fill);
+        let mixer_row = row![channels, right_group, master_strip]
+            .spacing(4)
+            .padding([8, 4]);
+
+        mixer_row.into()
     }
 }
 
