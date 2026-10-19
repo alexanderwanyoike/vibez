@@ -103,7 +103,7 @@ selected one.
 
 ## Status
 
-v0.5.0 is in testing on `dev`; the latest release is v0.4.1. Still early.
+v0.5.1, and still early.
 Linux is the primary development platform; macOS and
 Windows build and pass CI on every change but get less hands-on testing.
 Projects save to a self-contained versioned `.vzp` container, but breaking
