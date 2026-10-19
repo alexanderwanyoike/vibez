@@ -46,24 +46,24 @@ pub struct MixerStripView<'a> {
     pub automation: &'a [vibez_core::automation::AutomationLane],
     /// The strip's height; the fader takes what the other sections leave.
     pub height: f32,
+    /// Which bank of buses the send rows show.
+    pub send_bank: usize,
 }
 
 /// Everything on a strip but its fader, measured on the real desk.
 const SECTIONS_H: f32 = 560.0;
 /// One row of send knobs, and the SENDS legend above them.
 const SEND_ROW_H: f32 = 30.0;
-const SENDS_LEGEND_H: f32 = 14.0;
+/// The sends section: its legend and a full bank of rows. Returns and the
+/// master leave the same room so every fader lines up.
+const SENDS_H: f32 = 16.0 + SENDS_PER_BANK as f32 * (SEND_ROW_H + 4.0);
 /// The shortest fader worth having; below it the desk scrolls instead.
 const MIN_FADER_H: f32 = 220.0;
 
 /// The shortest a strip can be while keeping a usable fader, with `buses`
 /// send knobs on each track strip.
 pub fn min_strip_height(buses: usize) -> f32 {
-    let sends = if buses == 0 {
-        0.0
-    } else {
-        SENDS_LEGEND_H + buses.div_ceil(3) as f32 * SEND_ROW_H
-    };
+    let sends = if buses == 0 { 0.0 } else { SENDS_H + 6.0 };
     SECTIONS_H + sends + MIN_FADER_H
 }
 
@@ -125,13 +125,23 @@ pub fn view_mixer_strip<'a>(
             strip = strip.push(view_sends(
                 track,
                 buses,
+                view.send_bank,
                 view.playhead_beat,
                 view.automation,
             ));
             strip = strip.push(rule());
         }
-        StripRole::Track => {}
-        StripRole::Bus | StripRole::Master => {}
+        StripRole::Bus | StripRole::Master if !buses.is_empty() => {
+            let label = if role == StripRole::Bus {
+                "RETURN"
+            } else {
+                "OUTPUT"
+            };
+            strip = strip
+                .push(container(legend(label)).height(SENDS_H))
+                .push(rule());
+        }
+        StripRole::Track | StripRole::Bus | StripRole::Master => {}
     }
     if is_master {
         // The sum has no pan or channel buttons; their room keeps its fader
@@ -407,53 +417,79 @@ pub const SENDS_PER_BANK: usize = 4;
 
 /// How many banks `buses` buses fill; an empty desk still has one.
 pub fn send_banks(buses: usize) -> usize {
-    1
+    buses.div_ceil(SENDS_PER_BANK).max(1)
 }
 
 /// The buses on `bank`'s rows, top to bottom, with `None` for rows past the
 /// last bus. A bank past the last shows the last.
 pub fn bank_buses(buses: &[ProjectTrack], bank: usize) -> [Option<&ProjectTrack>; SENDS_PER_BANK] {
-    [None; SENDS_PER_BANK]
+    let bank = bank.min(send_banks(buses.len()) - 1);
+    std::array::from_fn(|row| buses.get(bank * SENDS_PER_BANK + row))
 }
 
-/// Send section on a track strip: one knob per bus, bus-colored,
-/// wrapped three to a row under a SENDS header.
+/// Send section on a track strip: a row per bus on the bank, with the bus's
+/// colour, its name and its send knob.
 fn view_sends<'a>(
     track: &'a ProjectTrack,
     buses: &'a [ProjectTrack],
+    bank: usize,
     playhead_beat: f64,
     automation: &'a [vibez_core::automation::AutomationLane],
 ) -> Element<'a, Message> {
-    let mut section = column![text("SENDS").size(7).color(th::text_muted())]
-        .spacing(2)
-        .align_x(iced::Alignment::Center);
-    for chunk in buses.chunks(3) {
-        let mut knobs = row![].spacing(4).align_y(iced::Alignment::Center);
-        for bus in chunk {
-            let amount = effective_send_amount(track, automation, bus.id, playhead_beat);
-            let letter = bus.name.chars().next().unwrap_or('?');
-            let knob = EffectKnobWidget::for_send(
-                track.id,
-                bus.id,
-                amount,
-                th::track_color(bus.color_index),
-            );
-            let knob_canvas: Element<'a, Message> = canvas(knob)
-                .width(Length::Fixed(20.0))
-                .height(Length::Fixed(20.0))
-                .into();
-            knobs = knobs.push(
-                column![
-                    knob_canvas,
-                    text(letter.to_string()).size(7).color(th::text_dim())
+    let bank = bank.min(send_banks(buses.len()) - 1);
+    let legend = if buses.len() > SENDS_PER_BANK {
+        let first = bank * SENDS_PER_BANK + 1;
+        format!("SENDS {first}–{}", first + SENDS_PER_BANK - 1)
+    } else {
+        "SENDS".to_string()
+    };
+    let dot = |colour: Color| {
+        container(Space::new(6, 6)).style(move |_: &Theme| container::Style {
+            background: Some(colour.into()),
+            border: iced::Border {
+                radius: 3.0.into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+    };
+    let mut rows = column![text(legend).font(PERFORM_LABEL).size(9).color(th::text())].spacing(4);
+    for bus in bank_buses(buses, bank) {
+        let send: Element<'a, Message> = match bus {
+            Some(bus) => {
+                let colour = th::track_color(bus.color_index);
+                let amount = effective_send_amount(track, automation, bus.id, playhead_beat);
+                row![
+                    dot(colour),
+                    text(crate::widgets::clip_slot::fit(
+                        &bus.name,
+                        STRIP_W - 60.0,
+                        10.0
+                    ))
+                    .size(10)
+                    .color(th::text())
+                    .width(Length::Fill),
+                    canvas(EffectKnobWidget::for_send(track.id, bus.id, amount, colour))
+                        .width(Length::Fixed(28.0))
+                        .height(Length::Fixed(28.0)),
                 ]
-                .spacing(0)
-                .align_x(iced::Alignment::Center),
-            );
-        }
-        section = section.push(knobs);
+                .spacing(5)
+                .height(SEND_ROW_H)
+                .align_y(iced::Alignment::Center)
+                .into()
+            }
+            None => row![
+                dot(th::border()),
+                text("—").size(10).color(th::text_muted())
+            ]
+            .spacing(5)
+            .height(SEND_ROW_H)
+            .align_y(iced::Alignment::Center)
+            .into(),
+        };
+        rows = rows.push(send);
     }
-    container(section).padding([2, 0]).into()
+    container(rows).height(SENDS_H).into()
 }
 
 fn effective_send_amount(

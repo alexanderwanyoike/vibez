@@ -16,6 +16,8 @@ use super::*;
 
 /// The desk's own padding round the strips, above and below.
 const DESK_PADDING: f32 = 32.0;
+/// The send bank switch above the strips, when there is more than one bank.
+const BANK_BAR_H: f32 = 30.0;
 
 impl App {
     pub(super) fn view_mixer(&self) -> Element<'_, Message> {
@@ -42,8 +44,11 @@ impl App {
             let minimum = crate::widgets::mixer_strip::min_strip_height(
                 self.state.project_tracks.buses.len(),
             );
+            let bank_bar = self.view_send_bank_bar();
+            let bar_h = if bank_bar.is_some() { BANK_BAR_H } else { 0.0 };
+            let desk = self.view_desk((size.height - DESK_PADDING - bar_h).max(minimum));
             iced::widget::Scrollable::with_direction(
-                self.view_desk((size.height - DESK_PADDING).max(minimum)),
+                column![].push_maybe(bank_bar).push(desk),
                 iced::widget::scrollable::Direction::Vertical(
                     iced::widget::scrollable::Scrollbar::new(),
                 ),
@@ -70,6 +75,60 @@ impl App {
         .into()
     }
 
+    /// The switch between banks of buses on the send rows; none while every
+    /// bus fits one bank.
+    fn view_send_bank_bar(&self) -> Option<Element<'_, Message>> {
+        use crate::widgets::mixer_strip::{send_banks, SENDS_PER_BANK};
+        let banks = send_banks(self.state.project_tracks.buses.len());
+        if banks < 2 {
+            return None;
+        }
+        let current = self.state.view.mixer_send_bank.min(banks - 1);
+        let mut bar = row![text("SENDS").size(10).color(th::text_dim())]
+            .spacing(6)
+            .align_y(iced::Alignment::Center);
+        for bank in 0..banks {
+            let first = bank * SENDS_PER_BANK + 1;
+            let active = bank == current;
+            bar = bar.push(
+                button(
+                    text(format!("{first}–{}", first + SENDS_PER_BANK - 1))
+                        .size(10)
+                        .color(if active { th::accent() } else { th::text_dim() }),
+                )
+                .on_press(Message::View(ViewMsg::SetMixerSendBank(bank)))
+                .padding([3, 10])
+                .style(move |_: &Theme, status| button::Style {
+                    background: Some(
+                        if active || matches!(status, button::Status::Hovered) {
+                            th::bg_hover()
+                        } else {
+                            th::bg_surface()
+                        }
+                        .into(),
+                    ),
+                    border: iced::Border {
+                        color: if active {
+                            th::accent_dim()
+                        } else {
+                            th::border()
+                        },
+                        width: 1.0,
+                        radius: 2.0.into(),
+                    },
+                    ..Default::default()
+                }),
+            );
+        }
+        Some(
+            container(bar)
+                .height(BANK_BAR_H)
+                .padding([4, 12])
+                .center_y(BANK_BAR_H)
+                .into(),
+        )
+    }
+
     /// The strips, returns and master at `height`.
     fn view_desk(&self, height: f32) -> Element<'_, Message> {
         let playhead_beat = self.state.position_beats();
@@ -93,6 +152,7 @@ impl App {
                     number: format!("{:02}", index + 1),
                     editing_name: self.state.view.editing_track_name == Some(track.id),
                     height,
+                    send_bank: self.state.view.mixer_send_bank,
                     edit_text: &self.state.view.edit_name_text,
                     playhead_beat,
                     automation: self
@@ -125,6 +185,7 @@ impl App {
                     number: format!("R{}", index + 1),
                     editing_name: self.state.view.editing_track_name == Some(bus.id),
                     height,
+                    send_bank: self.state.view.mixer_send_bank,
                     edit_text: &self.state.view.edit_name_text,
                     playhead_beat,
                     automation: self
@@ -187,6 +248,7 @@ impl App {
                 number: "M".into(),
                 editing_name: false,
                 height,
+                send_bank: self.state.view.mixer_send_bank,
                 edit_text: &self.state.view.edit_name_text,
                 playhead_beat,
                 automation: self
