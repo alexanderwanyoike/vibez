@@ -87,6 +87,9 @@ pub struct ClipEditor {
     queued_requests: HashMap<TrackId, u64>,
     pub next_request: u64,
     pub running: bool,
+    /// The clip each track was playing when the transport last stopped,
+    /// launched again when it starts.
+    pub resume: HashMap<TrackId, ClipId>,
     pub started_at: HashMap<TrackId, u64>,
     pub selected: Option<ClipId>,
     pub editor: TimelineEditorState,

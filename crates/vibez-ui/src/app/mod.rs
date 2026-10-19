@@ -772,6 +772,8 @@ impl App {
 }
 
 mod clip_launcher;
+#[cfg(test)]
+mod clip_launcher_resume_tests;
 mod clip_record;
 mod views_clip_launcher;
 
