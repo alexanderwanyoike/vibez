@@ -260,6 +260,32 @@ mod tests {
     }
 
     #[test]
+    fn faders_follow_a_console_db_law_not_a_linear_one() {
+        // Both faders have 100 px of travel. Thirty of them down from
+        // 0 dB lands near -15 dB on a desk; a linear law gives -8 dB.
+        let vertical = FaderWidget::new(TrackId::MASTER, 1.0, Color::WHITE);
+        let bounds = Rectangle::new(Point::new(100.0, 100.0), Size::new(24.0, 108.0));
+        let mut state = FaderState::default();
+        let (event, cursor) = press(Point::new(112.0, 150.0));
+        vertical.update(&mut state, event, bounds, cursor);
+        let (event, cursor) = drag(Point::new(112.0, 180.0));
+        let lowered = gain_of(vertical.update(&mut state, event, bounds, cursor).1).unwrap();
+
+        let horizontal = HorizontalFaderWidget::new(TrackId::MASTER, 1.0, Color::WHITE);
+        let bounds = Rectangle::new(Point::new(100.0, 100.0), Size::new(108.0, 16.0));
+        let mut state = HorizontalFaderState::default();
+        let (event, cursor) = press(Point::new(150.0, 108.0));
+        horizontal.update(&mut state, event, bounds, cursor);
+        let (event, cursor) = drag(Point::new(120.0, 108.0));
+        let left = gain_of(horizontal.update(&mut state, event, bounds, cursor).1).unwrap();
+
+        for gain in [lowered, left] {
+            let db = vibez_core::level::amplitude_to_db(gain);
+            assert!((-18.0..-12.0).contains(&db), "30% below unity gave {db} dB");
+        }
+    }
+
+    #[test]
     fn separate_fader_drags_get_distinct_undo_gestures() {
         let widget = FaderWidget::new(TrackId::MASTER, 1.0, Color::WHITE);
         let bounds = Rectangle::new(Point::new(100.0, 100.0), Size::new(24.0, 108.0));
