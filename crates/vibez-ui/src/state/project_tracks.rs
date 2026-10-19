@@ -35,6 +35,14 @@ impl ProjectTracksState {
             .find(|t| t.id == id)
     }
 
+    /// Every channel but the master, in mixer order: tracks, then buses.
+    pub fn channel_ids(&self) -> impl Iterator<Item = TrackId> + '_ {
+        self.tracks
+            .iter()
+            .chain(self.buses.iter())
+            .map(|track| track.id)
+    }
+
     pub fn find_mut(&mut self, id: TrackId) -> Option<&mut ProjectTrack> {
         if id.is_master() {
             return Some(&mut self.master);
