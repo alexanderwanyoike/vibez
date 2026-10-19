@@ -1,5 +1,9 @@
-use iced::widget::{button, canvas, column, container, row, text};
-use iced::{Element, Length, Theme};
+//! A mix desk channel strip laid out like an SSL console: channel number,
+//! four-band EQ, sends, pan, SEL/SOLO/MUTE, a long fader with an LED meter
+//! and a dark name display, in the theme's colours.
+
+use iced::widget::{button, canvas, column, container, horizontal_space, row, text, Space};
+use iced::{Color, Element, Length, Theme};
 
 use crate::icons;
 use crate::message::Message;
@@ -7,12 +11,11 @@ use vibez_core::effect::EffectType;
 
 use crate::state::{ProjectTrack, UiEffect};
 use crate::theme as th;
+use crate::typography::{PERFORM_LABEL, PERFORM_TECH};
+use crate::widgets::console;
 use crate::widgets::effect_knob::EffectKnobWidget;
 use crate::widgets::fader::FaderWidget;
 use crate::widgets::knob::KnobWidget;
-use crate::widgets::track_header::view_editable_channel_name;
-use crate::widgets::vu_meter::VuMeterWidget;
-use vibez_core::midi::TrackKind;
 
 /// What kind of channel a mixer strip renders. Tracks get the full
 /// set plus send knobs; buses trade sends/solo for a RETURN badge;
@@ -24,7 +27,9 @@ pub enum StripRole {
     Master,
 }
 
-const STRIP_W: f32 = 110.0;
+pub const STRIP_W: f32 = 116.0;
+const PAN_H: f32 = 56.0;
+const BUTTONS_H: f32 = 22.0;
 
 /// Per-render inputs that are not part of the project-owned channel itself.
 pub struct MixerStripView<'a> {
@@ -32,6 +37,9 @@ pub struct MixerStripView<'a> {
     pub selected: bool,
     /// Sent when the strip's chrome is clicked.
     pub click: Message,
+    /// The strip's number on the desk: 01 for the first track, R1 for the
+    /// first return.
+    pub number: String,
     pub editing_name: bool,
     pub edit_text: &'a str,
     pub playhead_beat: f64,
@@ -41,7 +49,7 @@ pub struct MixerStripView<'a> {
 }
 
 /// Everything on a strip but its fader, measured on the real desk.
-const SECTIONS_H: f32 = 500.0;
+const SECTIONS_H: f32 = 560.0;
 /// One row of send knobs, and the SENDS legend above them.
 const SEND_ROW_H: f32 = 30.0;
 const SENDS_LEGEND_H: f32 = 14.0;
@@ -74,265 +82,323 @@ pub fn view_mixer_strip<'a>(
         th::track_color(track.color_index)
     };
 
-    // Track name + type icon
-    let type_icon = match role {
-        StripRole::Master => icons::icon(icons::VOLUME_2).size(10).color(track_color),
-        StripRole::Bus => icons::icon(icons::VOLUME_2).size(10).color(track_color),
-        StripRole::Track => match track.kind {
-            TrackKind::Audio => icons::icon(icons::AUDIO_WAVEFORM)
+    let remove: Element<'a, Message> = match role {
+        StripRole::Track => icon_button(icons::TRASH_2, Message::remove_track(track.id)),
+        StripRole::Bus => icon_button(icons::X, Message::remove_bus(track.id)),
+        StripRole::Master => Space::with_width(0).into(),
+    };
+    let header = row![
+        container(
+            text(view.number.clone())
+                .font(PERFORM_TECH)
                 .size(10)
-                .color(track_color),
-            TrackKind::Instrument(_) | TrackKind::Midi => {
-                icons::icon(icons::MUSIC).size(10).color(track_color)
-            }
-        },
-    };
-
-    let name: Element<'a, Message> = if is_master {
-        text(&track.name)
-            .size(12)
-            .color(th::text())
-            .width(Length::Fill)
-            .into()
-    } else {
-        view_editable_channel_name(track, view.editing_name, view.edit_text, 12, th::text())
-    };
-
-    // Tracks are deletable straight from the strip; the master is
-    // not, and buses carry their remove control on the RETURN badge.
-    let delete_el: Element<'a, Message> = if role == StripRole::Track {
-        button(icons::icon(icons::TRASH_2).size(9).color(th::text_dim()))
-            .on_press(Message::remove_track(track.id))
-            .padding([1, 3])
-            .style(|_theme: &Theme, status| {
-                let tc = match status {
-                    button::Status::Hovered | button::Status::Pressed => th::danger(),
-                    _ => th::text_dim(),
-                };
-                button::Style {
-                    background: None,
-                    text_color: tc,
-                    border: iced::Border::default(),
-                    ..Default::default()
-                }
-            })
-            .into()
-    } else {
-        text("").size(9).into()
-    };
-
-    let name_row = row![type_icon, name, delete_el]
-        .spacing(4)
-        .align_y(iced::Alignment::Center);
-
-    // Pan knob (bigger)
-    let knob = KnobWidget::new(track.id, track.pan, track_color);
-    let knob_canvas: Element<'_, Message> = canvas(knob)
-        .width(Length::Fixed(40.0))
-        .height(Length::Fixed(40.0))
-        .into();
-
-    let pan_label = text(format_pan(track.pan)).size(10).color(th::text_dim());
-
-    // Fader (wider)
-    let fader = FaderWidget::new(track.id, track.gain, track_color);
-    let fader_canvas: Element<'_, Message> = canvas(fader)
-        .width(Length::Fixed(32.0))
-        .height(Length::Fill)
-        .into();
-
-    let gain_label = text(format_gain_db(track.gain))
-        .size(11)
-        .color(th::text_dim());
-
-    // VU meter (wider)
-    let meter = VuMeterWidget {
-        peak_l: view.peaks.0,
-        peak_r: view.peaks.1,
-    };
-    let meter_canvas: Element<'_, Message> = canvas(meter)
-        .width(Length::Fixed(24.0))
-        .height(Length::Fill)
-        .into();
-
-    // Mute button with filled background when active
-    let mute_btn = {
-        let label = text("M").size(11);
-        if track.mute {
-            button(label.color(th::bg_dark()))
-                .on_press(Message::set_track_mute(track.id))
-                .padding([4, 8])
-                .style(move |_theme: &Theme, _status| button::Style {
-                    background: Some(th::mute_active().into()),
-                    text_color: th::bg_dark(),
-                    border: iced::Border {
-                        radius: 2.0.into(),
-                        ..Default::default()
-                    },
-                    ..Default::default()
-                })
-        } else {
-            button(label.color(th::text_dim()))
-                .on_press(Message::set_track_mute(track.id))
-                .padding([4, 8])
-                .style(move |_theme: &Theme, _status| button::Style {
-                    background: Some(th::bg_elevated().into()),
-                    text_color: th::text_dim(),
-                    border: iced::Border {
-                        color: th::border(),
-                        width: 1.0,
-                        radius: 2.0.into(),
-                    },
-                    ..Default::default()
-                })
-        }
-    };
-
-    // Solo button with filled background when active
-    let solo_btn = {
-        let label = text("S").size(11);
-        if track.solo {
-            button(label.color(th::bg_dark()))
-                .on_press(Message::set_track_solo(track.id))
-                .padding([4, 8])
-                .style(move |_theme: &Theme, _status| button::Style {
-                    background: Some(th::solo_active().into()),
-                    text_color: th::bg_dark(),
-                    border: iced::Border {
-                        radius: 2.0.into(),
-                        ..Default::default()
-                    },
-                    ..Default::default()
-                })
-        } else {
-            button(label.color(th::text_dim()))
-                .on_press(Message::set_track_solo(track.id))
-                .padding([4, 8])
-                .style(move |_theme: &Theme, _status| button::Style {
-                    background: Some(th::bg_elevated().into()),
-                    text_color: th::text_dim(),
-                    border: iced::Border {
-                        color: th::border(),
-                        width: 1.0,
-                        radius: 2.0.into(),
-                    },
-                    ..Default::default()
-                })
-        }
-    };
-
-    // Fader + meter side by side
-    let fader_meter = row![fader_canvas, meter_canvas]
-        .spacing(2)
-        .height(Length::Fill);
-
-    let eq_section = view_strip_eq(track);
-
-    let strip = if is_master {
-        // No pan, mute, or solo on the sum: a MASTER tag keeps the
-        // strip's vertical rhythm instead.
-        let badge = container(text("MASTER").size(8).color(th::accent()))
-            .padding([3, 8])
-            .style(|_theme: &Theme| container::Style {
-                background: Some(th::bg_elevated().into()),
-                border: iced::Border {
-                    color: th::accent_dim(),
-                    width: 1.0,
-                    radius: 2.0.into(),
-                },
+                .color(Color::from_rgb(1.0, 0.604, 0.239)),
+        )
+        .padding([1, 5])
+        .style(|_: &Theme| container::Style {
+            background: Some(Color::from_rgb(0.102, 0.059, 0.031).into()),
+            border: iced::Border {
+                color: Color::BLACK,
+                width: 1.0,
+                radius: 2.0.into(),
+            },
+            ..Default::default()
+        }),
+        horizontal_space(),
+        container(Space::new(20, 5)).style(move |_: &Theme| container::Style {
+            background: Some(track_color.into()),
+            border: iced::Border {
+                radius: 1.0.into(),
                 ..Default::default()
-            });
-        column![name_row, eq_section, badge, fader_meter, gain_label]
-    } else if role == StripRole::Bus {
-        // Return channel: RETURN badge + remove control in place of
-        // sends; balance pan, mute, and solo still apply.
-        let badge = container(text("RETURN").size(8).color(track_color))
-            .padding([3, 6])
-            .style(move |_theme: &Theme| container::Style {
-                background: Some(th::bg_elevated().into()),
-                border: iced::Border {
-                    color: th::darken(track_color, 0.5),
-                    width: 1.0,
-                    radius: 2.0.into(),
-                },
-                ..Default::default()
-            });
-        let remove_btn = button(icons::icon(icons::X).size(9).color(th::text_dim()))
-            .on_press(Message::remove_bus(track.id))
-            .padding([2, 5])
-            .style(|_theme: &Theme, status| {
-                let (bg, tc) = match status {
-                    button::Status::Hovered | button::Status::Pressed => {
-                        (Some(th::bg_hover().into()), th::danger())
-                    }
-                    _ => (None, th::text_dim()),
-                };
-                button::Style {
-                    background: bg,
-                    text_color: tc,
-                    border: iced::Border {
-                        radius: 2.0.into(),
-                        ..Default::default()
-                    },
-                    ..Default::default()
-                }
-            });
-        let badge_row = row![badge, remove_btn]
-            .spacing(4)
-            .align_y(iced::Alignment::Center);
-        column![
-            name_row,
-            eq_section,
-            badge_row,
-            knob_canvas,
-            pan_label,
-            fader_meter,
-            gain_label,
-            row![mute_btn, solo_btn].spacing(4),
-        ]
-    } else {
-        let mut col = column![name_row, eq_section];
-        if !buses.is_empty() {
-            col = col.push(view_sends(
+            },
+            ..Default::default()
+        }),
+        remove,
+    ]
+    .spacing(5)
+    .height(26)
+    .align_y(iced::Alignment::Center);
+
+    let mut strip = column![header, rule(), view_strip_eq(track), rule()];
+    match role {
+        StripRole::Track if !buses.is_empty() => {
+            strip = strip.push(view_sends(
                 track,
                 buses,
                 view.playhead_beat,
                 view.automation,
             ));
+            strip = strip.push(rule());
         }
-        col.push(knob_canvas)
-            .push(pan_label)
-            .push(fader_meter)
-            .push(gain_label)
-            .push(row![mute_btn, solo_btn].spacing(4))
+        StripRole::Track => {}
+        StripRole::Bus | StripRole::Master => {}
     }
-    .spacing(4)
-    .padding(8)
-    .width(Length::Fixed(STRIP_W))
-    .height(Length::Fill)
-    .align_x(iced::Alignment::Center);
+    if is_master {
+        // The sum has no pan or channel buttons; their room keeps its fader
+        // level with the channels'.
+        strip = strip
+            .push(Space::with_height(PAN_H))
+            .push(rule())
+            .push(Space::with_height(BUTTONS_H))
+            .push(rule());
+    } else {
+        let pan = KnobWidget::new(track.id, track.pan, track_color);
+        strip = strip
+            .push(
+                column![
+                    canvas(pan)
+                        .width(Length::Fixed(40.0))
+                        .height(Length::Fixed(40.0)),
+                    text(format!("PAN {}", format_pan(track.pan)))
+                        .font(PERFORM_TECH)
+                        .size(9)
+                        .color(th::text_dim()),
+                ]
+                .spacing(1)
+                .width(Length::Fill)
+                .height(PAN_H)
+                .align_x(iced::Alignment::Center),
+            )
+            .push(rule());
+        let mut buttons = row![].spacing(4);
+        if role == StripRole::Track {
+            buttons = buttons.push(led_button(
+                "SEL",
+                view.selected.then_some(th::accent()),
+                Message::Arrangement(
+                    crate::domains::arrangement::ArrangementMsg::ToggleChannelSelection(track.id),
+                ),
+            ));
+        }
+        buttons = buttons
+            .push(led_button(
+                "S",
+                track.solo.then_some(console::LED_YELLOW),
+                Message::set_track_solo(track.id),
+            ))
+            .push(led_button(
+                "M",
+                track.mute.then_some(console::LED_RED),
+                Message::set_track_mute(track.id),
+            ));
+        strip = strip
+            .push(
+                container(buttons)
+                    .width(Length::Fill)
+                    .height(BUTTONS_H)
+                    .center_x(Length::Fill)
+                    .center_y(BUTTONS_H),
+            )
+            .push(rule());
+    }
 
-    let body = container(strip)
-        .height(Length::Fixed(view.height))
-        .style(move |_theme: &Theme| container::Style {
-            background: Some(th::bg_surface().into()),
-            border: iced::Border {
-                color: if view.selected {
-                    th::accent()
-                } else {
-                    th::border()
-                },
-                width: 1.0,
-                radius: 2.0.into(),
-            },
-            ..Default::default()
-        });
+    let fader = FaderWidget::new(track.id, track.gain, track_color);
+    let meter = console::LedMeter {
+        peak_l: view.peaks.0,
+        peak_r: view.peaks.1,
+    };
+    strip = strip
+        .push(
+            container(
+                row![
+                    canvas(fader)
+                        .width(Length::Fixed(50.0))
+                        .height(Length::Fill),
+                    canvas(meter)
+                        .width(Length::Fixed(14.0))
+                        .height(Length::Fill),
+                ]
+                .spacing(4)
+                .height(Length::Fill),
+            )
+            .center_x(Length::Fill)
+            .height(Length::Fill),
+        )
+        .push(
+            container(
+                text(format_gain_db(track.gain))
+                    .font(PERFORM_TECH)
+                    .size(10)
+                    .color(th::text()),
+            )
+            .center_x(Length::Fill),
+        )
+        .push(name_display(track, is_master, track_color, &view));
+
+    let selected = view.selected;
+    let body = container(
+        strip
+            .spacing(5)
+            .padding([4, 6])
+            .width(Length::Fixed(STRIP_W))
+            .height(Length::Fill),
+    )
+    .height(Length::Fixed(view.height))
+    .style(move |_: &Theme| container::Style {
+        background: Some(th::bg_surface().into()),
+        border: iced::Border {
+            color: if selected { th::accent() } else { th::border() },
+            width: if selected { 2.0 } else { 1.0 },
+            radius: 2.0.into(),
+        },
+        ..Default::default()
+    });
 
     // Clicking anywhere on the strip chrome selects the track, so
     // the detail panel follows the mixer like it follows the
     // arrangement headers. Knobs, faders, and buttons still win
     // their own clicks.
     iced::widget::mouse_area(body).on_press(view.click).into()
+}
+
+/// The silkscreen rule between a strip's sections.
+fn rule<'a>() -> Element<'a, Message> {
+    container(Space::new(Length::Fill, 1))
+        .style(|_: &Theme| container::Style {
+            background: Some(th::border().into()),
+            ..Default::default()
+        })
+        .into()
+}
+
+/// A section legend in the strip's silkscreen style.
+fn legend<'a>(label: &'a str) -> Element<'a, Message> {
+    text(label)
+        .font(PERFORM_LABEL)
+        .size(9)
+        .color(th::text())
+        .into()
+}
+
+/// A square console button with an LED that lights in `lit`.
+fn led_button<'a>(label: &'a str, lit: Option<Color>, on_press: Message) -> Element<'a, Message> {
+    let led = container(Space::new(6, 6)).style(move |_: &Theme| container::Style {
+        background: Some(lit.unwrap_or_else(th::bg_dark).into()),
+        border: iced::Border {
+            color: Color::from_rgba(0.0, 0.0, 0.0, 0.6),
+            width: 0.5,
+            radius: 3.0.into(),
+        },
+        ..Default::default()
+    });
+    button(
+        row![
+            led,
+            text(label)
+                .font(PERFORM_LABEL)
+                .size(8)
+                .color(th::text())
+                .wrapping(iced::widget::text::Wrapping::None)
+        ]
+        .spacing(3)
+        .align_y(iced::Alignment::Center),
+    )
+    .on_press(on_press)
+    .padding([3, 4])
+    .style(|_: &Theme, status| button::Style {
+        background: Some(
+            if matches!(status, button::Status::Hovered | button::Status::Pressed) {
+                th::bg_hover()
+            } else {
+                th::bg_elevated()
+            }
+            .into(),
+        ),
+        text_color: th::text(),
+        border: iced::Border {
+            color: th::border(),
+            width: 1.0,
+            radius: 2.0.into(),
+        },
+        ..Default::default()
+    })
+    .into()
+}
+
+fn icon_button<'a>(icon: char, on_press: Message) -> Element<'a, Message> {
+    button(icons::icon(icon).size(9))
+        .on_press(on_press)
+        .padding([1, 3])
+        .style(|_: &Theme, status| button::Style {
+            background: None,
+            text_color: if matches!(status, button::Status::Hovered | button::Status::Pressed) {
+                th::danger()
+            } else {
+                th::text_dim()
+            },
+            border: iced::Border::default(),
+            ..Default::default()
+        })
+        .into()
+}
+
+/// The channel's name on a dark display at the foot of the strip, editable
+/// with a click like the other channel names.
+fn name_display<'a>(
+    track: &'a ProjectTrack,
+    is_master: bool,
+    colour: Color,
+    view: &MixerStripView<'a>,
+) -> Element<'a, Message> {
+    let name: Element<'a, Message> = if view.editing_name {
+        iced::widget::text_input("Name", view.edit_text)
+            .on_input(|value| Message::View(crate::domains::view::ViewMsg::EditNameText(value)))
+            .on_submit(Message::View(crate::domains::view::ViewMsg::FinishEditing))
+            .size(11)
+            .width(Length::Fill)
+            .into()
+    } else {
+        let label = text(crate::widgets::clip_slot::fit(
+            &track.name,
+            STRIP_W - 34.0,
+            11.0,
+        ))
+        .font(PERFORM_LABEL)
+        .size(11)
+        .color(console::DISPLAY_TEXT);
+        if is_master {
+            label.into()
+        } else {
+            button(label)
+                .on_press(Message::View(
+                    crate::domains::view::ViewMsg::StartEditingTrackName {
+                        track_id: track.id,
+                        name: track.name.clone(),
+                    },
+                ))
+                .padding(0)
+                .style(|_: &Theme, _| button::Style {
+                    background: None,
+                    text_color: console::DISPLAY_TEXT,
+                    border: iced::Border::default(),
+                    ..Default::default()
+                })
+                .into()
+        }
+    };
+    container(
+        row![
+            container(Space::new(3, 12)).style(move |_: &Theme| container::Style {
+                background: Some(colour.into()),
+                ..Default::default()
+            }),
+            name
+        ]
+        .spacing(5)
+        .align_y(iced::Alignment::Center),
+    )
+    .padding([3, 5])
+    .width(Length::Fill)
+    .style(|_: &Theme| container::Style {
+        background: Some(console::DISPLAY.into()),
+        border: iced::Border {
+            color: Color::BLACK,
+            width: 1.0,
+            radius: 2.0.into(),
+        },
+        ..Default::default()
+    })
+    .into()
 }
 
 /// Send section on a track strip: one knob per bus, bus-colored,
@@ -414,118 +480,51 @@ fn view_strip_eq(track: &ProjectTrack) -> Element<'_, Message> {
         .find(|e| e.effect_type == EffectType::Eq && e.plugin_ref.is_none());
 
     let Some(eq) = eq else {
-        return container(
-            button(text("+ EQ").size(10).color(th::text_dim()))
-                .on_press(Message::add_effect(track.id, EffectType::Eq))
-                .padding([2, 10])
-                .style(|_theme: &Theme, status| {
-                    let bg = match status {
-                        button::Status::Hovered | button::Status::Pressed => {
-                            Some(th::bg_hover().into())
-                        }
-                        _ => Some(th::bg_elevated().into()),
-                    };
-                    button::Style {
-                        background: bg,
-                        text_color: th::text_dim(),
-                        border: iced::Border {
-                            color: th::border(),
-                            width: 1.0,
-                            radius: 2.0.into(),
-                        },
-                        ..Default::default()
-                    }
-                }),
-        )
-        .padding([4, 0])
+        return container(led_button(
+            "+ EQ",
+            None,
+            Message::add_effect(track.id, EffectType::Eq),
+        ))
+        .center_x(Length::Fill)
         .into();
     };
 
-    // Console band colors, from the current theme.
-    let hf = th::eq_hf();
-    let hmf = th::eq_hmf();
-    let lmf = th::eq_lmf();
-    let lf = th::eq_lf();
-
-    let mut bands = column![].spacing(2).align_x(iced::Alignment::Center);
-
-    // Header: EQ label + IN (bypass) toggle.
-    let in_btn = {
-        let active = !eq.bypass;
-        let label = text("IN").size(8);
-        button(if active {
-            label.color(th::bg_dark())
-        } else {
-            label.color(th::text_dim())
-        })
-        .on_press(Message::toggle_effect_bypass(track.id, eq.id))
-        .padding([1, 5])
-        .style(move |_theme: &Theme, _status| button::Style {
-            background: Some(if active {
-                th::accent().into()
-            } else {
-                th::bg_elevated().into()
-            }),
-            text_color: if active {
-                th::bg_dark()
-            } else {
-                th::text_dim()
-            },
-            border: iced::Border {
-                color: th::border(),
-                width: 1.0,
-                radius: 2.0.into(),
-            },
-            ..Default::default()
-        })
-    };
-    bands = bands.push(
-        row![text("EQ").size(9).color(th::text_dim()), in_btn]
-            .spacing(6)
-            .align_y(iced::Alignment::Center),
-    );
+    let header = row![
+        legend("EQ"),
+        horizontal_space(),
+        led_button(
+            "IN",
+            (!eq.bypass).then_some(console::LED_GREEN),
+            Message::toggle_effect_bypass(track.id, eq.id),
+        ),
+    ]
+    .align_y(iced::Alignment::Center);
 
     // (gain idx, freq idx, q/bell idx, bell?, color, label)
-    let rows: [(usize, usize, usize, bool, iced::Color, &str); 4] = [
-        (9, 10, 11, true, hf, "HF"),
-        (6, 7, 8, false, hmf, "HMF"),
-        (3, 4, 5, false, lmf, "LMF"),
-        (0, 1, 2, true, lf, "LF"),
+    let rows: [(usize, usize, usize, bool, Color, &str); 4] = [
+        (9, 10, 11, true, th::eq_hf(), "HF"),
+        (6, 7, 8, false, th::eq_hmf(), "HMF"),
+        (3, 4, 5, false, th::eq_lmf(), "LMF"),
+        (0, 1, 2, true, th::eq_lf(), "LF"),
     ];
-    for (i, (gain_i, freq_i, third_i, is_bell_toggle, color, label)) in rows.into_iter().enumerate()
-    {
-        if i > 0 {
-            bands = bands.push(
-                container(text(""))
-                    .width(Length::Fill)
-                    .height(Length::Fixed(1.0))
-                    .style(|_theme: &Theme| container::Style {
-                        background: Some(
-                            iced::Color {
-                                a: 0.5,
-                                ..th::border()
-                            }
-                            .into(),
-                        ),
-                        ..Default::default()
-                    }),
-            );
-        }
+    let mut bands = column![header].spacing(6);
+    for (gain_i, freq_i, third_i, bell_toggle, color, label) in rows {
         bands = bands.push(view_eq_band(
             track.id,
             eq,
             gain_i,
             freq_i,
             third_i,
-            is_bell_toggle,
+            bell_toggle,
             color,
             label,
         ));
     }
-
-    container(bands).padding([4, 0]).width(Length::Fill).into()
+    bands.into()
 }
 
+/// Console stagger: the gain knob under the band's legend on the left,
+/// frequency over Q (or the bell switch on the shelving bands) on the right.
 #[allow(clippy::too_many_arguments)]
 fn view_eq_band<'a>(
     track_id: vibez_core::id::TrackId,
@@ -534,10 +533,10 @@ fn view_eq_band<'a>(
     freq_i: usize,
     third_i: usize,
     bell_toggle: bool,
-    color: iced::Color,
+    color: Color,
     label: &'static str,
 ) -> Element<'a, Message> {
-    let knob = |i: usize, size: f32| -> Element<'a, Message> {
+    let knob = |i: usize, size: f32, caption: &'static str| -> Element<'a, Message> {
         let d = &eq.descriptors[i];
         let w = EffectKnobWidget::new(
             track_id,
@@ -549,91 +548,53 @@ fn view_eq_band<'a>(
             d.default,
             color,
         );
-        canvas(w)
-            .width(Length::Fixed(size))
-            .height(Length::Fixed(size))
-            .into()
-    };
-
-    // Console stagger: the gain knob rides high on the left, the
-    // frequency knob sits low on the right, Q (or the bell switch)
-    // tucks under the gain. The eye zig-zags down the strip.
-    let dim = iced::Color {
-        a: 0.75,
-        ..th::text_dim()
-    };
-    let gain_col = column![
-        row![
-            text(label).size(10).color(color),
-            text("dB").size(8).color(dim)
+        column![
+            canvas(w)
+                .width(Length::Fixed(size))
+                .height(Length::Fixed(size)),
+            text(caption)
+                .font(PERFORM_LABEL)
+                .size(8)
+                .color(th::text_dim()),
         ]
-        .spacing(3)
-        .align_y(iced::Alignment::Center),
-        knob(gain_i, 34.0),
-    ]
-    .spacing(1)
-    .align_x(iced::Alignment::Center);
-
-    let third_el: Element<'a, Message> = if bell_toggle {
-        let bell_on = eq.params.get(third_i).copied().unwrap_or(0.0) >= 0.5;
-        button(text("BELL").size(8).color(if bell_on {
-            th::bg_dark()
-        } else {
-            th::text_dim()
-        }))
-        .on_press(Message::set_effect_param(
-            track_id,
-            eq.id,
-            third_i,
-            if bell_on { 0.0 } else { 1.0 },
-        ))
-        .padding([3, 6])
-        .style(move |_theme: &Theme, _status| button::Style {
-            background: Some(if bell_on {
-                color.into()
-            } else {
-                th::bg_elevated().into()
-            }),
-            text_color: if bell_on {
-                th::bg_dark()
-            } else {
-                th::text_dim()
-            },
-            border: iced::Border {
-                color: th::border(),
-                width: 1.0,
-                radius: 2.0.into(),
-            },
-            ..Default::default()
-        })
+        .align_x(iced::Alignment::Center)
         .into()
-    } else {
-        column![text("Q").size(8).color(dim), knob(third_i, 28.0)]
-            .spacing(1)
-            .align_x(iced::Alignment::Center)
-            .into()
     };
 
-    let freq_col = column![
-        text(if freq_i == 10 || freq_i == 7 {
-            "kHz"
-        } else {
-            "Hz"
-        })
-        .size(8)
-        .color(dim),
-        knob(freq_i, 28.0),
-    ]
-    .spacing(1)
-    .align_x(iced::Alignment::Center);
+    let third: Element<'a, Message> = if bell_toggle {
+        let bell_on = eq.params.get(third_i).copied().unwrap_or(0.0) >= 0.5;
+        led_button(
+            "BELL",
+            bell_on.then_some(color),
+            Message::set_effect_param(track_id, eq.id, third_i, if bell_on { 0.0 } else { 1.0 }),
+        )
+    } else {
+        knob(third_i, 28.0, "Q")
+    };
 
     row![
-        column![gain_col, third_el]
-            .spacing(2)
-            .align_x(iced::Alignment::Center),
-        column![text("").size(6), freq_col].align_x(iced::Alignment::Center),
+        column![
+            text(label).font(PERFORM_LABEL).size(10).color(color),
+            knob(gain_i, 34.0, "GAIN"),
+        ]
+        .spacing(2)
+        .align_x(iced::Alignment::Center),
+        column![
+            knob(
+                freq_i,
+                28.0,
+                if freq_i == 10 || freq_i == 7 {
+                    "kHz"
+                } else {
+                    "Hz"
+                }
+            ),
+            third,
+        ]
+        .spacing(3)
+        .align_x(iced::Alignment::Center),
     ]
-    .spacing(12)
+    .spacing(14)
     .align_y(iced::Alignment::Start)
     .into()
 }

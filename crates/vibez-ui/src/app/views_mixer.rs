@@ -1,7 +1,7 @@
 //! Mixer workspace view: channel strips for tracks and buses.
 //! Split from views_shell.rs; inherent methods on [`super::App`].
 
-use iced::widget::{button, center, column, container, horizontal_space, mouse_area, row, text};
+use iced::widget::{button, center, column, container, mouse_area, row, text};
 use iced::{Element, Length, Theme};
 
 use crate::domains::view::ViewMsg;
@@ -76,7 +76,7 @@ impl App {
         let buses = &self.state.project_tracks.buses;
         let mut strips = row![].spacing(4).padding(8);
 
-        for track in &self.state.project_tracks.tracks {
+        for (index, track) in self.state.project_tracks.tracks.iter().enumerate() {
             let selected = self.channel_selected(track.id);
             let strip = view_mixer_strip(
                 track,
@@ -90,6 +90,7 @@ impl App {
                         .unwrap_or_default(),
                     selected,
                     click: self.channel_click(track.id),
+                    number: format!("{:02}", index + 1),
                     editing_name: self.state.view.editing_track_name == Some(track.id),
                     height,
                     edit_text: &self.state.view.edit_name_text,
@@ -107,7 +108,7 @@ impl App {
         // Returns live on the right, next to the master: new buses
         // appear where the "+ Bus" pillar sits, growing toward it.
         let mut right_group = row![].spacing(4).padding(8);
-        for bus in buses {
+        for (index, bus) in buses.iter().enumerate() {
             let selected = self.channel_selected(bus.id);
             right_group = right_group.push(view_mixer_strip(
                 bus,
@@ -121,6 +122,7 @@ impl App {
                         .unwrap_or_default(),
                     selected,
                     click: self.channel_click(bus.id),
+                    number: format!("R{}", index + 1),
                     editing_name: self.state.view.editing_track_name == Some(bus.id),
                     height,
                     edit_text: &self.state.view.edit_name_text,
@@ -182,6 +184,7 @@ impl App {
                     .unwrap_or_default(),
                 selected: master_selected,
                 click: self.channel_click(vibez_core::id::TrackId::MASTER),
+                number: "M".into(),
                 editing_name: false,
                 height,
                 edit_text: &self.state.view.edit_name_text,
@@ -195,7 +198,16 @@ impl App {
         ))
         .padding(8);
 
-        let mixer_row = row![strips, horizontal_space(), right_group, master_strip]
+        // Tracks scroll sideways once they outgrow the window; the returns
+        // and the master stay pinned on the right like a desk's.
+        let channels = iced::widget::Scrollable::with_direction(
+            strips,
+            iced::widget::scrollable::Direction::Horizontal(
+                iced::widget::scrollable::Scrollbar::new(),
+            ),
+        )
+        .width(Length::Fill);
+        let mixer_row = row![channels, right_group, master_strip]
             .spacing(4)
             .padding([8, 4]);
 
