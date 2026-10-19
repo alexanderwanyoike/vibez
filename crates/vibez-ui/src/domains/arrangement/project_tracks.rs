@@ -3,6 +3,27 @@
 use super::*;
 
 impl ArrangementState {
+    /// The channels an edit on `track_id` reaches: the selected set when the
+    /// channel is part of it, otherwise the channel alone.
+    fn channel_group(&self, track_id: TrackId) -> Vec<TrackId> {
+        if self.selected_channels.contains(&track_id) {
+            self.selected_channels.clone()
+        } else {
+            vec![track_id]
+        }
+    }
+
+    fn select_channels(
+        &mut self,
+        project_tracks: &ProjectTracksState,
+        keep: impl Fn(TrackId) -> bool,
+    ) {
+        self.selected_channels = project_tracks
+            .channel_ids()
+            .filter(|id| keep(*id))
+            .collect();
+    }
+
     fn remove_project_track(
         &mut self,
         project_tracks: &mut ProjectTracksState,
@@ -35,6 +56,7 @@ impl ArrangementState {
             }
         }
         Arc::make_mut(&mut self.timeline).remove(track_id);
+        self.selected_channels.retain(|id| *id != track_id);
         if self.selected_track == Some(track_id) {
             self.selected_track = project_tracks.tracks.first().map(|track| track.id);
         }
@@ -121,7 +143,39 @@ impl ArrangementState {
             ArrangementMsg::RemoveTrack(track_id) => {
                 return self.remove_project_track(project_tracks, track_id, engine);
             }
-            ArrangementMsg::SelectTrack(track_id) => self.selected_track = Some(track_id),
+            ArrangementMsg::SelectTrack(track_id) => {
+                self.selected_track = Some(track_id);
+                self.select_channels(project_tracks, |id| id == track_id);
+            }
+            ArrangementMsg::ToggleChannelSelection(track_id) => {
+                if !track_id.is_master() {
+                    let selected = std::mem::take(&mut self.selected_channels);
+                    let joins = !selected.contains(&track_id);
+                    self.select_channels(project_tracks, |id| {
+                        if id == track_id {
+                            joins
+                        } else {
+                            selected.contains(&id)
+                        }
+                    });
+                    self.selected_track = Some(track_id);
+                }
+            }
+            ArrangementMsg::SelectChannelRange(track_id) => {
+                let order: Vec<_> = project_tracks.channel_ids().collect();
+                let at = |id| order.iter().position(|channel| *channel == id);
+                match (self.selected_track.and_then(at), at(track_id)) {
+                    (Some(anchor), Some(end)) => {
+                        let range = anchor.min(end)..=anchor.max(end);
+                        self.selected_channels = order[range].to_vec();
+                    }
+                    _ => {
+                        self.selected_track = Some(track_id);
+                        self.select_channels(project_tracks, |id| id == track_id);
+                    }
+                }
+            }
+            ArrangementMsg::SelectAllChannels => self.select_channels(project_tracks, |_| true),
             ArrangementMsg::RenameTrack(track_id, new_name) => {
                 if let Some(track) = project_tracks.find_mut(track_id) {
                     track.name = new_name;
@@ -145,28 +199,58 @@ impl ArrangementState {
             }
             ArrangementMsg::SetTrackGain(track_id, gain) => {
                 let gain = gain.clamp(0.0, 2.0);
-                engine.send(EngineCommand::SetTrackGain(track_id, gain));
-                if let Some(track) = project_tracks.find_mut(track_id) {
-                    track.gain = gain;
+                // The rest of the set moves by the same dB. The floor keeps a
+                // fader leaving silence from multiplying the others by
+                // infinity.
+                let floor = vibez_core::level::db_to_amplitude(-60.0);
+                let ratio = project_tracks
+                    .find(track_id)
+                    .map_or(1.0, |track| gain.max(floor) / track.gain.max(floor));
+                for id in self.channel_group(track_id) {
+                    if let Some(track) = project_tracks.find_mut(id) {
+                        track.gain = if id == track_id {
+                            gain
+                        } else {
+                            (track.gain * ratio).clamp(0.0, 2.0)
+                        };
+                        engine.send(EngineCommand::SetTrackGain(id, track.gain));
+                    }
                 }
             }
             ArrangementMsg::SetTrackPan(track_id, pan) => {
                 let pan = pan.clamp(0.0, 1.0);
-                engine.send(EngineCommand::SetTrackPan(track_id, pan));
-                if let Some(track) = project_tracks.find_mut(track_id) {
-                    track.pan = pan;
+                let shift = project_tracks
+                    .find(track_id)
+                    .map_or(0.0, |track| pan - track.pan);
+                for id in self.channel_group(track_id) {
+                    if let Some(track) = project_tracks.find_mut(id) {
+                        track.pan = if id == track_id {
+                            pan
+                        } else {
+                            (track.pan + shift).clamp(0.0, 1.0)
+                        };
+                        engine.send(EngineCommand::SetTrackPan(id, track.pan));
+                    }
                 }
             }
             ArrangementMsg::SetTrackMute(track_id) => {
-                if let Some(track) = project_tracks.find_mut(track_id) {
-                    track.mute = !track.mute;
-                    engine.send(EngineCommand::SetTrackMute(track_id, track.mute));
+                if let Some(mute) = project_tracks.find(track_id).map(|track| !track.mute) {
+                    for id in self.channel_group(track_id) {
+                        if let Some(track) = project_tracks.find_mut(id) {
+                            track.mute = mute;
+                            engine.send(EngineCommand::SetTrackMute(id, mute));
+                        }
+                    }
                 }
             }
             ArrangementMsg::SetTrackSolo(track_id) => {
-                if let Some(track) = project_tracks.find_mut(track_id) {
-                    track.solo = !track.solo;
-                    engine.send(EngineCommand::SetTrackSolo(track_id, track.solo));
+                if let Some(solo) = project_tracks.find(track_id).map(|track| !track.solo) {
+                    for id in self.channel_group(track_id) {
+                        if let Some(track) = project_tracks.find_mut(id) {
+                            track.solo = solo;
+                            engine.send(EngineCommand::SetTrackSolo(id, solo));
+                        }
+                    }
                 }
             }
             ArrangementMsg::AddBus => {
@@ -198,6 +282,7 @@ impl ArrangementState {
                         lane.target != vibez_core::automation::AutomationTarget::Send { bus_id }
                     });
                 }
+                self.selected_channels.retain(|id| *id != bus_id);
                 if self.selected_track == Some(bus_id) {
                     self.selected_track = project_tracks.tracks.first().map(|track| track.id);
                 }
@@ -211,15 +296,36 @@ impl ArrangementState {
                 amount,
             } => {
                 let amount = amount.clamp(0.0, 1.0);
-                if let Some(track) = project_tracks.tracks.iter_mut().find(|t| t.id == track_id) {
-                    match track.sends.iter_mut().find(|(id, _)| *id == bus_id) {
-                        Some(send) => send.1 = amount,
-                        None => track.sends.push((bus_id, amount)),
+                let send_of = |track: &ProjectTrack| {
+                    track
+                        .sends
+                        .iter()
+                        .find(|(id, _)| *id == bus_id)
+                        .map_or(0.0, |(_, amount)| *amount)
+                };
+                let shift = project_tracks
+                    .tracks
+                    .iter()
+                    .find(|t| t.id == track_id)
+                    .map_or(0.0, |track| amount - send_of(track));
+                for id in self.channel_group(track_id) {
+                    // Only tracks send to buses.
+                    let Some(track) = project_tracks.tracks.iter_mut().find(|t| t.id == id) else {
+                        continue;
+                    };
+                    let level = if id == track_id {
+                        amount
+                    } else {
+                        (send_of(track) + shift).clamp(0.0, 1.0)
+                    };
+                    match track.sends.iter_mut().find(|(bus, _)| *bus == bus_id) {
+                        Some(send) => send.1 = level,
+                        None => track.sends.push((bus_id, level)),
                     }
                     engine.send(EngineCommand::SetSend {
-                        track_id,
+                        track_id: id,
                         bus_id,
-                        amount,
+                        amount: level,
                     });
                 }
             }

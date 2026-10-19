@@ -65,6 +65,11 @@ pub enum ArrangementMsg {
     /// Delete immediately without opening the optional confirmation UI.
     RemoveTrack(TrackId),
     SelectTrack(TrackId),
+    /// Adds the channel to the mixer's selected set, or takes it out.
+    ToggleChannelSelection(TrackId),
+    /// Selects every channel from the last one clicked to this one.
+    SelectChannelRange(TrackId),
+    SelectAllChannels,
     RenameTrack(TrackId, String),
     RenameClip(TrackId, ClipId, String),
     MoveTrackUp(TrackId),

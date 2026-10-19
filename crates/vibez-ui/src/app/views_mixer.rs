@@ -39,7 +39,7 @@ impl App {
         let mut strips = row![].spacing(4).padding(8).height(Length::Fill);
 
         for track in &self.state.project_tracks.tracks {
-            let selected = self.state.arrangement.selected_track == Some(track.id);
+            let selected = self.channel_selected(track.id);
             let strip = view_mixer_strip(
                 track,
                 StripRole::Track,
@@ -51,6 +51,7 @@ impl App {
                         .copied()
                         .unwrap_or_default(),
                     selected,
+                    click: self.channel_click(track.id),
                     editing_name: self.state.view.editing_track_name == Some(track.id),
                     edit_text: &self.state.view.edit_name_text,
                     playhead_beat,
@@ -68,7 +69,7 @@ impl App {
         // appear where the "+ Bus" pillar sits, growing toward it.
         let mut right_group = row![].spacing(4).padding(8).height(Length::Fill);
         for bus in buses {
-            let selected = self.state.arrangement.selected_track == Some(bus.id);
+            let selected = self.channel_selected(bus.id);
             right_group = right_group.push(view_mixer_strip(
                 bus,
                 StripRole::Bus,
@@ -80,6 +81,7 @@ impl App {
                         .copied()
                         .unwrap_or_default(),
                     selected,
+                    click: self.channel_click(bus.id),
                     editing_name: self.state.view.editing_track_name == Some(bus.id),
                     edit_text: &self.state.view.edit_name_text,
                     playhead_beat,
@@ -139,6 +141,7 @@ impl App {
                     .copied()
                     .unwrap_or_default(),
                 selected: master_selected,
+                click: self.channel_click(vibez_core::id::TrackId::MASTER),
                 editing_name: false,
                 edit_text: &self.state.view.edit_name_text,
                 playhead_beat,
@@ -176,5 +179,97 @@ impl App {
             target: ContextMenuTarget::ArrangementEmpty,
         }))
         .into()
+    }
+}
+
+impl App {
+    /// What a click on a channel strip does, given the keys held: the
+    /// platform command key adds or removes the channel, Shift selects the
+    /// range up to it.
+    pub(super) fn channel_click(&self, track_id: vibez_core::id::TrackId) -> Message {
+        use crate::domains::arrangement::ArrangementMsg;
+        let modifiers = self.state.view.held_modifiers;
+        if super::command_held(modifiers, super::ON_MACOS) {
+            Message::Arrangement(ArrangementMsg::ToggleChannelSelection(track_id))
+        } else if modifiers.shift() {
+            Message::Arrangement(ArrangementMsg::SelectChannelRange(track_id))
+        } else {
+            Message::select_track(track_id)
+        }
+    }
+
+    /// Whether a strip shows as selected: one of the set, or the selected
+    /// channel when no set has been made.
+    fn channel_selected(&self, track_id: vibez_core::id::TrackId) -> bool {
+        let set = &self.state.arrangement.selected_channels;
+        set.contains(&track_id)
+            || (set.is_empty() && self.state.arrangement.selected_track == Some(track_id))
+    }
+}
+
+#[cfg(test)]
+mod channel_selection_tests {
+    use std::sync::Arc;
+
+    use iced::keyboard::{Event, Modifiers};
+    use vibez_core::id::TrackId;
+
+    use crate::domains::arrangement::ArrangementMsg;
+    use crate::message::Message;
+    use crate::state::{ProjectTrack, Workspace};
+
+    fn mixer_with(tracks: usize) -> (super::App, Vec<TrackId>) {
+        let mut app = super::super::test_support::app();
+        let ids: Vec<_> = (0..tracks)
+            .map(|index| {
+                let track = ProjectTrack::new(TrackId::new(), format!("Track {index}"), 0);
+                let id = track.id;
+                Arc::make_mut(&mut app.state.project_tracks)
+                    .tracks
+                    .push(track);
+                id
+            })
+            .collect();
+        app.state.view.workspace = Workspace::Mix;
+        (app, ids)
+    }
+
+    fn hold(app: &mut super::App, modifiers: Modifiers) {
+        let _ = app.update(Message::KeyboardInput {
+            event: Event::ModifiersChanged(modifiers),
+            occurred_at: std::time::Instant::now(),
+        });
+    }
+
+    #[test]
+    fn select_all_in_the_mix_view_selects_every_channel() {
+        let (mut app, ids) = mixer_with(3);
+        let _ = app.update(Message::SelectAllPressed);
+        assert_eq!(app.state.arrangement.selected_channels, ids);
+    }
+
+    #[test]
+    fn a_strip_click_adds_with_the_command_key_and_ranges_with_shift() {
+        let (mut app, ids) = mixer_with(3);
+        let command = if super::super::ON_MACOS {
+            Modifiers::LOGO
+        } else {
+            Modifiers::CTRL
+        };
+        hold(&mut app, command);
+        assert!(matches!(
+            app.channel_click(ids[1]),
+            Message::Arrangement(ArrangementMsg::ToggleChannelSelection(id)) if id == ids[1]
+        ));
+        hold(&mut app, Modifiers::SHIFT);
+        assert!(matches!(
+            app.channel_click(ids[2]),
+            Message::Arrangement(ArrangementMsg::SelectChannelRange(id)) if id == ids[2]
+        ));
+        hold(&mut app, Modifiers::empty());
+        assert!(matches!(
+            app.channel_click(ids[0]),
+            Message::Arrangement(ArrangementMsg::SelectTrack(id)) if id == ids[0]
+        ));
     }
 }

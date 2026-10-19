@@ -107,6 +107,9 @@ impl App {
         if self.text_field_editing() {
             return Task::none();
         }
+        if self.state.view.workspace == crate::state::Workspace::Mix {
+            return self.update(Message::Arrangement(ArrangementMsg::SelectAllChannels));
+        }
         if !self.editor_shortcuts_have_focus() {
             return Task::none();
         }
