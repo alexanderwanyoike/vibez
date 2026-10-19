@@ -178,3 +178,77 @@ impl App {
         .into()
     }
 }
+
+impl App {
+    /// What a click on a channel strip does, given the keys held.
+    pub(super) fn channel_click(&self, track_id: vibez_core::id::TrackId) -> Message {
+        Message::select_track(track_id)
+    }
+}
+
+#[cfg(test)]
+mod channel_selection_tests {
+    use std::sync::Arc;
+
+    use iced::keyboard::{Event, Modifiers};
+    use vibez_core::id::TrackId;
+
+    use crate::domains::arrangement::ArrangementMsg;
+    use crate::message::Message;
+    use crate::state::{ProjectTrack, Workspace};
+
+    fn mixer_with(tracks: usize) -> (super::App, Vec<TrackId>) {
+        let mut app = super::super::test_support::app();
+        let ids: Vec<_> = (0..tracks)
+            .map(|index| {
+                let track = ProjectTrack::new(TrackId::new(), format!("Track {index}"), 0);
+                let id = track.id;
+                Arc::make_mut(&mut app.state.project_tracks)
+                    .tracks
+                    .push(track);
+                id
+            })
+            .collect();
+        app.state.view.workspace = Workspace::Mix;
+        (app, ids)
+    }
+
+    fn hold(app: &mut super::App, modifiers: Modifiers) {
+        let _ = app.update(Message::KeyboardInput {
+            event: Event::ModifiersChanged(modifiers),
+            occurred_at: std::time::Instant::now(),
+        });
+    }
+
+    #[test]
+    fn select_all_in_the_mix_view_selects_every_channel() {
+        let (mut app, ids) = mixer_with(3);
+        let _ = app.update(Message::SelectAllPressed);
+        assert_eq!(app.state.arrangement.selected_channels, ids);
+    }
+
+    #[test]
+    fn a_strip_click_adds_with_the_command_key_and_ranges_with_shift() {
+        let (mut app, ids) = mixer_with(3);
+        let command = if super::super::ON_MACOS {
+            Modifiers::LOGO
+        } else {
+            Modifiers::CTRL
+        };
+        hold(&mut app, command);
+        assert!(matches!(
+            app.channel_click(ids[1]),
+            Message::Arrangement(ArrangementMsg::ToggleChannelSelection(id)) if id == ids[1]
+        ));
+        hold(&mut app, Modifiers::SHIFT);
+        assert!(matches!(
+            app.channel_click(ids[2]),
+            Message::Arrangement(ArrangementMsg::SelectChannelRange(id)) if id == ids[2]
+        ));
+        hold(&mut app, Modifiers::empty());
+        assert!(matches!(
+            app.channel_click(ids[0]),
+            Message::Arrangement(ArrangementMsg::SelectTrack(id)) if id == ids[0]
+        ));
+    }
+}
