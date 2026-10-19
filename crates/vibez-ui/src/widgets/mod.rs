@@ -65,3 +65,4 @@ pub mod vu_meter;
 pub mod waveform;
 pub mod wavetable_device;
 pub mod wavetable_display;
+pub mod wheel_gate;

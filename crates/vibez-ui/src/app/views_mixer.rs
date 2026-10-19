@@ -16,6 +16,8 @@ use super::*;
 
 /// The desk's own padding round the strips, above and below.
 const DESK_PADDING: f32 = 32.0;
+/// Returns shown side by side before their area scrolls.
+const PINNED_RETURNS: usize = 4;
 /// The send bank switch above the strips, when there is more than one bank.
 const BANK_BAR_H: f32 = 30.0;
 
@@ -167,10 +169,10 @@ impl App {
 
         // Returns live on the right, next to the master: new buses
         // appear where the "+ Bus" pillar sits, growing toward it.
-        let mut right_group = row![].spacing(4).padding(8);
+        let mut returns = row![].spacing(4).padding(8);
         for (index, bus) in buses.iter().enumerate() {
             let selected = self.channel_selected(bus.id);
-            right_group = right_group.push(view_mixer_strip(
+            returns = returns.push(view_mixer_strip(
                 bus,
                 StripRole::Bus,
                 buses,
@@ -224,11 +226,9 @@ impl App {
                 ..Default::default()
             }
         });
-        right_group = right_group.push(
-            container(add_bus_btn)
-                .height(Length::Fixed(height))
-                .align_y(iced::Alignment::Center),
-        );
+        let add_bus = container(add_bus_btn)
+            .height(Length::Fixed(height))
+            .align_y(iced::Alignment::Center);
 
         // Master strip — a real channel, pinned to far right
         let master_selected =
@@ -262,14 +262,37 @@ impl App {
 
         // Tracks scroll sideways once they outgrow the window; the returns
         // and the master stay pinned on the right like a desk's.
-        let channels = iced::widget::Scrollable::with_direction(
-            strips,
-            iced::widget::scrollable::Direction::Horizontal(
-                iced::widget::scrollable::Scrollbar::new(),
-            ),
-        )
-        .width(Length::Fill);
-        let mixer_row = row![channels, right_group, master_strip]
+        // The plain wheel scrolls the desk up and down; Shift turns it
+        // sideways over the tracks or the returns.
+        let channels = crate::widgets::wheel_gate::shift_wheel(
+            iced::widget::Scrollable::with_direction(
+                strips,
+                iced::widget::scrollable::Direction::Horizontal(
+                    iced::widget::scrollable::Scrollbar::new(),
+                ),
+            )
+            .width(Length::Fill),
+        );
+        // Past a few returns their area scrolls on its own, so they never
+        // squeeze the tracks off the desk or push the master out of view.
+        let returns: Element<'_, Message> = if buses.len() > PINNED_RETURNS {
+            let strips = PINNED_RETURNS as f32;
+            crate::widgets::wheel_gate::shift_wheel(
+                iced::widget::Scrollable::with_direction(
+                    returns,
+                    iced::widget::scrollable::Direction::Horizontal(
+                        iced::widget::scrollable::Scrollbar::new(),
+                    ),
+                )
+                .width(Length::Fixed(
+                    strips * crate::widgets::mixer_strip::STRIP_W + (strips - 1.0) * 4.0 + 16.0,
+                )),
+            )
+            .into()
+        } else {
+            returns.into()
+        };
+        let mixer_row = row![channels, returns, add_bus, master_strip]
             .spacing(4)
             .padding([8, 4]);
 
