@@ -213,13 +213,18 @@ fn editor_button<'a>(gui_key: Option<PluginGuiKey>) -> Element<'a, Message> {
     .into()
 }
 
-/// The device chain's scrollbar, and the gap it keeps from the cards.
+/// The room a chain that fits leaves under its cards.
+pub const CHAIN_PAD_BELOW: f32 = 8.0;
+
+/// The device chain's scrollbar, and the gap it keeps from the cards: the
+/// two fill the room a chain that fits leaves under its cards.
 pub const CHAIN_BAR_W: f32 = 7.0;
-pub const CHAIN_BAR_GAP: f32 = 3.0;
+pub const CHAIN_BAR_GAP: f32 = CHAIN_PAD_BELOW - CHAIN_BAR_W;
 
 /// The room a chain `chain_width` wide keeps beneath its cards for the
-/// scrollbar in a section `available` wide: only one that overflows shows
-/// the bar, so only it gives up the height, and its bar never covers them.
+/// scrollbar in a section `available` wide. Only one that overflows shows
+/// the bar, in the room under its cards, so its cards stay as tall as a
+/// chain's that fits and the bar never covers them.
 pub fn chain_bar_room(chain_width: f32, available: f32) -> f32 {
     if chain_width > available + 0.5 {
         CHAIN_BAR_W + CHAIN_BAR_GAP
@@ -274,6 +279,11 @@ mod tests {
         expanded: 760.0,
         max: 1000.0,
     };
+
+    #[test]
+    fn a_scrolling_chain_keeps_its_cards_as_tall_as_one_that_fits() {
+        assert_eq!(chain_bar_room(1200.0, 1000.0), CHAIN_PAD_BELOW);
+    }
 
     #[test]
     fn only_an_overflowing_chain_keeps_room_for_its_scrollbar() {

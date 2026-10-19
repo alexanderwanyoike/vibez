@@ -14,6 +14,8 @@ use crate::timeline_geometry::{TimelineGeometry, BASE_PIXELS_PER_BEAT};
 #[derive(Debug, Clone)]
 pub enum ViewMsg {
     SwitchWorkspace(Workspace),
+    /// Shows this bank of buses on the mixer's send rows.
+    SetMixerSendBank(usize),
     SwitchDetailTab(DetailPanelTab),
     ZoomIn,
     ZoomOut,
@@ -101,6 +103,7 @@ impl ViewState {
             ViewMsg::SwitchDetailTab(tab) => {
                 self.detail_panel_tab = tab;
             }
+            ViewMsg::SetMixerSendBank(bank) => self.mixer_send_bank = bank,
             ViewMsg::ZoomIn => {
                 self.zoom_around(1.25, self.window_width / 2.0, ctx.total_beats);
             }

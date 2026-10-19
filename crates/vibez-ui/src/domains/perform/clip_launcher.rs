@@ -87,8 +87,15 @@ pub struct ClipEditor {
     queued_requests: HashMap<TrackId, u64>,
     pub next_request: u64,
     pub running: bool,
+    /// The clip each track was playing when the transport last stopped,
+    /// launched again when it starts.
+    pub resume: HashMap<TrackId, ClipId>,
     pub started_at: HashMap<TrackId, u64>,
     pub selected: Option<ClipId>,
+    /// The cell paste targets: the selected clip's, or an empty one.
+    pub slot: Option<(TrackId, u32)>,
+    pub clipboard: Option<LauncherClip>,
+    pub dragging: Option<ClipId>,
     pub editor: TimelineEditorState,
     pub first_track: usize,
     pub first_row: u32,
@@ -204,12 +211,34 @@ pub enum ClipMsg {
     LaunchRow(u32),
     StopAll,
 
-    CreateMidi { track_id: TrackId, row: u32 },
+    CreateMidi {
+        track_id: TrackId,
+        row: u32,
+    },
     Select(ClipId),
+    SelectSlot {
+        track_id: TrackId,
+        row: u32,
+    },
     Delete(ClipId),
     ToggleLoop(ClipId),
     Duplicate(ClipId),
-    MoveWindow { tracks: i32, rows: i32 },
+    Copy,
+    Cut,
+    Paste,
+    BeginDrag(ClipId),
+    EndDrag,
+    /// `copy` leaves the dragged clip where it was.
+    Drop {
+        clip: ClipId,
+        track_id: TrackId,
+        row: u32,
+        copy: bool,
+    },
+    MoveWindow {
+        tracks: i32,
+        rows: i32,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -226,6 +255,12 @@ impl ClipMsg {
             self,
             Self::CreateMidi { .. } | Self::Delete(_) | Self::Duplicate(_) | Self::ToggleLoop(_)
         )
+    }
+
+    /// Edits that may change nothing: an empty clipboard, an empty cell, a
+    /// track of the other kind. The app records them only once they have.
+    pub const fn defers_project_edit(&self) -> bool {
+        matches!(self, Self::Cut | Self::Paste | Self::Drop { .. })
     }
 }
 
@@ -283,6 +318,7 @@ impl PerformState {
     pub fn select_launcher_clip(&mut self, id: ClipId) -> Option<TrackId> {
         let clip = self.clips.by_id(id)?;
         self.clip_editor.selected = Some(id);
+        self.clip_editor.slot = Some((clip.track_id, clip.row));
         let mut editor = TimelineEditorState {
             timeline: Arc::clone(&clip.timeline),
             selected_track: Some(clip.track_id),
@@ -304,6 +340,52 @@ impl PerformState {
         self.clip_editor.editor = editor;
         self.editor_focus = PerformEditorFocus::TimelineEditor;
         Some(clip.track_id)
+    }
+
+    /// Removes the clip, returning the stop its track needs when the clip
+    /// was playing or about to.
+    fn remove_launcher_clip(&mut self, id: ClipId) -> Option<ClipLaunchRequest> {
+        let stop = self.clips.by_id(id).and_then(|clip| {
+            (self
+                .clip_editor
+                .playing
+                .get(&clip.track_id)
+                .is_some_and(|active| active.id == id)
+                || self.clip_editor.queued.get(&clip.track_id) == Some(&Some(id)))
+            .then_some(ClipLaunchRequest::Stop(clip.track_id))
+        });
+        Arc::make_mut(&mut self.clips)
+            .clips
+            .retain(|clip| clip.id != id);
+        if self.clip_editor.selected == Some(id) {
+            self.clip_editor.selected = None;
+            self.clip_editor.editor = Default::default();
+        }
+        stop
+    }
+
+    /// Empties the cell for `source` once its track can hold it, returning
+    /// the stop the replaced clip needs, or why it cannot (`None` for a
+    /// track that no longer exists).
+    fn clear_cell_for(
+        &mut self,
+        source: &LauncherClip,
+        track_id: TrackId,
+        row: u32,
+        tracks: &[crate::state::ProjectTrack],
+    ) -> Result<Option<ClipLaunchRequest>, Option<&'static str>> {
+        let track = tracks
+            .iter()
+            .find(|track| track.id == track_id)
+            .ok_or(None)?;
+        if let Some(status) = source.refused_by(track) {
+            return Err(Some(status));
+        }
+        Ok(self
+            .clips
+            .at(track_id, row)
+            .map(|clip| clip.id)
+            .and_then(|occupant| self.remove_launcher_clip(occupant)))
     }
 
     pub(super) fn update_clips(&mut self, msg: ClipMsg, ctx: PerformCtx<'_>) -> PerformAction {
@@ -356,6 +438,98 @@ impl PerformState {
                 }
             }
             ClipMsg::Select(id) => selected = self.select_launcher_clip(id),
+            ClipMsg::BeginDrag(id) => self.clip_editor.dragging = Some(id),
+            ClipMsg::EndDrag => self.clip_editor.dragging = None,
+            ClipMsg::Drop {
+                clip: id,
+                track_id,
+                row,
+                copy,
+            } => {
+                self.clip_editor.dragging = None;
+                let Some(source) = self.clips.by_id(id).cloned() else {
+                    return PerformAction::default();
+                };
+                if (source.track_id, source.row) == (track_id, row) {
+                    return PerformAction::default();
+                }
+                clip_launch = match self.clear_cell_for(&source, track_id, row, ctx.project_tracks)
+                {
+                    Ok(stop) => stop,
+                    Err(status) => {
+                        return PerformAction {
+                            status,
+                            ..Default::default()
+                        }
+                    }
+                };
+                let placed = if !copy && track_id == source.track_id {
+                    if let Some(clip) = Arc::make_mut(&mut self.clips).by_id_mut(id) {
+                        clip.row = row;
+                    }
+                    id
+                } else {
+                    let placed = source.copied_to(track_id, row);
+                    let placed_id = placed.id;
+                    Arc::make_mut(&mut self.clips).clips.push(placed);
+                    if !copy {
+                        clip_launch = self.remove_launcher_clip(id).or(clip_launch);
+                    }
+                    placed_id
+                };
+                selected = self.select_launcher_clip(placed);
+            }
+            ClipMsg::Copy => {
+                self.clip_editor.clipboard = self
+                    .clip_editor
+                    .selected
+                    .and_then(|id| self.clips.by_id(id))
+                    .cloned();
+            }
+            ClipMsg::Cut => {
+                let Some(id) = self.clip_editor.selected else {
+                    return PerformAction::default();
+                };
+                self.clip_editor.clipboard = self.clips.by_id(id).cloned();
+                clip_launch = self.remove_launcher_clip(id);
+            }
+            ClipMsg::Paste => {
+                let Some((source, (track_id, row))) = self
+                    .clip_editor
+                    .clipboard
+                    .clone()
+                    .zip(self.clip_editor.slot)
+                else {
+                    return PerformAction::default();
+                };
+                clip_launch = match self.clear_cell_for(&source, track_id, row, ctx.project_tracks)
+                {
+                    Ok(stop) => stop,
+                    Err(status) => {
+                        return PerformAction {
+                            status,
+                            ..Default::default()
+                        }
+                    }
+                };
+                let copy = source.copied_to(track_id, row);
+                let id = copy.id;
+                Arc::make_mut(&mut self.clips).clips.push(copy);
+                selected = self.select_launcher_clip(id);
+            }
+            ClipMsg::SelectSlot { track_id, row } => {
+                if let Some(id) = self.clips.at(track_id, row).map(|clip| clip.id) {
+                    selected = self.select_launcher_clip(id);
+                } else {
+                    self.clip_editor.selected = None;
+                    self.clip_editor.slot = Some((track_id, row));
+                    self.clip_editor.editor = Default::default();
+                    return PerformAction {
+                        select_project_track: Some(track_id),
+                        ..Default::default()
+                    };
+                }
+            }
             ClipMsg::CreateMidi { track_id, row } => {
                 if self.clips.at(track_id, row).is_some()
                     || !ctx
@@ -387,52 +561,15 @@ impl PerformState {
                 else {
                     return PerformAction::default();
                 };
-                let id = ClipId::new();
-                let mut timeline = (*source.timeline).clone();
-                for content in timeline.by_track.values_mut() {
-                    for clip in &mut content.clips {
-                        clip.id = id;
-                        clip.fades = clip.fades.unlinked();
-                    }
-                    for clip in &mut content.note_clips {
-                        clip.id = id;
-                        clip.selected_notes.clear();
-                    }
-                    for lane in &mut content.automation {
-                        lane.id = vibez_core::id::LaneId::new();
-                    }
-                }
-                Arc::make_mut(&mut self.clips).clips.push(LauncherClip {
-                    id,
-                    track_id,
-                    row,
-                    timeline: Arc::new(timeline),
-                });
+                let copy = source.copied_to(track_id, row);
+                let id = copy.id;
+                Arc::make_mut(&mut self.clips).clips.push(copy);
                 selected = self.select_launcher_clip(id);
                 if row < self.clip_editor.first_row || row >= self.clip_editor.first_row + 4 {
                     self.clip_editor.first_row = row;
                 }
             }
-            ClipMsg::Delete(id) => {
-                if let Some(clip) = self.clips.by_id(id) {
-                    if self
-                        .clip_editor
-                        .playing
-                        .get(&clip.track_id)
-                        .is_some_and(|active| active.id == id)
-                        || self.clip_editor.queued.get(&clip.track_id) == Some(&Some(id))
-                    {
-                        clip_launch = Some(ClipLaunchRequest::Stop(clip.track_id));
-                    }
-                }
-                Arc::make_mut(&mut self.clips)
-                    .clips
-                    .retain(|clip| clip.id != id);
-                if self.clip_editor.selected == Some(id) {
-                    self.clip_editor.selected = None;
-                    self.clip_editor.editor = Default::default();
-                }
-            }
+            ClipMsg::Delete(id) => clip_launch = self.remove_launcher_clip(id),
             ClipMsg::MoveWindow { tracks, rows } => {
                 self.clip_editor.first_track = self
                     .clip_editor
@@ -456,6 +593,51 @@ impl PerformState {
 }
 
 impl LauncherClip {
+    /// An independent copy in `track_id`'s `row`: its own id, so editing
+    /// either never changes the other.
+    pub fn copied_to(&self, track_id: TrackId, row: u32) -> LauncherClip {
+        let id = ClipId::new();
+        let mut timeline = (*self.timeline).clone();
+        if track_id != self.track_id {
+            if let Some(mut content) = timeline.by_track.remove(&self.track_id) {
+                content
+                    .automation
+                    .retain(|lane| lane.target.on_every_track());
+                timeline.by_track.insert(track_id, content);
+            }
+        }
+        for content in timeline.by_track.values_mut() {
+            for clip in &mut content.clips {
+                clip.id = id;
+                clip.fades = clip.fades.unlinked();
+            }
+            for clip in &mut content.note_clips {
+                clip.id = id;
+                clip.selected_notes.clear();
+            }
+            for lane in &mut content.automation {
+                lane.id = vibez_core::id::LaneId::new();
+            }
+        }
+        LauncherClip {
+            id,
+            track_id,
+            row,
+            timeline: Arc::new(timeline),
+        }
+    }
+
+    /// Why `track` cannot hold this clip, if it cannot.
+    pub fn refused_by(&self, track: &crate::state::ProjectTrack) -> Option<&'static str> {
+        match self.part()? {
+            SlotPart::Midi(_) if !track.kind.is_midi() => Some("A MIDI clip needs a MIDI track"),
+            SlotPart::Audio(_) if track.kind.is_midi() => {
+                Some("An audio clip needs an audio track")
+            }
+            _ => None,
+        }
+    }
+
     pub fn length_and_loop(&self, samples_per_beat: f64) -> (u64, bool) {
         match self.part() {
             Some(SlotPart::Audio(clip)) => (clip.duration.max(1), clip.loop_enabled),
@@ -489,3 +671,7 @@ impl LauncherClip {
 #[cfg(test)]
 #[path = "clip_launcher_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "clip_launcher_edit_tests.rs"]
+mod edit_tests;

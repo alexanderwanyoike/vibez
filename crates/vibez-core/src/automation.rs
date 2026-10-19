@@ -140,6 +140,15 @@ impl AutomationTarget {
     pub const fn is_stepped(self) -> bool {
         matches!(self, Self::TrackMute)
     }
+
+    /// Whether every track has this control, so a lane still means the same
+    /// on another track. Device, plugin and send lanes name one track's own.
+    pub const fn on_every_track(self) -> bool {
+        matches!(
+            self,
+            Self::TrackGain | Self::TrackPan | Self::TrackMute | Self::TrackSwingOffset
+        )
+    }
 }
 
 #[cfg(test)]

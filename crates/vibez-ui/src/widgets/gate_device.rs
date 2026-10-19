@@ -42,13 +42,14 @@ pub const COMPACT_W: f32 = 420.0;
 pub const FULL_W: f32 = GROUP_W * 2.0 + 1.0 + PAD * 2.0 + 16.0;
 pub const MAX_W: f32 = 1000.0;
 
-pub fn card_width(available: f32) -> f32 {
-    if available >= COMPACT_W {
-        available.min(MAX_W)
-    } else {
-        COMPACT_W
-    }
-}
+/// The widths this card lays itself out for.
+pub const WIDTHS: crate::widgets::device_chrome::CardWidths =
+    crate::widgets::device_chrome::CardWidths {
+        compact: COMPACT_W,
+        medium: COMPACT_W,
+        expanded: FULL_W,
+        max: MAX_W,
+    };
 
 pub fn preset_bar_width(size: Size) -> f32 {
     size.width - PAD * 2.0 - 90.0
@@ -474,8 +475,8 @@ mod tests {
 
     #[test]
     fn card_width_grows_with_the_section_up_to_its_maximum() {
-        assert_eq!(card_width(300.0), COMPACT_W);
-        assert_eq!(card_width(700.0), 700.0);
-        assert_eq!(card_width(5000.0), MAX_W);
+        assert_eq!(WIDTHS.card_width(300.0), COMPACT_W);
+        assert_eq!(WIDTHS.card_width(700.0), 700.0);
+        assert_eq!(WIDTHS.card_width(5000.0), MAX_W);
     }
 }

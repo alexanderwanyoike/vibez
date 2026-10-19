@@ -26,6 +26,11 @@ same editor you use in Arrange, then launch it from a pad grid.
 - **Swing** modelled on the MPC2000XL, set per project, per track, or per clip
 - **Section Record** with count-in, overdub and replace, timed against the audio
   engine's sample clock rather than the UI frame rate
+- **Clips mode** gives every track its own column of clips instead: launch,
+  copy, paste and drag them, record a take into the selected cell with F4, and
+  Play picks up whatever was playing when you stopped
+
+![The clip launcher: a column of clips per track, several playing](docs/perform-clips.png)
 
 The pad grid works from the computer keyboard, so you do not need a MIDI
 controller to start. MIDI input can play notes into the selected instrument
@@ -41,7 +46,7 @@ you can edit afterwards. Captured material keeps no reference back to its
 Sections, so editing a Section later never rewrites a take you already
 recorded.
 
-![A captured performance written into the Arrangement](docs/arrange-capture.png)
+![A captured performance written into the Arrangement, with a channel EQ below](docs/arrange-capture.png)
 
 Everything Capture writes is material you could have drawn by hand, so the rest
 of Arrange applies to it unchanged:
@@ -69,17 +74,19 @@ Mix is a real console rather than a row of faders. Every channel has its own
 EQ, the master is an actual channel, and the device rack below follows the
 selected one.
 
-![Mix: channel strips with EQ, the master channel, and the device rack](docs/mix.png)
+![Mix: channel strips with EQ and sends, two returns, the master, and the device rack](docs/mix.png)
 
-- **Channel strips** with a four-band EQ, pan, fader, metering, mute and solo
+- **Channel strips** with a four-band EQ, named sends, pan, a fader with a dB
+  scale, LED metering, mute and solo
+- **Move channels together**: select a set with Ctrl-click, Shift-click or
+  Ctrl+A, and their faders, pans, sends, mutes and solos move as one
 - **Buses, returns and sends**, and a real master channel rather than a
   summing shortcut
-- **Built-in instruments**: subtractive synth, sampler, and a drum rack with
-  four banks of 16 pads. Coming in v0.5.0: a wavetable synth, an FM synth, a
-  Sampler on every drum pad, and 808 and 909 kits
-- **Built-in effects**: EQ, filter, delay, reverb, drive, bitcrush, compressor,
-  auto-pan, gate, phaser, and gain. Coming in v0.5.0: echo, saturator and a
-  true-peak limiter
+- **Built-in instruments**: subtractive, wavetable and FM synths, a sampler, and
+  a drum rack with four banks of 16 pads, a Sampler on every pad, and 808 and
+  909 kits
+- **Built-in effects**: EQ, filter, delay, echo, reverb, drive, saturator,
+  bitcrush, compressor, true-peak limiter, auto-pan, gate, phaser, and gain
 - **Plugin hosting**: VST3 and CLAP instruments and effects with native GUIs,
   sandboxed plugin scanning, and state persisted in your project
 
@@ -96,7 +103,7 @@ selected one.
 
 ## Status
 
-v0.5.0 is in testing on `dev`; the latest release is v0.4.1. Still early.
+v0.5.1, and still early.
 Linux is the primary development platform; macOS and
 Windows build and pass CI on every change but get less hands-on testing.
 Projects save to a self-contained versioned `.vzp` container, but breaking

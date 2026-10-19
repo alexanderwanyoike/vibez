@@ -225,6 +225,8 @@ pub enum PerformMsg {
     Capture(CaptureMsg),
     SectionRecord(SectionRecordMsg),
     ClipRecord(clip_record::ClipRecordMsg),
+    /// Record in whichever layout is showing.
+    ToggleRecord,
     SelectMode(PerformMode),
     FocusEditor(PerformEditorFocus),
     BeginKeyRebind(PadPosition),
@@ -290,6 +292,10 @@ pub enum PerformMsg {
 }
 
 impl PerformMsg {
+    pub const fn defers_project_edit(&self) -> bool {
+        matches!(self, Self::Clips(msg) if msg.defers_project_edit())
+    }
+
     pub const fn marks_dirty(&self) -> bool {
         if let Self::Clips(msg) = self {
             return msg.marks_dirty();
@@ -341,7 +347,7 @@ pub struct PerformAction {
     pub capture: Option<CaptureAction>,
     pub section_record: Option<SectionRecordAction>,
     pub clip_record: Option<clip_record::ClipRecordAction>,
-    pub section_record_status: Option<&'static str>,
+    pub status: Option<&'static str>,
 }
 
 impl PerformState {
@@ -436,6 +442,14 @@ impl PerformState {
                 if self.layout == vibez_project::PerformLayout::Sections {
                     return self.update_section_record(msg);
                 }
+            }
+            PerformMsg::ToggleRecord => {
+                return match self.layout {
+                    vibez_project::PerformLayout::Sections => {
+                        self.update_section_record(SectionRecordMsg::Toggle)
+                    }
+                    vibez_project::PerformLayout::Clips => self.toggle_clip_record(),
+                };
             }
             PerformMsg::SelectMode(mode) => {
                 if ctx.workspace_visible {

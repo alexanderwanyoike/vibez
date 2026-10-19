@@ -57,6 +57,9 @@ pub struct EffectKnobWidget {
     pub max: f32,
     pub default: f32,
     pub arc_color: Color,
+    /// Tints the unlit part of the ring, so a knob at zero still shows
+    /// what it belongs to.
+    pub ring_tint: Option<Color>,
 }
 
 impl EffectKnobWidget {
@@ -80,6 +83,7 @@ impl EffectKnobWidget {
             max,
             default,
             arc_color,
+            ring_tint: None,
         }
     }
 
@@ -103,6 +107,7 @@ impl EffectKnobWidget {
             max,
             default,
             arc_color,
+            ring_tint: None,
         }
     }
 
@@ -118,6 +123,7 @@ impl EffectKnobWidget {
             max: 1.0,
             default: 0.0,
             arc_color,
+            ring_tint: Some(arc_color),
         }
     }
 
@@ -142,6 +148,7 @@ impl EffectKnobWidget {
             max,
             default,
             arc_color,
+            ring_tint: None,
         }
     }
 
@@ -321,10 +328,10 @@ impl canvas::Program<Message> for EffectKnobWidget {
             ..canvas::Stroke::default()
         };
         let bg_arc = build_arc(center, arc_radius, ARC_START, ARC_END);
-        frame.stroke(
-            &bg_arc,
-            round.with_color(theme::knob_track()).with_width(2.5),
-        );
+        let ring = self.ring_tint.map_or(theme::knob_track(), |tint| {
+            theme::blend(theme::knob_track(), tint, 0.35)
+        });
+        frame.stroke(&bg_arc, round.with_color(ring).with_width(2.5));
 
         if norm > 0.005 {
             let value_arc = build_arc(center, arc_radius, ARC_START, value_angle);

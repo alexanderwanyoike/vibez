@@ -442,3 +442,78 @@ mod live_edit_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod clipboard_tests {
+    use std::sync::Arc;
+
+    use vibez_core::id::TrackId;
+
+    use crate::domains::arrangement::ArrangementMsg;
+    use crate::domains::perform::{ClipMsg, PerformMsg};
+    use crate::domains::project::ProjectMsg;
+    use crate::message::Message;
+    use crate::state::{ProjectTrack, Workspace};
+
+    #[test]
+    fn copy_and_paste_shortcuts_copy_a_launcher_clip_as_one_undo_step() {
+        let mut app = super::super::test_support::app();
+        let mut track = ProjectTrack::new(TrackId::new(), "Bass".into(), 0);
+        track.kind = vibez_core::midi::TrackKind::Midi;
+        let track_id = track.id;
+        Arc::make_mut(&mut app.state.project_tracks)
+            .tracks
+            .push(track);
+        app.state.view.workspace = Workspace::Perform;
+        app.state.perform.layout = vibez_project::PerformLayout::Clips;
+        let clips = |msg| Message::Perform(PerformMsg::Clips(msg));
+
+        let _ = app.update(clips(ClipMsg::CreateMidi { track_id, row: 0 }));
+        let _ = app.update(Message::Arrangement(ArrangementMsg::CopySelectedClips));
+        let _ = app.update(clips(ClipMsg::SelectSlot { track_id, row: 1 }));
+        let _ = app.update(Message::Arrangement(ArrangementMsg::PasteClips));
+        assert!(app.state.perform.clips.at(track_id, 1).is_some());
+
+        let _ = app.update(Message::Project(ProjectMsg::Undo));
+        assert!(app.state.perform.clips.at(track_id, 1).is_none());
+        assert!(app.state.perform.clips.at(track_id, 0).is_some());
+    }
+
+    #[test]
+    fn a_launcher_edit_that_changes_nothing_leaves_no_undo_step() {
+        let mut app = super::super::test_support::app();
+        let mut midi = ProjectTrack::new(TrackId::new(), "Bass".into(), 0);
+        midi.kind = vibez_core::midi::TrackKind::Midi;
+        let audio = ProjectTrack::new(TrackId::new(), "Vocals".into(), 1);
+        let (midi_id, audio_id) = (midi.id, audio.id);
+        Arc::make_mut(&mut app.state.project_tracks)
+            .tracks
+            .extend([midi, audio]);
+        app.state.view.workspace = Workspace::Perform;
+        app.state.perform.layout = vibez_project::PerformLayout::Clips;
+        let clips = |msg| Message::Perform(PerformMsg::Clips(msg));
+        let _ = app.update(clips(ClipMsg::CreateMidi {
+            track_id: midi_id,
+            row: 0,
+        }));
+        let clip = app.state.perform.clip_editor.selected.unwrap();
+        let _ = app.update(Message::Arrangement(ArrangementMsg::CopySelectedClips));
+        let steps = app.state.project.history.undo.len();
+        app.state.project.dirty = false;
+
+        let _ = app.update(clips(ClipMsg::SelectSlot {
+            track_id: audio_id,
+            row: 0,
+        }));
+        let _ = app.update(Message::Arrangement(ArrangementMsg::PasteClips));
+        let _ = app.update(Message::Arrangement(ArrangementMsg::CutSelectedClips));
+        let _ = app.update(clips(ClipMsg::Drop {
+            clip,
+            track_id: audio_id,
+            row: 1,
+            copy: false,
+        }));
+        assert_eq!(app.state.project.history.undo.len(), steps);
+        assert!(!app.state.project.dirty);
+    }
+}

@@ -17,7 +17,7 @@ const CHAIN_SPACING: f32 = 6.0;
 const PLACEHOLDER_W: f32 = 120.0;
 
 /// Native devices that lay themselves out from the width they are given.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 enum Flexible {
     Gain,
     Eq,
@@ -35,27 +35,68 @@ enum Flexible {
     Phaser,
 }
 
+/// A built-in instrument whose card takes a flexible share like the
+/// effects do.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum NativeInstrument {
+    Synth,
+    Sampler,
+    DrumRack,
+    Wavetable,
+    Fm,
+}
+
+impl NativeInstrument {
+    fn of(track: &UiTrack) -> Option<Self> {
+        if crate::domains::synth::is_native_synth(track) {
+            Some(Self::Synth)
+        } else if crate::domains::sampler::is_native_sampler(track) {
+            Some(Self::Sampler)
+        } else if crate::domains::sampler::is_native_drum_rack(track) {
+            Some(Self::DrumRack)
+        } else if crate::domains::wavetable::is_native_wavetable(track) {
+            Some(Self::Wavetable)
+        } else if crate::domains::fm::is_native_fm(track) {
+            Some(Self::Fm)
+        } else {
+            None
+        }
+    }
+
+    /// The card's width given a `share` of a chain `available` wide.
+    fn card_width(self, share: f32, available: f32) -> f32 {
+        use crate::widgets::*;
+        match self {
+            Self::Synth => synth_device::WIDTHS,
+            Self::Sampler => sampler_device::WIDTHS,
+            Self::DrumRack => drum_rack_device::WIDTHS,
+            Self::Wavetable | Self::Fm => instrument_bands::WIDTHS,
+        }
+        .chain_width(share, available)
+    }
+}
+
 impl Flexible {
     /// The card's width given a `share` of a chain `available` wide.
     fn card_width(self, share: f32, available: f32) -> f32 {
+        use crate::widgets::*;
         match self {
-            Self::Gain => crate::widgets::gain_device::WIDTHS.chain_width(share, available),
-            Self::Eq => crate::widgets::eq_device::WIDTHS.chain_width(share, available),
-            Self::Compressor => {
-                crate::widgets::compressor_device::WIDTHS.chain_width(share, available)
-            }
-            Self::Limiter => crate::widgets::limiter_device::card_width(share),
-            Self::Filter => crate::widgets::filter_device::card_width(share),
-            Self::Gate => crate::widgets::gate_device::card_width(share),
-            Self::Drive => crate::widgets::drive_device::card_width(share),
-            Self::Saturator => crate::widgets::saturator_device::card_width(share),
-            Self::Bitcrush => crate::widgets::bitcrush_device::card_width(share),
-            Self::Delay => crate::widgets::delay_device::card_width(share),
-            Self::Echo => crate::widgets::echo_device::card_width(share),
-            Self::Reverb => crate::widgets::reverb_device::card_width(share),
-            Self::Phaser => crate::widgets::phaser_device::card_width(share),
-            Self::AutoPan => crate::widgets::auto_pan_device::card_width(share),
+            Self::Gain => gain_device::WIDTHS,
+            Self::Eq => eq_device::WIDTHS,
+            Self::Compressor => compressor_device::WIDTHS,
+            Self::Limiter => limiter_device::WIDTHS,
+            Self::Filter => filter_device::WIDTHS,
+            Self::Gate => gate_device::WIDTHS,
+            Self::Drive => drive_device::WIDTHS,
+            Self::Saturator => saturator_device::WIDTHS,
+            Self::Bitcrush => bitcrush_device::WIDTHS,
+            Self::Delay => delay_device::WIDTHS,
+            Self::Echo => echo_device::WIDTHS,
+            Self::Reverb => reverb_device::WIDTHS,
+            Self::Phaser => phaser_device::WIDTHS,
+            Self::AutoPan => auto_pan_device::WIDTHS,
         }
+        .chain_width(share, available)
     }
 }
 
@@ -82,9 +123,15 @@ impl App {
             self.device_chain_row(track_id, track, track_color, size.width)
         });
 
+        // The chain keeps the room under its cards itself, for its scrollbar.
         let content = column![header, chain]
             .spacing(6)
-            .padding(8)
+            .padding(iced::Padding {
+                top: 8.0,
+                right: 8.0,
+                bottom: 0.0,
+                left: 8.0,
+            })
             .width(Length::Fill)
             .height(Length::Fill);
 
@@ -113,15 +160,8 @@ impl App {
         // device can take its share of whatever width the section has left.
         let mut cards: Vec<Option<Element<'a, Message>>> = Vec::new();
         let mut used = 0.0;
-        // The native synth and sampler take a flexible share like the
-        // effects do.
-        let synth = crate::domains::synth::is_native_synth(track);
-        let sampler = crate::domains::sampler::is_native_sampler(track);
-        let drum_rack = crate::domains::sampler::is_native_drum_rack(track);
-        let wavetable = crate::domains::wavetable::is_native_wavetable(track);
-        let fm = crate::domains::fm::is_native_fm(track);
-        let flexible_instrument = synth || sampler || drum_rack || wavetable || fm;
-        if flexible_instrument {
+        let native = NativeInstrument::of(track);
+        if native.is_some() {
             cards.push(None);
         } else if let Some((card, width)) = self.instrument_card(track_id, track, track_color) {
             cards.push(Some(card));
@@ -183,41 +223,27 @@ impl App {
                 self.state.transport.sample_rate,
             )));
         }
-        let shares = flexible.len() + usize::from(flexible_instrument);
+        let shares = flexible.len() + usize::from(native.is_some());
         let spacing = CHAIN_SPACING * cards.len().saturating_sub(1) as f32;
         let mut chain_width = used + spacing;
         if shares > 0 {
             let share = (available_width - used - spacing) / shares as f32;
-            let instrument_width = if synth {
-                crate::widgets::synth_device::card_width(share)
-            } else if sampler {
-                crate::widgets::sampler_device::card_width(share)
-            } else if wavetable {
-                crate::widgets::wavetable_device::card_width(share)
-            } else if fm {
-                crate::widgets::fm_device::card_width(share)
-            } else {
-                crate::widgets::drum_rack_device::card_width(share)
-            };
-            if flexible_instrument {
-                chain_width += instrument_width;
-            }
-            if synth {
-                cards[0] = Some(self.synth_card(track_id, track, track_color, instrument_width));
-            }
-            if sampler {
-                cards[0] = Some(self.sampler_card(track_id, track, track_color, instrument_width));
-            }
-            if wavetable {
-                cards[0] =
-                    Some(self.wavetable_card(track_id, track, track_color, instrument_width));
-            }
-            if fm {
-                cards[0] = Some(self.fm_card(track_id, track, track_color, instrument_width));
-            }
-            if drum_rack {
-                cards[0] =
-                    Some(self.drum_rack_card(track_id, track, track_color, instrument_width));
+            if let Some(native) = native {
+                let width = native.card_width(share, available_width);
+                chain_width += width;
+                cards[0] = Some(match native {
+                    NativeInstrument::Synth => self.synth_card(track_id, track, track_color, width),
+                    NativeInstrument::Sampler => {
+                        self.sampler_card(track_id, track, track_color, width)
+                    }
+                    NativeInstrument::DrumRack => {
+                        self.drum_rack_card(track_id, track, track_color, width)
+                    }
+                    NativeInstrument::Wavetable => {
+                        self.wavetable_card(track_id, track, track_color, width)
+                    }
+                    NativeInstrument::Fm => self.fm_card(track_id, track, track_color, width),
+                });
             }
             for (position, effect, sidechain, kind) in flexible {
                 let width = kind.card_width(share, available_width);
@@ -270,19 +296,29 @@ impl App {
 
         // Built with its direction: the default vertical check rejects the
         // full-height cards before a later `.direction` could apply.
+        use crate::widgets::device_chrome::{
+            chain_bar_room, CHAIN_BAR_GAP, CHAIN_BAR_W, CHAIN_PAD_BELOW,
+        };
+        let overflows = chain_bar_room(chain_width, available_width) > 0.0;
         let bar = scrollable::Scrollbar::new()
-            .width(crate::widgets::device_chrome::CHAIN_BAR_W)
-            .scroller_width(crate::widgets::device_chrome::CHAIN_BAR_W);
-        let bar =
-            if crate::widgets::device_chrome::chain_bar_room(chain_width, available_width) > 0.0 {
-                bar.spacing(crate::widgets::device_chrome::CHAIN_BAR_GAP)
-            } else {
-                bar
-            };
-        scrollable::Scrollable::with_direction(devices_row, scrollable::Direction::Horizontal(bar))
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into()
+            .width(CHAIN_BAR_W)
+            .scroller_width(CHAIN_BAR_W);
+        let bar = if overflows {
+            bar.spacing(CHAIN_BAR_GAP)
+        } else {
+            bar
+        };
+        let chain = scrollable::Scrollable::with_direction(
+            devices_row,
+            scrollable::Direction::Horizontal(bar),
+        )
+        .width(Length::Fill)
+        .height(Length::Fill);
+        if overflows {
+            chain.into()
+        } else {
+            column![chain, iced::widget::Space::with_height(CHAIN_PAD_BELOW)].into()
+        }
     }
 
     /// The channel's instrument card and its width, or the placeholder that
@@ -853,5 +889,98 @@ impl App {
                 .width(Length::Fixed(PLACEHOLDER_W))
                 .align_x(iced::Alignment::Center),
         )
+    }
+}
+
+#[cfg(test)]
+mod width_tests {
+    use super::{Flexible, NativeInstrument};
+    use crate::widgets::device_chrome::CardWidths;
+
+    const EFFECTS: [(Flexible, CardWidths); 14] = [
+        (Flexible::Gain, crate::widgets::gain_device::WIDTHS),
+        (Flexible::Eq, crate::widgets::eq_device::WIDTHS),
+        (
+            Flexible::Compressor,
+            crate::widgets::compressor_device::WIDTHS,
+        ),
+        (Flexible::Limiter, crate::widgets::limiter_device::WIDTHS),
+        (Flexible::Filter, crate::widgets::filter_device::WIDTHS),
+        (Flexible::Gate, crate::widgets::gate_device::WIDTHS),
+        (Flexible::Drive, crate::widgets::drive_device::WIDTHS),
+        (
+            Flexible::Saturator,
+            crate::widgets::saturator_device::WIDTHS,
+        ),
+        (Flexible::Bitcrush, crate::widgets::bitcrush_device::WIDTHS),
+        (Flexible::Delay, crate::widgets::delay_device::WIDTHS),
+        (Flexible::Echo, crate::widgets::echo_device::WIDTHS),
+        (Flexible::Reverb, crate::widgets::reverb_device::WIDTHS),
+        (Flexible::Phaser, crate::widgets::phaser_device::WIDTHS),
+        (Flexible::AutoPan, crate::widgets::auto_pan_device::WIDTHS),
+    ];
+
+    const INSTRUMENTS: [(NativeInstrument, CardWidths); 5] = [
+        (
+            NativeInstrument::Synth,
+            crate::widgets::synth_device::WIDTHS,
+        ),
+        (
+            NativeInstrument::Sampler,
+            crate::widgets::sampler_device::WIDTHS,
+        ),
+        (
+            NativeInstrument::DrumRack,
+            crate::widgets::drum_rack_device::WIDTHS,
+        ),
+        (
+            NativeInstrument::Wavetable,
+            crate::widgets::instrument_bands::WIDTHS,
+        ),
+        (
+            NativeInstrument::Fm,
+            crate::widgets::instrument_bands::WIDTHS,
+        ),
+    ];
+
+    /// A device's name, its width for a share of a section, and its table.
+    type Device = (String, Box<dyn Fn(f32, f32) -> f32>, CardWidths);
+
+    fn every_device() -> Vec<Device> {
+        let mut all: Vec<Device> = Vec::new();
+        for (kind, widths) in EFFECTS {
+            all.push((
+                format!("{kind:?}"),
+                Box::new(move |s, a| kind.card_width(s, a)),
+                widths,
+            ));
+        }
+        for (kind, widths) in INSTRUMENTS {
+            all.push((
+                format!("{kind:?}"),
+                Box::new(move |s, a| kind.card_width(s, a)),
+                widths,
+            ));
+        }
+        all
+    }
+
+    #[test]
+    fn a_crowded_chain_keeps_every_device_expanded_and_scrolls() {
+        for (name, width, widths) in every_device() {
+            assert!(
+                width(100.0, 1_900.0) >= widths.expanded,
+                "{name}: {} under {}",
+                width(100.0, 1_900.0),
+                widths.expanded
+            );
+        }
+    }
+
+    #[test]
+    fn a_roomy_chain_still_lets_every_device_grow_to_its_maximum() {
+        for (name, width, widths) in every_device() {
+            assert_eq!(width(5_000.0, 5_000.0), widths.max, "{name}");
+        }
     }
 }

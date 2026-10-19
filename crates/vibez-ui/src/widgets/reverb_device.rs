@@ -34,13 +34,17 @@ const LINE_ITEM_W: f32 = 124.0;
 pub const COMPACT_W: f32 = 420.0;
 pub const MAX_W: f32 = 1000.0;
 
-pub fn card_width(available: f32) -> f32 {
-    if available >= COMPACT_W {
-        available.min(MAX_W)
-    } else {
-        COMPACT_W
-    }
-}
+/// Every control fits on the short card's one line.
+pub const FULL_W: f32 = PAD * 2.0 + 5.0 * LINE_ITEM_W + 4.0 * 10.0;
+
+/// The widths this card lays itself out for.
+pub const WIDTHS: crate::widgets::device_chrome::CardWidths =
+    crate::widgets::device_chrome::CardWidths {
+        compact: COMPACT_W,
+        medium: COMPACT_W,
+        expanded: FULL_W,
+        max: MAX_W,
+    };
 
 pub fn preset_bar_width(size: Size) -> f32 {
     size.width - PAD * 2.0 - 90.0

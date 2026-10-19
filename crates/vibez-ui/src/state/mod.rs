@@ -128,6 +128,11 @@ pub struct ViewState {
     /// Short-lived, engine-authored note flashes for device feedback.
     /// This is view state only and is never persisted with the project.
     pub(crate) drum_pad_flash_until: HashMap<(TrackId, u8), std::time::Instant>,
+    /// Modifier keys held now, for mouse clicks that change meaning with
+    /// them.
+    pub held_modifiers: iced::keyboard::Modifiers,
+    /// The bank of buses the mixer's send rows show.
+    pub mixer_send_bank: usize,
 }
 impl Default for ViewState {
     fn default() -> Self {
@@ -156,6 +161,8 @@ impl Default for ViewState {
             editing_clip_name: None,
             edit_name_text: String::new(),
             drum_pad_flash_until: HashMap::new(),
+            held_modifiers: iced::keyboard::Modifiers::empty(),
+            mixer_send_bank: 0,
         }
     }
 }
@@ -543,6 +550,9 @@ impl std::ops::DerefMut for TimelineEditorState {
 pub struct ArrangementState {
     pub(crate) editor: TimelineEditorState,
     pub pending_project_track_deletion: Option<TrackId>,
+    /// Mixer channels selected together, in mixer order. A fader, pan,
+    /// send, mute or solo moved on one of them moves them all.
+    pub selected_channels: Vec<TrackId>,
 }
 impl std::ops::Deref for ArrangementState {
     type Target = TimelineEditorState;

@@ -565,7 +565,7 @@ impl App {
         let small = clip_layout && pad_size < 60.0;
         let title_size = if small { 9.0 } else { 13.0 };
         let title = if clip_layout {
-            crate::widgets::clip_slot::fit(
+            crate::typography::fit(
                 &title,
                 pad_size - if small { 4.0 } else { 16.0 },
                 title_size,

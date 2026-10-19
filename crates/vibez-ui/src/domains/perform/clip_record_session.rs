@@ -358,6 +358,40 @@ mod tests {
     }
 
     #[test]
+    fn the_record_toggle_records_into_the_selected_cell_and_finishes_its_take() {
+        let mut state = PerformState {
+            layout: vibez_project::PerformLayout::Clips,
+            ..Default::default()
+        };
+        let mut engine = RecordingEngine::default();
+        let ctx = PerformCtx::default();
+        let unselected = state.update(PerformMsg::ToggleRecord, &mut engine, ctx);
+        assert_eq!(unselected.clip_record, None);
+        assert!(unselected.status.is_some(), "says to pick a cell first");
+
+        let track = TrackId::new();
+        state.clip_editor.slot = Some((track, 2));
+        assert_eq!(
+            state
+                .update(PerformMsg::ToggleRecord, &mut engine, ctx)
+                .clip_record,
+            Some(ClipRecordAction::Start {
+                track_id: track,
+                row: 2
+            })
+        );
+
+        state.clip_record = recording(Some(400), LoopRecordMode::Overdub);
+        assert_eq!(
+            state
+                .update(PerformMsg::ToggleRecord, &mut engine, ctx)
+                .clip_record,
+            Some(ClipRecordAction::Stop),
+            "finishes the take wherever the selection has moved"
+        );
+    }
+
+    #[test]
     fn cancellation_during_count_in_clears_engine_and_restores_the_slot() {
         let mut state = PerformState {
             clip_record: recording(Some(400), LoopRecordMode::Replace),

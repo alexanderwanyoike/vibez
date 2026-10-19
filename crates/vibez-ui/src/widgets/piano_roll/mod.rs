@@ -236,18 +236,68 @@ fn clamp_scroll_y(scroll_y: f32, canvas_height: f32) -> f32 {
 
 pub(crate) use vibez_core::midi::pitch_name;
 
+/// Up and Down move selected notes a semitone, or an octave with Shift.
+fn semitone_step(modifiers: iced::keyboard::Modifiers) -> i8 {
+    if modifiers.shift() {
+        12
+    } else {
+        1
+    }
+}
+
+/// A note as it stood when a move began.
+#[derive(Debug, Clone, Copy)]
+struct MovedNote {
+    index: usize,
+    pitch: u8,
+    start_beat: f64,
+    duration_beats: f64,
+}
+
+/// Where every moved note lands for an offset of `beats` and `semitones`,
+/// the offset first held back so the whole group stays inside the clip's
+/// `total_beats` and the MIDI range and keeps its shape.
+fn moved_notes(
+    notes: &[MovedNote],
+    beats: f64,
+    semitones: i16,
+    total_beats: f64,
+) -> Vec<(usize, f64, u8)> {
+    let earliest = notes
+        .iter()
+        .map(|note| note.start_beat)
+        .fold(f64::MAX, f64::min);
+    let latest_end = notes
+        .iter()
+        .map(|note| note.start_beat + note.duration_beats)
+        .fold(f64::MIN, f64::max);
+    let lowest = notes.iter().map(|note| note.pitch).min().unwrap_or(0) as i16;
+    let highest = notes.iter().map(|note| note.pitch).max().unwrap_or(0) as i16;
+    let beats = beats.clamp(-earliest, (total_beats - latest_end).max(-earliest));
+    let semitones = semitones.clamp(LOW_NOTE as i16 - lowest, HIGH_NOTE as i16 - 1 - highest);
+    notes
+        .iter()
+        .map(|note| {
+            (
+                note.index,
+                note.start_beat + beats,
+                (note.pitch as i16 + semitones) as u8,
+            )
+        })
+        .collect()
+}
+
 /// Drag action in progress.
 #[derive(Debug, Clone)]
 #[allow(clippy::enum_variant_names)]
 enum DragAction {
+    /// Moving the grabbed note and every note selected with it, together.
     MoveNote {
-        note_index: usize,
-        original_pitch: u8,
         original_start_beat: f64,
-        /// All selected notes: (index, pitch, start_beat)
-        original_notes: Vec<(usize, u8, f64)>,
+        original_notes: Vec<MovedNote>,
         start_x: f32,
         start_y: f32,
+        undo_gesture: UndoGestureId,
     },
     ResizeNote {
         note_index: usize,
@@ -515,21 +565,23 @@ impl canvas::Program<Message> for PianoRollWidget {
                                     }
                                 };
 
-                                let original_notes: Vec<(usize, u8, f64)> = selected_set
+                                let original_notes: Vec<MovedNote> = selected_set
                                     .iter()
                                     .filter(|&&i| i < clip_data.notes.len())
-                                    .map(|&i| {
-                                        (i, clip_data.notes[i].pitch, clip_data.notes[i].start_beat)
+                                    .map(|&i| MovedNote {
+                                        index: i,
+                                        pitch: clip_data.notes[i].pitch,
+                                        start_beat: clip_data.notes[i].start_beat,
+                                        duration_beats: clip_data.notes[i].duration_beats,
                                     })
                                     .collect();
 
                                 state.drag = Some(DragAction::MoveNote {
-                                    note_index: idx,
-                                    original_pitch: note.pitch,
                                     original_start_beat: note.start_beat,
                                     original_notes,
                                     start_x: pos.x,
                                     start_y: pos.y,
+                                    undo_gesture: UndoGestureId::new(),
                                 });
                             }
 
@@ -639,48 +691,38 @@ impl canvas::Program<Message> for PianoRollWidget {
 
                             match drag {
                                 DragAction::MoveNote {
-                                    note_index,
-                                    original_pitch,
                                     original_start_beat,
+                                    original_notes,
                                     start_x,
                                     start_y,
-                                    ..
+                                    undo_gesture,
                                 } => {
                                     let dx = local.x - start_x;
                                     let dy = local.y - start_y;
                                     let beat_delta = geometry.beats_for_width(dx);
                                     let pitch_delta = -(dy / KEY_HEIGHT).round() as i16;
-
-                                    let anchor_new_beat = self
-                                        .snapped_beat(original_start_beat + beat_delta, &bounds);
-                                    let snapped_beat_delta = anchor_new_beat - original_start_beat;
-
-                                    // Move anchor note for visual feedback (works for both
-                                    // single and multi-note drag; other notes move on release)
-                                    let idx = *note_index;
-                                    if idx < clip_data.notes.len() {
-                                        let max_beat = (self.total_beats
-                                            - clip_data.notes[idx].duration_beats)
-                                            .max(0.0);
-                                        let new_beat = (original_start_beat + snapped_beat_delta)
-                                            .clamp(0.0, max_beat);
-                                        let new_pitch = (*original_pitch as i16 + pitch_delta)
-                                            .clamp(LOW_NOTE as i16, HIGH_NOTE as i16 - 1)
-                                            as u8;
-
-                                        let mut note = clip_data.notes[idx];
-                                        note.start_beat = new_beat;
-                                        note.pitch = new_pitch;
-                                        return (
-                                            canvas::event::Status::Captured,
-                                            Some(Message::PianoRoll(PianoRollMsg::EditNote(
-                                                self.track_id,
-                                                clip_data.clip_id,
-                                                idx,
-                                                note,
-                                            ))),
-                                        );
-                                    }
+                                    // The grabbed note snaps; the rest keep their
+                                    // places against it.
+                                    let snapped_beat_delta = self
+                                        .snapped_beat(original_start_beat + beat_delta, &bounds)
+                                        - original_start_beat;
+                                    let moves = moved_notes(
+                                        original_notes,
+                                        snapped_beat_delta,
+                                        pitch_delta,
+                                        self.total_beats,
+                                    );
+                                    return (
+                                        canvas::event::Status::Captured,
+                                        Some(
+                                            Message::PianoRoll(PianoRollMsg::MoveNotesAbsolute {
+                                                track_id: self.track_id,
+                                                clip_id: clip_data.clip_id,
+                                                moves,
+                                            })
+                                            .in_undo_gesture(*undo_gesture),
+                                        ),
+                                    );
                                 }
                                 DragAction::ResizeNote {
                                     note_index,
@@ -802,63 +844,6 @@ impl canvas::Program<Message> for PianoRollWidget {
                         return (canvas::event::Status::Captured, None);
                     }
 
-                    // On release of a multi-note drag, move all non-anchor notes
-                    if let DragAction::MoveNote {
-                        note_index,
-                        original_start_beat,
-                        ref original_notes,
-                        start_x,
-                        start_y,
-                        ..
-                    } = drag
-                    {
-                        if original_notes.len() > 1 {
-                            if let Some(ref clip_data) = self.clip {
-                                if let Some(pos) = state.last_cursor {
-                                    let geometry = self.geometry(&bounds);
-
-                                    let dx = pos.x - start_x;
-                                    let dy = pos.y - start_y;
-                                    let beat_delta = geometry.beats_for_width(dx);
-                                    let pitch_delta = -(dy / KEY_HEIGHT).round() as i16;
-
-                                    let anchor_new_beat = self
-                                        .snapped_beat(original_start_beat + beat_delta, &bounds);
-                                    let snapped_beat_delta = anchor_new_beat - original_start_beat;
-
-                                    // Compute absolute positions for all selected notes
-                                    // (anchor was already moved during drag, non-anchor need moving)
-                                    let moves: Vec<(usize, f64, u8)> = original_notes
-                                        .iter()
-                                        .filter(|(i, _, _)| {
-                                            *i != note_index && *i < clip_data.notes.len()
-                                        })
-                                        .map(|(i, orig_pitch, orig_beat)| {
-                                            let new_beat =
-                                                (orig_beat + snapped_beat_delta).max(0.0);
-                                            let new_pitch = (*orig_pitch as i16 + pitch_delta)
-                                                .clamp(LOW_NOTE as i16, HIGH_NOTE as i16 - 1)
-                                                as u8;
-                                            (*i, new_beat, new_pitch)
-                                        })
-                                        .collect();
-
-                                    if !moves.is_empty() {
-                                        return (
-                                            canvas::event::Status::Captured,
-                                            Some(Message::PianoRoll(
-                                                PianoRollMsg::MoveNotesAbsolute {
-                                                    track_id: self.track_id,
-                                                    clip_id: clip_data.clip_id,
-                                                    moves,
-                                                },
-                                            )),
-                                        );
-                                    }
-                                }
-                            }
-                        }
-                    }
                     return (canvas::event::Status::Captured, None);
                 }
             }
@@ -923,6 +908,7 @@ impl canvas::Program<Message> for PianoRollWidget {
             }
             canvas::Event::Keyboard(iced::keyboard::Event::KeyPressed {
                 key: iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowUp),
+                modifiers,
                 ..
             }) if !self.reserve_arrow_keys => {
                 if let Some(ref clip_data) = self.clip {
@@ -933,7 +919,7 @@ impl canvas::Program<Message> for PianoRollWidget {
                                 track_id: self.track_id,
                                 clip_id: clip_data.clip_id,
                                 delta_beats: 0.0,
-                                delta_semitones: 1,
+                                delta_semitones: semitone_step(modifiers),
                             })),
                         );
                     }
@@ -941,6 +927,7 @@ impl canvas::Program<Message> for PianoRollWidget {
             }
             canvas::Event::Keyboard(iced::keyboard::Event::KeyPressed {
                 key: iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowDown),
+                modifiers,
                 ..
             }) if !self.reserve_arrow_keys => {
                 if let Some(ref clip_data) = self.clip {
@@ -951,7 +938,7 @@ impl canvas::Program<Message> for PianoRollWidget {
                                 track_id: self.track_id,
                                 clip_id: clip_data.clip_id,
                                 delta_beats: 0.0,
-                                delta_semitones: -1,
+                                delta_semitones: -semitone_step(modifiers),
                             })),
                         );
                     }

@@ -498,10 +498,16 @@ footer .for-mum { flex-basis: 100%; }
         <li><b>Track Mutes <kbd>F2</kbd></b><span>Bring parts in and out from the same pads. You can turn one loop into a full arrangement just by performing the mutes.</span></li>
         <li><b>Instrument <kbd>F3</kbd></b><span>The selected instrument is mapped to sixteen pads, with Full Level, 16 Levels and Note Repeat.</span></li>
         <li><b>Feel</b><span>Swing is modelled on the MPC2000XL and can live at project, track or clip level.</span></li>
+        <li><b>Clip launcher</b><span>Or give every track its own column of clips. Launch, copy, paste and drag them, and Play picks up whatever was playing when you stopped.</span></li>
+        <li><b>Record <kbd>F4</kbd></b><span>Record a take with a count-in, into the selected Section or the selected clip cell.</span></li>
       </ul>
       <figure class="shot">
-        <img src="images/band-perform.webp" alt="The Perform workspace: a 16 pad grid of named Sections beside the Section editor" width="1100">
-        <figcaption>Perform &middot; Sections mode &middot; Bank 1 &middot; the Section editor on the right</figcaption>
+        <img src="images/band-perform.webp" alt="The Perform workspace: a 16 pad grid of named Sections, one playing, beside the Section editor, with a channel EQ below" width="1100">
+        <figcaption>Perform &middot; Sections mode &middot; Build 2 playing &middot; the Chords EQ in the rack below</figcaption>
+      </figure>
+      <figure class="shot">
+        <img src="images/band-clips.webp" alt="The clip launcher: a column of clips per track, several playing, with a warped audio clip open in the editor" width="1100" loading="lazy">
+        <figcaption>Perform &middot; clip launcher &middot; clips playing across three rows &middot; a warped audio clip in the editor</figcaption>
       </figure>
     </section>
   </div>
@@ -533,8 +539,8 @@ footer .for-mum { flex-basis: 100%; }
         <li><b>Autosave</b><span>Projects are saved to a versioned, self-contained file, with autosave working in the background.</span></li>
       </ul>
       <figure class="shot">
-        <img src="images/band-arrange.webp" alt="A captured performance written into the Arrangement, with Track Mute automation lanes" width="1100">
-        <figcaption>Arrange &middot; a captured take &middot; Track Mute automation written alongside the clips</figcaption>
+        <img src="images/band-arrange.webp" alt="A captured performance written into the Arrangement, with a channel EQ and its live spectrum below" width="1100">
+        <figcaption>Arrange &middot; a captured take &middot; the Chords EQ with its live spectrum</figcaption>
       </figure>
     </div>
   </section>
@@ -547,13 +553,14 @@ footer .for-mum { flex-basis: 100%; }
         <span class="role">Mix</span>
       </div>
       <p class="lede">
-        The Mix view is laid out like an analogue desk. Every channel has a four-band EQ, and there
-        are buses, returns and sends. The master behaves like a normal channel too. The device rack
-        follows the selected channel and hosts vibez instruments, VST3 plugins and CLAP plugins.
+        The Mix view is laid out like an analogue desk. Every channel has a four-band EQ, named
+        sends to its returns, and a fader with a proper dB scale beside an LED meter. Select a few
+        channels and move them together. The master behaves like a normal channel too. The device
+        rack follows the selected channel and hosts vibez instruments, VST3 plugins and CLAP plugins.
       </p>
       <figure class="shot">
         <img src="images/band-mix.webp" alt="The Mix workspace: channel strips with EQ curves, the master channel, and the device rack" width="1100">
-        <figcaption>Mix &middot; channel EQ &middot; master channel &middot; device rack</figcaption>
+        <figcaption>Mix &middot; channel EQ and sends &middot; Reverb and Delay returns &middot; the Reverb return's rack</figcaption>
       </figure>
     </section>
 
@@ -629,7 +636,7 @@ footer .for-mum { flex-basis: 100%; }
           <div class="krow"><span class="kb"><kbd>F1</kbd></span><dfn>Sections mode</dfn></div>
           <div class="krow"><span class="kb"><kbd>F2</kbd></span><dfn>Track Mutes mode</dfn></div>
           <div class="krow"><span class="kb"><kbd>F3</kbd></span><dfn>Instrument mode</dfn></div>
-          <div class="krow"><span class="kb"><kbd>F4</kbd></span><dfn>Section Record on and off</dfn></div>
+          <div class="krow"><span class="kb"><kbd>F4</kbd></span><dfn>Record on and off: Section Record, or the selected Clip cell</dfn></div>
           <div class="krow"><span class="kb"><kbd>F5</kbd></span><dfn>Capture into Arrange</dfn></div>
           <div class="krow"><span class="kb"><kbd>1</kbd><kbd>Q</kbd><kbd>A</kbd><kbd>Z</kbd></span><dfn>The pads, four rows of four, rebindable</dfn></div>
           <div class="krow"><span class="kb"><kbd>[</kbd><kbd>]</kbd></span><dfn>Previous and next pad bank</dfn></div>
@@ -673,6 +680,7 @@ footer .for-mum { flex-basis: 100%; }
           <div class="krow"><span class="kb"><kbd>Ctrl</kbd><kbd>A</kbd></span><dfn>Select every note in the clip</dfn></div>
           <div class="krow"><span class="kb"><kbd>&larr;</kbd> <kbd>&rarr;</kbd></span><dfn>Nudge selected notes by one grid step</dfn></div>
           <div class="krow"><span class="kb"><kbd>&uarr;</kbd> <kbd>&darr;</kbd></span><dfn>Transpose selected notes by a semitone</dfn></div>
+          <div class="krow"><span class="kb"><kbd>Shift</kbd> <kbd>&uarr;</kbd> <kbd>&darr;</kbd></span><dfn>Transpose selected notes by an octave</dfn></div>
           <div class="krow"><span class="kb"><kbd>&uarr;</kbd> <kbd>&darr;</kbd></span><dfn>With no notes selected, moves through Browser results</dfn></div>
           <div class="krow"><span class="kb"><kbd>Enter</kbd></span><dfn>Import the selected Browser sample into the arrangement</dfn></div>
           <div class="krow"><span class="kb"><kbd>Alt</kbd><kbd>&larr;</kbd> <kbd>&rarr;</kbd></span><dfn>Make the Browser narrower and wider</dfn></div>
@@ -869,9 +877,9 @@ cd vibez &amp;&amp; cargo run --release</code>
     { k: 'X', n: 'Warping',         m: 'Browser and Arrange', s: 'images/warping.webp', c: 'Browser \u00b7 warp audition \u00b7 source 132.7 detected against project 128',
       d: 'Preview a loop against the playing track. Warp detects its tempo, fits it to the project BPM and keeps it there when the tempo changes.' },
     { k: 'C', n: 'Channel EQ',      m: 'Mix', s: 'images/channeleq.webp', c: 'Mix \u00b7 every channel with its own four band EQ',
-      d: 'Every channel has a four band EQ. Buses, returns, sends and the master use the same channel strip.' },
-    { k: 'V', n: 'Device rack',     m: 'Mix', s: 'images/devicerack.webp', c: 'Mix \u00b7 the rack following the selected channel',
-      d: 'The rack holds the built-in synth, sampler and drum rack. It also loads VST3 and CLAP plugins with their native interfaces. Plugin scanning runs in a separate process, so a broken plugin does not crash vibez.' }
+      d: 'Every channel has a four band EQ and named sends to the returns. Returns and the master use the same channel strip.' },
+    { k: 'V', n: 'Device rack',     m: 'Mix', s: 'images/devicerack.webp', c: 'Mix \u00b7 the Sampler in the rack of the selected channel',
+      d: 'The rack holds vibez\u2019s own synths, sampler, drum rack and effects. It also loads VST3 and CLAP plugins with their native interfaces. Plugin scanning runs in a separate process, so a broken plugin does not crash vibez.' }
   ];
   var HUES = ['var(--kick)', 'var(--chords)', 'var(--chat)', 'var(--clap)'];
   var RGBA = ['rgba(204,127,61,.16)', 'rgba(188,174,64,.16)', 'rgba(82,164,96,.16)', 'rgba(63,149,164,.16)'];
