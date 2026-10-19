@@ -57,6 +57,22 @@ pub enum ClipRecordAction {
 }
 
 impl PerformState {
+    /// Finishes the take in progress, or records into the selected cell.
+    pub(super) fn toggle_clip_record(&mut self) -> PerformAction {
+        let take = self
+            .clip_record
+            .session
+            .as_ref()
+            .map(|session| (session.working.track_id, session.working.row));
+        match take.or(self.clip_editor.slot) {
+            Some((track_id, row)) => self.update_clip_record(ClipRecordMsg::Slot(track_id, row)),
+            None => PerformAction {
+                status: Some("Select a cell to record into"),
+                ..Default::default()
+            },
+        }
+    }
+
     pub(super) fn update_clip_record(&mut self, msg: ClipRecordMsg) -> PerformAction {
         if self.layout != vibez_project::PerformLayout::Clips {
             return PerformAction::default();

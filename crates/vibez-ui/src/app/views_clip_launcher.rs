@@ -654,7 +654,7 @@ impl App {
         }
         let footer = row![
             text(if keyboard_active {
-                "Keys toggle · Empty cell stops track · Alt + key launches row · F5 Capture"
+                "Keys toggle · Empty cell stops track · Alt + key launches row · F4 Record · F5 Capture"
             } else {
                 "F1 Clips · Double-click names to edit"
             })
