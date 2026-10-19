@@ -19,7 +19,7 @@ use crate::message::Message;
 use crate::widgets::device_controls::{segmented, Param};
 use crate::widgets::device_layout::KNOB_ROW_H;
 pub use crate::widgets::instrument_bands::{
-    card_width, preset_bar_width, Form, COMPACT_W, FULL_W, MAX_W, MEDIUM_W,
+    preset_bar_width, Form, COMPACT_W, FULL_W, MAX_W, MEDIUM_W,
 };
 use crate::widgets::instrument_bands::{
     BandCard, Group, PlotKind, Tier, BAND_PAD, HEADER_H, STRIP_H,

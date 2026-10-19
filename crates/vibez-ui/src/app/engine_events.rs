@@ -419,6 +419,12 @@ impl App {
                         drop(retired);
                     }
                     EngineEvent::PlaybackStopped => {
+                        let editor = &mut self.state.perform.clip_editor;
+                        editor.resume = editor
+                            .playing
+                            .iter()
+                            .map(|(track, clip)| (*track, clip.id))
+                            .collect();
                         self.state.perform.clip_editor.running = false;
                         self.state.perform.clip_editor.playing.clear();
                         self.state.perform.clip_editor.started_at.clear();

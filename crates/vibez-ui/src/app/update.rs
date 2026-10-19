@@ -87,18 +87,23 @@ impl App {
         };
         let message = if self.state.view.workspace == crate::state::Workspace::Perform
             && self.state.perform.layout == vibez_project::PerformLayout::Clips
-            && matches!(
-                &message,
+        {
+            use crate::domains::perform::ClipMsg;
+            let launcher = |msg| Message::Perform(PerformMsg::Clips(msg));
+            match message {
                 Message::Arrangement(
-                    ArrangementMsg::DuplicateSelectedClip | ArrangementMsg::DuplicateNoteClip(..)
-                )
-            ) {
-            let Some(id) = self.state.perform.clip_editor.selected else {
-                return Task::none();
-            };
-            Message::Perform(PerformMsg::Clips(
-                crate::domains::perform::ClipMsg::Duplicate(id),
-            ))
+                    ArrangementMsg::DuplicateSelectedClip | ArrangementMsg::DuplicateNoteClip(..),
+                ) => {
+                    let Some(id) = self.state.perform.clip_editor.selected else {
+                        return Task::none();
+                    };
+                    launcher(ClipMsg::Duplicate(id))
+                }
+                Message::Arrangement(ArrangementMsg::CopySelectedClips) => launcher(ClipMsg::Copy),
+                Message::Arrangement(ArrangementMsg::CutSelectedClips) => launcher(ClipMsg::Cut),
+                Message::Arrangement(ArrangementMsg::PasteClips) => launcher(ClipMsg::Paste),
+                message => message,
+            }
         } else {
             message
         };
@@ -280,10 +285,23 @@ impl App {
                 if self.state.view.workspace == crate::state::Workspace::Perform
                     && self.state.perform.layout == vibez_project::PerformLayout::Clips
                     && !self.state.transport.playing
-                    && matches!(msg, crate::domains::transport::TransportMsg::TogglePlayback)
+                    && matches!(
+                        msg,
+                        crate::domains::transport::TransportMsg::TogglePlayback
+                            | crate::domains::transport::TransportMsg::Play
+                    )
                 {
                     self.state.perform.clip_editor.running = true;
                     self.send_command(vibez_engine::commands::EngineCommand::BeginClipPerformance);
+                    let resume = std::mem::take(&mut self.state.perform.clip_editor.resume);
+                    for clip in resume.into_values() {
+                        // A clip deleted while stopped has nothing to resume.
+                        if self.state.perform.clips.by_id(clip).is_some() {
+                            self.launch_clips(crate::domains::perform::ClipLaunchRequest::Clip(
+                                clip,
+                            ));
+                        }
+                    }
                     return Task::none();
                 }
                 if self.place_focused_section_playhead(&msg) {
@@ -618,7 +636,17 @@ impl App {
                 }
             }
             Message::Perform(msg) => {
-                return self.route_perform_message(msg);
+                if !msg.defers_project_edit() {
+                    return self.route_perform_message(msg);
+                }
+                let (snapshot, clips) =
+                    (self.take_snapshot(), Arc::clone(&self.state.perform.clips));
+                let task = self.route_perform_message(msg);
+                if !Arc::ptr_eq(&clips, &self.state.perform.clips) {
+                    self.state.project.history.push_edit(snapshot, undo_gesture);
+                    self.mark_project_dirty();
+                }
+                return task;
             }
             Message::SectionResidencyReady {
                 request_id,

@@ -323,9 +323,6 @@ impl ArrangementMsg {
         matches!(
             self,
             Self::MoveClipToTrack { .. }
-                | Self::CopySelectedClips
-                | Self::CutSelectedClips
-                | Self::PasteClips
                 | Self::SplitAudioClip { .. }
                 | Self::SliceAudioClipAtMarkers { .. }
                 | Self::RequestSliceAudioClipToDrumRack { .. }

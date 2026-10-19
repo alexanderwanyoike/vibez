@@ -523,3 +523,68 @@ fn a_selection_dragged_past_the_clip_start_keeps_its_shape() {
     // The group stops at the clip start together: the chord keeps its shape.
     assert_eq!(moves, vec![(0, 0.0, 60), (1, 2.0, 64)]);
 }
+
+#[test]
+fn shift_with_up_or_down_moves_selected_notes_an_octave() {
+    use iced::keyboard::key::{Named, Physical};
+    use iced::keyboard::{Event, Key, Location, Modifiers};
+    let clip = UiNoteClip {
+        id: ClipId::new(),
+        name: "Riff".into(),
+        position_beats: 0.0,
+        duration_beats: 4.0,
+        notes: vec![MidiNote {
+            pitch: 60,
+            start_beat: 0.0,
+            duration_beats: 1.0,
+            velocity: 100,
+        }],
+        selected_notes: HashSet::from([0]),
+        start_marker_beats: 0.0,
+        loop_enabled: false,
+        loop_start_beats: 0.0,
+        loop_end_beats: 4.0,
+        groove_grid: vibez_core::perform::GrooveGrid::Off,
+    };
+    let bounds = Rectangle::new(Point::ORIGIN, iced::Size::new(852.0, 400.0));
+    let widget = PianoRollWidget::from_clip(
+        TrackId::new(),
+        &clip,
+        0.0,
+        4.0,
+        Color::WHITE,
+        GridConfig::new(SnapGrid::SIXTEENTH, true, false, 0),
+        default_scroll_y(bounds.height),
+        PianoRollEditMode::Select,
+    );
+    for (named, modifiers, expected) in [
+        (Named::ArrowUp, Modifiers::SHIFT, 12),
+        (Named::ArrowDown, Modifiers::SHIFT, -12),
+        (Named::ArrowUp, Modifiers::empty(), 1),
+    ] {
+        let message = widget
+            .update(
+                &mut PianoRollState::default(),
+                canvas::Event::Keyboard(Event::KeyPressed {
+                    key: Key::Named(named),
+                    modified_key: Key::Named(named),
+                    physical_key: Physical::Unidentified(
+                        iced::keyboard::key::NativeCode::Unidentified,
+                    ),
+                    location: Location::Standard,
+                    modifiers,
+                    text: None,
+                }),
+                bounds,
+                mouse::Cursor::Unavailable,
+            )
+            .1;
+        assert!(
+            matches!(
+                piano_roll_message(message.clone()),
+                Some(PianoRollMsg::NudgeSelectedNotes { delta_semitones, .. }) if delta_semitones == expected
+            ),
+            "{named:?} {modifiers:?}: {message:?}"
+        );
+    }
+}
