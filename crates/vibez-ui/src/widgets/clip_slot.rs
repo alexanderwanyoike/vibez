@@ -63,17 +63,6 @@ fn label(
     });
 }
 
-pub(crate) fn fit(text: &str, width: f32, size: f32) -> String {
-    let limit = (width / (size * 0.61)).max(0.0) as usize;
-    if text.chars().count() <= limit {
-        text.into()
-    } else if limit < 3 {
-        String::new()
-    } else {
-        format!("{}..", text.chars().take(limit - 2).collect::<String>())
-    }
-}
-
 fn thumbnail_plot(size: Size, compact: bool, has_key: bool) -> Rectangle {
     let (w, h) = (size.width, size.height);
     if compact && h < 44.0 {
@@ -244,7 +233,7 @@ impl canvas::Program<Message> for ClipSlot<'_> {
             };
             label(
                 frame,
-                &fit(
+                &crate::typography::fit(
                     if self.recording && slot.timeline.get(slot.track_id).is_none() {
                         "Recording audio"
                     } else {
@@ -418,7 +407,7 @@ impl canvas::Program<Message> for LauncherTrackName<'_> {
         let mut frame = canvas::Frame::new(renderer, bounds.size());
         label(
             &mut frame,
-            &fit(self.name, bounds.width, 13.0),
+            &crate::typography::fit(self.name, bounds.width, 13.0),
             0.0,
             0.0,
             13.0,
