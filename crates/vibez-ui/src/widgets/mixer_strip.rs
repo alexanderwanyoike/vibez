@@ -28,6 +28,8 @@ pub enum StripRole {
 pub struct MixerStripView<'a> {
     pub peaks: (f32, f32),
     pub selected: bool,
+    /// Sent when the strip's chrome is clicked.
+    pub click: Message,
     pub editing_name: bool,
     pub edit_text: &'a str,
     pub playhead_beat: f64,
@@ -307,9 +309,7 @@ pub fn view_mixer_strip<'a>(
     // the detail panel follows the mixer like it follows the
     // arrangement headers. Knobs, faders, and buttons still win
     // their own clicks.
-    iced::widget::mouse_area(body)
-        .on_press(Message::select_track(track.id))
-        .into()
+    iced::widget::mouse_area(body).on_press(view.click).into()
 }
 
 /// Send section on a track strip: one knob per bus, bus-colored,

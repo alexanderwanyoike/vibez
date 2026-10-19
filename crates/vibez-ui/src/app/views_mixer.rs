@@ -39,7 +39,7 @@ impl App {
         let mut strips = row![].spacing(4).padding(8).height(Length::Fill);
 
         for track in &self.state.project_tracks.tracks {
-            let selected = self.state.arrangement.selected_track == Some(track.id);
+            let selected = self.channel_selected(track.id);
             let strip = view_mixer_strip(
                 track,
                 StripRole::Track,
@@ -51,6 +51,7 @@ impl App {
                         .copied()
                         .unwrap_or_default(),
                     selected,
+                    click: self.channel_click(track.id),
                     editing_name: self.state.view.editing_track_name == Some(track.id),
                     edit_text: &self.state.view.edit_name_text,
                     playhead_beat,
@@ -68,7 +69,7 @@ impl App {
         // appear where the "+ Bus" pillar sits, growing toward it.
         let mut right_group = row![].spacing(4).padding(8).height(Length::Fill);
         for bus in buses {
-            let selected = self.state.arrangement.selected_track == Some(bus.id);
+            let selected = self.channel_selected(bus.id);
             right_group = right_group.push(view_mixer_strip(
                 bus,
                 StripRole::Bus,
@@ -80,6 +81,7 @@ impl App {
                         .copied()
                         .unwrap_or_default(),
                     selected,
+                    click: self.channel_click(bus.id),
                     editing_name: self.state.view.editing_track_name == Some(bus.id),
                     edit_text: &self.state.view.edit_name_text,
                     playhead_beat,
@@ -139,6 +141,7 @@ impl App {
                     .copied()
                     .unwrap_or_default(),
                 selected: master_selected,
+                click: self.channel_click(vibez_core::id::TrackId::MASTER),
                 editing_name: false,
                 edit_text: &self.state.view.edit_name_text,
                 playhead_beat,
@@ -180,9 +183,27 @@ impl App {
 }
 
 impl App {
-    /// What a click on a channel strip does, given the keys held.
+    /// What a click on a channel strip does, given the keys held: the
+    /// platform command key adds or removes the channel, Shift selects the
+    /// range up to it.
     pub(super) fn channel_click(&self, track_id: vibez_core::id::TrackId) -> Message {
-        Message::select_track(track_id)
+        use crate::domains::arrangement::ArrangementMsg;
+        let modifiers = self.state.view.held_modifiers;
+        if super::command_held(modifiers, super::ON_MACOS) {
+            Message::Arrangement(ArrangementMsg::ToggleChannelSelection(track_id))
+        } else if modifiers.shift() {
+            Message::Arrangement(ArrangementMsg::SelectChannelRange(track_id))
+        } else {
+            Message::select_track(track_id)
+        }
+    }
+
+    /// Whether a strip shows as selected: one of the set, or the selected
+    /// channel when no set has been made.
+    fn channel_selected(&self, track_id: vibez_core::id::TrackId) -> bool {
+        let set = &self.state.arrangement.selected_channels;
+        set.contains(&track_id)
+            || (set.is_empty() && self.state.arrangement.selected_track == Some(track_id))
     }
 }
 

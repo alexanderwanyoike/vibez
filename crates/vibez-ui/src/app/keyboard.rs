@@ -151,6 +151,9 @@ impl super::App {
     ) -> iced::Task<Message> {
         use iced::keyboard::key::Named;
 
+        if let iced::keyboard::Event::ModifiersChanged(modifiers) = event {
+            self.state.view.held_modifiers = modifiers;
+        }
         if self.state.project.new_project_layout.is_some() {
             if let iced::keyboard::Event::KeyPressed { key, .. } = event {
                 return match key {
