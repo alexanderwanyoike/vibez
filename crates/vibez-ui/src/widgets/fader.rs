@@ -253,7 +253,7 @@ mod tests {
     #[test]
     fn vertical_fader_keeps_tracking_when_cursor_leaves_bounds() {
         let widget = FaderWidget::new(TrackId::MASTER, 1.0, Color::WHITE);
-        let bounds = Rectangle::new(Point::new(100.0, 100.0), Size::new(24.0, 108.0));
+        let bounds = Rectangle::new(Point::new(100.0, 100.0), Size::new(48.0, 100.0 + CAP_H));
         let mut state = FaderState::default();
 
         let (event, cursor) = press(Point::new(112.0, 150.0));
@@ -272,7 +272,7 @@ mod tests {
         // the widget's `value` field stays stale across them; the
         // drag must still apply every delta, not just the last one.
         let widget = FaderWidget::new(TrackId::MASTER, 1.0, Color::WHITE);
-        let bounds = Rectangle::new(Point::new(100.0, 100.0), Size::new(24.0, 108.0));
+        let bounds = Rectangle::new(Point::new(100.0, 100.0), Size::new(48.0, 100.0 + CAP_H));
         let mut state = FaderState::default();
 
         let (event, cursor) = press(Point::new(112.0, 150.0));
@@ -331,7 +331,7 @@ mod tests {
         // Both faders have 100 px of travel. Thirty of them down from
         // 0 dB lands near -15 dB on a desk; a linear law gives -8 dB.
         let vertical = FaderWidget::new(TrackId::MASTER, 1.0, Color::WHITE);
-        let bounds = Rectangle::new(Point::new(100.0, 100.0), Size::new(24.0, 108.0));
+        let bounds = Rectangle::new(Point::new(100.0, 100.0), Size::new(48.0, 100.0 + CAP_H));
         let mut state = FaderState::default();
         let (event, cursor) = press(Point::new(112.0, 150.0));
         vertical.update(&mut state, event, bounds, cursor);
@@ -355,7 +355,7 @@ mod tests {
     #[test]
     fn separate_fader_drags_get_distinct_undo_gestures() {
         let widget = FaderWidget::new(TrackId::MASTER, 1.0, Color::WHITE);
-        let bounds = Rectangle::new(Point::new(100.0, 100.0), Size::new(24.0, 108.0));
+        let bounds = Rectangle::new(Point::new(100.0, 100.0), Size::new(48.0, 100.0 + CAP_H));
         let mut state = FaderState::default();
 
         let (event, cursor) = press(Point::new(112.0, 150.0));
@@ -376,7 +376,7 @@ mod tests {
     }
 }
 
-/// Vertical fader widget for track gain control.
+/// The mix desk's channel fader, with its dB scale beside it.
 pub struct FaderWidget {
     pub track_id: TrackId,
     /// Current gain value (0.0..2.0).
@@ -394,6 +394,12 @@ impl FaderWidget {
         }
     }
 }
+
+/// The handle's height; its centre travels the rest.
+pub const CAP_H: f32 = 14.0;
+/// Room left of the slot for the dB scale.
+const SCALE_W: f32 = 18.0;
+const SCALE_DB: [f32; 7] = [6.0, 0.0, -5.0, -10.0, -20.0, -40.0, -60.0];
 
 /// State for mouse dragging.
 #[derive(Debug, Default)]
@@ -417,50 +423,92 @@ impl canvas::Program<Message> for FaderWidget {
         let w = bounds.width;
         let h = bounds.height;
 
-        // Fader track
-        let track_w = 6.0;
-        let track_x = (w - track_w) / 2.0;
-        let track_top = 4.0;
-        let track_h = h - 8.0;
-
-        frame.fill_rectangle(
-            iced::Point::new(track_x, track_top),
-            iced::Size::new(track_w, track_h),
-            theme::fader_track(),
-        );
-
-        let unity_y = track_top + track_h * (1.0 - fader_position(1.0));
-        let unity_line = canvas::Path::line(
-            iced::Point::new(track_x - 2.0, unity_y),
-            iced::Point::new(track_x + track_w + 2.0, unity_y),
-        );
-        frame.stroke(
-            &unity_line,
-            canvas::Stroke::default()
-                .with_color(theme::text_dim())
-                .with_width(1.0),
-        );
-
-        let handle_y = track_top + track_h * (1.0 - fader_position(self.value));
-        let handle_h = 10.0;
-        let handle_w = w - 4.0;
-        let handle_x = 2.0;
-
-        // Filled portion (from bottom to handle) using track color
-        let fill_h = track_top + track_h - handle_y;
-        if fill_h > 0.0 {
+        let slot_x = SCALE_W + (w - SCALE_W) / 2.0;
+        let travel = (h - CAP_H).max(1.0);
+        let y_of = |gain: f32| CAP_H / 2.0 + travel * (1.0 - fader_position(gain));
+        for db in SCALE_DB {
+            let y = y_of(db_to_amplitude(db));
+            frame.fill_text(canvas::Text {
+                content: if db > 0.0 {
+                    format!("+{db:.0}")
+                } else {
+                    format!("{db:.0}")
+                },
+                position: iced::Point::new(SCALE_W - 2.0, y),
+                color: theme::text_dim(),
+                size: 7.5.into(),
+                horizontal_alignment: iced::alignment::Horizontal::Right,
+                vertical_alignment: iced::alignment::Vertical::Center,
+                ..canvas::Text::default()
+            });
             frame.fill_rectangle(
-                iced::Point::new(track_x, handle_y),
-                iced::Size::new(track_w, fill_h),
-                self.fill_color,
+                iced::Point::new(slot_x - 9.0, y),
+                iced::Size::new(4.0, 1.0),
+                theme::text_dim(),
             );
         }
-
-        // Handle
+        // Glow rail: a slim dark rail, lit in the track colour from the
+        // handle down, with a soft column of light round the lit part. The
+        // glow is mixed opaque against the strip: the renderer blends alpha
+        // in linear light, which would make a faint alpha glow glare.
+        let glow = |amount: f32| theme::blend(theme::bg_surface(), self.fill_color, amount);
+        let handle_y = y_of(self.value);
+        let rail_bottom = CAP_H / 2.0 + travel;
+        let lit = (rail_bottom - handle_y).max(0.0);
         frame.fill_rectangle(
-            iced::Point::new(handle_x, handle_y - handle_h / 2.0),
-            iced::Size::new(handle_w, handle_h),
-            theme::fader_handle(),
+            iced::Point::new(slot_x - 6.0, handle_y),
+            iced::Size::new(12.0, lit),
+            glow(0.14),
+        );
+        frame.fill(
+            &canvas::Path::rounded_rectangle(
+                iced::Point::new(slot_x - 2.0, CAP_H / 2.0 - 2.0),
+                iced::Size::new(4.0, travel + 4.0),
+                2.0.into(),
+            ),
+            theme::darken(theme::bg_surface(), 0.55),
+        );
+        frame.fill_rectangle(
+            iced::Point::new(slot_x - 2.0, handle_y),
+            iced::Size::new(4.0, lit),
+            canvas::gradient::Linear::new(
+                iced::Point::new(slot_x, rail_bottom),
+                iced::Point::new(slot_x, handle_y),
+            )
+            .add_stop(0.0, glow(0.2))
+            .add_stop(1.0, self.fill_color),
+        );
+
+        let handle_w = (w - SCALE_W - 8.0).clamp(14.0, 26.0);
+        frame.fill_rectangle(
+            iced::Point::new(slot_x - handle_w / 2.0 - 3.0, handle_y - CAP_H / 2.0 - 3.0),
+            iced::Size::new(handle_w + 6.0, CAP_H + 6.0),
+            glow(0.22),
+        );
+        let handle = iced::Rectangle::new(
+            iced::Point::new(slot_x - handle_w / 2.0, handle_y - CAP_H / 2.0),
+            iced::Size::new(handle_w, CAP_H),
+        );
+        let body = canvas::Path::rounded_rectangle(handle.position(), handle.size(), 2.0.into());
+        frame.fill(
+            &body,
+            canvas::gradient::Linear::new(
+                handle.position(),
+                iced::Point::new(handle.x, handle.y + handle.height),
+            )
+            .add_stop(0.0, theme::bg_hover())
+            .add_stop(1.0, theme::bg_dark()),
+        );
+        frame.stroke(
+            &body,
+            canvas::Stroke::default()
+                .with_color(self.fill_color)
+                .with_width(1.5),
+        );
+        frame.fill_rectangle(
+            iced::Point::new(slot_x - handle_w / 2.0 + 6.0, handle_y - 1.0),
+            iced::Size::new(handle_w - 12.0, 2.0),
+            self.fill_color,
         );
 
         vec![frame.into_geometry()]
@@ -500,7 +548,7 @@ impl canvas::Program<Message> for FaderWidget {
                 }
             }
             canvas::Event::Mouse(iced::mouse::Event::CursorMoved { .. }) => {
-                let track_h = (bounds.height - 8.0).max(1.0);
+                let track_h = (bounds.height - CAP_H).max(1.0);
                 if let Some(position) = state.drag.drag_to(cursor, 0.0, -1.0 / track_h, 0.0..=1.0) {
                     let gain = fader_gain(position);
                     return (
