@@ -5328,6 +5328,7 @@ dependencies = [
  "vibez-instruments",
  "vibez-plugin-host",
  "vibez-project",
+ "windows-sys 0.59.0",
  "x11rb",
 ]
 
