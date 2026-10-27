@@ -171,7 +171,7 @@ impl Renderer {
                                 * Transformation::scale(scale_factor),
                             pixels,
                             clip_mask,
-                            clip_bounds,
+                            new_clip_bounds,
                         );
                     }
 

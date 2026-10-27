@@ -472,7 +472,7 @@ impl Engine {
         transformation: Transformation,
         pixels: &mut tiny_skia::PixmapMut<'_>,
         clip_mask: &mut tiny_skia::Mask,
-        layer_bounds: Rectangle,
+        clip_bounds: Rectangle,
     ) {
         match primitive {
             Primitive::Fill { path, paint, rule } => {
@@ -487,14 +487,12 @@ impl Engine {
                     } * transformation
                 };
 
-                let Some(clip_bounds) =
-                    layer_bounds.intersection(&physical_bounds)
-                else {
+                if !clip_bounds.intersects(&physical_bounds) {
                     return;
-                };
+                }
 
-                let clip_mask =
-                    (physical_bounds != clip_bounds).then_some(clip_mask as &_);
+                let clip_mask = (!physical_bounds.is_within(&clip_bounds))
+                    .then_some(clip_mask as &_);
 
                 pixels.fill_path(
                     path,
@@ -520,14 +518,12 @@ impl Engine {
                     } * transformation
                 };
 
-                let Some(clip_bounds) =
-                    layer_bounds.intersection(&physical_bounds)
-                else {
+                if !clip_bounds.intersects(&physical_bounds) {
                     return;
-                };
+                }
 
-                let clip_mask =
-                    (physical_bounds != clip_bounds).then_some(clip_mask as &_);
+                let clip_mask = (!physical_bounds.is_within(&clip_bounds))
+                    .then_some(clip_mask as &_);
 
                 pixels.stroke_path(
                     path,
