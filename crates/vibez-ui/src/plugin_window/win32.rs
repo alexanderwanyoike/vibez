@@ -264,3 +264,25 @@ fn client_size(hwnd: HWND) -> (u32, u32) {
         (rect.bottom - rect.top).max(0) as u32,
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn registration_failure_keeps_the_windows_error() {
+        assert_eq!(registration_result(0, 8), Err(Win32Error(8)));
+    }
+
+    #[test]
+    fn an_existing_class_counts_as_registered() {
+        assert_eq!(registration_result(0, ERROR_CLASS_ALREADY_EXISTS), Ok(()));
+        assert_eq!(registration_result(0xC001, 0), Ok(()));
+    }
+
+    #[test]
+    fn registering_the_class_again_still_succeeds() {
+        assert_eq!(register_class(), Ok(()));
+        assert_eq!(register_class(), Ok(()));
+    }
+}
