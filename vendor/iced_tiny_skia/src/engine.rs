@@ -476,16 +476,8 @@ impl Engine {
     ) {
         match primitive {
             Primitive::Fill { path, paint, rule } => {
-                let physical_bounds = {
-                    let bounds = path.bounds();
-
-                    Rectangle {
-                        x: bounds.x(),
-                        y: bounds.y(),
-                        width: bounds.width(),
-                        height: bounds.height(),
-                    } * transformation
-                };
+                let physical_bounds =
+                    primitive.visible_bounds() * transformation;
 
                 if !clip_bounds.intersects(&physical_bounds) {
                     return;
@@ -507,16 +499,8 @@ impl Engine {
                 paint,
                 stroke,
             } => {
-                let physical_bounds = {
-                    let bounds = path.bounds();
-
-                    Rectangle {
-                        x: bounds.x(),
-                        y: bounds.y(),
-                        width: bounds.width(),
-                        height: bounds.height(),
-                    } * transformation
-                };
+                let physical_bounds =
+                    primitive.visible_bounds() * transformation;
 
                 if !clip_bounds.intersects(&physical_bounds) {
                     return;

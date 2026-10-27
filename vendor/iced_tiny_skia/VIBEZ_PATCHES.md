@@ -18,3 +18,9 @@ iced 0.14 or later.
   the clip at the window origin and compared float bounds with `!=`, so
   rounding switched the misplaced mask on and hid shapes on any canvas away
   from the top-left corner. Backported from iced 0.14.
+- **Stroke bounds include the stroke width.** `Primitive::visible_bounds`
+  pads strokes by half their width and the engine culls with it
+  (`primitive.rs`, `engine.rs`). 0.13.0 used the bare path bounds, which are
+  zero-area for straight horizontal or vertical lines, so grid lines, flat
+  curves and playhead-style lines were culled and never added to the damage.
+  The culling half is backported from iced 0.14; the damage half is ours.

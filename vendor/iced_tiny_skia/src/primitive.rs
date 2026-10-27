@@ -25,16 +25,21 @@ pub enum Primitive {
 impl Primitive {
     /// Returns the visible bounds of the [`Primitive`].
     pub fn visible_bounds(&self) -> Rectangle {
-        let bounds = match self {
-            Primitive::Fill { path, .. } => path.bounds(),
-            Primitive::Stroke { path, .. } => path.bounds(),
+        let (bounds, outset) = match self {
+            Primitive::Fill { path, .. } => (path.bounds(), 0.0),
+            // A stroke reaches half its width past the path, and a
+            // straight axis-aligned path has zero-area bounds that would
+            // otherwise be culled and never damaged.
+            Primitive::Stroke { path, stroke, .. } => {
+                (path.bounds(), stroke.width / 2.0)
+            }
         };
 
         Rectangle {
-            x: bounds.x(),
-            y: bounds.y(),
-            width: bounds.width(),
-            height: bounds.height(),
+            x: bounds.x() - outset,
+            y: bounds.y() - outset,
+            width: bounds.width() + outset * 2.0,
+            height: bounds.height() + outset * 2.0,
         }
     }
 }
