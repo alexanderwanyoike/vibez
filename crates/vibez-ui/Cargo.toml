@@ -39,7 +39,7 @@ vibez-engine = { workspace = true, features = ["test-support"] }
 vibez-plugin-host = { workspace = true, features = ["test-fixtures"] }
 tempfile = "3"
 
-[target.'cfg(not(target_os = "macos"))'.dependencies]
+[target.'cfg(not(any(target_os = "macos", windows)))'.dependencies]
 x11rb = "0.13"
 
 [target.'cfg(windows)'.dependencies]
