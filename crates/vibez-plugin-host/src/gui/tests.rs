@@ -62,8 +62,36 @@ fn clap_created_gui_is_destroyed_even_before_attachment() {
 fn native_api_matches_target() {
     #[cfg(target_os = "macos")]
     assert_eq!(GuiApi::native(), GuiApi::Cocoa);
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(windows)]
+    assert_eq!(GuiApi::native(), GuiApi::Win32);
+    #[cfg(not(any(target_os = "macos", windows)))]
     assert_eq!(GuiApi::native(), GuiApi::X11);
+}
+
+#[test]
+fn win32_clap_editor_receives_its_hwnd() {
+    let state = State::new(GuiApi::Win32);
+    let plugin = Clap::new(&state);
+    let mut parent = 0u8;
+    let parent = (&mut parent as *mut u8).cast();
+    let mut handle = unsafe { ClapGuiHandle::new_for_api(plugin.ptr(), GuiApi::Win32) }.unwrap();
+    assert!(handle.create_gui());
+    assert!(!unsafe { handle.attach_to_parent(GuiParent::X11(42)) });
+    assert!(unsafe { handle.attach_to_parent(GuiParent::Win32(parent)) });
+    assert_eq!(*state.apis.borrow(), ["win32", "win32", "win32"]);
+    assert_eq!(state.parent.get(), parent);
+}
+
+#[test]
+fn win32_vst3_editor_receives_hwnd_parent() {
+    let state = State::new(GuiApi::Win32);
+    let plugin = Vst::new(&state);
+    let mut parent = 0u8;
+    let parent = (&mut parent as *mut u8).cast();
+    let mut handle = unsafe { Vst3GuiHandle::new(plugin.ptr()) }.unwrap();
+    assert!(unsafe { handle.open_in_parent(GuiParent::Win32(parent)) });
+    assert_eq!(*state.apis.borrow(), ["HWND", "HWND"]);
+    assert_eq!(state.parent.get(), parent);
 }
 
 #[test]

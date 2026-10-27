@@ -39,8 +39,11 @@ vibez-engine = { workspace = true, features = ["test-support"] }
 vibez-plugin-host = { workspace = true, features = ["test-fixtures"] }
 tempfile = "3"
 
-[target.'cfg(not(target_os = "macos"))'.dependencies]
+[target.'cfg(not(any(target_os = "macos", windows)))'.dependencies]
 x11rb = "0.13"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_System_LibraryLoader", "Win32_UI_WindowsAndMessaging"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"

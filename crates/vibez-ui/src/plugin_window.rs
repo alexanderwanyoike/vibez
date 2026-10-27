@@ -4,11 +4,15 @@ use vibez_plugin_host::PluginGuiHandle;
 
 #[cfg(target_os = "macos")]
 mod macos;
-#[cfg(not(target_os = "macos"))]
+#[cfg(windows)]
+mod win32;
+#[cfg(not(any(target_os = "macos", windows)))]
 mod x11;
 #[cfg(target_os = "macos")]
 pub use macos::PluginWindowManager;
-#[cfg(not(target_os = "macos"))]
+#[cfg(windows)]
+pub use win32::PluginWindowManager;
+#[cfg(not(any(target_os = "macos", windows)))]
 pub use x11::PluginWindowManager;
 
 /// Events emitted by the plugin window manager during poll_events().
