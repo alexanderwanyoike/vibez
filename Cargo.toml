@@ -11,6 +11,7 @@ members = [
     "crates/vibez-dropbox",
     "crates/vibez-ui",
 ]
+exclude = ["vendor"]
 resolver = "2"
 
 [workspace.package]
@@ -89,3 +90,8 @@ assets = [
     ["assets/icon/vibez-512.png", "usr/share/icons/hicolor/512x512/apps/vibez.png", "644"],
     ["assets/demo.vibez", "usr/share/vibez/demo.vibez", "644"],
 ]
+
+# iced 0.13 software renderer with clip and stroke-bounds fixes backported
+# from iced 0.14; see vendor/iced_tiny_skia/VIBEZ_PATCHES.md.
+[patch.crates-io]
+iced_tiny_skia = { path = "vendor/iced_tiny_skia" }
