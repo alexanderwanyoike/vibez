@@ -564,6 +564,29 @@ mod tests {
         assert_eq!(differing, 0, "pixels that changed with the canvas position");
     }
 
+    #[test]
+    fn straight_grid_lines_and_a_flat_curve_draw_on_the_software_renderer() {
+        let widget = widget();
+        let size = iced::Size::new(400.0, 160.0);
+        let rendered = crate::widgets::software_render::render(
+            &widget,
+            &EqDisplayState::default(),
+            Rectangle::new(Point::new(16.0, 16.0), size),
+        );
+        let y = size.height * 0.2;
+        let grid_x = (freq_to_norm(1_000.0) * size.width).floor();
+        let panel = rendered.rgb(grid_x + 6.0, y);
+        assert_ne!(rendered.rgb(grid_x, y), panel, "1 kHz grid line");
+
+        // White accent along unity, between the LMF and HMF handles.
+        let unity = widget.db_to_y(0.0, size.height).floor();
+        let [r, g, b] = rendered.rgb(freq_to_norm(1_000.0) * size.width + 3.0, unity);
+        assert!(
+            r > 200 && g > 200 && b > 200,
+            "flat curve at unity, got {r},{g},{b}"
+        );
+    }
+
     fn wheel_over_band(widget: &EqDisplayWidget, band: usize) -> Option<Message> {
         let bounds = Rectangle::new(Point::ORIGIN, iced::Size::new(400.0, 160.0));
         let handle = widget.handle_pos(&BANDS[band], bounds);
