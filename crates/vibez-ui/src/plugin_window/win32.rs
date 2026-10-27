@@ -2,11 +2,13 @@
 
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::sync::Once;
+use std::fmt;
 
 use vibez_plugin_host::gui::{GuiParent, PluginGuiKey};
 use vibez_plugin_host::PluginGuiHandle;
-use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
+use windows_sys::Win32::Foundation::{
+    GetLastError, ERROR_CLASS_ALREADY_EXISTS, HWND, LPARAM, LRESULT, RECT, WPARAM,
+};
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     AdjustWindowRectEx, CreateWindowExW, DefWindowProcW, DestroyWindow, GetClientRect,
@@ -44,25 +46,48 @@ unsafe extern "system" fn window_proc(
     DefWindowProcW(hwnd, msg, wparam, lparam)
 }
 
-fn register_class() {
-    static REGISTER: Once = Once::new();
-    REGISTER.call_once(|| unsafe {
-        let class = WNDCLASSEXW {
-            cbSize: std::mem::size_of::<WNDCLASSEXW>() as u32,
-            style: 0,
-            lpfnWndProc: Some(window_proc),
-            cbClsExtra: 0,
-            cbWndExtra: 0,
-            hInstance: GetModuleHandleW(std::ptr::null()),
-            hIcon: std::ptr::null_mut(),
-            hCursor: LoadCursorW(std::ptr::null_mut(), IDC_ARROW),
-            hbrBackground: std::ptr::null_mut(),
-            lpszMenuName: std::ptr::null(),
-            lpszClassName: CLASS_NAME,
-            hIconSm: std::ptr::null_mut(),
-        };
-        RegisterClassExW(&class);
-    });
+/// A failed Win32 call and its `GetLastError` code.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Win32Error(u32);
+
+impl fmt::Display for Win32Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Win32 error {}", self.0)
+    }
+}
+
+fn register_class() -> Result<(), Win32Error> {
+    let class = WNDCLASSEXW {
+        cbSize: std::mem::size_of::<WNDCLASSEXW>() as u32,
+        style: 0,
+        lpfnWndProc: Some(window_proc),
+        cbClsExtra: 0,
+        cbWndExtra: 0,
+        hInstance: unsafe { GetModuleHandleW(std::ptr::null()) },
+        hIcon: std::ptr::null_mut(),
+        hCursor: unsafe { LoadCursorW(std::ptr::null_mut(), IDC_ARROW) },
+        hbrBackground: std::ptr::null_mut(),
+        lpszMenuName: std::ptr::null(),
+        lpszClassName: CLASS_NAME,
+        hIconSm: std::ptr::null_mut(),
+    };
+    let atom = unsafe { RegisterClassExW(&class) };
+    let last_error = if atom == 0 {
+        unsafe { GetLastError() }
+    } else {
+        0
+    };
+    registration_result(atom, last_error)
+}
+
+/// `RegisterClassExW` returns 0 on failure; a class this module already
+/// registered (another manager, or a test) is as good as a fresh one.
+fn registration_result(atom: u16, last_error: u32) -> Result<(), Win32Error> {
+    if atom != 0 || last_error == ERROR_CLASS_ALREADY_EXISTS {
+        Ok(())
+    } else {
+        Err(Win32Error(last_error))
+    }
 }
 
 struct OpenPluginWindow {
@@ -84,20 +109,36 @@ impl Drop for OpenPluginWindow {
 
 pub struct PluginWindowManager {
     windows: HashMap<PluginGuiKey, OpenPluginWindow>,
+    /// Set only after registration succeeds, so a failure is retried on
+    /// the next open instead of being remembered as done.
+    class_registered: bool,
 }
 
 impl PluginWindowManager {
     pub fn new() -> Option<Self> {
-        register_class();
         Some(Self {
             windows: HashMap::new(),
+            class_registered: false,
         })
+    }
+
+    fn ensure_class_registered(&mut self) -> bool {
+        if !self.class_registered {
+            match register_class() {
+                Ok(()) => self.class_registered = true,
+                Err(e) => eprintln!("vibez: cannot register the plugin window class: {e}"),
+            }
+        }
+        self.class_registered
     }
 
     pub fn open(&mut self, key: PluginGuiKey, raw_ptr: PluginRawPtr, title: String) -> bool {
         if self.is_open(key) {
             self.raise(key);
             return true;
+        }
+        if !self.ensure_class_registered() {
+            return false;
         }
         let Some(mut gui_handle) = (unsafe { gui_handle(raw_ptr) }) else {
             return false;
