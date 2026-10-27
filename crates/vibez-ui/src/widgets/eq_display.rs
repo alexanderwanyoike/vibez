@@ -537,6 +537,33 @@ mod tests {
         }
     }
 
+    #[test]
+    fn the_graph_draws_the_same_wherever_it_sits_on_the_software_renderer() {
+        use crate::widgets::software_render::{render, BACKGROUND};
+        let widget = widget();
+        let size = iced::Size::new(400.0, 160.0);
+        let near_origin = render(
+            &widget,
+            &EqDisplayState::default(),
+            Rectangle::new(Point::new(16.0, 16.0), size),
+        );
+        let elsewhere = render(
+            &widget,
+            &EqDisplayState::default(),
+            Rectangle::new(Point::new(240.0, 610.0), size),
+        );
+
+        let panel = near_origin.rgb(size.width * 0.5, size.height * 0.25);
+        assert_ne!(panel, BACKGROUND, "the panel fills the canvas");
+        let differing = near_origin
+            .canvas_pixels()
+            .iter()
+            .zip(elsewhere.canvas_pixels())
+            .filter(|(a, b)| **a != *b)
+            .count();
+        assert_eq!(differing, 0, "pixels that changed with the canvas position");
+    }
+
     fn wheel_over_band(widget: &EqDisplayWidget, band: usize) -> Option<Message> {
         let bounds = Rectangle::new(Point::ORIGIN, iced::Size::new(400.0, 160.0));
         let handle = widget.handle_pos(&BANDS[band], bounds);
