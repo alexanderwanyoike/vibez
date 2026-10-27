@@ -47,12 +47,14 @@ impl State {
         match self.api {
             GuiApi::Cocoa => "cocoa",
             GuiApi::X11 => "x11",
+            GuiApi::Win32 => "win32",
         }
     }
     fn vst3_api(&self) -> &str {
         match self.api {
             GuiApi::Cocoa => "NSView",
             GuiApi::X11 => "X11EmbedWindowID",
+            GuiApi::Win32 => "HWND",
         }
     }
 
@@ -133,6 +135,7 @@ unsafe extern "C" fn set_parent(plugin: *const clap_plugin, parent: *const clap_
     state.parent.set(match state.api {
         GuiApi::Cocoa => (*parent).specific.cocoa,
         GuiApi::X11 => (*parent).specific.x11 as usize as *mut c_void,
+        GuiApi::Win32 => (*parent).specific.win32,
     });
     true
 }
