@@ -362,6 +362,13 @@ impl std::fmt::Display for MusicalBoundary {
     }
 }
 
+/// How far past a boundary a quantized Track Mute press may land and still
+/// take effect at once instead of waiting a whole grid step. The engine cannot
+/// see the audio device buffer or UI frame delay between what the performer
+/// hears and when the command arrives, so a press aimed at a downbeat
+/// routinely lands just after it.
+pub const LATE_PRESS_TOLERANCE_BEATS: f64 = 0.25;
+
 /// Musical boundary at which a resident Section launch becomes effective.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
