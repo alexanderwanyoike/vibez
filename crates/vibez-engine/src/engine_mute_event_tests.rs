@@ -331,3 +331,72 @@ fn immediate_mixer_mute_cancels_a_pending_pad_change_before_applying() {
         ] if *cancelled_track == track_id && *changed_track == track_id
     ));
 }
+
+fn effective_mute_after_press_at(
+    position: usize,
+    quantization: TrackMuteQuantization,
+) -> Option<u64> {
+    effective_mute_after_press_in(EngineCommand::Play, position, quantization)
+}
+
+fn effective_mute_after_press_in(
+    start: EngineCommand,
+    position: usize,
+    quantization: TrackMuteQuantization,
+) -> Option<u64> {
+    let (mut engine, mut cmd_tx, mut event_rx) = AudioEngine::new();
+    let track_id = TrackId::new();
+    // One beat is 64 samples, so a 16th note is 16 samples.
+    cmd_tx.push(EngineCommand::SetSampleRate(64)).unwrap();
+    cmd_tx.push(EngineCommand::SetBpm(60.0)).unwrap();
+    cmd_tx.push(EngineCommand::add_track(track_id)).unwrap();
+    cmd_tx.push(start).unwrap();
+    engine.process(&mut vec![0.0; position], 1);
+    while event_rx.pop().is_ok() {}
+
+    cmd_tx
+        .push(EngineCommand::QueueTrackMute {
+            track_id,
+            muted: true,
+            quantization,
+        })
+        .unwrap();
+    engine.process(&mut vec![0.0; 4096], 1);
+
+    std::iter::from_fn(|| event_rx.pop().ok()).find_map(|event| match event {
+        EngineEvent::TrackMuteChanged(TrackMuteChangedEvent {
+            track_id: event_track,
+            muted: true,
+            effective_at_samples,
+        }) if event_track == track_id => Some(effective_at_samples),
+        _ => None,
+    })
+}
+
+#[test]
+fn a_bar_mute_pressed_just_after_the_downbeat_applies_at_once() {
+    assert_eq!(
+        effective_mute_after_press_at(260, TrackMuteQuantization::OneBar),
+        Some(260)
+    );
+}
+
+#[test]
+fn a_bar_mute_pressed_past_the_late_window_waits_for_the_next_bar() {
+    assert_eq!(
+        effective_mute_after_press_at(272, TrackMuteQuantization::OneBar),
+        Some(512)
+    );
+}
+
+#[test]
+fn a_clip_performance_mute_pressed_just_after_the_downbeat_applies_at_once() {
+    assert_eq!(
+        effective_mute_after_press_in(
+            EngineCommand::BeginClipPerformance,
+            260,
+            TrackMuteQuantization::OneBar
+        ),
+        Some(260)
+    );
+}
