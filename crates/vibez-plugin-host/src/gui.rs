@@ -1,7 +1,8 @@
 use std::ffi::{c_void, CStr};
 
 use clap_sys::ext::gui::{
-    clap_plugin_gui, clap_window, clap_window_handle, CLAP_EXT_GUI, CLAP_WINDOW_API_X11,
+    clap_plugin_gui, clap_window, clap_window_handle, CLAP_EXT_GUI, CLAP_WINDOW_API_WIN32,
+    CLAP_WINDOW_API_X11,
 };
 use clap_sys::plugin::clap_plugin;
 
@@ -11,12 +12,15 @@ use vibez_core::id::{EffectId, TrackId};
 pub enum GuiApi {
     X11,
     Cocoa,
+    Win32,
 }
 
 impl GuiApi {
     pub const fn native() -> Self {
         if cfg!(target_os = "macos") {
             Self::Cocoa
+        } else if cfg!(windows) {
+            Self::Win32
         } else {
             Self::X11
         }
@@ -26,6 +30,7 @@ impl GuiApi {
         match self {
             Self::X11 => CLAP_WINDOW_API_X11,
             Self::Cocoa => clap_sys::ext::gui::CLAP_WINDOW_API_COCOA,
+            Self::Win32 => CLAP_WINDOW_API_WIN32,
         }
     }
 
@@ -33,6 +38,7 @@ impl GuiApi {
         match self {
             Self::X11 => b"X11EmbedWindowID\0",
             Self::Cocoa => b"NSView\0",
+            Self::Win32 => b"HWND\0",
         }
     }
 }
@@ -41,6 +47,7 @@ impl GuiApi {
 pub enum GuiParent {
     X11(u32),
     Cocoa(*mut c_void),
+    Win32(*mut c_void),
 }
 
 impl GuiParent {
@@ -48,13 +55,14 @@ impl GuiParent {
         match self {
             Self::X11(_) => GuiApi::X11,
             Self::Cocoa(_) => GuiApi::Cocoa,
+            Self::Win32(_) => GuiApi::Win32,
         }
     }
 
     fn as_ptr(self) -> *mut c_void {
         match self {
             Self::X11(id) => id as usize as *mut c_void,
-            Self::Cocoa(view) => view,
+            Self::Cocoa(view) | Self::Win32(view) => view,
         }
     }
 }
@@ -363,6 +371,7 @@ impl ClapGuiHandle {
                 x11: id as clap_sys::ext::gui::clap_xwnd,
             },
             GuiParent::Cocoa(view) => clap_window_handle { cocoa: view },
+            GuiParent::Win32(hwnd) => clap_window_handle { win32: hwnd },
         };
         let window = clap_window {
             api: self.api.clap_name().as_ptr(),
