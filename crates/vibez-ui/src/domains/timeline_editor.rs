@@ -91,13 +91,16 @@ pub(crate) mod conformance {
         );
         resolved_editor_mut(&mut adapter).update(
             &mut project_tracks,
-            ArrangementMsg::MoveNoteClipPosition {
-                track_id,
-                clip_id,
+            ArrangementMsg::MoveSelectedClips {
+                anchor: clip_id,
                 new_position_beats: 12.0,
+                target_track: track_id,
             },
             &mut engine,
-            ArrangementCtx::default(),
+            ArrangementCtx {
+                samples_per_beat: 100.0,
+                ..ArrangementCtx::default()
+            },
         );
 
         let mut automation = AutomationState::default();
