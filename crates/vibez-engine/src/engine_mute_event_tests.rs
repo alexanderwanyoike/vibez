@@ -400,3 +400,27 @@ fn a_clip_performance_mute_pressed_just_after_the_downbeat_applies_at_once() {
         Some(260)
     );
 }
+
+#[test]
+fn a_four_bar_mute_waits_for_the_next_phrase_boundary() {
+    assert_eq!(
+        effective_mute_after_press_at(300, TrackMuteQuantization::FourBars),
+        Some(1024)
+    );
+}
+
+#[test]
+fn a_four_bar_mute_pressed_just_after_a_phrase_boundary_applies_at_once() {
+    assert_eq!(
+        effective_mute_after_press_at(1030, TrackMuteQuantization::FourBars),
+        Some(1030)
+    );
+}
+
+#[test]
+fn a_four_bar_mute_pressed_just_after_a_plain_bar_still_waits_for_the_phrase() {
+    assert_eq!(
+        effective_mute_after_press_at(1284, TrackMuteQuantization::FourBars),
+        Some(2048)
+    );
+}

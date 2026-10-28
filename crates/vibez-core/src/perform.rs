@@ -428,6 +428,18 @@ mod track_mute_quantization_tests {
         assert_eq!(MusicalBoundary::Immediate.beats(), None);
         assert_eq!(MusicalBoundary::OneBeat.beats(), Some(1.0));
         assert_eq!(MusicalBoundary::OneBar.beats(), Some(4.0));
+        assert_eq!(MusicalBoundary::TwoBars.beats(), Some(8.0));
+        assert_eq!(MusicalBoundary::FourBars.beats(), Some(16.0));
+        assert_eq!(MusicalBoundary::EightBars.beats(), Some(32.0));
+        assert_eq!(MusicalBoundary::SixteenBars.beats(), Some(64.0));
+        assert_eq!(
+            SectionLaunchQuantization::EightBars.musical_boundary(),
+            Some(MusicalBoundary::EightBars)
+        );
+        assert_eq!(
+            serde_json::to_string(&SectionLaunchQuantization::SixteenBars).unwrap(),
+            "\"sixteen_bars\""
+        );
         assert_eq!(
             SectionLaunchQuantization::OneBar.musical_boundary(),
             Some(MusicalBoundary::OneBar)
@@ -438,7 +450,16 @@ mod track_mute_quantization_tests {
     fn track_mute_quantization_shares_the_section_launch_definition() {
         assert_eq!(
             TrackMuteQuantization::ALL.map(TrackMuteQuantization::label),
-            ["Immediate", "1 Beat", "1 Bar", "End of Section"]
+            [
+                "Immediate",
+                "1 Beat",
+                "1 Bar",
+                "2 Bars",
+                "4 Bars",
+                "8 Bars",
+                "16 Bars",
+                "End of Section"
+            ]
         );
         assert_eq!(
             serde_json::to_string(&TrackMuteQuantization::OneBar).unwrap(),
