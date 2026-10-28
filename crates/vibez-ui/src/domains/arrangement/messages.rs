@@ -234,6 +234,14 @@ pub enum ArrangementMsg {
         anchor: ArrangementSelection,
         new_duration_beats: f64,
     },
+    /// Drag of `anchor`: the whole selection follows it by the same time
+    /// offset and lane offset. The anchor is named by Clip id alone because
+    /// the drag keeps going after it has changed lanes.
+    MoveSelectedClips {
+        anchor: ClipId,
+        new_position_beats: f64,
+        target_track: TrackId,
+    },
     DuplicateNoteClip(TrackId, ClipId),
     SplitAudioClip {
         track_id: TrackId,
@@ -352,6 +360,7 @@ impl ArrangementMsg {
                 | Self::SetAudioClipFadeCurve { .. }
                 | Self::SetAudioClipCrossfadeCurve { .. }
                 | Self::MoveClipToTrack { .. }
+                | Self::MoveSelectedClips { .. }
                 | Self::ToggleClipLoop(..)
                 | Self::ToggleClipReverse(..)
                 | Self::SelectTransientMarker { .. }

@@ -523,6 +523,20 @@ impl TimelineEditorState {
                     new_duration_beats,
                 );
             }
+            ArrangementMsg::MoveSelectedClips {
+                anchor,
+                new_position_beats,
+                target_track,
+            } => {
+                self.move_selected_clips(
+                    project_tracks,
+                    engine,
+                    ctx,
+                    anchor,
+                    new_position_beats,
+                    target_track,
+                );
+            }
             ArrangementMsg::SetTimeSelection {
                 start_beats,
                 end_beats,

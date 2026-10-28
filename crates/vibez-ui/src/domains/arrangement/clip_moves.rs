@@ -5,9 +5,9 @@ use std::sync::Arc;
 use vibez_core::id::{ClipId, TrackId};
 use vibez_engine::commands::EngineCommand;
 
-use crate::state::{ArrangementSelection, TimelineEditorState};
+use crate::state::{ArrangementSelection, ProjectTracksState, TimelineEditorState};
 
-use super::EngineHandle;
+use super::{ArrangementCtx, EngineHandle};
 
 impl TimelineEditorState {
     pub(super) fn move_audio_clip(
@@ -156,5 +156,123 @@ impl TimelineEditorState {
                 self.selected_track = Some(target_track);
             }
         }
+    }
+
+    pub(super) fn move_selected_clips(
+        &mut self,
+        project_tracks: &ProjectTracksState,
+        engine: &mut impl EngineHandle,
+        ctx: ArrangementCtx,
+        anchor: ClipId,
+        new_position_beats: f64,
+        target_track: TrackId,
+    ) {
+        if ctx.samples_per_beat <= 0.0 {
+            return;
+        }
+        let Some(anchor) = self.locate_clip(anchor) else {
+            return;
+        };
+        let targets: Vec<ArrangementSelection> = if self.selected_clips.contains(&anchor) {
+            self.selected_clips.iter().copied().collect()
+        } else {
+            vec![anchor]
+        };
+        let beats_of = |this: &Self, selection: ArrangementSelection| match selection {
+            ArrangementSelection::AudioClip { track_id, clip_id } => this
+                .find_content(track_id)
+                .and_then(|content| content.clips.iter().find(|clip| clip.id == clip_id))
+                .map(|clip| clip.position as f64 / ctx.samples_per_beat),
+            ArrangementSelection::NoteClip { track_id, clip_id } => this
+                .find_content(track_id)
+                .and_then(|content| content.note_clips.iter().find(|clip| clip.id == clip_id))
+                .map(|clip| clip.position_beats),
+        };
+        let Some(anchor_beats) = beats_of(self, anchor) else {
+            return;
+        };
+        let earliest = targets
+            .iter()
+            .filter_map(|selection| beats_of(self, *selection))
+            .fold(f64::INFINITY, f64::min);
+        let delta_beats = (new_position_beats - anchor_beats).max(-earliest);
+        let delta_samples = (delta_beats * ctx.samples_per_beat).round() as i64;
+
+        let lane_of = |track_id: TrackId| {
+            project_tracks
+                .tracks
+                .iter()
+                .position(|track| track.id == track_id)
+        };
+        let lane_shift = lane_of(target_track)
+            .zip(lane_of(anchor.track_id()))
+            .map_or(0, |(target, current)| target as isize - current as isize);
+        // A lane change moves every clip or none, so the selection never
+        // splits apart on a lane that cannot hold one of its clips.
+        let destinations: Option<Vec<TrackId>> = (lane_shift != 0)
+            .then(|| {
+                targets
+                    .iter()
+                    .map(|selection| {
+                        let lane = lane_of(selection.track_id())?.checked_add_signed(lane_shift)?;
+                        let track = project_tracks.tracks.get(lane)?;
+                        (track.kind.is_midi() == selection.is_note_clip()).then_some(track.id)
+                    })
+                    .collect()
+            })
+            .flatten();
+
+        for (index, selection) in targets.iter().enumerate() {
+            match *selection {
+                ArrangementSelection::AudioClip { track_id, clip_id } if delta_samples != 0 => {
+                    if let Some(position) = self
+                        .find_content(track_id)
+                        .and_then(|content| content.clips.iter().find(|clip| clip.id == clip_id))
+                        .map(|clip| clip.position)
+                    {
+                        let moved = (position as i64 + delta_samples).max(0) as u64;
+                        self.move_audio_clip(engine, track_id, clip_id, moved);
+                    }
+                }
+                ArrangementSelection::NoteClip { track_id, clip_id } if delta_beats != 0.0 => {
+                    if let Some(beats) = beats_of(self, *selection) {
+                        self.move_note_clip(
+                            engine,
+                            track_id,
+                            clip_id,
+                            (beats + delta_beats).max(0.0),
+                        );
+                    }
+                }
+                _ => {}
+            }
+            if let Some(destination) = destinations.as_ref().map(|lanes| lanes[index]) {
+                self.move_clip_to_track(
+                    engine,
+                    selection.track_id(),
+                    destination,
+                    selection.clip_id(),
+                    selection.is_note_clip(),
+                );
+            }
+        }
+        if destinations.is_some() {
+            self.selected_track = Some(target_track);
+        }
+    }
+
+    fn locate_clip(&self, clip_id: ClipId) -> Option<ArrangementSelection> {
+        self.timeline
+            .by_track
+            .iter()
+            .find_map(|(&track_id, content)| {
+                if content.clips.iter().any(|clip| clip.id == clip_id) {
+                    Some(ArrangementSelection::AudioClip { track_id, clip_id })
+                } else if content.note_clips.iter().any(|clip| clip.id == clip_id) {
+                    Some(ArrangementSelection::NoteClip { track_id, clip_id })
+                } else {
+                    None
+                }
+            })
     }
 }
