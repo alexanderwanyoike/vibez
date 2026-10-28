@@ -333,16 +333,32 @@ pub enum MusicalBoundary {
     Immediate,
     OneBeat,
     OneBar,
+    TwoBars,
+    FourBars,
+    EightBars,
+    SixteenBars,
 }
 
 impl MusicalBoundary {
-    pub const ALL: [Self; 3] = [Self::Immediate, Self::OneBeat, Self::OneBar];
+    pub const ALL: [Self; 7] = [
+        Self::Immediate,
+        Self::OneBeat,
+        Self::OneBar,
+        Self::TwoBars,
+        Self::FourBars,
+        Self::EightBars,
+        Self::SixteenBars,
+    ];
 
     pub const fn label(self) -> &'static str {
         match self {
             Self::Immediate => "Immediate",
             Self::OneBeat => "1 Beat",
             Self::OneBar => "1 Bar",
+            Self::TwoBars => "2 Bars",
+            Self::FourBars => "4 Bars",
+            Self::EightBars => "8 Bars",
+            Self::SixteenBars => "16 Bars",
         }
     }
 
@@ -352,6 +368,10 @@ impl MusicalBoundary {
             Self::Immediate => None,
             Self::OneBeat => Some(1.0),
             Self::OneBar => Some(4.0),
+            Self::TwoBars => Some(8.0),
+            Self::FourBars => Some(16.0),
+            Self::EightBars => Some(32.0),
+            Self::SixteenBars => Some(64.0),
         }
     }
 }
@@ -377,14 +397,22 @@ pub enum SectionLaunchQuantization {
     OneBeat,
     #[default]
     OneBar,
+    TwoBars,
+    FourBars,
+    EightBars,
+    SixteenBars,
     EndOfSection,
 }
 
 impl SectionLaunchQuantization {
-    pub const ALL: [Self; 4] = [
+    pub const ALL: [Self; 8] = [
         Self::Immediate,
         Self::OneBeat,
         Self::OneBar,
+        Self::TwoBars,
+        Self::FourBars,
+        Self::EightBars,
+        Self::SixteenBars,
         Self::EndOfSection,
     ];
 
@@ -401,6 +429,10 @@ impl SectionLaunchQuantization {
             Self::Immediate => Some(MusicalBoundary::Immediate),
             Self::OneBeat => Some(MusicalBoundary::OneBeat),
             Self::OneBar => Some(MusicalBoundary::OneBar),
+            Self::TwoBars => Some(MusicalBoundary::TwoBars),
+            Self::FourBars => Some(MusicalBoundary::FourBars),
+            Self::EightBars => Some(MusicalBoundary::EightBars),
+            Self::SixteenBars => Some(MusicalBoundary::SixteenBars),
             Self::EndOfSection => None,
         }
     }
