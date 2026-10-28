@@ -60,7 +60,6 @@ pub struct TrackClipCanvas {
     pub track_index: usize,
     pub total_tracks: usize,
     pub track_ids: Vec<TrackId>,
-    pub track_kinds: Vec<bool>, // is_instrument flags
     /// True vertical layout of every row in this column, so a rubber-band
     /// spans lanes correctly even with automation lanes expanded. Empty
     /// when the surface has not opted into box selection.
@@ -132,7 +131,6 @@ impl TrackClipCanvas {
         track_index: usize,
         total_tracks: usize,
         track_ids: Vec<TrackId>,
-        track_kinds: Vec<bool>,
         selected_clips: HashSet<ClipId>,
         loop_enabled: bool,
         loop_start_beats: f64,
@@ -257,7 +255,6 @@ impl TrackClipCanvas {
             track_index,
             total_tracks,
             track_ids,
-            track_kinds,
             row_spans: Vec::new(),
             marquee: None,
             selected_clips,
@@ -503,7 +500,6 @@ impl canvas::Program<Message> for TrackClipCanvas {
                             state.drag = Some(ClipDragAction::MoveClip {
                                 undo_gesture: UndoGestureId::new(),
                                 clip_id,
-                                is_note_clip,
                                 start_local_x: pos.x,
                                 start_scroll_beats: self.scroll_offset_beats,
                                 original_position_beats: pos_beats,

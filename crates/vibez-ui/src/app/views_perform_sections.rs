@@ -241,13 +241,6 @@ impl App {
                 .iter()
                 .map(|track| track.id)
                 .collect();
-            let track_kinds: Vec<_> = self
-                .state
-                .project_tracks
-                .tracks
-                .iter()
-                .map(|track| track.kind.is_midi())
-                .collect();
             let total_tracks = track_ids.len();
             let empty_content = TrackTimelineContent::default();
             // Real vertical layout of the section column, so a rubber-band
@@ -481,7 +474,6 @@ impl App {
                     index,
                     total_tracks,
                     track_ids.clone(),
-                    track_kinds.clone(),
                     selected_clips,
                     false,
                     0.0,

@@ -10,7 +10,6 @@ pub enum ClipDragAction {
     MoveClip {
         undo_gesture: UndoGestureId,
         clip_id: ClipId,
-        is_note_clip: bool,
         start_local_x: f32,
         start_scroll_beats: f64,
         original_position_beats: f64,

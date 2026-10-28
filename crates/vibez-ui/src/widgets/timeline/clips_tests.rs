@@ -51,7 +51,6 @@ fn track_canvas_at(
         0,
         1,
         vec![track_id],
-        vec![false],
         HashSet::new(),
         false,
         0.0,
