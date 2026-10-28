@@ -103,7 +103,7 @@ selected one.
 
 ## Status
 
-v0.5.2, and still early.
+v0.5.3, and still early.
 Linux is the primary development platform; macOS and
 Windows build and pass CI on every change but get less hands-on testing.
 Projects save to a self-contained versioned `.vzp` container, but breaking
