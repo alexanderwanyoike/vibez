@@ -33,7 +33,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          # Linux packages require the glibc of the machine that built them
+          # (cargo-deb's $auto depends, and the binary's symbol versions), so
+          # this pins that floor at 2.35: Mint 21+, Ubuntu 22.04+, Debian 12+.
+          - os: ubuntu-22.04
             label: linux-x86_64
           - os: macos-latest
             label: macos-arm64
