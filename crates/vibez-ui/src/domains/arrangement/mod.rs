@@ -312,20 +312,6 @@ impl TimelineEditorState {
                     }
                 }
             }
-            ArrangementMsg::MoveAudioClip {
-                track_id,
-                clip_id,
-                new_position,
-            } => {
-                self.move_audio_clip(engine, track_id, clip_id, new_position);
-            }
-            ArrangementMsg::MoveNoteClipPosition {
-                track_id,
-                clip_id,
-                new_position_beats,
-            } => {
-                self.move_note_clip(engine, track_id, clip_id, new_position_beats);
-            }
             ArrangementMsg::ResizeAudioClip {
                 track_id,
                 clip_id,
@@ -355,14 +341,6 @@ impl TimelineEditorState {
                 if self.set_crossfade_curve(engine, track_id, outgoing_id, incoming_id, curve) {
                     action.mark_dirty = true;
                 }
-            }
-            ArrangementMsg::MoveClipToTrack {
-                source_track,
-                target_track,
-                clip_id,
-                is_note_clip,
-            } => {
-                self.move_clip_to_track(engine, source_track, target_track, clip_id, is_note_clip);
             }
             ArrangementMsg::DeleteSelectedClip => {
                 let selections: Vec<_> = self.selected_clips.drain().collect();

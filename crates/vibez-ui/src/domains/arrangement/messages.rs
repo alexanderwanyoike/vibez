@@ -101,16 +101,6 @@ pub enum ArrangementMsg {
         selection: ArrangementSelection,
         shift_held: bool,
     },
-    MoveAudioClip {
-        track_id: TrackId,
-        clip_id: ClipId,
-        new_position: u64,
-    },
-    MoveNoteClipPosition {
-        track_id: TrackId,
-        clip_id: ClipId,
-        new_position_beats: f64,
-    },
     ResizeAudioClip {
         track_id: TrackId,
         clip_id: ClipId,
@@ -133,12 +123,6 @@ pub enum ArrangementMsg {
         outgoing_id: ClipId,
         incoming_id: ClipId,
         curve: vibez_core::track::FadeCurve,
-    },
-    MoveClipToTrack {
-        source_track: TrackId,
-        target_track: TrackId,
-        clip_id: ClipId,
-        is_note_clip: bool,
     },
     ToggleClipLoop(TrackId, ClipId),
     ToggleClipReverse(TrackId, ClipId),
@@ -330,8 +314,7 @@ impl ArrangementMsg {
     pub(crate) const fn requires_multiple_slot_parts(&self) -> bool {
         matches!(
             self,
-            Self::MoveClipToTrack { .. }
-                | Self::SplitAudioClip { .. }
+            Self::SplitAudioClip { .. }
                 | Self::SliceAudioClipAtMarkers { .. }
                 | Self::RequestSliceAudioClipToDrumRack { .. }
                 | Self::SliceAudioClipToDrumRack { .. }
@@ -353,13 +336,10 @@ impl ArrangementMsg {
             Self::RenameClip(..)
                 | Self::RemoveClip(..)
                 | Self::SelectArrangementClip { .. }
-                | Self::MoveAudioClip { .. }
-                | Self::MoveNoteClipPosition { .. }
                 | Self::ResizeAudioClip { .. }
                 | Self::SetAudioClipFade { .. }
                 | Self::SetAudioClipFadeCurve { .. }
                 | Self::SetAudioClipCrossfadeCurve { .. }
-                | Self::MoveClipToTrack { .. }
                 | Self::MoveSelectedClips { .. }
                 | Self::ToggleClipLoop(..)
                 | Self::ToggleClipReverse(..)
