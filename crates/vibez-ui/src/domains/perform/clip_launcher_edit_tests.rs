@@ -282,3 +282,29 @@ fn a_drop_onto_a_track_of_the_other_kind_leaves_the_clip_where_it_was() {
     assert_eq!(state.clips.at(midi, 0).map(|clip| clip.id), Some(id));
     assert_eq!(state.clip_editor.dragging, None);
 }
+
+#[test]
+fn an_empty_clip_takes_the_new_clip_length_and_free_keeps_four_bars() {
+    use crate::domains::perform::clip_record::RecordLength;
+    let tracks = tracks(1);
+    let track = tracks[0].id;
+    let mut state = launcher();
+    let length = |state: &PerformState, id| {
+        state
+            .clips
+            .by_id(id)
+            .unwrap()
+            .timeline
+            .get(track)
+            .unwrap()
+            .note_clips[0]
+            .duration_beats
+    };
+
+    let free = create(&mut state, &tracks, track, 0);
+    assert_eq!(length(&state, free), 16.0);
+
+    state.clip_record.length = RecordLength::Bars(2);
+    let two_bars = create(&mut state, &tracks, track, 1);
+    assert_eq!(length(&state, two_bars), 8.0);
+}
