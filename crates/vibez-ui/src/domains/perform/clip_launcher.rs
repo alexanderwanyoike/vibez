@@ -547,7 +547,7 @@ impl PerformState {
                         track_id,
                         row,
                         format!("Pattern {}", row + 1),
-                        16.0,
+                        self.clip_record.length.beats().unwrap_or(16.0),
                     ));
                 selected = self.select_launcher_clip(id);
             }
