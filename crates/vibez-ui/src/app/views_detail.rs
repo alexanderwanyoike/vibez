@@ -630,7 +630,16 @@ impl App {
 }
 
 fn clip_length_label(beats: f64) -> String {
-    format!("Dur: {beats:.1}")
+    let beats = (beats.max(0.0) * 100.0).round() / 100.0;
+    let bars = (beats / 4.0).floor();
+    let rest = beats - bars * 4.0;
+    let plural =
+        |count: f64, unit: &str| format!("{count} {unit}{}", if count == 1.0 { "" } else { "s" });
+    match (bars > 0.0, rest > 0.0) {
+        (true, true) => format!("{} {}", plural(bars, "bar"), plural(rest, "beat")),
+        (true, false) => plural(bars, "bar"),
+        (false, _) => plural(rest, "beat"),
+    }
 }
 
 #[cfg(test)]
