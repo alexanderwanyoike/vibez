@@ -423,7 +423,7 @@ impl App {
             let pos_label = text(format!("Pos: {:.1}", clip.position_beats))
                 .size(10)
                 .color(th::text_dim());
-            let dur_label = text(format!("Dur: {:.1}", clip.duration_beats))
+            let dur_label = text(clip_length_label(clip.duration_beats))
                 .size(10)
                 .color(th::text_dim());
 
@@ -627,6 +627,10 @@ impl App {
             })
             .into()
     }
+}
+
+fn clip_length_label(beats: f64) -> String {
+    format!("Dur: {beats:.1}")
 }
 
 #[cfg(test)]
