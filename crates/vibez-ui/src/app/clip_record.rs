@@ -59,7 +59,7 @@ impl App {
                     .map(|beats| (beats * spb).round() as u64)
             });
         let id = original.as_ref().map_or_else(ClipId::new, |clip| clip.id);
-        let beats = length.map_or(16.0, |samples| samples as f64 / spb);
+        let beats = length.map_or(DEFAULT_NEW_CLIP_BEATS, |samples| samples as f64 / spb);
         let working = if audio {
             original.clone().unwrap_or(LauncherClip {
                 id,
