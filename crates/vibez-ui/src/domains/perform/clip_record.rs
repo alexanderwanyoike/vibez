@@ -15,6 +15,7 @@ use vibez_core::midi::MidiNote;
 /// A new Clip made at Free length has no take to measure yet.
 pub const DEFAULT_NEW_CLIP_BEATS: f64 = 16.0;
 
+/// The NEW CLIP length: it sets both recorded takes and Clips created empty.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum RecordLength {
     #[default]
