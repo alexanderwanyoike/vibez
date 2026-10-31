@@ -26,8 +26,10 @@ use super::*;
 
 mod hit_test;
 
-/// Pointer travel before a press becomes a rubber-band rather than a seek.
-const MARQUEE_MIN_PX: f32 = 4.0;
+/// Pointer travel before a press counts as a drag rather than a click: a
+/// rubber-band rather than a seek, or a group move rather than narrowing the
+/// selection to the pressed Clip.
+const DRAG_MIN_PX: f32 = 4.0;
 
 /// Vertical travel before a clip drag may change lane. Without it a
 /// horizontal drag near a row boundary would flicker between tracks.
@@ -58,7 +60,6 @@ pub struct TrackClipCanvas {
     pub track_index: usize,
     pub total_tracks: usize,
     pub track_ids: Vec<TrackId>,
-    pub track_kinds: Vec<bool>, // is_instrument flags
     /// True vertical layout of every row in this column, so a rubber-band
     /// spans lanes correctly even with automation lanes expanded. Empty
     /// when the surface has not opted into box selection.
@@ -130,7 +131,6 @@ impl TrackClipCanvas {
         track_index: usize,
         total_tracks: usize,
         track_ids: Vec<TrackId>,
-        track_kinds: Vec<bool>,
         selected_clips: HashSet<ClipId>,
         loop_enabled: bool,
         loop_start_beats: f64,
@@ -255,7 +255,6 @@ impl TrackClipCanvas {
             track_index,
             total_tracks,
             track_ids,
-            track_kinds,
             row_spans: Vec::new(),
             marquee: None,
             selected_clips,
@@ -501,11 +500,13 @@ impl canvas::Program<Message> for TrackClipCanvas {
                             state.drag = Some(ClipDragAction::MoveClip {
                                 undo_gesture: UndoGestureId::new(),
                                 clip_id,
-                                is_note_clip,
                                 start_local_x: pos.x,
                                 start_scroll_beats: self.scroll_offset_beats,
                                 original_position_beats: pos_beats,
                                 start_y: pos.y,
+                                collapse_to: (self.selected_clips.contains(&clip_id)
+                                    && !state.shift_held)
+                                    .then_some(selection),
                             });
                         } else {
                             // Body → seek / region-select (like empty space)
@@ -519,8 +520,7 @@ impl canvas::Program<Message> for TrackClipCanvas {
 
                         return (
                             canvas::event::Status::Captured,
-                            if near_right
-                                && in_title_bar
+                            if in_title_bar
                                 && self.selected_clips.contains(&clip_id)
                                 && !state.shift_held
                             {
@@ -627,7 +627,7 @@ impl canvas::Program<Message> for TrackClipCanvas {
                                 let dy = (column_y - *anchor_column_y).abs();
                                 // Vertical travel promotes too: a drag
                                 // straight down the lanes is a valid box.
-                                if dx > MARQUEE_MIN_PX || dy > MARQUEE_MIN_PX {
+                                if dx > DRAG_MIN_PX || dy > DRAG_MIN_PX {
                                     let anchor_snapped = self.snapped_beat(*anchor);
                                     let anchor_y = *anchor_column_y;
                                     state.drag = Some(ClipDragAction::RegionSelect {
@@ -665,11 +665,11 @@ impl canvas::Program<Message> for TrackClipCanvas {
                             ClipDragAction::MoveClip {
                                 undo_gesture,
                                 clip_id,
-                                is_note_clip,
                                 start_local_x,
                                 start_scroll_beats,
                                 original_position_beats,
                                 start_y,
+                                ..
                             } => {
                                 let delta_px = local_x - start_local_x;
                                 let new_pos = crate::timeline_geometry::compensated_drag_beat(
@@ -681,66 +681,23 @@ impl canvas::Program<Message> for TrackClipCanvas {
                                 )
                                 .max(0.0);
 
-                                let snapped = self.snapped_beat(new_pos);
-
-                                // Check for cross-track drag
-                                let local_y = local.y;
-                                let dy = local_y - start_y;
-
                                 // Resolve against real row geometry when the
                                 // surface supplied it; stepping by a fixed
                                 // row height mis-targets as soon as a track
                                 // above has its automation lanes expanded.
-                                let target_idx = self
-                                    .resolve_lane_at(self.row_top() + local_y)
-                                    .filter(|_| dy.abs() > CROSS_TRACK_MIN_PX);
-
-                                if let Some(target_idx) = target_idx {
-                                    if target_idx != self.track_index
-                                        && target_idx < self.track_ids.len()
-                                    {
-                                        let target_track = self.track_ids[target_idx];
-                                        let target_is_instrument = self.track_kinds[target_idx];
-
-                                        // Type compatibility: note clips to instrument tracks,
-                                        // audio clips to audio tracks
-                                        if *is_note_clip == target_is_instrument {
-                                            let edit = Message::Arrangement(
-                                                ArrangementMsg::MoveClipToTrack {
-                                                    source_track: track_id,
-                                                    target_track,
-                                                    clip_id: *clip_id,
-                                                    is_note_clip: *is_note_clip,
-                                                },
-                                            )
-                                            .in_undo_gesture(*undo_gesture);
-                                            return (canvas::event::Status::Captured, Some(edit));
-                                        }
-                                    }
-                                }
-
-                                if *is_note_clip {
-                                    let edit = Message::Arrangement(
-                                        ArrangementMsg::MoveNoteClipPosition {
-                                            track_id,
-                                            clip_id: *clip_id,
-                                            new_position_beats: snapped,
-                                        },
-                                    )
+                                let target_track = self
+                                    .resolve_lane_at(self.row_top() + local.y)
+                                    .filter(|_| (local.y - start_y).abs() > CROSS_TRACK_MIN_PX)
+                                    .and_then(|lane| self.track_ids.get(lane).copied())
+                                    .unwrap_or(track_id);
+                                let edit =
+                                    Message::Arrangement(ArrangementMsg::MoveSelectedClips {
+                                        anchor: *clip_id,
+                                        new_position_beats: self.snapped_beat(new_pos),
+                                        target_track,
+                                    })
                                     .in_undo_gesture(*undo_gesture);
-                                    return (canvas::event::Status::Captured, Some(edit));
-                                } else {
-                                    let spb = self.spb();
-                                    let new_sample_pos = (snapped * spb) as u64;
-                                    let edit =
-                                        Message::Arrangement(ArrangementMsg::MoveAudioClip {
-                                            track_id,
-                                            clip_id: *clip_id,
-                                            new_position: new_sample_pos,
-                                        })
-                                        .in_undo_gesture(*undo_gesture);
-                                    return (canvas::event::Status::Captured, Some(edit));
-                                }
+                                return (canvas::event::Status::Captured, Some(edit));
                             }
                             ClipDragAction::ResizeClip {
                                 undo_gesture,
@@ -886,6 +843,25 @@ impl canvas::Program<Message> for TrackClipCanvas {
                             // Drops the box; the clip selection it produced
                             // and the time range it set both stay.
                             Some(Message::Arrangement(ArrangementMsg::EndMarqueeSelect))
+                        }
+                        ClipDragAction::MoveClip {
+                            collapse_to: Some(selection),
+                            start_local_x,
+                            start_y,
+                            ..
+                        } if LocalDrag::unclamped().position(cursor, bounds).is_some_and(
+                            |local| {
+                                (local.x - start_local_x).abs() <= DRAG_MIN_PX
+                                    && (local.y - start_y).abs() <= DRAG_MIN_PX
+                            },
+                        ) =>
+                        {
+                            Some(Message::Arrangement(
+                                ArrangementMsg::SelectArrangementClip {
+                                    selection: *selection,
+                                    shift_held: false,
+                                },
+                            ))
                         }
                         _ => None,
                     };
