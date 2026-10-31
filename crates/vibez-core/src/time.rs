@@ -112,6 +112,14 @@ mod tests {
     }
 
     #[test]
+    fn length_label_hides_float_error_in_the_leftover_beats() {
+        let label = |beats| MusicalTime(beats).length_label();
+        assert_eq!(label(4.1), "1 bar 0.1 beats");
+        assert_eq!(label(12.3), "3 bars 0.3 beats");
+        assert_eq!(label(4.0 + 1.0 / 3.0), "1 bar 0.33 beats");
+    }
+
+    #[test]
     fn tempo_map_120bpm() {
         let tm = TempoMap::new(120.0, 44_100);
         assert!((tm.seconds_per_beat() - 0.5).abs() < 1e-10);
