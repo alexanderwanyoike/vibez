@@ -14,6 +14,9 @@ impl SampleTime {
     }
 }
 
+/// Every bar is 4/4 until the Project gains a time signature.
+pub const BEATS_PER_BAR: f64 = 4.0;
+
 /// Musical position in beats (quarter notes).
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Default, Serialize, Deserialize)]
 pub struct MusicalTime(pub f64);
@@ -25,6 +28,21 @@ impl MusicalTime {
 
     pub fn bar(self, beats_per_bar: f64) -> f64 {
         self.0 / beats_per_bar
+    }
+
+    /// A length as whole bars plus leftover beats, such as "1 bar 2 beats".
+    pub fn length_label(self) -> String {
+        let beats = (self.0.max(0.0) * 100.0).round() / 100.0;
+        let bars = (beats / BEATS_PER_BAR).floor();
+        let rest = beats - bars * BEATS_PER_BAR;
+        let plural = |count: f64, unit: &str| {
+            format!("{count} {unit}{}", if count == 1.0 { "" } else { "s" })
+        };
+        match (bars > 0.0, rest > 0.0) {
+            (true, true) => format!("{} {}", plural(bars, "bar"), plural(rest, "beat")),
+            (true, false) => plural(bars, "bar"),
+            (false, _) => plural(rest, "beat"),
+        }
     }
 }
 
@@ -80,6 +98,17 @@ mod tests {
         let mt = MusicalTime::from_bars(2.0, 4.0);
         assert!((mt.0 - 8.0).abs() < 1e-10);
         assert!((mt.bar(4.0) - 2.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn length_label_reads_in_bars_and_leftover_beats() {
+        let label = |beats| MusicalTime(beats).length_label();
+        assert_eq!(label(16.0), "4 bars");
+        assert_eq!(label(4.0), "1 bar");
+        assert_eq!(label(6.0), "1 bar 2 beats");
+        assert_eq!(label(1.0), "1 beat");
+        assert_eq!(label(1.5), "1.5 beats");
+        assert_eq!(label(12.25), "3 bars 0.25 beats");
     }
 
     #[test]

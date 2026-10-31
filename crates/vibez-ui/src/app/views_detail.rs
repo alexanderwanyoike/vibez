@@ -423,7 +423,7 @@ impl App {
             let pos_label = text(format!("Pos: {:.1}", clip.position_beats))
                 .size(10)
                 .color(th::text_dim());
-            let dur_label = text(clip_length_label(clip.duration_beats))
+            let dur_label = text(vibez_core::time::MusicalTime(clip.duration_beats).length_label())
                 .size(10)
                 .color(th::text_dim());
 
@@ -629,38 +629,15 @@ impl App {
     }
 }
 
-fn clip_length_label(beats: f64) -> String {
-    let beats = (beats.max(0.0) * 100.0).round() / 100.0;
-    let bars = (beats / 4.0).floor();
-    let rest = beats - bars * 4.0;
-    let plural =
-        |count: f64, unit: &str| format!("{count} {unit}{}", if count == 1.0 { "" } else { "s" });
-    match (bars > 0.0, rest > 0.0) {
-        (true, true) => format!("{} {}", plural(bars, "bar"), plural(rest, "beat")),
-        (true, false) => plural(bars, "bar"),
-        (false, _) => plural(rest, "beat"),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
-        clip_length_label, effective_detail_panel_height, focused_note_clip_for_track,
+        effective_detail_panel_height, focused_note_clip_for_track,
         resolved_detail_playhead_samples, single_selected_audio_clip_for_track,
         visible_note_clip_for_track,
     };
     use crate::state::{ArrangementSelection, TimelineEditorState};
     use vibez_core::id::{ClipId, SectionId, TrackId};
-
-    #[test]
-    fn clip_length_reads_in_bars_and_leftover_beats() {
-        assert_eq!(clip_length_label(16.0), "4 bars");
-        assert_eq!(clip_length_label(4.0), "1 bar");
-        assert_eq!(clip_length_label(6.0), "1 bar 2 beats");
-        assert_eq!(clip_length_label(1.0), "1 beat");
-        assert_eq!(clip_length_label(1.5), "1.5 beats");
-        assert_eq!(clip_length_label(12.25), "3 bars 0.25 beats");
-    }
 
     #[test]
     fn detail_panel_height_preserves_the_workspace_at_small_windows() {
