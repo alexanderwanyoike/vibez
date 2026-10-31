@@ -222,7 +222,7 @@ impl AudioEngine {
         let effective_at_samples = if let Some(boundary) = quantization.musical_boundary() {
             boundary
                 .beats()
-                .map_or(now, |beats| self.next_grid_boundary(now, beats))
+                .map_or(now, |beats| self.track_mute_boundary(now, beats))
         } else {
             self.active_section
                 .map(|active| {
@@ -262,6 +262,28 @@ impl AudioEngine {
             },
             allowance,
         );
+    }
+
+    fn track_mute_boundary(&self, now: u64, beats: f64) -> u64 {
+        if self.transport.bpm() <= 0.0 {
+            return now;
+        }
+        let presented = self.presentation_context(self.mix_latency());
+        let heard = match self.clock_domain {
+            ClockDomain::Arrange => presented.arrange,
+            ClockDomain::Perform => presented.perform,
+        };
+        let samples_per_beat = self.sample_rate as f64 * 60.0 / self.transport.bpm();
+        let grid = beats * samples_per_beat;
+        let previous = (heard as f64 / grid).floor() * grid;
+        let tolerance = vibez_core::perform::LATE_PRESS_TOLERANCE_BEATS * samples_per_beat;
+        // The clock's starting point is not a downbeat the performer could
+        // have aimed at and missed; a press there is set-up for the next one.
+        if previous > 0.0 && heard as f64 - previous < tolerance {
+            now
+        } else {
+            self.next_grid_boundary(now, beats)
+        }
     }
 
     pub(super) fn next_track_mute_boundary(&self) -> Option<u64> {
