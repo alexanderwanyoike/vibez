@@ -333,16 +333,32 @@ pub enum MusicalBoundary {
     Immediate,
     OneBeat,
     OneBar,
+    TwoBars,
+    FourBars,
+    EightBars,
+    SixteenBars,
 }
 
 impl MusicalBoundary {
-    pub const ALL: [Self; 3] = [Self::Immediate, Self::OneBeat, Self::OneBar];
+    pub const ALL: [Self; 7] = [
+        Self::Immediate,
+        Self::OneBeat,
+        Self::OneBar,
+        Self::TwoBars,
+        Self::FourBars,
+        Self::EightBars,
+        Self::SixteenBars,
+    ];
 
     pub const fn label(self) -> &'static str {
         match self {
             Self::Immediate => "Immediate",
             Self::OneBeat => "1 Beat",
             Self::OneBar => "1 Bar",
+            Self::TwoBars => "2 Bars",
+            Self::FourBars => "4 Bars",
+            Self::EightBars => "8 Bars",
+            Self::SixteenBars => "16 Bars",
         }
     }
 
@@ -352,6 +368,10 @@ impl MusicalBoundary {
             Self::Immediate => None,
             Self::OneBeat => Some(1.0),
             Self::OneBar => Some(4.0),
+            Self::TwoBars => Some(8.0),
+            Self::FourBars => Some(16.0),
+            Self::EightBars => Some(32.0),
+            Self::SixteenBars => Some(64.0),
         }
     }
 }
@@ -362,6 +382,13 @@ impl std::fmt::Display for MusicalBoundary {
     }
 }
 
+/// How far past a boundary a quantized Track Mute press may land and still
+/// take effect at once instead of waiting a whole grid step. The engine cannot
+/// see the audio device buffer or UI frame delay between what the performer
+/// hears and when the command arrives, so a press aimed at a downbeat
+/// routinely lands just after it.
+pub const LATE_PRESS_TOLERANCE_BEATS: f64 = 0.25;
+
 /// Musical boundary at which a resident Section launch becomes effective.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -370,14 +397,22 @@ pub enum SectionLaunchQuantization {
     OneBeat,
     #[default]
     OneBar,
+    TwoBars,
+    FourBars,
+    EightBars,
+    SixteenBars,
     EndOfSection,
 }
 
 impl SectionLaunchQuantization {
-    pub const ALL: [Self; 4] = [
+    pub const ALL: [Self; 8] = [
         Self::Immediate,
         Self::OneBeat,
         Self::OneBar,
+        Self::TwoBars,
+        Self::FourBars,
+        Self::EightBars,
+        Self::SixteenBars,
         Self::EndOfSection,
     ];
 
@@ -394,6 +429,10 @@ impl SectionLaunchQuantization {
             Self::Immediate => Some(MusicalBoundary::Immediate),
             Self::OneBeat => Some(MusicalBoundary::OneBeat),
             Self::OneBar => Some(MusicalBoundary::OneBar),
+            Self::TwoBars => Some(MusicalBoundary::TwoBars),
+            Self::FourBars => Some(MusicalBoundary::FourBars),
+            Self::EightBars => Some(MusicalBoundary::EightBars),
+            Self::SixteenBars => Some(MusicalBoundary::SixteenBars),
             Self::EndOfSection => None,
         }
     }
@@ -421,6 +460,18 @@ mod track_mute_quantization_tests {
         assert_eq!(MusicalBoundary::Immediate.beats(), None);
         assert_eq!(MusicalBoundary::OneBeat.beats(), Some(1.0));
         assert_eq!(MusicalBoundary::OneBar.beats(), Some(4.0));
+        assert_eq!(MusicalBoundary::TwoBars.beats(), Some(8.0));
+        assert_eq!(MusicalBoundary::FourBars.beats(), Some(16.0));
+        assert_eq!(MusicalBoundary::EightBars.beats(), Some(32.0));
+        assert_eq!(MusicalBoundary::SixteenBars.beats(), Some(64.0));
+        assert_eq!(
+            SectionLaunchQuantization::EightBars.musical_boundary(),
+            Some(MusicalBoundary::EightBars)
+        );
+        assert_eq!(
+            serde_json::to_string(&SectionLaunchQuantization::SixteenBars).unwrap(),
+            "\"sixteen_bars\""
+        );
         assert_eq!(
             SectionLaunchQuantization::OneBar.musical_boundary(),
             Some(MusicalBoundary::OneBar)
@@ -431,7 +482,16 @@ mod track_mute_quantization_tests {
     fn track_mute_quantization_shares_the_section_launch_definition() {
         assert_eq!(
             TrackMuteQuantization::ALL.map(TrackMuteQuantization::label),
-            ["Immediate", "1 Beat", "1 Bar", "End of Section"]
+            [
+                "Immediate",
+                "1 Beat",
+                "1 Bar",
+                "2 Bars",
+                "4 Bars",
+                "8 Bars",
+                "16 Bars",
+                "End of Section"
+            ]
         );
         assert_eq!(
             serde_json::to_string(&TrackMuteQuantization::OneBar).unwrap(),

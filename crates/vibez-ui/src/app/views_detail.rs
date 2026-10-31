@@ -423,7 +423,7 @@ impl App {
             let pos_label = text(format!("Pos: {:.1}", clip.position_beats))
                 .size(10)
                 .color(th::text_dim());
-            let dur_label = text(format!("Dur: {:.1}", clip.duration_beats))
+            let dur_label = text(vibez_core::time::MusicalTime(clip.duration_beats).length_label())
                 .size(10)
                 .color(th::text_dim());
 

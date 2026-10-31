@@ -192,13 +192,6 @@ impl App {
             .iter()
             .map(|t| t.id)
             .collect();
-        let track_kinds: Vec<bool> = self
-            .state
-            .project_tracks
-            .tracks
-            .iter()
-            .map(|t| t.kind.is_midi())
-            .collect();
         let total_track_count = self.state.project_tracks.tracks.len();
         let browser_drag_duration = self
             .state
@@ -306,7 +299,6 @@ impl App {
                 track_index,
                 total_track_count,
                 track_ids.clone(),
-                track_kinds.clone(),
                 selected_clips,
                 self.state.transport.loop_enabled,
                 self.state.transport.loop_start_beats,

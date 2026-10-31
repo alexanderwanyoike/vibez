@@ -60,6 +60,7 @@ mod audio_markers;
 mod channel_selection;
 mod clipboard_loops;
 mod crossfades;
+mod group_move;
 mod note_clips;
 mod project_tracks;
 mod selection;

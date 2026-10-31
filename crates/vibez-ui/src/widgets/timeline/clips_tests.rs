@@ -51,7 +51,6 @@ fn track_canvas_at(
         0,
         1,
         vec![track_id],
-        vec![false],
         HashSet::new(),
         false,
         0.0,
@@ -764,5 +763,118 @@ fn overlapping_fade_controls_choose_the_handle_nearest_the_pointer() {
     assert!(matches!(
         canvas.fade_control_hit(curve, bounds.height),
         Some(fade_drag::FadeControlDrag::Curve(_))
+    ));
+}
+
+fn canvas_with_selected_audio_clip() -> (TrackClipCanvas, ClipId) {
+    let mut canvas = empty_track_canvas();
+    let clip_id = ClipId::new();
+    canvas.clips.push(TimelineClip {
+        clip_id,
+        position: 0,
+        duration: 88_200,
+        name: "Clip".into(),
+        peaks: Arc::new(Vec::new()),
+        peak_span_frames: None,
+        loop_enabled: false,
+        loop_start: 0,
+        loop_end: 0,
+        fade_in_frames: 0,
+        fade_out_frames: 0,
+        fade_in_curve: Default::default(),
+        fade_out_curve: Default::default(),
+        crossfade_in_from: None,
+        crossfade_out_to: None,
+        warp_stale: false,
+    });
+    canvas.selected_clips.insert(clip_id);
+    (canvas, clip_id)
+}
+
+fn left_event(
+    canvas: &TrackClipCanvas,
+    state: &mut ClipInteractionState,
+    event: iced::mouse::Event,
+    position: Point,
+) -> Option<Message> {
+    <TrackClipCanvas as canvas::Program<Message>>::update(
+        canvas,
+        state,
+        canvas::Event::Mouse(event),
+        Rectangle::new(Point::ORIGIN, Size::new(800.0, 80.0)),
+        mouse::Cursor::Available(position),
+    )
+    .1
+}
+
+#[test]
+fn pressing_a_selected_clip_keeps_the_selection_and_dragging_moves_it_as_a_group() {
+    let (canvas, clip_id) = canvas_with_selected_audio_clip();
+    let start = Point::new(canvas.beat_to_x(1.0), CLIP_Y + 4.0);
+    let mut state = ClipInteractionState::default();
+
+    let pressed = left_event(
+        &canvas,
+        &mut state,
+        iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left),
+        start,
+    );
+    assert!(pressed.is_none(), "the press must not narrow the selection");
+
+    let target = Point::new(canvas.beat_to_x(2.0), start.y);
+    let moved = left_event(
+        &canvas,
+        &mut state,
+        iced::mouse::Event::CursorMoved { position: target },
+        target,
+    );
+    assert!(matches!(
+        moved,
+        Some(Message::UndoGesture { edit, .. }) if matches!(
+            *edit,
+            Message::Arrangement(ArrangementMsg::MoveSelectedClips {
+                anchor,
+                new_position_beats,
+                target_track,
+            }) if anchor == clip_id
+                && (new_position_beats - 1.0).abs() < 1e-9
+                && target_track == canvas.track_ids[0]
+        )
+    ));
+
+    let released = left_event(
+        &canvas,
+        &mut state,
+        iced::mouse::Event::ButtonReleased(iced::mouse::Button::Left),
+        target,
+    );
+    assert!(released.is_none(), "a drag keeps the whole selection");
+}
+
+#[test]
+fn clicking_a_selected_clip_without_dragging_narrows_the_selection_to_it() {
+    let (canvas, clip_id) = canvas_with_selected_audio_clip();
+    let start = Point::new(canvas.beat_to_x(1.0), CLIP_Y + 4.0);
+    let mut state = ClipInteractionState::default();
+
+    left_event(
+        &canvas,
+        &mut state,
+        iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left),
+        start,
+    );
+    let released = left_event(
+        &canvas,
+        &mut state,
+        iced::mouse::Event::ButtonReleased(iced::mouse::Button::Left),
+        start,
+    );
+
+    assert!(matches!(
+        released,
+        Some(Message::Arrangement(ArrangementMsg::SelectArrangementClip {
+            selection: crate::state::ArrangementSelection::AudioClip { clip_id: id, .. },
+            shift_held: false,
+        })) if id == clip_id
     ));
 }

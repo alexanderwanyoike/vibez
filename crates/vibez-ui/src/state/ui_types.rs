@@ -653,6 +653,24 @@ pub enum ArrangementSelection {
     NoteClip { track_id: TrackId, clip_id: ClipId },
 }
 
+impl ArrangementSelection {
+    pub const fn track_id(self) -> TrackId {
+        match self {
+            Self::AudioClip { track_id, .. } | Self::NoteClip { track_id, .. } => track_id,
+        }
+    }
+
+    pub const fn clip_id(self) -> ClipId {
+        match self {
+            Self::AudioClip { clip_id, .. } | Self::NoteClip { clip_id, .. } => clip_id,
+        }
+    }
+
+    pub const fn is_note_clip(self) -> bool {
+        matches!(self, Self::NoteClip { .. })
+    }
+}
+
 /// Drawable geometry for a rubber-band being dragged across a timeline.
 ///
 /// `top_y` / `bottom_y` are measured from the top of the first track row,

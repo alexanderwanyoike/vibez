@@ -220,10 +220,7 @@ impl App {
                 | Message::DrumRackPadSampleDecoded(..)
                 | Message::BrowserImportPrepared { .. }
                 | Message::Arrangement(ArrangementMsg::SetClipLoopRegion { .. })
-                | Message::Arrangement(ArrangementMsg::MoveAudioClip { .. })
-                | Message::Arrangement(ArrangementMsg::MoveNoteClipPosition { .. })
                 | Message::Arrangement(ArrangementMsg::ResizeAudioClip { .. })
-                | Message::Arrangement(ArrangementMsg::MoveClipToTrack { .. })
                 | Message::Arrangement(ArrangementMsg::DeleteSelectedClip)
                 | Message::Arrangement(ArrangementMsg::DuplicateSelectedClip)
                 | Message::Transport(TransportMsg::ToggleArrangementLoop)

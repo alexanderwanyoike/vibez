@@ -213,15 +213,26 @@ fn moving_one_crossfaded_clip_unlinks_both_edges_without_losing_fade_lengths() {
         ArrangementCtx::default(),
     );
     engine.0.clear();
-
-    a.update(
-        ArrangementMsg::MoveAudioClip {
+    let both = std::mem::replace(
+        &mut a.selected_clips,
+        HashSet::from([ArrangementSelection::AudioClip {
             track_id,
             clip_id: incoming_id,
-            new_position: 1_100,
+        }]),
+    );
+    let ctx = ArrangementCtx {
+        samples_per_beat: 100.0,
+        ..ArrangementCtx::default()
+    };
+
+    a.update(
+        ArrangementMsg::MoveSelectedClips {
+            anchor: incoming_id,
+            new_position_beats: 11.0,
+            target_track: track_id,
         },
         &mut engine,
-        ArrangementCtx::default(),
+        ctx,
     );
 
     let outgoing = a.tracks[0]
@@ -252,14 +263,15 @@ fn moving_one_crossfaded_clip_unlinks_both_edges_without_losing_fade_lengths() {
     ));
 
     a.update(
-        ArrangementMsg::MoveAudioClip {
-            track_id,
-            clip_id: incoming_id,
-            new_position: 750,
+        ArrangementMsg::MoveSelectedClips {
+            anchor: incoming_id,
+            new_position_beats: 7.5,
+            target_track: track_id,
         },
         &mut engine,
-        ArrangementCtx::default(),
+        ctx,
     );
+    a.selected_clips = both;
     a.update(
         ArrangementMsg::CrossfadeSelectedAudioClips,
         &mut engine,
