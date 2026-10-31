@@ -32,9 +32,10 @@ impl MusicalTime {
 
     /// A length as whole bars plus leftover beats, such as "1 bar 2 beats".
     pub fn length_label(self) -> String {
-        let beats = (self.0.max(0.0) * 100.0).round() / 100.0;
-        let bars = (beats / BEATS_PER_BAR).floor();
-        let rest = beats - bars * BEATS_PER_BAR;
+        let hundredths = (self.0.max(0.0) * 100.0).round() as u64;
+        let per_bar = (BEATS_PER_BAR * 100.0) as u64;
+        let bars = (hundredths / per_bar) as f64;
+        let rest = (hundredths % per_bar) as f64 / 100.0;
         let plural = |count: f64, unit: &str| {
             format!("{count} {unit}{}", if count == 1.0 { "" } else { "s" })
         };
