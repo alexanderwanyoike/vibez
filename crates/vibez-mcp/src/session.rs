@@ -5,6 +5,10 @@ use std::path::{Path, PathBuf};
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use vibez_core::effect::EffectInfo;
+use vibez_core::id::{ClipId, EffectId, TrackId};
+use vibez_core::midi::{MidiNote, NoteClipInfo, TrackKind};
+use vibez_core::track::{ClipGainDb, ClipInfo, InstrumentStateInfo, MediaSourceRef, TrackInfo};
 use vibez_project::Project;
 
 use crate::device_params::{AppliedParameter, Device, DeviceParamError};
@@ -125,14 +129,29 @@ pub struct TrackSession {
 
 impl TrackSession {
     pub fn new(name: &str, bpm: f64) -> Result<Self, SessionError> {
-        let _ = (name, bpm);
-        todo!()
+        validate_tempo(bpm)?;
+        let mut master = TrackInfo::new("Master");
+        master.id = TrackId::MASTER;
+        Ok(Self {
+            project: Project {
+                name: name.to_string(),
+                bpm,
+                master: Some(master),
+                ..Project::default()
+            },
+            container: None,
+        })
     }
 
     /// Adopts an existing project, e.g. one opened from disk.
-    pub fn from_project(project: Project, container: Option<PathBuf>) -> Self {
-        let _ = (project, container);
-        todo!()
+    pub fn from_project(mut project: Project, container: Option<PathBuf>) -> Self {
+        vibez_core::id::ensure_ids_above(project.max_persisted_id());
+        if project.master.is_none() {
+            let mut master = TrackInfo::new("Master");
+            master.id = TrackId::MASTER;
+            project.master = Some(master);
+        }
+        Self { project, container }
     }
 
     pub fn project(&self) -> &Project {
@@ -149,13 +168,45 @@ impl TrackSession {
     }
 
     pub fn set_tempo(&mut self, bpm: f64) -> Result<(), SessionError> {
-        let _ = bpm;
-        todo!()
+        validate_tempo(bpm)?;
+        self.project.bpm = bpm;
+        Ok(())
     }
 
     pub fn add_track(&mut self, spec: NewTrack) -> Result<u64, SessionError> {
-        let _ = spec;
-        todo!()
+        let mut track = TrackInfo::new(spec.name);
+        track.color_index = (self.project.tracks.len() % 8) as u8;
+        if let Some(device) = spec.instrument {
+            let kind = device
+                .instrument_kind()
+                .ok_or(SessionError::NotAnInstrument(device))?;
+            let params = device.default_params();
+            let state = match device {
+                Device::Sampler => {
+                    let sample = spec.sample.ok_or(SessionError::SamplerWithoutSample)?;
+                    sample_frames(&sample, self.project.sample_rate)?;
+                    InstrumentStateInfo::Sampler {
+                        params,
+                        source: Some(MediaSourceRef::LocalFile { path: sample }),
+                    }
+                }
+                Device::SubtractiveSynth => InstrumentStateInfo::SubtractiveSynth { params },
+                Device::WavetableSynth => InstrumentStateInfo::WavetableSynth { params },
+                _ => InstrumentStateInfo::FmSynth { params },
+            };
+            track.kind = TrackKind::Midi;
+            track.instrument = Some(kind);
+            track.native_instrument = Some(state);
+        }
+        if let Some(db) = spec.gain_db {
+            track.gain = db_to_gain(db);
+        }
+        if let Some(pan) = spec.pan {
+            track.pan = agent_pan_to_vibez(pan);
+        }
+        let id = track.id.raw();
+        self.project.tracks.push(track);
+        Ok(id)
     }
 
     pub fn set_track_mix(
@@ -165,8 +216,17 @@ impl TrackSession {
         pan: Option<f32>,
         mute: Option<bool>,
     ) -> Result<(), SessionError> {
-        let _ = (track_id, gain_db, pan, mute);
-        todo!()
+        let track = self.track_mut(track_id)?;
+        if let Some(db) = gain_db {
+            track.gain = db_to_gain(db);
+        }
+        if let Some(pan) = pan {
+            track.pan = agent_pan_to_vibez(pan);
+        }
+        if let Some(mute) = mute {
+            track.mute = mute;
+        }
+        Ok(())
     }
 
     pub fn set_instrument_parameters(
@@ -174,8 +234,21 @@ impl TrackSession {
         track_id: u64,
         values: &BTreeMap<String, f32>,
     ) -> Result<Vec<AppliedParameter>, SessionError> {
-        let _ = (track_id, values);
-        todo!()
+        let track = self.track_mut(track_id)?;
+        let device = track
+            .instrument
+            .and_then(Device::for_instrument)
+            .ok_or(SessionError::NotAnInstrumentTrack(track_id))?;
+        let params = match track.native_instrument.as_mut() {
+            Some(
+                InstrumentStateInfo::SubtractiveSynth { params }
+                | InstrumentStateInfo::WavetableSynth { params }
+                | InstrumentStateInfo::FmSynth { params }
+                | InstrumentStateInfo::Sampler { params, .. },
+            ) => params,
+            _ => return Err(SessionError::NotAnInstrumentTrack(track_id)),
+        };
+        Ok(crate::device_params::apply_named(device, params, values)?)
     }
 
     /// Appends an effect to a track's chain; track 0 is the master bus.
@@ -185,8 +258,22 @@ impl TrackSession {
         device: Device,
         values: &BTreeMap<String, f32>,
     ) -> Result<(u64, Vec<AppliedParameter>), SessionError> {
-        let _ = (track_id, device, values);
-        todo!()
+        let effect_type = device
+            .effect_type()
+            .ok_or(SessionError::NotAnEffect(device))?;
+        let mut params = device.default_params();
+        let applied = crate::device_params::apply_named(device, &mut params, values)?;
+        let id = EffectId::new();
+        self.track_mut(track_id)?.effects.push(EffectInfo {
+            id,
+            effect_type,
+            bypass: false,
+            params,
+            plugin: None,
+            sidechains: Vec::new(),
+            inactive_sidechains: Vec::new(),
+        });
+        Ok((id.raw(), applied))
     }
 
     pub fn set_effect_parameters(
@@ -195,33 +282,311 @@ impl TrackSession {
         effect_id: u64,
         values: &BTreeMap<String, f32>,
     ) -> Result<Vec<AppliedParameter>, SessionError> {
-        let _ = (track_id, effect_id, values);
-        todo!()
+        let effect = self
+            .track_mut(track_id)?
+            .effects
+            .iter_mut()
+            .find(|effect| effect.id.raw() == effect_id)
+            .ok_or(SessionError::UnknownEffect {
+                track: track_id,
+                effect: effect_id,
+            })?;
+        let device = Device::for_effect(effect.effect_type);
+        Ok(crate::device_params::apply_named(
+            device,
+            &mut effect.params,
+            values,
+        )?)
     }
 
     pub fn add_audio_clip(&mut self, spec: NewAudioClip) -> Result<u64, SessionError> {
-        let _ = spec;
-        todo!()
+        validate_beat("start_beat", spec.start_beat)?;
+        let track = self.track(spec.track_id)?;
+        if track.instrument.is_some() {
+            return Err(SessionError::NotAnAudioTrack(spec.track_id));
+        }
+        let track_id = track.id;
+        let available = sample_frames(&spec.sample, self.project.sample_rate)?;
+        let loop_end = match spec.loop_beats {
+            Some(beats) => {
+                validate_length("loop_beats", beats)?;
+                let frames = self.beats_to_frames(beats);
+                if frames > available {
+                    return Err(SessionError::InvalidTiming(format!(
+                        "a {beats}-beat loop needs {frames} frames but the sample has {available}"
+                    )));
+                }
+                Some(frames)
+            }
+            None => None,
+        };
+        let duration = match spec.length_beats {
+            Some(beats) => {
+                validate_length("length_beats", beats)?;
+                let frames = self.beats_to_frames(beats);
+                if loop_end.is_none() && frames > available {
+                    return Err(SessionError::InvalidTiming(format!(
+                        "{beats} beats is longer than the sample; set loop_beats to repeat it"
+                    )));
+                }
+                frames
+            }
+            None => available,
+        };
+        let gain_db = match spec.gain_db {
+            Some(db) => ClipGainDb::new(db).ok_or_else(|| {
+                SessionError::InvalidTiming(format!("clip gain {db} dB is out of range"))
+            })?,
+            None => ClipGainDb::default(),
+        };
+        let id = ClipId::new();
+        let name = spec
+            .sample
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "Audio".into());
+        self.project.arrange.clips.push(ClipInfo {
+            id,
+            track_id,
+            name,
+            position: self.beats_to_frames(spec.start_beat),
+            source_offset: 0,
+            start_marker: None,
+            duration,
+            source: Some(MediaSourceRef::LocalFile { path: spec.sample }),
+            file_path: None,
+            loop_enabled: loop_end.is_some(),
+            loop_start: 0,
+            loop_end: loop_end.unwrap_or(0),
+            gain_db,
+            fades: Default::default(),
+            playback_direction: Default::default(),
+            transient_markers: Default::default(),
+            warp_markers: Default::default(),
+            transpose: Default::default(),
+            original_bpm: None,
+            warped: false,
+            warped_to_bpm: None,
+        });
+        Ok(id.raw())
     }
 
     pub fn add_note_clip(&mut self, spec: NewNoteClip) -> Result<u64, SessionError> {
-        let _ = spec;
-        todo!()
+        validate_beat("start_beat", spec.start_beat)?;
+        validate_length("length_beats", spec.length_beats)?;
+        let track = self.track(spec.track_id)?;
+        if track.instrument.is_none() {
+            return Err(SessionError::NotAnInstrumentTrack(spec.track_id));
+        }
+        let track_id = track.id;
+        let notes = spec
+            .notes
+            .iter()
+            .map(|note| validate_note(note, spec.length_beats))
+            .collect::<Result<Vec<_>, _>>()?;
+        let id = ClipId::new();
+        self.project.arrange.note_clips.push(NoteClipInfo {
+            id,
+            track_id,
+            name: format!("Notes {}", self.project.arrange.note_clips.len() + 1),
+            position_beats: spec.start_beat,
+            duration_beats: spec.length_beats,
+            notes,
+            start_marker_beats: None,
+            loop_enabled: false,
+            loop_start_beats: 0.0,
+            loop_end_beats: 0.0,
+            groove_grid: Default::default(),
+        });
+        Ok(id.raw())
     }
 
     /// End of the last clip in beats.
     pub fn length_beats(&self) -> f64 {
-        todo!()
+        let audio_end = self
+            .project
+            .arrange
+            .clips
+            .iter()
+            .map(|clip| self.frames_to_beats(clip.position + clip.duration))
+            .fold(0.0, f64::max);
+        let notes_end = self
+            .project
+            .arrange
+            .note_clips
+            .iter()
+            .map(|clip| clip.position_beats + clip.duration_beats)
+            .fold(0.0, f64::max);
+        audio_end.max(notes_end)
     }
 
     pub fn beats_to_frames(&self, beats: f64) -> u64 {
-        let _ = beats;
-        todo!()
+        (beats * 60.0 / self.project.bpm * f64::from(self.project.sample_rate)).round() as u64
+    }
+
+    fn frames_to_beats(&self, frames: u64) -> f64 {
+        frames as f64 / f64::from(self.project.sample_rate) * self.project.bpm / 60.0
     }
 
     pub fn summary(&self) -> ProjectSummary {
-        todo!()
+        let length_beats = self.length_beats();
+        let master = self
+            .project
+            .master
+            .as_ref()
+            .map(|master| self.track_summary(master))
+            .expect("a session always has a master");
+        ProjectSummary {
+            name: self.project.name.clone(),
+            bpm: self.project.bpm,
+            length_beats,
+            length_seconds: length_beats * 60.0 / self.project.bpm,
+            saved_to: self.container.clone(),
+            master,
+            tracks: self
+                .project
+                .tracks
+                .iter()
+                .map(|track| self.track_summary(track))
+                .collect(),
+        }
     }
+
+    fn track_summary(&self, track: &TrackInfo) -> TrackSummary {
+        let arrange = &self.project.arrange;
+        TrackSummary {
+            id: track.id.raw(),
+            name: track.name.clone(),
+            instrument: track.instrument.and_then(Device::for_instrument),
+            gain_db: gain_to_db(track.gain),
+            pan: track.pan * 2.0 - 1.0,
+            mute: track.mute,
+            effects: track
+                .effects
+                .iter()
+                .map(|effect| EffectSummary {
+                    id: effect.id.raw(),
+                    device: Device::for_effect(effect.effect_type),
+                })
+                .collect(),
+            audio_clips: arrange
+                .clips
+                .iter()
+                .filter(|c| c.track_id == track.id)
+                .count(),
+            note_clips: arrange
+                .note_clips
+                .iter()
+                .filter(|c| c.track_id == track.id)
+                .count(),
+        }
+    }
+
+    fn track(&self, track_id: u64) -> Result<&TrackInfo, SessionError> {
+        self.project
+            .tracks
+            .iter()
+            .find(|track| track.id.raw() == track_id)
+            .ok_or(SessionError::UnknownTrack(track_id))
+    }
+
+    fn track_mut(&mut self, track_id: u64) -> Result<&mut TrackInfo, SessionError> {
+        if track_id == TrackId::MASTER.raw() {
+            return self
+                .project
+                .master
+                .as_mut()
+                .ok_or(SessionError::UnknownTrack(track_id));
+        }
+        self.project
+            .tracks
+            .iter_mut()
+            .find(|track| track.id.raw() == track_id)
+            .ok_or(SessionError::UnknownTrack(track_id))
+    }
+}
+
+fn validate_tempo(bpm: f64) -> Result<(), SessionError> {
+    if (MIN_BPM..=MAX_BPM).contains(&bpm) {
+        Ok(())
+    } else {
+        Err(SessionError::InvalidTempo(bpm))
+    }
+}
+
+fn validate_beat(name: &str, beats: f64) -> Result<(), SessionError> {
+    if beats.is_finite() && beats >= 0.0 {
+        Ok(())
+    } else {
+        Err(SessionError::InvalidTiming(format!(
+            "{name} must be zero or more, got {beats}"
+        )))
+    }
+}
+
+fn validate_length(name: &str, beats: f64) -> Result<(), SessionError> {
+    if beats.is_finite() && beats > 0.0 {
+        Ok(())
+    } else {
+        Err(SessionError::InvalidTiming(format!(
+            "{name} must be positive, got {beats}"
+        )))
+    }
+}
+
+fn validate_note(note: &Note, clip_beats: f64) -> Result<MidiNote, SessionError> {
+    if note.pitch > 127 {
+        return Err(SessionError::InvalidNote(format!(
+            "pitch {} is above 127",
+            note.pitch
+        )));
+    }
+    if !(1..=127).contains(&note.velocity) {
+        return Err(SessionError::InvalidNote(format!(
+            "velocity {} must be 1 to 127",
+            note.velocity
+        )));
+    }
+    let fits = note.start_beat.is_finite()
+        && note.length_beats.is_finite()
+        && note.start_beat >= 0.0
+        && note.length_beats > 0.0
+        && note.start_beat < clip_beats;
+    if !fits {
+        return Err(SessionError::InvalidNote(format!(
+            "note at beat {} for {} beats does not start inside a {clip_beats}-beat clip",
+            note.start_beat, note.length_beats
+        )));
+    }
+    Ok(MidiNote {
+        pitch: note.pitch,
+        velocity: note.velocity,
+        start_beat: note.start_beat,
+        duration_beats: note.length_beats,
+    })
+}
+
+/// Length of a sample in project-rate frames, which is how clip geometry is stored.
+fn sample_frames(path: &Path, project_rate: u32) -> Result<u64, SessionError> {
+    let audio =
+        vibez_audio_io::file_io::decode_audio_file(path).map_err(|error| SessionError::Sample {
+            path: path.to_path_buf(),
+            reason: error.to_string(),
+        })?;
+    let frames = audio.num_frames() as u64;
+    Ok(frames * u64::from(project_rate) / u64::from(audio.sample_rate.max(1)))
+}
+
+fn db_to_gain(db: f32) -> f32 {
+    10f32.powf(db / 20.0)
+}
+
+fn gain_to_db(gain: f32) -> f32 {
+    20.0 * gain.max(1e-6).log10()
+}
+
+fn agent_pan_to_vibez(pan: f32) -> f32 {
+    (pan.clamp(-1.0, 1.0) + 1.0) / 2.0
 }
 
 #[cfg(test)]

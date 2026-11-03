@@ -77,6 +77,35 @@ impl Device {
     pub fn default_params(self) -> Vec<f32> {
         self.descriptors().iter().map(|d| d.default).collect()
     }
+
+    pub fn for_instrument(kind: InstrumentKind) -> Option<Device> {
+        match kind {
+            InstrumentKind::SubtractiveSynth => Some(Device::SubtractiveSynth),
+            InstrumentKind::WavetableSynth => Some(Device::WavetableSynth),
+            InstrumentKind::FmSynth => Some(Device::FmSynth),
+            InstrumentKind::Sampler => Some(Device::Sampler),
+            InstrumentKind::DrumRack => None,
+        }
+    }
+
+    pub fn for_effect(effect_type: EffectType) -> Device {
+        match effect_type {
+            EffectType::Gain => Device::Gain,
+            EffectType::Filter => Device::Filter,
+            EffectType::Delay => Device::Delay,
+            EffectType::Echo => Device::Echo,
+            EffectType::Reverb => Device::Reverb,
+            EffectType::Drive => Device::Drive,
+            EffectType::Saturator => Device::Saturator,
+            EffectType::Bitcrush => Device::Bitcrush,
+            EffectType::Compressor => Device::Compressor,
+            EffectType::Limiter => Device::Limiter,
+            EffectType::AutoPan => Device::AutoPan,
+            EffectType::Gate => Device::Gate,
+            EffectType::Phaser => Device::Phaser,
+            EffectType::Eq => Device::Eq,
+        }
+    }
 }
 
 /// One parameter as an agent sees it.
