@@ -1,9 +1,14 @@
 //! Renders a session offline through the Vibez engine, exactly as the app's Export does, and writes a WAV.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use schemars::JsonSchema;
 use serde::Serialize;
+use vibez_core::audio_buffer::DecodedAudio;
+use vibez_core::track::{InstrumentStateInfo, MediaSourceRef};
+use vibez_engine::render::{BounceMode, BounceRequest};
 
 use crate::session::TrackSession;
 
@@ -45,8 +50,207 @@ pub fn bounce(
     path: &Path,
     range: &BounceRange,
 ) -> Result<BounceReport, BounceError> {
-    let _ = (session, path, range);
-    todo!()
+    let project = session.project();
+    let content_end = session.length_beats();
+    if content_end <= 0.0 {
+        return Err(BounceError::NothingToRender);
+    }
+    let start_beat = range.start_beat.unwrap_or(0.0);
+    let end_beat = range.end_beat.unwrap_or(content_end);
+    let tail = range.tail_seconds.unwrap_or(DEFAULT_TAIL_SECONDS);
+    if !(start_beat.is_finite()
+        && end_beat.is_finite()
+        && start_beat >= 0.0
+        && end_beat > start_beat)
+        || !(tail.is_finite() && tail >= 0.0)
+    {
+        return Err(BounceError::InvalidRange(format!(
+            "beats {start_beat}..{end_beat} with a {tail}s tail"
+        )));
+    }
+    let sample_rate = project.sample_rate;
+    let start = session.beats_to_frames(start_beat);
+    let end = session.beats_to_frames(end_beat) + (tail * f64::from(sample_rate)).round() as u64;
+
+    let media = MediaResolver::new(session.container(), sample_rate);
+    let mut clip_audio = HashMap::new();
+    for clip in &project.arrange.clips {
+        let source = clip.resolved_source().ok_or_else(|| BounceError::Media {
+            label: clip.name.clone(),
+            reason: "the clip has no media source".into(),
+        })?;
+        clip_audio.insert(clip.id, media.load(source, &clip.name)?);
+    }
+    let mut sampler_audio = HashMap::new();
+    let mut drum_pad_audio = HashMap::new();
+    for track in &project.tracks {
+        match &track.native_instrument {
+            Some(InstrumentStateInfo::Sampler {
+                source: Some(source),
+                ..
+            }) => {
+                let audio = media.load(source, &track.name)?;
+                sampler_audio.insert(track.id, (audio, source_label(source)));
+            }
+            Some(InstrumentStateInfo::DrumRack { pads }) => {
+                for (index, pad) in pads.iter().enumerate() {
+                    if let Some(source) = &pad.source {
+                        let label = format!("{} pad {}", track.name, index + 1);
+                        let audio = media.load(source, &label)?;
+                        drum_pad_audio.insert(
+                            (track.id, index),
+                            (audio, pad.name.clone().unwrap_or(label)),
+                        );
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let request = BounceRequest {
+        tracks: project.tracks.clone(),
+        master: project.master.clone(),
+        buses: project.buses.clone(),
+        audio_clips: project.arrange.clips.clone(),
+        note_clips: project.arrange.note_clips.clone(),
+        clip_audio,
+        sampler_audio,
+        drum_pad_audio,
+        mode: BounceMode::Master,
+        range_samples: (start, end),
+        bpm: project.bpm,
+        sample_rate,
+        swing: project.swing,
+    };
+    let result = vibez_engine::render::render_offline(&request);
+    if !result.warnings.is_empty() {
+        return Err(BounceError::Incomplete(result.warnings.join("; ")));
+    }
+    vibez_audio_io::file_io::write_wav_file(path, &result.audio).map_err(|error| {
+        BounceError::Write {
+            path: path.to_path_buf(),
+            reason: error.to_string(),
+        }
+    })?;
+    let (peak, rms) = levels(&result.audio);
+    Ok(BounceReport {
+        path: path.to_path_buf(),
+        sample_rate,
+        seconds: result.audio.duration_seconds(),
+        peak_dbfs: to_dbfs(peak),
+        rms_dbfs: to_dbfs(rms),
+    })
+}
+
+/// Loads media the way the app hydrates a saved project, then resamples to the
+/// project rate as an import would.
+struct MediaResolver<'a> {
+    container: Option<&'a Path>,
+    sample_rate: u32,
+}
+
+impl<'a> MediaResolver<'a> {
+    fn new(container: Option<&'a Path>, sample_rate: u32) -> Self {
+        Self {
+            container,
+            sample_rate,
+        }
+    }
+
+    fn load(&self, source: &MediaSourceRef, label: &str) -> Result<Arc<DecodedAudio>, BounceError> {
+        let fail = |reason: String| BounceError::Media {
+            label: label.to_string(),
+            reason,
+        };
+        let decoded = match source {
+            MediaSourceRef::LocalFile { path }
+            | MediaSourceRef::StagedProjectMedia {
+                staging_path: path, ..
+            }
+            | MediaSourceRef::StagedRemoteProjectMedia {
+                staging_path: path, ..
+            } => {
+                vibez_audio_io::file_io::decode_audio_file(path).map_err(|e| fail(e.to_string()))?
+            }
+            MediaSourceRef::ProjectMedia { id, file_name, .. } => {
+                let container = self
+                    .container
+                    .ok_or_else(|| fail("Project Media needs the .vzp it came from".into()))?;
+                let bytes = vibez_project::project_format_v1::ProjectContainer::open(container)
+                    .and_then(|container| container.read_media(id))
+                    .map_err(|e| fail(e.to_string()))?;
+                let extension = Path::new(file_name)
+                    .extension()
+                    .map(|value| value.to_string_lossy().into_owned());
+                vibez_audio_io::file_io::decode_audio_cursor(
+                    std::io::Cursor::new(bytes),
+                    extension.as_deref(),
+                )
+                .map_err(|e| fail(e.to_string()))?
+            }
+            MediaSourceRef::DropboxFile {
+                path_lower, rev, ..
+            } => {
+                let cache = vibez_dropbox::DropboxCache::new();
+                if !cache.is_cached(path_lower, rev.as_deref()) {
+                    return Err(fail(
+                        "the Dropbox file is not downloaded yet; fetch it first".into(),
+                    ));
+                }
+                let path = cache.path_for(path_lower, rev.as_deref());
+                vibez_audio_io::file_io::decode_audio_file(&path)
+                    .map_err(|e| fail(e.to_string()))?
+            }
+        };
+        let audio = vibez_audio_io::file_io::resample_audio(&decoded, self.sample_rate)
+            .map_err(|e| fail(e.to_string()))?;
+        Ok(Arc::new(audio))
+    }
+}
+
+fn source_label(source: &MediaSourceRef) -> String {
+    match source {
+        MediaSourceRef::LocalFile { path } => path
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default(),
+        MediaSourceRef::StagedProjectMedia { file_name, .. }
+        | MediaSourceRef::StagedRemoteProjectMedia { file_name, .. }
+        | MediaSourceRef::ProjectMedia { file_name, .. } => file_name.clone(),
+        MediaSourceRef::DropboxFile { display_path, .. } => display_path
+            .rsplit('/')
+            .next()
+            .unwrap_or(display_path)
+            .to_string(),
+    }
+}
+
+fn levels(audio: &DecodedAudio) -> (f32, f32) {
+    let mut peak = 0f32;
+    let mut sum = 0f64;
+    let mut count = 0usize;
+    for channel in &audio.channels {
+        for &sample in channel {
+            peak = peak.max(sample.abs());
+            sum += f64::from(sample) * f64::from(sample);
+            count += 1;
+        }
+    }
+    let rms = if count == 0 {
+        0.0
+    } else {
+        (sum / count as f64).sqrt() as f32
+    };
+    (peak, rms)
+}
+
+fn to_dbfs(level: f32) -> f32 {
+    if level <= 0.0 {
+        -120.0
+    } else {
+        (20.0 * level.log10()).max(-120.0)
+    }
 }
 
 #[cfg(test)]
