@@ -9,6 +9,7 @@ members = [
     "crates/vibez-plugin-host/tests/fixtures",
     "crates/vibez-project",
     "crates/vibez-dropbox",
+    "crates/vibez-mcp",
     "crates/vibez-ui",
 ]
 resolver = "2"
@@ -28,6 +29,7 @@ vibez-instruments = { path = "crates/vibez-instruments" }
 vibez-plugin-host = { path = "crates/vibez-plugin-host" }
 vibez-project = { path = "crates/vibez-project" }
 vibez-dropbox = { path = "crates/vibez-dropbox" }
+vibez-mcp = { path = "crates/vibez-mcp" }
 vibez-ui = { path = "crates/vibez-ui" }
 
 # Audio

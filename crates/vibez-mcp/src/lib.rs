@@ -1,0 +1,4 @@
+//! Model Context Protocol server that lets an agent author, save and render Vibez projects.
+
+pub mod device_params;
+pub mod server;
