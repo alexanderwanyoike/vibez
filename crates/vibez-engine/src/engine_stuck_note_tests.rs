@@ -575,3 +575,95 @@ fn editing_a_launcher_pattern_releases_removed_notes_and_preserves_other_voices(
     engine.process(&mut [0.0; 12], 1);
     assert_eq!(*log.lock().unwrap(), vec![(false, 67), (false, 64)]);
 }
+
+#[test]
+fn a_legato_launch_picks_up_notes_already_sounding_at_its_start() {
+    use crate::playback_source::{EngineNoteClip, PreparedClipPlayback, PreparedPlaybackSource};
+    use vibez_core::perform::{ClipLaunchMode, MusicalBoundary};
+    let note = |pitch, start_beat, duration_beats| MidiNote {
+        pitch,
+        velocity: 100,
+        start_beat,
+        duration_beats,
+    };
+    for batch_render in [false, true] {
+        let track = TrackId::new();
+        let (mut engine, mut commands, _events) =
+            graph_engine(&[routing_channel(track), routing_channel(TrackId::MASTER)]);
+        let log = Arc::new(Mutex::new(Vec::new()));
+        for command in [
+            EngineCommand::SetSampleRate(8),
+            EngineCommand::SetBpm(120.0),
+            EngineCommand::add_track(track),
+            EngineCommand::SetInstrument {
+                track_id: track,
+                instrument: Box::new(SpyInstrument {
+                    events: log.clone(),
+                    batch_render,
+                }),
+            },
+        ] {
+            commands.push(command).unwrap();
+        }
+        let pattern = |request_id, launch_mode, notes| {
+            let id = ClipId::new();
+            Box::new(PreparedClipPlayback {
+                track_id: track,
+                clip_id: Some(id),
+                request_id,
+                length_samples: 32,
+                looping: true,
+                launch_mode,
+                start_position: 0,
+                source: Box::new(PreparedPlaybackSource::new(
+                    vec![],
+                    vec![EngineNoteClip::new(
+                        id,
+                        0.0,
+                        8.0,
+                        notes,
+                        0.0,
+                        true,
+                        0.0,
+                        8.0,
+                        Default::default(),
+                    )],
+                    vec![],
+                )),
+            })
+        };
+        let mut launch = |clip, quantization| {
+            commands
+                .push(EngineCommand::QueueClips {
+                    clips: vec![clip],
+                    quantization,
+                })
+                .unwrap();
+        };
+        launch(
+            pattern(1, ClipLaunchMode::Play, vec![note(60, 0.0, 4.0)]),
+            MusicalBoundary::Immediate,
+        );
+        engine.process(&mut [0.0; 6], 1);
+        log.lock().unwrap().clear();
+        // Four samples per beat: the swap lands on beat 2 of the pattern.
+        launch(
+            pattern(
+                2,
+                ClipLaunchMode::Legato,
+                vec![note(64, 1.0, 6.0), note(67, 0.0, 1.0), note(69, 2.0, 1.0)],
+            ),
+            MusicalBoundary::OneBeat,
+        );
+        engine.process(&mut [0.0; 3], 1);
+        let heard = log.lock().unwrap().clone();
+        assert!(heard.contains(&(false, 60)), "{heard:?}");
+        assert!(heard.contains(&(true, 64)), "{heard:?}");
+        assert!(!heard.contains(&(true, 67)), "{heard:?}");
+        assert_eq!(
+            heard.iter().filter(|event| **event == (true, 69)).count(),
+            1,
+            "{heard:?}"
+        );
+    }
+}

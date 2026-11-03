@@ -1021,3 +1021,115 @@ fn a_running_launch_on_an_eighth_lands_before_the_next_bar() {
     assert!((output[0] - 0.1).abs() < 1e-5, "{output:?}");
     assert!((output[1] - 0.3).abs() < 1e-5, "{output:?}");
 }
+fn legato(mut clip: Box<PreparedClipPlayback>) -> Box<PreparedClipPlayback> {
+    clip.launch_mode = vibez_core::perform::ClipLaunchMode::Legato;
+    clip
+}
+fn ramp(base: f32, len: usize) -> Vec<f32> {
+    (0..len).map(|i| base + i as f32 * 0.01).collect()
+}
+fn assert_samples(output: &[f32], expected: &[f32]) {
+    for (got, want) in output.iter().zip(expected) {
+        assert!((got - want).abs() < 1e-5, "{output:?} != {expected:?}");
+    }
+}
+#[test]
+fn a_legato_launch_starts_at_the_outgoing_clips_position() {
+    let (mut engine, mut commands, mut events, a, _b) = setup();
+    launch(
+        &mut commands,
+        vec![clip(a, 1, &ramp(0.0, 16), true)],
+        MusicalBoundary::OneBar,
+    );
+    engine.process(&mut [0.0; 6], 1);
+    launch(
+        &mut commands,
+        vec![legato(clip(a, 2, &ramp(1.0, 16), true))],
+        MusicalBoundary::OneBeat,
+    );
+    let mut output = [0.0; 4];
+    engine.process(&mut output, 1);
+    assert_samples(&output, &[0.06, 0.07, 1.08, 1.09]);
+    assert!(
+        std::iter::from_fn(|| events.pop().ok()).any(|event| matches!(
+            event,
+            EngineEvent::ClipTransitioned {
+                request_id: 2,
+                effective_at_samples: 8,
+                start_position: 8,
+                ..
+            }
+        ))
+    );
+}
+#[test]
+fn a_legato_launch_wraps_the_position_into_a_shorter_clip() {
+    let (mut engine, mut commands, _events, a, _b) = setup();
+    launch(
+        &mut commands,
+        vec![clip(a, 1, &ramp(0.0, 16), true)],
+        MusicalBoundary::OneBar,
+    );
+    engine.process(&mut [0.0; 9], 1);
+    launch(
+        &mut commands,
+        vec![legato(clip(a, 2, &ramp(1.0, 8), true))],
+        MusicalBoundary::OneBeat,
+    );
+    let mut output = [0.0; 4];
+    engine.process(&mut output, 1);
+    assert_samples(&output, &[0.09, 0.10, 0.11, 1.04]);
+}
+#[test]
+fn a_legato_launch_on_a_silent_track_starts_from_the_beginning() {
+    let (mut engine, mut commands, _events, a, b) = setup();
+    launch(
+        &mut commands,
+        vec![clip(b, 1, &[0.0; 16], true)],
+        MusicalBoundary::OneBar,
+    );
+    engine.process(&mut [0.0; 6], 1);
+    launch(
+        &mut commands,
+        vec![legato(clip(a, 2, &ramp(1.0, 16), true))],
+        MusicalBoundary::OneBeat,
+    );
+    let mut output = [0.0; 4];
+    engine.process(&mut output, 1);
+    assert_samples(&output, &[0.0, 0.0, 1.0, 1.01]);
+}
+#[test]
+fn a_legato_swap_dips_the_audio_around_the_boundary_instead_of_clicking() {
+    let a = TrackId::new();
+    let (mut engine, mut commands, _events) =
+        graph_engine(&[routing_channel(a), routing_channel(TrackId::MASTER)]);
+    for command in [
+        EngineCommand::SetSampleRate(48_000),
+        EngineCommand::SetBpm(120.0),
+        EngineCommand::add_track(a),
+    ] {
+        commands.push(command).unwrap();
+    }
+    engine.process(&mut [], 1);
+    launch(
+        &mut commands,
+        vec![clip(a, 1, &[0.5; 48_000], true)],
+        MusicalBoundary::OneBar,
+    );
+    engine.process(&mut vec![0.0; 1_000], 1);
+    launch(
+        &mut commands,
+        vec![legato(clip(a, 2, &[0.5; 48_000], true))],
+        MusicalBoundary::OneBeat,
+    );
+    // One beat at 120 BPM and 48 kHz is 24 000 samples.
+    let boundary = 24_000 - 1_000;
+    let mut output = vec![0.0; boundary + 200];
+    engine.process(&mut output, 1);
+    assert!((output[boundary - 200] - 0.5).abs() < 1e-5);
+    assert!(output[boundary - 1] < 0.05, "{}", output[boundary - 1]);
+    assert!(output[boundary] < 0.05, "{}", output[boundary]);
+    assert!((output[boundary + 100] - 0.5).abs() < 1e-5);
+    let dipped = output.iter().filter(|sample| **sample < 0.49).count();
+    assert!((2..=100).contains(&dipped), "{dipped} dipped samples");
+}
