@@ -58,12 +58,12 @@ pub fn bounce(
     let start_beat = range.start_beat.unwrap_or(0.0);
     let end_beat = range.end_beat.unwrap_or(content_end);
     let tail = range.tail_seconds.unwrap_or(DEFAULT_TAIL_SECONDS);
-    if !(start_beat.is_finite()
+    let valid_beats = start_beat.is_finite()
         && end_beat.is_finite()
         && start_beat >= 0.0
-        && end_beat > start_beat)
-        || !(tail.is_finite() && tail >= 0.0)
-    {
+        && end_beat > start_beat;
+    let valid_tail = tail.is_finite() && tail >= 0.0;
+    if !(valid_beats && valid_tail) {
         return Err(BounceError::InvalidRange(format!(
             "beats {start_beat}..{end_beat} with a {tail}s tail"
         )));
