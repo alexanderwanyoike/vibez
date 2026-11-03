@@ -977,3 +977,42 @@ fn record_source_start_precedes_its_same_boundary_transition_and_keeps_real_audi
     drop(returned);
     assert_eq!(audio.strong_count(), 0);
 }
+#[test]
+fn split_launches_that_start_the_performance_all_begin_together() {
+    let (mut engine, mut commands, _events, a, b) = setup();
+    launch(
+        &mut commands,
+        vec![clip(a, 1, &[0.1; 32], true)],
+        MusicalBoundary::Eighth,
+    );
+    launch(
+        &mut commands,
+        vec![clip(b, 2, &[0.2; 32], true)],
+        MusicalBoundary::OneBar,
+    );
+    let mut output = [0.0; 3];
+    engine.process(&mut output, 1);
+    for got in output {
+        assert!((got - 0.3).abs() < 1e-5, "{output:?}");
+    }
+}
+#[test]
+fn a_running_launch_on_an_eighth_lands_before_the_next_bar() {
+    let (mut engine, mut commands, _events, a, b) = setup();
+    launch(
+        &mut commands,
+        vec![clip(a, 1, &[0.1; 32], true)],
+        MusicalBoundary::OneBar,
+    );
+    engine.process(&mut [0.0; 5], 1);
+    launch(
+        &mut commands,
+        vec![clip(b, 2, &[0.2; 32], true)],
+        MusicalBoundary::Eighth,
+    );
+    let mut output = [0.0; 3];
+    engine.process(&mut output, 1);
+    // 4 samples per beat puts eighth-note boundaries every 2 samples.
+    assert!((output[0] - 0.1).abs() < 1e-5, "{output:?}");
+    assert!((output[1] - 0.3).abs() < 1e-5, "{output:?}");
+}
