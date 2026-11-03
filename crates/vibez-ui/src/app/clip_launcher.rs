@@ -72,6 +72,7 @@ impl App {
                 track_id,
                 row,
                 timeline: Arc::new(timeline),
+                launch_quantization: None,
             });
         self.state.perform.select_launcher_clip(id);
         self.state.view.detail_panel_tab = crate::state::DetailPanelTab::Clip;
@@ -160,7 +161,11 @@ impl App {
         let samples_per_beat = self.state.transport.samples_per_beat();
         let mut batches: Vec<(MusicalBoundary, Vec<_>)> = Vec::new();
         for (track_id, clip) in targets {
-            let quantization = self.state.perform.clips.launch_quantization(track_id);
+            let clips = &self.state.perform.clips;
+            let quantization = clip.as_ref().map_or_else(
+                || clips.launch_quantization(track_id),
+                |clip| clips.clip_launch_quantization(clip),
+            );
             let batch = match batches.iter().position(|(q, _)| *q == quantization) {
                 Some(index) => index,
                 None => {
