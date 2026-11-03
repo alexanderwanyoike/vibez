@@ -345,6 +345,7 @@ impl App {
             sample_rate: self.state.transport.sample_rate,
             tracks,
             perform_layout: self.state.perform.layout,
+            launcher_tracks: Vec::new(),
             launcher_clips: self
                 .state
                 .perform

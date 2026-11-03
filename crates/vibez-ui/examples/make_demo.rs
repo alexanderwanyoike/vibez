@@ -173,6 +173,7 @@ fn main() {
         sections: Vec::new(),
         perform_layout: Default::default(),
         launcher_clips: Vec::new(),
+        launcher_tracks: Vec::new(),
     };
     let path = std::path::Path::new("assets/demo.vibez");
     project.save_to_file(path).expect("save demo project");
