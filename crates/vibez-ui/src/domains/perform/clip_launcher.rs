@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use vibez_core::id::{ClipId, TrackId};
-use vibez_core::perform::MusicalBoundary;
+use vibez_core::perform::{ClipLaunchMode, MusicalBoundary};
 use vibez_project::PerformLayout;
 
 use crate::state::{
@@ -70,6 +70,8 @@ pub struct ClipStore {
     /// Holds only tracks off [`DEFAULT_LAUNCH_QUANTIZATION`], so a saved
     /// Project lists exactly the tracks someone changed.
     launch_quantization: HashMap<TrackId, MusicalBoundary>,
+    /// Holds only tracks off Play, like `launch_quantization`.
+    launch_mode: HashMap<TrackId, ClipLaunchMode>,
 }
 
 impl ClipStore {
@@ -91,6 +93,30 @@ impl ClipStore {
         } else {
             self.launch_quantization.insert(track_id, quantization);
         }
+    }
+
+    pub fn launch_mode(&self, track_id: TrackId) -> ClipLaunchMode {
+        self.launch_mode.get(&track_id).copied().unwrap_or_default()
+    }
+
+    pub fn set_launch_mode(&mut self, track_id: TrackId, mode: ClipLaunchMode) {
+        if mode == ClipLaunchMode::default() {
+            self.launch_mode.remove(&track_id);
+        } else {
+            self.launch_mode.insert(track_id, mode);
+        }
+    }
+
+    /// Prepares `clip` to launch with its track's launch mode.
+    pub fn prepare_launch(
+        &self,
+        clip: &LauncherClip,
+        request_id: u64,
+        samples_per_beat: f64,
+    ) -> Box<vibez_engine::playback_source::PreparedClipPlayback> {
+        let mut prepared = clip.prepare(request_id, samples_per_beat);
+        prepared.launch_mode = self.launch_mode(clip.track_id);
+        prepared
     }
 
     pub fn at(&self, track_id: TrackId, row: u32) -> Option<&LauncherClip> {
@@ -276,6 +302,10 @@ pub enum ClipMsg {
         clip_id: ClipId,
         quantization: Option<MusicalBoundary>,
     },
+    SetLaunchMode {
+        track_id: TrackId,
+        mode: ClipLaunchMode,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -290,7 +320,11 @@ impl ClipMsg {
     pub const fn marks_dirty(&self) -> bool {
         matches!(
             self,
-            Self::CreateMidi { .. } | Self::Delete(_) | Self::Duplicate(_) | Self::ToggleLoop(_)
+            Self::CreateMidi { .. }
+                | Self::Delete(_)
+                | Self::Duplicate(_)
+                | Self::ToggleLoop(_)
+                | Self::SetLaunchMode { .. }
         )
     }
 
@@ -650,6 +684,9 @@ impl PerformState {
                         clip.launch_quantization = quantization;
                     }
                 }
+            }
+            ClipMsg::SetLaunchMode { track_id, mode } => {
+                Arc::make_mut(&mut self.clips).set_launch_mode(track_id, mode)
             }
             ClipMsg::MoveWindow { tracks, rows } => {
                 self.clip_editor.first_track = self

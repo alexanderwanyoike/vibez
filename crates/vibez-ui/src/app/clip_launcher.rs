@@ -183,7 +183,11 @@ impl App {
                 request_id,
             );
             if let Some(clip) = clip {
-                prepared.push(clip.prepare(request_id, samples_per_beat));
+                prepared.push(self.state.perform.clips.prepare_launch(
+                    &clip,
+                    request_id,
+                    samples_per_beat,
+                ));
                 self.state
                     .perform
                     .clip_editor
@@ -272,7 +276,7 @@ pub(super) fn refresh_edited_clips(
         let active = clip.prepare(editor.next_request, spb);
         editor.pending.insert(editor.next_request, clip.clone());
         editor.next_request += 1;
-        let queued = clip.prepare(editor.next_request, spb);
+        let queued = perform.clips.prepare_launch(clip, editor.next_request, spb);
         editor.pending.insert(editor.next_request, clip.clone());
         engine.send(EngineCommand::EditClip { active, queued });
     }

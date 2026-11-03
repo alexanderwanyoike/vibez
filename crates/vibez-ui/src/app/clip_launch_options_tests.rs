@@ -107,6 +107,7 @@ async fn track_launch_quantization_reopens_with_the_project() {
         vec![vibez_project::LauncherTrackInfo {
             track_id: breaks,
             launch_quantization: MusicalBoundary::Sixteenth,
+            launch_mode: ClipLaunchMode::Play,
         }],
         "only tracks off the default are written"
     );
