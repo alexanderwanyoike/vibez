@@ -44,6 +44,26 @@ pub enum SampleLibraryError {
     NotConnected,
     #[error("Dropbox download failed: {0}")]
     Download(String),
+    #[error("could not decode {path}: {reason}")]
+    Decode { path: PathBuf, reason: String },
+}
+
+/// What a sample is, so an agent can choose loops that fit the project.
+#[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
+pub struct SampleInfo {
+    pub path: PathBuf,
+    pub seconds: f64,
+    pub channels: usize,
+    pub sample_rate: u32,
+    /// Vibez's tempo estimate, when the sample is rhythmic enough to have one.
+    pub estimated_bpm: Option<f64>,
+    pub bpm_confidence: Option<f32>,
+    pub peak_dbfs: f32,
+}
+
+pub fn inspect(path: &Path) -> Result<SampleInfo, SampleLibraryError> {
+    let _ = path;
+    todo!()
 }
 
 pub struct SampleLibrary {
@@ -350,6 +370,37 @@ mod tests {
         assert!(matches!(
             lib.dropbox_entry("/Packs/Norman Cook/readme.txt"),
             Err(SampleLibraryError::NotInCatalog(_))
+        ));
+    }
+
+    #[test]
+    fn inspecting_a_sample_reports_its_shape_and_tempo() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("clicks.wav");
+        let rate = 44_100;
+        let mut wave = vec![0f32; rate * 8];
+        // A short burst every half second is 120 BPM.
+        for beat in 0..16 {
+            for i in 0..400 {
+                wave[beat * rate / 2 + i] = if i % 2 == 0 { 0.8 } else { -0.8 };
+            }
+        }
+        vibez_audio_io::file_io::write_wav_file(
+            &path,
+            &vibez_core::audio_buffer::DecodedAudio {
+                channels: vec![wave],
+                sample_rate: rate as u32,
+            },
+        )
+        .unwrap();
+        let info = inspect(&path).unwrap();
+        assert_eq!(info.channels, 1);
+        assert!((info.seconds - 8.0).abs() < 0.01);
+        let bpm = info.estimated_bpm.expect("a steady pulse has a tempo");
+        assert!((bpm - 120.0).abs() < 2.0, "estimated {bpm}");
+        assert!(matches!(
+            inspect(&dir.path().join("missing.wav")),
+            Err(SampleLibraryError::Decode { .. })
         ));
     }
 
