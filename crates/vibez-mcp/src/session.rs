@@ -122,6 +122,7 @@ pub struct ProjectSummary {
     pub tracks: Vec<TrackSummary>,
 }
 
+#[derive(Debug)]
 pub struct TrackSession {
     project: Project,
     container: Option<PathBuf>,

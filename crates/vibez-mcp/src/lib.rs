@@ -2,5 +2,6 @@
 
 pub mod bounce;
 pub mod device_params;
+pub mod project_file;
 pub mod server;
 pub mod session;
