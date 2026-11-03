@@ -33,19 +33,49 @@ pub enum Device {
 
 impl Device {
     pub fn instrument_kind(self) -> Option<InstrumentKind> {
-        todo!()
+        match self {
+            Device::SubtractiveSynth => Some(InstrumentKind::SubtractiveSynth),
+            Device::WavetableSynth => Some(InstrumentKind::WavetableSynth),
+            Device::FmSynth => Some(InstrumentKind::FmSynth),
+            Device::Sampler => Some(InstrumentKind::Sampler),
+            _ => None,
+        }
     }
 
     pub fn effect_type(self) -> Option<EffectType> {
-        todo!()
+        match self {
+            Device::Gain => Some(EffectType::Gain),
+            Device::Filter => Some(EffectType::Filter),
+            Device::Delay => Some(EffectType::Delay),
+            Device::Echo => Some(EffectType::Echo),
+            Device::Reverb => Some(EffectType::Reverb),
+            Device::Drive => Some(EffectType::Drive),
+            Device::Saturator => Some(EffectType::Saturator),
+            Device::Bitcrush => Some(EffectType::Bitcrush),
+            Device::Compressor => Some(EffectType::Compressor),
+            Device::Limiter => Some(EffectType::Limiter),
+            Device::AutoPan => Some(EffectType::AutoPan),
+            Device::Gate => Some(EffectType::Gate),
+            Device::Phaser => Some(EffectType::Phaser),
+            Device::Eq => Some(EffectType::Eq),
+            _ => None,
+        }
     }
 
     pub fn descriptors(self) -> &'static [ParamDescriptor] {
-        todo!()
+        if let Some(kind) = self.instrument_kind() {
+            return vibez_instruments::descriptors_for(kind);
+        }
+        let effect_type = self
+            .effect_type()
+            .expect("every Device is an instrument or an effect");
+        // Descriptors are static per effect type; the sample rate only sizes
+        // the throwaway instance's buffers.
+        vibez_dsp::factory::create_effect(effect_type, 48_000.0).param_descriptors()
     }
 
     pub fn default_params(self) -> Vec<f32> {
-        todo!()
+        self.descriptors().iter().map(|d| d.default).collect()
     }
 }
 
@@ -80,8 +110,17 @@ pub enum DeviceParamError {
 }
 
 pub fn parameter_info(device: Device) -> Vec<ParameterInfo> {
-    let _ = device;
-    todo!()
+    device
+        .descriptors()
+        .iter()
+        .map(|d| ParameterInfo {
+            name: d.name.to_string(),
+            min: d.min,
+            max: d.max,
+            default: d.default,
+            unit: d.unit.to_string(),
+        })
+        .collect()
 }
 
 /// Writes named values into `params`, clamping each to its descriptor range.
@@ -91,8 +130,44 @@ pub fn apply_named(
     params: &mut Vec<f32>,
     values: &BTreeMap<String, f32>,
 ) -> Result<Vec<AppliedParameter>, DeviceParamError> {
-    let _ = (device, params, values);
-    todo!()
+    let descriptors = device.descriptors();
+    let mut resolved = Vec::with_capacity(values.len());
+    for (name, &requested) in values {
+        if !requested.is_finite() {
+            return Err(DeviceParamError::NotFinite { name: name.clone() });
+        }
+        let index = descriptors
+            .iter()
+            .position(|d| d.name.eq_ignore_ascii_case(name.trim()))
+            .ok_or_else(|| DeviceParamError::UnknownParameter {
+                device,
+                name: name.clone(),
+                known: descriptors
+                    .iter()
+                    .map(|d| d.name)
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            })?;
+        resolved.push((index, requested));
+    }
+
+    if params.len() < descriptors.len() {
+        let defaults = device.default_params();
+        params.extend_from_slice(&defaults[params.len()..]);
+    }
+    Ok(resolved
+        .into_iter()
+        .map(|(index, requested)| {
+            let descriptor = &descriptors[index];
+            let applied = requested.clamp(descriptor.min, descriptor.max);
+            params[index] = applied;
+            AppliedParameter {
+                name: descriptor.name.to_string(),
+                requested,
+                applied,
+            }
+        })
+        .collect())
 }
 
 #[cfg(test)]
