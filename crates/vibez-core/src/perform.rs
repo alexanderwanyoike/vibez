@@ -390,6 +390,35 @@ impl std::fmt::Display for MusicalBoundary {
     }
 }
 
+/// How a launched Clip takes over from the Clip already playing on its Track.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ClipLaunchMode {
+    /// Start from the Clip's beginning.
+    #[default]
+    Play,
+    /// Start at the point the outgoing Clip had reached, wrapped to this
+    /// Clip's length, so the groove carries on.
+    Legato,
+}
+
+impl ClipLaunchMode {
+    pub const ALL: [Self; 2] = [Self::Play, Self::Legato];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Play => "Play",
+            Self::Legato => "Legato",
+        }
+    }
+}
+
+impl std::fmt::Display for ClipLaunchMode {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.label())
+    }
+}
+
 /// How far past a boundary a quantized Track Mute press may land and still
 /// take effect at once instead of waiting a whole grid step. The engine cannot
 /// see the audio device buffer or UI frame delay between what the performer
@@ -544,6 +573,19 @@ mod clip_launch_tests {
         assert_eq!(
             serde_json::to_string(&MusicalBoundary::Eighth).unwrap(),
             "\"eighth\""
+        );
+    }
+
+    #[test]
+    fn clip_launch_modes_default_to_play_and_save_by_name() {
+        assert_eq!(ClipLaunchMode::default(), ClipLaunchMode::Play);
+        assert_eq!(
+            ClipLaunchMode::ALL.map(ClipLaunchMode::label),
+            ["Play", "Legato"]
+        );
+        assert_eq!(
+            serde_json::to_string(&ClipLaunchMode::Legato).unwrap(),
+            "\"legato\""
         );
     }
 }
