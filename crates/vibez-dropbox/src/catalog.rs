@@ -1,8 +1,6 @@
 //! On-disk snapshot of a remote connection's file metadata, shared by the app's Browser and headless tools.
 
-#[cfg(test)]
-use std::path::Path;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
@@ -77,8 +75,8 @@ impl RemoteCatalogStore {
         }
     }
 
-    #[cfg(test)]
-    fn at(path: PathBuf) -> Self {
+    /// A store at an explicit path, for tools and tests that do not use the app's data folder.
+    pub fn at(path: PathBuf) -> Self {
         Self { path }
     }
 
@@ -116,7 +114,6 @@ impl RemoteCatalogStore {
             .map_err(|error| format!("could not commit remote catalog: {error}"))
     }
 
-    #[cfg(test)]
     pub fn path(&self) -> &Path {
         &self.path
     }
