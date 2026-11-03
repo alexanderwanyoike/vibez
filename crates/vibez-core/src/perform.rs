@@ -331,6 +331,8 @@ mod groove_tests {
 pub enum MusicalBoundary {
     #[default]
     Immediate,
+    Sixteenth,
+    Eighth,
     OneBeat,
     OneBar,
     TwoBars,
@@ -340,8 +342,10 @@ pub enum MusicalBoundary {
 }
 
 impl MusicalBoundary {
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 9] = [
         Self::Immediate,
+        Self::Sixteenth,
+        Self::Eighth,
         Self::OneBeat,
         Self::OneBar,
         Self::TwoBars,
@@ -353,6 +357,8 @@ impl MusicalBoundary {
     pub const fn label(self) -> &'static str {
         match self {
             Self::Immediate => "Immediate",
+            Self::Sixteenth => "1/16",
+            Self::Eighth => "1/8",
             Self::OneBeat => "1 Beat",
             Self::OneBar => "1 Bar",
             Self::TwoBars => "2 Bars",
@@ -366,6 +372,8 @@ impl MusicalBoundary {
     pub const fn beats(self) -> Option<f64> {
         match self {
             Self::Immediate => None,
+            Self::Sixteenth => Some(0.25),
+            Self::Eighth => Some(0.5),
             Self::OneBeat => Some(1.0),
             Self::OneBar => Some(4.0),
             Self::TwoBars => Some(8.0),
