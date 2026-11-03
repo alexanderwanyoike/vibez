@@ -5,6 +5,11 @@ use std::path::{Path, PathBuf};
 use schemars::JsonSchema;
 use serde::Serialize;
 
+use vibez_project::project_format_v1::{
+    detect_project_format, save_project_v1, ProjectContainer, ProjectFileFormat,
+};
+use vibez_project::Project;
+
 use crate::session::TrackSession;
 
 #[derive(Debug, thiserror::Error)]
@@ -27,13 +32,56 @@ pub struct SaveReport {
 /// Saves to a `.vzp`, embedding every referenced sample. The session then
 /// refers to the embedded copies, so later saves and bounces need no source files.
 pub fn save(session: &mut TrackSession, path: &Path) -> Result<SaveReport, ProjectFileError> {
-    let _ = (session, path);
-    todo!()
+    let is_vzp = path
+        .extension()
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("vzp"));
+    if !is_vzp {
+        return Err(ProjectFileError::NotVzp(path.to_path_buf()));
+    }
+    let failed = |reason: String| ProjectFileError::Save {
+        path: path.to_path_buf(),
+        reason,
+    };
+    let saved = save_project_v1(path, session.container(), session.project().clone())
+        .map_err(|error| failed(error.to_string()))?;
+    let embedded_media = ProjectContainer::open(path)
+        .and_then(|container| container.load_document())
+        .map_err(|error| failed(error.to_string()))?
+        .project_media
+        .len();
+    let bytes = std::fs::metadata(path)
+        .map_err(|error| failed(error.to_string()))?
+        .len();
+    *session = TrackSession::from_project(saved.project, Some(path.to_path_buf()));
+    Ok(SaveReport {
+        path: path.to_path_buf(),
+        embedded_media,
+        bytes,
+    })
 }
 
 pub fn open(path: &Path) -> Result<TrackSession, ProjectFileError> {
-    let _ = path;
-    todo!()
+    let failed = |reason: String| ProjectFileError::Open {
+        path: path.to_path_buf(),
+        reason,
+    };
+    match detect_project_format(path).map_err(|error| failed(error.to_string()))? {
+        ProjectFileFormat::V1 => {
+            let project = ProjectContainer::open(path)
+                .and_then(|container| container.load_document())
+                .map_err(|error| failed(error.to_string()))?
+                .project;
+            Ok(TrackSession::from_project(
+                project,
+                Some(path.to_path_buf()),
+            ))
+        }
+        ProjectFileFormat::LegacyJson => {
+            let project =
+                Project::load_from_file(path).map_err(|error| failed(error.to_string()))?;
+            Ok(TrackSession::from_project(project, None))
+        }
+    }
 }
 
 #[cfg(test)]
