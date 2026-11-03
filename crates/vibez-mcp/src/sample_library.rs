@@ -6,7 +6,9 @@ use std::sync::OnceLock;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use vibez_dropbox::catalog::{RemoteCatalogEntry, RemoteCatalogStore};
-use vibez_dropbox::DropboxCache;
+use vibez_dropbox::{
+    load_app_key_with_env_override, DropboxCache, DropboxClient, DropboxEntry, DropboxSettings,
+};
 
 /// Colon-separated (semicolon on Windows) folders searched for local samples.
 pub const SAMPLE_DIRS_ENV: &str = "VIBEZ_MCP_SAMPLE_DIRS";
@@ -68,7 +70,17 @@ impl SampleLibrary {
     /// Local folders from [`SAMPLE_DIRS_ENV`] (default `~/Music/Samples`), the
     /// app's Dropbox catalog and the app's media cache.
     pub fn from_environment() -> Self {
-        todo!()
+        let local_roots = match std::env::var_os(SAMPLE_DIRS_ENV) {
+            Some(value) => std::env::split_paths(&value).collect(),
+            None => dirs::home_dir()
+                .map(|home| vec![home.join("Music").join("Samples")])
+                .unwrap_or_default(),
+        };
+        Self::new(
+            local_roots,
+            Some(RemoteCatalogStore::for_dropbox()),
+            DropboxCache::new(),
+        )
     }
 
     pub fn local_roots(&self) -> &[PathBuf] {
@@ -82,22 +94,156 @@ impl SampleLibrary {
         source: SampleSource,
         limit: usize,
     ) -> Result<Vec<SampleHit>, SampleLibraryError> {
-        let _ = (query, source, limit);
-        todo!()
+        let words: Vec<String> = query
+            .split_whitespace()
+            .map(|word| word.to_lowercase())
+            .collect();
+        if words.is_empty() {
+            return Err(SampleLibraryError::EmptyQuery);
+        }
+        let matches = |path: &str| {
+            let lower = path.to_lowercase();
+            words.iter().all(|word| lower.contains(word.as_str()))
+        };
+        let mut hits = Vec::new();
+        if source != SampleSource::Dropbox {
+            let mut files = Vec::new();
+            for root in &self.local_roots {
+                collect_audio_files(root, &mut files);
+            }
+            files.sort();
+            hits.extend(
+                files
+                    .into_iter()
+                    .filter(|file| matches(&file.to_string_lossy()))
+                    .map(|file| SampleHit {
+                        source: SampleSource::Local,
+                        path: file.to_string_lossy().into_owned(),
+                        size_bytes: std::fs::metadata(&file).ok().map(|m| m.len()),
+                        local_path: Some(file),
+                    }),
+            );
+        }
+        if source != SampleSource::Local && self.catalog.is_some() {
+            let mut remote: Vec<&RemoteCatalogEntry> = self
+                .catalog_entries()?
+                .iter()
+                .filter(|entry| matches(&entry.path))
+                .collect();
+            remote.sort_by(|a, b| a.path.cmp(&b.path));
+            hits.extend(remote.into_iter().map(|entry| SampleHit {
+                source: SampleSource::Dropbox,
+                path: entry.path.clone(),
+                size_bytes: entry.size,
+                local_path: self.cached_path(entry),
+            }));
+        }
+        hits.truncate(limit);
+        Ok(hits)
     }
 
     /// The catalog entry for a Dropbox path, as shown in search results.
     pub fn dropbox_entry(&self, path: &str) -> Result<RemoteCatalogEntry, SampleLibraryError> {
-        let _ = path;
-        todo!()
+        let lower = path.trim().to_lowercase();
+        self.catalog_entries()?
+            .iter()
+            .find(|entry| entry.provider_item_id == lower)
+            .cloned()
+            .ok_or_else(|| SampleLibraryError::NotInCatalog(path.to_string()))
     }
 
     /// Downloads a Dropbox sample into Vibez's media cache (or reuses it) and
     /// returns the local path.
     pub async fn fetch(&self, path: &str) -> Result<PathBuf, SampleLibraryError> {
-        let _ = path;
-        todo!()
+        let entry = self.dropbox_entry(path)?;
+        if let Some(cached) = self.cached_path(&entry) {
+            return Ok(cached);
+        }
+        let mut settings = DropboxSettings::load();
+        let tokens = settings
+            .tokens
+            .clone()
+            .ok_or(SampleLibraryError::NotConnected)?;
+        let app_key =
+            load_app_key_with_env_override(&settings).ok_or(SampleLibraryError::NotConnected)?;
+        let client = DropboxClient::new(app_key, tokens.clone());
+        let local = client
+            .download_to_cache(
+                &DropboxEntry {
+                    path_lower: entry.provider_item_id.clone(),
+                    path_display: entry.path.clone(),
+                    name: entry.name.clone(),
+                    is_folder: false,
+                    rev: entry.revision.clone(),
+                    size: entry.size,
+                },
+                &self.cache,
+            )
+            .await
+            .map_err(|error| SampleLibraryError::Download(error.to_string()))?;
+        // The client refreshes expired access tokens; keeping the new one
+        // spares the app a refresh round-trip on its next start.
+        let refreshed = client.tokens().await;
+        if refreshed.access_token != tokens.access_token {
+            settings.tokens = Some(refreshed);
+            if let Err(error) = settings.save() {
+                eprintln!("vibez-mcp: could not store refreshed Dropbox tokens: {error}");
+            }
+        }
+        Ok(local)
     }
+
+    fn catalog_entries(&self) -> Result<&[RemoteCatalogEntry], SampleLibraryError> {
+        let Some(store) = &self.catalog else {
+            return Ok(&[]);
+        };
+        // The catalog can hold hundreds of thousands of entries; it is read
+        // once and only audio files are kept.
+        self.entries
+            .get_or_init(|| {
+                store.load().map(|snapshot| {
+                    snapshot
+                        .entries
+                        .into_iter()
+                        .filter(RemoteCatalogEntry::is_supported_audio)
+                        .collect()
+                })
+            })
+            .as_deref()
+            .map_err(|error| SampleLibraryError::Catalog(error.clone()))
+    }
+
+    fn cached_path(&self, entry: &RemoteCatalogEntry) -> Option<PathBuf> {
+        let revision = entry.revision.as_deref();
+        self.cache
+            .is_cached(&entry.provider_item_id, revision)
+            .then(|| self.cache.path_for(&entry.provider_item_id, revision))
+    }
+}
+
+fn collect_audio_files(dir: &Path, files: &mut Vec<PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Ok(kind) = entry.file_type() else {
+            continue;
+        };
+        let hidden = entry.file_name().to_string_lossy().starts_with('.');
+        if kind.is_dir() && !hidden {
+            collect_audio_files(&path, files);
+        } else if kind.is_file() && is_audio(&path) {
+            files.push(path);
+        }
+    }
+}
+
+fn is_audio(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .and_then(vibez_core::audio_format::audio_format_for_extension)
+        .is_some()
 }
 
 #[cfg(test)]
