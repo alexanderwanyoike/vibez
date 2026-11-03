@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use iced::Task;
 use vibez_core::id::{ClipId, TrackId};
+use vibez_core::perform::MusicalBoundary;
 use vibez_project::{PerformLayout, TimelineLocation};
 
 use crate::domains::perform::LauncherClip;
@@ -157,8 +158,17 @@ impl App {
             return;
         }
         let samples_per_beat = self.state.transport.samples_per_beat();
-        let mut prepared = Vec::new();
+        let mut batches: Vec<(MusicalBoundary, Vec<_>)> = Vec::new();
         for (track_id, clip) in targets {
+            let quantization = self.state.perform.clips.launch_quantization(track_id);
+            let batch = match batches.iter().position(|(q, _)| *q == quantization) {
+                Some(index) => index,
+                None => {
+                    batches.push((quantization, Vec::new()));
+                    batches.len() - 1
+                }
+            };
+            let prepared = &mut batches[batch].1;
             self.state.perform.clip_editor.next_request += 1;
             let request_id = self.state.perform.clip_editor.next_request;
             // Reflect intent before the callback without letting an older engine
@@ -179,11 +189,13 @@ impl App {
                 prepared.push(PreparedClipPlayback::stop(track_id, request_id));
             }
         }
-        if !prepared.is_empty() {
+        if !batches.is_empty() {
             self.state.perform.clip_editor.running = true;
+        }
+        for (quantization, clips) in batches {
             self.send_command(EngineCommand::QueueClips {
-                clips: prepared,
-                quantization: vibez_core::perform::MusicalBoundary::OneBar,
+                clips,
+                quantization,
             });
         }
     }
@@ -225,7 +237,7 @@ pub(super) fn refresh_edited_clips(
                     removed.track_id,
                     editor.next_request,
                 )],
-                quantization: vibez_core::perform::MusicalBoundary::OneBar,
+                quantization: perform.clips.launch_quantization(removed.track_id),
             });
         }
     }
