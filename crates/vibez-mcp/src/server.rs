@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
@@ -11,7 +11,7 @@ use rmcp::{tool, tool_handler, tool_router, Json, ServerHandler};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::bounce::BounceReport;
+use crate::bounce::{BounceRange, BounceReport};
 use crate::device_params::{self, AppliedParameter, Device, ParameterInfo};
 use crate::project_file::SaveReport;
 use crate::sample_library::{SampleHit, SampleInfo, SampleLibrary, SampleSource};
@@ -25,6 +25,8 @@ describe_project to check, bounce to hear it as a WAV and save_project for a .vz
 opens. Timing is in beats from the project start (4 beats per bar); track 0 is the master.";
 
 type ToolResult<T> = Result<Json<T>, String>;
+
+const NO_PROJECT: &str = "no project is open; call create_project or open_project first";
 
 #[derive(Clone)]
 pub struct VibezServer {
@@ -58,8 +60,11 @@ impl VibezServer {
 must appear in the file's path. Dropbox hits without a local_path need fetch_sample first."
     )]
     async fn search_samples(&self, Parameters(r): Parameters<SearchRequest>) -> ToolResult<Hits> {
-        let _ = r;
-        todo!()
+        let hits = self
+            .library
+            .search(&r.query, r.source, r.limit)
+            .map_err(|e| e.to_string())?;
+        Ok(Json(Hits { hits }))
     }
 
     #[tool(
@@ -70,8 +75,12 @@ cache and return its local path."
         &self,
         Parameters(r): Parameters<DropboxPathRequest>,
     ) -> ToolResult<Fetched> {
-        let _ = r;
-        todo!()
+        let local_path = self
+            .library
+            .fetch(&r.path)
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(Json(Fetched { local_path }))
     }
 
     #[tool(
@@ -82,8 +91,11 @@ tempo estimate."
         &self,
         Parameters(r): Parameters<PathRequest>,
     ) -> ToolResult<SampleInfo> {
-        let _ = r;
-        todo!()
+        tokio::task::spawn_blocking(move || crate::sample_library::inspect(&r.path))
+            .await
+            .map_err(|e| e.to_string())?
+            .map(Json)
+            .map_err(|e| e.to_string())
     }
 
     #[tool(
@@ -105,8 +117,10 @@ Use these names when setting instrument or effect parameters."
         &self,
         Parameters(r): Parameters<CreateProjectRequest>,
     ) -> ToolResult<ProjectSummary> {
-        let _ = r;
-        todo!()
+        let session = TrackSession::new(&r.name, r.bpm).map_err(|e| e.to_string())?;
+        let summary = session.summary();
+        *self.lock()? = Some(session);
+        Ok(Json(summary))
     }
 
     #[tool(
@@ -117,8 +131,13 @@ replacing the current one."
         &self,
         Parameters(r): Parameters<PathRequest>,
     ) -> ToolResult<ProjectSummary> {
-        let _ = r;
-        todo!()
+        self.blocking(move |slot| {
+            let session = crate::project_file::open(&r.path).map_err(|e| e.to_string())?;
+            let summary = session.summary();
+            *slot = Some(session);
+            Ok(Json(summary))
+        })
+        .await
     }
 
     #[tool(
@@ -126,7 +145,7 @@ replacing the current one."
 clip counts."
     )]
     async fn describe_project(&self) -> ToolResult<ProjectSummary> {
-        todo!()
+        self.edit(|session| Ok(Json(session.summary())))
     }
 
     #[tool(description = "Change the project tempo.")]
@@ -134,16 +153,20 @@ clip counts."
         &self,
         Parameters(r): Parameters<TempoRequest>,
     ) -> ToolResult<ProjectSummary> {
-        let _ = r;
-        todo!()
+        self.edit(|session| {
+            session.set_tempo(r.bpm).map_err(|e| e.to_string())?;
+            Ok(Json(session.summary()))
+        })
     }
 
     #[tool(description = "Add a track. Give an instrument (subtractive_synth, \
 wavetable_synth, fm_synth, or sampler with a sample path) for a MIDI track, or none for an \
 audio track.")]
     async fn add_track(&self, Parameters(r): Parameters<NewTrack>) -> ToolResult<TrackCreated> {
-        let _ = r;
-        todo!()
+        self.edit(|session| {
+            let track_id = session.add_track(r).map_err(|e| e.to_string())?;
+            Ok(Json(TrackCreated { track_id }))
+        })
     }
 
     #[tool(description = "Set a track's volume in dB, pan from -1 to 1, or mute.")]
@@ -151,8 +174,12 @@ audio track.")]
         &self,
         Parameters(r): Parameters<TrackMixRequest>,
     ) -> ToolResult<ProjectSummary> {
-        let _ = r;
-        todo!()
+        self.edit(|session| {
+            session
+                .set_track_mix(r.track_id, r.gain_db, r.pan, r.mute)
+                .map_err(|e| e.to_string())?;
+            Ok(Json(session.summary()))
+        })
     }
 
     #[tool(
@@ -163,8 +190,12 @@ to the parameter's range."
         &self,
         Parameters(r): Parameters<ParametersRequest>,
     ) -> ToolResult<Applied> {
-        let _ = r;
-        todo!()
+        self.edit(|session| {
+            let applied = session
+                .set_instrument_parameters(r.track_id, &r.values)
+                .map_err(|e| e.to_string())?;
+            Ok(Json(Applied { applied }))
+        })
     }
 
     #[tool(
@@ -175,8 +206,12 @@ with optional named parameter values."
         &self,
         Parameters(r): Parameters<AddEffectRequest>,
     ) -> ToolResult<EffectCreated> {
-        let _ = r;
-        todo!()
+        self.edit(|session| {
+            let (effect_id, applied) = session
+                .add_effect(r.track_id, r.device, &r.values)
+                .map_err(|e| e.to_string())?;
+            Ok(Json(EffectCreated { effect_id, applied }))
+        })
     }
 
     #[tool(description = "Set named parameters on an effect already on a track.")]
@@ -184,8 +219,12 @@ with optional named parameter values."
         &self,
         Parameters(r): Parameters<EffectParametersRequest>,
     ) -> ToolResult<Applied> {
-        let _ = r;
-        todo!()
+        self.edit(|session| {
+            let applied = session
+                .set_effect_parameters(r.track_id, r.effect_id, &r.values)
+                .map_err(|e| e.to_string())?;
+            Ok(Json(Applied { applied }))
+        })
     }
 
     #[tool(
@@ -196,8 +235,10 @@ part of the sample at the project tempo for length_beats."
         &self,
         Parameters(r): Parameters<NewAudioClip>,
     ) -> ToolResult<ClipCreated> {
-        let _ = r;
-        todo!()
+        self.edit(|session| {
+            let clip_id = session.add_audio_clip(r).map_err(|e| e.to_string())?;
+            Ok(Json(ClipCreated { clip_id }))
+        })
     }
 
     #[tool(
@@ -208,8 +249,10 @@ beats are relative to the clip."
         &self,
         Parameters(r): Parameters<NewNoteClip>,
     ) -> ToolResult<ClipCreated> {
-        let _ = r;
-        todo!()
+        self.edit(|session| {
+            let clip_id = session.add_note_clip(r).map_err(|e| e.to_string())?;
+            Ok(Json(ClipCreated { clip_id }))
+        })
     }
 
     #[tool(
@@ -217,8 +260,13 @@ beats are relative to the clip."
 every sample embedded."
     )]
     async fn save_project(&self, Parameters(r): Parameters<PathRequest>) -> ToolResult<SaveReport> {
-        let _ = r;
-        todo!()
+        self.blocking(move |slot| {
+            let session = slot.as_mut().ok_or(NO_PROJECT)?;
+            crate::project_file::save(session, &r.path)
+                .map(Json)
+                .map_err(|e| e.to_string())
+        })
+        .await
     }
 
     #[tool(
@@ -229,9 +277,55 @@ app's Export. Optionally limit it to a beat range and set the tail length."
         &self,
         Parameters(r): Parameters<BounceToolRequest>,
     ) -> ToolResult<BounceReport> {
-        let _ = r;
-        todo!()
+        self.blocking(move |slot| {
+            let session = slot.as_ref().ok_or(NO_PROJECT)?;
+            let range = BounceRange {
+                start_beat: r.start_beat,
+                end_beat: r.end_beat,
+                tail_seconds: r.tail_seconds,
+            };
+            crate::bounce::bounce(session, &r.path, &range)
+                .map(Json)
+                .map_err(|e| e.to_string())
+        })
+        .await
     }
+}
+
+impl VibezServer {
+    fn lock(&self) -> Result<MutexGuard<'_, Option<TrackSession>>, String> {
+        lock_session(&self.session)
+    }
+
+    fn edit<T>(
+        &self,
+        change: impl FnOnce(&mut TrackSession) -> Result<T, String>,
+    ) -> Result<T, String> {
+        let mut slot = self.lock()?;
+        change(slot.as_mut().ok_or(NO_PROJECT)?)
+    }
+
+    /// Runs disk and render work off the async executor.
+    async fn blocking<T: Send + 'static>(
+        &self,
+        work: impl FnOnce(&mut Option<TrackSession>) -> Result<T, String> + Send + 'static,
+    ) -> Result<T, String> {
+        let session = Arc::clone(&self.session);
+        tokio::task::spawn_blocking(move || {
+            let mut slot = lock_session(&session)?;
+            work(&mut slot)
+        })
+        .await
+        .map_err(|error| format!("the tool task failed: {error}"))?
+    }
+}
+
+fn lock_session(
+    session: &Mutex<Option<TrackSession>>,
+) -> Result<MutexGuard<'_, Option<TrackSession>>, String> {
+    session
+        .lock()
+        .map_err(|_| "an earlier tool call panicked while editing the project".to_string())
 }
 
 #[tool_handler(router = self.tool_router)]
