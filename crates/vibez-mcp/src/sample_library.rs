@@ -62,8 +62,31 @@ pub struct SampleInfo {
 }
 
 pub fn inspect(path: &Path) -> Result<SampleInfo, SampleLibraryError> {
-    let _ = path;
-    todo!()
+    let audio = vibez_audio_io::file_io::decode_audio_file(path).map_err(|error| {
+        SampleLibraryError::Decode {
+            path: path.to_path_buf(),
+            reason: error.to_string(),
+        }
+    })?;
+    let estimate = vibez_core::onset::detect_bpm(&audio, audio.sample_rate);
+    let peak = audio
+        .channels
+        .iter()
+        .flatten()
+        .fold(0f32, |peak, sample| peak.max(sample.abs()));
+    Ok(SampleInfo {
+        path: path.to_path_buf(),
+        seconds: audio.duration_seconds(),
+        channels: audio.num_channels(),
+        sample_rate: audio.sample_rate,
+        estimated_bpm: estimate.as_ref().map(|e| e.bpm),
+        bpm_confidence: estimate.as_ref().map(|e| e.confidence),
+        peak_dbfs: if peak > 0.0 {
+            20.0 * peak.log10()
+        } else {
+            -120.0
+        },
+    })
 }
 
 pub struct SampleLibrary {
