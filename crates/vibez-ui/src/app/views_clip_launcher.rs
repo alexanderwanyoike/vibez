@@ -352,6 +352,20 @@ impl App {
         .into()
     }
 
+    fn view_track_launch_mode(&self, track_id: vibez_core::id::TrackId) -> Element<'_, Message> {
+        use vibez_core::perform::ClipLaunchMode;
+        pick_list(
+            ClipLaunchMode::ALL,
+            Some(self.state.perform.clips.launch_mode(track_id)),
+            move |mode| {
+                Message::Perform(PerformMsg::Clips(ClipMsg::SetLaunchMode { track_id, mode }))
+            },
+        )
+        .text_size(9)
+        .padding([1, 4])
+        .into()
+    }
+
     fn view_clip_grid(&self, width: f32) -> Element<'_, Message> {
         let keyboard_active = self.state.perform.mode == PerformMode::Sections;
         let compact = self.state.view.window_height < 800.0;
@@ -488,8 +502,9 @@ impl App {
                         .into()
                     };
                 let launch = self.view_track_launch_quantization(track.id);
+                let mode = self.view_track_launch_mode(track.id);
                 let header = if compact {
-                    column![row![track_name, launch]
+                    column![row![track_name, mode, launch]
                         .spacing(4)
                         .align_y(iced::Alignment::Center)]
                 } else {
@@ -509,6 +524,7 @@ impl App {
                                 .font(PERFORM_TECH)
                                 .size(9)
                                 .color(th::text_dim()),
+                            mode,
                             launch,
                         ]
                         .spacing(4)
