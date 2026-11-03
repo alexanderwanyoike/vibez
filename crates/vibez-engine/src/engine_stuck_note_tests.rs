@@ -505,6 +505,8 @@ fn editing_a_launcher_pattern_releases_removed_notes_and_preserves_other_voices(
             request_id,
             length_samples: 32,
             looping: true,
+            launch_mode: Default::default(),
+            start_position: 0,
             source: Box::new(PreparedPlaybackSource::new(
                 vec![],
                 vec![EngineNoteClip::new(

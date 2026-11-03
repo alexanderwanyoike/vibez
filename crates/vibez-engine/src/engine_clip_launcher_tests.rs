@@ -19,6 +19,8 @@ fn clip(
         request_id,
         length_samples: samples.len() as u64,
         looping,
+        launch_mode: Default::default(),
+        start_position: 0,
         source: Box::new(PreparedPlaybackSource::new(
             vec![EngineClip {
                 id,
@@ -50,6 +52,8 @@ fn stop(track_id: TrackId) -> Box<PreparedClipPlayback> {
         request_id: 99,
         length_samples: 1,
         looping: false,
+        launch_mode: Default::default(),
+        start_position: 0,
         source: Box::default(),
     })
 }
@@ -926,6 +930,7 @@ fn record_source_start_precedes_its_same_boundary_transition_and_keeps_real_audi
                 clip_id: Some(clip_id),
                 request_id: 11,
                 effective_at_samples: 16,
+                start_position: 0,
                 retired: Some(retired),
             } if *track_id == record_track && *clip_id == id => {
                 assert_eq!(std::ptr::from_ref(retired.as_ref()) as usize, original);

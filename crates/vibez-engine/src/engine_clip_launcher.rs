@@ -237,6 +237,7 @@ impl AudioEngine {
                         clip_id: prepared.clip_id,
                         request_id: prepared.request_id,
                         effective_at_samples: now,
+                        start_position: prepared.start_position,
                         retired: Some(prepared),
                     }
                 } else {
@@ -247,6 +248,7 @@ impl AudioEngine {
                         clip_id: None,
                         request_id: 0,
                         effective_at_samples: now,
+                        start_position: 0,
                         retired: None,
                     }
                 };

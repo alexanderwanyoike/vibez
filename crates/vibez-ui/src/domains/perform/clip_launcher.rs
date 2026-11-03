@@ -743,6 +743,8 @@ impl LauncherClip {
             request_id,
             length_samples,
             looping,
+            launch_mode: Default::default(),
+            start_position: 0,
             source: Box::new(super::sections::prepare_track_source(
                 self.timeline.get(self.track_id),
             )),

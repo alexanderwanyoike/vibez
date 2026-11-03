@@ -316,6 +316,7 @@ impl AudioEngine {
                     clip_id: prepared.clip_id,
                     request_id: prepared.request_id,
                     effective_at_samples: source,
+                    start_position: prepared.start_position,
                     retired: Some(prepared),
                 };
                 let source_now = self.output_position + self.rendered_callback_frames as u64;

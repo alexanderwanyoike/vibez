@@ -1000,6 +1000,8 @@ fn prepare_pending_home(home: PendingHome) -> PendingHomeFixture {
                     request_id: 1,
                     length_samples: 32,
                     looping: true,
+                    launch_mode: Default::default(),
+                    start_position: 0,
                     source,
                 })],
                 quantization: MusicalBoundary::Immediate,
@@ -1075,6 +1077,8 @@ fn prepare_pending_home(home: PendingHome) -> PendingHomeFixture {
                     request_id: 2,
                     length_samples: 32,
                     looping: true,
+                    launch_mode: Default::default(),
+                    start_position: 0,
                     source: Box::new(source),
                 })
             };

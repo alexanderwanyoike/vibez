@@ -12,6 +12,8 @@ fn clip(track_id: TrackId, request_id: u64) -> Box<PreparedClipPlayback> {
         request_id,
         length_samples: 100,
         looping: true,
+        launch_mode: Default::default(),
+        start_position: 0,
         source: Box::new(PreparedPlaybackSource::new(
             vec![EngineClip {
                 id,
@@ -1138,6 +1140,7 @@ fn public_packet_preserves_last_credit_for_all_retained_terminals_and_returns_ea
                     clip_id,
                     request_id,
                     effective_at_samples,
+                    start_position: 0,
                     retired: Some(owner),
                 } => {
                     assert_eq!(track_id, fixture.tracks[0]);
