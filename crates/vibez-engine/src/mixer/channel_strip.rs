@@ -31,7 +31,7 @@ impl EngineTrack {
             queued_mute: None,
             automation_mute: None,
             automation_overrides: AutomationOverrides::default(),
-            mute_ramp: MuteRamp::default(),
+            mute_ramp: GainRamp::default(),
             solo: false,
             swing_offset: None,
             automation_swing_offset: None,

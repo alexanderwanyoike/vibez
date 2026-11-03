@@ -37,13 +37,13 @@ pub(crate) struct QueuedTrackMute {
 }
 
 #[derive(Debug, Clone, Copy)]
-struct MuteRamp {
+struct GainRamp {
     gain: f32,
     target: f32,
     remaining: u32,
 }
 
-impl Default for MuteRamp {
+impl Default for GainRamp {
     fn default() -> Self {
         Self {
             gain: 1.0,
@@ -53,16 +53,21 @@ impl Default for MuteRamp {
     }
 }
 
-impl MuteRamp {
+impl GainRamp {
     fn set_muted(&mut self, muted: bool, immediate: bool) {
         let target = if muted { 0.0 } else { 1.0 };
         if immediate {
-            self.gain = target;
-            self.target = target;
-            self.remaining = 0;
+            self.ramp_to(target, 0);
         } else if self.target != target {
-            self.target = target;
-            self.remaining = MUTE_RAMP_FRAMES;
+            self.ramp_to(target, MUTE_RAMP_FRAMES);
+        }
+    }
+
+    fn ramp_to(&mut self, target: f32, frames: u32) {
+        self.target = target;
+        self.remaining = frames;
+        if frames == 0 {
+            self.gain = target;
         }
     }
 
@@ -144,7 +149,7 @@ pub struct EngineTrack {
     pub(crate) queued_mute: Option<QueuedTrackMute>,
     automation_mute: Option<bool>,
     automation_overrides: AutomationOverrides,
-    mute_ramp: MuteRamp,
+    mute_ramp: GainRamp,
     pub solo: bool,
     pub swing_offset: Option<SwingOffset>,
     /// Block-evaluated automation override; manual FOLLOW/offset remains intact.
