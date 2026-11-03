@@ -772,7 +772,7 @@ impl App {
 }
 
 #[cfg(test)]
-mod clip_launch_quantization_tests;
+mod clip_launch_options_tests;
 mod clip_launcher;
 #[cfg(test)]
 mod clip_launcher_resume_tests;

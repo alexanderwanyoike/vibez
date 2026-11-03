@@ -1,4 +1,4 @@
-//! Each Project Track launches its Clips on its own boundary.
+//! Each Project Track, and each Clip, launches with its own options.
 
 use std::sync::Arc;
 
