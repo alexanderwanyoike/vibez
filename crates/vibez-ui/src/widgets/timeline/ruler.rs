@@ -13,7 +13,7 @@ use crate::domains::view::ViewMsg;
 use crate::message::Message;
 use crate::state::{ContextMenuTarget, GridConfig, UndoGestureId};
 use crate::timeline_geometry::{TimelineGeometry, TimelineViewport};
-use crate::timeline_snap::SnapTargets;
+use crate::timeline_snap::{SnapContext, SnapTargets};
 use crate::widgets::double_click::DoubleClick;
 use crate::widgets::drag_phase::{DragPhase, CLICK_SLOP_PX};
 
@@ -66,7 +66,7 @@ pub struct RulerInteractionState {
     drag: Option<RulerDragAction>,
     double_click: DoubleClick,
     shift_held: bool,
-    /// Bypasses the grid, as Alt does in Ableton.
+    /// Bypasses all snapping, as Alt does in Ableton.
     alt_held: bool,
 }
 
@@ -206,11 +206,12 @@ impl canvas::Program<Message> for RulerWidget {
                             phase: DragPhase::Pending,
                             ..
                         } => {
-                            let beat = if state.alt_held {
-                                beat
-                            } else {
-                                self.grid.snap_beat(beat, self.pixels_per_beat())
+                            let context = SnapContext {
+                                grid: self.grid,
+                                pixels_per_beat: self.pixels_per_beat(),
+                                free: state.alt_held,
                             };
+                            let beat = self.snap_targets.click(beat, context).beat;
                             Some(Message::Transport(TransportMsg::SeekToBeat(beat)))
                         }
                         RulerDragAction::Numbers { .. } | RulerDragAction::Brace { .. } => None,

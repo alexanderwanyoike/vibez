@@ -12,6 +12,7 @@ pub enum SnapTargetKind {
     Grid,
     ClipEdge,
     Playhead,
+    PlayStart,
     LoopStart,
     LoopEnd,
     TimeSelectionEdge,

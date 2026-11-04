@@ -104,10 +104,25 @@ impl App {
         let geometry = TimelineGeometry::from_zoom(zoom_level, scroll_offset);
         let total_beats = self.state.total_beats();
 
+        let play_start_beats = self.state.transport.play_start_beats;
+        let mut snap_targets =
+            SnapTargets::for_editor(timeline, self.state.transport.samples_per_beat())
+                .with_marker(playhead_beats, SnapTargetKind::Playhead)
+                .with_marker(play_start_beats, SnapTargetKind::PlayStart);
+        if self.state.transport.loop_enabled {
+            snap_targets = snap_targets
+                .with_marker(
+                    self.state.transport.loop_start_beats,
+                    SnapTargetKind::LoopStart,
+                )
+                .with_marker(self.state.transport.loop_end_beats, SnapTargetKind::LoopEnd);
+        }
+        let snap_targets = std::sync::Arc::new(snap_targets);
+
         // Beat-based ruler, offset by track header width
         let ruler = RulerWidget {
             playhead_beats,
-            play_start_beats: Some(self.state.transport.play_start_beats),
+            play_start_beats: Some(play_start_beats),
             zoom_level,
             grid: self.state.view.arrange_grid,
             scroll_offset_beats: scroll_offset,
@@ -118,7 +133,7 @@ impl App {
             time_selection_active: timeline.time_selection_active,
             selection_start_beats: timeline.selection_start_beats,
             selection_end_beats: timeline.selection_end_beats,
-            snap_targets: Default::default(),
+            snap_targets: snap_targets.clone(),
         };
         let ruler_canvas: Element<'_, Message> = canvas(ruler)
             .width(Length::Fill)
@@ -230,19 +245,6 @@ impl App {
                 (track.id, extra_height)
             }),
         );
-
-        let mut snap_targets =
-            SnapTargets::for_editor(timeline, self.state.transport.samples_per_beat())
-                .with_marker(playhead_beats, SnapTargetKind::Playhead);
-        if self.state.transport.loop_enabled {
-            snap_targets = snap_targets
-                .with_marker(
-                    self.state.transport.loop_start_beats,
-                    SnapTargetKind::LoopStart,
-                )
-                .with_marker(self.state.transport.loop_end_beats, SnapTargetKind::LoopEnd);
-        }
-        let snap_targets = std::sync::Arc::new(snap_targets);
 
         let mut track_rows = column![].spacing(0);
         let empty_content = TrackTimelineContent::default();

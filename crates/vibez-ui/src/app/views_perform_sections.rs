@@ -149,6 +149,16 @@ impl App {
             } else {
                 None
             };
+            let snap_targets = std::sync::Arc::new(
+                crate::timeline_snap::SnapTargets::for_editor(
+                    editor,
+                    self.state.transport.samples_per_beat(),
+                )
+                .with_marker(
+                    self.state.perform.section_editor.edit_cursor_beats(),
+                    crate::timeline_snap::SnapTargetKind::Playhead,
+                ),
+            );
             let ruler = RulerWidget {
                 playhead_beats: playback_playhead_beats.unwrap_or(-1.0),
                 play_start_beats: None,
@@ -162,7 +172,7 @@ impl App {
                 time_selection_active: editor.time_selection_active,
                 selection_start_beats: editor.selection_start_beats,
                 selection_end_beats: editor.selection_end_beats,
-                snap_targets: Default::default(),
+                snap_targets: snap_targets.clone(),
             };
             let ruler_canvas: Element<'_, Message> = Element::from(
                 canvas(ruler)
@@ -256,16 +266,6 @@ impl App {
                     };
                     (track.id, extra_height)
                 }),
-            );
-            let snap_targets = std::sync::Arc::new(
-                crate::timeline_snap::SnapTargets::for_editor(
-                    editor,
-                    self.state.transport.samples_per_beat(),
-                )
-                .with_marker(
-                    self.state.perform.section_editor.edit_cursor_beats(),
-                    crate::timeline_snap::SnapTargetKind::Playhead,
-                ),
             );
             let mut track_rows = column![].width(Length::Fill);
 
