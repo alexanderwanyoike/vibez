@@ -220,6 +220,7 @@ impl TimelineEditorState {
         let mut clip_end_beat = None;
         if let Some(track) = self.find_content_mut(track_id) {
             if let Some(clip) = track.clips.iter_mut().find(|clip| clip.id == clip_id) {
+                let new_duration = clip.playable_duration(new_duration);
                 let old_mapping_end = clip.warp_timeline_end();
                 let new_mapping_end = new_duration
                     .min((clip.audio.num_frames() as u64).saturating_sub(clip.source_offset));

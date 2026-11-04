@@ -150,6 +150,18 @@ impl UiClip {
         )
     }
 
+    /// The length `requested` may actually take, as an unlooped Clip stops
+    /// where its sample runs out.
+    pub(crate) fn playable_duration(&self, requested: u64) -> u64 {
+        if self.loop_enabled {
+            return requested;
+        }
+        let frames = self.audio.num_frames() as u64;
+        let longest = (self.warp_timeline_end() + frames.saturating_sub(self.source_end()))
+            .saturating_sub(self.start_marker.saturating_sub(self.source_offset));
+        requested.min(longest)
+    }
+
     pub(crate) fn warp_timeline_end(&self) -> u64 {
         let identity_end = self
             .duration

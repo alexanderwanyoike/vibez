@@ -273,6 +273,10 @@ fn enabling_a_mixed_loop_selection_preserves_existing_regions() {
 fn extending_audio_does_not_enable_looping_implicitly() {
     let mut arrangement = arrangement_with_tracks(1);
     let (track_id, clip_id) = add_audio_clip(&mut arrangement, 0, 0, 200);
+    arrangement.tracks[0].clips[0].audio = Arc::new(vibez_core::audio_buffer::DecodedAudio {
+        channels: vec![vec![0.0; 400]],
+        sample_rate: 44100,
+    });
     let mut engine = RecordingEngine::default();
 
     arrangement.update(
