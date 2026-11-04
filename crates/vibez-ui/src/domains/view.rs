@@ -334,6 +334,25 @@ mod tests {
     use crate::timeline_geometry::TimelineGeometry;
 
     #[test]
+    fn a_clip_editor_view_belongs_to_the_clip_it_was_set_for() {
+        let mut view = ViewState::default();
+        let zoomed = ClipId::new();
+        let viewport = TimelineViewport::new(4.0, 12.0);
+
+        view.update(
+            ViewMsg::SetClipEditorView {
+                clip_id: zoomed,
+                viewport,
+            },
+            &TimelineEditorState::default(),
+            ViewCtx::default(),
+        );
+
+        assert_eq!(view.clip_editor_view(zoomed), Some(viewport));
+        assert_eq!(view.clip_editor_view(ClipId::new()), None);
+    }
+
+    #[test]
     fn zoom_clamps_both_directions() {
         let mut v = ViewState::default();
         v.update(

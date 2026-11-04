@@ -1077,5 +1077,7 @@ mod note_gesture_tests;
 #[cfg(test)]
 mod tests;
 mod velocity_lane;
+#[cfg(test)]
+mod view_tests;
 
 pub use velocity_lane::VelocityLaneWidget;
