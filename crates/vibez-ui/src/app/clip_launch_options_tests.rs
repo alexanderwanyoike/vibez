@@ -380,12 +380,14 @@ fn a_legato_transition_plays_and_captures_from_its_start_position() {
         Some(9)
     );
     let captured = perform.capture.finish(16).unwrap().materialize();
-    let pitches: Vec<_> = captured.by_track[&breaks].note_clips[0]
+    let take = &captured.by_track[&breaks].note_clips[0];
+    let heard: Vec<_> = take
         .notes
         .iter()
+        .filter(|note| note.start_beat >= take.start_marker_beats)
         .map(|note| note.pitch)
         .collect();
-    assert_eq!(pitches, vec![43]);
+    assert_eq!(heard, vec![43]);
 }
 
 #[test]

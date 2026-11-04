@@ -2,7 +2,9 @@
 //!
 //! The audio engine owns effective timestamps. This module snapshots the
 //! canonical Section source at those boundaries, then creates independent
-//! linear Arrange clips only after the engine confirms Capture stop.
+//! Arrange clips only after the engine confirms Capture stop. Like Ableton
+//! recording Session into the Arrangement, each launch of a looping source
+//! becomes one looping clip per track for as long as it played.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -15,7 +17,9 @@ use crate::state::{ArrangementTimeline, TrackTimelineContent, UiClip, UiNoteClip
 
 use super::{PerformAction, Section};
 
+mod looped_launch;
 mod performance_log;
+use looped_launch::{looped_note_clip, LoopedLaunch};
 use performance_log::{CompletedPerformanceLog, PerformanceLog};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -208,6 +212,14 @@ impl CompletedCapture {
                     .clock
                     .arrange_start_samples
                     .saturating_add((kept_start - i128::from(self.engine_start_samples)) as u64);
+                let looped_launch = span.source.looping.then_some(LoopedLaunch {
+                    phase_samples: source_cursor,
+                    played_samples: remaining,
+                    destination_start_samples: destination_cursor,
+                    samples_per_beat,
+                });
+                let looped_notes = looped_launch
+                    .and_then(|launch| looped_note_clip(content, &span.source, launch));
                 while remaining > 0 && source_cursor < section_length {
                     let segment_length = remaining.min(section_length - source_cursor);
                     let destination = result.by_track.entry(*track_id).or_default();
@@ -218,7 +230,9 @@ impl CompletedCapture {
                         samples_per_beat,
                     };
                     append_audio_window(destination, content, &span.source, window);
-                    append_note_window(destination, content, &span.source, window);
+                    if looped_notes.is_none() {
+                        append_note_window(destination, content, &span.source, window);
+                    }
                     performance_log::append_automation_window(
                         destination,
                         content,
@@ -232,6 +246,14 @@ impl CompletedCapture {
                         break;
                     }
                     source_cursor = 0;
+                }
+                if let Some(clip) = looped_notes {
+                    result
+                        .by_track
+                        .entry(*track_id)
+                        .or_default()
+                        .note_clips
+                        .push(clip);
                 }
             }
         }
