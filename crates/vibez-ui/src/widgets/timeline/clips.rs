@@ -481,6 +481,8 @@ impl canvas::Program<Message> for TrackClipCanvas {
                                 clip_id,
                                 is_note_clip,
                                 clip_start_beat: pos_beats,
+                                start_local_x: pos.x,
+                                phase: DragPhase::Pending,
                             });
                         } else if in_title_bar {
                             // Title bar → move clip
@@ -707,7 +709,17 @@ impl canvas::Program<Message> for TrackClipCanvas {
                                 clip_id,
                                 is_note_clip,
                                 clip_start_beat,
+                                start_local_x,
+                                phase,
                             } => {
+                                // A resize follows the pointer's x alone.
+                                let mut phase = *phase;
+                                if !phase.follow(
+                                    Point::new(*start_local_x, 0.0),
+                                    Point::new(local_x, 0.0),
+                                ) {
+                                    return (canvas::event::Status::Captured, None);
+                                }
                                 let snapped = self.grid.length_to_dragged_end(
                                     *clip_start_beat,
                                     self.x_to_beat(local_x),
@@ -725,6 +737,11 @@ impl canvas::Program<Message> for TrackClipCanvas {
                                         new_duration_beats: snapped,
                                     })
                                     .in_undo_gesture(*undo_gesture);
+                                if let Some(ClipDragAction::ResizeClip { phase: held, .. }) =
+                                    &mut state.drag
+                                {
+                                    *held = phase;
+                                }
                                 return (canvas::event::Status::Captured, Some(edit));
                             }
                             ClipDragAction::FadeClip(drag) => {
