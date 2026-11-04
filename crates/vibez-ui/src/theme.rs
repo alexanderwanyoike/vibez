@@ -349,7 +349,7 @@ impl ThemePalette {
 impl ThemePalette {
     /// Background of the timeline lanes behind clips.
     pub fn lane(&self) -> Color {
-        self.bg_dark
+        blend(self.bg_dark, self.text, self.lane_style.recess)
     }
 }
 
@@ -463,7 +463,7 @@ pub fn fader_track() -> Color {
 }
 
 pub fn track_bg() -> Color {
-    bg_dark()
+    CURRENT.read().unwrap().lane()
 }
 
 pub fn track_bg_selected() -> Color {
