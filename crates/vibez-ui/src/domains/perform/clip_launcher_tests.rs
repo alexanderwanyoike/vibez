@@ -630,7 +630,9 @@ fn recovery_from_a_previous_project_preserves_a_new_unconsumed_launch() {
 fn a_stop_lands_where_the_playing_clip_would_launch() {
     let track = TrackId::new();
     let mut state = PerformState::default();
-    Arc::make_mut(&mut state.clips).set_launch_quantization(track, MusicalBoundary::OneBeat);
+    state.edit_track_launch(track, |options| {
+        options.quantization = MusicalBoundary::OneBeat
+    });
     assert_eq!(
         state.stop_quantization(track),
         MusicalBoundary::OneBeat,

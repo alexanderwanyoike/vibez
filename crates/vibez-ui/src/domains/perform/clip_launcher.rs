@@ -65,9 +65,9 @@ pub const DEFAULT_LAUNCH_QUANTIZATION: MusicalBoundary = MusicalBoundary::OneBar
 
 /// A Project Track's Clip launch options.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct TrackLaunchOptions {
-    quantization: MusicalBoundary,
-    mode: ClipLaunchMode,
+pub(crate) struct TrackLaunchOptions {
+    pub(crate) quantization: MusicalBoundary,
+    pub(crate) mode: ClipLaunchMode,
 }
 
 impl Default for TrackLaunchOptions {
@@ -152,16 +152,8 @@ impl ClipStore {
             .unwrap_or_else(|| self.launch_mode(clip.track_id))
     }
 
-    pub fn set_launch_quantization(&mut self, track_id: TrackId, quantization: MusicalBoundary) {
-        self.update_track_options(track_id, |options| options.quantization = quantization);
-    }
-
     pub fn launch_mode(&self, track_id: TrackId) -> ClipLaunchMode {
         self.track_options(track_id).mode
-    }
-
-    pub fn set_launch_mode(&mut self, track_id: TrackId, mode: ClipLaunchMode) {
-        self.update_track_options(track_id, |options| options.mode = mode);
     }
 
     /// Prepares `clip` to launch with its own or its track's launch mode.
@@ -403,6 +395,40 @@ impl ClipMsg {
 }
 
 impl PerformState {
+    /// Leaves the shared store untouched when `edit` changes nothing, so a
+    /// picker choosing its current value is not a Project edit.
+    pub(crate) fn edit_track_launch(
+        &mut self,
+        track_id: TrackId,
+        edit: impl FnOnce(&mut TrackLaunchOptions),
+    ) {
+        let current = self.clips.track_options(track_id);
+        let mut options = current;
+        edit(&mut options);
+        if options != current {
+            Arc::make_mut(&mut self.clips)
+                .update_track_options(track_id, |stored| *stored = options);
+        }
+    }
+
+    /// The Clip counterpart of `edit_track_launch`.
+    pub(crate) fn edit_clip_launch(
+        &mut self,
+        clip_id: ClipId,
+        edit: impl FnOnce(&mut ClipLaunchOverrides),
+    ) {
+        let Some(current) = self.clips.by_id(clip_id).map(|clip| clip.launch) else {
+            return;
+        };
+        let mut launch = current;
+        edit(&mut launch);
+        if launch != current {
+            if let Some(clip) = Arc::make_mut(&mut self.clips).by_id_mut(clip_id) {
+                clip.launch = launch;
+            }
+        }
+    }
+
     /// A stop lands where the Clip it stops would launch.
     pub fn stop_quantization(&self, track_id: TrackId) -> MusicalBoundary {
         self.clip_editor.playing.get(&track_id).map_or_else(
@@ -725,40 +751,16 @@ impl PerformState {
             ClipMsg::SetLaunchQuantization {
                 track_id,
                 quantization,
-            } => {
-                if self.clips.launch_quantization(track_id) != quantization {
-                    Arc::make_mut(&mut self.clips).set_launch_quantization(track_id, quantization);
-                }
-            }
+            } => self.edit_track_launch(track_id, |options| options.quantization = quantization),
             ClipMsg::SetClipLaunchQuantization {
                 clip_id,
                 quantization,
-            } => {
-                if self
-                    .clips
-                    .by_id(clip_id)
-                    .is_some_and(|clip| clip.launch.quantization != quantization)
-                {
-                    if let Some(clip) = Arc::make_mut(&mut self.clips).by_id_mut(clip_id) {
-                        clip.launch.quantization = quantization;
-                    }
-                }
-            }
+            } => self.edit_clip_launch(clip_id, |launch| launch.quantization = quantization),
             ClipMsg::SetLaunchMode { track_id, mode } => {
-                if self.clips.launch_mode(track_id) != mode {
-                    Arc::make_mut(&mut self.clips).set_launch_mode(track_id, mode);
-                }
+                self.edit_track_launch(track_id, |options| options.mode = mode)
             }
             ClipMsg::SetClipLaunchMode { clip_id, mode } => {
-                if self
-                    .clips
-                    .by_id(clip_id)
-                    .is_some_and(|clip| clip.launch.mode != mode)
-                {
-                    if let Some(clip) = Arc::make_mut(&mut self.clips).by_id_mut(clip_id) {
-                        clip.launch.mode = mode;
-                    }
-                }
+                self.edit_clip_launch(clip_id, |launch| launch.mode = mode)
             }
             ClipMsg::MoveWindow { tracks, rows } => {
                 self.clip_editor.first_track = self

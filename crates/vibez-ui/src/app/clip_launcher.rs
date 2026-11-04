@@ -349,9 +349,8 @@ mod live_edit_tests {
         clip.launch.mode = Some(ClipLaunchMode::AtEnd);
         let mut state = crate::domains::perform::PerformState::default();
         state.layout = PerformLayout::Clips;
-        let clips = Arc::make_mut(&mut state.clips);
-        clips.clips.push(clip.clone());
-        clips.set_launch_mode(track, ClipLaunchMode::Legato);
+        Arc::make_mut(&mut state.clips).clips.push(clip.clone());
+        state.edit_track_launch(track, |options| options.mode = ClipLaunchMode::Legato);
         state.clip_editor.running = true;
         state.clip_editor.queued.insert(track, Some(clip.id));
         let before = Arc::clone(&state.clips);
