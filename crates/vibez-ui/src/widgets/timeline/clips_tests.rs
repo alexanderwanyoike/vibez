@@ -102,7 +102,7 @@ fn note_clips_keep_their_notes_at_one_pixel_per_beat() {
 
     assert_eq!(canvas.geometry().pixels_per_beat(), 1.0);
     assert_eq!(canvas.note_clips.len(), 1);
-    assert_eq!(canvas.note_clips[0].notes.len(), 64);
+    assert_eq!(canvas.note_clips[0].notes.spans().len(), 64);
 }
 
 #[test]
@@ -117,7 +117,7 @@ fn track_canvas_materialises_only_the_visible_note_clips() {
 
     assert_eq!(canvas.note_clips.len(), 1);
     assert_eq!(canvas.note_clips[0].clip_id, visible_id);
-    assert_eq!(canvas.note_clips[0].notes.len(), 64);
+    assert_eq!(canvas.note_clips[0].notes.spans().len(), 64);
 }
 
 #[test]
@@ -139,13 +139,19 @@ fn looped_note_previews_repeat_their_notes_on_every_pass() {
 
     let canvas = track_canvas(&content, 1.0);
 
+    let starts: Vec<_> = canvas.note_clips[0]
+        .notes
+        .spans()
+        .iter()
+        .map(|span| (span.pitch, span.start, span.end))
+        .collect();
     assert_eq!(
-        canvas.note_clips[0].notes,
+        starts,
         vec![
             (60, 0.0, 0.5),
-            (60, 2.0, 0.5),
-            (60, 4.0, 0.5),
-            (60, 6.0, 0.5),
+            (60, 2.0, 2.5),
+            (60, 4.0, 4.5),
+            (60, 6.0, 6.5),
         ]
     );
 }
@@ -416,7 +422,7 @@ fn recording_preview_is_visible_but_not_hit_testable() {
         position_beats: 0.0,
         duration_beats: 4.0,
         name: "● RECORDING LIVE".into(),
-        notes: vec![(60, 0.0, 0.5)],
+        notes: Arc::new(NoteSummary::new([(60, 0.0, 0.5)], 1.0)),
         start_marker_beats: 0.0,
         loop_enabled: false,
         loop_start_beats: 0.0,

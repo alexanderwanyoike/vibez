@@ -230,15 +230,14 @@ impl TrackClipCanvas {
                 position_beats: c.position_beats,
                 duration_beats: c.duration_beats,
                 name: c.name.clone(),
-                notes: c
-                    .notes
-                    .iter()
-                    .flat_map(|note| {
+                notes: Arc::new(NoteSummary::new(
+                    c.notes.iter().flat_map(|note| {
                         c.note_occurrences(note.start_beat)
                             .into_iter()
                             .map(move |occurrence| (note.pitch, occurrence, note.duration_beats))
-                    })
-                    .collect(),
+                    }),
+                    geometry.pixels_per_beat(),
+                )),
                 start_marker_beats: c.start_marker_beats,
                 loop_enabled: c.loop_enabled,
                 loop_start_beats: c.loop_start_beats,

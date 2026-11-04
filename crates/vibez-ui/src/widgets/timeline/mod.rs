@@ -53,7 +53,7 @@ pub struct TimelineNoteClip {
     pub position_beats: f64,
     pub duration_beats: f64,
     pub name: String,
-    pub notes: Vec<(u8, f64, f64)>, // (pitch, start, duration)
+    pub notes: Arc<NoteSummary>,
     pub start_marker_beats: f64,
     pub loop_enabled: bool,
     pub loop_start_beats: f64,
@@ -244,6 +244,7 @@ mod loop_tint;
 pub mod marquee;
 mod minimap;
 mod note_marks;
+mod note_summary;
 mod ruler;
 mod ruler_drag;
 mod ruler_draw;
@@ -255,6 +256,7 @@ pub use clip_drag::ClipDragAction;
 pub use clips::*;
 pub use marquee::{build_row_spans, TrackRowSpan};
 pub use minimap::*;
+pub use note_summary::{NoteSpan, NoteSummary};
 pub use ruler::*;
 pub use time_ruler::{TimeRulerWidget, TIME_RULER_HEIGHT};
 
