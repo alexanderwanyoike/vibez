@@ -279,18 +279,18 @@ impl ClipMsg {
     pub const fn marks_dirty(&self) -> bool {
         matches!(
             self,
-            Self::CreateMidi { .. }
-                | Self::Delete(_)
-                | Self::Duplicate(_)
-                | Self::ToggleLoop(_)
-                | Self::SetLaunchQuantization { .. }
+            Self::CreateMidi { .. } | Self::Delete(_) | Self::Duplicate(_) | Self::ToggleLoop(_)
         )
     }
 
     /// Edits that may change nothing: an empty clipboard, an empty cell, a
-    /// track of the other kind. The app records them only once they have.
+    /// track of the other kind, a picker choosing its current value. The app
+    /// records them only once they have.
     pub const fn defers_project_edit(&self) -> bool {
-        matches!(self, Self::Cut | Self::Paste | Self::Drop { .. })
+        matches!(
+            self,
+            Self::Cut | Self::Paste | Self::Drop { .. } | Self::SetLaunchQuantization { .. }
+        )
     }
 }
 
@@ -606,7 +606,11 @@ impl PerformState {
             ClipMsg::SetLaunchQuantization {
                 track_id,
                 quantization,
-            } => Arc::make_mut(&mut self.clips).set_launch_quantization(track_id, quantization),
+            } => {
+                if self.clips.launch_quantization(track_id) != quantization {
+                    Arc::make_mut(&mut self.clips).set_launch_quantization(track_id, quantization);
+                }
+            }
             ClipMsg::MoveWindow { tracks, rows } => {
                 self.clip_editor.first_track = self
                     .clip_editor
