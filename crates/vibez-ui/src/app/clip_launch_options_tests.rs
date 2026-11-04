@@ -383,3 +383,12 @@ fn a_legato_transition_plays_and_captures_from_its_start_position() {
         .collect();
     assert_eq!(pitches, vec![43]);
 }
+
+#[test]
+fn choosing_a_tracks_current_launch_mode_is_not_an_edit() {
+    let breaks = TrackId::new();
+    let (mut app, _sent) = clip_app(&[breaks]);
+    let _ = app.update(set_mode(breaks, ClipLaunchMode::Play));
+    assert!(!app.state.project.dirty);
+    assert!(!app.state.project.history.can_undo());
+}
