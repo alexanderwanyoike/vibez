@@ -236,7 +236,9 @@ impl TransportState {
                 TransportAction::None
             }
             TransportMsg::EngineStopped => {
-                let stopped_on_its_own = self.will_play();
+                // The confirmation of a Stop that a Play has already followed
+                // is not a stop on its own and must not move the new playback.
+                let stopped_on_its_own = self.playback == PlaybackPhase::Playing;
                 self.follow_engine(false);
                 if stopped_on_its_own && !ctx.perform_playback_active {
                     self.continue_samples = self.position_samples;
