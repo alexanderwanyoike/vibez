@@ -338,7 +338,7 @@ fn apply_capture_to_arrangement(
             .sort_by(|left, right| left.position_beats.total_cmp(&right.position_beats));
 
         for clip in &destination.clips {
-            engine.add_audio_clip(track_id, clip);
+            engine.send(clip.add_command(track_id));
         }
         for clip in &destination.note_clips {
             engine.send(clip.add_command(track_id));

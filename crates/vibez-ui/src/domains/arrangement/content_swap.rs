@@ -39,7 +39,7 @@ pub fn swap_changed_content(
     }
     for clip in &target.clips {
         if !current.clips.contains(clip) {
-            engine.add_audio_clip(track_id, clip);
+            engine.send(clip.add_command(track_id));
         }
     }
     for clip in &target.note_clips {

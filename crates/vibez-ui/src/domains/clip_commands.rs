@@ -1,10 +1,33 @@
 //! Engine commands that send one whole arrangement clip, built from its UI model.
 
 use vibez_core::id::TrackId;
-use vibez_engine::clip_insertion::PreparedNoteClipInsertion;
+use vibez_engine::clip_insertion::{PreparedClipInsertion, PreparedNoteClipInsertion};
 use vibez_engine::commands::EngineCommand;
 
-use crate::state::UiNoteClip;
+use crate::state::{UiClip, UiNoteClip};
+
+impl UiClip {
+    /// The clip with its audio as one insertion.
+    pub fn add_command(&self, track_id: TrackId) -> EngineCommand {
+        EngineCommand::AddClip {
+            insertion: PreparedClipInsertion::new(),
+            track_id,
+            clip_id: self.id,
+            audio: std::sync::Arc::clone(&self.audio),
+            position: self.position,
+            source_offset: self.source_offset,
+            start_marker: self.start_marker,
+            duration: self.duration,
+            loop_enabled: self.loop_enabled,
+            loop_start: self.loop_start,
+            loop_end: self.loop_end,
+            linear_gain: self.gain_db.linear(),
+            fades: self.fades,
+            playback_direction: self.playback_direction,
+            warp_markers: self.warp_markers.clone(),
+        }
+    }
+}
 
 impl UiNoteClip {
     /// The clip with all its notes as one insertion.

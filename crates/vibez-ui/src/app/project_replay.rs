@@ -387,7 +387,7 @@ impl App {
         }
 
         for clip in &content.clips {
-            crate::domains::EngineHandle::add_audio_clip(&mut self.cmd_tx, track.id, clip);
+            self.send_command(clip.add_command(track.id));
         }
 
         for clip in &content.note_clips {
