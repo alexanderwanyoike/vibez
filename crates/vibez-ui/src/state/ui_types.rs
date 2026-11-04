@@ -1056,6 +1056,15 @@ pub struct GridConfig {
     pub adaptive_bias: i8,
 }
 
+/// Zoom-adaptive like Ableton, because a fixed default is under a pixel
+/// per step at song zoom and over-coarse when zoomed in. `selected` is the
+/// value a switch to a fixed grid starts from.
+impl Default for GridConfig {
+    fn default() -> Self {
+        Self::new(SnapGrid::EIGHTH, true, true, 0)
+    }
+}
+
 impl GridConfig {
     pub const fn new(
         selected: SnapGrid,

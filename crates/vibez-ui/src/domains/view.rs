@@ -833,7 +833,11 @@ mod tests {
     #[test]
     fn grid_commands_update_the_shared_editor_grid() {
         let mut v = ViewState::default();
-        assert_eq!(v.grid.selected, SnapGrid::EIGHTH);
+        v.update(
+            ViewMsg::SetSnapGrid(SnapGrid::EIGHTH),
+            &TimelineEditorState::default(),
+            ViewCtx::default(),
+        );
         assert!(v.grid.snap_enabled);
         assert!(!v.grid.adaptive);
 

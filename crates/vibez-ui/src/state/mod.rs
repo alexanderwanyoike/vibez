@@ -148,7 +148,7 @@ impl Default for ViewState {
             perform_surface_resize_active: false,
             viewport: crate::timeline_geometry::TimelineViewport::new(1.0, 0.0),
             zoom_before_selection: None,
-            grid: GridConfig::new(SnapGrid::EIGHTH, true, false, 0),
+            grid: GridConfig::default(),
             context_menu: None,
             drum_rack_slice_dialog: None,
             transient_analysis_dialog: None,
