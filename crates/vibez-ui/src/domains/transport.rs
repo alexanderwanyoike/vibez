@@ -402,6 +402,23 @@ mod tests {
     }
 
     #[test]
+    fn play_right_after_stop_does_not_seek_when_the_stop_is_confirmed() {
+        let (mut t, mut engine) = playing_from(128.0);
+        t.update(TransportMsg::Stop, &mut engine, TransportCtx::default());
+        t.update(TransportMsg::Play, &mut engine, TransportCtx::default());
+        engine.0.clear();
+
+        t.update(
+            TransportMsg::EngineStopped,
+            &mut engine,
+            TransportCtx::default(),
+        );
+
+        assert!(engine.0.is_empty(), "the new playback must not jump back");
+        assert!(t.will_play());
+    }
+
+    #[test]
     fn perform_stopping_on_its_own_keeps_the_arrange_cursor() {
         let (mut t, mut engine) = playing_from(128.0);
         let cursor = t.position_samples;
