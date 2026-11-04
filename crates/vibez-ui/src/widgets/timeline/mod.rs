@@ -243,6 +243,7 @@ mod minimap;
 mod note_marks;
 mod ruler;
 mod ruler_drag;
+mod ruler_draw;
 mod ruler_scale;
 
 pub use clip_drag::ClipDragAction;
