@@ -24,9 +24,7 @@ pub(crate) mod loop_record;
 mod note_repeat;
 pub(crate) mod section_record;
 mod sections;
-pub use clip_launcher::{
-    ClipEditor, ClipLaunchRequest, ClipMsg, ClipStore, LauncherClip, DEFAULT_LAUNCH_QUANTIZATION,
-};
+pub use clip_launcher::{ClipEditor, ClipLaunchRequest, ClipMsg, ClipStore, LauncherClip};
 mod track_mutes;
 pub use capture::{
     CaptureAction, CaptureMsg, CapturePhase, CaptureState, CapturedTimelineSource,
