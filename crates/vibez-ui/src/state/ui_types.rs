@@ -177,10 +177,23 @@ impl UiClip {
         self.reset_loop_region_to_clip();
     }
 
-    pub(crate) fn clamp_loop_to_clip(&mut self) {
-        let clip_end = self.source_offset.saturating_add(self.duration);
-        self.loop_start = self.loop_start.max(self.source_offset).min(clip_end);
-        self.loop_end = self.loop_end.min(clip_end);
+    /// The furthest a loop may reach: the whole source, except that Warp
+    /// Markers map only the clip's own window.
+    pub(crate) fn loop_content_end(&self) -> u64 {
+        if self.warp_markers.is_empty() {
+            self.audio.num_frames() as u64
+        } else {
+            self.source_offset.saturating_add(self.warp_timeline_end())
+        }
+    }
+
+    /// Resizing a warped clip resizes its Warp Marker map, which can cut the
+    /// loop; any other loop is content and outlives the clip's length.
+    pub(crate) fn clamp_loop_to_warp_map(&mut self) {
+        if self.warp_markers.is_empty() {
+            return;
+        }
+        self.loop_end = self.loop_end.min(self.loop_content_end());
         if self.loop_end <= self.loop_start || self.start_marker >= self.loop_end {
             self.reset_loop_region_to_clip();
         }
@@ -523,16 +536,6 @@ impl UiNoteClip {
     pub(crate) fn enable_loop_over_clip(&mut self) {
         self.loop_enabled = true;
         self.reset_loop_region_to_clip();
-    }
-
-    pub(crate) fn clamp_loop_to_duration(&mut self) {
-        self.loop_start_beats = self.loop_start_beats.clamp(0.0, self.duration_beats);
-        self.loop_end_beats = self.loop_end_beats.min(self.duration_beats);
-        if self.loop_end_beats <= self.loop_start_beats
-            || self.start_marker_beats >= self.loop_end_beats
-        {
-            self.reset_loop_region_to_clip();
-        }
     }
 
     pub(crate) fn clamp_start_to_duration(&mut self) {

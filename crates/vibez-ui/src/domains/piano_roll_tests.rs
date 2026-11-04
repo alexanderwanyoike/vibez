@@ -392,7 +392,7 @@ fn a_clip_length_drag_step_edits_the_clip_bounds_in_place() {
                 clip_id,
                 duration_beats: 3.0,
                 loop_start_beats: 1.0,
-                loop_end_beats: 3.0,
+                loop_end_beats: 4.0,
                 ..
             }] if (*track_id, *clip_id) == (tid, cid)
         ),
