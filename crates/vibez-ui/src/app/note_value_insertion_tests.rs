@@ -291,7 +291,7 @@ fn piano_roll_note_growth_is_served_before_current_stale_batch_reuse_undo_stop_a
                     if matches!(change, InnerChange::Stop) {
                         assert!(!outer.engine.transport().is_playing());
                         assert_eq!(outer.engine.transport().position(), 0);
-                        assert!(!outer.app.state.transport.playing);
+                        assert!(!outer.app.state.transport.is_playing());
                         0.0
                     } else {
                         0.25
@@ -305,7 +305,7 @@ fn piano_roll_note_growth_is_served_before_current_stale_batch_reuse_undo_stop_a
         }
         assert_signal(&render(&mut outer.engine, true), expected_signal);
         if matches!(change, InnerChange::Clear) {
-            assert!(!outer.app.state.transport.playing);
+            assert!(!outer.app.state.transport.is_playing());
         }
         drop(canonical_tracks);
         drop(canonical_timeline);

@@ -51,7 +51,7 @@ fn play_resumes_the_clips_that_were_playing_when_the_transport_stopped() {
             .clip_editor
             .playing
             .insert(track, clip.clone());
-        app.state.transport.playing = true;
+        app.state.transport.playback = crate::state::PlaybackPhase::Playing;
 
         events.push(EngineEvent::PlaybackStopped).unwrap();
         app.poll_engine_events();

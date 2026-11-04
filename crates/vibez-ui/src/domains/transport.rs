@@ -10,7 +10,7 @@
 use vibez_engine::commands::EngineCommand;
 
 use super::EngineHandle;
-use crate::state::TransportState;
+use crate::state::{PlaybackPhase, TransportState};
 
 /// Messages the transport domain handles.
 #[derive(Debug, Clone)]
@@ -68,19 +68,32 @@ pub enum TransportAction {
 }
 
 impl TransportState {
+    /// What the screen shows, so it never runs ahead of the engine.
+    pub fn is_playing(&self) -> bool {
+        matches!(
+            self.playback,
+            PlaybackPhase::Playing | PlaybackPhase::Stopping
+        )
+    }
+
     /// Playing, or asked to play: what a toggle acts on before the engine
     /// confirms.
     pub fn will_play(&self) -> bool {
-        self.requested_playing.unwrap_or(self.playing)
+        matches!(
+            self.playback,
+            PlaybackPhase::Starting | PlaybackPhase::Playing
+        )
     }
 
     /// The engine reported its transport. A request it has not reached yet,
     /// such as a Stop sent right after Play, stays pending.
     pub fn follow_engine(&mut self, playing: bool) {
-        self.playing = playing;
-        if self.requested_playing == Some(playing) {
-            self.requested_playing = None;
-        }
+        self.playback = match (self.playback, playing) {
+            (PlaybackPhase::Starting, false) => PlaybackPhase::Starting,
+            (PlaybackPhase::Stopping, true) => PlaybackPhase::Stopping,
+            (_, true) => PlaybackPhase::Playing,
+            (_, false) => PlaybackPhase::Stopped,
+        };
     }
 
     pub fn samples_per_beat(&self) -> f64 {
@@ -104,12 +117,16 @@ impl TransportState {
     ) -> TransportAction {
         match msg {
             TransportMsg::Play => {
-                self.requested_playing = Some(true);
+                if self.playback != PlaybackPhase::Playing {
+                    self.playback = PlaybackPhase::Starting;
+                }
                 engine.send(EngineCommand::Play);
                 TransportAction::None
             }
             TransportMsg::Stop => {
-                self.requested_playing = Some(false);
+                if self.playback != PlaybackPhase::Stopped {
+                    self.playback = PlaybackPhase::Stopping;
+                }
                 engine.send(EngineCommand::Stop);
                 if !ctx.perform_playback_active {
                     self.position_samples = 0;
@@ -251,7 +268,7 @@ mod tests {
     #[test]
     fn stop_resets_position_and_seeks_zero() {
         let mut t = transport();
-        t.playing = true;
+        t.playback = PlaybackPhase::Playing;
         t.position_samples = 12345;
         let mut engine = RecordingEngine::default();
         t.update(TransportMsg::Stop, &mut engine, TransportCtx::default());
@@ -263,7 +280,7 @@ mod tests {
     #[test]
     fn perform_stop_preserves_the_arrange_cursor_and_does_not_seek() {
         let mut t = transport();
-        t.playing = true;
+        t.playback = PlaybackPhase::Playing;
         t.position_samples = 12_345;
         let mut engine = RecordingEngine::default();
         t.update(
@@ -285,25 +302,25 @@ mod tests {
         let mut t = transport();
         let mut engine = RecordingEngine::default();
         t.update(TransportMsg::Play, &mut engine, TransportCtx::default());
-        assert!(!t.playing);
+        assert!(!t.is_playing());
         assert!(t.will_play());
 
         t.follow_engine(true);
-        assert!(t.playing);
+        assert!(t.is_playing());
         assert!(t.will_play());
     }
 
     #[test]
     fn stop_shows_stopped_only_once_the_engine_stops() {
         let mut t = transport();
-        t.playing = true;
+        t.playback = PlaybackPhase::Playing;
         let mut engine = RecordingEngine::default();
         t.update(TransportMsg::Stop, &mut engine, TransportCtx::default());
-        assert!(t.playing);
+        assert!(t.is_playing());
         assert!(!t.will_play());
 
         t.follow_engine(false);
-        assert!(!t.playing);
+        assert!(!t.is_playing());
     }
 
     #[test]
@@ -330,7 +347,7 @@ mod tests {
         ));
 
         t.follow_engine(true);
-        assert!(t.playing);
+        assert!(t.is_playing());
         assert!(
             !t.will_play(),
             "the Stop sent after Play is still on its way"

@@ -997,7 +997,7 @@ mod tests {
         assert!(state.perform.clip_editor.pending.is_empty());
         assert!(state.perform.clip_editor.running);
         assert!(
-            state.transport.playing,
+            state.transport.is_playing(),
             "a lost PlaybackStarted must also recover"
         );
         assert!(state.perform.clip_editor.started_at.contains_key(&track));

@@ -541,8 +541,9 @@ The engine lives on the cpal audio callback. Its rules:
   Capture commands, and waits for those.
 - A note clip is sent as one prepared insertion that carries all its notes;
   `AddNote` is for single edits.
-- The UI's `playing` flag follows the engine's `PlaybackStarted` and
-  `PlaybackStopped` events; an unconfirmed Play or Stop is held as a request.
+- The UI's `PlaybackPhase` follows the engine's `PlaybackStarted` and
+  `PlaybackStopped` events; an unconfirmed Play or Stop is `Starting` or
+  `Stopping`.
 - Everything the engine needs (decoded audio, plugin instances, note data) is
   handed to it fully constructed; `Arc<DecodedAudio>` shares immutable sample
   data with the UI without copying.

@@ -1,13 +1,22 @@
+/// The engine's last reported transport, with any Play or Stop it has not
+/// confirmed yet.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlaybackPhase {
+    Stopped,
+    /// Play was sent and the engine has not started yet.
+    Starting,
+    Playing,
+    /// Stop was sent and the engine has not stopped yet.
+    Stopping,
+}
+
 /// Transport domain state: playback position, tempo, and the
 /// arrangement loop. First extracted domain slice of the
 /// architecture refactor: owns everything the transport bar and the
 /// beat/sample math need, and nothing else.
 #[derive(Debug)]
 pub struct TransportState {
-    /// What the engine last reported, so the screen never runs ahead of it.
-    pub playing: bool,
-    /// A Play or Stop the engine has not confirmed yet.
-    pub requested_playing: Option<bool>,
+    pub playback: PlaybackPhase,
     pub position_samples: u64,
     pub sample_rate: u32,
     pub bpm: f64,
@@ -20,8 +29,7 @@ pub struct TransportState {
 impl Default for TransportState {
     fn default() -> Self {
         Self {
-            playing: false,
-            requested_playing: None,
+            playback: PlaybackPhase::Stopped,
             position_samples: 0,
             sample_rate: 44_100,
             bpm: 120.0,

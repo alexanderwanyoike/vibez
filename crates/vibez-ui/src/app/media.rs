@@ -242,7 +242,7 @@ impl App {
         playback_mode: AuditionMode,
     ) {
         let warped = playback_mode == AuditionMode::Warp;
-        let queued = self.state.transport.playing && warped;
+        let queued = self.state.transport.is_playing() && warped;
         // Retain a UI-side clone (never cleared on stop) so the engine
         // voice can never drop the final Arc inside the RT callback.
         // A superseded buffer moves into the retired ring rather than
