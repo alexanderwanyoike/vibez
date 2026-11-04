@@ -464,6 +464,8 @@ pub fn view_track_header<'a>(
         background: Some(
             if selected {
                 th::track_bg_selected()
+            } else if flags.hovered {
+                th::track_header_hovered()
             } else {
                 th::bg_surface()
             }

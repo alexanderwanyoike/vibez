@@ -492,6 +492,11 @@ pub fn track_bg_selected() -> Color {
     bg_elevated()
 }
 
+/// A hovered track header, halfway to its selected shade.
+pub fn track_header_hovered() -> Color {
+    blend(bg_surface(), track_bg_selected(), 0.5)
+}
+
 pub fn ruler_bg() -> Color {
     bg_surface()
 }
