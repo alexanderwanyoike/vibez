@@ -123,9 +123,6 @@ impl TrackClipCanvas {
             let grid = lane_grid(geometry, w, step);
             let style = theme::lane_style();
             let ink = theme::text();
-            // Mixed here rather than painted translucent: the renderer
-            // blends alpha in linear light, which would make these faint
-            // tints several times stronger than their tokens.
             let band = theme::blend(bg_color, ink, style.band);
             for &(start, end) in &grid.bands {
                 frame.fill_rectangle(

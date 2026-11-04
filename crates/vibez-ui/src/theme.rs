@@ -156,8 +156,7 @@ pub struct ClipStyle {
 impl ClipStyle {
     pub const DARK: Self = Self {
         body_opacity: 0.55,
-        // The renderer composites the see-through body in linear light,
-        // which lifts it on a dark lane; this pulls it back to the mockup.
+        // Tuned by eye against the mockup's dark body shade.
         body_toward_lane: 0.28,
         ink: Color {
             r: 10.0 / 255.0,
@@ -504,6 +503,11 @@ pub fn ruler_text() -> Color {
 /// Mix two theme colors without escaping the active palette. Perform uses
 /// this for instrument-like depth that still follows light, dark, and custom
 /// `.vzt` themes.
+///
+/// Faint tints and fades are mixed with this rather than painted
+/// translucent: the renderer blends alpha in linear light, which makes a
+/// faint tint several times stronger than its token and fades dark ink on a
+/// light background far more than on a dark one.
 pub fn blend(from: Color, to: Color, amount: f32) -> Color {
     let amount = amount.clamp(0.0, 1.0);
     let keep = 1.0 - amount;

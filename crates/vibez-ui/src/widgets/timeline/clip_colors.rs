@@ -18,9 +18,7 @@ pub(super) struct ClipColors {
 /// How far a selected clip's title moves toward white.
 const SELECTED_TITLE_LIFT: f32 = 0.33;
 
-/// How far a clip on a muted track is mixed toward its lane. Mixed rather
-/// than made translucent: the renderer blends in linear light, which leaves
-/// dark ink on a light lane far fainter than the same fade on a dark one.
+/// How far a clip on a muted track is mixed toward its lane.
 const MUTED_FADE: f32 = 0.55;
 
 impl ClipColors {
