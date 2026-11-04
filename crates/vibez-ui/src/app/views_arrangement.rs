@@ -31,6 +31,10 @@ use crate::widgets::track_header::{
 
 use super::*;
 
+/// Expanded return or master automation scrolls inside this cap so the
+/// pinned footer can never squeeze the track list out of the window.
+const CHANNEL_FOOTER_MAX_HEIGHT: f32 = 240.0;
+
 impl App {
     pub(super) fn view_arrangement(&self) -> Element<'_, Message> {
         let timeline = self.state.arrangement.resolve_timeline().editor;
@@ -451,6 +455,7 @@ impl App {
         // Clipless lanes at the bottom, Ableton-style: a slim header
         // (select, expand, delete for returns) and their automation
         // lanes when expanded.
+        let mut channel_rows = column![].spacing(0);
         let master_ref = &self.state.project_tracks.master;
         let channel_refs: Vec<&crate::state::ProjectTrack> = self
             .state
@@ -568,23 +573,30 @@ impl App {
                     ..Default::default()
                 });
 
-            track_rows = track_rows.push(row![header, filler].height(Length::Fixed(26.0)));
+            channel_rows = channel_rows.push(row![header, filler].height(Length::Fixed(26.0)));
             if expanded {
-                track_rows = self.push_automation_lanes(track_rows, timeline, channel, chan_color);
+                channel_rows =
+                    self.push_automation_lanes(channel_rows, timeline, channel, chan_color);
             }
         }
 
-        let content = column![ruler_row, minimap_row, track_rows];
+        let track_body = scrollable(track_rows)
+            .direction(scrollable::Direction::Vertical(
+                scrollable::Scrollbar::default(),
+            ))
+            .height(Length::Fill);
+        let channel_footer = container(scrollable(channel_rows).direction(
+            scrollable::Direction::Vertical(scrollable::Scrollbar::default()),
+        ))
+        .max_height(CHANNEL_FOOTER_MAX_HEIGHT);
 
-        let scrollable_content = scrollable(content).direction(scrollable::Direction::Vertical(
-            scrollable::Scrollbar::default(),
-        ));
+        let content = column![ruler_row, minimap_row, track_body, channel_footer];
 
         // mouse_area only provides on_right_press (no cursor position),
         // so use the globally tracked cursor for the scrollable background.
         // Track canvas right-clicks still supply their precise event position.
         mouse_area(
-            container(scrollable_content)
+            container(content)
                 .width(Length::Fill)
                 .height(Length::FillPortion(5))
                 .style(|_theme: &Theme| container::Style {
