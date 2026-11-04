@@ -18,6 +18,14 @@ pub(super) struct ClipColors {
 /// How far a selected clip's title moves toward white.
 const SELECTED_TITLE_LIFT: f32 = 0.33;
 
+impl ClipColors {
+    /// The same clip on a muted track: it stays in place and readable but
+    /// steps back, while a selection outline keeps its full strength.
+    pub fn muted(self) -> Self {
+        self
+    }
+}
+
 /// The colours of a clip on `track`'s lane in the active theme.
 pub(super) fn clip_colors(track: Color, selected: bool) -> ClipColors {
     shade(
@@ -98,6 +106,25 @@ mod tests {
             }
         );
         assert!(colors.loop_tick.a > 0.0 && colors.loop_tick.a < colors.ink.a);
+    }
+
+    #[test]
+    fn a_clip_on_a_muted_track_fades_everything_but_its_selection_outline() {
+        let live = shade(RED, true, ClipStyle::DARK, DARK_LANE, TEXT);
+
+        let muted = live.muted();
+
+        for (part, before, after) in [
+            ("title", live.title, muted.title),
+            ("body", live.body, muted.body),
+            ("ink", live.ink, muted.ink),
+            ("text", live.text, muted.text),
+            ("loop tick", live.loop_tick, muted.loop_tick),
+        ] {
+            assert!(after.a < before.a * 0.6, "{part}: {after:?}");
+            assert_eq!((after.r, after.g, after.b), (before.r, before.g, before.b));
+        }
+        assert_eq!(muted.selection, live.selection);
     }
 
     #[test]
