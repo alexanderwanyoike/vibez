@@ -184,3 +184,50 @@ impl App {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domains::perform::Section;
+    use crate::timeline_geometry::FRAME_MARGIN_PIXELS;
+
+    /// An app showing one Section's timeline in Perform, with the timeline
+    /// focused.
+    fn app_in_a_section() -> App {
+        let mut app = super::super::test_support::app();
+        app.state.view.workspace = Workspace::Perform;
+        let section = Section::new(0);
+        app.state.perform.selected_section = Some(section.id);
+        std::sync::Arc::make_mut(&mut app.state.perform.sections).insert(section);
+        app.state.perform.editor_focus = PerformEditorFocus::TimelineEditor;
+        app
+    }
+
+    #[test]
+    fn section_fit_frames_the_section_inside_the_lane_margin() {
+        let mut app = app_in_a_section();
+        let section_beats = app
+            .state
+            .perform
+            .selected_section
+            .and_then(|id| app.state.perform.sections.by_id(id))
+            .map(|section| section.length_beats)
+            .unwrap();
+
+        let _ = app.update(Message::View(ViewMsg::ZoomToFit));
+
+        let width = app.section_timeline_viewport_width();
+        let end_x = app
+            .state
+            .perform
+            .section_editor
+            .viewport()
+            .geometry()
+            .beat_to_x(section_beats);
+        assert!(
+            end_x <= width - 2.0 * FRAME_MARGIN_PIXELS + 0.01,
+            "the section ends at {end_x} of {width}"
+        );
+        assert!(end_x > width - 4.0 * FRAME_MARGIN_PIXELS, "ends at {end_x}");
+    }
+}
