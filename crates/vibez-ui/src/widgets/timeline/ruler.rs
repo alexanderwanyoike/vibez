@@ -4,6 +4,7 @@ use iced::mouse;
 use iced::widget::canvas;
 use iced::{Rectangle, Renderer, Theme};
 
+use super::ruler_scale::label_step_beats;
 use crate::domains::arrangement::ArrangementMsg;
 use crate::domains::transport::TransportMsg;
 use crate::domains::view::ViewMsg;
@@ -42,23 +43,6 @@ enum RulerDragAction {
 pub struct RulerInteractionState {
     drag: Option<RulerDragAction>,
     shift_held: bool,
-}
-
-/// Bars between labelled bar numbers, about 60 px apart at any zoom.
-pub(super) fn bar_label_step(pixels_per_bar: f32) -> u32 {
-    if pixels_per_bar >= 60.0 {
-        1
-    } else if pixels_per_bar >= 30.0 {
-        2
-    } else if pixels_per_bar >= 15.0 {
-        4
-    } else if pixels_per_bar >= 8.0 {
-        8
-    } else if pixels_per_bar >= 4.0 {
-        16
-    } else {
-        32
-    }
 }
 
 impl RulerWidget {
@@ -115,7 +99,7 @@ impl canvas::Program<Message> for RulerWidget {
             let ppb = self.pixels_per_beat();
             let pixels_per_bar = ppb * beats_per_bar as f32;
 
-            let bar_step = i64::from(bar_label_step(pixels_per_bar));
+            let bar_step = (label_step_beats(ppb) / beats_per_bar) as i64;
 
             for beat_i in start_beat..end_beat {
                 let beat = beat_i as f64;

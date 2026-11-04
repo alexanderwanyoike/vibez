@@ -32,8 +32,7 @@ pub(super) fn lane_grid(geometry: TimelineGeometry, width: f32, step_beats: f64)
     }
     let first_beat = geometry.x_to_beat(0.0);
     let last_beat = geometry.x_to_beat(width);
-    let label_beats =
-        f64::from(super::ruler::bar_label_step(ppb * BEATS_PER_BAR as f32)) * BEATS_PER_BAR;
+    let label_beats = super::ruler_scale::label_step_beats(ppb);
 
     let mut bands = Vec::new();
     let first_band = (first_beat / label_beats).floor() as i64;
