@@ -424,7 +424,9 @@ impl TimelineEditorState {
             } => {
                 return self.op_trim_selected_clips_start(engine, ctx, anchor, new_start_beats);
             }
-            ArrangementMsg::DropClips { .. } => {}
+            ArrangementMsg::DropClips { anchor } => {
+                return self.op_drop_clips(engine, ctx, anchor);
+            }
             ArrangementMsg::MoveSelectedClips {
                 anchor,
                 new_position_beats,

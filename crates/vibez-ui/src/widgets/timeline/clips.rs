@@ -901,6 +901,23 @@ impl canvas::Program<Message> for TrackClipCanvas {
                                 shift_held: false,
                             },
                         )),
+                        ClipDragAction::MoveClip {
+                            undo_gesture,
+                            clip_id,
+                            phase: DragPhase::Dragging,
+                            ..
+                        }
+                        | ClipDragAction::ResizeClip {
+                            undo_gesture,
+                            anchor:
+                                ArrangementSelection::AudioClip { clip_id, .. }
+                                | ArrangementSelection::NoteClip { clip_id, .. },
+                            phase: DragPhase::Dragging,
+                            ..
+                        } => Some(
+                            Message::Arrangement(ArrangementMsg::DropClips { anchor: *clip_id })
+                                .in_undo_gesture(*undo_gesture),
+                        ),
                         _ => None,
                     };
                     state.drag = None;

@@ -234,7 +234,7 @@ impl TimelineEditorState {
         }
     }
 
-    fn locate_clip(&self, clip_id: ClipId) -> Option<ArrangementSelection> {
+    pub(super) fn locate_clip(&self, clip_id: ClipId) -> Option<ArrangementSelection> {
         self.timeline
             .by_track
             .iter()

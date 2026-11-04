@@ -8,7 +8,7 @@ use vibez_engine::commands::EngineCommand;
 
 use super::clip_trims::{audio_start_trimmed, note_start_trimmed};
 use super::fragment_geometry::audio_fragment;
-use super::EngineHandle;
+use super::{ArrangementAction, ArrangementCtx, EngineHandle};
 use crate::state::{
     ArrangementSelection, TimelineEditorState, TrackTimelineContent, UiClip, UiNoteClip,
     SHORTEST_LENGTH_BEATS,
@@ -95,6 +95,22 @@ pub(super) fn lane_overwrite(
 }
 
 impl TimelineEditorState {
+    pub(super) fn op_drop_clips(
+        &mut self,
+        engine: &mut impl EngineHandle,
+        ctx: ArrangementCtx,
+        anchor: ClipId,
+    ) -> ArrangementAction {
+        let Some(anchor) = self.locate_clip(anchor) else {
+            return ArrangementAction::default();
+        };
+        let dropped = self.gesture_targets(anchor);
+        ArrangementAction {
+            mark_dirty: self.overwrite_under(engine, &dropped, ctx.samples_per_beat),
+            ..Default::default()
+        }
+    }
+
     /// Each of `placed` overwrites the other Clips under it on its lane.
     /// Returns whether any Clip was overwritten.
     pub(super) fn overwrite_under(
