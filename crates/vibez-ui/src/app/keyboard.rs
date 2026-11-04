@@ -836,6 +836,10 @@ mod tests {
             Some(Message::Transport(TransportMsg::TogglePlayback))
         ));
         assert!(matches!(
+            global_key_handler(Key::Named(Named::Space), Modifiers::SHIFT),
+            Some(Message::Transport(TransportMsg::ContinuePlayback))
+        ));
+        assert!(matches!(
             global_key_handler(Key::Named(Named::Escape), Modifiers::empty()),
             Some(Message::EscapePressed)
         ));

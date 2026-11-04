@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn stop_and_space_finalize_an_active_audio_recording() {
+fn stop_space_and_shift_space_finalize_an_active_audio_recording() {
     assert_eq!(
         audio_recording_transport_guard(
             crate::domains::audio_recording::AudioRecordingPhase::Recording,
@@ -13,6 +13,13 @@ fn stop_and_space_finalize_an_active_audio_recording() {
         audio_recording_transport_guard(
             crate::domains::audio_recording::AudioRecordingPhase::Recording,
             &TransportMsg::TogglePlayback,
+        ),
+        AudioRecordingTransportGuard::StopRecording
+    );
+    assert_eq!(
+        audio_recording_transport_guard(
+            crate::domains::audio_recording::AudioRecordingPhase::Recording,
+            &TransportMsg::ContinuePlayback,
         ),
         AudioRecordingTransportGuard::StopRecording
     );

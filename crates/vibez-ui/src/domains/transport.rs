@@ -425,6 +425,88 @@ mod tests {
     }
 
     #[test]
+    fn continue_plays_from_where_playback_stopped_and_stop_still_returns() {
+        let (mut t, mut engine) = playing_from(128.0);
+        let stopped_at = t.position_samples;
+        t.update(TransportMsg::Stop, &mut engine, TransportCtx::default());
+        t.follow_engine(false);
+        engine.0.clear();
+
+        t.update(
+            TransportMsg::ContinuePlayback,
+            &mut engine,
+            TransportCtx::default(),
+        );
+        assert_eq!(t.position_samples, stopped_at);
+        assert!(matches!(
+            engine.0.as_slice(),
+            [EngineCommand::Seek(s), EngineCommand::Play] if *s == stopped_at
+        ));
+
+        t.follow_engine(true);
+        t.update(
+            TransportMsg::EnginePosition(stopped_at + 1_000),
+            &mut engine,
+            TransportCtx::default(),
+        );
+        t.update(TransportMsg::Stop, &mut engine, TransportCtx::default());
+        assert_eq!(t.position_samples, t.beats_to_samples_at(128.0));
+    }
+
+    #[test]
+    fn continue_after_a_click_plays_from_the_click() {
+        let (mut t, mut engine) = playing_from(128.0);
+        t.update(TransportMsg::Stop, &mut engine, TransportCtx::default());
+        t.follow_engine(false);
+        t.update(
+            TransportMsg::SeekToBeat(64.0),
+            &mut engine,
+            TransportCtx::default(),
+        );
+
+        t.update(
+            TransportMsg::ContinuePlayback,
+            &mut engine,
+            TransportCtx::default(),
+        );
+
+        assert_eq!(t.position_samples, t.beats_to_samples_at(64.0));
+    }
+
+    #[test]
+    fn continue_after_stopping_on_its_own_plays_from_where_it_stopped() {
+        let (mut t, mut engine) = playing_from(128.0);
+        let stopped_at = t.position_samples;
+        t.update(
+            TransportMsg::EngineStopped,
+            &mut engine,
+            TransportCtx::default(),
+        );
+
+        t.update(
+            TransportMsg::ContinuePlayback,
+            &mut engine,
+            TransportCtx::default(),
+        );
+
+        assert_eq!(t.position_samples, stopped_at);
+    }
+
+    #[test]
+    fn continue_while_playing_stops_like_space() {
+        let (mut t, mut engine) = playing_from(128.0);
+
+        t.update(
+            TransportMsg::ContinuePlayback,
+            &mut engine,
+            TransportCtx::default(),
+        );
+
+        assert!(!t.will_play());
+        assert_eq!(t.position_samples, t.beats_to_samples_at(128.0));
+    }
+
+    #[test]
     fn perform_stop_preserves_the_arrange_cursor_and_does_not_seek() {
         let mut t = transport();
         t.playback = PlaybackPhase::Playing;
