@@ -1586,3 +1586,33 @@ fn a_short_clip_at_fit_zoom_shows_the_grab_cursor_near_its_start() {
 
     assert_eq!(cursor, mouse::Interaction::Grab);
 }
+
+#[test]
+fn pressing_where_clips_overlap_picks_the_one_drawn_on_top() {
+    let (mut canvas, under_id) = canvas_with_selected_audio_clip();
+    canvas.selected_clips.clear();
+    canvas.clips[0].duration = (8.0 * canvas.spb()) as u64;
+    let (other, on_top_id) = canvas_with_selected_audio_clip();
+    let mut on_top = other.clips.into_iter().next().expect("a clip");
+    on_top.position = (4.0 * canvas.spb()) as u64;
+    canvas.clips.push(on_top);
+    let press = Point::new(canvas.beat_to_x(6.0), CLIP_Y + 4.0);
+
+    let pressed = left_event(
+        &canvas,
+        &mut ClipInteractionState::default(),
+        iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left),
+        press,
+    );
+
+    match pressed {
+        Some(Message::Arrangement(ArrangementMsg::SelectArrangementClip {
+            selection: crate::state::ArrangementSelection::AudioClip { clip_id, .. },
+            ..
+        })) => assert_eq!(
+            clip_id, on_top_id,
+            "picked the clip underneath, {under_id:?}"
+        ),
+        other => panic!("expected a clip selection, got {other:?}"),
+    }
+}
