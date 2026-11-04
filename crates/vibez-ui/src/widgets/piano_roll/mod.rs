@@ -435,6 +435,7 @@ pub struct PianoRollState {
     drag: Option<DragAction>,
     last_cursor: Option<Point>,
     shift_held: bool,
+    alt_held: bool,
     double_click: DoubleClick,
     /// Pitch currently held down via a key-lane click (audition).
     audition_pitch: Option<u8>,
@@ -561,16 +562,19 @@ impl canvas::Program<Message> for PianoRollWidget {
             canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
                 if let Some(pos) = cursor.position_in(bounds) {
                     if pos.y <= RULER_HEIGHT {
-                        let Some(drag) = self.begin_marker_drag(pos, &bounds).or_else(|| {
-                            self.clip.as_ref().map(|clip| DragAction::Ruler {
-                                clip_id: clip.clip_id,
-                                zoom: RulerZoom::begin(
-                                    self.clip_view(),
-                                    Point::new(pos.x - KEY_WIDTH, pos.y),
-                                    note_area_width(&bounds),
-                                ),
+                        let Some(drag) = self
+                            .begin_marker_drag(pos, &bounds, state.alt_held)
+                            .or_else(|| {
+                                self.clip.as_ref().map(|clip| DragAction::Ruler {
+                                    clip_id: clip.clip_id,
+                                    zoom: RulerZoom::begin(
+                                        self.clip_view(),
+                                        Point::new(pos.x - KEY_WIDTH, pos.y),
+                                        note_area_width(&bounds),
+                                    ),
+                                })
                             })
-                        }) else {
+                        else {
                             return (canvas::event::Status::Ignored, None);
                         };
                         state.drag = Some(drag);
@@ -840,7 +844,9 @@ impl canvas::Program<Message> for PianoRollWidget {
                     }
 
                     if let Some(drag) = state.drag.as_ref() {
-                        if let Some(message) = self.marker_drag_message(drag, local, &bounds) {
+                        if let Some(message) =
+                            self.marker_drag_message(drag, local, &bounds, state.alt_held)
+                        {
                             return (canvas::event::Status::Captured, Some(message));
                         }
                     }
@@ -1061,6 +1067,7 @@ impl canvas::Program<Message> for PianoRollWidget {
 
             canvas::Event::Keyboard(iced::keyboard::Event::ModifiersChanged(modifiers)) => {
                 state.shift_held = modifiers.shift();
+                state.alt_held = modifiers.alt();
             }
             canvas::Event::Keyboard(iced::keyboard::Event::KeyPressed {
                 key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Shift),

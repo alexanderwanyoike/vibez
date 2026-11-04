@@ -38,10 +38,13 @@ impl PianoRollWidget {
         clip_loop_markers::hit_test_start(self.beat_to_x(clip.start_marker_beats, bounds), position)
     }
 
+    /// `free` is a drag with Alt held, which ignores the grid as the
+    /// Arrange's drags do.
     pub(super) fn begin_marker_drag(
         &self,
         position: Point,
         bounds: &Rectangle,
+        free: bool,
     ) -> Option<DragAction> {
         let clip = self.clip.as_ref()?;
         if self.hit_test_start_marker(position, bounds) {
@@ -57,9 +60,18 @@ impl PianoRollWidget {
                     marker,
                     clip.loop_start_beats,
                     clip.loop_end_beats,
-                    self.snapped_beat(self.x_to_beat(position.x, bounds), bounds),
+                    self.marker_beat(position.x, bounds, free),
                 ),
             })
+        }
+    }
+
+    fn marker_beat(&self, x: f32, bounds: &Rectangle, free: bool) -> f64 {
+        let beat = self.x_to_beat(x, bounds);
+        if free {
+            beat
+        } else {
+            self.snapped_beat(beat, bounds)
         }
     }
 
@@ -68,14 +80,15 @@ impl PianoRollWidget {
         action: &DragAction,
         position: Point,
         bounds: &Rectangle,
+        free: bool,
     ) -> Option<Message> {
         let clip = self.clip.as_ref()?;
-        let min_length = if self.grid.snap_enabled {
+        let min_length = if self.grid.snap_enabled && !free {
             self.effective_grid(bounds).beat_size()
         } else {
             0.01
         };
-        let pointer_at = |x: f32| self.snapped_beat(self.x_to_beat(x, bounds), bounds);
+        let pointer_at = |x: f32| self.marker_beat(x, bounds, free);
         match action {
             DragAction::Start {
                 clip_id,

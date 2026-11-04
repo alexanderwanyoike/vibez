@@ -61,6 +61,7 @@ pub struct AudioClipDetailState {
     drag: Option<AudioMarkerDrag>,
     double_click: DoubleClick,
     shift_held: bool,
+    alt_held: bool,
 }
 
 const AUDIO_RULER_HEIGHT: f32 = 30.0;
@@ -163,8 +164,10 @@ impl AudioClipDetailWidget {
         self.geometry(bounds).pixels_per_beat()
     }
 
-    fn minimum_loop_frames(&self, bounds: &Rectangle) -> u64 {
-        let beats = if self.grid.snap_enabled {
+    /// `free` is a drag with Alt held, which ignores the grid as the
+    /// Arrange's drags do.
+    fn minimum_loop_frames(&self, bounds: &Rectangle, free: bool) -> u64 {
+        let beats = if self.grid.snap_enabled && !free {
             self.grid
                 .effective_grid(self.pixels_per_beat(bounds))
                 .beat_size()
@@ -246,13 +249,13 @@ impl AudioClipDetailWidget {
     }
 
     fn x_to_local_frame(&self, x: f32, bounds: &Rectangle) -> u64 {
-        self.x_to_local_frame_up_to(x, bounds, self.loop_range_frames())
+        self.x_to_local_frame_up_to(x, bounds, self.loop_range_frames(), false)
     }
 
-    fn x_to_local_frame_up_to(&self, x: f32, bounds: &Rectangle, limit: u64) -> u64 {
+    fn x_to_local_frame_up_to(&self, x: f32, bounds: &Rectangle, limit: u64, free: bool) -> u64 {
         let geometry = self.geometry(bounds);
         let beat = geometry.x_to_beat(x).max(0.0);
-        let beat = if self.grid.snap_enabled {
+        let beat = if self.grid.snap_enabled && !free {
             self.grid.snap_beat(beat, geometry.pixels_per_beat())
         } else {
             beat
@@ -281,10 +284,10 @@ impl AudioClipDetailWidget {
         clip_loop_markers::hit_test_start(self.timeline_to_x(self.start_marker, bounds), position)
     }
 
-    fn start_marker_from_x(&self, x: f32, bounds: &Rectangle) -> u64 {
+    fn start_marker_from_x(&self, x: f32, bounds: &Rectangle, free: bool) -> u64 {
         let candidate = self
             .source_offset
-            .saturating_add(self.x_to_local_frame_up_to(x, bounds, self.content_frames()));
+            .saturating_add(self.x_to_local_frame_up_to(x, bounds, self.content_frames(), free));
         let source_end = self.source_offset.saturating_add(self.loop_range_frames());
         self.timeline()
             .clamp_start(candidate, self.source_offset, source_end)
@@ -673,6 +676,7 @@ impl canvas::Program<Message> for AudioClipDetailWidget {
         match event {
             canvas::Event::Keyboard(iced::keyboard::Event::ModifiersChanged(modifiers)) => {
                 state.shift_held = modifiers.shift();
+                state.alt_held = modifiers.alt();
                 (canvas::event::Status::Ignored, None)
             }
             canvas::Event::Mouse(mouse::Event::WheelScrolled { delta })
@@ -828,7 +832,8 @@ impl canvas::Program<Message> for AudioClipDetailWidget {
                         marker,
                         self.loop_start.saturating_sub(self.source_offset) as f64,
                         self.loop_end.saturating_sub(self.source_offset) as f64,
-                        self.x_to_local_frame_up_to(position.x, &bounds, u64::MAX) as f64,
+                        self.x_to_local_frame_up_to(position.x, &bounds, u64::MAX, state.alt_held)
+                            as f64,
                     )))
                 } else {
                     Some(AudioMarkerDrag::Ruler(RulerZoom::begin(
@@ -862,7 +867,8 @@ impl canvas::Program<Message> for AudioClipDetailWidget {
                         }))
                     }
                     AudioMarkerDrag::Start(undo_gesture) => {
-                        let start_marker = self.start_marker_from_x(position.x, &bounds);
+                        let start_marker =
+                            self.start_marker_from_x(position.x, &bounds, state.alt_held);
                         (start_marker != self.start_marker).then(|| {
                             Message::Arrangement(ArrangementMsg::SetClipStartMarker {
                                 track_id: self.track_id,
@@ -874,8 +880,9 @@ impl canvas::Program<Message> for AudioClipDetailWidget {
                     }
                     AudioMarkerDrag::Loop(drag) => {
                         let max = self.loop_content_end.saturating_sub(self.source_offset);
-                        let pointer = self.x_to_local_frame_up_to(position.x, &bounds, max);
-                        let min_length = self.minimum_loop_frames(&bounds).min(max);
+                        let pointer =
+                            self.x_to_local_frame_up_to(position.x, &bounds, max, state.alt_held);
+                        let min_length = self.minimum_loop_frames(&bounds, state.alt_held).min(max);
                         let (loop_start, loop_end) =
                             drag.resolve(pointer as f64, min_length as f64, max as f64);
                         let loop_start =
