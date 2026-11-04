@@ -89,6 +89,27 @@ impl App {
         true
     }
 
+    /// Escape during a Clip drag: the Clips, the engine and the selection go
+    /// back to how the drag found them, and no undo step is left.
+    pub(super) fn cancel_clip_drag(&mut self) -> bool {
+        let Some(gesture) = self
+            .state
+            .arrangement
+            .editor
+            .cancel_clip_drag()
+            .or_else(|| self.state.perform.timeline_editor_mut().cancel_clip_drag())
+        else {
+            return false;
+        };
+        if let Some(snapshot) = self.state.project.history.revert_gesture(gesture) {
+            self.apply_snapshot(snapshot);
+        }
+        self.state.arrangement.drag_resize_active = false;
+        self.state.perform.timeline_editor_mut().drag_resize_active = false;
+        self.state.status_text = "Drag cancelled".into();
+        true
+    }
+
     pub(super) fn apply_snapshot(&mut self, snapshot: crate::state::ProjectSnapshot) {
         self.restart_device_metering();
         self.cancel_device_preset_load();

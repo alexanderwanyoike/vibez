@@ -420,6 +420,9 @@ impl App {
         if self.state.project.new_project_layout.take().is_some() {
             return Task::none();
         }
+        if self.cancel_clip_drag() {
+            return Task::none();
+        }
         if self.state.view.transient_analysis_dialog.take().is_some() {
             return Task::none();
         }
