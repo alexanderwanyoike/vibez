@@ -476,7 +476,7 @@ fn start_marker_moves_without_changing_the_midi_loop_region() {
 }
 
 #[test]
-fn midi_loop_region_must_be_ordered_and_inside_the_clip() {
+fn midi_loop_region_must_be_ordered_and_may_reach_past_the_clip() {
     let (mut tracks, track_id, clip_id) = midi_track_with_clip();
     let mut piano_roll = PianoRollState::default();
     let mut engine = RecordingEngine::default();
@@ -485,8 +485,8 @@ fn midi_loop_region_must_be_ordered_and_inside_the_clip() {
         PianoRollMsg::SetNoteClipLoopRegion {
             track_id,
             clip_id,
-            loop_start_beats: 3.0,
-            loop_end_beats: 5.0,
+            loop_start_beats: 5.0,
+            loop_end_beats: 3.0,
         },
         &mut engine,
         &mut tracks,
@@ -501,14 +501,14 @@ fn midi_loop_region_must_be_ordered_and_inside_the_clip() {
             track_id,
             clip_id,
             loop_start_beats: 1.0,
-            loop_end_beats: 3.0,
+            loop_end_beats: 6.0,
         },
         &mut engine,
         &mut tracks,
         PianoRollCtx::default(),
     );
     let clip = &tracks.get(track_id).unwrap().note_clips[0];
-    assert_eq!((clip.loop_start_beats, clip.loop_end_beats), (1.0, 3.0));
+    assert_eq!((clip.loop_start_beats, clip.loop_end_beats), (1.0, 6.0));
     assert!(matches!(
         engine.0.as_slice(),
         [EngineCommand::SetNoteClipLoop { .. }]
@@ -520,7 +520,7 @@ fn midi_loop_region_must_be_ordered_and_inside_the_clip() {
             track_id,
             clip_id,
             loop_start_beats: 1.0,
-            loop_end_beats: 3.0,
+            loop_end_beats: 6.0,
         },
         &mut engine,
         &mut tracks,
