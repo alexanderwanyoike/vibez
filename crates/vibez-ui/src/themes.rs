@@ -73,16 +73,31 @@ const EQ_CONSOLE: [Color; 4] = [
     },
 ];
 
-/// The default track rainbow (charcoal's).
+/// The default track palette (Charcoal's): eight hues at low saturation
+/// and mid lightness, so clips stay tellable apart without the colour
+/// shouting over the music they hold.
 pub(crate) const TRACKS_CLASSIC: [Color; 8] = [
-    rgb8(224, 96, 96),
-    rgb8(224, 144, 64),
-    rgb8(208, 192, 64),
-    rgb8(80, 176, 96),
-    rgb8(64, 160, 176),
-    rgb8(96, 128, 208),
-    rgb8(144, 96, 192),
-    rgb8(192, 96, 160),
+    rgb8(189, 136, 132),
+    rgb8(189, 159, 132),
+    rgb8(180, 165, 116),
+    rgb8(132, 189, 146),
+    rgb8(132, 181, 189),
+    rgb8(132, 155, 189),
+    rgb8(157, 132, 189),
+    rgb8(189, 132, 164),
+];
+
+/// The default palette's hues, a little more saturated and darker so
+/// they hold up against light lanes.
+const TRACKS_CLASSIC_LIGHT: [Color; 8] = [
+    rgb8(194, 118, 112),
+    rgb8(194, 150, 112),
+    rgb8(186, 165, 94),
+    rgb8(112, 194, 133),
+    rgb8(112, 183, 194),
+    rgb8(112, 145, 194),
+    rgb8(148, 112, 194),
+    rgb8(194, 112, 158),
 ];
 
 const TRACKS_NEON: [Color; 8] = [
@@ -494,7 +509,7 @@ pub fn builtins() -> Vec<ThemePalette> {
             bg: rgb8(242, 242, 240),
             accent: rgb8(235, 120, 15),
             text: rgb8(40, 42, 46),
-            tracks: TRACKS_CLASSIC,
+            tracks: TRACKS_CLASSIC_LIGHT,
             eq: EQ_CONSOLE,
         }),
     ]);
