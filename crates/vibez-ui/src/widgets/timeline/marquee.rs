@@ -33,16 +33,14 @@ impl TrackRowSpan {
 
 /// Build the vertical layout shared by every timeline surface.
 ///
-/// Callers supply each track and the height of any expanded rows beneath
-/// its clip lane. Keeping the accumulation here ensures Arrange and Perform
-/// resolve the same column geometry.
-pub fn build_row_spans(
-    lane_height: f32,
-    rows: impl IntoIterator<Item = (TrackId, f32)>,
-) -> Vec<TrackRowSpan> {
+/// Callers supply each track with the height of its clip lane and of any
+/// expanded rows beneath it, as `(track, lane height, extra height)`.
+/// Keeping the accumulation here ensures Arrange and Perform resolve the
+/// same column geometry.
+pub fn build_row_spans(rows: impl IntoIterator<Item = (TrackId, f32, f32)>) -> Vec<TrackRowSpan> {
     let mut top = 0.0;
     rows.into_iter()
-        .map(|(track_id, extra_height)| {
+        .map(|(track_id, lane_height, extra_height)| {
             let height = lane_height + extra_height;
             let span = TrackRowSpan {
                 track_id,
@@ -190,7 +188,11 @@ mod tests {
     #[test]
     fn row_spans_accumulate_extra_height_between_clip_lanes() {
         let ids: Vec<TrackId> = (0..3).map(|_| TrackId::new()).collect();
-        let spans = build_row_spans(70.0, [(ids[0], 0.0), (ids[1], 56.0), (ids[2], 0.0)]);
+        let spans = build_row_spans([
+            (ids[0], 70.0, 0.0),
+            (ids[1], 70.0, 56.0),
+            (ids[2], 70.0, 0.0),
+        ]);
 
         assert_eq!(
             spans,
@@ -225,5 +227,50 @@ mod tests {
         assert_eq!(slice_for_lane(150.0, 190.0, 70.0, 70.0), None);
         // Partial overlap from above.
         assert_eq!(slice_for_lane(50.0, 90.0, 70.0, 70.0), Some((0.0, 20.0)));
+    }
+
+    #[test]
+    fn row_spans_stack_lanes_of_mixed_heights() {
+        let ids: Vec<TrackId> = (0..3).map(|_| TrackId::new()).collect();
+        let spans = build_row_spans([
+            (ids[0], 210.0, 0.0),
+            (ids[1], 52.0, 56.0),
+            (ids[2], 70.0, 0.0),
+        ]);
+
+        let placed: Vec<_> = spans
+            .iter()
+            .map(|span| (span.top, span.height, span.lane_height))
+            .collect();
+        assert_eq!(
+            placed,
+            vec![
+                (0.0, 210.0, 210.0),
+                (210.0, 108.0, 52.0),
+                (318.0, 70.0, 70.0)
+            ]
+        );
+    }
+
+    #[test]
+    fn a_box_resolves_lanes_by_their_own_heights() {
+        let ids: Vec<TrackId> = (0..3).map(|_| TrackId::new()).collect();
+        let rows = build_row_spans([
+            (ids[0], 210.0, 0.0),
+            (ids[1], 52.0, 0.0),
+            (ids[2], 70.0, 0.0),
+        ]);
+
+        // Inside the tall first lane only: a 70 px row assumption would
+        // already reach the second track.
+        assert_eq!(
+            resolve(0.0, 4.0, 20.0, 150.0, &rows).track_ids,
+            vec![ids[0]]
+        );
+        // Starting in the short lane and ending in the last.
+        assert_eq!(
+            resolve(0.0, 4.0, 230.0, 270.0, &rows).track_ids,
+            vec![ids[1], ids[2]]
+        );
     }
 }

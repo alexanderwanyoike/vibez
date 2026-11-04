@@ -224,23 +224,20 @@ impl App {
         // Track rows: header widgets + clip canvas
         // Real vertical layout of the column, so a rubber-band drag can map
         // a y offset back to a track even with automation lanes expanded.
-        let row_spans = build_row_spans(
-            TRACK_ROW_HEIGHT,
-            self.state.project_tracks.tracks.iter().map(|track| {
-                let extra_height = if self.state.automation_ui.expanded.contains(&track.id) {
-                    self.automation_rows_height(timeline, track.id)
-                } else {
-                    0.0
-                };
-                (track.id, extra_height)
-            }),
-        );
+        let row_spans = build_row_spans(self.state.project_tracks.tracks.iter().map(|track| {
+            let extra_height = if self.state.automation_ui.expanded.contains(&track.id) {
+                self.automation_rows_height(timeline, track.id)
+            } else {
+                0.0
+            };
+            (track.id, TRACK_ROW_HEIGHT, extra_height)
+        }));
 
         let mut track_rows = column![].spacing(0);
         let empty_content = TrackTimelineContent::default();
         let browser_drag_active = self.state.browser.drag_source.is_some();
 
-        for track in self.state.project_tracks.tracks.iter() {
+        for (track, span) in self.state.project_tracks.tracks.iter().zip(&row_spans) {
             let content = timeline.timeline.get(track.id).unwrap_or(&empty_content);
             let selected = timeline.selected_track == Some(track.id);
             let track_color = th::track_color(track.color_index);
@@ -370,7 +367,7 @@ impl App {
             let mut clip_canvas_area = mouse_area(
                 canvas(clip_canvas_widget)
                     .width(Length::Fill)
-                    .height(Length::Fixed(TRACK_ROW_HEIGHT)),
+                    .height(Length::Fixed(span.lane_height)),
             );
             if browser_drag_active {
                 clip_canvas_area = clip_canvas_area
@@ -395,7 +392,7 @@ impl App {
                     y: self.state.view.cursor_y,
                     target: ContextMenuTarget::TrackHeader { track_id: track.id },
                 }));
-            let track_row = row![header, clip_canvas].height(Length::Fixed(TRACK_ROW_HEIGHT));
+            let track_row = row![header, clip_canvas].height(Length::Fixed(span.lane_height));
 
             track_rows = track_rows.push(track_row);
 

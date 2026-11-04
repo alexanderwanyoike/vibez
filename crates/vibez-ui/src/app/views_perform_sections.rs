@@ -251,14 +251,13 @@ impl App {
             // Real vertical layout of the section column, so a rubber-band
             // maps a y offset back to a track the same way Arrange does.
             let row_spans = crate::widgets::timeline::build_row_spans(
-                row_height,
                 self.state.project_tracks.tracks.iter().map(|track| {
                     let extra_height = if self.state.automation_ui.expanded.contains(&track.id) {
                         self.automation_rows_height(editor, track.id)
                     } else {
                         0.0
                     };
-                    (track.id, extra_height)
+                    (track.id, row_height, extra_height)
                 }),
             );
             let mut track_rows = column![].width(Length::Fill);
