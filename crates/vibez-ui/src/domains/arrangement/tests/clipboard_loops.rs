@@ -348,7 +348,10 @@ fn duplicate_preserves_audio_and_midi_loop_settings() {
     a.update(
         ArrangementMsg::DuplicateSelectedClip,
         &mut engine,
-        ArrangementCtx::default(),
+        ArrangementCtx {
+            samples_per_beat: 100.0,
+            ..Default::default()
+        },
     );
 
     let audio_copy = a.tracks[0].clips.last().unwrap();
@@ -428,7 +431,10 @@ fn repeated_duplicate_keeps_the_source_clip_name_readable() {
         a.update(
             ArrangementMsg::DuplicateSelectedClip,
             &mut engine,
-            ArrangementCtx::default(),
+            ArrangementCtx {
+                samples_per_beat: 100.0,
+                ..Default::default()
+            },
         );
     }
 
@@ -468,7 +474,10 @@ fn midi_duplicate_keeps_the_source_clip_name_readable() {
     a.update(
         ArrangementMsg::DuplicateSelectedClip,
         &mut engine,
-        ArrangementCtx::default(),
+        ArrangementCtx {
+            samples_per_beat: 100.0,
+            ..Default::default()
+        },
     );
 
     assert!(a.tracks[1]

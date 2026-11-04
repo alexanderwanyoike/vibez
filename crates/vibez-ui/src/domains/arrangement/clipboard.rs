@@ -33,11 +33,26 @@ impl ClipboardClip {
         }
     }
 
-    fn position_beats(&self) -> f64 {
+    pub(super) fn position_beats(&self) -> f64 {
         match self {
             Self::Audio { position_beats, .. } | Self::Note { position_beats, .. } => {
                 *position_beats
             }
+        }
+    }
+
+    pub(super) fn end_beats(&self, spb: f64) -> f64 {
+        match self {
+            Self::Audio {
+                position_beats,
+                clip,
+                ..
+            } => position_beats + clip.duration as f64 / spb,
+            Self::Note {
+                position_beats,
+                clip,
+                ..
+            } => position_beats + clip.duration_beats,
         }
     }
 }

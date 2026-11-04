@@ -34,6 +34,7 @@ mod control_swap;
 pub use content_swap::swap_changed_content;
 pub use control_swap::swap_changed_controls;
 mod crossfades;
+mod duplicate;
 mod fade_edits;
 mod slice_to_drum_rack;
 mod slicing;
@@ -384,89 +385,7 @@ impl TimelineEditorState {
                 }
             }
             ArrangementMsg::DuplicateSelectedClip => {
-                let selections: Vec<_> = self.selected_clips.iter().copied().collect();
-                if !selections.is_empty() {
-                    let mut new_selections = HashSet::new();
-                    for selection in &selections {
-                        match selection {
-                            ArrangementSelection::AudioClip { track_id, clip_id } => {
-                                let duplicate = self.find_content(*track_id).and_then(|track| {
-                                    track.clips.iter().find(|c| c.id == *clip_id).map(|clip| {
-                                        let mut duplicate = clip.clone();
-                                        duplicate.id = ClipId::new();
-                                        duplicate.name = clip.name.clone();
-                                        duplicate.position =
-                                            clip.position.saturating_add(clip.duration);
-                                        duplicate.fades = duplicate.fades.unlinked();
-                                        duplicate
-                                    })
-                                });
-                                if let Some(duplicate) = duplicate {
-                                    engine.send(EngineCommand::AddClip {
-                                        insertion: vibez_engine::clip_insertion::PreparedClipInsertion::new(),
-                                        track_id: *track_id,
-                                        clip_id: duplicate.id,
-                                        audio: Arc::clone(&duplicate.audio),
-                                        position: duplicate.position,
-                                        source_offset: duplicate.source_offset,
-                                        start_marker: duplicate.start_marker,
-                                        duration: duplicate.duration,
-                                        loop_enabled: duplicate.loop_enabled,
-                                        loop_start: duplicate.loop_start,
-                                        loop_end: duplicate.loop_end,
-                                        linear_gain: duplicate.gain_db.linear(),
-                                        fades: duplicate.fades,
-                                        playback_direction: duplicate.playback_direction,
-                                        warp_markers: duplicate.warp_markers.clone(),
-                                    });
-                                    let new_id = duplicate.id;
-                                    if let Some(track) = self.find_content_mut(*track_id) {
-                                        track.clips.push(duplicate);
-                                    }
-                                    new_selections.insert(ArrangementSelection::AudioClip {
-                                        track_id: *track_id,
-                                        clip_id: new_id,
-                                    });
-                                }
-                            }
-                            ArrangementSelection::NoteClip { track_id, clip_id } => {
-                                let duplicate =
-                                    self.find_content(*track_id).and_then(|track| {
-                                        track.note_clips.iter().find(|c| c.id == *clip_id).map(
-                                            |clip| {
-                                                let mut duplicate = clip.clone();
-                                                duplicate.id = ClipId::new();
-                                                duplicate.name = clip.name.clone();
-                                                duplicate.position_beats =
-                                                    clip.position_beats + clip.duration_beats;
-                                                duplicate.selected_notes.clear();
-                                                duplicate
-                                            },
-                                        )
-                                    });
-                                if let Some(duplicate) = duplicate {
-                                    engine.send(duplicate.add_command(*track_id));
-                                    let new_id = duplicate.id;
-                                    if let Some(track) = self.find_content_mut(*track_id) {
-                                        track.note_clips.push(duplicate);
-                                    }
-                                    new_selections.insert(ArrangementSelection::NoteClip {
-                                        track_id: *track_id,
-                                        clip_id: new_id,
-                                    });
-                                }
-                            }
-                        }
-                    }
-                    action.mark_dirty = !new_selections.is_empty();
-                    self.selected_clips = new_selections;
-                    let count = selections.len();
-                    action.status = Some(if count == 1 {
-                        "Duplicated clip".to_string()
-                    } else {
-                        format!("Duplicated {count} clips")
-                    });
-                }
+                return self.op_duplicate_selection(project_tracks, engine, ctx);
             }
             ArrangementMsg::CopySelectedClips => {
                 unreachable!("clipboard messages are resolved at the application boundary")
