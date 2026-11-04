@@ -301,7 +301,12 @@ fn a_looped_clip_longer_than_its_source_scrolls_only_to_the_source_end() {
     let bounds = Rectangle::new(Point::ORIGIN, iced::Size::new(400.0, 200.0));
 
     for _ in 0..50 {
-        widget.view = wheel(&widget, Modifiers::empty(), Point::new(200.0, 100.0), bounds);
+        widget.view = wheel(
+            &widget,
+            Modifiers::empty(),
+            Point::new(200.0, 100.0),
+            bounds,
+        );
     }
 
     let right_edge = widget.x_to_timeline_frame(400.0 - FRAME_MARGIN_PIXELS, &bounds);

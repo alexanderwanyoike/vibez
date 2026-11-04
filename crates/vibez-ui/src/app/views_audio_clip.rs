@@ -50,14 +50,11 @@ impl App {
         track_color: Color,
     ) -> Element<'_, Message> {
         let playhead_samples = self.detail_playhead_samples();
-        let playhead_normalized = playhead_samples
+        let playhead_frame = playhead_samples
             .filter(|playhead| {
-                clip.duration > 0
-                    && *playhead >= clip.position
-                    && *playhead < clip.position + clip.duration
+                *playhead >= clip.position && *playhead < clip.position + clip.duration
             })
-            .map(|playhead| (playhead - clip.position) as f64 / clip.duration as f64)
-            .unwrap_or(-1.0);
+            .map(|playhead| playhead - clip.position);
 
         let waveform_widget = AudioClipDetailWidget {
             location: self.active_timeline_location(),
@@ -71,7 +68,7 @@ impl App {
             bpm: self.state.transport.bpm,
             grid: self.state.view.clip_grid,
             track_color,
-            playhead_normalized,
+            playhead_frame,
             loop_enabled: clip.loop_enabled,
             loop_start: clip.loop_start,
             loop_end: clip.loop_end,
@@ -95,6 +92,7 @@ impl App {
                     *selected_track == track_id && *selected_clip == clip.id
                 })
                 .map(|(_, _, source_frame)| source_frame),
+            view: self.state.view.clip_editor_view(clip.id),
         };
 
         let waveform_canvas: Element<'_, Message> = canvas(waveform_widget)

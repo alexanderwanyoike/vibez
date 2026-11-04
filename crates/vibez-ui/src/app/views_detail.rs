@@ -13,6 +13,7 @@ use crate::icons;
 use crate::message::Message;
 use crate::state::{ArrangementSelection, DetailPanelTab, GridCommand, TimelineEditorState};
 use crate::theme as th;
+use crate::widgets::audio_clip_detail::audio_clip_editor_view;
 use crate::widgets::clip_editor_view::ClipEditorView;
 use crate::widgets::piano_roll::{PianoRollWidget, VelocityLaneWidget};
 
@@ -193,14 +194,21 @@ impl App {
         }
         let track_id = editor.selected_track?;
         let clip_id = single_selected_audio_clip_for_track(editor, track_id)?;
-        let beats = self
+        let clip = self
             .state
             .active_timeline_content(track_id)?
             .clips
             .iter()
-            .find(|clip| clip.id == clip_id)
-            .map(|clip| clip.duration as f64 / self.state.transport.samples_per_beat())?;
-        Some(ClipEditorView::framing(None, None, beats, beats))
+            .find(|clip| clip.id == clip_id)?;
+        Some(audio_clip_editor_view(
+            self.state.view.clip_editor_view(clip.id),
+            self.state.transport.samples_per_beat(),
+            clip.source_offset,
+            clip.loop_enabled
+                .then_some((clip.loop_start, clip.loop_end)),
+            clip.duration,
+            clip.duration,
+        ))
     }
 
     /// The Snap list for the clip editor grid, shown in each clip editor.
