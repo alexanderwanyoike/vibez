@@ -197,6 +197,20 @@ fn a_looped_audio_clip_keeps_its_loop_phase_on_both_sides() {
 }
 
 #[test]
+fn a_reversed_audio_clip_keeps_its_content_in_place_on_both_sides() {
+    let mut clip = audio(0, 800);
+    clip.playback_direction = ClipPlaybackDirection::Reverse;
+
+    let edits = place(&audio_lane(&[&clip]), 2.0, 4.0);
+
+    let pieces = audio_pieces(&edits, &clip).unwrap();
+    assert_eq!(pieces.len(), 2);
+    for piece in pieces {
+        assert_audio_in_place(&clip, piece);
+    }
+}
+
+#[test]
 fn a_range_over_several_clips_trims_both_ends_and_removes_the_middle() {
     let first = audio(0, 300);
     let middle = audio(300, 200);
