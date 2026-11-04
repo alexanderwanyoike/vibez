@@ -25,7 +25,7 @@ use crate::widgets::timeline::{
     TRACK_ROW_HEIGHT,
 };
 use crate::widgets::track_header::{
-    view_editable_channel_name, view_track_header, TrackHeaderRecordingView,
+    view_editable_channel_name, view_track_header, TrackHeaderFlags, TrackHeaderRecordingView,
 };
 
 use super::*;
@@ -258,11 +258,13 @@ impl App {
                 || self.state.audio_recording.monitor_track == Some(track.id);
             let header = view_track_header(
                 track,
-                selected,
-                editing,
+                TrackHeaderFlags {
+                    selected,
+                    editing_name: editing,
+                    automation_open,
+                    hovered: self.state.view.hovered_track_header == Some(track.id),
+                },
                 &self.state.view.edit_name_text,
-                automation_open,
-                self.state.view.hovered_track_header == Some(track.id),
                 TrackHeaderRecordingView {
                     output_peaks: self
                         .track_meter_peaks

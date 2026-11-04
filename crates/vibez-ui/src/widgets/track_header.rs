@@ -24,6 +24,27 @@ pub const TRACK_HEADER_WIDTH: f32 = 220.0;
 /// Total width including the 3px color bar on the left edge.
 pub const TRACK_HEADER_TOTAL_WIDTH: f32 = TRACK_HEADER_WIDTH + 3.0;
 
+/// How an Arrange track header is shown.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct TrackHeaderFlags {
+    pub selected: bool,
+    pub editing_name: bool,
+    pub automation_open: bool,
+    pub hovered: bool,
+}
+
+impl TrackHeaderFlags {
+    /// An audio track's input controls show while its header is hovered,
+    /// and stay while the track is armed, resampling or monitoring.
+    fn shows_audio_input(self, track: &ProjectTrack, armed: bool) -> bool {
+        track.kind == TrackKind::Audio
+            && (self.hovered
+                || armed
+                || track.audio_input_route.resample_source().is_some()
+                || track.input_monitoring != InputMonitoring::Off)
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct TrackHeaderRecordingView<'a> {
     pub input_channels: u16,
@@ -138,13 +159,16 @@ pub fn view_editable_channel_name<'a>(
 /// Render the track header for the arrangement view.
 pub fn view_track_header<'a>(
     track: &'a ProjectTrack,
-    selected: bool,
-    editing_name: bool,
+    flags: TrackHeaderFlags,
     edit_text: &'a str,
-    automation_open: bool,
-    hovered: bool,
     recording: TrackHeaderRecordingView<'a>,
 ) -> Element<'a, Message> {
+    let TrackHeaderFlags {
+        selected,
+        editing_name,
+        automation_open,
+        hovered,
+    } = flags;
     let TrackHeaderRecordingView {
         input_channels: audio_input_channels,
         armed,
@@ -285,11 +309,7 @@ pub fn view_track_header<'a>(
         }
     };
 
-    let shows_input = hovered
-        || armed
-        || track.audio_input_route.resample_source().is_some()
-        || track.input_monitoring != InputMonitoring::Off;
-    let track_controls: Element<'_, Message> = if track.kind == TrackKind::Audio && shows_input {
+    let track_controls: Element<'_, Message> = if flags.shows_audio_input(track, armed) {
         let arm_color = if armed { th::danger() } else { th::text_dim() };
         let arm_icon = if armed {
             icons::CIRCLE_DOT
@@ -474,5 +494,43 @@ fn quiet_action_style(_theme: &Theme, status: button::Status) -> button::Style {
             ..Default::default()
         },
         ..Default::default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use vibez_core::id::TrackId;
+
+    fn audio_track() -> ProjectTrack {
+        ProjectTrack::new(TrackId::new(), "Vox".into(), 0)
+    }
+
+    #[test]
+    fn an_audio_header_shows_its_input_while_hovered_or_in_use() {
+        let resting = TrackHeaderFlags::default();
+        let hovered = TrackHeaderFlags {
+            hovered: true,
+            ..resting
+        };
+        let mut monitoring = audio_track();
+        monitoring.input_monitoring = InputMonitoring::On;
+
+        assert!(!resting.shows_audio_input(&audio_track(), false));
+        assert!(hovered.shows_audio_input(&audio_track(), false));
+        assert!(resting.shows_audio_input(&audio_track(), true));
+        assert!(resting.shows_audio_input(&monitoring, false));
+    }
+
+    #[test]
+    fn a_midi_header_never_shows_audio_input() {
+        let mut midi = audio_track();
+        midi.kind = TrackKind::Midi;
+        let hovered = TrackHeaderFlags {
+            hovered: true,
+            ..TrackHeaderFlags::default()
+        };
+
+        assert!(!hovered.shows_audio_input(&midi, true));
     }
 }
