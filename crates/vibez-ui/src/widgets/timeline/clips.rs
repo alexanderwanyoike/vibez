@@ -708,14 +708,11 @@ impl canvas::Program<Message> for TrackClipCanvas {
                                 is_note_clip,
                                 clip_start_beat,
                             } => {
-                                let current_beat = self.x_to_beat(local_x);
-                                let min_duration = if self.grid.snap_enabled {
-                                    self.grid.effective_grid(self.pixels_per_beat()).beat_size()
-                                } else {
-                                    0.01
-                                };
-                                let new_dur = (current_beat - clip_start_beat).max(min_duration);
-                                let snapped = self.snapped_beat(new_dur).max(min_duration);
+                                let snapped = self.grid.length_to_dragged_end(
+                                    *clip_start_beat,
+                                    self.x_to_beat(local_x),
+                                    self.pixels_per_beat(),
+                                );
 
                                 if *is_note_clip {
                                     let edit =
