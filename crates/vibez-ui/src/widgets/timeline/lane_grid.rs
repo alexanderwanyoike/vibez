@@ -19,10 +19,74 @@ pub(super) struct LaneGrid {
     pub lines: Vec<(f32, GridLine)>,
 }
 
+const BEATS_PER_BAR: f64 = 4.0;
+
+/// Lines any closer turn a zoomed-out lane into a barcode.
+const MIN_LINE_GAP_PX: f32 = 14.0;
+
 /// Bands and lines across `width` pixels for a grid of `step_beats`.
 pub(super) fn lane_grid(geometry: TimelineGeometry, width: f32, step_beats: f64) -> LaneGrid {
-    let _ = (geometry, width, step_beats);
-    LaneGrid::default()
+    let ppb = geometry.pixels_per_beat();
+    if ppb <= 0.0 || step_beats <= 0.0 {
+        return LaneGrid::default();
+    }
+    let first_beat = geometry.x_to_beat(0.0);
+    let last_beat = geometry.x_to_beat(width);
+    let label_beats =
+        f64::from(super::ruler::bar_label_step(ppb * BEATS_PER_BAR as f32)) * BEATS_PER_BAR;
+
+    let mut bands = Vec::new();
+    let first_band = (first_beat / label_beats).floor() as i64;
+    let last_band = (last_beat / label_beats).ceil() as i64;
+    for band in (first_band..last_band).filter(|band| band.rem_euclid(2) == 1) {
+        let start = geometry
+            .beat_to_x(band as f64 * label_beats)
+            .round()
+            .max(0.0);
+        let end = geometry
+            .beat_to_x((band + 1) as f64 * label_beats)
+            .round()
+            .min(width.floor());
+        if end > start {
+            bands.push((start, end));
+        }
+    }
+
+    let bars_apart = ppb * BEATS_PER_BAR as f32 >= MIN_LINE_GAP_PX;
+    let mut fine_beats = step_beats;
+    while ppb * (fine_beats as f32) < MIN_LINE_GAP_PX {
+        fine_beats *= 2.0;
+    }
+    let fine_apart = fine_beats < BEATS_PER_BAR;
+    let mut lines = Vec::new();
+    let first_step = (first_beat / step_beats).ceil() as i64;
+    let last_step = (last_beat / step_beats).floor() as i64;
+    for step in first_step..=last_step {
+        let beat = step as f64 * step_beats;
+        let line = if is_multiple(beat, label_beats) {
+            GridLine::Label
+        } else if is_multiple(beat, BEATS_PER_BAR) {
+            GridLine::Bar
+        } else {
+            GridLine::Fine
+        };
+        let shown = match line {
+            GridLine::Label => true,
+            GridLine::Bar => bars_apart,
+            GridLine::Fine => fine_apart && is_multiple(beat, fine_beats),
+        };
+        let x = geometry.beat_to_x(beat).round();
+        if shown && (0.0..width).contains(&x) {
+            lines.push((x, line));
+        }
+    }
+
+    LaneGrid { bands, lines }
+}
+
+fn is_multiple(beat: f64, of: f64) -> bool {
+    let ratio = beat / of;
+    (ratio - ratio.round()).abs() < 1e-6
 }
 
 #[cfg(test)]

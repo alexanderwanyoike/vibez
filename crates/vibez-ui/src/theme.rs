@@ -444,6 +444,10 @@ pub fn clip_style() -> ClipStyle {
     CURRENT.read().unwrap().clip_style
 }
 
+pub fn lane_style() -> LaneStyle {
+    CURRENT.read().unwrap().lane_style
+}
+
 // ── Derived roles (aliases of palette fields) ──
 
 pub fn mute_active() -> Color {

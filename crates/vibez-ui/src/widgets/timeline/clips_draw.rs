@@ -9,6 +9,7 @@ use crate::theme;
 use super::clip_colors::clip_colors;
 use super::clip_frame::{clip_box, draw_clip_back, draw_clip_front, LoopPasses};
 use super::fade_drag::{fade_curve_handle, fade_handle_xs};
+use super::lane_grid::{lane_grid, GridLine};
 use super::note_marks::note_marks;
 use super::*;
 
@@ -100,33 +101,40 @@ impl TrackClipCanvas {
 
         // Grid lines use the same effective division as interaction.
         if self.bpm > 0.0 {
-            let visible = geometry.visible_beats(w);
-            let grid = self.grid.effective_grid(ppb);
-            let step = grid.beat_size();
-            let start = (self.scroll_offset_beats / step).floor().max(0.0) as i64;
-            let end = ((self.scroll_offset_beats + visible) / step).ceil() as i64 + 1;
-
-            for grid_i in start..end {
-                let beat = grid_i as f64 * step;
-                let x = self.beat_to_x(beat);
-                if x < -1.0 || x > w + 1.0 {
-                    continue;
-                }
-                let on_bar = (beat / 4.0 - (beat / 4.0).round()).abs() < 1e-6;
-                let on_beat = (beat - beat.round()).abs() < 1e-6;
-                let (color, width) = if on_bar {
-                    (theme::grid_bar(), 1.0)
-                } else if on_beat {
-                    (theme::grid_beat(), 0.75)
-                } else {
-                    (theme::grid_sub(), 0.5)
+            let step = self.grid.effective_grid(ppb).beat_size();
+            let grid = lane_grid(geometry, w, step);
+            let style = theme::lane_style();
+            let ink = theme::text();
+            // Mixed here rather than painted translucent: the renderer
+            // blends alpha in linear light, which would make these faint
+            // tints several times stronger than their tokens.
+            let band = theme::blend(bg_color, ink, style.band);
+            for &(start, end) in &grid.bands {
+                frame.fill_rectangle(
+                    iced::Point::new(start, 0.0),
+                    iced::Size::new(end - start, h),
+                    band,
+                );
+            }
+            for (x, line) in grid.lines {
+                let strength = match line {
+                    GridLine::Label => style.lines[0],
+                    GridLine::Bar => style.lines[1],
+                    GridLine::Fine => style.lines[2],
                 };
-                let line = canvas::Path::line(iced::Point::new(x, 0.0), iced::Point::new(x, h));
-                frame.stroke(
-                    &line,
-                    canvas::Stroke::default()
-                        .with_color(color)
-                        .with_width(width),
+                let under = if grid
+                    .bands
+                    .iter()
+                    .any(|&(start, end)| (start..end).contains(&x))
+                {
+                    band
+                } else {
+                    bg_color
+                };
+                frame.fill_rectangle(
+                    iced::Point::new(x, 0.0),
+                    iced::Size::new(1.0, h),
+                    theme::blend(under, ink, strength),
                 );
             }
         }
