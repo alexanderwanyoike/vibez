@@ -869,10 +869,18 @@ impl AppState {
     }
 
     /// Total duration in beats across all tracks, with generous padding.
+    /// Where the song's last clip ends, in beats; zero for an empty song.
+    pub fn song_beats(&self) -> f64 {
+        if self.transport.bpm > 0.0 {
+            self.duration_seconds() * self.transport.bpm / 60.0
+        } else {
+            0.0
+        }
+    }
+
     pub fn total_beats(&self) -> f64 {
-        let dur = self.duration_seconds();
-        if dur > 0.0 && self.transport.bpm > 0.0 {
-            let content_beats = dur * self.transport.bpm / 60.0;
+        let content_beats = self.song_beats();
+        if content_beats > 0.0 {
             // Pad by 32 beats or 25% of content, whichever is larger
             let padding = (content_beats * 0.25).max(32.0);
             (content_beats + padding).max(64.0)
