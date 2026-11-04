@@ -844,6 +844,10 @@ mod tests {
             Some(Message::Transport(TransportMsg::ContinuePlayback))
         ));
         assert!(matches!(
+            global_key_handler(Key::Named(Named::Home), Modifiers::empty()),
+            Some(Message::Transport(TransportMsg::SeekToBeat(beat))) if beat == 0.0
+        ));
+        assert!(matches!(
             global_key_handler(Key::Named(Named::Escape), Modifiers::empty()),
             Some(Message::EscapePressed)
         ));
