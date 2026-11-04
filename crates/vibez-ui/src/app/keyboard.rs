@@ -993,6 +993,98 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn bare_z_and_x_zoom_to_the_selection_and_back() {
+        use iced::keyboard::{Key, Modifiers};
+
+        assert!(matches!(
+            global_key_handler(Key::Character("z".into()), Modifiers::empty()),
+            Some(Message::View(ViewMsg::ZoomToSelection))
+        ));
+        assert!(matches!(
+            global_key_handler(Key::Character("x".into()), Modifiers::empty()),
+            Some(Message::View(ViewMsg::ZoomBack))
+        ));
+        assert!(matches!(
+            global_key_handler(Key::Character("z".into()), command_modifier()),
+            Some(Message::Project(ProjectMsg::Undo))
+        ));
+        assert!(matches!(
+            global_key_handler(Key::Character("x".into()), command_modifier()),
+            Some(Message::Arrangement(ArrangementMsg::CutSelectedClips))
+        ));
+        assert!(global_key_handler(Key::Character("Z".into()), Modifiers::SHIFT).is_none());
+    }
+
+    #[test]
+    fn held_z_and_x_zoom_once_each() {
+        let mut state = EdgeShortcutState::default();
+        let started = std::time::Instant::now();
+
+        for (key_id, message) in [
+            ("Character(\"z\")", ViewMsg::ZoomToSelection),
+            ("Character(\"x\")", ViewMsg::ZoomBack),
+        ] {
+            let message = Message::View(message);
+            assert!(state.should_dispatch(key_id, &message, started));
+            assert!(!state.should_dispatch(
+                key_id,
+                &message,
+                started + std::time::Duration::from_millis(500),
+            ));
+        }
+    }
+
+    #[test]
+    fn perform_pad_keys_keep_z_and_x_in_perform() {
+        use crate::domains::perform::ComputerKey;
+        use crate::state::Workspace;
+        use iced::keyboard::key::{Code, Physical};
+        use iced::keyboard::{Event, Key, Location, Modifiers};
+
+        let mut app = super::super::test_support::app();
+        for (character, code, computer_key) in [
+            ("z", Code::KeyZ, ComputerKey::Z),
+            ("x", Code::KeyX, ComputerKey::X),
+        ] {
+            let pad = app
+                .state
+                .perform
+                .input_mapping
+                .position_for(computer_key)
+                .expect("a default pad key");
+            for (workspace, plays_the_pad) in
+                [(Workspace::Perform, true), (Workspace::Arrange, false)]
+            {
+                app.state.view.workspace = workspace;
+                let _ = app.handle_keyboard_input(
+                    Event::KeyPressed {
+                        key: Key::Character(character.into()),
+                        modified_key: Key::Character(character.into()),
+                        physical_key: Physical::Code(code),
+                        location: Location::Standard,
+                        modifiers: Modifiers::empty(),
+                        text: Some(character.into()),
+                    },
+                    std::time::Instant::now(),
+                );
+                assert_eq!(
+                    app.state.perform.is_pad_pressed(pad),
+                    plays_the_pad,
+                    "{character} in {workspace:?}"
+                );
+                let _ = app.handle_keyboard_input(
+                    Event::KeyReleased {
+                        key: Key::Character(character.into()),
+                        location: Location::Standard,
+                        modifiers: Modifiers::empty(),
+                    },
+                    std::time::Instant::now(),
+                );
+            }
+        }
+    }
 }
 
 #[cfg(test)]
