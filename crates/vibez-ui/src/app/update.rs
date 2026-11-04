@@ -281,7 +281,7 @@ impl App {
             Message::Transport(msg) => {
                 if self.state.view.workspace == crate::state::Workspace::Perform
                     && self.state.perform.layout == vibez_project::PerformLayout::Clips
-                    && !self.state.transport.playing
+                    && !self.state.transport.will_play()
                     && matches!(
                         msg,
                         crate::domains::transport::TransportMsg::TogglePlayback
@@ -308,7 +308,7 @@ impl App {
                     || matches!(
                         &msg,
                         crate::domains::transport::TransportMsg::TogglePlayback
-                            if self.state.transport.playing
+                            if self.state.transport.will_play()
                     );
                 if stops_perform {
                     self.end_capture_automation_gesture();

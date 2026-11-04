@@ -167,7 +167,7 @@ fn apply_clip_resync(
         .resync_track(snapshot, &state.perform.clips);
 
     if state.perform.clip_editor.next_request <= snapshot.through_request {
-        state.transport.playing = snapshot.transport_playing;
+        state.transport.follow_engine(snapshot.transport_playing);
     }
     let source = state
         .perform
@@ -434,16 +434,14 @@ impl App {
                         self.state.perform.clip_editor.started_at.clear();
                         self.state.perform.clip_editor.clear_queue();
                         self.state.perform.clip_editor.pending.clear();
-                        self.state.transport.playing = false;
+                        self.state.transport.follow_engine(false);
                         self.state.perform.playing_section = None;
                         self.state.perform.queued_section = None;
                         self.state.perform.pending_section_boundary_samples = None;
                         self.state.perform.section_playhead_samples = 0;
                         self.state.perform.clear_pending_track_mutes();
                     }
-                    EngineEvent::PlaybackStarted => {
-                        self.state.transport.playing = true;
-                    }
+                    EngineEvent::PlaybackStarted => self.state.transport.follow_engine(true),
                     EngineEvent::AuditionStopped => {
                         self.state.browser.stop_audition_state();
                         if active_audition_status(&self.state.status_text) {

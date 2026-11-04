@@ -51,6 +51,7 @@ impl App {
         self._input_stream = None;
         self.state.audio_recording = Default::default();
         self.state.transport.playing = false;
+        self.state.transport.requested_playing = None;
         self.state.transport.position_samples = 0;
         self.send_command(EngineCommand::Stop);
         self.send_command(EngineCommand::Seek(0));

@@ -68,6 +68,21 @@ pub enum TransportAction {
 }
 
 impl TransportState {
+    /// Playing, or asked to play: what a toggle acts on before the engine
+    /// confirms.
+    pub fn will_play(&self) -> bool {
+        self.requested_playing.unwrap_or(self.playing)
+    }
+
+    /// The engine reported its transport. A request it has not reached yet,
+    /// such as a Stop sent right after Play, stays pending.
+    pub fn follow_engine(&mut self, playing: bool) {
+        self.playing = playing;
+        if self.requested_playing == Some(playing) {
+            self.requested_playing = None;
+        }
+    }
+
     pub fn samples_per_beat(&self) -> f64 {
         vibez_core::time::TempoMap::new(self.bpm, self.sample_rate).samples_per_beat()
     }
@@ -89,12 +104,12 @@ impl TransportState {
     ) -> TransportAction {
         match msg {
             TransportMsg::Play => {
-                self.playing = true;
+                self.requested_playing = Some(true);
                 engine.send(EngineCommand::Play);
                 TransportAction::None
             }
             TransportMsg::Stop => {
-                self.playing = false;
+                self.requested_playing = Some(false);
                 engine.send(EngineCommand::Stop);
                 if !ctx.perform_playback_active {
                     self.position_samples = 0;
@@ -103,7 +118,7 @@ impl TransportState {
                 TransportAction::None
             }
             TransportMsg::TogglePlayback => {
-                let next = if self.playing {
+                let next = if self.will_play() {
                     TransportMsg::Stop
                 } else {
                     TransportMsg::Play
@@ -182,7 +197,7 @@ impl TransportState {
                 TransportAction::None
             }
             TransportMsg::EngineStopped => {
-                self.playing = false;
+                self.follow_engine(false);
                 TransportAction::None
             }
         }
@@ -226,11 +241,10 @@ mod tests {
     }
 
     #[test]
-    fn play_sends_play_and_sets_state() {
+    fn play_sends_play() {
         let mut t = transport();
         let mut engine = RecordingEngine::default();
         t.update(TransportMsg::Play, &mut engine, TransportCtx::default());
-        assert!(t.playing);
         assert!(matches!(engine.0[0], EngineCommand::Play));
     }
 
@@ -241,7 +255,7 @@ mod tests {
         t.position_samples = 12345;
         let mut engine = RecordingEngine::default();
         t.update(TransportMsg::Stop, &mut engine, TransportCtx::default());
-        assert!(!t.playing);
+        assert!(!t.will_play());
         assert_eq!(t.position_samples, 0);
         assert!(matches!(engine.0[1], EngineCommand::Seek(0)));
     }
@@ -261,7 +275,7 @@ mod tests {
             },
         );
 
-        assert!(!t.playing);
+        assert!(!t.will_play());
         assert_eq!(t.position_samples, 12_345);
         assert!(matches!(engine.0.as_slice(), [EngineCommand::Stop]));
     }
