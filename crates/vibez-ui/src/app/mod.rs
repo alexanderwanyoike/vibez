@@ -784,6 +784,9 @@ mod clip_project_tests;
 mod capture_then_play_tests;
 
 #[cfg(test)]
+mod clip_drag_undo_tests;
+
+#[cfg(test)]
 mod clip_shortcut_tests;
 
 #[cfg(test)]

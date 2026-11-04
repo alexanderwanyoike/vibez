@@ -67,3 +67,4 @@ mod note_clips;
 mod project_tracks;
 mod selection;
 mod trim_join;
+mod unchanged_drags;
