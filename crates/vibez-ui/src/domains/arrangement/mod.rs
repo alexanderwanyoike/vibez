@@ -27,6 +27,7 @@ pub use messages::{
     ClipTransposeRenderRequest,
 };
 mod clip_copies;
+mod clip_drag;
 mod clip_moves;
 mod clip_spans;
 mod clipboard;
@@ -445,7 +446,11 @@ impl TimelineEditorState {
             } => {
                 return self.op_trim_selected_clips_start(engine, ctx, anchor, new_start_beats);
             }
+            ArrangementMsg::DragClips { step, edit } => {
+                return self.drag_clips(project_tracks, engine, ctx, step, *edit);
+            }
             ArrangementMsg::DropClips { anchor } => {
+                self.clip_drag = None;
                 return self.op_drop_clips(engine, ctx, anchor);
             }
             ArrangementMsg::MoveSelectedClips {

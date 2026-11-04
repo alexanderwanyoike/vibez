@@ -879,18 +879,18 @@ fn pressing_a_selected_clip_keeps_the_selection_and_dragging_moves_it_as_a_group
         iced::mouse::Event::CursorMoved { position: target },
         target,
     );
-    let Some(Message::UndoGesture { id: gesture, edit }) = moved else {
+    let Some(Message::UndoGesture { id: gesture, .. }) = moved else {
         panic!("expected a clip move, got {moved:?}");
     };
     assert!(matches!(
-        *edit,
-        Message::Arrangement(ArrangementMsg::MoveSelectedClips {
+        drag_edit(moved.as_ref()),
+        Some(ArrangementMsg::MoveSelectedClips {
             anchor,
             new_position_beats,
             target_track,
-        }) if anchor == clip_id
+        }) if *anchor == clip_id
             && (new_position_beats - 1.0).abs() < 1e-9
-            && target_track == canvas.track_ids[0]
+            && *target_track == canvas.track_ids[0]
     ));
 
     let released = left_event(
@@ -989,12 +989,20 @@ fn canvas_with_off_grid_audio_clip() -> (TrackClipCanvas, ClipId) {
 }
 
 fn is_clip_edit(message: &Message) -> bool {
-    match message {
-        Message::UndoGesture { edit, .. } => is_clip_edit(edit),
-        Message::Arrangement(
-            ArrangementMsg::MoveSelectedClips { .. } | ArrangementMsg::ResizeSelectedClips { .. },
-        ) => true,
-        _ => false,
+    matches!(
+        drag_edit(Some(message)),
+        Some(ArrangementMsg::MoveSelectedClips { .. } | ArrangementMsg::ResizeSelectedClips { .. })
+    )
+}
+
+/// The Clip edit a pointer move carries, under its undo gesture and drag
+/// preview.
+fn drag_edit(message: Option<&Message>) -> Option<&ArrangementMsg> {
+    match message? {
+        Message::UndoGesture { edit, .. } => drag_edit(Some(edit)),
+        Message::Arrangement(ArrangementMsg::DragClips { edit, .. }) => Some(edit),
+        Message::Arrangement(edit) => Some(edit),
+        _ => None,
     }
 }
 
@@ -1052,21 +1060,18 @@ fn dragging_an_off_grid_clip_moves_it_by_whole_grid_steps_keeping_its_offset() {
         target,
     );
 
-    match moved {
-        Some(Message::UndoGesture { edit, .. }) => match *edit {
-            Message::Arrangement(ArrangementMsg::MoveSelectedClips {
-                anchor,
-                new_position_beats,
-                ..
-            }) => {
-                assert_eq!(anchor, clip_id);
-                assert!(
-                    (new_position_beats - 2.1).abs() < 1e-4,
-                    "moved to {new_position_beats}"
-                );
-            }
-            other => panic!("expected a clip move, got {other:?}"),
-        },
+    match drag_edit(moved.as_ref()) {
+        Some(ArrangementMsg::MoveSelectedClips {
+            anchor,
+            new_position_beats,
+            ..
+        }) => {
+            assert_eq!(*anchor, clip_id);
+            assert!(
+                (new_position_beats - 2.1).abs() < 1e-4,
+                "moved to {new_position_beats}"
+            );
+        }
         other => panic!("expected a clip move, got {other:?}"),
     }
 }
@@ -1082,14 +1087,10 @@ fn resize_length_after_modified_drag(
     to_beat: f64,
     modifiers: Modifiers,
 ) -> Option<f64> {
-    match end_drag_message(canvas, to_beat, modifiers) {
-        Some(Message::UndoGesture { edit, .. }) => match *edit {
-            Message::Arrangement(ArrangementMsg::ResizeSelectedClips {
-                new_duration_beats,
-                ..
-            }) => Some(new_duration_beats),
-            _ => None,
-        },
+    match drag_edit(end_drag_message(canvas, to_beat, modifiers).as_ref()) {
+        Some(ArrangementMsg::ResizeSelectedClips {
+            new_duration_beats, ..
+        }) => Some(*new_duration_beats),
         _ => None,
     }
 }
@@ -1323,13 +1324,10 @@ fn moved_start_after_drag(
     travel: f64,
     modifiers: Modifiers,
 ) -> Option<f64> {
-    match title_drag_message(canvas, travel, modifiers) {
-        Some(Message::UndoGesture { edit, .. }) => match *edit {
-            Message::Arrangement(ArrangementMsg::MoveSelectedClips {
-                new_position_beats, ..
-            }) => Some(new_position_beats),
-            _ => None,
-        },
+    match drag_edit(title_drag_message(canvas, travel, modifiers).as_ref()) {
+        Some(ArrangementMsg::MoveSelectedClips {
+            new_position_beats, ..
+        }) => Some(*new_position_beats),
         _ => None,
     }
 }
@@ -1500,19 +1498,16 @@ fn trimmed_start_after_drag(
         iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left),
         start,
     );
-    match left_event(
+    let moved = left_event(
         canvas,
         &mut state,
         iced::mouse::Event::CursorMoved { position: target },
         target,
-    ) {
-        Some(Message::UndoGesture { edit, .. }) => match *edit {
-            Message::Arrangement(ArrangementMsg::TrimSelectedClipsStart {
-                new_start_beats,
-                ..
-            }) => Some(new_start_beats),
-            _ => None,
-        },
+    );
+    match drag_edit(moved.as_ref()) {
+        Some(ArrangementMsg::TrimSelectedClipsStart {
+            new_start_beats, ..
+        }) => Some(*new_start_beats),
         _ => None,
     }
 }
@@ -1559,11 +1554,8 @@ fn a_clip_end_resizes_from_anywhere_down_its_edge() {
 
     assert!(
         matches!(
-            &moved,
-            Some(Message::UndoGesture { edit, .. }) if matches!(
-                **edit,
-                Message::Arrangement(ArrangementMsg::ResizeSelectedClips { .. })
-            )
+            drag_edit(moved.as_ref()),
+            Some(ArrangementMsg::ResizeSelectedClips { .. })
         ),
         "{moved:?}"
     );
@@ -1615,11 +1607,8 @@ fn a_shaky_click_on_a_clip_start_never_trims_it() {
 
     assert!(
         !matches!(
-            &moved,
-            Some(Message::UndoGesture { edit, .. }) if matches!(
-                **edit,
-                Message::Arrangement(ArrangementMsg::TrimSelectedClipsStart { .. })
-            )
+            drag_edit(moved.as_ref()),
+            Some(ArrangementMsg::TrimSelectedClipsStart { .. })
         ),
         "3 px of travel is a click: {moved:?}"
     );
@@ -1682,11 +1671,8 @@ fn a_short_clip_at_fit_zoom_moves_when_dragged_near_its_start() {
 
     assert!(
         matches!(
-            &dragged,
-            Some(Message::UndoGesture { edit, .. }) if matches!(
-                **edit,
-                Message::Arrangement(ArrangementMsg::MoveSelectedClips { .. })
-            )
+            drag_edit(dragged.as_ref()),
+            Some(ArrangementMsg::MoveSelectedClips { .. })
         ),
         "{dragged:?}"
     );
@@ -1776,20 +1762,18 @@ fn a_clip_dragged_down_a_tall_lane_changes_track_only_past_its_bottom_edge() {
 
     let target_at = |state: &mut ClipInteractionState, y: f32| {
         let point = Point::new(x, y);
-        match left_event(
+        let message = left_event(
             &canvas,
             state,
             iced::mouse::Event::CursorMoved { position: point },
             point,
-        ) {
-            Some(Message::UndoGesture { edit, .. }) => match *edit {
-                Message::Arrangement(ArrangementMsg::MoveSelectedClips {
-                    anchor,
-                    target_track,
-                    ..
-                }) if anchor == clip_id => target_track,
-                other => panic!("expected a clip move, got {other:?}"),
-            },
+        );
+        match drag_edit(message.as_ref()) {
+            Some(ArrangementMsg::MoveSelectedClips {
+                anchor,
+                target_track,
+                ..
+            }) if *anchor == clip_id => *target_track,
             other => panic!("expected a clip move, got {other:?}"),
         }
     };
