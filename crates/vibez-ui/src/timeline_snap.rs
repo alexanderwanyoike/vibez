@@ -149,7 +149,7 @@ impl SnapTargets {
         edges: &[f64],
         grid_shift: f64,
         context: SnapContext,
-        _with_dragged: bool,
+        with_dragged: bool,
     ) -> Snapped {
         let first = edges[0];
         if context.free || !context.grid.snap_enabled {
@@ -158,12 +158,34 @@ impl SnapTargets {
                 target: None,
             };
         }
-        Snapped {
-            beat: first + grid_shift,
-            target: Some(SnapTarget {
+        let grid = (
+            grid_shift,
+            SnapTarget {
                 beat: first + grid_shift,
                 kind: SnapTargetKind::Grid,
-            }),
+            },
+        );
+        let reach = f64::from(MAGNET_RADIUS_PX / context.pixels_per_beat);
+        let (shift, target) = self
+            .magnets
+            .iter()
+            .filter(|magnet| with_dragged || !magnet.dragged)
+            .flat_map(|magnet| {
+                edges
+                    .iter()
+                    .map(move |edge| (magnet.target.beat - edge, magnet.target))
+            })
+            .filter(|(shift, _)| shift.abs() <= reach)
+            .fold(grid, |nearest, pull| {
+                if pull.0.abs() <= nearest.0.abs() {
+                    pull
+                } else {
+                    nearest
+                }
+            });
+        Snapped {
+            beat: first + shift,
+            target: Some(target),
         }
     }
 }
