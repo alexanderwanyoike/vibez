@@ -1166,3 +1166,12 @@ fn clicking_an_empty_lane_seeks_to_the_nearest_grid_line() {
 
     assert_eq!(beat, Some(7.0));
 }
+
+#[test]
+fn an_alt_click_on_a_clip_body_seeks_exactly_where_clicked() {
+    let (canvas, _) = canvas_with_selected_audio_clip();
+
+    let beat = seek_beat_after_click(&canvas, 1.3, CLIP_BODY_Y, Modifiers::ALT).expect("a seek");
+
+    assert!((beat - 1.3).abs() < 1e-3, "seeked to {beat}");
+}
