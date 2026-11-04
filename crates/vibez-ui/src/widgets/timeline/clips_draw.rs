@@ -68,7 +68,12 @@ impl TrackClipCanvas {
         } else {
             self.track_color
         };
-        clip_colors(track, selected)
+        let colors = clip_colors(track, selected);
+        if self.muted && !recording_preview {
+            colors.muted()
+        } else {
+            colors
+        }
     }
 
     pub(super) fn draw_impl(
