@@ -15,8 +15,7 @@ use super::*;
 /// How far to shift the lane so whole-pixel coordinates inside it land on
 /// whole screen pixels.
 fn whole_pixel_offset(origin: iced::Point) -> iced::Vector {
-    let _ = origin;
-    iced::Vector::ZERO
+    iced::Vector::new(-origin.x.fract(), -origin.y.fract())
 }
 
 fn visible_pixel_columns(
@@ -69,6 +68,9 @@ impl TrackClipCanvas {
         cursor: mouse::Cursor,
     ) -> Vec<canvas::Geometry> {
         let mut frame = canvas::Frame::new(renderer, bounds.size());
+        // Layout can place the lane between pixel rows, which would smear
+        // every clip edge and one pixel line across two rows.
+        frame.translate(whole_pixel_offset(bounds.position()));
         let w = bounds.width;
         let h = bounds.height;
         let geometry = self.geometry();
@@ -89,7 +91,12 @@ impl TrackClipCanvas {
         } else {
             theme::track_bg()
         };
-        frame.fill_rectangle(iced::Point::ORIGIN, iced::Size::new(w, h), bg_color);
+        // One pixel larger to cover what the whole-pixel shift uncovers.
+        frame.fill_rectangle(
+            iced::Point::ORIGIN,
+            iced::Size::new(w + 1.0, h + 1.0),
+            bg_color,
+        );
 
         // Grid lines use the same effective division as interaction.
         if self.bpm > 0.0 {
