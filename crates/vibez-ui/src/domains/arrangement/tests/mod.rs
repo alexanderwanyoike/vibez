@@ -67,6 +67,7 @@ mod group_move;
 mod loop_region;
 mod note_clips;
 mod overwrite;
+mod overwrite_edits;
 mod project_tracks;
 mod selection;
 mod shortest_length;
