@@ -121,6 +121,51 @@ fn track_canvas_materialises_only_the_visible_note_clips() {
 }
 
 #[test]
+fn editing_one_clips_notes_rebuilds_only_that_clips_summary() {
+    let mut content = TrackTimelineContent::default();
+    content.note_clips.push(note_clip(0.0));
+    content.note_clips.push(note_clip(32.0));
+    let before = track_canvas(&content, 1.0);
+
+    content.note_clips[0].notes[0].pitch += 1;
+    let edited = track_canvas(&content, 1.0);
+    content.note_clips[0].duration_beats = 16.0;
+    let resized = track_canvas(&content, 1.0);
+
+    assert!(!Arc::ptr_eq(
+        &before.note_clips[0].notes,
+        &edited.note_clips[0].notes
+    ));
+    assert!(!Arc::ptr_eq(
+        &edited.note_clips[0].notes,
+        &resized.note_clips[0].notes
+    ));
+    assert!(Arc::ptr_eq(
+        &before.note_clips[1].notes,
+        &resized.note_clips[1].notes
+    ));
+}
+
+#[test]
+fn a_note_summary_is_kept_until_the_zoom_leaves_its_bucket() {
+    let mut content = TrackTimelineContent::default();
+    content.note_clips.push(note_clip(0.0));
+
+    let twenty_pixels_per_beat = track_canvas(&content, 1.0);
+    let twenty_four = track_canvas(&content, 1.2);
+    let forty = track_canvas(&content, 2.0);
+
+    assert!(Arc::ptr_eq(
+        &twenty_pixels_per_beat.note_clips[0].notes,
+        &twenty_four.note_clips[0].notes
+    ));
+    assert!(!Arc::ptr_eq(
+        &twenty_four.note_clips[0].notes,
+        &forty.note_clips[0].notes
+    ));
+}
+
+#[test]
 fn looped_note_previews_repeat_their_notes_on_every_pass() {
     let mut clip = note_clip(0.0);
     clip.duration_beats = 8.0;
