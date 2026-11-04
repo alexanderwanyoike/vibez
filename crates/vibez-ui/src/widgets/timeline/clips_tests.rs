@@ -970,6 +970,51 @@ fn dragging_an_off_grid_clip_moves_it_by_whole_grid_steps_keeping_its_offset() {
     }
 }
 
+/// Presses `canvas`'s first Clip on its right edge and drags the pointer to
+/// `to_beat`, returning the length the last pointer move asked for.
+fn resize_length_after_drag(canvas: &TrackClipCanvas, to_beat: f64) -> Option<f64> {
+    let clip = &canvas.clips[0];
+    let end_beat = (clip.position + clip.duration) as f64 / canvas.spb();
+    let start = Point::new(canvas.beat_to_x(end_beat) - 2.0, CLIP_Y + 4.0);
+    let target = Point::new(canvas.beat_to_x(to_beat), start.y);
+    let mut state = ClipInteractionState::default();
+
+    left_event(
+        canvas,
+        &mut state,
+        iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left),
+        start,
+    );
+    match left_event(
+        canvas,
+        &mut state,
+        iced::mouse::Event::CursorMoved { position: target },
+        target,
+    ) {
+        Some(Message::UndoGesture { edit, .. }) => match *edit {
+            Message::Arrangement(ArrangementMsg::ResizeSelectedClips {
+                new_duration_beats,
+                ..
+            }) => Some(new_duration_beats),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+#[test]
+fn resizing_an_off_grid_clip_ends_it_on_the_grid_line_under_the_pointer() {
+    let (canvas, _) = canvas_with_off_grid_audio_clip();
+
+    let length = resize_length_after_drag(&canvas, 6.0).expect("a resize");
+
+    assert!(
+        (1.1 + length - 6.0).abs() < 1e-4,
+        "ended at beat {}",
+        1.1 + length
+    );
+}
+
 #[test]
 fn one_clip_edit_key_press_emits_one_message_whatever_the_lane_count() {
     let lanes: Vec<_> = (0..3)
