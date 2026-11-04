@@ -14,7 +14,8 @@ const ELLIPSIS: char = '\u{2026}';
 /// Measured widths of a text, whole and shortened to each length.
 struct Widths {
     whole: f32,
-    /// `shortened[n]` is the width of its first `n` chars plus an ellipsis.
+    /// `shortened[n]` is the width of its first `n` chars, without trailing
+    /// space, plus an ellipsis.
     shortened: Vec<f32>,
 }
 
@@ -41,7 +42,7 @@ fn widths(text: &str, size: f32, font: Font) -> Rc<Widths> {
             whole: measure(text),
             shortened: text
                 .char_indices()
-                .map(|(end, _)| measure(&format!("{}{ELLIPSIS}", &text[..end])))
+                .map(|(end, _)| measure(&shortened(text, end)))
                 .collect(),
         });
         cache.insert(key, Rc::clone(&widths));
@@ -60,12 +61,18 @@ pub fn fit_text(text: &str, width: f32, size: f32, font: Font, min_kept: usize) 
     let kept = widths
         .shortened
         .iter()
-        .rposition(|shortened| *shortened <= width)?;
+        .rposition(|cut_width| *cut_width <= width)?;
     (kept >= min_kept).then(|| {
-        let mut fitted: String = text.chars().take(kept).collect();
-        fitted.push(ELLIPSIS);
-        fitted
+        let end = text
+            .char_indices()
+            .nth(kept)
+            .map_or(text.len(), |(end, _)| end);
+        shortened(text, end)
     })
+}
+
+fn shortened(text: &str, end: usize) -> String {
+    format!("{}{ELLIPSIS}", text[..end].trim_end())
 }
 
 #[cfg(test)]
