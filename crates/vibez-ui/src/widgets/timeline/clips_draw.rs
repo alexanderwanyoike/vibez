@@ -551,27 +551,23 @@ impl TrackClipCanvas {
                 }
 
                 // Draw note blocks inside the clip (below title bar)
-                if clip_w > 4.0 {
-                    let left = clip_x.max(0.0);
-                    let area = Rectangle {
-                        x: left,
-                        y: clip_y + CLIP_TITLE_HEIGHT,
-                        width: ((body.x + body.width).min(w) - left).max(0.0),
-                        height: clip_h - CLIP_TITLE_HEIGHT,
-                    };
-                    for mark in
-                        note_marks(&note_clip.notes, clip_x, area, geometry.pixels_per_beat())
-                    {
-                        frame.fill_rectangle(
-                            mark.rect.position(),
-                            mark.rect.size(),
-                            if mark.repeated {
-                                theme::with_alpha(self.track_color, 0.5)
-                            } else {
-                                note_block_color
-                            },
-                        );
-                    }
+                let left = clip_x.max(0.0);
+                let area = Rectangle {
+                    x: left,
+                    y: clip_y + CLIP_TITLE_HEIGHT,
+                    width: ((body.x + body.width).min(w) - left).max(0.0),
+                    height: clip_h - CLIP_TITLE_HEIGHT,
+                };
+                for mark in note_marks(&note_clip.notes, clip_x, area, geometry.pixels_per_beat()) {
+                    frame.fill_rectangle(
+                        mark.rect.position(),
+                        mark.rect.size(),
+                        if mark.repeated {
+                            theme::with_alpha(self.track_color, 0.5)
+                        } else {
+                            note_block_color
+                        },
+                    );
                 }
 
                 // Loop markers for note clips

@@ -10,36 +10,73 @@ pub(super) struct NoteMark {
     pub repeated: bool,
 }
 
+/// Breathing room between the marks and the top and bottom of the body.
+const PAD: f32 = 2.0;
+const MIN_MARK_HEIGHT: f32 = 2.0;
+const MAX_MARK_HEIGHT: f32 = 6.0;
+
 /// Lay out `notes` (pitch, clip-local start, duration, repeated) for a clip
 /// whose beat 0 is at `origin_x`. `area` is the on-screen part of the clip
 /// body below its title.
+///
+/// The clip's pitch range is fitted to the body, so one mark row per pitch.
+/// Marks on one row that would touch on screen merge into one, which keeps
+/// the mark count bounded by the visible width rather than the note count.
 pub(super) fn note_marks(
     notes: &[(u8, f64, f64, bool)],
     origin_x: f32,
     area: Rectangle,
     pixels_per_beat: f32,
 ) -> Vec<NoteMark> {
-    let Some(min_pitch) = notes.iter().map(|note| note.0).min() else {
+    let Some(lowest) = notes.iter().map(|note| note.0).min() else {
         return Vec::new();
     };
-    let max_pitch = notes.iter().map(|note| note.0).max().unwrap_or(min_pitch);
-    let pitch_range = (max_pitch - min_pitch + 1).max(12) as f32;
+    let highest = notes.iter().map(|note| note.0).max().unwrap_or(lowest);
+    let rows = f32::from(highest - lowest) + 1.0;
+    let inner = (area.height - 2.0 * PAD).max(0.0);
+    let height = (inner / rows)
+        .clamp(MIN_MARK_HEIGHT, MAX_MARK_HEIGHT)
+        .min(inner);
+    // A range too wide for MIN_MARK_HEIGHT rows lets neighbouring rows
+    // overlap rather than spill out of the body.
+    let step = if rows > 1.0 {
+        ((inner - height) / (rows - 1.0)).min(height)
+    } else {
+        0.0
+    };
+    let top = area.y + PAD + (inner - (step * (rows - 1.0) + height)) / 2.0;
     let right = area.x + area.width;
-    notes
+
+    let mut spans: Vec<(bool, u8, f32, f32)> = notes
         .iter()
-        .map(|&(pitch, start_beat, duration_beats, repeated)| {
-            let note_x = origin_x + start_beat as f32 * pixels_per_beat;
-            let note_w = duration_beats as f32 * pixels_per_beat;
-            let note_y_frac = (max_pitch.saturating_sub(pitch)) as f32 / pitch_range;
-            NoteMark {
-                rect: Rectangle {
-                    x: note_x,
-                    y: area.y + 2.0 + note_y_frac * (area.height - 4.0),
-                    width: note_w.max(2.0).min(right - note_x).max(0.0),
-                    height: ((area.height - 4.0) / pitch_range).clamp(2.0, 6.0),
-                },
-                repeated,
-            }
+        .filter_map(|&(pitch, start_beat, duration_beats, repeated)| {
+            let start_x = origin_x + start_beat as f32 * pixels_per_beat;
+            let end_x = start_x + duration_beats as f32 * pixels_per_beat;
+            // Whole pixels, at least one wide, so a note narrower than a
+            // pixel paints a solid column instead of a faint antialiased one.
+            let x0 = start_x.floor().max(area.x);
+            let x1 = end_x.ceil().max(start_x.floor() + 1.0).min(right);
+            (x1 > x0).then_some((repeated, pitch, x0, x1))
+        })
+        .collect();
+    spans.sort_unstable_by(|a, b| (a.0, a.1).cmp(&(b.0, b.1)).then(a.2.total_cmp(&b.2)));
+    spans.dedup_by(|next, kept| {
+        let merge = next.0 == kept.0 && next.1 == kept.1 && next.2 <= kept.3;
+        if merge {
+            kept.3 = kept.3.max(next.3);
+        }
+        merge
+    });
+    spans
+        .into_iter()
+        .map(|(repeated, pitch, x0, x1)| NoteMark {
+            rect: Rectangle {
+                x: x0,
+                y: top + f32::from(highest - pitch) * step,
+                width: x1 - x0,
+                height,
+            },
+            repeated,
         })
         .collect()
 }
