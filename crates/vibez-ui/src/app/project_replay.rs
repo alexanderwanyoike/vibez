@@ -342,23 +342,7 @@ impl App {
         }
 
         for clip in &content.clips {
-            self.send_command(EngineCommand::AddClip {
-                insertion: vibez_engine::clip_insertion::PreparedClipInsertion::new(),
-                track_id: track.id,
-                clip_id: clip.id,
-                audio: Arc::clone(&clip.audio),
-                position: clip.position,
-                source_offset: clip.source_offset,
-                start_marker: clip.start_marker,
-                duration: clip.duration,
-                loop_enabled: clip.loop_enabled,
-                loop_start: clip.loop_start,
-                loop_end: clip.loop_end,
-                linear_gain: clip.gain_db.linear(),
-                fades: clip.fades,
-                playback_direction: clip.playback_direction,
-                warp_markers: clip.warp_markers.clone(),
-            });
+            crate::domains::EngineHandle::add_audio_clip(&mut self.cmd_tx, track.id, clip);
         }
 
         for clip in &content.note_clips {

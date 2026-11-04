@@ -84,6 +84,26 @@ pub trait EngineHandle {
         let command = EngineCommand::set_built_in_instrument(track_id, kind, self.sample_rate());
         self.send(command);
     }
+
+    fn add_audio_clip(&mut self, track_id: vibez_core::id::TrackId, clip: &crate::state::UiClip) {
+        self.send(EngineCommand::AddClip {
+            insertion: vibez_engine::clip_insertion::PreparedClipInsertion::new(),
+            track_id,
+            clip_id: clip.id,
+            audio: std::sync::Arc::clone(&clip.audio),
+            position: clip.position,
+            source_offset: clip.source_offset,
+            start_marker: clip.start_marker,
+            duration: clip.duration,
+            loop_enabled: clip.loop_enabled,
+            loop_start: clip.loop_start,
+            loop_end: clip.loop_end,
+            linear_gain: clip.gain_db.linear(),
+            fades: clip.fades,
+            playback_direction: clip.playback_direction,
+            warp_markers: clip.warp_markers.clone(),
+        });
+    }
 }
 
 /// Ordered UI-side delivery for the bounded real-time engine queues.

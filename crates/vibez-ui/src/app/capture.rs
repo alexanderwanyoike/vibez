@@ -337,7 +337,7 @@ fn apply_capture_to_arrangement(
             .sort_by(|left, right| left.position_beats.total_cmp(&right.position_beats));
 
         for clip in &destination.clips {
-            engine.send(add_audio_clip_command(track_id, clip));
+            engine.add_audio_clip(track_id, clip);
         }
         for clip in &destination.note_clips {
             engine.send(clip.add_command(track_id));
@@ -483,29 +483,6 @@ fn replace_automation_interval(
             }
             None => existing.push(incoming_lane),
         }
-    }
-}
-
-fn add_audio_clip_command(
-    track_id: vibez_core::id::TrackId,
-    clip: &crate::state::UiClip,
-) -> EngineCommand {
-    EngineCommand::AddClip {
-        insertion: vibez_engine::clip_insertion::PreparedClipInsertion::new(),
-        track_id,
-        clip_id: clip.id,
-        audio: Arc::clone(&clip.audio),
-        position: clip.position,
-        source_offset: clip.source_offset,
-        start_marker: clip.start_marker,
-        duration: clip.duration,
-        loop_enabled: clip.loop_enabled,
-        loop_start: clip.loop_start,
-        loop_end: clip.loop_end,
-        linear_gain: clip.gain_db.linear(),
-        fades: clip.fades,
-        playback_direction: clip.playback_direction,
-        warp_markers: clip.warp_markers.clone(),
     }
 }
 
