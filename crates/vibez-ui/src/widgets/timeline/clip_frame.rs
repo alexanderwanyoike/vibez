@@ -1,5 +1,6 @@
 //! The frame every timeline clip shares: its box, edge and title.
 
+use iced::border::Radius;
 use iced::widget::canvas;
 use iced::{Point, Rectangle, Size};
 
@@ -34,6 +35,23 @@ fn clip_outline(body: Rectangle, stroke_width: f32) -> Rectangle {
         width: (body.width - stroke_width).max(0.0),
         height: (body.height - stroke_width).max(0.0),
     }
+}
+
+/// The on-screen part of a clip box and its corner radii.
+pub(super) fn visible_clip(body: Rectangle, viewport_width: f32) -> (Rectangle, Radius) {
+    let _ = viewport_width;
+    (body, Radius::default())
+}
+
+/// Where a looped clip's passes after the first begin, on screen.
+pub(super) fn loop_tick_xs(
+    body: Rectangle,
+    first_wrap_px: f32,
+    pass_px: f32,
+    viewport_width: f32,
+) -> Vec<f32> {
+    let _ = (body, first_wrap_px, pass_px, viewport_width);
+    Vec::new()
 }
 
 /// Paint a clip's title strip and see-through body, under its contents.
@@ -75,7 +93,62 @@ pub(super) fn draw_clip_front(
 
 #[cfg(test)]
 mod tests {
-    use super::{clip_box, clip_outline};
+    use super::{clip_box, clip_outline, loop_tick_xs, visible_clip};
+    use iced::Rectangle;
+
+    fn clip(x: f32, width: f32) -> Rectangle {
+        Rectangle {
+            x,
+            y: 2.0,
+            width,
+            height: 60.0,
+        }
+    }
+
+    #[test]
+    fn a_clip_on_screen_rounds_all_four_corners() {
+        let (shown, radius) = visible_clip(clip(100.0, 200.0), 1000.0);
+
+        assert_eq!(shown, clip(100.0, 200.0));
+        assert_eq!(
+            <[f32; 4]>::from(radius),
+            [3.0, 3.0, 3.0, 3.0],
+            "top left, top right, bottom right, bottom left"
+        );
+    }
+
+    #[test]
+    fn a_clip_cut_by_the_viewport_keeps_square_corners_where_it_is_cut() {
+        let (shown, radius) = visible_clip(clip(-5000.0, 10_000.0), 1000.0);
+
+        assert!(shown.x < 0.0 && shown.x > -10.0, "{shown:?}");
+        assert!(shown.x + shown.width > 1000.0 && shown.x + shown.width < 1010.0);
+        assert_eq!(<[f32; 4]>::from(radius), [0.0; 4]);
+
+        let (_, left_cut) = visible_clip(clip(-50.0, 200.0), 1000.0);
+        assert_eq!(<[f32; 4]>::from(left_cut), [0.0, 3.0, 3.0, 0.0]);
+    }
+
+    #[test]
+    fn a_looped_clip_marks_where_each_later_pass_begins() {
+        assert_eq!(
+            loop_tick_xs(clip(100.0, 200.0), 40.0, 40.0, 1000.0),
+            [140.0, 180.0, 220.0, 260.0]
+        );
+    }
+
+    #[test]
+    fn no_loop_ticks_when_passes_are_too_narrow_to_read() {
+        assert!(loop_tick_xs(clip(100.0, 200.0), 6.0, 6.0, 1000.0).is_empty());
+    }
+
+    #[test]
+    fn loop_ticks_are_made_only_for_the_visible_part_of_a_long_clip() {
+        let ticks = loop_tick_xs(clip(-100_000.0, 200_000.0), 50.0, 50.0, 1000.0);
+
+        assert_eq!(ticks.len(), 20);
+        assert!(ticks.iter().all(|x| (0.0..1000.0).contains(x)), "{ticks:?}");
+    }
 
     #[test]
     fn back_to_back_clips_leave_a_gap_between_them_at_any_zoom() {
