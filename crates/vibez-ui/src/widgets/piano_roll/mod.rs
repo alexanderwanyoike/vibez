@@ -254,6 +254,21 @@ struct MovedNote {
     duration_beats: f64,
 }
 
+/// The `selection` notes as they stand when a drag begins.
+fn grabbed_notes(notes: &[MidiNote], selection: &HashSet<usize>) -> Vec<MovedNote> {
+    selection
+        .iter()
+        .filter_map(|&index| {
+            notes.get(index).map(|note| MovedNote {
+                index,
+                pitch: note.pitch,
+                start_beat: note.start_beat,
+                duration_beats: note.duration_beats,
+            })
+        })
+        .collect()
+}
+
 /// Where every moved note lands for an offset of `beats` and `semitones`,
 /// the offset first held back so the whole group stays inside the clip's
 /// `total_beats` and the MIDI range and keeps its shape.
@@ -583,16 +598,7 @@ impl canvas::Program<Message> for PianoRollWidget {
                                     }
                                 };
 
-                                let original_notes: Vec<MovedNote> = selected_set
-                                    .iter()
-                                    .filter(|&&i| i < clip_data.notes.len())
-                                    .map(|&i| MovedNote {
-                                        index: i,
-                                        pitch: clip_data.notes[i].pitch,
-                                        start_beat: clip_data.notes[i].start_beat,
-                                        duration_beats: clip_data.notes[i].duration_beats,
-                                    })
-                                    .collect();
+                                let original_notes = grabbed_notes(&clip_data.notes, &selected_set);
 
                                 let sent_moves = original_notes
                                     .iter()
