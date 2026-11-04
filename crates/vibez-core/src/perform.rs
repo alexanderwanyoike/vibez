@@ -487,30 +487,6 @@ mod track_mute_quantization_tests {
     }
 
     #[test]
-    fn clip_launch_boundaries_reach_eighth_and_sixteenth_notes() {
-        assert_eq!(MusicalBoundary::Sixteenth.beats(), Some(0.25));
-        assert_eq!(MusicalBoundary::Eighth.beats(), Some(0.5));
-        assert_eq!(
-            MusicalBoundary::ALL.map(MusicalBoundary::label),
-            [
-                "Immediate",
-                "1/16",
-                "1/8",
-                "1 Beat",
-                "1 Bar",
-                "2 Bars",
-                "4 Bars",
-                "8 Bars",
-                "16 Bars"
-            ]
-        );
-        assert_eq!(
-            serde_json::to_string(&MusicalBoundary::Eighth).unwrap(),
-            "\"eighth\""
-        );
-    }
-
-    #[test]
     fn track_mute_quantization_shares_the_section_launch_definition() {
         assert_eq!(
             TrackMuteQuantization::ALL.map(TrackMuteQuantization::label),
@@ -539,6 +515,35 @@ mod track_mute_quantization_tests {
         assert_eq!(
             TrackMuteQuantization::default(),
             SectionLaunchQuantization::OneBar
+        );
+    }
+}
+
+#[cfg(test)]
+mod clip_launch_tests {
+    use super::*;
+
+    #[test]
+    fn clip_launch_boundaries_reach_eighth_and_sixteenth_notes() {
+        assert_eq!(MusicalBoundary::Sixteenth.beats(), Some(0.25));
+        assert_eq!(MusicalBoundary::Eighth.beats(), Some(0.5));
+        assert_eq!(
+            MusicalBoundary::ALL.map(MusicalBoundary::label),
+            [
+                "Immediate",
+                "1/16",
+                "1/8",
+                "1 Beat",
+                "1 Bar",
+                "2 Bars",
+                "4 Bars",
+                "8 Bars",
+                "16 Bars"
+            ]
+        );
+        assert_eq!(
+            serde_json::to_string(&MusicalBoundary::Eighth).unwrap(),
+            "\"eighth\""
         );
     }
 }
