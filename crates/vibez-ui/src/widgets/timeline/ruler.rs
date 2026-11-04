@@ -27,6 +27,9 @@ pub struct RulerWidget {
     pub grid: GridConfig,
     pub scroll_offset_beats: f64,
     pub total_beats: f64,
+    /// Arrange edits its loop with a brace in a strip above the numbers;
+    /// a Section loops over its whole length and has no strip.
+    pub loop_brace: bool,
     pub loop_enabled: bool,
     pub loop_start_beats: f64,
     pub loop_end_beats: f64,
@@ -479,3 +482,7 @@ fn draw_marks(
 }
 
 // ── TrackClipCanvas ──
+
+#[cfg(test)]
+#[path = "ruler_tests.rs"]
+mod tests;

@@ -181,6 +181,7 @@ fn independently_constructed_ruler_and_lane_align_from_the_same_viewport() {
         grid: GridConfig::new(crate::state::SnapGrid::EIGHTH, true, false, 0),
         scroll_offset_beats: 9.5,
         total_beats: 64.0,
+        loop_brace: false,
         loop_enabled: false,
         loop_start_beats: 0.0,
         loop_end_beats: 64.0,

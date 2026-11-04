@@ -112,6 +112,7 @@ impl App {
             grid: self.state.view.grid_config(),
             scroll_offset_beats: scroll_offset,
             total_beats,
+            loop_brace: true,
             loop_enabled: self.state.transport.loop_enabled,
             loop_start_beats: self.state.transport.loop_start_beats,
             loop_end_beats: self.state.transport.loop_end_beats,
