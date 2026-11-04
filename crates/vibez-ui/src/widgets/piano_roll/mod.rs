@@ -575,7 +575,14 @@ impl canvas::Program<Message> for PianoRollWidget {
                         };
                         state.drag = Some(drag);
                         state.last_cursor = Some(pos);
-                        return (canvas::event::Status::Captured, None);
+                        let pin = self.clip.as_ref().and_then(|clip| {
+                            let viewport = self.clip_view().pin(note_area_width(&bounds))?;
+                            Some(Message::View(ViewMsg::SetClipEditorView {
+                                clip_id: clip.clip_id,
+                                viewport,
+                            }))
+                        });
+                        return (canvas::event::Status::Captured, pin);
                     }
 
                     // Key lane: press auditions the pitch on this

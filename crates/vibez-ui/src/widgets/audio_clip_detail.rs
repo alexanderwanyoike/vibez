@@ -837,7 +837,13 @@ impl canvas::Program<Message> for AudioClipDetailWidget {
                         bounds.width.max(1.0),
                     )))
                 };
-                (canvas::event::Status::Captured, None)
+                let pin = self.clip_view().pin(bounds.width.max(1.0)).map(|viewport| {
+                    Message::View(ViewMsg::SetClipEditorView {
+                        clip_id: self.clip_id,
+                        viewport,
+                    })
+                });
+                (canvas::event::Status::Captured, pin)
             }
             canvas::Event::Mouse(mouse::Event::CursorMoved { .. }) => {
                 let Some(drag) = state.drag else {

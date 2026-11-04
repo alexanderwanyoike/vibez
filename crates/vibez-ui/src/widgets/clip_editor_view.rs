@@ -93,6 +93,13 @@ impl ClipEditorView {
         }
     }
 
+    /// The framing to store when a marker drag begins: the frame follows
+    /// the loop, so dragging the loop would otherwise move the editor
+    /// under the pointer.
+    pub(crate) fn pin(self, width: f32) -> Option<TimelineViewport> {
+        self.stored.is_none().then(|| self.viewport(width))
+    }
+
     pub(crate) fn geometry(self, width: f32, origin_x: f32) -> TimelineGeometry {
         self.viewport(width).geometry().with_origin(origin_x)
     }
