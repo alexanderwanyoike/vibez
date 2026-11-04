@@ -17,7 +17,10 @@ impl TimelineEditorState {
                 ..Default::default()
             };
         }
-        let entries = self.collect_selected_clips(project_tracks, spb);
+        let entries = self.collect_selected_clips(project_tracks, spb, |lane| {
+            self.time_selection_track
+                .is_none_or(|target| lane == target)
+        });
         let ranged =
             self.time_selection_active && self.selection_end_beats > self.selection_start_beats;
         let span = if ranged {

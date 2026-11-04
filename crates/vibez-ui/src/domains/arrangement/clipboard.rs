@@ -130,7 +130,10 @@ impl TimelineEditorState {
         clipboard: &mut ClipClipboard,
         ctx: ArrangementCtx,
     ) -> ArrangementAction {
-        let copied = self.collect_selected_clips(project_tracks, ctx.samples_per_beat);
+        let copied = self.collect_selected_clips(project_tracks, ctx.samples_per_beat, |lane| {
+            self.time_selection_track
+                .is_none_or(|target| lane == target)
+        });
         let count = copied.len();
         if count > 0 {
             *clipboard = ClipClipboard { clips: copied };
@@ -145,12 +148,14 @@ impl TimelineEditorState {
         }
     }
 
-    /// The time selection's content when one is active, otherwise the
-    /// selected clips, with lane offsets relative to the topmost source lane.
+    /// The time selection's content on the lanes `in_range` accepts when one
+    /// is active, otherwise the selected clips, with lane offsets relative to
+    /// the topmost source lane.
     pub(super) fn collect_selected_clips(
         &self,
         project_tracks: &ProjectTracksState,
         spb: f64,
+        in_range: impl Fn(TrackId) -> bool,
     ) -> Vec<ClipboardClip> {
         let mut copied = Vec::new();
 
@@ -160,10 +165,12 @@ impl TimelineEditorState {
         {
             let start = self.selection_start_beats;
             let end = self.selection_end_beats;
-            for (track_id, content) in self.timeline.by_track.iter().filter(|(track_id, _)| {
-                self.time_selection_track
-                    .is_none_or(|target| **track_id == target)
-            }) {
+            for (track_id, content) in self
+                .timeline
+                .by_track
+                .iter()
+                .filter(|(track_id, _)| in_range(**track_id))
+            {
                 for clip in &content.clips {
                     let clip_start = clip.position as f64 / spb;
                     let clip_end = (clip.position + clip.duration) as f64 / spb;
