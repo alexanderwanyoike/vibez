@@ -137,3 +137,12 @@ fn undo_restores_the_previous_track_quantization() {
         MusicalBoundary::OneBar
     );
 }
+
+#[test]
+fn choosing_a_tracks_current_quantization_is_not_an_edit() {
+    let breaks = TrackId::new();
+    let (mut app, _sent) = clip_app(&[breaks]);
+    let _ = app.update(set(breaks, MusicalBoundary::OneBar));
+    assert!(!app.state.project.dirty);
+    assert!(!app.state.project.history.can_undo());
+}
