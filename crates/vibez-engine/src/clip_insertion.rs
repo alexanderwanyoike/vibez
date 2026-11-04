@@ -312,10 +312,11 @@ impl PreparedClipInsertion {
     }
 }
 
-/// An empty note clip and its complete storage exchange, prepared off callback.
+/// A note clip and its complete storage exchange, prepared off callback.
 ///
-/// The private wrapper cannot be used as an audio control or carry prepopulated
-/// notes. Later AddNote commands retain their existing separate FIFO behavior.
+/// The private wrapper cannot be used as an audio control. A clip that already
+/// has notes carries them with [`Self::with_notes`], so the whole clip costs
+/// one storage exchange; AddNote is for single edits.
 #[must_use = "send this prepared note clip or drop it off callback"]
 pub struct PreparedNoteClipInsertion(Box<PreparedClipInsertion>);
 
@@ -374,13 +375,31 @@ impl PreparedNoteClipInsertion {
         ))
     }
 
+    pub fn with_notes(mut self, notes: Vec<MidiNote>) -> Self {
+        let Some(ClipInsertionDelta::NoteClip(clip)) = self.0.clip.as_mut() else {
+            unreachable!("the opaque wrapper owns one note clip");
+        };
+        *clip = EngineNoteClip::new(
+            clip.id,
+            clip.position_beats,
+            clip.duration_beats,
+            notes,
+            clip.start_marker_beats,
+            clip.loop_enabled,
+            clip.loop_start_beats,
+            clip.loop_end_beats,
+            clip.groove_grid,
+        );
+        self
+    }
+
     pub fn id(&self) -> ClipInsertionId {
         self.0.id()
     }
 
     pub(crate) fn into_control(self) -> (ClipId, Box<PreparedClipInsertion>) {
         let Some(ClipInsertionDelta::NoteClip(clip)) = self.0.clip.as_ref() else {
-            unreachable!("the opaque wrapper owns one empty note clip");
+            unreachable!("the opaque wrapper owns one note clip");
         };
         (clip.id, self.0)
     }
