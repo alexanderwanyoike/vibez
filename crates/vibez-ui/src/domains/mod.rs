@@ -252,13 +252,14 @@ impl EngineHandle for EngineCommandQueue {
             }
             return;
         }
-        rings.transport.record_main_command(&cmd);
         if !self.pending.is_empty() {
             if let Some(cmd) = supersede_waiting(&mut self.pending, cmd) {
+                rings.transport.record_main_command(&cmd);
                 self.pending.push_back(cmd);
             }
             return;
         }
+        rings.transport.record_main_command(&cmd);
         if let Err(rtrb::PushError::Full(cmd)) = rings.commands.push(cmd) {
             self.pending.push_back(cmd);
         }
