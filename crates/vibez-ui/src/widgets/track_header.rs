@@ -46,12 +46,12 @@ impl TrackHeaderFlags {
 
     /// Whether the quiet add and delete actions are shown and clickable.
     fn shows_actions(self) -> bool {
-        true
+        self.hovered
     }
 
     /// Whether the automation toggle is shown and clickable.
     fn shows_automation_toggle(self) -> bool {
-        true
+        self.hovered || self.automation_open
     }
 }
 
@@ -177,7 +177,7 @@ pub fn view_track_header<'a>(
         selected,
         editing_name,
         automation_open,
-        hovered,
+        ..
     } = flags;
     let TrackHeaderRecordingView {
         input_channels: audio_input_channels,
@@ -207,7 +207,7 @@ pub fn view_track_header<'a>(
 
     // Hidden actions stay laid out, so nothing shifts when the pointer
     // arrives; they can only be clicked while the header is hovered.
-    let action_color = if hovered {
+    let action_color = if flags.shows_actions() {
         th::text_dim()
     } else {
         iced::Color::TRANSPARENT
