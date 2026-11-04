@@ -56,6 +56,8 @@ fn visible_pixel_columns(
 #[derive(Debug, PartialEq)]
 struct ClipTitleLayout {
     region: Rectangle,
+    /// Relative to `region`, because `Frame::with_clip` translates drawing
+    /// to the region's origin.
     text: iced::Point,
 }
 
@@ -74,7 +76,7 @@ fn clip_title_layout(
             width: right - left,
             height: CLIP_TITLE_HEIGHT,
         },
-        text: iced::Point::new((clip_x + 4.0).max(left + 4.0), clip_y + 3.0),
+        text: iced::Point::new(4.0, 3.0),
     })
 }
 
