@@ -23,7 +23,7 @@ use crate::widgets::local_drag::LocalDrag;
 use crate::widgets::timeline::marquee;
 use vibez_core::id::{ClipId, TrackId};
 
-use super::clip_drag::ClipDragAction;
+use super::clip_drag::{ClipDragAction, ClipEdge};
 use super::*;
 
 mod hit_test;
@@ -422,7 +422,7 @@ impl canvas::Program<Message> for TrackClipCanvas {
             }
             if let Some(hit) = self.hit_test(pos.x) {
                 let in_title_bar = pos.y < CLIP_Y + CLIP_TITLE_HEIGHT;
-                if hit.near_right && in_title_bar {
+                if hit.edge.is_some() {
                     return mouse::Interaction::ResizingHorizontally;
                 }
                 if in_title_bar {
@@ -462,8 +462,9 @@ impl canvas::Program<Message> for TrackClipCanvas {
 
             // -- Left click: select clip, start drag, or seek --
             // Clip zones (Ableton-style):
-            //   Title bar (top ~18px): move / resize (right edge)
-            //   Body (below title):    seek / region-select
+            //   Either edge, full height: resize from that edge
+            //   Title bar (top ~18px):    move
+            //   Body (below title):       seek / region-select
             canvas::Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left)) => {
                 if let Some(pos) = cursor.position_in(bounds) {
                     if let Some(control) = self.fade_control_hit(pos, bounds.height) {
@@ -483,12 +484,13 @@ impl canvas::Program<Message> for TrackClipCanvas {
                     if let Some(ClipHit {
                         clip_id,
                         is_note_clip,
-                        near_right,
+                        edge,
                         position_beats: pos_beats,
                         duration_beats: dur_beats,
                     }) = self.hit_test(pos.x)
                     {
                         let in_title_bar = pos.y < CLIP_Y + CLIP_TITLE_HEIGHT;
+                        let grabbed = in_title_bar || edge.is_some();
 
                         // Build selection message
                         let selection = if is_note_clip {
@@ -497,13 +499,16 @@ impl canvas::Program<Message> for TrackClipCanvas {
                             ArrangementSelection::AudioClip { track_id, clip_id }
                         };
 
-                        if near_right && in_title_bar {
-                            // Right edge of title bar → resize
+                        if let Some(edge) = edge {
                             state.drag = Some(ClipDragAction::ResizeClip {
                                 undo_gesture: UndoGestureId::new(),
                                 clip_id,
                                 is_note_clip,
-                                clip_start_beat: pos_beats,
+                                edge,
+                                fixed_beat: match edge {
+                                    ClipEdge::Start => pos_beats + dur_beats,
+                                    ClipEdge::End => pos_beats,
+                                },
                                 start_local_x: pos.x,
                                 phase: DragPhase::Pending,
                             });
@@ -534,7 +539,7 @@ impl canvas::Program<Message> for TrackClipCanvas {
 
                         return (
                             canvas::event::Status::Captured,
-                            if in_title_bar
+                            if grabbed
                                 && self.selected_clips.contains(&clip_id)
                                 && !state.shift_held
                             {
@@ -743,7 +748,8 @@ impl canvas::Program<Message> for TrackClipCanvas {
                                 undo_gesture,
                                 clip_id,
                                 is_note_clip,
-                                clip_start_beat,
+                                edge,
+                                fixed_beat,
                                 start_local_x,
                                 phase,
                             } => {
@@ -755,27 +761,33 @@ impl canvas::Program<Message> for TrackClipCanvas {
                                 ) {
                                     return (canvas::event::Status::Captured, None);
                                 }
-                                let snapped = self
-                                    .snap_targets
-                                    .span_end(
-                                        *clip_start_beat,
-                                        self.x_to_beat(local_x),
-                                        self.snap_context(state.alt_held),
-                                    )
-                                    .beat
-                                    - clip_start_beat;
+                                let pointer = self.x_to_beat(local_x);
+                                let context = self.snap_context(state.alt_held);
                                 let clip_id = *clip_id;
                                 let anchor = if *is_note_clip {
                                     ArrangementSelection::NoteClip { track_id, clip_id }
                                 } else {
                                     ArrangementSelection::AudioClip { track_id, clip_id }
                                 };
-                                let edit =
-                                    Message::Arrangement(ArrangementMsg::ResizeSelectedClips {
+                                let edit = match edge {
+                                    ClipEdge::Start => ArrangementMsg::TrimSelectedClipsStart {
                                         anchor,
-                                        new_duration_beats: snapped,
-                                    })
-                                    .in_undo_gesture(*undo_gesture);
+                                        new_start_beats: self
+                                            .snap_targets
+                                            .span_start(pointer, *fixed_beat, context)
+                                            .beat,
+                                    },
+                                    ClipEdge::End => ArrangementMsg::ResizeSelectedClips {
+                                        anchor,
+                                        new_duration_beats: self
+                                            .snap_targets
+                                            .span_end(*fixed_beat, pointer, context)
+                                            .beat
+                                            - fixed_beat,
+                                    },
+                                };
+                                let edit =
+                                    Message::Arrangement(edit).in_undo_gesture(*undo_gesture);
                                 if let Some(ClipDragAction::ResizeClip { phase: held, .. }) =
                                     &mut state.drag
                                 {

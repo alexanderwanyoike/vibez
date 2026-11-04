@@ -210,6 +210,21 @@ impl SnapTargets {
         }
     }
 
+    /// Where the start of a span to `end` lands when dragged to `start`:
+    /// where a dragged Clip edge does, but never nearer `end` than
+    /// [`SHORTEST_LENGTH_BEATS`] nor before the timeline's start.
+    pub fn span_start(&self, start: f64, end: f64, context: SnapContext) -> Snapped {
+        let landed = self.dragged_edge(start, context);
+        let latest = end - SHORTEST_LENGTH_BEATS;
+        if (0.0..=latest).contains(&landed.beat) {
+            return landed;
+        }
+        Snapped {
+            beat: landed.beat.clamp(0.0, latest.max(0.0)),
+            target: None,
+        }
+    }
+
     /// Where a dragged end of the loop at `edge` lands.
     pub fn loop_edge(&self, edge: f64, context: SnapContext) -> Snapped {
         self.land(

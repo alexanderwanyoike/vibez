@@ -1,15 +1,32 @@
 //! Clip hit testing and marquee message construction.
 
 use super::*;
+use crate::widgets::timeline::clip_drag::ClipEdge;
 
 /// The Clip under the pointer.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct ClipHit {
     pub clip_id: ClipId,
     pub is_note_clip: bool,
-    pub near_right: bool,
+    /// The edge whose resize zone the pointer is in.
+    pub edge: Option<ClipEdge>,
     pub position_beats: f64,
     pub duration_beats: f64,
+}
+
+/// The resize zone under `pos_x` of a Clip drawn from `clip_x`, `clip_w`
+/// wide. Each edge's zone runs the Clip's full height; where the zones of a
+/// narrow Clip overlap, the nearer edge wins.
+fn edge_at(pos_x: f32, clip_x: f32, clip_w: f32) -> Option<ClipEdge> {
+    let from_start = pos_x - clip_x;
+    let from_end = clip_x + clip_w - pos_x;
+    if from_end < RESIZE_EDGE_PX && from_end <= from_start {
+        Some(ClipEdge::End)
+    } else if from_start < RESIZE_EDGE_PX {
+        Some(ClipEdge::Start)
+    } else {
+        None
+    }
 }
 
 impl TrackClipCanvas {
@@ -66,7 +83,7 @@ impl TrackClipCanvas {
                 return Some(ClipHit {
                     clip_id: clip.clip_id,
                     is_note_clip: false,
-                    near_right: pos_x > clip_x + clip_w - RESIZE_EDGE_PX,
+                    edge: edge_at(pos_x, clip_x, clip_w),
                     position_beats: clip_start_beat,
                     duration_beats: clip_dur_beats,
                 });
@@ -81,7 +98,7 @@ impl TrackClipCanvas {
                 return Some(ClipHit {
                     clip_id: note_clip.clip_id,
                     is_note_clip: true,
-                    near_right: pos_x > clip_x + clip_w - RESIZE_EDGE_PX,
+                    edge: edge_at(pos_x, clip_x, clip_w),
                     position_beats: note_clip.position_beats,
                     duration_beats: note_clip.duration_beats,
                 });
