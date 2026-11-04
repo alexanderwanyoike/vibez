@@ -13,6 +13,7 @@ use crate::domains::view::ViewMsg;
 use crate::message::Message;
 use crate::state::{ContextMenuTarget, GridConfig, UndoGestureId};
 use crate::timeline_geometry::{TimelineGeometry, TimelineViewport};
+use crate::timeline_snap::SnapTargets;
 use crate::widgets::double_click::DoubleClick;
 use crate::widgets::drag_phase::{DragPhase, CLICK_SLOP_PX};
 
@@ -38,6 +39,8 @@ pub struct RulerWidget {
     pub time_selection_active: bool,
     pub selection_start_beats: f64,
     pub selection_end_beats: f64,
+    /// Clip edges and markers a seek click locks onto.
+    pub snap_targets: std::sync::Arc<SnapTargets>,
 }
 
 /// Active drag action on the ruler.

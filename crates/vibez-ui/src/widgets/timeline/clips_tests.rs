@@ -187,6 +187,7 @@ fn independently_constructed_ruler_and_lane_align_from_the_same_viewport() {
         time_selection_active: false,
         selection_start_beats: 0.0,
         selection_end_beats: 0.0,
+        snap_targets: Default::default(),
     };
 
     assert_eq!(ruler.geometry().beat_to_x(13.25), lane.beat_to_x(13.25));

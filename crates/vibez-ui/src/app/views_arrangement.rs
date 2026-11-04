@@ -118,6 +118,7 @@ impl App {
             time_selection_active: timeline.time_selection_active,
             selection_start_beats: timeline.selection_start_beats,
             selection_end_beats: timeline.selection_end_beats,
+            snap_targets: Default::default(),
         };
         let ruler_canvas: Element<'_, Message> = canvas(ruler)
             .width(Length::Fill)

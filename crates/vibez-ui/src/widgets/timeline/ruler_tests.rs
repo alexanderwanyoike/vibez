@@ -27,6 +27,7 @@ fn ruler() -> RulerWidget {
         time_selection_active: false,
         selection_start_beats: 0.0,
         selection_end_beats: 0.0,
+        snap_targets: Default::default(),
     }
 }
 
@@ -306,6 +307,21 @@ fn a_ruler_click_seeks_to_the_nearest_grid_line() {
         seek_beat_after_click(&ruler(), 9.2, iced::keyboard::Modifiers::empty()),
         Some(9.0)
     );
+}
+
+#[test]
+fn a_ruler_click_near_a_clip_edge_seeks_onto_it() {
+    let ruler = RulerWidget {
+        snap_targets: std::sync::Arc::new(
+            SnapTargets::default().with_marker(9.3, crate::timeline_snap::SnapTargetKind::ClipEdge),
+        ),
+        ..ruler()
+    };
+
+    let beat =
+        seek_beat_after_click(&ruler, 9.2, iced::keyboard::Modifiers::empty()).expect("a seek");
+
+    assert!((beat - 9.3).abs() < 1e-9, "seeked to {beat}");
 }
 
 #[test]

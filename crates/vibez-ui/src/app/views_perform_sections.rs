@@ -162,6 +162,7 @@ impl App {
                 time_selection_active: editor.time_selection_active,
                 selection_start_beats: editor.selection_start_beats,
                 selection_end_beats: editor.selection_end_beats,
+                snap_targets: Default::default(),
             };
             let ruler_canvas: Element<'_, Message> = Element::from(
                 canvas(ruler)
