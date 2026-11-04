@@ -220,3 +220,17 @@ fn a_shaky_click_on_an_off_grid_note_body_leaves_it_alone() {
     assert_eq!(editor.notes(), original);
     assert!(editor.history.undo.is_empty());
 }
+
+#[test]
+fn note_drags_that_stay_in_their_grid_cell_leave_no_undo_step() {
+    let original = vec![note(60, 1.0, 1.0)];
+    let mut editor = Editor::new(original.clone(), HashSet::new());
+    let body = editor.at(1.5, 60);
+    let end = Point::new(editor.at(2.0, 60).x - 2.0, body.y);
+
+    editor.drag(body, &steps(body, Point::new(body.x + 10.0, body.y)));
+    editor.drag(end, &steps(end, Point::new(end.x + 10.0, end.y)));
+
+    assert_eq!(editor.notes(), original);
+    assert!(editor.history.undo.is_empty());
+}
