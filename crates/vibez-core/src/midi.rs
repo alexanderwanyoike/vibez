@@ -34,8 +34,8 @@ impl MidiNote {
     }
 }
 
-/// The furthest beat a note Clip's content reaches, 4096 bars, so a loop
-/// dragged or loaded past the clip's end stays finite.
+/// The furthest beat a note Clip's content reaches, 4096 bars, so a loop or
+/// start marker placed past the clip's end stays finite.
 pub const NOTE_CONTENT_END_BEATS: f64 = 16_384.0;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -71,7 +71,7 @@ impl NoteClipInfo {
             self.duration_beats,
             self.loop_enabled,
         )
-        .clamp_start(start, 0.0, self.duration_beats)
+        .clamp_start(start, 0.0, NOTE_CONTENT_END_BEATS)
     }
 }
 

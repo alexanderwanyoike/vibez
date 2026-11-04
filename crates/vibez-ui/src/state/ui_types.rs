@@ -605,13 +605,13 @@ impl UiNoteClip {
     pub(crate) fn clamp_start_to_duration(&mut self) {
         self.start_marker_beats =
             self.timeline()
-                .clamp_start(self.start_marker_beats, 0.0, self.duration_beats);
+                .clamp_start(self.start_marker_beats, 0.0, NOTE_CONTENT_END_BEATS);
     }
 
     pub(crate) fn set_start_marker(&mut self, start_marker_beats: f64) -> bool {
         let valid = self
             .timeline()
-            .accepts_start(start_marker_beats, 0.0, self.duration_beats);
+            .accepts_start(start_marker_beats, 0.0, NOTE_CONTENT_END_BEATS);
         if !valid || start_marker_beats == self.start_marker_beats {
             return false;
         }
