@@ -21,8 +21,8 @@ use crate::theme as th;
 use crate::timeline_geometry::TimelineGeometry;
 use crate::widgets::arrange_corner::{arrange_corner, arrangement_size_labels, song_length_label};
 use crate::widgets::timeline::{
-    build_row_spans, ArrangementMinimap, MinimapTrack, RulerWidget, TimelineClip, TrackClipCanvas,
-    ARRANGE_RULER_HEIGHT, OVERVIEW_HEIGHT, TRACK_ROW_HEIGHT,
+    build_row_spans, ArrangementMinimap, MinimapTrack, RulerWidget, TimeRulerWidget, TimelineClip,
+    TrackClipCanvas, ARRANGE_RULER_HEIGHT, OVERVIEW_HEIGHT, TIME_RULER_HEIGHT, TRACK_ROW_HEIGHT,
 };
 use crate::widgets::track_header::{
     view_editable_channel_name, view_track_header, ChannelNameStyle, TrackHeaderFlags,
@@ -594,7 +594,20 @@ impl App {
         ))
         .max_height(CHANNEL_FOOTER_MAX_HEIGHT);
 
-        let content = column![minimap_row, ruler_row, track_body, channel_footer];
+        let time_ruler: Element<'_, Message> = canvas(TimeRulerWidget {
+            bpm,
+            zoom_level,
+            scroll_offset_beats: scroll_offset,
+        })
+        .width(Length::Fill)
+        .height(Length::Fixed(TIME_RULER_HEIGHT))
+        .into();
+        let time_row = row![
+            arrange_corner("Time".into(), String::new(), TIME_RULER_HEIGHT),
+            time_ruler
+        ];
+
+        let content = column![minimap_row, ruler_row, track_body, channel_footer, time_row];
 
         // mouse_area only provides on_right_press (no cursor position),
         // so use the globally tracked cursor for the scrollable background.

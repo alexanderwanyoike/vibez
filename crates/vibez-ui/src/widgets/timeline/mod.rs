@@ -252,6 +252,7 @@ pub use clips::*;
 pub use marquee::{build_row_spans, TrackRowSpan, TRACK_ROW_HEIGHT};
 pub use minimap::*;
 pub use ruler::*;
+pub use time_ruler::{TimeRulerWidget, TIME_RULER_HEIGHT};
 
 #[cfg(test)]
 mod performance_tests {
