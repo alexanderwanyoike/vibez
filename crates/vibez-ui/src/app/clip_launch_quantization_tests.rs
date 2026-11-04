@@ -254,3 +254,13 @@ fn stopping_a_playing_clip_waits_for_its_own_quantization() {
         );
     }
 }
+
+#[test]
+fn choosing_a_clips_current_quantization_is_not_an_edit() {
+    let breaks = TrackId::new();
+    let (mut app, _sent) = clip_app(&[breaks]);
+    let clip = app.state.perform.clips.at(breaks, 0).unwrap().id;
+    let _ = app.update(set_clip(clip, None));
+    assert!(!app.state.project.dirty);
+    assert!(!app.state.project.history.can_undo());
+}
