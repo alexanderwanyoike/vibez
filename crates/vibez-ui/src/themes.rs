@@ -9,7 +9,7 @@ use std::path::PathBuf;
 
 use iced::Color;
 
-use crate::theme::{ClipStyle, ThemePalette};
+use crate::theme::{ClipStyle, LaneStyle, ThemePalette};
 
 const fn rgb8(r: u8, g: u8, b: u8) -> Color {
     Color {
@@ -205,6 +205,7 @@ fn dark(seed: Seed) -> ThemePalette {
         piano_black_key: darken(bg, 0.15),
         piano_key_label: lighten(bg, 0.32),
         clip_style: ClipStyle::DARK,
+        lane_style: LaneStyle::DARK,
     }
 }
 
@@ -258,6 +259,7 @@ fn light(seed: Seed) -> ThemePalette {
         piano_black_key: rgb8(40, 40, 40),
         piano_key_label: darken(bg, 0.45),
         clip_style: ClipStyle::LIGHT,
+        lane_style: LaneStyle::LIGHT,
     }
 }
 

@@ -133,6 +133,10 @@ pub struct ThemePalette {
     /// Older `.vzt` files predate it and load with the dark style.
     #[serde(default)]
     pub clip_style: ClipStyle,
+
+    /// Older `.vzt` files predate it and load with the dark style.
+    #[serde(default)]
+    pub lane_style: LaneStyle,
 }
 
 /// How a timeline clip is shaded from its track colour.
@@ -174,6 +178,43 @@ impl ClipStyle {
 }
 
 impl Default for ClipStyle {
+    fn default() -> Self {
+        Self::DARK
+    }
+}
+
+/// How the timeline lanes behind clips are shaded from the palette. Every
+/// part is a mix toward the text colour, so the dark style still reads on
+/// a light theme file that predates it.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct LaneStyle {
+    /// How far the lane is mixed from the background toward the text
+    /// colour. Light themes sink their lanes below the headers.
+    pub recess: f32,
+    /// How far every other bar band is mixed toward the text colour.
+    pub band: f32,
+    /// How far grid lines at the ruler's label step, at bars and at finer
+    /// steps are mixed toward the text colour. Kept faint because clip
+    /// bodies are see-through and the grid must read as texture behind
+    /// them.
+    pub lines: [f32; 3],
+}
+
+impl LaneStyle {
+    pub const DARK: Self = Self {
+        recess: 0.0,
+        band: 0.025,
+        lines: [0.085, 0.05, 0.028],
+    };
+
+    pub const LIGHT: Self = Self {
+        recess: 0.15,
+        band: 0.05,
+        lines: [0.13, 0.075, 0.045],
+    };
+}
+
+impl Default for LaneStyle {
     fn default() -> Self {
         Self::DARK
     }
@@ -300,6 +341,7 @@ impl ThemePalette {
             piano_black_key: rgb(0.102, 0.102, 0.102),
             piano_key_label: rgb(0.35, 0.35, 0.35),
             clip_style: ClipStyle::DARK,
+            lane_style: LaneStyle::DARK,
         }
     }
 }
@@ -548,6 +590,16 @@ mod tests {
         let palette: ThemePalette = serde_json::from_value(json).unwrap();
 
         assert_eq!(palette.clip_style, ClipStyle::DARK);
+    }
+
+    #[test]
+    fn a_theme_file_without_lane_style_loads_with_the_dark_style() {
+        let mut json = serde_json::to_value(ThemePalette::charcoal()).unwrap();
+        json.as_object_mut().unwrap().remove("lane_style");
+
+        let palette: ThemePalette = serde_json::from_value(json).unwrap();
+
+        assert_eq!(palette.lane_style, LaneStyle::DARK);
     }
 
     #[test]
