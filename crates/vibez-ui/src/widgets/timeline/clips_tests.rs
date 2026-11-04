@@ -51,8 +51,6 @@ fn track_canvas_at(
         Color::BLACK,
         120.0,
         track_id,
-        0,
-        1,
         vec![track_id],
         HashSet::new(),
         false,

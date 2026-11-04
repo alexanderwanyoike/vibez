@@ -206,7 +206,6 @@ impl App {
             .iter()
             .map(|t| t.id)
             .collect();
-        let total_track_count = self.state.project_tracks.tracks.len();
         let browser_drag_duration = self
             .state
             .browser
@@ -241,7 +240,7 @@ impl App {
         let empty_content = TrackTimelineContent::default();
         let browser_drag_active = self.state.browser.drag_source.is_some();
 
-        for (track_index, track) in self.state.project_tracks.tracks.iter().enumerate() {
+        for track in self.state.project_tracks.tracks.iter() {
             let content = timeline.timeline.get(track.id).unwrap_or(&empty_content);
             let selected = timeline.selected_track == Some(track.id);
             let track_color = th::track_color(track.color_index);
@@ -313,8 +312,6 @@ impl App {
                 track_color,
                 bpm,
                 track.id,
-                track_index,
-                total_track_count,
                 track_ids.clone(),
                 selected_clips,
                 self.state.transport.loop_enabled,

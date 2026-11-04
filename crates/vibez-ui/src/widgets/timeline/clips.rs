@@ -59,8 +59,6 @@ pub struct ClipInteractionState {
 pub struct TrackClipCanvas {
     vertical_wheel_routing: VerticalWheelRouting,
     pub track_id: TrackId,
-    pub track_index: usize,
-    pub total_tracks: usize,
     pub track_ids: Vec<TrackId>,
     /// True vertical layout of every row in this column, so a rubber-band
     /// spans lanes correctly even with automation lanes expanded. Empty
@@ -133,8 +131,6 @@ impl TrackClipCanvas {
         track_color: Color,
         bpm: f64,
         track_id: TrackId,
-        track_index: usize,
-        total_tracks: usize,
         track_ids: Vec<TrackId>,
         selected_clips: HashSet<ClipId>,
         loop_enabled: bool,
@@ -246,8 +242,6 @@ impl TrackClipCanvas {
         Self {
             vertical_wheel_routing: VerticalWheelRouting::default(),
             track_id,
-            track_index,
-            total_tracks,
             track_ids,
             row_spans: Vec::new(),
             marquee: None,
@@ -360,16 +354,7 @@ impl TrackClipCanvas {
     }
 
     /// Index of the lane sitting at a column-space y.
-    ///
-    /// Falls back to uniform row stepping relative to this lane when the
-    /// surface supplied no layout, preserving the old behaviour for
-    /// canvases that have not opted into box selection.
     pub(super) fn resolve_lane_at(&self, column_y: f32) -> Option<usize> {
-        if self.row_spans.is_empty() {
-            let offset = ((column_y - self.row_top()) / TRACK_ROW_HEIGHT).floor() as i32;
-            let last = self.total_tracks as i32 - 1;
-            return (last >= 0).then(|| (self.track_index as i32 + offset).clamp(0, last) as usize);
-        }
         self.row_spans
             .iter()
             .position(|row| column_y >= row.top && column_y < row.bottom())
