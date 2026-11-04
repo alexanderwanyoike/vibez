@@ -16,7 +16,7 @@ use crate::state::{
 use crate::timeline_geometry::{TimelineGeometry, TimelineViewport};
 use crate::timeline_snap::SnapTargets;
 use crate::widgets::clip_editor_view::{wheel_intent, ClipEditorView, WheelIntent};
-use crate::widgets::clip_loop_markers::{self, LoopDrag};
+use crate::widgets::clip_loop_markers::{self, LoopDrag, LoopMarker};
 use crate::widgets::double_click::DoubleClick;
 use crate::widgets::drag_phase::{past_click_slop, DragPhase};
 use crate::widgets::local_drag::LocalDrag;
@@ -466,6 +466,10 @@ impl canvas::Program<Message> for PianoRollWidget {
                 DragAction::ResizeNote { .. } | DragAction::DrawNote { .. } => {
                     mouse::Interaction::ResizingHorizontally
                 }
+                DragAction::Loop {
+                    drag: LoopDrag::Move { .. },
+                    ..
+                } => mouse::Interaction::Grabbing,
                 DragAction::Loop { .. } | DragAction::Start { .. } => {
                     mouse::Interaction::ResizingHorizontally
                 }
@@ -474,10 +478,13 @@ impl canvas::Program<Message> for PianoRollWidget {
         }
 
         if let Some(pos) = cursor.position_in(bounds) {
-            if self.hit_test_start_marker(pos, &bounds)
-                || self.hit_test_loop_marker(pos, &bounds).is_some()
-            {
+            if self.hit_test_start_marker(pos, &bounds) {
                 return mouse::Interaction::ResizingHorizontally;
+            }
+            match self.hit_test_loop_marker(pos, &bounds) {
+                Some(LoopMarker::Body) => return mouse::Interaction::Grab,
+                Some(_) => return mouse::Interaction::ResizingHorizontally,
+                None => {}
             }
         }
 

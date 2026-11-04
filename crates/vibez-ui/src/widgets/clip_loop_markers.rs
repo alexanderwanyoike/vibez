@@ -17,6 +17,8 @@ const START_MARKER_WIDTH: f32 = 7.0;
 pub(crate) enum LoopMarker {
     Start,
     End,
+    /// The bar between the handles, which carries the whole loop.
+    Body,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -29,10 +31,17 @@ pub(crate) enum LoopDrag {
         fixed_start: f64,
         undo_gesture: UndoGestureId,
     },
+    Move {
+        length: f64,
+        /// How far the pointer pressed past the loop start.
+        grab: f64,
+        undo_gesture: UndoGestureId,
+    },
 }
 
 impl LoopDrag {
-    pub(crate) fn begin(marker: LoopMarker, start: f64, end: f64) -> Self {
+    /// `pointer` is where the press landed, snapped as the drag will be.
+    pub(crate) fn begin(marker: LoopMarker, start: f64, end: f64, pointer: f64) -> Self {
         match marker {
             LoopMarker::Start => Self::Start {
                 fixed_end: end,
@@ -42,6 +51,11 @@ impl LoopDrag {
                 fixed_start: start,
                 undo_gesture: UndoGestureId::new(),
             },
+            LoopMarker::Body => Self::Move {
+                length: end - start,
+                grab: pointer - start,
+                undo_gesture: UndoGestureId::new(),
+            },
         }
     }
 
@@ -49,12 +63,18 @@ impl LoopDrag {
         match self {
             Self::Start { fixed_end, .. } => span_with_start(pointer, fixed_end, min_length),
             Self::End { fixed_start, .. } => span_with_end(pointer, fixed_start, min_length, max),
+            Self::Move { length, grab, .. } => {
+                let start = (pointer - grab).clamp(0.0, (max - length).max(0.0));
+                (start, start + length)
+            }
         }
     }
 
     pub(crate) fn undo_gesture(self) -> UndoGestureId {
         match self {
-            Self::Start { undo_gesture, .. } | Self::End { undo_gesture, .. } => undo_gesture,
+            Self::Start { undo_gesture, .. }
+            | Self::End { undo_gesture, .. }
+            | Self::Move { undo_gesture, .. } => undo_gesture,
         }
     }
 }
@@ -68,7 +88,10 @@ pub(crate) fn hit_test(
     if position.y < 0.0 || position.y > rail_height {
         return None;
     }
-    nearest_end(start_x, end_x, position.x, HIT_RADIUS)
+    nearest_end(start_x, end_x, position.x, HIT_RADIUS).or_else(|| {
+        let inside = position.x > start_x.min(end_x) && position.x < start_x.max(end_x);
+        inside.then_some(LoopMarker::Body)
+    })
 }
 
 /// The end of a brace from `start_x` to `end_x` within `radius` of `x`,

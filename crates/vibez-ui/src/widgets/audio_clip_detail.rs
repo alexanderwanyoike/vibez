@@ -615,7 +615,18 @@ impl canvas::Program<Message> for AudioClipDetailWidget {
         bounds: Rectangle,
         cursor: mouse::Cursor,
     ) -> mouse::Interaction {
-        if state.drag.is_some()
+        if matches!(
+            state.drag,
+            Some(AudioMarkerDrag::Loop(LoopDrag::Move { .. }))
+        ) {
+            return mouse::Interaction::Grabbing;
+        }
+        let over_body = cursor.position_in(bounds).is_some_and(|position| {
+            self.hit_test_loop_marker(position, &bounds) == Some(LoopMarker::Body)
+        });
+        if over_body && state.drag.is_none() {
+            mouse::Interaction::Grab
+        } else if state.drag.is_some()
             || cursor.position_in(bounds).is_some_and(|position| {
                 self.hit_test_start_marker(position, &bounds)
                     || self.hit_test_loop_marker(position, &bounds).is_some()
@@ -796,6 +807,7 @@ impl canvas::Program<Message> for AudioClipDetailWidget {
                         marker,
                         self.loop_start.saturating_sub(self.source_offset) as f64,
                         self.loop_end.saturating_sub(self.source_offset) as f64,
+                        self.x_to_local_frame_up_to(position.x, &bounds, u64::MAX) as f64,
                     )))
                 } else {
                     return (canvas::event::Status::Ignored, None);

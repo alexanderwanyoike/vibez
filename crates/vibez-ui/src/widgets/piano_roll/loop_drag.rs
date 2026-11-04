@@ -53,7 +53,12 @@ impl PianoRollWidget {
             let marker = self.hit_test_loop_marker(position, bounds)?;
             Some(DragAction::Loop {
                 clip_id: clip.clip_id,
-                drag: LoopDrag::begin(marker, clip.loop_start_beats, clip.loop_end_beats),
+                drag: LoopDrag::begin(
+                    marker,
+                    clip.loop_start_beats,
+                    clip.loop_end_beats,
+                    self.snapped_beat(self.x_to_beat(position.x, bounds), bounds),
+                ),
             })
         }
     }
