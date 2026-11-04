@@ -39,6 +39,8 @@ pub struct AudioClipDetailWidget {
     pub loop_enabled: bool,
     pub loop_start: u64,
     pub loop_end: u64,
+    /// See `UiClip::loop_content_end`.
+    pub loop_content_end: u64,
     pub playback_direction: ClipPlaybackDirection,
     pub transient_markers: TransientMarkers,
     pub selected_transient_marker: Option<u64>,
@@ -165,7 +167,11 @@ impl AudioClipDetailWidget {
     }
 
     fn x_to_local_frame(&self, x: f32, bounds: &Rectangle) -> u64 {
-        let fraction = f64::from(x / bounds.width.max(1.0)).clamp(0.0, 1.0);
+        self.x_to_local_frame_up_to(x, bounds, self.loop_range_frames())
+    }
+
+    fn x_to_local_frame_up_to(&self, x: f32, bounds: &Rectangle, limit: u64) -> u64 {
+        let fraction = f64::from(x / bounds.width.max(1.0)).max(0.0);
         let fraction = match self.playback_direction {
             ClipPlaybackDirection::Forward => fraction,
             ClipPlaybackDirection::Reverse => 1.0 - fraction,
@@ -177,7 +183,7 @@ impl AudioClipDetailWidget {
         } else {
             local
         };
-        (local.round() as u64).min(self.loop_range_frames())
+        (local.round() as u64).min(limit)
     }
 
     fn x_to_unsnapped_local_frame(&self, x: f32, bounds: &Rectangle) -> u64 {
@@ -827,8 +833,8 @@ impl canvas::Program<Message> for AudioClipDetailWidget {
                         })
                     }
                     AudioMarkerDrag::Loop(drag) => {
-                        let pointer = self.x_to_local_frame(position.x, &bounds);
-                        let max = self.loop_range_frames();
+                        let max = self.loop_content_end.saturating_sub(self.source_offset);
+                        let pointer = self.x_to_local_frame_up_to(position.x, &bounds, max);
                         let min_length = self.minimum_loop_frames(&bounds).min(max);
                         let (loop_start, loop_end) =
                             drag.resolve(pointer as f64, min_length as f64, max as f64);

@@ -21,6 +21,7 @@ fn widget() -> AudioClipDetailWidget {
         loop_enabled: true,
         loop_start: 100,
         loop_end: 500,
+        loop_content_end: 1_000,
         playback_direction: ClipPlaybackDirection::Forward,
         transient_markers: Default::default(),
         selected_transient_marker: None,
@@ -481,7 +482,7 @@ fn audio_loop_overshoot_keeps_one_grid_cell_between_the_handles() {
 }
 
 #[test]
-fn dragging_repairs_a_legacy_region_past_the_visible_clip() {
+fn a_loop_end_past_the_visible_clip_is_grabbed_at_the_editor_edge() {
     let mut widget = widget();
     widget.duration_samples = 400;
     widget.loop_end = 900;
@@ -507,6 +508,6 @@ fn dragging_repairs_a_legacy_region_past_the_visible_clip() {
 
     assert!(matches!(
         arrangement_message(message),
-        Some(ArrangementMsg::SetClipLoopRegion { loop_end: 500, .. })
+        Some(ArrangementMsg::SetClipLoopRegion { loop_end: 600, .. })
     ));
 }

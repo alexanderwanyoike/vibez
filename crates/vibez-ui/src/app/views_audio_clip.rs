@@ -75,6 +75,7 @@ impl App {
             loop_enabled: clip.loop_enabled,
             loop_start: clip.loop_start,
             loop_end: clip.loop_end,
+            loop_content_end: clip.loop_content_end(),
             playback_direction: clip.playback_direction,
             transient_markers: clip.transient_markers.clone(),
             selected_transient_marker: self
