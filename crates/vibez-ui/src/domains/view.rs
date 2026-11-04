@@ -832,6 +832,32 @@ mod tests {
     }
 
     #[test]
+    fn the_clip_editor_grid_and_the_arrange_grid_change_independently() {
+        let mut v = ViewState::default();
+        let timeline = TimelineEditorState::default();
+
+        v.update(
+            ViewMsg::ChooseClipGrid(GridChoice::Fixed(SnapGrid::THIRTY_SECOND)),
+            &timeline,
+            ViewCtx::default(),
+        );
+        assert_eq!(v.clip_grid.effective_grid(1.375), SnapGrid::THIRTY_SECOND);
+        assert_eq!(v.arrange_grid.effective_grid(1.375), SnapGrid::FOUR_BARS);
+
+        v.update(
+            ViewMsg::ChooseArrangeGrid(GridChoice::Fixed(SnapGrid::BAR)),
+            &timeline,
+            ViewCtx::default(),
+        );
+        v.update(ViewMsg::NarrowGrid, &timeline, ViewCtx::default());
+        v.update(ViewMsg::ToggleSnapToGrid, &timeline, ViewCtx::default());
+        assert_eq!(v.arrange_grid.selected, SnapGrid::QUARTER);
+        assert!(!v.arrange_grid.snap_enabled);
+        assert_eq!(v.clip_grid.effective_grid(1.375), SnapGrid::THIRTY_SECOND);
+        assert!(v.clip_grid.snap_enabled);
+    }
+
+    #[test]
     fn grid_commands_update_the_shared_editor_grid() {
         let mut v = ViewState::default();
         v.update(
