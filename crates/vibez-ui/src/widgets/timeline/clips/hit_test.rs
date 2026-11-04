@@ -15,14 +15,19 @@ pub(crate) struct ClipHit {
 }
 
 /// The resize zone under `pos_x` of a Clip drawn from `clip_x`, `clip_w`
-/// wide. Each edge's zone runs the Clip's full height; where the zones of a
-/// narrow Clip overlap, the nearer edge wins.
+/// wide. Each edge's zone runs the Clip's full height and shrinks with the
+/// Clip's width, as in Ableton, so zooming out never turns a move into a
+/// resize.
 fn edge_at(pos_x: f32, clip_x: f32, clip_w: f32) -> Option<ClipEdge> {
+    if clip_w < RESIZABLE_CLIP_MIN_PX {
+        return None;
+    }
+    let zone = RESIZE_EDGE_PX.min(clip_w * RESIZE_EDGE_MAX_FRACTION);
     let from_start = pos_x - clip_x;
     let from_end = clip_x + clip_w - pos_x;
-    if from_end < RESIZE_EDGE_PX && from_end <= from_start {
+    if from_end < zone {
         Some(ClipEdge::End)
-    } else if from_start < RESIZE_EDGE_PX {
+    } else if from_start < zone {
         Some(ClipEdge::Start)
     } else {
         None
