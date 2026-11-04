@@ -400,27 +400,44 @@ fn transport_time_label(state: &AppState) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::transport_time_label;
+    use super::{position_readout, PositionReadout};
     use crate::state::{AppState, Workspace};
 
     #[test]
-    fn perform_labels_its_independent_zero_based_clock() {
+    fn perform_reads_its_own_zero_based_clock_in_the_display() {
         let mut state = AppState::default();
         state.view.workspace = Workspace::Perform;
         state.transport.sample_rate = 48_000;
+        state.transport.bpm = 120.0;
         state.transport.position_samples = 480_000;
-        state.perform.performance_position_samples = 72_000;
+        state.perform.performance_position_samples = 156_000;
 
-        assert_eq!(transport_time_label(&state), "PERFORMANCE TIME · 00:01.50");
+        assert_eq!(
+            position_readout(&state),
+            PositionReadout {
+                position: "2.3.3".into(),
+                time: "00:03.25".into(),
+                time_label: "PERFORMANCE TIME",
+            }
+        );
     }
 
     #[test]
-    fn arrange_keeps_the_canonical_cursor_and_duration_readout() {
+    fn arrange_reads_its_cursor_as_bar_beat_sixteenth_and_time() {
         let mut state = AppState::default();
         state.view.workspace = Workspace::Arrange;
         state.transport.sample_rate = 48_000;
-        state.transport.position_samples = 72_000;
+        state.transport.bpm = 120.0;
+        state.transport.position_samples = 156_000;
+        state.perform.performance_position_samples = 480_000;
 
-        assert_eq!(transport_time_label(&state), "00:01.50 / 00:00.00");
+        assert_eq!(
+            position_readout(&state),
+            PositionReadout {
+                position: "2.3.3".into(),
+                time: "00:03.25".into(),
+                time_label: "TIME",
+            }
+        );
     }
 }
