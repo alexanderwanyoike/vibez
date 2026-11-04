@@ -117,6 +117,18 @@ mod tests {
     }
 
     #[test]
+    fn beat_lines_rank_as_label_lines_when_the_ruler_labels_beats() {
+        // 50 px beats are labelled on the ruler.
+        let grid = lane_grid(TimelineGeometry::new(50.0, 0.0), 400.0, 0.5);
+
+        assert_eq!(
+            lines_of(&grid, GridLine::Label),
+            vec![0.0, 50.0, 100.0, 150.0, 200.0, 250.0, 300.0, 350.0]
+        );
+        assert!(lines_of(&grid, GridLine::Bar).is_empty());
+    }
+
+    #[test]
     fn bands_and_lines_land_on_whole_pixels_when_scrolled_between_them() {
         let grid = lane_grid(TimelineGeometry::new(14.3, 3.37), 900.0, 1.0);
 
