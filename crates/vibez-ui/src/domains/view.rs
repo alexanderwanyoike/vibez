@@ -129,7 +129,7 @@ impl ViewState {
                 self.zoom_around(1.0 / 1.25, self.window_width / 2.0, ctx.total_beats);
             }
             ViewMsg::SetZoom(level) => {
-                let factor = level.clamp(0.01, 16.0) / self.zoom_level;
+                let factor = TimelineViewport::clamp_zoom(level) / self.zoom_level;
                 self.zoom_around(factor, self.window_width / 2.0, ctx.total_beats);
             }
             ViewMsg::ZoomAround { factor, anchor_x } => {
@@ -320,7 +320,7 @@ impl ViewState {
         let old_geometry = TimelineGeometry::from_zoom(self.zoom_level, 0.0);
         let anchor_x = anchor_x.max(0.0);
         let anchor_beat = self.scroll_offset_beats + old_geometry.beats_for_width(anchor_x);
-        let next_zoom = (self.zoom_level * factor).clamp(0.01, 16.0);
+        let next_zoom = TimelineViewport::clamp_zoom(self.zoom_level * factor);
         let next_geometry = TimelineGeometry::from_zoom(next_zoom, 0.0);
         self.zoom_level = next_zoom;
         self.scroll_offset_beats = (anchor_beat - next_geometry.beats_for_width(anchor_x))

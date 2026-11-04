@@ -62,6 +62,14 @@ pub struct TimelineViewport {
 }
 
 impl TimelineViewport {
+    const MIN_ZOOM: f32 = 0.01;
+    const MAX_ZOOM: f32 = 16.0;
+
+    /// `zoom_level` held inside the zoom range every timeline shares.
+    pub fn clamp_zoom(zoom_level: f32) -> f32 {
+        zoom_level.clamp(Self::MIN_ZOOM, Self::MAX_ZOOM)
+    }
+
     pub const fn new(zoom_level: f32, scroll_offset_beats: f64) -> Self {
         Self {
             zoom_level,
@@ -90,7 +98,7 @@ impl TimelineViewport {
         }
         let anchor_x = anchor_x.clamp(0.0, viewport_width.max(0.0));
         let anchor_beat = self.geometry().x_to_beat(anchor_x);
-        self.zoom_level = (self.zoom_level * factor).clamp(0.01, 16.0);
+        self.zoom_level = Self::clamp_zoom(self.zoom_level * factor);
         self.scroll_offset_beats = anchor_beat - self.geometry().beats_for_width(anchor_x);
         self.clamp(total_beats, viewport_width);
     }
@@ -100,7 +108,7 @@ impl TimelineViewport {
         let span = (end_beats - start_beats).max(f64::EPSILON);
         let usable = (viewport_width - 2.0 * FRAME_MARGIN_PIXELS).max(1.0);
         let pixels_per_beat = (f64::from(usable) / span) as f32;
-        self.zoom_level = (pixels_per_beat / BASE_PIXELS_PER_BEAT).clamp(0.01, 16.0);
+        self.zoom_level = Self::clamp_zoom(pixels_per_beat / BASE_PIXELS_PER_BEAT);
         self.scroll_offset_beats =
             (start_beats - self.geometry().beats_for_width(FRAME_MARGIN_PIXELS)).max(0.0);
     }

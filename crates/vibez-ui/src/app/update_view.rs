@@ -5,7 +5,7 @@ use crate::domains::perform::PerformEditorFocus;
 use crate::domains::timeline_editor::TimelineEditorAdapter;
 use crate::domains::view::{ViewCtx, ViewMsg};
 use crate::state::Workspace;
-use crate::timeline_geometry::{TimelineGeometry, BASE_PIXELS_PER_BEAT};
+use crate::timeline_geometry::{TimelineGeometry, TimelineViewport, BASE_PIXELS_PER_BEAT};
 
 use super::*;
 
@@ -47,7 +47,7 @@ impl App {
                 viewport_width,
             ),
             ViewMsg::SetZoom(level) => {
-                let factor = level.clamp(0.01, 16.0) / viewport.zoom_level;
+                let factor = TimelineViewport::clamp_zoom(*level) / viewport.zoom_level;
                 viewport.zoom_around(factor, viewport_width / 2.0, total_beats, viewport_width);
             }
             ViewMsg::ZoomAround { factor, anchor_x } => {
@@ -56,7 +56,8 @@ impl App {
             ViewMsg::ZoomToFit => {
                 let target_ppb =
                     TimelineGeometry::fitted(total_beats, viewport_width, 0.0).pixels_per_beat();
-                viewport.zoom_level = (target_ppb / BASE_PIXELS_PER_BEAT).clamp(0.01, 16.0);
+                viewport.zoom_level =
+                    TimelineViewport::clamp_zoom(target_ppb / BASE_PIXELS_PER_BEAT);
                 viewport.scroll_offset_beats = 0.0;
                 viewport.clamp(total_beats, viewport_width);
             }
