@@ -6,6 +6,9 @@ const WHEEL_LINE_PIXELS: f32 = 40.0;
 const ZOOM_SENSITIVITY: f32 = 0.003;
 pub const EDGE_SCROLL_ZONE_PIXELS: f32 = 64.0;
 pub const MAX_EDGE_SCROLL_BEATS_PER_SECOND: f64 = 8.0;
+/// Space kept either side of a framed span so its first and last bar lines
+/// stay clear of the lane edges.
+pub const FRAME_MARGIN_PIXELS: f32 = 12.0;
 
 /// Normalise line- and pixel-based wheel input to physical-ish pixels.
 pub fn wheel_delta_pixels(delta: iced::mouse::ScrollDelta) -> (f32, f32) {
@@ -90,6 +93,16 @@ impl TimelineViewport {
         self.zoom_level = (self.zoom_level * factor).clamp(0.01, 16.0);
         self.scroll_offset_beats = anchor_beat - self.geometry().beats_for_width(anchor_x);
         self.clamp(total_beats, viewport_width);
+    }
+
+    /// Zoom and scroll so `start..end` fills the viewport inside the margin.
+    pub fn frame(&mut self, start_beats: f64, end_beats: f64, viewport_width: f32) {
+        let span = (end_beats - start_beats).max(f64::EPSILON);
+        let usable = (viewport_width - 2.0 * FRAME_MARGIN_PIXELS).max(1.0);
+        let pixels_per_beat = (f64::from(usable) / span) as f32;
+        self.zoom_level = (pixels_per_beat / BASE_PIXELS_PER_BEAT).clamp(0.01, 16.0);
+        self.scroll_offset_beats =
+            (start_beats - self.geometry().beats_for_width(FRAME_MARGIN_PIXELS)).max(0.0);
     }
 
     pub fn clamp(&mut self, total_beats: f64, viewport_width: f32) {

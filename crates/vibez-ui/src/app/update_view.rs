@@ -13,6 +13,8 @@ impl App {
     fn view_ctx(&self) -> ViewCtx {
         ViewCtx {
             total_beats: self.state.total_beats(),
+            song_beats: self.state.song_beats(),
+            lane_width: self.arrange_lane_width(),
         }
     }
 

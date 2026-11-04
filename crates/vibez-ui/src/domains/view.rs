@@ -8,7 +8,7 @@ use vibez_core::id::{ClipId, TrackId};
 use crate::state::{
     ContextMenuTarget, DetailPanelTab, SnapGrid, TimelineEditorState, ViewState, Workspace,
 };
-use crate::timeline_geometry::{TimelineGeometry, BASE_PIXELS_PER_BEAT};
+use crate::timeline_geometry::{TimelineGeometry, TimelineViewport};
 
 /// Messages the view domain handles.
 #[derive(Debug, Clone)]
@@ -72,8 +72,12 @@ pub enum RenameRequest {
 /// Read-only cross-domain facts for view updates.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ViewCtx {
-    /// Total arrangement length in beats (zoom-to-fit, scroll clamp).
+    /// Padded arrangement length in beats (scroll clamp).
     pub total_beats: f64,
+    /// Where the song's last clip ends, in beats (zoom-to-fit).
+    pub song_beats: f64,
+    /// Width of the Arrange clip lanes, which zoom-to-fit frames into.
+    pub lane_width: f32,
 }
 
 /// Cross-domain effects requested by a view update.
@@ -122,13 +126,13 @@ impl ViewState {
                 self.zoom_around(factor, anchor_x, ctx.total_beats);
             }
             ViewMsg::ZoomToFit => {
-                let content_beats = ctx.total_beats;
-                if content_beats > 0.0 {
-                    let canvas_width = self.window_width.max(1.0);
-                    let target_ppb = TimelineGeometry::fitted(content_beats, canvas_width, 0.0)
-                        .pixels_per_beat();
-                    self.zoom_level = (target_ppb / BASE_PIXELS_PER_BEAT).clamp(0.01, 16.0);
-                    self.scroll_offset_beats = 0.0;
+                let song_end = if ctx.song_beats > 0.0 {
+                    ctx.song_beats
+                } else {
+                    ctx.total_beats
+                };
+                if song_end > 0.0 {
+                    self.frame(0.0, song_end, ctx.lane_width);
                 }
             }
             ViewMsg::ScrollArrangement(delta) => {
@@ -277,6 +281,13 @@ impl ViewState {
         action
     }
 
+    fn frame(&mut self, start_beats: f64, end_beats: f64, lane_width: f32) {
+        let mut viewport = TimelineViewport::new(self.zoom_level, self.scroll_offset_beats);
+        viewport.frame(start_beats, end_beats, lane_width);
+        self.zoom_level = viewport.zoom_level;
+        self.scroll_offset_beats = viewport.scroll_offset_beats;
+    }
+
     fn zoom_around(&mut self, factor: f32, anchor_x: f32, total_beats: f64) {
         if !factor.is_finite() || factor <= 0.0 {
             return;
@@ -331,6 +342,7 @@ mod tests {
             &TimelineEditorState::default(),
             ViewCtx {
                 total_beats: 1_000.0,
+                ..ViewCtx::default()
             },
         );
 
@@ -399,7 +411,10 @@ mod tests {
     #[test]
     fn scroll_clamps_to_content() {
         let mut v = ViewState::default();
-        let ctx = ViewCtx { total_beats: 32.0 };
+        let ctx = ViewCtx {
+            total_beats: 32.0,
+            ..ViewCtx::default()
+        };
         v.update(
             ViewMsg::ScrollArrangement(100.0),
             &TimelineEditorState::default(),
