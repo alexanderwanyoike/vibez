@@ -365,6 +365,26 @@ fn auto_stop_at_end_of_audio() {
 }
 
 #[test]
+fn stopping_on_its_own_at_the_song_end_reports_playback_stopped() {
+    let tid = TrackId::new();
+    let (mut engine, mut cmd_tx, mut event_rx) =
+        graph_engine(&[routing_channel(tid), routing_channel(TrackId::MASTER)]);
+    add_unity_clip(&mut cmd_tx, tid, make_test_audio(16));
+    cmd_tx.push(EngineCommand::Play).unwrap();
+
+    let mut stopped = false;
+    for _ in 0..4 {
+        engine.process(&mut [0.0f32; 64], 2);
+        while let Ok(event) = event_rx.pop() {
+            stopped |= event == EngineEvent::PlaybackStopped;
+        }
+    }
+
+    assert!(!engine.transport().is_playing());
+    assert!(stopped, "the UI would keep showing playing");
+}
+
+#[test]
 fn arrangement_recording_advances_past_the_existing_content_end() {
     let (mut engine, mut cmd_tx, _event_rx) = graph_engine(&[routing_channel(TrackId::MASTER)]);
     let (tid, _) = constant_clip_track(&mut cmd_tx, 16);
