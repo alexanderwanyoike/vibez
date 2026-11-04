@@ -13,7 +13,10 @@ use crate::state::{ProjectTrack, Workspace};
 fn clip_app(tracks: &[TrackId]) -> (super::App, rtrb::Consumer<EngineCommand>) {
     let mut app = super::test_support::app();
     let (commands, sent) = rtrb::RingBuffer::new(64);
-    app.cmd_tx = crate::domains::EngineCommandQueue::new(commands);
+    app.cmd_tx = crate::domains::EngineCommandQueue::new(
+        commands,
+        vibez_engine::transport_ring::transport_ring().0,
+    );
     app.state.view.workspace = Workspace::Perform;
     app.state.perform.layout = vibez_project::PerformLayout::Clips;
     for (index, track) in tracks.iter().enumerate() {

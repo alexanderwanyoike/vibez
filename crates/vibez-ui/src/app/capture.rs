@@ -909,7 +909,8 @@ mod tests {
             samples_per_beat: 22_050.0,
         };
         let mut timeline = Arc::new(ArrangementTimeline::default());
-        let mut commands = EngineCommandQueue::new(producer);
+        let mut commands =
+            EngineCommandQueue::new(producer, audio_engine.take_transport_sender().unwrap());
         apply_capture_to_arrangement(&mut timeline, captured, &mut commands);
         assert_eq!(commands.pending_len(), 2);
 

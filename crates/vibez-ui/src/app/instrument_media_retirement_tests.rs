@@ -279,7 +279,10 @@ fn actual_pad_sync_prepares_all_source_names_and_preserves_canonical_media_and_s
         for explicit in [None, Some("Custom name"), Some("")] {
             let mut app = test_support::app();
             let (commands, mut received) = rtrb::RingBuffer::new(8);
-            app.cmd_tx = crate::domains::EngineCommandQueue::new(commands);
+            app.cmd_tx = crate::domains::EngineCommandQueue::new(
+                commands,
+                vibez_engine::transport_ring::transport_ring().0,
+            );
             let track_id = TrackId::new();
             let canonical_audio = sample();
             let audio_pointer = Arc::as_ptr(&canonical_audio);

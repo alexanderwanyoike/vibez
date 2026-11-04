@@ -91,7 +91,10 @@ fn actual_drum_ui_clear_load_and_undo_preserve_fifo_media_audio_and_retired_guar
     let mut app = test_support::app();
     app.state.transport.sample_rate = 1000;
     let (commands, mut observed) = rtrb::RingBuffer::new(2048);
-    app.cmd_tx = crate::domains::EngineCommandQueue::new(commands);
+    app.cmd_tx = crate::domains::EngineCommandQueue::new(
+        commands,
+        vibez_engine::transport_ring::transport_ring().0,
+    );
     let (mut engine, mut engine_commands, events) = AudioEngine::new();
     app.event_rx = Some(events);
     let track_id = TrackId::new();

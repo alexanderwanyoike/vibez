@@ -96,7 +96,8 @@ fn pending() -> Pending {
     let mut app = super::test_support::app();
     app.state.confirm_project_track_deletion = false;
     let (mut engine, commands, events) = AudioEngine::new();
-    app.cmd_tx = crate::domains::EngineCommandQueue::new(commands);
+    app.cmd_tx =
+        crate::domains::EngineCommandQueue::new(commands, engine.take_transport_sender().unwrap());
     app.event_rx = Some(events);
     let track = TrackId::new();
     let mut model = ProjectTrack::new(track, "Audio".into(), 0);
@@ -205,9 +206,21 @@ fn clip_request_polling_serves_current_stale_delete_undo_stop_and_clear_state() 
             Change::Clear => fixture.app.clear_project_runtime(),
         }
         fixture.app.send_command(EngineCommand::SetBpm(137.0));
-        assert_signal(&render(&mut fixture.engine, true), 0.25);
-        assert_eq!(fixture.engine.transport().position(), 16, "{change:?}");
-        assert!(fixture.engine.transport().is_playing(), "{change:?}");
+        let stopped = matches!(change, Change::Stop);
+        assert_signal(
+            &render(&mut fixture.engine, true),
+            if stopped { 0.0 } else { 0.25 },
+        );
+        assert_eq!(
+            fixture.engine.transport().position(),
+            if stopped { 0 } else { 16 },
+            "{change:?}"
+        );
+        assert_eq!(
+            fixture.engine.transport().is_playing(),
+            !stopped,
+            "{change:?}"
+        );
         assert_eq!(fixture.engine.transport().bpm(), 120.0, "{change:?}");
         assert_eq!(fixture.engine.tracks()[0].playback_source.clips.len(), 1);
         let canonical_tracks = Arc::clone(&fixture.app.state.project_tracks);
@@ -302,7 +315,10 @@ fn clip_completion_polling_drops_unique_rejected_owners_with_current_or_stale_ui
     for stale in [false, true] {
         let mut app = super::test_support::app();
         let (mut engine, commands, events) = AudioEngine::new();
-        app.cmd_tx = crate::domains::EngineCommandQueue::new(commands);
+        app.cmd_tx = crate::domains::EngineCommandQueue::new(
+            commands,
+            engine.take_transport_sender().unwrap(),
+        );
         app.event_rx = Some(events);
         let track = TrackId::new();
         if !stale {

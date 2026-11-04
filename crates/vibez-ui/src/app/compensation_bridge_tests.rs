@@ -61,7 +61,10 @@ fn returned_device_event_reconfigures_on_main_and_publishes_resume_or_reject_wit
             vibez_dsp::factory::create_effect(EffectType::Gain, 44100.0)
         };
         let (commands, mut consumer) = rtrb::RingBuffer::new(8);
-        app.cmd_tx = crate::domains::EngineCommandQueue::new(commands);
+        app.cmd_tx = crate::domains::EngineCommandQueue::new(
+            commands,
+            vibez_engine::transport_ring::transport_ring().0,
+        );
         app.send_command(EngineCommand::InsertEffect {
             track_id,
             effect_id: id,
@@ -177,7 +180,10 @@ fn queued_replacement_or_project_reset_revokes_old_event_before_main_activation(
             .push(track);
         let restarts = Arc::new(AtomicUsize::new(0));
         let (producer, mut consumer) = rtrb::RingBuffer::new(1);
-        app.cmd_tx = crate::domains::EngineCommandQueue::new(producer);
+        app.cmd_tx = crate::domains::EngineCommandQueue::new(
+            producer,
+            vibez_engine::transport_ring::transport_ring().0,
+        );
         app.send_command(EngineCommand::InsertEffect {
             track_id,
             effect_id,
@@ -199,7 +205,7 @@ fn queued_replacement_or_project_reset_revokes_old_event_before_main_activation(
                 bypass: false,
             },
         };
-        app.send_command(EngineCommand::Play);
+        app.send_command(EngineCommand::SetBpm(120.0));
         if replace {
             app.send_command(EngineCommand::InsertEffect {
                 track_id,

@@ -71,7 +71,10 @@ fn failed_restart_invalidates_cached_latency_without_removing_the_insert() {
         .tracks
         .push(track);
     let (producer, mut consumer) = rtrb::RingBuffer::new(8);
-    app.cmd_tx = crate::domains::EngineCommandQueue::new(producer);
+    app.cmd_tx = crate::domains::EngineCommandQueue::new(
+        producer,
+        vibez_engine::transport_ring::transport_ring().0,
+    );
     app.send_command(EngineCommand::InsertEffect {
         track_id,
         effect_id: id,

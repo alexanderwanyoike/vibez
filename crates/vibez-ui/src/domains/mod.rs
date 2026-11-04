@@ -50,6 +50,7 @@ pub mod view;
 pub mod wavetable;
 
 use vibez_engine::commands::EngineCommand;
+use vibez_engine::transport_ring::{TransportCommand, TransportSender};
 
 /// The one way domains talk to the audio engine. A trait (interface)
 /// instead of the concrete channel so tests can inject a recorder
@@ -84,15 +85,17 @@ pub trait EngineHandle {
     }
 }
 
-/// Ordered UI-side delivery for the bounded real-time engine queue.
+/// Ordered UI-side delivery for the bounded real-time engine queues.
 ///
 /// Large edits such as a long Perform Capture can expand into more commands
 /// than fit in one audio callback's ring buffer. Overflow stays on the UI
 /// thread and is retried on later ticks; new commands join the back of the
-/// same queue so transport actions cannot overtake unfinished project sync.
+/// same queue. Transport commands take the transport ring instead, so Play
+/// and Stop never wait for unfinished content edits.
 pub struct EngineCommandQueue {
-    producer: Option<rtrb::Producer<EngineCommand>>,
+    rings: Option<EngineRings>,
     pending: VecDeque<EngineCommand>,
+    pending_transport: VecDeque<TransportCommand>,
     device_owners: std::collections::HashMap<
         (vibez_core::id::TrackId, Option<vibez_core::id::EffectId>),
         usize,
@@ -101,11 +104,17 @@ pub struct EngineCommandQueue {
     sample_rate: u32,
 }
 
+struct EngineRings {
+    commands: rtrb::Producer<EngineCommand>,
+    transport: TransportSender,
+}
+
 impl Default for EngineCommandQueue {
     fn default() -> Self {
         Self {
-            producer: None,
+            rings: None,
             pending: VecDeque::new(),
+            pending_transport: VecDeque::new(),
             device_owners: Default::default(),
             effect_chain_edited: false,
             sample_rate: vibez_engine::engine::DEFAULT_SAMPLE_RATE,
@@ -114,9 +123,12 @@ impl Default for EngineCommandQueue {
 }
 
 impl EngineCommandQueue {
-    pub fn new(producer: rtrb::Producer<EngineCommand>) -> Self {
+    pub fn new(commands: rtrb::Producer<EngineCommand>, transport: TransportSender) -> Self {
         Self {
-            producer: Some(producer),
+            rings: Some(EngineRings {
+                commands,
+                transport,
+            }),
             ..Self::default()
         }
     }
@@ -169,12 +181,19 @@ impl EngineCommandQueue {
     }
 
     pub fn flush(&mut self) {
-        let Some(producer) = self.producer.as_mut() else {
+        let Some(rings) = self.rings.as_mut() else {
             self.pending.clear();
+            self.pending_transport.clear();
             return;
         };
+        while let Some(command) = self.pending_transport.pop_front() {
+            if let Err(command) = rings.transport.push(command) {
+                self.pending_transport.push_front(command);
+                break;
+            }
+        }
         while let Some(command) = self.pending.pop_front() {
-            match producer.push(command) {
+            match rings.commands.push(command) {
                 Ok(()) => {}
                 Err(rtrb::PushError::Full(command)) => {
                     self.pending.push_front(command);
@@ -203,14 +222,26 @@ impl EngineHandle for EngineCommandQueue {
         if let EngineCommand::SetSampleRate(rate) = &cmd {
             self.sample_rate = *rate;
         }
-        let Some(producer) = self.producer.as_mut() else {
+        let Some(rings) = self.rings.as_mut() else {
             return;
         };
+        if cmd.is_transport() {
+            let stamped = rings.transport.stamp(cmd);
+            if !self.pending_transport.is_empty() {
+                self.pending_transport.push_back(stamped);
+                return;
+            }
+            if let Err(stamped) = rings.transport.push(stamped) {
+                self.pending_transport.push_back(stamped);
+            }
+            return;
+        }
+        rings.transport.record_main_command(&cmd);
         if !self.pending.is_empty() {
             self.pending.push_back(cmd);
             return;
         }
-        if let Err(rtrb::PushError::Full(cmd)) = producer.push(cmd) {
+        if let Err(rtrb::PushError::Full(cmd)) = rings.commands.push(cmd) {
             self.pending.push_back(cmd);
         }
     }

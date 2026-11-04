@@ -289,6 +289,9 @@ impl Drop for App {
 impl App {
     fn new() -> (Self, Task<Message>) {
         let (mut engine, cmd_tx, event_rx) = AudioEngine::new();
+        let transport = engine
+            .take_transport_sender()
+            .expect("a new engine still holds its transport sender");
         let eq_spectrum_rx = engine.take_effect_spectrum_consumer();
         let ui_settings = UiSettings::load();
         // Read before the settings are picked apart below, and clamped
@@ -465,7 +468,7 @@ impl App {
         let mut app = Self {
             state,
             edge_shortcuts: EdgeShortcutState::default(),
-            cmd_tx: crate::domains::EngineCommandQueue::new(cmd_tx),
+            cmd_tx: crate::domains::EngineCommandQueue::new(cmd_tx, transport),
             event_rx: Some(event_rx),
             _stream: Some(output_stream),
             sample_retirement: Default::default(),
