@@ -62,6 +62,7 @@ mod clipboard_loops;
 mod content_swap;
 mod crossfades;
 mod group_move;
+mod loop_region;
 mod note_clips;
 mod project_tracks;
 mod selection;
