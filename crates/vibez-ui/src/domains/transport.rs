@@ -266,7 +266,7 @@ mod tests {
     }
 
     #[test]
-    fn stop_resets_position_and_seeks_zero() {
+    fn stop_before_any_click_returns_to_the_song_start() {
         let mut t = transport();
         t.playback = PlaybackPhase::Playing;
         t.position_samples = 12345;
@@ -275,6 +275,86 @@ mod tests {
         assert!(!t.will_play());
         assert_eq!(t.position_samples, 0);
         assert!(matches!(engine.0[1], EngineCommand::Seek(0)));
+    }
+
+    /// Clicks `beat`, plays, and lets the playhead run on past it.
+    fn playing_from(beat: f64) -> (TransportState, RecordingEngine) {
+        let mut t = transport();
+        let mut engine = RecordingEngine::default();
+        t.update(
+            TransportMsg::SeekToBeat(beat),
+            &mut engine,
+            TransportCtx::default(),
+        );
+        t.update(TransportMsg::Play, &mut engine, TransportCtx::default());
+        t.follow_engine(true);
+        let ran_on = t.position_samples + 100_000;
+        t.update(
+            TransportMsg::EnginePosition(ran_on),
+            &mut engine,
+            TransportCtx::default(),
+        );
+        engine.0.clear();
+        (t, engine)
+    }
+
+    #[test]
+    fn stop_returns_to_where_play_started() {
+        let (mut t, mut engine) = playing_from(128.0);
+        let start = t.beats_to_samples_at(128.0);
+
+        t.update(TransportMsg::Stop, &mut engine, TransportCtx::default());
+
+        assert_eq!(t.position_samples, start);
+        assert!(matches!(
+            engine.0.as_slice(),
+            [EngineCommand::Stop, EngineCommand::Seek(s)] if *s == start
+        ));
+    }
+
+    #[test]
+    fn a_click_while_playing_moves_where_stop_returns() {
+        let (mut t, mut engine) = playing_from(128.0);
+        t.update(
+            TransportMsg::SeekToBeat(64.0),
+            &mut engine,
+            TransportCtx::default(),
+        );
+        t.update(
+            TransportMsg::EnginePosition(t.position_samples + 100_000),
+            &mut engine,
+            TransportCtx::default(),
+        );
+
+        t.update(TransportMsg::Stop, &mut engine, TransportCtx::default());
+
+        assert_eq!(t.position_samples, t.beats_to_samples_at(64.0));
+    }
+
+    #[test]
+    fn a_second_stop_goes_to_the_song_start_and_play_starts_there() {
+        let (mut t, mut engine) = playing_from(128.0);
+        t.update(TransportMsg::Stop, &mut engine, TransportCtx::default());
+        t.follow_engine(false);
+        assert_eq!(t.position_samples, t.beats_to_samples_at(128.0));
+
+        engine.0.clear();
+        t.update(TransportMsg::Stop, &mut engine, TransportCtx::default());
+        assert_eq!(t.position_samples, 0);
+        assert!(matches!(
+            engine.0.as_slice(),
+            [EngineCommand::Stop, EngineCommand::Seek(0)]
+        ));
+
+        t.update(TransportMsg::Play, &mut engine, TransportCtx::default());
+        t.follow_engine(true);
+        t.update(
+            TransportMsg::EnginePosition(50_000),
+            &mut engine,
+            TransportCtx::default(),
+        );
+        t.update(TransportMsg::Stop, &mut engine, TransportCtx::default());
+        assert_eq!(t.position_samples, 0);
     }
 
     #[test]
