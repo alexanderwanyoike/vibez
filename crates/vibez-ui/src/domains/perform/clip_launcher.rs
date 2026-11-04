@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use vibez_core::id::{ClipId, TrackId};
+use vibez_core::perform::MusicalBoundary;
 use vibez_project::PerformLayout;
 
 use crate::state::{
@@ -58,12 +59,33 @@ impl LauncherClip {
     }
 }
 
+/// The boundary a Project Track launches on until its launch quantization is set.
+pub const DEFAULT_LAUNCH_QUANTIZATION: MusicalBoundary = MusicalBoundary::OneBar;
+
 #[derive(Debug, Clone, Default)]
 pub struct ClipStore {
     pub clips: Vec<LauncherClip>,
+    /// Holds only tracks off [`DEFAULT_LAUNCH_QUANTIZATION`], so a saved
+    /// Project lists exactly the tracks someone changed.
+    launch_quantization: HashMap<TrackId, MusicalBoundary>,
 }
 
 impl ClipStore {
+    pub fn launch_quantization(&self, track_id: TrackId) -> MusicalBoundary {
+        self.launch_quantization
+            .get(&track_id)
+            .copied()
+            .unwrap_or(DEFAULT_LAUNCH_QUANTIZATION)
+    }
+
+    pub fn set_launch_quantization(&mut self, track_id: TrackId, quantization: MusicalBoundary) {
+        if quantization == DEFAULT_LAUNCH_QUANTIZATION {
+            self.launch_quantization.remove(&track_id);
+        } else {
+            self.launch_quantization.insert(track_id, quantization);
+        }
+    }
+
     pub fn at(&self, track_id: TrackId, row: u32) -> Option<&LauncherClip> {
         self.clips
             .iter()
@@ -239,6 +261,10 @@ pub enum ClipMsg {
         tracks: i32,
         rows: i32,
     },
+    SetLaunchQuantization {
+        track_id: TrackId,
+        quantization: MusicalBoundary,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -258,9 +284,13 @@ impl ClipMsg {
     }
 
     /// Edits that may change nothing: an empty clipboard, an empty cell, a
-    /// track of the other kind. The app records them only once they have.
+    /// track of the other kind, a picker choosing its current value. The app
+    /// records them only once they have.
     pub const fn defers_project_edit(&self) -> bool {
-        matches!(self, Self::Cut | Self::Paste | Self::Drop { .. })
+        matches!(
+            self,
+            Self::Cut | Self::Paste | Self::Drop { .. } | Self::SetLaunchQuantization { .. }
+        )
     }
 }
 
@@ -573,6 +603,14 @@ impl PerformState {
                 }
             }
             ClipMsg::Delete(id) => clip_launch = self.remove_launcher_clip(id),
+            ClipMsg::SetLaunchQuantization {
+                track_id,
+                quantization,
+            } => {
+                if self.clips.launch_quantization(track_id) != quantization {
+                    Arc::make_mut(&mut self.clips).set_launch_quantization(track_id, quantization);
+                }
+            }
             ClipMsg::MoveWindow { tracks, rows } => {
                 self.clip_editor.first_track = self
                     .clip_editor

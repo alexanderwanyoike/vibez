@@ -345,6 +345,22 @@ impl App {
             sample_rate: self.state.transport.sample_rate,
             tracks,
             perform_layout: self.state.perform.layout,
+            launcher_tracks: self
+                .state
+                .project_tracks
+                .tracks
+                .iter()
+                .map(|track| track.id)
+                .filter_map(|track_id| {
+                    let launch_quantization =
+                        self.state.perform.clips.launch_quantization(track_id);
+                    (launch_quantization != crate::domains::perform::DEFAULT_LAUNCH_QUANTIZATION)
+                        .then_some(vibez_project::LauncherTrackInfo {
+                            track_id,
+                            launch_quantization,
+                        })
+                })
+                .collect(),
             launcher_clips: self
                 .state
                 .perform
@@ -426,21 +442,24 @@ impl App {
         self.clear_project_runtime();
         self.state.project.unresolved_clips = loaded.unresolved_clips;
         self.state.perform.layout = loaded.project.perform_layout;
-        self.state.perform.clips = Arc::new(crate::domains::perform::ClipStore {
-            clips: loaded
-                .project
-                .launcher_clips
-                .iter()
-                .map(|clip| crate::domains::perform::LauncherClip {
-                    id: clip.id,
-                    track_id: clip.track_id,
-                    row: clip.row,
-                    timeline: Arc::new(super::project_sections::timeline_without_audio(
-                        &clip.timeline,
-                    )),
-                })
-                .collect(),
-        });
+        let mut clips = crate::domains::perform::ClipStore::default();
+        clips.clips = loaded
+            .project
+            .launcher_clips
+            .iter()
+            .map(|clip| crate::domains::perform::LauncherClip {
+                id: clip.id,
+                track_id: clip.track_id,
+                row: clip.row,
+                timeline: Arc::new(super::project_sections::timeline_without_audio(
+                    &clip.timeline,
+                )),
+            })
+            .collect();
+        for track in &loaded.project.launcher_tracks {
+            clips.set_launch_quantization(track.track_id, track.launch_quantization);
+        }
+        self.state.perform.clips = Arc::new(clips);
         self.state.perform.sections = Arc::new(
             super::project_sections::section_store_from_project(&loaded.project.sections),
         );

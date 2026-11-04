@@ -266,6 +266,26 @@ impl App {
         container(controls).padding([5, 12]).into()
     }
 
+    fn view_track_launch_quantization(
+        &self,
+        track_id: vibez_core::id::TrackId,
+    ) -> Element<'_, Message> {
+        use vibez_core::perform::MusicalBoundary;
+        pick_list(
+            MusicalBoundary::ALL,
+            Some(self.state.perform.clips.launch_quantization(track_id)),
+            move |quantization| {
+                Message::Perform(PerformMsg::Clips(ClipMsg::SetLaunchQuantization {
+                    track_id,
+                    quantization,
+                }))
+            },
+        )
+        .text_size(9)
+        .padding([1, 4])
+        .into()
+    }
+
     fn view_clip_grid(&self, width: f32) -> Element<'_, Message> {
         let keyboard_active = self.state.perform.mode == PerformMode::Sections;
         let compact = self.state.view.window_height < 800.0;
@@ -400,19 +420,35 @@ impl App {
                         .height(20)
                         .into()
                     };
-                let mut header = column![track_name].spacing(3);
-                if !compact {
-                    header = header.push(
-                        text(if track.kind.is_midi() {
-                            "MIDI"
-                        } else {
-                            "AUDIO"
-                        })
-                        .font(PERFORM_TECH)
-                        .size(9)
-                        .color(th::text_dim()),
-                    );
-                }
+                let launch = self.view_track_launch_quantization(track.id);
+                let header = if compact {
+                    column![row![track_name, launch]
+                        .spacing(4)
+                        .align_y(iced::Alignment::Center)]
+                } else {
+                    column![
+                        track_name,
+                        row![
+                            text(if track.kind.is_midi() {
+                                "MIDI"
+                            } else {
+                                "AUDIO"
+                            })
+                            .font(PERFORM_TECH)
+                            .size(9)
+                            .color(th::text_dim()),
+                            horizontal_space(),
+                            text("LAUNCH")
+                                .font(PERFORM_TECH)
+                                .size(9)
+                                .color(th::text_dim()),
+                            launch,
+                        ]
+                        .spacing(4)
+                        .align_y(iced::Alignment::Center)
+                    ]
+                    .spacing(3)
+                };
                 let mut lane = column![container(header).padding([3, 8]).height(header_height)]
                     .spacing(0)
                     .width(Length::Fixed(lane_width));

@@ -472,6 +472,7 @@ fn resync_preserves_queued_sources_and_newer_intent_while_reclaiming_obsolete_pe
     );
     let store = ClipStore {
         clips: vec![clip.clone(), future.clone()],
+        ..Default::default()
     };
     let mut editor = ClipEditor {
         running: true,
@@ -573,6 +574,7 @@ fn recovery_from_a_previous_project_preserves_a_new_unconsumed_launch() {
         super::super::clip_record::empty_midi_clip(ClipId::new(), track, 0, "Take".into(), 4.0);
     let store = ClipStore {
         clips: vec![clip.clone()],
+        ..Default::default()
     };
     let mut editor = ClipEditor {
         next_request: 40,
