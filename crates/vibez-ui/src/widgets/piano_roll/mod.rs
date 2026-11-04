@@ -330,7 +330,7 @@ enum DragAction {
 
 /// Drag distance before an empty-space press counts as a rubber-band
 /// rather than a plain deselecting click.
-const MARQUEE_MIN_PX: f32 = 4.0;
+const DRAG_MIN_PX: f32 = 4.0;
 
 /// Max time between clicks to count as double-click (ms).
 const DOUBLE_CLICK_MS: u64 = 400;
@@ -839,8 +839,8 @@ impl canvas::Program<Message> for PianoRollWidget {
                         additive,
                     } = drag
                     {
-                        let travelled = (current.x - anchor.x).abs() >= MARQUEE_MIN_PX
-                            || (current.y - anchor.y).abs() >= MARQUEE_MIN_PX;
+                        let travelled = (current.x - anchor.x).abs() >= DRAG_MIN_PX
+                            || (current.y - anchor.y).abs() >= DRAG_MIN_PX;
                         if let (true, Some(clip_data)) = (travelled, self.clip.as_ref()) {
                             if let Some(region) = self.marquee_region(anchor, current, &bounds) {
                                 return (
