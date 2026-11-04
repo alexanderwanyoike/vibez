@@ -210,14 +210,21 @@ impl CompletedCapture {
                     .saturating_add((kept_start - i128::from(self.engine_start_samples)) as u64);
                 while remaining > 0 && source_cursor < section_length {
                     let segment_length = remaining.min(section_length - source_cursor);
-                    append_track_window(
-                        result.by_track.entry(*track_id).or_default(),
-                        content,
-                        &span.source,
-                        source_cursor,
-                        source_cursor + segment_length,
-                        destination_cursor,
+                    let destination = result.by_track.entry(*track_id).or_default();
+                    let window = CaptureWindow {
+                        source_start_samples: source_cursor,
+                        source_end_samples: source_cursor + segment_length,
+                        destination_start_samples: destination_cursor,
                         samples_per_beat,
+                    };
+                    append_audio_window(destination, content, &span.source, window);
+                    append_note_window(destination, content, &span.source, window);
+                    performance_log::append_automation_window(
+                        destination,
+                        content,
+                        window.source_start_beats(),
+                        window.source_end_beats(),
+                        window.destination_start_beats(),
                     );
                     remaining -= segment_length;
                     destination_cursor = destination_cursor.saturating_add(segment_length);
@@ -668,19 +675,46 @@ fn samples_per_beat(sample_rate: u32, bpm: f64) -> f64 {
     }
 }
 
-fn append_track_window(
+/// One pass of a source, copied from source-local samples to Arrange samples.
+#[derive(Debug, Clone, Copy)]
+struct CaptureWindow {
+    source_start_samples: u64,
+    source_end_samples: u64,
+    destination_start_samples: u64,
+    samples_per_beat: f64,
+}
+
+impl CaptureWindow {
+    fn source_start_beats(self) -> f64 {
+        self.source_start_samples as f64 / self.samples_per_beat
+    }
+
+    fn source_end_beats(self) -> f64 {
+        self.source_end_samples as f64 / self.samples_per_beat
+    }
+
+    fn destination_start_beats(self) -> f64 {
+        self.destination_start_samples as f64 / self.samples_per_beat
+    }
+}
+
+fn captured_clip_name(source: &CapturedTimelineSource, clip_name: &str) -> String {
+    if source.name == clip_name {
+        format!("Capture · {clip_name}")
+    } else {
+        format!("Capture · {} · {clip_name}", source.name)
+    }
+}
+
+fn append_audio_window(
     destination: &mut TrackTimelineContent,
     content: &TrackTimelineContent,
     source: &CapturedTimelineSource,
-    window_start_samples: u64,
-    window_end_samples: u64,
-    destination_start_samples: u64,
-    samples_per_beat: f64,
+    window: CaptureWindow,
 ) {
-    let window_start_beats = window_start_samples as f64 / samples_per_beat;
-    let window_end_beats = window_end_samples as f64 / samples_per_beat;
-    let destination_start_beats = destination_start_samples as f64 / samples_per_beat;
-
+    let window_start_samples = window.source_start_samples;
+    let window_end_samples = window.source_end_samples;
+    let destination_start_samples = window.destination_start_samples;
     for clip in &content.clips {
         let overlap_start = clip.position.max(window_start_samples);
         let overlap_end = clip
@@ -696,11 +730,7 @@ fn append_track_window(
             clip.warp_geometry_for_fragment(delta, fragment_duration);
         let mut fragment = UiClip {
             id: ClipId::new(),
-            name: if source.name == clip.name {
-                format!("Capture · {}", clip.name)
-            } else {
-                format!("Capture · {} · {}", source.name, clip.name)
-            },
+            name: captured_clip_name(source, &clip.name),
             audio: Arc::clone(&clip.audio),
             source: clip.source.clone(),
             position: destination_start_samples + (overlap_start - window_start_samples),
@@ -732,7 +762,17 @@ fn append_track_window(
         }
         destination.clips.push(fragment);
     }
+}
 
+fn append_note_window(
+    destination: &mut TrackTimelineContent,
+    content: &TrackTimelineContent,
+    source: &CapturedTimelineSource,
+    window: CaptureWindow,
+) {
+    let window_start_beats = window.source_start_beats();
+    let window_end_beats = window.source_end_beats();
+    let destination_start_beats = window.destination_start_beats();
     for clip in &content.note_clips {
         let clip_end = clip.position_beats + clip.duration_beats;
         let overlap_start = clip.position_beats.max(window_start_beats);
@@ -745,11 +785,7 @@ fn append_track_window(
         let notes = captured_visible_notes(clip, local_start, local_end);
         let fragment = UiNoteClip {
             id: ClipId::new(),
-            name: if source.name == clip.name {
-                format!("Capture · {}", clip.name)
-            } else {
-                format!("Capture · {} · {}", source.name, clip.name)
-            },
+            name: captured_clip_name(source, &clip.name),
             position_beats: destination_start_beats + (overlap_start - window_start_beats),
             duration_beats: overlap_end - overlap_start,
             notes,
@@ -762,13 +798,6 @@ fn append_track_window(
         };
         destination.note_clips.push(fragment);
     }
-    performance_log::append_automation_window(
-        destination,
-        content,
-        window_start_beats,
-        window_end_beats,
-        destination_start_beats,
-    );
 }
 
 pub(crate) fn captured_audio_offset(clip: &UiClip, timeline_delta: u64) -> u64 {
