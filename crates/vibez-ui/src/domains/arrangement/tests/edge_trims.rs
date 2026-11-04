@@ -295,3 +295,161 @@ fn trimming_a_clip_to_its_own_start_does_nothing() {
     assert_eq!(action, ArrangementAction::default());
     assert!(engine.0.is_empty(), "{} engine commands", engine.0.len());
 }
+
+/// A note Clip at `position_beats`, 8 beats long, with notes at beats 0.5,
+/// 2 and 5 of its content.
+fn note_clip(a: &mut ArrangementFixture, position_beats: f64) -> ArrangementSelection {
+    let track_id = a.tracks[0].id;
+    let clip_id = ClipId::new();
+    a.tracks[0].note_clips.push(UiNoteClip {
+        id: clip_id,
+        name: "Notes".into(),
+        position_beats,
+        duration_beats: 8.0,
+        notes: [0.5, 2.0, 5.0]
+            .into_iter()
+            .map(|start_beat| MidiNote {
+                pitch: 60,
+                velocity: 100,
+                start_beat,
+                duration_beats: 0.5,
+            })
+            .collect(),
+        selected_notes: Default::default(),
+        start_marker_beats: 0.0,
+        loop_enabled: false,
+        loop_start_beats: 0.0,
+        loop_end_beats: 8.0,
+        groove_grid: vibez_core::perform::GrooveGrid::Off,
+    });
+    ArrangementSelection::NoteClip { track_id, clip_id }
+}
+
+fn trim_notes(a: &mut ArrangementFixture, anchor: ArrangementSelection, beats: f64) -> UiNoteClip {
+    trim(a, anchor, beats, &mut RecordingEngine::default());
+    a.tracks[0].note_clips[0].clone()
+}
+
+/// Arrangement beats of every note onset the Clip plays, repeats included.
+fn note_onsets(clip: &UiNoteClip) -> Vec<f64> {
+    let mut onsets: Vec<_> = clip
+        .notes
+        .iter()
+        .flat_map(|note| clip.note_occurrences(note.start_beat))
+        .map(|occurrence| clip.position_beats + occurrence)
+        .collect();
+    onsets.sort_by(f64::total_cmp);
+    onsets
+}
+
+#[test]
+fn trimming_a_note_clips_start_later_keeps_its_notes_in_place() {
+    let mut a = arrangement_with_tracks(1);
+    let anchor = note_clip(&mut a, 4.0);
+
+    let after = trim_notes(&mut a, anchor, 6.0);
+
+    assert_eq!((after.position_beats, after.duration_beats), (6.0, 6.0));
+    assert_eq!(note_onsets(&after), vec![6.0, 9.0]);
+    assert_eq!(after.notes.len(), 3, "the hidden note is kept");
+}
+
+#[test]
+fn trimming_a_note_clips_start_edits_it_in_the_engine_without_re_adding_its_notes() {
+    let mut a = arrangement_with_tracks(1);
+    let anchor = note_clip(&mut a, 4.0);
+    let mut engine = RecordingEngine::default();
+
+    trim(&mut a, anchor, 6.0, &mut engine);
+
+    assert!(engine.0.iter().any(|command| matches!(
+        command,
+        EngineCommand::MoveNoteClip {
+            new_position_beats,
+            ..
+        } if *new_position_beats == 6.0
+    )));
+    assert!(engine.0.iter().any(|command| matches!(
+        command,
+        EngineCommand::SetNoteClipBounds {
+            duration_beats,
+            start_marker_beats,
+            ..
+        } if (*duration_beats, *start_marker_beats) == (6.0, 2.0)
+    )));
+    assert!(!engine.0.iter().any(|command| matches!(
+        command,
+        EngineCommand::RemoveNoteClip(..) | EngineCommand::AddNoteClip { .. }
+    )));
+}
+
+#[test]
+fn trimming_a_note_clips_start_back_earlier_brings_its_notes_back_in_place() {
+    let mut a = arrangement_with_tracks(1);
+    let anchor = note_clip(&mut a, 4.0);
+    assert_eq!(trim_notes(&mut a, anchor, 10.0).position_beats, 10.0);
+
+    let after = trim_notes(&mut a, anchor, 4.0);
+
+    assert_eq!((after.position_beats, after.duration_beats), (4.0, 8.0));
+    assert_eq!(note_onsets(&after), vec![4.5, 6.0, 9.0]);
+}
+
+#[test]
+fn a_note_clips_start_stops_at_the_start_of_its_content() {
+    let mut a = arrangement_with_tracks(1);
+    let anchor = note_clip(&mut a, 4.0);
+    assert_eq!(trim_notes(&mut a, anchor, 5.0).position_beats, 5.0);
+
+    let after = trim_notes(&mut a, anchor, 2.0);
+
+    assert_eq!((after.position_beats, after.duration_beats), (4.0, 8.0));
+    assert_eq!(after.start_marker_beats, 0.0);
+}
+
+#[test]
+fn a_looped_note_clip_trimmed_past_its_loop_end_keeps_every_repeat_in_place() {
+    let mut a = arrangement_with_tracks(1);
+    let anchor = note_clip(&mut a, 4.0);
+    let clip = &mut a.tracks[0].note_clips[0];
+    clip.loop_enabled = true;
+    clip.loop_end_beats = 3.0;
+    let before = note_onsets(&a.tracks[0].note_clips[0]);
+
+    let after = trim_notes(&mut a, anchor, 7.5);
+
+    let kept: Vec<_> = before.into_iter().filter(|onset| *onset >= 7.5).collect();
+    assert_eq!(note_onsets(&after), kept);
+}
+
+#[test]
+fn trimming_a_mixed_selection_moves_audio_and_note_clip_starts_together() {
+    let mut a = arrangement_with_tracks(1);
+    let audio = sample_clip(&mut a, 1_000, 300, 200, 500);
+    let notes = note_clip(&mut a, 4.0);
+    a.selected_clips.insert(audio);
+    a.selected_clips.insert(notes);
+
+    trim(&mut a, notes, 5.0, &mut RecordingEngine::default());
+
+    assert_eq!(a.tracks[0].clips[0].position, 400);
+    assert_eq!(a.tracks[0].note_clips[0].position_beats, 5.0);
+}
+
+#[test]
+fn a_looped_note_clips_start_comes_back_earlier_as_far_as_its_loop_start() {
+    let mut a = arrangement_with_tracks(1);
+    let anchor = note_clip(&mut a, 4.0);
+    let clip = &mut a.tracks[0].note_clips[0];
+    clip.loop_enabled = true;
+    clip.start_marker_beats = 1.0;
+    clip.loop_start_beats = 1.0;
+    clip.loop_end_beats = 3.0;
+    let before = note_onsets(&a.tracks[0].note_clips[0]);
+    assert_eq!(trim_notes(&mut a, anchor, 5.5).position_beats, 5.5);
+
+    let after = trim_notes(&mut a, anchor, 2.0);
+
+    assert_eq!((after.position_beats, after.start_marker_beats), (4.0, 1.0));
+    assert_eq!(note_onsets(&after), before);
+}
