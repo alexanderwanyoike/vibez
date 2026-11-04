@@ -52,6 +52,21 @@ fn visible_pixel_columns(
     }
 }
 
+/// The rectangle a clip's body and border are painted in.
+fn clip_box(clip_x: f32, clip_y: f32, clip_w: f32, clip_h: f32) -> Rectangle {
+    Rectangle {
+        x: clip_x,
+        y: clip_y,
+        width: clip_w.max(2.0),
+        height: clip_h,
+    }
+}
+
+/// The path rectangle for a border of `stroke_width` around `body`.
+fn clip_outline(body: Rectangle, _stroke_width: f32) -> Rectangle {
+    body
+}
+
 /// Where a clip title is clipped to, and where its text starts.
 #[derive(Debug, PartialEq)]
 struct ClipTitleLayout {
@@ -232,13 +247,10 @@ impl TrackClipCanvas {
 
                 let clip_y = 4.0;
                 let clip_h = h - 8.0;
+                let body = clip_box(clip_x, clip_y, clip_w, clip_h);
 
                 // Clip body
-                frame.fill_rectangle(
-                    iced::Point::new(clip_x, clip_y),
-                    iced::Size::new(clip_w.max(2.0), clip_h),
-                    clip_color,
-                );
+                frame.fill_rectangle(body.position(), body.size(), clip_color);
 
                 // Mini waveform using track color (drawn below title bar)
                 if !clip.peaks.is_empty() && clip_w > 4.0 {
@@ -368,10 +380,8 @@ impl TrackClipCanvas {
                 let border_width = if is_selected { 2.0 } else { 1.0 };
 
                 // Clip border
-                let border = canvas::Path::rectangle(
-                    iced::Point::new(clip_x, clip_y),
-                    iced::Size::new(clip_w.max(2.0), clip_h),
-                );
+                let outline = clip_outline(body, border_width);
+                let border = canvas::Path::rectangle(outline.position(), outline.size());
                 frame.stroke(
                     &border,
                     canvas::Stroke::default()
@@ -382,8 +392,8 @@ impl TrackClipCanvas {
                 // Title bar separator
                 let title_sep_y = clip_y + CLIP_TITLE_HEIGHT;
                 let title_line = canvas::Path::line(
-                    iced::Point::new(clip_x, title_sep_y),
-                    iced::Point::new(clip_x + clip_w.max(2.0), title_sep_y),
+                    iced::Point::new(body.x, title_sep_y),
+                    iced::Point::new(body.x + body.width, title_sep_y),
                 );
                 frame.stroke(
                     &title_line,
@@ -502,13 +512,10 @@ impl TrackClipCanvas {
 
                 let clip_y = 4.0;
                 let clip_h = h - 8.0;
+                let body = clip_box(clip_x, clip_y, clip_w, clip_h);
 
                 // Clip body
-                frame.fill_rectangle(
-                    iced::Point::new(clip_x, clip_y),
-                    iced::Size::new(clip_w.max(2.0), clip_h),
-                    note_clip_color,
-                );
+                frame.fill_rectangle(body.position(), body.size(), note_clip_color);
 
                 let looping =
                     note_clip.loop_enabled && note_clip.loop_end_beats > note_clip.loop_start_beats;
@@ -586,10 +593,8 @@ impl TrackClipCanvas {
                 let border_width = if is_selected { 2.0 } else { 1.0 };
 
                 // Clip border
-                let border = canvas::Path::rectangle(
-                    iced::Point::new(clip_x, clip_y),
-                    iced::Size::new(clip_w.max(2.0), clip_h),
-                );
+                let outline = clip_outline(body, border_width);
+                let border = canvas::Path::rectangle(outline.position(), outline.size());
                 frame.stroke(
                     &border,
                     canvas::Stroke::default()
@@ -600,8 +605,8 @@ impl TrackClipCanvas {
                 // Title bar separator
                 let title_sep_y = clip_y + CLIP_TITLE_HEIGHT;
                 let title_line = canvas::Path::line(
-                    iced::Point::new(clip_x, title_sep_y),
-                    iced::Point::new(clip_x + clip_w.max(2.0), title_sep_y),
+                    iced::Point::new(body.x, title_sep_y),
+                    iced::Point::new(body.x + body.width, title_sep_y),
                 );
                 frame.stroke(
                     &title_line,
