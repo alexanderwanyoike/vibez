@@ -146,6 +146,16 @@ impl TimelineEditorState {
     fn find_content_mut(&mut self, track_id: TrackId) -> Option<&mut TrackTimelineContent> {
         Arc::make_mut(&mut self.timeline).get_mut(track_id)
     }
+
+    /// The Clips a gesture on `anchor` edits: the whole selection when it
+    /// holds `anchor`, otherwise `anchor` alone.
+    fn gesture_targets(&self, anchor: ArrangementSelection) -> Vec<ArrangementSelection> {
+        if self.selected_clips.contains(&anchor) {
+            self.selected_clips.iter().copied().collect()
+        } else {
+            vec![anchor]
+        }
+    }
 }
 
 mod project_tracks;

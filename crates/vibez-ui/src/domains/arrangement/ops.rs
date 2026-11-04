@@ -439,11 +439,7 @@ impl TimelineEditorState {
             return ArrangementAction::default();
         };
         let delta = new_duration_beats - anchor_duration;
-        let targets: Vec<_> = if self.selected_clips.contains(&anchor) {
-            self.selected_clips.iter().copied().collect()
-        } else {
-            vec![anchor]
-        };
+        let targets = self.gesture_targets(anchor);
         let mut max_end = None::<f64>;
         let mut changed = false;
         for target in targets {

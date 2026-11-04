@@ -29,11 +29,7 @@ impl TimelineEditorState {
             return ArrangementAction::default();
         };
         let delta = new_start_beats - anchor_start;
-        let targets: Vec<_> = if self.selected_clips.contains(&anchor) {
-            self.selected_clips.iter().copied().collect()
-        } else {
-            vec![anchor]
-        };
+        let targets = self.gesture_targets(anchor);
         let shortest_frames = (SHORTEST_LENGTH_BEATS * spb).round() as u64;
         let mut changed = false;
         for target in targets {
