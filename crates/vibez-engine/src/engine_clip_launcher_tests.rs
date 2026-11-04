@@ -1099,6 +1099,47 @@ fn a_legato_launch_on_a_silent_track_starts_from_the_beginning() {
     assert_samples(&output, &[0.0, 0.0, 1.0, 1.01]);
 }
 #[test]
+fn an_immediate_legato_swap_dips_across_small_callbacks() {
+    let a = TrackId::new();
+    let (mut engine, mut commands, _events) =
+        graph_engine(&[routing_channel(a), routing_channel(TrackId::MASTER)]);
+    for command in [
+        EngineCommand::SetSampleRate(48_000),
+        EngineCommand::SetBpm(120.0),
+        EngineCommand::add_track(a),
+    ] {
+        commands.push(command).unwrap();
+    }
+    engine.process(&mut [], 1);
+    launch(
+        &mut commands,
+        vec![clip(a, 1, &[0.5; 48_000], true)],
+        MusicalBoundary::OneBar,
+    );
+    let mut output = vec![0.0; 1_000];
+    engine.process(&mut output, 1);
+    launch(
+        &mut commands,
+        vec![legato(clip(a, 2, &[-0.5; 48_000], true))],
+        MusicalBoundary::Immediate,
+    );
+    for _ in 0..20 {
+        let mut block = [0.0; 16];
+        engine.process(&mut block, 1);
+        output.extend_from_slice(&block);
+    }
+    assert!(
+        (output.last().unwrap() + 0.5).abs() < 1e-5,
+        "the new clip plays"
+    );
+    let step = output
+        .windows(2)
+        .map(|pair| (pair[1] - pair[0]).abs())
+        .fold(0.0, f32::max);
+    assert!(step < 0.05, "{step} step at the swap");
+}
+
+#[test]
 fn a_legato_swap_dips_the_audio_around_the_boundary_instead_of_clicking() {
     let a = TrackId::new();
     let (mut engine, mut commands, _events) =
