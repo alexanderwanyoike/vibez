@@ -48,7 +48,8 @@ enum VerticalWheelRouting {
 pub struct ClipInteractionState {
     pub drag: Option<ClipDragAction>,
     pub shift_held: bool,
-    /// Bypasses the grid, as Alt does in Ableton.
+    /// Bypasses all snapping, read live through drags, as Alt does in
+    /// Ableton.
     pub alt_held: bool,
 }
 
@@ -702,7 +703,7 @@ impl canvas::Program<Message> for TrackClipCanvas {
                                         *original_position_beats,
                                         *length_beats,
                                         travel,
-                                        self.snap_context(false),
+                                        self.snap_context(state.alt_held),
                                     )
                                     .beat
                                     .max(0.0);
@@ -748,7 +749,10 @@ impl canvas::Program<Message> for TrackClipCanvas {
                                 }
                                 let end = self
                                     .snap_targets
-                                    .dragged_end(self.x_to_beat(local_x), self.snap_context(false))
+                                    .dragged_end(
+                                        self.x_to_beat(local_x),
+                                        self.snap_context(state.alt_held),
+                                    )
                                     .beat;
                                 let snapped = (end - clip_start_beat)
                                     .max(crate::state::SHORTEST_LENGTH_BEATS);
