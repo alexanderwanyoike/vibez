@@ -822,6 +822,15 @@ mod tests {
     }
 
     #[test]
+    fn the_default_grid_follows_zoom_so_a_fit_zoom_drag_lands_on_a_bar() {
+        let grid = ViewState::default().grid_config();
+        let fit_zoom_pixels_per_beat = 1.375;
+
+        assert_eq!(grid.snap_beat(116.5, fit_zoom_pixels_per_beat), 112.0);
+        assert_eq!(grid.effective_grid(80.0), SnapGrid::SIXTEENTH);
+    }
+
+    #[test]
     fn grid_commands_update_the_shared_editor_grid() {
         let mut v = ViewState::default();
         assert_eq!(v.grid.selected, SnapGrid::EIGHTH);
