@@ -298,12 +298,14 @@ enum DragAction {
         start_x: f32,
         start_y: f32,
         undo_gesture: UndoGestureId,
+        started: bool,
     },
     ResizeNote {
         note_index: usize,
         original_duration: f64,
         start_x: f32,
         undo_gesture: UndoGestureId,
+        started: bool,
     },
     DrawNote {
         clip_id: ClipId,
@@ -328,8 +330,9 @@ enum DragAction {
     },
 }
 
-/// Drag distance before an empty-space press counts as a rubber-band
-/// rather than a plain deselecting click.
+/// Pointer travel before a press counts as a drag rather than a click: a
+/// rubber-band rather than a deselect, or a note move or resize rather than
+/// a shaky click that would snap an off-grid note.
 const DRAG_MIN_PX: f32 = 4.0;
 
 /// Max time between clicks to count as double-click (ms).
@@ -532,6 +535,7 @@ impl canvas::Program<Message> for PianoRollWidget {
                                     original_duration: note.duration_beats,
                                     start_x: pos.x,
                                     undo_gesture: UndoGestureId::new(),
+                                    started: false,
                                 });
                                 return (
                                     canvas::event::Status::Captured,
@@ -590,6 +594,7 @@ impl canvas::Program<Message> for PianoRollWidget {
                                     start_x: pos.x,
                                     start_y: pos.y,
                                     undo_gesture: UndoGestureId::new(),
+                                    started: false,
                                 });
                             }
 
@@ -693,6 +698,31 @@ impl canvas::Program<Message> for PianoRollWidget {
                         return (canvas::event::Status::Captured, None);
                     }
 
+                    match state.drag.as_mut() {
+                        Some(DragAction::MoveNote {
+                            start_x,
+                            start_y,
+                            started,
+                            ..
+                        }) if !*started => {
+                            if (local.x - *start_x).abs() < DRAG_MIN_PX
+                                && (local.y - *start_y).abs() < DRAG_MIN_PX
+                            {
+                                return (canvas::event::Status::Captured, None);
+                            }
+                            *started = true;
+                        }
+                        Some(DragAction::ResizeNote {
+                            start_x, started, ..
+                        }) if !*started => {
+                            if (local.x - *start_x).abs() < DRAG_MIN_PX {
+                                return (canvas::event::Status::Captured, None);
+                            }
+                            *started = true;
+                        }
+                        _ => {}
+                    }
+
                     if let Some(ref drag) = state.drag {
                         if let Some(ref clip_data) = self.clip {
                             let geometry = self.geometry(&bounds);
@@ -704,6 +734,7 @@ impl canvas::Program<Message> for PianoRollWidget {
                                     start_x,
                                     start_y,
                                     undo_gesture,
+                                    ..
                                 } => {
                                     let dx = local.x - start_x;
                                     let dy = local.y - start_y;
@@ -737,6 +768,7 @@ impl canvas::Program<Message> for PianoRollWidget {
                                     original_duration,
                                     start_x,
                                     undo_gesture,
+                                    ..
                                 } => {
                                     let dx = local.x - start_x;
                                     let beat_delta = geometry.beats_for_width(dx);
