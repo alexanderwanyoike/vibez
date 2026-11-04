@@ -1082,6 +1082,25 @@ fn resize_length_after_modified_drag(
     to_beat: f64,
     modifiers: Modifiers,
 ) -> Option<f64> {
+    match end_drag_message(canvas, to_beat, modifiers) {
+        Some(Message::UndoGesture { edit, .. }) => match *edit {
+            Message::Arrangement(ArrangementMsg::ResizeSelectedClips {
+                new_duration_beats,
+                ..
+            }) => Some(new_duration_beats),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// Presses `canvas`'s first Clip on its right edge with `modifiers` held and
+/// drags the pointer to `to_beat`, returning what the pointer move sent.
+fn end_drag_message(
+    canvas: &TrackClipCanvas,
+    to_beat: f64,
+    modifiers: Modifiers,
+) -> Option<Message> {
     let clip = &canvas.clips[0];
     let end_beat = (clip.position + clip.duration) as f64 / canvas.spb();
     let start = Point::new(canvas.beat_to_x(end_beat) - 2.0, CLIP_Y + 4.0);
@@ -1101,21 +1120,12 @@ fn resize_length_after_modified_drag(
         iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left),
         start,
     );
-    match left_event(
+    left_event(
         canvas,
         &mut state,
         iced::mouse::Event::CursorMoved { position: target },
         target,
-    ) {
-        Some(Message::UndoGesture { edit, .. }) => match *edit {
-            Message::Arrangement(ArrangementMsg::ResizeSelectedClips {
-                new_duration_beats,
-                ..
-            }) => Some(new_duration_beats),
-            _ => None,
-        },
-        _ => None,
-    }
+    )
 }
 
 #[test]
@@ -1313,6 +1323,24 @@ fn moved_start_after_drag(
     travel: f64,
     modifiers: Modifiers,
 ) -> Option<f64> {
+    match title_drag_message(canvas, travel, modifiers) {
+        Some(Message::UndoGesture { edit, .. }) => match *edit {
+            Message::Arrangement(ArrangementMsg::MoveSelectedClips {
+                new_position_beats, ..
+            }) => Some(new_position_beats),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// Presses `canvas`'s first Clip title at beat 1.5 with `modifiers` held
+/// and drags it `travel` beats, returning what the pointer move sent.
+fn title_drag_message(
+    canvas: &TrackClipCanvas,
+    travel: f64,
+    modifiers: Modifiers,
+) -> Option<Message> {
     let start = Point::new(canvas.beat_to_x(1.5), CLIP_Y + 4.0);
     let target = Point::new(canvas.beat_to_x(1.5 + travel), start.y);
     let mut state = ClipInteractionState::default();
@@ -1329,20 +1357,60 @@ fn moved_start_after_drag(
         iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left),
         start,
     );
-    match left_event(
+    left_event(
         canvas,
         &mut state,
         iced::mouse::Event::CursorMoved { position: target },
         target,
-    ) {
-        Some(Message::UndoGesture { edit, .. }) => match *edit {
-            Message::Arrangement(ArrangementMsg::MoveSelectedClips {
-                new_position_beats, ..
-            }) => Some(new_position_beats),
-            _ => None,
-        },
+    )
+}
+
+/// The preview step a drag's pointer move carries.
+fn drag_step(message: Option<Message>) -> Option<crate::state::ClipDragStep> {
+    match message? {
+        Message::UndoGesture { edit, .. } => drag_step(Some(*edit)),
+        Message::Arrangement(ArrangementMsg::DragClips { step, .. }) => Some(step),
         _ => None,
     }
+}
+
+#[test]
+fn a_clip_move_step_reports_the_clip_edge_it_locked_onto() {
+    let (canvas, clip_id) = canvas_beside_an_off_grid_clip();
+
+    let step = drag_step(title_drag_message(&canvas, 4.15, Modifiers::empty())).expect("a step");
+
+    assert_eq!(step.kind, crate::state::ClipDragKind::Move);
+    assert_eq!((step.anchor, step.origin_track), (clip_id, canvas.track_id));
+    assert!((step.origin.start_beats - 1.1).abs() < 1e-4);
+    let guide = step.guide.expect("a snapped move locks onto a line");
+    assert_eq!(guide.kind, crate::timeline_snap::SnapTargetKind::ClipEdge);
+    assert!((guide.beat - 9.3).abs() < 1e-9, "guide at {}", guide.beat);
+}
+
+#[test]
+fn an_alt_clip_move_step_shows_no_guide() {
+    let (canvas, _) = canvas_beside_an_off_grid_clip();
+
+    let step = drag_step(title_drag_message(&canvas, 4.15, Modifiers::ALT)).expect("a step");
+
+    assert_eq!(step.guide, None);
+}
+
+#[test]
+fn a_clip_end_step_reports_the_grid_line_it_locked_onto() {
+    let (canvas, _) = canvas_with_off_grid_audio_clip();
+
+    let step = drag_step(end_drag_message(&canvas, 7.05, Modifiers::empty())).expect("a step");
+
+    assert_eq!(step.kind, crate::state::ClipDragKind::End);
+    assert_eq!(
+        step.guide,
+        Some(crate::timeline_snap::SnapTarget {
+            beat: 7.0,
+            kind: crate::timeline_snap::SnapTargetKind::Grid,
+        })
+    );
 }
 
 #[test]
