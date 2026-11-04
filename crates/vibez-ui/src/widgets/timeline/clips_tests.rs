@@ -1638,6 +1638,24 @@ fn the_pointer_shows_a_resize_cursor_on_either_clip_edge() {
     assert_eq!(cursor_at(3.0, 0.0), mouse::Interaction::Pointer);
 }
 
+#[test]
+fn the_pointer_is_an_i_beam_over_a_clip_body_and_an_arrow_on_an_empty_lane() {
+    let (canvas, _) = canvas_with_off_grid_audio_clip();
+    let bounds = Rectangle::new(Point::ORIGIN, Size::new(800.0, 80.0));
+    let cursor_at = |beat: f64, y: f32| {
+        <TrackClipCanvas as canvas::Program<Message>>::mouse_interaction(
+            &canvas,
+            &ClipInteractionState::default(),
+            bounds,
+            mouse::Cursor::Available(Point::new(canvas.beat_to_x(beat), y)),
+        )
+    };
+
+    assert_eq!(cursor_at(3.0, CLIP_BODY_Y), mouse::Interaction::Text);
+    assert_eq!(cursor_at(3.0, CLIP_Y + 4.0), mouse::Interaction::Grab);
+    assert_eq!(cursor_at(8.0, CLIP_BODY_Y), mouse::Interaction::Idle);
+}
+
 /// A three bar Clip at beat 4, unselected, at the zoom where it is 16 px
 /// wide, as at fit zoom on a real song.
 fn canvas_with_a_short_clip_at_fit_zoom() -> TrackClipCanvas {
