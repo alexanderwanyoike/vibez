@@ -32,6 +32,8 @@ pub enum ViewMsg {
     /// (Ableton's X).
     ZoomBack,
     ScrollArrangement(f64),
+    /// Jump straight to a zoom and scroll, as a ruler drag does.
+    SetViewport(TimelineViewport),
     SetSnapGrid(SnapGrid),
     NarrowGrid,
     WidenGrid,
@@ -190,6 +192,7 @@ impl ViewState {
                     self.viewport.clamp(ctx.total_beats, ctx.lane_width);
                 }
             }
+            ViewMsg::SetViewport(_) => {}
             ViewMsg::SetSnapGrid(grid) => {
                 self.snap_grid = grid;
                 self.adaptive_grid = false;
@@ -668,6 +671,35 @@ mod tests {
         );
 
         assert_eq!(v.viewport.scroll_offset_beats, 320.0 - visible);
+    }
+
+    #[test]
+    fn setting_the_viewport_keeps_the_scroll_inside_the_song() {
+        let mut v = ViewState::default();
+        let ctx = ViewCtx {
+            total_beats: 32.0,
+            ..ViewCtx::default()
+        };
+
+        v.update(
+            ViewMsg::SetViewport(TimelineViewport::new(3.0, 12.0)),
+            &TimelineEditorState::default(),
+            ctx,
+        );
+        assert_eq!(
+            (v.viewport.zoom_level, v.viewport.scroll_offset_beats),
+            (3.0, 12.0)
+        );
+
+        v.update(
+            ViewMsg::SetViewport(TimelineViewport::new(0.5, -4.0)),
+            &TimelineEditorState::default(),
+            ctx,
+        );
+        assert_eq!(
+            (v.viewport.zoom_level, v.viewport.scroll_offset_beats),
+            (0.5, 0.0)
+        );
     }
 
     #[test]

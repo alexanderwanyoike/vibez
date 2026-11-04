@@ -115,6 +115,14 @@ impl TimelineViewport {
             (start_beats - self.geometry().beats_for_width(FRAME_MARGIN_PIXELS)).max(0.0);
     }
 
+    /// The view a ruler drag that started on this view reaches. Dragging
+    /// `drag_down` pixels down zooms in, and the grabbed beat stays under
+    /// the pointer, so sideways movement pans.
+    pub fn ruler_dragged(self, grabbed_beat: f64, pointer_x: f32, drag_down: f32) -> Self {
+        let _ = (grabbed_beat, pointer_x, drag_down);
+        self
+    }
+
     pub fn clamp(&mut self, total_beats: f64, viewport_width: f32) {
         self.scroll_offset_beats = self
             .scroll_offset_beats
@@ -254,6 +262,37 @@ mod tests {
         assert_eq!(viewport.scroll_offset_beats, 44.0);
         viewport.scroll_by(-1_000.0, 64.0, 800.0);
         assert_eq!(viewport.scroll_offset_beats, 0.0);
+    }
+
+    #[test]
+    fn dragging_the_ruler_down_zooms_in_around_the_grabbed_beat() {
+        let start = TimelineViewport::new(1.0, 10.0);
+
+        let closer = start.ruler_dragged(30.0, 400.0, 50.0);
+        let wider = start.ruler_dragged(30.0, 400.0, -50.0);
+
+        assert!(closer.zoom_level > 1.5);
+        assert!(wider.zoom_level < 0.6);
+        for view in [closer, wider] {
+            assert!((view.geometry().x_to_beat(400.0) - 30.0).abs() < 1.0e-9);
+        }
+    }
+
+    #[test]
+    fn dragging_the_ruler_sideways_pans_with_the_pointer() {
+        let start = TimelineViewport::new(1.0, 10.0);
+
+        let panned = start.ruler_dragged(30.0, 300.0, 0.0);
+
+        assert_eq!(panned, TimelineViewport::new(1.0, 15.0));
+    }
+
+    #[test]
+    fn ruler_drag_zoom_stops_at_the_zoom_limits() {
+        let start = TimelineViewport::new(1.0, 0.0);
+
+        assert_eq!(start.ruler_dragged(0.0, 0.0, 10_000.0).zoom_level, 16.0);
+        assert_eq!(start.ruler_dragged(0.0, 0.0, -10_000.0).zoom_level, 0.01);
     }
 
     #[test]
