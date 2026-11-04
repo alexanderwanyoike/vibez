@@ -124,13 +124,16 @@ impl TransportState {
                 TransportAction::None
             }
             TransportMsg::Stop => {
+                let already_stopped = !self.will_play();
                 if self.playback != PlaybackPhase::Stopped {
                     self.playback = PlaybackPhase::Stopping;
                 }
                 engine.send(EngineCommand::Stop);
                 if !ctx.perform_playback_active {
-                    self.position_samples = 0;
-                    engine.send(EngineCommand::Seek(0));
+                    if already_stopped {
+                        self.play_start_samples = 0;
+                    }
+                    self.return_to_play_start(engine);
                 }
                 TransportAction::None
             }
@@ -146,8 +149,7 @@ impl TransportState {
                 if ctx.total_duration_samples > 0 {
                     let sample_pos =
                         (normalized.clamp(0.0, 1.0) * ctx.total_duration_samples as f64) as u64;
-                    self.position_samples = sample_pos;
-                    engine.send(EngineCommand::Seek(sample_pos));
+                    self.place_play_start(sample_pos, engine);
                 }
                 TransportAction::ClearTimeSelection
             }
@@ -158,8 +160,7 @@ impl TransportState {
                     0.0
                 };
                 let sample_pos = (beat.max(0.0) * samples_per_beat).round() as u64;
-                self.position_samples = sample_pos;
-                engine.send(EngineCommand::Seek(sample_pos));
+                self.place_play_start(sample_pos, engine);
                 TransportAction::ClearTimeSelection
             }
             TransportMsg::BpmChanged(text) => {
@@ -218,6 +219,16 @@ impl TransportState {
                 TransportAction::None
             }
         }
+    }
+
+    fn place_play_start(&mut self, samples: u64, engine: &mut impl EngineHandle) {
+        self.play_start_samples = samples;
+        self.return_to_play_start(engine);
+    }
+
+    fn return_to_play_start(&mut self, engine: &mut impl EngineHandle) {
+        self.position_samples = self.play_start_samples;
+        engine.send(EngineCommand::Seek(self.play_start_samples));
     }
 
     /// Apply a new tempo: clamp, notify the engine, remap the loop
