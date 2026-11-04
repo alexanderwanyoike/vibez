@@ -254,13 +254,38 @@ impl EngineHandle for EngineCommandQueue {
         }
         rings.transport.record_main_command(&cmd);
         if !self.pending.is_empty() {
-            self.pending.push_back(cmd);
+            if let Some(cmd) = supersede_waiting(&mut self.pending, cmd) {
+                self.pending.push_back(cmd);
+            }
             return;
         }
         if let Err(rtrb::PushError::Full(cmd)) = rings.commands.push(cmd) {
             self.pending.push_back(cmd);
         }
     }
+}
+
+/// Overwrites the waiting edit `cmd` makes redundant, so a drag stalled
+/// behind a content edit leaves one edit per clip in the queue, not one per
+/// mouse move. Returns `cmd` when nothing waiting can take its place.
+fn supersede_waiting(
+    pending: &mut VecDeque<EngineCommand>,
+    cmd: EngineCommand,
+) -> Option<EngineCommand> {
+    let Some(key) = cmd.clip_geometry_key() else {
+        return Some(cmd);
+    };
+    for waiting in pending.iter_mut().rev() {
+        match waiting.clip_geometry_key() {
+            Some(waiting_key) if waiting_key == key => {
+                *waiting = cmd;
+                return None;
+            }
+            Some(_) => {}
+            None => break,
+        }
+    }
+    Some(cmd)
 }
 
 /// Production implementation: wraps the real lock-free command queue.
