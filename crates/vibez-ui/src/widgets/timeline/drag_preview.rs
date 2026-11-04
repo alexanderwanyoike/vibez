@@ -54,8 +54,8 @@ pub(super) fn readout_box(
 }
 
 impl TrackClipCanvas {
-    /// The outline where the dragged Clip began, drawn under the Clips so
-    /// the dragged one covers it wherever they overlap.
+    /// The outline where the dragged Clip began, drawn under the moving
+    /// Clips so the dragged one covers it wherever they overlap.
     pub(super) fn draw_drag_origin(&self, frame: &mut canvas::Frame, height: f32) {
         let Some(step) = self
             .clip_drag

@@ -11,6 +11,7 @@ use super::clip_frame::{clip_box, draw_clip_back, draw_clip_front, LoopPasses};
 use super::drag_preview::draw_drag_shadow;
 use super::fade_drag::{fade_curve_handle, fade_handle_xs};
 use super::lane_grid::{lane_grid, GridLine};
+use super::lane_layers::StaticLayer;
 use super::loop_tint::{parts, LoopSpan};
 use super::note_marks::note_marks;
 use super::*;
@@ -84,22 +85,42 @@ impl TrackClipCanvas {
 
     pub(super) fn draw_impl(
         &self,
+        static_layer: &StaticLayer,
         renderer: &Renderer,
         bounds: Rectangle,
         cursor: mouse::Cursor,
     ) -> Vec<canvas::Geometry> {
-        let mut frame = canvas::Frame::new(renderer, bounds.size());
         // Layout can place the lane between pixel rows, which would smear
         // every clip edge and one pixel line across two rows.
-        frame.translate(whole_pixel_offset(bounds.position()));
+        let offset = whole_pixel_offset(bounds.position());
+        let resting = static_layer.draw(self, renderer, bounds, cursor, |frame| {
+            frame.translate(offset);
+            self.draw_static_layer(frame, bounds, cursor);
+        });
+        let mut frame = canvas::Frame::new(renderer, bounds.size());
+        frame.translate(offset);
+        self.draw_live_layer(&mut frame, bounds, cursor);
+        vec![resting, frame.into_geometry()]
+    }
+
+    /// True when a sample drag is hovering this lane, which paints a drop
+    /// indicator.
+    pub(super) fn drop_hover(&self, bounds: Rectangle, cursor: mouse::Cursor) -> bool {
+        self.sample_drop_active && cursor.position_in(bounds).is_some()
+    }
+
+    /// The lane background, grid and every Clip not moving with a drag.
+    fn draw_static_layer(
+        &self,
+        frame: &mut canvas::Frame,
+        bounds: Rectangle,
+        cursor: mouse::Cursor,
+    ) {
         let w = bounds.width;
         let h = bounds.height;
         let geometry = self.geometry();
         let ppb = geometry.pixels_per_beat();
-
-        // True when a sample drag is active and the cursor is hovering this
-        // lane. Used to paint a drop indicator.
-        let drop_hover = self.sample_drop_active && cursor.position_in(bounds).is_some();
+        let drop_hover = self.drop_hover(bounds, cursor);
         let drop_compatible = !self.is_instrument;
 
         // Background
@@ -136,7 +157,7 @@ impl TrackClipCanvas {
             }
         };
         // One pixel larger to cover what the whole-pixel shift uncovers.
-        fill_backdrop(&mut frame, 0.0, w + 1.0, h + 1.0, bg_color);
+        fill_backdrop(frame, 0.0, w + 1.0, h + 1.0, bg_color);
 
         // Grid lines use the same effective division as interaction.
         if self.bpm > 0.0 {
@@ -145,7 +166,7 @@ impl TrackClipCanvas {
             let ink = theme::text();
             let band = theme::blend(bg_color, ink, style.band);
             for &(start, end) in &grid.bands {
-                fill_backdrop(&mut frame, start, end, h, band);
+                fill_backdrop(frame, start, end, h, band);
             }
             for (x, line) in grid.lines {
                 let strength = match line {
@@ -162,25 +183,42 @@ impl TrackClipCanvas {
                 } else {
                     bg_color
                 };
-                fill_backdrop(
-                    &mut frame,
-                    x,
-                    x + 1.0,
-                    h,
-                    theme::blend(under, ink, strength),
-                );
+                fill_backdrop(frame, x, x + 1.0, h, theme::blend(under, ink, strength));
             }
         }
 
-        self.draw_drag_origin(&mut frame, h);
-
-        // Draw audio clips
         if self.bpm > 0.0 {
-            for clip in self.dragged_last(&self.clips, |clip| clip.clip_id) {
-                self.draw_audio_clip(&mut frame, clip, false, w, h);
+            for clip in self.resting_clips() {
+                self.draw_audio_clip(frame, clip, false, w, h);
+            }
+        }
+        if self.is_instrument && self.bpm > 0.0 {
+            for note_clip in self.resting_note_clips() {
+                self.draw_note_clip(frame, note_clip, false, w, h);
+            }
+        }
+    }
+
+    /// What moves while the lane plays or a Clip is dragged.
+    fn draw_live_layer(&self, frame: &mut canvas::Frame, bounds: Rectangle, cursor: mouse::Cursor) {
+        let w = bounds.width;
+        let h = bounds.height;
+        let geometry = self.geometry();
+        let drop_hover = self.drop_hover(bounds, cursor);
+        let drop_compatible = !self.is_instrument;
+
+        self.draw_drag_origin(frame, h);
+
+        // The drag's anchor last, so it rides above the Clips it passes.
+        if self.bpm > 0.0 {
+            for clip in self
+                .dragged_last(&self.clips, |clip| clip.clip_id)
+                .filter(|clip| self.is_moving(clip.clip_id))
+            {
+                self.draw_audio_clip(frame, clip, false, w, h);
             }
             if let Some(preview) = &self.audio_recording_preview {
-                self.draw_audio_clip(&mut frame, preview, true, w, h);
+                self.draw_audio_clip(frame, preview, true, w, h);
             }
         }
 
@@ -212,13 +250,15 @@ impl TrackClipCanvas {
             }
         }
 
-        // Draw note clips (for instrument tracks)
         if self.is_instrument && self.bpm > 0.0 {
-            for note_clip in self.dragged_last(&self.note_clips, |clip| clip.clip_id) {
-                self.draw_note_clip(&mut frame, note_clip, false, w, h);
+            for note_clip in self
+                .dragged_last(&self.note_clips, |clip| clip.clip_id)
+                .filter(|clip| self.is_moving(clip.clip_id))
+            {
+                self.draw_note_clip(frame, note_clip, false, w, h);
             }
             if let Some(preview) = &self.recording_preview {
-                self.draw_note_clip(&mut frame, preview, true, w, h);
+                self.draw_note_clip(frame, preview, true, w, h);
             }
         }
 
@@ -267,7 +307,7 @@ impl TrackClipCanvas {
             }
         }
 
-        self.draw_drag_guide(&mut frame, w, h);
+        self.draw_drag_guide(frame, w, h);
 
         // A playing Section has an engine-owned playback marker in addition
         // to its runtime edit cursor. Draw it first and in the accent colour
@@ -384,9 +424,7 @@ impl TrackClipCanvas {
             }
         }
 
-        self.draw_drag_readout(&mut frame, w, h);
-
-        vec![frame.into_geometry()]
+        self.draw_drag_readout(frame, w, h);
     }
 
     fn draw_audio_clip(

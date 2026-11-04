@@ -24,6 +24,7 @@ use crate::widgets::timeline::marquee;
 use vibez_core::id::{ClipId, TrackId};
 
 use super::clip_drag::ClipDragAction;
+use super::lane_layers::StaticLayer;
 use super::lane_timing;
 use super::note_summary::note_clip_summary;
 use super::*;
@@ -56,6 +57,7 @@ pub struct ClipInteractionState {
     /// Bypasses all snapping, read live through drags, as Alt does in
     /// Ableton.
     pub alt_held: bool,
+    pub(super) static_layer: StaticLayer,
 }
 
 /// Canvas for ONE track's clip area (waveforms, borders, names, playhead overlay).
@@ -373,14 +375,14 @@ impl canvas::Program<Message> for TrackClipCanvas {
 
     fn draw(
         &self,
-        _state: &Self::State,
+        state: &Self::State,
         renderer: &Renderer,
         _theme: &Theme,
         bounds: Rectangle,
         cursor: mouse::Cursor,
     ) -> Vec<canvas::Geometry> {
         let timing = lane_timing::start();
-        let geometry = self.draw_impl(renderer, bounds, cursor);
+        let geometry = self.draw_impl(&state.static_layer, renderer, bounds, cursor);
         lane_timing::finish(timing, lane_timing::Phase::Draw);
         geometry
     }
