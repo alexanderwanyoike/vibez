@@ -354,6 +354,18 @@ mod tests {
     }
 
     #[test]
+    fn a_looping_start_marker_is_bounded_by_the_loop_not_the_clip_length() {
+        let frames = FrameClipTimeline::new(60, 0, 80, 40, true);
+        assert_eq!(frames.clamp_start(60, 0, 40), 60);
+        assert!(frames.accepts_start(70, 0, 40));
+        assert_eq!(frames.clamp_start(90, 0, 40), 79);
+
+        let beats = BeatClipTimeline::new(3.0, 0.0, 4.0, 2.0, true);
+        assert_eq!(beats.clamp_start(3.0, 0.0, 2.0), 3.0);
+        assert!(beats.accepts_start(3.5, 0.0, 2.0));
+    }
+
+    #[test]
     fn clamp_start_uses_each_flavours_native_minimum_gap() {
         let frames = FrameClipTimeline::new(0, 0, 100, 100, true);
         assert_eq!(frames.clamp_start(100, 0, 100), 99);
