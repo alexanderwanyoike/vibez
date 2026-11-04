@@ -2,6 +2,7 @@
 
 use vibez_core::time::BEATS_PER_BAR;
 
+use super::ruler_scale::{is_multiple, label_step_beats};
 use crate::timeline_geometry::TimelineGeometry;
 
 /// How strongly a grid line is drawn.
@@ -32,7 +33,7 @@ pub(super) fn lane_grid(geometry: TimelineGeometry, width: f32, step_beats: f64)
     }
     let first_beat = geometry.x_to_beat(0.0);
     let last_beat = geometry.x_to_beat(width);
-    let label_beats = super::ruler_scale::label_step_beats(ppb);
+    let label_beats = label_step_beats(ppb);
 
     let band_beats = label_beats.max(BEATS_PER_BAR);
     let mut bands = Vec::new();
@@ -82,11 +83,6 @@ pub(super) fn lane_grid(geometry: TimelineGeometry, width: f32, step_beats: f64)
     }
 
     LaneGrid { bands, lines }
-}
-
-fn is_multiple(beat: f64, of: f64) -> bool {
-    let ratio = beat / of;
-    (ratio - ratio.round()).abs() < 1e-6
 }
 
 #[cfg(test)]

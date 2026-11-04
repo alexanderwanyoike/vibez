@@ -72,7 +72,7 @@ fn label_text(beat: f64, label_beats: f64) -> String {
     }
 }
 
-fn is_multiple(beat: f64, of: f64) -> bool {
+pub(super) fn is_multiple(beat: f64, of: f64) -> bool {
     let ratio = beat / of;
     (ratio - ratio.round()).abs() < 1e-6
 }
