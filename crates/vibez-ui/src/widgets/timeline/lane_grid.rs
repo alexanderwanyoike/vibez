@@ -34,16 +34,17 @@ pub(super) fn lane_grid(geometry: TimelineGeometry, width: f32, step_beats: f64)
     let last_beat = geometry.x_to_beat(width);
     let label_beats = super::ruler_scale::label_step_beats(ppb);
 
+    let band_beats = label_beats.max(BEATS_PER_BAR);
     let mut bands = Vec::new();
-    let first_band = (first_beat / label_beats).floor() as i64;
-    let last_band = (last_beat / label_beats).ceil() as i64;
+    let first_band = (first_beat / band_beats).floor() as i64;
+    let last_band = (last_beat / band_beats).ceil() as i64;
     for band in (first_band..last_band).filter(|band| band.rem_euclid(2) == 1) {
         let start = geometry
-            .beat_to_x(band as f64 * label_beats)
+            .beat_to_x(band as f64 * band_beats)
             .round()
             .max(0.0);
         let end = geometry
-            .beat_to_x((band + 1) as f64 * label_beats)
+            .beat_to_x((band + 1) as f64 * band_beats)
             .round()
             .min(width.floor());
         if end > start {

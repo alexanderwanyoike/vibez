@@ -99,7 +99,7 @@ impl canvas::Program<Message> for RulerWidget {
             let ppb = self.pixels_per_beat();
             let pixels_per_bar = ppb * beats_per_bar as f32;
 
-            let bar_step = (label_step_beats(ppb) / beats_per_bar) as i64;
+            let bar_step = ((label_step_beats(ppb) / beats_per_bar) as i64).max(1);
 
             for beat_i in start_beat..end_beat {
                 let beat = beat_i as f64;

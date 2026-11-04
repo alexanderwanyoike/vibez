@@ -2,8 +2,15 @@
 
 use vibez_core::time::BEATS_PER_BAR;
 
-/// Beats between ruler labels, about 60 px apart at any zoom.
+/// Beats between ruler labels: bars about 60 px apart, then every beat
+/// once a beat is 40 px wide, then every sixteenth once one is 60 px wide.
 pub(super) fn label_step_beats(pixels_per_beat: f32) -> f64 {
+    if pixels_per_beat * 0.25 >= 60.0 {
+        return 0.25;
+    }
+    if pixels_per_beat >= 40.0 {
+        return 1.0;
+    }
     let pixels_per_bar = pixels_per_beat * BEATS_PER_BAR as f32;
     let bars = if pixels_per_bar >= 60.0 {
         1.0
