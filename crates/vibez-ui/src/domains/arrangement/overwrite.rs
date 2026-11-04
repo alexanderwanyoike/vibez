@@ -4,10 +4,15 @@
 use std::collections::HashSet;
 
 use vibez_core::id::ClipId;
+use vibez_engine::commands::EngineCommand;
 
 use super::clip_trims::{audio_start_trimmed, note_start_trimmed};
 use super::fragment_geometry::audio_fragment;
-use crate::state::{TrackTimelineContent, UiClip, UiNoteClip, SHORTEST_LENGTH_BEATS};
+use super::EngineHandle;
+use crate::state::{
+    ArrangementSelection, TimelineEditorState, TrackTimelineContent, UiClip, UiNoteClip,
+    SHORTEST_LENGTH_BEATS,
+};
 
 const BEAT_EPSILON: f64 = 1e-9;
 
@@ -87,4 +92,63 @@ pub(super) fn lane_overwrite(
         edits.notes.push((clip.id, pieces));
     }
     edits
+}
+
+impl TimelineEditorState {
+    /// Each of `placed` overwrites the other Clips under it on its lane.
+    /// Returns whether any Clip was overwritten.
+    pub(super) fn overwrite_under(
+        &mut self,
+        engine: &mut impl EngineHandle,
+        placed: &[ArrangementSelection],
+        samples_per_beat: f64,
+    ) -> bool {
+        if samples_per_beat <= 0.0 {
+            return false;
+        }
+        let mut changed = false;
+        for selection in placed {
+            let track_id = selection.track_id();
+            let (Some(lane), Some(span)) = (
+                self.find_content(track_id),
+                self.clip_span(*selection, samples_per_beat),
+            ) else {
+                continue;
+            };
+            let range = (span.start_beats, span.end_beats());
+            let on_lane: HashSet<ClipId> = placed
+                .iter()
+                .filter(|other| other.track_id() == track_id)
+                .map(|other| other.clip_id())
+                .collect();
+            let edits = lane_overwrite(lane, range, &on_lane, samples_per_beat);
+            let edits_lane = !edits.audio.is_empty() || !edits.notes.is_empty();
+            if edits_lane && !changed {
+                engine.send(EngineCommand::BeginContentRebuild);
+            }
+            for (clip_id, pieces) in edits.audio {
+                if !pieces.iter().any(|piece| piece.id == clip_id) {
+                    self.selected_clips
+                        .remove(&ArrangementSelection::AudioClip { track_id, clip_id });
+                }
+                self.replace_audio_clip(engine, track_id, clip_id, pieces);
+                changed = true;
+            }
+            for (clip_id, pieces) in edits.notes {
+                if !pieces.iter().any(|piece| piece.id == clip_id) {
+                    self.selected_clips
+                        .remove(&ArrangementSelection::NoteClip { track_id, clip_id });
+                    if self.selected_note_clip == Some((track_id, clip_id)) {
+                        self.selected_note_clip = None;
+                    }
+                }
+                self.replace_note_clip(engine, track_id, clip_id, pieces);
+                changed = true;
+            }
+        }
+        if changed {
+            engine.send(EngineCommand::EndContentRebuild);
+        }
+        changed
+    }
 }

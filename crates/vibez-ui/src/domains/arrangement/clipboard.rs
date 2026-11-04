@@ -367,7 +367,8 @@ impl TimelineEditorState {
     }
 
     /// Adds each clip to its lane so that `origin_beats` lands on
-    /// `anchor_beats`, and returns the new clips as a selection.
+    /// `anchor_beats`, overwriting what it lands on, and returns the new
+    /// clips as a selection.
     pub(super) fn place_clips(
         &mut self,
         entries: impl IntoIterator<Item = (ClipboardClip, TrackId)>,
@@ -426,6 +427,8 @@ impl TimelineEditorState {
                 }
             }
         }
+        let placed: Vec<_> = selected.iter().copied().collect();
+        self.overwrite_under(engine, &placed, spb);
         selected
     }
 }

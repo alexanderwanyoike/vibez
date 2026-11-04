@@ -162,7 +162,7 @@ fn a_time_selection_duplicates_its_range_right_after_itself() {
     let action = duplicate(&mut a);
 
     assert!(action.mark_dirty);
-    assert_eq!(audio_spans(&a, 0), vec![(0, 800), (600, 400)]);
+    assert_eq!(audio_spans(&a, 0), vec![(0, 600), (600, 400)]);
     assert_eq!(note_spans(&a, 1), vec![(3.0, 2.0), (7.0, 2.0)]);
     assert!(a.time_selection_active);
     assert_eq!(
