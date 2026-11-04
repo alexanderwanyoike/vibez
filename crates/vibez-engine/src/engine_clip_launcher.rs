@@ -297,22 +297,16 @@ impl AudioEngine {
             let declick_frames = u64::from(self.sample_rate / 1000);
             let batch_waiting = self.clip_batch_waiting_boundary();
             for track in &mut self.tracks {
-                let swap_in = track.legato_swap_in(now, batch_waiting);
-                track.update_launch_declick(swap_in, declick_frames);
-                if let Some(frames) = swap_in.filter(|frames| *frames > declick_frames) {
-                    count = count.min((frames - declick_frames) as usize);
-                }
-            }
-            for track in &self.tracks {
-                if let Some(queued) = track
-                    .queued_clip
-                    .as_ref()
-                    .filter(|queued| !queued.pending_batch || self.clip_batch_waiting_boundary())
-                {
+                if let Some(queued) = track.scheduled_clip(batch_waiting) {
                     count = count.min(queued.effective_at.saturating_sub(now) as usize);
                 }
                 if let Some(active) = track.active_clip {
                     count = count.min(active.length.saturating_sub(active.position) as usize);
+                }
+                let swap_in = track.legato_swap_in(now, batch_waiting);
+                track.update_launch_declick(swap_in, declick_frames);
+                if let Some(frames) = swap_in.filter(|frames| *frames > declick_frames) {
+                    count = count.min((frames - declick_frames) as usize);
                 }
             }
             debug_assert!(count > 0);

@@ -1,7 +1,7 @@
 //! How a launched Clip takes over a Track's launcher slot.
 
 use super::*;
-use crate::playback_source::{ActiveClipPlayback, PreparedClipPlayback};
+use crate::playback_source::{ActiveClipPlayback, PreparedClipPlayback, QueuedClipPlayback};
 use vibez_core::perform::ClipLaunchMode;
 
 impl EngineTrack {
@@ -27,13 +27,19 @@ impl EngineTrack {
         self.pickup_launch_notes = start > 0;
     }
 
+    /// The queued Clip once its swap time is final. A batch's time can still
+    /// move until the whole batch is staged.
+    pub(crate) fn scheduled_clip(&self, batch_waiting: bool) -> Option<&QueuedClipPlayback> {
+        self.queued_clip
+            .as_ref()
+            .filter(|queued| !queued.pending_batch || batch_waiting)
+    }
+
     /// Frames until a queued Legato Clip replaces the one playing.
     pub(crate) fn legato_swap_in(&self, now: u64, batch_waiting: bool) -> Option<u64> {
         self.active_clip?;
-        self.queued_clip
-            .as_ref()
+        self.scheduled_clip(batch_waiting)
             .filter(|queued| queued.prepared.launch_mode == ClipLaunchMode::Legato)
-            .filter(|queued| !queued.pending_batch || batch_waiting)
             .map(|queued| queued.effective_at.saturating_sub(now))
     }
 
