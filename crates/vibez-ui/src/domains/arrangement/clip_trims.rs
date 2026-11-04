@@ -5,8 +5,9 @@ use vibez_core::track::ClipPlaybackDirection;
 
 use super::fragment_geometry::audio_fragment;
 use super::{ArrangementAction, ArrangementCtx, EngineHandle};
-use crate::state::SHORTEST_LENGTH_BEATS;
-use crate::state::{ArrangementSelection, TimelineEditorState, UiClip};
+use crate::state::{
+    ArrangementSelection, TimelineEditorState, UiClip, UiNoteClip, SHORTEST_LENGTH_BEATS,
+};
 
 impl TimelineEditorState {
     pub(super) fn op_trim_selected_clips_start(
@@ -32,16 +33,28 @@ impl TimelineEditorState {
         let shortest_frames = (SHORTEST_LENGTH_BEATS * spb).round() as u64;
         let mut changed = false;
         for target in targets {
-            if let ArrangementSelection::AudioClip { track_id, clip_id } = target {
-                let trimmed = self
-                    .find_content(track_id)
-                    .and_then(|t| t.clips.iter().find(|c| c.id == clip_id))
-                    .map(|clip| {
-                        audio_start_trimmed(clip, (delta * spb).round() as i64, shortest_frames)
-                    });
-                if let Some(trimmed) = trimmed.flatten() {
-                    changed = true;
-                    self.replace_audio_clip(engine, track_id, clip_id, vec![trimmed]);
+            match target {
+                ArrangementSelection::AudioClip { track_id, clip_id } => {
+                    let trimmed = self
+                        .find_content(track_id)
+                        .and_then(|t| t.clips.iter().find(|c| c.id == clip_id))
+                        .and_then(|clip| {
+                            audio_start_trimmed(clip, (delta * spb).round() as i64, shortest_frames)
+                        });
+                    if let Some(trimmed) = trimmed {
+                        changed = true;
+                        self.replace_audio_clip(engine, track_id, clip_id, vec![trimmed]);
+                    }
+                }
+                ArrangementSelection::NoteClip { track_id, clip_id } => {
+                    let trimmed = self
+                        .find_content(track_id)
+                        .and_then(|t| t.note_clips.iter().find(|c| c.id == clip_id))
+                        .and_then(|clip| note_start_trimmed(clip, delta));
+                    if let Some(trimmed) = trimmed {
+                        changed = true;
+                        self.replace_note_clip(engine, track_id, clip_id, vec![trimmed]);
+                    }
                 }
             }
         }
@@ -98,5 +111,28 @@ fn audio_start_trimmed(clip: &UiClip, delta: i64, shortest: u64) -> Option<UiCli
         .checked_sub(clip.duration)
         .filter(|g| *g > 0)?;
     trimmed.position -= gained;
+    Some(trimmed)
+}
+
+/// `clip` with its start `delta` beats later (earlier when negative), or
+/// `None` when it cannot move that way. Its notes stay where they are in
+/// the content; the start marker moves over them.
+fn note_start_trimmed(clip: &UiNoteClip, delta: f64) -> Option<UiNoteClip> {
+    let earliest = if clip.loop_enabled {
+        clip.loop_start_beats.min(clip.start_marker_beats)
+    } else {
+        0.0
+    };
+    let delta = delta
+        .max(earliest - clip.start_marker_beats)
+        .max(-clip.position_beats)
+        .min((clip.duration_beats - SHORTEST_LENGTH_BEATS).max(0.0));
+    if delta == 0.0 {
+        return None;
+    }
+    let mut trimmed = clip.clone();
+    trimmed.start_marker_beats = clip.timeline().source_at(delta);
+    trimmed.position_beats += delta;
+    trimmed.duration_beats -= delta;
     Some(trimmed)
 }

@@ -11,7 +11,7 @@ use vibez_core::id::{ClipId, TrackId};
 use vibez_core::midi::MidiNote;
 use vibez_engine::commands::EngineCommand;
 
-use super::clip_edges::sync_audio_edges;
+use super::clip_edges::{sync_audio_edges, sync_note_edges};
 use super::fragment_geometry::{audio_fragment, unmuted_beat_ranges, visible_notes};
 use super::EngineHandle;
 use crate::state::{
@@ -653,18 +653,35 @@ impl TimelineEditorState {
     }
 
     /// Note-clip counterpart of [`Self::replace_audio_clip`].
-    fn replace_note_clip(
+    pub(super) fn replace_note_clip(
         &mut self,
         engine: &mut impl EngineHandle,
         track_id: TrackId,
         original_id: ClipId,
         fragments: Vec<UiNoteClip>,
     ) {
-        engine.send(EngineCommand::RemoveNoteClip(track_id, original_id));
+        let original = self
+            .find_content(track_id)
+            .and_then(|content| {
+                content
+                    .note_clips
+                    .iter()
+                    .find(|clip| clip.id == original_id)
+            })
+            .cloned();
+        let kept = original
+            .zip(fragments.iter().find(|fragment| fragment.id == original_id))
+            .is_some_and(|(original, kept)| sync_note_edges(engine, track_id, &original, kept));
+        if !kept {
+            engine.send(EngineCommand::RemoveNoteClip(track_id, original_id));
+        }
         if let Some(content) = self.find_content_mut(track_id) {
             content.note_clips.retain(|clip| clip.id != original_id);
         }
-        for clip in &fragments {
+        for clip in fragments
+            .iter()
+            .filter(|fragment| !kept || fragment.id != original_id)
+        {
             engine.send(clip.add_command(track_id));
         }
         if let Some(content) = self.find_content_mut(track_id) {

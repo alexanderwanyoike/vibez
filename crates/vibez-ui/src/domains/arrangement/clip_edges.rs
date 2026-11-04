@@ -6,7 +6,7 @@ use vibez_core::id::TrackId;
 use vibez_engine::commands::EngineCommand;
 
 use super::EngineHandle;
-use crate::state::UiClip;
+use crate::state::{UiClip, UiNoteClip};
 
 /// Brings the engine's `old` to `new` in place, so the Clip keeps sounding
 /// through a trim. Returns `false`, sending nothing, when `new` differs in
@@ -47,5 +47,30 @@ pub(super) fn sync_audio_edges(
             fades: new.fades,
         });
     }
+    true
+}
+
+/// Note-clip counterpart of [`sync_audio_edges`].
+pub(super) fn sync_note_edges(
+    engine: &mut impl EngineHandle,
+    track_id: TrackId,
+    old: &UiNoteClip,
+    new: &UiNoteClip,
+) -> bool {
+    let same_content = old.id == new.id
+        && old.notes == new.notes
+        && old.loop_enabled == new.loop_enabled
+        && old.groove_grid == new.groove_grid;
+    if !same_content {
+        return false;
+    }
+    if new.position_beats != old.position_beats {
+        engine.send(EngineCommand::MoveNoteClip {
+            track_id,
+            clip_id: new.id,
+            new_position_beats: new.position_beats,
+        });
+    }
+    engine.send(new.bounds_command(track_id));
     true
 }
