@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::widgets::timeline::clip_drag::ClipEdge;
+use crate::widgets::timeline::clip_frame::clip_box;
 
 /// The Clip under the pointer.
 #[derive(Debug, Clone, Copy)]
@@ -94,10 +95,14 @@ impl TrackClipCanvas {
         });
 
         note_clips.chain(audio_clips).find_map(|hit| {
-            let clip_x = self.beat_to_x(hit.position_beats);
-            let clip_w = geometry.width_for_beats(hit.duration_beats);
-            (pos_x >= clip_x && pos_x <= clip_x + clip_w).then(|| ClipHit {
-                edge: edge_at(pos_x, clip_x, clip_w),
+            let body = clip_box(
+                self.beat_to_x(hit.position_beats),
+                CLIP_Y,
+                geometry.width_for_beats(hit.duration_beats),
+                0.0,
+            );
+            (pos_x >= body.x && pos_x <= body.x + body.width).then(|| ClipHit {
+                edge: edge_at(pos_x, body.x, body.width),
                 ..hit
             })
         })
