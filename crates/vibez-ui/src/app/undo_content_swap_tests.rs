@@ -151,3 +151,87 @@ fn undoing_a_clip_move_swaps_only_that_clip() {
         0.0
     );
 }
+
+fn built_in_gain() -> UiEffect {
+    let device = vibez_dsp::factory::create_effect(EffectType::Gain, 44_100.0);
+    UiEffect {
+        reconfiguration_failed: false,
+        latency_samples: Some(0),
+        id: EffectId::new(),
+        effect_type: EffectType::Gain,
+        bypass: false,
+        params: device
+            .param_descriptors()
+            .iter()
+            .map(|p| p.default)
+            .collect(),
+        descriptors: device.param_descriptors(),
+        plugin_name: None,
+        has_plugin_gui: false,
+        plugin_ref: None,
+        external_inputs: Vec::new(),
+        inactive_sidechains: Vec::new(),
+        sidechains: Vec::new(),
+    }
+}
+
+#[test]
+fn undoing_mixer_and_device_value_changes_sends_them_as_controls() {
+    let (mut app, mut commands, keys, _) = two_track_project();
+    let drums = app.state.project_tracks.tracks[1].id;
+    let effect = built_in_gain();
+    let effect_id = effect.id;
+    let original_param = effect.params[0];
+    Arc::make_mut(&mut app.state.project_tracks).tracks[1]
+        .effects
+        .push(effect);
+    app.push_undo_snapshot(None);
+    let tracks = Arc::make_mut(&mut app.state.project_tracks);
+    tracks.tracks[0].mute = true;
+    tracks.tracks[1].gain = 0.5;
+    tracks.tracks[1].pan = 0.1;
+    tracks.tracks[1].effects[0].params[0] = original_param + 0.25;
+    tracks.tracks[1].effects[0].bypass = true;
+    drain(&mut commands);
+
+    let _ = app.update_and_refresh_clips(Message::Project(ProjectMsg::Undo));
+
+    let sent = drain(&mut commands);
+    assert!(
+        !sent.iter().any(|command| matches!(
+            command,
+            EngineCommand::RemoveTrack(_)
+                | EngineCommand::AddTrack(_)
+                | EngineCommand::RemoveEffect(..)
+                | EngineCommand::InsertEffect { .. }
+                | EngineCommand::SetInstrument { .. }
+        )),
+        "a value change leaves tracks and devices in the engine"
+    );
+    assert!(
+        !app.state.status_text.contains("plugin"),
+        "no plugin reloads: {}",
+        app.state.status_text
+    );
+    assert!(sent
+        .iter()
+        .any(|command| matches!(command, EngineCommand::SetTrackMute(id, false) if *id == keys)));
+    assert!(sent.iter().any(
+        |command| matches!(command, EngineCommand::SetTrackGain(id, gain) if *id == drums && *gain == 1.0)
+    ));
+    assert!(sent.iter().any(
+        |command| matches!(command, EngineCommand::SetTrackPan(id, pan) if *id == drums && *pan == 0.5)
+    ));
+    assert!(sent.iter().any(|command| matches!(
+        command,
+        EngineCommand::SetEffectParam { track_id, effect_id: id, param_index: 0, value }
+            if *track_id == drums && *id == effect_id && *value == original_param
+    )));
+    assert!(sent.iter().any(|command| matches!(
+        command,
+        EngineCommand::SetEffectBypass { track_id, effect_id: id, bypass: false }
+            if *track_id == drums && *id == effect_id
+    )));
+    assert!(!app.state.project_tracks.tracks[0].mute);
+    assert_eq!(app.state.project_tracks.tracks[1].gain, 1.0);
+}
