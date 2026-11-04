@@ -15,6 +15,9 @@ const MINOR_TICK_HEIGHT: f32 = 4.0;
 /// The brace's inset from the top and bottom of the loop strip.
 const BRACE_INSET: f32 = 3.0;
 const BRACE_RADIUS: f32 = 2.0;
+const PLAY_START_SIZE: Size = Size::new(9.0, 6.0);
+/// The playhead's head sits on the bottom edge, over the lane's line.
+const PLAYHEAD_SIZE: Size = Size::new(11.0, 7.0);
 
 impl RulerWidget {
     pub(super) fn paint(&self, renderer: &Renderer, size: Size) -> canvas::Geometry {
@@ -30,7 +33,7 @@ impl RulerWidget {
         draw_marks(&mut frame, self.geometry(), width, top, size.height);
         self.paint_time_selection(&mut frame, width, top, size.height);
         self.paint_play_start(&mut frame, width, top);
-        self.paint_playhead(&mut frame, width, top, size.height);
+        self.paint_playhead(&mut frame, width, size.height);
         frame.into_geometry()
     }
 
@@ -116,27 +119,29 @@ impl RulerWidget {
         };
         let x = self.geometry().beat_to_x(play_start);
         if (0.0..=width).contains(&x) {
-            let marker = canvas::Path::new(|path| {
-                path.move_to(Point::new(x - 5.0, top));
-                path.line_to(Point::new(x + 5.0, top));
-                path.line_to(Point::new(x, top + 7.0));
-                path.close();
-            });
-            frame.fill(&marker, theme::playhead());
+            frame.fill(&down_triangle(x, top, PLAY_START_SIZE), theme::text_dim());
         }
     }
 
-    fn paint_playhead(&self, frame: &mut canvas::Frame, width: f32, top: f32, bottom: f32) {
+    fn paint_playhead(&self, frame: &mut canvas::Frame, width: f32, bottom: f32) {
         let x = self.geometry().beat_to_x(self.playhead_beats);
         if (0.0..=width).contains(&x) {
-            frame.stroke(
-                &canvas::Path::line(Point::new(x, top), Point::new(x, bottom)),
-                canvas::Stroke::default()
-                    .with_color(theme::playhead())
-                    .with_width(2.0),
+            frame.fill(
+                &down_triangle(x, bottom - PLAYHEAD_SIZE.height, PLAYHEAD_SIZE),
+                theme::playhead(),
             );
         }
     }
+}
+
+/// A downward triangle `size` big, centred on `x` with its base at `top`.
+fn down_triangle(x: f32, top: f32, size: Size) -> canvas::Path {
+    canvas::Path::new(|path| {
+        path.move_to(Point::new(x - size.width / 2.0, top));
+        path.line_to(Point::new(x + size.width / 2.0, top));
+        path.line_to(Point::new(x, top + size.height));
+        path.close();
+    })
 }
 
 /// The number strip's labels and ticks between `top` and `bottom`.
