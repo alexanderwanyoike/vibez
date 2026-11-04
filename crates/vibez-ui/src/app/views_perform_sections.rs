@@ -256,6 +256,16 @@ impl App {
                     (track.id, extra_height)
                 }),
             );
+            let snap_targets = std::sync::Arc::new(
+                crate::timeline_snap::SnapTargets::for_editor(
+                    editor,
+                    self.state.transport.samples_per_beat(),
+                )
+                .with_marker(
+                    self.state.perform.section_editor.edit_cursor_beats(),
+                    crate::timeline_snap::SnapTargetKind::Playhead,
+                ),
+            );
             let mut track_rows = column![].width(Length::Fill);
 
             for (index, track) in self.state.project_tracks.tracks.iter().enumerate() {
@@ -486,6 +496,7 @@ impl App {
                     row_spans.clone(),
                     editor.marquee.as_ref().map(|marquee| marquee.rect),
                 )
+                .with_snap_targets(snap_targets.clone())
                 .with_vertical_track_scrolling();
                 if let Some(preview) = recording_preview.as_ref().filter(|preview| {
                     preview.target_id == section_id && preview.track_id == track.id

@@ -19,6 +19,7 @@ use crate::message::Message;
 use crate::state::{ArrangementSelection, ContextMenuTarget, TrackTimelineContent};
 use crate::theme as th;
 use crate::timeline_geometry::TimelineGeometry;
+use crate::timeline_snap::{SnapTargetKind, SnapTargets};
 use crate::widgets::arrange_corner::{arrange_corner, arrangement_size_labels, song_length_label};
 use crate::widgets::timeline::{
     build_row_spans, ArrangementMinimap, MinimapTrack, RulerWidget, TimeRulerWidget, TimelineClip,
@@ -229,6 +230,19 @@ impl App {
             }),
         );
 
+        let mut snap_targets =
+            SnapTargets::for_editor(timeline, self.state.transport.samples_per_beat())
+                .with_marker(playhead_beats, SnapTargetKind::Playhead);
+        if self.state.transport.loop_enabled {
+            snap_targets = snap_targets
+                .with_marker(
+                    self.state.transport.loop_start_beats,
+                    SnapTargetKind::LoopStart,
+                )
+                .with_marker(self.state.transport.loop_end_beats, SnapTargetKind::LoopEnd);
+        }
+        let snap_targets = std::sync::Arc::new(snap_targets);
+
         let mut track_rows = column![].spacing(0);
         let empty_content = TrackTimelineContent::default();
         let browser_drag_active = self.state.browser.drag_source.is_some();
@@ -323,7 +337,8 @@ impl App {
             .with_marquee(
                 row_spans.clone(),
                 timeline.marquee.as_ref().map(|marquee| marquee.rect),
-            );
+            )
+            .with_snap_targets(snap_targets.clone());
             if let Some(preview) = self.state.audio_recording.preview_for_track(track.id) {
                 let name = match preview.source {
                     crate::domains::audio_recording::AudioRecordingSource::HardwareInput => {
