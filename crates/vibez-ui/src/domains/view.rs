@@ -387,6 +387,169 @@ mod tests {
         );
     }
 
+    const LANE_WIDTH: f32 = 1600.0;
+    const SAMPLES_PER_BEAT: f64 = 100.0;
+
+    fn selection_ctx() -> ViewCtx {
+        ViewCtx {
+            total_beats: 400.0,
+            song_beats: 320.0,
+            lane_width: LANE_WIDTH,
+            samples_per_beat: SAMPLES_PER_BEAT,
+        }
+    }
+
+    fn zoomed_out_view() -> ViewState {
+        ViewState {
+            zoom_level: 0.25,
+            scroll_offset_beats: 8.0,
+            ..ViewState::default()
+        }
+    }
+
+    fn assert_framed(view: &ViewState, start: f64, end: f64) {
+        let margin = crate::timeline_geometry::FRAME_MARGIN_PIXELS;
+        let geometry = TimelineGeometry::from_zoom(view.zoom_level, view.scroll_offset_beats);
+        let (start_x, end_x) = (geometry.beat_to_x(start), geometry.beat_to_x(end));
+        assert!(
+            (start_x - margin).abs() < 0.01,
+            "selection starts at {start_x}"
+        );
+        assert!(
+            (end_x - (LANE_WIDTH - margin)).abs() < 0.01,
+            "selection ends at {end_x}"
+        );
+    }
+
+    fn audio_clip(position: u64, duration: u64) -> crate::state::UiClip {
+        crate::state::UiClip {
+            id: ClipId::new(),
+            name: "Audio".into(),
+            audio: std::sync::Arc::new(vibez_core::audio_buffer::DecodedAudio {
+                channels: vec![vec![0.0; 8]],
+                sample_rate: 48_000,
+            }),
+            source: None,
+            position,
+            source_offset: 0,
+            start_marker: 0,
+            duration,
+            loop_enabled: false,
+            loop_start: 0,
+            loop_end: 0,
+            gain_db: Default::default(),
+            fades: Default::default(),
+            playback_direction: Default::default(),
+            transient_markers: Default::default(),
+            warp_markers: Default::default(),
+            transpose: Default::default(),
+            original_bpm: None,
+            warped: false,
+            warped_to_bpm: None,
+            original_audio: None,
+        }
+    }
+
+    fn note_clip(position_beats: f64, duration_beats: f64) -> crate::state::UiNoteClip {
+        crate::state::UiNoteClip {
+            id: ClipId::new(),
+            name: "MIDI".into(),
+            position_beats,
+            duration_beats,
+            notes: Vec::new(),
+            selected_notes: Default::default(),
+            start_marker_beats: 0.0,
+            loop_enabled: false,
+            loop_start_beats: 0.0,
+            loop_end_beats: 0.0,
+            groove_grid: Default::default(),
+        }
+    }
+
+    #[test]
+    fn zoom_to_selection_frames_the_time_selection_and_zoom_back_restores_the_view() {
+        let mut view = zoomed_out_view();
+        let timeline = TimelineEditorState {
+            time_selection_active: true,
+            selection_start_beats: 64.0,
+            selection_end_beats: 80.0,
+            ..TimelineEditorState::default()
+        };
+
+        view.update(ViewMsg::ZoomToSelection, &timeline, selection_ctx());
+        assert_framed(&view, 64.0, 80.0);
+
+        view.update(ViewMsg::ZoomBack, &timeline, selection_ctx());
+        assert_eq!(view.zoom_level, 0.25);
+        assert_eq!(view.scroll_offset_beats, 8.0);
+    }
+
+    #[test]
+    fn zoom_to_selection_frames_every_selected_clip_without_a_time_range() {
+        let mut view = zoomed_out_view();
+        let (audio_track, midi_track) = (TrackId::new(), TrackId::new());
+        let audio = audio_clip(3_200, 800);
+        let notes = note_clip(44.0, 4.0);
+        let unselected = note_clip(200.0, 4.0);
+        let mut content = crate::state::TimelineContent::default();
+        content.ensure(audio_track).clips.push(audio.clone());
+        content
+            .ensure(midi_track)
+            .note_clips
+            .extend([notes.clone(), unselected]);
+        let timeline = TimelineEditorState {
+            timeline: std::sync::Arc::new(content),
+            selected_clips: [
+                crate::state::ArrangementSelection::AudioClip {
+                    track_id: audio_track,
+                    clip_id: audio.id,
+                },
+                crate::state::ArrangementSelection::NoteClip {
+                    track_id: midi_track,
+                    clip_id: notes.id,
+                },
+            ]
+            .into_iter()
+            .collect(),
+            ..TimelineEditorState::default()
+        };
+
+        view.update(ViewMsg::ZoomToSelection, &timeline, selection_ctx());
+
+        assert_framed(&view, 32.0, 48.0);
+    }
+
+    #[test]
+    fn zoom_to_selection_without_a_selection_leaves_the_view_alone() {
+        let mut view = zoomed_out_view();
+        let timeline = TimelineEditorState::default();
+
+        view.update(ViewMsg::ZoomToSelection, &timeline, selection_ctx());
+        view.update(ViewMsg::ZoomBack, &timeline, selection_ctx());
+
+        assert_eq!(view.zoom_level, 0.25);
+        assert_eq!(view.scroll_offset_beats, 8.0);
+    }
+
+    #[test]
+    fn zoom_back_remembers_one_level_only() {
+        let mut view = zoomed_out_view();
+        let timeline = TimelineEditorState {
+            time_selection_active: true,
+            selection_start_beats: 64.0,
+            selection_end_beats: 80.0,
+            ..TimelineEditorState::default()
+        };
+
+        view.update(ViewMsg::ZoomToSelection, &timeline, selection_ctx());
+        view.update(ViewMsg::ZoomBack, &timeline, selection_ctx());
+        view.update(ViewMsg::ZoomIn, &timeline, selection_ctx());
+        let zoomed_in = (view.zoom_level, view.scroll_offset_beats);
+        view.update(ViewMsg::ZoomBack, &timeline, selection_ctx());
+
+        assert_eq!((view.zoom_level, view.scroll_offset_beats), zoomed_in);
+    }
+
     #[test]
     fn all_workspaces_are_reachable_without_resetting_view_state() {
         let mut view = ViewState {
