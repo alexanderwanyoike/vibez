@@ -1,8 +1,14 @@
 //! Fitting a clip's name into its title strip.
 
-use iced::widget::canvas;
-use iced::{Color, Font, Rectangle};
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::rc::Rc;
 
+use iced::alignment::Vertical;
+use iced::widget::canvas;
+use iced::{Color, Font, Point, Rectangle};
+
+use crate::icons;
 use crate::widgets::device_controls::text_width;
 
 use super::CLIP_TITLE_HEIGHT;
@@ -11,36 +17,73 @@ const TITLE_SIZE: f32 = 11.0;
 const TITLE_FONT: Font = crate::typography::CLIP_TITLE;
 /// Space between the title text and either end of the strip.
 const TITLE_PADDING: f32 = 6.0;
+const LOOP_ICON_SIZE: f32 = 10.0;
 /// Width of the loop icon plus its gap before the name.
 const LOOP_ICON_ROOM: f32 = 15.0;
+/// A looped clip's strip narrower than this shows no loop icon.
+const LOOP_ICON_MIN_WIDTH: f32 = 60.0;
+/// Fewer letters than this before an ellipsis say nothing, so the strip
+/// stays empty instead.
+const MIN_KEPT_CHARS: usize = 3;
+const ELLIPSIS: char = '\u{2026}';
 
 fn name_width(text: &str) -> f32 {
     text_width(text, TITLE_SIZE, TITLE_FONT)
 }
 
-fn fit_clip_title(name: &str, clip_width: f32, loop_icon_visible: bool) -> Option<String> {
-    if clip_width <= 40.0 {
-        return None;
-    }
-    const HORIZONTAL_PADDING: f32 = 8.0;
-    const LOOP_ICON_WIDTH: f32 = 18.0;
-    const APPROX_GLYPH_WIDTH: f32 = 6.5;
-    let reserved = HORIZONTAL_PADDING
-        + if loop_icon_visible {
-            LOOP_ICON_WIDTH
+/// Measured widths of a name, whole and shortened to each length.
+struct NameWidths {
+    whole: f32,
+    /// `shortened[n]` is the width of its first `n` chars plus an ellipsis.
+    shortened: Vec<f32>,
+}
+
+thread_local! {
+    /// Shaping text is far too slow to repeat for every clip on every
+    /// frame, and a song repeats a few names many times.
+    static NAME_WIDTHS: RefCell<HashMap<String, Rc<NameWidths>>> = RefCell::new(HashMap::new());
+}
+
+fn name_widths(name: &str) -> Rc<NameWidths> {
+    NAME_WIDTHS.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if let Some(widths) = cache.get(name) {
+            return Rc::clone(widths);
+        }
+        if cache.len() >= 1024 {
+            cache.clear();
+        }
+        let widths = Rc::new(NameWidths {
+            whole: name_width(name),
+            shortened: name
+                .char_indices()
+                .map(|(end, _)| name_width(&format!("{}{ELLIPSIS}", &name[..end])))
+                .collect(),
+        });
+        cache.insert(name.to_owned(), Rc::clone(&widths));
+        widths
+    })
+}
+
+/// What of `name` fits a title strip `strip_width` wide.
+fn fit_clip_title(name: &str, strip_width: f32, loop_icon_visible: bool) -> Option<String> {
+    let room = strip_width
+        - 2.0 * TITLE_PADDING
+        - if loop_icon_visible {
+            LOOP_ICON_ROOM
         } else {
             0.0
         };
-    let max_chars = ((clip_width - reserved).max(0.0) / APPROX_GLYPH_WIDTH).floor() as usize;
-    if max_chars < 4 {
-        return None;
+    let widths = name_widths(name);
+    if widths.whole <= room {
+        return Some(name.to_owned());
     }
-    if name.chars().count() <= max_chars {
-        Some(name.to_string())
-    } else {
-        let prefix: String = name.chars().take(max_chars - 2).collect();
-        Some(format!("{prefix}.."))
-    }
+    let kept = widths.shortened.iter().rposition(|width| *width <= room)?;
+    (kept >= MIN_KEPT_CHARS).then(|| {
+        let mut title: String = name.chars().take(kept).collect();
+        title.push(ELLIPSIS);
+        title
+    })
 }
 
 /// Where a clip title is clipped to, and where its text starts.
@@ -67,7 +110,7 @@ fn clip_title_layout(
             width: right - left,
             height: CLIP_TITLE_HEIGHT,
         },
-        text: iced::Point::new(4.0, 3.0),
+        text: Point::new(TITLE_PADDING, CLIP_TITLE_HEIGHT / 2.0),
     })
 }
 
@@ -75,25 +118,43 @@ pub(super) fn draw_clip_title(
     frame: &mut canvas::Frame,
     name: &str,
     body: Rectangle,
-    loop_enabled: bool,
+    looped: bool,
     color: Color,
     viewport_width: f32,
 ) {
-    let title_width = (body.width - if loop_enabled { 18.0 } else { 0.0 }).max(0.0);
-    let Some(layout) = clip_title_layout(body.x, body.y, title_width, viewport_width) else {
+    let Some(layout) = clip_title_layout(body.x, body.y, body.width, viewport_width) else {
         return;
     };
-    let Some(title) = fit_clip_title(name, layout.region.width, loop_enabled) else {
+    let loop_icon = looped && layout.region.width > LOOP_ICON_MIN_WIDTH;
+    let title = fit_clip_title(name, layout.region.width, loop_icon);
+    if !loop_icon && title.is_none() {
         return;
-    };
+    }
     frame.with_clip(layout.region, |title_frame| {
-        title_frame.fill_text(canvas::Text {
-            content: title,
-            position: layout.text,
-            color,
-            size: iced::Pixels(11.0),
-            ..Default::default()
-        });
+        let mut position = layout.text;
+        if loop_icon {
+            title_frame.fill_text(canvas::Text {
+                content: icons::REPEAT.to_string(),
+                position,
+                color,
+                size: LOOP_ICON_SIZE.into(),
+                font: icons::ICON_FONT,
+                vertical_alignment: Vertical::Center,
+                ..Default::default()
+            });
+            position.x += LOOP_ICON_ROOM;
+        }
+        if let Some(title) = title {
+            title_frame.fill_text(canvas::Text {
+                content: title,
+                position,
+                color,
+                size: TITLE_SIZE.into(),
+                font: TITLE_FONT,
+                vertical_alignment: Vertical::Center,
+                ..Default::default()
+            });
+        }
     });
 }
 
@@ -146,13 +207,10 @@ mod tests {
 
     #[test]
     fn clip_title_text_starts_at_the_left_of_its_region_at_any_scroll() {
-        for clip_x in [-200.0, 0.0, 100.0, 600.0] {
+        let unscrolled = clip_title_layout(0.0, 4.0, 400.0, 800.0).unwrap().text;
+        for clip_x in [-200.0, 100.0, 600.0] {
             let layout = clip_title_layout(clip_x, 4.0, 400.0, 800.0).unwrap();
-            assert_eq!(
-                layout.text,
-                iced::Point::new(4.0, 3.0),
-                "clip at x {clip_x}"
-            );
+            assert_eq!(layout.text, unscrolled, "clip at x {clip_x}");
         }
     }
 }

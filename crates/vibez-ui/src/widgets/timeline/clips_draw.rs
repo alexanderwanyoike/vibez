@@ -203,17 +203,6 @@ impl TrackClipCanvas {
                         }
                         repeat_beat += loop_region_beats;
                     }
-
-                    // Small "L" icon
-                    if clip_w > 20.0 {
-                        frame.fill_text(canvas::Text {
-                            content: "L".to_string(),
-                            position: iced::Point::new(clip_x + clip_w - 14.0, clip_y + 3.0),
-                            color: theme::accent(),
-                            size: iced::Pixels(9.0),
-                            ..Default::default()
-                        });
-                    }
                 }
 
                 if !is_recording_preview
@@ -269,7 +258,14 @@ impl TrackClipCanvas {
                         }
                     }
                 }
-                draw_clip_front(&mut frame, body, &colors, &clip.name, clip.loop_enabled, w);
+                draw_clip_front(
+                    &mut frame,
+                    body,
+                    &colors,
+                    &clip.name,
+                    clip.loop_enabled && clip.loop_end > clip.loop_start,
+                    w,
+                );
 
                 // Diagonal stripe overlay when the clip's warp is
                 // stale relative to the current project tempo. Low
@@ -408,25 +404,7 @@ impl TrackClipCanvas {
                     frame.fill_rectangle(mark.rect.position(), mark.rect.size(), colors.ink);
                 }
 
-                // Loop markers for note clips
-                if looping && clip_w > 20.0 {
-                    frame.fill_text(canvas::Text {
-                        content: "L".to_string(),
-                        position: iced::Point::new(clip_x + clip_w - 14.0, clip_y + 3.0),
-                        color: theme::accent(),
-                        size: iced::Pixels(9.0),
-                        ..Default::default()
-                    });
-                }
-
-                draw_clip_front(
-                    &mut frame,
-                    body,
-                    &colors,
-                    &note_clip.name,
-                    note_clip.loop_enabled,
-                    w,
-                );
+                draw_clip_front(&mut frame, body, &colors, &note_clip.name, looping, w);
             }
         }
 
