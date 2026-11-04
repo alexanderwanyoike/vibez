@@ -333,6 +333,17 @@ impl App {
                 .size(9)
                 .color(th::text_dim()),
             clip_launch_picker(
+                clips.launch_mode(clip.track_id),
+                clip.launch_mode,
+                vibez_core::perform::ClipLaunchMode::ALL,
+                move |mode| {
+                    Message::Perform(PerformMsg::Clips(ClipMsg::SetClipLaunchMode {
+                        clip_id,
+                        mode,
+                    }))
+                },
+            ),
+            clip_launch_picker(
                 clips.launch_quantization(clip.track_id),
                 clip.launch_quantization,
                 vibez_core::perform::MusicalBoundary::ALL,
