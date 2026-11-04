@@ -36,12 +36,21 @@ pub fn song_length_label(seconds: f64, bpm: f64) -> String {
     }
     let bars = (seconds * bpm / 60.0 / BEATS_PER_BAR).ceil() as u64;
     let whole_seconds = seconds.round() as u64;
-    let unit = if bars == 1 { "bar" } else { "bars" };
     format!(
-        "{bars} {unit}, {}:{:02}",
+        "{}, {}:{:02}",
+        counted(bars as usize, "bar"),
         whole_seconds / 60,
         whole_seconds % 60
     )
+}
+
+/// The track and clip counts beside the ruler.
+pub fn arrangement_size_labels(track_count: usize, clip_count: usize) -> (String, String) {
+    (counted(track_count, "track"), counted(clip_count, "clip"))
+}
+
+fn counted(count: usize, unit: &str) -> String {
+    format!("{count} {unit}{}", if count == 1 { "" } else { "s" })
 }
 
 #[cfg(test)]
@@ -53,6 +62,18 @@ mod tests {
         assert_eq!(song_length_label(140.0, 120.0), "70 bars, 2:20");
         assert_eq!(song_length_label(61.0, 120.0), "31 bars, 1:01");
         assert_eq!(song_length_label(2.0, 120.0), "1 bar, 0:02");
+    }
+
+    #[test]
+    fn track_and_clip_counts_read_singular_for_one() {
+        assert_eq!(
+            arrangement_size_labels(1, 1),
+            ("1 track".into(), "1 clip".into())
+        );
+        assert_eq!(
+            arrangement_size_labels(8, 0),
+            ("8 tracks".into(), "0 clips".into())
+        );
     }
 
     #[test]

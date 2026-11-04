@@ -425,6 +425,16 @@ impl TimelineContent {
     pub fn remove(&mut self, track_id: TrackId) -> Option<TrackTimelineContent> {
         self.by_track.remove(&track_id)
     }
+
+    /// Audio and note clips on `tracks`, leaving out content kept for a
+    /// track no longer in the list.
+    pub fn clip_count(&self, tracks: impl IntoIterator<Item = TrackId>) -> usize {
+        tracks
+            .into_iter()
+            .filter_map(|track_id| self.get(track_id))
+            .map(|content| content.clips.len() + content.note_clips.len())
+            .sum()
+    }
 }
 
 /// Backward-compatible name for the project's linear Arrange content.

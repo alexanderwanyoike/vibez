@@ -19,7 +19,7 @@ use crate::message::Message;
 use crate::state::{ArrangementSelection, ContextMenuTarget, TrackTimelineContent};
 use crate::theme as th;
 use crate::timeline_geometry::TimelineGeometry;
-use crate::widgets::arrange_corner::{arrange_corner, song_length_label};
+use crate::widgets::arrange_corner::{arrange_corner, arrangement_size_labels, song_length_label};
 use crate::widgets::timeline::{
     build_row_spans, ArrangementMinimap, MinimapTrack, RulerWidget, TimelineClip, TrackClipCanvas,
     TRACK_ROW_HEIGHT,
@@ -116,26 +116,17 @@ impl App {
             .height(Length::Fixed(28.0))
             .into();
 
-        let track_count = self.state.project_tracks.tracks.len();
-        let clip_count: usize = self
-            .state
-            .project_tracks
-            .tracks
-            .iter()
-            .filter_map(|track| timeline.timeline.get(track.id))
-            .map(|content| content.clips.len() + content.note_clips.len())
-            .sum();
-        let ruler_spacer = arrange_corner(
-            format!(
-                "{track_count} {}",
-                if track_count == 1 { "track" } else { "tracks" }
+        let (tracks_label, clips_label) = arrangement_size_labels(
+            self.state.project_tracks.tracks.len(),
+            timeline.timeline.clip_count(
+                self.state
+                    .project_tracks
+                    .tracks
+                    .iter()
+                    .map(|track| track.id),
             ),
-            format!(
-                "{clip_count} {}",
-                if clip_count == 1 { "clip" } else { "clips" }
-            ),
-            28.0,
         );
+        let ruler_spacer = arrange_corner(tracks_label, clips_label, 28.0);
 
         let ruler_row = row![ruler_spacer, ruler_canvas];
 

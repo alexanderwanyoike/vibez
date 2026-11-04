@@ -286,3 +286,30 @@ fn rename_empty_rejected() {
     }
     assert_eq!(state.project_tracks.tracks[0].name, "Track 1");
 }
+
+#[test]
+fn the_clip_count_covers_listed_tracks_only() {
+    let note_clip = || UiNoteClip {
+        id: ClipId::new(),
+        name: "Pattern".into(),
+        position_beats: 0.0,
+        duration_beats: 4.0,
+        notes: Vec::new(),
+        selected_notes: Default::default(),
+        start_marker_beats: 0.0,
+        loop_enabled: false,
+        loop_start_beats: 0.0,
+        loop_end_beats: 4.0,
+        groove_grid: Default::default(),
+    };
+    let (drums, bass, removed) = (TrackId::new(), TrackId::new(), TrackId::new());
+    let mut content = TimelineContent::default();
+    content
+        .ensure(drums)
+        .note_clips
+        .extend([note_clip(), note_clip()]);
+    content.ensure(bass).note_clips.push(note_clip());
+    content.ensure(removed).note_clips.push(note_clip());
+
+    assert_eq!(content.clip_count([drums, bass]), 3);
+}
