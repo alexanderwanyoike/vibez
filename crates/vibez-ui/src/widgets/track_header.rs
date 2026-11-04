@@ -1,13 +1,14 @@
 use std::borrow::Borrow;
 
 use iced::widget::{
-    button, canvas, column, container, horizontal_space, mouse_area, pick_list, row, text,
-    text_input,
+    button, canvas, column, container, horizontal_space, mouse_area, pick_list, row, stack, text,
+    text_input, vertical_space,
 };
 use iced::{Element, Length, Theme};
 
 use crate::domains::automation::AutomationMsg;
 use crate::domains::piano_roll::PianoRollMsg;
+use crate::domains::track_heights::TrackHeightMsg;
 use crate::domains::view::ViewMsg;
 use crate::icons;
 use crate::message::Message;
@@ -15,6 +16,7 @@ use crate::state::ProjectTrack;
 use crate::theme as th;
 use crate::widgets::fader::HorizontalFaderWidget;
 use crate::widgets::vu_meter::HorizontalVuMeterWidget;
+use vibez_core::id::TrackId;
 use vibez_core::midi::TrackKind;
 use vibez_core::track::{AudioInputRoute, InputMonitoring};
 
@@ -53,6 +55,10 @@ impl TrackHeaderFlags {
         self.hovered || self.automation_open
     }
 }
+
+/// Grab strip along the header's bottom edge, drawn over its padding so
+/// the controls above keep their full height.
+const RESIZE_HANDLE_HEIGHT: f32 = 5.0;
 
 #[derive(Debug, Clone, Copy)]
 pub struct TrackHeaderRecordingView<'a> {
@@ -468,19 +474,22 @@ pub fn view_track_header<'a>(
 
     let header_with_bar = row![color_bar, header].height(Length::Fill);
 
-    let card = container(header_with_bar).style(move |_theme: &Theme| container::Style {
-        background: Some(
-            if selected {
-                th::track_bg_selected()
-            } else if flags.hovered {
-                th::track_header_hovered()
-            } else {
-                th::bg_surface()
-            }
-            .into(),
-        ),
-        ..Default::default()
-    });
+    let card = container(header_with_bar)
+        .height(Length::Fill)
+        .clip(true)
+        .style(move |_theme: &Theme| container::Style {
+            background: Some(
+                if selected {
+                    th::track_bg_selected()
+                } else if flags.hovered {
+                    th::track_header_hovered()
+                } else {
+                    th::bg_surface()
+                }
+                .into(),
+            ),
+            ..Default::default()
+        });
 
     // The whole header column selects the track. Child widgets
     // (name, M/S, add, fader) capture their own clicks first,
@@ -497,6 +506,27 @@ pub fn view_track_header<'a>(
             hovered: false,
         }))
         .into()
+}
+
+/// A track header with a grab strip on its bottom edge that resizes the
+/// track's lane.
+pub fn with_resize_edge<'a>(
+    header: Element<'a, Message>,
+    track_id: TrackId,
+    resizing: bool,
+) -> Element<'a, Message> {
+    let resize_handle = mouse_area(
+        container(text(""))
+            .width(Length::Fill)
+            .height(Length::Fixed(RESIZE_HANDLE_HEIGHT))
+            .style(move |_theme: &Theme| container::Style {
+                background: resizing.then(|| th::accent_dim().into()),
+                ..Default::default()
+            }),
+    )
+    .on_press(Message::TrackHeight(TrackHeightMsg::BeginResize(track_id)))
+    .interaction(iced::mouse::Interaction::ResizingVertically);
+    stack![header, column![vertical_space(), resize_handle]].into()
 }
 
 fn quiet_action_style(_theme: &Theme, status: button::Status) -> button::Style {

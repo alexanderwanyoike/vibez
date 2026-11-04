@@ -23,11 +23,11 @@ use crate::timeline_snap::SnapTargets;
 use crate::widgets::arrange_corner::{arrange_corner, arrangement_size_labels, song_length_label};
 use crate::widgets::timeline::{
     build_row_spans, ArrangementMinimap, MinimapTrack, RulerWidget, TimeRulerWidget, TimelineClip,
-    TrackClipCanvas, ARRANGE_RULER_HEIGHT, OVERVIEW_HEIGHT, TIME_RULER_HEIGHT, TRACK_ROW_HEIGHT,
+    TrackClipCanvas, ARRANGE_RULER_HEIGHT, OVERVIEW_HEIGHT, TIME_RULER_HEIGHT,
 };
 use crate::widgets::track_header::{
-    view_editable_channel_name, view_track_header, ChannelNameStyle, TrackHeaderFlags,
-    TrackHeaderRecordingView,
+    view_editable_channel_name, view_track_header, with_resize_edge, ChannelNameStyle,
+    TrackHeaderFlags, TrackHeaderRecordingView,
 };
 
 use super::*;
@@ -230,7 +230,11 @@ impl App {
             } else {
                 0.0
             };
-            (track.id, TRACK_ROW_HEIGHT, extra_height)
+            (
+                track.id,
+                self.state.track_heights.height(track.id),
+                extra_height,
+            )
         }));
 
         let mut track_rows = column![].spacing(0);
@@ -267,29 +271,33 @@ impl App {
             let input_channels = self.state.audio_settings.input_channel_count();
             let input_target = self.state.audio_recording.armed_track == Some(track.id)
                 || self.state.audio_recording.monitor_track == Some(track.id);
-            let header = view_track_header(
-                track,
-                TrackHeaderFlags {
-                    selected,
-                    editing_name: editing,
-                    automation_open,
-                    hovered: self.state.view.hovered_track_header == Some(track.id),
-                },
-                &self.state.view.edit_name_text,
-                TrackHeaderRecordingView {
-                    output_peaks: self
-                        .track_meter_peaks
-                        .get(&track.id)
-                        .copied()
-                        .unwrap_or_default(),
-                    input_channels,
-                    armed: self.state.audio_recording.armed_track == Some(track.id),
-                    input_peaks: input_target.then_some((
-                        self.state.audio_recording.input_peak_l,
-                        self.state.audio_recording.input_peak_r,
-                    )),
-                    source_tracks: &self.state.project_tracks.tracks,
-                },
+            let header = with_resize_edge(
+                view_track_header(
+                    track,
+                    TrackHeaderFlags {
+                        selected,
+                        editing_name: editing,
+                        automation_open,
+                        hovered: self.state.view.hovered_track_header == Some(track.id),
+                    },
+                    &self.state.view.edit_name_text,
+                    TrackHeaderRecordingView {
+                        output_peaks: self
+                            .track_meter_peaks
+                            .get(&track.id)
+                            .copied()
+                            .unwrap_or_default(),
+                        input_channels,
+                        armed: self.state.audio_recording.armed_track == Some(track.id),
+                        input_peaks: input_target.then_some((
+                            self.state.audio_recording.input_peak_l,
+                            self.state.audio_recording.input_peak_r,
+                        )),
+                        source_tracks: &self.state.project_tracks.tracks,
+                    },
+                ),
+                track.id,
+                self.state.track_heights.resizing() == Some(track.id),
             );
 
             // Clip canvas for this track

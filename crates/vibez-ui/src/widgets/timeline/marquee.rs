@@ -2,14 +2,11 @@
 //!
 //! Each track lane is its own canvas, so the lane that starts a drag has
 //! to resolve the box against the whole column on everyone's behalf. That
-//! only works if lanes know their real vertical placement: the cross-track
-//! clip drag next door assumes a uniform 70px row and silently mis-targets
-//! once automation lanes are expanded. These spans carry the true layout.
+//! only works if lanes know their real vertical placement: lanes differ in
+//! height and expanded automation lanes sit between them. These spans
+//! carry the true layout.
 
 use vibez_core::id::TrackId;
-
-/// Height of one track's clip lane in the arrangement column.
-pub const TRACK_ROW_HEIGHT: f32 = 70.0;
 
 /// Vertical placement of one track row within the arrangement column,
 /// measured from the top of the first row and including any expanded
