@@ -25,7 +25,8 @@ const MUTED_OPACITY: f32 = 0.25;
 impl ClipColors {
     /// The same clip on a muted track: it stays in place and readable but
     /// steps back, while a selection outline keeps its full strength.
-    pub fn muted(self) -> Self {
+    pub fn muted(self, lane: Color) -> Self {
+        let _ = lane;
         let fade = |color: Color| theme::with_alpha(color, color.a * MUTED_OPACITY);
         Self {
             title: fade(self.title),
@@ -121,22 +122,26 @@ mod tests {
     }
 
     #[test]
-    fn a_clip_on_a_muted_track_fades_everything_but_its_selection_outline() {
-        let live = shade(RED, true, ClipStyle::DARK, DARK_LANE, TEXT);
+    fn a_clip_on_a_muted_track_fades_toward_its_lane_but_keeps_its_selection_outline() {
+        for lane in [DARK_LANE, LIGHT_LANE] {
+            let live = shade(RED, true, ClipStyle::DARK, lane, TEXT);
 
-        let muted = live.muted();
+            let muted = live.muted(lane);
 
-        for (part, before, after) in [
-            ("title", live.title, muted.title),
-            ("body", live.body, muted.body),
-            ("ink", live.ink, muted.ink),
-            ("text", live.text, muted.text),
-            ("loop tick", live.loop_tick, muted.loop_tick),
-        ] {
-            assert!(after.a < before.a * 0.6, "{part}: {after:?}");
-            assert_eq!((after.r, after.g, after.b), (before.r, before.g, before.b));
+            for (part, before, after) in [
+                ("title", live.title, muted.title),
+                ("body", live.body, muted.body),
+                ("ink", live.ink, muted.ink),
+                ("text", live.text, muted.text),
+                ("loop tick", live.loop_tick, muted.loop_tick),
+            ] {
+                let gap =
+                    |c: Color| (c.r - lane.r).abs() + (c.g - lane.g).abs() + (c.b - lane.b).abs();
+                assert!(gap(after) < gap(before) * 0.6, "{part}: {after:?}");
+                assert_eq!(after.a, before.a, "{part} keeps its opacity");
+            }
+            assert_eq!(muted.selection, live.selection);
         }
-        assert_eq!(muted.selection, live.selection);
     }
 
     #[test]

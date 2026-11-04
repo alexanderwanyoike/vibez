@@ -74,7 +74,7 @@ impl TrackClipCanvas {
         };
         let colors = clip_colors(track, selected);
         if self.muted && !recording_preview {
-            colors.muted()
+            colors.muted(theme::track_bg())
         } else {
             colors
         }
