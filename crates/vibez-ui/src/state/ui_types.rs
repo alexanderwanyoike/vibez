@@ -602,6 +602,12 @@ impl UiNoteClip {
         }
     }
 
+    /// Change the length to `duration_beats`, moving the right edge.
+    pub(crate) fn resize(&mut self, duration_beats: f64) {
+        self.duration_beats = duration_beats;
+        self.clamp_start_to_content();
+    }
+
     pub(crate) fn clamp_start_to_content(&mut self) {
         self.start_marker_beats =
             self.timeline()
