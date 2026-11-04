@@ -228,6 +228,7 @@ pub(super) const CLIP_Y: f32 = 4.0;
 pub(super) const FADE_HANDLE_Y: f32 = CLIP_Y + CLIP_TITLE_HEIGHT + 6.0;
 pub(super) const FADE_HANDLE_HIT_RADIUS: f32 = 7.0;
 
+mod clip_colors;
 mod clip_drag;
 mod clip_frame;
 mod clip_title;

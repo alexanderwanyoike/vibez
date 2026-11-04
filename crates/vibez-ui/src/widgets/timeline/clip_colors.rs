@@ -1,0 +1,96 @@
+//! Colours of a timeline clip's parts, derived from its track colour.
+
+use iced::Color;
+
+use crate::theme::ClipStyle;
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct ClipColors {
+    pub title: Color,
+    pub body: Color,
+    /// Notes and waveform.
+    pub ink: Color,
+    pub text: Color,
+    pub loop_tick: Color,
+    pub selection: Option<Color>,
+}
+
+fn shade(track: Color, selected: bool, style: ClipStyle, lane: Color, text: Color) -> ClipColors {
+    let _ = (selected, style, lane, text);
+    ClipColors {
+        title: Color::TRANSPARENT,
+        body: Color { a: 0.4, ..track },
+        ink: Color { a: 0.8, ..track },
+        text: Color::WHITE,
+        loop_tick: Color::TRANSPARENT,
+        selection: None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::shade;
+    use crate::theme::ClipStyle;
+    use iced::Color;
+
+    const RED: Color = Color::from_rgb(0.8, 0.4, 0.4);
+    const DARK_LANE: Color = Color::from_rgb(0.1, 0.1, 0.1);
+    const LIGHT_LANE: Color = Color::from_rgb(0.95, 0.95, 0.94);
+    const TEXT: Color = Color::from_rgb(0.9, 0.9, 0.9);
+
+    fn luma(c: Color) -> f32 {
+        0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b
+    }
+
+    #[test]
+    fn a_clip_has_an_opaque_title_in_its_track_colour_and_a_body_at_the_theme_opacity() {
+        let style = ClipStyle {
+            body_opacity: 0.7,
+            ..ClipStyle::DARK
+        };
+
+        let colors = shade(RED, false, style, DARK_LANE, TEXT);
+
+        assert_eq!(colors.title, RED);
+        assert_eq!(colors.body.a, 0.7);
+    }
+
+    #[test]
+    fn the_body_leans_toward_the_lane_behind_it() {
+        let on_dark = shade(RED, false, ClipStyle::DARK, DARK_LANE, TEXT).body;
+        let on_light = shade(RED, false, ClipStyle::LIGHT, LIGHT_LANE, TEXT).body;
+
+        assert!(luma(on_dark) < luma(RED), "{on_dark:?}");
+        assert!(luma(on_light) > luma(RED), "{on_light:?}");
+        assert!(on_dark.r > on_dark.g, "keeps the track hue: {on_dark:?}");
+    }
+
+    #[test]
+    fn notes_waveform_and_name_are_drawn_in_the_theme_ink() {
+        let colors = shade(RED, false, ClipStyle::DARK, DARK_LANE, TEXT);
+
+        assert_eq!(colors.ink, ClipStyle::DARK.ink);
+        assert_eq!(
+            colors.text,
+            Color {
+                a: 1.0,
+                ..ClipStyle::DARK.ink
+            }
+        );
+        assert!(colors.loop_tick.a > 0.0 && colors.loop_tick.a < colors.ink.a);
+    }
+
+    #[test]
+    fn selecting_a_clip_lightens_its_title_and_outlines_it() {
+        let idle = shade(RED, false, ClipStyle::DARK, DARK_LANE, TEXT);
+        let selected = shade(RED, true, ClipStyle::DARK, DARK_LANE, TEXT);
+
+        assert!(luma(selected.title) > luma(idle.title));
+        assert_eq!(selected.title.a, 1.0);
+        assert_eq!(idle.selection, None);
+        assert_eq!(
+            selected.selection.map(|c| (c.r, c.g, c.b)),
+            Some((0.9, 0.9, 0.9))
+        );
+    }
+}
