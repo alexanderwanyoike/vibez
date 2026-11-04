@@ -104,6 +104,7 @@ impl AudioEngine {
         clip_id: vibez_core::id::ClipId,
         new_position_beats: f64,
     ) {
+        let playhead_beat = self.arrange_playhead_beat();
         if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
             if let Some(clip) = track
                 .playback_source
@@ -113,8 +114,16 @@ impl AudioEngine {
             {
                 clip.position_beats = new_position_beats;
             }
+            track.release_notes_left_by(clip_id, playhead_beat);
         }
         self.recalculate_audio_length();
+    }
+
+    fn arrange_playhead_beat(&self) -> f64 {
+        let samples_per_beat =
+            vibez_core::time::TempoMap::new(self.transport.bpm(), self.sample_rate)
+                .samples_per_beat();
+        self.transport.position() as f64 / samples_per_beat
     }
 
     pub(super) fn command_remove_note(

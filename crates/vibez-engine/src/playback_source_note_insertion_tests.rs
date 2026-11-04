@@ -595,7 +595,17 @@ fn pending_note_clip_growth_preserves_current_duplicate_edits_and_voice_release_
     assert_eq!(completed[0].id(), first_id);
     assert_eq!(completed[1].id(), second_id);
     assert_eq!(commands.slots(), empty_slots);
-    assert_eq!(scheduled_calls.observed(), before_scheduled);
+    // The move to beat 0.5 leaves the playhead before the Clip, so its
+    // sounding note is released, as Ableton releases a note whose Clip is
+    // dragged out from under the playhead. Insertion itself releases nothing.
+    assert_eq!(
+        scheduled_calls.observed(),
+        (
+            before_scheduled.0,
+            before_scheduled.1 + 1,
+            before_scheduled.2
+        )
+    );
     assert_eq!(
         live_calls.observed(),
         (before_live.0, before_live.1 + 1, before_live.2)
@@ -644,8 +654,13 @@ fn pending_note_clip_growth_preserves_current_duplicate_edits_and_voice_release_
     drop(completed);
     let mut output = [0.0; 16];
     measured_callback(&mut engine, &mut output);
-    assert_sounding(&output);
-    assert_eq!(scheduled_calls.observed(), before_scheduled);
+    assert_eq!(output, [0.0; 16]);
+    let released_by_move = (
+        before_scheduled.0,
+        before_scheduled.1 + 1,
+        before_scheduled.2,
+    );
+    assert_eq!(scheduled_calls.observed(), released_by_move);
     assert_eq!(
         live_calls.observed(),
         (before_live.0, before_live.1 + 1, before_live.2)
@@ -654,14 +669,7 @@ fn pending_note_clip_growth_preserves_current_duplicate_edits_and_voice_release_
     commands.push(EngineCommand::Stop).unwrap();
     measured_callback(&mut engine, &mut []);
     assert!(!engine.transport().is_playing());
-    assert_eq!(
-        scheduled_calls.observed(),
-        (
-            before_scheduled.0,
-            before_scheduled.1 + 1,
-            before_scheduled.2
-        )
-    );
+    assert_eq!(scheduled_calls.observed(), released_by_move);
     assert_eq!(
         live_calls.observed(),
         (before_live.0, before_live.1 + 1, before_live.2)

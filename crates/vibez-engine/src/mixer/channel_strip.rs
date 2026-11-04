@@ -45,6 +45,7 @@ impl EngineTrack {
             timed_note_offs: Vec::with_capacity(SCHEDULED_NOTES_PER_BLOCK),
             note_repeats: TrackNoteRepeats::default(),
             active_notes: 0,
+            note_owners: [None; 128],
             pending_note_activity: 0,
             suppress_source_notes: false,
         }
@@ -484,6 +485,30 @@ impl EngineTrack {
                 }
                 self.active_notes &= !(1u128 << pitch);
             }
+        }
+    }
+
+    /// Send note-offs for the notes `clip_id` started that it no longer
+    /// holds at Arrangement `beat`, after an edit moved or resized it.
+    pub(crate) fn release_notes_left_by(&mut self, clip_id: ClipId, beat: f64) {
+        let clip = self
+            .playback_source
+            .note_clips
+            .iter()
+            .find(|clip| clip.id == clip_id);
+        let mut sounding = self.active_notes;
+        while sounding != 0 {
+            let pitch = sounding.trailing_zeros() as u8;
+            sounding &= sounding - 1;
+            if self.note_owners[pitch as usize] != Some(clip_id)
+                || clip.is_some_and(|clip| clip.holds_note_at(pitch, beat))
+            {
+                continue;
+            }
+            if let Some(instrument) = self.instrument.as_mut() {
+                instrument.note_off(pitch);
+            }
+            self.active_notes &= !(1u128 << pitch);
         }
     }
 
