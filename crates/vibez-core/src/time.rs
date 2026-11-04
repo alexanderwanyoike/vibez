@@ -48,6 +48,34 @@ impl MusicalTime {
             (false, _) => plural(rest, "beat"),
         }
     }
+
+    /// A position as bar, beat and sixteenth counted from 1, such as
+    /// "33.1.1", as Ableton reads positions.
+    pub fn bar_beat_sixteenth(self) -> String {
+        // The epsilon keeps a position a hair under a line, from float
+        // error, on that line.
+        let sixteenths = (self.0.max(0.0) * 4.0 + 1e-6).floor() as u64;
+        let per_bar = (BEATS_PER_BAR * 4.0) as u64;
+        format!(
+            "{}.{}.{}",
+            sixteenths / per_bar + 1,
+            sixteenths % per_bar / 4 + 1,
+            sixteenths % 4 + 1
+        )
+    }
+
+    /// A length as whole bars, beats and sixteenths, such as "4.0.0", as
+    /// Ableton reads lengths.
+    pub fn bars_beats_sixteenths(self) -> String {
+        let sixteenths = (self.0.max(0.0) * 4.0).round() as u64;
+        let per_bar = (BEATS_PER_BAR * 4.0) as u64;
+        format!(
+            "{}.{}.{}",
+            sixteenths / per_bar,
+            sixteenths % per_bar / 4,
+            sixteenths % 4
+        )
+    }
 }
 
 /// Converts between musical time and sample time at a fixed tempo.
