@@ -257,8 +257,11 @@ fn capture_replaces_existing_content(
     captured.controlled_track_ids.iter().any(|track_id| {
         arrange.get(*track_id).is_some_and(|existing| {
             existing.clips.iter().any(|clip| {
-                clip.position < captured.arrange_end_samples
-                    && clip.position.saturating_add(clip.duration) > captured.arrange_start_samples
+                audio_overlaps(
+                    clip,
+                    captured.arrange_start_samples,
+                    captured.arrange_end_samples,
+                )
             }) || existing.note_clips.iter().any(|clip| {
                 let start = (clip.position_beats * captured.samples_per_beat)
                     .round()
@@ -305,44 +308,54 @@ fn apply_capture_to_arrangement(
         clip_count += incoming.clips.len() + incoming.note_clips.len();
 
         let destination = timeline.ensure(track_id);
-        for clip in &destination.clips {
+        let (replaced_audio, kept_audio): (Vec<_>, Vec<_>) = std::mem::take(&mut destination.clips)
+            .into_iter()
+            .partition(|clip| audio_overlaps(clip, arrange_start_samples, arrange_end_samples));
+        let (replaced_notes, kept_notes): (Vec<_>, Vec<_>) =
+            std::mem::take(&mut destination.note_clips)
+                .into_iter()
+                .partition(|clip| notes_overlap(clip, start_beat, end_beat));
+        for clip in &replaced_audio {
             engine.send(EngineCommand::RemoveClip(track_id, clip.id));
         }
-        for clip in &destination.note_clips {
+        for clip in &replaced_notes {
             engine.send(EngineCommand::RemoveNoteClip(track_id, clip.id));
         }
-
-        destination.clips = destination
-            .clips
+        let mut added_audio: Vec<_> = replaced_audio
             .iter()
             .flat_map(|clip| {
                 preserve_audio_outside_interval(clip, arrange_start_samples, arrange_end_samples)
             })
             .collect();
-        destination.note_clips = destination
-            .note_clips
+        added_audio.append(&mut incoming.clips);
+        let mut added_notes: Vec<_> = replaced_notes
             .iter()
             .flat_map(|clip| preserve_notes_outside_interval(clip, start_beat, end_beat))
             .collect();
+        added_notes.append(&mut incoming.note_clips);
         replace_automation_interval(
             &mut destination.automation,
             incoming.automation,
             start_beat,
             end_beat,
         );
-        destination.clips.append(&mut incoming.clips);
-        destination.note_clips.append(&mut incoming.note_clips);
+
+        let audio_lane = kept_audio.len() + added_audio.len();
+        for clip in &added_audio {
+            engine.send(clip.add_command_beside(track_id, audio_lane));
+        }
+        let note_lane = kept_notes.len() + added_notes.len();
+        for clip in &added_notes {
+            engine.send(clip.add_command_beside(track_id, note_lane));
+        }
+        destination.clips = kept_audio;
+        destination.clips.append(&mut added_audio);
         destination.clips.sort_by_key(|clip| clip.position);
+        destination.note_clips = kept_notes;
+        destination.note_clips.append(&mut added_notes);
         destination
             .note_clips
             .sort_by(|left, right| left.position_beats.total_cmp(&right.position_beats));
-
-        for clip in &destination.clips {
-            engine.send(clip.add_command(track_id));
-        }
-        for clip in &destination.note_clips {
-            engine.send(clip.add_command(track_id));
-        }
         for lane in &destination.automation {
             engine.send(EngineCommand::SetAutomationLane {
                 track_id,
@@ -366,13 +379,21 @@ fn apply_capture_to_arrangement(
     clip_count
 }
 
+fn audio_overlaps(clip: &crate::state::UiClip, start: u64, end: u64) -> bool {
+    clip.position < end && clip.position.saturating_add(clip.duration) > start
+}
+
+fn notes_overlap(clip: &crate::state::UiNoteClip, start: f64, end: f64) -> bool {
+    clip.position_beats < end && clip.position_beats + clip.duration_beats > start
+}
+
 fn preserve_audio_outside_interval(
     clip: &crate::state::UiClip,
     start: u64,
     end: u64,
 ) -> Vec<crate::state::UiClip> {
     let clip_end = clip.position.saturating_add(clip.duration);
-    if clip_end <= start || clip.position >= end {
+    if !audio_overlaps(clip, start, end) {
         return vec![clip.clone()];
     }
     let mut fragments = Vec::with_capacity(2);
@@ -402,7 +423,7 @@ fn preserve_notes_outside_interval(
     end: f64,
 ) -> Vec<crate::state::UiNoteClip> {
     let clip_end = clip.position_beats + clip.duration_beats;
-    if clip_end <= start || clip.position_beats >= end {
+    if !notes_overlap(clip, start, end) {
         return vec![clip.clone()];
     }
     let mut fragments = Vec::with_capacity(2);
