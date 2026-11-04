@@ -52,14 +52,57 @@ fn visible_pixel_columns(
     }
 }
 
-fn visible_title_bounds(
+/// Where a clip title is clipped to, and where its text starts.
+#[derive(Debug, PartialEq)]
+struct ClipTitleLayout {
+    region: Rectangle,
+    text: iced::Point,
+}
+
+fn clip_title_layout(
     clip_x: f32,
+    clip_y: f32,
     title_width: f32,
     viewport_width: f32,
-) -> Option<(f32, f32, f32)> {
+) -> Option<ClipTitleLayout> {
     let left = clip_x.max(0.0);
     let right = (clip_x + title_width).min(viewport_width);
-    (right > left).then(|| (left, right - left, (clip_x + 4.0).max(left + 4.0)))
+    (right > left).then(|| ClipTitleLayout {
+        region: Rectangle {
+            x: left,
+            y: clip_y,
+            width: right - left,
+            height: CLIP_TITLE_HEIGHT,
+        },
+        text: iced::Point::new((clip_x + 4.0).max(left + 4.0), clip_y + 3.0),
+    })
+}
+
+fn draw_clip_title(
+    frame: &mut canvas::Frame,
+    name: &str,
+    clip_x: f32,
+    clip_y: f32,
+    clip_w: f32,
+    loop_enabled: bool,
+    viewport_width: f32,
+) {
+    let title_width = (clip_w - if loop_enabled { 18.0 } else { 0.0 }).max(0.0);
+    let Some(layout) = clip_title_layout(clip_x, clip_y, title_width, viewport_width) else {
+        return;
+    };
+    let Some(title) = fit_clip_title(name, layout.region.width, loop_enabled) else {
+        return;
+    };
+    frame.with_clip(layout.region, |title_frame| {
+        title_frame.fill_text(canvas::Text {
+            content: title,
+            position: layout.text,
+            color: theme::text(),
+            size: iced::Pixels(11.0),
+            ..Default::default()
+        });
+    });
 }
 
 fn waveform_peak_for_pixel(
@@ -347,33 +390,15 @@ impl TrackClipCanvas {
                         .with_width(1.0),
                 );
 
-                // Clip name label
-                let title_width = (clip_w - if clip.loop_enabled { 18.0 } else { 0.0 }).max(0.0);
-                if let Some((title_x, visible_title_width, text_x)) =
-                    visible_title_bounds(clip_x, title_width, w)
-                {
-                    if let Some(title) =
-                        fit_clip_title(clip.name.as_str(), visible_title_width, clip.loop_enabled)
-                    {
-                        frame.with_clip(
-                            Rectangle {
-                                x: title_x,
-                                y: clip_y,
-                                width: visible_title_width,
-                                height: CLIP_TITLE_HEIGHT,
-                            },
-                            |title_frame| {
-                                title_frame.fill_text(canvas::Text {
-                                    content: title,
-                                    position: iced::Point::new(text_x, clip_y + 3.0),
-                                    color: theme::text(),
-                                    size: iced::Pixels(11.0),
-                                    ..Default::default()
-                                });
-                            },
-                        );
-                    }
-                }
+                draw_clip_title(
+                    &mut frame,
+                    &clip.name,
+                    clip_x,
+                    clip_y,
+                    clip_w,
+                    clip.loop_enabled,
+                    w,
+                );
 
                 // Diagonal stripe overlay when the clip's warp is
                 // stale relative to the current project tempo. Low
@@ -583,36 +608,15 @@ impl TrackClipCanvas {
                         .with_width(1.0),
                 );
 
-                // Clip name label
-                let title_width =
-                    (clip_w - if note_clip.loop_enabled { 18.0 } else { 0.0 }).max(0.0);
-                if let Some((title_x, visible_title_width, text_x)) =
-                    visible_title_bounds(clip_x, title_width, w)
-                {
-                    if let Some(title) = fit_clip_title(
-                        note_clip.name.as_str(),
-                        visible_title_width,
-                        note_clip.loop_enabled,
-                    ) {
-                        frame.with_clip(
-                            Rectangle {
-                                x: title_x,
-                                y: clip_y,
-                                width: visible_title_width,
-                                height: CLIP_TITLE_HEIGHT,
-                            },
-                            |title_frame| {
-                                title_frame.fill_text(canvas::Text {
-                                    content: title,
-                                    position: iced::Point::new(text_x, clip_y + 3.0),
-                                    color: theme::text(),
-                                    size: iced::Pixels(11.0),
-                                    ..Default::default()
-                                });
-                            },
-                        );
-                    }
-                }
+                draw_clip_title(
+                    &mut frame,
+                    &note_clip.name,
+                    clip_x,
+                    clip_y,
+                    clip_w,
+                    note_clip.loop_enabled,
+                    w,
+                );
             }
         }
 
@@ -798,7 +802,7 @@ impl TrackClipCanvas {
 #[cfg(test)]
 mod tests {
     use super::{
-        fit_clip_title, visible_pixel_columns, visible_title_bounds, waveform_peak_for_pixel,
+        clip_title_layout, fit_clip_title, visible_pixel_columns, waveform_peak_for_pixel,
     };
 
     #[test]
@@ -874,14 +878,9 @@ mod tests {
 
     #[test]
     fn clip_title_bounds_never_escape_the_arrangement_viewport() {
-        assert_eq!(
-            visible_title_bounds(-200.0, 400.0, 800.0),
-            Some((0.0, 200.0, 4.0))
-        );
-        assert_eq!(
-            visible_title_bounds(100.0, 200.0, 800.0),
-            Some((100.0, 200.0, 104.0))
-        );
-        assert_eq!(visible_title_bounds(900.0, 200.0, 800.0), None);
+        let region = |clip_x| clip_title_layout(clip_x, 4.0, 400.0, 800.0).map(|l| l.region);
+        assert_eq!(region(-200.0).map(|r| (r.x, r.width)), Some((0.0, 200.0)));
+        assert_eq!(region(600.0).map(|r| (r.x, r.width)), Some((600.0, 200.0)));
+        assert_eq!(region(900.0), None);
     }
 }
