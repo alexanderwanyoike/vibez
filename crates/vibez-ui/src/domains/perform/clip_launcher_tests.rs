@@ -625,3 +625,38 @@ fn recovery_from_a_previous_project_preserves_a_new_unconsumed_launch() {
         .expect("the eventual transition must still resolve its source");
     assert_eq!(acknowledged.id, clip.id);
 }
+
+#[test]
+fn a_stop_lands_where_the_playing_clip_would_launch() {
+    let track = TrackId::new();
+    let mut state = PerformState::default();
+    Arc::make_mut(&mut state.clips).set_launch_quantization(track, MusicalBoundary::OneBeat);
+    assert_eq!(
+        state.stop_quantization(track),
+        MusicalBoundary::OneBeat,
+        "a silent track stops on its own quantization"
+    );
+    let mut clip = crate::domains::perform::clip_record::empty_midi_clip(
+        ClipId::new(),
+        track,
+        0,
+        "Break".into(),
+        4.0,
+    );
+    clip.launch_quantization = Some(MusicalBoundary::Eighth);
+    state.clip_editor.playing.insert(track, clip.clone());
+    assert_eq!(
+        state.stop_quantization(track),
+        MusicalBoundary::Eighth,
+        "a playing clip that was removed keeps its own"
+    );
+    Arc::make_mut(&mut state.clips).clips.push(LauncherClip {
+        launch_quantization: None,
+        ..clip
+    });
+    assert_eq!(
+        state.stop_quantization(track),
+        MusicalBoundary::OneBeat,
+        "the clip's current options win over the playing snapshot"
+    );
+}

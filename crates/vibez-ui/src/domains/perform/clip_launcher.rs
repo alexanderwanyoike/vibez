@@ -19,6 +19,8 @@ pub struct LauncherClip {
     pub track_id: TrackId,
     pub row: u32,
     pub timeline: Arc<ArrangementTimeline>,
+    /// `None` follows the Project Track's launch quantization.
+    pub launch_quantization: Option<MusicalBoundary>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -76,6 +78,11 @@ impl ClipStore {
             .get(&track_id)
             .copied()
             .unwrap_or(DEFAULT_LAUNCH_QUANTIZATION)
+    }
+
+    pub fn clip_launch_quantization(&self, clip: &LauncherClip) -> MusicalBoundary {
+        clip.launch_quantization
+            .unwrap_or_else(|| self.launch_quantization(clip.track_id))
     }
 
     pub fn set_launch_quantization(&mut self, track_id: TrackId, quantization: MusicalBoundary) {
@@ -265,6 +272,10 @@ pub enum ClipMsg {
         track_id: TrackId,
         quantization: MusicalBoundary,
     },
+    SetClipLaunchQuantization {
+        clip_id: ClipId,
+        quantization: Option<MusicalBoundary>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -289,12 +300,27 @@ impl ClipMsg {
     pub const fn defers_project_edit(&self) -> bool {
         matches!(
             self,
-            Self::Cut | Self::Paste | Self::Drop { .. } | Self::SetLaunchQuantization { .. }
+            Self::Cut
+                | Self::Paste
+                | Self::Drop { .. }
+                | Self::SetLaunchQuantization { .. }
+                | Self::SetClipLaunchQuantization { .. }
         )
     }
 }
 
 impl PerformState {
+    /// A stop lands where the Clip it stops would launch.
+    pub fn stop_quantization(&self, track_id: TrackId) -> MusicalBoundary {
+        self.clip_editor.playing.get(&track_id).map_or_else(
+            || self.clips.launch_quantization(track_id),
+            |playing| {
+                self.clips
+                    .clip_launch_quantization(self.clips.by_id(playing.id).unwrap_or(playing))
+            },
+        )
+    }
+
     pub fn toggle_clip_request(&self, id: ClipId) -> Option<ClipLaunchRequest> {
         let clip = self.clips.by_id(id)?;
         Some(if self.clip_is_triggered(clip) {
@@ -611,6 +637,20 @@ impl PerformState {
                     Arc::make_mut(&mut self.clips).set_launch_quantization(track_id, quantization);
                 }
             }
+            ClipMsg::SetClipLaunchQuantization {
+                clip_id,
+                quantization,
+            } => {
+                if self
+                    .clips
+                    .by_id(clip_id)
+                    .is_some_and(|clip| clip.launch_quantization != quantization)
+                {
+                    if let Some(clip) = Arc::make_mut(&mut self.clips).by_id_mut(clip_id) {
+                        clip.launch_quantization = quantization;
+                    }
+                }
+            }
             ClipMsg::MoveWindow { tracks, rows } => {
                 self.clip_editor.first_track = self
                     .clip_editor
@@ -665,6 +705,7 @@ impl LauncherClip {
             track_id,
             row,
             timeline: Arc::new(timeline),
+            launch_quantization: self.launch_quantization,
         }
     }
 

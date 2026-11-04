@@ -66,6 +66,7 @@ impl App {
                 track_id,
                 row,
                 timeline: Arc::default(),
+                launch_quantization: None,
             })
         } else {
             original
@@ -359,6 +360,7 @@ impl App {
             track_id: outcome.track_id,
             row: session.working.row,
             timeline: Arc::new(timeline),
+            launch_quantization: session.working.launch_quantization,
         };
         self.publish_recorded_clip(recorded, self.state.transport.playing);
         self.state.perform.select_launcher_clip(id);
