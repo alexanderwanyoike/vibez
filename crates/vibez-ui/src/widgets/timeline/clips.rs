@@ -899,45 +899,11 @@ impl canvas::Program<Message> for TrackClipCanvas {
                 }
             }
 
-            // Delete/Backspace are handled centrally by the global
-            // DeleteKeyPressed shortcut (context-aware: selected notes
-            // first, then clips). The old canvas binding here raced
-            // the piano roll's and won, deleting the clip while a
-            // note was selected; it could even delete the whole track.
-
-            // -- Lane-local keyboard shortcuts (Ctrl+D/E/J) --
-            // Track creation is global and must not be handled here: this
-            // canvas is instantiated once per track, so one Ctrl+T event would
-            // otherwise publish one AddTrack message per existing lane.
-            canvas::Event::Keyboard(iced::keyboard::Event::KeyPressed {
-                key: iced::keyboard::Key::Character(ref c),
-                modifiers,
-                ..
-            }) => {
-                if crate::app::command_held(modifiers, crate::app::ON_MACOS) {
-                    match c.as_str() {
-                        "d" if !self.selected_clips.is_empty() => {
-                            return (
-                                canvas::event::Status::Captured,
-                                Some(Message::Arrangement(ArrangementMsg::DuplicateSelectedClip)),
-                            );
-                        }
-                        "e" => {
-                            return (
-                                canvas::event::Status::Captured,
-                                Some(Message::split_selected_at_playhead()),
-                            );
-                        }
-                        "j" if !self.selected_clips.is_empty() => {
-                            return (
-                                canvas::event::Status::Captured,
-                                Some(Message::join_selected_clips()),
-                            );
-                        }
-                        _ => {}
-                    }
-                }
-            }
+            // Clip edit keys (Delete, Command+D/E/J/T) belong to the global
+            // keyboard handler. This canvas exists once per lane, so a key
+            // handled here would run its edit once per lane, and a Delete
+            // bound here raced the piano roll's and deleted the clip while a
+            // note was selected.
 
             // -- Track shift key state for multi-select --
             canvas::Event::Keyboard(iced::keyboard::Event::ModifiersChanged(modifiers)) => {

@@ -551,6 +551,7 @@ pub(crate) fn global_key_handler(
                 }
             }
             "m" | "M" => Some(Message::create_clip_from_selection()),
+            "d" => Some(Message::Arrangement(ArrangementMsg::DuplicateSelectedClip)),
             "e" => Some(Message::split_selected_at_playhead()),
             "j" => Some(Message::join_selected_clips()),
             "l" | "L" => {
