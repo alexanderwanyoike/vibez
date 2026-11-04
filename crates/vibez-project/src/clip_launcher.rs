@@ -32,6 +32,9 @@ pub struct LauncherClipInfo {
     /// `None` follows the Project Track's launch quantization.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub launch_quantization: Option<MusicalBoundary>,
+    /// `None` follows the Project Track's launch mode.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub launch_mode: Option<ClipLaunchMode>,
 }
 
 /// A Project Track's Clip launch options. Tracks on the defaults are not written.

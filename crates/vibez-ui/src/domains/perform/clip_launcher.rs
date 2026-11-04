@@ -21,6 +21,8 @@ pub struct LauncherClip {
     pub timeline: Arc<ArrangementTimeline>,
     /// `None` follows the Project Track's launch quantization.
     pub launch_quantization: Option<MusicalBoundary>,
+    /// `None` follows the Project Track's launch mode.
+    pub launch_mode: Option<ClipLaunchMode>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -146,6 +148,11 @@ impl ClipStore {
             .unwrap_or_else(|| self.launch_quantization(clip.track_id))
     }
 
+    pub fn clip_launch_mode(&self, clip: &LauncherClip) -> ClipLaunchMode {
+        clip.launch_mode
+            .unwrap_or_else(|| self.launch_mode(clip.track_id))
+    }
+
     pub fn set_launch_quantization(&mut self, track_id: TrackId, quantization: MusicalBoundary) {
         self.update_track_options(track_id, |options| options.quantization = quantization);
     }
@@ -158,7 +165,7 @@ impl ClipStore {
         self.update_track_options(track_id, |options| options.mode = mode);
     }
 
-    /// Prepares `clip` to launch with its track's launch mode.
+    /// Prepares `clip` to launch with its own or its track's launch mode.
     pub fn prepare_launch(
         &self,
         clip: &LauncherClip,
@@ -166,7 +173,7 @@ impl ClipStore {
         samples_per_beat: f64,
     ) -> Box<vibez_engine::playback_source::PreparedClipPlayback> {
         let mut prepared = clip.prepare(request_id, samples_per_beat);
-        prepared.launch_mode = self.launch_mode(clip.track_id);
+        prepared.launch_mode = self.clip_launch_mode(clip);
         prepared
     }
 
@@ -357,6 +364,10 @@ pub enum ClipMsg {
         track_id: TrackId,
         mode: ClipLaunchMode,
     },
+    SetClipLaunchMode {
+        clip_id: ClipId,
+        mode: Option<ClipLaunchMode>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -371,7 +382,11 @@ impl ClipMsg {
     pub const fn marks_dirty(&self) -> bool {
         matches!(
             self,
-            Self::CreateMidi { .. } | Self::Delete(_) | Self::Duplicate(_) | Self::ToggleLoop(_)
+            Self::CreateMidi { .. }
+                | Self::Delete(_)
+                | Self::Duplicate(_)
+                | Self::ToggleLoop(_)
+                | Self::SetClipLaunchMode { .. }
         )
     }
 
@@ -738,6 +753,11 @@ impl PerformState {
                     Arc::make_mut(&mut self.clips).set_launch_mode(track_id, mode);
                 }
             }
+            ClipMsg::SetClipLaunchMode { clip_id, mode } => {
+                if let Some(clip) = Arc::make_mut(&mut self.clips).by_id_mut(clip_id) {
+                    clip.launch_mode = mode;
+                }
+            }
             ClipMsg::MoveWindow { tracks, rows } => {
                 self.clip_editor.first_track = self
                     .clip_editor
@@ -793,6 +813,7 @@ impl LauncherClip {
             row,
             timeline: Arc::new(timeline),
             launch_quantization: self.launch_quantization,
+            launch_mode: self.launch_mode,
         }
     }
 

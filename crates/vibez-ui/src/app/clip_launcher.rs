@@ -73,6 +73,7 @@ impl App {
                 row,
                 timeline: Arc::new(timeline),
                 launch_quantization: None,
+                launch_mode: None,
             });
         self.state.perform.select_launcher_clip(id);
         self.state.view.detail_panel_tab = crate::state::DetailPanelTab::Clip;

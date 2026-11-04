@@ -28,6 +28,7 @@ fn source(track_id: TrackId, pitch: u8, beats: f64) -> LauncherClip {
         row: 0,
         timeline: Arc::new(timeline),
         launch_quantization: None,
+        launch_mode: None,
     }
 }
 

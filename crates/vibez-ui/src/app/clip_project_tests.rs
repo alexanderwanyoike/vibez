@@ -26,6 +26,7 @@ async fn clip_project_reopens_audio_midi_and_independent_arrange_content() {
         row: 13,
         timeline: midi,
         launch_quantization: None,
+        launch_mode: None,
     });
     let audio_id = ClipId::new();
     let audio = vibez_core::track::ClipInfo {
@@ -62,6 +63,7 @@ async fn clip_project_reopens_audio_midi_and_independent_arrange_content() {
             ..Default::default()
         },
         launch_quantization: None,
+        launch_mode: None,
     });
     let destination = directory.path().join("Clip project.vzp");
     save_project_async(destination.clone(), None, project)
@@ -104,6 +106,7 @@ fn legacy_documents_keep_sections_and_discover_launcher_ids() {
         row: 5,
         timeline: Default::default(),
         launch_quantization: None,
+        launch_mode: None,
     });
     assert!(project.max_persisted_id() >= id.raw().max(track_id.raw()));
     assert!(project
@@ -168,6 +171,7 @@ async fn recorded_audio_cells_require_container_saves_and_reopen_with_embedded_m
                     ..Default::default()
                 },
                 launch_quantization: None,
+                launch_mode: None,
             }],
             ..Default::default()
         };

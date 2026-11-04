@@ -364,6 +364,7 @@ impl App {
                     row: clip.row,
                     timeline: super::project_sections::timeline_info_from_ui(&clip.timeline),
                     launch_quantization: clip.launch_quantization,
+                    launch_mode: clip.launch_mode,
                 })
                 .collect(),
             arrange: super::project_sections::timeline_info_from_ui(
@@ -447,6 +448,7 @@ impl App {
                     &clip.timeline,
                 )),
                 launch_quantization: clip.launch_quantization,
+                launch_mode: clip.launch_mode,
             })
             .collect();
         clips.restore_launcher_tracks(&loaded.project.launcher_tracks);

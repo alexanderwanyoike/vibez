@@ -177,6 +177,7 @@ pub fn empty_midi_clip(
         row,
         timeline: Arc::new(timeline),
         launch_quantization: None,
+        launch_mode: None,
     }
 }
 
