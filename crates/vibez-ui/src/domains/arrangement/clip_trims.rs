@@ -81,12 +81,15 @@ fn audio_start_trimmed(clip: &UiClip, delta: i64, shortest: u64) -> Option<UiCli
         trimmed.id = clip.id;
         return Some(trimmed);
     }
-    // Extending a looped Clip earlier repeats its loop rather than revealing
-    // the source before it, which is a different edit.
+    let mut wanted = delta.unsigned_abs().min(clip.position);
     if clip.loop_enabled {
-        return None;
+        // Before its loop start a looped Clip repeats its loop rather than
+        // revealing the source there, which is a different edit.
+        if clip.playback_direction == ClipPlaybackDirection::Reverse {
+            return None;
+        }
+        wanted = wanted.min(clip.start_marker.saturating_sub(clip.loop_start));
     }
-    let wanted = delta.unsigned_abs().min(clip.position);
     let mut trimmed = clip.clone();
     match clip.playback_direction {
         ClipPlaybackDirection::Forward => {
@@ -118,6 +121,7 @@ fn audio_start_trimmed(clip: &UiClip, delta: i64, shortest: u64) -> Option<UiCli
 /// `None` when it cannot move that way. Its notes stay where they are in
 /// the content; the start marker moves over them.
 fn note_start_trimmed(clip: &UiNoteClip, delta: f64) -> Option<UiNoteClip> {
+    // See `audio_start_trimmed` for why a looped Clip stops at its loop start.
     let earliest = if clip.loop_enabled {
         clip.loop_start_beats.min(clip.start_marker_beats)
     } else {
