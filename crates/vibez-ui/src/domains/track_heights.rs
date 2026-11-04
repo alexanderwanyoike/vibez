@@ -1,0 +1,193 @@
+//! Arrange track heights: how tall each track's lane is drawn, and the
+//! header-edge drag that resizes one lane or, with Alt, every lane.
+
+use std::collections::HashMap;
+
+use vibez_core::id::TrackId;
+
+pub const DEFAULT_TRACK_HEIGHT: f32 = 70.0;
+/// The header column reserves its spacing and padding before laying out
+/// rows, so any shorter squeezes mute and solo under the name row.
+pub const MIN_TRACK_HEIGHT: f32 = 62.0;
+pub const MAX_TRACK_HEIGHT: f32 = 420.0;
+
+/// Messages the track height domain handles.
+#[derive(Debug, Clone)]
+pub enum TrackHeightMsg {
+    /// Pressed on this track header's bottom edge.
+    BeginResize(TrackId),
+    /// The pointer moved to this window y during a resize.
+    DragTo(f32),
+    EndResize,
+}
+
+/// Read-only facts a resize needs from outside the domain.
+#[derive(Debug, Clone, Copy)]
+pub struct TrackHeightCtx<'a> {
+    /// Window y of the pointer.
+    pub cursor_y: f32,
+    /// Alt is held, so the drag sets every track to one height.
+    pub all_tracks: bool,
+    /// Every Arrange track, top to bottom.
+    pub track_ids: &'a [TrackId],
+}
+
+/// Cross-domain effects requested by a track height update.
+#[derive(Debug, Default, PartialEq)]
+pub struct TrackHeightAction {
+    /// A finished resize changed a height the project saves.
+    pub mark_dirty: bool,
+}
+
+/// Lane height per Arrange track. Tracks never resized are absent and
+/// draw at [`DEFAULT_TRACK_HEIGHT`].
+#[derive(Debug, Clone, Default)]
+pub struct TrackHeights {
+    _heights: HashMap<TrackId, f32>,
+}
+
+impl TrackHeights {
+    /// Heights read back from a project file.
+    pub fn from_saved(_saved: &[(TrackId, f32)]) -> Self {
+        Self::default()
+    }
+
+    /// The heights a project file keeps for these tracks.
+    pub fn saved(&self, _track_ids: impl IntoIterator<Item = TrackId>) -> Vec<(TrackId, f32)> {
+        Vec::new()
+    }
+
+    pub fn height(&self, _track_id: TrackId) -> f32 {
+        DEFAULT_TRACK_HEIGHT
+    }
+
+    /// The track whose header edge is being dragged.
+    pub fn resizing(&self) -> Option<TrackId> {
+        None
+    }
+
+    pub fn update(&mut self, _msg: TrackHeightMsg, _ctx: TrackHeightCtx<'_>) -> TrackHeightAction {
+        TrackHeightAction::default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tracks() -> Vec<TrackId> {
+        (0..3).map(|_| TrackId::new()).collect()
+    }
+
+    fn ctx(cursor_y: f32, all_tracks: bool, track_ids: &[TrackId]) -> TrackHeightCtx<'_> {
+        TrackHeightCtx {
+            cursor_y,
+            all_tracks,
+            track_ids,
+        }
+    }
+
+    fn drag(
+        heights: &mut TrackHeights,
+        track_id: TrackId,
+        (from_y, to_y): (f32, f32),
+        all_tracks: bool,
+        ids: &[TrackId],
+    ) -> TrackHeightAction {
+        heights.update(
+            TrackHeightMsg::BeginResize(track_id),
+            ctx(from_y, all_tracks, ids),
+        );
+        heights.update(TrackHeightMsg::DragTo(to_y), ctx(to_y, all_tracks, ids));
+        heights.update(TrackHeightMsg::EndResize, ctx(to_y, all_tracks, ids))
+    }
+
+    #[test]
+    fn dragging_a_header_edge_resizes_only_that_track() {
+        let ids = tracks();
+        let mut heights = TrackHeights::default();
+
+        heights.update(TrackHeightMsg::BeginResize(ids[0]), ctx(300.0, false, &ids));
+        assert_eq!(heights.resizing(), Some(ids[0]));
+        heights.update(TrackHeightMsg::DragTo(440.0), ctx(440.0, false, &ids));
+
+        assert_eq!(heights.height(ids[0]), DEFAULT_TRACK_HEIGHT + 140.0);
+        assert_eq!(heights.height(ids[1]), DEFAULT_TRACK_HEIGHT);
+    }
+
+    #[test]
+    fn a_resize_stops_at_the_minimum_and_maximum_height() {
+        let ids = tracks();
+        let mut heights = TrackHeights::default();
+
+        drag(&mut heights, ids[0], (300.0, -2000.0), false, &ids);
+        assert_eq!(heights.height(ids[0]), MIN_TRACK_HEIGHT);
+
+        drag(&mut heights, ids[0], (300.0, 5000.0), false, &ids);
+        assert_eq!(heights.height(ids[0]), MAX_TRACK_HEIGHT);
+    }
+
+    #[test]
+    fn alt_dragging_sets_every_track_to_the_dragged_tracks_height() {
+        let ids = tracks();
+        let mut heights = TrackHeights::default();
+        drag(&mut heights, ids[0], (100.0, 240.0), false, &ids);
+
+        drag(&mut heights, ids[1], (300.0, 330.0), true, &ids);
+
+        assert!(ids
+            .iter()
+            .all(|&id| heights.height(id) == DEFAULT_TRACK_HEIGHT + 30.0));
+    }
+
+    #[test]
+    fn only_a_resize_that_changed_a_height_marks_the_project_dirty() {
+        let ids = tracks();
+        let mut heights = TrackHeights::default();
+
+        assert_eq!(
+            drag(&mut heights, ids[0], (300.0, 300.0), false, &ids),
+            TrackHeightAction::default()
+        );
+        assert_eq!(
+            drag(&mut heights, ids[0], (300.0, 320.0), false, &ids),
+            TrackHeightAction { mark_dirty: true }
+        );
+        assert_eq!(heights.resizing(), None);
+    }
+
+    #[test]
+    fn moving_the_pointer_without_a_resize_changes_nothing() {
+        let ids = tracks();
+        let mut heights = TrackHeights::default();
+
+        heights.update(TrackHeightMsg::DragTo(500.0), ctx(500.0, false, &ids));
+
+        assert_eq!(heights.height(ids[0]), DEFAULT_TRACK_HEIGHT);
+    }
+
+    #[test]
+    fn saved_heights_come_back_and_skip_tracks_no_longer_there() {
+        let ids = tracks();
+        let mut heights = TrackHeights::default();
+        drag(&mut heights, ids[0], (100.0, 240.0), false, &ids);
+        drag(&mut heights, ids[2], (100.0, 80.0), false, &ids);
+
+        let saved = heights.saved([ids[0], ids[1]]);
+        assert_eq!(saved, vec![(ids[0], DEFAULT_TRACK_HEIGHT + 140.0)]);
+
+        let reopened = TrackHeights::from_saved(&saved);
+        assert_eq!(reopened.height(ids[0]), DEFAULT_TRACK_HEIGHT + 140.0);
+        assert_eq!(reopened.height(ids[2]), DEFAULT_TRACK_HEIGHT);
+    }
+
+    #[test]
+    fn a_saved_height_out_of_range_loads_clamped() {
+        let ids = tracks();
+
+        let reopened = TrackHeights::from_saved(&[(ids[0], 4.0), (ids[1], 9000.0)]);
+
+        assert_eq!(reopened.height(ids[0]), MIN_TRACK_HEIGHT);
+        assert_eq!(reopened.height(ids[1]), MAX_TRACK_HEIGHT);
+    }
+}
