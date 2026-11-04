@@ -535,8 +535,10 @@ The engine lives on the cpal audio callback. Its rules:
   are drained at the start of each callback.
 - Transport commands (Play, Stop, Seek, loop changes) travel on their own
   transport ring. A content edit waiting for storage pauses the main ring, but
-  a transport command overtakes it, and only it: each one is stamped with the
-  number of non-content commands sent before it and waits for those.
+  a transport command overtakes it and the content and channel edits queued
+  behind it (`EngineCommand::transport_may_overtake`). Each one is stamped
+  with the number of other commands sent before it, such as tempo, Section or
+  Capture commands, and waits for those.
 - A note clip is sent as one prepared insertion that carries all its notes;
   `AddNote` is for single edits.
 - The UI's `playing` flag follows the engine's `PlaybackStarted` and
