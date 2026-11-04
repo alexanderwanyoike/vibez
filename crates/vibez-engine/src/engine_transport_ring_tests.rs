@@ -1,4 +1,4 @@
-//! Play and Stop overtake content edits waiting for storage, never a control command sent before them.
+//! Play and Stop overtake content and channel edits waiting behind storage, never a tempo or Section command sent before them.
 
 use super::*;
 use crate::clip_insertion::{PreparedNoteClipInsertion, PreparedNoteInsertion};

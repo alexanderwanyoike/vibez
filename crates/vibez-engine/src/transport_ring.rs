@@ -1,4 +1,4 @@
-//! Transport commands reach the callback on their own ring and overtake only pending content edits.
+//! Transport commands reach the callback on their own ring and overtake only edits the transport never reads.
 
 use rtrb::{Consumer, Producer, RingBuffer};
 
@@ -20,8 +20,16 @@ impl EngineCommand {
         )
     }
 
-    /// Arrangement content edits: the only commands a transport command may
-    /// overtake. Anything else keeps its order relative to the transport.
+    /// Content edits, and edits to channels, devices and the track list.
+    /// Play, Stop and Seek read none of that state, so a rebuild that queues
+    /// thousands of them never delays the transport. Anything else (tempo,
+    /// Sections, Capture, recording, live notes) keeps its order relative to
+    /// the transport.
+    pub fn transport_may_overtake(&self) -> bool {
+        self.is_content_edit() || self.is_channel_edit()
+    }
+
+    /// Arrangement content edits.
     pub fn is_content_edit(&self) -> bool {
         matches!(
             self,
@@ -51,16 +59,53 @@ impl EngineCommand {
                 | Self::EditNote { .. }
         )
     }
+
+    fn is_channel_edit(&self) -> bool {
+        matches!(
+            self,
+            Self::AddTrack(_)
+                | Self::RemoveTrack(_)
+                | Self::ReorderTracks(_)
+                | Self::AddBus(_)
+                | Self::RemoveBus(_)
+                | Self::SetTrackGain(..)
+                | Self::SetTrackPan(..)
+                | Self::SetTrackMute(..)
+                | Self::SetTrackSolo(..)
+                | Self::SetTrackSwingOffset(..)
+                | Self::SetAutomationOverride { .. }
+                | Self::SetSend { .. }
+                | Self::SetRouting(_)
+                | Self::UpdateAutomationRouting(_)
+                | Self::RejectRoutingUpdate { .. }
+                | Self::ResumeDeviceReconfiguration { .. }
+                | Self::RejectDeviceReconfiguration { .. }
+                | Self::InsertEffect { .. }
+                | Self::RemoveEffect(..)
+                | Self::MoveEffect { .. }
+                | Self::SetEffectParam { .. }
+                | Self::SetEffectBypass { .. }
+                | Self::SetEffectMeterChannel { .. }
+                | Self::SetInstrument { .. }
+                | Self::RemoveTrackInstrument(_)
+                | Self::SetInstrumentParam { .. }
+                | Self::LoadSamplerSample { .. }
+                | Self::LoadDrumRackPadSample { .. }
+                | Self::ClearDrumRackPad { .. }
+                | Self::SetDrumRackPadState { .. }
+                | Self::SetDrumRackPadParam { .. }
+        )
+    }
 }
 
 /// Sender and receiver must count the same commands, or a transport command
 /// waits forever or overtakes a control it should follow.
 fn controls_in(command: &EngineCommand) -> u64 {
-    u64::from(!command.is_content_edit())
+    u64::from(!command.transport_may_overtake())
 }
 
-/// A transport command stamped with how many non-content commands were sent
-/// on the main command ring before it.
+/// A transport command stamped with how many commands it may not overtake
+/// were sent on the main command ring before it.
 pub struct TransportCommand {
     controls_before: u64,
     command: EngineCommand,
@@ -124,8 +169,8 @@ impl TransportReceiver {
         self.controls_applied += controls_in(command);
     }
 
-    /// The next transport command, once every non-content command sent
-    /// before it has been applied.
+    /// The next transport command, once every command it may not overtake
+    /// has been applied.
     pub(crate) fn ready(&self) -> Option<&EngineCommand> {
         self.consumer
             .peek()
