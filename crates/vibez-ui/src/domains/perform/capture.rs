@@ -19,7 +19,7 @@ use super::{PerformAction, Section};
 
 mod looped_launch;
 mod performance_log;
-use looped_launch::{looped_note_clip, LoopedLaunch};
+use looped_launch::{looped_audio_clip, looped_note_clip, LoopedLaunch};
 use performance_log::{CompletedPerformanceLog, PerformanceLog};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -214,12 +214,15 @@ impl CompletedCapture {
                     .saturating_add((kept_start - i128::from(self.engine_start_samples)) as u64);
                 let looped_launch = span.source.looping.then_some(LoopedLaunch {
                     phase_samples: source_cursor,
+                    pass_samples: section_length,
                     played_samples: remaining,
                     destination_start_samples: destination_cursor,
                     samples_per_beat,
                 });
                 let looped_notes = looped_launch
                     .and_then(|launch| looped_note_clip(content, &span.source, launch));
+                let looped_audio = looped_launch
+                    .and_then(|launch| looped_audio_clip(content, &span.source, launch));
                 while remaining > 0 && source_cursor < section_length {
                     let segment_length = remaining.min(section_length - source_cursor);
                     let destination = result.by_track.entry(*track_id).or_default();
@@ -229,7 +232,9 @@ impl CompletedCapture {
                         destination_start_samples: destination_cursor,
                         samples_per_beat,
                     };
-                    append_audio_window(destination, content, &span.source, window);
+                    if looped_audio.is_none() {
+                        append_audio_window(destination, content, &span.source, window);
+                    }
                     if looped_notes.is_none() {
                         append_note_window(destination, content, &span.source, window);
                     }
@@ -247,13 +252,10 @@ impl CompletedCapture {
                     }
                     source_cursor = 0;
                 }
-                if let Some(clip) = looped_notes {
-                    result
-                        .by_track
-                        .entry(*track_id)
-                        .or_default()
-                        .note_clips
-                        .push(clip);
+                if looped_notes.is_some() || looped_audio.is_some() {
+                    let destination = result.by_track.entry(*track_id).or_default();
+                    destination.note_clips.extend(looped_notes);
+                    destination.clips.extend(looped_audio);
                 }
             }
         }
