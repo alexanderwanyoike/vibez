@@ -28,6 +28,8 @@ use super::*;
 
 mod hit_test;
 
+use hit_test::ClipHit;
+
 /// Vertical travel before a clip drag may change lane. Without it a
 /// horizontal drag near a row boundary would flicker between tracks.
 const CROSS_TRACK_MIN_PX: f32 = 20.0;
@@ -418,9 +420,9 @@ impl canvas::Program<Message> for TrackClipCanvas {
                     }
                 };
             }
-            if let Some((_, _, near_right, _, _)) = self.hit_test(pos.x) {
+            if let Some(hit) = self.hit_test(pos.x) {
                 let in_title_bar = pos.y < CLIP_Y + CLIP_TITLE_HEIGHT;
-                if near_right && in_title_bar {
+                if hit.near_right && in_title_bar {
                     return mouse::Interaction::ResizingHorizontally;
                 }
                 if in_title_bar {
@@ -478,8 +480,13 @@ impl canvas::Program<Message> for TrackClipCanvas {
                         });
                         return (canvas::event::Status::Captured, None);
                     }
-                    if let Some((clip_id, is_note_clip, near_right, pos_beats, dur_beats)) =
-                        self.hit_test(pos.x)
+                    if let Some(ClipHit {
+                        clip_id,
+                        is_note_clip,
+                        near_right,
+                        position_beats: pos_beats,
+                        duration_beats: dur_beats,
+                    }) = self.hit_test(pos.x)
                     {
                         let in_title_bar = pos.y < CLIP_Y + CLIP_TITLE_HEIGHT;
 
@@ -568,7 +575,12 @@ impl canvas::Program<Message> for TrackClipCanvas {
                     let screen_y = bounds.y + pos.y;
 
                     // Hit test for clip
-                    if let Some((clip_id, is_note_clip, _, _, _)) = self.hit_test(pos.x) {
+                    if let Some(ClipHit {
+                        clip_id,
+                        is_note_clip,
+                        ..
+                    }) = self.hit_test(pos.x)
+                    {
                         return (
                             canvas::event::Status::Captured,
                             Some(Message::View(ViewMsg::ShowContextMenu {

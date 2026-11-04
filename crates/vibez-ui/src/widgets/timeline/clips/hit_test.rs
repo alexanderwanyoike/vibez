@@ -2,6 +2,16 @@
 
 use super::*;
 
+/// The Clip under the pointer.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ClipHit {
+    pub clip_id: ClipId,
+    pub is_note_clip: bool,
+    pub near_right: bool,
+    pub position_beats: f64,
+    pub duration_beats: f64,
+}
+
 impl TrackClipCanvas {
     /// Samples per beat for Audio Clip geometry.
     pub(crate) fn spb(&self) -> f64 {
@@ -42,10 +52,7 @@ impl TrackClipCanvas {
     }
 
     /// Find a clip at the given pixel position.
-    ///
-    /// Returns `(clip_id, is_note_clip, near_right_edge, position_beats,
-    /// duration_beats)`.
-    pub(crate) fn hit_test(&self, pos_x: f32) -> Option<(ClipId, bool, bool, f64, f64)> {
+    pub(crate) fn hit_test(&self, pos_x: f32) -> Option<ClipHit> {
         let geometry = self.geometry();
         let spb = self.spb();
 
@@ -56,14 +63,13 @@ impl TrackClipCanvas {
             let clip_w = geometry.width_for_beats(clip_dur_beats);
 
             if pos_x >= clip_x && pos_x <= clip_x + clip_w {
-                let near_right = pos_x > clip_x + clip_w - RESIZE_EDGE_PX;
-                return Some((
-                    clip.clip_id,
-                    false,
-                    near_right,
-                    clip_start_beat,
-                    clip_dur_beats,
-                ));
+                return Some(ClipHit {
+                    clip_id: clip.clip_id,
+                    is_note_clip: false,
+                    near_right: pos_x > clip_x + clip_w - RESIZE_EDGE_PX,
+                    position_beats: clip_start_beat,
+                    duration_beats: clip_dur_beats,
+                });
             }
         }
 
@@ -72,14 +78,13 @@ impl TrackClipCanvas {
             let clip_w = geometry.width_for_beats(note_clip.duration_beats);
 
             if pos_x >= clip_x && pos_x <= clip_x + clip_w {
-                let near_right = pos_x > clip_x + clip_w - RESIZE_EDGE_PX;
-                return Some((
-                    note_clip.clip_id,
-                    true,
-                    near_right,
-                    note_clip.position_beats,
-                    note_clip.duration_beats,
-                ));
+                return Some(ClipHit {
+                    clip_id: note_clip.clip_id,
+                    is_note_clip: true,
+                    near_right: pos_x > clip_x + clip_w - RESIZE_EDGE_PX,
+                    position_beats: note_clip.position_beats,
+                    duration_beats: note_clip.duration_beats,
+                });
             }
         }
 
