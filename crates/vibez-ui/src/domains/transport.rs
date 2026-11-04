@@ -353,6 +353,21 @@ mod tests {
     }
 
     #[test]
+    fn stop_returns_to_the_same_beat_after_a_tempo_change() {
+        let (mut t, mut engine) = playing_from(32.0);
+        t.update(
+            TransportMsg::NudgeBpm(-60.0),
+            &mut engine,
+            TransportCtx::default(),
+        );
+
+        t.update(TransportMsg::Stop, &mut engine, TransportCtx::default());
+
+        assert_eq!(t.bpm, 60.0);
+        assert_eq!(t.position_samples, t.beats_to_samples_at(32.0));
+    }
+
+    #[test]
     fn a_click_while_playing_moves_where_stop_returns() {
         let (mut t, mut engine) = playing_from(128.0);
         t.update(
