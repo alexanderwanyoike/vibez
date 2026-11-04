@@ -108,3 +108,32 @@ impl TrackClipCanvas {
         None
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_wide_clip_resizes_from_a_full_edge_zone_on_both_sides() {
+        assert_eq!(edge_at(107.0, 100.0, 200.0), Some(ClipEdge::Start));
+        assert_eq!(edge_at(293.0, 100.0, 200.0), Some(ClipEdge::End));
+        assert_eq!(edge_at(109.0, 100.0, 200.0), None);
+        assert_eq!(edge_at(291.0, 100.0, 200.0), None);
+    }
+
+    #[test]
+    fn a_short_clip_keeps_a_move_zone_in_its_middle() {
+        assert_eq!(edge_at(103.0, 100.0, 16.0), Some(ClipEdge::Start));
+        assert_eq!(edge_at(113.0, 100.0, 16.0), Some(ClipEdge::End));
+        assert_eq!(edge_at(105.0, 100.0, 16.0), None);
+        assert_eq!(edge_at(108.0, 100.0, 16.0), None);
+        assert_eq!(edge_at(111.0, 100.0, 16.0), None);
+    }
+
+    #[test]
+    fn a_tiny_clip_only_moves() {
+        for x in [100.0, 100.5, 102.0, 103.5, 104.0] {
+            assert_eq!(edge_at(x, 100.0, 4.0), None, "at {x}");
+        }
+    }
+}
