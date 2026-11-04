@@ -76,8 +76,8 @@ impl TransportState {
     pub fn reset_to_song_start(&mut self) {
         self.playback = PlaybackPhase::Stopped;
         self.position_samples = 0;
-        self.play_start_samples = 0;
-        self.continue_samples = 0;
+        self.play_start_beats = 0.0;
+        self.continue_beats = 0.0;
     }
 
     /// What the screen shows, so it never runs ahead of the engine.
@@ -147,9 +147,9 @@ impl TransportState {
                 engine.send(EngineCommand::Stop);
                 if !ctx.perform_playback_active {
                     if already_stopped {
-                        self.place_play_start(0, engine);
+                        self.place_play_start(0.0, engine);
                     } else {
-                        self.continue_samples = self.position_samples;
+                        self.continue_beats = self.position_beats();
                         self.return_to_play_start(engine);
                     }
                 }
@@ -165,27 +165,20 @@ impl TransportState {
             }
             TransportMsg::ContinuePlayback => {
                 if !self.will_play() {
-                    self.position_samples = self.continue_samples;
-                    engine.send(EngineCommand::Seek(self.continue_samples));
+                    self.position_samples = self.nearest_sample(self.continue_beats);
+                    engine.send(EngineCommand::Seek(self.position_samples));
                 }
                 self.update(TransportMsg::TogglePlayback, engine, ctx)
             }
             TransportMsg::Seek(normalized) => {
                 if ctx.total_duration_samples > 0 {
-                    let sample_pos =
-                        (normalized.clamp(0.0, 1.0) * ctx.total_duration_samples as f64) as u64;
-                    self.place_play_start(sample_pos, engine);
+                    let sample_pos = normalized.clamp(0.0, 1.0) * ctx.total_duration_samples as f64;
+                    self.place_play_start(sample_pos / self.samples_per_beat(), engine);
                 }
                 TransportAction::ClearTimeSelection
             }
             TransportMsg::SeekToBeat(beat) => {
-                let samples_per_beat = if self.bpm > 0.0 {
-                    self.sample_rate as f64 * 60.0 / self.bpm
-                } else {
-                    0.0
-                };
-                let sample_pos = (beat.max(0.0) * samples_per_beat).round() as u64;
-                self.place_play_start(sample_pos, engine);
+                self.place_play_start(beat.max(0.0), engine);
                 TransportAction::ClearTimeSelection
             }
             TransportMsg::BpmChanged(text) => {
@@ -245,7 +238,7 @@ impl TransportState {
                 let stopped_on_its_own = self.playback == PlaybackPhase::Playing;
                 self.follow_engine(false);
                 if stopped_on_its_own && !ctx.perform_playback_active {
-                    self.continue_samples = self.position_samples;
+                    self.continue_beats = self.position_beats();
                     self.return_to_play_start(engine);
                 }
                 TransportAction::None
@@ -253,15 +246,19 @@ impl TransportState {
         }
     }
 
-    fn place_play_start(&mut self, samples: u64, engine: &mut impl EngineHandle) {
-        self.play_start_samples = samples;
-        self.continue_samples = samples;
+    fn nearest_sample(&self, beats: f64) -> u64 {
+        (beats * self.samples_per_beat()).round() as u64
+    }
+
+    fn place_play_start(&mut self, beats: f64, engine: &mut impl EngineHandle) {
+        self.play_start_beats = beats;
+        self.continue_beats = beats;
         self.return_to_play_start(engine);
     }
 
     fn return_to_play_start(&mut self, engine: &mut impl EngineHandle) {
-        self.position_samples = self.play_start_samples;
-        engine.send(EngineCommand::Seek(self.play_start_samples));
+        self.position_samples = self.nearest_sample(self.play_start_beats);
+        engine.send(EngineCommand::Seek(self.position_samples));
     }
 
     /// Apply a new tempo: clamp, notify the engine, remap the loop

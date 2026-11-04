@@ -1062,14 +1062,14 @@ mod tests {
         let (mut events, received) = rtrb::RingBuffer::new(4);
         app.event_rx = Some(received);
         app.state.transport.playback = crate::state::PlaybackPhase::Playing;
-        app.state.transport.play_start_samples = 1_000;
+        app.state.transport.play_start_beats = 1.0;
         app.state.transport.position_samples = 90_000;
 
         events.push(EngineEvent::PlaybackStopped).unwrap();
         app.poll_engine_events();
 
         assert!(!app.state.transport.is_playing());
-        assert_eq!(app.state.transport.position_samples, 1_000);
+        assert_eq!(app.state.transport.position_samples, 22_050);
     }
 
     #[test]
