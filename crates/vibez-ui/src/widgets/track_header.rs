@@ -43,6 +43,16 @@ impl TrackHeaderFlags {
                 || track.audio_input_route.resample_source().is_some()
                 || track.input_monitoring != InputMonitoring::Off)
     }
+
+    /// Whether the quiet add and delete actions are shown and clickable.
+    fn shows_actions(self) -> bool {
+        true
+    }
+
+    /// Whether the automation toggle is shown and clickable.
+    fn shows_automation_toggle(self) -> bool {
+        true
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -210,12 +220,16 @@ pub fn view_track_header<'a>(
         }
     };
     let add_btn = button(icons::icon(icons::PLUS).size(11).color(action_color))
-        .on_press(add_message)
+        .on_press_maybe(flags.shows_actions().then_some(add_message))
         .padding([2, 4])
         .style(quiet_action_style);
 
     let delete_btn = button(icons::icon(icons::TRASH_2).size(10).color(action_color))
-        .on_press(Message::remove_track(track.id))
+        .on_press_maybe(
+            flags
+                .shows_actions()
+                .then(|| Message::remove_track(track.id)),
+        )
         .padding([2, 4])
         .style(quiet_action_style);
 
@@ -226,9 +240,13 @@ pub fn view_track_header<'a>(
             action_color
         };
         button(icons::icon(icons::SLIDERS_VERTICAL).size(10).color(color))
-            .on_press(Message::Automation(AutomationMsg::ToggleTrackLanes(
-                track.id,
-            )))
+            .on_press_maybe(
+                flags
+                    .shows_automation_toggle()
+                    .then_some(Message::Automation(AutomationMsg::ToggleTrackLanes(
+                        track.id,
+                    ))),
+            )
             .padding([2, 4])
             .style(quiet_action_style)
     };
@@ -520,6 +538,26 @@ mod tests {
         assert!(hovered.shows_audio_input(&audio_track(), false));
         assert!(resting.shows_audio_input(&audio_track(), true));
         assert!(resting.shows_audio_input(&monitoring, false));
+    }
+
+    #[test]
+    fn hidden_header_actions_take_no_clicks() {
+        let resting = TrackHeaderFlags::default();
+        let hovered = TrackHeaderFlags {
+            hovered: true,
+            ..resting
+        };
+        let automation_open = TrackHeaderFlags {
+            automation_open: true,
+            ..resting
+        };
+
+        assert!(!resting.shows_actions());
+        assert!(!resting.shows_automation_toggle());
+        assert!(hovered.shows_actions());
+        assert!(hovered.shows_automation_toggle());
+        assert!(!automation_open.shows_actions());
+        assert!(automation_open.shows_automation_toggle());
     }
 
     #[test]
