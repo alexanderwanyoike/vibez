@@ -18,6 +18,9 @@ pub enum TransportMsg {
     Play,
     Stop,
     TogglePlayback,
+    /// Shift+Space: TogglePlayback that starts from where playback last
+    /// stopped instead of the play start.
+    ContinuePlayback,
     /// Seek to a normalized [0, 1] position on the timeline.
     Seek(f64),
     /// Seek to an absolute musical position on the arrangement ruler.
@@ -132,9 +135,11 @@ impl TransportState {
                 engine.send(EngineCommand::Stop);
                 if !ctx.perform_playback_active {
                     if already_stopped {
-                        self.play_start_samples = 0;
+                        self.place_play_start(0, engine);
+                    } else {
+                        self.continue_samples = self.position_samples;
+                        self.return_to_play_start(engine);
                     }
-                    self.return_to_play_start(engine);
                 }
                 TransportAction::None
             }
@@ -145,6 +150,13 @@ impl TransportState {
                     TransportMsg::Play
                 };
                 self.update(next, engine, ctx)
+            }
+            TransportMsg::ContinuePlayback => {
+                if !self.will_play() {
+                    self.position_samples = self.continue_samples;
+                    engine.send(EngineCommand::Seek(self.continue_samples));
+                }
+                self.update(TransportMsg::TogglePlayback, engine, ctx)
             }
             TransportMsg::Seek(normalized) => {
                 if ctx.total_duration_samples > 0 {
@@ -219,6 +231,7 @@ impl TransportState {
                 let stopped_on_its_own = self.will_play();
                 self.follow_engine(false);
                 if stopped_on_its_own && !ctx.perform_playback_active {
+                    self.continue_samples = self.position_samples;
                     self.return_to_play_start(engine);
                 }
                 TransportAction::None
@@ -228,6 +241,7 @@ impl TransportState {
 
     fn place_play_start(&mut self, samples: u64, engine: &mut impl EngineHandle) {
         self.play_start_samples = samples;
+        self.continue_samples = samples;
         self.return_to_play_start(engine);
     }
 

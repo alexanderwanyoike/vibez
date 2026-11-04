@@ -25,7 +25,7 @@ fn audio_recording_transport_guard(
     message: &TransportMsg,
 ) -> AudioRecordingTransportGuard {
     match message {
-        TransportMsg::Stop | TransportMsg::TogglePlayback
+        TransportMsg::Stop | TransportMsg::TogglePlayback | TransportMsg::ContinuePlayback
             if phase == crate::domains::audio_recording::AudioRecordingPhase::Recording =>
         {
             AudioRecordingTransportGuard::StopRecording
@@ -143,7 +143,11 @@ impl App {
         if self.state.perform.clip_record.is_active()
             && matches!(
                 &message,
-                Message::Transport(TransportMsg::Stop | TransportMsg::TogglePlayback)
+                Message::Transport(
+                    TransportMsg::Stop
+                        | TransportMsg::TogglePlayback
+                        | TransportMsg::ContinuePlayback
+                )
             )
         {
             if self.state.perform.clip_record.pending_audio_arm.is_some() {
@@ -285,6 +289,7 @@ impl App {
                     && matches!(
                         msg,
                         crate::domains::transport::TransportMsg::TogglePlayback
+                            | crate::domains::transport::TransportMsg::ContinuePlayback
                             | crate::domains::transport::TransportMsg::Play
                     )
                 {
@@ -308,6 +313,7 @@ impl App {
                     || matches!(
                         &msg,
                         crate::domains::transport::TransportMsg::TogglePlayback
+                            | crate::domains::transport::TransportMsg::ContinuePlayback
                             if self.state.transport.will_play()
                     );
                 if stops_perform {

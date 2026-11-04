@@ -53,6 +53,7 @@ impl App {
         self.state.transport.playback = crate::state::PlaybackPhase::Stopped;
         self.state.transport.position_samples = 0;
         self.state.transport.play_start_samples = 0;
+        self.state.transport.continue_samples = 0;
         self.send_command(EngineCommand::Stop);
         self.send_command(EngineCommand::Seek(0));
 

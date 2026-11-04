@@ -20,6 +20,9 @@ pub struct TransportState {
     pub position_samples: u64,
     /// Where Play starts and Stop returns: the last click on the timeline.
     pub play_start_samples: u64,
+    /// Where Shift+Space plays from: where playback last stopped, or the
+    /// play start once it is placed again.
+    pub continue_samples: u64,
     pub sample_rate: u32,
     pub bpm: f64,
     pub bpm_text: String,
@@ -34,6 +37,7 @@ impl Default for TransportState {
             playback: PlaybackPhase::Stopped,
             position_samples: 0,
             play_start_samples: 0,
+            continue_samples: 0,
             sample_rate: 44_100,
             bpm: 120.0,
             bpm_text: "120".to_string(),

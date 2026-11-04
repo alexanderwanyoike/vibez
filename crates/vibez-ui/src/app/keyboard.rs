@@ -400,9 +400,13 @@ pub(crate) fn global_key_handler(
 ) -> Option<Message> {
     use iced::keyboard::key::Named;
 
-    // Space: toggle playback (no modifiers required)
     if matches!(key, iced::keyboard::Key::Named(Named::Space)) {
-        return Some(Message::Transport(TransportMsg::TogglePlayback));
+        let toggle = if modifiers.shift() {
+            TransportMsg::ContinuePlayback
+        } else {
+            TransportMsg::TogglePlayback
+        };
+        return Some(Message::Transport(toggle));
     }
 
     if modifiers.is_empty() {
