@@ -267,6 +267,63 @@ mod tests {
     }
 
     #[test]
+    fn play_shows_playing_only_once_the_engine_starts() {
+        let mut t = transport();
+        let mut engine = RecordingEngine::default();
+        t.update(TransportMsg::Play, &mut engine, TransportCtx::default());
+        assert!(!t.playing);
+        assert!(t.will_play());
+
+        t.follow_engine(true);
+        assert!(t.playing);
+        assert!(t.will_play());
+    }
+
+    #[test]
+    fn stop_shows_stopped_only_once_the_engine_stops() {
+        let mut t = transport();
+        t.playing = true;
+        let mut engine = RecordingEngine::default();
+        t.update(TransportMsg::Stop, &mut engine, TransportCtx::default());
+        assert!(t.playing);
+        assert!(!t.will_play());
+
+        t.follow_engine(false);
+        assert!(!t.playing);
+    }
+
+    #[test]
+    fn toggling_before_the_engine_answers_follows_the_request() {
+        let mut t = transport();
+        let mut engine = RecordingEngine::default();
+        t.update(
+            TransportMsg::TogglePlayback,
+            &mut engine,
+            TransportCtx::default(),
+        );
+        t.update(
+            TransportMsg::TogglePlayback,
+            &mut engine,
+            TransportCtx::default(),
+        );
+        assert!(matches!(
+            engine.0.as_slice(),
+            [
+                EngineCommand::Play,
+                EngineCommand::Stop,
+                EngineCommand::Seek(0)
+            ]
+        ));
+
+        t.follow_engine(true);
+        assert!(t.playing);
+        assert!(
+            !t.will_play(),
+            "the Stop sent after Play is still on its way"
+        );
+    }
+
+    #[test]
     fn bpm_submit_parses_clamps_and_reports_change() {
         let mut t = transport();
         t.bpm_text = "1500".to_string();
