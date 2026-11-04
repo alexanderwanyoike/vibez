@@ -28,6 +28,8 @@ pub use messages::{
 };
 mod clip_moves;
 mod clipboard;
+mod content_swap;
+pub use content_swap::swap_changed_content;
 mod crossfades;
 mod fade_edits;
 mod slice_to_drum_rack;

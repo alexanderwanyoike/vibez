@@ -5,6 +5,7 @@ use std::sync::Arc;
 mod browser_results;
 mod browser_state;
 mod project_tracks;
+mod same_channels;
 mod snapshot;
 pub use project_tracks::ProjectTracksState;
 mod transport_state;

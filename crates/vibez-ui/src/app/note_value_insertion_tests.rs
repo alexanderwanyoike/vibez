@@ -250,10 +250,13 @@ fn piano_roll_note_growth_is_served_before_current_stale_batch_reuse_undo_stop_a
                 assert!(canonical.note_clips[1].notes.is_empty());
                 let actual = &outer.engine.tracks()[0].playback_source.note_clips;
                 assert_eq!(actual.len(), 2);
-                assert_eq!(actual[0].notes, [old]);
-                assert!(actual[1].notes.is_empty());
-                assert!(outer.engine.tracks()[0].instrument.is_none());
-                0.125
+                let resident = actual.iter().find(|clip| clip.id == outer.resident);
+                assert_eq!(resident.unwrap().notes, [old]);
+                let incoming = actual.iter().find(|clip| clip.id == outer.incoming.id);
+                assert!(incoming.unwrap().notes.is_empty());
+                assert!(outer.engine.tracks()[0].instrument.is_some());
+                // Swapping the resident clip flushes the held voice.
+                0.0
             }
             InnerChange::Current
             | InnerChange::CanonicalStale

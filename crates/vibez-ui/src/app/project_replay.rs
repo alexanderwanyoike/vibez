@@ -109,6 +109,14 @@ impl App {
             .section_editor
             .editor_mut()
             .discard_audio_clip_inspector_edits();
+        if self
+            .state
+            .project_tracks
+            .same_channels(&snapshot.project_tracks)
+        {
+            self.swap_changed_content(snapshot);
+            return;
+        }
         self.plugin_load_requests.reset();
         self.sidechain_sync_inputs = None;
         self.track_meter_peaks.clear();
@@ -204,6 +212,29 @@ impl App {
             .or_else(|| self.persisted_monitor_on_track());
         if let Err(error) = self.sync_audio_input_runtime() {
             eprintln!("vibez: Audio Input could not follow project restore: {error}");
+        }
+    }
+
+    /// Tracks, devices and plugins are unchanged, so they keep running and
+    /// only the timeline content that differs is swapped in the engine.
+    fn swap_changed_content(&mut self, snapshot: crate::state::ProjectSnapshot) {
+        let current = Arc::clone(&self.state.arrangement.timeline);
+        self.restore_snapshot_state(snapshot);
+        let target = Arc::clone(&self.state.arrangement.timeline);
+        let empty = crate::state::TrackTimelineContent::default();
+        let tracks = &self.state.project_tracks;
+        for channel in tracks
+            .tracks
+            .iter()
+            .chain(std::iter::once(&tracks.master))
+            .chain(&tracks.buses)
+        {
+            crate::domains::arrangement::swap_changed_content(
+                &mut self.cmd_tx,
+                channel.id,
+                current.get(channel.id).unwrap_or(&empty),
+                target.get(channel.id).unwrap_or(&empty),
+            );
         }
     }
 

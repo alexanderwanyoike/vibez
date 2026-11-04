@@ -60,6 +60,67 @@ pub struct UiClip {
     pub original_audio: Option<Arc<DecodedAudio>>,
 }
 
+/// Decoded audio compares by buffer identity: comparing samples would scan
+/// whole recordings, and every edit that changes audio installs a new buffer.
+impl PartialEq for UiClip {
+    fn eq(&self, other: &Self) -> bool {
+        let Self {
+            id,
+            name,
+            audio,
+            source,
+            position,
+            source_offset,
+            start_marker,
+            duration,
+            loop_enabled,
+            loop_start,
+            loop_end,
+            gain_db,
+            fades,
+            playback_direction,
+            transient_markers,
+            warp_markers,
+            transpose,
+            original_bpm,
+            warped,
+            warped_to_bpm,
+            original_audio,
+        } = self;
+        *id == other.id
+            && Arc::ptr_eq(audio, &other.audio)
+            && *position == other.position
+            && *source_offset == other.source_offset
+            && *start_marker == other.start_marker
+            && *duration == other.duration
+            && *loop_enabled == other.loop_enabled
+            && *loop_start == other.loop_start
+            && *loop_end == other.loop_end
+            && *gain_db == other.gain_db
+            && *fades == other.fades
+            && *playback_direction == other.playback_direction
+            && *warp_markers == other.warp_markers
+            && *name == other.name
+            && *source == other.source
+            && *transient_markers == other.transient_markers
+            && *transpose == other.transpose
+            && *original_bpm == other.original_bpm
+            && *warped == other.warped
+            && *warped_to_bpm == other.warped_to_bpm
+            && same_audio(original_audio, &other.original_audio)
+    }
+}
+
+pub(super) fn same_audio(
+    left: &Option<Arc<DecodedAudio>>,
+    right: &Option<Arc<DecodedAudio>>,
+) -> bool {
+    match (left, right) {
+        (Some(left), Some(right)) => Arc::ptr_eq(left, right),
+        (left, right) => left.is_none() && right.is_none(),
+    }
+}
+
 impl UiClip {
     pub(crate) fn source_end(&self) -> u64 {
         self.warp_markers.source_end(
@@ -400,7 +461,7 @@ impl UiEffect {
 }
 
 /// A note clip (MIDI pattern) as represented in the UI.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct UiNoteClip {
     pub id: ClipId,
     pub name: String,
@@ -661,7 +722,7 @@ impl ProjectTrack {
 /// This type contains only timeline-editable state. Channel identity,
 /// devices, routing, sends, and mixer state stay on [`ProjectTrack`]. Runtime
 /// meters and device-media caches therefore cannot leak into timeline clones.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct TrackTimelineContent {
     pub clips: Vec<UiClip>,
     pub note_clips: Vec<UiNoteClip>,
