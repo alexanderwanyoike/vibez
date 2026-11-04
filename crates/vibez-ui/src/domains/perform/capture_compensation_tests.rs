@@ -56,23 +56,11 @@ fn heard_window_trims_early_prefix_and_retains_its_tail_at_capture_stop() {
     capture.start(0, Some((section("First", early, full, 4), 0)));
     let result = capture.finish(12).unwrap().materialize();
     let early_clip = &result.by_track[&early].clips[0];
-    assert_eq!(
-        (
-            early_clip.position,
-            early_clip.source_offset,
-            early_clip.duration
-        ),
-        (0, 4, 12)
-    );
+    assert_eq!((early_clip.position, early_clip.duration), (0, 12));
+    assert_eq!(early_clip.source_frame_at(0), 4);
     let full_clip = &result.by_track[&full].clips[0];
-    assert_eq!(
-        (
-            full_clip.position,
-            full_clip.source_offset,
-            full_clip.duration
-        ),
-        (0, 0, 12)
-    );
+    assert_eq!((full_clip.position, full_clip.duration), (0, 12));
+    assert_eq!(full_clip.source_frame_at(0), 0);
 }
 
 #[test]

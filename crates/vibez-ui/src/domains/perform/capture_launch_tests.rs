@@ -184,3 +184,111 @@ fn a_track_with_several_section_clips_still_writes_one_clip_per_launch() {
     );
     assert_eq!(clips[0].name, "Capture · Groove A");
 }
+
+fn audio_section(name: &str, track_id: TrackId, frames: u64) -> Section {
+    let mut section = Section::new(0);
+    section.name = name.into();
+    section.length_beats = 16.0;
+    Arc::make_mut(&mut section.timeline)
+        .ensure(track_id)
+        .clips
+        .push(UiClip {
+            id: ClipId::new(),
+            name: name.into(),
+            audio: Arc::new(vibez_core::audio_buffer::DecodedAudio {
+                channels: vec![(0..frames).map(|frame| frame as f32).collect()],
+                sample_rate: SAMPLE_RATE,
+            }),
+            source: None,
+            position: 0,
+            source_offset: 0,
+            start_marker: 0,
+            duration: frames,
+            loop_enabled: false,
+            loop_start: 0,
+            loop_end: 0,
+            gain_db: Default::default(),
+            fades: Default::default(),
+            playback_direction: Default::default(),
+            transient_markers: Default::default(),
+            warp_markers: Default::default(),
+            transpose: Default::default(),
+            original_bpm: None,
+            warped: false,
+            warped_to_bpm: None,
+            original_audio: None,
+        });
+    section
+}
+
+fn audio_spans(clips: &[UiClip]) -> Vec<(u64, u64)> {
+    clips
+        .iter()
+        .map(|clip| (clip.position, clip.duration))
+        .collect()
+}
+
+#[test]
+fn four_passes_of_a_looping_audio_section_become_one_looped_clip() {
+    let track_id = TrackId::new();
+    let section = audio_section("Break", track_id, PASS);
+    let mut capture = capture_from(8);
+    capture.start(0, Some((CapturedTimelineSource::from_section(&section), 0)));
+    let take = capture.finish(4 * PASS).unwrap().materialize();
+    let clips = &take.by_track[&track_id].clips;
+
+    assert_eq!(audio_spans(clips), [(8, 4 * PASS)]);
+    let clip = &clips[0];
+    assert!(clip.loop_enabled);
+    assert_eq!(
+        (clip.start_marker, clip.loop_start, clip.loop_end),
+        (0, 0, PASS)
+    );
+    assert_eq!(clip.name, "Capture · Break");
+    for pass in 0..4 {
+        assert_eq!(clip.source_frame_at(pass * PASS + 5), 5);
+    }
+}
+
+#[test]
+fn an_audio_clip_that_loops_inside_its_pass_keeps_its_own_loop() {
+    let track_id = TrackId::new();
+    let mut section = audio_section("Hats", track_id, PASS);
+    let clip = &mut Arc::make_mut(&mut section.timeline).ensure(track_id).clips[0];
+    clip.loop_enabled = true;
+    clip.loop_end = PASS / 4;
+    let mut capture = capture_from(0);
+    capture.start(
+        0,
+        Some((CapturedTimelineSource::from_section(&section), 20)),
+    );
+    capture.transition(CapturedTimelineSource::from_section(&section), 3 * PASS);
+    let take = capture.finish(4 * PASS).unwrap().materialize();
+    let clips = &take.by_track[&track_id].clips;
+
+    assert_eq!(audio_spans(clips), [(0, 3 * PASS), (3 * PASS, PASS)]);
+    assert_eq!(
+        (
+            clips[0].start_marker,
+            clips[0].loop_start,
+            clips[0].loop_end
+        ),
+        (4, 0, PASS / 4)
+    );
+    assert_eq!(clips[1].start_marker, 0);
+}
+
+#[test]
+fn audio_that_a_looped_clip_cannot_repeat_keeps_one_clip_per_pass() {
+    let track_id = TrackId::new();
+    let mut section = audio_section("Late", track_id, PASS / 2);
+    Arc::make_mut(&mut section.timeline).ensure(track_id).clips[0].position = PASS / 2;
+    let mut capture = capture_from(0);
+    capture.start(0, Some((CapturedTimelineSource::from_section(&section), 0)));
+    let take = capture.finish(2 * PASS).unwrap().materialize();
+
+    assert_eq!(
+        audio_spans(&take.by_track[&track_id].clips),
+        [(PASS / 2, PASS / 2), (PASS + PASS / 2, PASS / 2)]
+    );
+}
