@@ -1,5 +1,13 @@
 use super::*;
+use crate::timeline_geometry::{TimelineViewport, FRAME_MARGIN_PIXELS};
+use iced::keyboard::{Event, Modifiers};
 use iced::widget::canvas::Program;
+
+/// At 120 BPM and 1 kHz a beat is 500 frames, so zoom 25 draws one frame
+/// per pixel from the clip's source offset.
+fn one_frame_per_pixel() -> Option<TimelineViewport> {
+    Some(TimelineViewport::new(25.0, 0.0))
+}
 
 fn widget() -> AudioClipDetailWidget {
     AudioClipDetailWidget {
@@ -17,7 +25,7 @@ fn widget() -> AudioClipDetailWidget {
         bpm: 120.0,
         grid: GridConfig::new(crate::state::SnapGrid::QUARTER, true, false, 0),
         track_color: Color::WHITE,
-        playhead_normalized: -1.0,
+        playhead_frame: None,
         loop_enabled: true,
         loop_start: 100,
         loop_end: 500,
@@ -27,6 +35,7 @@ fn widget() -> AudioClipDetailWidget {
         selected_transient_marker: None,
         warp_markers: Default::default(),
         selected_warp_marker: None,
+        view: one_frame_per_pixel(),
     }
 }
 
@@ -189,27 +198,125 @@ fn overlapping_start_and_loop_start_have_separate_hit_rows() {
 }
 
 #[test]
-fn audio_ruler_maps_measures_from_project_tempo() {
+fn an_audio_clip_opens_framed_on_its_loop() {
     let mut widget = widget();
-    widget.duration_samples = 4_000;
+    widget.bpm = 1_200.0;
+    widget.view = None;
+    widget.loop_start = 300;
+    widget.loop_end = 700;
     let bounds = Rectangle::new(Point::ORIGIN, iced::Size::new(800.0, 200.0));
 
-    assert_eq!(widget.total_beats(), 8.0);
-    assert_eq!(widget.beat_to_x(4.0, &bounds), 400.0);
-    assert_eq!(widget.beat_to_x(8.0, &bounds), 800.0);
+    assert!((widget.timeline_to_x(300, &bounds) - FRAME_MARGIN_PIXELS).abs() < 1e-3);
+    assert!((widget.timeline_to_x(700, &bounds) - (800.0 - FRAME_MARGIN_PIXELS)).abs() < 1e-3);
+}
+
+fn wheel(
+    widget: &AudioClipDetailWidget,
+    modifiers: Modifiers,
+    pointer: Point,
+    bounds: Rectangle,
+) -> Option<TimelineViewport> {
+    let mut state = AudioClipDetailState::default();
+    widget.update(
+        &mut state,
+        canvas::Event::Keyboard(Event::ModifiersChanged(modifiers)),
+        bounds,
+        mouse::Cursor::Available(pointer),
+    );
+    match widget
+        .update(
+            &mut state,
+            canvas::Event::Mouse(mouse::Event::WheelScrolled {
+                delta: mouse::ScrollDelta::Lines { x: 0.0, y: 1.0 },
+            }),
+            bounds,
+            mouse::Cursor::Available(pointer),
+        )
+        .1
+    {
+        Some(Message::View(ViewMsg::SetClipEditorView { clip_id, viewport }))
+            if clip_id == widget.clip_id =>
+        {
+            Some(viewport)
+        }
+        _ => None,
+    }
 }
 
 #[test]
-fn reverse_mirrors_source_markers_and_pointer_mapping() {
+fn shift_wheel_zooms_the_audio_editor_around_the_pointer() {
     let mut widget = widget();
-    widget.playback_direction = ClipPlaybackDirection::Reverse;
-    widget.grid.snap_enabled = false;
+    widget.bpm = 1_200.0;
+    widget.view = Some(TimelineViewport::new(2.0, 0.0));
     let bounds = Rectangle::new(Point::ORIGIN, iced::Size::new(800.0, 200.0));
+    let pointer = Point::new(100.0, 100.0);
+    let frame_under_pointer = widget.x_to_timeline_frame(pointer.x, &bounds);
 
-    assert_eq!(widget.timeline_to_x(100, &bounds), 800.0);
-    assert_eq!(widget.timeline_to_x(300, &bounds), 600.0);
-    assert_eq!(widget.x_to_local_frame(600.0, &bounds), 200);
-    assert_eq!(widget.x_to_local_frame(800.0, &bounds), 0);
+    widget.view = wheel(&widget, Modifiers::SHIFT, pointer, bounds);
+
+    assert!(widget.view.is_some_and(|view| view.zoom_level > 2.0));
+    assert!((widget.x_to_timeline_frame(pointer.x, &bounds) - frame_under_pointer).abs() < 1e-3);
+}
+
+#[test]
+fn a_plain_wheel_scrolls_the_audio_editor_in_time() {
+    let mut widget = widget();
+    widget.bpm = 1_200.0;
+    widget.view = Some(TimelineViewport::new(2.0, 0.0));
+    let bounds = Rectangle::new(Point::ORIGIN, iced::Size::new(400.0, 200.0));
+    let first_frame = widget.x_to_timeline_frame(0.0, &bounds);
+
+    widget.view = wheel(
+        &widget,
+        Modifiers::empty(),
+        Point::new(200.0, 100.0),
+        bounds,
+    );
+
+    assert!(widget.x_to_timeline_frame(0.0, &bounds) > first_frame);
+}
+
+#[test]
+fn the_audio_editor_scrolls_no_further_than_the_source() {
+    let mut widget = widget();
+    let bounds = Rectangle::new(Point::ORIGIN, iced::Size::new(400.0, 200.0));
+
+    for _ in 0..50 {
+        widget.view = wheel(
+            &widget,
+            Modifiers::empty(),
+            Point::new(200.0, 100.0),
+            bounds,
+        );
+    }
+
+    let right_edge = widget.x_to_timeline_frame(400.0 - FRAME_MARGIN_PIXELS, &bounds);
+    assert!((right_edge - 1_000.0).abs() < 1e-3);
+}
+
+#[test]
+fn a_looped_clip_longer_than_its_source_scrolls_only_to_the_source_end() {
+    let mut widget = widget();
+    widget.duration_samples = 5_000;
+    let bounds = Rectangle::new(Point::ORIGIN, iced::Size::new(400.0, 200.0));
+
+    for _ in 0..50 {
+        widget.view = wheel(&widget, Modifiers::empty(), Point::new(200.0, 100.0), bounds);
+    }
+
+    let right_edge = widget.x_to_timeline_frame(400.0 - FRAME_MARGIN_PIXELS, &bounds);
+    assert!((right_edge - 1_000.0).abs() < 1e-3);
+}
+
+#[test]
+fn the_playhead_follows_the_loop_through_the_source() {
+    let mut widget = widget();
+    widget.playhead_frame = Some(450);
+    assert_eq!(widget.playhead_timeline_frame(), Some(150));
+
+    widget.playback_direction = ClipPlaybackDirection::Reverse;
+    widget.playhead_frame = Some(0);
+    assert_eq!(widget.playhead_timeline_frame(), Some(499));
 }
 
 #[test]
@@ -482,13 +589,15 @@ fn audio_loop_overshoot_keeps_one_grid_cell_between_the_handles() {
 }
 
 #[test]
-fn a_loop_end_past_the_visible_clip_is_grabbed_at_the_editor_edge() {
+fn a_loop_end_past_the_clip_end_is_drawn_and_grabbed_where_it_is() {
     let mut widget = widget();
+    widget.grid.snap_enabled = false;
     widget.duration_samples = 400;
-    widget.loop_end = 900;
+    widget.loop_end = 700;
     let bounds = Rectangle::new(Point::ORIGIN, iced::Size::new(800.0, 200.0));
-    let end = Point::new(bounds.width - 1.0, 5.0);
-    let target = Point::new(600.0, 5.0);
+    let end = Point::new(widget.timeline_to_x(widget.loop_end, &bounds), 5.0);
+    assert_eq!(end.x, 600.0);
+    let target = Point::new(650.0, 5.0);
     let mut state = AudioClipDetailState::default();
 
     widget.update(
@@ -508,6 +617,41 @@ fn a_loop_end_past_the_visible_clip_is_grabbed_at_the_editor_edge() {
 
     assert!(matches!(
         arrangement_message(message),
-        Some(ArrangementMsg::SetClipLoopRegion { loop_end: 600, .. })
+        Some(ArrangementMsg::SetClipLoopRegion { loop_end: 750, .. })
+    ));
+}
+
+#[test]
+fn a_looped_start_marker_drags_past_the_clip_end_inside_its_loop() {
+    let mut widget = widget();
+    widget.grid.snap_enabled = false;
+    widget.duration_samples = 400;
+    widget.loop_end = 900;
+    let bounds = Rectangle::new(Point::ORIGIN, iced::Size::new(800.0, 200.0));
+    let start = Point::new(widget.timeline_to_x(widget.start_marker, &bounds), 15.0);
+    let target = Point::new(600.0, 15.0);
+    let mut state = AudioClipDetailState::default();
+
+    widget.update(
+        &mut state,
+        canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)),
+        bounds,
+        mouse::Cursor::Available(start),
+    );
+    let message = widget
+        .update(
+            &mut state,
+            canvas::Event::Mouse(mouse::Event::CursorMoved { position: target }),
+            bounds,
+            mouse::Cursor::Available(target),
+        )
+        .1;
+
+    assert!(matches!(
+        arrangement_message(message),
+        Some(ArrangementMsg::SetClipStartMarker {
+            start_marker: 700,
+            ..
+        })
     ));
 }
