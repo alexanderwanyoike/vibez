@@ -74,7 +74,7 @@ const EQ_CONSOLE: [Color; 4] = [
 ];
 
 /// The default track rainbow (charcoal's).
-const TRACKS_CLASSIC: [Color; 8] = [
+pub(crate) const TRACKS_CLASSIC: [Color; 8] = [
     rgb8(224, 96, 96),
     rgb8(224, 144, 64),
     rgb8(208, 192, 64),

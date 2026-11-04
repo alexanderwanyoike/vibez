@@ -280,16 +280,7 @@ impl ThemePalette {
             knob_body_engaged: rgb(0.16, 0.16, 0.16),
             knob_track: rgb(0.22, 0.22, 0.22),
             fader_handle: rgb(0.533, 0.533, 0.533),
-            track_colors: [
-                rgb(0.878, 0.376, 0.376), // red
-                rgb(0.878, 0.565, 0.251), // orange
-                rgb(0.816, 0.753, 0.251), // yellow
-                rgb(0.314, 0.690, 0.376), // green
-                rgb(0.251, 0.627, 0.690), // cyan
-                rgb(0.376, 0.502, 0.816), // blue
-                rgb(0.565, 0.376, 0.753), // purple
-                rgb(0.753, 0.376, 0.627), // pink
-            ],
+            track_colors: crate::themes::TRACKS_CLASSIC,
             eq_lf: rgb(0.65, 0.46, 0.28),
             eq_lmf: rgb(0.36, 0.48, 0.72),
             eq_hmf: rgb(0.33, 0.62, 0.38),
