@@ -3,13 +3,19 @@
 use crate::domains::browser::BrowserMsg;
 use crate::domains::perform::PerformEditorFocus;
 use crate::domains::timeline_editor::TimelineEditorAdapter;
-use crate::domains::view::ViewMsg;
+use crate::domains::view::{ViewCtx, ViewMsg};
 use crate::state::Workspace;
 use crate::timeline_geometry::{TimelineGeometry, BASE_PIXELS_PER_BEAT};
 
 use super::*;
 
 impl App {
+    fn view_ctx(&self) -> ViewCtx {
+        ViewCtx {
+            total_beats: self.state.total_beats(),
+        }
+    }
+
     fn route_section_timeline_navigation(&mut self, msg: &ViewMsg) -> bool {
         if self.state.view.workspace != Workspace::Perform
             || self.state.perform.editor_focus != PerformEditorFocus::TimelineEditor
@@ -92,9 +98,7 @@ impl App {
             _ => None,
         };
         if let Some(resize_msg) = detail_panel_resize {
-            let ctx = crate::domains::view::ViewCtx {
-                total_beats: self.state.total_beats(),
-            };
+            let ctx = self.view_ctx();
             let action = self.state.view.update(
                 resize_msg,
                 self.state.arrangement.resolve_timeline().editor,
@@ -114,9 +118,7 @@ impl App {
             _ => None,
         };
         if let Some(resize_msg) = perform_surface_resize {
-            let ctx = crate::domains::view::ViewCtx {
-                total_beats: self.state.total_beats(),
-            };
+            let ctx = self.view_ctx();
             let action = self.state.view.update(
                 resize_msg,
                 self.state.arrangement.resolve_timeline().editor,
@@ -147,9 +149,7 @@ impl App {
         if self.route_section_timeline_navigation(&msg) {
             return Task::none();
         }
-        let ctx = crate::domains::view::ViewCtx {
-            total_beats: self.state.total_beats(),
-        };
+        let ctx = self.view_ctx();
         let editor = if self.state.view.workspace == Workspace::Perform
             && (self.state.perform.has_selected_timeline()
                 || self.state.perform.layout == vibez_project::PerformLayout::Clips)
