@@ -7,6 +7,8 @@ use vibez_core::clip_timeline::BeatClipTimeline;
 use vibez_core::id::ClipId;
 use vibez_core::track::FadeCurve;
 
+use source_peaks::source_peaks;
+
 // ── Lightweight data types for rendering ──
 
 /// Lightweight copy of clip data for rendering.
@@ -71,7 +73,6 @@ impl TimelineNoteClip {
 }
 
 /// Compute waveform peaks for a clip, with loop-aware wrapping.
-/// Uses `peak_in_range` on contiguous segments for O(pixels) cost regardless of clip length.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 struct PeakCacheKey {
     audio: usize,
@@ -89,9 +90,6 @@ struct PeakCacheEntry {
     audio: Weak<vibez_core::audio_buffer::DecodedAudio>,
     peaks: Arc<Vec<(f32, f32)>>,
 }
-
-#[cfg(test)]
-thread_local! { static SOURCE_SCANS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }
 
 thread_local! {
     static PEAK_CACHE: RefCell<HashMap<PeakCacheKey, PeakCacheEntry>> = RefCell::new(HashMap::new());
@@ -121,8 +119,6 @@ pub fn compute_clip_peaks(clip: &crate::state::UiClip) -> Arc<Vec<(f32, f32)>> {
         return peaks;
     }
 
-    #[cfg(test)]
-    SOURCE_SCANS.with(|scans| scans.set(scans.get() + 1));
     let num_peaks = (clip.duration as usize / 100).clamp(1, 1000);
     let timeline = clip.timeline();
     let looping = timeline.is_looping();
@@ -146,16 +142,9 @@ pub fn compute_clip_peaks(clip: &crate::state::UiClip) -> Arc<Vec<(f32, f32)>> {
         return Arc::new(vec![(0.0, 0.0); num_peaks]);
     }
 
-    let peak_for_range = |src_start: usize, src_end: usize| -> (f32, f32) {
-        let mut mn = 0.0f32;
-        let mut mx = 0.0f32;
-        for ch in 0..channels {
-            let (ch_min, ch_max) = clip.audio.peak_in_range(ch, src_start, src_end);
-            mn = mn.min(ch_min);
-            mx = mx.max(ch_max);
-        }
-        (mn, mx)
-    };
+    let source = source_peaks(&clip.audio);
+    let peak_for_range =
+        |src_start: usize, src_end: usize| source.peak(&clip.audio, src_start, src_end);
 
     // Cache full loop region peak for spans >= loop_len
     let full_loop_peak = if looping {
@@ -259,6 +248,7 @@ mod ruler;
 mod ruler_drag;
 mod ruler_draw;
 mod ruler_scale;
+mod source_peaks;
 mod time_ruler;
 
 pub use clip_drag::ClipDragAction;
@@ -324,7 +314,7 @@ mod performance_tests {
         let frames = 44_100 * 30;
         let mut clip = long_clip(frames);
         compute_clip_peaks(&clip);
-        let scans = super::SOURCE_SCANS.with(|scans| scans.get());
+        let scans = super::source_peaks::SOURCE_SCANS.with(|scans| scans.get());
 
         for duration in [frames / 2, frames / 3, frames / 4, frames - 1] {
             clip.duration = duration as u64;
@@ -332,7 +322,10 @@ mod performance_tests {
             assert!(peaks.iter().all(|&(min, max)| (min, max) == (-0.25, 0.25)));
         }
 
-        assert_eq!(super::SOURCE_SCANS.with(|scans| scans.get()), scans);
+        assert_eq!(
+            super::source_peaks::SOURCE_SCANS.with(|scans| scans.get()),
+            scans
+        );
     }
 
     #[test]
