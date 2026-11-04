@@ -802,6 +802,10 @@ mod tests;
 mod stuck_note_tests;
 
 #[cfg(test)]
+#[path = "engine_transport_ring_tests.rs"]
+mod transport_ring_tests;
+
+#[cfg(test)]
 #[path = "engine_note_edit_allocation_tests.rs"]
 mod note_edit_allocation_tests;
 
