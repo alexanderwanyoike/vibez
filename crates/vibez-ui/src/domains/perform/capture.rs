@@ -839,6 +839,9 @@ mod clip_capture_tests;
 #[path = "capture_compensation_tests.rs"]
 mod compensation_tests;
 #[cfg(test)]
+#[path = "capture_launch_tests.rs"]
+mod launch_tests;
+#[cfg(test)]
 #[path = "capture_tests.rs"]
 mod tests;
 

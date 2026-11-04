@@ -153,7 +153,10 @@ fn midi_offsets_preserve_note_duration_velocity_and_groove() {
     for (track, expected_start) in [(early, 1.0), (full, 2.0)] {
         let clip = &result.by_track[&track].note_clips[0];
         let note = &clip.notes[0];
-        assert_eq!(clip.position_beats + note.start_beat, expected_start);
+        assert_eq!(
+            clip.position_beats + clip.note_occurrences(note.start_beat)[0],
+            expected_start
+        );
         assert_eq!(note.duration_beats, 1.0);
         assert_eq!(note.velocity, 98);
         assert_eq!(clip.groove_grid, GrooveGrid::Sixteenth);
