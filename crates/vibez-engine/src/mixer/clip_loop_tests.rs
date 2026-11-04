@@ -1,10 +1,13 @@
 //! A looped clip plays its loop whatever the clip's own length.
 
-use vibez_core::id::ClipId;
+use std::sync::Arc;
+
+use vibez_core::audio_buffer::DecodedAudio;
+use vibez_core::id::{ClipId, TrackId};
 use vibez_core::midi::MidiNote;
 use vibez_core::perform::{GrooveGrid, SwingAmount};
 
-use super::{collect_timed_note_events, EngineNoteClip};
+use super::{collect_timed_note_events, EngineClip, EngineNoteClip, EngineTrack};
 
 const SAMPLES_PER_BEAT: f64 = 100.0;
 
@@ -69,4 +72,33 @@ fn a_midi_clip_longer_than_its_loop_repeats_the_loop() {
         note_ons(clip, 1_000),
         [(0, 60), (200, 60), (400, 60), (600, 60)]
     );
+}
+
+#[test]
+fn an_audio_clip_shorter_than_its_loop_plays_the_loop_from_its_start_marker() {
+    let audio = Arc::new(DecodedAudio {
+        channels: vec![(0..100).map(|frame| frame as f32).collect()],
+        sample_rate: 44_100,
+    });
+    let mut track = EngineTrack::new(TrackId::new());
+    track.playback_source.push_audio_clip(EngineClip {
+        id: ClipId::new(),
+        audio,
+        position: 0,
+        source_offset: 0,
+        start_marker: 50,
+        duration: 40,
+        loop_enabled: true,
+        loop_start: 0,
+        loop_end: 80,
+        linear_gain: 1.0,
+        fades: Default::default(),
+        playback_direction: Default::default(),
+        warp_markers: Default::default(),
+    });
+
+    assert!(track.render(0, 40, 1, None));
+    let played: Vec<f32> = track.mix_buffer[..40].to_vec();
+    let expected: Vec<f32> = (50..80).chain(0..10).map(|frame| frame as f32).collect();
+    assert_eq!(played, expected);
 }
