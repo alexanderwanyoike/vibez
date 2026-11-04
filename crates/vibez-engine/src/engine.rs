@@ -544,8 +544,7 @@ impl AudioEngine {
             self.rendered_callback_frames = rendered;
             self.active_section = None;
             self.clock_domain = ClockDomain::Arrange;
-            self.transport
-                .set_audio_length(self.arrangement_audio_length);
+            self.transport.set_audio_length(self.arrangement_end());
         }
 
         // Discontinuous jump NOT already handled by the loop-boundary

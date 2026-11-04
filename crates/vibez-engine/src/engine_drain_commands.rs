@@ -779,7 +779,7 @@ impl AudioEngine {
                     self.transport.set_audio_length(if active {
                         None
                     } else {
-                        self.arrangement_audio_length
+                        self.arrangement_end()
                     });
                 }
             }
@@ -1039,10 +1039,19 @@ impl AudioEngine {
             samples_per_beat,
         );
         self.arrangement_audio_length = (total > 0).then_some(total);
+        self.apply_arrangement_end();
+    }
+
+    /// Perform, Sections and arrangement recording run without an end.
+    fn apply_arrangement_end(&mut self) {
         if !self.clip_performance && self.active_section.is_none() && !self.arrangement_recording {
-            self.transport
-                .set_audio_length(self.arrangement_audio_length);
+            self.transport.set_audio_length(self.arrangement_end());
         }
+    }
+
+    /// Where Arrange playback stops on its own.
+    pub(super) fn arrangement_end(&self) -> Option<u64> {
+        self.arrangement_audio_length
     }
 }
 
