@@ -375,6 +375,77 @@ mod engine_command_queue_tests {
         ));
         assert_eq!(queue.pending_len(), 2_999);
     }
+
+    #[test]
+    fn waiting_drag_edits_for_one_clip_keep_only_the_latest() {
+        let (producer, mut consumer) = rtrb::RingBuffer::new(1);
+        let mut queue =
+            EngineCommandQueue::new(producer, vibez_engine::transport_ring::transport_ring().0);
+        let track_id = vibez_core::id::TrackId::new();
+        let [dragged, beside] = [(); 2].map(|_| vibez_core::id::ClipId::new());
+        let step = |clip_id, beats: f64| {
+            [
+                EngineCommand::MoveNoteClip {
+                    track_id,
+                    clip_id,
+                    new_position_beats: beats,
+                },
+                EngineCommand::SetNoteClipBounds {
+                    track_id,
+                    clip_id,
+                    duration_beats: beats + 4.0,
+                    start_marker_beats: 0.0,
+                    loop_start_beats: 0.0,
+                    loop_end_beats: beats + 4.0,
+                },
+            ]
+        };
+        queue.send(EngineCommand::SetBpm(120.0));
+        for beats in 1..=100 {
+            for command in step(dragged, f64::from(beats))
+                .into_iter()
+                .chain(step(beside, f64::from(beats) / 2.0))
+            {
+                queue.send(command);
+            }
+        }
+        assert_eq!(queue.pending_len(), 4);
+
+        let mut delivered = Vec::new();
+        while delivered.len() < 5 {
+            delivered.extend(consumer.pop());
+            queue.flush();
+        }
+        assert!(matches!(
+            delivered.as_slice(),
+            [
+                EngineCommand::SetBpm(_),
+                EngineCommand::MoveNoteClip { clip_id: a, new_position_beats: 100.0, .. },
+                EngineCommand::SetNoteClipBounds { clip_id: b, duration_beats: 104.0, .. },
+                EngineCommand::MoveNoteClip { clip_id: c, new_position_beats: 50.0, .. },
+                EngineCommand::SetNoteClipBounds { clip_id: d, duration_beats: 54.0, .. },
+            ] if [*a, *b] == [dragged; 2] && [*c, *d] == [beside; 2]
+        ));
+    }
+
+    #[test]
+    fn a_drag_edit_never_jumps_ahead_of_another_edit_of_its_clip() {
+        let (producer, _consumer) = rtrb::RingBuffer::new(1);
+        let mut queue =
+            EngineCommandQueue::new(producer, vibez_engine::transport_ring::transport_ring().0);
+        let track_id = vibez_core::id::TrackId::new();
+        let clip_id = vibez_core::id::ClipId::new();
+        let moved = |new_position_beats| EngineCommand::MoveNoteClip {
+            track_id,
+            clip_id,
+            new_position_beats,
+        };
+        queue.send(EngineCommand::SetBpm(120.0));
+        queue.send(moved(1.0));
+        queue.send(EngineCommand::RemoveNoteClip(track_id, clip_id));
+        queue.send(moved(2.0));
+        assert_eq!(queue.pending_len(), 3);
+    }
 }
 
 #[cfg(test)]
