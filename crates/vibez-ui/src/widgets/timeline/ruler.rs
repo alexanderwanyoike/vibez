@@ -15,6 +15,8 @@ use crate::timeline_geometry::TimelineGeometry;
 /// Canvas widget that draws a beat-based ruler with bar.beat labels.
 pub struct RulerWidget {
     pub playhead_beats: f64,
+    /// Arrange's play-start marker; Section rulers have none.
+    pub play_start_beats: Option<f64>,
     pub bpm: f64,
     pub zoom_level: f32,
     pub grid: GridConfig,
@@ -309,6 +311,19 @@ impl canvas::Program<Message> for RulerWidget {
                         .with_color(theme::accent())
                         .with_width(1.0),
                 );
+            }
+        }
+
+        if let Some(play_start) = self.play_start_beats {
+            let x = self.beat_to_x(play_start, w);
+            if (0.0..=w).contains(&x) {
+                let marker = canvas::Path::new(|path| {
+                    path.move_to(iced::Point::new(x - 5.0, 0.0));
+                    path.line_to(iced::Point::new(x + 5.0, 0.0));
+                    path.line_to(iced::Point::new(x, 7.0));
+                    path.close();
+                });
+                frame.fill(&marker, theme::playhead());
             }
         }
 

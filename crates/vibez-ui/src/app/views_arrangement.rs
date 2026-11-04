@@ -97,6 +97,10 @@ impl App {
         // Beat-based ruler across the top (offset by track header width)
         let ruler = RulerWidget {
             playhead_beats,
+            play_start_beats: Some(
+                self.state.transport.play_start_samples as f64
+                    / self.state.transport.samples_per_beat(),
+            ),
             bpm,
             zoom_level,
             grid: self.state.view.grid_config(),
