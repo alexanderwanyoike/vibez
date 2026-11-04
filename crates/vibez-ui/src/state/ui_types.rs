@@ -602,7 +602,7 @@ impl UiNoteClip {
         }
     }
 
-    pub(crate) fn clamp_start_to_duration(&mut self) {
+    pub(crate) fn clamp_start_to_content(&mut self) {
         self.start_marker_beats =
             self.timeline()
                 .clamp_start(self.start_marker_beats, 0.0, NOTE_CONTENT_END_BEATS);

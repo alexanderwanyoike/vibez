@@ -484,7 +484,7 @@ impl TimelineEditorState {
                         }
                         changed = true;
                         clip.duration_beats = duration;
-                        clip.clamp_start_to_duration();
+                        clip.clamp_start_to_content();
                         engine.send(clip.bounds_command(track_id));
                         max_end = Some(
                             max_end
