@@ -237,6 +237,7 @@ mod clips_draw;
 #[cfg(test)]
 mod clips_tests;
 mod fade_drag;
+mod lane_grid;
 pub mod marquee;
 mod minimap;
 mod note_marks;
