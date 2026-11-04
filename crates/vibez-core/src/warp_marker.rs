@@ -302,6 +302,29 @@ impl WarpMarkers {
         (mapped_start, fragment)
     }
 
+    /// Run the map `extension` timeline frames earlier than `source_start`
+    /// at its first segment's rate, as far as the source allows. Returns
+    /// the timeline frames gained, the new source start and the new map.
+    pub fn extended_start(&self, extension: u64, source_start: u64) -> (u64, u64, Self) {
+        let (Some(first), Some(second)) = (self.0.first(), self.0.get(1)) else {
+            let gained = extension.min(source_start);
+            return (gained, source_start - gained, Self::default());
+        };
+        let rate = (second.source_frame - first.source_frame) as f64
+            / (second.timeline_frame - first.timeline_frame) as f64;
+        let gained = extension.min((first.source_frame as f64 / rate).floor() as u64);
+        let start = first
+            .source_frame
+            .saturating_sub((gained as f64 * rate).round() as u64);
+        let mut extended = self.clone();
+        for marker in &mut extended.0[1..] {
+            marker.timeline_frame += gained;
+        }
+        extended.0[0].source_frame = start;
+        extended.collapse_identity();
+        (gained, start, extended)
+    }
+
     pub fn resized_timeline(
         &self,
         old_duration: u64,
