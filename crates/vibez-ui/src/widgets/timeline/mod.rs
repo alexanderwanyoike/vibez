@@ -229,6 +229,7 @@ pub(super) const FADE_HANDLE_Y: f32 = CLIP_Y + CLIP_TITLE_HEIGHT + 6.0;
 pub(super) const FADE_HANDLE_HIT_RADIUS: f32 = 7.0;
 
 mod clip_drag;
+mod clip_title;
 mod clips;
 mod clips_draw;
 #[cfg(test)]
