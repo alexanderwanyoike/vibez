@@ -156,7 +156,9 @@ pub struct ClipStyle {
 impl ClipStyle {
     pub const DARK: Self = Self {
         body_opacity: 0.55,
-        body_toward_lane: 0.1,
+        // The renderer composites the see-through body in linear light,
+        // which lifts it on a dark lane; this pulls it back to the mockup.
+        body_toward_lane: 0.28,
         ink: Color {
             r: 10.0 / 255.0,
             g: 10.0 / 255.0,
