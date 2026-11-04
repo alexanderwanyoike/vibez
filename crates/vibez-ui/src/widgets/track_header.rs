@@ -19,10 +19,12 @@ use vibez_core::midi::TrackKind;
 use vibez_core::track::{AudioInputRoute, InputMonitoring};
 
 /// Width of the track header panel in the arrangement view.
-pub const TRACK_HEADER_WIDTH: f32 = 220.0;
+pub const TRACK_HEADER_WIDTH: f32 = 219.0;
 
-/// Total width including the 3px color bar on the left edge.
-pub const TRACK_HEADER_TOTAL_WIDTH: f32 = TRACK_HEADER_WIDTH + 3.0;
+const COLOR_BAR_WIDTH: f32 = 4.0;
+
+/// Total width including the color bar on the left edge.
+pub const TRACK_HEADER_TOTAL_WIDTH: f32 = TRACK_HEADER_WIDTH + COLOR_BAR_WIDTH;
 
 /// How an Arrange track header is shown.
 #[derive(Debug, Clone, Copy, Default)]
@@ -451,7 +453,7 @@ pub fn view_track_header<'a>(
 
     // Color bar on the left edge
     let color_bar = container(text(""))
-        .width(Length::Fixed(3.0))
+        .width(Length::Fixed(COLOR_BAR_WIDTH))
         .height(Length::Fill)
         .style(move |_theme: &Theme| container::Style {
             background: Some(track_color.into()),
