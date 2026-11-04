@@ -44,7 +44,7 @@ impl TrackHeaderFlags {
                 || track.input_monitoring != InputMonitoring::Off)
     }
 
-    /// Whether the quiet add and delete actions are shown and clickable.
+    /// Whether the quiet add action is shown and clickable.
     fn shows_actions(self) -> bool {
         self.hovered
     }
@@ -188,7 +188,7 @@ pub fn view_track_header<'a>(
     } = recording;
     let track_color = th::track_color(track.color_index);
 
-    // Row 1: Track type icon + name + "+" add clip button + delete button
+    // Row 1: Track type icon + name + "+" add clip button
     let type_icon = match track.kind {
         TrackKind::Audio => icons::icon(icons::AUDIO_WAVEFORM)
             .size(12)
@@ -224,15 +224,6 @@ pub fn view_track_header<'a>(
         .padding([2, 4])
         .style(quiet_action_style);
 
-    let delete_btn = button(icons::icon(icons::TRASH_2).size(10).color(action_color))
-        .on_press_maybe(
-            flags
-                .shows_actions()
-                .then(|| Message::remove_track(track.id)),
-        )
-        .padding([2, 4])
-        .style(quiet_action_style);
-
     let auto_btn = {
         let color = if automation_open {
             th::accent()
@@ -256,8 +247,7 @@ pub fn view_track_header<'a>(
         name_widget,
         horizontal_space(),
         auto_btn,
-        add_btn,
-        delete_btn
+        add_btn
     ]
     .spacing(4)
     .align_y(iced::Alignment::Center);
@@ -483,7 +473,7 @@ pub fn view_track_header<'a>(
     });
 
     // The whole header column selects the track. Child widgets
-    // (name, M/S, add, delete, fader) capture their own clicks first,
+    // (name, M/S, add, fader) capture their own clicks first,
     // so this only fires on otherwise-dead header space.
     let track_id = track.id;
     mouse_area(card)
