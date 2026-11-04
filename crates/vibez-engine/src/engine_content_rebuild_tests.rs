@@ -131,3 +131,24 @@ fn the_song_end_does_not_stop_playback_until_a_content_rebuild_has_finished() {
     assert!(rebuild.engine.transport().is_playing());
     assert_eq!(rebuild.engine.transport().audio_length(), Some(100_000));
 }
+
+#[test]
+fn a_nested_content_rebuild_holds_the_song_end_until_the_outer_one_ends() {
+    let mut rebuild = Rebuild::new();
+    let long = rebuild.add_clip(100_000);
+    rebuild.play_from(20_000);
+
+    rebuild.send(EngineCommand::BeginContentRebuild);
+    rebuild.send(EngineCommand::BeginContentRebuild);
+    rebuild.send(EngineCommand::RemoveClip(rebuild.track_id, long));
+    rebuild.add_clip(21_000);
+    rebuild.send(EngineCommand::EndContentRebuild);
+    for _ in 0..8 {
+        rebuild.callback();
+    }
+
+    assert!(
+        rebuild.engine.transport().is_playing(),
+        "the outer rebuild is still re-adding the song"
+    );
+}
