@@ -232,4 +232,25 @@ mod tests {
         viewport.scroll_by(-1_000.0, 64.0, 800.0);
         assert_eq!(viewport.scroll_offset_beats, 0.0);
     }
+
+    #[test]
+    fn framing_a_span_fills_the_viewport_inside_a_margin() {
+        let mut viewport = TimelineViewport::new(1.0, 0.0);
+
+        viewport.frame(32.0, 48.0, 800.0);
+
+        let geometry = viewport.geometry();
+        assert!((geometry.beat_to_x(32.0) - FRAME_MARGIN_PIXELS).abs() < 1.0e-3);
+        assert!((geometry.beat_to_x(48.0) - (800.0 - FRAME_MARGIN_PIXELS)).abs() < 1.0e-3);
+    }
+
+    #[test]
+    fn framing_from_the_song_start_never_scrolls_before_it() {
+        let mut viewport = TimelineViewport::new(1.0, 12.0);
+
+        viewport.frame(0.0, 64.0, 800.0);
+
+        assert_eq!(viewport.scroll_offset_beats, 0.0);
+        assert!(viewport.geometry().beat_to_x(64.0) < 800.0 - FRAME_MARGIN_PIXELS);
+    }
 }

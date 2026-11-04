@@ -341,6 +341,41 @@ mod tests {
     }
 
     #[test]
+    fn fit_shows_the_whole_song_inside_the_lane_area_not_the_window() {
+        let mut view = ViewState {
+            zoom_level: 3.0,
+            scroll_offset_beats: 40.0,
+            window_width: 1920.0,
+            ..ViewState::default()
+        };
+        let lane_width = 1697.0;
+        let song_beats = 1120.0;
+
+        view.update(
+            ViewMsg::ZoomToFit,
+            &TimelineEditorState::default(),
+            ViewCtx {
+                total_beats: 1400.0,
+                song_beats,
+                lane_width,
+                ..ViewCtx::default()
+            },
+        );
+
+        let song_end_x = TimelineGeometry::from_zoom(view.zoom_level, view.scroll_offset_beats)
+            .beat_to_x(song_beats);
+        assert_eq!(view.scroll_offset_beats, 0.0);
+        assert!(
+            song_end_x <= lane_width - 2.0 * crate::timeline_geometry::FRAME_MARGIN_PIXELS + 0.01,
+            "the last bar ends inside the lanes, at {song_end_x}"
+        );
+        assert!(
+            song_end_x > lane_width - 4.0 * crate::timeline_geometry::FRAME_MARGIN_PIXELS,
+            "the song fills the lanes rather than the padded timeline, ends at {song_end_x}"
+        );
+    }
+
+    #[test]
     fn all_workspaces_are_reachable_without_resetting_view_state() {
         let mut view = ViewState {
             zoom_level: 2.5,
