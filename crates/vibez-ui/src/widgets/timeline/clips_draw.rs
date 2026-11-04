@@ -176,169 +176,11 @@ impl TrackClipCanvas {
 
         // Draw audio clips
         if self.bpm > 0.0 {
-            let spb = self.sample_rate as f64 * 60.0 / self.bpm;
-            for (clip, is_recording_preview) in self
-                .dragged_last(&self.clips, |clip| clip.clip_id)
-                .map(|clip| (clip, false))
-                .chain(self.audio_recording_preview.iter().map(|clip| (clip, true)))
-            {
-                let is_selected =
-                    !is_recording_preview && self.selected_clips.contains(&clip.clip_id);
-                let colors = self.clip_colors(is_selected, is_recording_preview);
-                let clip_start_beat = clip.position as f64 / spb;
-                let clip_dur_beats = clip.duration as f64 / spb;
-
-                let clip_x = self.beat_to_x(clip_start_beat);
-                let clip_w = geometry.width_for_beats(clip_dur_beats);
-
-                // Skip clips entirely outside viewport
-                if clip_x + clip_w < 0.0 || clip_x > w {
-                    continue;
-                }
-
-                let clip_y = CLIP_Y;
-                let clip_h = h - 2.0 * CLIP_Y;
-                let body = clip_box(clip_x, clip_y, clip_w, clip_h);
-
-                if !is_recording_preview && self.is_dragged(clip.clip_id) {
-                    draw_drag_shadow(&mut frame, body);
-                }
-                let looped = clip.loop_enabled && clip.loop_end > clip.loop_start;
-                let loop_passes = looped.then(|| {
-                    let pass_px =
-                        geometry.width_for_beats((clip.loop_end - clip.loop_start) as f64 / spb);
-                    LoopPasses {
-                        first_wrap_px: pass_px,
-                        pass_px,
-                    }
-                });
-                draw_clip_back(&mut frame, body, &colors, loop_passes, w);
-
-                if !clip.peaks.is_empty() && clip_w > 4.0 {
-                    let body_top = clip_y + CLIP_TITLE_HEIGHT;
-                    let body_h = clip_h - CLIP_TITLE_HEIGHT;
-                    let center_y = body_top + body_h / 2.0;
-                    let half_h = body_h / 2.0 - 2.0;
-                    let pixels = clip_w as usize;
-                    let frames_per_pixel = spb / f64::from(ppb);
-                    for px in visible_pixel_columns(clip_x, body.width, w) {
-                        let screen_x = clip_x + px as f32;
-                        let Some((min_val, max_val)) = waveform_peak_for_pixel(
-                            &clip.peaks,
-                            px,
-                            pixels,
-                            frames_per_pixel,
-                            clip.peak_span_frames,
-                        ) else {
-                            break;
-                        };
-                        let y_top = center_y - (max_val * half_h);
-                        let y_bottom = center_y - (min_val * half_h);
-                        let height = (y_bottom - y_top).max(1.0);
-                        frame.fill_rectangle(
-                            iced::Point::new(screen_x, y_top),
-                            iced::Size::new(1.0, height),
-                            colors.ink,
-                        );
-                    }
-                }
-
-                if !is_recording_preview
-                    && (is_selected || clip.fade_in_frames > 0 || clip.fade_out_frames > 0)
-                {
-                    let (fade_in_x, fade_out_x) = fade_handle_xs(clip_x, clip_w, clip);
-                    let top = clip_y + CLIP_TITLE_HEIGHT + 2.0;
-                    let bottom = clip_y + clip_h - 2.0;
-                    let envelope = canvas::Path::new(|builder| {
-                        builder.move_to(iced::Point::new(clip_x, bottom));
-                        for step in 1..=12 {
-                            let progress = step as f32 / 12.0;
-                            let x = clip_x + (fade_in_x - clip_x) * progress;
-                            let y = bottom
-                                - (bottom - top)
-                                    * clip
-                                        .fade_in_curve
-                                        .gain_for(progress, clip.crossfade_in_from.is_some());
-                            builder.line_to(iced::Point::new(x, y));
-                        }
-                        builder.line_to(iced::Point::new(fade_out_x, top));
-                        for step in 1..=12 {
-                            let progress = step as f32 / 12.0;
-                            let x = fade_out_x + (clip_x + clip_w - fade_out_x) * progress;
-                            let gain = clip
-                                .fade_out_curve
-                                .fade_out_gain(progress, clip.crossfade_out_to.is_some());
-                            let y = bottom - (bottom - top) * gain;
-                            builder.line_to(iced::Point::new(x, y));
-                        }
-                    });
-                    frame.stroke(
-                        &envelope,
-                        canvas::Stroke::default()
-                            .with_color(theme::with_alpha(theme::text(), 0.72))
-                            .with_width(1.25),
-                    );
-                    if is_selected {
-                        for x in [fade_in_x, fade_out_x] {
-                            frame.fill_rectangle(
-                                iced::Point::new(x - 2.5, FADE_HANDLE_Y - 2.5),
-                                iced::Size::new(5.0, 5.0),
-                                theme::accent(),
-                            );
-                        }
-                        for edge in [
-                            crate::state::AudioClipFadeEdge::In,
-                            crate::state::AudioClipFadeEdge::Out,
-                        ] {
-                            if let Some(handle) = fade_curve_handle(clip_x, clip_w, h, clip, edge) {
-                                frame.fill(&canvas::Path::circle(handle, 3.25), theme::accent());
-                            }
-                        }
-                    }
-                }
-                draw_clip_front(&mut frame, body, &colors, &clip.name, looped, w);
-
-                // Diagonal stripe overlay when the clip's warp is
-                // stale relative to the current project tempo. Low
-                // opacity so the waveform and clip colour remain
-                // legible, but strong enough to catch the eye.
-                if clip.warp_stale && clip_w > 4.0 {
-                    let stripe_color = theme::with_alpha(theme::meter_yellow(), 0.22);
-                    let stripe_spacing = 8.0f32;
-                    let stripe_stroke = 1.5f32;
-                    let mut offset = -clip_h;
-                    while offset < clip_w {
-                        let x0 = clip_x + offset;
-                        let x1 = clip_x + offset + clip_h;
-                        let a_x = x0.clamp(clip_x, body.x + body.width);
-                        let b_x = x1.clamp(clip_x, body.x + body.width);
-                        let a_t = if (x1 - x0).abs() > 0.1 {
-                            (a_x - x0) / (x1 - x0)
-                        } else {
-                            0.0
-                        };
-                        let b_t = if (x1 - x0).abs() > 0.1 {
-                            (b_x - x0) / (x1 - x0)
-                        } else {
-                            0.0
-                        };
-                        let a_y = clip_y + a_t * clip_h;
-                        let b_y = clip_y + b_t * clip_h;
-                        if (b_x - a_x).abs() > 0.5 {
-                            let line = canvas::Path::line(
-                                iced::Point::new(a_x, a_y),
-                                iced::Point::new(b_x, b_y),
-                            );
-                            frame.stroke(
-                                &line,
-                                canvas::Stroke::default()
-                                    .with_color(stripe_color)
-                                    .with_width(stripe_stroke),
-                            );
-                        }
-                        offset += stripe_spacing;
-                    }
-                }
+            for clip in self.dragged_last(&self.clips, |clip| clip.clip_id) {
+                self.draw_audio_clip(&mut frame, clip, false, w, h);
+            }
+            if let Some(preview) = &self.audio_recording_preview {
+                self.draw_audio_clip(&mut frame, preview, true, w, h);
             }
         }
 
@@ -372,57 +214,11 @@ impl TrackClipCanvas {
 
         // Draw note clips (for instrument tracks)
         if self.is_instrument && self.bpm > 0.0 {
-            for (note_clip, is_recording_preview) in self
-                .dragged_last(&self.note_clips, |clip| clip.clip_id)
-                .map(|clip| (clip, false))
-                .chain(self.recording_preview.iter().map(|clip| (clip, true)))
-            {
-                let is_selected =
-                    !is_recording_preview && self.selected_clips.contains(&note_clip.clip_id);
-                let colors = self.clip_colors(is_selected, is_recording_preview);
-                let clip_x = self.beat_to_x(note_clip.position_beats);
-                let clip_w = geometry.width_for_beats(note_clip.duration_beats);
-
-                // Skip clips outside viewport
-                if clip_x + clip_w < 0.0 || clip_x > w {
-                    continue;
-                }
-
-                let clip_y = CLIP_Y;
-                let clip_h = h - 2.0 * CLIP_Y;
-                let body = clip_box(clip_x, clip_y, clip_w, clip_h);
-
-                if !is_recording_preview && self.is_dragged(note_clip.clip_id) {
-                    draw_drag_shadow(&mut frame, body);
-                }
-                let looping =
-                    note_clip.loop_enabled && note_clip.loop_end_beats > note_clip.loop_start_beats;
-                let loop_passes =
-                    note_clip
-                        .timeline()
-                        .first_wrap()
-                        .filter(|_| looping)
-                        .map(|first_wrap| LoopPasses {
-                            first_wrap_px: geometry.width_for_beats(first_wrap),
-                            pass_px: geometry.width_for_beats(
-                                note_clip.loop_end_beats - note_clip.loop_start_beats,
-                            ),
-                        });
-                draw_clip_back(&mut frame, body, &colors, loop_passes, w);
-
-                // Draw note blocks inside the clip (below title bar)
-                let left = clip_x.max(0.0);
-                let area = Rectangle {
-                    x: left,
-                    y: clip_y + CLIP_TITLE_HEIGHT,
-                    width: ((body.x + body.width).min(w) - left).max(0.0),
-                    height: clip_h - CLIP_TITLE_HEIGHT,
-                };
-                for mark in note_marks(&note_clip.notes, clip_x, area, geometry.pixels_per_beat()) {
-                    frame.fill_rectangle(mark.position(), mark.size(), colors.ink);
-                }
-
-                draw_clip_front(&mut frame, body, &colors, &note_clip.name, looping, w);
+            for note_clip in self.dragged_last(&self.note_clips, |clip| clip.clip_id) {
+                self.draw_note_clip(&mut frame, note_clip, false, w, h);
+            }
+            if let Some(preview) = &self.recording_preview {
+                self.draw_note_clip(&mut frame, preview, true, w, h);
             }
         }
 
@@ -591,6 +387,226 @@ impl TrackClipCanvas {
         self.draw_drag_readout(&mut frame, w, h);
 
         vec![frame.into_geometry()]
+    }
+
+    fn draw_audio_clip(
+        &self,
+        frame: &mut canvas::Frame,
+        clip: &TimelineClip,
+        is_recording_preview: bool,
+        w: f32,
+        h: f32,
+    ) {
+        let geometry = self.geometry();
+        let ppb = geometry.pixels_per_beat();
+        let spb = self.sample_rate as f64 * 60.0 / self.bpm;
+        let is_selected = !is_recording_preview && self.selected_clips.contains(&clip.clip_id);
+        let colors = self.clip_colors(is_selected, is_recording_preview);
+        let clip_start_beat = clip.position as f64 / spb;
+        let clip_dur_beats = clip.duration as f64 / spb;
+
+        let clip_x = self.beat_to_x(clip_start_beat);
+        let clip_w = geometry.width_for_beats(clip_dur_beats);
+
+        // Skip clips entirely outside viewport
+        if clip_x + clip_w < 0.0 || clip_x > w {
+            return;
+        }
+
+        let clip_y = CLIP_Y;
+        let clip_h = h - 2.0 * CLIP_Y;
+        let body = clip_box(clip_x, clip_y, clip_w, clip_h);
+
+        if !is_recording_preview && self.is_dragged(clip.clip_id) {
+            draw_drag_shadow(frame, body);
+        }
+        let looped = clip.loop_enabled && clip.loop_end > clip.loop_start;
+        let loop_passes = looped.then(|| {
+            let pass_px = geometry.width_for_beats((clip.loop_end - clip.loop_start) as f64 / spb);
+            LoopPasses {
+                first_wrap_px: pass_px,
+                pass_px,
+            }
+        });
+        draw_clip_back(frame, body, &colors, loop_passes, w);
+
+        if !clip.peaks.is_empty() && clip_w > 4.0 {
+            let body_top = clip_y + CLIP_TITLE_HEIGHT;
+            let body_h = clip_h - CLIP_TITLE_HEIGHT;
+            let center_y = body_top + body_h / 2.0;
+            let half_h = body_h / 2.0 - 2.0;
+            let pixels = clip_w as usize;
+            let frames_per_pixel = spb / f64::from(ppb);
+            for px in visible_pixel_columns(clip_x, body.width, w) {
+                let screen_x = clip_x + px as f32;
+                let Some((min_val, max_val)) = waveform_peak_for_pixel(
+                    &clip.peaks,
+                    px,
+                    pixels,
+                    frames_per_pixel,
+                    clip.peak_span_frames,
+                ) else {
+                    break;
+                };
+                let y_top = center_y - (max_val * half_h);
+                let y_bottom = center_y - (min_val * half_h);
+                let height = (y_bottom - y_top).max(1.0);
+                frame.fill_rectangle(
+                    iced::Point::new(screen_x, y_top),
+                    iced::Size::new(1.0, height),
+                    colors.ink,
+                );
+            }
+        }
+
+        if !is_recording_preview
+            && (is_selected || clip.fade_in_frames > 0 || clip.fade_out_frames > 0)
+        {
+            let (fade_in_x, fade_out_x) = fade_handle_xs(clip_x, clip_w, clip);
+            let top = clip_y + CLIP_TITLE_HEIGHT + 2.0;
+            let bottom = clip_y + clip_h - 2.0;
+            let envelope = canvas::Path::new(|builder| {
+                builder.move_to(iced::Point::new(clip_x, bottom));
+                for step in 1..=12 {
+                    let progress = step as f32 / 12.0;
+                    let x = clip_x + (fade_in_x - clip_x) * progress;
+                    let y = bottom
+                        - (bottom - top)
+                            * clip
+                                .fade_in_curve
+                                .gain_for(progress, clip.crossfade_in_from.is_some());
+                    builder.line_to(iced::Point::new(x, y));
+                }
+                builder.line_to(iced::Point::new(fade_out_x, top));
+                for step in 1..=12 {
+                    let progress = step as f32 / 12.0;
+                    let x = fade_out_x + (clip_x + clip_w - fade_out_x) * progress;
+                    let gain = clip
+                        .fade_out_curve
+                        .fade_out_gain(progress, clip.crossfade_out_to.is_some());
+                    let y = bottom - (bottom - top) * gain;
+                    builder.line_to(iced::Point::new(x, y));
+                }
+            });
+            frame.stroke(
+                &envelope,
+                canvas::Stroke::default()
+                    .with_color(theme::with_alpha(theme::text(), 0.72))
+                    .with_width(1.25),
+            );
+            if is_selected {
+                for x in [fade_in_x, fade_out_x] {
+                    frame.fill_rectangle(
+                        iced::Point::new(x - 2.5, FADE_HANDLE_Y - 2.5),
+                        iced::Size::new(5.0, 5.0),
+                        theme::accent(),
+                    );
+                }
+                for edge in [
+                    crate::state::AudioClipFadeEdge::In,
+                    crate::state::AudioClipFadeEdge::Out,
+                ] {
+                    if let Some(handle) = fade_curve_handle(clip_x, clip_w, h, clip, edge) {
+                        frame.fill(&canvas::Path::circle(handle, 3.25), theme::accent());
+                    }
+                }
+            }
+        }
+        draw_clip_front(frame, body, &colors, &clip.name, looped, w);
+
+        // Diagonal stripe overlay when the clip's warp is
+        // stale relative to the current project tempo. Low
+        // opacity so the waveform and clip colour remain
+        // legible, but strong enough to catch the eye.
+        if clip.warp_stale && clip_w > 4.0 {
+            let stripe_color = theme::with_alpha(theme::meter_yellow(), 0.22);
+            let stripe_spacing = 8.0f32;
+            let stripe_stroke = 1.5f32;
+            let mut offset = -clip_h;
+            while offset < clip_w {
+                let x0 = clip_x + offset;
+                let x1 = clip_x + offset + clip_h;
+                let a_x = x0.clamp(clip_x, body.x + body.width);
+                let b_x = x1.clamp(clip_x, body.x + body.width);
+                let a_t = if (x1 - x0).abs() > 0.1 {
+                    (a_x - x0) / (x1 - x0)
+                } else {
+                    0.0
+                };
+                let b_t = if (x1 - x0).abs() > 0.1 {
+                    (b_x - x0) / (x1 - x0)
+                } else {
+                    0.0
+                };
+                let a_y = clip_y + a_t * clip_h;
+                let b_y = clip_y + b_t * clip_h;
+                if (b_x - a_x).abs() > 0.5 {
+                    let line =
+                        canvas::Path::line(iced::Point::new(a_x, a_y), iced::Point::new(b_x, b_y));
+                    frame.stroke(
+                        &line,
+                        canvas::Stroke::default()
+                            .with_color(stripe_color)
+                            .with_width(stripe_stroke),
+                    );
+                }
+                offset += stripe_spacing;
+            }
+        }
+    }
+
+    fn draw_note_clip(
+        &self,
+        frame: &mut canvas::Frame,
+        note_clip: &TimelineNoteClip,
+        is_recording_preview: bool,
+        w: f32,
+        h: f32,
+    ) {
+        let geometry = self.geometry();
+        let is_selected = !is_recording_preview && self.selected_clips.contains(&note_clip.clip_id);
+        let colors = self.clip_colors(is_selected, is_recording_preview);
+        let clip_x = self.beat_to_x(note_clip.position_beats);
+        let clip_w = geometry.width_for_beats(note_clip.duration_beats);
+
+        // Skip clips outside viewport
+        if clip_x + clip_w < 0.0 || clip_x > w {
+            return;
+        }
+
+        let clip_y = CLIP_Y;
+        let clip_h = h - 2.0 * CLIP_Y;
+        let body = clip_box(clip_x, clip_y, clip_w, clip_h);
+
+        if !is_recording_preview && self.is_dragged(note_clip.clip_id) {
+            draw_drag_shadow(frame, body);
+        }
+        let looping =
+            note_clip.loop_enabled && note_clip.loop_end_beats > note_clip.loop_start_beats;
+        let loop_passes = note_clip
+            .timeline()
+            .first_wrap()
+            .filter(|_| looping)
+            .map(|first_wrap| LoopPasses {
+                first_wrap_px: geometry.width_for_beats(first_wrap),
+                pass_px: geometry
+                    .width_for_beats(note_clip.loop_end_beats - note_clip.loop_start_beats),
+            });
+        draw_clip_back(frame, body, &colors, loop_passes, w);
+
+        // Draw note blocks inside the clip (below title bar)
+        let left = clip_x.max(0.0);
+        let area = Rectangle {
+            x: left,
+            y: clip_y + CLIP_TITLE_HEIGHT,
+            width: ((body.x + body.width).min(w) - left).max(0.0),
+            height: clip_h - CLIP_TITLE_HEIGHT,
+        };
+        for mark in note_marks(&note_clip.notes, clip_x, area, geometry.pixels_per_beat()) {
+            frame.fill_rectangle(mark.position(), mark.size(), colors.ink);
+        }
+
+        draw_clip_front(frame, body, &colors, &note_clip.name, looping, w);
     }
 }
 
