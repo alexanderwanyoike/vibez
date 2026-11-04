@@ -617,40 +617,14 @@ impl PianoRollState {
                             clip.loop_start_beats = 0.0;
                             clip.loop_end_beats = 0.0;
 
-                            sync_data = Some((
-                                clip.position_beats,
-                                clip.duration_beats,
-                                clip.notes.clone(),
-                                clip.groove_grid,
-                            ));
+                            sync_data = Some(clip.clone());
                         }
                     }
                 }
                 // Sync to engine outside the mutable borrow
-                if let Some((pos, dur, notes, groove_grid)) = sync_data {
+                if let Some(clip) = sync_data {
                     engine.send(EngineCommand::RemoveNoteClip(track_id, clip_id));
-                    engine.send(EngineCommand::AddNoteClip {
-                        track_id,
-                        insertion: vibez_engine::clip_insertion::PreparedNoteClipInsertion::new(
-                            clip_id,
-                            pos,
-                            dur,
-                            0.0,
-                            false,
-                            0.0,
-                            0.0,
-                            groove_grid,
-                        ),
-                    });
-                    for note in &notes {
-                        engine.send(EngineCommand::AddNote {
-                            track_id,
-                            clip_id,
-                            insertion: vibez_engine::clip_insertion::PreparedNoteInsertion::new(
-                                *note,
-                            ),
-                        });
-                    }
+                    engine.add_note_clip(track_id, &clip);
                 }
                 action.status = Some("Cropped clip to content".to_string());
             }
@@ -679,53 +653,13 @@ impl PianoRollState {
                         }
 
                         clip_end_beat = Some(clip.position_beats + clip.duration_beats);
-                        sync_data = Some((
-                            clip.position_beats,
-                            clip.duration_beats,
-                            clip.notes.clone(),
-                            clip.start_marker_beats,
-                            clip.loop_enabled,
-                            clip.loop_start_beats,
-                            clip.loop_end_beats,
-                            clip.groove_grid,
-                        ));
+                        sync_data = Some(clip.clone());
                     }
                 }
                 // Sync to engine via Remove+Add+re-add-notes (loop state included atomically)
-                if let Some((
-                    pos,
-                    dur,
-                    notes,
-                    start_marker_beats,
-                    loop_enabled,
-                    loop_start_beats,
-                    loop_end_beats,
-                    groove_grid,
-                )) = sync_data
-                {
+                if let Some(clip) = sync_data {
                     engine.send(EngineCommand::RemoveNoteClip(track_id, clip_id));
-                    engine.send(EngineCommand::AddNoteClip {
-                        track_id,
-                        insertion: vibez_engine::clip_insertion::PreparedNoteClipInsertion::new(
-                            clip_id,
-                            pos,
-                            dur,
-                            start_marker_beats,
-                            loop_enabled,
-                            loop_start_beats,
-                            loop_end_beats,
-                            groove_grid,
-                        ),
-                    });
-                    for note in &notes {
-                        engine.send(EngineCommand::AddNote {
-                            track_id,
-                            clip_id,
-                            insertion: vibez_engine::clip_insertion::PreparedNoteInsertion::new(
-                                *note,
-                            ),
-                        });
-                    }
+                    engine.add_note_clip(track_id, &clip);
                 }
                 if let Some(end_beat) = clip_end_beat {
                     action.scroll_to_beat = Some(end_beat);

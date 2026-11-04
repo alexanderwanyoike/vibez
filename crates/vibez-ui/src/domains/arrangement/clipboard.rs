@@ -367,28 +367,7 @@ impl TimelineEditorState {
                     clip.id = ClipId::new();
                     clip.position_beats = position_beats;
                     clip.selected_notes.clear();
-                    engine.send(EngineCommand::AddNoteClip {
-                        track_id,
-                        insertion: vibez_engine::clip_insertion::PreparedNoteClipInsertion::new(
-                            clip.id,
-                            clip.position_beats,
-                            clip.duration_beats,
-                            clip.start_marker_beats,
-                            clip.loop_enabled,
-                            clip.loop_start_beats,
-                            clip.loop_end_beats,
-                            clip.groove_grid,
-                        ),
-                    });
-                    for note in &clip.notes {
-                        engine.send(EngineCommand::AddNote {
-                            track_id,
-                            clip_id: clip.id,
-                            insertion: vibez_engine::clip_insertion::PreparedNoteInsertion::new(
-                                *note,
-                            ),
-                        });
-                    }
+                    engine.add_note_clip(track_id, &clip);
                     selected.insert(ArrangementSelection::NoteClip {
                         track_id,
                         clip_id: clip.id,

@@ -621,40 +621,22 @@ impl TimelineEditorState {
 
         // Add joined clip
         let new_id = ClipId::new();
-        engine.send(EngineCommand::AddNoteClip {
-            track_id,
-            insertion: vibez_engine::clip_insertion::PreparedNoteClipInsertion::new(
-                new_id,
-                start_pos,
-                total_duration,
-                0.0,
-                joined_loop_enabled,
-                0.0,
-                total_duration,
-                vibez_core::perform::GrooveGrid::Off,
-            ),
-        });
-        for note in &merged_notes {
-            engine.send(EngineCommand::AddNote {
-                track_id,
-                clip_id: new_id,
-                insertion: vibez_engine::clip_insertion::PreparedNoteInsertion::new(*note),
-            });
-        }
+        let joined = UiNoteClip {
+            id: new_id,
+            name: "Joined".to_string(),
+            position_beats: start_pos,
+            duration_beats: total_duration,
+            notes: merged_notes,
+            selected_notes: HashSet::new(),
+            start_marker_beats: 0.0,
+            loop_enabled: joined_loop_enabled,
+            loop_start_beats: 0.0,
+            loop_end_beats: total_duration,
+            groove_grid: vibez_core::perform::GrooveGrid::Off,
+        };
+        engine.add_note_clip(track_id, &joined);
         if let Some(track) = self.find_content_mut(track_id) {
-            track.note_clips.push(UiNoteClip {
-                id: new_id,
-                name: "Joined".to_string(),
-                position_beats: start_pos,
-                duration_beats: total_duration,
-                notes: merged_notes,
-                selected_notes: HashSet::new(),
-                start_marker_beats: 0.0,
-                loop_enabled: joined_loop_enabled,
-                loop_start_beats: 0.0,
-                loop_end_beats: total_duration,
-                groove_grid: vibez_core::perform::GrooveGrid::Off,
-            });
+            track.note_clips.push(joined);
         }
 
         self.selected_clips.clear();
@@ -725,26 +707,7 @@ impl TimelineEditorState {
             content.note_clips.retain(|clip| clip.id != original_id);
         }
         for clip in &fragments {
-            engine.send(EngineCommand::AddNoteClip {
-                track_id,
-                insertion: vibez_engine::clip_insertion::PreparedNoteClipInsertion::new(
-                    clip.id,
-                    clip.position_beats,
-                    clip.duration_beats,
-                    clip.start_marker_beats,
-                    clip.loop_enabled,
-                    clip.loop_start_beats,
-                    clip.loop_end_beats,
-                    clip.groove_grid,
-                ),
-            });
-            for note in &clip.notes {
-                engine.send(EngineCommand::AddNote {
-                    track_id,
-                    clip_id: clip.id,
-                    insertion: vibez_engine::clip_insertion::PreparedNoteInsertion::new(*note),
-                });
-            }
+            engine.add_note_clip(track_id, clip);
         }
         if let Some(content) = self.find_content_mut(track_id) {
             content.note_clips.extend(fragments);

@@ -777,44 +777,29 @@ impl App {
         }
 
         for note_clip in &loaded.project.arrange.note_clips {
-            let start_marker_beats = note_clip.resolved_start_marker_beats();
-            self.send_command(EngineCommand::AddNoteClip {
-                track_id: note_clip.track_id,
-                insertion: vibez_engine::clip_insertion::PreparedNoteClipInsertion::new(
-                    note_clip.id,
-                    note_clip.position_beats,
-                    note_clip.duration_beats,
-                    start_marker_beats,
-                    note_clip.loop_enabled,
-                    note_clip.loop_start_beats,
-                    note_clip.loop_end_beats,
-                    note_clip.groove_grid,
-                ),
-            });
-            for note in &note_clip.notes {
-                self.send_command(EngineCommand::AddNote {
-                    track_id: note_clip.track_id,
-                    clip_id: note_clip.id,
-                    insertion: vibez_engine::clip_insertion::PreparedNoteInsertion::new(*note),
-                });
-            }
+            let clip = UiNoteClip {
+                id: note_clip.id,
+                name: note_clip.name.clone(),
+                position_beats: note_clip.position_beats,
+                duration_beats: note_clip.duration_beats,
+                notes: note_clip.notes.clone(),
+                selected_notes: HashSet::new(),
+                start_marker_beats: note_clip.resolved_start_marker_beats(),
+                loop_enabled: note_clip.loop_enabled,
+                loop_start_beats: note_clip.loop_start_beats,
+                loop_end_beats: note_clip.loop_end_beats,
+                groove_grid: note_clip.groove_grid,
+            };
+            crate::domains::EngineHandle::add_note_clip(
+                &mut self.cmd_tx,
+                note_clip.track_id,
+                &clip,
+            );
             if self.state.find_track(note_clip.track_id).is_some() {
                 self.state
                     .arrange_content_mut(note_clip.track_id)
                     .note_clips
-                    .push(UiNoteClip {
-                        id: note_clip.id,
-                        name: note_clip.name.clone(),
-                        position_beats: note_clip.position_beats,
-                        duration_beats: note_clip.duration_beats,
-                        notes: note_clip.notes.clone(),
-                        selected_notes: HashSet::new(),
-                        start_marker_beats,
-                        loop_enabled: note_clip.loop_enabled,
-                        loop_start_beats: note_clip.loop_start_beats,
-                        loop_end_beats: note_clip.loop_end_beats,
-                        groove_grid: note_clip.groove_grid,
-                    });
+                    .push(clip);
             }
         }
 

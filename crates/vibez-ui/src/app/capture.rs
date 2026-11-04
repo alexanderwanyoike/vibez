@@ -285,7 +285,6 @@ fn apply_capture_to_arrangement(
         pre_capture_mutes,
         samples_per_beat,
     } = captured;
-    let mut commands = Vec::new();
     let mut clip_count = 0;
     let timeline = Arc::make_mut(arrange);
     for track_id in by_track.keys().copied() {
@@ -306,10 +305,10 @@ fn apply_capture_to_arrangement(
 
         let destination = timeline.ensure(track_id);
         for clip in &destination.clips {
-            commands.push(EngineCommand::RemoveClip(track_id, clip.id));
+            engine.send(EngineCommand::RemoveClip(track_id, clip.id));
         }
         for clip in &destination.note_clips {
-            commands.push(EngineCommand::RemoveNoteClip(track_id, clip.id));
+            engine.send(EngineCommand::RemoveNoteClip(track_id, clip.id));
         }
 
         destination.clips = destination
@@ -338,13 +337,13 @@ fn apply_capture_to_arrangement(
             .sort_by(|left, right| left.position_beats.total_cmp(&right.position_beats));
 
         for clip in &destination.clips {
-            commands.push(add_audio_clip_command(track_id, clip));
+            engine.send(add_audio_clip_command(track_id, clip));
         }
         for clip in &destination.note_clips {
-            commands.extend(add_note_clip_commands(track_id, clip));
+            engine.add_note_clip(track_id, clip);
         }
         for lane in &destination.automation {
-            commands.push(EngineCommand::SetAutomationLane {
+            engine.send(EngineCommand::SetAutomationLane {
                 track_id,
                 insertion: vibez_engine::clip_insertion::PreparedAutomationLaneInsertion::new(
                     lane.clone(),
@@ -353,17 +352,14 @@ fn apply_capture_to_arrangement(
         }
         if let Some(muted) = pre_capture_mutes.get(&track_id) {
             if captured_mute {
-                commands.push(EngineCommand::SetTrackMute(track_id, *muted));
-                commands.push(EngineCommand::SetAutomationOverride {
+                engine.send(EngineCommand::SetTrackMute(track_id, *muted));
+                engine.send(EngineCommand::SetAutomationOverride {
                     track_id,
                     target: vibez_core::automation::AutomationTarget::TrackMute,
                     overridden: false,
                 });
             }
         }
-    }
-    for command in commands {
-        engine.send(command);
     }
     clip_count
 }
@@ -511,31 +507,6 @@ fn add_audio_clip_command(
         playback_direction: clip.playback_direction,
         warp_markers: clip.warp_markers.clone(),
     }
-}
-
-fn add_note_clip_commands(
-    track_id: vibez_core::id::TrackId,
-    clip: &crate::state::UiNoteClip,
-) -> Vec<EngineCommand> {
-    let mut commands = vec![EngineCommand::AddNoteClip {
-        track_id,
-        insertion: vibez_engine::clip_insertion::PreparedNoteClipInsertion::new(
-            clip.id,
-            clip.position_beats,
-            clip.duration_beats,
-            clip.start_marker_beats,
-            clip.loop_enabled,
-            clip.loop_start_beats,
-            clip.loop_end_beats,
-            clip.groove_grid,
-        ),
-    }];
-    commands.extend(clip.notes.iter().map(|note| EngineCommand::AddNote {
-        track_id,
-        clip_id: clip.id,
-        insertion: vibez_engine::clip_insertion::PreparedNoteInsertion::new(*note),
-    }));
-    commands
 }
 
 #[cfg(test)]
