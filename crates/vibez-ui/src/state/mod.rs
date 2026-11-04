@@ -113,7 +113,11 @@ pub struct ViewState {
     pub viewport: crate::timeline_geometry::TimelineViewport,
     /// The Arrange view a zoom to selection replaced, for zoom back.
     pub zoom_before_selection: Option<crate::timeline_geometry::TimelineViewport>,
+    /// Arrange and Section timelines; the transport bar and grid shortcuts
+    /// edit it.
     pub arrange_grid: GridConfig,
+    /// Piano roll and audio clip editor, following their own zoom.
+    pub clip_grid: GridConfig,
     pub context_menu: Option<ContextMenu>,
     pub drum_rack_slice_dialog: Option<DrumRackSliceDialog>,
     pub transient_analysis_dialog: Option<TransientAnalysisDialog>,
@@ -149,6 +153,7 @@ impl Default for ViewState {
             viewport: crate::timeline_geometry::TimelineViewport::new(1.0, 0.0),
             zoom_before_selection: None,
             arrange_grid: GridConfig::default(),
+            clip_grid: GridConfig::default(),
             context_menu: None,
             drum_rack_slice_dialog: None,
             transient_analysis_dialog: None,

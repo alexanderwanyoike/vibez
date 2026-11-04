@@ -622,11 +622,7 @@ impl App {
             },
             Message::PianoRoll(msg) => {
                 let ctx = crate::domains::piano_roll::PianoRollCtx {
-                    snap_grid: self
-                        .state
-                        .view
-                        .arrange_grid
-                        .effective_grid(self.timeline_pixels_per_beat()),
+                    snap_grid: self.clip_editor_grid(),
                 };
                 let action = self.route_piano_roll_editor_message(msg, ctx);
                 self.apply_piano_roll_action(action);

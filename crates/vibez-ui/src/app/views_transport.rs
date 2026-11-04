@@ -339,7 +339,7 @@ impl App {
         let grid_picker = pick_list(
             grid.choices(pixels_per_beat),
             Some(grid.choice(pixels_per_beat)),
-            |choice| Message::View(ViewMsg::ChooseGrid(choice)),
+            |choice| Message::View(ViewMsg::ChooseArrangeGrid(choice)),
         )
         .width(Length::Fixed(86.0))
         .padding([3, 8])

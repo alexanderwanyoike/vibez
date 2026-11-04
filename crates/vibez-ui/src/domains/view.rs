@@ -34,7 +34,9 @@ pub enum ViewMsg {
     ScrollArrangement(f64),
     /// Jump straight to a zoom and scroll, as a ruler drag does.
     SetViewport(TimelineViewport),
-    ChooseGrid(GridChoice),
+    ChooseArrangeGrid(GridChoice),
+    ChooseClipGrid(GridChoice),
+    /// Grid commands without a target are the Arrange grid's shortcuts.
     NarrowGrid,
     WidenGrid,
     ToggleTripletGrid,
@@ -200,7 +202,8 @@ impl ViewState {
                     self.viewport.clamp(ctx.total_beats, ctx.lane_width);
                 }
             }
-            ViewMsg::ChooseGrid(choice) => self.arrange_grid.choose(choice),
+            ViewMsg::ChooseArrangeGrid(choice) => self.arrange_grid.choose(choice),
+            ViewMsg::ChooseClipGrid(choice) => self.clip_grid.choose(choice),
             ViewMsg::NarrowGrid => self.arrange_grid.narrow(),
             ViewMsg::WidenGrid => self.arrange_grid.widen(),
             ViewMsg::ToggleTripletGrid => self.arrange_grid.toggle_triplet(),
@@ -858,10 +861,10 @@ mod tests {
     }
 
     #[test]
-    fn grid_commands_update_the_shared_editor_grid() {
+    fn grid_commands_update_the_arrange_grid() {
         let mut v = ViewState::default();
         v.update(
-            ViewMsg::ChooseGrid(GridChoice::Fixed(SnapGrid::EIGHTH)),
+            ViewMsg::ChooseArrangeGrid(GridChoice::Fixed(SnapGrid::EIGHTH)),
             &TimelineEditorState::default(),
             ViewCtx::default(),
         );

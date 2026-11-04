@@ -9,11 +9,7 @@ impl App {
     ) -> Task<Message> {
         match message {
             Message::QuantizeAudioClip { track_id, clip_id } => {
-                let grid = self
-                    .state
-                    .view
-                    .arrange_grid
-                    .effective_grid(self.timeline_pixels_per_beat());
+                let grid = self.clip_editor_grid();
                 return self.dispatch_audio_quantize(
                     self.active_timeline_location(),
                     track_id,

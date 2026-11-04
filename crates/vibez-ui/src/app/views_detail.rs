@@ -153,6 +153,51 @@ impl App {
             .unwrap_or(false)
     }
 
+    /// The open clip editor's step on the clip editor grid; quantize uses
+    /// it so it matches the lines the editor draws.
+    pub(super) fn clip_editor_grid(&self) -> crate::state::SnapGrid {
+        self.state
+            .view
+            .clip_grid
+            .effective_grid(self.clip_editor_pixels_per_beat())
+    }
+
+    /// Approximate zoom of the clip editor. Both clip editors fit the whole
+    /// clip into the panel; with no clip open the timeline's zoom stands in.
+    pub(super) fn clip_editor_pixels_per_beat(&self) -> f32 {
+        self.clip_editor_clip_beats()
+            .map(|beats| {
+                crate::timeline_geometry::TimelineGeometry::fitted(
+                    beats,
+                    self.state.view.window_width,
+                    52.0,
+                )
+                .pixels_per_beat()
+            })
+            .unwrap_or_else(|| self.timeline_pixels_per_beat())
+    }
+
+    fn clip_editor_clip_beats(&self) -> Option<f64> {
+        let editor = self.state.active_timeline_editor();
+        if let Some((track_id, clip_id)) = editor.selected_note_clip {
+            return self
+                .state
+                .active_timeline_content(track_id)?
+                .note_clips
+                .iter()
+                .find(|clip| clip.id == clip_id)
+                .map(|clip| clip.duration_beats);
+        }
+        let track_id = editor.selected_track?;
+        let clip_id = single_selected_audio_clip_for_track(editor, track_id)?;
+        self.state
+            .active_timeline_content(track_id)?
+            .clips
+            .iter()
+            .find(|clip| clip.id == clip_id)
+            .map(|clip| clip.duration as f64 / self.state.transport.samples_per_beat())
+    }
+
     fn midi_clip_editor_visible(&self) -> bool {
         self.visible_piano_roll_clip().is_some()
     }
@@ -379,7 +424,7 @@ impl App {
                         clip_relative_playhead,
                         clip.duration_beats,
                         track_color,
-                        self.state.view.arrange_grid,
+                        self.state.view.clip_grid,
                         self.state.piano_roll.scroll_y,
                         self.state.piano_roll.edit_mode,
                     ),
@@ -388,7 +433,7 @@ impl App {
                         clip,
                         clip.duration_beats,
                         track_color,
-                        self.state.view.arrange_grid,
+                        self.state.view.clip_grid,
                     ),
                 )
             }
@@ -592,12 +637,12 @@ impl App {
 
         let mode_row = row![select_btn, draw_btn].spacing(1);
 
-        let grid = self.state.view.arrange_grid;
-        let pixels_per_beat = self.timeline_pixels_per_beat();
+        let grid = self.state.view.clip_grid;
+        let pixels_per_beat = self.clip_editor_pixels_per_beat();
         let snap_picker = pick_list(
             grid.choices(pixels_per_beat),
             Some(grid.choice(pixels_per_beat)),
-            |choice| Message::View(ViewMsg::ChooseGrid(choice)),
+            |choice| Message::View(ViewMsg::ChooseClipGrid(choice)),
         )
         .width(Length::Fixed(90.0));
         let snap_label = text("Snap:").size(10).color(th::text_dim());

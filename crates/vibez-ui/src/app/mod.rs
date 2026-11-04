@@ -658,28 +658,8 @@ impl App {
         );
     }
 
+    /// Zoom of the Arrange or Section timeline on screen.
     pub(super) fn timeline_pixels_per_beat(&self) -> f32 {
-        let editor = self.state.active_timeline_editor();
-        if let Some((track_id, clip_id)) = editor.selected_note_clip {
-            if let Some(duration) =
-                self.state
-                    .active_timeline_content(track_id)
-                    .and_then(|content| {
-                        content
-                            .note_clips
-                            .iter()
-                            .find(|clip| clip.id == clip_id)
-                            .map(|clip| clip.duration_beats)
-                    })
-            {
-                return crate::timeline_geometry::TimelineGeometry::fitted(
-                    duration,
-                    self.state.view.window_width,
-                    52.0,
-                )
-                .pixels_per_beat();
-            }
-        }
         if self.state.view.workspace == crate::state::Workspace::Perform
             && self.state.perform.selected_section.is_some()
         {
