@@ -162,10 +162,17 @@ impl App {
         let mut batches: Vec<(MusicalBoundary, Vec<_>)> = Vec::new();
         for (track_id, clip) in targets {
             let clips = &self.state.perform.clips;
-            let quantization = clip.as_ref().map_or_else(
-                || clips.launch_quantization(track_id),
-                |clip| clips.clip_launch_quantization(clip),
-            );
+            // A stop lands where the Clip it stops would launch.
+            let quantization = clip
+                .as_ref()
+                .or_else(|| {
+                    let playing = self.state.perform.clip_editor.playing.get(&track_id)?;
+                    Some(clips.by_id(playing.id).unwrap_or(playing))
+                })
+                .map_or_else(
+                    || clips.launch_quantization(track_id),
+                    |clip| clips.clip_launch_quantization(clip),
+                );
             let batch = match batches.iter().position(|(q, _)| *q == quantization) {
                 Some(index) => index,
                 None => {
@@ -242,7 +249,7 @@ pub(super) fn refresh_edited_clips(
                     removed.track_id,
                     editor.next_request,
                 )],
-                quantization: perform.clips.launch_quantization(removed.track_id),
+                quantization: perform.clips.clip_launch_quantization(removed),
             });
         }
     }
