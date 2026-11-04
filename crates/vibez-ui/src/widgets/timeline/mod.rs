@@ -245,6 +245,7 @@ mod ruler;
 mod ruler_drag;
 mod ruler_draw;
 mod ruler_scale;
+mod time_ruler;
 
 pub use clip_drag::ClipDragAction;
 pub use clips::*;
