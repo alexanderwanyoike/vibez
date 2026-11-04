@@ -282,6 +282,29 @@ fn double_clip_clones_notes_and_grows_engine_clip() {
 }
 
 #[test]
+fn doubling_a_clip_sends_it_to_the_engine_as_one_insertion() {
+    let (mut tracks, tid, cid) = midi_track_with_clip();
+    let mut pr = PianoRollState::default();
+    let mut engine = RecordingEngine::default();
+    pr.update(
+        PianoRollMsg::DoubleNoteClip(tid, cid),
+        &mut engine,
+        &mut tracks,
+        PianoRollCtx::default(),
+    );
+    assert!(
+        matches!(
+            engine.0.as_slice(),
+            [
+                EngineCommand::RemoveNoteClip(removed_track, removed_clip),
+                EngineCommand::AddNoteClip { track_id, .. },
+            ] if (*removed_track, *removed_clip, *track_id) == (tid, cid, tid)
+        ),
+        "one swap of the whole doubled clip, never a command per note"
+    );
+}
+
+#[test]
 fn enabling_loop_replaces_stale_bounds_with_the_current_clip_length() {
     let (mut tracks, tid, cid) = midi_track_with_clip();
     let clip = &mut tracks.get_mut(tid).unwrap().note_clips[0];
