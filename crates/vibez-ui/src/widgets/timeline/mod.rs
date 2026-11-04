@@ -245,6 +245,7 @@ mod clips_tests;
 mod drag_preview;
 mod fade_drag;
 mod lane_grid;
+mod lane_timing;
 mod loop_tint;
 pub mod marquee;
 mod minimap;

@@ -24,6 +24,7 @@ use crate::widgets::timeline::marquee;
 use vibez_core::id::{ClipId, TrackId};
 
 use super::clip_drag::ClipDragAction;
+use super::lane_timing;
 use super::*;
 
 mod drag_steps;
@@ -148,6 +149,7 @@ impl TrackClipCanvas {
         sample_drop_duration_beats: Option<f64>,
         sample_drop_detail: Option<String>,
     ) -> Self {
+        let timing = lane_timing::start();
         let geometry = TimelineGeometry::from_zoom(zoom_level, scroll_offset_beats);
         let visible_beats = geometry.visible_beats(viewport_width.max(1.0));
         let prefetch = visible_beats * 0.25;
@@ -243,7 +245,7 @@ impl TrackClipCanvas {
                 loop_end_beats: c.loop_end_beats,
             })
             .collect();
-        Self {
+        let lane = Self {
             vertical_wheel_routing: VerticalWheelRouting::default(),
             track_id,
             track_ids,
@@ -280,7 +282,9 @@ impl TrackClipCanvas {
             snap_targets: Arc::default(),
             clip_drag: None,
             track_name: track.name.clone(),
-        }
+        };
+        lane_timing::finish(timing, lane_timing::Phase::Build);
+        lane
     }
 
     /// Opt this lane into box selection by handing it the column layout
@@ -382,7 +386,10 @@ impl canvas::Program<Message> for TrackClipCanvas {
         bounds: Rectangle,
         cursor: mouse::Cursor,
     ) -> Vec<canvas::Geometry> {
-        self.draw_impl(renderer, bounds, cursor)
+        let timing = lane_timing::start();
+        let geometry = self.draw_impl(renderer, bounds, cursor);
+        lane_timing::finish(timing, lane_timing::Phase::Draw);
+        geometry
     }
     fn mouse_interaction(
         &self,
