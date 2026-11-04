@@ -215,3 +215,30 @@ fn midi_move_and_resize_steps_are_each_one_in_place_engine_edit() {
         ),
     ]);
 }
+
+#[test]
+fn audio_move_and_trim_steps_are_each_one_in_place_engine_edit() {
+    let mut song = song();
+    let [audio, _] = song.audio;
+    let loop_clip = ArrangementSelection::AudioClip {
+        track_id: audio,
+        clip_id: song.loop_clip,
+    };
+    assert_in_place(&[
+        (
+            "audio move",
+            song.drag(loop_clip, |step| ArrangementMsg::MoveSelectedClips {
+                anchor: loop_clip.clip_id(),
+                new_position_beats: step as f64,
+                target_track: audio,
+            }),
+        ),
+        (
+            "audio trim",
+            song.drag(loop_clip, |step| ArrangementMsg::ResizeSelectedClips {
+                anchor: loop_clip,
+                new_duration_beats: 8.0 - step as f64 * 0.5,
+            }),
+        ),
+    ]);
+}
