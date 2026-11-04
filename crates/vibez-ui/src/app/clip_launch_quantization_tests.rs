@@ -235,3 +235,22 @@ async fn a_clip_launch_quantization_survives_duplicate_save_and_reopen() {
         );
     }
 }
+
+#[test]
+fn stopping_a_playing_clip_waits_for_its_own_quantization() {
+    let breaks = TrackId::new();
+    let (mut app, mut sent) = clip_app(&[breaks]);
+    let clip = app.state.perform.clips.at(breaks, 0).unwrap().clone();
+    let _ = app.update(set_clip(clip.id, Some(MusicalBoundary::Eighth)));
+    for stop in [ClipMsg::Toggle(clip.id), ClipMsg::StopTrack(breaks)] {
+        let editor = &mut app.state.perform.clip_editor;
+        editor.running = true;
+        editor.queued.clear();
+        editor.playing.insert(breaks, clip.clone());
+        let _ = app.update(Message::Perform(PerformMsg::Clips(stop)));
+        assert_eq!(
+            launches(&mut sent),
+            vec![(MusicalBoundary::Eighth, vec![breaks])]
+        );
+    }
+}
