@@ -964,6 +964,8 @@ fn is_black_key(pitch: u8) -> bool {
 mod draw;
 mod loop_drag;
 #[cfg(test)]
+mod note_gesture_tests;
+#[cfg(test)]
 mod tests;
 mod velocity_lane;
 
