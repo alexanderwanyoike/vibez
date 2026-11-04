@@ -43,13 +43,14 @@ impl AudioEngine {
         });
     }
 
-    /// Notes sounding from the old shape would never get their note-offs.
+    /// Notes the new shape no longer covers would never get their note-offs.
     fn reshape_note_clip(
         &mut self,
         track_id: vibez_core::id::TrackId,
         clip_id: vibez_core::id::ClipId,
         reshape: impl FnOnce(&mut crate::playback_source::EngineNoteClip),
     ) {
+        let playhead_beat = self.arrange_playhead_beat();
         if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
             if let Some(clip) = track
                 .playback_source
@@ -59,7 +60,7 @@ impl AudioEngine {
             {
                 reshape(clip);
             }
-            track.flush_notes();
+            track.release_notes_left_by(clip_id, playhead_beat);
         }
         self.recalculate_audio_length();
     }
