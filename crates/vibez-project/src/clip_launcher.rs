@@ -62,3 +62,29 @@ pub struct LauncherTrackInfo {
 fn is_play(mode: &ClipLaunchMode) -> bool {
     *mode == ClipLaunchMode::Play
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn clip_launch_overrides_save_under_their_own_names_and_only_when_set() {
+        let set = ClipLaunchOverrides {
+            quantization: Some(MusicalBoundary::Eighth),
+            mode: Some(ClipLaunchMode::Legato),
+        };
+        let json = serde_json::to_value(set).unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({ "launch_quantization": "eighth", "launch_mode": "legato" })
+        );
+        assert_eq!(
+            serde_json::from_value::<ClipLaunchOverrides>(json).unwrap(),
+            set
+        );
+        assert_eq!(
+            serde_json::to_value(ClipLaunchOverrides::default()).unwrap(),
+            serde_json::json!({})
+        );
+    }
+}
