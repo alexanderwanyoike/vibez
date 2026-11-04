@@ -662,39 +662,11 @@ impl PianoRollState {
                 action.drag_resize_active = true;
             }
             PianoRollMsg::HalveNoteClip(track_id, clip_id) => {
-                let mut marker_sync = None;
-                if let Some(track) = find_track_mut(tracks, track_id) {
-                    if let Some(clip) = track.note_clips.iter_mut().find(|c| c.id == clip_id) {
-                        let new_dur = (clip.duration_beats / 2.0).max(0.25);
-                        clip.resize(new_dur);
-                        engine.send(EngineCommand::SetNoteClipDuration {
-                            track_id,
-                            clip_id,
-                            duration_beats: new_dur,
-                        });
-                        marker_sync = Some((
-                            clip.start_marker_beats,
-                            clip.loop_enabled,
-                            clip.loop_start_beats,
-                            clip.loop_end_beats,
-                        ));
-                    }
-                }
-                if let Some((start_marker_beats, enabled, loop_start_beats, loop_end_beats)) =
-                    marker_sync
+                if let Some(clip) = find_track_mut(tracks, track_id)
+                    .and_then(|track| track.note_clips.iter_mut().find(|c| c.id == clip_id))
                 {
-                    engine.send(EngineCommand::SetNoteClipStartMarker {
-                        track_id,
-                        clip_id,
-                        start_marker_beats,
-                    });
-                    engine.send(EngineCommand::SetNoteClipLoop {
-                        track_id,
-                        clip_id,
-                        enabled,
-                        loop_start_beats,
-                        loop_end_beats,
-                    });
+                    clip.resize((clip.duration_beats / 2.0).max(0.25));
+                    engine.send(clip.bounds_command(track_id));
                 }
                 action.status = Some("Halved clip duration".to_string());
             }
