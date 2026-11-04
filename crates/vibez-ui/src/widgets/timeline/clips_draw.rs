@@ -136,9 +136,9 @@ impl TrackClipCanvas {
             }
             for (x, line) in grid.lines {
                 let strength = match line {
-                    GridLine::Label => style.lines[0],
-                    GridLine::Bar => style.lines[1],
-                    GridLine::Fine => style.lines[2],
+                    GridLine::Label => style.lines.label,
+                    GridLine::Bar => style.lines.bar,
+                    GridLine::Fine => style.lines.fine,
                 };
                 let under = if grid
                     .bands

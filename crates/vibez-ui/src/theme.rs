@@ -195,24 +195,41 @@ pub struct LaneStyle {
     pub recess: f32,
     /// How far every other bar band is mixed toward the text colour.
     pub band: f32,
-    /// How far grid lines at the ruler's label step, at bars and at finer
-    /// steps are mixed toward the text colour. Kept faint because clip
-    /// bodies are see-through and the grid must read as texture behind
-    /// them.
-    pub lines: [f32; 3],
+    /// How far grid lines are mixed toward the text colour. Kept faint
+    /// because clip bodies are see-through and the grid must read as
+    /// texture behind them.
+    pub lines: GridLineStrengths,
+}
+
+/// How strongly each rank of lane grid line is mixed toward the text colour.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct GridLineStrengths {
+    /// Lines on the ruler's label step.
+    pub label: f32,
+    pub bar: f32,
+    /// Lines on steps finer than a bar.
+    pub fine: f32,
 }
 
 impl LaneStyle {
     pub const DARK: Self = Self {
         recess: 0.0,
         band: 0.025,
-        lines: [0.085, 0.05, 0.028],
+        lines: GridLineStrengths {
+            label: 0.085,
+            bar: 0.05,
+            fine: 0.028,
+        },
     };
 
     pub const LIGHT: Self = Self {
         recess: 0.15,
         band: 0.05,
-        lines: [0.13, 0.075, 0.045],
+        lines: GridLineStrengths {
+            label: 0.13,
+            bar: 0.075,
+            fine: 0.045,
+        },
     };
 }
 
