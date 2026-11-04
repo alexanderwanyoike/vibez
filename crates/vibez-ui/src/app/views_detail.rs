@@ -198,6 +198,23 @@ impl App {
             .map(|clip| clip.duration as f64 / self.state.transport.samples_per_beat())
     }
 
+    /// The Snap list for the clip editor grid, shown in each clip editor.
+    pub(super) fn clip_grid_snap_list(&self) -> Element<'_, Message> {
+        let grid = self.state.view.clip_grid;
+        let pixels_per_beat = self.clip_editor_pixels_per_beat();
+        let snap_picker = pick_list(
+            grid.choices(pixels_per_beat),
+            Some(grid.choice(pixels_per_beat)),
+            |choice| Message::View(ViewMsg::ChooseClipGrid(choice)),
+        )
+        .width(Length::Fixed(90.0));
+        let snap_label = text("Snap:").size(10).color(th::text_dim());
+        row![snap_label, snap_picker]
+            .spacing(4)
+            .align_y(iced::Alignment::Center)
+            .into()
+    }
+
     fn midi_clip_editor_visible(&self) -> bool {
         self.visible_piano_roll_clip().is_some()
     }
@@ -637,18 +654,14 @@ impl App {
 
         let mode_row = row![select_btn, draw_btn].spacing(1);
 
-        let grid = self.state.view.clip_grid;
-        let pixels_per_beat = self.clip_editor_pixels_per_beat();
-        let snap_picker = pick_list(
-            grid.choices(pixels_per_beat),
-            Some(grid.choice(pixels_per_beat)),
-            |choice| Message::View(ViewMsg::ChooseClipGrid(choice)),
-        )
-        .width(Length::Fixed(90.0));
-        let snap_label = text("Snap:").size(10).color(th::text_dim());
-        let header_row = row![label, mode_row, horizontal_space(), snap_label, snap_picker]
-            .spacing(4)
-            .align_y(iced::Alignment::Center);
+        let header_row = row![
+            label,
+            mode_row,
+            horizontal_space(),
+            self.clip_grid_snap_list()
+        ]
+        .spacing(4)
+        .align_y(iced::Alignment::Center);
 
         content_col = content_col
             .push(header_row)
