@@ -280,13 +280,15 @@ fn apply_capture_to_arrangement(
     captured: MaterializedCapture,
     engine: &mut impl crate::domains::EngineHandle,
 ) -> usize {
+    let start_beat = captured.start_beat();
+    let end_beat = captured.end_beat();
     let MaterializedCapture {
         arrange_start_samples,
         arrange_end_samples,
         mut by_track,
         mut controlled_track_ids,
         pre_capture_mutes,
-        samples_per_beat,
+        samples_per_beat: _,
     } = captured;
     let mut clip_count = 0;
     let timeline = Arc::make_mut(arrange);
@@ -295,8 +297,6 @@ fn apply_capture_to_arrangement(
             controlled_track_ids.push(track_id);
         }
     }
-    let start_beat = arrange_start_samples as f64 / samples_per_beat;
-    let end_beat = arrange_end_samples as f64 / samples_per_beat;
 
     engine.send(EngineCommand::BeginContentRebuild);
     for track_id in controlled_track_ids {

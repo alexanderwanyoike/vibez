@@ -148,6 +148,16 @@ pub struct MaterializedCapture {
 }
 
 impl MaterializedCapture {
+    /// Where the take begins, on the same ticks as its MIDI clips.
+    pub fn start_beat(&self) -> f64 {
+        on_tick(self.arrange_start_samples as f64 / self.samples_per_beat)
+    }
+
+    /// Where the take ends, on the same ticks as its MIDI clips.
+    pub fn end_beat(&self) -> f64 {
+        on_tick(self.arrange_end_samples as f64 / self.samples_per_beat)
+    }
+
     pub fn is_empty(&self) -> bool {
         self.by_track.values().all(|content| {
             content.clips.is_empty()
@@ -270,7 +280,7 @@ impl CompletedCapture {
                 continue;
             }
             let mut lane = AutomationLane::new(AutomationTarget::TrackMute);
-            let start_beat = result.arrange_start_samples as f64 / samples_per_beat;
+            let start_beat = result.start_beat();
             lane.insert_point(AutomationPoint {
                 beat: start_beat,
                 value: if *pre_capture_muted { 1.0 } else { 0.0 },
@@ -294,7 +304,7 @@ impl CompletedCapture {
                 });
             }
             lane.insert_point(AutomationPoint {
-                beat: result.arrange_end_samples as f64 / samples_per_beat,
+                beat: result.end_beat(),
                 value: if *pre_capture_muted { 1.0 } else { 0.0 },
                 curve: 0.0,
             });
