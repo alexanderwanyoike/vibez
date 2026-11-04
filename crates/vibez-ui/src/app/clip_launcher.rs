@@ -336,6 +336,38 @@ mod live_edit_tests {
     }
 
     #[test]
+    fn a_live_edit_keeps_a_queued_clips_own_launch_mode() {
+        use vibez_core::perform::ClipLaunchMode;
+        let track = TrackId::new();
+        let mut clip = crate::domains::perform::clip_record::empty_midi_clip(
+            ClipId::new(),
+            track,
+            0,
+            "Take".into(),
+            4.0,
+        );
+        clip.launch.mode = Some(ClipLaunchMode::AtEnd);
+        let mut state = crate::domains::perform::PerformState::default();
+        state.layout = PerformLayout::Clips;
+        let clips = Arc::make_mut(&mut state.clips);
+        clips.clips.push(clip.clone());
+        clips.set_launch_mode(track, ClipLaunchMode::Legato);
+        state.clip_editor.running = true;
+        state.clip_editor.queued.insert(track, Some(clip.id));
+        let before = Arc::clone(&state.clips);
+        Arc::make_mut(&mut Arc::make_mut(&mut state.clips).clips[0].timeline)
+            .ensure(track)
+            .note_clips[0]
+            .name = "Edited".into();
+        let mut engine = RecordingEngine::default();
+        refresh_edited_clips(&before, &mut state, None, 100.0, &mut engine);
+        assert!(matches!(
+            &engine.0[..],
+            [EngineCommand::EditClip { queued, .. }] if queued.launch_mode == ClipLaunchMode::AtEnd
+        ));
+    }
+
+    #[test]
     fn deleting_the_part_in_the_shared_editor_stops_its_resident_clip() {
         let track = TrackId::new();
         let clip = crate::domains::perform::clip_record::empty_midi_clip(
