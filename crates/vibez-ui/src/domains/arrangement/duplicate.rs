@@ -17,9 +17,15 @@ impl TimelineEditorState {
                 ..Default::default()
             };
         }
+        // A box over several lanes records only the lane it started on, but
+        // it selected every clip it touched, so those clips name its lanes.
         let entries = self.collect_selected_clips(project_tracks, spb, |lane| {
             self.time_selection_track
                 .is_none_or(|target| lane == target)
+                || self
+                    .selected_clips
+                    .iter()
+                    .any(|selection| selection.track_id() == lane)
         });
         let ranged =
             self.time_selection_active && self.selection_end_beats > self.selection_start_beats;
