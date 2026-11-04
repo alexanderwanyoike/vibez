@@ -190,7 +190,7 @@ fn independently_constructed_ruler_and_lane_align_from_the_same_viewport() {
         selection_end_beats: 0.0,
     };
 
-    assert_eq!(ruler.beat_to_x(13.25, 800.0), lane.beat_to_x(13.25));
+    assert_eq!(ruler.geometry().beat_to_x(13.25), lane.beat_to_x(13.25));
 }
 
 #[test]

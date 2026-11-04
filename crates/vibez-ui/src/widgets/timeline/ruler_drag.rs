@@ -12,10 +12,27 @@ pub(super) enum BraceGrab {
     New,
 }
 
+/// Pixels either side of a brace end that still grab it.
+const END_GRAB_PX: f32 = 6.0;
+
 /// What a press at `x` grabs of a brace drawn from `start_x` to `end_x`.
 pub(super) fn brace_grab(x: f32, start_x: f32, end_x: f32) -> BraceGrab {
-    let _ = (x, start_x, end_x);
-    BraceGrab::New
+    if end_x <= start_x {
+        return BraceGrab::New;
+    }
+    let to_start = (x - start_x).abs();
+    let to_end = (x - end_x).abs();
+    if to_start.min(to_end) < END_GRAB_PX {
+        if to_start <= to_end {
+            BraceGrab::Start
+        } else {
+            BraceGrab::End
+        }
+    } else if x > start_x && x < end_x {
+        BraceGrab::Whole
+    } else {
+        BraceGrab::New
+    }
 }
 
 /// A loop strip drag from press to release.
@@ -32,8 +49,23 @@ impl BraceDrag {
     /// `pixels_per_beat`; `None` while a new loop is still too short to
     /// draw.
     pub fn loop_at(self, beat: f64, grid: GridConfig, pixels_per_beat: f32) -> Option<(f64, f64)> {
-        let _ = (beat, grid, pixels_per_beat);
-        None
+        let step = grid.effective_grid(pixels_per_beat).beat_size();
+        let snap = |beat: f64| grid.snap_beat(beat, pixels_per_beat);
+        let (start, end) = self.original;
+        match self.grab {
+            BraceGrab::Start => Some((snap(beat).min(end - step).max(0.0), end)),
+            BraceGrab::End => Some((start, snap(beat).max(start + step))),
+            BraceGrab::Whole => {
+                let shift = snap(beat - self.pressed_beat).max(-start);
+                Some((start + shift, end + shift))
+            }
+            BraceGrab::New => {
+                let anchor = snap(self.pressed_beat);
+                let current = snap(beat);
+                ((current - anchor).abs() >= step / 2.0)
+                    .then(|| (anchor.min(current).max(0.0), anchor.max(current)))
+            }
+        }
     }
 }
 

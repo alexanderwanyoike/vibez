@@ -505,6 +505,16 @@ pub fn ruler_tick() -> Color {
     blend(ruler_bg(), text(), 0.22)
 }
 
+/// The strip above the ruler numbers that holds the loop brace.
+pub fn ruler_loop_strip() -> Color {
+    blend(ruler_bg(), Color::BLACK, 0.08)
+}
+
+/// The loop brace while the loop is off.
+pub fn ruler_brace_off() -> Color {
+    blend(ruler_bg(), text(), 0.25)
+}
+
 /// Mix two theme colors without escaping the active palette. Perform uses
 /// this for instrument-like depth that still follows light, dark, and custom
 /// `.vzt` themes.

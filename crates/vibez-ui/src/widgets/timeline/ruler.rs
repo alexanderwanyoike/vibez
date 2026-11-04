@@ -1,15 +1,21 @@
-//! Beat ruler: bar numbers, loop-region drag, seek clicks.
+//! The beat ruler's pointer gestures: loop brace drags, seek clicks and
+//! wheel navigation.
 
 use iced::mouse;
 use iced::widget::canvas;
 use iced::{Rectangle, Renderer, Theme};
 
+use super::ruler_drag::{brace_grab, BraceDrag, BraceGrab};
 use crate::domains::arrangement::ArrangementMsg;
 use crate::domains::transport::TransportMsg;
 use crate::domains::view::ViewMsg;
 use crate::message::Message;
-use crate::state::{ContextMenuTarget, GridConfig};
+use crate::state::{ContextMenuTarget, GridConfig, UndoGestureId};
 use crate::timeline_geometry::TimelineGeometry;
+
+/// Height of the Arrange ruler: the loop strip over the number strip.
+pub const ARRANGE_RULER_HEIGHT: f32 = 36.0;
+pub(super) const LOOP_STRIP_HEIGHT: f32 = 13.0;
 
 /// Canvas widget that draws a beat-based ruler with bar.beat labels.
 pub struct RulerWidget {
@@ -35,8 +41,17 @@ pub struct RulerWidget {
 /// Active drag action on the ruler.
 #[derive(Debug, Clone)]
 enum RulerDragAction {
-    PendingSeek { beat: f64, start_x: f32 },
-    RegionSelect { anchor_beat: f64 },
+    PendingSeek {
+        beat: f64,
+        start_x: f32,
+    },
+    RegionSelect {
+        anchor_beat: f64,
+    },
+    Brace {
+        drag: BraceDrag,
+        gesture: UndoGestureId,
+    },
 }
 
 /// Interaction state for the ruler widget.
@@ -55,12 +70,38 @@ impl RulerWidget {
         self.geometry().pixels_per_beat()
     }
 
-    pub(crate) fn beat_to_x(&self, beat: f64, _width: f32) -> f32 {
-        self.geometry().beat_to_x(beat)
-    }
-
     fn snapped_beat(&self, beat: f64) -> f64 {
         self.grid.snap_beat(beat, self.pixels_per_beat())
+    }
+
+    /// Where the number strip starts, below the loop strip if there is one.
+    pub(super) fn numbers_top(&self) -> f32 {
+        if self.loop_brace {
+            LOOP_STRIP_HEIGHT
+        } else {
+            0.0
+        }
+    }
+
+    fn brace_grab_at(&self, x: f32) -> BraceGrab {
+        let geometry = self.geometry();
+        brace_grab(
+            x,
+            geometry.beat_to_x(self.loop_start_beats),
+            geometry.beat_to_x(self.loop_end_beats),
+        )
+    }
+
+    /// The loop edit for the pointer at `beat`, if it changes the loop.
+    fn brace_edit(&self, drag: BraceDrag, gesture: UndoGestureId, beat: f64) -> Option<Message> {
+        let (start_beats, end_beats) = drag.loop_at(beat, self.grid, self.pixels_per_beat())?;
+        ((start_beats, end_beats) != (self.loop_start_beats, self.loop_end_beats)).then(|| {
+            Message::Transport(TransportMsg::SetArrangementLoopRegion {
+                start_beats,
+                end_beats,
+            })
+            .in_undo_gesture(gesture)
+        })
     }
 }
 
@@ -90,6 +131,17 @@ impl canvas::Program<Message> for RulerWidget {
             canvas::Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left)) => {
                 if let Some(pos) = cursor.position_in(bounds) {
                     let beat = self.geometry().x_to_beat(pos.x);
+                    if pos.y < self.numbers_top() {
+                        state.drag = Some(RulerDragAction::Brace {
+                            drag: BraceDrag {
+                                grab: self.brace_grab_at(pos.x),
+                                original: (self.loop_start_beats, self.loop_end_beats),
+                                pressed_beat: beat,
+                            },
+                            gesture: UndoGestureId::new(),
+                        });
+                        return (canvas::event::Status::Captured, None);
+                    }
                     state.drag = Some(RulerDragAction::PendingSeek {
                         beat,
                         start_x: pos.x,
@@ -103,6 +155,12 @@ impl canvas::Program<Message> for RulerWidget {
                     if let Some(pos) = cursor.position() {
                         let local_x = pos.x - bounds.x;
                         let beat = self.geometry().x_to_beat(local_x);
+                        if let RulerDragAction::Brace { drag, gesture } = drag {
+                            return (
+                                canvas::event::Status::Captured,
+                                self.brace_edit(*drag, *gesture, beat),
+                            );
+                        }
 
                         // Auto-scroll when dragging near ruler edges
                         if matches!(drag, RulerDragAction::RegionSelect { .. }) {
@@ -174,6 +232,7 @@ impl canvas::Program<Message> for RulerWidget {
                                     );
                                 }
                             }
+                            RulerDragAction::Brace { .. } => {}
                         }
                     }
                 }
@@ -190,6 +249,7 @@ impl canvas::Program<Message> for RulerWidget {
                             // Completed region select
                             Some(Message::set_time_selection_active(true))
                         }
+                        RulerDragAction::Brace { .. } => None,
                     };
                     state.drag = None;
                     return (canvas::event::Status::Captured, msg);
@@ -284,12 +344,25 @@ impl canvas::Program<Message> for RulerWidget {
             return match drag {
                 RulerDragAction::RegionSelect { .. } => mouse::Interaction::Crosshair,
                 RulerDragAction::PendingSeek { .. } => mouse::Interaction::Pointer,
+                RulerDragAction::Brace { drag, .. } => brace_interaction(drag.grab, true),
             };
         }
-        if cursor.is_over(bounds) {
-            return mouse::Interaction::Pointer;
+        match cursor.position_in(bounds) {
+            Some(pos) if pos.y < self.numbers_top() => {
+                brace_interaction(self.brace_grab_at(pos.x), false)
+            }
+            Some(_) => mouse::Interaction::Pointer,
+            None => mouse::Interaction::default(),
         }
-        mouse::Interaction::default()
+    }
+}
+
+fn brace_interaction(grab: BraceGrab, dragging: bool) -> mouse::Interaction {
+    match grab {
+        BraceGrab::Start | BraceGrab::End => mouse::Interaction::ResizingHorizontally,
+        BraceGrab::Whole if dragging => mouse::Interaction::Grabbing,
+        BraceGrab::Whole => mouse::Interaction::Grab,
+        BraceGrab::New => mouse::Interaction::Crosshair,
     }
 }
 
