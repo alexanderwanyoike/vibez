@@ -2,11 +2,11 @@
 
 use iced::mouse;
 use iced::widget::canvas;
-use iced::{Color, Rectangle, Renderer};
+use iced::{Rectangle, Renderer};
 
 use crate::theme;
 
-use super::clip_title::draw_clip_title;
+use super::clip_frame::{clip_box, draw_clip_front};
 use super::fade_drag::{fade_curve_handle, fade_handle_xs};
 use super::note_marks::note_marks;
 use super::*;
@@ -25,33 +25,6 @@ fn visible_pixel_columns(
         start..end
     } else {
         0..0
-    }
-}
-
-/// Lane left showing after each clip, so back-to-back clips of one track
-/// still read as separate clips when zoomed out to the whole song.
-const CLIP_GAP: f32 = 1.0;
-
-/// The rectangle a clip's body, contents and border are painted in.
-fn clip_box(clip_x: f32, clip_y: f32, clip_w: f32, clip_h: f32) -> Rectangle {
-    Rectangle {
-        x: clip_x,
-        y: clip_y,
-        width: (clip_w - CLIP_GAP).max(1.0),
-        height: clip_h,
-    }
-}
-
-/// The path rectangle for a border of `stroke_width` around `body`. Strokes
-/// are centred on the path, so it is inset by half the stroke to keep the
-/// border out of the gap.
-fn clip_outline(body: Rectangle, stroke_width: f32) -> Rectangle {
-    let inset = stroke_width / 2.0;
-    Rectangle {
-        x: body.x + inset,
-        y: body.y + inset,
-        width: (body.width - stroke_width).max(0.0),
-        height: (body.height - stroke_width).max(0.0),
     }
 }
 
@@ -311,36 +284,12 @@ impl TrackClipCanvas {
                     clip_border_color
                 };
                 let border_width = if is_selected { 2.0 } else { 1.0 };
-
-                // Clip border
-                let outline = clip_outline(body, border_width);
-                let border = canvas::Path::rectangle(outline.position(), outline.size());
-                frame.stroke(
-                    &border,
-                    canvas::Stroke::default()
-                        .with_color(border_color)
-                        .with_width(border_width),
-                );
-
-                // Title bar separator
-                let title_sep_y = clip_y + CLIP_TITLE_HEIGHT;
-                let title_line = canvas::Path::line(
-                    iced::Point::new(body.x, title_sep_y),
-                    iced::Point::new(body.x + body.width, title_sep_y),
-                );
-                frame.stroke(
-                    &title_line,
-                    canvas::Stroke::default()
-                        .with_color(theme::with_alpha(Color::BLACK, 0.3))
-                        .with_width(1.0),
-                );
-
-                draw_clip_title(
+                draw_clip_front(
                     &mut frame,
+                    body,
+                    border_color,
+                    border_width,
                     &clip.name,
-                    clip_x,
-                    clip_y,
-                    body.width,
                     clip.loop_enabled,
                     w,
                 );
@@ -513,36 +462,12 @@ impl TrackClipCanvas {
                     theme::darken(self.track_color, 0.7)
                 };
                 let border_width = if is_selected { 2.0 } else { 1.0 };
-
-                // Clip border
-                let outline = clip_outline(body, border_width);
-                let border = canvas::Path::rectangle(outline.position(), outline.size());
-                frame.stroke(
-                    &border,
-                    canvas::Stroke::default()
-                        .with_color(border_color)
-                        .with_width(border_width),
-                );
-
-                // Title bar separator
-                let title_sep_y = clip_y + CLIP_TITLE_HEIGHT;
-                let title_line = canvas::Path::line(
-                    iced::Point::new(body.x, title_sep_y),
-                    iced::Point::new(body.x + body.width, title_sep_y),
-                );
-                frame.stroke(
-                    &title_line,
-                    canvas::Stroke::default()
-                        .with_color(theme::with_alpha(Color::BLACK, 0.3))
-                        .with_width(1.0),
-                );
-
-                draw_clip_title(
+                draw_clip_front(
                     &mut frame,
+                    body,
+                    border_color,
+                    border_width,
                     &note_clip.name,
-                    clip_x,
-                    clip_y,
-                    body.width,
                     note_clip.loop_enabled,
                     w,
                 );
@@ -730,7 +655,7 @@ impl TrackClipCanvas {
 
 #[cfg(test)]
 mod tests {
-    use super::{clip_box, clip_outline, visible_pixel_columns, waveform_peak_for_pixel};
+    use super::{visible_pixel_columns, waveform_peak_for_pixel};
 
     #[test]
     fn a_live_waveform_pixel_keeps_its_source_range_as_the_take_grows() {
@@ -780,30 +705,5 @@ mod tests {
         );
         assert_eq!(visible_pixel_columns(200.0, 400.0, 1_000.0), 0..400);
         assert_eq!(visible_pixel_columns(1_200.0, 400.0, 1_000.0), 0..0);
-    }
-
-    #[test]
-    fn back_to_back_clips_leave_a_gap_between_them_at_any_zoom() {
-        for clip_w in [400.0, 12.0, 3.0] {
-            let first = clip_box(100.0, 4.0, clip_w, 70.0);
-            let second = clip_box(100.0 + clip_w, 4.0, clip_w, 70.0);
-            assert!(
-                first.x + first.width + 1.0 <= second.x,
-                "clips {clip_w} px wide"
-            );
-            assert!(first.width >= 1.0, "clips {clip_w} px wide");
-        }
-    }
-
-    #[test]
-    fn a_clip_border_never_paints_outside_its_box() {
-        let body = clip_box(100.0, 4.0, 50.0, 70.0);
-        for stroke in [1.0, 2.0] {
-            let outline = clip_outline(body, stroke);
-            assert!(outline.x - stroke / 2.0 >= body.x);
-            assert!(outline.y - stroke / 2.0 >= body.y);
-            assert!(outline.x + outline.width + stroke / 2.0 <= body.x + body.width);
-            assert!(outline.y + outline.height + stroke / 2.0 <= body.y + body.height);
-        }
     }
 }
