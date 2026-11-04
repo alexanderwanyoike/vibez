@@ -883,4 +883,16 @@ mod tests {
         assert_eq!(region(600.0).map(|r| (r.x, r.width)), Some((600.0, 200.0)));
         assert_eq!(region(900.0), None);
     }
+
+    #[test]
+    fn clip_title_text_starts_at_the_left_of_its_region_at_any_scroll() {
+        for clip_x in [-200.0, 0.0, 100.0, 600.0] {
+            let layout = clip_title_layout(clip_x, 4.0, 400.0, 800.0).unwrap();
+            assert_eq!(
+                layout.text,
+                iced::Point::new(4.0, 3.0),
+                "clip at x {clip_x}"
+            );
+        }
+    }
 }
