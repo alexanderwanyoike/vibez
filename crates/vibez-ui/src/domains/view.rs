@@ -6,7 +6,7 @@
 use vibez_core::id::{ClipId, TrackId};
 
 use crate::state::{
-    ContextMenuTarget, DetailPanelTab, SnapGrid, TimelineEditorState, ViewState, Workspace,
+    ContextMenuTarget, DetailPanelTab, GridChoice, TimelineEditorState, ViewState, Workspace,
 };
 use crate::timeline_geometry::TimelineViewport;
 
@@ -34,7 +34,7 @@ pub enum ViewMsg {
     ScrollArrangement(f64),
     /// Jump straight to a zoom and scroll, as a ruler drag does.
     SetViewport(TimelineViewport),
-    SetSnapGrid(SnapGrid),
+    ChooseGrid(GridChoice),
     NarrowGrid,
     WidenGrid,
     ToggleTripletGrid,
@@ -200,7 +200,7 @@ impl ViewState {
                     self.viewport.clamp(ctx.total_beats, ctx.lane_width);
                 }
             }
-            ViewMsg::SetSnapGrid(grid) => self.grid.select_fixed(grid),
+            ViewMsg::ChooseGrid(choice) => self.grid.choose(choice),
             ViewMsg::NarrowGrid => self.grid.narrow(),
             ViewMsg::WidenGrid => self.grid.widen(),
             ViewMsg::ToggleTripletGrid => self.grid.toggle_triplet(),
@@ -324,6 +324,7 @@ impl ViewState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::state::SnapGrid;
     use crate::timeline_geometry::TimelineGeometry;
 
     #[test]
@@ -834,7 +835,7 @@ mod tests {
     fn grid_commands_update_the_shared_editor_grid() {
         let mut v = ViewState::default();
         v.update(
-            ViewMsg::SetSnapGrid(SnapGrid::EIGHTH),
+            ViewMsg::ChooseGrid(GridChoice::Fixed(SnapGrid::EIGHTH)),
             &TimelineEditorState::default(),
             ViewCtx::default(),
         );

@@ -592,15 +592,12 @@ impl App {
 
         let mode_row = row![select_btn, draw_btn].spacing(1);
 
+        let grid = self.state.view.grid_config();
+        let pixels_per_beat = self.active_editor_pixels_per_beat();
         let snap_picker = pick_list(
-            crate::state::SnapGrid::all(),
-            Some(
-                self.state
-                    .view
-                    .grid_config()
-                    .effective_grid(self.active_editor_pixels_per_beat()),
-            ),
-            |grid| Message::View(ViewMsg::SetSnapGrid(grid)),
+            grid.choices(pixels_per_beat),
+            Some(grid.choice(pixels_per_beat)),
+            |choice| Message::View(ViewMsg::ChooseGrid(choice)),
         )
         .width(Length::Fixed(90.0));
         let snap_label = text("Snap:").size(10).color(th::text_dim());

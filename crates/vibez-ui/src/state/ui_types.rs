@@ -1108,21 +1108,44 @@ impl GridConfig {
         self.adaptive = !self.adaptive;
     }
 
-    pub fn select_fixed(&mut self, grid: SnapGrid) {
-        self.selected = grid;
-        self.adaptive = false;
-        self.adaptive_bias = 0;
+    pub fn choose(&mut self, choice: GridChoice) {
+        match choice {
+            GridChoice::Auto(_) => self.adaptive = true,
+            GridChoice::Fixed(grid) => {
+                self.selected = grid;
+                self.adaptive = false;
+                self.adaptive_bias = 0;
+            }
+        }
+    }
+
+    /// The snap list entry for this grid at this zoom.
+    pub fn choice(self, pixels_per_beat: f32) -> GridChoice {
+        if self.adaptive {
+            self.auto_choice(pixels_per_beat)
+        } else {
+            GridChoice::Fixed(self.selected)
+        }
+    }
+
+    /// Every snap list entry, Auto first.
+    pub fn choices(self, pixels_per_beat: f32) -> Vec<GridChoice> {
+        std::iter::once(self.auto_choice(pixels_per_beat))
+            .chain(SnapGrid::all().iter().copied().map(GridChoice::Fixed))
+            .collect()
+    }
+
+    fn auto_choice(self, pixels_per_beat: f32) -> GridChoice {
+        GridChoice::Auto(SnapGrid::adaptive(
+            pixels_per_beat,
+            self.adaptive_bias,
+            self.selected.is_triplet(),
+        ))
     }
 
     pub fn effective_grid(self, pixels_per_beat: f32) -> SnapGrid {
-        if self.adaptive {
-            SnapGrid::adaptive(
-                pixels_per_beat,
-                self.adaptive_bias,
-                self.selected.is_triplet(),
-            )
-        } else {
-            self.selected
+        match self.choice(pixels_per_beat) {
+            GridChoice::Auto(grid) | GridChoice::Fixed(grid) => grid,
         }
     }
 
@@ -1149,6 +1172,24 @@ impl GridConfig {
             self.effective_grid(pixels_per_beat).snap_beat_floor(beat)
         } else {
             beat
+        }
+    }
+}
+
+/// An entry in an editor's snap list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GridChoice {
+    /// Follows the editor's zoom; carries the step it resolves to now so
+    /// the list reads what a drag will snap to.
+    Auto(SnapGrid),
+    Fixed(SnapGrid),
+}
+
+impl std::fmt::Display for GridChoice {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Auto(grid) => write!(f, "Auto {}", grid.label()),
+            Self::Fixed(grid) => f.write_str(grid.label()),
         }
     }
 }

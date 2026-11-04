@@ -334,15 +334,12 @@ impl App {
             ..Default::default()
         });
 
+        let grid = self.state.view.grid_config();
+        let pixels_per_beat = self.active_editor_pixels_per_beat();
         let grid_picker = pick_list(
-            crate::state::SnapGrid::all(),
-            Some(
-                self.state
-                    .view
-                    .grid_config()
-                    .effective_grid(self.active_editor_pixels_per_beat()),
-            ),
-            |grid| Message::View(ViewMsg::SetSnapGrid(grid)),
+            grid.choices(pixels_per_beat),
+            Some(grid.choice(pixels_per_beat)),
+            |choice| Message::View(ViewMsg::ChooseGrid(choice)),
         )
         .width(Length::Fixed(86.0))
         .padding([3, 8])
