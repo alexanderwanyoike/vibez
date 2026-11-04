@@ -234,3 +234,52 @@ fn note_drags_that_stay_in_their_grid_cell_leave_no_undo_step() {
     assert_eq!(editor.notes(), original);
     assert!(editor.history.undo.is_empty());
 }
+
+fn durations(editor: &Editor) -> Vec<f64> {
+    editor
+        .notes()
+        .iter()
+        .map(|note| note.duration_beats)
+        .collect()
+}
+
+#[test]
+fn resizing_one_selected_note_resizes_the_whole_selection_in_one_undo_step() {
+    let original = vec![note(60, 0.0, 1.0), note(64, 2.0, 0.5), note(67, 4.0, 1.0)];
+    let mut editor = Editor::new(original.clone(), HashSet::from([0, 1]));
+    let grab = Point::new(editor.at(1.0, 60).x - 2.0, editor.at(1.0, 60).y);
+    let release = Point::new(editor.at(2.0, 60).x - 2.0, grab.y);
+
+    editor.drag(grab, &steps(grab, release));
+
+    assert_eq!(durations(&editor), vec![2.0, 1.5, 1.0]);
+    assert_eq!(editor.clip().selected_notes, HashSet::from([0, 1]));
+    assert_eq!(editor.history.undo.len(), 1);
+    editor.undo();
+    assert_eq!(editor.notes(), original);
+}
+
+#[test]
+fn shrinking_a_selection_keeps_every_note_at_least_one_grid_cell_long() {
+    let original = vec![note(60, 0.0, 1.0), note(64, 2.0, 0.5)];
+    let mut editor = Editor::new(original, HashSet::from([0, 1]));
+    let grab = Point::new(editor.at(1.0, 60).x - 2.0, editor.at(1.0, 60).y);
+    let release = Point::new(editor.at(0.5, 60).x - 2.0, grab.y);
+
+    editor.drag(grab, &steps(grab, release));
+
+    assert_eq!(durations(&editor), vec![0.5, 0.25]);
+}
+
+#[test]
+fn resizing_an_unselected_note_selects_and_resizes_only_it() {
+    let original = vec![note(60, 0.0, 1.0), note(64, 2.0, 0.5)];
+    let mut editor = Editor::new(original, HashSet::from([1]));
+    let grab = Point::new(editor.at(1.0, 60).x - 2.0, editor.at(1.0, 60).y);
+    let release = Point::new(editor.at(2.0, 60).x - 2.0, grab.y);
+
+    editor.drag(grab, &steps(grab, release));
+
+    assert_eq!(durations(&editor), vec![2.0, 0.5]);
+    assert_eq!(editor.clip().selected_notes, HashSet::from([0]));
+}
