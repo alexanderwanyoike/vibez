@@ -232,6 +232,12 @@ pub enum ArrangementMsg {
         new_position_beats: f64,
         target_track: TrackId,
     },
+    /// A drag of `anchor` (a move or either edge) was released: the Clips
+    /// it carried overwrite what they landed on. Overwriting waits for the
+    /// release so the drag can pass over other Clips without cutting them.
+    DropClips {
+        anchor: ClipId,
+    },
     DuplicateNoteClip(TrackId, ClipId),
     SplitAudioClip {
         track_id: TrackId,
@@ -347,6 +353,7 @@ impl ArrangementMsg {
                 | Self::SetAudioClipFadeCurve { .. }
                 | Self::SetAudioClipCrossfadeCurve { .. }
                 | Self::MoveSelectedClips { .. }
+                | Self::DropClips { .. }
                 | Self::ToggleClipLoop(..)
                 | Self::ToggleClipReverse(..)
                 | Self::SelectTransientMarker { .. }
@@ -442,6 +449,7 @@ impl ArrangementMsg {
                 self,
                 Self::DuplicateSelectedClip
                     | Self::MoveSelectedClips { .. }
+                    | Self::DropClips { .. }
                     | Self::ResizeSelectedClips { .. }
                     | Self::TrimSelectedClipsStart { .. }
                     | Self::SplitSelectedAtPlayhead

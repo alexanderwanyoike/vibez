@@ -146,3 +146,125 @@ fn a_paste_into_a_longer_clip_splits_it_in_the_engine_too() {
         EngineCommand::RemoveClip(track, clip) if (*track, *clip) == (track_id, long)
     )));
 }
+
+fn drop(a: &mut ArrangementFixture, anchor: ClipId) -> ArrangementAction {
+    a.update(
+        ArrangementMsg::DropClips { anchor },
+        &mut RecordingEngine::default(),
+        CTX,
+    )
+}
+
+#[test]
+fn a_clip_dragged_over_others_cuts_them_only_when_dropped() {
+    let mut a = arrangement_with_tracks(1);
+    let (track_id, dragged) = add_audio_clip(&mut a, 0, 0, 400);
+    add_audio_clip(&mut a, 0, 800, 1200);
+
+    a.update(
+        ArrangementMsg::MoveSelectedClips {
+            anchor: dragged,
+            new_position_beats: 10.0,
+            target_track: track_id,
+        },
+        &mut RecordingEngine::default(),
+        CTX,
+    );
+    assert_eq!(audio_spans(&a, 0), vec![(800, 1200), (1000, 400)]);
+    let action = drop(&mut a, dragged);
+
+    assert!(action.mark_dirty);
+    assert_eq!(
+        audio_spans(&a, 0),
+        vec![(800, 200), (1000, 400), (1400, 600)]
+    );
+}
+
+#[test]
+fn a_clip_dropped_on_another_lane_overwrites_that_lane() {
+    let mut a = arrangement_with_tracks(2);
+    let (_, dragged) = add_audio_clip(&mut a, 0, 0, 400);
+    add_audio_clip(&mut a, 1, 200, 400);
+    let destination = a.tracks[1].id;
+
+    a.update(
+        ArrangementMsg::MoveSelectedClips {
+            anchor: dragged,
+            new_position_beats: 0.0,
+            target_track: destination,
+        },
+        &mut RecordingEngine::default(),
+        CTX,
+    );
+    drop(&mut a, dragged);
+
+    assert_eq!(audio_spans(&a, 0), vec![]);
+    assert_eq!(audio_spans(&a, 1), vec![(0, 400), (400, 200)]);
+}
+
+#[test]
+fn a_selection_dropped_together_overwrites_others_but_not_itself() {
+    let mut a = arrangement_with_tracks(1);
+    let first = add_audio_clip(&mut a, 0, 0, 400);
+    let second = add_audio_clip(&mut a, 0, 300, 400);
+    add_audio_clip(&mut a, 0, 600, 400);
+    select_audio(&mut a, first);
+    select_audio(&mut a, second);
+
+    drop(&mut a, first.1);
+
+    assert_eq!(audio_spans(&a, 0), vec![(0, 400), (300, 400), (700, 300)]);
+}
+
+#[test]
+fn a_note_clip_lengthened_over_its_neighbour_trims_it_when_dropped() {
+    let mut a = arrangement_with_tracks(0);
+    a.update(
+        ArrangementMsg::AddMidiTrack,
+        &mut RecordingEngine::default(),
+        CTX,
+    );
+    let grown = add_note_clip(&mut a, 0.0, 4.0);
+    add_note_clip(&mut a, 4.0, 4.0);
+    let track_id = a.tracks[0].id;
+    let anchor = ArrangementSelection::NoteClip {
+        track_id,
+        clip_id: grown,
+    };
+
+    a.update(
+        ArrangementMsg::ResizeSelectedClips {
+            anchor,
+            new_duration_beats: 6.0,
+        },
+        &mut RecordingEngine::default(),
+        CTX,
+    );
+    drop(&mut a, grown);
+
+    assert_eq!(note_spans(&a, 0), vec![(0.0, 6.0), (6.0, 2.0)]);
+}
+
+#[test]
+fn a_clip_start_dragged_over_its_neighbour_trims_it_when_dropped() {
+    let mut a = arrangement_with_tracks(1);
+    add_audio_clip(&mut a, 0, 0, 400);
+    let (track_id, trimmed) = add_audio_clip(&mut a, 0, 400, 400);
+    a.tracks[0].clips[1].source_offset = 400;
+    a.tracks[0].clips[1].start_marker = 400;
+
+    a.update(
+        ArrangementMsg::TrimSelectedClipsStart {
+            anchor: ArrangementSelection::AudioClip {
+                track_id,
+                clip_id: trimmed,
+            },
+            new_start_beats: 2.0,
+        },
+        &mut RecordingEngine::default(),
+        CTX,
+    );
+    drop(&mut a, trimmed);
+
+    assert_eq!(audio_spans(&a, 0), vec![(0, 200), (200, 600)]);
+}

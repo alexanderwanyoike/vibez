@@ -14,7 +14,9 @@ use crate::domains::arrangement::ArrangementMsg;
 use crate::domains::transport::TransportMsg;
 use crate::domains::view::ViewMsg;
 use crate::message::Message;
-use crate::state::{ContextMenuTarget, GridConfig, ProjectTrack, TrackTimelineContent};
+use crate::state::{
+    ContextMenuTarget, GridConfig, ProjectTrack, TrackTimelineContent, UndoGestureId,
+};
 use vibez_core::id::{ClipId, TrackId};
 use vibez_core::midi::MidiNote;
 use vibez_core::perform::GrooveGrid;
@@ -879,18 +881,18 @@ fn pressing_a_selected_clip_keeps_the_selection_and_dragging_moves_it_as_a_group
         iced::mouse::Event::CursorMoved { position: target },
         target,
     );
+    let Some(Message::UndoGesture { id: gesture, edit }) = moved else {
+        panic!("expected a clip move, got {moved:?}");
+    };
     assert!(matches!(
-        moved,
-        Some(Message::UndoGesture { edit, .. }) if matches!(
-            *edit,
-            Message::Arrangement(ArrangementMsg::MoveSelectedClips {
-                anchor,
-                new_position_beats,
-                target_track,
-            }) if anchor == clip_id
-                && (new_position_beats - 1.0).abs() < 1e-9
-                && target_track == canvas.track_ids[0]
-        )
+        *edit,
+        Message::Arrangement(ArrangementMsg::MoveSelectedClips {
+            anchor,
+            new_position_beats,
+            target_track,
+        }) if anchor == clip_id
+            && (new_position_beats - 1.0).abs() < 1e-9
+            && target_track == canvas.track_ids[0]
     ));
 
     let released = left_event(
@@ -899,7 +901,58 @@ fn pressing_a_selected_clip_keeps_the_selection_and_dragging_moves_it_as_a_group
         iced::mouse::Event::ButtonReleased(iced::mouse::Button::Left),
         target,
     );
-    assert!(released.is_none(), "a drag keeps the whole selection");
+    assert!(
+        is_drop_of(released.as_ref(), clip_id, gesture),
+        "a drag keeps the whole selection and drops it: {released:?}"
+    );
+}
+
+/// `message` drops `clip_id` as the last step of undo gesture `gesture`.
+fn is_drop_of(message: Option<&Message>, clip_id: ClipId, gesture: UndoGestureId) -> bool {
+    matches!(
+        message,
+        Some(Message::UndoGesture { id, edit }) if *id == gesture && matches!(
+            **edit,
+            Message::Arrangement(ArrangementMsg::DropClips { anchor }) if anchor == clip_id
+        )
+    )
+}
+
+#[test]
+fn releasing_a_clip_edge_drag_drops_the_clip_in_the_same_undo_gesture() {
+    let (canvas, clip_id) = canvas_with_off_grid_audio_clip();
+    for (edge_beat, inset, to_beat) in [(5.1, -2.0, 7.0), (1.1, 2.0, 0.5)] {
+        let start = Point::new(canvas.beat_to_x(edge_beat) + inset, CLIP_FOOT_Y);
+        let target = Point::new(canvas.beat_to_x(to_beat), start.y);
+        let mut state = ClipInteractionState::default();
+
+        left_event(
+            &canvas,
+            &mut state,
+            iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left),
+            start,
+        );
+        let dragged = left_event(
+            &canvas,
+            &mut state,
+            iced::mouse::Event::CursorMoved { position: target },
+            target,
+        );
+        let Some(Message::UndoGesture { id: gesture, .. }) = dragged else {
+            panic!("expected an edge drag, got {dragged:?}");
+        };
+        let released = left_event(
+            &canvas,
+            &mut state,
+            iced::mouse::Event::ButtonReleased(iced::mouse::Button::Left),
+            target,
+        );
+
+        assert!(
+            is_drop_of(released.as_ref(), clip_id, gesture),
+            "edge at beat {edge_beat}: {released:?}"
+        );
+    }
 }
 
 #[test]

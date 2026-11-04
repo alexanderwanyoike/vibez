@@ -110,3 +110,48 @@ fn a_left_edge_trim_that_changes_nothing_leaves_no_undo_step() {
     assert!(!app.state.project.history.can_undo());
     assert!(!app.state.project.dirty);
 }
+
+#[test]
+fn a_move_and_the_overwrite_on_its_drop_are_one_undo_step() {
+    let (mut app, track_id, clip_id) = off_grid_clip();
+    let mut neighbour = app.state.arrange_content_mut(track_id).note_clips[0].clone();
+    neighbour.id = ClipId::new();
+    neighbour.position_beats = 6.0;
+    app.state
+        .arrange_content_mut(track_id)
+        .note_clips
+        .push(neighbour);
+    let gesture = UndoGestureId::new();
+
+    drag(
+        &mut app,
+        gesture,
+        ArrangementMsg::MoveSelectedClips {
+            anchor: clip_id,
+            new_position_beats: 5.0,
+            target_track: track_id,
+        },
+    );
+    drag(
+        &mut app,
+        gesture,
+        ArrangementMsg::DropClips { anchor: clip_id },
+    );
+    let spans = |app: &mut App| {
+        let mut spans: Vec<_> = app
+            .state
+            .arrange_content_mut(track_id)
+            .note_clips
+            .iter()
+            .map(|clip| (clip.position_beats, clip.duration_beats))
+            .collect();
+        spans.sort_by(|a, b| a.0.total_cmp(&b.0));
+        spans
+    };
+    assert_eq!(spans(&mut app), vec![(5.0, 4.0), (9.0, 1.0)]);
+
+    let _ = app.update(Message::Project(crate::domains::project::ProjectMsg::Undo));
+
+    assert_eq!(spans(&mut app), vec![(1.1, 4.0), (6.0, 4.0)]);
+    assert!(!app.state.project.history.can_undo());
+}
