@@ -453,3 +453,21 @@ fn a_looped_note_clips_start_comes_back_earlier_as_far_as_its_loop_start() {
     assert_eq!((after.position_beats, after.start_marker_beats), (4.0, 1.0));
     assert_eq!(note_onsets(&after), before);
 }
+
+#[test]
+fn a_looped_audio_clips_start_comes_back_earlier_as_far_as_its_loop_start() {
+    let mut a = arrangement_with_tracks(1);
+    let anchor = sample_clip(&mut a, 1_000, 300, 0, 600);
+    let clip = &mut a.tracks[0].clips[0];
+    clip.loop_enabled = true;
+    clip.start_marker = 100;
+    clip.loop_start = 100;
+    clip.loop_end = 300;
+    let before = a.tracks[0].clips[0].clone();
+    assert_eq!(trim_audio(&mut a, anchor, 4.5).position, 450);
+
+    let after = trim_audio(&mut a, anchor, 1.0);
+
+    assert_eq!((after.position, after.start_marker), (300, 100));
+    assert_audio_in_place(&before, &after, 0);
+}
