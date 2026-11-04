@@ -461,6 +461,25 @@ mod tests {
     }
 
     #[test]
+    fn editor_grids_default_to_zoom_adaptive_and_roundtrip() {
+        use crate::state::{GridConfig, SnapGrid};
+
+        let old: UiSettings = serde_json::from_str("{}").unwrap();
+        assert_eq!(old.arrange_grid, GridConfig::default());
+        assert_eq!(old.clip_grid, GridConfig::default());
+
+        let settings = UiSettings {
+            arrange_grid: GridConfig::new(SnapGrid::BAR, false, false, 0),
+            clip_grid: GridConfig::new(SnapGrid::SIXTEENTH.triplet(), true, true, -2),
+            ..UiSettings::default()
+        };
+        let loaded: UiSettings =
+            serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+        assert_eq!(loaded.arrange_grid, settings.arrange_grid);
+        assert_eq!(loaded.clip_grid, settings.clip_grid);
+    }
+
+    #[test]
     fn detail_panel_height_defaults_and_roundtrips() {
         let old: UiSettings = serde_json::from_str("{}").unwrap();
         assert_eq!(

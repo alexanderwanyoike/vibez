@@ -835,6 +835,24 @@ mod tests {
     }
 
     #[test]
+    fn every_grid_change_is_saved_as_a_preference() {
+        let timeline = TimelineEditorState::default();
+        let auto = GridChoice::Auto(SnapGrid::QUARTER);
+        for msg in [
+            ViewMsg::ChooseArrangeGrid(auto),
+            ViewMsg::ChooseClipGrid(auto),
+            ViewMsg::NarrowGrid,
+            ViewMsg::WidenGrid,
+            ViewMsg::ToggleTripletGrid,
+            ViewMsg::ToggleSnapToGrid,
+            ViewMsg::ToggleAdaptiveGrid,
+        ] {
+            let action = ViewState::default().update(msg.clone(), &timeline, ViewCtx::default());
+            assert!(action.persist_settings, "{msg:?} was not saved");
+        }
+    }
+
+    #[test]
     fn the_clip_editor_grid_and_the_arrange_grid_change_independently() {
         let mut v = ViewState::default();
         let timeline = TimelineEditorState::default();
