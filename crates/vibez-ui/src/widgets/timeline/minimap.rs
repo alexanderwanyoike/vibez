@@ -9,6 +9,10 @@ use crate::message::Message;
 use crate::theme;
 use crate::timeline_geometry::TimelineGeometry;
 
+/// The mockup's overview height, kept below the ruler's so the overview
+/// never outweighs it.
+pub const OVERVIEW_HEIGHT: f32 = 34.0;
+
 /// Space above and below the clip rows, so the viewport outline does not
 /// sit on top of the first and last track.
 const ROW_INSET: f32 = 3.0;

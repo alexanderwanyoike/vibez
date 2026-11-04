@@ -22,7 +22,7 @@ use crate::timeline_geometry::TimelineGeometry;
 use crate::widgets::arrange_corner::{arrange_corner, arrangement_size_labels, song_length_label};
 use crate::widgets::timeline::{
     build_row_spans, ArrangementMinimap, MinimapTrack, RulerWidget, TimelineClip, TrackClipCanvas,
-    TRACK_ROW_HEIGHT,
+    OVERVIEW_HEIGHT, TRACK_ROW_HEIGHT,
 };
 use crate::widgets::track_header::{
     view_editable_channel_name, view_track_header, TrackHeaderFlags, TrackHeaderRecordingView,
@@ -175,11 +175,11 @@ impl App {
         let minimap_spacer = arrange_corner(
             "Overview".into(),
             song_length_label(self.state.duration_seconds(), bpm),
-            40.0,
+            OVERVIEW_HEIGHT,
         );
         let minimap_canvas: Element<'_, Message> = canvas(minimap)
             .width(Length::Fill)
-            .height(Length::Fixed(40.0))
+            .height(Length::Fixed(OVERVIEW_HEIGHT))
             .into();
         let minimap_row = row![minimap_spacer, minimap_canvas];
 
