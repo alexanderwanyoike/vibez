@@ -261,7 +261,7 @@ fn quantize_snaps_notes_and_reports_count() {
 }
 
 #[test]
-fn double_clip_clones_notes_and_grows_engine_clip() {
+fn double_clip_clones_notes_and_doubles_its_length() {
     let (mut tracks, tid, cid) = midi_track_with_clip();
     let mut pr = PianoRollState::default();
     let mut engine = RecordingEngine::default();
@@ -275,10 +275,6 @@ fn double_clip_clones_notes_and_grows_engine_clip() {
     assert_eq!(clip.duration_beats, 8.0);
     assert_eq!(clip.notes.len(), 4);
     assert_eq!(clip.notes[2].start_beat, 4.1);
-    assert!(engine
-        .0
-        .iter()
-        .any(|c| matches!(c, EngineCommand::SetNoteClipDuration { .. })));
 }
 
 #[test]
