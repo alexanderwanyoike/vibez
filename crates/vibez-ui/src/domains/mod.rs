@@ -250,7 +250,8 @@ mod engine_command_queue_tests {
     #[test]
     fn built_in_devices_use_the_rate_last_forwarded_to_the_engine() {
         let (producer, mut consumer) = rtrb::RingBuffer::new(4);
-        let mut queue = EngineCommandQueue::new(producer);
+        let mut queue =
+            EngineCommandQueue::new(producer, vibez_engine::transport_ring::transport_ring().0);
         assert_eq!(
             queue.sample_rate(),
             vibez_engine::engine::DEFAULT_SAMPLE_RATE
@@ -275,11 +276,12 @@ mod engine_command_queue_tests {
     #[test]
     fn overflow_and_new_commands_keep_fifo_order_across_flushes() {
         let (producer, mut consumer) = rtrb::RingBuffer::new(1);
-        let mut queue = EngineCommandQueue::new(producer);
+        let mut queue =
+            EngineCommandQueue::new(producer, vibez_engine::transport_ring::transport_ring().0);
 
         queue.send(EngineCommand::SetBpm(100.0));
         queue.send(EngineCommand::SetBpm(110.0));
-        queue.send(EngineCommand::Play);
+        queue.send(EngineCommand::SetBpm(120.0));
         assert_eq!(queue.pending_len(), 2);
 
         assert!(matches!(consumer.pop(), Ok(EngineCommand::SetBpm(100.0))));
@@ -288,7 +290,43 @@ mod engine_command_queue_tests {
         assert!(matches!(consumer.pop(), Ok(EngineCommand::SetBpm(110.0))));
         queue.flush();
         assert_eq!(queue.pending_len(), 0);
-        assert!(matches!(consumer.pop(), Ok(EngineCommand::Play)));
+        assert!(matches!(consumer.pop(), Ok(EngineCommand::SetBpm(120.0))));
+    }
+
+    #[test]
+    fn play_and_stop_skip_thousands_of_queued_content_edits() {
+        let (producer, _consumer) = rtrb::RingBuffer::new(1);
+        let (transport, mut sent_transport) = vibez_engine::transport_ring::transport_ring();
+        let mut queue = EngineCommandQueue::new(producer, transport);
+        let track_id = vibez_core::id::TrackId::new();
+        let clip_id = vibez_core::id::ClipId::new();
+        for _ in 0..3_000 {
+            queue.send(EngineCommand::AddNote {
+                track_id,
+                clip_id,
+                insertion: vibez_engine::clip_insertion::PreparedNoteInsertion::new(
+                    vibez_core::midi::MidiNote {
+                        pitch: 60,
+                        velocity: 100,
+                        start_beat: 0.0,
+                        duration_beats: 1.0,
+                    },
+                ),
+            });
+        }
+        assert_eq!(queue.pending_len(), 2_999);
+
+        queue.send(EngineCommand::Play);
+        queue.send(EngineCommand::Stop);
+        assert!(matches!(
+            sent_transport.pop().as_ref().map(|sent| sent.command()),
+            Ok(EngineCommand::Play)
+        ));
+        assert!(matches!(
+            sent_transport.pop().as_ref().map(|sent| sent.command()),
+            Ok(EngineCommand::Stop)
+        ));
+        assert_eq!(queue.pending_len(), 2_999);
     }
 }
 
