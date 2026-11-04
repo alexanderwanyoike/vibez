@@ -84,21 +84,6 @@ pub trait EngineHandle {
         let command = EngineCommand::set_built_in_instrument(track_id, kind, self.sample_rate());
         self.send(command);
     }
-
-    fn set_note_clip_bounds(
-        &mut self,
-        track_id: vibez_core::id::TrackId,
-        clip: &crate::state::UiNoteClip,
-    ) {
-        self.send(EngineCommand::SetNoteClipBounds {
-            track_id,
-            clip_id: clip.id,
-            duration_beats: clip.duration_beats,
-            start_marker_beats: clip.start_marker_beats,
-            loop_start_beats: clip.loop_start_beats,
-            loop_end_beats: clip.loop_end_beats,
-        });
-    }
 }
 
 /// Ordered UI-side delivery for the bounded real-time engine queues.

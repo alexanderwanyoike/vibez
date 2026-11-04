@@ -492,7 +492,7 @@ impl TimelineEditorState {
                         if clip.loop_enabled {
                             clip.clamp_loop_to_duration();
                         }
-                        engine.set_note_clip_bounds(track_id, clip);
+                        engine.send(clip.bounds_command(track_id));
                         max_end = Some(
                             max_end
                                 .unwrap_or(0.0)

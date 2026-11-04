@@ -1,4 +1,4 @@
-//! Engine commands that send one whole arrangement clip, built from its UI model.
+//! Engine commands that send or reshape one arrangement clip, built from its UI model.
 
 use vibez_core::id::TrackId;
 use vibez_engine::clip_insertion::{PreparedClipInsertion, PreparedNoteClipInsertion};
@@ -35,6 +35,19 @@ impl UiClip {
 }
 
 impl UiNoteClip {
+    /// The clip's new length, start marker and loop, applied in place
+    /// without touching its notes.
+    pub fn bounds_command(&self, track_id: TrackId) -> EngineCommand {
+        EngineCommand::SetNoteClipBounds {
+            track_id,
+            clip_id: self.id,
+            duration_beats: self.duration_beats,
+            start_marker_beats: self.start_marker_beats,
+            loop_start_beats: self.loop_start_beats,
+            loop_end_beats: self.loop_end_beats,
+        }
+    }
+
     /// The clip with all its notes as one insertion.
     pub fn add_command(&self, track_id: TrackId) -> EngineCommand {
         self.add_command_beside(track_id, 0)

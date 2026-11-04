@@ -626,7 +626,7 @@ impl PianoRollState {
                         }
 
                         clip_end_beat = Some(clip.position_beats + clip.duration_beats);
-                        engine.set_note_clip_bounds(track_id, clip);
+                        engine.send(clip.bounds_command(track_id));
                     }
                 }
                 if let Some(end_beat) = clip_end_beat {
