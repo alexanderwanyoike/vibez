@@ -6,6 +6,10 @@ use crate::events::{ClipPlayingState, ClipQueuedState, ClipTrackState};
 use crate::playback_source::PreparedClipPlayback;
 
 impl AudioEngine {
+    pub(super) fn launch_declick_frames(&self) -> u64 {
+        u64::from(self.sample_rate / 1000)
+    }
+
     pub(super) fn edit_clip(
         &mut self,
         active: Box<PreparedClipPlayback>,
@@ -294,7 +298,7 @@ impl AudioEngine {
             if let Some(boundary) = self.next_clip_record_boundary() {
                 count = count.min(boundary.saturating_sub(now) as usize);
             }
-            let declick_frames = u64::from(self.sample_rate / 1000);
+            let declick_frames = self.launch_declick_frames();
             let batch_waiting = self.clip_batch_waiting_boundary();
             for track in &mut self.tracks {
                 if let Some(queued) = track.scheduled_clip(batch_waiting) {

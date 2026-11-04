@@ -24,6 +24,15 @@ pub(super) struct PendingClipBatch {
 }
 
 impl AudioEngine {
+    fn clip_batch_boundary(&self, now: u64, quantization: MusicalBoundary, starting: bool) -> u64 {
+        if starting {
+            return now;
+        }
+        quantization
+            .beats()
+            .map_or(now, |beats| self.next_achievable_boundary(now, beats))
+    }
+
     pub(super) fn clip_batch_blocks_commands(&self) -> bool {
         self.pending_clip_batch
             .as_ref()
@@ -81,13 +90,7 @@ impl AudioEngine {
         let starting = !self.clip_performance || !self.transport.is_playing();
         self.begin_clip_performance(allowance);
         let now = self.performance_position;
-        let boundary = if starting {
-            now
-        } else {
-            quantization
-                .beats()
-                .map_or(now, |beats| self.next_achievable_boundary(now, beats))
-        };
+        let boundary = self.clip_batch_boundary(now, quantization, starting);
         self.pending_clip_batch = Some(PendingClipBatch {
             clips,
             quantization,
@@ -238,14 +241,7 @@ impl AudioEngine {
                 );
             }
             if batch.boundary < now {
-                batch.boundary = if batch.starting {
-                    now
-                } else {
-                    batch
-                        .quantization
-                        .beats()
-                        .map_or(now, |beats| self.next_achievable_boundary(now, beats))
-                };
+                batch.boundary = self.clip_batch_boundary(now, batch.quantization, batch.starting);
             }
             for track in &mut self.tracks {
                 if let Some(queued) = track
