@@ -127,13 +127,15 @@ impl Transport {
     /// Advance the transport by `frames` samples and return the new position.
     ///
     /// If the transport is stopped, the position is unchanged.  If
-    /// `audio_length` is set, the position is clamped so it never exceeds the
-    /// audio length.
+    /// `audio_length` is set and the playhead reaches it, the position is
+    /// clamped to it and playback stops. A playhead already past the end
+    /// keeps going, like Ableton playing empty arrangement space.
     pub fn advance(&mut self, frames: u64) -> u64 {
         if !self.playing {
             return self.position;
         }
 
+        let before = self.position;
         self.position = self.position.saturating_add(frames);
 
         // Arrangement loop takes priority over audio_length auto-stop
@@ -145,7 +147,7 @@ impl Transport {
         }
 
         if let Some(len) = self.audio_length {
-            if self.position >= len {
+            if before < len && self.position >= len {
                 self.position = len;
                 self.playing = false; // auto-stop at end
             }
