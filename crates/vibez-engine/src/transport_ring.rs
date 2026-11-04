@@ -53,6 +53,12 @@ impl EngineCommand {
     }
 }
 
+/// Sender and receiver must count the same commands, or a transport command
+/// waits forever or overtakes a control it should follow.
+fn controls_in(command: &EngineCommand) -> u64 {
+    u64::from(!command.is_content_edit())
+}
+
 /// A transport command stamped with how many non-content commands were sent
 /// on the main command ring before it.
 pub struct TransportCommand {
@@ -76,9 +82,7 @@ impl TransportSender {
     /// Call for every command sent on the main command ring, in send order,
     /// including commands the sender holds back while that ring is full.
     pub fn record_main_command(&mut self, command: &EngineCommand) {
-        if !command.is_content_edit() {
-            self.controls_sent += 1;
-        }
+        self.controls_sent += controls_in(command);
     }
 
     /// Stamp at send time, not push time: a command held back while this
@@ -117,9 +121,7 @@ impl TransportReceiver {
     }
 
     pub(crate) fn record_main_command(&mut self, command: &EngineCommand) {
-        if !command.is_content_edit() {
-            self.controls_applied += 1;
-        }
+        self.controls_applied += controls_in(command);
     }
 
     /// The next transport command, once every non-content command sent
