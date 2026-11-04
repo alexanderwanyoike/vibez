@@ -271,6 +271,26 @@ fn dragging_down_the_ruler_zooms_in_and_sideways_scrolls() {
 }
 
 #[test]
+fn pressing_a_loop_handle_pins_the_framing_so_the_drag_does_not_reframe() {
+    let clip = long_clip(true);
+    let mut widget = editor(&clip);
+    let end_x = widget.beat_to_x(16.0, &bounds());
+
+    let pressed = widget.update(
+        &mut PianoRollState::default(),
+        canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)),
+        bounds(),
+        mouse::Cursor::Available(Point::new(end_x, 5.0)),
+    );
+    widget.view = Some(requested_view(pressed.1, &clip));
+    if let Some(data) = widget.clip.as_mut() {
+        data.loop_end_beats = 24.0;
+    }
+
+    assert!((widget.beat_to_x(16.0, &bounds()) - end_x).abs() < 1e-3);
+}
+
+#[test]
 fn zoomed_in_a_resized_note_ends_on_the_finer_grid_the_zoom_shows() {
     let mut clip = long_clip(false);
     clip.notes = vec![MidiNote {

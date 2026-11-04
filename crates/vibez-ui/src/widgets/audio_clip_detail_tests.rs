@@ -730,3 +730,26 @@ fn dragging_down_the_audio_ruler_zooms_in_around_the_press() {
     assert!(viewport.zoom_level > 2.0);
     assert!((widget.x_to_timeline_frame(press.x, &bounds) - frame_under_press).abs() < 1e-3);
 }
+
+#[test]
+fn pressing_an_audio_loop_handle_pins_the_framing_so_the_drag_does_not_reframe() {
+    let mut widget = widget();
+    widget.bpm = 1_200.0;
+    widget.view = None;
+    let bounds = Rectangle::new(Point::ORIGIN, iced::Size::new(800.0, 200.0));
+    let end_x = widget.timeline_to_x(widget.loop_end, &bounds);
+
+    let pressed = widget.update(
+        &mut AudioClipDetailState::default(),
+        canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)),
+        bounds,
+        mouse::Cursor::Available(Point::new(end_x, 5.0)),
+    );
+    let Some(Message::View(ViewMsg::SetClipEditorView { viewport, .. })) = pressed.1 else {
+        panic!("expected the framing to be pinned, got {:?}", pressed.1);
+    };
+    widget.view = Some(viewport);
+    widget.loop_end = 900;
+
+    assert!((widget.timeline_to_x(500, &bounds) - end_x).abs() < 1e-3);
+}
