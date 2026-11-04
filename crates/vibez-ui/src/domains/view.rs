@@ -103,6 +103,13 @@ impl ViewMsg {
             ViewMsg::ScrollArrangement(delta) => {
                 viewport.scroll_by(delta, total_beats, viewport_width);
             }
+            ViewMsg::SetViewport(target) => {
+                *viewport = TimelineViewport::new(
+                    TimelineViewport::clamp_zoom(target.zoom_level),
+                    target.scroll_offset_beats,
+                );
+                viewport.clamp(total_beats, viewport_width);
+            }
             _ => return false,
         }
         true
@@ -167,7 +174,8 @@ impl ViewState {
             | ViewMsg::ZoomOut
             | ViewMsg::SetZoom(_)
             | ViewMsg::ZoomAround { .. }
-            | ViewMsg::ScrollArrangement(_) => {
+            | ViewMsg::ScrollArrangement(_)
+            | ViewMsg::SetViewport(_) => {
                 msg.navigate(&mut self.viewport, ctx.total_beats, ctx.lane_width);
             }
             ViewMsg::ZoomToFit => {
@@ -192,7 +200,6 @@ impl ViewState {
                     self.viewport.clamp(ctx.total_beats, ctx.lane_width);
                 }
             }
-            ViewMsg::SetViewport(_) => {}
             ViewMsg::SetSnapGrid(grid) => {
                 self.snap_grid = grid;
                 self.adaptive_grid = false;

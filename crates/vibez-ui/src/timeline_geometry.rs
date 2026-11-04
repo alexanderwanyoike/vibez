@@ -4,6 +4,8 @@
 pub const BASE_PIXELS_PER_BEAT: f32 = 20.0;
 const WHEEL_LINE_PIXELS: f32 = 40.0;
 const ZOOM_SENSITIVITY: f32 = 0.003;
+/// Zoom per pixel of vertical ruler drag: about 3.3x per 100 px.
+const RULER_DRAG_ZOOM_PER_PIXEL: f32 = 0.012;
 pub const EDGE_SCROLL_ZONE_PIXELS: f32 = 64.0;
 pub const MAX_EDGE_SCROLL_BEATS_PER_SECOND: f64 = 8.0;
 /// Space kept either side of a framed span so its first and last bar lines
@@ -119,8 +121,11 @@ impl TimelineViewport {
     /// `drag_down` pixels down zooms in, and the grabbed beat stays under
     /// the pointer, so sideways movement pans.
     pub fn ruler_dragged(self, grabbed_beat: f64, pointer_x: f32, drag_down: f32) -> Self {
-        let _ = (grabbed_beat, pointer_x, drag_down);
-        self
+        let zoom_level =
+            Self::clamp_zoom(self.zoom_level * (drag_down * RULER_DRAG_ZOOM_PER_PIXEL).exp());
+        let scroll_offset_beats =
+            grabbed_beat - TimelineGeometry::from_zoom(zoom_level, 0.0).beats_for_width(pointer_x);
+        Self::new(zoom_level, scroll_offset_beats)
     }
 
     pub fn clamp(&mut self, total_beats: f64, viewport_width: f32) {
