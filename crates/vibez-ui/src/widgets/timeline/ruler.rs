@@ -1,21 +1,26 @@
-//! The beat ruler's pointer gestures: loop brace drags, seek clicks and
-//! wheel navigation.
+//! The beat ruler's pointer gestures: loop brace drags, seek clicks, zoom
+//! drags and wheel navigation.
+
+use std::time::{Duration, Instant};
 
 use iced::mouse;
 use iced::widget::canvas;
-use iced::{Rectangle, Renderer, Theme};
+use iced::{Point, Rectangle, Renderer, Theme};
 
 use super::ruler_drag::{brace_grab, BraceDrag, BraceGrab};
-use crate::domains::arrangement::ArrangementMsg;
 use crate::domains::transport::TransportMsg;
 use crate::domains::view::ViewMsg;
 use crate::message::Message;
 use crate::state::{ContextMenuTarget, GridConfig, UndoGestureId};
-use crate::timeline_geometry::TimelineGeometry;
+use crate::timeline_geometry::{TimelineGeometry, TimelineViewport};
+use crate::widgets::double_click::DoubleClick;
 
 /// Height of the Arrange ruler: the loop strip over the number strip.
 pub const ARRANGE_RULER_HEIGHT: f32 = 36.0;
 pub(super) const LOOP_STRIP_HEIGHT: f32 = 13.0;
+/// Pointer travel that still counts as a click rather than a drag.
+const CLICK_THRESHOLD_PX: f32 = 3.0;
+const DOUBLE_CLICK_WINDOW: Duration = Duration::from_millis(300);
 
 /// Canvas widget that draws a beat-based ruler with bar.beat labels.
 pub struct RulerWidget {
@@ -41,12 +46,17 @@ pub struct RulerWidget {
 /// Active drag action on the ruler.
 #[derive(Debug, Clone)]
 enum RulerDragAction {
+    /// A press on the numbers: released in place it sets the play start.
     PendingSeek {
         beat: f64,
-        start_x: f32,
+        start: Point,
+        view: TimelineViewport,
     },
-    RegionSelect {
-        anchor_beat: f64,
+    /// The numbers dragged past the click threshold: zoom and pan.
+    Zoom {
+        grabbed_beat: f64,
+        start: Point,
+        view: TimelineViewport,
     },
     Brace {
         drag: BraceDrag,
@@ -58,6 +68,7 @@ enum RulerDragAction {
 #[derive(Debug, Default)]
 pub struct RulerInteractionState {
     drag: Option<RulerDragAction>,
+    double_click: DoubleClick,
     shift_held: bool,
 }
 
@@ -68,10 +79,6 @@ impl RulerWidget {
 
     fn pixels_per_beat(&self) -> f32 {
         self.geometry().pixels_per_beat()
-    }
-
-    fn snapped_beat(&self, beat: f64) -> f64 {
-        self.grid.snap_beat(beat, self.pixels_per_beat())
     }
 
     /// Where the number strip starts, below the loop strip if there is one.
@@ -127,7 +134,6 @@ impl canvas::Program<Message> for RulerWidget {
         cursor: mouse::Cursor,
     ) -> (canvas::event::Status, Option<Message>) {
         match event {
-            // Left-click: PendingSeek (may become RegionSelect on drag)
             canvas::Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left)) => {
                 if let Some(pos) = cursor.position_in(bounds) {
                     let beat = self.geometry().x_to_beat(pos.x);
@@ -142,116 +148,66 @@ impl canvas::Program<Message> for RulerWidget {
                         });
                         return (canvas::event::Status::Captured, None);
                     }
+                    if state.double_click.press(
+                        Instant::now(),
+                        pos,
+                        DOUBLE_CLICK_WINDOW,
+                        Some(CLICK_THRESHOLD_PX),
+                    ) {
+                        state.double_click.clear();
+                        state.drag = None;
+                        return (
+                            canvas::event::Status::Captured,
+                            Some(Message::View(ViewMsg::ZoomToFit)),
+                        );
+                    }
                     state.drag = Some(RulerDragAction::PendingSeek {
                         beat,
-                        start_x: pos.x,
+                        start: pos,
+                        view: TimelineViewport::new(self.zoom_level, self.scroll_offset_beats),
                     });
                     return (canvas::event::Status::Captured, None);
                 }
             }
-            // Mouse move: transition PendingSeek→RegionSelect, or update region
             canvas::Event::Mouse(iced::mouse::Event::CursorMoved { .. }) => {
-                if let Some(ref drag) = state.drag {
-                    if let Some(pos) = cursor.position() {
-                        let local_x = pos.x - bounds.x;
-                        let beat = self.geometry().x_to_beat(local_x);
-                        if let RulerDragAction::Brace { drag, gesture } = drag {
-                            return (
-                                canvas::event::Status::Captured,
-                                self.brace_edit(*drag, *gesture, beat),
-                            );
-                        }
-
-                        // Auto-scroll when dragging near ruler edges
-                        if matches!(drag, RulerDragAction::RegionSelect { .. }) {
-                            let edge_zone = 50.0_f32;
-                            if local_x > bounds.width - edge_zone {
-                                let overshoot = ((local_x - (bounds.width - edge_zone))
-                                    / edge_zone)
-                                    .clamp(0.0, 3.0);
-                                return (
-                                    canvas::event::Status::Captured,
-                                    Some(Message::View(ViewMsg::ScrollArrangement(
-                                        overshoot as f64 * 2.0,
-                                    ))),
-                                );
-                            }
-                            if local_x < edge_zone && self.scroll_offset_beats > 0.0 {
-                                let overshoot = ((edge_zone - local_x) / edge_zone).clamp(0.0, 3.0);
-                                return (
-                                    canvas::event::Status::Captured,
-                                    Some(Message::View(ViewMsg::ScrollArrangement(
-                                        -(overshoot as f64 * 2.0),
-                                    ))),
-                                );
-                            }
-                        }
-
-                        match drag {
-                            RulerDragAction::PendingSeek {
-                                beat: anchor,
-                                start_x,
-                            } => {
-                                let dx = (local_x - start_x).abs();
-                                if dx > 4.0 {
-                                    let anchor = self.snapped_beat(*anchor);
-                                    let current = self.snapped_beat(beat);
-                                    let start = anchor.min(current);
-                                    let end = anchor.max(current);
-                                    state.drag = Some(RulerDragAction::RegionSelect {
-                                        anchor_beat: anchor,
-                                    });
-                                    if end > start {
-                                        return (
-                                            canvas::event::Status::Captured,
-                                            Some(Message::Arrangement(
-                                                ArrangementMsg::SetTimeSelection {
-                                                    start_beats: start,
-                                                    end_beats: end,
-                                                    track_id: None,
-                                                },
-                                            )),
-                                        );
-                                    }
-                                }
-                            }
-                            RulerDragAction::RegionSelect { anchor_beat } => {
-                                let current = self.snapped_beat(beat);
-                                let start = anchor_beat.min(current);
-                                let end = anchor_beat.max(current);
-                                if end > start {
-                                    return (
-                                        canvas::event::Status::Captured,
-                                        Some(Message::Arrangement(
-                                            ArrangementMsg::SetTimeSelection {
-                                                start_beats: start,
-                                                end_beats: end,
-                                                track_id: None,
-                                            },
-                                        )),
-                                    );
-                                }
-                            }
-                            RulerDragAction::Brace { .. } => {}
-                        }
+                let (Some(drag), Some(pos)) = (state.drag.clone(), cursor.position()) else {
+                    return (canvas::event::Status::Ignored, None);
+                };
+                let local = Point::new(pos.x - bounds.x, pos.y - bounds.y);
+                let message = match drag {
+                    RulerDragAction::Brace { drag, gesture } => {
+                        self.brace_edit(drag, gesture, self.geometry().x_to_beat(local.x))
                     }
-                }
+                    RulerDragAction::PendingSeek { beat, start, view } => {
+                        if (local.x - start.x).abs() <= CLICK_THRESHOLD_PX
+                            && (local.y - start.y).abs() <= CLICK_THRESHOLD_PX
+                        {
+                            return (canvas::event::Status::Captured, None);
+                        }
+                        state.double_click.clear();
+                        state.drag = Some(RulerDragAction::Zoom {
+                            grabbed_beat: beat,
+                            start,
+                            view,
+                        });
+                        Some(zoom_drag(view, beat, start, local))
+                    }
+                    RulerDragAction::Zoom {
+                        grabbed_beat,
+                        start,
+                        view,
+                    } => Some(zoom_drag(view, grabbed_beat, start, local)),
+                };
+                return (canvas::event::Status::Captured, message);
             }
-            // Mouse release
             canvas::Event::Mouse(iced::mouse::Event::ButtonReleased(iced::mouse::Button::Left)) => {
-                if let Some(ref drag) = state.drag {
+                if let Some(drag) = state.drag.take() {
                     let msg = match drag {
                         RulerDragAction::PendingSeek { beat, .. } => {
-                            // Short click → seek + clear selection
-                            Some(Message::Transport(TransportMsg::SeekToBeat(*beat)))
+                            Some(Message::Transport(TransportMsg::SeekToBeat(beat)))
                         }
-                        RulerDragAction::RegionSelect { .. } => {
-                            // Completed region select
-                            Some(Message::set_time_selection_active(true))
-                        }
-                        RulerDragAction::Brace { .. } => None,
+                        RulerDragAction::Zoom { .. } | RulerDragAction::Brace { .. } => None,
                     };
-                    state.drag = None;
                     return (canvas::event::Status::Captured, msg);
                 }
             }
@@ -342,8 +298,8 @@ impl canvas::Program<Message> for RulerWidget {
     ) -> mouse::Interaction {
         if let Some(ref drag) = state.drag {
             return match drag {
-                RulerDragAction::RegionSelect { .. } => mouse::Interaction::Crosshair,
                 RulerDragAction::PendingSeek { .. } => mouse::Interaction::Pointer,
+                RulerDragAction::Zoom { .. } => mouse::Interaction::ZoomIn,
                 RulerDragAction::Brace { drag, .. } => brace_interaction(drag.grab, true),
             };
         }
@@ -355,6 +311,15 @@ impl canvas::Program<Message> for RulerWidget {
             None => mouse::Interaction::default(),
         }
     }
+}
+
+/// The ruler drag message for the pointer at `at`, from a press at `start`.
+fn zoom_drag(view: TimelineViewport, grabbed_beat: f64, start: Point, at: Point) -> Message {
+    Message::View(ViewMsg::SetViewport(view.ruler_dragged(
+        grabbed_beat,
+        at.x,
+        at.y - start.y,
+    )))
 }
 
 fn brace_interaction(grab: BraceGrab, dragging: bool) -> mouse::Interaction {
