@@ -223,4 +223,19 @@ mod tests {
         );
         assert!(end_x > width - 4.0 * FRAME_MARGIN_PIXELS, "ends at {end_x}");
     }
+
+    #[test]
+    fn z_and_x_in_a_section_leave_the_hidden_arrange_view_alone() {
+        let mut app = app_in_a_section();
+        let editor = app.state.perform.section_editor.editor_mut();
+        editor.time_selection_active = true;
+        editor.selection_start_beats = 4.0;
+        editor.selection_end_beats = 8.0;
+        let arrange = app.state.view.viewport;
+
+        let _ = app.update(Message::View(ViewMsg::ZoomToSelection));
+        assert_eq!(app.state.view.viewport, arrange);
+        let _ = app.update(Message::View(ViewMsg::ZoomBack));
+        assert_eq!(app.state.view.viewport, arrange);
+    }
 }
