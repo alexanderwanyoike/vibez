@@ -109,6 +109,7 @@ impl App {
             .section_editor
             .editor_mut()
             .discard_audio_clip_inspector_edits();
+        self.send_command(EngineCommand::BeginContentRebuild);
         if self
             .state
             .project_tracks
@@ -118,6 +119,7 @@ impl App {
         } else {
             self.replay_snapshot(snapshot);
         }
+        self.send_command(EngineCommand::EndContentRebuild);
     }
 
     /// Tears down every channel and replays the snapshot into the engine,

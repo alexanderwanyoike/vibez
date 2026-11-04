@@ -295,6 +295,7 @@ fn apply_capture_to_arrangement(
     let start_beat = arrange_start_samples as f64 / samples_per_beat;
     let end_beat = arrange_end_samples as f64 / samples_per_beat;
 
+    engine.send(EngineCommand::BeginContentRebuild);
     for track_id in controlled_track_ids {
         let mut incoming = by_track.remove(&track_id).unwrap_or_default();
         let captured_mute = incoming
@@ -361,6 +362,7 @@ fn apply_capture_to_arrangement(
             }
         }
     }
+    engine.send(EngineCommand::EndContentRebuild);
     clip_count
 }
 
@@ -793,8 +795,9 @@ mod tests {
 
         let clips = arrange.get(track_id).unwrap().note_clips.len();
         assert_eq!(clips, 41);
+        let rebuild_bracket = 2;
         assert!(
-            engine.0.len() <= 2 * clips,
+            engine.0.len() <= 2 * clips + rebuild_bracket,
             "{} commands for {clips} clips",
             engine.0.len()
         );
@@ -936,7 +939,11 @@ mod tests {
         let mut commands =
             EngineCommandQueue::new(producer, audio_engine.take_transport_sender().unwrap());
         apply_capture_to_arrangement(&mut timeline, captured, &mut commands);
-        assert_eq!(commands.pending_len(), 1);
+        assert_eq!(
+            commands.pending_len(),
+            3,
+            "the last clip and the rebuild bracket"
+        );
 
         let operations = vibez_core::constants::RING_BUFFER_CAPACITY + 1;
         audio_engine.process_block(AudioProcessBlock::new(&mut [], 2));
