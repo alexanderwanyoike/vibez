@@ -1032,6 +1032,39 @@ fn a_clip_resized_at_fit_zoom_can_shrink_below_the_coarse_adaptive_grid() {
 }
 
 #[test]
+fn a_shaky_click_on_an_off_grid_clip_end_never_resizes_it() {
+    let (canvas, _) = canvas_with_off_grid_audio_clip();
+    let start = Point::new(canvas.beat_to_x(5.1) - 2.0, CLIP_Y + 4.0);
+    let jitter = Point::new(start.x + 3.0, start.y + 1.0);
+    let mut state = ClipInteractionState::default();
+
+    left_event(
+        &canvas,
+        &mut state,
+        iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left),
+        start,
+    );
+    let moved = left_event(
+        &canvas,
+        &mut state,
+        iced::mouse::Event::CursorMoved { position: jitter },
+        jitter,
+    );
+    let released = left_event(
+        &canvas,
+        &mut state,
+        iced::mouse::Event::ButtonReleased(iced::mouse::Button::Left),
+        jitter,
+    );
+
+    assert!(
+        !moved.as_ref().is_some_and(is_clip_edit),
+        "3 px of travel is a click: {moved:?}"
+    );
+    assert!(!released.as_ref().is_some_and(is_clip_edit), "{released:?}");
+}
+
+#[test]
 fn one_clip_edit_key_press_emits_one_message_whatever_the_lane_count() {
     let lanes: Vec<_> = (0..3)
         .map(|_| canvas_with_selected_audio_clip().0)
