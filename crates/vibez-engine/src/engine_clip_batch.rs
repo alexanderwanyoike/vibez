@@ -4,7 +4,7 @@ use super::clip_launcher::ClipEventContext;
 use super::presentation_queue::PresentationAdmission;
 use super::*;
 use crate::playback_source::{PreparedClipPlayback, QueuedClipPlayback};
-use vibez_core::perform::MusicalBoundary;
+use vibez_core::perform::{ClipLaunchMode, MusicalBoundary};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum BatchPhase {
@@ -20,17 +20,27 @@ pub(super) struct PendingClipBatch {
     quantization: MusicalBoundary,
     boundary: u64,
     starting: bool,
+    /// Frames the boundary keeps ahead of the moment it is chosen, so a
+    /// Legato swap has room to dip the outgoing Clip first.
+    swap_lead: u64,
     phase: BatchPhase,
 }
 
 impl AudioEngine {
-    fn clip_batch_boundary(&self, now: u64, quantization: MusicalBoundary, starting: bool) -> u64 {
+    fn clip_batch_boundary(
+        &self,
+        now: u64,
+        quantization: MusicalBoundary,
+        starting: bool,
+        swap_lead: u64,
+    ) -> u64 {
         if starting {
             return now;
         }
         quantization
             .beats()
             .map_or(now, |beats| self.next_achievable_boundary(now, beats))
+            .max(now + swap_lead)
     }
 
     pub(super) fn clip_batch_blocks_commands(&self) -> bool {
@@ -90,12 +100,21 @@ impl AudioEngine {
         let starting = !self.clip_performance || !self.transport.is_playing();
         self.begin_clip_performance(allowance);
         let now = self.performance_position;
-        let boundary = self.clip_batch_boundary(now, quantization, starting);
+        let swap_lead = if clips
+            .iter()
+            .any(|clip| clip.launch_mode == ClipLaunchMode::Legato)
+        {
+            self.launch_declick_frames()
+        } else {
+            0
+        };
+        let boundary = self.clip_batch_boundary(now, quantization, starting, swap_lead);
         self.pending_clip_batch = Some(PendingClipBatch {
             clips,
             quantization,
             boundary,
             starting,
+            swap_lead,
             phase: BatchPhase::Staging,
         });
         self.apply_clip_boundaries(now);
@@ -241,7 +260,12 @@ impl AudioEngine {
                 );
             }
             if batch.boundary < now {
-                batch.boundary = self.clip_batch_boundary(now, batch.quantization, batch.starting);
+                batch.boundary = self.clip_batch_boundary(
+                    now,
+                    batch.quantization,
+                    batch.starting,
+                    batch.swap_lead,
+                );
             }
             for track in &mut self.tracks {
                 if let Some(queued) = track
