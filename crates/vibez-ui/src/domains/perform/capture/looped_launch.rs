@@ -5,7 +5,7 @@ use vibez_core::track::{ClipFades, ClipPlaybackDirection};
 
 use crate::state::{TrackTimelineContent, UiClip, UiNoteClip};
 
-use super::{captured_clip_name, captured_visible_notes, CapturedTimelineSource};
+use super::{captured_clip_name, captured_visible_notes, on_tick, CapturedTimelineSource};
 
 /// What one launch of a looping source played on the Arrange timeline.
 #[derive(Debug, Clone, Copy)]
@@ -26,7 +26,7 @@ pub(super) fn looped_note_clip(
     source: &CapturedTimelineSource,
     launch: LoopedLaunch,
 ) -> Option<UiNoteClip> {
-    let pass_beats = source.length_beats;
+    let pass_beats = on_tick(source.length_beats);
     let sounding: Vec<_> = content
         .note_clips
         .iter()
@@ -63,13 +63,15 @@ pub(super) fn looped_note_clip(
         [only] => captured_clip_name(source, &only.name),
         _ => captured_clip_name(source, &source.name),
     };
-    let beats = |samples: u64| samples as f64 / launch.samples_per_beat;
+    let beats = |samples: u64| on_tick(samples as f64 / launch.samples_per_beat);
     let phase = beats(launch.phase_samples);
+    let position_beats = beats(launch.destination_start_samples);
+    let end_beats = beats(launch.destination_start_samples + launch.played_samples);
     Some(UiNoteClip {
         id: ClipId::new(),
         name,
-        position_beats: beats(launch.destination_start_samples),
-        duration_beats: beats(launch.played_samples),
+        position_beats,
+        duration_beats: end_beats - position_beats,
         notes,
         selected_notes: Default::default(),
         start_marker_beats: if phase < pass_beats { phase } else { 0.0 },

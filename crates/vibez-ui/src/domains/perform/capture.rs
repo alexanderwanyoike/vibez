@@ -699,6 +699,14 @@ fn samples_per_beat(sample_rate: u32, bpm: f64) -> f64 {
     }
 }
 
+/// Engine boundaries land on whole samples, which rarely fall exactly on a
+/// beat, so captured MIDI clip edges snap to this musical resolution.
+const TICKS_PER_BEAT: f64 = 960.0;
+
+fn on_tick(beats: f64) -> f64 {
+    (beats * TICKS_PER_BEAT).round() / TICKS_PER_BEAT
+}
+
 /// One pass of a source, copied from source-local samples to Arrange samples.
 #[derive(Debug, Clone, Copy)]
 struct CaptureWindow {
@@ -794,9 +802,9 @@ fn append_note_window(
     source: &CapturedTimelineSource,
     window: CaptureWindow,
 ) {
-    let window_start_beats = window.source_start_beats();
-    let window_end_beats = window.source_end_beats();
-    let destination_start_beats = window.destination_start_beats();
+    let window_start_beats = on_tick(window.source_start_beats());
+    let window_end_beats = on_tick(window.source_end_beats());
+    let destination_start_beats = on_tick(window.destination_start_beats());
     for clip in &content.note_clips {
         let clip_end = clip.position_beats + clip.duration_beats;
         let overlap_start = clip.position_beats.max(window_start_beats);
@@ -807,11 +815,13 @@ fn append_note_window(
         let local_start = overlap_start - clip.position_beats;
         let local_end = overlap_end - clip.position_beats;
         let notes = captured_visible_notes(clip, local_start, local_end);
+        let position_beats = on_tick(destination_start_beats + overlap_start - window_start_beats);
+        let end_beats = on_tick(destination_start_beats + overlap_end - window_start_beats);
         let fragment = UiNoteClip {
             id: ClipId::new(),
             name: captured_clip_name(source, &clip.name),
-            position_beats: destination_start_beats + (overlap_start - window_start_beats),
-            duration_beats: overlap_end - overlap_start,
+            position_beats,
+            duration_beats: end_beats - position_beats,
             notes,
             selected_notes: Default::default(),
             start_marker_beats: 0.0,
