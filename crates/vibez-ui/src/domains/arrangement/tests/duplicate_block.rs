@@ -171,3 +171,29 @@ fn a_time_selection_duplicates_its_range_right_after_itself() {
     );
     assert_eq!(a.selected_clips.len(), 2);
 }
+
+#[test]
+fn a_box_over_several_lanes_duplicates_its_range_on_every_lane_it_caught() {
+    let mut a = arrangement_with_tracks(2);
+    add_audio_clip(&mut a, 0, 0, 400);
+    add_audio_clip(&mut a, 1, 0, 400);
+    let lanes = vec![a.tracks[0].id, a.tracks[1].id];
+    a.update(
+        ArrangementMsg::MarqueeSelect {
+            anchor_track: lanes[0],
+            start_beats: 0.0,
+            end_beats: 4.0,
+            top_y: 0.0,
+            bottom_y: 140.0,
+            track_ids: lanes,
+            additive: false,
+        },
+        &mut RecordingEngine::default(),
+        CTX,
+    );
+
+    duplicate(&mut a);
+
+    assert_eq!(audio_spans(&a, 0), vec![(0, 400), (400, 400)]);
+    assert_eq!(audio_spans(&a, 1), vec![(0, 400), (400, 400)]);
+}
