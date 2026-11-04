@@ -666,14 +666,18 @@ impl canvas::Program<Message> for TrackClipCanvas {
                                     return (canvas::event::Status::Captured, None);
                                 }
                                 let delta_px = local_x - start_local_x;
-                                let new_pos = crate::timeline_geometry::compensated_drag_beat(
+                                let travel = crate::timeline_geometry::compensated_drag_beat(
                                     *original_position_beats,
                                     delta_px,
                                     geometry.pixels_per_beat(),
                                     *start_scroll_beats,
                                     self.scroll_offset_beats,
-                                )
-                                .max(0.0);
+                                ) - original_position_beats;
+                                // Snapping the travel rather than the landing
+                                // beat keeps an off-grid Clip's offset from
+                                // the grid, as Ableton does.
+                                let new_pos =
+                                    (original_position_beats + self.snapped_beat(travel)).max(0.0);
 
                                 // Resolve against real row geometry when the
                                 // surface supplied it; stepping by a fixed
@@ -687,7 +691,7 @@ impl canvas::Program<Message> for TrackClipCanvas {
                                 let edit =
                                     Message::Arrangement(ArrangementMsg::MoveSelectedClips {
                                         anchor: *clip_id,
-                                        new_position_beats: self.snapped_beat(new_pos),
+                                        new_position_beats: new_pos,
                                         target_track,
                                     })
                                     .in_undo_gesture(*undo_gesture);
