@@ -7,7 +7,7 @@ use iced::{Rectangle, Renderer};
 use crate::theme;
 
 use super::clip_colors::clip_colors;
-use super::clip_frame::{clip_box, draw_clip_back, draw_clip_front};
+use super::clip_frame::{clip_box, draw_clip_back, draw_clip_front, LoopPasses};
 use super::fade_drag::{fade_curve_handle, fade_handle_xs};
 use super::note_marks::note_marks;
 use super::*;
@@ -151,7 +151,16 @@ impl TrackClipCanvas {
                 let clip_h = h - 8.0;
                 let body = clip_box(clip_x, clip_y, clip_w, clip_h);
 
-                draw_clip_back(&mut frame, body, &colors);
+                let looped = clip.loop_enabled && clip.loop_end > clip.loop_start;
+                let loop_passes = looped.then(|| {
+                    let pass_px =
+                        geometry.width_for_beats((clip.loop_end - clip.loop_start) as f64 / spb);
+                    LoopPasses {
+                        first_wrap_px: pass_px,
+                        pass_px,
+                    }
+                });
+                draw_clip_back(&mut frame, body, &colors, loop_passes, w);
 
                 if !clip.peaks.is_empty() && clip_w > 4.0 {
                     let body_top = clip_y + CLIP_TITLE_HEIGHT;
@@ -179,29 +188,6 @@ impl TrackClipCanvas {
                             iced::Size::new(1.0, height),
                             colors.ink,
                         );
-                    }
-                }
-
-                // Loop markers
-                if clip.loop_enabled && clip.loop_end > clip.loop_start {
-                    let loop_region_samples = (clip.loop_end - clip.loop_start) as f64;
-                    let loop_region_beats = loop_region_samples / spb;
-
-                    // Draw repeated sections with lower opacity
-                    let repeat_color = theme::with_alpha(self.track_color, 0.25);
-                    let first_loop_offset_beats = (clip.loop_end - clip.loop_start) as f64 / spb;
-                    let mut repeat_beat = clip_start_beat + first_loop_offset_beats;
-                    while repeat_beat < clip_start_beat + clip_dur_beats {
-                        let rx = self.beat_to_x(repeat_beat);
-                        let rw = geometry.width_for_beats(loop_region_beats);
-                        if rx < w && rx + rw > 0.0 {
-                            frame.fill_rectangle(
-                                iced::Point::new(rx, clip_y),
-                                iced::Size::new(rw.min(body.x + body.width - rx).max(0.0), clip_h),
-                                repeat_color,
-                            );
-                        }
-                        repeat_beat += loop_region_beats;
                     }
                 }
 
@@ -258,14 +244,7 @@ impl TrackClipCanvas {
                         }
                     }
                 }
-                draw_clip_front(
-                    &mut frame,
-                    body,
-                    &colors,
-                    &clip.name,
-                    clip.loop_enabled && clip.loop_end > clip.loop_start,
-                    w,
-                );
+                draw_clip_front(&mut frame, body, &colors, &clip.name, looped, w);
 
                 // Diagonal stripe overlay when the clip's warp is
                 // stale relative to the current project tempo. Low
@@ -369,28 +348,20 @@ impl TrackClipCanvas {
                 let clip_h = h - 8.0;
                 let body = clip_box(clip_x, clip_y, clip_w, clip_h);
 
-                draw_clip_back(&mut frame, body, &colors);
-
                 let looping =
                     note_clip.loop_enabled && note_clip.loop_end_beats > note_clip.loop_start_beats;
-                if looping {
-                    let loop_len = note_clip.loop_end_beats - note_clip.loop_start_beats;
-                    let repeat_color = theme::with_alpha(self.track_color, 0.2);
-                    let mut repeat_beat =
-                        note_clip.position_beats + note_clip.timeline().first_wrap().unwrap_or(0.0);
-                    while repeat_beat < note_clip.position_beats + note_clip.duration_beats {
-                        let rx = self.beat_to_x(repeat_beat);
-                        let rw = geometry.width_for_beats(loop_len);
-                        if rx < w && rx + rw > 0.0 {
-                            frame.fill_rectangle(
-                                iced::Point::new(rx, clip_y),
-                                iced::Size::new(rw.min(body.x + body.width - rx).max(0.0), clip_h),
-                                repeat_color,
-                            );
-                        }
-                        repeat_beat += loop_len;
-                    }
-                }
+                let loop_passes =
+                    note_clip
+                        .timeline()
+                        .first_wrap()
+                        .filter(|_| looping)
+                        .map(|first_wrap| LoopPasses {
+                            first_wrap_px: geometry.width_for_beats(first_wrap),
+                            pass_px: geometry.width_for_beats(
+                                note_clip.loop_end_beats - note_clip.loop_start_beats,
+                            ),
+                        });
+                draw_clip_back(&mut frame, body, &colors, loop_passes, w);
 
                 // Draw note blocks inside the clip (below title bar)
                 let left = clip_x.max(0.0);
