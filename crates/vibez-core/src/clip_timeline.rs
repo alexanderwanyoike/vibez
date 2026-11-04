@@ -90,11 +90,7 @@ impl FrameClipTimeline {
         source_end: u64,
         minimum_gap: u64,
     ) -> u64 {
-        let marker_end = if self.loop_enabled {
-            source_end.min(self.loop_end)
-        } else {
-            source_end
-        };
+        let marker_end = self.marker_end(source_end);
         candidate.clamp(
             source_start,
             marker_end
@@ -105,8 +101,17 @@ impl FrameClipTimeline {
 
     pub fn accepts_start(self, candidate: u64, source_start: u64, source_end: u64) -> bool {
         candidate == self.clamp_start(candidate, source_start, source_end)
-            && candidate < source_end
-            && (!self.loop_enabled || candidate < self.loop_end)
+            && candidate < self.marker_end(source_end)
+    }
+
+    /// A looping clip's start marker belongs to its loop, which may run past
+    /// the clip's own length; an unlooped one ends with its source.
+    fn marker_end(self, source_end: u64) -> u64 {
+        if self.loop_enabled {
+            self.loop_end
+        } else {
+            source_end
+        }
     }
 }
 
@@ -243,11 +248,7 @@ impl BeatClipTimeline {
         source_end: f64,
         minimum_gap: f64,
     ) -> f64 {
-        let marker_end = if self.loop_enabled && self.loop_end.is_finite() {
-            source_end.min(self.loop_end)
-        } else {
-            source_end
-        };
+        let marker_end = self.marker_end(source_end);
         candidate.clamp(
             source_start,
             (marker_end - minimum_gap.max(Self::MIN_START_GAP)).max(source_start),
@@ -257,8 +258,15 @@ impl BeatClipTimeline {
     pub fn accepts_start(self, candidate: f64, source_start: f64, source_end: f64) -> bool {
         candidate.is_finite()
             && candidate == self.clamp_start(candidate, source_start, source_end)
-            && candidate < source_end
-            && (!self.loop_enabled || candidate < self.loop_end)
+            && candidate < self.marker_end(source_end)
+    }
+
+    fn marker_end(self, source_end: f64) -> f64 {
+        if self.loop_enabled && self.loop_end.is_finite() {
+            self.loop_end
+        } else {
+            source_end
+        }
     }
 }
 
