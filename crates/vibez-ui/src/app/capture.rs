@@ -604,6 +604,41 @@ mod tests {
     }
 
     #[test]
+    fn a_capture_holds_the_song_end_while_it_re_adds_its_tracks() {
+        let track_id = TrackId::new();
+        let mut arrange = Arc::new(ArrangementTimeline::default());
+        Arc::make_mut(&mut arrange)
+            .ensure(track_id)
+            .clips
+            .push(audio_clip(0, 8));
+        let captured = MaterializedCapture {
+            arrange_start_samples: 16,
+            arrange_end_samples: 24,
+            controlled_track_ids: vec![track_id],
+            samples_per_beat: 4.0,
+            ..MaterializedCapture::default()
+        };
+
+        let mut engine = crate::domains::test_support::RecordingEngine::default();
+        apply_capture_to_arrangement(&mut arrange, captured, &mut engine);
+
+        let edits: Vec<_> = engine
+            .0
+            .iter()
+            .filter(|command| command.is_content_edit())
+            .collect();
+        assert!(edits.len() > 2, "the Capture re-adds the track's clip");
+        assert!(matches!(
+            edits.first(),
+            Some(EngineCommand::BeginContentRebuild)
+        ));
+        assert!(matches!(
+            edits.last(),
+            Some(EngineCommand::EndContentRebuild)
+        ));
+    }
+
+    #[test]
     fn silent_capture_detects_material_that_it_will_replace() {
         let track_id = TrackId::new();
         let mut arrange = ArrangementTimeline::default();
