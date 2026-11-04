@@ -77,40 +77,29 @@ impl TrackClipCanvas {
     pub(crate) fn hit_test(&self, pos_x: f32) -> Option<ClipHit> {
         let geometry = self.geometry();
         let spb = self.spb();
+        let audio_clips = self.clips.iter().map(|clip| ClipHit {
+            clip_id: clip.clip_id,
+            is_note_clip: false,
+            edge: None,
+            position_beats: clip.position as f64 / spb,
+            duration_beats: clip.duration as f64 / spb,
+        });
+        let note_clips = self.note_clips.iter().map(|clip| ClipHit {
+            clip_id: clip.clip_id,
+            is_note_clip: true,
+            edge: None,
+            position_beats: clip.position_beats,
+            duration_beats: clip.duration_beats,
+        });
 
-        for clip in &self.clips {
-            let clip_start_beat = clip.position as f64 / spb;
-            let clip_dur_beats = clip.duration as f64 / spb;
-            let clip_x = self.beat_to_x(clip_start_beat);
-            let clip_w = geometry.width_for_beats(clip_dur_beats);
-
-            if pos_x >= clip_x && pos_x <= clip_x + clip_w {
-                return Some(ClipHit {
-                    clip_id: clip.clip_id,
-                    is_note_clip: false,
-                    edge: edge_at(pos_x, clip_x, clip_w),
-                    position_beats: clip_start_beat,
-                    duration_beats: clip_dur_beats,
-                });
-            }
-        }
-
-        for note_clip in &self.note_clips {
-            let clip_x = self.beat_to_x(note_clip.position_beats);
-            let clip_w = geometry.width_for_beats(note_clip.duration_beats);
-
-            if pos_x >= clip_x && pos_x <= clip_x + clip_w {
-                return Some(ClipHit {
-                    clip_id: note_clip.clip_id,
-                    is_note_clip: true,
-                    edge: edge_at(pos_x, clip_x, clip_w),
-                    position_beats: note_clip.position_beats,
-                    duration_beats: note_clip.duration_beats,
-                });
-            }
-        }
-
-        None
+        audio_clips.chain(note_clips).find_map(|hit| {
+            let clip_x = self.beat_to_x(hit.position_beats);
+            let clip_w = geometry.width_for_beats(hit.duration_beats);
+            (pos_x >= clip_x && pos_x <= clip_x + clip_w).then(|| ClipHit {
+                edge: edge_at(pos_x, clip_x, clip_w),
+                ..hit
+            })
+        })
     }
 }
 
