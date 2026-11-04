@@ -398,7 +398,7 @@ impl canvas::Program<Message> for TrackClipCanvas {
                 ClipDragAction::FadeCurve(_) => mouse::Interaction::ResizingVertically,
                 ClipDragAction::CrossfadeCurve(_) => mouse::Interaction::ResizingVertically,
                 ClipDragAction::RegionSelect { .. } => mouse::Interaction::Crosshair,
-                ClipDragAction::PendingSeek { .. } => mouse::Interaction::Pointer,
+                ClipDragAction::PendingSeek { .. } => mouse::Interaction::Text,
                 ClipDragAction::PanViewport { .. } => mouse::Interaction::Grabbing,
             };
         }
@@ -423,10 +423,10 @@ impl canvas::Program<Message> for TrackClipCanvas {
                 if in_title_bar {
                     return mouse::Interaction::Grab;
                 }
-                // Body zone — pointer (for seek / region select)
-                return mouse::Interaction::Pointer;
+                // A click in the body seeks and a drag selects time.
+                return mouse::Interaction::Text;
             }
-            return mouse::Interaction::Pointer;
+            return mouse::Interaction::Idle;
         }
 
         mouse::Interaction::default()

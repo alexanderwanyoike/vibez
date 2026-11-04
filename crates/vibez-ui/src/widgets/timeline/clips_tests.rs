@@ -1635,7 +1635,7 @@ fn the_pointer_shows_a_resize_cursor_on_either_clip_edge() {
         cursor_at(5.1, -2.0),
         mouse::Interaction::ResizingHorizontally
     );
-    assert_eq!(cursor_at(3.0, 0.0), mouse::Interaction::Pointer);
+    assert_eq!(cursor_at(3.0, 0.0), mouse::Interaction::Text);
 }
 
 #[test]
