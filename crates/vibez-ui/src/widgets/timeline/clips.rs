@@ -17,7 +17,7 @@ use crate::state::{
     TrackTimelineContent, UndoGestureId,
 };
 use crate::timeline_geometry::TimelineGeometry;
-use crate::widgets::drag_phase::past_click_slop;
+use crate::widgets::drag_phase::{past_click_slop, DragPhase};
 use crate::widgets::local_drag::LocalDrag;
 use crate::widgets::timeline::marquee;
 use vibez_core::id::{ClipId, TrackId};
@@ -494,6 +494,7 @@ impl canvas::Program<Message> for TrackClipCanvas {
                                 collapse_to: (self.selected_clips.contains(&clip_id)
                                     && !state.shift_held)
                                     .then_some(selection),
+                                phase: DragPhase::Pending,
                             });
                         } else {
                             // Body → seek / region-select (like empty space)
@@ -657,8 +658,13 @@ impl canvas::Program<Message> for TrackClipCanvas {
                                 start_scroll_beats,
                                 original_position_beats,
                                 start_y,
+                                phase,
                                 ..
                             } => {
+                                let mut phase = *phase;
+                                if !phase.follow(Point::new(*start_local_x, *start_y), local) {
+                                    return (canvas::event::Status::Captured, None);
+                                }
                                 let delta_px = local_x - start_local_x;
                                 let new_pos = crate::timeline_geometry::compensated_drag_beat(
                                     *original_position_beats,
@@ -685,6 +691,11 @@ impl canvas::Program<Message> for TrackClipCanvas {
                                         target_track,
                                     })
                                     .in_undo_gesture(*undo_gesture);
+                                if let Some(ClipDragAction::MoveClip { phase: held, .. }) =
+                                    &mut state.drag
+                                {
+                                    *held = phase;
+                                }
                                 return (canvas::event::Status::Captured, Some(edit));
                             }
                             ClipDragAction::ResizeClip {
@@ -834,20 +845,14 @@ impl canvas::Program<Message> for TrackClipCanvas {
                         }
                         ClipDragAction::MoveClip {
                             collapse_to: Some(selection),
-                            start_local_x,
-                            start_y,
+                            phase: DragPhase::Pending,
                             ..
-                        } if LocalDrag::unclamped().position(cursor, bounds).is_some_and(
-                            |local| !past_click_slop(Point::new(*start_local_x, *start_y), local),
-                        ) =>
-                        {
-                            Some(Message::Arrangement(
-                                ArrangementMsg::SelectArrangementClip {
-                                    selection: *selection,
-                                    shift_held: false,
-                                },
-                            ))
-                        }
+                        } => Some(Message::Arrangement(
+                            ArrangementMsg::SelectArrangementClip {
+                                selection: *selection,
+                                shift_held: false,
+                            },
+                        )),
                         _ => None,
                     };
                     state.drag = None;
