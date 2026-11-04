@@ -343,6 +343,57 @@ mod tests {
     }
 
     #[test]
+    fn stopping_on_its_own_returns_to_where_play_started() {
+        let (mut t, mut engine) = playing_from(128.0);
+        let start = t.beats_to_samples_at(128.0);
+
+        t.update(
+            TransportMsg::EngineStopped,
+            &mut engine,
+            TransportCtx::default(),
+        );
+
+        assert!(!t.is_playing());
+        assert_eq!(t.position_samples, start);
+        assert!(matches!(engine.0.as_slice(), [EngineCommand::Seek(s)] if *s == start));
+    }
+
+    #[test]
+    fn the_confirmation_of_a_requested_stop_does_not_seek_again() {
+        let (mut t, mut engine) = playing_from(128.0);
+        t.update(TransportMsg::Stop, &mut engine, TransportCtx::default());
+        engine.0.clear();
+
+        t.update(
+            TransportMsg::EngineStopped,
+            &mut engine,
+            TransportCtx::default(),
+        );
+
+        assert!(!t.is_playing());
+        assert!(engine.0.is_empty());
+    }
+
+    #[test]
+    fn perform_stopping_on_its_own_keeps_the_arrange_cursor() {
+        let (mut t, mut engine) = playing_from(128.0);
+        let cursor = t.position_samples;
+
+        t.update(
+            TransportMsg::EngineStopped,
+            &mut engine,
+            TransportCtx {
+                perform_playback_active: true,
+                ..TransportCtx::default()
+            },
+        );
+
+        assert!(!t.is_playing());
+        assert_eq!(t.position_samples, cursor);
+        assert!(engine.0.is_empty());
+    }
+
+    #[test]
     fn a_second_stop_goes_to_the_song_start_and_play_starts_there() {
         let (mut t, mut engine) = playing_from(128.0);
         t.update(TransportMsg::Stop, &mut engine, TransportCtx::default());

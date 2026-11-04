@@ -1055,6 +1055,22 @@ mod tests {
     }
 
     #[test]
+    fn arrange_stopping_on_its_own_shows_stopped_back_where_play_started() {
+        let mut app = crate::app::test_support::app();
+        let (mut events, received) = rtrb::RingBuffer::new(4);
+        app.event_rx = Some(received);
+        app.state.transport.playback = crate::state::PlaybackPhase::Playing;
+        app.state.transport.play_start_samples = 1_000;
+        app.state.transport.position_samples = 90_000;
+
+        events.push(EngineEvent::PlaybackStopped).unwrap();
+        app.poll_engine_events();
+
+        assert!(!app.state.transport.is_playing());
+        assert_eq!(app.state.transport.position_samples, 1_000);
+    }
+
+    #[test]
     fn audition_completion_recognizes_every_canonical_playing_status() {
         for status in [
             RAW_AUDITION_PLAYING,
