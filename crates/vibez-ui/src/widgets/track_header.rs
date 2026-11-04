@@ -188,16 +188,7 @@ pub fn view_track_header<'a>(
     } = recording;
     let track_color = th::track_color(track.color_index);
 
-    // Row 1: Track type icon + name + "+" add clip button
-    let type_icon = match track.kind {
-        TrackKind::Audio => icons::icon(icons::AUDIO_WAVEFORM)
-            .size(12)
-            .color(track_color),
-        TrackKind::Instrument(_) | TrackKind::Midi => {
-            icons::icon(icons::MUSIC).size(12).color(track_color)
-        }
-    };
-
+    // Row 1: name and kind, then the quiet actions
     let name_color = if track.mute {
         th::text_dim()
     } else {
@@ -242,9 +233,10 @@ pub fn view_track_header<'a>(
             .style(quiet_action_style)
     };
 
+    let kind_label = text(track.kind.label()).size(10).color(th::text_dim());
     let name_row = row![
-        type_icon,
         name_widget,
+        kind_label,
         horizontal_space(),
         auto_btn,
         add_btn
