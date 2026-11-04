@@ -91,6 +91,21 @@ where
     .into()
 }
 
+fn track_launch_picker<'a, T, L>(
+    all: L,
+    selected: T,
+    on_select: impl Fn(T) -> Message + 'a,
+) -> Element<'a, Message>
+where
+    T: Clone + PartialEq + std::fmt::Display + 'static,
+    L: std::borrow::Borrow<[T]> + 'a,
+{
+    pick_list(all, Some(selected), on_select)
+        .text_size(9)
+        .padding([1, 4])
+        .into()
+}
+
 pub(super) const MIN_CLIP_DOCK_WIDTH: f32 = 900.0;
 pub(super) const LAUNCHER_NAME_INPUT_ID: &str = "launcher-name";
 
@@ -361,40 +376,6 @@ impl App {
         .into()
     }
 
-    fn view_track_launch_quantization(
-        &self,
-        track_id: vibez_core::id::TrackId,
-    ) -> Element<'_, Message> {
-        use vibez_core::perform::MusicalBoundary;
-        pick_list(
-            MusicalBoundary::ALL,
-            Some(self.state.perform.clips.launch_quantization(track_id)),
-            move |quantization| {
-                Message::Perform(PerformMsg::Clips(ClipMsg::SetLaunchQuantization {
-                    track_id,
-                    quantization,
-                }))
-            },
-        )
-        .text_size(9)
-        .padding([1, 4])
-        .into()
-    }
-
-    fn view_track_launch_mode(&self, track_id: vibez_core::id::TrackId) -> Element<'_, Message> {
-        use vibez_core::perform::ClipLaunchMode;
-        pick_list(
-            ClipLaunchMode::ALL,
-            Some(self.state.perform.clips.launch_mode(track_id)),
-            move |mode| {
-                Message::Perform(PerformMsg::Clips(ClipMsg::SetLaunchMode { track_id, mode }))
-            },
-        )
-        .text_size(9)
-        .padding([1, 4])
-        .into()
-    }
-
     fn view_clip_grid(&self, width: f32) -> Element<'_, Message> {
         let keyboard_active = self.state.perform.mode == PerformMode::Sections;
         let compact = self.state.view.window_height < 800.0;
@@ -530,8 +511,28 @@ impl App {
                         .height(20)
                         .into()
                     };
-                let launch = self.view_track_launch_quantization(track.id);
-                let mode = self.view_track_launch_mode(track.id);
+                let track_id = track.id;
+                let clips = &self.state.perform.clips;
+                let launch = track_launch_picker(
+                    vibez_core::perform::MusicalBoundary::ALL,
+                    clips.launch_quantization(track_id),
+                    move |quantization| {
+                        Message::Perform(PerformMsg::Clips(ClipMsg::SetLaunchQuantization {
+                            track_id,
+                            quantization,
+                        }))
+                    },
+                );
+                let mode = track_launch_picker(
+                    vibez_core::perform::ClipLaunchMode::ALL,
+                    clips.launch_mode(track_id),
+                    move |mode| {
+                        Message::Perform(PerformMsg::Clips(ClipMsg::SetLaunchMode {
+                            track_id,
+                            mode,
+                        }))
+                    },
+                );
                 let header = if compact {
                     column![row![track_name, mode, launch]
                         .spacing(4)
