@@ -931,6 +931,46 @@ fn a_click_with_a_shaky_hand_never_moves_an_off_grid_clip() {
 }
 
 #[test]
+fn dragging_an_off_grid_clip_moves_it_by_whole_grid_steps_keeping_its_offset() {
+    let (canvas, clip_id) = canvas_with_off_grid_audio_clip();
+    let start = Point::new(canvas.beat_to_x(1.5), CLIP_Y + 4.0);
+    let mut state = ClipInteractionState::default();
+
+    left_event(
+        &canvas,
+        &mut state,
+        iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left),
+        start,
+    );
+    // 1.1 beats of travel on the 1/8 grid is two grid steps.
+    let target = Point::new(canvas.beat_to_x(2.6), start.y);
+    let moved = left_event(
+        &canvas,
+        &mut state,
+        iced::mouse::Event::CursorMoved { position: target },
+        target,
+    );
+
+    match moved {
+        Some(Message::UndoGesture { edit, .. }) => match *edit {
+            Message::Arrangement(ArrangementMsg::MoveSelectedClips {
+                anchor,
+                new_position_beats,
+                ..
+            }) => {
+                assert_eq!(anchor, clip_id);
+                assert!(
+                    (new_position_beats - 2.1).abs() < 1e-4,
+                    "moved to {new_position_beats}"
+                );
+            }
+            other => panic!("expected a clip move, got {other:?}"),
+        },
+        other => panic!("expected a clip move, got {other:?}"),
+    }
+}
+
+#[test]
 fn one_clip_edit_key_press_emits_one_message_whatever_the_lane_count() {
     let lanes: Vec<_> = (0..3)
         .map(|_| canvas_with_selected_audio_clip().0)
