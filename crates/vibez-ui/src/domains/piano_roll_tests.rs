@@ -401,6 +401,33 @@ fn a_clip_length_drag_step_edits_the_clip_bounds_in_place() {
 }
 
 #[test]
+fn halving_a_clip_edits_its_bounds_in_place() {
+    let (mut tracks, tid, cid) = midi_track_with_clip();
+    let mut piano_roll = PianoRollState::default();
+    let mut engine = RecordingEngine::default();
+
+    piano_roll.update(
+        PianoRollMsg::HalveNoteClip(tid, cid),
+        &mut engine,
+        &mut tracks,
+        PianoRollCtx::default(),
+    );
+
+    assert!(
+        matches!(
+            engine.0.as_slice(),
+            [EngineCommand::SetNoteClipBounds {
+                track_id,
+                clip_id,
+                duration_beats: 2.0,
+                ..
+            }] if (*track_id, *clip_id) == (tid, cid)
+        ),
+        "one in-place edit, never three separate ones"
+    );
+}
+
+#[test]
 fn halving_and_regrowing_a_looped_clip_keeps_its_loop() {
     let (mut tracks, tid, cid) = midi_track_with_clip();
     let clip = &mut tracks.get_mut(tid).unwrap().note_clips[0];
