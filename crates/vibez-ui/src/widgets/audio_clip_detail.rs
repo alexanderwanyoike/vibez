@@ -195,6 +195,17 @@ impl AudioClipDetailWidget {
         )
     }
 
+    /// The furthest content frame the clip plays: from its start marker for
+    /// its length, or to the loop end once it wraps.
+    fn played_end(&self) -> u64 {
+        let end = self.start_marker.saturating_add(self.duration_samples);
+        if self.timeline().is_looping() {
+            end.min(self.loop_end)
+        } else {
+            end
+        }
+    }
+
     /// The content frame the playhead is playing, which wraps with the loop.
     fn playhead_timeline_frame(&self) -> Option<u64> {
         let clip_frame = self
@@ -461,6 +472,14 @@ impl canvas::Program<Message> for AudioClipDetailWidget {
             iced::Size::new(w, AUDIO_RULER_HEIGHT),
             theme::with_alpha(theme::bg_surface(), 0.96),
         );
+        let clip_end_x = self.timeline_to_x(self.played_end(), &bounds).max(0.0);
+        if clip_end_x < w {
+            frame.fill_rectangle(
+                Point::new(clip_end_x, 0.0),
+                iced::Size::new(w - clip_end_x, h),
+                theme::past_clip_end_shade(),
+            );
+        }
         if looping {
             clip_loop_markers::draw_brace(
                 &mut frame,

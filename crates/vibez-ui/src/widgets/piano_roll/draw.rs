@@ -314,6 +314,21 @@ impl PianoRollWidget {
             }
         }
 
+        // Loop repeats are drawn laid out after the loop, so the clip ends
+        // its length after the start marker, wrapped or not.
+        let start_marker = self
+            .clip
+            .as_ref()
+            .map_or(0.0, |clip| clip.start_marker_beats);
+        let clip_end_x = geometry.beat_to_x(start_marker + total).max(KEY_WIDTH);
+        if clip_end_x < w {
+            frame.fill_rectangle(
+                iced::Point::new(clip_end_x, RULER_HEIGHT),
+                iced::Size::new(w - clip_end_x, h - RULER_HEIGHT),
+                theme::past_clip_end_shade(),
+            );
+        }
+
         // ── Rubber-band selection rectangle ──
         if let Some(DragAction::MarqueeNotes {
             anchor, current, ..
@@ -358,6 +373,14 @@ impl PianoRollWidget {
             iced::Size::new(w, RULER_HEIGHT),
             theme::bg_surface(),
         );
+
+        if clip_end_x < w {
+            frame.fill_rectangle(
+                iced::Point::new(clip_end_x, 0.0),
+                iced::Size::new(w - clip_end_x, RULER_HEIGHT),
+                theme::past_clip_end_shade(),
+            );
+        }
 
         // Paint the brace below ruler text so bar numbers remain legible.
         if let Some(clip) = &self.clip {
