@@ -67,3 +67,19 @@ pub fn fit_text(text: &str, width: f32, size: f32, font: Font, min_kept: usize) 
         fitted
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SIZE: f32 = 11.0;
+
+    #[test]
+    fn a_cut_at_a_space_drops_the_space_before_the_ellipsis() {
+        let width = text_width("Open \u{2026}", SIZE, Font::DEFAULT);
+
+        let fitted = fit_text("Open Hat Long Tail", width, SIZE, Font::DEFAULT, 0);
+
+        assert_eq!(fitted.as_deref(), Some("Open\u{2026}"));
+    }
+}
