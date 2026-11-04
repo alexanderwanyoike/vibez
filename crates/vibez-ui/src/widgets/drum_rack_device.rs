@@ -30,6 +30,7 @@ use crate::widgets::device_controls::{
 use crate::widgets::mini_waveform::column_peaks;
 use crate::widgets::on_blur::on_blur;
 use crate::widgets::sampler_device::SamplerView;
+use crate::widgets::text_fit::fit_text;
 
 const PAD: f32 = 10.0;
 const GAP: f32 = 4.0;
@@ -203,23 +204,6 @@ pub fn preset_bar_width(layout: Layout) -> f32 {
     } else {
         bar
     }
-}
-
-/// A name cut to what fits `width`, ending in an ellipsis when it was cut.
-fn fitted(name: &str, width: f32, measure: impl Fn(&str) -> f32) -> String {
-    if measure(name) <= width {
-        return name.to_string();
-    }
-    let chars: Vec<char> = name.chars().collect();
-    (0..chars.len())
-        .rev()
-        .map(|keep| {
-            let mut cut: String = chars[..keep].iter().collect::<String>().trim_end().into();
-            cut.push('\u{2026}');
-            cut
-        })
-        .find(|cut| measure(cut) <= width)
-        .unwrap_or_default()
 }
 
 /// One pad: its name, which scrolls while hovered when too long to show,
@@ -410,7 +394,17 @@ impl canvas::Program<Message> for PadView<'_> {
                     frame.fill_text(line(name.to_string(), x));
                     frame.fill_text(line(name.to_string(), x + lap));
                 }
-                None => frame.fill_text(line(fitted(name, name_area.width, measure), 0.0)),
+                None => frame.fill_text(line(
+                    fit_text(
+                        name,
+                        name_area.width,
+                        size_px,
+                        crate::typography::PERFORM_LABEL,
+                        0,
+                    )
+                    .unwrap_or_default(),
+                    0.0,
+                )),
             }
         });
         let mut geometry = vec![frame.into_geometry()];
@@ -1049,18 +1043,6 @@ mod tests {
             assert!(!default.short && default.rows == 4, "{width}: {default:?}");
         }
         assert!(arrange(Size::new(SIDE_BY_SIDE_W, 168.0)).side_by_side);
-    }
-
-    #[test]
-    fn a_long_name_is_cut_with_an_ellipsis_and_a_short_one_kept() {
-        let measure = |content: &str| content.chars().count() as f32 * 6.0;
-        assert_eq!(fitted("Kick", 100.0, measure), "Kick");
-        let cut = fitted("Open Hat Long Tail 03", 50.0, measure);
-        assert!(cut.ends_with('\u{2026}'), "{cut}");
-        assert!(measure(&cut) <= 50.0, "{cut}");
-        assert_eq!(cut, "Open Ha\u{2026}");
-        // A cut at a space drops the space.
-        assert_eq!(fitted("Open Hat", 36.0, measure), "Open\u{2026}");
     }
 
     #[test]
