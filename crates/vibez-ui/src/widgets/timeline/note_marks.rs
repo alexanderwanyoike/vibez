@@ -43,3 +43,77 @@ pub(super) fn note_marks(
         })
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::note_marks;
+    use iced::Rectangle;
+
+    const AREA: Rectangle = Rectangle {
+        x: 0.0,
+        y: 22.0,
+        width: 800.0,
+        height: 44.0,
+    };
+
+    fn sixteenths(pitch: u8, count: usize) -> Vec<(u8, f64, f64, bool)> {
+        (0..count)
+            .map(|index| (pitch, index as f64 * 0.25, 0.2, false))
+            .collect()
+    }
+
+    #[test]
+    fn a_single_pitch_clip_draws_its_notes_centred_in_the_body() {
+        let marks = note_marks(&sixteenths(36, 4), 0.0, AREA, 20.0);
+
+        let centre = marks[0].rect.y + marks[0].rect.height / 2.0;
+        assert!(
+            (centre - (AREA.y + AREA.height / 2.0)).abs() < 0.5,
+            "centre {centre}"
+        );
+    }
+
+    #[test]
+    fn dense_notes_on_one_pitch_merge_into_one_mark_when_zoomed_out() {
+        let marks = note_marks(&sixteenths(36, 64), 0.0, AREA, 1.0);
+
+        assert_eq!(marks.len(), 1);
+        assert_eq!(marks[0].rect.x, 0.0);
+        assert_eq!(marks[0].rect.width, 16.0);
+    }
+
+    #[test]
+    fn notes_with_space_between_them_stay_separate_marks() {
+        let marks = note_marks(&sixteenths(36, 8), 0.0, AREA, 20.0);
+
+        assert_eq!(marks.len(), 8);
+    }
+
+    #[test]
+    fn a_note_shorter_than_a_pixel_paints_one_whole_pixel() {
+        let marks = note_marks(&[(60, 0.5, 0.1, false)], 10.0, AREA, 1.0);
+
+        assert_eq!(marks[0].rect.x, 10.0);
+        assert_eq!(marks[0].rect.width, 1.0);
+    }
+
+    #[test]
+    fn only_the_visible_part_of_a_scrolled_clip_makes_marks() {
+        let notes = [
+            (60, 0.0, 1.0, false),
+            (60, 49.5, 1.0, false),
+            (60, 55.0, 1.0, false),
+            (60, 60.0, 1.0, false),
+            (60, 200.0, 1.0, false),
+        ];
+        let visible = Rectangle {
+            width: 200.0,
+            ..AREA
+        };
+
+        let marks = note_marks(&notes, -1000.0, visible, 20.0);
+
+        let spans: Vec<_> = marks.iter().map(|m| (m.rect.x, m.rect.width)).collect();
+        assert_eq!(spans, [(0.0, 10.0), (100.0, 20.0)]);
+    }
+}
