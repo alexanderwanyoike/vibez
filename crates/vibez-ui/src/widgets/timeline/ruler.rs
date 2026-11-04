@@ -63,6 +63,8 @@ pub struct RulerInteractionState {
     drag: Option<RulerDragAction>,
     double_click: DoubleClick,
     shift_held: bool,
+    /// Bypasses the grid, as Alt does in Ableton.
+    alt_held: bool,
 }
 
 impl RulerWidget {
@@ -200,9 +202,14 @@ impl canvas::Program<Message> for RulerWidget {
                             beat,
                             phase: DragPhase::Pending,
                             ..
-                        } => Some(Message::Transport(TransportMsg::SeekToBeat(
-                            self.grid.snap_beat(beat, self.pixels_per_beat()),
-                        ))),
+                        } => {
+                            let beat = if state.alt_held {
+                                beat
+                            } else {
+                                self.grid.snap_beat(beat, self.pixels_per_beat())
+                            };
+                            Some(Message::Transport(TransportMsg::SeekToBeat(beat)))
+                        }
                         RulerDragAction::Numbers { .. } | RulerDragAction::Brace { .. } => None,
                     };
                     return (canvas::event::Status::Captured, msg);
@@ -281,6 +288,7 @@ impl canvas::Program<Message> for RulerWidget {
             // Track shift key state for zoom
             canvas::Event::Keyboard(iced::keyboard::Event::ModifiersChanged(modifiers)) => {
                 state.shift_held = modifiers.shift();
+                state.alt_held = modifiers.alt();
             }
             _ => {}
         }

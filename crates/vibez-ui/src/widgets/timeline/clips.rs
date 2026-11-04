@@ -47,6 +47,8 @@ enum VerticalWheelRouting {
 pub struct ClipInteractionState {
     pub drag: Option<ClipDragAction>,
     pub shift_held: bool,
+    /// Bypasses the grid, as Alt does in Ableton.
+    pub alt_held: bool,
 }
 
 /// Canvas for ONE track's clip area (waveforms, borders, names, playhead overlay).
@@ -843,9 +845,12 @@ impl canvas::Program<Message> for TrackClipCanvas {
                     let msg = match drag {
                         ClipDragAction::PendingSeek { beat, .. } => {
                             // Short click → seek + clear selection
-                            Some(Message::Transport(TransportMsg::SeekToBeat(
-                                self.snapped_beat(*beat),
-                            )))
+                            let beat = if state.alt_held {
+                                *beat
+                            } else {
+                                self.snapped_beat(*beat)
+                            };
+                            Some(Message::Transport(TransportMsg::SeekToBeat(beat)))
                         }
                         ClipDragAction::RegionSelect { .. } => {
                             // Drops the box; the clip selection it produced
@@ -922,6 +927,7 @@ impl canvas::Program<Message> for TrackClipCanvas {
             // -- Track shift key state for multi-select --
             canvas::Event::Keyboard(iced::keyboard::Event::ModifiersChanged(modifiers)) => {
                 state.shift_held = modifiers.shift();
+                state.alt_held = modifiers.alt();
             }
 
             _ => {}
