@@ -21,18 +21,9 @@ impl AudioEngine {
         clip_id: vibez_core::id::ClipId,
         duration_beats: f64,
     ) {
-        if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
-            if let Some(clip) = track
-                .playback_source
-                .note_clips
-                .iter_mut()
-                .find(|c| c.id == clip_id)
-            {
-                clip.duration_beats = duration_beats;
-            }
-            track.flush_notes();
-        }
-        self.recalculate_audio_length();
+        self.reshape_note_clip(track_id, clip_id, |clip| {
+            clip.duration_beats = duration_beats;
+        });
     }
 
     pub(super) fn command_set_note_clip_bounds(
@@ -44,6 +35,21 @@ impl AudioEngine {
         loop_start_beats: f64,
         loop_end_beats: f64,
     ) {
+        self.reshape_note_clip(track_id, clip_id, |clip| {
+            clip.duration_beats = duration_beats;
+            clip.start_marker_beats = start_marker_beats;
+            clip.loop_start_beats = loop_start_beats;
+            clip.loop_end_beats = loop_end_beats;
+        });
+    }
+
+    /// Notes sounding from the old shape would never get their note-offs.
+    fn reshape_note_clip(
+        &mut self,
+        track_id: vibez_core::id::TrackId,
+        clip_id: vibez_core::id::ClipId,
+        reshape: impl FnOnce(&mut crate::playback_source::EngineNoteClip),
+    ) {
         if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
             if let Some(clip) = track
                 .playback_source
@@ -51,10 +57,7 @@ impl AudioEngine {
                 .iter_mut()
                 .find(|c| c.id == clip_id)
             {
-                clip.duration_beats = duration_beats;
-                clip.start_marker_beats = start_marker_beats;
-                clip.loop_start_beats = loop_start_beats;
-                clip.loop_end_beats = loop_end_beats;
+                reshape(clip);
             }
             track.flush_notes();
         }
