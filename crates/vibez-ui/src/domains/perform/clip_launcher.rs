@@ -290,11 +290,7 @@ impl ClipMsg {
     pub const fn marks_dirty(&self) -> bool {
         matches!(
             self,
-            Self::CreateMidi { .. }
-                | Self::Delete(_)
-                | Self::Duplicate(_)
-                | Self::ToggleLoop(_)
-                | Self::SetClipLaunchQuantization { .. }
+            Self::CreateMidi { .. } | Self::Delete(_) | Self::Duplicate(_) | Self::ToggleLoop(_)
         )
     }
 
@@ -304,7 +300,11 @@ impl ClipMsg {
     pub const fn defers_project_edit(&self) -> bool {
         matches!(
             self,
-            Self::Cut | Self::Paste | Self::Drop { .. } | Self::SetLaunchQuantization { .. }
+            Self::Cut
+                | Self::Paste
+                | Self::Drop { .. }
+                | Self::SetLaunchQuantization { .. }
+                | Self::SetClipLaunchQuantization { .. }
         )
     }
 }
@@ -630,8 +630,14 @@ impl PerformState {
                 clip_id,
                 quantization,
             } => {
-                if let Some(clip) = Arc::make_mut(&mut self.clips).by_id_mut(clip_id) {
-                    clip.launch_quantization = quantization;
+                if self
+                    .clips
+                    .by_id(clip_id)
+                    .is_some_and(|clip| clip.launch_quantization != quantization)
+                {
+                    if let Some(clip) = Arc::make_mut(&mut self.clips).by_id_mut(clip_id) {
+                        clip.launch_quantization = quantization;
+                    }
                 }
             }
             ClipMsg::MoveWindow { tracks, rows } => {
