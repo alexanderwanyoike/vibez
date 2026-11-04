@@ -266,7 +266,13 @@ impl ViewState {
                 self.edit_name_text.clear();
                 action.close_device_menu = true;
             }
-            ViewMsg::TrackHeaderHovered { .. } => {}
+            ViewMsg::TrackHeaderHovered { track_id, hovered } => {
+                if hovered {
+                    self.hovered_track_header = Some(track_id);
+                } else if self.hovered_track_header == Some(track_id) {
+                    self.hovered_track_header = None;
+                }
+            }
         }
         action
     }
