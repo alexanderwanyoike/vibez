@@ -6,6 +6,7 @@ use iced::{Point, Rectangle, Size};
 
 use super::*;
 use crate::state::{SnapGrid, UndoGestureId};
+use crate::timeline_geometry::TimelineViewport;
 
 /// The loop strip and the number strip of an Arrange ruler.
 const STRIP_Y: f32 = 6.0;
@@ -164,4 +165,76 @@ fn section_rulers_have_no_loop_strip() {
         release(&ruler, &mut state, Point::new(100.0, STRIP_Y)),
         Some(Message::Transport(TransportMsg::SeekToBeat(_)))
     ));
+}
+
+fn viewport_of(message: Option<Message>) -> Option<TimelineViewport> {
+    match message? {
+        Message::View(ViewMsg::SetViewport(viewport)) => Some(viewport),
+        _ => None,
+    }
+}
+
+#[test]
+fn dragging_down_on_the_numbers_zooms_in_around_the_grabbed_beat() {
+    let ruler = ruler();
+    let mut state = RulerInteractionState::default();
+
+    press(&ruler, &mut state, Point::new(400.0, NUMBERS_Y));
+    let view = viewport_of(move_to(
+        &ruler,
+        &mut state,
+        Point::new(400.0, NUMBERS_Y + 50.0),
+    ));
+
+    assert_eq!(
+        view,
+        Some(TimelineViewport::new(1.0, 0.0).ruler_dragged(20.0, 400.0, 50.0))
+    );
+    assert!(view.is_some_and(|view| view.zoom_level > 1.0));
+    assert!(
+        release(&ruler, &mut state, Point::new(400.0, NUMBERS_Y + 50.0)).is_none(),
+        "a zoom drag never moves the play start"
+    );
+}
+
+#[test]
+fn dragging_sideways_on_the_numbers_pans_with_the_pointer() {
+    let ruler = RulerWidget {
+        scroll_offset_beats: 10.0,
+        ..ruler()
+    };
+    let mut state = RulerInteractionState::default();
+
+    press(&ruler, &mut state, Point::new(400.0, NUMBERS_Y));
+    let view = viewport_of(move_to(&ruler, &mut state, Point::new(300.0, NUMBERS_Y)));
+
+    assert_eq!(view, Some(TimelineViewport::new(1.0, 15.0)));
+}
+
+#[test]
+fn double_clicking_the_numbers_fits_the_song() {
+    let ruler = ruler();
+    let mut state = RulerInteractionState::default();
+    let at = Point::new(400.0, NUMBERS_Y);
+
+    press(&ruler, &mut state, at);
+    release(&ruler, &mut state, at);
+
+    assert!(matches!(
+        press(&ruler, &mut state, at),
+        Some(Message::View(ViewMsg::ZoomToFit))
+    ));
+    assert!(release(&ruler, &mut state, at).is_none());
+}
+
+#[test]
+fn double_clicking_the_loop_strip_does_not_fit() {
+    let ruler = ruler();
+    let mut state = RulerInteractionState::default();
+    let at = Point::new(100.0, STRIP_Y);
+
+    press(&ruler, &mut state, at);
+    release(&ruler, &mut state, at);
+
+    assert!(press(&ruler, &mut state, at).is_none());
 }
