@@ -713,30 +713,19 @@ impl canvas::Program<Message> for TrackClipCanvas {
                                     self.x_to_beat(local_x),
                                     self.pixels_per_beat(),
                                 );
-
-                                if *is_note_clip {
-                                    let edit =
-                                        Message::Arrangement(ArrangementMsg::ResizeSelectedClips {
-                                            anchor: ArrangementSelection::NoteClip {
-                                                track_id,
-                                                clip_id: *clip_id,
-                                            },
-                                            new_duration_beats: snapped,
-                                        })
-                                        .in_undo_gesture(*undo_gesture);
-                                    return (canvas::event::Status::Captured, Some(edit));
+                                let clip_id = *clip_id;
+                                let anchor = if *is_note_clip {
+                                    ArrangementSelection::NoteClip { track_id, clip_id }
                                 } else {
-                                    let edit =
-                                        Message::Arrangement(ArrangementMsg::ResizeSelectedClips {
-                                            anchor: ArrangementSelection::AudioClip {
-                                                track_id,
-                                                clip_id: *clip_id,
-                                            },
-                                            new_duration_beats: snapped,
-                                        })
-                                        .in_undo_gesture(*undo_gesture);
-                                    return (canvas::event::Status::Captured, Some(edit));
-                                }
+                                    ArrangementSelection::AudioClip { track_id, clip_id }
+                                };
+                                let edit =
+                                    Message::Arrangement(ArrangementMsg::ResizeSelectedClips {
+                                        anchor,
+                                        new_duration_beats: snapped,
+                                    })
+                                    .in_undo_gesture(*undo_gesture);
+                                return (canvas::event::Status::Captured, Some(edit));
                             }
                             ClipDragAction::FadeClip(drag) => {
                                 let edit = Message::Arrangement(ArrangementMsg::SetAudioClipFade {
