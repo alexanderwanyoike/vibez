@@ -3,7 +3,7 @@
 use super::presentation_queue::PresentationAdmission;
 use super::*;
 use crate::events::{ClipPlayingState, ClipQueuedState, ClipTrackState};
-use crate::playback_source::{ActiveClipPlayback, PreparedClipPlayback};
+use crate::playback_source::PreparedClipPlayback;
 
 impl AudioEngine {
     pub(super) fn edit_clip(
@@ -223,15 +223,7 @@ impl AudioEngine {
                 let track = &mut self.tracks[index];
                 let event = if queued_due {
                     let mut prepared = track.queued_clip.take().expect("due Clip").prepared;
-                    track.flush_notes();
-                    std::mem::swap(&mut track.launcher_source, &mut prepared.source);
-                    track.active_clip = prepared.clip_id.map(|clip_id| ActiveClipPlayback {
-                        clip_id,
-                        request_id: prepared.request_id,
-                        position: 0,
-                        length: prepared.length_samples.max(1),
-                        looping: prepared.looping,
-                    });
+                    track.start_launcher_clip(&mut prepared);
                     EngineEvent::ClipTransitioned {
                         track_id: prepared.track_id,
                         clip_id: prepared.clip_id,

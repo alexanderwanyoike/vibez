@@ -8,6 +8,7 @@ use crate::note_repeat::{NoteRepeatTrigger, TrackNoteRepeats};
 use crate::playback_source::PreparedPlaybackSource;
 pub use crate::playback_source::{EngineClip, EngineNoteClip};
 mod channel_strip;
+mod clip_launch;
 mod effect_slot;
 mod groove;
 mod note_repeat;

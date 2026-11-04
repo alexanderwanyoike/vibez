@@ -3,7 +3,7 @@
 use super::clip_launcher::ClipEventContext;
 use super::presentation_queue::PresentationAdmission;
 use super::*;
-use crate::playback_source::{ActiveClipPlayback, PreparedClipPlayback, QueuedClipPlayback};
+use crate::playback_source::{PreparedClipPlayback, QueuedClipPlayback};
 use vibez_core::perform::MusicalBoundary;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -276,15 +276,7 @@ impl AudioEngine {
                 }
                 debug_assert!(batch.clips.len() < batch.clips.capacity());
                 let mut prepared = track.queued_clip.take().expect("batch slot").prepared;
-                track.flush_notes();
-                std::mem::swap(&mut track.launcher_source, &mut prepared.source);
-                track.active_clip = prepared.clip_id.map(|clip_id| ActiveClipPlayback {
-                    clip_id,
-                    request_id: prepared.request_id,
-                    position: 0,
-                    length: prepared.length_samples.max(1),
-                    looping: prepared.looping,
-                });
+                track.start_launcher_clip(&mut prepared);
                 batch.clips.push(prepared);
             }
             batch.clips.reverse();
