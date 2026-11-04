@@ -13,8 +13,8 @@ use crate::domains::transport::TransportMsg;
 use crate::domains::view::ViewMsg;
 use crate::message::Message;
 use crate::state::{
-    ArrangementMarqueeRect, ArrangementSelection, ClipSpan, ContextMenuTarget, GridConfig,
-    ProjectTrack, TrackTimelineContent, UndoGestureId,
+    ArrangementMarqueeRect, ArrangementSelection, ClipDragPreview, ClipSpan, ContextMenuTarget,
+    GridConfig, ProjectTrack, TrackTimelineContent, UndoGestureId,
 };
 use crate::timeline_geometry::TimelineGeometry;
 use crate::timeline_snap::{SnapContext, SnapTargets};
@@ -111,6 +111,9 @@ pub struct TrackClipCanvas {
     pub sample_drop_detail: Option<String>,
     /// Clip edges and markers on every lane that drags and clicks lock onto.
     pub snap_targets: Arc<SnapTargets>,
+    /// The Clip drag in flight on this lane's timeline, whichever lane it
+    /// began on.
+    pub clip_drag: Option<ClipDragPreview>,
     /// The track name this canvas was constructed with. Drawn on the drop
     /// indicator so the user can verify which lane will receive the drop.
     pub track_name: String,
@@ -275,6 +278,7 @@ impl TrackClipCanvas {
             sample_drop_duration_beats,
             sample_drop_detail,
             snap_targets: Arc::default(),
+            clip_drag: None,
             track_name: track.name.clone(),
         }
     }
@@ -294,6 +298,11 @@ impl TrackClipCanvas {
 
     pub fn with_snap_targets(mut self, snap_targets: Arc<SnapTargets>) -> Self {
         self.snap_targets = snap_targets;
+        self
+    }
+
+    pub fn with_clip_drag(mut self, clip_drag: Option<ClipDragPreview>) -> Self {
+        self.clip_drag = clip_drag;
         self
     }
 

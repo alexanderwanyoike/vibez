@@ -334,7 +334,8 @@ impl App {
                 row_spans.clone(),
                 timeline.marquee.as_ref().map(|marquee| marquee.rect),
             )
-            .with_snap_targets(snap_targets.clone());
+            .with_snap_targets(snap_targets.clone())
+            .with_clip_drag(timeline.clip_drag.as_ref().map(|drag| drag.preview.clone()));
             if let Some(preview) = self.state.audio_recording.preview_for_track(track.id) {
                 let name = match preview.source {
                     crate::domains::audio_recording::AudioRecordingSource::HardwareInput => {
