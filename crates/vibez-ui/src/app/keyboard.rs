@@ -33,6 +33,7 @@ impl EdgeShortcutState {
                         | crate::domains::perform::ClipMsg::StopTrack(_)
                 ))
                 | Message::Perform(PerformMsg::Capture(CaptureMsg::Toggle))
+                | Message::View(ViewMsg::ZoomToSelection | ViewMsg::ZoomBack)
         );
         if !edge_triggered {
             return true;
@@ -430,6 +431,15 @@ pub(crate) fn global_key_handler(
             };
             if let Some(bank) = bank {
                 return Some(Message::Perform(bank));
+            }
+            // Reached only when no Perform pad claimed the key.
+            let zoom = match character.as_str() {
+                "z" => Some(ViewMsg::ZoomToSelection),
+                "x" => Some(ViewMsg::ZoomBack),
+                _ => None,
+            };
+            if let Some(zoom) = zoom {
+                return Some(Message::View(zoom));
             }
         }
     }
