@@ -74,7 +74,7 @@ impl TimelineEditorState {
                 // Remove from engine source track
                 engine.send(EngineCommand::RemoveNoteClip(source_track, clip_id));
                 // Add to engine target track
-                engine.add_note_clip(target_track, &clip);
+                engine.send(clip.add_command(target_track));
                 // Add to UI target track
                 if let Some(track) = self.find_content_mut(target_track) {
                     track.note_clips.push(clip);

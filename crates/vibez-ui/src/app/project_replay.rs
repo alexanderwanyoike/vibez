@@ -362,7 +362,7 @@ impl App {
         }
 
         for clip in &content.note_clips {
-            crate::domains::EngineHandle::add_note_clip(&mut self.cmd_tx, track.id, clip);
+            self.send_command(clip.add_command(track.id));
         }
     }
 

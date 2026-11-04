@@ -15,6 +15,7 @@ pub mod auto_pan;
 pub mod automation;
 pub mod bitcrush;
 pub mod browser;
+mod clip_commands;
 pub mod compensation;
 pub mod compressor;
 pub mod delay;
@@ -82,27 +83,6 @@ pub trait EngineHandle {
     ) {
         let command = EngineCommand::set_built_in_instrument(track_id, kind, self.sample_rate());
         self.send(command);
-    }
-
-    fn add_note_clip(
-        &mut self,
-        track_id: vibez_core::id::TrackId,
-        clip: &crate::state::UiNoteClip,
-    ) {
-        self.send(EngineCommand::AddNoteClip {
-            track_id,
-            insertion: vibez_engine::clip_insertion::PreparedNoteClipInsertion::new(
-                clip.id,
-                clip.position_beats,
-                clip.duration_beats,
-                clip.start_marker_beats,
-                clip.loop_enabled,
-                clip.loop_start_beats,
-                clip.loop_end_beats,
-                clip.groove_grid,
-            )
-            .with_notes(clip.notes.clone()),
-        });
     }
 }
 

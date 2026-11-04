@@ -367,7 +367,7 @@ impl TimelineEditorState {
                     clip.id = ClipId::new();
                     clip.position_beats = position_beats;
                     clip.selected_notes.clear();
-                    engine.add_note_clip(track_id, &clip);
+                    engine.send(clip.add_command(track_id));
                     selected.insert(ArrangementSelection::NoteClip {
                         track_id,
                         clip_id: clip.id,

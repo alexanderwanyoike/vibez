@@ -624,7 +624,7 @@ impl PianoRollState {
                 // Sync to engine outside the mutable borrow
                 if let Some(clip) = sync_data {
                     engine.send(EngineCommand::RemoveNoteClip(track_id, clip_id));
-                    engine.add_note_clip(track_id, &clip);
+                    engine.send(clip.add_command(track_id));
                 }
                 action.status = Some("Cropped clip to content".to_string());
             }
@@ -659,7 +659,7 @@ impl PianoRollState {
                 // Sync to engine via Remove+Add+re-add-notes (loop state included atomically)
                 if let Some(clip) = sync_data {
                     engine.send(EngineCommand::RemoveNoteClip(track_id, clip_id));
-                    engine.add_note_clip(track_id, &clip);
+                    engine.send(clip.add_command(track_id));
                 }
                 if let Some(end_beat) = clip_end_beat {
                     action.scroll_to_beat = Some(end_beat);

@@ -502,7 +502,7 @@ impl TimelineEditorState {
                     }
                     if let Some(clip) = sync {
                         engine.send(EngineCommand::RemoveNoteClip(track_id, clip_id));
-                        engine.add_note_clip(track_id, &clip);
+                        engine.send(clip.add_command(track_id));
                     }
                 }
             }

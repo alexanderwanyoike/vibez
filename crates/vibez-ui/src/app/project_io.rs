@@ -790,11 +790,7 @@ impl App {
                 loop_end_beats: note_clip.loop_end_beats,
                 groove_grid: note_clip.groove_grid,
             };
-            crate::domains::EngineHandle::add_note_clip(
-                &mut self.cmd_tx,
-                note_clip.track_id,
-                &clip,
-            );
+            self.send_command(clip.add_command(note_clip.track_id));
             if self.state.find_track(note_clip.track_id).is_some() {
                 self.state
                     .arrange_content_mut(note_clip.track_id)

@@ -634,7 +634,7 @@ impl TimelineEditorState {
             loop_end_beats: total_duration,
             groove_grid: vibez_core::perform::GrooveGrid::Off,
         };
-        engine.add_note_clip(track_id, &joined);
+        engine.send(joined.add_command(track_id));
         if let Some(track) = self.find_content_mut(track_id) {
             track.note_clips.push(joined);
         }
@@ -707,7 +707,7 @@ impl TimelineEditorState {
             content.note_clips.retain(|clip| clip.id != original_id);
         }
         for clip in &fragments {
-            engine.add_note_clip(track_id, clip);
+            engine.send(clip.add_command(track_id));
         }
         if let Some(content) = self.find_content_mut(track_id) {
             content.note_clips.extend(fragments);

@@ -438,7 +438,7 @@ impl TimelineEditorState {
                                         )
                                     });
                                 if let Some(duplicate) = duplicate {
-                                    engine.add_note_clip(*track_id, &duplicate);
+                                    engine.send(duplicate.add_command(*track_id));
                                     let new_id = duplicate.id;
                                     if let Some(track) = self.find_content_mut(*track_id) {
                                         track.note_clips.push(duplicate);
@@ -598,7 +598,7 @@ impl TimelineEditorState {
                 }
 
                 if let Some(new_clip) = new_clip_data {
-                    engine.add_note_clip(track_id, &new_clip);
+                    engine.send(new_clip.add_command(track_id));
                     if let Some(track) = self.find_content_mut(track_id) {
                         track.note_clips.push(new_clip);
                     }

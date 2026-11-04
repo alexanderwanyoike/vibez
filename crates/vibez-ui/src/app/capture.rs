@@ -340,7 +340,7 @@ fn apply_capture_to_arrangement(
             engine.send(add_audio_clip_command(track_id, clip));
         }
         for clip in &destination.note_clips {
-            engine.add_note_clip(track_id, clip);
+            engine.send(clip.add_command(track_id));
         }
         for lane in &destination.automation {
             engine.send(EngineCommand::SetAutomationLane {
