@@ -169,10 +169,47 @@ impl App {
             self.send_command(EngineCommand::RemoveBus(bus_id));
         }
 
-        self.state.project_tracks = snapshot.project_tracks;
+        self.state.project_tracks = Arc::clone(&snapshot.project_tracks);
         self.state
             .perform
             .sync_project_tracks(&self.state.project_tracks.tracks);
+        self.restore_snapshot_state(snapshot);
+
+        let tracks = self.state.project_tracks.tracks.clone();
+        for track in &tracks {
+            self.replay_track_to_engine(track);
+        }
+        let master = self.state.project_tracks.master.clone();
+        self.replay_track_to_engine(&master);
+        let buses = self.state.project_tracks.buses.clone();
+        for bus in &buses {
+            self.replay_bus_to_engine(bus);
+        }
+
+        // Reload plugin devices through the project-open pipeline;
+        // they re-enter the chains at their recorded positions.
+        self.spawn_project_plugin_loads(reloads.effects, reloads.instruments);
+        if self
+            .state
+            .audio_recording
+            .armed_track
+            .is_some_and(|id| self.state.find_track(id).is_none())
+        {
+            self.state.audio_recording.armed_track = None;
+        }
+        self.state.audio_recording.monitor_track = self
+            .state
+            .audio_recording
+            .armed_track
+            .or_else(|| self.persisted_monitor_on_track());
+        if let Err(error) = self.sync_audio_input_runtime() {
+            eprintln!("vibez: Audio Input could not follow project restore: {error}");
+        }
+    }
+
+    /// Everything but the Project Tracks follows the snapshot, and the engine
+    /// gets its tempo and loop; channels and their content are the caller's.
+    fn restore_snapshot_state(&mut self, snapshot: crate::state::ProjectSnapshot) {
         self.state.arrangement.timeline = snapshot.arrange_timeline;
         self.state.perform.sections = snapshot.sections;
         self.state.perform.clips = snapshot.launcher_clips;
@@ -208,37 +245,6 @@ impl App {
                 .state
                 .beats_to_samples(self.state.transport.loop_end_beats);
             self.send_command(EngineCommand::SetArrangementLoopRegion { start, end });
-        }
-
-        let tracks = self.state.project_tracks.tracks.clone();
-        for track in &tracks {
-            self.replay_track_to_engine(track);
-        }
-        let master = self.state.project_tracks.master.clone();
-        self.replay_track_to_engine(&master);
-        let buses = self.state.project_tracks.buses.clone();
-        for bus in &buses {
-            self.replay_bus_to_engine(bus);
-        }
-
-        // Reload plugin devices through the project-open pipeline;
-        // they re-enter the chains at their recorded positions.
-        self.spawn_project_plugin_loads(reloads.effects, reloads.instruments);
-        if self
-            .state
-            .audio_recording
-            .armed_track
-            .is_some_and(|id| self.state.find_track(id).is_none())
-        {
-            self.state.audio_recording.armed_track = None;
-        }
-        self.state.audio_recording.monitor_track = self
-            .state
-            .audio_recording
-            .armed_track
-            .or_else(|| self.persisted_monitor_on_track());
-        if let Err(error) = self.sync_audio_input_runtime() {
-            eprintln!("vibez: Audio Input could not follow project restore: {error}");
         }
     }
 
