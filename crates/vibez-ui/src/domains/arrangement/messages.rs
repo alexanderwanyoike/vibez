@@ -218,6 +218,12 @@ pub enum ArrangementMsg {
         anchor: ArrangementSelection,
         new_duration_beats: f64,
     },
+    /// Drag of `anchor`'s left edge: every selected Clip's start moves by
+    /// the same offset while its content keeps its Arrangement time.
+    TrimSelectedClipsStart {
+        anchor: ArrangementSelection,
+        new_start_beats: f64,
+    },
     /// Drag of `anchor`: the whole selection follows it by the same time
     /// offset and lane offset. The anchor is named by Clip id alone because
     /// the drag keeps going after it has changed lanes.
@@ -367,6 +373,7 @@ impl ArrangementMsg {
                 | Self::PasteClips
                 | Self::ToggleSelectedClipLoop
                 | Self::ResizeSelectedClips { .. }
+                | Self::TrimSelectedClipsStart { .. }
                 | Self::DuplicateNoteClip(..)
                 | Self::SplitAudioClip { .. }
                 | Self::SliceAudioClipAtMarkers { .. }
@@ -436,6 +443,7 @@ impl ArrangementMsg {
                 Self::DuplicateSelectedClip
                     | Self::MoveSelectedClips { .. }
                     | Self::ResizeSelectedClips { .. }
+                    | Self::TrimSelectedClipsStart { .. }
                     | Self::SplitSelectedAtPlayhead
                     | Self::JoinSelectedClips
                     | Self::SubmitAudioClipInspectorField { .. }

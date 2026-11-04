@@ -484,6 +484,12 @@ impl TimelineEditorState {
                     new_duration_beats,
                 );
             }
+            ArrangementMsg::TrimSelectedClipsStart {
+                anchor,
+                new_start_beats,
+            } => {
+                return self.op_trim_selected_clips_start(engine, ctx, anchor, new_start_beats);
+            }
             ArrangementMsg::MoveSelectedClips {
                 anchor,
                 new_position_beats,
@@ -797,6 +803,8 @@ impl TimelineEditorState {
 }
 
 mod audio_clip_inspector;
+mod clip_edges;
+mod clip_trims;
 mod fragment_geometry;
 mod media_ops;
 mod ops;

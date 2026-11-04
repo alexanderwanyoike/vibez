@@ -11,6 +11,7 @@ use vibez_core::id::{ClipId, TrackId};
 use vibez_core::midi::MidiNote;
 use vibez_engine::commands::EngineCommand;
 
+use super::clip_edges::sync_audio_edges;
 use super::fragment_geometry::{audio_fragment, unmuted_beat_ranges, visible_notes};
 use super::EngineHandle;
 use crate::state::{
@@ -611,11 +612,23 @@ impl TimelineEditorState {
         for fragment in &mut fragments {
             fragment.fades = fragment.fades.unlinked();
         }
-        engine.send(EngineCommand::RemoveClip(track_id, original_id));
+        let original = self
+            .find_content(track_id)
+            .and_then(|content| content.clips.iter().find(|clip| clip.id == original_id))
+            .cloned();
+        let kept = original
+            .zip(fragments.iter().find(|fragment| fragment.id == original_id))
+            .is_some_and(|(original, kept)| sync_audio_edges(engine, track_id, &original, kept));
+        if !kept {
+            engine.send(EngineCommand::RemoveClip(track_id, original_id));
+        }
         if let Some(content) = self.find_content_mut(track_id) {
             content.clips.retain(|clip| clip.id != original_id);
         }
-        for clip in &fragments {
+        for clip in fragments
+            .iter()
+            .filter(|fragment| !kept || fragment.id != original_id)
+        {
             engine.send(EngineCommand::AddClip {
                 insertion: vibez_engine::clip_insertion::PreparedClipInsertion::new(),
                 track_id,
