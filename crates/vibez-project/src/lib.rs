@@ -87,6 +87,9 @@ pub struct Project {
     pub launcher_clips: Vec<LauncherClipInfo>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub launcher_tracks: Vec<LauncherTrackInfo>,
+    /// Arrange lane height of every track resized away from the default.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub track_heights: Vec<(TrackId, f32)>,
 }
 
 impl Default for Project {
@@ -106,6 +109,7 @@ impl Default for Project {
             perform_layout: PerformLayout::default(),
             launcher_clips: Vec::new(),
             launcher_tracks: Vec::new(),
+            track_heights: Vec::new(),
         }
     }
 }
@@ -526,6 +530,7 @@ mod tests {
             perform_layout: Default::default(),
             launcher_clips: Vec::new(),
             launcher_tracks: Vec::new(),
+            track_heights: Vec::new(),
         };
 
         project.save_to_file(&path).unwrap();
@@ -603,6 +608,7 @@ mod tests {
             perform_layout: Default::default(),
             launcher_clips: Vec::new(),
             launcher_tracks: Vec::new(),
+            track_heights: Vec::new(),
         };
         let legacy_bytes = serde_json::to_vec_pretty(&project).unwrap();
 
@@ -711,6 +717,7 @@ mod tests {
             perform_layout: Default::default(),
             launcher_clips: Vec::new(),
             launcher_tracks: Vec::new(),
+            track_heights: Vec::new(),
         };
 
         project.save_to_file(&path).unwrap();
@@ -764,6 +771,7 @@ mod tests {
             perform_layout: Default::default(),
             launcher_clips: Vec::new(),
             launcher_tracks: Vec::new(),
+            track_heights: Vec::new(),
         };
 
         project.save_to_file(&path).unwrap();

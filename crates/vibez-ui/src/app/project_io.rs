@@ -354,6 +354,7 @@ impl App {
                     .iter()
                     .map(|track| track.id),
             ),
+            track_heights: Vec::new(),
             launcher_clips: self
                 .state
                 .perform

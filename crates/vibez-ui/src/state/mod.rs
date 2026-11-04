@@ -703,6 +703,8 @@ pub struct AppState {
     /// from `UiSettings::warp_confidence_threshold`.
     pub warp_confidence_threshold: f32,
     pub automation_ui: crate::domains::automation::AutomationState,
+    /// Arrange lane heights, saved with the project but outside undo.
+    pub track_heights: crate::domains::track_heights::TrackHeights,
 
     // Browser domain slice (sample library, Dropbox, drag-drop).
     pub browser: BrowserState,
@@ -754,6 +756,7 @@ impl Default for AppState {
             auto_warp_on_import: false,
             warp_confidence_threshold: 0.6,
             automation_ui: crate::domains::automation::AutomationState::default(),
+            track_heights: Default::default(),
             browser: BrowserState::default(),
             current_theme_name: "Charcoal".to_string(),
             user_themes: Vec::new(),
