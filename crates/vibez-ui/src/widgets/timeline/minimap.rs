@@ -9,6 +9,10 @@ use crate::message::Message;
 use crate::theme;
 use crate::timeline_geometry::TimelineGeometry;
 
+/// Space above and below the clip rows, so the viewport outline does not
+/// sit on top of the first and last track.
+const ROW_INSET: f32 = 3.0;
+
 /// Per-track data for the minimap overview.
 pub struct MinimapTrack {
     pub color: Color,
@@ -65,12 +69,8 @@ impl canvas::Program<Message> for ArrangementMinimap {
         let w = bounds.width;
         let h = bounds.height;
 
-        // Background
-        frame.fill_rectangle(
-            iced::Point::ORIGIN,
-            iced::Size::new(w, h),
-            theme::bg_elevated(),
-        );
+        let background = theme::track_bg();
+        frame.fill_rectangle(iced::Point::ORIGIN, iced::Size::new(w, h), background);
 
         if self.total_beats <= 0.0 || self.tracks.is_empty() {
             return vec![frame.into_geometry()];
@@ -78,12 +78,17 @@ impl canvas::Program<Message> for ArrangementMinimap {
 
         let overview = TimelineGeometry::fitted(self.total_beats, w, 0.0);
         let num_tracks = self.tracks.len();
-        let track_h = (h / num_tracks as f32).max(2.0);
+        let rows_h = h - 2.0 * ROW_INSET;
+        let track_h = (rows_h / num_tracks as f32).max(1.0);
+        let clip_h = if track_h >= 3.0 {
+            track_h - 1.0
+        } else {
+            track_h
+        };
 
-        // Draw clips for each track
         for (i, track) in self.tracks.iter().enumerate() {
-            let y = i as f32 * track_h;
-            let clip_color = theme::with_alpha(track.color, 0.6);
+            let y = ROW_INSET + i as f32 * track_h;
+            let clip_color = theme::blend(track.color, background, 0.15);
             for &(start, dur) in &track.clips {
                 let cx = overview.beat_to_x(start);
                 let cw = overview.width_for_beats(dur).max(1.0);
@@ -92,7 +97,7 @@ impl canvas::Program<Message> for ArrangementMinimap {
                 }
                 frame.fill_rectangle(
                     iced::Point::new(cx, y),
-                    iced::Size::new(cw, track_h),
+                    iced::Size::new(cw, clip_h),
                     clip_color,
                 );
             }
@@ -120,28 +125,22 @@ impl canvas::Program<Message> for ArrangementMinimap {
         let vx = vx_start.max(0.0);
         let vw = vx_end.min(w) - vx;
         if vw > 0.0 {
-            // Subtle fill
             frame.fill_rectangle(
                 iced::Point::new(vx, 0.0),
                 iced::Size::new(vw, h),
-                Color {
-                    a: 0.05,
-                    ..theme::text()
-                },
+                theme::with_alpha(theme::text(), 0.008),
             );
-            // Orange border
-            let rect_path = canvas::Path::new(|b| {
-                b.move_to(iced::Point::new(vx, 0.5));
-                b.line_to(iced::Point::new(vx + vw, 0.5));
-                b.line_to(iced::Point::new(vx + vw, h - 0.5));
-                b.line_to(iced::Point::new(vx, h - 0.5));
-                b.close();
-            });
+            let (left, right) = (vx.round() + 0.5, (vx + vw).round() - 0.5);
+            let outline = canvas::Path::rounded_rectangle(
+                iced::Point::new(left, 1.5),
+                iced::Size::new((right - left).max(1.0), h - 3.0),
+                3.0.into(),
+            );
             frame.stroke(
-                &rect_path,
+                &outline,
                 canvas::Stroke::default()
-                    .with_color(theme::accent())
-                    .with_width(1.5),
+                    .with_color(theme::blend(background, theme::text(), 0.55))
+                    .with_width(1.0),
             );
         }
 
