@@ -120,7 +120,7 @@ fn track_canvas_materialises_only_the_visible_note_clips() {
 }
 
 #[test]
-fn looped_note_previews_keep_initial_notes_solid_and_repeats_ghosted() {
+fn looped_note_previews_repeat_their_notes_on_every_pass() {
     let mut clip = note_clip(0.0);
     clip.duration_beats = 8.0;
     clip.notes = vec![MidiNote {
@@ -141,10 +141,10 @@ fn looped_note_previews_keep_initial_notes_solid_and_repeats_ghosted() {
     assert_eq!(
         canvas.note_clips[0].notes,
         vec![
-            (60, 0.0, 0.5, false),
-            (60, 2.0, 0.5, true),
-            (60, 4.0, 0.5, true),
-            (60, 6.0, 0.5, true),
+            (60, 0.0, 0.5),
+            (60, 2.0, 0.5),
+            (60, 4.0, 0.5),
+            (60, 6.0, 0.5),
         ]
     );
 }
@@ -415,7 +415,7 @@ fn recording_preview_is_visible_but_not_hit_testable() {
         position_beats: 0.0,
         duration_beats: 4.0,
         name: "● RECORDING LIVE".into(),
-        notes: vec![(60, 0.0, 0.5, false)],
+        notes: vec![(60, 0.0, 0.5)],
         start_marker_beats: 0.0,
         loop_enabled: false,
         loop_start_beats: 0.0,

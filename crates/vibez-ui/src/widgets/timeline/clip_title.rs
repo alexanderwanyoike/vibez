@@ -1,9 +1,7 @@
 //! Fitting a clip's name into its title strip.
 
 use iced::widget::canvas;
-use iced::Rectangle;
-
-use crate::theme;
+use iced::{Color, Rectangle};
 
 use super::CLIP_TITLE_HEIGHT;
 
@@ -63,14 +61,13 @@ fn clip_title_layout(
 pub(super) fn draw_clip_title(
     frame: &mut canvas::Frame,
     name: &str,
-    clip_x: f32,
-    clip_y: f32,
-    clip_w: f32,
+    body: Rectangle,
     loop_enabled: bool,
+    color: Color,
     viewport_width: f32,
 ) {
-    let title_width = (clip_w - if loop_enabled { 18.0 } else { 0.0 }).max(0.0);
-    let Some(layout) = clip_title_layout(clip_x, clip_y, title_width, viewport_width) else {
+    let title_width = (body.width - if loop_enabled { 18.0 } else { 0.0 }).max(0.0);
+    let Some(layout) = clip_title_layout(body.x, body.y, title_width, viewport_width) else {
         return;
     };
     let Some(title) = fit_clip_title(name, layout.region.width, loop_enabled) else {
@@ -80,7 +77,7 @@ pub(super) fn draw_clip_title(
         title_frame.fill_text(canvas::Text {
             content: title,
             position: layout.text,
-            color: theme::text(),
+            color,
             size: iced::Pixels(11.0),
             ..Default::default()
         });

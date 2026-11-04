@@ -2,7 +2,7 @@
 
 use iced::Color;
 
-use crate::theme::ClipStyle;
+use crate::theme::{self, ClipStyle};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) struct ClipColors {
@@ -15,15 +15,35 @@ pub(super) struct ClipColors {
     pub selection: Option<Color>,
 }
 
+/// How far a selected clip's title moves toward white.
+const SELECTED_TITLE_LIFT: f32 = 0.33;
+
+/// The colours of a clip on `track`'s lane in the active theme.
+pub(super) fn clip_colors(track: Color, selected: bool) -> ClipColors {
+    shade(
+        track,
+        selected,
+        theme::clip_style(),
+        theme::track_bg(),
+        theme::text(),
+    )
+}
+
 fn shade(track: Color, selected: bool, style: ClipStyle, lane: Color, text: Color) -> ClipColors {
-    let _ = (selected, style, lane, text);
+    let track = theme::with_alpha(track, 1.0);
+    let title = if selected {
+        theme::blend(track, Color::WHITE, SELECTED_TITLE_LIFT)
+    } else {
+        track
+    };
+    let body = theme::blend(track, lane, style.body_toward_lane);
     ClipColors {
-        title: Color::TRANSPARENT,
-        body: Color { a: 0.4, ..track },
-        ink: Color { a: 0.8, ..track },
-        text: Color::WHITE,
-        loop_tick: Color::TRANSPARENT,
-        selection: None,
+        title,
+        body: theme::with_alpha(body, style.body_opacity),
+        ink: style.ink,
+        text: theme::with_alpha(style.ink, 1.0),
+        loop_tick: theme::with_alpha(style.ink, style.ink.a * 0.2),
+        selection: selected.then(|| theme::with_alpha(text, 0.9)),
     }
 }
 

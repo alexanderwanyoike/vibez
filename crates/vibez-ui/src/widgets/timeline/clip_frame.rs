@@ -1,16 +1,17 @@
 //! The frame every timeline clip shares: its box, edge and title.
 
 use iced::widget::canvas;
-use iced::{Color, Rectangle};
+use iced::{Point, Rectangle, Size};
 
-use crate::theme;
-
+use super::clip_colors::ClipColors;
 use super::clip_title::draw_clip_title;
 use super::CLIP_TITLE_HEIGHT;
 
 /// Lane left showing after each clip, so back-to-back clips of one track
 /// still read as separate clips when zoomed out to the whole song.
 const CLIP_GAP: f32 = 1.0;
+
+const SELECTION_WIDTH: f32 = 1.0;
 
 /// The rectangle a clip's body, contents and border are painted in.
 pub(super) fn clip_box(clip_x: f32, clip_y: f32, clip_w: f32, clip_h: f32) -> Rectangle {
@@ -35,44 +36,41 @@ fn clip_outline(body: Rectangle, stroke_width: f32) -> Rectangle {
     }
 }
 
-/// Paint a clip's edge, title separator and name over its contents.
+/// Paint a clip's title strip and see-through body, under its contents.
+pub(super) fn draw_clip_back(frame: &mut canvas::Frame, body: Rectangle, colors: &ClipColors) {
+    let title_height = CLIP_TITLE_HEIGHT.min(body.height);
+    frame.fill_rectangle(
+        body.position(),
+        Size::new(body.width, title_height),
+        colors.title,
+    );
+    frame.fill_rectangle(
+        Point::new(body.x, body.y + title_height),
+        Size::new(body.width, body.height - title_height),
+        colors.body,
+    );
+}
+
+/// Paint a clip's selection edge and name over its contents.
 pub(super) fn draw_clip_front(
     frame: &mut canvas::Frame,
     body: Rectangle,
-    edge: Color,
-    edge_width: f32,
+    colors: &ClipColors,
     name: &str,
     looped: bool,
     viewport_width: f32,
 ) {
-    let outline = clip_outline(body, edge_width);
-    frame.stroke(
-        &canvas::Path::rectangle(outline.position(), outline.size()),
-        canvas::Stroke::default()
-            .with_color(edge)
-            .with_width(edge_width),
-    );
+    if let Some(selection) = colors.selection {
+        let outline = clip_outline(body, SELECTION_WIDTH);
+        frame.stroke(
+            &canvas::Path::rectangle(outline.position(), outline.size()),
+            canvas::Stroke::default()
+                .with_color(selection)
+                .with_width(SELECTION_WIDTH),
+        );
+    }
 
-    let title_sep_y = body.y + CLIP_TITLE_HEIGHT;
-    frame.stroke(
-        &canvas::Path::line(
-            iced::Point::new(body.x, title_sep_y),
-            iced::Point::new(body.x + body.width, title_sep_y),
-        ),
-        canvas::Stroke::default()
-            .with_color(theme::with_alpha(Color::BLACK, 0.3))
-            .with_width(1.0),
-    );
-
-    draw_clip_title(
-        frame,
-        name,
-        body.x,
-        body.y,
-        body.width,
-        looped,
-        viewport_width,
-    );
+    draw_clip_title(frame, name, body, looped, colors.text, viewport_width);
 }
 
 #[cfg(test)]

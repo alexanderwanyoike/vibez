@@ -400,6 +400,10 @@ accessors! {
     piano_key_label => piano_key_label,
 }
 
+pub fn clip_style() -> ClipStyle {
+    CURRENT.read().unwrap().clip_style
+}
+
 // ── Derived roles (aliases of palette fields) ──
 
 pub fn mute_active() -> Color {

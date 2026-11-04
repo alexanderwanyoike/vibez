@@ -6,7 +6,8 @@ use iced::{Rectangle, Renderer};
 
 use crate::theme;
 
-use super::clip_frame::{clip_box, draw_clip_front};
+use super::clip_colors::clip_colors;
+use super::clip_frame::{clip_box, draw_clip_back, draw_clip_front};
 use super::fade_drag::{fade_curve_handle, fade_handle_xs};
 use super::note_marks::note_marks;
 use super::*;
@@ -125,21 +126,16 @@ impl TrackClipCanvas {
                 .map(|clip| (clip, false))
                 .chain(self.audio_recording_preview.iter().map(|clip| (clip, true)))
             {
-                let clip_color = if is_recording_preview {
-                    theme::with_alpha(theme::danger(), 0.28)
-                } else {
-                    theme::with_alpha(self.track_color, 0.5)
-                };
-                let clip_border_color = if is_recording_preview {
-                    theme::danger()
-                } else {
-                    theme::darken(self.track_color, 0.7)
-                };
-                let waveform_color = if is_recording_preview {
-                    theme::with_alpha(theme::danger(), 0.92)
-                } else {
-                    theme::with_alpha(self.track_color, 0.6)
-                };
+                let is_selected =
+                    !is_recording_preview && self.selected_clips.contains(&clip.clip_id);
+                let colors = clip_colors(
+                    if is_recording_preview {
+                        theme::danger()
+                    } else {
+                        self.track_color
+                    },
+                    is_selected,
+                );
                 let clip_start_beat = clip.position as f64 / spb;
                 let clip_dur_beats = clip.duration as f64 / spb;
 
@@ -155,10 +151,8 @@ impl TrackClipCanvas {
                 let clip_h = h - 8.0;
                 let body = clip_box(clip_x, clip_y, clip_w, clip_h);
 
-                // Clip body
-                frame.fill_rectangle(body.position(), body.size(), clip_color);
+                draw_clip_back(&mut frame, body, &colors);
 
-                // Mini waveform using track color (drawn below title bar)
                 if !clip.peaks.is_empty() && clip_w > 4.0 {
                     let body_top = clip_y + CLIP_TITLE_HEIGHT;
                     let body_h = clip_h - CLIP_TITLE_HEIGHT;
@@ -183,7 +177,7 @@ impl TrackClipCanvas {
                         frame.fill_rectangle(
                             iced::Point::new(screen_x, y_top),
                             iced::Size::new(1.0, height),
-                            waveform_color,
+                            colors.ink,
                         );
                     }
                 }
@@ -222,9 +216,6 @@ impl TrackClipCanvas {
                     }
                 }
 
-                // Selection highlight
-                let is_selected =
-                    !is_recording_preview && self.selected_clips.contains(&clip.clip_id);
                 if !is_recording_preview
                     && (is_selected || clip.fade_in_frames > 0 || clip.fade_out_frames > 0)
                 {
@@ -278,21 +269,7 @@ impl TrackClipCanvas {
                         }
                     }
                 }
-                let border_color = if is_selected {
-                    theme::accent()
-                } else {
-                    clip_border_color
-                };
-                let border_width = if is_selected { 2.0 } else { 1.0 };
-                draw_clip_front(
-                    &mut frame,
-                    body,
-                    border_color,
-                    border_width,
-                    &clip.name,
-                    clip.loop_enabled,
-                    w,
-                );
+                draw_clip_front(&mut frame, body, &colors, &clip.name, clip.loop_enabled, w);
 
                 // Diagonal stripe overlay when the clip's warp is
                 // stale relative to the current project tempo. Low
@@ -374,16 +351,16 @@ impl TrackClipCanvas {
                 .map(|clip| (clip, false))
                 .chain(self.recording_preview.iter().map(|clip| (clip, true)))
             {
-                let note_clip_color = if is_recording_preview {
-                    theme::with_alpha(theme::danger(), 0.32)
-                } else {
-                    theme::with_alpha(self.track_color, 0.4)
-                };
-                let note_block_color = if is_recording_preview {
-                    theme::with_alpha(theme::danger(), 0.88)
-                } else {
-                    theme::with_alpha(self.track_color, 0.8)
-                };
+                let is_selected =
+                    !is_recording_preview && self.selected_clips.contains(&note_clip.clip_id);
+                let colors = clip_colors(
+                    if is_recording_preview {
+                        theme::danger()
+                    } else {
+                        self.track_color
+                    },
+                    is_selected,
+                );
                 let clip_x = self.beat_to_x(note_clip.position_beats);
                 let clip_w = geometry.width_for_beats(note_clip.duration_beats);
 
@@ -396,8 +373,7 @@ impl TrackClipCanvas {
                 let clip_h = h - 8.0;
                 let body = clip_box(clip_x, clip_y, clip_w, clip_h);
 
-                // Clip body
-                frame.fill_rectangle(body.position(), body.size(), note_clip_color);
+                draw_clip_back(&mut frame, body, &colors);
 
                 let looping =
                     note_clip.loop_enabled && note_clip.loop_end_beats > note_clip.loop_start_beats;
@@ -429,15 +405,7 @@ impl TrackClipCanvas {
                     height: clip_h - CLIP_TITLE_HEIGHT,
                 };
                 for mark in note_marks(&note_clip.notes, clip_x, area, geometry.pixels_per_beat()) {
-                    frame.fill_rectangle(
-                        mark.rect.position(),
-                        mark.rect.size(),
-                        if mark.repeated {
-                            theme::with_alpha(self.track_color, 0.5)
-                        } else {
-                            note_block_color
-                        },
-                    );
+                    frame.fill_rectangle(mark.rect.position(), mark.rect.size(), colors.ink);
                 }
 
                 // Loop markers for note clips
@@ -451,22 +419,10 @@ impl TrackClipCanvas {
                     });
                 }
 
-                // Selection highlight
-                let is_selected =
-                    !is_recording_preview && self.selected_clips.contains(&note_clip.clip_id);
-                let border_color = if is_recording_preview {
-                    theme::danger()
-                } else if is_selected {
-                    theme::accent()
-                } else {
-                    theme::darken(self.track_color, 0.7)
-                };
-                let border_width = if is_selected { 2.0 } else { 1.0 };
                 draw_clip_front(
                     &mut frame,
                     body,
-                    border_color,
-                    border_width,
+                    &colors,
                     &note_clip.name,
                     note_clip.loop_enabled,
                     w,
