@@ -223,6 +223,53 @@ fn dragging_the_brace_between_its_handles_moves_the_whole_loop() {
     ));
 }
 
+fn ruler_drag_to(
+    widget: &PianoRollWidget,
+    state: &mut PianoRollState,
+    clip: &UiNoteClip,
+    to: Point,
+) -> TimelineViewport {
+    requested_view(
+        widget
+            .update(
+                state,
+                canvas::Event::Mouse(mouse::Event::CursorMoved { position: to }),
+                bounds(),
+                mouse::Cursor::Available(to),
+            )
+            .1,
+        clip,
+    )
+}
+
+#[test]
+fn dragging_down_the_ruler_zooms_in_and_sideways_scrolls() {
+    let clip = long_clip(true);
+    let mut widget = editor(&clip);
+    let press = Point::new(400.0, 25.0);
+    let beat_under_press = widget.x_to_beat(press.x, &bounds());
+    let pixels_per_beat = widget.pixels_per_beat(&bounds());
+    let mut state = PianoRollState::default();
+
+    let pressed = widget.update(
+        &mut state,
+        canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)),
+        bounds(),
+        mouse::Cursor::Available(press),
+    );
+    assert_eq!(pressed.0, canvas::event::Status::Captured);
+
+    let below = Point::new(press.x, press.y + 60.0);
+    widget.view = Some(ruler_drag_to(&widget, &mut state, &clip, below));
+    assert!(widget.pixels_per_beat(&bounds()) > pixels_per_beat);
+    assert!((widget.x_to_beat(press.x, &bounds()) - beat_under_press).abs() < 1e-6);
+
+    let first_beat = widget.x_to_beat(KEY_WIDTH, &bounds());
+    let left = Point::new(press.x - 80.0, below.y);
+    widget.view = Some(ruler_drag_to(&widget, &mut state, &clip, left));
+    assert!(widget.x_to_beat(KEY_WIDTH, &bounds()) > first_beat);
+}
+
 #[test]
 fn zoomed_in_a_resized_note_ends_on_the_finer_grid_the_zoom_shows() {
     let mut clip = long_clip(false);

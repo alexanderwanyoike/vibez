@@ -695,3 +695,38 @@ fn moving_the_whole_audio_loop_stops_at_the_source_end() {
         })
     ));
 }
+
+#[test]
+fn dragging_down_the_audio_ruler_zooms_in_around_the_press() {
+    let mut widget = widget();
+    widget.bpm = 1_200.0;
+    widget.view = Some(TimelineViewport::new(2.0, 0.0));
+    let bounds = Rectangle::new(Point::ORIGIN, iced::Size::new(800.0, 200.0));
+    let press = Point::new(100.0, 25.0);
+    let frame_under_press = widget.x_to_timeline_frame(press.x, &bounds);
+    let mut state = AudioClipDetailState::default();
+
+    let pressed = widget.update(
+        &mut state,
+        canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)),
+        bounds,
+        mouse::Cursor::Available(press),
+    );
+    assert_eq!(pressed.0, canvas::event::Status::Captured);
+    let below = Point::new(press.x, press.y + 60.0);
+    let message = widget
+        .update(
+            &mut state,
+            canvas::Event::Mouse(mouse::Event::CursorMoved { position: below }),
+            bounds,
+            mouse::Cursor::Available(below),
+        )
+        .1;
+    let Some(Message::View(ViewMsg::SetClipEditorView { viewport, .. })) = message else {
+        panic!("expected a clip editor view, got {message:?}");
+    };
+    widget.view = Some(viewport);
+
+    assert!(viewport.zoom_level > 2.0);
+    assert!((widget.x_to_timeline_frame(press.x, &bounds) - frame_under_press).abs() < 1e-3);
+}
