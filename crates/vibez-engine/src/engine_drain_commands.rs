@@ -716,11 +716,11 @@ impl AudioEngine {
                 self.command_remove_note_clip(track_id, clip_id)
             }
             EngineCommand::BeginContentRebuild => {
-                self.content_rebuild = true;
+                self.content_rebuilds += 1;
                 self.apply_arrangement_end();
             }
             EngineCommand::EndContentRebuild => {
-                self.content_rebuild = false;
+                self.content_rebuilds = self.content_rebuilds.saturating_sub(1);
                 self.apply_arrangement_end();
             }
             EngineCommand::MoveNoteClip {
@@ -1059,7 +1059,7 @@ impl AudioEngine {
 
     /// Where Arrange playback stops on its own.
     pub(super) fn arrangement_end(&self) -> Option<u64> {
-        if self.content_rebuild {
+        if self.content_rebuilds > 0 {
             None
         } else {
             self.arrangement_audio_length
