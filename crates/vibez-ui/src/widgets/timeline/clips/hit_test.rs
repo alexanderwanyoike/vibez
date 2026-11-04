@@ -73,18 +73,19 @@ impl TrackClipCanvas {
         })
     }
 
-    /// Find a clip at the given pixel position.
+    /// The Clip under `pos_x`, searched in reverse draw order so the Clip
+    /// drawn on top wins where Clips overlap.
     pub(crate) fn hit_test(&self, pos_x: f32) -> Option<ClipHit> {
         let geometry = self.geometry();
         let spb = self.spb();
-        let audio_clips = self.clips.iter().map(|clip| ClipHit {
+        let audio_clips = self.clips.iter().rev().map(|clip| ClipHit {
             clip_id: clip.clip_id,
             is_note_clip: false,
             edge: None,
             position_beats: clip.position as f64 / spb,
             duration_beats: clip.duration as f64 / spb,
         });
-        let note_clips = self.note_clips.iter().map(|clip| ClipHit {
+        let note_clips = self.note_clips.iter().rev().map(|clip| ClipHit {
             clip_id: clip.clip_id,
             is_note_clip: true,
             edge: None,
@@ -92,7 +93,7 @@ impl TrackClipCanvas {
             duration_beats: clip.duration_beats,
         });
 
-        audio_clips.chain(note_clips).find_map(|hit| {
+        note_clips.chain(audio_clips).find_map(|hit| {
             let clip_x = self.beat_to_x(hit.position_beats);
             let clip_w = geometry.width_for_beats(hit.duration_beats);
             (pos_x >= clip_x && pos_x <= clip_x + clip_w).then(|| ClipHit {
