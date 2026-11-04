@@ -111,6 +111,8 @@ pub struct ViewState {
     pub perform_surface_resize_active: bool,
     pub zoom_level: f32,
     pub scroll_offset_beats: f64,
+    /// The Arrange view a zoom to selection replaced, for zoom back.
+    pub zoom_before_selection: Option<crate::timeline_geometry::TimelineViewport>,
     pub snap_grid: SnapGrid,
     pub snap_enabled: bool,
     pub adaptive_grid: bool,
@@ -149,6 +151,7 @@ impl Default for ViewState {
             perform_surface_resize_active: false,
             zoom_level: 1.0,
             scroll_offset_beats: 0.0,
+            zoom_before_selection: None,
             snap_grid: SnapGrid::EIGHTH,
             snap_enabled: true,
             adaptive_grid: false,

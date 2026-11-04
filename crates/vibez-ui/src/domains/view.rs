@@ -6,7 +6,8 @@
 use vibez_core::id::{ClipId, TrackId};
 
 use crate::state::{
-    ContextMenuTarget, DetailPanelTab, SnapGrid, TimelineEditorState, ViewState, Workspace,
+    ArrangementSelection, ContextMenuTarget, DetailPanelTab, SnapGrid, TimelineEditorState,
+    ViewState, Workspace,
 };
 use crate::timeline_geometry::{TimelineGeometry, TimelineViewport};
 
@@ -25,6 +26,12 @@ pub enum ViewMsg {
         anchor_x: f32,
     },
     ZoomToFit,
+    /// Frame the time selection, or the selected clips, in the lanes
+    /// (Ableton's Z).
+    ZoomToSelection,
+    /// Return to the view from before the last zoom to selection
+    /// (Ableton's X).
+    ZoomBack,
     ScrollArrangement(f64),
     SetSnapGrid(SnapGrid),
     NarrowGrid,
@@ -76,8 +83,11 @@ pub struct ViewCtx {
     pub total_beats: f64,
     /// Where the song's last clip ends, in beats (zoom-to-fit).
     pub song_beats: f64,
-    /// Width of the Arrange clip lanes, which zoom-to-fit frames into.
+    /// Width of the Arrange clip lanes, which fit and zoom to selection
+    /// frame into.
     pub lane_width: f32,
+    /// Converts audio clip positions for zoom to selection.
+    pub samples_per_beat: f64,
 }
 
 /// Cross-domain effects requested by a view update.
@@ -133,6 +143,21 @@ impl ViewState {
                 };
                 if song_end > 0.0 {
                     self.frame(0.0, song_end, ctx.lane_width);
+                }
+            }
+            ViewMsg::ZoomToSelection => {
+                if let Some((start, end)) = selection_span_beats(timeline, ctx.samples_per_beat) {
+                    self.zoom_before_selection = Some(TimelineViewport::new(
+                        self.zoom_level,
+                        self.scroll_offset_beats,
+                    ));
+                    self.frame(start, end, ctx.lane_width);
+                }
+            }
+            ViewMsg::ZoomBack => {
+                if let Some(previous) = self.zoom_before_selection.take() {
+                    self.zoom_level = previous.zoom_level;
+                    self.scroll_offset_beats = previous.scroll_offset_beats;
                 }
             }
             ViewMsg::ScrollArrangement(delta) => {
@@ -301,6 +326,51 @@ impl ViewState {
         self.scroll_offset_beats = (anchor_beat - next_geometry.beats_for_width(anchor_x))
             .clamp(0.0, total_beats.max(0.0));
     }
+}
+
+/// The time selection when there is one, otherwise the span from the
+/// earliest selected clip start to the latest selected clip end.
+fn selection_span_beats(
+    timeline: &TimelineEditorState,
+    samples_per_beat: f64,
+) -> Option<(f64, f64)> {
+    if timeline.time_selection_active
+        && timeline.selection_end_beats > timeline.selection_start_beats
+    {
+        return Some((timeline.selection_start_beats, timeline.selection_end_beats));
+    }
+    timeline
+        .selected_clips
+        .iter()
+        .filter_map(|selection| {
+            let content = timeline.get(selection.track_id())?;
+            match selection {
+                ArrangementSelection::AudioClip { clip_id, .. } if samples_per_beat > 0.0 => {
+                    content
+                        .clips
+                        .iter()
+                        .find(|clip| clip.id == *clip_id)
+                        .map(|clip| {
+                            (
+                                clip.position as f64 / samples_per_beat,
+                                (clip.position + clip.duration) as f64 / samples_per_beat,
+                            )
+                        })
+                }
+                ArrangementSelection::AudioClip { .. } => None,
+                ArrangementSelection::NoteClip { clip_id, .. } => content
+                    .note_clips
+                    .iter()
+                    .find(|clip| clip.id == *clip_id)
+                    .map(|clip| {
+                        (
+                            clip.position_beats,
+                            clip.position_beats + clip.duration_beats,
+                        )
+                    }),
+            }
+        })
+        .reduce(|(start, end), (clip_start, clip_end)| (start.min(clip_start), end.max(clip_end)))
 }
 
 #[cfg(test)]
