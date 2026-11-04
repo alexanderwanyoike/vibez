@@ -1588,6 +1588,26 @@ fn a_short_clip_at_fit_zoom_shows_the_grab_cursor_near_its_start() {
 }
 
 #[test]
+fn a_clips_end_zone_stops_at_its_drawn_right_edge() {
+    let (canvas, clip_id) = canvas_with_selected_audio_clip();
+    let end_x = canvas.beat_to_x(canvas.clips[0].duration as f64 / canvas.spb());
+
+    let inside = canvas.hit_test(end_x - 1.5).expect("the clip");
+
+    assert_eq!(
+        (inside.clip_id, inside.edge),
+        (
+            clip_id,
+            Some(crate::widgets::timeline::clip_drag::ClipEdge::End)
+        )
+    );
+    assert!(
+        canvas.hit_test(end_x - 0.5).is_none(),
+        "the gap after the clip is lane"
+    );
+}
+
+#[test]
 fn pressing_where_clips_overlap_picks_the_one_drawn_on_top() {
     let (mut canvas, under_id) = canvas_with_selected_audio_clip();
     canvas.selected_clips.clear();
