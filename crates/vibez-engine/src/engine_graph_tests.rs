@@ -777,6 +777,8 @@ fn clip_mute_points_follow_nonzero_clip_position_inside_a_render_block() {
                 request_id: 1,
                 length_samples: 256,
                 looping: false,
+                launch_mode: Default::default(),
+                start_position: 0,
                 source: Box::new(source),
             })],
             quantization: MusicalBoundary::Immediate,

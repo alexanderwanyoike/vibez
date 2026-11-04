@@ -44,6 +44,8 @@ fn tail_request(
             request_id,
             length_samples: 1024,
             looping: true,
+            launch_mode: Default::default(),
+            start_position: 0,
             source: Box::new(PreparedPlaybackSource::new(vec![clip], vec![], vec![])),
         }),
         owner,

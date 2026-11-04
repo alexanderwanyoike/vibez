@@ -395,11 +395,15 @@ impl App {
                         request_id,
                         retired,
                         effective_at_samples,
+                        start_position,
                         ..
                     } => {
                         let editor = &mut self.state.perform.clip_editor;
                         editor.acknowledge_transition(track_id, request_id);
-                        editor.started_at.insert(track_id, effective_at_samples);
+                        editor.started_at.insert(
+                            track_id,
+                            effective_at_samples.saturating_sub(start_position),
+                        );
                         if let Some(clip) = editor.pending.remove(&request_id) {
                             editor.playing.insert(track_id, clip);
                         } else {
@@ -414,7 +418,7 @@ impl App {
                             track_id,
                             source,
                             effective_at_samples,
-                            0,
+                            start_position,
                         );
                         drop(retired);
                     }

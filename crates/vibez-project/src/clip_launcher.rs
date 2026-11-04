@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 use vibez_core::id::{ClipId, TrackId};
-use vibez_core::perform::MusicalBoundary;
+use vibez_core::perform::{ClipLaunchMode, MusicalBoundary};
 
 use crate::TimelineInfo;
 
@@ -39,4 +39,10 @@ pub struct LauncherClipInfo {
 pub struct LauncherTrackInfo {
     pub track_id: TrackId,
     pub launch_quantization: MusicalBoundary,
+    #[serde(default, skip_serializing_if = "is_play")]
+    pub launch_mode: ClipLaunchMode,
+}
+
+fn is_play(mode: &ClipLaunchMode) -> bool {
+    *mode == ClipLaunchMode::Play
 }

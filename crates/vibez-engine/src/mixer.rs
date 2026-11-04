@@ -8,6 +8,7 @@ use crate::note_repeat::{NoteRepeatTrigger, TrackNoteRepeats};
 use crate::playback_source::PreparedPlaybackSource;
 pub use crate::playback_source::{EngineClip, EngineNoteClip};
 mod channel_strip;
+mod clip_launch;
 mod effect_slot;
 mod groove;
 mod note_repeat;
@@ -37,13 +38,13 @@ pub(crate) struct QueuedTrackMute {
 }
 
 #[derive(Debug, Clone, Copy)]
-struct MuteRamp {
+struct GainRamp {
     gain: f32,
     target: f32,
     remaining: u32,
 }
 
-impl Default for MuteRamp {
+impl Default for GainRamp {
     fn default() -> Self {
         Self {
             gain: 1.0,
@@ -53,16 +54,21 @@ impl Default for MuteRamp {
     }
 }
 
-impl MuteRamp {
+impl GainRamp {
     fn set_muted(&mut self, muted: bool, immediate: bool) {
         let target = if muted { 0.0 } else { 1.0 };
         if immediate {
-            self.gain = target;
-            self.target = target;
-            self.remaining = 0;
+            self.ramp_to(target, 0);
         } else if self.target != target {
-            self.target = target;
-            self.remaining = MUTE_RAMP_FRAMES;
+            self.ramp_to(target, MUTE_RAMP_FRAMES);
+        }
+    }
+
+    fn ramp_to(&mut self, target: f32, frames: u32) {
+        self.target = target;
+        self.remaining = frames;
+        if frames == 0 {
+            self.gain = target;
         }
     }
 
@@ -144,7 +150,11 @@ pub struct EngineTrack {
     pub(crate) queued_mute: Option<QueuedTrackMute>,
     automation_mute: Option<bool>,
     automation_overrides: AutomationOverrides,
-    mute_ramp: MuteRamp,
+    mute_ramp: GainRamp,
+    launch_declick: GainRamp,
+    /// Set when a Clip starts mid-pattern, so the next render sounds the
+    /// notes it would already be holding.
+    pickup_launch_notes: bool,
     pub solo: bool,
     pub swing_offset: Option<SwingOffset>,
     /// Block-evaluated automation override; manual FOLLOW/offset remains intact.
@@ -251,17 +261,7 @@ impl EngineTrack {
 
         self.timed_note_ons.clear();
         self.timed_note_offs.clear();
-        if !self.suppress_source_notes {
-            collect_timed_note_events(
-                &self.playback_source.note_clips,
-                pos,
-                frames,
-                spb,
-                swing,
-                &mut self.timed_note_ons,
-                &mut self.timed_note_offs,
-            );
-        }
+        self.collect_source_note_events(pos, frames, spb, swing);
 
         // Note Repeat is generated from live held notes rather than resident
         // clip events, so retain its frame walk while the clip scheduler is
@@ -346,17 +346,7 @@ impl EngineTrack {
             .is_some_and(|instrument| instrument.instrument_kind() == InstrumentKind::DrumRack);
         self.timed_note_ons.clear();
         self.timed_note_offs.clear();
-        if !self.suppress_source_notes {
-            collect_timed_note_events(
-                &self.playback_source.note_clips,
-                pos,
-                frames,
-                spb,
-                swing,
-                &mut self.timed_note_ons,
-                &mut self.timed_note_offs,
-            );
-        }
+        self.collect_source_note_events(pos, frames, spb, swing);
         let mut note_on_index = 0;
         let mut note_off_index = 0;
 
@@ -406,6 +396,36 @@ impl EngineTrack {
         }
 
         rendered
+    }
+
+    fn collect_source_note_events(
+        &mut self,
+        pos: u64,
+        frames: usize,
+        samples_per_beat: f64,
+        swing: SwingAmount,
+    ) {
+        if self.suppress_source_notes {
+            return;
+        }
+        if std::mem::take(&mut self.pickup_launch_notes) {
+            groove::collect_sounding_note_ons(
+                &self.playback_source.note_clips,
+                pos,
+                samples_per_beat,
+                swing,
+                &mut self.timed_note_ons,
+            );
+        }
+        collect_timed_note_events(
+            &self.playback_source.note_clips,
+            pos,
+            frames,
+            samples_per_beat,
+            swing,
+            &mut self.timed_note_ons,
+            &mut self.timed_note_offs,
+        );
     }
 
     pub(crate) fn take_note_activity(&mut self) -> u128 {

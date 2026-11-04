@@ -691,6 +691,10 @@ pub struct PreparedClipPlayback {
     pub request_id: u64,
     pub length_samples: u64,
     pub looping: bool,
+    pub launch_mode: vibez_core::perform::ClipLaunchMode,
+    /// Written by the engine when this Clip takes over, so a deferred
+    /// acknowledgement can still report where playback began.
+    pub start_position: u64,
     pub source: Box<PreparedPlaybackSource>,
 }
 
@@ -702,6 +706,8 @@ impl PreparedClipPlayback {
             request_id,
             length_samples: 1,
             looping: false,
+            launch_mode: Default::default(),
+            start_position: 0,
             source: Box::default(),
         })
     }

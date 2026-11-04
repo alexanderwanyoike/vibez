@@ -60,6 +60,8 @@ fn unique_clip_request(
         request_id: request,
         length_samples: 128,
         looping: true,
+        launch_mode: Default::default(),
+        start_position: 0,
         source: Box::new(PreparedPlaybackSource::new(
             vec![EngineClip {
                 id: clip_id,

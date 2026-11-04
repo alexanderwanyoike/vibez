@@ -74,6 +74,8 @@ fn clip(
         request_id: request,
         length_samples: 16,
         looping: true,
+        launch_mode: Default::default(),
+        start_position: 0,
         source: Box::new(PreparedPlaybackSource::new(
             vec![EngineClip {
                 id,

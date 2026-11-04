@@ -3,9 +3,13 @@
 use super::presentation_queue::PresentationAdmission;
 use super::*;
 use crate::events::{ClipPlayingState, ClipQueuedState, ClipTrackState};
-use crate::playback_source::{ActiveClipPlayback, PreparedClipPlayback};
+use crate::playback_source::PreparedClipPlayback;
 
 impl AudioEngine {
+    pub(super) fn launch_declick_frames(&self) -> u64 {
+        u64::from(self.sample_rate / 1000)
+    }
+
     pub(super) fn edit_clip(
         &mut self,
         active: Box<PreparedClipPlayback>,
@@ -162,6 +166,7 @@ impl AudioEngine {
     pub(super) fn continue_clear_clip_sources(&mut self) {
         for index in 0..self.tracks.len() {
             self.tracks[index].active_clip = None;
+            self.tracks[index].reset_launch_declick();
             if self.tracks[index].queued_clip.is_some() {
                 if self.scheduled_presentation.capacity() - self.scheduled_presentation.len()
                     <= presentation_queue::COMMAND_PRESENTATION_RESERVE
@@ -223,20 +228,13 @@ impl AudioEngine {
                 let track = &mut self.tracks[index];
                 let event = if queued_due {
                     let mut prepared = track.queued_clip.take().expect("due Clip").prepared;
-                    track.flush_notes();
-                    std::mem::swap(&mut track.launcher_source, &mut prepared.source);
-                    track.active_clip = prepared.clip_id.map(|clip_id| ActiveClipPlayback {
-                        clip_id,
-                        request_id: prepared.request_id,
-                        position: 0,
-                        length: prepared.length_samples.max(1),
-                        looping: prepared.looping,
-                    });
+                    track.start_launcher_clip(&mut prepared);
                     EngineEvent::ClipTransitioned {
                         track_id: prepared.track_id,
                         clip_id: prepared.clip_id,
                         request_id: prepared.request_id,
                         effective_at_samples: now,
+                        start_position: prepared.start_position,
                         retired: Some(prepared),
                     }
                 } else {
@@ -247,6 +245,7 @@ impl AudioEngine {
                         clip_id: None,
                         request_id: 0,
                         effective_at_samples: now,
+                        start_position: 0,
                         retired: None,
                     }
                 };
@@ -299,16 +298,19 @@ impl AudioEngine {
             if let Some(boundary) = self.next_clip_record_boundary() {
                 count = count.min(boundary.saturating_sub(now) as usize);
             }
-            for track in &self.tracks {
-                if let Some(queued) = track
-                    .queued_clip
-                    .as_ref()
-                    .filter(|queued| !queued.pending_batch || self.clip_batch_waiting_boundary())
-                {
+            let declick_frames = self.launch_declick_frames();
+            let batch_waiting = self.clip_batch_waiting_boundary();
+            for track in &mut self.tracks {
+                if let Some(queued) = track.scheduled_clip(batch_waiting) {
                     count = count.min(queued.effective_at.saturating_sub(now) as usize);
                 }
                 if let Some(active) = track.active_clip {
                     count = count.min(active.length.saturating_sub(active.position) as usize);
+                }
+                let swap_in = track.legato_swap_in(now, batch_waiting);
+                track.update_launch_declick(swap_in, declick_frames);
+                if let Some(frames) = swap_in.filter(|frames| *frames > declick_frames) {
+                    count = count.min((frames - declick_frames) as usize);
                 }
             }
             debug_assert!(count > 0);

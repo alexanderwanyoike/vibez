@@ -345,22 +345,13 @@ impl App {
             sample_rate: self.state.transport.sample_rate,
             tracks,
             perform_layout: self.state.perform.layout,
-            launcher_tracks: self
-                .state
-                .project_tracks
-                .tracks
-                .iter()
-                .map(|track| track.id)
-                .filter_map(|track_id| {
-                    let launch_quantization =
-                        self.state.perform.clips.launch_quantization(track_id);
-                    (launch_quantization != crate::domains::perform::DEFAULT_LAUNCH_QUANTIZATION)
-                        .then_some(vibez_project::LauncherTrackInfo {
-                            track_id,
-                            launch_quantization,
-                        })
-                })
-                .collect(),
+            launcher_tracks: self.state.perform.clips.launcher_tracks(
+                self.state
+                    .project_tracks
+                    .tracks
+                    .iter()
+                    .map(|track| track.id),
+            ),
             launcher_clips: self
                 .state
                 .perform
@@ -458,9 +449,7 @@ impl App {
                 launch_quantization: clip.launch_quantization,
             })
             .collect();
-        for track in &loaded.project.launcher_tracks {
-            clips.set_launch_quantization(track.track_id, track.launch_quantization);
-        }
+        clips.restore_launcher_tracks(&loaded.project.launcher_tracks);
         self.state.perform.clips = Arc::new(clips);
         self.state.perform.sections = Arc::new(
             super::project_sections::section_store_from_project(&loaded.project.sections),

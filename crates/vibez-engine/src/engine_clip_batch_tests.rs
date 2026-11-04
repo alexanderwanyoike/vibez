@@ -12,6 +12,8 @@ fn clip(track_id: TrackId, request_id: u64) -> Box<PreparedClipPlayback> {
         request_id,
         length_samples: 100,
         looping: true,
+        launch_mode: Default::default(),
+        start_position: 0,
         source: Box::new(PreparedPlaybackSource::new(
             vec![EngineClip {
                 id,
@@ -690,6 +692,7 @@ fn publishing_does_not_count_ui_slots_before_a_real_heard_deadline() {
         quantization: MusicalBoundary::Immediate,
         boundary: 1,
         starting: false,
+        swap_lead: 0,
         phase: BatchPhase::Publishing {
             source: 1,
             physical: 20,
@@ -757,6 +760,7 @@ fn resync_does_not_announce_a_clip_before_its_reported_delay_is_heard() {
         quantization: MusicalBoundary::Immediate,
         boundary: 0,
         starting: true,
+        swap_lead: 0,
         phase: BatchPhase::Publishing {
             source: 0,
             physical: 0,
@@ -1138,6 +1142,7 @@ fn public_packet_preserves_last_credit_for_all_retained_terminals_and_returns_ea
                     clip_id,
                     request_id,
                     effective_at_samples,
+                    start_position: 0,
                     retired: Some(owner),
                 } => {
                     assert_eq!(track_id, fixture.tracks[0]);
@@ -1348,6 +1353,7 @@ fn staging_at_a_real_render_offset_cannot_spend_recovered_ring_slots() {
             quantization: MusicalBoundary::Immediate,
             boundary: engine.performance_position,
             starting: false,
+            swap_lead: 0,
             phase: BatchPhase::Staging,
         });
         assert_eq!(engine.pending_clip_batch.as_ref().unwrap().clips.len(), 3);
