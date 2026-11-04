@@ -100,15 +100,9 @@ pub trait EngineHandle {
                 clip.loop_start_beats,
                 clip.loop_end_beats,
                 clip.groove_grid,
-            ),
+            )
+            .with_notes(clip.notes.clone()),
         });
-        for note in &clip.notes {
-            self.send(EngineCommand::AddNote {
-                track_id,
-                clip_id: clip.id,
-                insertion: vibez_engine::clip_insertion::PreparedNoteInsertion::new(*note),
-            });
-        }
     }
 }
 

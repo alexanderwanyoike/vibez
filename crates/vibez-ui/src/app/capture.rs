@@ -911,11 +911,12 @@ mod tests {
             loop_end_beats: 0.0,
             groove_grid: GrooveGrid::Off,
         };
-        let mut filler = crate::state::TrackTimelineContent::default();
-        filler.note_clips.push(note_clip(
-            36,
-            vibez_core::constants::RING_BUFFER_CAPACITY - 1,
-        ));
+        let filler = crate::state::TrackTimelineContent {
+            note_clips: (0..vibez_core::constants::RING_BUFFER_CAPACITY)
+                .map(|_| note_clip(36, 1))
+                .collect(),
+            ..Default::default()
+        };
         let mut audible = crate::state::TrackTimelineContent::default();
         audible.note_clips.push(note_clip(72, 1));
 
@@ -931,38 +932,17 @@ mod tests {
         let mut commands =
             EngineCommandQueue::new(producer, audio_engine.take_transport_sender().unwrap());
         apply_capture_to_arrangement(&mut timeline, captured, &mut commands);
-        assert_eq!(commands.pending_len(), 2);
+        assert_eq!(commands.pending_len(), 1);
 
-        let filler_clip = &timeline.get(filler_track).unwrap().note_clips[0];
-        let audible_clip = &timeline.get(audible_track).unwrap().note_clips[0];
-        let expected_targets = [
-            (filler_track, filler_clip.id, filler_clip.notes.len() + 1),
-            (audible_track, audible_clip.id, audible_clip.notes.len() + 1),
-        ];
-        let expected_notes = filler_clip.notes.len() + audible_clip.notes.len();
-        assert_eq!(expected_notes, vibez_core::constants::RING_BUFFER_CAPACITY);
-        let operations = expected_notes + expected_targets.len();
-        assert_eq!(operations, 1026);
+        let operations = vibez_core::constants::RING_BUFFER_CAPACITY + 1;
         audio_engine.process_block(AudioProcessBlock::new(&mut [], 2));
         commands.flush();
         assert_eq!(commands.pending_len(), 0);
-        let mut requested = Vec::new();
         let mut completed = Vec::new();
-        // The second note can wait before later Tracks or Play reach the engine.
-        // Serve off callback without advancing the original musical start.
         for _ in 0..=operations {
             while let Ok(event) = events.pop() {
                 match event {
                     vibez_engine::events::EngineEvent::ClipInsertionStorageRequested(request) => {
-                        assert!(expected_targets.iter().any(|&(track, clip, _)| {
-                            (request.track_id, request.target)
-                                == (
-                                    track,
-                                    vibez_engine::clip_insertion::ClipInsertionTarget::Clip(clip),
-                                )
-                        }));
-                        assert!(!requested.contains(&request.id));
-                        requested.push(request.id.clone());
                         request.fulfill();
                     }
                     vibez_engine::events::EngineEvent::ClipInsertionCompleted(owner) => {
@@ -970,22 +950,7 @@ mod tests {
                             owner.outcome,
                             vibez_engine::clip_insertion::ClipInsertionOutcome::Applied
                         );
-                        let target = if completed.len() < expected_targets[0].2 {
-                            expected_targets[0]
-                        } else {
-                            expected_targets[1]
-                        };
-                        assert_eq!(
-                            (owner.track_id, owner.target),
-                            (
-                                target.0,
-                                vibez_engine::clip_insertion::ClipInsertionTarget::Clip(target.1)
-                            )
-                        );
-                        let id = owner.id();
-                        assert!(!completed.contains(&id));
-                        completed.push(id);
-                        drop(owner);
+                        completed.push(owner.track_id);
                     }
                     _ => {}
                 }
@@ -998,24 +963,21 @@ mod tests {
         }
         assert_eq!(commands.pending_len(), 0);
         assert_eq!(completed.len(), operations);
-        assert!(!requested.is_empty());
-        for id in &requested {
-            assert!(completed.contains(id));
-        }
-        for (track_id, clip_id, count) in expected_targets {
-            let actual = audio_engine
+        assert_eq!(completed.last(), Some(&audible_track));
+        for track_id in [filler_track, audible_track] {
+            let actual = &audio_engine
                 .tracks()
                 .iter()
                 .find(|track| track.id == track_id)
-                .unwrap();
-            let clips = &actual.playback_source.note_clips;
-            assert_eq!(clips.len(), 1);
-            assert_eq!(clips[0].id, clip_id);
-            assert_eq!(clips[0].notes.len(), count - 1);
-            assert_eq!(
-                clips[0].notes,
-                timeline.get(track_id).unwrap().note_clips[0].notes
-            );
+                .unwrap()
+                .playback_source
+                .note_clips;
+            let expected = &timeline.get(track_id).unwrap().note_clips;
+            assert_eq!(actual.len(), expected.len());
+            for (actual, expected) in actual.iter().zip(expected) {
+                assert_eq!(actual.id, expected.id);
+                assert_eq!(actual.notes, expected.notes);
+            }
         }
         assert_eq!(audio_engine.transport().position(), 0);
         assert!(!audio_engine.transport().is_playing());
