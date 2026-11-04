@@ -35,6 +35,32 @@ impl AudioEngine {
         self.recalculate_audio_length();
     }
 
+    pub(super) fn command_set_note_clip_bounds(
+        &mut self,
+        track_id: vibez_core::id::TrackId,
+        clip_id: vibez_core::id::ClipId,
+        duration_beats: f64,
+        start_marker_beats: f64,
+        loop_start_beats: f64,
+        loop_end_beats: f64,
+    ) {
+        if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
+            if let Some(clip) = track
+                .playback_source
+                .note_clips
+                .iter_mut()
+                .find(|c| c.id == clip_id)
+            {
+                clip.duration_beats = duration_beats;
+                clip.start_marker_beats = start_marker_beats;
+                clip.loop_start_beats = loop_start_beats;
+                clip.loop_end_beats = loop_end_beats;
+            }
+            track.flush_notes();
+        }
+        self.recalculate_audio_length();
+    }
+
     pub(super) fn command_set_note_clip_groove_grid(
         &mut self,
         track_id: vibez_core::id::TrackId,

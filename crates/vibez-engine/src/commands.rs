@@ -299,6 +299,16 @@ pub enum EngineCommand {
         clip_id: ClipId,
         duration_beats: f64,
     },
+    /// Commit a note clip's length, start and loop bounds without re-adding
+    /// it or its notes.
+    SetNoteClipBounds {
+        track_id: TrackId,
+        clip_id: ClipId,
+        duration_beats: f64,
+        start_marker_beats: f64,
+        loop_start_beats: f64,
+        loop_end_beats: f64,
+    },
     SetNoteClipGrooveGrid {
         track_id: TrackId,
         clip_id: ClipId,
