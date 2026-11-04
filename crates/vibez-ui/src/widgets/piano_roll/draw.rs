@@ -22,6 +22,13 @@ impl PianoRollWidget {
         let h = bounds.height;
         let grid_width = w - KEY_WIDTH;
         let total = self.total_beats.max(1.0);
+        // Loop repeats are drawn laid out after the loop, so the clip ends
+        // its length after the start marker, wrapped or not.
+        let clip_end = self
+            .clip
+            .as_ref()
+            .map_or(0.0, |clip| clip.start_marker_beats)
+            + total;
         let geometry = self.geometry(&bounds);
         let grid_ppb = geometry.pixels_per_beat();
 
@@ -160,7 +167,7 @@ impl PianoRollWidget {
 
                 // Draw repeat boundary lines in the looped region
                 let mut boundary_beat = clip_data.loop_end_beats + loop_len;
-                while boundary_beat < total {
+                while boundary_beat < clip_end {
                     let bx = self.beat_to_x(boundary_beat, &bounds);
                     let bline = canvas::Path::line(
                         iced::Point::new(bx, RULER_HEIGHT),
@@ -267,7 +274,7 @@ impl PianoRollWidget {
                     theme::with_alpha(theme::darken(self.track_color, 0.6), ghost_alpha);
 
                 let mut offset_beat = loop_len;
-                while clip_data.loop_end_beats + offset_beat - loop_len < total {
+                while clip_data.loop_end_beats + offset_beat - loop_len < clip_end {
                     for note in &clip_data.notes {
                         if !(LOW_NOTE..HIGH_NOTE).contains(&note.pitch) {
                             continue;
@@ -280,7 +287,7 @@ impl PianoRollWidget {
                         }
 
                         let ghost_beat = note.start_beat + offset_beat;
-                        if ghost_beat >= total {
+                        if ghost_beat >= clip_end {
                             continue;
                         }
 
@@ -314,13 +321,7 @@ impl PianoRollWidget {
             }
         }
 
-        // Loop repeats are drawn laid out after the loop, so the clip ends
-        // its length after the start marker, wrapped or not.
-        let start_marker = self
-            .clip
-            .as_ref()
-            .map_or(0.0, |clip| clip.start_marker_beats);
-        let clip_end_x = geometry.beat_to_x(start_marker + total).max(KEY_WIDTH);
+        let clip_end_x = geometry.beat_to_x(clip_end).max(KEY_WIDTH);
         if clip_end_x < w {
             frame.fill_rectangle(
                 iced::Point::new(clip_end_x, RULER_HEIGHT),
