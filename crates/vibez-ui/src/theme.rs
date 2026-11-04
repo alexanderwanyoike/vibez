@@ -346,6 +346,13 @@ impl ThemePalette {
     }
 }
 
+impl ThemePalette {
+    /// Background of the timeline lanes behind clips.
+    pub fn lane(&self) -> Color {
+        self.bg_dark
+    }
+}
+
 impl Default for ThemePalette {
     fn default() -> Self {
         Self::charcoal()

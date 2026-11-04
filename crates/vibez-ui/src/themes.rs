@@ -662,6 +662,18 @@ mod tests {
     }
 
     #[test]
+    fn porcelain_lanes_sit_below_its_headers_and_charcoal_lanes_on_its_background() {
+        fn luma(c: Color) -> f32 {
+            0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b
+        }
+        let porcelain = builtin_by_name("Porcelain").unwrap();
+        let charcoal = builtin_by_name("Charcoal").unwrap();
+
+        assert!(luma(porcelain.lane()) < luma(porcelain.bg_surface) - 0.05);
+        assert_eq!(charcoal.lane(), charcoal.bg_dark);
+    }
+
+    #[test]
     fn vzt_roundtrip_through_the_service() {
         let dir = tempfile::tempdir().unwrap();
         // Redirect the service to a temp dir via direct file ops:
