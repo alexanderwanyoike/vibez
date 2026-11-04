@@ -749,6 +749,54 @@ mod tests {
     }
 
     #[test]
+    fn a_song_sized_capture_sends_commands_per_clip_not_per_note() {
+        let track_id = TrackId::new();
+        let pattern = |position_beats: f64| UiNoteClip {
+            id: ClipId::new(),
+            name: "Pattern".into(),
+            position_beats,
+            duration_beats: 4.0,
+            notes: (0..8)
+                .map(|step| MidiNote {
+                    pitch: 36,
+                    velocity: 100,
+                    start_beat: f64::from(step) * 0.5,
+                    duration_beats: 0.25,
+                })
+                .collect(),
+            selected_notes: Default::default(),
+            start_marker_beats: 0.0,
+            loop_enabled: false,
+            loop_start_beats: 0.0,
+            loop_end_beats: 4.0,
+            groove_grid: GrooveGrid::Off,
+        };
+        let mut arrange = Arc::new(ArrangementTimeline::default());
+        let song = Arc::make_mut(&mut arrange).ensure(track_id);
+        song.note_clips = (0..40).map(|bar| pattern(f64::from(bar) * 4.0)).collect();
+        let mut incoming = crate::state::TrackTimelineContent::default();
+        incoming.note_clips.push(pattern(160.0));
+        let captured = MaterializedCapture {
+            arrange_start_samples: 640,
+            arrange_end_samples: 656,
+            by_track: HashMap::from([(track_id, incoming)]),
+            controlled_track_ids: vec![track_id],
+            pre_capture_mutes: HashMap::new(),
+            samples_per_beat: 4.0,
+        };
+        let mut engine = crate::domains::test_support::RecordingEngine::default();
+        apply_capture_to_arrangement(&mut arrange, captured, &mut engine);
+
+        let clips = arrange.get(track_id).unwrap().note_clips.len();
+        assert_eq!(clips, 41);
+        assert!(
+            engine.0.len() <= 2 * clips,
+            "{} commands for {clips} clips",
+            engine.0.len()
+        );
+    }
+
+    #[test]
     fn one_capture_transaction_round_trips_through_undo_and_redo() {
         let mut state = AppState::default();
         let track_id = TrackId::new();
