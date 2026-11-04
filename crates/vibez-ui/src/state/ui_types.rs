@@ -1089,13 +1089,14 @@ impl GridConfig {
     /// Length of a span starting at `start` whose end is dragged to `end`.
     ///
     /// The end snaps in absolute time, so it lands on a grid line even when
-    /// the start sits off the grid.
+    /// the start sits off the grid. The shortest length is a 1/16, or one
+    /// grid unit when the grid is finer, because a coarse adaptive grid at
+    /// fit zoom would otherwise forbid anything under 8 bars.
     pub fn length_to_dragged_end(self, start: f64, end: f64, pixels_per_beat: f32) -> f64 {
-        let min_length = if self.snap_enabled {
-            self.effective_grid(pixels_per_beat).beat_size()
-        } else {
-            0.01
-        };
+        let min_length = self
+            .effective_grid(pixels_per_beat)
+            .beat_size()
+            .min(SnapGrid::SIXTEENTH.beat_size());
         (self.snap_beat(end, pixels_per_beat) - start).max(min_length)
     }
 
