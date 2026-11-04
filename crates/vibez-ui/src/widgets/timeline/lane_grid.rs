@@ -1,5 +1,7 @@
 //! Where the lane grid's alternating bar bands and lines fall on screen.
 
+use vibez_core::time::BEATS_PER_BAR;
+
 use crate::timeline_geometry::TimelineGeometry;
 
 /// How strongly a grid line is drawn.
@@ -18,8 +20,6 @@ pub(super) struct LaneGrid {
     /// Whole-pixel x of each one pixel line.
     pub lines: Vec<(f32, GridLine)>,
 }
-
-const BEATS_PER_BAR: f64 = 4.0;
 
 /// Lines any closer turn a zoomed-out lane into a barcode.
 const MIN_LINE_GAP_PX: f32 = 14.0;

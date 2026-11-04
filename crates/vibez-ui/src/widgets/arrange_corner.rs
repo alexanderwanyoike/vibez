@@ -2,12 +2,11 @@
 
 use iced::widget::{container, horizontal_space, row, text};
 use iced::{Element, Length, Theme};
+use vibez_core::time::BEATS_PER_BAR;
 
 use crate::message::Message;
 use crate::theme as th;
 use crate::widgets::track_header::TRACK_HEADER_TOTAL_WIDTH;
-
-const BEATS_PER_BAR: f64 = 4.0;
 
 /// A header-column cell with a title on the left and a detail on the right.
 pub fn arrange_corner<'a>(title: String, detail: String, height: f32) -> Element<'a, Message> {
