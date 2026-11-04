@@ -19,6 +19,7 @@ use crate::message::Message;
 use crate::state::{ArrangementSelection, ContextMenuTarget, TrackTimelineContent};
 use crate::theme as th;
 use crate::timeline_geometry::TimelineGeometry;
+use crate::widgets::arrange_corner::{arrange_corner, song_length_label};
 use crate::widgets::timeline::{
     build_row_spans, ArrangementMinimap, MinimapTrack, RulerWidget, TimelineClip, TrackClipCanvas,
     TRACK_ROW_HEIGHT,
@@ -115,16 +116,26 @@ impl App {
             .height(Length::Fixed(28.0))
             .into();
 
-        // Spacer matching header width (including color bar) for the ruler row
-        let ruler_spacer = container(text(""))
-            .width(Length::Fixed(
-                crate::widgets::track_header::TRACK_HEADER_TOTAL_WIDTH,
-            ))
-            .height(Length::Fixed(28.0))
-            .style(|_theme: &Theme| iced::widget::container::Style {
-                background: Some(crate::theme::bg_surface().into()),
-                ..Default::default()
-            });
+        let track_count = self.state.project_tracks.tracks.len();
+        let clip_count: usize = self
+            .state
+            .project_tracks
+            .tracks
+            .iter()
+            .filter_map(|track| timeline.timeline.get(track.id))
+            .map(|content| content.clips.len() + content.note_clips.len())
+            .sum();
+        let ruler_spacer = arrange_corner(
+            format!(
+                "{track_count} {}",
+                if track_count == 1 { "track" } else { "tracks" }
+            ),
+            format!(
+                "{clip_count} {}",
+                if clip_count == 1 { "clip" } else { "clips" }
+            ),
+            28.0,
+        );
 
         let ruler_row = row![ruler_spacer, ruler_canvas];
 
@@ -170,15 +181,11 @@ impl App {
                 })
                 .collect(),
         };
-        let minimap_spacer = container(text(""))
-            .width(Length::Fixed(
-                crate::widgets::track_header::TRACK_HEADER_TOTAL_WIDTH,
-            ))
-            .height(Length::Fixed(40.0))
-            .style(|_theme: &Theme| iced::widget::container::Style {
-                background: Some(th::bg_surface().into()),
-                ..Default::default()
-            });
+        let minimap_spacer = arrange_corner(
+            "Overview".into(),
+            song_length_label(self.state.duration_seconds(), bpm),
+            40.0,
+        );
         let minimap_canvas: Element<'_, Message> = canvas(minimap)
             .width(Length::Fill)
             .height(Length::Fixed(40.0))
