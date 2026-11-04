@@ -25,6 +25,7 @@ use vibez_core::id::{ClipId, TrackId};
 
 use super::clip_drag::ClipDragAction;
 use super::lane_timing;
+use super::note_summary::note_clip_summary;
 use super::*;
 
 mod drag_steps;
@@ -230,14 +231,7 @@ impl TrackClipCanvas {
                 position_beats: c.position_beats,
                 duration_beats: c.duration_beats,
                 name: c.name.clone(),
-                notes: Arc::new(NoteSummary::new(
-                    c.notes.iter().flat_map(|note| {
-                        c.note_occurrences(note.start_beat)
-                            .into_iter()
-                            .map(move |occurrence| (note.pitch, occurrence, note.duration_beats))
-                    }),
-                    geometry.pixels_per_beat(),
-                )),
+                notes: note_clip_summary(c, geometry.pixels_per_beat()),
                 start_marker_beats: c.start_marker_beats,
                 loop_enabled: c.loop_enabled,
                 loop_start_beats: c.loop_start_beats,

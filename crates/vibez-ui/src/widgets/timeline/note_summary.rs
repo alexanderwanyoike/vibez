@@ -1,5 +1,28 @@
-//! A note clip's notes over every loop pass, merged where they would touch
-//! on screen at the lane's zoom bucket.
+//! A note clip's notes as its lane draws them: every loop pass, merged
+//! where they would touch on screen, laid out once per clip and zoom bucket.
+
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::hash::{DefaultHasher, Hash, Hasher};
+use std::sync::Arc;
+
+use vibez_core::id::ClipId;
+
+use crate::state::UiNoteClip;
+
+/// Summaries kept before the cache starts over.
+const CACHE_SUMMARIES: usize = 4096;
+
+struct CachedSummary {
+    /// The notes and bounds the summary was laid out from.
+    fingerprint: u64,
+    summary: Arc<NoteSummary>,
+}
+
+thread_local! {
+    static SUMMARIES: RefCell<HashMap<(ClipId, i32), CachedSummary>> =
+        RefCell::new(HashMap::new());
+}
 
 /// One run of notes on one pitch, in clip-local beats.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -18,6 +41,67 @@ pub struct NoteSummary {
 /// Zooms within one doubling of pixels per beat share a summary.
 pub(super) fn zoom_bucket(pixels_per_beat: f32) -> i32 {
     pixels_per_beat.max(f32::MIN_POSITIVE).log2().ceil() as i32
+}
+
+/// The summary of `clip` for a lane at `pixels_per_beat`, laid out again
+/// only when the clip's notes or bounds change or the zoom leaves its
+/// bucket.
+pub(super) fn note_clip_summary(clip: &UiNoteClip, pixels_per_beat: f32) -> Arc<NoteSummary> {
+    let key = (clip.id, zoom_bucket(pixels_per_beat));
+    let fingerprint = fingerprint(clip);
+    if let Some(summary) = SUMMARIES.with(|summaries| {
+        summaries
+            .borrow()
+            .get(&key)
+            .filter(|cached| cached.fingerprint == fingerprint)
+            .map(|cached| Arc::clone(&cached.summary))
+    }) {
+        return summary;
+    }
+
+    let summary = Arc::new(NoteSummary::new(
+        clip.notes.iter().flat_map(|note| {
+            clip.note_occurrences(note.start_beat)
+                .into_iter()
+                .map(move |occurrence| (note.pitch, occurrence, note.duration_beats))
+        }),
+        pixels_per_beat,
+    ));
+    SUMMARIES.with(|summaries| {
+        let mut summaries = summaries.borrow_mut();
+        if summaries.len() >= CACHE_SUMMARIES {
+            summaries.clear();
+        }
+        summaries.insert(
+            key,
+            CachedSummary {
+                fingerprint,
+                summary: Arc::clone(&summary),
+            },
+        );
+    });
+    summary
+}
+
+fn fingerprint(clip: &UiNoteClip) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    for note in &clip.notes {
+        (
+            note.pitch,
+            note.start_beat.to_bits(),
+            note.duration_beats.to_bits(),
+        )
+            .hash(&mut hasher);
+    }
+    (
+        clip.start_marker_beats.to_bits(),
+        clip.loop_enabled,
+        clip.loop_start_beats.to_bits(),
+        clip.loop_end_beats.to_bits(),
+        clip.duration_beats.to_bits(),
+    )
+        .hash(&mut hasher);
+    hasher.finish()
 }
 
 impl NoteSummary {
