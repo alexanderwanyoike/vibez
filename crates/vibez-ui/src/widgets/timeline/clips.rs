@@ -223,26 +223,23 @@ impl TrackClipCanvas {
                 position_beats: c.position_beats,
                 duration_beats: c.duration_beats,
                 name: c.name.clone(),
-                notes: if geometry.pixels_per_beat() >= 4.0 {
-                    c.notes
-                        .iter()
-                        .flat_map(|note| {
-                            let first_repeat = c.timeline().first_wrap().unwrap_or(f64::INFINITY);
-                            c.note_occurrences(note.start_beat)
-                                .into_iter()
-                                .map(move |occurrence| {
-                                    (
-                                        note.pitch,
-                                        occurrence,
-                                        note.duration_beats,
-                                        c.loop_enabled && occurrence + f64::EPSILON >= first_repeat,
-                                    )
-                                })
-                        })
-                        .collect()
-                } else {
-                    Vec::new()
-                },
+                notes: c
+                    .notes
+                    .iter()
+                    .flat_map(|note| {
+                        let first_repeat = c.timeline().first_wrap().unwrap_or(f64::INFINITY);
+                        c.note_occurrences(note.start_beat)
+                            .into_iter()
+                            .map(move |occurrence| {
+                                (
+                                    note.pitch,
+                                    occurrence,
+                                    note.duration_beats,
+                                    c.loop_enabled && occurrence + f64::EPSILON >= first_repeat,
+                                )
+                            })
+                    })
+                    .collect(),
                 start_marker_beats: c.start_marker_beats,
                 loop_enabled: c.loop_enabled,
                 loop_start_beats: c.loop_start_beats,
