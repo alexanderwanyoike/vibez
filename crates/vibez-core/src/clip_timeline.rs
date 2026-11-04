@@ -35,6 +35,17 @@ impl FrameClipTimeline {
         self.has_loop_region() && self.start < self.loop_end
     }
 
+    /// Where a clip's loop may begin: anywhere in its source, unless Warp
+    /// Markers bound it to the window they map (see
+    /// [`Self::loop_content_end`]).
+    pub fn loop_content_start(source_offset: u64, warp_markers: &WarpMarkers) -> u64 {
+        if warp_markers.is_empty() {
+            0
+        } else {
+            source_offset
+        }
+    }
+
     /// The furthest a clip's loop may reach. A loop is the clip's content,
     /// not part of its Arrangement window, so the source bounds it rather
     /// than the clip's length; Warp Markers map only the clip's own window,
