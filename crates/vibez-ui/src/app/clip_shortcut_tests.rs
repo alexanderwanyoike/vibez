@@ -82,3 +82,17 @@ fn duplicate_over_three_lanes_copies_each_clip_once_in_one_undo_step() {
     let _ = app.update(Message::Project(ProjectMsg::Undo));
     assert_eq!(clip_counts(&app, &tracks), vec![1, 1, 1]);
 }
+
+#[test]
+fn clip_edit_shortcuts_that_change_nothing_leave_no_undo_step() {
+    let (mut app, _) = selected_clips_on(1);
+    // The playhead sits on the clip's start, so there is nothing to split,
+    // and a lone clip has nothing to join.
+    command_key(&mut app, "e");
+    command_key(&mut app, "j");
+    app.state.arrangement.selected_clips.clear();
+    command_key(&mut app, "d");
+
+    assert!(!app.state.project.history.can_undo());
+    assert!(!app.state.project.dirty);
+}
