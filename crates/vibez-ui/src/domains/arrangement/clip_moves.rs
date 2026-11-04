@@ -72,7 +72,10 @@ impl TimelineEditorState {
                 // Remove from engine source track
                 engine.send(EngineCommand::RemoveNoteClip(source_track, clip_id));
                 // Add to engine target track
-                engine.send(clip.add_command(target_track));
+                let resident = self
+                    .find_content(target_track)
+                    .map_or(0, |track| track.note_clips.len());
+                engine.send(clip.add_command_beside(target_track, resident));
                 // Add to UI target track
                 if let Some(track) = self.find_content_mut(target_track) {
                     track.note_clips.push(clip);
@@ -101,7 +104,10 @@ impl TimelineEditorState {
                 // Remove from engine source track
                 engine.send(EngineCommand::RemoveClip(source_track, clip_id));
                 // Add to engine target track
-                engine.send(clip.add_command(target_track));
+                let resident = self
+                    .find_content(target_track)
+                    .map_or(0, |track| track.clips.len());
+                engine.send(clip.add_command_beside(target_track, resident));
                 // Add to UI target track
                 if let Some(track) = self.find_content_mut(target_track) {
                     track.clips.push(clip);
