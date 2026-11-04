@@ -431,13 +431,19 @@ impl App {
 
         let (mut piano_widget, velocity_widget) = match visible_clip {
             Some(clip) => {
-                let clip_relative_playhead = playhead_beats - clip.position_beats;
+                // Off the Clip, its content plays nothing to point at.
+                let clip_playhead = playhead_beats - clip.position_beats;
+                let content_playhead = if (0.0..clip.duration_beats).contains(&clip_playhead) {
+                    clip.timeline().source_at(clip_playhead)
+                } else {
+                    -1.0
+                };
                 (
                     PianoRollWidget::from_clip(
                         track_id,
                         clip,
-                        clip_relative_playhead,
-                        clip.duration_beats,
+                        content_playhead,
+                        clip.editor_beats(),
                         track_color,
                         self.state.view.clip_grid,
                         self.state.piano_roll.scroll_y,
@@ -446,7 +452,7 @@ impl App {
                     VelocityLaneWidget::from_clip(
                         track_id,
                         clip,
-                        clip.duration_beats,
+                        clip.editor_beats(),
                         track_color,
                         self.state.view.clip_grid,
                     ),

@@ -608,6 +608,16 @@ impl UiNoteClip {
                 .clamp_start(self.start_marker_beats, 0.0, NOTE_CONTENT_END_BEATS);
     }
 
+    /// Content beats a clip editor shows, from beat 0 to where the Clip
+    /// stops playing.
+    pub(crate) fn editor_beats(&self) -> f64 {
+        if self.timeline().is_looping() {
+            self.duration_beats
+        } else {
+            self.start_marker_beats + self.duration_beats
+        }
+    }
+
     pub(crate) fn set_start_marker(&mut self, start_marker_beats: f64) -> bool {
         let valid = self
             .timeline()
