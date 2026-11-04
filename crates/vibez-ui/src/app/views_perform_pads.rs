@@ -493,15 +493,7 @@ impl App {
                     };
                     (
                         track.name.clone(),
-                        format!(
-                            "{} · {}",
-                            if track.kind.is_midi() {
-                                "MIDI"
-                            } else {
-                                "AUDIO"
-                            },
-                            state
-                        ),
+                        format!("{} · {}", track.kind.label(), state),
                         th::track_color(track.color_index),
                         track.mute,
                     )

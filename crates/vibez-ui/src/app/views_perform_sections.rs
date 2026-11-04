@@ -281,11 +281,7 @@ impl App {
                 let hidden_count = hidden_note_count + hidden_audio_count;
                 let has_content = clip_count > 0 || !content.automation.is_empty();
                 let track_id = track.id;
-                let type_label = if track.kind.is_midi() {
-                    "MIDI"
-                } else {
-                    "AUDIO"
-                };
+                let type_label = track.kind.label();
                 let marker = container(horizontal_space())
                     .width(Length::Fixed(3.0))
                     .height(Length::Fixed(

@@ -541,14 +541,10 @@ impl App {
                     column![
                         track_name,
                         row![
-                            text(if track.kind.is_midi() {
-                                "MIDI"
-                            } else {
-                                "AUDIO"
-                            })
-                            .font(PERFORM_TECH)
-                            .size(9)
-                            .color(th::text_dim()),
+                            text(track.kind.label())
+                                .font(PERFORM_TECH)
+                                .size(9)
+                                .color(th::text_dim()),
                             horizontal_space(),
                             text("LAUNCH")
                                 .font(PERFORM_TECH)
