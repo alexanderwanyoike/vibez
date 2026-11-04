@@ -363,8 +363,7 @@ impl App {
                     track_id: clip.track_id,
                     row: clip.row,
                     timeline: super::project_sections::timeline_info_from_ui(&clip.timeline),
-                    launch_quantization: clip.launch_quantization,
-                    launch_mode: clip.launch_mode,
+                    launch: clip.launch,
                 })
                 .collect(),
             arrange: super::project_sections::timeline_info_from_ui(
@@ -447,8 +446,7 @@ impl App {
                 timeline: Arc::new(super::project_sections::timeline_without_audio(
                     &clip.timeline,
                 )),
-                launch_quantization: clip.launch_quantization,
-                launch_mode: clip.launch_mode,
+                launch: clip.launch,
             })
             .collect();
         clips.restore_launcher_tracks(&loaded.project.launcher_tracks);

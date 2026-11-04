@@ -209,7 +209,7 @@ async fn a_clip_launch_quantization_survives_duplicate_save_and_reopen() {
         .clips
         .clips
         .iter()
-        .map(|clip| (clip.id, clip.launch_quantization))
+        .map(|clip| (clip.id, clip.launch.quantization))
         .collect();
     assert_eq!(copies.len(), 2);
     assert!(copies
@@ -231,7 +231,8 @@ async fn a_clip_launch_quantization_survives_duplicate_save_and_reopen() {
                 .clips
                 .by_id(id)
                 .unwrap()
-                .launch_quantization,
+                .launch
+                .quantization,
             quantization
         );
     }
@@ -460,7 +461,7 @@ async fn a_clip_launch_mode_survives_duplicate_save_and_reopen() {
     reopened.rebuild_from_loaded_project(loaded);
     for id in ids {
         assert_eq!(
-            reopened.state.perform.clips.by_id(id).unwrap().launch_mode,
+            reopened.state.perform.clips.by_id(id).unwrap().launch.mode,
             Some(ClipLaunchMode::Legato)
         );
     }

@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use vibez_core::id::{ClipId, TrackId};
 use vibez_core::perform::{ClipLaunchMode, MusicalBoundary};
-use vibez_project::PerformLayout;
+use vibez_project::{ClipLaunchOverrides, PerformLayout};
 
 use crate::state::{
     ArrangementSelection, ArrangementTimeline, TimelineEditorState, UiClip, UiNoteClip,
@@ -19,10 +19,7 @@ pub struct LauncherClip {
     pub track_id: TrackId,
     pub row: u32,
     pub timeline: Arc<ArrangementTimeline>,
-    /// `None` follows the Project Track's launch quantization.
-    pub launch_quantization: Option<MusicalBoundary>,
-    /// `None` follows the Project Track's launch mode.
-    pub launch_mode: Option<ClipLaunchMode>,
+    pub launch: ClipLaunchOverrides,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -144,12 +141,14 @@ impl ClipStore {
     }
 
     pub fn clip_launch_quantization(&self, clip: &LauncherClip) -> MusicalBoundary {
-        clip.launch_quantization
+        clip.launch
+            .quantization
             .unwrap_or_else(|| self.launch_quantization(clip.track_id))
     }
 
     pub fn clip_launch_mode(&self, clip: &LauncherClip) -> ClipLaunchMode {
-        clip.launch_mode
+        clip.launch
+            .mode
             .unwrap_or_else(|| self.launch_mode(clip.track_id))
     }
 
@@ -741,10 +740,10 @@ impl PerformState {
                 if self
                     .clips
                     .by_id(clip_id)
-                    .is_some_and(|clip| clip.launch_quantization != quantization)
+                    .is_some_and(|clip| clip.launch.quantization != quantization)
                 {
                     if let Some(clip) = Arc::make_mut(&mut self.clips).by_id_mut(clip_id) {
-                        clip.launch_quantization = quantization;
+                        clip.launch.quantization = quantization;
                     }
                 }
             }
@@ -755,7 +754,7 @@ impl PerformState {
             }
             ClipMsg::SetClipLaunchMode { clip_id, mode } => {
                 if let Some(clip) = Arc::make_mut(&mut self.clips).by_id_mut(clip_id) {
-                    clip.launch_mode = mode;
+                    clip.launch.mode = mode;
                 }
             }
             ClipMsg::MoveWindow { tracks, rows } => {
@@ -812,8 +811,7 @@ impl LauncherClip {
             track_id,
             row,
             timeline: Arc::new(timeline),
-            launch_quantization: self.launch_quantization,
-            launch_mode: self.launch_mode,
+            launch: self.launch,
         }
     }
 

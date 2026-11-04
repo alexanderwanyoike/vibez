@@ -14,7 +14,7 @@ use vibez_core::perform::{GrooveProfile, SwingAmount};
 mod clip_launcher;
 pub mod device_preset;
 pub mod project_format_v1;
-pub use clip_launcher::{LauncherClipInfo, LauncherTrackInfo, PerformLayout};
+pub use clip_launcher::{ClipLaunchOverrides, LauncherClipInfo, LauncherTrackInfo, PerformLayout};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TimelineLocation {

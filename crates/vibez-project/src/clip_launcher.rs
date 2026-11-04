@@ -29,12 +29,25 @@ pub struct LauncherClipInfo {
     pub track_id: TrackId,
     pub row: u32,
     pub timeline: TimelineInfo,
-    /// `None` follows the Project Track's launch quantization.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub launch_quantization: Option<MusicalBoundary>,
-    /// `None` follows the Project Track's launch mode.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub launch_mode: Option<ClipLaunchMode>,
+    #[serde(flatten)]
+    pub launch: ClipLaunchOverrides,
+}
+
+/// A Clip's own launch options. `None` follows its Project Track.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClipLaunchOverrides {
+    #[serde(
+        rename = "launch_quantization",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub quantization: Option<MusicalBoundary>,
+    #[serde(
+        rename = "launch_mode",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub mode: Option<ClipLaunchMode>,
 }
 
 /// A Project Track's Clip launch options. Tracks on the defaults are not written.

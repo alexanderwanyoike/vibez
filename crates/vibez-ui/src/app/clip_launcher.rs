@@ -72,8 +72,7 @@ impl App {
                 track_id,
                 row,
                 timeline: Arc::new(timeline),
-                launch_quantization: None,
-                launch_mode: None,
+                launch: Default::default(),
             });
         self.state.perform.select_launcher_clip(id);
         self.state.view.detail_panel_tab = crate::state::DetailPanelTab::Clip;
@@ -372,7 +371,7 @@ mod live_edit_tests {
         let track = TrackId::new();
         let playing = empty_midi_clip(ClipId::new(), track, 0, "Break".into(), 4.0);
         let mut fill = empty_midi_clip(ClipId::new(), track, 1, "Fill".into(), 4.0);
-        fill.launch_quantization = Some(MusicalBoundary::Sixteenth);
+        fill.launch.quantization = Some(MusicalBoundary::Sixteenth);
         let mut state = crate::domains::perform::PerformState::default();
         state.layout = PerformLayout::Clips;
         Arc::make_mut(&mut state.clips)

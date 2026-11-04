@@ -334,7 +334,7 @@ impl App {
                 .color(th::text_dim()),
             clip_launch_picker(
                 clips.launch_mode(clip.track_id),
-                clip.launch_mode,
+                clip.launch.mode,
                 vibez_core::perform::ClipLaunchMode::ALL,
                 move |mode| {
                     Message::Perform(PerformMsg::Clips(ClipMsg::SetClipLaunchMode {
@@ -345,7 +345,7 @@ impl App {
             ),
             clip_launch_picker(
                 clips.launch_quantization(clip.track_id),
-                clip.launch_quantization,
+                clip.launch.quantization,
                 vibez_core::perform::MusicalBoundary::ALL,
                 move |quantization| {
                     Message::Perform(PerformMsg::Clips(ClipMsg::SetClipLaunchQuantization {
