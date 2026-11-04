@@ -174,11 +174,11 @@ impl SnapTargets {
         )
     }
 
-    /// Where a dragged Clip end at `end` lands.
-    pub fn dragged_end(&self, end: f64, context: SnapContext) -> Snapped {
+    /// Where a dragged Clip edge at `edge` lands.
+    pub fn dragged_edge(&self, edge: f64, context: SnapContext) -> Snapped {
         self.land(
-            &[end],
-            Self::grid_shift(end, context),
+            &[edge],
+            Self::grid_shift(edge, context),
             context,
             Moves::SelectedClips,
         )
@@ -196,10 +196,10 @@ impl SnapTargets {
     }
 
     /// Where the end of a span from `start` lands when dragged to `end`:
-    /// where a dragged Clip end does, but never nearer `start` than
+    /// where a dragged Clip edge does, but never nearer `start` than
     /// [`SHORTEST_LENGTH_BEATS`].
     pub fn span_end(&self, start: f64, end: f64, context: SnapContext) -> Snapped {
-        let landed = self.dragged_end(end, context);
+        let landed = self.dragged_edge(end, context);
         let shortest = start + SHORTEST_LENGTH_BEATS;
         if landed.beat >= shortest {
             return landed;
@@ -472,9 +472,9 @@ mod tests {
     }
 
     #[test]
-    fn a_dragged_end_locks_onto_another_clips_start() {
+    fn a_dragged_edge_locks_onto_another_clips_start() {
         assert_lands(
-            targets().dragged_end(10.25, context()),
+            targets().dragged_edge(10.25, context()),
             10.35,
             SnapTargetKind::ClipEdge,
         );
@@ -496,7 +496,7 @@ mod tests {
         let targets = SnapTargets::for_editor(&editor, SAMPLES_PER_BEAT);
 
         assert_lands(
-            targets.dragged_end(2.2, context()),
+            targets.dragged_edge(2.2, context()),
             2.0,
             SnapTargetKind::Grid,
         );
