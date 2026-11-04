@@ -613,12 +613,16 @@ impl PreparedPlaybackSource {
                 continue;
             }
             let audio_channels = clip.audio.num_channels();
-            let identity_source_end = clip
-                .source_offset
-                .saturating_add(clip.duration)
-                .min(clip.audio.num_frames() as u64);
-            let source_end = clip.warp_markers.source_end(identity_source_end) as usize;
             let timeline = clip.timeline();
+            // A loop is content and may run past the clip's own window.
+            let identity_source_end = if timeline.is_looping() {
+                clip.audio.num_frames() as u64
+            } else {
+                clip.source_offset
+                    .saturating_add(clip.duration)
+                    .min(clip.audio.num_frames() as u64)
+            };
+            let source_end = clip.warp_markers.source_end(identity_source_end) as usize;
             let identity_timeline_end = clip
                 .duration
                 .min((clip.audio.num_frames() as u64).saturating_sub(clip.source_offset));
