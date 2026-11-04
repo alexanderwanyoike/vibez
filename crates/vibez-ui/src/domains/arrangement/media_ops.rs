@@ -220,26 +220,9 @@ impl TimelineEditorState {
         let mut clip_end_beat = None;
         if let Some(track) = self.find_content_mut(track_id) {
             if let Some(clip) = track.clips.iter_mut().find(|clip| clip.id == clip_id) {
-                let new_duration = clip.playable_duration(new_duration);
-                let old_mapping_end = clip.warp_timeline_end();
-                let new_mapping_end = new_duration
-                    .min((clip.audio.num_frames() as u64).saturating_sub(clip.source_offset));
-                let warp_markers = clip.warp_markers.resized_timeline(
-                    old_mapping_end,
-                    new_mapping_end,
-                    clip.source_offset,
-                    clip.audio.num_frames() as u64,
-                );
-                let warp_changed = warp_markers != clip.warp_markers;
-                clip.warp_markers = warp_markers;
-                clip.duration = new_duration;
-                clip.clamp_fades_to_clip();
-                clip.clamp_start_to_source();
-                if clip.loop_enabled {
-                    clip.clamp_loop_to_warp_map();
-                }
-                clip.transient_markers
-                    .retain_source_range(clip.source_offset, clip.source_end());
+                let warp_markers_before = clip.warp_markers.clone();
+                clip.resize(new_duration);
+                let warp_changed = clip.warp_markers != warp_markers_before;
                 clip_end_beat = Some((clip.position + clip.duration) as f64 / ctx.samples_per_beat);
                 engine.send(clip.bounds_command(track_id));
                 if warp_changed {

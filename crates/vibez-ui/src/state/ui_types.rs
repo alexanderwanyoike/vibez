@@ -162,6 +162,29 @@ impl UiClip {
         requested.min(longest)
     }
 
+    /// Change the length to `requested`, or as near as the sample allows,
+    /// moving the right edge.
+    pub(crate) fn resize(&mut self, requested: u64) {
+        let new_duration = self.playable_duration(requested);
+        let old_mapping_end = self.warp_timeline_end();
+        let new_mapping_end =
+            new_duration.min((self.audio.num_frames() as u64).saturating_sub(self.source_offset));
+        self.warp_markers = self.warp_markers.resized_timeline(
+            old_mapping_end,
+            new_mapping_end,
+            self.source_offset,
+            self.audio.num_frames() as u64,
+        );
+        self.duration = new_duration;
+        self.clamp_fades_to_clip();
+        self.clamp_start_to_source();
+        if self.loop_enabled {
+            self.clamp_loop_to_warp_map();
+        }
+        self.transient_markers
+            .retain_source_range(self.source_offset, self.source_end());
+    }
+
     pub(crate) fn warp_timeline_end(&self) -> u64 {
         let identity_end = self
             .duration
