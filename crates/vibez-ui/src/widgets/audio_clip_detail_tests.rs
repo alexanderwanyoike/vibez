@@ -108,6 +108,49 @@ fn audio_loop_end_marker_drag_edits_source_frames() {
 }
 
 #[test]
+fn audio_loop_end_drags_past_the_clip_end_up_to_the_source_end() {
+    let widget = widget();
+    let bounds = Rectangle::new(Point::ORIGIN, iced::Size::new(800.0, 200.0));
+    let end = Point::new(widget.timeline_to_x(widget.loop_end, &bounds), 5.0);
+    let mut state = AudioClipDetailState::default();
+    widget.update(
+        &mut state,
+        canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)),
+        bounds,
+        mouse::Cursor::Available(end),
+    );
+
+    let mut drag_to = |x: f32| {
+        let target = Point::new(x, 5.0);
+        arrangement_message(
+            widget
+                .update(
+                    &mut state,
+                    canvas::Event::Mouse(mouse::Event::CursorMoved { position: target }),
+                    bounds,
+                    mouse::Cursor::Available(target),
+                )
+                .1,
+        )
+    };
+    assert!(matches!(
+        drag_to(850.0),
+        Some(ArrangementMsg::SetClipLoopRegion {
+            loop_start: 100,
+            loop_end: 1_000,
+            ..
+        })
+    ));
+    assert!(matches!(
+        drag_to(2_000.0),
+        Some(ArrangementMsg::SetClipLoopRegion {
+            loop_end: 1_000,
+            ..
+        })
+    ));
+}
+
+#[test]
 fn overlapping_start_and_loop_start_have_separate_hit_rows() {
     let mut widget = widget();
     widget.grid.snap_enabled = false;
