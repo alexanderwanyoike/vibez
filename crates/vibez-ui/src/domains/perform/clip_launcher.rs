@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use vibez_core::id::{ClipId, TrackId};
 use vibez_core::perform::{ClipLaunchMode, MusicalBoundary};
-use vibez_project::PerformLayout;
+use vibez_project::{ClipLaunchOverrides, PerformLayout};
 
 use crate::state::{
     ArrangementSelection, ArrangementTimeline, TimelineEditorState, UiClip, UiNoteClip,
@@ -13,14 +13,17 @@ use crate::state::{
 
 use super::{PerformAction, PerformCtx, PerformEditorFocus, PerformState};
 
+#[path = "clip_launch_options.rs"]
+mod launch_options;
+pub(crate) use launch_options::TrackLaunchOptions;
+
 #[derive(Debug, Clone)]
 pub struct LauncherClip {
     pub id: ClipId,
     pub track_id: TrackId,
     pub row: u32,
     pub timeline: Arc<ArrangementTimeline>,
-    /// `None` follows the Project Track's launch quantization.
-    pub launch_quantization: Option<MusicalBoundary>,
+    pub launch: ClipLaunchOverrides,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -61,25 +64,6 @@ impl LauncherClip {
     }
 }
 
-/// The boundary a Project Track launches on until its launch quantization is set.
-pub const DEFAULT_LAUNCH_QUANTIZATION: MusicalBoundary = MusicalBoundary::OneBar;
-
-/// A Project Track's Clip launch options.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct TrackLaunchOptions {
-    quantization: MusicalBoundary,
-    mode: ClipLaunchMode,
-}
-
-impl Default for TrackLaunchOptions {
-    fn default() -> Self {
-        Self {
-            quantization: DEFAULT_LAUNCH_QUANTIZATION,
-            mode: ClipLaunchMode::default(),
-        }
-    }
-}
-
 #[derive(Debug, Clone, Default)]
 pub struct ClipStore {
     pub clips: Vec<LauncherClip>,
@@ -89,87 +73,6 @@ pub struct ClipStore {
 }
 
 impl ClipStore {
-    fn track_options(&self, track_id: TrackId) -> TrackLaunchOptions {
-        self.track_options
-            .get(&track_id)
-            .copied()
-            .unwrap_or_default()
-    }
-
-    fn update_track_options(
-        &mut self,
-        track_id: TrackId,
-        update: impl FnOnce(&mut TrackLaunchOptions),
-    ) {
-        let mut options = self.track_options(track_id);
-        update(&mut options);
-        if options == TrackLaunchOptions::default() {
-            self.track_options.remove(&track_id);
-        } else {
-            self.track_options.insert(track_id, options);
-        }
-    }
-
-    /// Saved launch options for `tracks` that are off the defaults, in order.
-    pub fn launcher_tracks(
-        &self,
-        tracks: impl IntoIterator<Item = TrackId>,
-    ) -> Vec<vibez_project::LauncherTrackInfo> {
-        tracks
-            .into_iter()
-            .filter_map(|track_id| {
-                let options = self.track_options.get(&track_id)?;
-                Some(vibez_project::LauncherTrackInfo {
-                    track_id,
-                    launch_quantization: options.quantization,
-                    launch_mode: options.mode,
-                })
-            })
-            .collect()
-    }
-
-    pub fn restore_launcher_tracks(&mut self, tracks: &[vibez_project::LauncherTrackInfo]) {
-        for track in tracks {
-            self.update_track_options(track.track_id, |options| {
-                options.quantization = track.launch_quantization;
-                options.mode = track.launch_mode;
-            });
-        }
-    }
-
-    pub fn launch_quantization(&self, track_id: TrackId) -> MusicalBoundary {
-        self.track_options(track_id).quantization
-    }
-
-    pub fn clip_launch_quantization(&self, clip: &LauncherClip) -> MusicalBoundary {
-        clip.launch_quantization
-            .unwrap_or_else(|| self.launch_quantization(clip.track_id))
-    }
-
-    pub fn set_launch_quantization(&mut self, track_id: TrackId, quantization: MusicalBoundary) {
-        self.update_track_options(track_id, |options| options.quantization = quantization);
-    }
-
-    pub fn launch_mode(&self, track_id: TrackId) -> ClipLaunchMode {
-        self.track_options(track_id).mode
-    }
-
-    pub fn set_launch_mode(&mut self, track_id: TrackId, mode: ClipLaunchMode) {
-        self.update_track_options(track_id, |options| options.mode = mode);
-    }
-
-    /// Prepares `clip` to launch with its track's launch mode.
-    pub fn prepare_launch(
-        &self,
-        clip: &LauncherClip,
-        request_id: u64,
-        samples_per_beat: f64,
-    ) -> Box<vibez_engine::playback_source::PreparedClipPlayback> {
-        let mut prepared = clip.prepare(request_id, samples_per_beat);
-        prepared.launch_mode = self.launch_mode(clip.track_id);
-        prepared
-    }
-
     pub fn at(&self, track_id: TrackId, row: u32) -> Option<&LauncherClip> {
         self.clips
             .iter()
@@ -357,6 +260,10 @@ pub enum ClipMsg {
         track_id: TrackId,
         mode: ClipLaunchMode,
     },
+    SetClipLaunchMode {
+        clip_id: ClipId,
+        mode: Option<ClipLaunchMode>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -387,22 +294,12 @@ impl ClipMsg {
                 | Self::SetLaunchQuantization { .. }
                 | Self::SetClipLaunchQuantization { .. }
                 | Self::SetLaunchMode { .. }
+                | Self::SetClipLaunchMode { .. }
         )
     }
 }
 
 impl PerformState {
-    /// A stop lands where the Clip it stops would launch.
-    pub fn stop_quantization(&self, track_id: TrackId) -> MusicalBoundary {
-        self.clip_editor.playing.get(&track_id).map_or_else(
-            || self.clips.launch_quantization(track_id),
-            |playing| {
-                self.clips
-                    .clip_launch_quantization(self.clips.by_id(playing.id).unwrap_or(playing))
-            },
-        )
-    }
-
     pub fn toggle_clip_request(&self, id: ClipId) -> Option<ClipLaunchRequest> {
         let clip = self.clips.by_id(id)?;
         Some(if self.clip_is_triggered(clip) {
@@ -714,29 +611,16 @@ impl PerformState {
             ClipMsg::SetLaunchQuantization {
                 track_id,
                 quantization,
-            } => {
-                if self.clips.launch_quantization(track_id) != quantization {
-                    Arc::make_mut(&mut self.clips).set_launch_quantization(track_id, quantization);
-                }
-            }
+            } => self.edit_track_launch(track_id, |options| options.quantization = quantization),
             ClipMsg::SetClipLaunchQuantization {
                 clip_id,
                 quantization,
-            } => {
-                if self
-                    .clips
-                    .by_id(clip_id)
-                    .is_some_and(|clip| clip.launch_quantization != quantization)
-                {
-                    if let Some(clip) = Arc::make_mut(&mut self.clips).by_id_mut(clip_id) {
-                        clip.launch_quantization = quantization;
-                    }
-                }
-            }
+            } => self.edit_clip_launch(clip_id, |launch| launch.quantization = quantization),
             ClipMsg::SetLaunchMode { track_id, mode } => {
-                if self.clips.launch_mode(track_id) != mode {
-                    Arc::make_mut(&mut self.clips).set_launch_mode(track_id, mode);
-                }
+                self.edit_track_launch(track_id, |options| options.mode = mode)
+            }
+            ClipMsg::SetClipLaunchMode { clip_id, mode } => {
+                self.edit_clip_launch(clip_id, |launch| launch.mode = mode)
             }
             ClipMsg::MoveWindow { tracks, rows } => {
                 self.clip_editor.first_track = self
@@ -792,7 +676,7 @@ impl LauncherClip {
             track_id,
             row,
             timeline: Arc::new(timeline),
-            launch_quantization: self.launch_quantization,
+            launch: self.launch,
         }
     }
 

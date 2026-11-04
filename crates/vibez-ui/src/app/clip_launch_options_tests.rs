@@ -209,7 +209,7 @@ async fn a_clip_launch_quantization_survives_duplicate_save_and_reopen() {
         .clips
         .clips
         .iter()
-        .map(|clip| (clip.id, clip.launch_quantization))
+        .map(|clip| (clip.id, clip.launch.quantization))
         .collect();
     assert_eq!(copies.len(), 2);
     assert!(copies
@@ -231,7 +231,8 @@ async fn a_clip_launch_quantization_survives_duplicate_save_and_reopen() {
                 .clips
                 .by_id(id)
                 .unwrap()
-                .launch_quantization,
+                .launch
+                .quantization,
             quantization
         );
     }
@@ -389,6 +390,89 @@ fn choosing_a_tracks_current_launch_mode_is_not_an_edit() {
     let breaks = TrackId::new();
     let (mut app, _sent) = clip_app(&[breaks]);
     let _ = app.update(set_mode(breaks, ClipLaunchMode::Play));
+    assert!(!app.state.project.dirty);
+    assert!(!app.state.project.history.can_undo());
+}
+
+fn set_clip_mode(clip_id: ClipId, mode: Option<ClipLaunchMode>) -> Message {
+    Message::Perform(PerformMsg::Clips(ClipMsg::SetClipLaunchMode {
+        clip_id,
+        mode,
+    }))
+}
+
+fn launched_modes(sent: &mut rtrb::Consumer<EngineCommand>) -> Vec<ClipLaunchMode> {
+    std::iter::from_fn(|| sent.pop().ok())
+        .filter_map(|command| match command {
+            EngineCommand::QueueClips { clips, .. } => Some(clips),
+            _ => None,
+        })
+        .flatten()
+        .map(|clip| clip.launch_mode)
+        .collect()
+}
+
+#[test]
+fn a_clip_launch_mode_overrides_its_track_until_cleared() {
+    let breaks = TrackId::new();
+    let (mut app, mut sent) = clip_app(&[breaks]);
+    let clip = app.state.perform.clips.at(breaks, 0).unwrap().id;
+    let _ = app.update(set_mode(breaks, ClipLaunchMode::Legato));
+    let _ = app.update(set_clip_mode(clip, Some(ClipLaunchMode::AtEnd)));
+    assert!(app.state.project.dirty);
+    let toggle = Message::Perform(PerformMsg::Clips(ClipMsg::Toggle(clip)));
+    let _ = app.update(toggle.clone());
+    assert_eq!(launched_modes(&mut sent), vec![ClipLaunchMode::AtEnd]);
+    let _ = app.update(set_clip_mode(clip, None));
+    app.state.perform.clip_editor.queued.clear();
+    let _ = app.update(toggle);
+    assert_eq!(
+        launched_modes(&mut sent),
+        vec![ClipLaunchMode::Legato],
+        "a cleared clip follows its track again"
+    );
+}
+
+#[tokio::test]
+async fn a_clip_launch_mode_survives_duplicate_save_and_reopen() {
+    let breaks = TrackId::new();
+    let (mut app, _sent) = clip_app(&[breaks]);
+    let clip = app.state.perform.clips.at(breaks, 0).unwrap().id;
+    let _ = app.update(set_clip_mode(clip, Some(ClipLaunchMode::Legato)));
+    let _ = app.update(Message::Perform(PerformMsg::Clips(ClipMsg::Duplicate(
+        clip,
+    ))));
+    let ids: Vec<_> = app
+        .state
+        .perform
+        .clips
+        .clips
+        .iter()
+        .map(|clip| clip.id)
+        .collect();
+    assert_eq!(ids.len(), 2);
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("jungle.vzp");
+    super::save_project_async(path.clone(), None, app.project_from_state())
+        .await
+        .unwrap();
+    let loaded = super::load_project_async(path, None).await.unwrap();
+    let mut reopened = super::test_support::app();
+    reopened.rebuild_from_loaded_project(loaded);
+    for id in ids {
+        assert_eq!(
+            reopened.state.perform.clips.by_id(id).unwrap().launch.mode,
+            Some(ClipLaunchMode::Legato)
+        );
+    }
+}
+
+#[test]
+fn choosing_a_clips_current_launch_mode_is_not_an_edit() {
+    let breaks = TrackId::new();
+    let (mut app, _sent) = clip_app(&[breaks]);
+    let clip = app.state.perform.clips.at(breaks, 0).unwrap().id;
+    let _ = app.update(set_clip_mode(clip, None));
     assert!(!app.state.project.dirty);
     assert!(!app.state.project.history.can_undo());
 }
