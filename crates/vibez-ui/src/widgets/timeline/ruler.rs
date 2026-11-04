@@ -44,6 +44,23 @@ pub struct RulerInteractionState {
     shift_held: bool,
 }
 
+/// Bars between labelled bar numbers, about 60 px apart at any zoom.
+pub(super) fn bar_label_step(pixels_per_bar: f32) -> u32 {
+    if pixels_per_bar >= 60.0 {
+        1
+    } else if pixels_per_bar >= 30.0 {
+        2
+    } else if pixels_per_bar >= 15.0 {
+        4
+    } else if pixels_per_bar >= 8.0 {
+        8
+    } else if pixels_per_bar >= 4.0 {
+        16
+    } else {
+        32
+    }
+}
+
 impl RulerWidget {
     fn geometry(&self) -> TimelineGeometry {
         TimelineGeometry::from_zoom(self.zoom_level, self.scroll_offset_beats)
@@ -98,20 +115,7 @@ impl canvas::Program<Message> for RulerWidget {
             let ppb = self.pixels_per_beat();
             let pixels_per_bar = ppb * beats_per_bar as f32;
 
-            // Adaptive: ensure ~60px minimum between labeled bars
-            let bar_step: i64 = if pixels_per_bar >= 60.0 {
-                1
-            } else if pixels_per_bar >= 30.0 {
-                2
-            } else if pixels_per_bar >= 15.0 {
-                4
-            } else if pixels_per_bar >= 8.0 {
-                8
-            } else if pixels_per_bar >= 4.0 {
-                16
-            } else {
-                32
-            };
+            let bar_step = i64::from(bar_label_step(pixels_per_bar));
 
             for beat_i in start_beat..end_beat {
                 let beat = beat_i as f64;
