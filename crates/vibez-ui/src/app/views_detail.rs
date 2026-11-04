@@ -207,7 +207,9 @@ impl App {
             Some(grid.choice(pixels_per_beat)),
             |choice| Message::View(ViewMsg::ChooseClipGrid(choice)),
         )
-        .width(Length::Fixed(90.0));
+        .width(Length::Fixed(90.0))
+        .padding([3, 8])
+        .text_size(11);
         let snap_label = text("Snap:").size(10).color(th::text_dim());
         row![snap_label, snap_picker]
             .spacing(4)
