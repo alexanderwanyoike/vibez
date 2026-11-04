@@ -204,7 +204,7 @@ impl App {
                     .into()
             }
         };
-        let layout = section_record_bar_layout(self.perform_workspace_width());
+        let layout = section_record_bar_layout(self.browser_workspace_width());
         let content: Element<'_, Message> = match layout {
             SectionRecordBarLayout::Inline | SectionRecordBarLayout::StatusBelow => {
                 let controls = row![record_button, count_in, mode, quantization, capture_button]

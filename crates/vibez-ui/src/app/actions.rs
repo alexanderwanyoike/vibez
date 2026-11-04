@@ -606,16 +606,7 @@ impl App {
                 );
             }
         } else if self.state.arrangement.drag_resize_active {
-            let browser_width = if self.state.browser.open {
-                self.state
-                    .browser
-                    .effective_dock_width(self.state.view.window_width)
-                    + super::views_shell::HORIZONTAL_PANE_SPLITTER_WIDTH
-            } else {
-                0.0
-            };
-            let left_boundary =
-                browser_width + crate::widgets::track_header::TRACK_HEADER_TOTAL_WIDTH;
+            let left_boundary = self.state.view.window_width - self.arrange_lane_width();
             let viewport_width = (right_boundary - left_boundary).max(1.0);
             let velocity = crate::timeline_geometry::edge_scroll_velocity(
                 cursor_x,

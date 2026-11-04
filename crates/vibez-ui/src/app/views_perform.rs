@@ -121,7 +121,7 @@ impl App {
         if self.state.perform.layout == vibez_project::PerformLayout::Clips {
             return self.view_clip_perform();
         }
-        let workspace_width = self.perform_workspace_width();
+        let workspace_width = self.browser_workspace_width();
         let surface_width =
             effective_perform_surface_width(self.state.view.perform_surface_width, workspace_width);
         let section_width = self.section_construction_width();
@@ -155,20 +155,8 @@ impl App {
         .into()
     }
 
-    pub(super) fn perform_workspace_width(&self) -> f32 {
-        let browser_width = if self.state.browser.open {
-            self.state
-                .browser
-                .effective_dock_width(self.state.view.window_width)
-                + super::views_shell::HORIZONTAL_PANE_SPLITTER_WIDTH
-        } else {
-            0.0
-        };
-        (self.state.view.window_width - browser_width).max(0.0)
-    }
-
     pub(super) fn section_construction_width(&self) -> f32 {
-        let workspace_width = self.perform_workspace_width();
+        let workspace_width = self.browser_workspace_width();
         let surface_width =
             effective_perform_surface_width(self.state.view.perform_surface_width, workspace_width);
         (workspace_width - surface_width - super::views_shell::HORIZONTAL_PANE_SPLITTER_WIDTH)
@@ -183,7 +171,7 @@ impl App {
     }
 
     pub(super) fn perform_surface_drag_width(&self, cursor_x: f32) -> f32 {
-        let workspace_width = self.perform_workspace_width();
+        let workspace_width = self.browser_workspace_width();
         let workspace_left = self.state.view.window_width - workspace_width;
         effective_perform_surface_width(
             cursor_x - workspace_left,

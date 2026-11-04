@@ -212,7 +212,7 @@ impl App {
     }
 
     pub(super) fn view_clip_perform(&self) -> Element<'_, Message> {
-        let width = self.perform_workspace_width();
+        let width = self.browser_workspace_width();
         let content = if self.state.perform.mode == PerformMode::Sections {
             self.view_clip_grid(width)
         } else {

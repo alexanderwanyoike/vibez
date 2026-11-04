@@ -36,6 +36,12 @@ use super::*;
 const CHANNEL_FOOTER_MAX_HEIGHT: f32 = 240.0;
 
 impl App {
+    /// Width of the clip lanes, right of the track headers.
+    pub(super) fn arrange_lane_width(&self) -> f32 {
+        (self.browser_workspace_width() - crate::widgets::track_header::TRACK_HEADER_TOTAL_WIDTH)
+            .max(1.0)
+    }
+
     pub(super) fn view_arrangement(&self) -> Element<'_, Message> {
         let timeline = self.state.arrangement.resolve_timeline().editor;
         if self.state.project_tracks.tracks.is_empty() {
