@@ -410,6 +410,9 @@ pub(crate) fn global_key_handler(
     }
 
     if modifiers.is_empty() {
+        if matches!(key, iced::keyboard::Key::Named(Named::Home)) {
+            return Some(Message::Transport(TransportMsg::SeekToBeat(0.0)));
+        }
         let mode = match key {
             iced::keyboard::Key::Named(Named::F1) => Some(PerformMode::Sections),
             iced::keyboard::Key::Named(Named::F2) => Some(PerformMode::TrackMutes),
