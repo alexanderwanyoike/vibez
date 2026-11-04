@@ -37,13 +37,10 @@ impl AudioEngine {
             if !self.flush_removed_clip_owners() {
                 break;
             }
-            if self.pending_clip_insertion.is_some()
-                || self.capture_replay.is_some()
-                || self.clip_batch_blocks_commands()
-            {
+            if self.capture_replay.is_some() || self.clip_batch_blocks_commands() {
                 break;
             }
-            let Ok(_) = self.cmd_rx.peek() else {
+            let Some(_) = self.next_command() else {
                 break;
             };
             // Track-sized cancellation retains the remaining owners/intents.
@@ -64,21 +61,25 @@ impl AudioEngine {
                 || self.pending_bus_cleanup.is_some()
                 || (self.pending_section_record_stop.is_some()
                     && matches!(
-                        self.cmd_rx.peek(),
-                        Ok(EngineCommand::ArmSectionRecord { .. })
+                        self.next_command(),
+                        Some(EngineCommand::ArmSectionRecord { .. })
                     ))
                 || (self
                     .queued_section
                     .as_ref()
                     .is_some_and(|queued| queued.phase == SectionQueuePhase::Returning)
                     && matches!(
-                        self.cmd_rx.peek(),
-                        Ok(EngineCommand::LaunchSection(_)
-                            | EngineCommand::QueueSection { .. }
-                            | EngineCommand::ArmSectionRecord { .. })
+                        self.next_command(),
+                        Some(
+                            EngineCommand::LaunchSection(_)
+                                | EngineCommand::QueueSection { .. }
+                                | EngineCommand::ArmSectionRecord { .. }
+                        )
                     ))
                 || self.pending_retirements.available()
-                    < self.cmd_rx.peek().map_or(2, |cmd| cmd.retirement_reserve())
+                    < self
+                        .next_command()
+                        .map_or(2, |cmd| cmd.retirement_reserve())
                 || !self.channel_retirement.has_capacity()
             {
                 break;
@@ -87,19 +88,23 @@ impl AudioEngine {
             // destruction or unbounded leaked retirement buffers.
             if self.retired_routing.is_some()
                 && matches!(
-                    self.cmd_rx.peek(),
-                    Ok(EngineCommand::SetRouting(_)
-                        | EngineCommand::UpdateAutomationRouting(_)
-                        | EngineCommand::ResumeDeviceReconfiguration { .. })
+                    self.next_command(),
+                    Some(
+                        EngineCommand::SetRouting(_)
+                            | EngineCommand::UpdateAutomationRouting(_)
+                            | EngineCommand::ResumeDeviceReconfiguration { .. }
+                    )
                 )
             {
                 break;
             }
-            let budget = self.cmd_rx.peek().map_or(2, |cmd| cmd.retirement_reserve());
+            let budget = self
+                .next_command()
+                .map_or(2, |cmd| cmd.retirement_reserve());
             let Some(mut allowance) = self.pending_retirements.reserve(budget) else {
                 break;
             };
-            let Ok(cmd) = self.cmd_rx.pop() else {
+            let Some(cmd) = self.pop_next_command() else {
                 break;
             };
             let bus_cleanup = self.dispatch_command(cmd, &mut allowance);
@@ -110,6 +115,30 @@ impl AudioEngine {
                 self.clean_removed_bus_automation();
             }
         }
+    }
+
+    /// A ready transport command first; otherwise the main ring, unless a
+    /// content edit is waiting for storage.
+    fn next_command(&self) -> Option<&EngineCommand> {
+        if let Some(transport) = self.transport_rx.ready() {
+            return Some(transport);
+        }
+        if self.pending_clip_insertion.is_some() {
+            return None;
+        }
+        self.cmd_rx.peek().ok()
+    }
+
+    fn pop_next_command(&mut self) -> Option<EngineCommand> {
+        if let Some(transport) = self.transport_rx.pop_ready() {
+            return Some(transport);
+        }
+        if self.pending_clip_insertion.is_some() {
+            return None;
+        }
+        let cmd = self.cmd_rx.pop().ok()?;
+        self.transport_rx.record_main_command(&cmd);
+        Some(cmd)
     }
 
     fn arrangement_clip_mut(

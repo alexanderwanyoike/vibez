@@ -119,8 +119,9 @@ pub(crate) enum ClipInsertionDelta {
 ///
 /// Capacity is a hint, never a content limit or a snapshot of clip values.
 /// Native consumers must fulfill every ClipInsertionStorageRequested event.
-/// A pending exchange pauses later FIFO commands, including Stop and NoteOff;
-/// serving its request is required for progress even when its target is stale.
+/// A pending exchange pauses later FIFO commands, including NoteOff, but not
+/// the transport ring; serving its request is required for progress even when
+/// its target is stale.
 #[must_use = "send the prepared control with AddClip or drop it off callback"]
 pub struct PreparedClipInsertion {
     pub(crate) id: ClipInsertionId,
