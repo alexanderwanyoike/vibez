@@ -49,6 +49,8 @@ impl EngineCommand {
                 | Self::RemoveAutomationLane { .. }
                 | Self::AddNoteClip { .. }
                 | Self::RemoveNoteClip(..)
+                | Self::BeginContentRebuild
+                | Self::EndContentRebuild
                 | Self::MoveNoteClip { .. }
                 | Self::SetNoteClipDuration { .. }
                 | Self::SetNoteClipGrooveGrid { .. }

@@ -309,6 +309,11 @@ pub enum EngineCommand {
         insertion: crate::clip_insertion::PreparedNoteClipInsertion,
     },
     RemoveNoteClip(TrackId, ClipId),
+    /// The content edits that follow, up to [`EngineCommand::EndContentRebuild`],
+    /// may leave the song briefly shorter than it will be once they have all
+    /// landed, so Arrange playback does not stop at the song end meanwhile.
+    BeginContentRebuild,
+    EndContentRebuild,
     /// Move a note clip to a new beat position on the timeline.
     MoveNoteClip {
         track_id: TrackId,
