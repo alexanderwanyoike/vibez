@@ -140,6 +140,7 @@ pub fn view_editable_channel_name<'a>(
     editing_name: bool,
     edit_text: &'a str,
     size: u16,
+    font: iced::Font,
     color: iced::Color,
 ) -> Element<'a, Message> {
     if editing_name {
@@ -150,7 +151,7 @@ pub fn view_editable_channel_name<'a>(
             .width(Length::Fill)
             .into()
     } else {
-        button(text(&track.name).size(size).color(color))
+        button(text(&track.name).size(size).font(font).color(color))
             .on_press(Message::View(ViewMsg::StartEditingTrackName {
                 track_id: track.id,
                 name: track.name.clone(),
@@ -194,7 +195,14 @@ pub fn view_track_header<'a>(
     } else {
         th::text()
     };
-    let name_widget = view_editable_channel_name(track, editing_name, edit_text, 13, name_color);
+    let name_widget = view_editable_channel_name(
+        track,
+        editing_name,
+        edit_text,
+        13,
+        crate::typography::TRACK_TITLE,
+        name_color,
+    );
 
     // Hidden actions stay laid out, so nothing shifts when the pointer
     // arrives; they can only be clicked while the header is hovered.

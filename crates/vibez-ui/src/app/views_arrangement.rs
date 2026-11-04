@@ -498,6 +498,7 @@ impl App {
                     self.state.view.editing_track_name == Some(channel.id),
                     &self.state.view.edit_name_text,
                     11,
+                    iced::Font::DEFAULT,
                     name_color,
                 )
             };

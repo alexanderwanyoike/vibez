@@ -12,7 +12,10 @@ use crate::widgets::track_header::TRACK_HEADER_TOTAL_WIDTH;
 pub fn arrange_corner<'a>(title: String, detail: String, height: f32) -> Element<'a, Message> {
     container(
         row![
-            text(title).size(11).color(th::text()),
+            text(title)
+                .size(11)
+                .font(crate::typography::TRACK_TITLE)
+                .color(th::text()),
             horizontal_space(),
             text(detail).size(11).color(th::text_dim()),
         ]
