@@ -124,6 +124,25 @@ mod tests {
     }
 
     #[test]
+    fn a_position_reads_as_bar_beat_sixteenth_from_one() {
+        let label = |beats| MusicalTime(beats).bar_beat_sixteenth();
+        assert_eq!(label(0.0), "1.1.1");
+        assert_eq!(label(128.0), "33.1.1");
+        assert_eq!(label(5.75), "2.2.4");
+        assert_eq!(label(4.0 - 1e-9), "2.1.1");
+        assert_eq!(label(1.1), "1.2.1");
+    }
+
+    #[test]
+    fn a_length_reads_as_bars_beats_sixteenths_from_zero() {
+        let label = |beats| MusicalTime(beats).bars_beats_sixteenths();
+        assert_eq!(label(16.0), "4.0.0");
+        assert_eq!(label(6.5), "1.2.2");
+        assert_eq!(label(0.25), "0.0.1");
+        assert_eq!(label(12.3), "3.0.1");
+    }
+
+    #[test]
     fn tempo_map_120bpm() {
         let tm = TempoMap::new(120.0, 44_100);
         assert!((tm.seconds_per_beat() - 0.5).abs() < 1e-10);
