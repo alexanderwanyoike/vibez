@@ -162,6 +162,7 @@ impl AudioEngine {
     pub(super) fn continue_clear_clip_sources(&mut self) {
         for index in 0..self.tracks.len() {
             self.tracks[index].active_clip = None;
+            self.tracks[index].reset_launch_declick();
             if self.tracks[index].queued_clip.is_some() {
                 if self.scheduled_presentation.capacity() - self.scheduled_presentation.len()
                     <= presentation_queue::COMMAND_PRESENTATION_RESERVE
@@ -292,6 +293,15 @@ impl AudioEngine {
             let mut count = frames - rendered;
             if let Some(boundary) = self.next_clip_record_boundary() {
                 count = count.min(boundary.saturating_sub(now) as usize);
+            }
+            let declick_frames = u64::from(self.sample_rate / 1000);
+            let batch_waiting = self.clip_batch_waiting_boundary();
+            for track in &mut self.tracks {
+                let swap_in = track.legato_swap_in(now, batch_waiting);
+                track.update_launch_declick(swap_in, declick_frames);
+                if let Some(frames) = swap_in.filter(|frames| *frames > declick_frames) {
+                    count = count.min((frames - declick_frames) as usize);
+                }
             }
             for track in &self.tracks {
                 if let Some(queued) = track

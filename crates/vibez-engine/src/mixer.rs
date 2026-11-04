@@ -151,6 +151,10 @@ pub struct EngineTrack {
     automation_mute: Option<bool>,
     automation_overrides: AutomationOverrides,
     mute_ramp: GainRamp,
+    launch_declick: GainRamp,
+    /// Set when a Clip starts mid-pattern, so the next render sounds the
+    /// notes it would already be holding.
+    pickup_launch_notes: bool,
     pub solo: bool,
     pub swing_offset: Option<SwingOffset>,
     /// Block-evaluated automation override; manual FOLLOW/offset remains intact.
@@ -403,6 +407,15 @@ impl EngineTrack {
     ) {
         if self.suppress_source_notes {
             return;
+        }
+        if std::mem::take(&mut self.pickup_launch_notes) {
+            groove::collect_sounding_note_ons(
+                &self.playback_source.note_clips,
+                pos,
+                samples_per_beat,
+                swing,
+                &mut self.timed_note_ons,
+            );
         }
         collect_timed_note_events(
             &self.playback_source.note_clips,

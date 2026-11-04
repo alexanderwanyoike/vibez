@@ -32,6 +32,8 @@ impl EngineTrack {
             automation_mute: None,
             automation_overrides: AutomationOverrides::default(),
             mute_ramp: GainRamp::default(),
+            launch_declick: GainRamp::default(),
+            pickup_launch_notes: false,
             solo: false,
             swing_offset: None,
             automation_swing_offset: None,
@@ -490,6 +492,7 @@ impl EngineTrack {
     /// immediately (built-ins) or on its next render (plugins).
     pub fn flush_notes(&mut self) {
         self.reset_groove_latches();
+        self.pickup_launch_notes = false;
         if self.active_notes == 0 {
             return;
         }
@@ -531,13 +534,15 @@ impl EngineTrack {
     ) -> bool {
         let buf_size = frames * channels;
         self.ensure_buffer(buf_size);
-        self.playback_source.render_audio(
+        let rendered = self.playback_source.render_audio(
             &mut self.mix_buffer[..buf_size],
             pos,
             frames,
             channels,
             loop_region,
-        )
+        );
+        self.apply_launch_declick(frames, channels);
+        rendered
     }
 
     pub fn process_effects(
