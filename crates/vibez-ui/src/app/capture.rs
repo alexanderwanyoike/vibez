@@ -881,6 +881,58 @@ mod tests {
     }
 
     #[test]
+    fn a_captured_clip_meets_the_content_it_keeps_after_the_take() {
+        // 124 BPM at 44.1 kHz puts the stop between two ticks.
+        let samples_per_beat: f64 = 44_100.0 * 60.0 / 124.0;
+        let track_id = TrackId::new();
+        let existing = UiNoteClip {
+            id: ClipId::new(),
+            name: "Existing".into(),
+            position_beats: 0.0,
+            duration_beats: 32.0,
+            notes: Vec::new(),
+            selected_notes: Default::default(),
+            start_marker_beats: 0.0,
+            loop_enabled: false,
+            loop_start_beats: 0.0,
+            loop_end_beats: 0.0,
+            groove_grid: GrooveGrid::Off,
+        };
+        let mut section = crate::domains::perform::Section::new(0);
+        let mut groove = existing.clone();
+        groove.duration_beats = section.length_beats;
+        Arc::make_mut(&mut section.timeline)
+            .ensure(track_id)
+            .note_clips
+            .push(groove);
+        let mut capture = crate::domains::perform::CaptureState::default();
+        capture.update(crate::domains::perform::CaptureMsg::Toggle);
+        capture.prepare(0, 44_100, 124.0);
+        capture.start(
+            0,
+            Some((
+                crate::domains::perform::CapturedTimelineSource::from_section(&section),
+                0,
+            )),
+        );
+        let stop = (10.3 * samples_per_beat).round() as u64;
+        let take = capture.finish(stop).unwrap().materialize();
+        let mut arrange = Arc::new(ArrangementTimeline::default());
+        Arc::make_mut(&mut arrange)
+            .ensure(track_id)
+            .note_clips
+            .push(existing);
+        apply_capture_to_arrangement(&mut arrange, take, &mut DiscardingEngine);
+
+        let clips = &arrange.get(track_id).unwrap().note_clips;
+        assert_eq!(clips.len(), 2);
+        assert_eq!(
+            clips[0].position_beats + clips[0].duration_beats,
+            clips[1].position_beats
+        );
+    }
+
+    #[test]
     fn one_capture_transaction_round_trips_through_undo_and_redo() {
         let mut state = AppState::default();
         let track_id = TrackId::new();
