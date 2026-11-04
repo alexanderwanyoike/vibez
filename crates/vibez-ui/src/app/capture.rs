@@ -612,7 +612,7 @@ mod tests {
         Arc::make_mut(&mut arrange)
             .ensure(track_id)
             .clips
-            .push(audio_clip(0, 8));
+            .push(audio_clip(12, 8));
         let captured = MaterializedCapture {
             arrange_start_samples: 16,
             arrange_end_samples: 24,
@@ -801,6 +801,62 @@ mod tests {
             "{} commands for {clips} clips",
             engine.0.len()
         );
+    }
+
+    #[test]
+    fn a_capture_leaves_the_engine_clips_outside_its_interval_alone() {
+        let track_id = TrackId::new();
+        let pattern = |position_beats: f64| UiNoteClip {
+            id: ClipId::new(),
+            name: "Pattern".into(),
+            position_beats,
+            duration_beats: 4.0,
+            notes: Vec::new(),
+            selected_notes: Default::default(),
+            start_marker_beats: 0.0,
+            loop_enabled: false,
+            loop_start_beats: 0.0,
+            loop_end_beats: 0.0,
+            groove_grid: GrooveGrid::Off,
+        };
+        let mut arrange = Arc::new(ArrangementTimeline::default());
+        let song = Arc::make_mut(&mut arrange).ensure(track_id);
+        song.note_clips = (0..40).map(|bar| pattern(f64::from(bar) * 4.0)).collect();
+        song.clips = vec![audio_clip(0, 16), audio_clip(36, 8), audio_clip(400, 16)];
+        let mut incoming = crate::state::TrackTimelineContent::default();
+        incoming.note_clips.push(pattern(8.0));
+        let captured = MaterializedCapture {
+            arrange_start_samples: 32,
+            arrange_end_samples: 48,
+            by_track: HashMap::from([(track_id, incoming)]),
+            controlled_track_ids: vec![track_id],
+            pre_capture_mutes: HashMap::new(),
+            samples_per_beat: 4.0,
+        };
+        let mut engine = crate::domains::test_support::RecordingEngine::default();
+        apply_capture_to_arrangement(&mut arrange, captured, &mut engine);
+
+        let count = |matches: fn(&EngineCommand) -> bool| {
+            engine.0.iter().filter(|command| matches(command)).count()
+        };
+        assert_eq!(
+            count(|command| matches!(command, EngineCommand::RemoveNoteClip(..))),
+            1
+        );
+        assert_eq!(
+            count(|command| matches!(command, EngineCommand::AddNoteClip { .. })),
+            1
+        );
+        assert_eq!(
+            count(|command| matches!(command, EngineCommand::RemoveClip(..))),
+            1
+        );
+        assert_eq!(
+            count(|command| matches!(command, EngineCommand::AddClip { .. })),
+            0
+        );
+        let content = arrange.get(track_id).unwrap();
+        assert_eq!((content.note_clips.len(), content.clips.len()), (40, 2));
     }
 
     #[test]
