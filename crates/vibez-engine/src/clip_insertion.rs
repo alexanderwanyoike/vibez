@@ -379,17 +379,7 @@ impl PreparedNoteClipInsertion {
         let Some(ClipInsertionDelta::NoteClip(clip)) = self.0.clip.as_mut() else {
             unreachable!("the opaque wrapper owns one note clip");
         };
-        *clip = EngineNoteClip::new(
-            clip.id,
-            clip.position_beats,
-            clip.duration_beats,
-            notes,
-            clip.start_marker_beats,
-            clip.loop_enabled,
-            clip.loop_start_beats,
-            clip.loop_end_beats,
-            clip.groove_grid,
-        );
+        clip.replace_notes(notes);
         self
     }
 
