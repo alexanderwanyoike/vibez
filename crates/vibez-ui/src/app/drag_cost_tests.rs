@@ -122,7 +122,7 @@ fn song() -> Song {
     let loop_clip = audio_clip(0, 8 * spb);
     let loop_id = loop_clip.id;
     timeline.ensure(audio[0]).clips.push(loop_clip);
-    for bar in 0..2 {
+    for bar in 0..4 {
         timeline
             .ensure(audio[1])
             .clips
@@ -131,7 +131,7 @@ fn song() -> Song {
     let long = note_clip(0.0, 64.0, LONG_CLIP_NOTES);
     let long_id = long.id;
     timeline.ensure(midi[0]).note_clips.push(long);
-    for bar in 0..2 {
+    for bar in 0..4 {
         timeline
             .ensure(midi[1])
             .note_clips
@@ -241,4 +241,94 @@ fn audio_move_and_trim_steps_are_each_one_in_place_engine_edit() {
             }),
         ),
     ]);
+}
+
+struct ResidentSong {
+    song: Song,
+    engine: vibez_engine::engine::AudioEngine,
+}
+
+/// The song resident in a real engine, with every storage request served.
+fn resident_song() -> ResidentSong {
+    let mut song = song();
+    let (mut engine, commands, events) = vibez_engine::engine::AudioEngine::new();
+    song.app.cmd_tx =
+        crate::domains::EngineCommandQueue::new(commands, engine.take_transport_sender().unwrap());
+    song.app.event_rx = Some(events);
+    let tracks = song.app.state.project_tracks.tracks.clone();
+    for track in &tracks {
+        song.app.replay_track_to_engine(track);
+    }
+    song.app.sync_sidechain_routing();
+    for _ in 0..16 {
+        engine.process_block(vibez_engine::engine::AudioProcessBlock::new(&mut [], 2));
+        song.app.poll_engine_events();
+    }
+    ResidentSong { song, engine }
+}
+
+impl ResidentSong {
+    fn source(&self, track_id: TrackId) -> &vibez_engine::playback_source::PreparedPlaybackSource {
+        &self
+            .engine
+            .tracks()
+            .iter()
+            .find(|track| track.id == track_id)
+            .unwrap()
+            .playback_source
+    }
+}
+
+#[test]
+fn a_clip_dragged_into_a_full_lane_plays_there_in_the_next_callback() {
+    let mut resident = resident_song();
+    let [audio, audio_target] = resident.song.audio;
+    let [midi, midi_target] = resident.song.midi;
+    let target_audio = resident.source(audio_target);
+    let target_notes = resident.source(midi_target);
+    assert_eq!(target_audio.clips.len(), target_audio.clips.capacity());
+    assert_eq!(
+        target_notes.note_clips.len(),
+        target_notes.note_clips.capacity()
+    );
+    let (loop_clip, long_clip) = (resident.song.loop_clip, resident.song.long_clip);
+    for (grabbed, target_track) in [
+        (
+            ArrangementSelection::AudioClip {
+                track_id: audio,
+                clip_id: loop_clip,
+            },
+            audio_target,
+        ),
+        (
+            ArrangementSelection::NoteClip {
+                track_id: midi,
+                clip_id: long_clip,
+            },
+            midi_target,
+        ),
+    ] {
+        resident
+            .song
+            .drag(grabbed, |_| ArrangementMsg::MoveSelectedClips {
+                anchor: grabbed.clip_id(),
+                new_position_beats: 0.0,
+                target_track,
+            });
+    }
+
+    resident
+        .engine
+        .process_block(vibez_engine::engine::AudioProcessBlock::new(&mut [], 2));
+
+    assert!(resident
+        .source(audio_target)
+        .clips
+        .iter()
+        .any(|clip| clip.id == loop_clip));
+    assert!(resident
+        .source(midi_target)
+        .note_clips
+        .iter()
+        .any(|clip| clip.id == long_clip));
 }
