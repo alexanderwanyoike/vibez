@@ -2,12 +2,6 @@
 
 use iced::Rectangle;
 
-/// One filled mark inside a note clip's body.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(super) struct NoteMark {
-    pub rect: Rectangle,
-}
-
 /// Breathing room between the marks and the top and bottom of the body.
 const PAD: f32 = 2.0;
 const MIN_MARK_HEIGHT: f32 = 2.0;
@@ -25,7 +19,7 @@ pub(super) fn note_marks(
     origin_x: f32,
     area: Rectangle,
     pixels_per_beat: f32,
-) -> Vec<NoteMark> {
+) -> Vec<Rectangle> {
     let Some(lowest) = notes.iter().map(|note| note.0).min() else {
         return Vec::new();
     };
@@ -67,13 +61,11 @@ pub(super) fn note_marks(
     });
     spans
         .into_iter()
-        .map(|(pitch, x0, x1)| NoteMark {
-            rect: Rectangle {
-                x: x0,
-                y: top + f32::from(highest - pitch) * step,
-                width: x1 - x0,
-                height,
-            },
+        .map(|(pitch, x0, x1)| Rectangle {
+            x: x0,
+            y: top + f32::from(highest - pitch) * step,
+            width: x1 - x0,
+            height,
         })
         .collect()
 }
@@ -100,7 +92,7 @@ mod tests {
     fn a_single_pitch_clip_draws_its_notes_centred_in_the_body() {
         let marks = note_marks(&sixteenths(36, 4), 0.0, AREA, 20.0);
 
-        let centre = marks[0].rect.y + marks[0].rect.height / 2.0;
+        let centre = marks[0].y + marks[0].height / 2.0;
         assert!(
             (centre - (AREA.y + AREA.height / 2.0)).abs() < 0.5,
             "centre {centre}"
@@ -112,8 +104,8 @@ mod tests {
         let marks = note_marks(&sixteenths(36, 64), 0.0, AREA, 1.0);
 
         assert_eq!(marks.len(), 1);
-        assert_eq!(marks[0].rect.x, 0.0);
-        assert_eq!(marks[0].rect.width, 16.0);
+        assert_eq!(marks[0].x, 0.0);
+        assert_eq!(marks[0].width, 16.0);
     }
 
     #[test]
@@ -127,8 +119,8 @@ mod tests {
     fn a_note_shorter_than_a_pixel_paints_one_whole_pixel() {
         let marks = note_marks(&[(60, 0.5, 0.1)], 10.0, AREA, 1.0);
 
-        assert_eq!(marks[0].rect.x, 10.0);
-        assert_eq!(marks[0].rect.width, 1.0);
+        assert_eq!(marks[0].x, 10.0);
+        assert_eq!(marks[0].width, 1.0);
     }
 
     #[test]
@@ -147,7 +139,7 @@ mod tests {
 
         let marks = note_marks(&notes, -1000.0, visible, 20.0);
 
-        let spans: Vec<_> = marks.iter().map(|m| (m.rect.x, m.rect.width)).collect();
+        let spans: Vec<_> = marks.iter().map(|m| (m.x, m.width)).collect();
         assert_eq!(spans, [(0.0, 10.0), (100.0, 20.0)]);
     }
 }

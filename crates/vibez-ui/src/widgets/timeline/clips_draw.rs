@@ -386,7 +386,7 @@ impl TrackClipCanvas {
                     height: clip_h - CLIP_TITLE_HEIGHT,
                 };
                 for mark in note_marks(&note_clip.notes, clip_x, area, geometry.pixels_per_beat()) {
-                    frame.fill_rectangle(mark.rect.position(), mark.rect.size(), colors.ink);
+                    frame.fill_rectangle(mark.position(), mark.size(), colors.ink);
                 }
 
                 draw_clip_front(&mut frame, body, &colors, &note_clip.name, looping, w);
