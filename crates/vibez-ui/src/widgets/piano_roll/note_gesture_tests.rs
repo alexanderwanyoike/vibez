@@ -196,3 +196,27 @@ fn drawing_a_note_by_dragging_is_one_undo_step() {
     editor.undo();
     assert!(editor.notes().is_empty());
 }
+
+#[test]
+fn a_shaky_click_on_an_off_grid_note_end_leaves_it_alone() {
+    let original = vec![note(60, 0.1, 0.93)];
+    let mut editor = Editor::new(original.clone(), HashSet::new());
+    let grab = Point::new(editor.at(1.03, 60).x - 1.0, editor.at(1.03, 60).y);
+
+    editor.drag(grab, &[Point::new(grab.x + 2.0, grab.y + 1.0)]);
+
+    assert_eq!(editor.notes(), original);
+    assert!(editor.history.undo.is_empty());
+}
+
+#[test]
+fn a_shaky_click_on_an_off_grid_note_body_leaves_it_alone() {
+    let original = vec![note(60, 0.1, 0.93)];
+    let mut editor = Editor::new(original.clone(), HashSet::new());
+    let grab = editor.at(0.5, 60);
+
+    editor.drag(grab, &[Point::new(grab.x + 2.0, grab.y + 2.0)]);
+
+    assert_eq!(editor.notes(), original);
+    assert!(editor.history.undo.is_empty());
+}
