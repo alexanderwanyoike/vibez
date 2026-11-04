@@ -974,11 +974,26 @@ fn dragging_an_off_grid_clip_moves_it_by_whole_grid_steps_keeping_its_offset() {
 /// Presses `canvas`'s first Clip on its right edge and drags the pointer to
 /// `to_beat`, returning the length the last pointer move asked for.
 fn resize_length_after_drag(canvas: &TrackClipCanvas, to_beat: f64) -> Option<f64> {
+    resize_length_after_modified_drag(canvas, to_beat, Modifiers::empty())
+}
+
+fn resize_length_after_modified_drag(
+    canvas: &TrackClipCanvas,
+    to_beat: f64,
+    modifiers: Modifiers,
+) -> Option<f64> {
     let clip = &canvas.clips[0];
     let end_beat = (clip.position + clip.duration) as f64 / canvas.spb();
     let start = Point::new(canvas.beat_to_x(end_beat) - 2.0, CLIP_Y + 4.0);
     let target = Point::new(canvas.beat_to_x(to_beat), start.y);
     let mut state = ClipInteractionState::default();
+    <TrackClipCanvas as canvas::Program<Message>>::update(
+        canvas,
+        &mut state,
+        canvas::Event::Keyboard(Event::ModifiersChanged(modifiers)),
+        Rectangle::new(Point::ORIGIN, Size::new(800.0, 80.0)),
+        mouse::Cursor::Available(start),
+    );
 
     left_event(
         canvas,
@@ -1262,4 +1277,26 @@ fn clicking_near_another_lanes_clip_start_seeks_onto_it() {
         seek_beat_after_click(&canvas, 9.2, CLIP_BODY_Y, Modifiers::empty()).expect("a seek");
 
     assert!((beat - 9.3).abs() < 1e-9, "seeked to {beat}");
+}
+
+#[test]
+fn an_alt_drag_moves_a_clip_exactly_with_the_pointer() {
+    let (canvas, _) = canvas_beside_an_off_grid_clip();
+
+    let start = moved_start_after_drag(&canvas, 4.15, Modifiers::ALT).expect("a move");
+
+    assert!((start - 5.25).abs() < 1e-3, "moved to {start}");
+}
+
+#[test]
+fn an_alt_resize_ends_a_clip_exactly_under_the_pointer() {
+    let (canvas, _) = canvas_beside_an_off_grid_clip();
+
+    let length = resize_length_after_modified_drag(&canvas, 9.2, Modifiers::ALT).expect("a resize");
+
+    assert!(
+        (1.1 + length - 9.2).abs() < 1e-3,
+        "ended at {}",
+        1.1 + length
+    );
 }
