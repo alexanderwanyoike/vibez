@@ -12,6 +12,13 @@ use super::fade_drag::{fade_curve_handle, fade_handle_xs};
 use super::note_marks::note_marks;
 use super::*;
 
+/// How far to shift the lane so whole-pixel coordinates inside it land on
+/// whole screen pixels.
+fn whole_pixel_offset(origin: iced::Point) -> iced::Vector {
+    let _ = origin;
+    iced::Vector::ZERO
+}
+
 fn visible_pixel_columns(
     clip_x: f32,
     clip_width: f32,
@@ -560,7 +567,17 @@ impl TrackClipCanvas {
 
 #[cfg(test)]
 mod tests {
-    use super::{visible_pixel_columns, waveform_peak_for_pixel};
+    use super::{visible_pixel_columns, waveform_peak_for_pixel, whole_pixel_offset};
+
+    #[test]
+    fn a_lane_laid_out_between_pixel_rows_paints_on_whole_pixels() {
+        let origin = iced::Point::new(640.25, 173.5);
+
+        let painted = origin + whole_pixel_offset(origin);
+
+        assert_eq!((painted.x.fract(), painted.y.fract()), (0.0, 0.0));
+        assert!(origin.distance(painted) < 1.0);
+    }
 
     #[test]
     fn a_live_waveform_pixel_keeps_its_source_range_as_the_take_grows() {
