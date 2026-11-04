@@ -90,6 +90,9 @@ struct PeakCacheEntry {
     peaks: Arc<Vec<(f32, f32)>>,
 }
 
+#[cfg(test)]
+thread_local! { static SOURCE_SCANS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }
+
 thread_local! {
     static PEAK_CACHE: RefCell<HashMap<PeakCacheKey, PeakCacheEntry>> = RefCell::new(HashMap::new());
 }
@@ -118,6 +121,8 @@ pub fn compute_clip_peaks(clip: &crate::state::UiClip) -> Arc<Vec<(f32, f32)>> {
         return peaks;
     }
 
+    #[cfg(test)]
+    SOURCE_SCANS.with(|scans| scans.set(scans.get() + 1));
     let num_peaks = (clip.duration as usize / 100).clamp(1, 1000);
     let timeline = clip.timeline();
     let looping = timeline.is_looping();
@@ -272,14 +277,12 @@ mod performance_tests {
     use vibez_core::id::ClipId;
     use vibez_core::track::ClipPlaybackDirection;
 
-    #[test]
-    fn duplicated_long_clips_reuse_cached_waveform_peaks() {
-        let frames = 44_100 * 30;
+    fn long_clip(frames: usize) -> UiClip {
         let audio = Arc::new(DecodedAudio {
             channels: vec![vec![0.25; frames], vec![-0.25; frames]],
             sample_rate: 44_100,
         });
-        let clip = UiClip {
+        UiClip {
             id: ClipId::new(),
             name: "Long loop.wav".into(),
             audio,
@@ -301,7 +304,12 @@ mod performance_tests {
             warped: false,
             warped_to_bpm: None,
             original_audio: None,
-        };
+        }
+    }
+
+    #[test]
+    fn duplicated_long_clips_reuse_cached_waveform_peaks() {
+        let clip = long_clip(44_100 * 30);
 
         let first = compute_clip_peaks(&clip);
         for _ in 0..12 {
@@ -309,6 +317,22 @@ mod performance_tests {
             assert_eq!(duplicate_peaks.len(), 1000);
             assert!(Arc::ptr_eq(&first, &duplicate_peaks));
         }
+    }
+
+    #[test]
+    fn resizing_a_clip_never_rescans_its_source() {
+        let frames = 44_100 * 30;
+        let mut clip = long_clip(frames);
+        compute_clip_peaks(&clip);
+        let scans = super::SOURCE_SCANS.with(|scans| scans.get());
+
+        for duration in [frames / 2, frames / 3, frames / 4, frames - 1] {
+            clip.duration = duration as u64;
+            let peaks = compute_clip_peaks(&clip);
+            assert!(peaks.iter().all(|&(min, max)| (min, max) == (-0.25, 0.25)));
+        }
+
+        assert_eq!(super::SOURCE_SCANS.with(|scans| scans.get()), scans);
     }
 
     #[test]
