@@ -115,8 +115,29 @@ impl TimelineEditorState {
         clipboard: &mut ClipClipboard,
         ctx: ArrangementCtx,
     ) -> ArrangementAction {
+        let copied = self.collect_selected_clips(project_tracks, ctx.samples_per_beat);
+        let count = copied.len();
+        if count > 0 {
+            *clipboard = ClipClipboard { clips: copied };
+        }
+        ArrangementAction {
+            status: Some(match count {
+                0 => "Nothing to copy".to_string(),
+                1 => "Copied clip".to_string(),
+                _ => format!("Copied {count} clips"),
+            }),
+            ..Default::default()
+        }
+    }
+
+    /// The time selection's content when one is active, otherwise the
+    /// selected clips, with lane offsets relative to the topmost source lane.
+    pub(super) fn collect_selected_clips(
+        &self,
+        project_tracks: &ProjectTracksState,
+        spb: f64,
+    ) -> Vec<ClipboardClip> {
         let mut copied = Vec::new();
-        let spb = ctx.samples_per_beat;
 
         if self.time_selection_active
             && self.selection_end_beats > self.selection_start_beats
@@ -252,19 +273,7 @@ impl TimelineEditorState {
                 }
             }
         }
-
-        let count = copied.len();
-        if count > 0 {
-            *clipboard = ClipClipboard { clips: copied };
-        }
-        ArrangementAction {
-            status: Some(match count {
-                0 => "Nothing to copy".to_string(),
-                1 => "Copied clip".to_string(),
-                _ => format!("Copied {count} clips"),
-            }),
-            ..Default::default()
-        }
+        copied
     }
 
     fn op_paste_clips(
@@ -327,16 +336,47 @@ impl TimelineEditorState {
             .map(ClipboardClip::position_beats)
             .min_by(f64::total_cmp)
             .unwrap_or(0.0);
-        let paste_anchor_beats = ctx.playhead_beats.max(0.0);
+        let selected = self.place_clips(
+            clipboard.clips.iter().cloned().zip(destinations),
+            earliest_position_beats,
+            ctx.playhead_beats.max(0.0),
+            engine,
+            ctx.samples_per_beat,
+        );
+
+        let count = selected.len();
+        self.selected_clips = selected;
+        self.selected_track = Some(anchor_track);
+        self.clear_time_selection();
+        ArrangementAction {
+            status: Some(if count == 1 {
+                "Pasted clip".to_string()
+            } else {
+                format!("Pasted {count} clips")
+            }),
+            mark_dirty: true,
+            ..Default::default()
+        }
+    }
+
+    /// Adds each clip to its lane so that `origin_beats` lands on
+    /// `anchor_beats`, and returns the new clips as a selection.
+    pub(super) fn place_clips(
+        &mut self,
+        entries: impl IntoIterator<Item = (ClipboardClip, TrackId)>,
+        origin_beats: f64,
+        anchor_beats: f64,
+        engine: &mut impl EngineHandle,
+        spb: f64,
+    ) -> HashSet<ArrangementSelection> {
         let mut selected = HashSet::new();
-        for (entry, track_id) in clipboard.clips.iter().cloned().zip(destinations) {
-            let position_beats =
-                paste_anchor_beats + (entry.position_beats() - earliest_position_beats);
+        for (entry, track_id) in entries {
+            let position_beats = anchor_beats + (entry.position_beats() - origin_beats);
             match entry {
                 ClipboardClip::Audio { mut clip, .. } => {
                     clip.fades = clip.fades.unlinked();
                     clip.id = ClipId::new();
-                    clip.position = (position_beats * ctx.samples_per_beat).round().max(0.0) as u64;
+                    clip.position = (position_beats * spb).round().max(0.0) as u64;
                     engine.send(EngineCommand::AddClip {
                         insertion: vibez_engine::clip_insertion::PreparedClipInsertion::new(),
                         track_id,
@@ -379,20 +419,7 @@ impl TimelineEditorState {
                 }
             }
         }
-
-        let count = selected.len();
-        self.selected_clips = selected;
-        self.selected_track = Some(anchor_track);
-        self.clear_time_selection();
-        ArrangementAction {
-            status: Some(if count == 1 {
-                "Pasted clip".to_string()
-            } else {
-                format!("Pasted {count} clips")
-            }),
-            mark_dirty: true,
-            ..Default::default()
-        }
+        selected
     }
 }
 
