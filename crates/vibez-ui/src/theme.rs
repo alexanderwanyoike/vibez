@@ -501,8 +501,8 @@ pub fn ruler_bg() -> Color {
     bg_surface()
 }
 
-pub fn ruler_text() -> Color {
-    text_dim()
+pub fn ruler_tick() -> Color {
+    blend(ruler_bg(), text(), 0.22)
 }
 
 /// Mix two theme colors without escaping the active palette. Perform uses

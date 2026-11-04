@@ -4,7 +4,7 @@ use iced::mouse;
 use iced::widget::canvas;
 use iced::{Rectangle, Renderer, Theme};
 
-use super::ruler_scale::label_step_beats;
+use super::ruler_scale::{ruler_marks, RulerMark};
 use crate::domains::arrangement::ArrangementMsg;
 use crate::domains::transport::TransportMsg;
 use crate::domains::view::ViewMsg;
@@ -12,6 +12,10 @@ use crate::message::Message;
 use crate::state::{ContextMenuTarget, GridConfig};
 use crate::theme;
 use crate::timeline_geometry::TimelineGeometry;
+use crate::typography;
+
+const MID_TICK_HEIGHT: f32 = 7.0;
+const MINOR_TICK_HEIGHT: f32 = 4.0;
 
 /// Canvas widget that draws a beat-based ruler with bar.beat labels.
 pub struct RulerWidget {
@@ -54,10 +58,6 @@ impl RulerWidget {
         self.geometry().pixels_per_beat()
     }
 
-    fn visible_beats(&self, width: f32) -> f64 {
-        self.geometry().visible_beats(width)
-    }
-
     pub(crate) fn beat_to_x(&self, beat: f64, _width: f32) -> f32 {
         self.geometry().beat_to_x(beat)
     }
@@ -89,127 +89,7 @@ impl canvas::Program<Message> for RulerWidget {
             theme::ruler_bg(),
         );
 
-        if self.bpm > 0.0 {
-            let beats_per_bar = 4.0_f64;
-            let visible = self.visible_beats(w);
-            let start_beat = self.scroll_offset_beats.floor().max(0.0) as i64;
-            let end_beat = (self.scroll_offset_beats + visible).ceil() as i64 + 1;
-
-            // Adaptive label density based on zoom
-            let ppb = self.pixels_per_beat();
-            let pixels_per_bar = ppb * beats_per_bar as f32;
-
-            let bar_step = ((label_step_beats(ppb) / beats_per_bar) as i64).max(1);
-
-            for beat_i in start_beat..end_beat {
-                let beat = beat_i as f64;
-                let x = self.beat_to_x(beat, w);
-
-                if x < -10.0 || x > w + 10.0 {
-                    continue;
-                }
-
-                let bar_index = (beat / beats_per_bar).floor() as i64;
-                let beat_in_bar = (beat % beats_per_bar) as usize;
-                let is_bar = beat_in_bar == 0;
-
-                if is_bar {
-                    let show_label = (bar_index % bar_step) == 0;
-                    let show_tick = show_label || pixels_per_bar >= 10.0;
-
-                    if show_tick {
-                        // Bar line (thick)
-                        let tick = canvas::Path::line(
-                            iced::Point::new(x, h * 0.3),
-                            iced::Point::new(x, h),
-                        );
-                        frame.stroke(
-                            &tick,
-                            canvas::Stroke::default()
-                                .with_color(theme::border())
-                                .with_width(1.5),
-                        );
-                    }
-
-                    if show_label {
-                        // Bar label
-                        if ppb < 40.0 {
-                            // Low zoom: bar numbers only ("1", "2", "3")
-                            let label = format!("{}", bar_index + 1);
-                            frame.fill_text(canvas::Text {
-                                content: label,
-                                position: iced::Point::new(x + 4.0, 3.0),
-                                color: theme::ruler_text(),
-                                size: iced::Pixels(12.0),
-                                ..Default::default()
-                            });
-                        } else {
-                            // Medium/high zoom: bar.beat ("1.1", "2.1")
-                            let label = format!("{}.1", bar_index + 1);
-                            frame.fill_text(canvas::Text {
-                                content: label,
-                                position: iced::Point::new(x + 4.0, 3.0),
-                                color: theme::ruler_text(),
-                                size: iced::Pixels(12.0),
-                                ..Default::default()
-                            });
-                        }
-                    }
-                } else if ppb >= 40.0 {
-                    // Beat ticks only at medium+ zoom
-                    let tick =
-                        canvas::Path::line(iced::Point::new(x, h * 0.65), iced::Point::new(x, h));
-                    frame.stroke(
-                        &tick,
-                        canvas::Stroke::default()
-                            .with_color(theme::divider())
-                            .with_width(0.5),
-                    );
-
-                    // Beat labels only at high zoom (≥80 ppb)
-                    if ppb >= 80.0 {
-                        let label = format!("{}.{}", bar_index + 1, beat_in_bar + 1);
-                        frame.fill_text(canvas::Text {
-                            content: label,
-                            position: iced::Point::new(x + 2.0, 6.0),
-                            color: theme::text_muted(),
-                            size: iced::Pixels(9.0),
-                            ..Default::default()
-                        });
-                    }
-                }
-
-                // Sub-beat ticks at very high zoom (>120 ppb)
-                if ppb > 120.0 {
-                    for sub in 1..4 {
-                        let sub_beat = beat + sub as f64 * 0.25;
-                        let sub_x = self.beat_to_x(sub_beat, w);
-                        if sub_x > 0.0 && sub_x < w {
-                            let sub_tick = canvas::Path::line(
-                                iced::Point::new(sub_x, h * 0.8),
-                                iced::Point::new(sub_x, h),
-                            );
-                            frame.stroke(
-                                &sub_tick,
-                                canvas::Stroke::default()
-                                    .with_color(theme::divider())
-                                    .with_width(0.3),
-                            );
-                        }
-                    }
-                }
-            }
-
-            // Ruler bottom border
-            let bottom_border =
-                canvas::Path::line(iced::Point::new(0.0, h - 1.0), iced::Point::new(w, h - 1.0));
-            frame.stroke(
-                &bottom_border,
-                canvas::Stroke::default()
-                    .with_color(theme::border())
-                    .with_width(1.0),
-            );
-        }
+        draw_marks(&mut frame, self.geometry(), w, 0.0, h);
 
         // Loop region overlay
         if self.loop_enabled && self.loop_end_beats > self.loop_start_beats {
@@ -546,6 +426,56 @@ impl canvas::Program<Message> for RulerWidget {
         }
         mouse::Interaction::default()
     }
+}
+
+/// The number strip's labels and ticks between `top` and `bottom`.
+fn draw_marks(
+    frame: &mut canvas::Frame,
+    geometry: TimelineGeometry,
+    width: f32,
+    top: f32,
+    bottom: f32,
+) {
+    let tick = theme::ruler_tick();
+    for mark in ruler_marks(geometry, width) {
+        match mark {
+            RulerMark::Label { x, text, bar } => {
+                frame.fill_rectangle(
+                    iced::Point::new(x, top),
+                    iced::Size::new(1.0, bottom - top),
+                    tick,
+                );
+                let (font, size, color) = if bar {
+                    (typography::PERFORM_LABEL, 11.0, theme::text())
+                } else {
+                    (typography::PERFORM_DISPLAY, 10.5, theme::text_dim())
+                };
+                frame.fill_text(canvas::Text {
+                    content: text,
+                    position: iced::Point::new(x + 4.0, top + 4.0),
+                    color,
+                    size: iced::Pixels(size),
+                    font,
+                    ..Default::default()
+                });
+            }
+            RulerMark::Mid { x } => frame.fill_rectangle(
+                iced::Point::new(x, bottom - MID_TICK_HEIGHT),
+                iced::Size::new(1.0, MID_TICK_HEIGHT),
+                tick,
+            ),
+            RulerMark::Minor { x } => frame.fill_rectangle(
+                iced::Point::new(x, bottom - MINOR_TICK_HEIGHT),
+                iced::Size::new(1.0, MINOR_TICK_HEIGHT),
+                tick,
+            ),
+        }
+    }
+    frame.fill_rectangle(
+        iced::Point::new(0.0, bottom - 1.0),
+        iced::Size::new(width, 1.0),
+        theme::border(),
+    );
 }
 
 // ── TrackClipCanvas ──

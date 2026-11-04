@@ -21,10 +21,60 @@ pub(super) enum RulerMark {
     },
 }
 
+/// Ticks any closer blur into a solid strip.
+const MIN_TICK_GAP_PX: f32 = 7.0;
+
 /// Labels and ticks across `width` pixels.
 pub(super) fn ruler_marks(geometry: TimelineGeometry, width: f32) -> Vec<RulerMark> {
-    let _ = (geometry, width);
-    Vec::new()
+    let ppb = geometry.pixels_per_beat();
+    let label_beats = label_step_beats(ppb);
+    let tick_beats = [label_beats / 4.0, label_beats / 2.0]
+        .into_iter()
+        .find(|step| geometry.width_for_beats(*step) >= MIN_TICK_GAP_PX);
+    let step = tick_beats.unwrap_or(label_beats);
+    let first = (geometry.x_to_beat(0.0).max(0.0) / step).floor() as i64;
+    let last = (geometry.x_to_beat(width) / step).ceil() as i64;
+
+    let mut marks = Vec::new();
+    for index in first..=last {
+        let beat = index as f64 * step;
+        let x = geometry.beat_to_x(beat).round();
+        if !(0.0..=width).contains(&x) {
+            continue;
+        }
+        marks.push(if is_multiple(beat, label_beats) {
+            RulerMark::Label {
+                x,
+                text: label_text(beat, label_beats),
+                bar: is_multiple(beat, BEATS_PER_BAR),
+            }
+        } else if step < label_beats / 2.0 && is_multiple(beat, label_beats / 2.0) {
+            RulerMark::Mid { x }
+        } else {
+            RulerMark::Minor { x }
+        });
+    }
+    marks
+}
+
+/// "33" on a bar, "33.2" on a beat, "33.2.3" on a sixteenth.
+fn label_text(beat: f64, label_beats: f64) -> String {
+    let bar = (beat / BEATS_PER_BAR + 1e-9).floor();
+    let in_bar = beat - bar * BEATS_PER_BAR;
+    let beat_in_bar = (in_bar + 1e-9).floor();
+    let sixteenth = ((in_bar - beat_in_bar) * 4.0).round();
+    if label_beats >= BEATS_PER_BAR || in_bar < 1e-6 {
+        format!("{}", bar + 1.0)
+    } else if label_beats >= 1.0 || sixteenth == 0.0 {
+        format!("{}.{}", bar + 1.0, beat_in_bar + 1.0)
+    } else {
+        format!("{}.{}.{}", bar + 1.0, beat_in_bar + 1.0, sixteenth + 1.0)
+    }
+}
+
+fn is_multiple(beat: f64, of: f64) -> bool {
+    let ratio = beat / of;
+    (ratio - ratio.round()).abs() < 1e-6
 }
 
 /// Beats between ruler labels: bars about 60 px apart, then every beat
