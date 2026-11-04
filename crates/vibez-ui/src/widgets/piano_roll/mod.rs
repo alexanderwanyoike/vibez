@@ -287,7 +287,8 @@ fn moved_notes(
         .collect()
 }
 
-/// Drag action in progress.
+/// Drag action in progress. Each note drag remembers what it last sent, so
+/// a pointer move that changes nothing sends no edit and leaves no undo step.
 #[derive(Debug, Clone)]
 #[allow(clippy::enum_variant_names)]
 enum DragAction {
@@ -299,6 +300,7 @@ enum DragAction {
         start_y: f32,
         undo_gesture: UndoGestureId,
         started: bool,
+        sent_moves: Vec<(usize, f64, u8)>,
     },
     ResizeNote {
         note_index: usize,
@@ -306,6 +308,7 @@ enum DragAction {
         start_x: f32,
         undo_gesture: UndoGestureId,
         started: bool,
+        sent_duration: f64,
     },
     DrawNote {
         clip_id: ClipId,
@@ -313,6 +316,7 @@ enum DragAction {
         start_beat: f64,
         start_x: f32,
         undo_gesture: UndoGestureId,
+        sent_duration: f64,
     },
     /// Rubber-band select dragged out from empty grid space.
     MarqueeNotes {
@@ -505,6 +509,7 @@ impl canvas::Program<Message> for PianoRollWidget {
                                 start_beat: snapped_beat,
                                 start_x: pos.x,
                                 undo_gesture,
+                                sent_duration: note_duration,
                             });
 
                             return (
@@ -536,6 +541,7 @@ impl canvas::Program<Message> for PianoRollWidget {
                                     start_x: pos.x,
                                     undo_gesture: UndoGestureId::new(),
                                     started: false,
+                                    sent_duration: note.duration_beats,
                                 });
                                 return (
                                     canvas::event::Status::Captured,
@@ -588,6 +594,10 @@ impl canvas::Program<Message> for PianoRollWidget {
                                     })
                                     .collect();
 
+                                let sent_moves = original_notes
+                                    .iter()
+                                    .map(|note| (note.index, note.start_beat, note.pitch))
+                                    .collect();
                                 state.drag = Some(DragAction::MoveNote {
                                     original_start_beat: note.start_beat,
                                     original_notes,
@@ -595,6 +605,7 @@ impl canvas::Program<Message> for PianoRollWidget {
                                     start_y: pos.y,
                                     undo_gesture: UndoGestureId::new(),
                                     started: false,
+                                    sent_moves,
                                 });
                             }
 
@@ -723,7 +734,7 @@ impl canvas::Program<Message> for PianoRollWidget {
                         _ => {}
                     }
 
-                    if let Some(ref drag) = state.drag {
+                    if let Some(drag) = state.drag.as_mut() {
                         if let Some(ref clip_data) = self.clip {
                             let geometry = self.geometry(&bounds);
 
@@ -734,23 +745,28 @@ impl canvas::Program<Message> for PianoRollWidget {
                                     start_x,
                                     start_y,
                                     undo_gesture,
+                                    sent_moves,
                                     ..
                                 } => {
-                                    let dx = local.x - start_x;
-                                    let dy = local.y - start_y;
+                                    let dx = local.x - *start_x;
+                                    let dy = local.y - *start_y;
                                     let beat_delta = geometry.beats_for_width(dx);
                                     let pitch_delta = -(dy / KEY_HEIGHT).round() as i16;
                                     // The grabbed note snaps; the rest keep their
                                     // places against it.
                                     let snapped_beat_delta = self
-                                        .snapped_beat(original_start_beat + beat_delta, &bounds)
-                                        - original_start_beat;
+                                        .snapped_beat(*original_start_beat + beat_delta, &bounds)
+                                        - *original_start_beat;
                                     let moves = moved_notes(
                                         original_notes,
                                         snapped_beat_delta,
                                         pitch_delta,
                                         self.total_beats,
                                     );
+                                    if moves == *sent_moves {
+                                        return (canvas::event::Status::Captured, None);
+                                    }
+                                    sent_moves.clone_from(&moves);
                                     return (
                                         canvas::event::Status::Captured,
                                         Some(
@@ -768,9 +784,10 @@ impl canvas::Program<Message> for PianoRollWidget {
                                     original_duration,
                                     start_x,
                                     undo_gesture,
+                                    sent_duration,
                                     ..
                                 } => {
-                                    let dx = local.x - start_x;
+                                    let dx = local.x - *start_x;
                                     let beat_delta = geometry.beats_for_width(dx);
                                     let min_duration = if self.grid.snap_enabled {
                                         self.effective_grid(&bounds).beat_size()
@@ -779,13 +796,17 @@ impl canvas::Program<Message> for PianoRollWidget {
                                     };
                                     let new_duration = self
                                         .snapped_beat(
-                                            (original_duration + beat_delta).max(min_duration),
+                                            (*original_duration + beat_delta).max(min_duration),
                                             &bounds,
                                         )
                                         .max(min_duration);
 
                                     let idx = *note_index;
+                                    if new_duration == *sent_duration {
+                                        return (canvas::event::Status::Captured, None);
+                                    }
                                     if idx < clip_data.notes.len() {
+                                        *sent_duration = new_duration;
                                         let mut note = clip_data.notes[idx];
                                         note.duration_beats = new_duration;
                                         return (
@@ -808,9 +829,10 @@ impl canvas::Program<Message> for PianoRollWidget {
                                     start_beat,
                                     start_x,
                                     undo_gesture,
+                                    sent_duration,
                                 } => {
                                     // Extend note duration while dragging
-                                    let dx = local.x - start_x;
+                                    let dx = local.x - *start_x;
                                     let beat_delta = geometry.beats_for_width(dx);
                                     let min_duration = self.effective_grid(&bounds).beat_size();
                                     let new_duration = self
@@ -827,8 +849,12 @@ impl canvas::Program<Message> for PianoRollWidget {
                                     // Find the note we just added (last note at this pitch/beat)
                                     if let Some(idx) = clip_data.notes.iter().rposition(|n| {
                                         n.pitch == *pitch
-                                            && (n.start_beat - start_beat).abs() < 0.001
+                                            && (n.start_beat - *start_beat).abs() < 0.001
                                     }) {
+                                        if new_duration == *sent_duration {
+                                            return (canvas::event::Status::Captured, None);
+                                        }
+                                        *sent_duration = new_duration;
                                         let mut note = clip_data.notes[idx];
                                         note.duration_beats = new_duration;
                                         return (

@@ -433,7 +433,7 @@ fn dragging_a_selection_moves_every_note_together_in_one_undo_step() {
     moves.sort_by_key(|(index, ..)| *index);
     assert_eq!(moves, vec![(0, 1.0, 62), (1, 3.0, 66)]);
 
-    let further = Point::new(target.x + 1.0, target.y);
+    let further = Point::new(widget.beat_to_x(1.75, &bounds), target.y);
     let second = widget
         .update(
             &mut state,
