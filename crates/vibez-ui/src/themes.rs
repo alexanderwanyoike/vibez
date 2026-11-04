@@ -617,6 +617,33 @@ mod tests {
         }
     }
 
+    fn saturation_and_lightness(c: Color) -> (f32, f32) {
+        let max = c.r.max(c.g).max(c.b);
+        let min = c.r.min(c.g).min(c.b);
+        let lightness = (max + min) / 2.0;
+        let chroma = max - min;
+        let saturation = if chroma == 0.0 {
+            0.0
+        } else {
+            chroma / (1.0 - (2.0 * lightness - 1.0).abs())
+        };
+        (saturation, lightness)
+    }
+
+    #[test]
+    fn the_default_dark_and_light_themes_use_a_muted_track_palette() {
+        for name in ["Charcoal", "Porcelain"] {
+            let theme = builtin_by_name(name).unwrap();
+            for color in theme.track_colors {
+                let (saturation, lightness) = saturation_and_lightness(color);
+                assert!(
+                    saturation <= 0.42 && (0.5..=0.68).contains(&lightness),
+                    "{name} track colour {color:?} is s={saturation} l={lightness}"
+                );
+            }
+        }
+    }
+
     #[test]
     fn vzt_roundtrip_through_the_service() {
         let dir = tempfile::tempdir().unwrap();
