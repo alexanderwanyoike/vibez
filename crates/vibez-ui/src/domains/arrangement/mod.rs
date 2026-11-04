@@ -489,7 +489,7 @@ impl TimelineEditorState {
                 new_position_beats,
                 target_track,
             } => {
-                self.move_selected_clips(
+                return self.move_selected_clips(
                     project_tracks,
                     engine,
                     ctx,

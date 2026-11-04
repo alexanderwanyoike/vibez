@@ -5,7 +5,7 @@ use vibez_engine::commands::EngineCommand;
 
 use crate::state::{ArrangementSelection, ProjectTracksState, TimelineEditorState};
 
-use super::{ArrangementCtx, EngineHandle};
+use super::{ArrangementAction, ArrangementCtx, EngineHandle};
 
 impl TimelineEditorState {
     pub(super) fn move_audio_clip(
@@ -135,12 +135,12 @@ impl TimelineEditorState {
         anchor: ClipId,
         new_position_beats: f64,
         target_track: TrackId,
-    ) {
+    ) -> ArrangementAction {
         if ctx.samples_per_beat <= 0.0 {
-            return;
+            return ArrangementAction::default();
         }
         let Some(anchor) = self.locate_clip(anchor) else {
-            return;
+            return ArrangementAction::default();
         };
         let targets: Vec<ArrangementSelection> = if self.selected_clips.contains(&anchor) {
             self.selected_clips.iter().copied().collect()
@@ -152,7 +152,7 @@ impl TimelineEditorState {
                 .map(|span| span.start_beats)
         };
         let Some(anchor_beats) = beats_of(self, anchor) else {
-            return;
+            return ArrangementAction::default();
         };
         let earliest = targets
             .iter()
@@ -184,6 +184,16 @@ impl TimelineEditorState {
                     .collect()
             })
             .flatten();
+        let moves_in_time = targets.iter().any(|selection| {
+            if selection.is_note_clip() {
+                delta_beats != 0.0
+            } else {
+                delta_samples != 0
+            }
+        });
+        if !moves_in_time && destinations.is_none() {
+            return ArrangementAction::default();
+        }
 
         for (index, selection) in targets.iter().enumerate() {
             match *selection {
@@ -221,6 +231,10 @@ impl TimelineEditorState {
         }
         if destinations.is_some() {
             self.selected_track = Some(target_track);
+        }
+        ArrangementAction {
+            mark_dirty: true,
+            ..Default::default()
         }
     }
 

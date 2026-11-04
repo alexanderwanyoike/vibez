@@ -445,22 +445,25 @@ impl TimelineEditorState {
             vec![anchor]
         };
         let mut max_end = None::<f64>;
+        let mut changed = false;
         for target in targets {
             match target {
                 ArrangementSelection::AudioClip { track_id, clip_id } => {
-                    if let Some(old) = self
-                        .clip_span(target, ctx.samples_per_beat)
-                        .map(|span| span.length_beats)
-                    {
-                        let duration =
-                            ((old + delta).max(0.25) * ctx.samples_per_beat).round() as u64;
-                        let action = self.op_resize_audio_clip(
-                            engine,
-                            ctx,
-                            track_id,
-                            clip_id,
-                            duration.max(1),
-                        );
+                    let old = self
+                        .find_content(track_id)
+                        .and_then(|t| t.clips.iter().find(|c| c.id == clip_id))
+                        .map(|c| c.duration);
+                    if let Some(old) = old {
+                        let old_beats = old as f64 / ctx.samples_per_beat;
+                        let duration = (((old_beats + delta).max(0.25) * ctx.samples_per_beat)
+                            .round() as u64)
+                            .max(1);
+                        if duration == old {
+                            continue;
+                        }
+                        changed = true;
+                        let action =
+                            self.op_resize_audio_clip(engine, ctx, track_id, clip_id, duration);
                         max_end = match (max_end, action.scroll_to_beat) {
                             (Some(a), Some(b)) => Some(a.max(b)),
                             (None, value) | (value, None) => value,
@@ -472,7 +475,12 @@ impl TimelineEditorState {
                         .find_content_mut(track_id)
                         .and_then(|t| t.note_clips.iter_mut().find(|c| c.id == clip_id))
                     {
-                        clip.duration_beats = (clip.duration_beats + delta).max(0.25);
+                        let duration = (clip.duration_beats + delta).max(0.25);
+                        if duration == clip.duration_beats {
+                            continue;
+                        }
+                        changed = true;
+                        clip.duration_beats = duration;
                         clip.clamp_start_to_duration();
                         engine.send(clip.bounds_command(track_id));
                         max_end = Some(
@@ -484,9 +492,13 @@ impl TimelineEditorState {
                 }
             }
         }
+        if !changed {
+            return ArrangementAction::default();
+        }
         self.drag_resize_active = true;
         ArrangementAction {
             scroll_to_beat: max_end,
+            mark_dirty: true,
             ..Default::default()
         }
     }
