@@ -247,6 +247,16 @@ mod tests {
     }
 
     #[test]
+    fn a_playhead_already_past_the_end_keeps_playing_from_where_it_is() {
+        let mut t = Transport::new();
+        t.seek(50_000);
+        t.play();
+        t.set_audio_length(Some(10_000));
+        assert_eq!(t.advance(512), 50_512);
+        assert!(t.is_playing());
+    }
+
+    #[test]
     fn set_bpm_clamps() {
         let mut t = Transport::new();
         t.set_bpm(10.0); // below MIN_BPM
