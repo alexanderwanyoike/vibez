@@ -23,9 +23,10 @@ use crate::widgets::local_drag::LocalDrag;
 use crate::widgets::timeline::marquee;
 use vibez_core::id::{ClipId, TrackId};
 
-use super::clip_drag::{ClipDragAction, ClipEdge};
+use super::clip_drag::ClipDragAction;
 use super::*;
 
+mod drag_steps;
 mod hit_test;
 
 use hit_test::ClipHit;
@@ -671,91 +672,17 @@ impl canvas::Program<Message> for TrackClipCanvas {
                                     )),
                                 );
                             }
-                            ClipDragAction::MoveClip {
-                                undo_gesture,
-                                clip_id,
-                                start_local_x,
-                                start_scroll_beats,
-                                origin,
-                                start_y,
-                                phase,
-                                ..
-                            } => {
-                                if !phase.follow(Point::new(*start_local_x, *start_y), local) {
-                                    return (canvas::event::Status::Captured, None);
-                                }
-                                let delta_px = local_x - *start_local_x;
-                                let travel = crate::timeline_geometry::compensated_drag_beat(
-                                    origin.start_beats,
-                                    delta_px,
-                                    geometry.pixels_per_beat(),
-                                    *start_scroll_beats,
-                                    self.scroll_offset_beats,
-                                ) - origin.start_beats;
-                                let new_pos = self
-                                    .snap_targets
-                                    .moved_span(
-                                        origin.start_beats,
-                                        origin.length_beats,
-                                        travel,
-                                        self.snap_context(state.alt_held),
-                                    )
-                                    .beat
-                                    .max(0.0);
-
-                                // Resolve against real row geometry when the
-                                // surface supplied it; stepping by a fixed
-                                // row height mis-targets as soon as a track
-                                // above has its automation lanes expanded.
-                                let target_track = self
-                                    .resolve_lane_at(self.row_top() + local.y)
-                                    .filter(|_| (local.y - *start_y).abs() > CROSS_TRACK_MIN_PX)
-                                    .and_then(|lane| self.track_ids.get(lane).copied())
-                                    .unwrap_or(track_id);
-                                let edit =
-                                    Message::Arrangement(ArrangementMsg::MoveSelectedClips {
-                                        anchor: *clip_id,
-                                        new_position_beats: new_pos,
-                                        target_track,
-                                    })
-                                    .in_undo_gesture(*undo_gesture);
-                                return (canvas::event::Status::Captured, Some(edit));
+                            ClipDragAction::MoveClip { .. } => {
+                                return (
+                                    canvas::event::Status::Captured,
+                                    self.move_step(state, local),
+                                );
                             }
-                            ClipDragAction::ResizeClip {
-                                undo_gesture,
-                                anchor,
-                                edge,
-                                origin,
-                                start_local_x,
-                                phase,
-                            } => {
-                                let fixed_beat = edge.fixed_beat(*origin);
-                                if !phase.follow_x(*start_local_x, local_x) {
-                                    return (canvas::event::Status::Captured, None);
-                                }
-                                let pointer = self.x_to_beat(local_x);
-                                let context = self.snap_context(state.alt_held);
-                                let anchor = *anchor;
-                                let edit = match edge {
-                                    ClipEdge::Start => ArrangementMsg::TrimSelectedClipsStart {
-                                        anchor,
-                                        new_start_beats: self
-                                            .snap_targets
-                                            .span_start(pointer, fixed_beat, context)
-                                            .beat,
-                                    },
-                                    ClipEdge::End => ArrangementMsg::ResizeSelectedClips {
-                                        anchor,
-                                        new_duration_beats: self
-                                            .snap_targets
-                                            .span_end(fixed_beat, pointer, context)
-                                            .beat
-                                            - fixed_beat,
-                                    },
-                                };
-                                let edit =
-                                    Message::Arrangement(edit).in_undo_gesture(*undo_gesture);
-                                return (canvas::event::Status::Captured, Some(edit));
+                            ClipDragAction::ResizeClip { .. } => {
+                                return (
+                                    canvas::event::Status::Captured,
+                                    self.edge_step(state, local),
+                                );
                             }
                             ClipDragAction::FadeClip(drag) => {
                                 let handle = self
