@@ -8,12 +8,14 @@ use iced::widget::canvas;
 use iced::{Color, Point, Rectangle, Renderer, Theme};
 
 use crate::domains::piano_roll::PianoRollMsg;
+use crate::domains::view::ViewMsg;
 use crate::message::Message;
 use crate::state::{
     GridConfig, PianoRollEditMode, SnapGrid, UiNoteClip, UndoGestureId, SHORTEST_LENGTH_BEATS,
 };
-use crate::timeline_geometry::TimelineGeometry;
+use crate::timeline_geometry::{TimelineGeometry, TimelineViewport};
 use crate::timeline_snap::SnapTargets;
+use crate::widgets::clip_editor_view::{wheel_intent, ClipEditorView, WheelIntent};
 use crate::widgets::clip_loop_markers::{self, LoopDrag};
 use crate::widgets::double_click::DoubleClick;
 use crate::widgets::drag_phase::{past_click_slop, DragPhase};
@@ -55,6 +57,8 @@ pub struct PianoRollWidget {
     pub scroll_y: f32,
     pub edit_mode: PianoRollEditMode,
     pub reserve_arrow_keys: bool,
+    /// The producer's zoom and scroll for this clip; `None` frames its loop.
+    pub view: Option<TimelineViewport>,
 }
 
 /// Owned data for drawing a note clip in the piano roll.
@@ -99,6 +103,7 @@ impl PianoRollWidget {
             scroll_y,
             edit_mode,
             reserve_arrow_keys: false,
+            view: None,
         }
     }
 
@@ -113,11 +118,16 @@ impl PianoRollWidget {
             scroll_y: default_scroll_y(200.0),
             edit_mode: PianoRollEditMode::default(),
             reserve_arrow_keys: false,
+            view: None,
         }
     }
 
+    fn clip_view(&self) -> ClipEditorView {
+        clip_editor_view(self.clip.as_ref(), self.total_beats, self.view)
+    }
+
     fn geometry(&self, bounds: &Rectangle) -> TimelineGeometry {
-        fitted_geometry(self.total_beats, bounds.width)
+        view_geometry(self.clip_view(), bounds.width)
     }
 
     fn beat_to_x(&self, beat: f64, bounds: &Rectangle) -> f32 {
@@ -223,6 +233,40 @@ struct MarqueeRegion {
     high_pitch: u8,
 }
 
+/// The piano roll and its velocity lane frame the loop, or the whole clip
+/// when it does not loop, and scroll as far as the loop reaches.
+fn clip_editor_view(
+    clip: Option<&PianoRollClipData>,
+    total_beats: f64,
+    stored: Option<TimelineViewport>,
+) -> ClipEditorView {
+    let loop_span = clip
+        .filter(|clip| clip.loop_enabled)
+        .map(|clip| (clip.loop_start_beats, clip.loop_end_beats));
+    framed_view(stored, loop_span, total_beats)
+}
+
+/// The view of a piano roll showing `total_beats` of content that loops
+/// over `loop_span`, unless the producer stored one.
+pub(crate) fn framed_view(
+    stored: Option<TimelineViewport>,
+    loop_span: Option<(f64, f64)>,
+    total_beats: f64,
+) -> ClipEditorView {
+    let total_beats = total_beats.max(1.0);
+    ClipEditorView::framing(stored, loop_span, total_beats, total_beats)
+}
+
+fn note_area_width(bounds: &Rectangle) -> f32 {
+    (bounds.width - KEY_WIDTH).max(1.0)
+}
+
+/// The piano roll's zoom for `view` in a widget `width` wide, its key
+/// column included.
+pub(crate) fn view_geometry(view: ClipEditorView, width: f32) -> TimelineGeometry {
+    view.geometry((width - KEY_WIDTH).max(1.0), KEY_WIDTH)
+}
+
 /// Default scroll_y to center on C3–C5 (musically useful range).
 pub fn default_scroll_y(canvas_height: f32) -> f32 {
     let c4_row = (HIGH_NOTE - 60 - 1) as f32;
@@ -271,12 +315,6 @@ fn grabbed_notes(notes: &[MidiNote], selection: &HashSet<usize>) -> Vec<MovedNot
             })
         })
         .collect()
-}
-
-/// The piano roll's zoom: `total_beats` fitted into `width` beside its
-/// key column.
-pub(crate) fn fitted_geometry(total_beats: f64, width: f32) -> TimelineGeometry {
-    TimelineGeometry::fitted(total_beats, width, KEY_WIDTH)
 }
 
 /// Every resized note's new length: the grabbed note takes `duration` and
@@ -472,9 +510,30 @@ impl canvas::Program<Message> for PianoRollWidget {
         cursor: mouse::Cursor,
     ) -> (canvas::event::Status, Option<Message>) {
         match event {
-            // ── Mouse wheel: vertical scroll ──
             canvas::Event::Mouse(mouse::Event::WheelScrolled { delta }) => {
                 if cursor.is_over(bounds) {
+                    let clip_id = self.clip.as_ref().map(|clip| clip.clip_id);
+                    let width = note_area_width(&bounds);
+                    let anchor_x = cursor
+                        .position_in(bounds)
+                        .map_or(width / 2.0, |position| position.x - KEY_WIDTH);
+                    let viewport = match wheel_intent(delta, state.shift_held) {
+                        WheelIntent::Zoom(factor) => {
+                            Some(self.clip_view().zoomed(factor, anchor_x, width))
+                        }
+                        WheelIntent::ScrollTime(pixels) => {
+                            Some(self.clip_view().scrolled(pixels, width))
+                        }
+                        WheelIntent::Plain(_) => None,
+                    };
+                    if let Some(viewport) = viewport {
+                        return (
+                            canvas::event::Status::Captured,
+                            clip_id.map(|clip_id| {
+                                Message::View(ViewMsg::SetClipEditorView { clip_id, viewport })
+                            }),
+                        );
+                    }
                     let dy = match delta {
                         mouse::ScrollDelta::Lines { y, .. } => -y * SCROLL_SPEED,
                         mouse::ScrollDelta::Pixels { y, .. } => -y,
@@ -957,7 +1016,9 @@ impl canvas::Program<Message> for PianoRollWidget {
                 }
             }
 
-            // ── Keyboard: track shift state ──
+            canvas::Event::Keyboard(iced::keyboard::Event::ModifiersChanged(modifiers)) => {
+                state.shift_held = modifiers.shift();
+            }
             canvas::Event::Keyboard(iced::keyboard::Event::KeyPressed {
                 key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Shift),
                 ..

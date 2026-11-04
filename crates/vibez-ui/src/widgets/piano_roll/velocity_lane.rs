@@ -25,6 +25,8 @@ pub struct VelocityLaneWidget {
     total_beats: f64,
     track_color: Color,
     grid: GridConfig,
+    /// See `PianoRollWidget::view`; both must share one view to line up.
+    pub view: Option<TimelineViewport>,
 }
 
 impl VelocityLaneWidget {
@@ -51,6 +53,7 @@ impl VelocityLaneWidget {
             total_beats,
             track_color,
             grid,
+            view: None,
         }
     }
 
@@ -61,11 +64,15 @@ impl VelocityLaneWidget {
             total_beats: 16.0,
             track_color,
             grid: GridConfig::new(SnapGrid::EIGHTH, true, false, 0),
+            view: None,
         }
     }
 
     fn geometry(&self, bounds: &Rectangle) -> TimelineGeometry {
-        fitted_geometry(self.total_beats.max(1.0), bounds.width)
+        view_geometry(
+            clip_editor_view(self.clip.as_ref(), self.total_beats, self.view),
+            bounds.width,
+        )
     }
 
     fn baseline(bounds: &Rectangle) -> f32 {
@@ -156,12 +163,17 @@ impl VelocityLaneWidget {
             .grid
             .effective_grid(geometry.pixels_per_beat())
             .beat_size();
-        let num_steps = (self.total_beats.max(1.0) / grid_step).ceil() as usize;
-        for step in 0..=num_steps {
+        let first_step = (geometry.x_to_beat(KEY_WIDTH) / grid_step).floor().max(0.0) as usize;
+        let num_steps =
+            (geometry.x_to_beat(bounds.width).max(self.total_beats) / grid_step).ceil() as usize;
+        for step in first_step..=num_steps {
             let beat = step as f64 * grid_step;
             let x = geometry.beat_to_x(beat).floor() + 0.5;
             if x > bounds.width {
                 break;
+            }
+            if x < KEY_WIDTH {
+                continue;
             }
             let beat_millis = (beat * 1000.0).round() as i64;
             let (color, width) = if beat_millis % 4000 == 0 {
@@ -186,7 +198,7 @@ impl VelocityLaneWidget {
         if let Some(clip) = &self.clip {
             for (index, note) in clip.notes.iter().enumerate() {
                 let x = geometry.beat_to_x(note.start_beat);
-                if x + BAR_MAX_WIDTH < KEY_WIDTH || x > bounds.width {
+                if x < KEY_WIDTH || x > bounds.width {
                     continue;
                 }
                 let y = Self::velocity_y(note.velocity, &bounds);

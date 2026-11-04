@@ -34,6 +34,11 @@ pub enum ViewMsg {
     ScrollArrangement(f64),
     /// Jump straight to a zoom and scroll, as a ruler drag does.
     SetViewport(TimelineViewport),
+    /// The producer zoomed or scrolled the clip editor showing this clip.
+    SetClipEditorView {
+        clip_id: ClipId,
+        viewport: TimelineViewport,
+    },
     Grid(GridTarget, GridCommand),
     BeginDetailPanelResize,
     ResizeDetailPanel(f32),
@@ -203,6 +208,9 @@ impl ViewState {
                     self.viewport = previous;
                     self.viewport.clamp(ctx.total_beats, ctx.lane_width);
                 }
+            }
+            ViewMsg::SetClipEditorView { clip_id, viewport } => {
+                self.clip_editor_view = Some((clip_id, viewport));
             }
             ViewMsg::Grid(target, command) => {
                 match target {

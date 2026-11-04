@@ -188,6 +188,11 @@ impl TimelineGeometry {
         }
     }
 
+    /// The same mapping drawn to the right of a fixed header.
+    pub fn with_origin(self, origin_x: f32) -> Self {
+        Self { origin_x, ..self }
+    }
+
     pub fn pixels_per_beat(self) -> f32 {
         self.pixels_per_beat
     }

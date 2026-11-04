@@ -9,7 +9,7 @@ use crate::message::Message;
 use crate::state::UndoGestureId;
 use crate::widgets::clip_loop_markers::{self, LoopDrag, LoopMarker};
 
-use super::{DragAction, PianoRollWidget, KEY_WIDTH};
+use super::{DragAction, PianoRollWidget};
 
 const LOOP_HANDLE_ROW_HEIGHT: f32 = 10.0;
 
@@ -76,7 +76,7 @@ impl PianoRollWidget {
                 clip_id,
                 undo_gesture,
             } => {
-                let pointer = pointer_at(position.x.clamp(KEY_WIDTH, bounds.width));
+                let pointer = pointer_at(position.x);
                 let marker_step = min_length.min(self.total_beats).max(0.01);
                 let start_marker_beats = BeatClipTimeline::new(
                     clip.start_marker_beats,
@@ -97,7 +97,7 @@ impl PianoRollWidget {
             }
             DragAction::Loop { clip_id, drag } => {
                 let (loop_start_beats, loop_end_beats) = drag.resolve(
-                    pointer_at(position.x.max(KEY_WIDTH)),
+                    pointer_at(position.x),
                     min_length.min(self.total_beats),
                     NOTE_CONTENT_END_BEATS,
                 );

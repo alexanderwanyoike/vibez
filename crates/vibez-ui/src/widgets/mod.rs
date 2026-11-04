@@ -7,6 +7,7 @@ pub mod bitcrush_device;
 pub mod bitcrush_display;
 pub mod browser_drag_ghost;
 pub mod browser_waveform;
+pub(crate) mod clip_editor_view;
 mod clip_loop_markers;
 pub mod clip_slot;
 pub mod compressor_device;
