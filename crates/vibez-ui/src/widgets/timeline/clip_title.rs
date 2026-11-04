@@ -1,9 +1,22 @@
 //! Fitting a clip's name into its title strip.
 
 use iced::widget::canvas;
-use iced::{Color, Rectangle};
+use iced::{Color, Font, Rectangle};
+
+use crate::widgets::device_controls::text_width;
 
 use super::CLIP_TITLE_HEIGHT;
+
+const TITLE_SIZE: f32 = 11.0;
+const TITLE_FONT: Font = crate::typography::CLIP_TITLE;
+/// Space between the title text and either end of the strip.
+const TITLE_PADDING: f32 = 6.0;
+/// Width of the loop icon plus its gap before the name.
+const LOOP_ICON_ROOM: f32 = 15.0;
+
+fn name_width(text: &str) -> f32 {
+    text_width(text, TITLE_SIZE, TITLE_FONT)
+}
 
 fn fit_clip_title(name: &str, clip_width: f32, loop_icon_visible: bool) -> Option<String> {
     if clip_width <= 40.0 {
@@ -86,27 +99,41 @@ pub(super) fn draw_clip_title(
 
 #[cfg(test)]
 mod tests {
-    use super::{clip_title_layout, fit_clip_title};
+    use super::{clip_title_layout, fit_clip_title, name_width, LOOP_ICON_ROOM, TITLE_PADDING};
+
+    const NAME: &str = "Capture · Pattern 1";
 
     #[test]
-    fn clip_title_is_constrained_to_its_visible_width() {
-        assert_eq!(
-            fit_clip_title("Kick.wav", 100.0, false),
-            Some("Kick.wav".into())
-        );
-        assert_eq!(
-            fit_clip_title("OTH_128_Hub_Full.wav", 80.0, false),
-            Some("OTH_128_H..".into())
-        );
-        assert_eq!(fit_clip_title("Kick.wav", 40.0, false), None);
+    fn a_title_wide_enough_for_the_measured_name_shows_all_of_it() {
+        let width = name_width(NAME) + 2.0 * TITLE_PADDING;
+
+        assert_eq!(fit_clip_title(NAME, width, false), Some(NAME.into()));
     }
 
     #[test]
-    fn loop_icon_reserves_title_space() {
-        assert_eq!(
-            fit_clip_title("OTH_128_Hub_Full.wav", 80.0, true),
-            Some("OTH_12..".into())
-        );
+    fn the_loop_icon_takes_its_room_once() {
+        let width = name_width(NAME) + 2.0 * TITLE_PADDING + LOOP_ICON_ROOM;
+
+        assert_eq!(fit_clip_title(NAME, width, true), Some(NAME.into()));
+    }
+
+    #[test]
+    fn a_name_too_long_for_its_strip_keeps_as_much_as_fits_before_an_ellipsis() {
+        let room = name_width(NAME) / 2.0;
+
+        let title = fit_clip_title(NAME, room + 2.0 * TITLE_PADDING, false).unwrap();
+
+        let kept = title.strip_suffix('…').expect("ends in an ellipsis");
+        assert!(name_width(&title) <= room, "{title}");
+        let one_more: String = NAME.chars().take(kept.chars().count() + 1).collect();
+        assert!(name_width(&format!("{one_more}…")) > room, "{title}");
+    }
+
+    #[test]
+    fn no_title_when_only_a_couple_of_letters_would_fit() {
+        let width = name_width("Ca…") + 2.0 * TITLE_PADDING;
+
+        assert_eq!(fit_clip_title(NAME, width, false), None);
     }
 
     #[test]

@@ -20,6 +20,9 @@ pub const PERFORM_LABEL: Font = Font {
     weight: Weight::Semibold,
     ..Font::with_name("IBM Plex Sans Condensed")
 };
+/// Clip names in timeline title strips: semibold and condensed, so more of
+/// a name fits a short clip.
+pub const CLIP_TITLE: Font = PERFORM_LABEL;
 pub const PERFORM_TECH: Font = Font {
     weight: Weight::Medium,
     ..Font::with_name("IBM Plex Mono")
