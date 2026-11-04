@@ -18,16 +18,19 @@ pub(super) struct ClipColors {
 /// How far a selected clip's title moves toward white.
 const SELECTED_TITLE_LIFT: f32 = 0.33;
 
-/// Opacity left to a clip on a muted track. Lower than it looks: the
-/// renderer blends in linear light, which makes translucency read stronger.
-const MUTED_OPACITY: f32 = 0.25;
+/// How far a clip on a muted track is mixed toward its lane. Mixed rather
+/// than made translucent: the renderer blends in linear light, which leaves
+/// dark ink on a light lane far fainter than the same fade on a dark one.
+const MUTED_FADE: f32 = 0.55;
 
 impl ClipColors {
     /// The same clip on a muted track: it stays in place and readable but
     /// steps back, while a selection outline keeps its full strength.
     pub fn muted(self, lane: Color) -> Self {
-        let _ = lane;
-        let fade = |color: Color| theme::with_alpha(color, color.a * MUTED_OPACITY);
+        let fade = |color: Color| Color {
+            a: color.a,
+            ..theme::blend(color, lane, MUTED_FADE)
+        };
         Self {
             title: fade(self.title),
             body: fade(self.body),
