@@ -423,6 +423,9 @@ impl App {
                         drop(retired);
                     }
                     EngineEvent::PlaybackStopped => {
+                        let _ = self.update(Message::Transport(
+                            crate::domains::transport::TransportMsg::EngineStopped,
+                        ));
                         let editor = &mut self.state.perform.clip_editor;
                         editor.resume = editor
                             .playing
@@ -434,7 +437,6 @@ impl App {
                         self.state.perform.clip_editor.started_at.clear();
                         self.state.perform.clip_editor.clear_queue();
                         self.state.perform.clip_editor.pending.clear();
-                        self.state.transport.follow_engine(false);
                         self.state.perform.playing_section = None;
                         self.state.perform.queued_section = None;
                         self.state.perform.pending_section_boundary_samples = None;

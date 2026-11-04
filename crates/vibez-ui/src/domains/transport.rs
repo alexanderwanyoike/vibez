@@ -33,6 +33,7 @@ pub enum TransportMsg {
     },
     /// Engine events routed to this domain.
     EnginePosition(u64),
+    /// The engine stopped, whether asked to or at the song end.
     EngineStopped,
 }
 
@@ -215,7 +216,11 @@ impl TransportState {
                 TransportAction::None
             }
             TransportMsg::EngineStopped => {
+                let stopped_on_its_own = self.will_play();
                 self.follow_engine(false);
+                if stopped_on_its_own && !ctx.perform_playback_active {
+                    self.return_to_play_start(engine);
+                }
                 TransportAction::None
             }
         }
