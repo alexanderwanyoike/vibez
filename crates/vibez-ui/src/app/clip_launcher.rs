@@ -224,6 +224,7 @@ pub(super) fn refresh_edited_clips(
         .iter()
         .filter(|clip| perform.clips.by_id(clip.id).is_none())
     {
+        let quantization = perform.stop_quantization(removed.track_id);
         let editor = &mut perform.clip_editor;
         if editor.queued.get(&removed.track_id) == Some(&None) {
             continue;
@@ -241,7 +242,7 @@ pub(super) fn refresh_edited_clips(
                     removed.track_id,
                     editor.next_request,
                 )],
-                quantization: perform.clips.clip_launch_quantization(removed),
+                quantization,
             });
         }
     }
