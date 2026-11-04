@@ -17,6 +17,7 @@ use crate::state::{
     TrackTimelineContent, UndoGestureId,
 };
 use crate::timeline_geometry::TimelineGeometry;
+use crate::timeline_snap::SnapTargets;
 use crate::widgets::drag_phase::{past_click_slop, DragPhase};
 use crate::widgets::local_drag::LocalDrag;
 use crate::widgets::timeline::marquee;
@@ -106,6 +107,8 @@ pub struct TrackClipCanvas {
     /// project tempo; WARP retains the source's confirmed musical length.
     pub sample_drop_duration_beats: Option<f64>,
     pub sample_drop_detail: Option<String>,
+    /// Clip edges and markers on every lane that drags and clicks lock onto.
+    pub snap_targets: Arc<SnapTargets>,
     /// The track name this canvas was constructed with. Drawn on the drop
     /// indicator so the user can verify which lane will receive the drop.
     pub track_name: String,
@@ -273,6 +276,7 @@ impl TrackClipCanvas {
             sample_drop_active,
             sample_drop_duration_beats,
             sample_drop_detail,
+            snap_targets: Arc::default(),
             track_name: track.name.clone(),
         }
     }
@@ -287,6 +291,11 @@ impl TrackClipCanvas {
     ) -> Self {
         self.row_spans = row_spans;
         self.marquee = marquee;
+        self
+    }
+
+    pub fn with_snap_targets(mut self, snap_targets: Arc<SnapTargets>) -> Self {
+        self.snap_targets = snap_targets;
         self
     }
 

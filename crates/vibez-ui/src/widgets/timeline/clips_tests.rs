@@ -1175,3 +1175,91 @@ fn an_alt_click_on_a_clip_body_seeks_exactly_where_clicked() {
 
     assert!((beat - 1.3).abs() < 1e-3, "seeked to {beat}");
 }
+
+/// The off-grid Clip at 1.1..5.1, with another lane holding a note Clip
+/// whose start sits off the grid at beat 9.3.
+fn canvas_beside_an_off_grid_clip() -> (TrackClipCanvas, ClipId) {
+    let (canvas, clip_id) = canvas_with_off_grid_audio_clip();
+    let mut other = note_clip(9.3);
+    other.duration_beats = 4.0;
+    let mut editor = crate::state::TimelineEditorState::default();
+    Arc::make_mut(&mut editor.timeline)
+        .ensure(TrackId::new())
+        .note_clips
+        .push(other);
+    let targets = crate::timeline_snap::SnapTargets::for_editor(&editor, canvas.spb());
+    (canvas.with_snap_targets(Arc::new(targets)), clip_id)
+}
+
+/// Presses `canvas`'s first Clip title at beat 1.5 with `modifiers` held
+/// and drags it `travel` beats, returning where the move puts its start.
+fn moved_start_after_drag(
+    canvas: &TrackClipCanvas,
+    travel: f64,
+    modifiers: Modifiers,
+) -> Option<f64> {
+    let start = Point::new(canvas.beat_to_x(1.5), CLIP_Y + 4.0);
+    let target = Point::new(canvas.beat_to_x(1.5 + travel), start.y);
+    let mut state = ClipInteractionState::default();
+    <TrackClipCanvas as canvas::Program<Message>>::update(
+        canvas,
+        &mut state,
+        canvas::Event::Keyboard(Event::ModifiersChanged(modifiers)),
+        Rectangle::new(Point::ORIGIN, Size::new(800.0, 80.0)),
+        mouse::Cursor::Available(start),
+    );
+    left_event(
+        canvas,
+        &mut state,
+        iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left),
+        start,
+    );
+    match left_event(
+        canvas,
+        &mut state,
+        iced::mouse::Event::CursorMoved { position: target },
+        target,
+    ) {
+        Some(Message::UndoGesture { edit, .. }) => match *edit {
+            Message::Arrangement(ArrangementMsg::MoveSelectedClips {
+                new_position_beats, ..
+            }) => Some(new_position_beats),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+#[test]
+fn dragging_a_clip_locks_its_end_onto_another_lanes_off_grid_clip_start() {
+    let (canvas, _) = canvas_beside_an_off_grid_clip();
+
+    // 4.15 beats of travel ends the 4 beat Clip at 9.25, just short of the
+    // other Clip's start, where the grid alone would end it at 9.1.
+    let start = moved_start_after_drag(&canvas, 4.15, Modifiers::empty()).expect("a move");
+
+    assert!((start + 4.0 - 9.3).abs() < 1e-4, "ended at {}", start + 4.0);
+}
+
+#[test]
+fn resizing_a_clip_locks_its_end_onto_another_lanes_off_grid_clip_start() {
+    let (canvas, _) = canvas_beside_an_off_grid_clip();
+
+    let length = resize_length_after_drag(&canvas, 9.2).expect("a resize");
+
+    assert!(
+        (1.1 + length - 9.3).abs() < 1e-4,
+        "ended at {}",
+        1.1 + length
+    );
+}
+
+#[test]
+fn clicking_near_another_lanes_clip_start_seeks_onto_it() {
+    let (canvas, _) = canvas_beside_an_off_grid_clip();
+
+    let beat =
+        seek_beat_after_click(&canvas, 9.2, CLIP_BODY_Y, Modifiers::empty()).expect("a seek");
+
+    assert!((beat - 9.3).abs() < 1e-9, "seeked to {beat}");
+}
