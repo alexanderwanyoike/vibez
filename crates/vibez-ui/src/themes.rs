@@ -648,13 +648,15 @@ mod tests {
     }
 
     #[test]
-    fn the_default_dark_and_light_themes_use_a_muted_track_palette() {
+    fn the_default_dark_and_light_themes_use_a_medium_strength_track_palette() {
+        // Above 0.41 saturation: Alex found the 0.30 to 0.40 palette too
+        // pale. Capped at 0.56 so tracks stay muted rather than neon.
         for name in ["Charcoal", "Porcelain"] {
             let theme = builtin_by_name(name).unwrap();
             for color in theme.track_colors {
                 let (saturation, lightness) = saturation_and_lightness(color);
                 assert!(
-                    saturation <= 0.42 && (0.5..=0.68).contains(&lightness),
+                    (0.41..=0.56).contains(&saturation) && (0.5..=0.62).contains(&lightness),
                     "{name} track colour {color:?} is s={saturation} l={lightness}"
                 );
             }
