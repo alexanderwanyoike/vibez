@@ -100,7 +100,7 @@ impl App {
         let geometry = TimelineGeometry::from_zoom(zoom_level, scroll_offset);
         let total_beats = self.state.total_beats();
 
-        // Beat-based ruler across the top (offset by track header width)
+        // Beat-based ruler, offset by track header width
         let ruler = RulerWidget {
             playhead_beats,
             play_start_beats: Some(self.state.transport.play_start_beats),
@@ -590,7 +590,7 @@ impl App {
         ))
         .max_height(CHANNEL_FOOTER_MAX_HEIGHT);
 
-        let content = column![ruler_row, minimap_row, track_body, channel_footer];
+        let content = column![minimap_row, ruler_row, track_body, channel_footer];
 
         // mouse_area only provides on_right_press (no cursor position),
         // so use the globally tracked cursor for the scrollable background.
