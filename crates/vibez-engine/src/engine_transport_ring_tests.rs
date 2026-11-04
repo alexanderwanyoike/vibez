@@ -130,3 +130,26 @@ fn a_transport_command_waits_for_a_control_command_sent_before_it() {
     assert!(lanes.engine.transport().is_playing());
     assert_eq!(lanes.engine.transport().bpm(), 90.0);
 }
+
+#[test]
+fn play_overtakes_channel_edits_queued_behind_pending_content_edits() {
+    let mut lanes = lanes_with_pending_notes(64);
+    let track_id = TrackId::new();
+    lanes.send(EngineCommand::add_track(track_id));
+    lanes.send(EngineCommand::SetTrackMute(track_id, true));
+    lanes.send(EngineCommand::SetTrackGain(track_id, 0.5));
+    lanes.send(EngineCommand::SetAutomationOverride {
+        track_id,
+        target: vibez_core::automation::AutomationTarget::TrackMute,
+        overridden: false,
+    });
+    lanes.send(EngineCommand::RemoveTrack(track_id));
+
+    lanes.send_transport(EngineCommand::Play);
+    lanes.callback();
+
+    assert!(
+        lanes.engine.transport().is_playing(),
+        "Play must not wait for mixer edits stuck behind a content rebuild"
+    );
+}
