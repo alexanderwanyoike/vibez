@@ -3,10 +3,9 @@
 use iced::widget::{
     button, canvas, column, container, horizontal_space, mouse_area, progress_bar, row, stack, text,
 };
-use iced::{Color, Element, Length, Theme};
+use iced::{Element, Length, Theme};
 
 use crate::domains::browser::BrowserMsg;
-use crate::domains::project::ProjectMsg;
 use crate::domains::view::ViewMsg;
 
 use crate::icons;
@@ -77,8 +76,6 @@ impl App {
     // ── View ──
 
     pub(super) fn view(&self) -> Element<'_, Message> {
-        let header = self.view_header();
-
         let workspace_content = match self.state.view.workspace {
             Workspace::Arrange => self.view_arrangement(),
             Workspace::Perform => self.view_perform(),
@@ -105,12 +102,11 @@ impl App {
             Message::View(ViewMsg::BeginDetailPanelResize),
         );
         let detail_panel = self.view_detail_panel();
-        let transport_bar = self.view_transport();
+        let control_bar = self.view_control_bar();
         let status_bar = self.view_status();
 
         let layout = column![
-            header,
-            transport_bar,
+            control_bar,
             content,
             detail_splitter,
             detail_panel,
@@ -208,227 +204,6 @@ impl App {
         } else {
             base_layout
         }
-    }
-
-    pub(super) fn view_header(&self) -> Element<'_, Message> {
-        let title = text("vibez").size(22).color(th::accent());
-
-        // Workspace tabs
-        let arrange_tab = {
-            let active = self.state.view.workspace == Workspace::Arrange;
-            let (bg, text_color, border_color) = if active {
-                (th::bg_elevated(), th::accent(), th::accent_dim())
-            } else {
-                (
-                    iced::Color::TRANSPARENT,
-                    th::text_dim(),
-                    iced::Color::TRANSPARENT,
-                )
-            };
-            button(
-                row![
-                    icons::icon(icons::LAYOUT_LIST).size(13).color(text_color),
-                    text("Arrange").size(13).color(text_color)
-                ]
-                .spacing(4)
-                .align_y(iced::Alignment::Center),
-            )
-            .on_press(Message::View(ViewMsg::SwitchWorkspace(Workspace::Arrange)))
-            .padding([6, 14])
-            .style(move |_theme: &Theme, _status| button::Style {
-                background: Some(bg.into()),
-                text_color,
-                border: iced::Border {
-                    color: border_color,
-                    width: if active { 1.0 } else { 0.0 },
-                    radius: 4.0.into(),
-                },
-                ..Default::default()
-            })
-        };
-
-        let mix_tab = {
-            let active = self.state.view.workspace == Workspace::Mix;
-            let (bg, text_color, border_color) = if active {
-                (th::bg_elevated(), th::accent(), th::accent_dim())
-            } else {
-                (
-                    iced::Color::TRANSPARENT,
-                    th::text_dim(),
-                    iced::Color::TRANSPARENT,
-                )
-            };
-            button(
-                row![
-                    icons::icon(icons::SLIDERS_VERTICAL)
-                        .size(13)
-                        .color(text_color),
-                    text("Mix").size(13).color(text_color)
-                ]
-                .spacing(4)
-                .align_y(iced::Alignment::Center),
-            )
-            .on_press(Message::View(ViewMsg::SwitchWorkspace(Workspace::Mix)))
-            .padding([6, 14])
-            .style(move |_theme: &Theme, _status| button::Style {
-                background: Some(bg.into()),
-                text_color,
-                border: iced::Border {
-                    color: border_color,
-                    width: if active { 1.0 } else { 0.0 },
-                    radius: 4.0.into(),
-                },
-                ..Default::default()
-            })
-        };
-
-        let perform_tab = {
-            let active = self.state.view.workspace == Workspace::Perform;
-            let (bg, text_color, border_color) = if active {
-                (th::bg_elevated(), th::accent(), th::accent_dim())
-            } else {
-                (
-                    iced::Color::TRANSPARENT,
-                    th::text_dim(),
-                    iced::Color::TRANSPARENT,
-                )
-            };
-            button(
-                row![
-                    icons::icon(icons::MUSIC).size(13).color(text_color),
-                    text("Perform").size(13).color(text_color)
-                ]
-                .spacing(4)
-                .align_y(iced::Alignment::Center),
-            )
-            .on_press(Message::View(ViewMsg::SwitchWorkspace(Workspace::Perform)))
-            .padding([6, 14])
-            .style(move |_theme: &Theme, _status| button::Style {
-                background: Some(bg.into()),
-                text_color,
-                border: iced::Border {
-                    color: border_color,
-                    width: if active { 1.0 } else { 0.0 },
-                    radius: 4.0.into(),
-                },
-                ..Default::default()
-            })
-        };
-
-        let tabs = row![perform_tab, arrange_tab, mix_tab].spacing(4);
-
-        let file_btn = button(text("File").size(13).color(th::text_dim()))
-            .on_press(Message::Project(ProjectMsg::ToggleFileMenu))
-            .padding([6, 14])
-            .style(|_theme: &Theme, status| {
-                let bg = match status {
-                    button::Status::Hovered | button::Status::Pressed => {
-                        Some(th::bg_hover().into())
-                    }
-                    _ => None,
-                };
-                button::Style {
-                    background: bg,
-                    text_color: th::text_dim(),
-                    border: iced::Border::default(),
-                    ..Default::default()
-                }
-            });
-
-        let edit_btn = button(text("Edit").size(13).color(th::text_dim()))
-            .on_press(Message::View(ViewMsg::ToggleEditMenu))
-            .padding([6, 14])
-            .style(|_theme: &Theme, status| {
-                let background = match status {
-                    button::Status::Hovered | button::Status::Pressed => {
-                        Some(th::bg_hover().into())
-                    }
-                    _ => None,
-                };
-                button::Style {
-                    background,
-                    text_color: th::text_dim(),
-                    border: iced::Border::default(),
-                    ..Default::default()
-                }
-            });
-
-        let browser_active = self.state.browser.open;
-        let browser_btn = button(
-            row![
-                icons::icon(icons::AUDIO_WAVEFORM)
-                    .size(13)
-                    .color(if browser_active {
-                        th::accent()
-                    } else {
-                        th::text_dim()
-                    }),
-                text("Browser").size(13).color(if browser_active {
-                    th::accent()
-                } else {
-                    th::text_dim()
-                })
-            ]
-            .spacing(4)
-            .align_y(iced::Alignment::Center),
-        )
-        .on_press(Message::Browser(BrowserMsg::ToggleSampleBrowser))
-        .padding([6, 14])
-        .style(move |_theme: &Theme, status| {
-            let bg = if browser_active {
-                Some(th::bg_elevated().into())
-            } else {
-                match status {
-                    button::Status::Hovered | button::Status::Pressed => {
-                        Some(th::bg_hover().into())
-                    }
-                    _ => None,
-                }
-            };
-            button::Style {
-                background: bg,
-                text_color: if browser_active {
-                    th::accent()
-                } else {
-                    th::text_dim()
-                },
-                border: iced::Border {
-                    color: if browser_active {
-                        th::accent_dim()
-                    } else {
-                        Color::TRANSPARENT
-                    },
-                    width: if browser_active { 1.0 } else { 0.0 },
-                    radius: 4.0.into(),
-                },
-                ..Default::default()
-            }
-        });
-
-        let header_row = row![
-            title,
-            file_btn,
-            edit_btn,
-            browser_btn,
-            tabs,
-            horizontal_space()
-        ]
-        .spacing(8);
-
-        let header = header_row.padding(10).align_y(iced::Alignment::Center);
-
-        container(header)
-            .width(Length::Fill)
-            .style(|_theme: &Theme| container::Style {
-                background: Some(th::bg_surface().into()),
-                border: iced::Border {
-                    color: th::border(),
-                    width: 0.0,
-                    radius: 0.0.into(),
-                },
-                ..Default::default()
-            })
-            .into()
     }
 
     /// The release notice: a chip in the status bar rather than a

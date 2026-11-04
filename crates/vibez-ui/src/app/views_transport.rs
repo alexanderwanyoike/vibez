@@ -1,183 +1,219 @@
-//! Transport bar: play/stop, tempo, position, loop, and metering.
-//! Split from views_shell.rs; inherent methods on [`super::App`].
+//! The control bar's transport buttons and recessed position display.
 
-use iced::widget::{
-    button, canvas, column, container, horizontal_space, pick_list, row, text, text_input,
-};
-use iced::{Element, Length, Theme};
+use iced::widget::{button, canvas, column, container, row, text, text_input};
+use iced::{Alignment, Element, Length};
+use vibez_core::time::MusicalTime;
 
 use crate::domains::perform::PerformMsg;
 use crate::domains::transport::TransportMsg;
-use crate::domains::view::{GridTarget, ViewMsg};
 
 use crate::icons;
 use crate::message::Message;
-use crate::state::{AppState, GridCommand, Workspace};
+use crate::state::{AppState, Workspace};
 use crate::theme as th;
+use crate::typography;
 use crate::widgets::swing_knob::{parse_swing_percent, SwingKnobWidget};
-use crate::widgets::vu_meter::VuMeterWidget;
 
-use super::views_control_status::{audio_cpu_indicator, audio_stream_indicator};
+use super::views_control_bar_style as style;
 use super::*;
+
+const TRANSPORT_BUTTON_WIDTH: f32 = 34.0;
+const PLAY_BUTTON_WIDTH: f32 = 38.0;
+const TRANSPORT_BUTTON_HEIGHT: f32 = 30.0;
+const POSITION_WIDTH: f32 = 100.0;
+/// Wide enough for "PERFORMANCE TIME", so switching workspace never moves
+/// the display's other fields.
+const TIME_WIDTH: f32 = 96.0;
+const BPM_INPUT_WIDTH: f32 = 40.0;
+const SWING_WIDTH: f32 = 86.0;
+
+/// What the position display reads.
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct PositionReadout {
+    pub position: String,
+    pub time: String,
+    pub time_label: &'static str,
+}
+
+/// Perform runs its own clock from zero, so the display follows that clock
+/// there and the Arrange cursor everywhere else.
+pub(super) fn position_readout(state: &AppState) -> PositionReadout {
+    let (seconds, time_label) = if state.view.workspace == Workspace::Perform {
+        let seconds = if state.transport.sample_rate == 0 {
+            0.0
+        } else {
+            state.perform.performance_position_samples as f64
+                / f64::from(state.transport.sample_rate)
+        };
+        (seconds, "PERFORMANCE TIME")
+    } else {
+        (state.position_seconds(), "TIME")
+    };
+    PositionReadout {
+        position: MusicalTime(seconds * state.transport.bpm / 60.0).bar_beat_sixteenth(),
+        time: AppState::format_time(seconds),
+        time_label,
+    }
+}
+
+fn transport_button<'a>(
+    icon: char,
+    width: f32,
+    lit: Option<iced::Color>,
+    message: Message,
+) -> Element<'a, Message> {
+    button(
+        container(icons::icon(icon).size(14))
+            .center_x(Length::Fill)
+            .center_y(Length::Fill),
+    )
+    .on_press(message)
+    .width(Length::Fixed(width))
+    .height(Length::Fixed(TRANSPORT_BUTTON_HEIGHT))
+    .padding(0)
+    .style(style::segment(lit))
+    .into()
+}
+
+/// One field of the display: a value over its label.
+fn display_field<'a>(
+    value: impl Into<Element<'a, Message>>,
+    label: &'a str,
+    width: f32,
+) -> Element<'a, Message> {
+    container(
+        column![value.into(), style::display_label(label, th::text_muted())]
+            .spacing(1)
+            .align_x(Alignment::Center),
+    )
+    .center_x(Length::Fixed(width))
+    .center_y(Length::Fill)
+    .into()
+}
 
 impl App {
     pub(super) fn view_transport(&self) -> Element<'_, Message> {
-        // Skip back button
-        let skip_back_btn = button(icons::icon(icons::SKIP_BACK).size(16).color(th::text()))
-            .on_press(Message::Transport(TransportMsg::Stop))
-            .padding([8, 12])
-            .style(|_theme: &Theme, _status| button::Style {
-                background: Some(th::bg_elevated().into()),
-                text_color: th::text(),
-                border: iced::Border {
-                    color: th::border(),
-                    width: 1.0,
-                    radius: 4.0.into(),
-                },
-                ..Default::default()
-            });
+        row![self.view_transport_buttons(), self.view_position_display()]
+            .spacing(10)
+            .align_y(Alignment::Center)
+            .into()
+    }
 
-        // Play/Pause button
-        let play_pause_btn = if self.state.transport.is_playing() {
-            button(icons::icon(icons::PAUSE).size(16).color(th::accent()))
-                .on_press(Message::Transport(TransportMsg::Stop))
-                .padding([8, 14])
-                .style(|_theme: &Theme, _status| button::Style {
-                    background: Some(th::bg_elevated().into()),
-                    text_color: th::accent(),
-                    border: iced::Border {
-                        color: th::accent_dim(),
-                        width: 1.0,
-                        radius: 4.0.into(),
-                    },
-                    ..Default::default()
-                })
-        } else {
-            button(icons::icon(icons::PLAY).size(16).color(th::success()))
-                .on_press(Message::Transport(TransportMsg::Play))
-                .padding([8, 14])
-                .style(|_theme: &Theme, _status| button::Style {
-                    background: Some(th::bg_elevated().into()),
-                    text_color: th::success(),
-                    border: iced::Border {
-                        color: th::border(),
-                        width: 1.0,
-                        radius: 4.0.into(),
-                    },
-                    ..Default::default()
-                })
-        };
+    fn view_transport_buttons(&self) -> Element<'_, Message> {
+        let playing = self.state.transport.is_playing();
+        let buttons = row![
+            transport_button(
+                icons::SKIP_BACK,
+                TRANSPORT_BUTTON_WIDTH,
+                None,
+                Message::Transport(TransportMsg::SeekToBeat(0.0)),
+            ),
+            transport_button(
+                icons::STOP,
+                TRANSPORT_BUTTON_WIDTH,
+                None,
+                Message::Transport(TransportMsg::Stop),
+            ),
+            transport_button(
+                icons::PLAY,
+                PLAY_BUTTON_WIDTH,
+                playing.then(th::success),
+                Message::Transport(if playing {
+                    TransportMsg::Stop
+                } else {
+                    TransportMsg::Play
+                }),
+            ),
+            transport_button(
+                icons::CIRCLE,
+                TRANSPORT_BUTTON_WIDTH,
+                self.state.audio_recording.is_recording().then(th::danger),
+                Message::ToggleAudioRecording,
+            ),
+            transport_button(
+                icons::REPEAT,
+                TRANSPORT_BUTTON_WIDTH,
+                self.state.transport.loop_enabled.then(th::accent),
+                Message::Transport(TransportMsg::ToggleArrangementLoop),
+            ),
+        ]
+        .spacing(2);
+        container(buttons)
+            .padding(style::GROUP_INSET)
+            .style(style::group)
+            .into()
+    }
 
-        let audio_recording = self.state.audio_recording.is_recording();
-        let record_color = if audio_recording {
-            th::danger()
-        } else {
-            th::text_dim()
-        };
-        let record_btn = button(icons::icon(icons::CIRCLE).size(15).color(record_color))
-            .on_press(Message::ToggleAudioRecording)
-            .padding([8, 12])
-            .style(move |_theme: &Theme, _status| button::Style {
-                background: Some(
-                    if audio_recording {
-                        th::blend(th::danger(), th::bg_dark(), 0.24)
-                    } else {
-                        th::bg_elevated()
-                    }
-                    .into(),
-                ),
-                text_color: record_color,
-                border: iced::Border {
-                    color: if audio_recording {
-                        th::danger()
-                    } else {
-                        th::border()
-                    },
-                    width: 1.0,
-                    radius: 4.0.into(),
-                },
-                ..Default::default()
-            });
-
-        // Loop toggle button
-        let loop_btn = if self.state.transport.loop_enabled {
-            button(icons::icon(icons::REPEAT).size(16).color(th::accent()))
-                .on_press(Message::Transport(TransportMsg::ToggleArrangementLoop))
-                .padding([8, 12])
-                .style(|_theme: &Theme, _status| button::Style {
-                    background: Some(th::bg_elevated().into()),
-                    text_color: th::accent(),
-                    border: iced::Border {
-                        color: th::accent_dim(),
-                        width: 1.0,
-                        radius: 4.0.into(),
-                    },
-                    ..Default::default()
-                })
-        } else {
-            button(icons::icon(icons::REPEAT).size(16).color(th::text_dim()))
-                .on_press(Message::Transport(TransportMsg::ToggleArrangementLoop))
-                .padding([8, 12])
-                .style(|_theme: &Theme, _status| button::Style {
-                    background: Some(th::bg_elevated().into()),
-                    text_color: th::text_dim(),
-                    border: iced::Border {
-                        color: th::border(),
-                        width: 1.0,
-                        radius: 4.0.into(),
-                    },
-                    ..Default::default()
-                })
-        };
-
-        let transport_buttons =
-            row![skip_back_btn, play_pause_btn, record_btn, loop_btn].spacing(4);
-
-        // Time display
-        let time_text = text(transport_time_label(&self.state))
+    fn view_position_display(&self) -> Element<'_, Message> {
+        let readout = position_readout(&self.state);
+        let position = text(readout.position)
+            .font(typography::PERFORM_TECH_STRONG)
+            .size(19)
+            .color(th::text());
+        let time = text(readout.time)
+            .font(typography::PERFORM_TECH)
             .size(14)
             .color(th::text());
 
-        // BPM
+        let fields = row![
+            display_field(position, "BAR  BEAT  16TH", POSITION_WIDTH),
+            style::display_divider(),
+            display_field(time, readout.time_label, TIME_WIDTH),
+            style::display_divider(),
+            self.view_bpm_field(),
+            style::display_divider(),
+            self.view_swing_field(),
+        ]
+        .height(Length::Fill)
+        .align_y(Alignment::Center);
+
+        container(fields)
+            .height(Length::Fixed(style::DISPLAY_HEIGHT))
+            .padding([0, 2])
+            .style(style::display)
+            .into()
+    }
+
+    fn view_bpm_field(&self) -> Element<'_, Message> {
         let bpm_input = text_input("BPM", &self.state.transport.bpm_text)
             .on_input(|t| Message::Transport(TransportMsg::BpmChanged(t)))
             .on_submit(Message::Transport(TransportMsg::BpmSubmit))
-            .width(Length::Fixed(55.0))
-            .size(14);
-
-        let bpm_nudge = |icon: char, delta: f64| {
-            button(icons::icon(icon).size(8).color(th::text_dim()))
+            .font(typography::PERFORM_TECH)
+            .size(14)
+            .padding([0, 2])
+            .width(Length::Fixed(BPM_INPUT_WIDTH))
+            .style(style::display_input);
+        let nudge = |icon: char, delta: f64| {
+            button(icons::icon(icon).size(8))
                 .on_press(Message::Transport(TransportMsg::NudgeBpm(delta)))
-                .padding([0, 4])
-                .style(|_theme: &Theme, status| {
-                    let bg = match status {
-                        button::Status::Hovered | button::Status::Pressed => {
-                            Some(th::bg_hover().into())
-                        }
-                        _ => None,
-                    };
-                    button::Style {
-                        background: bg,
-                        text_color: th::text_dim(),
-                        border: iced::Border {
-                            radius: 2.0.into(),
-                            ..Default::default()
-                        },
-                        ..Default::default()
-                    }
-                })
+                .padding([0, 3])
+                .style(style::segment(None))
         };
-        let bpm_spinner = column![
-            bpm_nudge(icons::CHEVRON_UP, 1.0),
-            bpm_nudge(icons::CHEVRON_DOWN, -1.0),
+        let nudges = column![
+            nudge(icons::CHEVRON_UP, 1.0),
+            nudge(icons::CHEVRON_DOWN, -1.0)
         ]
         .spacing(1);
 
-        let bpm_label = text("BPM").size(12).color(th::text_dim());
+        container(
+            row![
+                column![bpm_input, style::display_label("BPM", th::text_muted())]
+                    .spacing(1)
+                    .align_x(Alignment::Center),
+                nudges,
+            ]
+            .spacing(2)
+            .align_y(Alignment::Center),
+        )
+        .padding([0, 6])
+        .center_y(Length::Fill)
+        .into()
+    }
 
+    fn view_swing_field(&self) -> Element<'_, Message> {
         let project_swing = self.state.perform.project_swing();
-        let project_swing_locked = self.state.perform.capture.is_active();
-        let project_swing_submit = parse_swing_percent(self.state.perform.project_swing_input())
+        let locked = self.state.perform.capture.is_active();
+        let submit = parse_swing_percent(self.state.perform.project_swing_input())
             .map(|swing| Message::Perform(PerformMsg::SetProjectSwing(swing.get())))
             .unwrap_or_else(|| {
                 Message::Perform(PerformMsg::ProjectSwingInput(format!(
@@ -185,216 +221,40 @@ impl App {
                     project_swing.get() * 100.0
                 )))
             });
-        let swing_input = text_input("%", self.state.perform.project_swing_input())
-            .width(Length::Fixed(42.0))
-            .padding([2, 4])
-            .size(11);
-        let swing_input = if project_swing_locked {
-            swing_input
+        let input = text_input("%", self.state.perform.project_swing_input())
+            .font(typography::PERFORM_TECH)
+            .size(14)
+            .padding([0, 2])
+            .width(Length::Fixed(34.0))
+            .style(style::display_input);
+        let input = if locked {
+            input
         } else {
-            swing_input
+            input
                 .on_input(|value| Message::Perform(PerformMsg::ProjectSwingInput(value)))
-                .on_submit(project_swing_submit)
+                .on_submit(submit)
         };
-        let swing_knob: Element<'_, Message> = canvas(SwingKnobWidget::project_locked(
-            project_swing,
-            project_swing_locked,
-        ))
-        .width(Length::Fixed(30.0))
-        .height(Length::Fixed(30.0))
-        .into();
-        let swing_control = container(
-            row![
-                swing_knob,
-                column![
-                    text(if project_swing_locked {
-                        "PROJECT SWING · CAPTURE LOCK"
-                    } else {
-                        "PROJECT SWING"
-                    })
-                    .size(8)
-                    .color(th::text_muted()),
-                    swing_input,
-                ]
-                .spacing(1),
-            ]
-            .spacing(6)
-            .align_y(iced::Alignment::Center),
-        )
-        .padding([2, 6])
-        .style(|_theme: &Theme| container::Style {
-            background: Some(th::bg_surface().into()),
-            border: iced::Border {
-                color: th::border(),
-                width: 1.0,
-                radius: 3.0.into(),
-            },
-            ..Default::default()
-        });
-
-        let grid = self.state.view.arrange_grid;
-        let pixels_per_beat = self.timeline_pixels_per_beat();
-        let grid_picker = pick_list(
-            grid.choices(pixels_per_beat),
-            Some(grid.choice(pixels_per_beat)),
-            |choice| {
-                Message::View(ViewMsg::Grid(
-                    GridTarget::Arrange,
-                    GridCommand::Choose(choice),
-                ))
-            },
-        )
-        .width(Length::Fixed(86.0))
-        .padding([3, 8])
-        .text_size(11)
-        .style(|_theme: &Theme, status| {
-            let highlighted = matches!(
-                status,
-                pick_list::Status::Hovered | pick_list::Status::Opened
-            );
-            pick_list::Style {
-                text_color: th::text(),
-                placeholder_color: th::text_dim(),
-                handle_color: if highlighted {
-                    th::accent()
-                } else {
-                    th::text_dim()
-                },
-                background: th::bg_surface().into(),
-                border: iced::Border {
-                    color: if highlighted {
-                        th::accent_dim()
-                    } else {
-                        th::border()
-                    },
-                    width: 1.0,
-                    radius: 3.0.into(),
-                },
-            }
-        })
-        .menu_style(|_theme: &Theme| iced::widget::overlay::menu::Style {
-            background: th::bg_elevated().into(),
-            border: iced::Border {
-                color: th::border_light(),
-                width: 1.0,
-                radius: 3.0.into(),
-            },
-            text_color: th::text(),
-            selected_text_color: th::accent(),
-            selected_background: th::bg_hover().into(),
-        });
-        let grid_toggle = |label: &'static str, active: bool, command: GridCommand| {
-            let color = if active { th::accent() } else { th::text_dim() };
-            button(text(label).size(9).color(color))
-                .on_press(Message::View(ViewMsg::Grid(GridTarget::Arrange, command)))
-                .padding([4, 6])
-                .style(move |_theme: &Theme, _status| button::Style {
-                    background: Some(
-                        if active {
-                            th::bg_elevated()
-                        } else {
-                            th::bg_surface()
-                        }
-                        .into(),
-                    ),
-                    text_color: color,
-                    border: iced::Border {
-                        color: if active {
-                            th::accent_dim()
-                        } else {
-                            th::border()
-                        },
-                        width: 1.0,
-                        radius: 3.0.into(),
-                    },
-                    ..Default::default()
-                })
-        };
-        let grid_controls = row![
-            grid_picker,
-            grid_toggle(
-                "SNAP",
-                self.state.view.arrange_grid.snap_enabled,
-                GridCommand::ToggleSnap,
-            ),
-            grid_toggle(
-                "T",
-                self.state.view.arrange_grid.selected.is_triplet(),
-                GridCommand::ToggleTriplet,
-            ),
-            grid_toggle(
-                "AUTO",
-                self.state.view.arrange_grid.adaptive,
-                GridCommand::ToggleAdaptive,
-            ),
-        ]
-        .spacing(3)
-        .align_y(iced::Alignment::Center);
-
-        // Master VU meter
-        let master_meter = VuMeterWidget {
-            peak_l: self.state.peak_l,
-            peak_r: self.state.peak_r,
-        };
-        let master_meter_canvas: Element<'_, Message> = canvas(master_meter)
-            .width(Length::Fixed(24.0))
-            .height(Length::Fixed(28.0))
-            .into();
-
-        let volume_icon = icons::icon(icons::VOLUME_2).size(14).color(th::text_dim());
-        let stream_health = audio_stream_indicator(&self.state.audio_stream_health);
-        let cpu_load = audio_cpu_indicator(self.state.audio_cpu_load_percent);
-
-        let transport = row![
-            transport_buttons,
-            horizontal_space(),
-            time_text,
-            horizontal_space(),
-            stream_health,
-            volume_icon,
-            master_meter_canvas,
-            cpu_load,
-            row![bpm_input, bpm_spinner]
-                .spacing(2)
-                .align_y(iced::Alignment::Center),
-            bpm_label,
-            swing_control,
-            grid_controls,
-        ]
-        .spacing(12)
-        .padding(10)
-        .align_y(iced::Alignment::Center);
-
-        container(transport)
-            .width(Length::Fill)
-            .style(|_theme: &Theme| container::Style {
-                background: Some(th::bg_surface().into()),
-                border: iced::Border {
-                    color: th::border(),
-                    width: 1.0,
-                    radius: 0.0.into(),
-                },
-                ..Default::default()
-            })
-            .into()
-    }
-}
-
-fn transport_time_label(state: &AppState) -> String {
-    if state.view.workspace == Workspace::Perform {
-        let seconds = if state.transport.sample_rate == 0 {
-            0.0
+        let knob: Element<'_, Message> =
+            canvas(SwingKnobWidget::project_locked(project_swing, locked))
+                .width(Length::Fixed(24.0))
+                .height(Length::Fixed(24.0))
+                .into();
+        let label = if locked {
+            style::display_label("CAPTURE LOCK", th::accent())
         } else {
-            state.perform.performance_position_samples as f64
-                / f64::from(state.transport.sample_rate)
+            style::display_label("SWING", th::text_muted())
         };
-        format!("PERFORMANCE TIME · {}", AppState::format_time(seconds))
-    } else {
-        format!(
-            "{} / {}",
-            AppState::format_time(state.position_seconds()),
-            AppState::format_time(state.duration_seconds()),
+
+        container(
+            column![
+                row![knob, input].spacing(4).align_y(Alignment::Center),
+                label
+            ]
+            .align_x(Alignment::Center),
         )
+        .center_x(Length::Fixed(SWING_WIDTH))
+        .center_y(Length::Fill)
+        .into()
     }
 }
 

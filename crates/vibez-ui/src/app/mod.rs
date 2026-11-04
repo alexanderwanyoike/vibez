@@ -238,6 +238,7 @@ mod views_browser_style;
 mod views_clip_swing;
 mod views_close_confirm;
 mod views_control_bar;
+mod views_control_bar_style;
 mod views_control_status;
 mod views_detail;
 mod views_devices;

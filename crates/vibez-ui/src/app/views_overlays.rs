@@ -440,8 +440,11 @@ impl App {
             ..Default::default()
         });
         let positioned = column![
-            vertical_space().height(Length::Fixed(42.0)),
-            row![horizontal_space().width(Length::Fixed(112.0)), card]
+            vertical_space().height(Length::Fixed(super::views_control_bar::MENU_TOP)),
+            row![
+                horizontal_space().width(Length::Fixed(super::views_control_bar::EDIT_MENU_LEFT)),
+                card
+            ]
         ];
         mouse_area(
             container(positioned)
