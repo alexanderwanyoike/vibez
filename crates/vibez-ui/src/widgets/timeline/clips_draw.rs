@@ -6,7 +6,7 @@ use iced::{Rectangle, Renderer};
 
 use crate::theme;
 
-use super::clip_colors::clip_colors;
+use super::clip_colors::{clip_colors, ClipColors};
 use super::clip_frame::{clip_box, draw_clip_back, draw_clip_front, LoopPasses};
 use super::fade_drag::{fade_curve_handle, fade_handle_xs};
 use super::lane_grid::{lane_grid, GridLine};
@@ -62,6 +62,15 @@ fn waveform_peak_for_pixel(
 }
 
 impl TrackClipCanvas {
+    fn clip_colors(&self, selected: bool, recording_preview: bool) -> ClipColors {
+        let track = if recording_preview {
+            theme::danger()
+        } else {
+            self.track_color
+        };
+        clip_colors(track, selected)
+    }
+
     pub(super) fn draw_impl(
         &self,
         renderer: &Renderer,
@@ -150,14 +159,7 @@ impl TrackClipCanvas {
             {
                 let is_selected =
                     !is_recording_preview && self.selected_clips.contains(&clip.clip_id);
-                let colors = clip_colors(
-                    if is_recording_preview {
-                        theme::danger()
-                    } else {
-                        self.track_color
-                    },
-                    is_selected,
-                );
+                let colors = self.clip_colors(is_selected, is_recording_preview);
                 let clip_start_beat = clip.position as f64 / spb;
                 let clip_dur_beats = clip.duration as f64 / spb;
 
@@ -350,14 +352,7 @@ impl TrackClipCanvas {
             {
                 let is_selected =
                     !is_recording_preview && self.selected_clips.contains(&note_clip.clip_id);
-                let colors = clip_colors(
-                    if is_recording_preview {
-                        theme::danger()
-                    } else {
-                        self.track_color
-                    },
-                    is_selected,
-                );
+                let colors = self.clip_colors(is_selected, is_recording_preview);
                 let clip_x = self.beat_to_x(note_clip.position_beats);
                 let clip_w = geometry.width_for_beats(note_clip.duration_beats);
 
