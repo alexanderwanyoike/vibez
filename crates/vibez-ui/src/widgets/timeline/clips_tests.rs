@@ -1016,6 +1016,22 @@ fn resizing_an_off_grid_clip_ends_it_on_the_grid_line_under_the_pointer() {
 }
 
 #[test]
+fn a_clip_resized_at_fit_zoom_can_shrink_below_the_coarse_adaptive_grid() {
+    let (mut canvas, _) = canvas_with_off_grid_audio_clip();
+    canvas.clips[0].duration = (64.0 * canvas.spb()) as u64;
+    canvas.zoom_level = 0.02;
+    canvas.grid = GridConfig::new(crate::state::SnapGrid::EIGHTH, true, true, 0);
+    assert_eq!(
+        canvas.grid.effective_grid(canvas.pixels_per_beat()),
+        crate::state::SnapGrid::EIGHT_BARS
+    );
+
+    let length = resize_length_after_drag(&canvas, 10.0).expect("a resize");
+
+    assert!((length - 0.25).abs() < 1e-9, "shrank to {length} beats");
+}
+
+#[test]
 fn one_clip_edit_key_press_emits_one_message_whatever_the_lane_count() {
     let lanes: Vec<_> = (0..3)
         .map(|_| canvas_with_selected_audio_clip().0)
