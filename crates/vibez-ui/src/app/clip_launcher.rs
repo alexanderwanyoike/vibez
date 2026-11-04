@@ -368,6 +368,37 @@ mod live_edit_tests {
     }
 
     #[test]
+    fn removing_a_queued_clip_stops_on_the_playing_clips_quantization() {
+        use crate::domains::perform::clip_record::empty_midi_clip;
+        use vibez_core::perform::MusicalBoundary;
+        let track = TrackId::new();
+        let playing = empty_midi_clip(ClipId::new(), track, 0, "Break".into(), 4.0);
+        let mut fill = empty_midi_clip(ClipId::new(), track, 1, "Fill".into(), 4.0);
+        fill.launch_quantization = Some(MusicalBoundary::Sixteenth);
+        let mut state = crate::domains::perform::PerformState::default();
+        state.layout = PerformLayout::Clips;
+        Arc::make_mut(&mut state.clips)
+            .clips
+            .extend([playing.clone(), fill.clone()]);
+        state.clip_editor.running = true;
+        state.clip_editor.playing.insert(track, playing);
+        state.clip_editor.queued.insert(track, Some(fill.id));
+        let before = Arc::clone(&state.clips);
+        Arc::make_mut(&mut state.clips)
+            .clips
+            .retain(|clip| clip.id != fill.id);
+        let mut engine = RecordingEngine::default();
+        refresh_edited_clips(&before, &mut state, None, 100.0, &mut engine);
+        assert!(matches!(
+            &engine.0[..],
+            [EngineCommand::QueueClips {
+                quantization: MusicalBoundary::OneBar,
+                ..
+            }]
+        ));
+    }
+
+    #[test]
     fn piano_roll_edit_publishes_new_source_without_relaunching() {
         let mut state = AppState::default();
         state.perform.layout = PerformLayout::Clips;
