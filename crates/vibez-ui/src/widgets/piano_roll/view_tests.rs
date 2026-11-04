@@ -188,6 +188,42 @@ fn a_loop_end_drags_past_the_clip_end_in_a_zoomed_out_view() {
 }
 
 #[test]
+fn dragging_the_brace_between_its_handles_moves_the_whole_loop() {
+    let clip = long_clip(true);
+    let widget = editor(&clip);
+    let grab = Point::new(widget.beat_to_x(12.0, &bounds()), 5.0);
+    let target = Point::new(widget.beat_to_x(14.0, &bounds()), 5.0);
+    let mut state = PianoRollState::default();
+
+    widget.update(
+        &mut state,
+        canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)),
+        bounds(),
+        mouse::Cursor::Available(grab),
+    );
+    let message = widget
+        .update(
+            &mut state,
+            canvas::Event::Mouse(mouse::Event::CursorMoved { position: target }),
+            bounds(),
+            mouse::Cursor::Available(target),
+        )
+        .1;
+
+    assert!(matches!(
+        message,
+        Some(Message::UndoGesture { edit, .. }) if matches!(
+            *edit,
+            Message::PianoRoll(PianoRollMsg::SetNoteClipLoopRegion {
+                loop_start_beats,
+                loop_end_beats,
+                ..
+            }) if loop_start_beats == 10.0 && loop_end_beats == 18.0
+        )
+    ));
+}
+
+#[test]
 fn zoomed_in_a_resized_note_ends_on_the_finer_grid_the_zoom_shows() {
     let mut clip = long_clip(false);
     clip.notes = vec![MidiNote {

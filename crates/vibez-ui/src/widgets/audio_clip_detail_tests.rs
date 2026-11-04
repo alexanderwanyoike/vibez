@@ -660,3 +660,38 @@ fn a_looped_start_marker_drags_past_the_clip_end_inside_its_loop() {
         })
     ));
 }
+
+#[test]
+fn moving_the_whole_audio_loop_stops_at_the_source_end() {
+    let widget = widget();
+    let bounds = Rectangle::new(Point::ORIGIN, iced::Size::new(800.0, 200.0));
+    let grab = Point::new(200.0, 5.0);
+    let past_the_source = Point::new(2_000.0, 5.0);
+    let mut state = AudioClipDetailState::default();
+
+    widget.update(
+        &mut state,
+        canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)),
+        bounds,
+        mouse::Cursor::Available(grab),
+    );
+    let message = widget
+        .update(
+            &mut state,
+            canvas::Event::Mouse(mouse::Event::CursorMoved {
+                position: past_the_source,
+            }),
+            bounds,
+            mouse::Cursor::Available(past_the_source),
+        )
+        .1;
+
+    assert!(matches!(
+        arrangement_message(message),
+        Some(ArrangementMsg::SetClipLoopRegion {
+            loop_start: 600,
+            loop_end: 1_000,
+            ..
+        })
+    ));
+}

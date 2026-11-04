@@ -186,10 +186,27 @@ mod tests {
 
     #[test]
     fn drag_respects_the_minimum_length_when_the_pointer_overshoots() {
-        let start = LoopDrag::begin(LoopMarker::Start, 10.0, 20.0);
+        let start = LoopDrag::begin(LoopMarker::Start, 10.0, 20.0, 10.0);
         assert_eq!(start.resolve(30.0, 4.0, 40.0), (16.0, 20.0));
 
-        let end = LoopDrag::begin(LoopMarker::End, 10.0, 20.0);
+        let end = LoopDrag::begin(LoopMarker::End, 10.0, 20.0, 20.0);
         assert_eq!(end.resolve(0.0, 4.0, 40.0), (10.0, 14.0));
+    }
+
+    #[test]
+    fn the_brace_between_its_handles_grabs_the_whole_loop() {
+        assert_eq!(
+            hit_test(100.0, 200.0, Point::new(150.0, 5.0), 10.0),
+            Some(LoopMarker::Body)
+        );
+        assert_eq!(hit_test(100.0, 200.0, Point::new(250.0, 5.0), 10.0), None);
+    }
+
+    #[test]
+    fn moving_the_whole_loop_keeps_its_length_inside_the_content() {
+        let drag = LoopDrag::begin(LoopMarker::Body, 10.0, 20.0, 12.0);
+        assert_eq!(drag.resolve(16.0, 4.0, 40.0), (14.0, 24.0));
+        assert_eq!(drag.resolve(0.0, 4.0, 40.0), (0.0, 10.0));
+        assert_eq!(drag.resolve(100.0, 4.0, 40.0), (30.0, 40.0));
     }
 }
