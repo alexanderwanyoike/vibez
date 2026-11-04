@@ -83,6 +83,18 @@ impl FrameClipTimeline {
         }
     }
 
+    /// The start that keeps every repeat in place when playback begins
+    /// `earlier` frames sooner, or `None` unless the start sits in a loop:
+    /// an intro before the loop plays once, so nothing repeats ahead of it.
+    pub fn start_before(self, earlier: u64) -> Option<u64> {
+        if !self.is_looping() || self.start < self.loop_start {
+            return None;
+        }
+        let length = self.loop_end - self.loop_start;
+        let phase = self.start - self.loop_start;
+        Some(self.loop_start + (phase + length - earlier % length) % length)
+    }
+
     pub fn first_wrap(self) -> Option<u64> {
         self.is_looping().then(|| self.loop_end - self.start)
     }
@@ -234,6 +246,18 @@ impl BeatClipTimeline {
         } else {
             raw
         }
+    }
+
+    /// See [`FrameClipTimeline::start_before`].
+    pub fn start_before(self, earlier: f64) -> Option<f64> {
+        if !self.is_looping() || self.start < self.loop_start {
+            return None;
+        }
+        let length = self.loop_end - self.loop_start;
+        let phase = (self.start - self.loop_start - earlier).rem_euclid(length);
+        // `rem_euclid` rounds a tiny negative phase up to `length`, which
+        // would put the start on the loop end.
+        Some(self.loop_start + if phase < length { phase } else { 0.0 })
     }
 
     pub fn first_wrap(self) -> Option<f64> {
