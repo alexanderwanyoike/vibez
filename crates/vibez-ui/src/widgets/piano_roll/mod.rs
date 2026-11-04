@@ -303,12 +303,14 @@ enum DragAction {
         note_index: usize,
         original_duration: f64,
         start_x: f32,
+        undo_gesture: UndoGestureId,
     },
     DrawNote {
         clip_id: ClipId,
         pitch: u8,
         start_beat: f64,
         start_x: f32,
+        undo_gesture: UndoGestureId,
     },
     /// Rubber-band select dragged out from empty grid space.
     MarqueeNotes {
@@ -493,22 +495,27 @@ impl canvas::Program<Message> for PianoRollWidget {
                                 return (canvas::event::Status::Captured, None);
                             }
 
+                            let undo_gesture = UndoGestureId::new();
                             state.drag = Some(DragAction::DrawNote {
                                 clip_id: clip_data.clip_id,
                                 pitch,
                                 start_beat: snapped_beat,
                                 start_x: pos.x,
+                                undo_gesture,
                             });
 
                             return (
                                 canvas::event::Status::Captured,
-                                Some(Message::PianoRoll(PianoRollMsg::AddNote {
-                                    track_id: self.track_id,
-                                    clip_id: clip_data.clip_id,
-                                    pitch,
-                                    start_beat: snapped_beat,
-                                    duration_beats: note_duration,
-                                })),
+                                Some(
+                                    Message::PianoRoll(PianoRollMsg::AddNote {
+                                        track_id: self.track_id,
+                                        clip_id: clip_data.clip_id,
+                                        pitch,
+                                        start_beat: snapped_beat,
+                                        duration_beats: note_duration,
+                                    })
+                                    .in_undo_gesture(undo_gesture),
+                                ),
                             );
                         }
 
@@ -524,6 +531,7 @@ impl canvas::Program<Message> for PianoRollWidget {
                                     note_index: idx,
                                     original_duration: note.duration_beats,
                                     start_x: pos.x,
+                                    undo_gesture: UndoGestureId::new(),
                                 });
                                 return (
                                     canvas::event::Status::Captured,
@@ -728,6 +736,7 @@ impl canvas::Program<Message> for PianoRollWidget {
                                     note_index,
                                     original_duration,
                                     start_x,
+                                    undo_gesture,
                                 } => {
                                     let dx = local.x - start_x;
                                     let beat_delta = geometry.beats_for_width(dx);
@@ -749,12 +758,15 @@ impl canvas::Program<Message> for PianoRollWidget {
                                         note.duration_beats = new_duration;
                                         return (
                                             canvas::event::Status::Captured,
-                                            Some(Message::PianoRoll(PianoRollMsg::EditNote(
-                                                self.track_id,
-                                                clip_data.clip_id,
-                                                idx,
-                                                note,
-                                            ))),
+                                            Some(
+                                                Message::PianoRoll(PianoRollMsg::EditNote(
+                                                    self.track_id,
+                                                    clip_data.clip_id,
+                                                    idx,
+                                                    note,
+                                                ))
+                                                .in_undo_gesture(*undo_gesture),
+                                            ),
                                         );
                                     }
                                 }
@@ -763,6 +775,7 @@ impl canvas::Program<Message> for PianoRollWidget {
                                     pitch,
                                     start_beat,
                                     start_x,
+                                    undo_gesture,
                                 } => {
                                     // Extend note duration while dragging
                                     let dx = local.x - start_x;
@@ -788,12 +801,15 @@ impl canvas::Program<Message> for PianoRollWidget {
                                         note.duration_beats = new_duration;
                                         return (
                                             canvas::event::Status::Captured,
-                                            Some(Message::PianoRoll(PianoRollMsg::EditNote(
-                                                self.track_id,
-                                                *clip_id,
-                                                idx,
-                                                note,
-                                            ))),
+                                            Some(
+                                                Message::PianoRoll(PianoRollMsg::EditNote(
+                                                    self.track_id,
+                                                    *clip_id,
+                                                    idx,
+                                                    note,
+                                                ))
+                                                .in_undo_gesture(*undo_gesture),
+                                            ),
                                         );
                                     }
                                 }
