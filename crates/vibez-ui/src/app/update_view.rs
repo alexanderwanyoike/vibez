@@ -146,6 +146,12 @@ impl App {
         if self.route_section_timeline_navigation(&msg) {
             return Task::none();
         }
+        // Zoom to selection frames the Arrange view, which Perform hides.
+        if self.state.view.workspace == Workspace::Perform
+            && matches!(msg, ViewMsg::ZoomToSelection | ViewMsg::ZoomBack)
+        {
+            return Task::none();
+        }
         let ctx = self.view_ctx();
         let editor = if self.state.view.workspace == Workspace::Perform
             && (self.state.perform.has_selected_timeline()
