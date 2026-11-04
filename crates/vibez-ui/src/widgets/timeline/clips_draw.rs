@@ -147,8 +147,8 @@ impl TrackClipCanvas {
                     continue;
                 }
 
-                let clip_y = 4.0;
-                let clip_h = h - 8.0;
+                let clip_y = CLIP_Y;
+                let clip_h = h - 2.0 * CLIP_Y;
                 let body = clip_box(clip_x, clip_y, clip_w, clip_h);
 
                 let looped = clip.loop_enabled && clip.loop_end > clip.loop_start;
@@ -344,8 +344,8 @@ impl TrackClipCanvas {
                     continue;
                 }
 
-                let clip_y = 4.0;
-                let clip_h = h - 8.0;
+                let clip_y = CLIP_Y;
+                let clip_h = h - 2.0 * CLIP_Y;
                 let body = clip_box(clip_x, clip_y, clip_w, clip_h);
 
                 let looping =
