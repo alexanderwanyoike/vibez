@@ -18,6 +18,8 @@ feature PRs on all three platforms.
 
 ## Requirements for a PR
 
+- Follows [CODING_STANDARDS.md](CODING_STANDARDS.md), the rules code review
+  checks
 - CI green on all three platforms: `cargo test --workspace` and
   `cargo clippy --workspace -- -D warnings`
 - `cargo fmt` clean
