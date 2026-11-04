@@ -292,3 +292,52 @@ fn audio_that_a_looped_clip_cannot_repeat_keeps_one_clip_per_pass() {
         [(PASS / 2, PASS / 2), (PASS + PASS / 2, PASS / 2)]
     );
 }
+
+#[test]
+fn captured_midi_clips_sit_on_whole_ticks_at_any_tempo() {
+    // 124 BPM at 44.1 kHz has no whole number of samples per beat, so every
+    // boundary the engine reports is a fraction of a sample off the beat.
+    let samples_per_beat = 44_100.0 * 60.0 / 124.0;
+    let at_beat = |beat: f64| (beat * samples_per_beat).round() as u64;
+    let track_id = TrackId::new();
+    let looping = midi_section("Groove A", track_id, 36);
+    let mut one_shot = midi_section("Fill", track_id, 38);
+    one_shot.looping = false;
+    let mut riff = midi_section("Riff", track_id, 40);
+    Arc::make_mut(&mut riff.timeline)
+        .ensure(track_id)
+        .note_clips[0]
+        .set_loop_enabled(true);
+    let launcher = crate::domains::perform::LauncherClip {
+        id: ClipId::new(),
+        track_id,
+        row: 0,
+        timeline: riff.timeline,
+        launch: Default::default(),
+    };
+    let mut capture = CaptureState {
+        phase: CapturePhase::Starting,
+        ..CaptureState::default()
+    };
+    capture.prepare(at_beat(4.0), 44_100, 124.0);
+    capture.start(0, Some((CapturedTimelineSource::from_section(&looping), 0)));
+    capture.transition(
+        CapturedTimelineSource::from_section(&one_shot),
+        at_beat(32.0),
+    );
+    capture.end_source(at_beat(40.0));
+    capture.clip_transition(
+        track_id,
+        Some(CapturedTimelineSource::from_clip(
+            &launcher,
+            samples_per_beat,
+        )),
+        at_beat(40.0),
+        0,
+    );
+    let take = capture.finish(at_beat(72.0)).unwrap().materialize();
+    let clips = &take.by_track[&track_id].note_clips;
+
+    assert_eq!(spans(clips), [(4.0, 32.0), (36.0, 8.0), (44.0, 32.0)]);
+    assert_eq!(clips[2].loop_end_beats, 16.0);
+}
