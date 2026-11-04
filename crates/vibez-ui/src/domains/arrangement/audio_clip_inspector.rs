@@ -368,13 +368,14 @@ impl TimelineEditorState {
                     action.status = Some("Loop boundary must be a positive time in seconds".into());
                     return action;
                 };
-                let source_end = clip.source_offset.saturating_add(clip.duration);
+                let clip_end = clip.source_offset.saturating_add(clip.duration);
+                let loop_limit = clip.loop_content_end();
                 let (new_start, new_end) = match field {
                     AudioClipInspectorField::LoopStart => {
-                        let end = if clip.loop_end > value && clip.loop_end <= source_end {
+                        let end = if clip.loop_end > value && clip.loop_end <= loop_limit {
                             clip.loop_end
                         } else {
-                            source_end
+                            clip_end
                         };
                         (value, end)
                     }
@@ -391,13 +392,13 @@ impl TimelineEditorState {
                 };
                 if new_start < clip.source_offset
                     || new_start >= new_end
-                    || new_end > source_end
+                    || new_end > loop_limit
                     || clip.start_marker >= new_end
                 {
                     action.status = Some(format!(
                         "Loop bounds must stay ordered inside {:.3} to {:.3} s",
                         format_seconds(clip.source_offset),
-                        format_seconds(source_end)
+                        format_seconds(loop_limit)
                     ));
                     return action;
                 }

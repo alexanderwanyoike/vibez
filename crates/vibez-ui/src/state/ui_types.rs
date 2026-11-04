@@ -225,11 +225,7 @@ impl UiClip {
     }
 
     pub(crate) fn set_loop_region(&mut self, start: u64, end: u64) -> bool {
-        let clip_end = self
-            .source_offset
-            .saturating_add(self.duration)
-            .min(self.audio.num_frames() as u64);
-        let valid = start >= self.source_offset && start < end && end <= clip_end;
+        let valid = start >= self.source_offset && start < end && end <= self.loop_content_end();
         let valid = valid && self.start_marker < end;
         if !valid || (start, end) == (self.loop_start, self.loop_end) {
             return false;
@@ -560,7 +556,6 @@ impl UiNoteClip {
             && end.is_finite()
             && start >= 0.0
             && start < end
-            && end <= self.duration_beats
             && self.start_marker_beats < end;
         if !valid || (start, end) == (self.loop_start_beats, self.loop_end_beats) {
             return false;
