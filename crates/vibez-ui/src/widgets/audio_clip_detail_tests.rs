@@ -753,3 +753,71 @@ fn pressing_an_audio_loop_handle_pins_the_framing_so_the_drag_does_not_reframe()
 
     assert!((widget.timeline_to_x(500, &bounds) - end_x).abs() < 1e-3);
 }
+
+fn drag_with_alt(widget: &AudioClipDetailWidget, from: Point, to: Point) -> Option<ArrangementMsg> {
+    let bounds = Rectangle::new(Point::ORIGIN, iced::Size::new(800.0, 200.0));
+    let mut state = AudioClipDetailState::default();
+    widget.update(
+        &mut state,
+        canvas::Event::Keyboard(Event::ModifiersChanged(Modifiers::ALT)),
+        bounds,
+        mouse::Cursor::Available(from),
+    );
+    widget.update(
+        &mut state,
+        canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)),
+        bounds,
+        mouse::Cursor::Available(from),
+    );
+    arrangement_message(
+        widget
+            .update(
+                &mut state,
+                canvas::Event::Mouse(mouse::Event::CursorMoved { position: to }),
+                bounds,
+                mouse::Cursor::Available(to),
+            )
+            .1,
+    )
+}
+
+#[test]
+fn alt_drags_an_audio_loop_handle_off_the_grid() {
+    let widget = widget();
+    let bounds = Rectangle::new(Point::ORIGIN, iced::Size::new(800.0, 200.0));
+    let end = Point::new(widget.timeline_to_x(widget.loop_end, &bounds), 5.0);
+
+    let message = drag_with_alt(&widget, end, Point::new(613.0, 5.0));
+
+    assert!(
+        matches!(
+            message,
+            Some(ArrangementMsg::SetClipLoopRegion {
+                loop_start: 100,
+                loop_end: 713,
+                ..
+            })
+        ),
+        "{message:?}"
+    );
+}
+
+#[test]
+fn alt_drags_the_audio_start_marker_off_the_grid() {
+    let widget = widget();
+    let bounds = Rectangle::new(Point::ORIGIN, iced::Size::new(800.0, 200.0));
+    let start = Point::new(widget.timeline_to_x(widget.start_marker, &bounds), 15.0);
+
+    let message = drag_with_alt(&widget, start, Point::new(213.0, 15.0));
+
+    assert!(
+        matches!(
+            message,
+            Some(ArrangementMsg::SetClipStartMarker {
+                start_marker: 313,
+                ..
+            })
+        ),
+        "{message:?}"
+    );
+}
