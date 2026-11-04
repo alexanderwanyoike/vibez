@@ -462,4 +462,48 @@ mod tests {
         assert!(markers.sanitize_for_clip(0, 1_000, 1_000));
         assert!(markers.is_empty());
     }
+
+    fn map(anchors: &[(u64, u64)]) -> WarpMarkers {
+        WarpMarkers(
+            anchors
+                .iter()
+                .map(|&(source, timeline)| WarpMarker::new(source, timeline))
+                .collect(),
+        )
+    }
+
+    #[test]
+    fn extending_the_start_keeps_every_anchor_at_its_source_and_runs_the_first_segment_earlier() {
+        let markers = map(&[(100, 0), (300, 400), (500, 500)]);
+
+        let (gained, source_start, extended) = markers.extended_start(100, 100);
+
+        assert_eq!((gained, source_start), (100, 50));
+        assert_eq!(extended, map(&[(50, 0), (300, 500), (500, 600)]));
+        for frame in 0..500 {
+            assert_eq!(
+                extended.source_at_timeline(frame as f64 + 100.0, 50, 600),
+                markers.source_at_timeline(frame as f64, 100, 500),
+                "timeline frame {frame}"
+            );
+        }
+    }
+
+    #[test]
+    fn extending_the_start_stops_at_the_start_of_the_source() {
+        let markers = map(&[(100, 0), (300, 400), (500, 500)]);
+
+        let (gained, source_start, extended) = markers.extended_start(1_000, 100);
+
+        assert_eq!((gained, source_start), (200, 0));
+        assert_eq!(extended, map(&[(0, 0), (300, 600), (500, 700)]));
+    }
+
+    #[test]
+    fn extending_an_identity_map_moves_its_source_start() {
+        let (gained, source_start, extended) = WarpMarkers::default().extended_start(500, 300);
+
+        assert_eq!((gained, source_start), (300, 0));
+        assert!(extended.is_empty());
+    }
 }
