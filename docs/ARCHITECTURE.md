@@ -548,7 +548,13 @@ The engine lives on the cpal audio callback. Its rules:
   shorter while it is rebuilt never stops or moves the playhead.
 - The UI's `PlaybackPhase` follows the engine's `PlaybackStarted` and
   `PlaybackStopped` events; an unconfirmed Play or Stop is `Starting` or
-  `Stopping`.
+  `Stopping`. Every stop reports `PlaybackStopped`, including the one at the
+  song end.
+- Arrange keeps a play-start marker, placed by clicking the timeline or ruler
+  and drawn on the ruler. Stop returns the playhead to it, Stop while stopped
+  (or Home) moves it to the song start, and a stop at the song end returns
+  there too. Shift+Space plays from where playback last stopped. Perform's
+  Stop leaves the Arrange cursor alone.
 - Everything the engine needs (decoded audio, plugin instances, note data) is
   handed to it fully constructed; `Arc<DecodedAudio>` shares immutable sample
   data with the UI without copying.
