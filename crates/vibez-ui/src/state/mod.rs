@@ -854,7 +854,6 @@ impl AppState {
         self.view.viewport.geometry().x_to_beat(x)
     }
 
-    /// Total duration in beats across all tracks, with generous padding.
     /// Where the song's last clip ends, in beats; zero for an empty song.
     pub fn song_beats(&self) -> f64 {
         if self.transport.bpm > 0.0 {
@@ -864,6 +863,7 @@ impl AppState {
         }
     }
 
+    /// Total duration in beats across all tracks, with generous padding.
     pub fn total_beats(&self) -> f64 {
         let content_beats = self.song_beats();
         if content_beats > 0.0 {
