@@ -13,8 +13,8 @@ use crate::domains::transport::TransportMsg;
 use crate::domains::view::ViewMsg;
 use crate::message::Message;
 use crate::state::{
-    ArrangementMarqueeRect, ArrangementSelection, ContextMenuTarget, GridConfig, ProjectTrack,
-    TrackTimelineContent, UndoGestureId,
+    ArrangementMarqueeRect, ArrangementSelection, ClipSpan, ContextMenuTarget, GridConfig,
+    ProjectTrack, TrackTimelineContent, UndoGestureId,
 };
 use crate::timeline_geometry::TimelineGeometry;
 use crate::timeline_snap::{SnapContext, SnapTargets};
@@ -484,15 +484,16 @@ impl canvas::Program<Message> for TrackClipCanvas {
                             ArrangementSelection::AudioClip { track_id, clip_id }
                         };
 
+                        let origin = ClipSpan {
+                            start_beats: pos_beats,
+                            length_beats: dur_beats,
+                        };
                         if let Some(edge) = edge {
                             state.drag = Some(ClipDragAction::ResizeClip {
                                 undo_gesture: UndoGestureId::new(),
                                 anchor: selection,
                                 edge,
-                                fixed_beat: match edge {
-                                    ClipEdge::Start => pos_beats + dur_beats,
-                                    ClipEdge::End => pos_beats,
-                                },
+                                origin,
                                 start_local_x: pos.x,
                                 phase: DragPhase::Pending,
                             });
@@ -503,8 +504,7 @@ impl canvas::Program<Message> for TrackClipCanvas {
                                 clip_id,
                                 start_local_x: pos.x,
                                 start_scroll_beats: self.scroll_offset_beats,
-                                original_position_beats: pos_beats,
-                                length_beats: dur_beats,
+                                origin,
                                 start_y: pos.y,
                                 collapse_to: (self.selected_clips.contains(&clip_id)
                                     && !state.shift_held)
@@ -676,8 +676,7 @@ impl canvas::Program<Message> for TrackClipCanvas {
                                 clip_id,
                                 start_local_x,
                                 start_scroll_beats,
-                                original_position_beats,
-                                length_beats,
+                                origin,
                                 start_y,
                                 phase,
                                 ..
@@ -687,17 +686,17 @@ impl canvas::Program<Message> for TrackClipCanvas {
                                 }
                                 let delta_px = local_x - *start_local_x;
                                 let travel = crate::timeline_geometry::compensated_drag_beat(
-                                    *original_position_beats,
+                                    origin.start_beats,
                                     delta_px,
                                     geometry.pixels_per_beat(),
                                     *start_scroll_beats,
                                     self.scroll_offset_beats,
-                                ) - *original_position_beats;
+                                ) - origin.start_beats;
                                 let new_pos = self
                                     .snap_targets
                                     .moved_span(
-                                        *original_position_beats,
-                                        *length_beats,
+                                        origin.start_beats,
+                                        origin.length_beats,
                                         travel,
                                         self.snap_context(state.alt_held),
                                     )
@@ -726,10 +725,11 @@ impl canvas::Program<Message> for TrackClipCanvas {
                                 undo_gesture,
                                 anchor,
                                 edge,
-                                fixed_beat,
+                                origin,
                                 start_local_x,
                                 phase,
                             } => {
+                                let fixed_beat = edge.fixed_beat(*origin);
                                 if !phase.follow_x(*start_local_x, local_x) {
                                     return (canvas::event::Status::Captured, None);
                                 }
@@ -741,16 +741,16 @@ impl canvas::Program<Message> for TrackClipCanvas {
                                         anchor,
                                         new_start_beats: self
                                             .snap_targets
-                                            .span_start(pointer, *fixed_beat, context)
+                                            .span_start(pointer, fixed_beat, context)
                                             .beat,
                                     },
                                     ClipEdge::End => ArrangementMsg::ResizeSelectedClips {
                                         anchor,
                                         new_duration_beats: self
                                             .snap_targets
-                                            .span_end(*fixed_beat, pointer, context)
+                                            .span_end(fixed_beat, pointer, context)
                                             .beat
-                                            - *fixed_beat,
+                                            - fixed_beat,
                                     },
                                 };
                                 let edit =

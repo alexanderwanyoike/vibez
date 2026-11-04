@@ -1,6 +1,6 @@
 //! Pointer gestures that can own the per-track Clip canvas.
 
-use crate::state::{ArrangementSelection, UndoGestureId};
+use crate::state::{ArrangementSelection, ClipSpan, UndoGestureId};
 use crate::widgets::drag_phase::DragPhase;
 use vibez_core::id::ClipId;
 
@@ -13,6 +13,16 @@ pub enum ClipEdge {
     End,
 }
 
+impl ClipEdge {
+    /// The beat of `span` that stays put while this edge is dragged.
+    pub fn fixed_beat(self, span: ClipSpan) -> f64 {
+        match self {
+            Self::Start => span.end_beats(),
+            Self::End => span.start_beats,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum ClipDragAction {
     MoveClip {
@@ -20,8 +30,7 @@ pub enum ClipDragAction {
         clip_id: ClipId,
         start_local_x: f32,
         start_scroll_beats: f64,
-        original_position_beats: f64,
-        length_beats: f64,
+        origin: ClipSpan,
         start_y: f32,
         /// Set when the press landed on an already-selected Clip: the
         /// selection stays for a group drag, and a click without a drag
@@ -35,8 +44,7 @@ pub enum ClipDragAction {
         undo_gesture: UndoGestureId,
         anchor: ArrangementSelection,
         edge: ClipEdge,
-        /// The Clip's other edge, which stays put.
-        fixed_beat: f64,
+        origin: ClipSpan,
         start_local_x: f32,
         /// Pending until the pointer travels past the click slop, so a
         /// shaky click never changes the Clip's length.
