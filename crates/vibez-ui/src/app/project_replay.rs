@@ -113,9 +113,9 @@ impl App {
         if self
             .state
             .project_tracks
-            .same_channels(&snapshot.project_tracks)
+            .same_channel_layout(&snapshot.project_tracks)
         {
-            self.swap_changed_content(snapshot);
+            self.swap_changed_values(snapshot);
         } else {
             self.replay_snapshot(snapshot);
         }
@@ -223,20 +223,26 @@ impl App {
         }
     }
 
-    /// Tracks, devices and plugins are unchanged, so they keep running and
-    /// only the timeline content that differs is swapped in the engine.
-    fn swap_changed_content(&mut self, snapshot: crate::state::ProjectSnapshot) {
+    /// Tracks, devices and plugins are unchanged, so they keep running; only
+    /// the mixer and device values and the timeline content that differ are
+    /// sent to the engine.
+    fn swap_changed_values(&mut self, snapshot: crate::state::ProjectSnapshot) {
+        let current_tracks = std::mem::replace(
+            &mut self.state.project_tracks,
+            Arc::clone(&snapshot.project_tracks),
+        );
+        self.state
+            .perform
+            .sync_project_tracks(&self.state.project_tracks.tracks);
+        let target_tracks = Arc::clone(&self.state.project_tracks);
+        for (current, target) in current_tracks.channels().zip(target_tracks.channels()) {
+            crate::domains::arrangement::swap_changed_controls(&mut self.cmd_tx, current, target);
+        }
         let current = Arc::clone(&self.state.arrangement.timeline);
         self.restore_snapshot_state(snapshot);
         let target = Arc::clone(&self.state.arrangement.timeline);
         let empty = crate::state::TrackTimelineContent::default();
-        let tracks = &self.state.project_tracks;
-        for channel in tracks
-            .tracks
-            .iter()
-            .chain(std::iter::once(&tracks.master))
-            .chain(&tracks.buses)
-        {
+        for channel in self.state.project_tracks.channels() {
             crate::domains::arrangement::swap_changed_content(
                 &mut self.cmd_tx,
                 channel.id,

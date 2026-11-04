@@ -1,12 +1,14 @@
-//! Whether two Project Track states describe the same channels, apart from what the running engine reports back.
+//! Whether two Project Track states hold the same channels and devices, so undo can move between them with control commands.
 
 use super::ui_types::same_audio;
 use super::{ProjectTrack, ProjectTracksState, UiDrumPad, UiEffect};
 
 impl ProjectTracksState {
-    /// Meter readings and reported latencies change while the song plays;
-    /// descriptors and GUI flags follow from the device itself.
-    pub fn same_channels(&self, other: &Self) -> bool {
+    /// Mixer values, send levels and built-in device values may differ, since
+    /// undo sends them as control commands. Meter readings and reported
+    /// latencies change while the song plays, descriptors and GUI flags
+    /// follow from the device itself, and names and colours are only drawn.
+    pub fn same_channel_layout(&self, other: &Self) -> bool {
         let Self {
             reduced_latency_monitoring,
             tracks,
@@ -29,20 +31,20 @@ fn all_same<T>(left: &[T], right: &[T], same: impl Fn(&T, &T) -> bool) -> bool {
 fn same_track(track: &ProjectTrack, other: &ProjectTrack) -> bool {
     let ProjectTrack {
         id,
-        name,
-        gain,
-        pan,
-        mute,
-        solo,
+        name: _,
+        gain: _,
+        pan: _,
+        mute: _,
+        solo: _,
         audio_input_route,
         input_monitoring,
-        swing_offset,
+        swing_offset: _,
         peak_l: _,
         peak_r: _,
         effects,
         sends,
         kind,
-        color_index,
+        color_index: _,
         has_instrument,
         instrument_kind,
         sample_name,
@@ -50,7 +52,7 @@ fn same_track(track: &ProjectTrack, other: &ProjectTrack) -> bool {
         sample_audio,
         instrument_params,
         drum_rack_pads,
-        selected_drum_pad,
+        selected_drum_pad: _,
         plugin_instrument_name,
         plugin_instrument_ref,
         plugin_instrument_descriptors: _,
@@ -58,26 +60,22 @@ fn same_track(track: &ProjectTrack, other: &ProjectTrack) -> bool {
         instrument_latency_samples: _,
     } = track;
     *id == other.id
-        && *name == other.name
-        && *gain == other.gain
-        && *pan == other.pan
-        && *mute == other.mute
-        && *solo == other.solo
         && *audio_input_route == other.audio_input_route
         && *input_monitoring == other.input_monitoring
-        && *swing_offset == other.swing_offset
         && all_same(effects, &other.effects, same_effect)
-        && *sends == other.sends
+        && sends.len() == other.sends.len()
+        && sends
+            .iter()
+            .zip(&other.sends)
+            .all(|((bus, _), (other_bus, _))| bus == other_bus)
         && *kind == other.kind
-        && *color_index == other.color_index
         && *has_instrument == other.has_instrument
         && *instrument_kind == other.instrument_kind
         && *sample_name == other.sample_name
         && *sample_source == other.sample_source
         && same_audio(sample_audio, &other.sample_audio)
-        && *instrument_params == other.instrument_params
+        && (instrument_kind.is_some() || *instrument_params == other.instrument_params)
         && all_same(drum_rack_pads, &other.drum_rack_pads, same_pad)
-        && *selected_drum_pad == other.selected_drum_pad
         && *plugin_instrument_name == other.plugin_instrument_name
         && *plugin_instrument_ref == other.plugin_instrument_ref
 }
@@ -88,7 +86,7 @@ fn same_effect(effect: &UiEffect, other: &UiEffect) -> bool {
         latency_samples: _,
         id,
         effect_type,
-        bypass,
+        bypass: _,
         params,
         descriptors: _,
         plugin_name,
@@ -101,8 +99,7 @@ fn same_effect(effect: &UiEffect, other: &UiEffect) -> bool {
     *reconfiguration_failed == other.reconfiguration_failed
         && *id == other.id
         && *effect_type == other.effect_type
-        && *bypass == other.bypass
-        && *params == other.params
+        && (plugin_ref.is_none() || *params == other.params)
         && *plugin_name == other.plugin_name
         && *plugin_ref == other.plugin_ref
         && *sidechains == other.sidechains
