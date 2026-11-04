@@ -689,11 +689,7 @@ impl App {
                 .geometry()
                 .pixels_per_beat();
         }
-        crate::timeline_geometry::TimelineGeometry::from_zoom(
-            self.state.view.zoom_level,
-            self.state.view.scroll_offset_beats,
-        )
-        .pixels_per_beat()
+        self.state.view.viewport.geometry().pixels_per_beat()
     }
 
     /// Auto-scroll the arrangement when a clip's right edge nears the visible boundary.
@@ -701,27 +697,24 @@ impl App {
     fn auto_scroll_to_beat(&mut self, clip_end_beat: f64) {
         // Conservative estimate of canvas width (window minus track headers)
         let canvas_width = 1400.0_f32;
-        let geometry = crate::timeline_geometry::TimelineGeometry::from_zoom(
-            self.state.view.zoom_level,
-            self.state.view.scroll_offset_beats,
-        );
+        let geometry = self.state.view.viewport.geometry();
         let visible_beats = geometry.visible_beats(canvas_width);
-        let visible_end = self.state.view.scroll_offset_beats + visible_beats;
+        let visible_end = self.state.view.viewport.scroll_offset_beats + visible_beats;
         let margin = 2.0_f64;
 
         if clip_end_beat > visible_end - margin {
             let delta = clip_end_beat - visible_end + margin * 2.0;
             let total = self.state.total_beats();
-            self.state.view.scroll_offset_beats =
-                (self.state.view.scroll_offset_beats + delta).clamp(0.0, total);
+            self.state.view.viewport.scroll_offset_beats =
+                (self.state.view.viewport.scroll_offset_beats + delta).clamp(0.0, total);
         }
         // Also scroll left when dragging toward the left edge
-        if clip_end_beat < self.state.view.scroll_offset_beats + margin
-            && self.state.view.scroll_offset_beats > 0.0
+        if clip_end_beat < self.state.view.viewport.scroll_offset_beats + margin
+            && self.state.view.viewport.scroll_offset_beats > 0.0
         {
-            let delta = self.state.view.scroll_offset_beats + margin - clip_end_beat;
-            self.state.view.scroll_offset_beats =
-                (self.state.view.scroll_offset_beats - delta).max(0.0);
+            let delta = self.state.view.viewport.scroll_offset_beats + margin - clip_end_beat;
+            self.state.view.viewport.scroll_offset_beats =
+                (self.state.view.viewport.scroll_offset_beats - delta).max(0.0);
         }
     }
 

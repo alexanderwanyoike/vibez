@@ -109,8 +109,8 @@ pub struct ViewState {
     pub detail_panel_resize_active: bool,
     pub perform_surface_width: f32,
     pub perform_surface_resize_active: bool,
-    pub zoom_level: f32,
-    pub scroll_offset_beats: f64,
+    /// How far the Arrange timeline is zoomed and scrolled.
+    pub viewport: crate::timeline_geometry::TimelineViewport,
     /// The Arrange view a zoom to selection replaced, for zoom back.
     pub zoom_before_selection: Option<crate::timeline_geometry::TimelineViewport>,
     pub snap_grid: SnapGrid,
@@ -149,8 +149,7 @@ impl Default for ViewState {
             detail_panel_resize_active: false,
             perform_surface_width: PERFORM_SURFACE_DEFAULT_WIDTH,
             perform_surface_resize_active: false,
-            zoom_level: 1.0,
-            scroll_offset_beats: 0.0,
+            viewport: crate::timeline_geometry::TimelineViewport::new(1.0, 0.0),
             zoom_before_selection: None,
             snap_grid: SnapGrid::EIGHTH,
             snap_enabled: true,
@@ -834,41 +833,25 @@ impl AppState {
     /// Pixels per beat at the current zoom level.
     #[allow(dead_code)]
     pub fn pixels_per_beat(&self) -> f32 {
-        crate::timeline_geometry::TimelineGeometry::from_zoom(
-            self.view.zoom_level,
-            self.view.scroll_offset_beats,
-        )
-        .pixels_per_beat()
+        self.view.viewport.geometry().pixels_per_beat()
     }
 
     /// Number of beats visible in a canvas of the given width.
     #[allow(dead_code)]
     pub fn visible_beats(&self, canvas_width: f32) -> f64 {
-        crate::timeline_geometry::TimelineGeometry::from_zoom(
-            self.view.zoom_level,
-            self.view.scroll_offset_beats,
-        )
-        .visible_beats(canvas_width)
+        self.view.viewport.geometry().visible_beats(canvas_width)
     }
 
     /// Convert a beat value to a pixel x coordinate in the viewport.
     #[allow(dead_code)]
     pub fn beat_to_x(&self, beat: f64) -> f32 {
-        crate::timeline_geometry::TimelineGeometry::from_zoom(
-            self.view.zoom_level,
-            self.view.scroll_offset_beats,
-        )
-        .beat_to_x(beat)
+        self.view.viewport.geometry().beat_to_x(beat)
     }
 
     /// Convert a pixel x coordinate in the viewport to a beat value.
     #[allow(dead_code)]
     pub fn x_to_beat(&self, x: f32) -> f64 {
-        crate::timeline_geometry::TimelineGeometry::from_zoom(
-            self.view.zoom_level,
-            self.view.scroll_offset_beats,
-        )
-        .x_to_beat(x)
+        self.view.viewport.geometry().x_to_beat(x)
     }
 
     /// Total duration in beats across all tracks, with generous padding.

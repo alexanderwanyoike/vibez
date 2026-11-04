@@ -614,12 +614,11 @@ impl App {
                 right_boundary,
             );
             if velocity != 0.0 {
-                let mut viewport = crate::timeline_geometry::TimelineViewport::new(
-                    self.state.view.zoom_level,
-                    self.state.view.scroll_offset_beats,
-                );
-                viewport.scroll_by(velocity / 60.0, self.state.total_beats(), viewport_width);
-                self.state.view.scroll_offset_beats = viewport.scroll_offset_beats;
+                let total_beats = self.state.total_beats();
+                self.state
+                    .view
+                    .viewport
+                    .scroll_by(velocity / 60.0, total_beats, viewport_width);
             }
         }
         let auto_save_task = if self.save_runtime.auto_save_due(std::time::Instant::now()) {

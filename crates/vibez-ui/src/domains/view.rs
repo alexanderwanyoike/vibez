@@ -129,7 +129,7 @@ impl ViewState {
                 self.zoom_around(1.0 / 1.25, self.window_width / 2.0, ctx.total_beats);
             }
             ViewMsg::SetZoom(level) => {
-                let factor = TimelineViewport::clamp_zoom(level) / self.zoom_level;
+                let factor = TimelineViewport::clamp_zoom(level) / self.viewport.zoom_level;
                 self.zoom_around(factor, self.window_width / 2.0, ctx.total_beats);
             }
             ViewMsg::ZoomAround { factor, anchor_x } => {
@@ -142,27 +142,24 @@ impl ViewState {
                     ctx.total_beats
                 };
                 if song_end > 0.0 {
-                    self.frame(0.0, song_end, ctx.lane_width);
+                    self.viewport.frame(0.0, song_end, ctx.lane_width);
                 }
             }
             ViewMsg::ZoomToSelection => {
                 if let Some((start, end)) = selection_span_beats(timeline, ctx.samples_per_beat) {
-                    self.zoom_before_selection = Some(TimelineViewport::new(
-                        self.zoom_level,
-                        self.scroll_offset_beats,
-                    ));
-                    self.frame(start, end, ctx.lane_width);
+                    self.zoom_before_selection = Some(self.viewport);
+                    self.viewport.frame(start, end, ctx.lane_width);
                 }
             }
             ViewMsg::ZoomBack => {
                 if let Some(previous) = self.zoom_before_selection.take() {
-                    self.zoom_level = previous.zoom_level;
-                    self.scroll_offset_beats = previous.scroll_offset_beats;
+                    self.viewport = previous;
                 }
             }
             ViewMsg::ScrollArrangement(delta) => {
                 let total = ctx.total_beats;
-                self.scroll_offset_beats = (self.scroll_offset_beats + delta).clamp(0.0, total);
+                self.viewport.scroll_offset_beats =
+                    (self.viewport.scroll_offset_beats + delta).clamp(0.0, total);
             }
             ViewMsg::SetSnapGrid(grid) => {
                 self.snap_grid = grid;
@@ -306,24 +303,18 @@ impl ViewState {
         action
     }
 
-    fn frame(&mut self, start_beats: f64, end_beats: f64, lane_width: f32) {
-        let mut viewport = TimelineViewport::new(self.zoom_level, self.scroll_offset_beats);
-        viewport.frame(start_beats, end_beats, lane_width);
-        self.zoom_level = viewport.zoom_level;
-        self.scroll_offset_beats = viewport.scroll_offset_beats;
-    }
-
     fn zoom_around(&mut self, factor: f32, anchor_x: f32, total_beats: f64) {
         if !factor.is_finite() || factor <= 0.0 {
             return;
         }
-        let old_geometry = TimelineGeometry::from_zoom(self.zoom_level, 0.0);
+        let old_geometry = TimelineGeometry::from_zoom(self.viewport.zoom_level, 0.0);
         let anchor_x = anchor_x.max(0.0);
-        let anchor_beat = self.scroll_offset_beats + old_geometry.beats_for_width(anchor_x);
-        let next_zoom = TimelineViewport::clamp_zoom(self.zoom_level * factor);
+        let anchor_beat =
+            self.viewport.scroll_offset_beats + old_geometry.beats_for_width(anchor_x);
+        let next_zoom = TimelineViewport::clamp_zoom(self.viewport.zoom_level * factor);
         let next_geometry = TimelineGeometry::from_zoom(next_zoom, 0.0);
-        self.zoom_level = next_zoom;
-        self.scroll_offset_beats = (anchor_beat - next_geometry.beats_for_width(anchor_x))
+        self.viewport.zoom_level = next_zoom;
+        self.viewport.scroll_offset_beats = (anchor_beat - next_geometry.beats_for_width(anchor_x))
             .clamp(0.0, total_beats.max(0.0));
     }
 }
@@ -385,27 +376,27 @@ mod tests {
             &TimelineEditorState::default(),
             ViewCtx::default(),
         );
-        assert_eq!(v.zoom_level, 16.0);
+        assert_eq!(v.viewport.zoom_level, 16.0);
         v.update(
             ViewMsg::SetZoom(0.0),
             &TimelineEditorState::default(),
             ViewCtx::default(),
         );
-        assert_eq!(v.zoom_level, 0.01);
+        assert_eq!(v.viewport.zoom_level, 0.01);
     }
 
     #[test]
     fn zoom_in_keeps_the_viewport_centre_on_the_same_beat() {
         let mut view = ViewState {
-            zoom_level: 1.0,
-            scroll_offset_beats: 100.0,
+            viewport: TimelineViewport::new(1.0, 100.0),
             window_width: 800.0,
             ..ViewState::default()
         };
         let centre_x = view.window_width / 2.0;
-        let before = view.scroll_offset_beats
+        let before = view.viewport.scroll_offset_beats
             + centre_x as f64
-                / TimelineGeometry::from_zoom(view.zoom_level, 0.0).pixels_per_beat() as f64;
+                / TimelineGeometry::from_zoom(view.viewport.zoom_level, 0.0).pixels_per_beat()
+                    as f64;
 
         view.update(
             ViewMsg::ZoomIn,
@@ -416,17 +407,17 @@ mod tests {
             },
         );
 
-        let after = view.scroll_offset_beats
+        let after = view.viewport.scroll_offset_beats
             + centre_x as f64
-                / TimelineGeometry::from_zoom(view.zoom_level, 0.0).pixels_per_beat() as f64;
+                / TimelineGeometry::from_zoom(view.viewport.zoom_level, 0.0).pixels_per_beat()
+                    as f64;
         assert!((after - before).abs() < 1.0e-9);
     }
 
     #[test]
     fn fit_shows_the_whole_song_inside_the_lane_area_not_the_window() {
         let mut view = ViewState {
-            zoom_level: 3.0,
-            scroll_offset_beats: 40.0,
+            viewport: TimelineViewport::new(3.0, 40.0),
             window_width: 1920.0,
             ..ViewState::default()
         };
@@ -444,9 +435,8 @@ mod tests {
             },
         );
 
-        let song_end_x = TimelineGeometry::from_zoom(view.zoom_level, view.scroll_offset_beats)
-            .beat_to_x(song_beats);
-        assert_eq!(view.scroll_offset_beats, 0.0);
+        let song_end_x = view.viewport.geometry().beat_to_x(song_beats);
+        assert_eq!(view.viewport.scroll_offset_beats, 0.0);
         assert!(
             song_end_x <= lane_width - 2.0 * crate::timeline_geometry::FRAME_MARGIN_PIXELS + 0.01,
             "the last bar ends inside the lanes, at {song_end_x}"
@@ -471,15 +461,14 @@ mod tests {
 
     fn zoomed_out_view() -> ViewState {
         ViewState {
-            zoom_level: 0.25,
-            scroll_offset_beats: 8.0,
+            viewport: TimelineViewport::new(0.25, 8.0),
             ..ViewState::default()
         }
     }
 
     fn assert_framed(view: &ViewState, start: f64, end: f64) {
         let margin = crate::timeline_geometry::FRAME_MARGIN_PIXELS;
-        let geometry = TimelineGeometry::from_zoom(view.zoom_level, view.scroll_offset_beats);
+        let geometry = view.viewport.geometry();
         let (start_x, end_x) = (geometry.beat_to_x(start), geometry.beat_to_x(end));
         assert!(
             (start_x - margin).abs() < 0.01,
@@ -550,8 +539,8 @@ mod tests {
         assert_framed(&view, 64.0, 80.0);
 
         view.update(ViewMsg::ZoomBack, &timeline, selection_ctx());
-        assert_eq!(view.zoom_level, 0.25);
-        assert_eq!(view.scroll_offset_beats, 8.0);
+        assert_eq!(view.viewport.zoom_level, 0.25);
+        assert_eq!(view.viewport.scroll_offset_beats, 8.0);
     }
 
     #[test]
@@ -597,8 +586,8 @@ mod tests {
         view.update(ViewMsg::ZoomToSelection, &timeline, selection_ctx());
         view.update(ViewMsg::ZoomBack, &timeline, selection_ctx());
 
-        assert_eq!(view.zoom_level, 0.25);
-        assert_eq!(view.scroll_offset_beats, 8.0);
+        assert_eq!(view.viewport.zoom_level, 0.25);
+        assert_eq!(view.viewport.scroll_offset_beats, 8.0);
     }
 
     #[test]
@@ -614,17 +603,19 @@ mod tests {
         view.update(ViewMsg::ZoomToSelection, &timeline, selection_ctx());
         view.update(ViewMsg::ZoomBack, &timeline, selection_ctx());
         view.update(ViewMsg::ZoomIn, &timeline, selection_ctx());
-        let zoomed_in = (view.zoom_level, view.scroll_offset_beats);
+        let zoomed_in = (view.viewport.zoom_level, view.viewport.scroll_offset_beats);
         view.update(ViewMsg::ZoomBack, &timeline, selection_ctx());
 
-        assert_eq!((view.zoom_level, view.scroll_offset_beats), zoomed_in);
+        assert_eq!(
+            (view.viewport.zoom_level, view.viewport.scroll_offset_beats),
+            zoomed_in
+        );
     }
 
     #[test]
     fn all_workspaces_are_reachable_without_resetting_view_state() {
         let mut view = ViewState {
-            zoom_level: 2.5,
-            scroll_offset_beats: 12.0,
+            viewport: TimelineViewport::new(2.5, 12.0),
             ..ViewState::default()
         };
         let timeline = TimelineEditorState::default();
@@ -636,8 +627,8 @@ mod tests {
                 ViewCtx::default(),
             );
             assert_eq!(view.workspace, workspace);
-            assert_eq!(view.zoom_level, 2.5);
-            assert_eq!(view.scroll_offset_beats, 12.0);
+            assert_eq!(view.viewport.zoom_level, 2.5);
+            assert_eq!(view.viewport.scroll_offset_beats, 12.0);
         }
     }
 
@@ -653,13 +644,13 @@ mod tests {
             &TimelineEditorState::default(),
             ctx,
         );
-        assert_eq!(v.scroll_offset_beats, 32.0);
+        assert_eq!(v.viewport.scroll_offset_beats, 32.0);
         v.update(
             ViewMsg::ScrollArrangement(-100.0),
             &TimelineEditorState::default(),
             ctx,
         );
-        assert_eq!(v.scroll_offset_beats, 0.0);
+        assert_eq!(v.viewport.scroll_offset_beats, 0.0);
     }
 
     #[test]

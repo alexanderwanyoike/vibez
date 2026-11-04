@@ -81,10 +81,7 @@ impl App {
             }));
             if browser_drag_active {
                 let grid = self.state.view.grid_config();
-                let geometry = TimelineGeometry::from_zoom(
-                    self.state.view.zoom_level,
-                    self.state.view.scroll_offset_beats,
-                );
+                let geometry = self.state.view.viewport.geometry();
                 area = area
                     .on_move(move |point| {
                         let beat =
@@ -101,8 +98,8 @@ impl App {
         let playhead_beats = self.state.transport.position_beats();
         let sample_rate = self.state.transport.sample_rate;
         let bpm = self.state.transport.bpm;
-        let zoom_level = self.state.view.zoom_level;
-        let scroll_offset = self.state.view.scroll_offset_beats;
+        let zoom_level = self.state.view.viewport.zoom_level;
+        let scroll_offset = self.state.view.viewport.scroll_offset_beats;
         let geometry = TimelineGeometry::from_zoom(zoom_level, scroll_offset);
         let total_beats = self.state.total_beats();
 

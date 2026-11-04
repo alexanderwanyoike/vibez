@@ -112,7 +112,7 @@ impl App {
         self.state.arrangement.time_selection_active = false;
         self.state.arrangement.selection_start_beats = 0.0;
         self.state.arrangement.selection_end_beats = 0.0;
-        self.state.view.scroll_offset_beats = 0.0;
+        self.state.view.viewport.scroll_offset_beats = 0.0;
         self.state.view.context_menu = None;
         self.state.devices.context_menu = None;
         self.state.project.file_menu_open = false;
