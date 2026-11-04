@@ -264,6 +264,7 @@ impl App {
                 editing,
                 &self.state.view.edit_name_text,
                 automation_open,
+                self.state.view.hovered_track_header == Some(track.id),
                 TrackHeaderRecordingView {
                     output_peaks: self
                         .track_meter_peaks
