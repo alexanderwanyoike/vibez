@@ -15,7 +15,7 @@ use crate::state::{
 };
 use crate::timeline_geometry::{TimelineGeometry, TimelineViewport};
 use crate::timeline_snap::SnapTargets;
-use crate::widgets::clip_editor_view::{wheel_intent, ClipEditorView, WheelIntent};
+use crate::widgets::clip_editor_view::{wheel_intent, ClipEditorView, RulerZoom, WheelIntent};
 use crate::widgets::clip_loop_markers::{self, LoopDrag, LoopMarker};
 use crate::widgets::double_click::DoubleClick;
 use crate::widgets::drag_phase::{past_click_slop, DragPhase};
@@ -418,6 +418,10 @@ enum DragAction {
         clip_id: ClipId,
         undo_gesture: UndoGestureId,
     },
+    Ruler {
+        clip_id: ClipId,
+        zoom: RulerZoom,
+    },
 }
 
 /// Max time between clicks to count as double-click (ms).
@@ -474,6 +478,7 @@ impl canvas::Program<Message> for PianoRollWidget {
                     mouse::Interaction::ResizingHorizontally
                 }
                 DragAction::MarqueeNotes { .. } => mouse::Interaction::Crosshair,
+                DragAction::Ruler { .. } => mouse::Interaction::ZoomIn,
             };
         }
 
@@ -556,7 +561,16 @@ impl canvas::Program<Message> for PianoRollWidget {
             canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
                 if let Some(pos) = cursor.position_in(bounds) {
                     if pos.y <= RULER_HEIGHT {
-                        let Some(drag) = self.begin_marker_drag(pos, &bounds) else {
+                        let Some(drag) = self.begin_marker_drag(pos, &bounds).or_else(|| {
+                            self.clip.as_ref().map(|clip| DragAction::Ruler {
+                                clip_id: clip.clip_id,
+                                zoom: RulerZoom::begin(
+                                    self.clip_view(),
+                                    Point::new(pos.x - KEY_WIDTH, pos.y),
+                                    note_area_width(&bounds),
+                                ),
+                            })
+                        }) else {
                             return (canvas::event::Status::Ignored, None);
                         };
                         state.drag = Some(drag);
@@ -804,6 +818,20 @@ impl canvas::Program<Message> for PianoRollWidget {
                 if let Some(local) = LocalDrag::unclamped().position(cursor, bounds) {
                     state.last_cursor = Some(local);
 
+                    if let Some(DragAction::Ruler { clip_id, zoom }) = state.drag.as_mut() {
+                        let viewport = zoom.drag_to(
+                            Point::new(local.x - KEY_WIDTH, local.y),
+                            note_area_width(&bounds),
+                        );
+                        return (
+                            canvas::event::Status::Captured,
+                            Some(Message::View(ViewMsg::SetClipEditorView {
+                                clip_id: *clip_id,
+                                viewport,
+                            })),
+                        );
+                    }
+
                     if let Some(drag) = state.drag.as_ref() {
                         if let Some(message) = self.marker_drag_message(drag, local, &bounds) {
                             return (canvas::event::Status::Captured, Some(message));
@@ -976,7 +1004,8 @@ impl canvas::Program<Message> for PianoRollWidget {
                                 // Handled above, before this borrow.
                                 DragAction::MarqueeNotes { .. }
                                 | DragAction::Loop { .. }
-                                | DragAction::Start { .. } => {}
+                                | DragAction::Start { .. }
+                                | DragAction::Ruler { .. } => {}
                             }
                         }
                     }

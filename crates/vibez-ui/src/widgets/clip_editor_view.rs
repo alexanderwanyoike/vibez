@@ -2,11 +2,16 @@
 //! producer zooms or scrolls it.
 
 use iced::mouse::ScrollDelta;
+use iced::Point;
 
 use crate::timeline_geometry::{
     wheel_delta_pixels, zoom_factor_from_pixels, TimelineGeometry, TimelineViewport,
     FRAME_MARGIN_PIXELS,
 };
+
+/// A ruler drag covers the zoom range in a short throw, as Ableton's does;
+/// the wheel's rate would need the drag to cross the whole screen.
+const RULER_ZOOM_GAIN: f32 = 3.0;
 
 /// One clip editor's horizontal view, resolved against the editor's width.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -81,6 +86,13 @@ impl ClipEditorView {
         })
     }
 
+    fn showing(self, viewport: TimelineViewport) -> Self {
+        Self {
+            stored: Some(viewport),
+            ..self
+        }
+    }
+
     pub(crate) fn geometry(self, width: f32, origin_x: f32) -> TimelineGeometry {
         self.viewport(width).geometry().with_origin(origin_x)
     }
@@ -103,5 +115,39 @@ impl ClipEditorView {
     /// first scroll from a loop framed at the end does not jump.
     fn scroll_extent(self, viewport: TimelineViewport) -> f64 {
         self.content_beats + viewport.geometry().beats_for_width(FRAME_MARGIN_PIXELS)
+    }
+}
+
+/// A drag along a clip editor's ruler: down zooms in around the press,
+/// sideways scrolls with the content following the pointer.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct RulerZoom {
+    view: ClipEditorView,
+    anchor_x: f32,
+    last: Point,
+}
+
+impl RulerZoom {
+    /// `at` is measured from the start of the time area.
+    pub(crate) fn begin(view: ClipEditorView, at: Point, width: f32) -> Self {
+        Self {
+            view: view.showing(view.viewport(width)),
+            anchor_x: at.x,
+            last: at,
+        }
+    }
+
+    /// Each step builds on the last view this drag produced, not on the
+    /// widget's, which can lag a frame behind the pointer.
+    pub(crate) fn drag_to(&mut self, to: Point, width: f32) -> TimelineViewport {
+        let factor = zoom_factor_from_pixels((to.y - self.last.y) * RULER_ZOOM_GAIN);
+        let zoomed = self.view.zoomed(factor, self.anchor_x, width);
+        let scrolled = self
+            .view
+            .showing(zoomed)
+            .scrolled(self.last.x - to.x, width);
+        self.view = self.view.showing(scrolled);
+        self.last = to;
+        scrolled
     }
 }

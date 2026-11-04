@@ -18,7 +18,7 @@ use crate::message::Message;
 use crate::state::{ContextMenuTarget, GridConfig, UndoGestureId};
 use crate::theme;
 use crate::timeline_geometry::{TimelineGeometry, TimelineViewport};
-use crate::widgets::clip_editor_view::{wheel_intent, ClipEditorView, WheelIntent};
+use crate::widgets::clip_editor_view::{wheel_intent, ClipEditorView, RulerZoom, WheelIntent};
 use crate::widgets::clip_loop_markers::{self, LoopDrag, LoopMarker};
 use crate::widgets::double_click::DoubleClick;
 use crate::widgets::local_drag::LocalDrag;
@@ -70,6 +70,7 @@ const LOOP_HANDLE_ROW_HEIGHT: f32 = 10.0;
 enum AudioMarkerDrag {
     Start(UndoGestureId),
     Loop(LoopDrag),
+    Ruler(RulerZoom),
     Transient {
         current_source_frame: u64,
         undo_gesture: UndoGestureId,
@@ -615,11 +616,12 @@ impl canvas::Program<Message> for AudioClipDetailWidget {
         bounds: Rectangle,
         cursor: mouse::Cursor,
     ) -> mouse::Interaction {
-        if matches!(
-            state.drag,
-            Some(AudioMarkerDrag::Loop(LoopDrag::Move { .. }))
-        ) {
-            return mouse::Interaction::Grabbing;
+        match state.drag {
+            Some(AudioMarkerDrag::Loop(LoopDrag::Move { .. })) => {
+                return mouse::Interaction::Grabbing
+            }
+            Some(AudioMarkerDrag::Ruler(_)) => return mouse::Interaction::ZoomIn,
+            _ => {}
         }
         let over_body = cursor.position_in(bounds).is_some_and(|position| {
             self.hit_test_loop_marker(position, &bounds) == Some(LoopMarker::Body)
@@ -810,7 +812,11 @@ impl canvas::Program<Message> for AudioClipDetailWidget {
                         self.x_to_local_frame_up_to(position.x, &bounds, u64::MAX) as f64,
                     )))
                 } else {
-                    return (canvas::event::Status::Ignored, None);
+                    Some(AudioMarkerDrag::Ruler(RulerZoom::begin(
+                        self.clip_view(),
+                        position,
+                        bounds.width.max(1.0),
+                    )))
                 };
                 (canvas::event::Status::Captured, None)
             }
@@ -822,6 +828,14 @@ impl canvas::Program<Message> for AudioClipDetailWidget {
                     return (canvas::event::Status::Captured, None);
                 };
                 let message = match drag {
+                    AudioMarkerDrag::Ruler(mut zoom) => {
+                        let viewport = zoom.drag_to(position, bounds.width.max(1.0));
+                        state.drag = Some(AudioMarkerDrag::Ruler(zoom));
+                        Some(Message::View(ViewMsg::SetClipEditorView {
+                            clip_id: self.clip_id,
+                            viewport,
+                        }))
+                    }
                     AudioMarkerDrag::Start(undo_gesture) => {
                         let start_marker = self.start_marker_from_x(position.x, &bounds);
                         (start_marker != self.start_marker).then(|| {
