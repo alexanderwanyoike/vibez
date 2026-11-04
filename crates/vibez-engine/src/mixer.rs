@@ -9,6 +9,8 @@ use crate::playback_source::PreparedPlaybackSource;
 pub use crate::playback_source::{EngineClip, EngineNoteClip};
 mod channel_strip;
 mod clip_launch;
+#[cfg(test)]
+mod clip_loop_tests;
 mod effect_slot;
 mod groove;
 mod note_repeat;
