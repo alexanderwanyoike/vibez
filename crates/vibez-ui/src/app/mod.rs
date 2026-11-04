@@ -404,6 +404,8 @@ impl App {
             view: crate::state::ViewState {
                 perform_surface_width: ui_settings.perform_surface_width,
                 detail_panel_height: ui_settings.detail_panel_height,
+                arrange_grid: ui_settings.arrange_grid,
+                clip_grid: ui_settings.clip_grid,
                 ..Default::default()
             },
             browser: crate::state::BrowserState {

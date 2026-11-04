@@ -202,13 +202,34 @@ impl ViewState {
                     self.viewport.clamp(ctx.total_beats, ctx.lane_width);
                 }
             }
-            ViewMsg::ChooseArrangeGrid(choice) => self.arrange_grid.choose(choice),
-            ViewMsg::ChooseClipGrid(choice) => self.clip_grid.choose(choice),
-            ViewMsg::NarrowGrid => self.arrange_grid.narrow(),
-            ViewMsg::WidenGrid => self.arrange_grid.widen(),
-            ViewMsg::ToggleTripletGrid => self.arrange_grid.toggle_triplet(),
-            ViewMsg::ToggleSnapToGrid => self.arrange_grid.toggle_snap(),
-            ViewMsg::ToggleAdaptiveGrid => self.arrange_grid.toggle_adaptive(),
+            ViewMsg::ChooseArrangeGrid(choice) => {
+                self.arrange_grid.choose(choice);
+                action.persist_settings = true;
+            }
+            ViewMsg::ChooseClipGrid(choice) => {
+                self.clip_grid.choose(choice);
+                action.persist_settings = true;
+            }
+            ViewMsg::NarrowGrid => {
+                self.arrange_grid.narrow();
+                action.persist_settings = true;
+            }
+            ViewMsg::WidenGrid => {
+                self.arrange_grid.widen();
+                action.persist_settings = true;
+            }
+            ViewMsg::ToggleTripletGrid => {
+                self.arrange_grid.toggle_triplet();
+                action.persist_settings = true;
+            }
+            ViewMsg::ToggleSnapToGrid => {
+                self.arrange_grid.toggle_snap();
+                action.persist_settings = true;
+            }
+            ViewMsg::ToggleAdaptiveGrid => {
+                self.arrange_grid.toggle_adaptive();
+                action.persist_settings = true;
+            }
             ViewMsg::BeginDetailPanelResize => {
                 self.detail_panel_resize_active = true;
             }

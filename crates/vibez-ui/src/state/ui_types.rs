@@ -853,7 +853,7 @@ pub enum DetailPanelTab {
     Devices,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 enum GridDivision {
     EightBars,
     FourBars,
@@ -866,7 +866,7 @@ enum GridDivision {
 }
 
 /// A musical grid division, optionally interpreted as a triplet.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SnapGrid {
     division: GridDivision,
     triplet: bool,
@@ -1047,8 +1047,8 @@ impl std::fmt::Display for SnapGrid {
 /// zoom would otherwise forbid anything under 8 bars.
 pub const SHORTEST_LENGTH_BEATS: f64 = 0.125;
 
-/// Shared grid modes passed into arrangement and MIDI editor widgets.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Grid modes passed into arrangement and clip editor widgets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct GridConfig {
     pub selected: SnapGrid,
     pub snap_enabled: bool,

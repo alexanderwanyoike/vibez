@@ -269,6 +269,8 @@ impl App {
             sample_browser_width: self.state.browser.dock_width,
             perform_surface_width: self.state.view.perform_surface_width,
             detail_panel_height: self.state.view.detail_panel_height,
+            arrange_grid: self.state.view.arrange_grid,
+            clip_grid: self.state.view.clip_grid,
             audition_enabled: self.state.browser.audition_enabled,
             audition_gain: self.state.browser.audition_gain,
             auto_warp_on_import: self.state.auto_warp_on_import,

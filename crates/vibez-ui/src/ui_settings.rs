@@ -26,6 +26,10 @@ pub struct UiSettings {
     pub perform_surface_width: f32,
     #[serde(default = "default_detail_panel_height")]
     pub detail_panel_height: f32,
+    #[serde(default)]
+    pub arrange_grid: crate::state::GridConfig,
+    #[serde(default)]
+    pub clip_grid: crate::state::GridConfig,
     #[serde(default = "default_audition_enabled")]
     pub audition_enabled: bool,
     #[serde(default = "default_audition_gain")]
@@ -138,6 +142,8 @@ impl Default for UiSettings {
             sample_browser_width: default_sample_browser_width(),
             perform_surface_width: default_perform_surface_width(),
             detail_panel_height: default_detail_panel_height(),
+            arrange_grid: crate::state::GridConfig::default(),
+            clip_grid: crate::state::GridConfig::default(),
             audition_enabled: default_audition_enabled(),
             audition_gain: default_audition_gain(),
             auto_warp_on_import: false,
