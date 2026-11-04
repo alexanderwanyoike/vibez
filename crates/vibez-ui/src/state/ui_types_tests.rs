@@ -48,3 +48,27 @@ fn grid_config_resolves_adaptive_density_and_can_disable_snapping() {
     let free = GridConfig::new(SnapGrid::SIXTEENTH, false, false, 0);
     assert_eq!(free.snap_beat(0.31, 80.0), 0.31);
 }
+
+#[test]
+fn choosing_auto_in_the_snap_list_returns_a_fixed_grid_to_zoom_adaptive() {
+    let mut grid = GridConfig::default();
+    grid.choose(GridChoice::Fixed(SnapGrid::EIGHTH));
+    assert_eq!(grid.effective_grid(1.375), SnapGrid::EIGHTH);
+
+    let auto = grid.choices(1.375)[0];
+    assert_eq!(auto.to_string(), "Auto 4 Bars");
+    grid.choose(auto);
+    assert_eq!(grid.effective_grid(1.375), SnapGrid::FOUR_BARS);
+    assert_eq!(grid.choice(1.375), auto);
+}
+
+#[test]
+fn the_snap_list_shows_the_step_the_grid_snaps_to() {
+    let grid = GridConfig::default();
+    assert_eq!(grid.choice(80.0).to_string(), "Auto 1/16");
+
+    let mut fixed = grid;
+    fixed.choose(GridChoice::Fixed(SnapGrid::SIXTEENTH.triplet()));
+    assert_eq!(fixed.choice(80.0).to_string(), "1/16T");
+    assert!(fixed.choices(80.0).contains(&fixed.choice(80.0)));
+}
