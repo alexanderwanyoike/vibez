@@ -843,7 +843,9 @@ impl canvas::Program<Message> for TrackClipCanvas {
                     let msg = match drag {
                         ClipDragAction::PendingSeek { beat, .. } => {
                             // Short click → seek + clear selection
-                            Some(Message::Transport(TransportMsg::SeekToBeat(*beat)))
+                            Some(Message::Transport(TransportMsg::SeekToBeat(
+                                self.snapped_beat(*beat),
+                            )))
                         }
                         ClipDragAction::RegionSelect { .. } => {
                             // Drops the box; the clip selection it produced
