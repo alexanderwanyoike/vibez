@@ -1174,3 +1174,78 @@ fn a_legato_swap_dips_the_audio_around_the_boundary_instead_of_clicking() {
     let dipped = output.iter().filter(|sample| **sample < 0.49).count();
     assert!((2..=100).contains(&dipped), "{dipped} dipped samples");
 }
+fn at_end(mut clip: Box<PreparedClipPlayback>) -> Box<PreparedClipPlayback> {
+    clip.launch_mode = vibez_core::perform::ClipLaunchMode::AtEnd;
+    clip
+}
+#[test]
+fn an_at_end_launch_waits_for_the_playing_clip_to_finish_its_loop() {
+    let (mut engine, mut commands, mut events, a, _b) = setup();
+    launch(
+        &mut commands,
+        vec![clip(a, 1, &ramp(0.0, 16), true)],
+        MusicalBoundary::OneBar,
+    );
+    engine.process(&mut [0.0; 3], 1);
+    launch(
+        &mut commands,
+        vec![at_end(clip(a, 2, &ramp(1.0, 16), true))],
+        MusicalBoundary::OneBeat,
+    );
+    let mut output = [0.0; 15];
+    engine.process(&mut output, 1);
+    assert_samples(&output[..2], &[0.03, 0.04]);
+    assert_samples(&output[12..], &[0.15, 1.0, 1.01]);
+    assert!(
+        std::iter::from_fn(|| events.pop().ok()).any(|event| matches!(
+            event,
+            EngineEvent::ClipTransitioned {
+                request_id: 2,
+                effective_at_samples: 16,
+                start_position: 0,
+                ..
+            }
+        ))
+    );
+}
+#[test]
+fn an_at_end_launch_on_a_silent_track_uses_its_quantization() {
+    let (mut engine, mut commands, _events, a, b) = setup();
+    launch(
+        &mut commands,
+        vec![clip(b, 1, &[0.0; 16], true)],
+        MusicalBoundary::OneBar,
+    );
+    engine.process(&mut [0.0; 6], 1);
+    launch(
+        &mut commands,
+        vec![at_end(clip(a, 2, &ramp(1.0, 16), true))],
+        MusicalBoundary::OneBeat,
+    );
+    let mut output = [0.0; 4];
+    engine.process(&mut output, 1);
+    assert_samples(&output, &[0.0, 0.0, 1.0, 1.01]);
+}
+#[test]
+fn a_row_launch_lands_play_clips_on_the_boundary_and_at_end_clips_at_their_end() {
+    let (mut engine, mut commands, _events, a, b) = setup();
+    launch(
+        &mut commands,
+        vec![clip(a, 1, &[0.0; 32], true), clip(b, 2, &[0.0; 32], true)],
+        MusicalBoundary::OneBar,
+    );
+    engine.process(&mut [0.0; 3], 1);
+    launch(
+        &mut commands,
+        vec![
+            at_end(clip(a, 3, &[0.5; 32], true)),
+            clip(b, 4, &[0.25; 32], true),
+        ],
+        MusicalBoundary::OneBeat,
+    );
+    let mut output = [0.0; 30];
+    engine.process(&mut output, 1);
+    assert_samples(&output[..1], &[0.0]);
+    assert_samples(&output[1..29], &[0.25; 28]);
+    assert_samples(&output[29..], &[0.75]);
+}

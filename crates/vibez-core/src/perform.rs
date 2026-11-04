@@ -400,15 +400,20 @@ pub enum ClipLaunchMode {
     /// Start at the point the outgoing Clip had reached, wrapped to this
     /// Clip's length, so the groove carries on.
     Legato,
+    /// Wait for the playing Clip to reach its end or loop point, then start
+    /// from the beginning. The launch quantization applies only when nothing
+    /// is playing on the Track.
+    AtEnd,
 }
 
 impl ClipLaunchMode {
-    pub const ALL: [Self; 2] = [Self::Play, Self::Legato];
+    pub const ALL: [Self; 3] = [Self::Play, Self::Legato, Self::AtEnd];
 
     pub const fn label(self) -> &'static str {
         match self {
             Self::Play => "Play",
             Self::Legato => "Legato",
+            Self::AtEnd => "At End",
         }
     }
 }
@@ -581,11 +586,15 @@ mod clip_launch_tests {
         assert_eq!(ClipLaunchMode::default(), ClipLaunchMode::Play);
         assert_eq!(
             ClipLaunchMode::ALL.map(ClipLaunchMode::label),
-            ["Play", "Legato"]
+            ["Play", "Legato", "At End"]
         );
         assert_eq!(
             serde_json::to_string(&ClipLaunchMode::Legato).unwrap(),
             "\"legato\""
+        );
+        assert_eq!(
+            serde_json::to_string(&ClipLaunchMode::AtEnd).unwrap(),
+            "\"at_end\""
         );
     }
 }

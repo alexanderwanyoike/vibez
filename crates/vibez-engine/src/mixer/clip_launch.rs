@@ -35,6 +35,13 @@ impl EngineTrack {
             .filter(|queued| !queued.pending_batch || batch_waiting)
     }
 
+    /// Where a `mode` launch takes over instead of the shared launch
+    /// boundary, if anywhere.
+    pub(crate) fn own_launch_boundary(&self, mode: ClipLaunchMode, now: u64) -> Option<u64> {
+        let playing = self.active_clip.filter(|_| mode == ClipLaunchMode::AtEnd)?;
+        Some(now + playing.length.saturating_sub(playing.position))
+    }
+
     /// Frames until a queued Legato Clip replaces the one playing.
     pub(crate) fn legato_swap_in(&self, now: u64, batch_waiting: bool) -> Option<u64> {
         self.active_clip?;

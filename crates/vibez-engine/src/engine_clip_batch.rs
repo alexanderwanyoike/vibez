@@ -239,10 +239,11 @@ impl AudioEngine {
                     clip_id: prepared.clip_id,
                     request_id: prepared.request_id,
                 };
+                let own_boundary = track.own_launch_boundary(prepared.launch_mode, now);
                 let old = track.queued_clip.replace(QueuedClipPlayback {
-                    pending_batch: true,
+                    pending_batch: own_boundary.is_none(),
                     prepared,
-                    effective_at: batch.boundary,
+                    effective_at: own_boundary.unwrap_or(batch.boundary),
                 });
                 let retired = old.map(|old| EngineEvent::ClipRequestRetired(old.prepared));
                 let physical = self.output_position + self.rendered_callback_frames as u64;
