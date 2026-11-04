@@ -39,6 +39,7 @@ fn context_menu_width(target: &ContextMenuTarget) -> f32 {
         ContextMenuTarget::Clip { .. } => CONTEXT_MENU_CLIP_WIDTH,
         ContextMenuTarget::TimeSelection { .. }
         | ContextMenuTarget::AudioClipDetail { .. }
+        | ContextMenuTarget::TrackHeader { .. }
         | ContextMenuTarget::ArrangementEmpty => 200.0 + CONTEXT_MENU_CARD_PADDING,
     }
 }
@@ -1053,6 +1054,14 @@ impl App {
                 ));
                 col.into()
             }
+            ContextMenuTarget::TrackHeader { track_id } => column![menu_btn(
+                icons::TRASH_2,
+                "Delete Track".into(),
+                Message::remove_track(*track_id),
+            )]
+            .spacing(0)
+            .width(Length::Fixed(200.0))
+            .into(),
             ContextMenuTarget::ArrangementEmpty => column![
                 menu_btn(
                     icons::AUDIO_WAVEFORM,

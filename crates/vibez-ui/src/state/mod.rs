@@ -333,6 +333,9 @@ pub enum ContextMenuTarget {
         transient_marker: Option<u64>,
         warp_marker: Option<u64>,
     },
+    TrackHeader {
+        track_id: TrackId,
+    },
     ArrangementEmpty,
 }
 

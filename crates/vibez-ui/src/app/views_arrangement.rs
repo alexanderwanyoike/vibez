@@ -376,6 +376,12 @@ impl App {
             }
             let clip_canvas: Element<'_, Message> = clip_canvas_area.into();
 
+            let header =
+                mouse_area(header).on_right_press(Message::View(ViewMsg::ShowContextMenu {
+                    x: self.state.view.cursor_x,
+                    y: self.state.view.cursor_y,
+                    target: ContextMenuTarget::TrackHeader { track_id: track.id },
+                }));
             let track_row = row![header, clip_canvas].height(Length::Fixed(TRACK_ROW_HEIGHT));
 
             track_rows = track_rows.push(track_row);
