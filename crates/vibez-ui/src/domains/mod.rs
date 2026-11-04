@@ -269,6 +269,10 @@ impl EngineHandle for EngineCommandQueue {
 /// Overwrites the waiting edit `cmd` makes redundant, so a drag stalled
 /// behind a content edit leaves one edit per clip in the queue, not one per
 /// mouse move. Returns `cmd` when nothing waiting can take its place.
+///
+/// Edits already pushed to the engine ring stay, since a pushed slot cannot be
+/// rewritten, and each is a cheap in-place edit the callback applies in one
+/// pass once the ring moves again.
 fn supersede_waiting(
     pending: &mut VecDeque<EngineCommand>,
     cmd: EngineCommand,
