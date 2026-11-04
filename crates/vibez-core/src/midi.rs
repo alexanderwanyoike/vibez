@@ -246,6 +246,24 @@ mod tests {
     }
 
     #[test]
+    fn resolved_start_marker_may_sit_past_an_unlooped_clips_length() {
+        let clip = NoteClipInfo {
+            id: ClipId::new(),
+            track_id: TrackId::new(),
+            name: "Trimmed".into(),
+            position_beats: 6.0,
+            duration_beats: 2.0,
+            notes: Vec::new(),
+            start_marker_beats: Some(6.0),
+            loop_enabled: false,
+            loop_start_beats: 0.0,
+            loop_end_beats: 8.0,
+            groove_grid: GrooveGrid::Off,
+        };
+        assert_eq!(clip.resolved_start_marker_beats(), 6.0);
+    }
+
+    #[test]
     fn resolved_start_marker_is_clamped_before_loop_end() {
         let clip = NoteClipInfo {
             id: ClipId::new(),
