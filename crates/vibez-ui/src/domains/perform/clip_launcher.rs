@@ -310,6 +310,17 @@ impl ClipMsg {
 }
 
 impl PerformState {
+    /// A stop lands where the Clip it stops would launch.
+    pub fn stop_quantization(&self, track_id: TrackId) -> MusicalBoundary {
+        self.clip_editor.playing.get(&track_id).map_or_else(
+            || self.clips.launch_quantization(track_id),
+            |playing| {
+                self.clips
+                    .clip_launch_quantization(self.clips.by_id(playing.id).unwrap_or(playing))
+            },
+        )
+    }
+
     pub fn toggle_clip_request(&self, id: ClipId) -> Option<ClipLaunchRequest> {
         let clip = self.clips.by_id(id)?;
         Some(if self.clip_is_triggered(clip) {

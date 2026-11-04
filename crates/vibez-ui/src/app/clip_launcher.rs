@@ -161,18 +161,10 @@ impl App {
         let samples_per_beat = self.state.transport.samples_per_beat();
         let mut batches: Vec<(MusicalBoundary, Vec<_>)> = Vec::new();
         for (track_id, clip) in targets {
-            let clips = &self.state.perform.clips;
-            // A stop lands where the Clip it stops would launch.
-            let quantization = clip
-                .as_ref()
-                .or_else(|| {
-                    let playing = self.state.perform.clip_editor.playing.get(&track_id)?;
-                    Some(clips.by_id(playing.id).unwrap_or(playing))
-                })
-                .map_or_else(
-                    || clips.launch_quantization(track_id),
-                    |clip| clips.clip_launch_quantization(clip),
-                );
+            let quantization = match &clip {
+                Some(clip) => self.state.perform.clips.clip_launch_quantization(clip),
+                None => self.state.perform.stop_quantization(track_id),
+            };
             let batch = match batches.iter().position(|(q, _)| *q == quantization) {
                 Some(index) => index,
                 None => {
