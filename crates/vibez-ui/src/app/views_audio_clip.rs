@@ -118,9 +118,15 @@ impl App {
         ))
         .size(8)
         .color(th::text_muted());
-        let header_row = row![label, marker_summary, horizontal_space(), clip_info]
-            .spacing(4)
-            .align_y(iced::Alignment::Center);
+        let header_row = row![
+            label,
+            marker_summary,
+            horizontal_space(),
+            clip_info,
+            self.clip_grid_snap_list()
+        ]
+        .spacing(4)
+        .align_y(iced::Alignment::Center);
 
         let sample_rate = f64::from(clip.audio.sample_rate.max(1));
         let source_start = clip.source_offset as f64 / sample_rate;
