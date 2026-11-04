@@ -1,3 +1,4 @@
+pub mod arrange_corner;
 pub mod audio_clip_detail;
 pub mod auto_pan_device;
 pub mod auto_pan_display;
