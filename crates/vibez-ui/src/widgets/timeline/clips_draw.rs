@@ -52,19 +52,31 @@ fn visible_pixel_columns(
     }
 }
 
-/// The rectangle a clip's body and border are painted in.
+/// Lane left showing after each clip, so back-to-back clips of one track
+/// still read as separate clips when zoomed out to the whole song.
+const CLIP_GAP: f32 = 1.0;
+
+/// The rectangle a clip's body, contents and border are painted in.
 fn clip_box(clip_x: f32, clip_y: f32, clip_w: f32, clip_h: f32) -> Rectangle {
     Rectangle {
         x: clip_x,
         y: clip_y,
-        width: clip_w.max(2.0),
+        width: (clip_w - CLIP_GAP).max(1.0),
         height: clip_h,
     }
 }
 
-/// The path rectangle for a border of `stroke_width` around `body`.
-fn clip_outline(body: Rectangle, _stroke_width: f32) -> Rectangle {
-    body
+/// The path rectangle for a border of `stroke_width` around `body`. Strokes
+/// are centred on the path, so it is inset by half the stroke to keep the
+/// border out of the gap.
+fn clip_outline(body: Rectangle, stroke_width: f32) -> Rectangle {
+    let inset = stroke_width / 2.0;
+    Rectangle {
+        x: body.x + inset,
+        y: body.y + inset,
+        width: (body.width - stroke_width).max(0.0),
+        height: (body.height - stroke_width).max(0.0),
+    }
 }
 
 /// Where a clip title is clipped to, and where its text starts.
@@ -260,7 +272,7 @@ impl TrackClipCanvas {
                     let half_h = body_h / 2.0 - 2.0;
                     let pixels = clip_w as usize;
                     let frames_per_pixel = spb / f64::from(ppb);
-                    for px in visible_pixel_columns(clip_x, clip_w, w) {
+                    for px in visible_pixel_columns(clip_x, body.width, w) {
                         let screen_x = clip_x + px as f32;
                         let Some((min_val, max_val)) = waveform_peak_for_pixel(
                             &clip.peaks,
@@ -297,7 +309,7 @@ impl TrackClipCanvas {
                         if rx < w && rx + rw > 0.0 {
                             frame.fill_rectangle(
                                 iced::Point::new(rx, clip_y),
-                                iced::Size::new(rw.min(clip_x + clip_w - rx).max(0.0), clip_h),
+                                iced::Size::new(rw.min(body.x + body.width - rx).max(0.0), clip_h),
                                 repeat_color,
                             );
                         }
@@ -407,7 +419,7 @@ impl TrackClipCanvas {
                     &clip.name,
                     clip_x,
                     clip_y,
-                    clip_w,
+                    body.width,
                     clip.loop_enabled,
                     w,
                 );
@@ -424,8 +436,8 @@ impl TrackClipCanvas {
                     while offset < clip_w {
                         let x0 = clip_x + offset;
                         let x1 = clip_x + offset + clip_h;
-                        let a_x = x0.clamp(clip_x, clip_x + clip_w);
-                        let b_x = x1.clamp(clip_x, clip_x + clip_w);
+                        let a_x = x0.clamp(clip_x, body.x + body.width);
+                        let b_x = x1.clamp(clip_x, body.x + body.width);
                         let a_t = if (x1 - x0).abs() > 0.1 {
                             (a_x - x0) / (x1 - x0)
                         } else {
@@ -530,7 +542,7 @@ impl TrackClipCanvas {
                         if rx < w && rx + rw > 0.0 {
                             frame.fill_rectangle(
                                 iced::Point::new(rx, clip_y),
-                                iced::Size::new(rw.min(clip_x + clip_w - rx).max(0.0), clip_h),
+                                iced::Size::new(rw.min(body.x + body.width - rx).max(0.0), clip_h),
                                 repeat_color,
                             );
                         }
@@ -559,7 +571,10 @@ impl TrackClipCanvas {
 
                         frame.fill_rectangle(
                             iced::Point::new(note_x, note_y),
-                            iced::Size::new(note_w.max(2.0), note_h),
+                            iced::Size::new(
+                                note_w.max(2.0).min(body.x + body.width - note_x).max(0.0),
+                                note_h,
+                            ),
                             if repeated {
                                 theme::with_alpha(self.track_color, 0.5)
                             } else {
@@ -620,7 +635,7 @@ impl TrackClipCanvas {
                     &note_clip.name,
                     clip_x,
                     clip_y,
-                    clip_w,
+                    body.width,
                     note_clip.loop_enabled,
                     w,
                 );
