@@ -819,19 +819,21 @@ impl canvas::Program<Message> for PianoRollWidget {
                                     sent_duration,
                                     ..
                                 } => {
-                                    let dx = local.x - *start_x;
-                                    let beat_delta = geometry.beats_for_width(dx);
+                                    let beat_delta = geometry.beats_for_width(local.x - *start_x);
+                                    let start_beat = original_notes
+                                        .iter()
+                                        .find(|note| note.index == *note_index)
+                                        .map_or(0.0, |note| note.start_beat);
+                                    let new_duration = self.grid.length_to_dragged_end(
+                                        start_beat,
+                                        start_beat + *original_duration + beat_delta,
+                                        geometry.pixels_per_beat(),
+                                    );
                                     let min_duration = if self.grid.snap_enabled {
                                         self.effective_grid(&bounds).beat_size()
                                     } else {
                                         0.01
                                     };
-                                    let new_duration = self
-                                        .snapped_beat(
-                                            (*original_duration + beat_delta).max(min_duration),
-                                            &bounds,
-                                        )
-                                        .max(min_duration);
 
                                     if new_duration == *sent_duration {
                                         return (canvas::event::Status::Captured, None);
