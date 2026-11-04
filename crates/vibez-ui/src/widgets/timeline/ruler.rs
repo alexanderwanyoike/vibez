@@ -200,7 +200,9 @@ impl canvas::Program<Message> for RulerWidget {
                             beat,
                             phase: DragPhase::Pending,
                             ..
-                        } => Some(Message::Transport(TransportMsg::SeekToBeat(beat))),
+                        } => Some(Message::Transport(TransportMsg::SeekToBeat(
+                            self.grid.snap_beat(beat, self.pixels_per_beat()),
+                        ))),
                         RulerDragAction::Numbers { .. } | RulerDragAction::Brace { .. } => None,
                     };
                     return (canvas::event::Status::Captured, msg);
