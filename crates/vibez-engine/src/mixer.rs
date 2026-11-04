@@ -257,17 +257,7 @@ impl EngineTrack {
 
         self.timed_note_ons.clear();
         self.timed_note_offs.clear();
-        if !self.suppress_source_notes {
-            collect_timed_note_events(
-                &self.playback_source.note_clips,
-                pos,
-                frames,
-                spb,
-                swing,
-                &mut self.timed_note_ons,
-                &mut self.timed_note_offs,
-            );
-        }
+        self.collect_source_note_events(pos, frames, spb, swing);
 
         // Note Repeat is generated from live held notes rather than resident
         // clip events, so retain its frame walk while the clip scheduler is
@@ -352,17 +342,7 @@ impl EngineTrack {
             .is_some_and(|instrument| instrument.instrument_kind() == InstrumentKind::DrumRack);
         self.timed_note_ons.clear();
         self.timed_note_offs.clear();
-        if !self.suppress_source_notes {
-            collect_timed_note_events(
-                &self.playback_source.note_clips,
-                pos,
-                frames,
-                spb,
-                swing,
-                &mut self.timed_note_ons,
-                &mut self.timed_note_offs,
-            );
-        }
+        self.collect_source_note_events(pos, frames, spb, swing);
         let mut note_on_index = 0;
         let mut note_off_index = 0;
 
@@ -412,6 +392,27 @@ impl EngineTrack {
         }
 
         rendered
+    }
+
+    fn collect_source_note_events(
+        &mut self,
+        pos: u64,
+        frames: usize,
+        samples_per_beat: f64,
+        swing: SwingAmount,
+    ) {
+        if self.suppress_source_notes {
+            return;
+        }
+        collect_timed_note_events(
+            &self.playback_source.note_clips,
+            pos,
+            frames,
+            samples_per_beat,
+            swing,
+            &mut self.timed_note_ons,
+            &mut self.timed_note_offs,
+        );
     }
 
     pub(crate) fn take_note_activity(&mut self) -> u128 {
