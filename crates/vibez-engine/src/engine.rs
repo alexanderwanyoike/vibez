@@ -817,6 +817,10 @@ mod stuck_note_tests;
 mod transport_ring_tests;
 
 #[cfg(test)]
+#[path = "engine_content_rebuild_tests.rs"]
+mod content_rebuild_tests;
+
+#[cfg(test)]
 #[path = "engine_note_edit_allocation_tests.rs"]
 mod note_edit_allocation_tests;
 
