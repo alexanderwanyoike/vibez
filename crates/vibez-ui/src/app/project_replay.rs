@@ -89,7 +89,7 @@ impl App {
         true
     }
 
-    pub(super) fn apply_snapshot(&mut self, mut snapshot: crate::state::ProjectSnapshot) {
+    pub(super) fn apply_snapshot(&mut self, snapshot: crate::state::ProjectSnapshot) {
         self.restart_device_metering();
         self.cancel_device_preset_load();
         if clip_only_snapshot(&self.state, &snapshot) {
@@ -115,8 +115,14 @@ impl App {
             .same_channels(&snapshot.project_tracks)
         {
             self.swap_changed_content(snapshot);
-            return;
+        } else {
+            self.replay_snapshot(snapshot);
         }
+    }
+
+    /// Tears down every channel and replays the snapshot into the engine,
+    /// reloading its plugins.
+    fn replay_snapshot(&mut self, mut snapshot: crate::state::ProjectSnapshot) {
         self.plugin_load_requests.reset();
         self.sidechain_sync_inputs = None;
         self.track_meter_peaks.clear();
