@@ -13,6 +13,10 @@ use super::lane_grid::{lane_grid, GridLine};
 use super::note_marks::note_marks;
 use super::*;
 
+/// How far a selected track's lane moves toward the text colour: enough
+/// to find the track, quiet enough that the clips stay the loudest thing.
+const SELECTED_LANE_LIFT: f32 = 0.035;
+
 /// How far to shift the lane so whole-pixel coordinates inside it land on
 /// whole screen pixels.
 fn whole_pixel_offset(origin: iced::Point) -> iced::Vector {
@@ -102,7 +106,7 @@ impl TrackClipCanvas {
         } else if drop_hover {
             theme::with_alpha(theme::danger(), 0.16)
         } else if self.selected {
-            theme::track_bg_selected()
+            theme::blend(theme::track_bg(), theme::text(), SELECTED_LANE_LIFT)
         } else {
             theme::track_bg()
         };
