@@ -433,7 +433,10 @@ impl ArrangementMsg {
         self.is_clipboard_project_edit()
             || matches!(
                 self,
-                Self::SubmitAudioClipInspectorField { .. }
+                Self::DuplicateSelectedClip
+                    | Self::SplitSelectedAtPlayhead
+                    | Self::JoinSelectedClips
+                    | Self::SubmitAudioClipInspectorField { .. }
                     | Self::SetAudioClipFade { .. }
                     | Self::SetAudioClipFadeCurve { .. }
                     | Self::SetAudioClipCrossfadeCurve { .. }

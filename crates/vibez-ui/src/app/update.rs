@@ -246,7 +246,6 @@ impl App {
                 | Message::Arrangement(ArrangementMsg::SetClipLoopRegion { .. })
                 | Message::Arrangement(ArrangementMsg::ResizeAudioClip { .. })
                 | Message::Arrangement(ArrangementMsg::DeleteSelectedClip)
-                | Message::Arrangement(ArrangementMsg::DuplicateSelectedClip)
                 | Message::Transport(TransportMsg::ToggleArrangementLoop)
                 | Message::Transport(TransportMsg::SetArrangementLoopRegion { .. })
                 | Message::Arrangement(ArrangementMsg::MoveSelectedTrackUp)

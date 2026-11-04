@@ -713,6 +713,7 @@ impl TimelineEditorState {
                 clip_id: left_id,
             });
             action.status = Some("Split audio clip".to_string());
+            action.mark_dirty = true;
         }
         action
     }
@@ -770,6 +771,7 @@ impl TimelineEditorState {
             });
             self.selected_note_clip = Some((track_id, left_id));
             action.status = Some("Split note clip".to_string());
+            action.mark_dirty = true;
         }
         action
     }
