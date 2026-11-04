@@ -1,15 +1,11 @@
 //! Fitting a clip's name into its title strip.
 
-use std::cell::RefCell;
-use std::collections::HashMap;
-use std::rc::Rc;
-
 use iced::alignment::Vertical;
 use iced::widget::canvas;
 use iced::{Color, Font, Point, Rectangle};
 
 use crate::icons;
-use crate::widgets::device_controls::text_width;
+use crate::widgets::text_fit::fit_text;
 
 use super::CLIP_TITLE_HEIGHT;
 
@@ -25,45 +21,6 @@ const LOOP_ICON_MIN_WIDTH: f32 = 60.0;
 /// Fewer letters than this before an ellipsis say nothing, so the strip
 /// stays empty instead.
 const MIN_KEPT_CHARS: usize = 3;
-const ELLIPSIS: char = '\u{2026}';
-
-fn name_width(text: &str) -> f32 {
-    text_width(text, TITLE_SIZE, TITLE_FONT)
-}
-
-/// Measured widths of a name, whole and shortened to each length.
-struct NameWidths {
-    whole: f32,
-    /// `shortened[n]` is the width of its first `n` chars plus an ellipsis.
-    shortened: Vec<f32>,
-}
-
-thread_local! {
-    /// Shaping text is far too slow to repeat for every clip on every
-    /// frame, and a song repeats a few names many times.
-    static NAME_WIDTHS: RefCell<HashMap<String, Rc<NameWidths>>> = RefCell::new(HashMap::new());
-}
-
-fn name_widths(name: &str) -> Rc<NameWidths> {
-    NAME_WIDTHS.with(|cache| {
-        let mut cache = cache.borrow_mut();
-        if let Some(widths) = cache.get(name) {
-            return Rc::clone(widths);
-        }
-        if cache.len() >= 1024 {
-            cache.clear();
-        }
-        let widths = Rc::new(NameWidths {
-            whole: name_width(name),
-            shortened: name
-                .char_indices()
-                .map(|(end, _)| name_width(&format!("{}{ELLIPSIS}", &name[..end])))
-                .collect(),
-        });
-        cache.insert(name.to_owned(), Rc::clone(&widths));
-        widths
-    })
-}
 
 /// What of `name` fits a title strip `strip_width` wide.
 fn fit_clip_title(name: &str, strip_width: f32, loop_icon_visible: bool) -> Option<String> {
@@ -74,16 +31,7 @@ fn fit_clip_title(name: &str, strip_width: f32, loop_icon_visible: bool) -> Opti
         } else {
             0.0
         };
-    let widths = name_widths(name);
-    if widths.whole <= room {
-        return Some(name.to_owned());
-    }
-    let kept = widths.shortened.iter().rposition(|width| *width <= room)?;
-    (kept >= MIN_KEPT_CHARS).then(|| {
-        let mut title: String = name.chars().take(kept).collect();
-        title.push(ELLIPSIS);
-        title
-    })
+    fit_text(name, room, TITLE_SIZE, TITLE_FONT, MIN_KEPT_CHARS)
 }
 
 /// Where a clip title is clipped to, and where its text starts.
@@ -160,7 +108,14 @@ pub(super) fn draw_clip_title(
 
 #[cfg(test)]
 mod tests {
-    use super::{clip_title_layout, fit_clip_title, name_width, LOOP_ICON_ROOM, TITLE_PADDING};
+    use super::{
+        clip_title_layout, fit_clip_title, LOOP_ICON_ROOM, TITLE_FONT, TITLE_PADDING, TITLE_SIZE,
+    };
+    use crate::widgets::device_controls::text_width;
+
+    fn name_width(text: &str) -> f32 {
+        text_width(text, TITLE_SIZE, TITLE_FONT)
+    }
 
     const NAME: &str = "Capture · Pattern 1";
 

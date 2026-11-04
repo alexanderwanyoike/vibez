@@ -58,6 +58,7 @@ pub mod saturator_display;
 pub mod swing_knob;
 pub mod synth_device;
 pub mod synth_display;
+pub mod text_fit;
 pub mod timeline;
 pub mod track_header;
 pub mod transient_sensitivity_knob;
