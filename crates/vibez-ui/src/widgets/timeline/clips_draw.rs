@@ -809,7 +809,8 @@ impl TrackClipCanvas {
 #[cfg(test)]
 mod tests {
     use super::{
-        clip_title_layout, fit_clip_title, visible_pixel_columns, waveform_peak_for_pixel,
+        clip_box, clip_outline, clip_title_layout, fit_clip_title, visible_pixel_columns,
+        waveform_peak_for_pixel,
     };
 
     #[test]
@@ -900,6 +901,31 @@ mod tests {
                 iced::Point::new(4.0, 3.0),
                 "clip at x {clip_x}"
             );
+        }
+    }
+
+    #[test]
+    fn back_to_back_clips_leave_a_gap_between_them_at_any_zoom() {
+        for clip_w in [400.0, 12.0, 3.0] {
+            let first = clip_box(100.0, 4.0, clip_w, 70.0);
+            let second = clip_box(100.0 + clip_w, 4.0, clip_w, 70.0);
+            assert!(
+                first.x + first.width + 1.0 <= second.x,
+                "clips {clip_w} px wide"
+            );
+            assert!(first.width >= 1.0, "clips {clip_w} px wide");
+        }
+    }
+
+    #[test]
+    fn a_clip_border_never_paints_outside_its_box() {
+        let body = clip_box(100.0, 4.0, 50.0, 70.0);
+        for stroke in [1.0, 2.0] {
+            let outline = clip_outline(body, stroke);
+            assert!(outline.x - stroke / 2.0 >= body.x);
+            assert!(outline.y - stroke / 2.0 >= body.y);
+            assert!(outline.x + outline.width + stroke / 2.0 <= body.x + body.width);
+            assert!(outline.y + outline.height + stroke / 2.0 <= body.y + body.height);
         }
     }
 }
