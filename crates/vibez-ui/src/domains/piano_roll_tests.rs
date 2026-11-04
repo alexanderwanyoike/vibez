@@ -364,6 +364,43 @@ fn extending_a_non_looping_clip_does_not_infer_a_loop_from_note_content() {
 }
 
 #[test]
+fn a_clip_length_drag_step_edits_the_clip_bounds_in_place() {
+    let (mut tracks, tid, cid) = midi_track_with_clip();
+    let clip = &mut tracks.get_mut(tid).unwrap().note_clips[0];
+    clip.loop_enabled = true;
+    clip.loop_start_beats = 1.0;
+    clip.loop_end_beats = 4.0;
+    let mut piano_roll = PianoRollState::default();
+    let mut engine = RecordingEngine::default();
+
+    piano_roll.update(
+        PianoRollMsg::ResizeNoteClipDuration {
+            track_id: tid,
+            clip_id: cid,
+            new_duration_beats: 3.0,
+        },
+        &mut engine,
+        &mut tracks,
+        PianoRollCtx::default(),
+    );
+
+    assert!(
+        matches!(
+            engine.0.as_slice(),
+            [EngineCommand::SetNoteClipBounds {
+                track_id,
+                clip_id,
+                duration_beats: 3.0,
+                loop_start_beats: 1.0,
+                loop_end_beats: 3.0,
+                ..
+            }] if (*track_id, *clip_id) == (tid, cid)
+        ),
+        "one in-place edit, never a re-insertion of the clip and its notes"
+    );
+}
+
+#[test]
 fn start_marker_moves_without_changing_the_midi_loop_region() {
     let (mut tracks, track_id, clip_id) = midi_track_with_clip();
     let clip = &mut tracks.get_mut(track_id).unwrap().note_clips[0];
