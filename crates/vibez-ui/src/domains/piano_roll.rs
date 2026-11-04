@@ -56,6 +56,13 @@ pub enum PianoRollMsg {
         clip_id: ClipId,
         velocities: Vec<(usize, u8)>,
     },
+    /// Set the length of one or more MIDI Notes as one project edit.
+    /// Invalid note indices are ignored.
+    SetNoteDurations {
+        track_id: TrackId,
+        clip_id: ClipId,
+        durations: Vec<(usize, f64)>,
+    },
     SelectNote(TrackId, ClipId, Option<usize>, bool),
     SelectAllNotes(TrackId, ClipId),
     /// Rubber-band selection: catch every note overlapping the beat span
@@ -366,6 +373,30 @@ impl PianoRollState {
                             continue;
                         };
                         note.velocity = velocity.clamp(1, 127);
+                        updates.push((note_index, *note));
+                    }
+                }
+                for (note_index, note) in updates {
+                    engine.send(EngineCommand::EditNote {
+                        track_id,
+                        clip_id,
+                        note_index,
+                        note,
+                    });
+                }
+            }
+            PianoRollMsg::SetNoteDurations {
+                track_id,
+                clip_id,
+                durations,
+            } => {
+                let mut updates: Vec<(usize, MidiNote)> = Vec::new();
+                if let Some(clip) = find_note_clip_mut(tracks, track_id, clip_id) {
+                    for (note_index, duration_beats) in durations {
+                        let Some(note) = clip.notes.get_mut(note_index) else {
+                            continue;
+                        };
+                        note.duration_beats = duration_beats;
                         updates.push((note_index, *note));
                     }
                 }

@@ -245,7 +245,7 @@ fn semitone_step(modifiers: iced::keyboard::Modifiers) -> i8 {
     }
 }
 
-/// A note as it stood when a move began.
+/// A note as it stood when a move or resize began.
 #[derive(Debug, Clone, Copy)]
 struct MovedNote {
     index: usize,
@@ -265,6 +265,31 @@ fn grabbed_notes(notes: &[MidiNote], selection: &HashSet<usize>) -> Vec<MovedNot
                 start_beat: note.start_beat,
                 duration_beats: note.duration_beats,
             })
+        })
+        .collect()
+}
+
+/// Every resized note's new length: the grabbed note takes `duration` and
+/// the rest change by the same amount, none shorter than `min_duration`.
+fn resized_notes(
+    notes: &[MovedNote],
+    grabbed: usize,
+    duration: f64,
+    min_duration: f64,
+) -> Vec<(usize, f64)> {
+    let delta = notes
+        .iter()
+        .find(|note| note.index == grabbed)
+        .map_or(0.0, |note| duration - note.duration_beats);
+    notes
+        .iter()
+        .map(|note| {
+            let resized = if note.index == grabbed {
+                duration
+            } else {
+                (note.duration_beats + delta).max(min_duration)
+            };
+            (note.index, resized)
         })
         .collect()
 }
@@ -317,9 +342,11 @@ enum DragAction {
         started: bool,
         sent_moves: Vec<(usize, f64, u8)>,
     },
+    /// Resizing the grabbed note and every note selected with it, together.
     ResizeNote {
         note_index: usize,
         original_duration: f64,
+        original_notes: Vec<MovedNote>,
         start_x: f32,
         undo_gesture: UndoGestureId,
         started: bool,
@@ -549,10 +576,16 @@ impl canvas::Program<Message> for PianoRollWidget {
                             let shift = state.shift_held;
 
                             if near_right {
-                                // Resize always selects just this note
+                                let selected = clip_data.selected_notes.contains(&idx);
+                                let resized = if selected {
+                                    clip_data.selected_notes.clone()
+                                } else {
+                                    HashSet::from([idx])
+                                };
                                 state.drag = Some(DragAction::ResizeNote {
                                     note_index: idx,
                                     original_duration: note.duration_beats,
+                                    original_notes: grabbed_notes(&clip_data.notes, &resized),
                                     start_x: pos.x,
                                     undo_gesture: UndoGestureId::new(),
                                     started: false,
@@ -560,12 +593,14 @@ impl canvas::Program<Message> for PianoRollWidget {
                                 });
                                 return (
                                     canvas::event::Status::Captured,
-                                    Some(Message::PianoRoll(PianoRollMsg::SelectNote(
-                                        self.track_id,
-                                        clip_data.clip_id,
-                                        Some(idx),
-                                        false,
-                                    ))),
+                                    (!selected).then(|| {
+                                        Message::PianoRoll(PianoRollMsg::SelectNote(
+                                            self.track_id,
+                                            clip_data.clip_id,
+                                            Some(idx),
+                                            false,
+                                        ))
+                                    }),
                                 );
                             }
 
@@ -788,6 +823,7 @@ impl canvas::Program<Message> for PianoRollWidget {
                                 DragAction::ResizeNote {
                                     note_index,
                                     original_duration,
+                                    original_notes,
                                     start_x,
                                     undo_gesture,
                                     sent_duration,
@@ -807,27 +843,26 @@ impl canvas::Program<Message> for PianoRollWidget {
                                         )
                                         .max(min_duration);
 
-                                    let idx = *note_index;
                                     if new_duration == *sent_duration {
                                         return (canvas::event::Status::Captured, None);
                                     }
-                                    if idx < clip_data.notes.len() {
-                                        *sent_duration = new_duration;
-                                        let mut note = clip_data.notes[idx];
-                                        note.duration_beats = new_duration;
-                                        return (
-                                            canvas::event::Status::Captured,
-                                            Some(
-                                                Message::PianoRoll(PianoRollMsg::EditNote(
-                                                    self.track_id,
-                                                    clip_data.clip_id,
-                                                    idx,
-                                                    note,
-                                                ))
-                                                .in_undo_gesture(*undo_gesture),
-                                            ),
-                                        );
-                                    }
+                                    *sent_duration = new_duration;
+                                    return (
+                                        canvas::event::Status::Captured,
+                                        Some(
+                                            Message::PianoRoll(PianoRollMsg::SetNoteDurations {
+                                                track_id: self.track_id,
+                                                clip_id: clip_data.clip_id,
+                                                durations: resized_notes(
+                                                    original_notes,
+                                                    *note_index,
+                                                    new_duration,
+                                                    min_duration,
+                                                ),
+                                            })
+                                            .in_undo_gesture(*undo_gesture),
+                                        ),
+                                    );
                                 }
                                 DragAction::DrawNote {
                                     clip_id,
