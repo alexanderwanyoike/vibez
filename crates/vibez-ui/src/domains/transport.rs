@@ -72,6 +72,14 @@ pub enum TransportAction {
 }
 
 impl TransportState {
+    /// A freshly loaded project: stopped, with every cursor at the song start.
+    pub fn reset_to_song_start(&mut self) {
+        self.playback = PlaybackPhase::Stopped;
+        self.position_samples = 0;
+        self.play_start_samples = 0;
+        self.continue_samples = 0;
+    }
+
     /// What the screen shows, so it never runs ahead of the engine.
     pub fn is_playing(&self) -> bool {
         matches!(
