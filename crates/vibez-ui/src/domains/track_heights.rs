@@ -43,31 +43,92 @@ pub struct TrackHeightAction {
 /// draw at [`DEFAULT_TRACK_HEIGHT`].
 #[derive(Debug, Clone, Default)]
 pub struct TrackHeights {
-    _heights: HashMap<TrackId, f32>,
+    heights: HashMap<TrackId, f32>,
+    resize: Option<TrackResize>,
+}
+
+#[derive(Debug, Clone)]
+struct TrackResize {
+    track_id: TrackId,
+    anchor_y: f32,
+    start_height: f32,
+    targets: Vec<TrackId>,
+    changed: bool,
+}
+
+fn clamp_height(height: f32) -> f32 {
+    height.clamp(MIN_TRACK_HEIGHT, MAX_TRACK_HEIGHT)
 }
 
 impl TrackHeights {
     /// Heights read back from a project file.
-    pub fn from_saved(_saved: &[(TrackId, f32)]) -> Self {
-        Self::default()
+    pub fn from_saved(saved: &[(TrackId, f32)]) -> Self {
+        Self {
+            heights: saved
+                .iter()
+                .map(|&(track_id, height)| (track_id, clamp_height(height)))
+                .collect(),
+            resize: None,
+        }
     }
 
     /// The heights a project file keeps for these tracks.
-    pub fn saved(&self, _track_ids: impl IntoIterator<Item = TrackId>) -> Vec<(TrackId, f32)> {
-        Vec::new()
+    pub fn saved(&self, track_ids: impl IntoIterator<Item = TrackId>) -> Vec<(TrackId, f32)> {
+        track_ids
+            .into_iter()
+            .filter_map(|track_id| {
+                self.heights
+                    .get(&track_id)
+                    .map(|&height| (track_id, height))
+            })
+            .collect()
     }
 
-    pub fn height(&self, _track_id: TrackId) -> f32 {
-        DEFAULT_TRACK_HEIGHT
+    pub fn height(&self, track_id: TrackId) -> f32 {
+        self.heights
+            .get(&track_id)
+            .copied()
+            .unwrap_or(DEFAULT_TRACK_HEIGHT)
     }
 
     /// The track whose header edge is being dragged.
     pub fn resizing(&self) -> Option<TrackId> {
-        None
+        self.resize.as_ref().map(|resize| resize.track_id)
     }
 
-    pub fn update(&mut self, _msg: TrackHeightMsg, _ctx: TrackHeightCtx<'_>) -> TrackHeightAction {
-        TrackHeightAction::default()
+    pub fn update(&mut self, msg: TrackHeightMsg, ctx: TrackHeightCtx<'_>) -> TrackHeightAction {
+        let mut action = TrackHeightAction::default();
+        match msg {
+            TrackHeightMsg::BeginResize(track_id) => {
+                self.resize = Some(TrackResize {
+                    track_id,
+                    anchor_y: ctx.cursor_y,
+                    start_height: self.height(track_id),
+                    targets: if ctx.all_tracks {
+                        ctx.track_ids.to_vec()
+                    } else {
+                        vec![track_id]
+                    },
+                    changed: false,
+                });
+            }
+            TrackHeightMsg::DragTo(cursor_y) => {
+                if let Some(resize) = &mut self.resize {
+                    let height = clamp_height(resize.start_height + cursor_y - resize.anchor_y);
+                    for &track_id in &resize.targets {
+                        let previous = self.heights.get(&track_id).copied();
+                        if previous.unwrap_or(DEFAULT_TRACK_HEIGHT) != height {
+                            self.heights.insert(track_id, height);
+                            resize.changed = true;
+                        }
+                    }
+                }
+            }
+            TrackHeightMsg::EndResize => {
+                action.mark_dirty = self.resize.take().is_some_and(|resize| resize.changed);
+            }
+        }
+        action
     }
 }
 
