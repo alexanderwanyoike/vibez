@@ -787,7 +787,7 @@ impl AppState {
     }
 
     pub fn position_beats(&self) -> f64 {
-        self.position_seconds() * self.transport.bpm / 60.0
+        self.transport.position_beats()
     }
 
     pub fn duration_seconds(&self) -> f64 {

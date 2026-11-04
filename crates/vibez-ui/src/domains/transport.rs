@@ -108,6 +108,10 @@ impl TransportState {
         };
     }
 
+    pub fn position_beats(&self) -> f64 {
+        self.position_samples as f64 / self.sample_rate as f64 * self.bpm / 60.0
+    }
+
     pub fn samples_per_beat(&self) -> f64 {
         vibez_core::time::TempoMap::new(self.bpm, self.sample_rate).samples_per_beat()
     }
