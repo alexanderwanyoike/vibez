@@ -1071,6 +1071,40 @@ impl GridConfig {
         }
     }
 
+    pub fn narrow(&mut self) {
+        if self.adaptive {
+            self.adaptive_bias = (self.adaptive_bias + 1).min(6);
+        } else {
+            self.selected = self.selected.narrower();
+        }
+    }
+
+    pub fn widen(&mut self) {
+        if self.adaptive {
+            self.adaptive_bias = (self.adaptive_bias - 1).max(-6);
+        } else {
+            self.selected = self.selected.wider();
+        }
+    }
+
+    pub fn toggle_triplet(&mut self) {
+        self.selected = self.selected.toggle_triplet();
+    }
+
+    pub fn toggle_snap(&mut self) {
+        self.snap_enabled = !self.snap_enabled;
+    }
+
+    pub fn toggle_adaptive(&mut self) {
+        self.adaptive = !self.adaptive;
+    }
+
+    pub fn select_fixed(&mut self, grid: SnapGrid) {
+        self.selected = grid;
+        self.adaptive = false;
+        self.adaptive_bias = 0;
+    }
+
     pub fn effective_grid(self, pixels_per_beat: f32) -> SnapGrid {
         if self.adaptive {
             SnapGrid::adaptive(

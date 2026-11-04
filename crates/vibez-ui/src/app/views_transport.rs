@@ -414,17 +414,17 @@ impl App {
             grid_picker,
             grid_toggle(
                 "SNAP",
-                self.state.view.snap_enabled,
+                self.state.view.grid.snap_enabled,
                 ViewMsg::ToggleSnapToGrid,
             ),
             grid_toggle(
                 "T",
-                self.state.view.snap_grid.is_triplet(),
+                self.state.view.grid.selected.is_triplet(),
                 ViewMsg::ToggleTripletGrid,
             ),
             grid_toggle(
                 "AUTO",
-                self.state.view.adaptive_grid,
+                self.state.view.grid.adaptive,
                 ViewMsg::ToggleAdaptiveGrid,
             ),
         ]

@@ -113,10 +113,7 @@ pub struct ViewState {
     pub viewport: crate::timeline_geometry::TimelineViewport,
     /// The Arrange view a zoom to selection replaced, for zoom back.
     pub zoom_before_selection: Option<crate::timeline_geometry::TimelineViewport>,
-    pub snap_grid: SnapGrid,
-    pub snap_enabled: bool,
-    pub adaptive_grid: bool,
-    pub adaptive_grid_bias: i8,
+    pub grid: GridConfig,
     pub context_menu: Option<ContextMenu>,
     pub drum_rack_slice_dialog: Option<DrumRackSliceDialog>,
     pub transient_analysis_dialog: Option<TransientAnalysisDialog>,
@@ -151,10 +148,7 @@ impl Default for ViewState {
             perform_surface_resize_active: false,
             viewport: crate::timeline_geometry::TimelineViewport::new(1.0, 0.0),
             zoom_before_selection: None,
-            snap_grid: SnapGrid::EIGHTH,
-            snap_enabled: true,
-            adaptive_grid: false,
-            adaptive_grid_bias: 0,
+            grid: GridConfig::new(SnapGrid::EIGHTH, true, false, 0),
             context_menu: None,
             drum_rack_slice_dialog: None,
             transient_analysis_dialog: None,
@@ -220,12 +214,7 @@ impl ViewState {
     }
 
     pub fn grid_config(&self) -> GridConfig {
-        GridConfig::new(
-            self.snap_grid,
-            self.snap_enabled,
-            self.adaptive_grid,
-            self.adaptive_grid_bias,
-        )
+        self.grid
     }
 
     pub fn dismiss_clip_dialogs_for(

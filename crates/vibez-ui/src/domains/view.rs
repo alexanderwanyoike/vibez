@@ -200,34 +200,12 @@ impl ViewState {
                     self.viewport.clamp(ctx.total_beats, ctx.lane_width);
                 }
             }
-            ViewMsg::SetSnapGrid(grid) => {
-                self.snap_grid = grid;
-                self.adaptive_grid = false;
-                self.adaptive_grid_bias = 0;
-            }
-            ViewMsg::NarrowGrid => {
-                if self.adaptive_grid {
-                    self.adaptive_grid_bias = (self.adaptive_grid_bias + 1).min(6);
-                } else {
-                    self.snap_grid = self.snap_grid.narrower();
-                }
-            }
-            ViewMsg::WidenGrid => {
-                if self.adaptive_grid {
-                    self.adaptive_grid_bias = (self.adaptive_grid_bias - 1).max(-6);
-                } else {
-                    self.snap_grid = self.snap_grid.wider();
-                }
-            }
-            ViewMsg::ToggleTripletGrid => {
-                self.snap_grid = self.snap_grid.toggle_triplet();
-            }
-            ViewMsg::ToggleSnapToGrid => {
-                self.snap_enabled = !self.snap_enabled;
-            }
-            ViewMsg::ToggleAdaptiveGrid => {
-                self.adaptive_grid = !self.adaptive_grid;
-            }
+            ViewMsg::SetSnapGrid(grid) => self.grid.select_fixed(grid),
+            ViewMsg::NarrowGrid => self.grid.narrow(),
+            ViewMsg::WidenGrid => self.grid.widen(),
+            ViewMsg::ToggleTripletGrid => self.grid.toggle_triplet(),
+            ViewMsg::ToggleSnapToGrid => self.grid.toggle_snap(),
+            ViewMsg::ToggleAdaptiveGrid => self.grid.toggle_adaptive(),
             ViewMsg::BeginDetailPanelResize => {
                 self.detail_panel_resize_active = true;
             }
@@ -846,40 +824,40 @@ mod tests {
     #[test]
     fn grid_commands_update_the_shared_editor_grid() {
         let mut v = ViewState::default();
-        assert_eq!(v.snap_grid, SnapGrid::EIGHTH);
-        assert!(v.snap_enabled);
-        assert!(!v.adaptive_grid);
+        assert_eq!(v.grid.selected, SnapGrid::EIGHTH);
+        assert!(v.grid.snap_enabled);
+        assert!(!v.grid.adaptive);
 
         v.update(
             ViewMsg::NarrowGrid,
             &TimelineEditorState::default(),
             ViewCtx::default(),
         );
-        assert_eq!(v.snap_grid, SnapGrid::SIXTEENTH);
+        assert_eq!(v.grid.selected, SnapGrid::SIXTEENTH);
         v.update(
             ViewMsg::WidenGrid,
             &TimelineEditorState::default(),
             ViewCtx::default(),
         );
-        assert_eq!(v.snap_grid, SnapGrid::EIGHTH);
+        assert_eq!(v.grid.selected, SnapGrid::EIGHTH);
         v.update(
             ViewMsg::ToggleTripletGrid,
             &TimelineEditorState::default(),
             ViewCtx::default(),
         );
-        assert_eq!(v.snap_grid, SnapGrid::EIGHTH.triplet());
+        assert_eq!(v.grid.selected, SnapGrid::EIGHTH.triplet());
         v.update(
             ViewMsg::ToggleSnapToGrid,
             &TimelineEditorState::default(),
             ViewCtx::default(),
         );
-        assert!(!v.snap_enabled);
+        assert!(!v.grid.snap_enabled);
         v.update(
             ViewMsg::ToggleAdaptiveGrid,
             &TimelineEditorState::default(),
             ViewCtx::default(),
         );
-        assert!(v.adaptive_grid);
+        assert!(v.grid.adaptive);
         assert_eq!(
             v.grid_config().effective_grid(20.0),
             SnapGrid::QUARTER.triplet()
