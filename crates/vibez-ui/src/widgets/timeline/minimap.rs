@@ -155,9 +155,7 @@ impl canvas::Program<Message> for ArrangementMinimap {
         }
 
         // Viewport rectangle
-        let visible = self.visible_beats(w);
-        let vx_start = overview.beat_to_x(self.scroll_offset_beats);
-        let vx_end = overview.beat_to_x(self.scroll_offset_beats + visible);
+        let (vx_start, vx_end) = self.view_box_x(overview, w);
         let vx = vx_start.max(0.0);
         let vw = vx_end.min(w) - vx;
         if vw > 0.0 {
