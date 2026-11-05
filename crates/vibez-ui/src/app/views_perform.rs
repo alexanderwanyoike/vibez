@@ -607,6 +607,15 @@ mod tests {
     }
 
     #[test]
+    fn the_section_timeline_spans_the_card_beside_its_track_gutter() {
+        let app = super::super::test_support::app();
+        assert_eq!(
+            app.section_timeline_viewport_width(),
+            app.section_construction_width() - SECTION_TRACK_GUTTER_WIDTH
+        );
+    }
+
+    #[test]
     fn section_toolbar_stacks_before_identity_text_collapses() {
         assert!(section_toolbar_stacks(SECTION_CONSTRUCTION_MIN_WIDTH));
         assert!(!section_toolbar_stacks(760.0));
