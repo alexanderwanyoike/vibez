@@ -553,12 +553,40 @@ impl Oklch {
         }
     }
 
-    pub fn of(_c: Color) -> Self {
-        todo!()
+    pub fn of(c: Color) -> Self {
+        let (r, g, b) = (linear(c.r), linear(c.g), linear(c.b));
+        let l = (0.412_221_46 * r + 0.536_332_55 * g + 0.051_445_995 * b).cbrt();
+        let m = (0.211_903_5 * r + 0.680_699_5 * g + 0.107_396_96 * b).cbrt();
+        let s = (0.088_302_46 * r + 0.281_718_85 * g + 0.629_978_7 * b).cbrt();
+        let a = 1.977_998_5 * l - 2.428_592_2 * m + 0.450_593_7 * s;
+        let b = 0.025_904_037 * l + 0.782_771_77 * m - 0.808_675_77 * s;
+        Self {
+            lightness: 0.210_454_26 * l + 0.793_617_8 * m - 0.004_072_047 * s,
+            chroma: a.hypot(b),
+            hue: b.atan2(a).to_degrees().rem_euclid(360.0),
+        }
     }
 
+    /// The sRGB colour, each channel clipped into gamut.
     pub fn color(self) -> Color {
-        todo!()
+        let (sin, cos) = self.hue.to_radians().sin_cos();
+        let (a, b) = (self.chroma * cos, self.chroma * sin);
+        let l = (self.lightness + 0.396_337_78 * a + 0.215_803_76 * b).powi(3);
+        let m = (self.lightness - 0.105_561_35 * a - 0.063_854_17 * b).powi(3);
+        let s = (self.lightness - 0.089_484_18 * a - 1.291_485_5 * b).powi(3);
+        let encoded = |v: f32| {
+            let v = v.clamp(0.0, 1.0);
+            if v <= 0.003_130_8 {
+                12.92 * v
+            } else {
+                1.055 * v.powf(1.0 / 2.4) - 0.055
+            }
+        };
+        Color::from_rgb(
+            encoded(4.076_741_7 * l - 3.307_711_6 * m + 0.230_969_94 * s),
+            encoded(-1.268_438 * l + 2.609_757_4 * m - 0.341_319_38 * s),
+            encoded(-0.004_196_086_3 * l - 0.703_418_6 * m + 1.707_614_7 * s),
+        )
     }
 }
 
