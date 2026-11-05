@@ -1,7 +1,7 @@
 //! Shared visual language and hit testing for loop braces.
 
 use iced::widget::canvas;
-use iced::{Color, Point};
+use iced::{mouse, Color, Point};
 
 use crate::state::UndoGestureId;
 use crate::widgets::span_edges::{nearest_edge, span_with_end, span_with_start, SpanEdge};
@@ -19,6 +19,16 @@ pub(crate) enum LoopMarker {
     End,
     /// The bar between the handles, which carries the whole loop.
     Body,
+}
+
+impl LoopMarker {
+    pub(crate) fn interaction(self, dragging: bool) -> mouse::Interaction {
+        match self {
+            Self::Start | Self::End => mouse::Interaction::ResizingHorizontally,
+            Self::Body if dragging => mouse::Interaction::Grabbing,
+            Self::Body => mouse::Interaction::Grab,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -88,8 +98,14 @@ pub(crate) fn hit_test(
     if position.y < 0.0 || position.y > rail_height {
         return None;
     }
-    nearest_end(start_x, end_x, position.x, HIT_RADIUS).or_else(|| {
-        let inside = position.x > start_x.min(end_x) && position.x < start_x.max(end_x);
+    marker_at(start_x, end_x, position.x, HIT_RADIUS)
+}
+
+/// The part of a brace from `start_x` to `end_x` under `x`: an end within
+/// `radius`, else the body between them.
+pub(crate) fn marker_at(start_x: f32, end_x: f32, x: f32, radius: f32) -> Option<LoopMarker> {
+    nearest_end(start_x, end_x, x, radius).or_else(|| {
+        let inside = x > start_x.min(end_x) && x < start_x.max(end_x);
         inside.then_some(LoopMarker::Body)
     })
 }

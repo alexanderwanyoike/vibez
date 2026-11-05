@@ -16,7 +16,7 @@ use crate::state::{
 use crate::timeline_geometry::{TimelineGeometry, TimelineViewport};
 use crate::timeline_snap::SnapTargets;
 use crate::widgets::clip_editor_view::{wheel_intent, ClipEditorView, RulerZoom, WheelIntent};
-use crate::widgets::clip_loop_markers::{self, LoopDrag, LoopMarker};
+use crate::widgets::clip_loop_markers::{self, LoopDrag};
 use crate::widgets::double_click::DoubleClick;
 use crate::widgets::drag_phase::{past_click_slop, DragPhase};
 use crate::widgets::local_drag::LocalDrag;
@@ -487,10 +487,8 @@ impl canvas::Program<Message> for PianoRollWidget {
             if self.hit_test_start_marker(pos, &bounds) {
                 return mouse::Interaction::ResizingHorizontally;
             }
-            match self.hit_test_loop_marker(pos, &bounds) {
-                Some(LoopMarker::Body) => return mouse::Interaction::Grab,
-                Some(_) => return mouse::Interaction::ResizingHorizontally,
-                None => {}
+            if let Some(marker) = self.hit_test_loop_marker(pos, &bounds) {
+                return marker.interaction(false);
             }
         }
 
