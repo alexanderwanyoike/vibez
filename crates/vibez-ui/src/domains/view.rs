@@ -561,6 +561,33 @@ mod tests {
     }
 
     #[test]
+    fn zoom_back_stays_inside_a_song_that_has_since_shrunk() {
+        let mut view = ViewState {
+            viewport: TimelineViewport::new(2.0, 300.0),
+            ..ViewState::default()
+        };
+        let timeline = TimelineEditorState {
+            time_selection_active: true,
+            selection_start_beats: 64.0,
+            selection_end_beats: 80.0,
+            ..TimelineEditorState::default()
+        };
+        view.update(ViewMsg::ZoomToSelection, &timeline, selection_ctx());
+        let shrunk = ViewCtx {
+            total_beats: 100.0,
+            ..selection_ctx()
+        };
+
+        view.update(ViewMsg::ZoomBack, &timeline, shrunk);
+
+        assert_eq!(view.viewport.zoom_level, 2.0);
+        assert_eq!(
+            view.viewport.scroll_offset_beats,
+            view.viewport.max_scroll(100.0, LANE_WIDTH)
+        );
+    }
+
+    #[test]
     fn zoom_back_remembers_one_level_only() {
         let mut view = zoomed_out_view();
         let timeline = TimelineEditorState {
