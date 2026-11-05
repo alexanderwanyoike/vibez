@@ -14,6 +14,7 @@ use crate::icons;
 use crate::message::Message;
 use crate::state::ProjectTrack;
 use crate::theme as th;
+use crate::widgets::control_style;
 use crate::widgets::fader::HorizontalFaderWidget;
 use crate::widgets::vu_meter::HorizontalVuMeterWidget;
 use vibez_core::id::TrackId;
@@ -283,104 +284,26 @@ pub fn view_track_header<'a>(
     .height(Length::Fixed(NAME_ROW_HEIGHT))
     .align_y(iced::Alignment::Center);
 
-    // Row 2: Mute/Solo buttons with filled backgrounds when active
-    let mute_btn = {
-        let label = text("M").size(11);
-        if track.mute {
-            button(label.color(th::bg_dark()))
-                .on_press(Message::set_track_mute(track.id))
-                .padding([3, 8])
-                .style(move |_theme: &Theme, _status| button::Style {
-                    background: Some(th::mute_active().into()),
-                    text_color: th::bg_dark(),
-                    border: iced::Border {
-                        radius: 2.0.into(),
-                        ..Default::default()
-                    },
-                    ..Default::default()
-                })
-        } else {
-            button(label.color(th::text_dim()))
-                .on_press(Message::set_track_mute(track.id))
-                .padding([3, 8])
-                .style(move |_theme: &Theme, _status| button::Style {
-                    background: Some(th::bg_elevated().into()),
-                    text_color: th::text_dim(),
-                    border: iced::Border {
-                        color: th::border(),
-                        width: 1.0,
-                        radius: 2.0.into(),
-                    },
-                    ..Default::default()
-                })
-        }
-    };
-
-    let solo_btn = {
-        let label = text("S").size(11);
-        if track.solo {
-            button(label.color(th::bg_dark()))
-                .on_press(Message::set_track_solo(track.id))
-                .padding([3, 8])
-                .style(move |_theme: &Theme, _status| button::Style {
-                    background: Some(th::solo_active().into()),
-                    text_color: th::bg_dark(),
-                    border: iced::Border {
-                        radius: 2.0.into(),
-                        ..Default::default()
-                    },
-                    ..Default::default()
-                })
-        } else {
-            button(label.color(th::text_dim()))
-                .on_press(Message::set_track_solo(track.id))
-                .padding([3, 8])
-                .style(move |_theme: &Theme, _status| button::Style {
-                    background: Some(th::bg_elevated().into()),
-                    text_color: th::text_dim(),
-                    border: iced::Border {
-                        color: th::border(),
-                        width: 1.0,
-                        radius: 2.0.into(),
-                    },
-                    ..Default::default()
-                })
-        }
-    };
+    let mute_btn = button(text("M").size(11))
+        .on_press(Message::set_track_mute(track.id))
+        .padding([3, 8])
+        .style(control_style::style(track.mute.then(th::mute_active)));
+    let solo_btn = button(text("S").size(11))
+        .on_press(Message::set_track_solo(track.id))
+        .padding([3, 8])
+        .style(control_style::style(track.solo.then(th::solo_active)));
 
     let track_controls: Element<'_, Message> = if shows_audio_input(track) {
-        let arm_color = if armed { th::danger() } else { th::text_dim() };
         let arm_icon = if armed {
             icons::CIRCLE_DOT
         } else {
             icons::CIRCLE
         };
-        let arm_btn = button(icons::icon(arm_icon).size(11).color(arm_color))
+        let arm_btn = button(icons::icon(arm_icon).size(11))
             .on_press(Message::ToggleAudioTrackArm(track.id))
             .width(Length::Fixed(25.0))
             .padding([3, 6])
-            .style(move |_theme: &Theme, status| {
-                let engaged = matches!(status, button::Status::Hovered | button::Status::Pressed);
-                button::Style {
-                    background: Some(
-                        if armed {
-                            th::blend(th::danger(), th::bg_dark(), 0.28)
-                        } else if engaged {
-                            th::bg_hover()
-                        } else {
-                            th::bg_dark()
-                        }
-                        .into(),
-                    ),
-                    text_color: arm_color,
-                    border: iced::Border {
-                        color: if armed { th::danger() } else { th::border() },
-                        width: 1.0,
-                        radius: 3.0.into(),
-                    },
-                    ..Default::default()
-                }
-            });
+            .style(control_style::style(armed.then(th::danger)));
         let mut routes = Vec::new();
         for channel in 0..audio_input_channels {
             let route = AudioInputRoute::Mono { channel };
