@@ -7,7 +7,7 @@ use vibez_core::id::{EffectId, TrackId};
 use vibez_core::midi::{InstrumentKind, TrackKind};
 use vibez_engine::commands::EngineCommand;
 
-use crate::state::ProjectTrack;
+use crate::state::{ProjectTrack, UndoGestureId};
 
 use super::*;
 
@@ -101,13 +101,18 @@ impl App {
         else {
             return false;
         };
-        if let Some(snapshot) = self.state.project.history.revert_gesture(gesture) {
-            self.apply_snapshot(snapshot);
-        }
+        self.revert_gesture(gesture);
         self.state.arrangement.end_drag_resize();
         self.state.perform.timeline_editor_mut().end_drag_resize();
         self.state.status_text = "Drag cancelled".into();
         true
+    }
+
+    /// Takes back every edit of `gesture`, which is still in flight.
+    pub(super) fn revert_gesture(&mut self, gesture: UndoGestureId) {
+        if let Some(snapshot) = self.state.project.history.revert_gesture(gesture) {
+            self.apply_snapshot(snapshot);
+        }
     }
 
     pub(super) fn apply_snapshot(&mut self, snapshot: crate::state::ProjectSnapshot) {
