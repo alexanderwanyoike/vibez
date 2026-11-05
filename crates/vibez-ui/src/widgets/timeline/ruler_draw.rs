@@ -3,6 +3,7 @@
 use iced::widget::canvas;
 use iced::{Point, Renderer, Size};
 
+use super::loop_tint::LoopSpan;
 use super::ruler::{RulerWidget, LOOP_STRIP_HEIGHT};
 use super::ruler_scale::{ruler_marks, RulerMark};
 use crate::theme;
@@ -71,16 +72,14 @@ impl RulerWidget {
     }
 
     fn paint_section_loop(&self, frame: &mut canvas::Frame, size: Size) {
-        if !self.loop_enabled || self.loop_end_beats <= self.loop_start_beats {
+        if !self.loop_enabled {
             return;
         }
-        let geometry = self.geometry();
-        let start = geometry.beat_to_x(self.loop_start_beats).max(0.0);
-        let end = geometry.beat_to_x(self.loop_end_beats).min(size.width);
-        if end > start {
+        let beats = (self.loop_start_beats, self.loop_end_beats);
+        if let Some(span) = LoopSpan::across(self.geometry(), size.width, beats) {
             frame.fill_rectangle(
-                Point::new(start, 0.0),
-                Size::new(end - start, size.height),
+                Point::new(span.start, 0.0),
+                Size::new(span.end - span.start, size.height),
                 theme::blend(
                     theme::ruler_bg(),
                     theme::accent(),
