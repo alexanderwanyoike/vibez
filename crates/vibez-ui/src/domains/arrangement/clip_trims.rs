@@ -21,7 +21,11 @@ impl TimelineEditorState {
         if spb <= 0.0 {
             return ArrangementAction::default();
         }
-        let Some(anchor_start) = self.clip_span(anchor, spb).map(|span| span.start_beats) else {
+        let origin = match &self.trim_origin {
+            Some(origin) if self.drag_resize_active => origin.clone(),
+            _ => self.trim_origin.insert(self.timeline.clone()).clone(),
+        };
+        let Some(anchor_start) = origin.clip_span(anchor, spb).map(|span| span.start_beats) else {
             return ArrangementAction::default();
         };
         let delta = new_start_beats - anchor_start;
@@ -33,25 +37,34 @@ impl TimelineEditorState {
         let shortest_frames = (SHORTEST_LENGTH_BEATS * spb).round() as u64;
         let mut changed = false;
         for target in targets {
+            let Some(lane) = origin.get(target.track_id()) else {
+                continue;
+            };
             match target {
                 ArrangementSelection::AudioClip { track_id, clip_id } => {
-                    let trimmed = self
+                    let Some(start) = lane.clips.iter().find(|c| c.id == clip_id) else {
+                        continue;
+                    };
+                    let trimmed =
+                        audio_start_trimmed(start, (delta * spb).round() as i64, shortest_frames)
+                            .unwrap_or_else(|| start.clone());
+                    let live = self
                         .find_content(track_id)
-                        .and_then(|t| t.clips.iter().find(|c| c.id == clip_id))
-                        .and_then(|clip| {
-                            audio_start_trimmed(clip, (delta * spb).round() as i64, shortest_frames)
-                        });
-                    if let Some(trimmed) = trimmed {
+                        .and_then(|t| t.clips.iter().find(|c| c.id == clip_id));
+                    if live != Some(&trimmed) {
                         changed = true;
                         self.replace_audio_clip(engine, track_id, clip_id, vec![trimmed]);
                     }
                 }
                 ArrangementSelection::NoteClip { track_id, clip_id } => {
-                    let trimmed = self
+                    let Some(start) = lane.note_clips.iter().find(|c| c.id == clip_id) else {
+                        continue;
+                    };
+                    let trimmed = note_start_trimmed(start, delta).unwrap_or_else(|| start.clone());
+                    let live = self
                         .find_content(track_id)
-                        .and_then(|t| t.note_clips.iter().find(|c| c.id == clip_id))
-                        .and_then(|clip| note_start_trimmed(clip, delta));
-                    if let Some(trimmed) = trimmed {
+                        .and_then(|t| t.note_clips.iter().find(|c| c.id == clip_id));
+                    if live != Some(&trimmed) {
                         changed = true;
                         self.replace_note_clip(engine, track_id, clip_id, vec![trimmed]);
                     }

@@ -133,6 +133,12 @@ impl TimelineEditorState {
         self.marquee = None;
     }
 
+    /// The drag in flight is over.
+    pub fn end_drag_resize(&mut self) {
+        self.drag_resize_active = false;
+        self.trim_origin = None;
+    }
+
     fn find_content(&self, track_id: TrackId) -> Option<&TrackTimelineContent> {
         self.timeline.get(track_id)
     }

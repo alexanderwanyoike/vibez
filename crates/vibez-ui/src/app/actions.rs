@@ -358,8 +358,8 @@ impl App {
             self.state.arrangement.selected_track = Some(track_id);
         }
         if action.end_drag_resize {
-            self.state.arrangement.drag_resize_active = false;
-            self.state.perform.timeline_editor_mut().drag_resize_active = false;
+            self.state.arrangement.end_drag_resize();
+            self.state.perform.timeline_editor_mut().end_drag_resize();
         }
         if action.close_device_menu {
             self.state.devices.context_menu = None;

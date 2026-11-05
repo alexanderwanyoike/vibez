@@ -457,6 +457,9 @@ pub struct TimelineEditorState {
     /// An arrangement drag (move/resize) is active; drives edge
     /// auto-scroll on ticks.
     pub drag_resize_active: bool,
+    /// The content a trim drag in flight began from. Each step trims from
+    /// it, so markers the edge passes over come back when it returns.
+    pub trim_origin: Option<Arc<TimelineContent>>,
     /// In-flight numeric Inspector edits. A missing entry means the control
     /// shows its committed Audio Clip value.
     pub audio_clip_inspector_edits: HashMap<(ClipId, AudioClipInspectorField), String>,
@@ -535,6 +538,7 @@ impl Default for TimelineEditorState {
             time_selection_track: None,
             marquee: None,
             drag_resize_active: false,
+            trim_origin: None,
             audio_clip_inspector_edits: HashMap::new(),
             audio_clip_transpose_debounce: HashMap::new(),
         }
