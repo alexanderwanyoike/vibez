@@ -434,6 +434,8 @@ impl ArrangementMsg {
             || matches!(
                 self,
                 Self::DuplicateSelectedClip
+                    | Self::MoveSelectedClips { .. }
+                    | Self::ResizeSelectedClips { .. }
                     | Self::SplitSelectedAtPlayhead
                     | Self::JoinSelectedClips
                     | Self::SubmitAudioClipInspectorField { .. }

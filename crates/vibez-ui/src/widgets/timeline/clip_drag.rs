@@ -1,6 +1,7 @@
 //! Pointer gestures that can own the per-track Clip canvas.
 
 use crate::state::{ArrangementSelection, UndoGestureId};
+use crate::widgets::drag_phase::DragPhase;
 use vibez_core::id::ClipId;
 
 use super::fade_drag::{CrossfadeCurveDrag, FadeClipDrag, FadeCurveDrag};
@@ -18,6 +19,9 @@ pub enum ClipDragAction {
         /// selection stays for a group drag, and a click without a drag
         /// narrows it to this Clip on release.
         collapse_to: Option<ArrangementSelection>,
+        /// Pending until the pointer travels past the click slop, so a
+        /// shaky click never moves the Clip.
+        phase: DragPhase,
     },
     ResizeClip {
         undo_gesture: UndoGestureId,

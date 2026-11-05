@@ -880,6 +880,96 @@ fn clicking_a_selected_clip_without_dragging_narrows_the_selection_to_it() {
     ));
 }
 
+/// The selected audio Clip moved off the grid, starting at beat 1.1.
+fn canvas_with_off_grid_audio_clip() -> (TrackClipCanvas, ClipId) {
+    let (mut canvas, clip_id) = canvas_with_selected_audio_clip();
+    canvas.clips[0].position = (1.1 * canvas.spb()).round() as u64;
+    (canvas, clip_id)
+}
+
+fn is_clip_edit(message: &Message) -> bool {
+    match message {
+        Message::UndoGesture { edit, .. } => is_clip_edit(edit),
+        Message::Arrangement(
+            ArrangementMsg::MoveSelectedClips { .. } | ArrangementMsg::ResizeSelectedClips { .. },
+        ) => true,
+        _ => false,
+    }
+}
+
+#[test]
+fn a_click_with_a_shaky_hand_never_moves_an_off_grid_clip() {
+    let (canvas, _) = canvas_with_off_grid_audio_clip();
+    let start = Point::new(canvas.beat_to_x(1.5), CLIP_Y + 4.0);
+    let jitter = Point::new(start.x + 3.0, start.y + 1.0);
+    let mut state = ClipInteractionState::default();
+
+    left_event(
+        &canvas,
+        &mut state,
+        iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left),
+        start,
+    );
+    let moved = left_event(
+        &canvas,
+        &mut state,
+        iced::mouse::Event::CursorMoved { position: jitter },
+        jitter,
+    );
+    let released = left_event(
+        &canvas,
+        &mut state,
+        iced::mouse::Event::ButtonReleased(iced::mouse::Button::Left),
+        jitter,
+    );
+
+    assert!(
+        !moved.as_ref().is_some_and(is_clip_edit),
+        "3 px of travel is a click: {moved:?}"
+    );
+    assert!(!released.as_ref().is_some_and(is_clip_edit), "{released:?}");
+}
+
+#[test]
+fn dragging_an_off_grid_clip_moves_it_by_whole_grid_steps_keeping_its_offset() {
+    let (canvas, clip_id) = canvas_with_off_grid_audio_clip();
+    let start = Point::new(canvas.beat_to_x(1.5), CLIP_Y + 4.0);
+    let mut state = ClipInteractionState::default();
+
+    left_event(
+        &canvas,
+        &mut state,
+        iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left),
+        start,
+    );
+    // 1.1 beats of travel on the 1/8 grid is two grid steps.
+    let target = Point::new(canvas.beat_to_x(2.6), start.y);
+    let moved = left_event(
+        &canvas,
+        &mut state,
+        iced::mouse::Event::CursorMoved { position: target },
+        target,
+    );
+
+    match moved {
+        Some(Message::UndoGesture { edit, .. }) => match *edit {
+            Message::Arrangement(ArrangementMsg::MoveSelectedClips {
+                anchor,
+                new_position_beats,
+                ..
+            }) => {
+                assert_eq!(anchor, clip_id);
+                assert!(
+                    (new_position_beats - 2.1).abs() < 1e-4,
+                    "moved to {new_position_beats}"
+                );
+            }
+            other => panic!("expected a clip move, got {other:?}"),
+        },
+        other => panic!("expected a clip move, got {other:?}"),
+    }
+}
+
 #[test]
 fn one_clip_edit_key_press_emits_one_message_whatever_the_lane_count() {
     let lanes: Vec<_> = (0..3)
