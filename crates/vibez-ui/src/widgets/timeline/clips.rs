@@ -423,10 +423,10 @@ impl canvas::Program<Message> for TrackClipCanvas {
                 if in_title_bar {
                     return mouse::Interaction::Grab;
                 }
-                // A click in the body seeks and a drag selects time.
-                return mouse::Interaction::Text;
             }
-            return mouse::Interaction::Idle;
+            // A click on a clip body or an empty lane seeks and a drag
+            // selects time, so both show the same I-beam.
+            return mouse::Interaction::Text;
         }
 
         mouse::Interaction::default()
