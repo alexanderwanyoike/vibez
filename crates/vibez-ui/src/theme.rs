@@ -537,11 +537,6 @@ impl Oklch {
 
     /// The sRGB colour, each channel clipped into gamut.
     pub fn color(self) -> Color {
-        let (sin, cos) = self.hue.to_radians().sin_cos();
-        let (a, b) = (self.chroma * cos, self.chroma * sin);
-        let l = (self.lightness + 0.396_337_78 * a + 0.215_803_76 * b).powi(3);
-        let m = (self.lightness - 0.105_561_35 * a - 0.063_854_17 * b).powi(3);
-        let s = (self.lightness - 0.089_484_18 * a - 1.291_485_5 * b).powi(3);
         let encoded = |v: f32| {
             let v = v.clamp(0.0, 1.0);
             if v <= 0.003_130_8 {
@@ -550,11 +545,22 @@ impl Oklch {
                 1.055 * v.powf(1.0 / 2.4) - 0.055
             }
         };
-        Color::from_rgb(
-            encoded(4.076_741_7 * l - 3.307_711_6 * m + 0.230_969_94 * s),
-            encoded(-1.268_438 * l + 2.609_757_4 * m - 0.341_319_38 * s),
-            encoded(-0.004_196_086_3 * l - 0.703_418_6 * m + 1.707_614_7 * s),
-        )
+        let [r, g, b] = self.linear_rgb();
+        Color::from_rgb(encoded(r), encoded(g), encoded(b))
+    }
+
+    /// Linear-light sRGB channels, outside 0..=1 when out of gamut.
+    fn linear_rgb(self) -> [f32; 3] {
+        let (sin, cos) = self.hue.to_radians().sin_cos();
+        let (a, b) = (self.chroma * cos, self.chroma * sin);
+        let l = (self.lightness + 0.396_337_78 * a + 0.215_803_76 * b).powi(3);
+        let m = (self.lightness - 0.105_561_35 * a - 0.063_854_17 * b).powi(3);
+        let s = (self.lightness - 0.089_484_18 * a - 1.291_485_5 * b).powi(3);
+        [
+            4.076_741_7 * l - 3.307_711_6 * m + 0.230_969_94 * s,
+            -1.268_438 * l + 2.609_757_4 * m - 0.341_319_38 * s,
+            -0.004_196_086_3 * l - 0.703_418_6 * m + 1.707_614_7 * s,
+        ]
     }
 }
 
