@@ -556,6 +556,41 @@ fn a_typed_loop_end_may_pass_the_clip_end_but_not_the_source_end() {
 }
 
 #[test]
+fn shortening_the_source_end_below_the_loop_end_keeps_the_loop() {
+    let mut a = arrangement_with_tracks(1);
+    let (tid, cid) = add_audio_clip(&mut a, 0, 0, 88_200);
+    let clip = &mut a.tracks[0].clips[0];
+    clip.loop_enabled = true;
+    clip.loop_end = 66_150;
+    let mut engine = RecordingEngine::default();
+    a.audio_clip_inspector_edits
+        .insert((cid, AudioClipInspectorField::SourceEnd), "1.000".into());
+
+    let action = a.update(
+        ArrangementMsg::SubmitAudioClipInspectorField {
+            track_id: tid,
+            clip_id: cid,
+            field: AudioClipInspectorField::SourceEnd,
+        },
+        &mut engine,
+        ArrangementCtx::default(),
+    );
+
+    assert!(action.mark_dirty);
+    let clip = &a.tracks[0].clips[0];
+    assert_eq!(clip.duration, 44_100);
+    assert_eq!((clip.loop_start, clip.loop_end), (0, 66_150));
+    assert!(engine.0.iter().any(|command| matches!(
+        command,
+        EngineCommand::SetClipLoop {
+            loop_start: 0,
+            loop_end: 66_150,
+            ..
+        }
+    )));
+}
+
+#[test]
 fn typed_transpose_rounds_fractional_semitones() {
     let mut a = arrangement_with_tracks(1);
     let (tid, cid) = add_audio_clip(&mut a, 0, 0, 44_100);
