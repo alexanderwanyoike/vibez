@@ -505,6 +505,16 @@ mod tests {
     }
 
     #[test]
+    fn the_mix_split_is_unset_in_an_old_file_and_roundtrips() {
+        let mix_split = |json: &str| {
+            let settings: UiSettings = serde_json::from_str(json).unwrap();
+            serde_json::to_value(settings).unwrap()["mix_detail_panel_height"].clone()
+        };
+        assert_eq!(mix_split("{}"), serde_json::Value::Null);
+        assert_eq!(mix_split(r#"{"mix_detail_panel_height": 312.0}"#), 312.0);
+    }
+
+    #[test]
     fn detail_panel_height_defaults_and_roundtrips() {
         let old: UiSettings = serde_json::from_str("{}").unwrap();
         assert_eq!(

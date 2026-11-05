@@ -991,4 +991,18 @@ mod tests {
 
         assert!(app.state.view.zoom_before_selection.is_none());
     }
+
+    #[test]
+    fn ui_json_saves_the_mix_split_beside_the_arrange_one() {
+        let mut app = super::super::test_support::app();
+        app.state.view.mix_detail_panel_height = Some(312.0);
+
+        let saved = serde_json::to_value(app.ui_settings()).unwrap();
+
+        assert_eq!(saved["mix_detail_panel_height"], 312.0);
+        assert_eq!(
+            saved["detail_panel_height"],
+            f64::from(crate::state::DETAIL_PANEL_DEFAULT_HEIGHT)
+        );
+    }
 }
