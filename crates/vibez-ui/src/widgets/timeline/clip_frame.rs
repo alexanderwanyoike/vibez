@@ -6,14 +6,13 @@ use iced::{Point, Rectangle, Size};
 
 use super::clip_colors::ClipColors;
 use super::clip_title::draw_clip_title;
-use super::CLIP_TITLE_HEIGHT;
+use super::{CLIP_TITLE_HEIGHT, CORNER_RADIUS};
 
 /// Lane left showing after each clip, so back-to-back clips of one track
 /// still read as separate clips when zoomed out to the whole song.
 const CLIP_GAP: f32 = 1.0;
 
 const SELECTION_WIDTH: f32 = 1.0;
-const CORNER_RADIUS: f32 = 3.0;
 /// How far past the viewport a cut clip is still painted, so its square cut
 /// end never shows.
 const OFFSCREEN_OVERHANG: f32 = 2.0;

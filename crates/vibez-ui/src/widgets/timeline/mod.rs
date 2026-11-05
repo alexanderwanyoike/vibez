@@ -212,6 +212,10 @@ pub fn compute_clip_peaks(clip: &crate::state::UiClip) -> Arc<Vec<(f32, f32)>> {
 
 // ── RulerWidget ──
 
+/// The corner radius of clips, the overview's view box and the tools
+/// around a timeline.
+pub const CORNER_RADIUS: f32 = 3.0;
+
 /// Widest a Clip's resize zone gets, at either edge.
 pub(super) const RESIZE_EDGE_PX: f32 = 8.0;
 /// Share of a Clip's width each resize zone may take, so a narrow Clip

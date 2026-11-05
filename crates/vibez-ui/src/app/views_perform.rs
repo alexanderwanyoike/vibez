@@ -12,6 +12,7 @@ use crate::theme as th;
 use crate::typography::{PERFORM_DISPLAY, PERFORM_LABEL, PERFORM_TECH, PERFORM_TECH_STRONG};
 use crate::widgets::hint::with_hint;
 use crate::widgets::shell_card::shell_card;
+use crate::widgets::timeline::CORNER_RADIUS as TIMELINE_RADIUS;
 
 use super::*;
 
@@ -23,9 +24,6 @@ const PAD_SURFACE_MIN_WIDTH: f32 = 320.0;
 const SECTION_CONSTRUCTION_MIN_WIDTH: f32 = 460.0;
 const SECTION_TOOLBAR_INLINE_MIN_WIDTH: f32 = 640.0;
 pub(super) const SECTION_TRACK_GUTTER_WIDTH: f32 = 112.0;
-pub(super) const SECTION_SCROLLBAR_SPACING: f32 = 1.0;
-pub(super) const SECTION_SCROLLBAR_RESERVATION: f32 =
-    crate::widgets::quiet_scroll::THICKNESS + SECTION_SCROLLBAR_SPACING;
 
 pub(super) fn perform_tool_button(
     icon: char,
@@ -73,7 +71,7 @@ pub(super) fn perform_tool_button(
                     th::border()
                 },
                 width: 1.0,
-                radius: 3.0.into(),
+                radius: TIMELINE_RADIUS.into(),
             },
             ..Default::default()
         }
@@ -152,10 +150,7 @@ impl App {
     }
 
     pub(super) fn section_timeline_viewport_width(&self) -> f32 {
-        (self.section_construction_width()
-            - SECTION_TRACK_GUTTER_WIDTH
-            - SECTION_SCROLLBAR_RESERVATION)
-            .max(1.0)
+        (self.section_construction_width() - SECTION_TRACK_GUTTER_WIDTH).max(1.0)
     }
 
     pub(super) fn perform_surface_drag_width(&self, cursor_x: f32) -> f32 {
@@ -323,15 +318,6 @@ impl App {
             .align_y(iced::Alignment::Center)
             .padding([12, 16])
             .width(Length::Fill)
-            .style(|_theme: &Theme| container::Style {
-                background: Some(th::bg_surface().into()),
-                border: iced::Border {
-                    color: th::border(),
-                    width: 1.0,
-                    radius: 0.0.into(),
-                },
-                ..Default::default()
-            })
             .into();
         };
 
@@ -446,7 +432,7 @@ impl App {
                         th::border_light()
                     },
                     width: 1.0,
-                    radius: 1.0.into(),
+                    radius: TIMELINE_RADIUS.into(),
                 },
             }
         })
@@ -534,7 +520,7 @@ impl App {
             border: iced::Border {
                 color: th::border_light(),
                 width: 1.0,
-                radius: 3.0.into(),
+                radius: TIMELINE_RADIUS.into(),
             },
             ..Default::default()
         });
@@ -560,18 +546,7 @@ impl App {
                 .into()
         };
 
-        container(toolbar)
-            .width(Length::Fill)
-            .style(|_theme: &Theme| container::Style {
-                background: Some(th::bg_surface().into()),
-                border: iced::Border {
-                    color: th::border(),
-                    width: 1.0,
-                    radius: 0.0.into(),
-                },
-                ..Default::default()
-            })
-            .into()
+        container(toolbar).width(Length::Fill).into()
     }
 }
 
@@ -604,6 +579,15 @@ mod tests {
         assert_eq!(effective_perform_surface_width(640.0, 1400.0), 640.0);
         assert_eq!(effective_perform_surface_width(1200.0, 1400.0), 932.0);
         assert_eq!(effective_perform_surface_width(500.0, 820.0), 352.0);
+    }
+
+    #[test]
+    fn the_section_timeline_spans_the_card_beside_its_track_gutter() {
+        let app = super::super::test_support::app();
+        assert_eq!(
+            app.section_timeline_viewport_width(),
+            app.section_construction_width() - SECTION_TRACK_GUTTER_WIDTH
+        );
     }
 
     #[test]
