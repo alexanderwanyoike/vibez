@@ -11,8 +11,6 @@ pub(super) const BAR_HEIGHT: f32 = 56.0;
 pub(super) const GROUP_INSET: f32 = 2.0;
 const GROUP_RADIUS: f32 = 7.0;
 const SEGMENT_RADIUS: f32 = 5.0;
-/// How far a lit segment's background leans toward its colour.
-const LIT_TINT: f32 = 0.2;
 pub(super) const DISPLAY_HEIGHT: f32 = 42.0;
 const DISPLAY_LABEL_SIZE: f32 = 8.0;
 
@@ -23,30 +21,30 @@ pub(super) fn bar(_theme: &Theme) -> container::Style {
     }
 }
 
-/// The hairline under the bar.
+/// The groove under the bar.
 pub(super) fn bar_rule<'a>() -> Element<'a, Message> {
-    rule(Length::Fill, Length::Fixed(1.0))
+    rule(Length::Fill, Length::Fixed(1.0), th::display_bg())
 }
 
-/// A joined group of segments on one raised strip.
+/// A joined group of segments sunk into one recessed well.
 pub(super) fn group(_theme: &Theme) -> container::Style {
     container::Style {
-        background: Some(th::bg_elevated().into()),
+        background: Some(th::display_bg().into()),
         border: Border {
-            color: th::border(),
-            width: 1.0,
             radius: GROUP_RADIUS.into(),
+            ..Default::default()
         },
         ..Default::default()
     }
 }
 
-/// A segment inside a group; `lit` is the colour it shows while on.
+/// A segment inside a group, raised onto the control shade while on and
+/// showing `lit`, its colour then.
 pub(super) fn segment(lit: Option<Color>) -> impl Fn(&Theme, button::Status) -> button::Style {
     move |_theme, status| {
         let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
         let background = match lit {
-            Some(color) => Some(th::blend(th::bg_elevated(), color, LIT_TINT).into()),
+            Some(_) => Some(th::control().into()),
             None if hovered => Some(th::bg_hover().into()),
             None => None,
         };
@@ -122,22 +120,20 @@ pub(super) fn group_pick_list_menu(_theme: &Theme) -> iced::widget::overlay::men
     }
 }
 
-/// The recessed position display, darker than the bar in a dark theme and
-/// lighter in a light one.
+/// The recessed position display.
 pub(super) fn display(_theme: &Theme) -> container::Style {
     container::Style {
-        background: Some(th::blend(th::bg_dark(), th::display_bg(), 0.5).into()),
+        background: Some(th::display_bg().into()),
         border: Border {
-            color: th::border(),
-            width: 1.0,
             radius: GROUP_RADIUS.into(),
+            ..Default::default()
         },
         ..Default::default()
     }
 }
 
 pub(super) fn display_divider<'a>() -> Element<'a, Message> {
-    rule(Length::Fixed(1.0), Length::Fill)
+    rule(Length::Fixed(1.0), Length::Fill, th::bg_dark())
 }
 
 /// An editable value in the display, drawn as plain readout text until it
@@ -174,10 +170,10 @@ pub(super) fn display_label<'a>(label: &'a str, color: Color) -> iced::widget::T
         .wrapping(text::Wrapping::None)
 }
 
-fn rule<'a>(width: Length, height: Length) -> Element<'a, Message> {
+fn rule<'a>(width: Length, height: Length, colour: Color) -> Element<'a, Message> {
     container(Space::new(width, height))
-        .style(|_theme: &Theme| container::Style {
-            background: Some(th::border().into()),
+        .style(move |_theme: &Theme| container::Style {
+            background: Some(colour.into()),
             ..Default::default()
         })
         .into()
