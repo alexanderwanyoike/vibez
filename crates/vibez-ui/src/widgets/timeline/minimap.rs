@@ -8,7 +8,7 @@ use crate::domains::view::ViewMsg;
 use crate::message::Message;
 use crate::theme;
 use crate::timeline_geometry::{TimelineGeometry, TimelineViewport};
-use crate::widgets::clip_loop_markers::{loop_with_end, loop_with_start, nearest_end, LoopMarker};
+use crate::widgets::span_edges::{nearest_edge, span_with_end, span_with_start, SpanEdge};
 
 use super::loop_tint::LoopSpan;
 
@@ -59,22 +59,20 @@ impl ArrangementMinimap {
         (start - widen, end + widen)
     }
 
-    /// The view box edge a press at `x` grabs: whether it is the start, and
-    /// the beat the other edge keeps.
-    fn edge_at(&self, overview: TimelineGeometry, width: f32, x: f32) -> Option<(bool, f64)> {
+    /// The view box edge a press at `x` grabs, and the beat the other edge
+    /// keeps.
+    fn edge_at(&self, overview: TimelineGeometry, width: f32, x: f32) -> Option<(SpanEdge, f64)> {
         let (start_x, end_x) = self.view_box_x(overview, width);
         let inner_grab = ((end_x - start_x - MIN_BOX_PX) / 2.0).clamp(0.0, EDGE_GRAB_PX);
         if x > start_x + inner_grab && x < end_x - inner_grab {
             return None;
         }
-        nearest_end(start_x, end_x, x, EDGE_GRAB_PX).map(|edge| {
-            let start = edge == LoopMarker::Start;
-            let fixed = if start {
-                self.scroll_offset_beats + self.visible_beats(width)
-            } else {
-                self.scroll_offset_beats
+        nearest_edge(start_x, end_x, x, EDGE_GRAB_PX).map(|edge| {
+            let fixed = match edge {
+                SpanEdge::Start => self.scroll_offset_beats + self.visible_beats(width),
+                SpanEdge::End => self.scroll_offset_beats,
             };
-            (start, fixed)
+            (edge, fixed)
         })
     }
 }
@@ -91,10 +89,7 @@ enum MinimapDragAction {
     PanViewport { start_x: f32, start_scroll: f64 },
     /// Dragging one edge of the viewport rectangle: zooming with the other
     /// edge held at `fixed_beat`.
-    ResizeViewport {
-        dragging_start: bool,
-        fixed_beat: f64,
-    },
+    ResizeViewport { edge: SpanEdge, fixed_beat: f64 },
     /// Clicked outside viewport — continuously scroll to cursor.
     Seeking,
 }
@@ -227,13 +222,8 @@ impl canvas::Program<Message> for ArrangementMinimap {
             canvas::Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left)) => {
                 if let Some(pos) = cursor.position_in(bounds) {
                     let click_beat = overview.x_to_beat(pos.x);
-                    if let Some((dragging_start, fixed_beat)) =
-                        self.edge_at(overview, bounds.width, pos.x)
-                    {
-                        state.drag = Some(MinimapDragAction::ResizeViewport {
-                            dragging_start,
-                            fixed_beat,
-                        });
+                    if let Some((edge, fixed_beat)) = self.edge_at(overview, bounds.width, pos.x) {
+                        state.drag = Some(MinimapDragAction::ResizeViewport { edge, fixed_beat });
                         return (canvas::event::Status::Captured, None);
                     }
 
@@ -277,16 +267,19 @@ impl canvas::Program<Message> for ArrangementMinimap {
                                     Some(Message::View(ViewMsg::ScrollArrangement(delta))),
                                 );
                             }
-                            MinimapDragAction::ResizeViewport {
-                                dragging_start,
-                                fixed_beat,
-                            } => {
+                            MinimapDragAction::ResizeViewport { edge, fixed_beat } => {
                                 let pointer = overview.x_to_beat(local_x);
                                 let min_span = overview.beats_for_width(2.0 * EDGE_GRAB_PX);
-                                let (start, end) = if *dragging_start {
-                                    loop_with_start(pointer, *fixed_beat, min_span)
-                                } else {
-                                    loop_with_end(pointer, *fixed_beat, min_span, self.total_beats)
+                                let (start, end) = match edge {
+                                    SpanEdge::Start => {
+                                        span_with_start(pointer, *fixed_beat, min_span)
+                                    }
+                                    SpanEdge::End => span_with_end(
+                                        pointer,
+                                        *fixed_beat,
+                                        min_span,
+                                        self.total_beats,
+                                    ),
                                 };
                                 return (
                                     canvas::event::Status::Captured,

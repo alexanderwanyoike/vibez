@@ -1,9 +1,10 @@
-//! Shared visual language and hit testing for Clip loop braces.
+//! Shared visual language and hit testing for loop braces.
 
 use iced::widget::canvas;
 use iced::{Color, Point};
 
 use crate::state::UndoGestureId;
+use crate::widgets::span_edges::{nearest_edge, span_with_end, span_with_start, SpanEdge};
 
 const HANDLE_WIDTH: f32 = 8.0;
 const HIT_RADIUS: f32 = 8.0;
@@ -16,18 +17,6 @@ const START_MARKER_WIDTH: f32 = 7.0;
 pub(crate) enum LoopMarker {
     Start,
     End,
-}
-
-/// The loop with its start at `pointer` and its end at `end`, at least
-/// `min_length` long and starting at or after zero.
-pub(crate) fn loop_with_start(pointer: f64, end: f64, min_length: f64) -> (f64, f64) {
-    (pointer.clamp(0.0, (end - min_length).max(0.0)), end)
-}
-
-/// The loop with its end at `pointer` and its start at `start`, at least
-/// `min_length` long and ending at or before `max`.
-pub(crate) fn loop_with_end(pointer: f64, start: f64, min_length: f64, max: f64) -> (f64, f64) {
-    (start, pointer.clamp((start + min_length).min(max), max))
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -58,8 +47,8 @@ impl LoopDrag {
 
     pub(crate) fn resolve(self, pointer: f64, min_length: f64, max: f64) -> (f64, f64) {
         match self {
-            Self::Start { fixed_end, .. } => loop_with_start(pointer, fixed_end, min_length),
-            Self::End { fixed_start, .. } => loop_with_end(pointer, fixed_start, min_length, max),
+            Self::Start { fixed_end, .. } => span_with_start(pointer, fixed_end, min_length),
+            Self::End { fixed_start, .. } => span_with_end(pointer, fixed_start, min_length, max),
         }
     }
 
@@ -85,14 +74,10 @@ pub(crate) fn hit_test(
 /// The end of a brace from `start_x` to `end_x` within `radius` of `x`,
 /// the nearer one where both are.
 pub(crate) fn nearest_end(start_x: f32, end_x: f32, x: f32, radius: f32) -> Option<LoopMarker> {
-    let start_distance = (x - start_x).abs();
-    let end_distance = (x - end_x).abs();
-    let nearest = if start_distance <= end_distance {
-        (LoopMarker::Start, start_distance)
-    } else {
-        (LoopMarker::End, end_distance)
-    };
-    (nearest.1 <= radius).then_some(nearest.0)
+    nearest_edge(start_x, end_x, x, radius).map(|edge| match edge {
+        SpanEdge::Start => LoopMarker::Start,
+        SpanEdge::End => LoopMarker::End,
+    })
 }
 
 pub(crate) fn draw_brace(frame: &mut canvas::Frame, start_x: f32, end_x: f32, color: Color) {

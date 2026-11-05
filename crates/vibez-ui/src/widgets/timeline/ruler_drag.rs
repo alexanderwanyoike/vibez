@@ -1,7 +1,7 @@
 //! Where a drag in the ruler's loop strip puts the Arrange loop.
 
 use crate::state::GridConfig;
-use crate::widgets::clip_loop_markers::{loop_with_end, loop_with_start, nearest_end, LoopMarker};
+use crate::widgets::span_edges::{nearest_edge, span_with_end, span_with_start, SpanEdge};
 
 /// Which part of the loop brace a press in the loop strip took hold of.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -21,9 +21,9 @@ pub(super) fn brace_grab(x: f32, start_x: f32, end_x: f32) -> BraceGrab {
     if end_x <= start_x {
         return BraceGrab::New;
     }
-    match nearest_end(start_x, end_x, x, END_GRAB_PX) {
-        Some(LoopMarker::Start) => BraceGrab::Start,
-        Some(LoopMarker::End) => BraceGrab::End,
+    match nearest_edge(start_x, end_x, x, END_GRAB_PX) {
+        Some(SpanEdge::Start) => BraceGrab::Start,
+        Some(SpanEdge::End) => BraceGrab::End,
         None if x > start_x && x < end_x => BraceGrab::Whole,
         None => BraceGrab::New,
     }
@@ -47,8 +47,8 @@ impl BraceDrag {
         let snap = |beat: f64| grid.snap_beat(beat, pixels_per_beat);
         let (start, end) = self.original;
         match self.grab {
-            BraceGrab::Start => Some(loop_with_start(snap(beat), end, step)),
-            BraceGrab::End => Some(loop_with_end(snap(beat), start, step, f64::INFINITY)),
+            BraceGrab::Start => Some(span_with_start(snap(beat), end, step)),
+            BraceGrab::End => Some(span_with_end(snap(beat), start, step, f64::INFINITY)),
             BraceGrab::Whole => {
                 let shift = snap(beat - self.pressed_beat).max(-start);
                 Some((start + shift, end + shift))
