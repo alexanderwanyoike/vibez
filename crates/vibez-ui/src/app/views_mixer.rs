@@ -355,3 +355,73 @@ mod desk_fit_tests {
         assert!(DESK_PADDING + strip_height(2) <= room);
     }
 }
+
+#[cfg(test)]
+mod divider_tests {
+    use crate::domains::view::ViewMsg;
+    use crate::message::Message;
+    use crate::shell_layout::DETAIL_PANEL_MIN_HEIGHT;
+    use crate::state::{Workspace, DETAIL_PANEL_DEFAULT_HEIGHT};
+
+    /// Mix in a 1440 x 900 window, with the divider held: its work column
+    /// runs 814 px from the 52 px chrome row down to the gap above the
+    /// status bar.
+    fn dragging_in_mix() -> super::App {
+        let mut app = super::super::test_support::app();
+        app.state.view.window_width = 1440.0;
+        app.state.view.window_height = 900.0;
+        app.state.view.workspace = Workspace::Mix;
+        let _ = app.update(Message::View(ViewMsg::BeginDetailPanelResize));
+        app
+    }
+
+    fn drag_to(app: &mut super::App, y: f32) {
+        let _ = app.update(Message::View(ViewMsg::CursorMoved(700.0, y)));
+    }
+
+    #[test]
+    fn the_mix_card_follows_the_divider_and_arrange_keeps_its_split() {
+        let mut app = dragging_in_mix();
+        drag_to(&mut app, 600.0);
+        assert_eq!(app.mix_workspace_height(), 544.0, "card from 52 to 596");
+        assert_eq!(
+            app.state.view.detail_panel_height,
+            DETAIL_PANEL_DEFAULT_HEIGHT
+        );
+    }
+
+    #[test]
+    fn the_divider_stops_where_the_mixer_still_shows_its_strip_headers() {
+        let mut app = dragging_in_mix();
+        drag_to(&mut app, 60.0);
+        assert_eq!(app.mix_workspace_height(), 120.0);
+    }
+
+    #[test]
+    fn the_divider_stops_where_the_detail_card_is_at_its_minimum() {
+        let mut app = dragging_in_mix();
+        drag_to(&mut app, 890.0);
+        assert_eq!(
+            app.mix_workspace_height(),
+            814.0 - 8.0 - DETAIL_PANEL_MIN_HEIGHT
+        );
+    }
+
+    #[test]
+    fn both_limits_hold_when_the_window_shrinks_after_a_drag() {
+        let mut app = dragging_in_mix();
+        drag_to(&mut app, 600.0);
+        app.state.view.window_height = 450.0;
+        assert_eq!(
+            app.mix_workspace_height(),
+            120.0,
+            "the detail card gives way"
+        );
+        app.state.view.window_height = 300.0;
+        assert_eq!(
+            app.mix_workspace_height(),
+            300.0 - 86.0 - 8.0 - DETAIL_PANEL_MIN_HEIGHT,
+            "the detail card's minimum outranks the mixer's"
+        );
+    }
+}
