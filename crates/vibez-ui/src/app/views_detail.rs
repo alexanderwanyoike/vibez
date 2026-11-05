@@ -182,7 +182,7 @@ impl App {
                 .note_clips
                 .iter()
                 .find(|clip| clip.id == clip_id)
-                .map(|clip| clip.duration_beats);
+                .map(|clip| clip.editor_beats());
         }
         let track_id = editor.selected_track?;
         let clip_id = single_selected_audio_clip_for_track(editor, track_id)?;
