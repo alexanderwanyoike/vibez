@@ -462,10 +462,10 @@ impl PerformState {
                     let content = Arc::make_mut(&mut clip.timeline).ensure(clip.track_id);
                     if audio {
                         if let Some(part) = content.clips.first_mut() {
-                            part.loop_enabled = !looping;
+                            part.set_loop_enabled(!looping);
                         }
                     } else if let Some(part) = content.note_clips.first_mut() {
-                        part.loop_enabled = !looping;
+                        part.set_loop_enabled(!looping);
                     }
                 }
                 if self.clip_editor.selected == Some(id) {
