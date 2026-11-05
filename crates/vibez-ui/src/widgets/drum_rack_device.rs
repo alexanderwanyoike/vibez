@@ -24,13 +24,13 @@ use crate::domains::param_entry::ValueEntry;
 use crate::message::Message;
 use crate::state::UiDrumPad;
 use crate::theme as th;
+use crate::typography::fit_text;
 use crate::widgets::device_controls::{
     heading, rule, segmented, tabs, text_width, vertical_rule, LABEL_SIZE,
 };
 use crate::widgets::mini_waveform::column_peaks;
 use crate::widgets::on_blur::on_blur;
 use crate::widgets::sampler_device::SamplerView;
-use crate::widgets::text_fit::fit_text;
 
 const PAD: f32 = 10.0;
 const GAP: f32 = 4.0;

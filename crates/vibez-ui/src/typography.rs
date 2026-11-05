@@ -3,6 +3,9 @@
 
 use iced::{font::Weight, Font};
 
+mod fit;
+pub use fit::fit_text;
+
 pub const PLEX_SANS_CONDENSED_MEDIUM_BYTES: &[u8] =
     include_bytes!("../../../assets/fonts/ibm-plex/IBMPlexSansCondensed-Medium.ttf");
 pub const PLEX_SANS_CONDENSED_SEMIBOLD_BYTES: &[u8] =

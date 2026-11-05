@@ -5,7 +5,7 @@ use iced::widget::canvas;
 use iced::{Color, Font, Point, Rectangle};
 
 use crate::icons;
-use crate::widgets::text_fit::fit_text;
+use crate::typography::fit_text;
 
 use super::CLIP_TITLE_HEIGHT;
 
