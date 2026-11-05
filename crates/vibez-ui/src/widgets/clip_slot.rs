@@ -757,6 +757,26 @@ mod tests {
     }
 
     #[test]
+    fn a_clip_fills_its_slots_tile_with_no_well_around_it() {
+        for size in [Size::new(140.0, 48.0), Size::new(240.0, 72.0)] {
+            assert_eq!(film(size), tile(size));
+        }
+    }
+
+    #[test]
+    fn the_selection_rings_a_slot_in_the_accent_with_or_without_a_clip() {
+        assert_eq!(ring(Attention::Selected, true), Some(th::accent()));
+        assert_eq!(ring(Attention::Selected, false), Some(th::accent()));
+    }
+
+    #[test]
+    fn an_empty_slot_shows_an_edge_only_under_the_pointer() {
+        assert_eq!(ring(Attention::Idle, false), None);
+        assert!(ring(Attention::Hovered, false).is_some());
+        assert_eq!(ring(Attention::Hovered, true), None, "a clip needs no edge");
+    }
+
+    #[test]
     fn dense_loop_preview_spans_the_whole_clip_with_bounded_work() {
         let onsets = preview_onsets(BeatClipTimeline::new(0.0, 0.0, 0.001, 16.0, true), 0.0, 64);
         assert_eq!(onsets.len(), 64);
