@@ -328,12 +328,15 @@ mod desk_fit_tests {
         assert_eq!(app.mix_workspace_height(), app.mix_desk_height());
 
         app.state.view.window_height = 600.0;
-        let room = 600.0
+        // Below the chrome row, the Mix card, the gap above the detail card,
+        // the detail card, and the gap above the status bar.
+        let detail = 600.0
             - super::super::views_control_bar_style::BAR_HEIGHT
-            - STATUS_HEIGHT
-            - 3.0 * PANE_GAP
-            - crate::shell_layout::DETAIL_PANEL_MIN_HEIGHT;
-        assert_eq!(app.mix_workspace_height(), room);
+            - app.mix_workspace_height()
+            - PANE_GAP
+            - PANE_GAP
+            - STATUS_HEIGHT;
+        assert_eq!(detail, crate::shell_layout::DETAIL_PANEL_MIN_HEIGHT);
     }
 
     #[test]
