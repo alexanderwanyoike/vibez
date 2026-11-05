@@ -3,11 +3,11 @@
 use super::*;
 use vibez_core::id::ClipId;
 use vibez_core::midi::MidiNote;
+use vibez_core::perform::GrooveGrid;
 
 /// A scheduled note-on: frame offset, pitch, velocity and the Clip it
 /// belongs to.
 pub(super) type TimedNoteOn = (u32, u8, u8, ClipId);
-use vibez_core::perform::GrooveGrid;
 
 #[inline]
 pub(super) fn mapped_note_start(clip: &EngineNoteClip, note: &MidiNote, swing: SwingAmount) -> f64 {
