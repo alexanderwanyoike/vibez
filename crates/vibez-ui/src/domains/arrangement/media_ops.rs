@@ -240,15 +240,7 @@ impl TimelineEditorState {
                 clip.transient_markers
                     .retain_source_range(clip.source_offset, clip.source_end());
                 clip_end_beat = Some((clip.position + clip.duration) as f64 / ctx.samples_per_beat);
-                engine.send(EngineCommand::SetClipBounds {
-                    track_id,
-                    clip_id,
-                    source_offset: clip.source_offset,
-                    start_marker: clip.start_marker,
-                    duration: clip.duration,
-                    loop_start: clip.loop_start,
-                    loop_end: clip.loop_end,
-                });
+                engine.send(clip.bounds_command(track_id));
                 if warp_changed {
                     engine.send(EngineCommand::SetClipWarpMarkers {
                         track_id,

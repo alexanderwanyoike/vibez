@@ -7,6 +7,20 @@ use vibez_engine::commands::EngineCommand;
 use crate::state::{UiClip, UiNoteClip};
 
 impl UiClip {
+    /// The clip's new source window, start marker and loop, applied in place
+    /// without touching its audio.
+    pub fn bounds_command(&self, track_id: TrackId) -> EngineCommand {
+        EngineCommand::SetClipBounds {
+            track_id,
+            clip_id: self.id,
+            source_offset: self.source_offset,
+            start_marker: self.start_marker,
+            duration: self.duration,
+            loop_start: self.loop_start,
+            loop_end: self.loop_end,
+        }
+    }
+
     /// The clip with its audio as one insertion.
     pub fn add_command(&self, track_id: TrackId) -> EngineCommand {
         self.add_command_beside(track_id, 0)
