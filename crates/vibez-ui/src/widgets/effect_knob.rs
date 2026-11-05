@@ -60,6 +60,8 @@ pub struct EffectKnobWidget {
     /// Tints the unlit part of the ring, so a knob at zero still shows
     /// what it belongs to.
     pub ring_tint: Option<Color>,
+    /// Lights the ring from its top centre, for values that cut and boost.
+    pub bipolar: bool,
 }
 
 impl EffectKnobWidget {
@@ -84,6 +86,7 @@ impl EffectKnobWidget {
             default,
             arc_color,
             ring_tint: None,
+            bipolar: false,
         }
     }
 
@@ -108,6 +111,7 @@ impl EffectKnobWidget {
             default,
             arc_color,
             ring_tint: None,
+            bipolar: false,
         }
     }
 
@@ -124,6 +128,7 @@ impl EffectKnobWidget {
             default: 0.0,
             arc_color,
             ring_tint: Some(arc_color),
+            bipolar: false,
         }
     }
 
@@ -149,6 +154,7 @@ impl EffectKnobWidget {
             default,
             arc_color,
             ring_tint: None,
+            bipolar: false,
         }
     }
 
@@ -233,6 +239,12 @@ impl EffectKnobWidget {
         } else {
             ((self.value - self.min) / range).clamp(0.0, 1.0)
         }
+    }
+
+    /// This knob lit from its centre.
+    pub fn bipolar(mut self) -> Self {
+        self.bipolar = true;
+        self
     }
 
     /// The span of the ring lit by the value, as start and end angles, or
@@ -551,6 +563,31 @@ mod tests {
             )) if actual_track == track_id && actual_effect == effect_id
                 && (value - 0.031_622_775).abs() < 1e-6
         ));
+    }
+
+    #[test]
+    fn a_bipolar_knob_lights_from_its_centre_toward_its_value() {
+        let knob = |value: f32| {
+            EffectKnobWidget::new(
+                TrackId::new(),
+                EffectId::new(),
+                0,
+                value,
+                -12.0,
+                12.0,
+                0.0,
+                Color::WHITE,
+            )
+        };
+        let centre = (ARC_START + ARC_END) / 2.0;
+        let quarter = (ARC_END - ARC_START) / 4.0;
+
+        let (from, to) = knob(6.0).bipolar().lit_arc().unwrap();
+        assert!((from - centre).abs() < 1e-5 && (to - (centre + quarter)).abs() < 1e-5);
+        let (from, to) = knob(-6.0).bipolar().lit_arc().unwrap();
+        assert!((from - (centre - quarter)).abs() < 1e-5 && (to - centre).abs() < 1e-5);
+        assert_eq!(knob(0.0).bipolar().lit_arc(), None, "flat lights nothing");
+        assert_eq!(knob(6.0).lit_arc().unwrap().0, ARC_START);
     }
 
     fn clip_knob(field: AudioClipRotaryField) -> EffectKnobWidget {
