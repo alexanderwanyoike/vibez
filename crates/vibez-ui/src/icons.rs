@@ -50,6 +50,12 @@ pub const FOLDER: char = '\u{E0D7}';
 pub const CLOUD: char = '\u{E088}';
 pub const LAYERS: char = '\u{E529}';
 pub const SEARCH: char = '\u{E151}';
+pub const FILE: char = '\u{E0C0}';
+pub const PLUG: char = '\u{E37F}';
+pub const AUDIO_LINES: char = '\u{E55A}';
+pub const LAYOUT_GRID: char = '\u{E0FF}';
+pub const PALETTE: char = '\u{E1DD}';
+pub const ROTATE_CW: char = '\u{E149}';
 
 /// Create an icon text element with the Lucide font.
 pub fn icon(codepoint: char) -> iced::widget::Text<'static> {

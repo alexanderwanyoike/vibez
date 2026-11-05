@@ -257,6 +257,7 @@ mod views_settings_audio;
 mod views_settings_dropbox;
 mod views_settings_perform;
 mod views_settings_project;
+mod views_settings_rows;
 mod views_settings_updates;
 mod views_shell;
 mod views_transient_analysis;
