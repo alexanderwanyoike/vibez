@@ -10,7 +10,7 @@ use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::clip_timeline::{BeatClipTimeline, FrameClipTimeline};
 use vibez_core::effect::{EffectType, ParamDescriptor};
 use vibez_core::id::{ClipId, EffectId, TrackId};
-use vibez_core::midi::{InstrumentKind, MidiNote, TrackKind};
+use vibez_core::midi::{InstrumentKind, MidiNote, TrackKind, NOTE_CONTENT_END_BEATS};
 use vibez_core::track::{
     AudioInputRoute, ClipFades, ClipGainDb, ClipPlaybackDirection, ClipTranspose, DrumPadState,
     InputMonitoring, MediaSourceRef,
@@ -167,20 +167,41 @@ impl UiClip {
         )
     }
 
+    /// Only a loop lets the start marker sit past the clip end, so the
+    /// marker returns to the clip start with the region it was bounded by.
     pub(crate) fn reset_loop_region_to_clip(&mut self) {
+        let end = self.source_offset.saturating_add(self.duration);
+        if self.start_marker >= end {
+            self.start_marker = self.source_offset;
+        }
         self.loop_start = self.start_marker;
-        self.loop_end = self.source_offset.saturating_add(self.duration);
+        self.loop_end = end;
     }
 
-    pub(crate) fn enable_loop_over_clip(&mut self) {
-        self.loop_enabled = true;
-        self.reset_loop_region_to_clip();
+    /// The loop region outlives its loop being off, as Ableton keeps a clip's
+    /// loop brace, so turning it back on loops the same region.
+    pub(crate) fn set_loop_enabled(&mut self, enabled: bool) {
+        self.loop_enabled = enabled;
+        if enabled && !self.accepts_loop_region(self.loop_start, self.loop_end) {
+            self.reset_loop_region_to_clip();
+        }
     }
 
-    pub(crate) fn clamp_loop_to_clip(&mut self) {
-        let clip_end = self.source_offset.saturating_add(self.duration);
-        self.loop_start = self.loop_start.max(self.source_offset).min(clip_end);
-        self.loop_end = self.loop_end.min(clip_end);
+    pub(crate) fn loop_content_end(&self) -> u64 {
+        FrameClipTimeline::loop_content_end(
+            self.source_offset,
+            self.audio.num_frames() as u64,
+            &self.warp_markers,
+        )
+    }
+
+    /// Resizing a warped clip resizes its Warp Marker map, which can cut the
+    /// loop.
+    pub(crate) fn clamp_loop_to_warp_map(&mut self) {
+        if self.warp_markers.is_empty() {
+            return;
+        }
+        self.loop_end = self.loop_end.min(self.loop_content_end());
         if self.loop_end <= self.loop_start || self.start_marker >= self.loop_end {
             self.reset_loop_region_to_clip();
         }
@@ -211,19 +232,33 @@ impl UiClip {
         true
     }
 
+    fn accepts_loop_region(&self, start: u64, end: u64) -> bool {
+        start >= self.source_offset
+            && start < end
+            && end <= self.loop_content_end()
+            && self.start_marker < end
+    }
+
     pub(crate) fn set_loop_region(&mut self, start: u64, end: u64) -> bool {
-        let clip_end = self
-            .source_offset
-            .saturating_add(self.duration)
-            .min(self.audio.num_frames() as u64);
-        let valid = start >= self.source_offset && start < end && end <= clip_end;
-        let valid = valid && self.start_marker < end;
-        if !valid || (start, end) == (self.loop_start, self.loop_end) {
+        if !self.accepts_loop_region(start, end) || (start, end) == (self.loop_start, self.loop_end)
+        {
             return false;
         }
         self.loop_start = start;
         self.loop_end = end;
         true
+    }
+
+    /// A loop region may reach past the clip end, so new source bounds only
+    /// pull its start up to the source start; a region that still does not
+    /// fit becomes the clip's.
+    pub(crate) fn fit_loop_region_to_source(&mut self) {
+        let start = self.loop_start.max(self.source_offset);
+        if self.accepts_loop_region(start, self.loop_end) {
+            self.loop_start = start;
+        } else {
+            self.reset_loop_region_to_clip();
+        }
     }
 
     pub(crate) fn clamp_fades_to_clip(&mut self) {
@@ -515,22 +550,19 @@ impl UiNoteClip {
         )
     }
 
+    /// See `UiClip::reset_loop_region_to_clip`.
     pub(crate) fn reset_loop_region_to_clip(&mut self) {
+        if self.start_marker_beats >= self.duration_beats {
+            self.start_marker_beats = 0.0;
+        }
         self.loop_start_beats = self.start_marker_beats;
         self.loop_end_beats = self.duration_beats;
     }
 
-    pub(crate) fn enable_loop_over_clip(&mut self) {
-        self.loop_enabled = true;
-        self.reset_loop_region_to_clip();
-    }
-
-    pub(crate) fn clamp_loop_to_duration(&mut self) {
-        self.loop_start_beats = self.loop_start_beats.clamp(0.0, self.duration_beats);
-        self.loop_end_beats = self.loop_end_beats.min(self.duration_beats);
-        if self.loop_end_beats <= self.loop_start_beats
-            || self.start_marker_beats >= self.loop_end_beats
-        {
+    /// See `UiClip::set_loop_enabled`.
+    pub(crate) fn set_loop_enabled(&mut self, enabled: bool) {
+        self.loop_enabled = enabled;
+        if enabled && !self.accepts_loop_region(self.loop_start_beats, self.loop_end_beats) {
             self.reset_loop_region_to_clip();
         }
     }
@@ -552,14 +584,19 @@ impl UiNoteClip {
         true
     }
 
-    pub(crate) fn set_loop_region(&mut self, start: f64, end: f64) -> bool {
-        let valid = start.is_finite()
+    fn accepts_loop_region(&self, start: f64, end: f64) -> bool {
+        start.is_finite()
             && end.is_finite()
             && start >= 0.0
             && start < end
-            && end <= self.duration_beats
-            && self.start_marker_beats < end;
-        if !valid || (start, end) == (self.loop_start_beats, self.loop_end_beats) {
+            && end <= NOTE_CONTENT_END_BEATS
+            && self.start_marker_beats < end
+    }
+
+    pub(crate) fn set_loop_region(&mut self, start: f64, end: f64) -> bool {
+        if !self.accepts_loop_region(start, end)
+            || (start, end) == (self.loop_start_beats, self.loop_end_beats)
+        {
             return false;
         }
         self.loop_start_beats = start;

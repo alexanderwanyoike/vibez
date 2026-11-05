@@ -653,16 +653,6 @@ impl PianoRollState {
                     if let Some(clip) = track.note_clips.iter_mut().find(|c| c.id == clip_id) {
                         clip.duration_beats = new_duration_beats;
                         clip.clamp_start_to_duration();
-
-                        // Keep the loop region inside the clip when
-                        // shrinking. Extending leaves the region
-                        // untouched so the looped pattern repeats to
-                        // fill the new length (the whole point of
-                        // stretching a looped clip).
-                        if clip.loop_enabled {
-                            clip.clamp_loop_to_duration();
-                        }
-
                         clip_end_beat = Some(clip.position_beats + clip.duration_beats);
                         engine.send(clip.bounds_command(track_id));
                     }
@@ -679,9 +669,6 @@ impl PianoRollState {
                         let new_dur = (clip.duration_beats / 2.0).max(0.25);
                         clip.duration_beats = new_dur;
                         clip.clamp_start_to_duration();
-                        if clip.loop_enabled {
-                            clip.clamp_loop_to_duration();
-                        }
                         engine.send(EngineCommand::SetNoteClipDuration {
                             track_id,
                             clip_id,

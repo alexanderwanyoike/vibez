@@ -235,7 +235,7 @@ impl TimelineEditorState {
                 clip.clamp_fades_to_clip();
                 clip.clamp_start_to_source();
                 if clip.loop_enabled {
-                    clip.clamp_loop_to_clip();
+                    clip.clamp_loop_to_warp_map();
                 }
                 clip.transient_markers
                     .retain_source_range(clip.source_offset, clip.source_end());

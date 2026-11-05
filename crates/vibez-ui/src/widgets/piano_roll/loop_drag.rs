@@ -2,6 +2,7 @@
 
 use iced::{Point, Rectangle};
 use vibez_core::clip_timeline::BeatClipTimeline;
+use vibez_core::midi::NOTE_CONTENT_END_BEATS;
 
 use crate::domains::piano_roll::PianoRollMsg;
 use crate::message::Message;
@@ -69,15 +70,13 @@ impl PianoRollWidget {
         } else {
             0.01
         };
-        let pointer = self.snapped_beat(
-            self.x_to_beat(position.x.clamp(KEY_WIDTH, bounds.width), bounds),
-            bounds,
-        );
+        let pointer_at = |x: f32| self.snapped_beat(self.x_to_beat(x, bounds), bounds);
         match action {
             DragAction::Start {
                 clip_id,
                 undo_gesture,
             } => {
+                let pointer = pointer_at(position.x.clamp(KEY_WIDTH, bounds.width));
                 let marker_step = min_length.min(self.total_beats).max(0.01);
                 let start_marker_beats = BeatClipTimeline::new(
                     clip.start_marker_beats,
@@ -97,8 +96,11 @@ impl PianoRollWidget {
                 })
             }
             DragAction::Loop { clip_id, drag } => {
-                let (loop_start_beats, loop_end_beats) =
-                    drag.resolve(pointer, min_length.min(self.total_beats), self.total_beats);
+                let (loop_start_beats, loop_end_beats) = drag.resolve(
+                    pointer_at(position.x.max(KEY_WIDTH)),
+                    min_length.min(self.total_beats),
+                    NOTE_CONTENT_END_BEATS,
+                );
                 ((loop_start_beats, loop_end_beats) != (clip.loop_start_beats, clip.loop_end_beats))
                     .then(|| {
                         Message::PianoRoll(PianoRollMsg::SetNoteClipLoopRegion {

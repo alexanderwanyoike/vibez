@@ -21,6 +21,7 @@ fn widget() -> AudioClipDetailWidget {
         loop_enabled: true,
         loop_start: 100,
         loop_end: 500,
+        loop_content_end: 1_000,
         playback_direction: ClipPlaybackDirection::Forward,
         transient_markers: Default::default(),
         selected_transient_marker: None,
@@ -104,6 +105,49 @@ fn audio_loop_end_marker_drag_edits_source_frames() {
             loop_start: 100,
             loop_end: 600,
         }) if track_id == widget.track_id && clip_id == widget.clip_id
+    ));
+}
+
+#[test]
+fn audio_loop_end_drags_past_the_clip_end_up_to_the_source_end() {
+    let widget = widget();
+    let bounds = Rectangle::new(Point::ORIGIN, iced::Size::new(800.0, 200.0));
+    let end = Point::new(widget.timeline_to_x(widget.loop_end, &bounds), 5.0);
+    let mut state = AudioClipDetailState::default();
+    widget.update(
+        &mut state,
+        canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)),
+        bounds,
+        mouse::Cursor::Available(end),
+    );
+
+    let mut drag_to = |x: f32| {
+        let target = Point::new(x, 5.0);
+        arrangement_message(
+            widget
+                .update(
+                    &mut state,
+                    canvas::Event::Mouse(mouse::Event::CursorMoved { position: target }),
+                    bounds,
+                    mouse::Cursor::Available(target),
+                )
+                .1,
+        )
+    };
+    assert!(matches!(
+        drag_to(850.0),
+        Some(ArrangementMsg::SetClipLoopRegion {
+            loop_start: 100,
+            loop_end: 1_000,
+            ..
+        })
+    ));
+    assert!(matches!(
+        drag_to(2_000.0),
+        Some(ArrangementMsg::SetClipLoopRegion {
+            loop_end: 1_000,
+            ..
+        })
     ));
 }
 
@@ -438,7 +482,7 @@ fn audio_loop_overshoot_keeps_one_grid_cell_between_the_handles() {
 }
 
 #[test]
-fn dragging_repairs_a_legacy_region_past_the_visible_clip() {
+fn a_loop_end_past_the_visible_clip_is_grabbed_at_the_editor_edge() {
     let mut widget = widget();
     widget.duration_samples = 400;
     widget.loop_end = 900;
@@ -464,6 +508,6 @@ fn dragging_repairs_a_legacy_region_past_the_visible_clip() {
 
     assert!(matches!(
         arrangement_message(message),
-        Some(ArrangementMsg::SetClipLoopRegion { loop_end: 500, .. })
+        Some(ArrangementMsg::SetClipLoopRegion { loop_end: 600, .. })
     ));
 }

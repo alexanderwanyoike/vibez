@@ -1,5 +1,7 @@
 //! Clip-local playback geometry shared by audio, MIDI, engine, and UI.
 
+use crate::warp_marker::WarpMarkers;
+
 /// Playback geometry measured in source frames.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FrameClipTimeline {
@@ -31,6 +33,41 @@ impl FrameClipTimeline {
 
     pub fn is_looping(self) -> bool {
         self.has_loop_region() && self.start < self.loop_end
+    }
+
+    /// The furthest a clip's loop may reach. A loop is the clip's content,
+    /// not part of its Arrangement window, so the source bounds it rather
+    /// than the clip's length; Warp Markers map only the clip's own window,
+    /// so they bound a warped clip's loop.
+    pub fn loop_content_end(
+        source_offset: u64,
+        source_frames: u64,
+        warp_markers: &WarpMarkers,
+    ) -> u64 {
+        warp_markers
+            .as_slice()
+            .last()
+            .map_or(source_frames, |anchor| {
+                source_offset.saturating_add(anchor.timeline_frame())
+            })
+    }
+
+    /// Where the content this clip plays ends before any Warp Marker mapping:
+    /// a playing loop reaches [`Self::loop_content_end`], an unlooped clip
+    /// ends with its window.
+    pub fn content_end(
+        self,
+        source_offset: u64,
+        source_frames: u64,
+        warp_markers: &WarpMarkers,
+    ) -> u64 {
+        if self.is_looping() {
+            Self::loop_content_end(source_offset, source_frames, warp_markers)
+        } else {
+            source_offset
+                .saturating_add(self.duration)
+                .min(source_frames)
+        }
     }
 
     fn has_loop_region(self) -> bool {
@@ -90,11 +127,7 @@ impl FrameClipTimeline {
         source_end: u64,
         minimum_gap: u64,
     ) -> u64 {
-        let marker_end = if self.loop_enabled {
-            source_end.min(self.loop_end)
-        } else {
-            source_end
-        };
+        let marker_end = self.marker_end(source_end);
         candidate.clamp(
             source_start,
             marker_end
@@ -105,8 +138,15 @@ impl FrameClipTimeline {
 
     pub fn accepts_start(self, candidate: u64, source_start: u64, source_end: u64) -> bool {
         candidate == self.clamp_start(candidate, source_start, source_end)
-            && candidate < source_end
-            && (!self.loop_enabled || candidate < self.loop_end)
+            && candidate < self.marker_end(source_end)
+    }
+
+    fn marker_end(self, source_end: u64) -> u64 {
+        if self.loop_enabled {
+            self.loop_end
+        } else {
+            source_end
+        }
     }
 }
 
@@ -243,11 +283,7 @@ impl BeatClipTimeline {
         source_end: f64,
         minimum_gap: f64,
     ) -> f64 {
-        let marker_end = if self.loop_enabled && self.loop_end.is_finite() {
-            source_end.min(self.loop_end)
-        } else {
-            source_end
-        };
+        let marker_end = self.marker_end(source_end);
         candidate.clamp(
             source_start,
             (marker_end - minimum_gap.max(Self::MIN_START_GAP)).max(source_start),
@@ -257,8 +293,15 @@ impl BeatClipTimeline {
     pub fn accepts_start(self, candidate: f64, source_start: f64, source_end: f64) -> bool {
         candidate.is_finite()
             && candidate == self.clamp_start(candidate, source_start, source_end)
-            && candidate < source_end
-            && (!self.loop_enabled || candidate < self.loop_end)
+            && candidate < self.marker_end(source_end)
+    }
+
+    fn marker_end(self, source_end: f64) -> f64 {
+        if self.loop_enabled && self.loop_end.is_finite() {
+            self.loop_end
+        } else {
+            source_end
+        }
     }
 }
 
@@ -351,6 +394,18 @@ mod tests {
             beats.occurrences_of(0.25).starting_after(998.0).next(),
             Some(998.25)
         );
+    }
+
+    #[test]
+    fn a_looping_start_marker_is_bounded_by_the_loop_not_the_clip_length() {
+        let frames = FrameClipTimeline::new(60, 0, 80, 40, true);
+        assert_eq!(frames.clamp_start(60, 0, 40), 60);
+        assert!(frames.accepts_start(70, 0, 40));
+        assert_eq!(frames.clamp_start(90, 0, 40), 79);
+
+        let beats = BeatClipTimeline::new(3.0, 0.0, 4.0, 2.0, true);
+        assert_eq!(beats.clamp_start(3.0, 0.0, 2.0), 3.0);
+        assert!(beats.accepts_start(3.5, 0.0, 2.0));
     }
 
     #[test]

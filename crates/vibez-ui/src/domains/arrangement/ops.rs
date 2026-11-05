@@ -370,12 +370,7 @@ impl TimelineEditorState {
                         .find_content_mut(track_id)
                         .and_then(|t| t.clips.iter_mut().find(|c| c.id == clip_id))
                     {
-                        let was_enabled = clip.loop_enabled;
-                        if enable && !was_enabled {
-                            clip.enable_loop_over_clip();
-                        } else {
-                            clip.loop_enabled = enable;
-                        }
+                        clip.set_loop_enabled(enable);
                         command = Some((clip.loop_start, clip.loop_end));
                         changed += 1;
                     }
@@ -395,12 +390,7 @@ impl TimelineEditorState {
                         .find_content_mut(track_id)
                         .and_then(|t| t.note_clips.iter_mut().find(|c| c.id == clip_id))
                     {
-                        let was_enabled = clip.loop_enabled;
-                        if enable && !was_enabled {
-                            clip.enable_loop_over_clip();
-                        } else {
-                            clip.loop_enabled = enable;
-                        }
+                        clip.set_loop_enabled(enable);
                         command = Some((clip.loop_start_beats, clip.loop_end_beats));
                         changed += 1;
                     }
@@ -481,9 +471,6 @@ impl TimelineEditorState {
                     {
                         clip.duration_beats = (clip.duration_beats + delta).max(0.25);
                         clip.clamp_start_to_duration();
-                        if clip.loop_enabled {
-                            clip.clamp_loop_to_duration();
-                        }
                         engine.send(clip.bounds_command(track_id));
                         max_end = Some(
                             max_end

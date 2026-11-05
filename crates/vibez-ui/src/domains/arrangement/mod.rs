@@ -188,10 +188,7 @@ impl TimelineEditorState {
                 let mut cmd_data = None;
                 if let Some(track) = self.find_content_mut(track_id) {
                     if let Some(clip) = track.clips.iter_mut().find(|c| c.id == clip_id) {
-                        clip.loop_enabled = !clip.loop_enabled;
-                        if clip.loop_enabled {
-                            clip.reset_loop_region_to_clip();
-                        }
+                        clip.set_loop_enabled(!clip.loop_enabled);
                         cmd_data = Some((clip.loop_enabled, clip.loop_start, clip.loop_end));
                     }
                 }

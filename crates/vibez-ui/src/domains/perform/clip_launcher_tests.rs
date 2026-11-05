@@ -294,6 +294,47 @@ fn loop_is_default_and_cell_toggle_updates_the_selected_editor_and_prepared_sour
 }
 
 #[test]
+fn cell_loop_toggle_on_resets_a_loop_region_that_no_longer_fits() {
+    let tracks = tracks(1);
+    let track_id = tracks[0].id;
+    let mut state = PerformState {
+        layout: PerformLayout::Clips,
+        ..Default::default()
+    };
+    let ctx = PerformCtx {
+        workspace_visible: true,
+        project_tracks: &tracks,
+        selected_project_track: Some(track_id),
+    };
+    state.update_clips(ClipMsg::CreateMidi { track_id, row: 0 }, ctx);
+    let id = state.clip_editor.selected.unwrap();
+    state.update_clips(ClipMsg::ToggleLoop(id), ctx);
+    let clip = Arc::make_mut(&mut state.clips).by_id_mut(id).unwrap();
+    let part = &mut Arc::make_mut(&mut clip.timeline)
+        .ensure(track_id)
+        .note_clips[0];
+    part.start_marker_beats = 2.0;
+    part.loop_start_beats = 0.0;
+    part.loop_end_beats = 1.0;
+
+    state.update_clips(ClipMsg::ToggleLoop(id), ctx);
+
+    let part = &state
+        .clips
+        .by_id(id)
+        .unwrap()
+        .timeline
+        .get(track_id)
+        .unwrap()
+        .note_clips[0];
+    assert!(part.loop_enabled);
+    assert_eq!(
+        (part.loop_start_beats, part.loop_end_beats),
+        (2.0, part.duration_beats)
+    );
+}
+
+#[test]
 fn clip_triggers_toggle_playing_and_queued_intent_without_changing_the_editor() {
     let tracks = tracks(1);
     let track = tracks[0].id;

@@ -298,13 +298,7 @@ impl TimelineEditorState {
                     .retain_source_range(new_start, new_end);
                 clip.clamp_fades_to_clip();
                 clip.clamp_start_to_source();
-                clip.loop_start = clip.loop_start.clamp(new_start, new_end);
-                clip.loop_end = clip.loop_end.clamp(clip.loop_start, new_end);
-                if clip.loop_enabled
-                    && (clip.loop_end <= clip.loop_start || clip.start_marker >= clip.loop_end)
-                {
-                    clip.reset_loop_region_to_clip();
-                }
+                clip.fit_loop_region_to_source();
                 engine.send(clip.bounds_command(track_id));
                 engine.send(EngineCommand::SetClipFades {
                     track_id,
@@ -368,13 +362,14 @@ impl TimelineEditorState {
                     action.status = Some("Loop boundary must be a positive time in seconds".into());
                     return action;
                 };
-                let source_end = clip.source_offset.saturating_add(clip.duration);
+                let clip_end = clip.source_offset.saturating_add(clip.duration);
+                let loop_limit = clip.loop_content_end();
                 let (new_start, new_end) = match field {
                     AudioClipInspectorField::LoopStart => {
-                        let end = if clip.loop_end > value && clip.loop_end <= source_end {
+                        let end = if clip.loop_end > value && clip.loop_end <= loop_limit {
                             clip.loop_end
                         } else {
-                            source_end
+                            clip_end
                         };
                         (value, end)
                     }
@@ -389,20 +384,16 @@ impl TimelineEditorState {
                     }
                     _ => unreachable!(),
                 };
-                if new_start < clip.source_offset
-                    || new_start >= new_end
-                    || new_end > source_end
-                    || clip.start_marker >= new_end
+                if (new_start, new_end) != (clip.loop_start, clip.loop_end)
+                    && !clip.set_loop_region(new_start, new_end)
                 {
                     action.status = Some(format!(
                         "Loop bounds must stay ordered inside {:.3} to {:.3} s",
                         format_seconds(clip.source_offset),
-                        format_seconds(source_end)
+                        format_seconds(loop_limit)
                     ));
                     return action;
                 }
-                clip.loop_start = new_start;
-                clip.loop_end = new_end;
                 engine.send(EngineCommand::SetClipLoop {
                     track_id,
                     clip_id,
