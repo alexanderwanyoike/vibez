@@ -66,9 +66,11 @@ impl App {
         bank_bar + DESK_PADDING + strip_height(buses)
     }
 
-    /// Every strip's height on the desk.
+    /// Every strip's height on the desk, stretched to fill a Mix card
+    /// taller than the desk.
     pub(super) fn mix_strip_height(&self) -> f32 {
-        strip_height(self.state.project_tracks.buses.len())
+        let spare = self.mix_workspace_height() - self.mix_desk_height();
+        strip_height(self.state.project_tracks.buses.len()) + spare.max(0.0)
     }
 
     /// The work column under the chrome row, down to the gap above the
