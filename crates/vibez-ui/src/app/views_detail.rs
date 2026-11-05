@@ -105,34 +105,19 @@ fn single_selected_audio_clip_for_track(
     }
 }
 
-/// A tab across the top of the detail panel, raised while `active`.
+/// A tab across the top of the detail panel, raised onto the control shade
+/// while `active`.
 fn detail_tab<'a>(
     label: &'a str,
     active: bool,
     tab: DetailPanelTab,
 ) -> iced::widget::Button<'a, Message> {
-    let (bg, text_color, border_color) = if active {
-        (th::bg_elevated(), th::accent(), th::accent_dim())
-    } else {
-        (
-            iced::Color::TRANSPARENT,
-            th::text_dim(),
-            iced::Color::TRANSPARENT,
-        )
-    };
-    button(text(label).size(12).color(text_color))
+    button(text(label).size(12))
         .on_press(Message::View(ViewMsg::SwitchDetailTab(tab)))
         .padding([4, 12])
-        .style(move |_theme: &Theme, _status| button::Style {
-            background: Some(bg.into()),
-            text_color,
-            border: iced::Border {
-                color: border_color,
-                width: if active { 1.0 } else { 0.0 },
-                radius: 4.0.into(),
-            },
-            ..Default::default()
-        })
+        .style(super::views_control_bar_style::segment(
+            active.then(th::accent),
+        ))
 }
 
 impl App {
