@@ -198,6 +198,61 @@ fn a_warped_clip_trimmed_later_then_back_earlier_plays_its_warp_in_place() {
 }
 
 #[test]
+fn a_trim_drag_past_a_warp_marker_and_back_restores_the_clip() {
+    let mut a = arrangement_with_tracks(1);
+    let anchor = sample_clip(&mut a, 1_000, 300, 200, 500);
+    assert!(a.tracks[0].clips[0]
+        .warp_markers
+        .add(400, 300, 200, 700, 500));
+    let before = a.tracks[0].clips[0].clone();
+
+    let past = trim_audio(&mut a, anchor, 7.0);
+    assert!(!past
+        .warp_markers
+        .as_slice()
+        .contains(&WarpMarker::new(400, 300)));
+    let back = trim_audio(&mut a, anchor, 3.0);
+
+    let geometry = |clip: &UiClip| {
+        (
+            clip.position,
+            clip.duration,
+            clip.source_offset,
+            clip.start_marker,
+        )
+    };
+    assert_eq!(geometry(&back), geometry(&before));
+    assert_eq!(back.warp_markers, before.warp_markers);
+}
+
+#[test]
+fn a_trim_drag_past_a_transient_marker_and_back_restores_it() {
+    let mut a = arrangement_with_tracks(1);
+    let anchor = sample_clip(&mut a, 1_000, 300, 200, 500);
+    a.tracks[0].clips[0]
+        .transient_markers
+        .replace_suggestions([250, 450, 650]);
+    let before = a.tracks[0].clips[0].clone();
+
+    trim_audio(&mut a, anchor, 4.0);
+    let back = trim_audio(&mut a, anchor, 3.0);
+
+    assert_eq!(back.transient_markers, before.transient_markers);
+}
+
+#[test]
+fn a_new_trim_drag_starts_from_the_clip_the_last_one_left() {
+    let mut a = arrangement_with_tracks(1);
+    let anchor = sample_clip(&mut a, 1_000, 300, 200, 500);
+    trim_audio(&mut a, anchor, 4.0);
+    a.drag_resize_active = false;
+
+    let after = trim_audio(&mut a, anchor, 5.0);
+
+    assert_eq!((after.position, after.duration), (500, 300));
+}
+
+#[test]
 fn a_reversed_clip_trimmed_later_and_earlier_keeps_its_audio_in_place() {
     let mut a = arrangement_with_tracks(1);
     let anchor = sample_clip(&mut a, 1_000, 300, 200, 500);
