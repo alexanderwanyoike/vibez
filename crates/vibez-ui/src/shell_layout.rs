@@ -36,3 +36,33 @@ pub fn browser_width_at(cursor_x: f32) -> f32 {
 pub fn detail_height_at(cursor_y: f32, window_height: f32) -> f32 {
     window_height - cursor_y - STATUS_HEIGHT
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_workspace_card_sits_one_gap_from_the_browser_card_and_the_window_edge() {
+        assert_eq!(
+            workspace_span(1440.0, Some(430.0)),
+            Span {
+                left: 446.0,
+                width: 986.0
+            }
+        );
+        assert_eq!(
+            workspace_span(1440.0, None),
+            Span {
+                left: 8.0,
+                width: 1424.0
+            }
+        );
+    }
+
+    #[test]
+    fn dragging_the_middle_of_a_gap_keeps_the_card_edge_under_the_pointer() {
+        assert_eq!(browser_width_at(442.0), 430.0);
+        // A detail card from 566 down to the gap above the 26 px status bar.
+        assert_eq!(detail_height_at(562.0, 900.0), 300.0);
+    }
+}
