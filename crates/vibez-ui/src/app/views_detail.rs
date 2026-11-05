@@ -343,9 +343,9 @@ impl App {
             .width(Length::Fill)
             .height(Length::Fixed(panel_height))
             .style(|_theme: &Theme| container::Style {
-                background: Some(th::bg_dark().into()),
+                background: Some(th::bg_surface().into()),
                 border: iced::Border {
-                    color: th::border(),
+                    color: th::groove(),
                     width: 1.0,
                     radius: 0.0.into(),
                 },
