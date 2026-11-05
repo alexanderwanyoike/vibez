@@ -6,7 +6,8 @@
 use vibez_core::id::{ClipId, TrackId};
 
 use crate::state::{
-    ContextMenuTarget, DetailPanelTab, GridChoice, TimelineEditorState, ViewState, Workspace,
+    ContextMenuTarget, DetailPanelTab, GridChoice, GridConfig, TimelineEditorState, ViewState,
+    Workspace,
 };
 use crate::timeline_geometry::TimelineViewport;
 
@@ -36,7 +37,7 @@ pub enum ViewMsg {
     SetViewport(TimelineViewport),
     ChooseArrangeGrid(GridChoice),
     ChooseClipGrid(GridChoice),
-    /// Grid commands without a target are the Arrange grid's shortcuts.
+    /// Grid shortcuts, for the grid of the editor with focus.
     NarrowGrid,
     WidenGrid,
     ToggleTripletGrid,
@@ -138,6 +139,9 @@ pub struct ViewCtx {
     pub lane_width: f32,
     /// Converts audio clip positions for zoom to selection.
     pub samples_per_beat: f64,
+    /// An open clip editor has keyboard focus, so the grid shortcuts edit
+    /// the clip grid rather than the Arrange grid.
+    pub clip_editor_focused: bool,
 }
 
 /// Cross-domain effects requested by a view update.
@@ -157,6 +161,14 @@ pub struct ViewAction {
 }
 
 impl ViewState {
+    fn focused_grid(&mut self, ctx: ViewCtx) -> &mut GridConfig {
+        if ctx.clip_editor_focused {
+            &mut self.clip_grid
+        } else {
+            &mut self.arrange_grid
+        }
+    }
+
     pub fn update(
         &mut self,
         msg: ViewMsg,
@@ -211,23 +223,23 @@ impl ViewState {
                 action.persist_settings = true;
             }
             ViewMsg::NarrowGrid => {
-                self.arrange_grid.narrow();
+                self.focused_grid(ctx).narrow();
                 action.persist_settings = true;
             }
             ViewMsg::WidenGrid => {
-                self.arrange_grid.widen();
+                self.focused_grid(ctx).widen();
                 action.persist_settings = true;
             }
             ViewMsg::ToggleTripletGrid => {
-                self.arrange_grid.toggle_triplet();
+                self.focused_grid(ctx).toggle_triplet();
                 action.persist_settings = true;
             }
             ViewMsg::ToggleSnapToGrid => {
-                self.arrange_grid.toggle_snap();
+                self.focused_grid(ctx).toggle_snap();
                 action.persist_settings = true;
             }
             ViewMsg::ToggleAdaptiveGrid => {
-                self.arrange_grid.toggle_adaptive();
+                self.focused_grid(ctx).toggle_adaptive();
                 action.persist_settings = true;
             }
             ViewMsg::BeginDetailPanelResize => {
@@ -440,6 +452,7 @@ mod tests {
             song_beats: 320.0,
             lane_width: LANE_WIDTH,
             samples_per_beat: SAMPLES_PER_BEAT,
+            ..Default::default()
         }
     }
 

@@ -15,6 +15,7 @@ impl App {
             song_beats: self.state.song_beats(),
             lane_width: self.arrange_lane_width(),
             samples_per_beat: self.state.transport.samples_per_beat(),
+            clip_editor_focused: self.focused_piano_roll_clip().is_some(),
         }
     }
 
