@@ -78,7 +78,7 @@ impl App {
             - chrome
             - crate::shell_layout::STATUS_HEIGHT
             - 3.0 * crate::shell_layout::PANE_GAP
-            - super::views_detail::DETAIL_PANEL_MIN_HEIGHT;
+            - crate::shell_layout::DETAIL_PANEL_MIN_HEIGHT;
         self.mix_desk_height().min(room).max(0.0)
     }
 
@@ -332,7 +332,7 @@ mod desk_fit_tests {
             - super::super::views_control_bar_style::BAR_HEIGHT
             - STATUS_HEIGHT
             - 3.0 * PANE_GAP
-            - super::super::views_detail::DETAIL_PANEL_MIN_HEIGHT;
+            - crate::shell_layout::DETAIL_PANEL_MIN_HEIGHT;
         assert_eq!(app.mix_workspace_height(), room);
     }
 
@@ -343,7 +343,7 @@ mod desk_fit_tests {
             - super::super::views_control_bar_style::BAR_HEIGHT
             - STATUS_HEIGHT
             - 3.0 * PANE_GAP
-            - super::super::views_detail::DETAIL_PANEL_MIN_HEIGHT;
+            - crate::shell_layout::DETAIL_PANEL_MIN_HEIGHT;
         assert!(DESK_PADDING + strip_height(2) <= room);
     }
 }

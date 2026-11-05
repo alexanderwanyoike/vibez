@@ -8,6 +8,9 @@ pub const PANE_GAP: f32 = 8.0;
 /// Height of the status bar along the bottom of the window.
 pub const STATUS_HEIGHT: f32 = 26.0;
 
+/// The shortest the detail card gets in any workspace.
+pub const DETAIL_PANEL_MIN_HEIGHT: f32 = 180.0;
+
 /// A region's left edge and width, in window pixels.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Span {
