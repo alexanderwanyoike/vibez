@@ -195,7 +195,8 @@ impl Default for ClipStyle {
 #[serde(default)]
 pub struct LaneStyle {
     /// How far the lane is mixed from the background toward the text
-    /// colour. Light themes sink their lanes below the headers.
+    /// colour. Built-in themes author the lane as the background itself;
+    /// older light theme files sink their lanes below it with this.
     pub recess: f32,
     /// How far every other bar band is mixed toward the text colour.
     pub band: f32,
@@ -231,7 +232,7 @@ impl LaneStyle {
     };
 
     pub const LIGHT: Self = Self {
-        recess: 0.15,
+        recess: 0.0,
         band: 0.05,
         lines: GridLineStrengths {
             label: 0.13,
@@ -498,7 +499,6 @@ impl Hsl {
 /// A colour as OKLCH: perceptual lightness in 0..=1, chroma, and hue in
 /// degrees. Palettes are authored in it because equal steps of its
 /// lightness look equal, which HSL's do not.
-#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct Oklch {
     pub lightness: f32,
@@ -506,7 +506,6 @@ pub(crate) struct Oklch {
     pub hue: f32,
 }
 
-#[allow(dead_code)]
 impl Oklch {
     pub const fn new(lightness: f32, chroma: f32, hue: f32) -> Self {
         Self {
@@ -516,6 +515,7 @@ impl Oklch {
         }
     }
 
+    #[cfg(test)]
     pub fn of(c: Color) -> Self {
         let (r, g, b) = (linear(c.r), linear(c.g), linear(c.b));
         let l = (0.412_221_46 * r + 0.536_332_55 * g + 0.051_445_995 * b).cbrt();
@@ -863,11 +863,12 @@ mod tests {
     #[test]
     fn palette_serializes_as_vzt_json_and_loads_back() {
         let p = crate::themes::charcoal();
+        let accent = hex::to_hex(&p.accent);
         let json = serde_json::to_string_pretty(&p).unwrap();
-        assert!(json.contains("\"accent\": \"#ff8c00\""));
+        assert!(json.contains(&format!("\"accent\": \"{accent}\"")));
         let back: ThemePalette = serde_json::from_str(&json).unwrap();
         assert_eq!(back.name, "Charcoal");
-        assert_eq!(hex::to_hex(&back.accent), "#ff8c00");
+        assert_eq!(hex::to_hex(&back.accent), accent);
         assert_eq!(back.track_colors.len(), 8);
     }
 
