@@ -27,6 +27,10 @@ pub struct ThemePalette {
     pub bg_elevated: Color,
     #[serde(with = "hex")]
     pub bg_hover: Color,
+    /// Button fills. Older `.vzt` files predate it and fill their controls
+    /// with `bg_elevated`, see [`ThemePalette::control`].
+    #[serde(default, with = "hex_option", skip_serializing_if = "Option::is_none")]
+    pub control: Option<Color>,
 
     // ── Text ──
     #[serde(with = "hex")]
@@ -283,6 +287,22 @@ mod hex {
     }
 }
 
+mod hex_option {
+    use iced::Color;
+    use serde::{Deserializer, Serializer};
+
+    pub fn serialize<S: Serializer>(c: &Option<Color>, s: S) -> Result<S::Ok, S::Error> {
+        match c {
+            Some(c) => super::hex::serialize(c, s),
+            None => s.serialize_none(),
+        }
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Color>, D::Error> {
+        super::hex::deserialize(d).map(Some)
+    }
+}
+
 mod hex_array {
     use iced::Color;
     use serde::{Deserialize, Deserializer, Serializer};
@@ -309,6 +329,11 @@ mod hex_array {
 }
 
 impl ThemePalette {
+    /// The fill of buttons and other controls.
+    pub fn control(&self) -> Color {
+        todo!()
+    }
+
     /// Background of the timeline lanes behind clips.
     pub fn lane(&self) -> Color {
         blend(self.bg_dark, self.text, self.lane_style.recess)
@@ -626,6 +651,11 @@ pub fn clip_style() -> ClipStyle {
     colour_strength().clip_style(CURRENT.read().unwrap().clip_style)
 }
 
+#[allow(dead_code)]
+pub fn control() -> Color {
+    CURRENT.read().unwrap().control()
+}
+
 pub fn lane_style() -> LaneStyle {
     CURRENT.read().unwrap().lane_style
 }
@@ -827,6 +857,27 @@ mod tests {
         let palette: ThemePalette = serde_json::from_value(json).unwrap();
 
         assert_eq!(palette.lane_style, LaneStyle::DARK);
+    }
+
+    #[test]
+    fn a_theme_file_without_a_control_fill_fills_controls_with_its_raised_shade() {
+        let mut json = serde_json::to_value(crate::themes::charcoal()).unwrap();
+        json.as_object_mut().unwrap().remove("control");
+
+        let palette: ThemePalette = serde_json::from_value(json).unwrap();
+
+        assert_eq!(palette.control(), palette.bg_elevated);
+    }
+
+    #[test]
+    fn a_theme_file_keeps_its_control_fill() {
+        let mut authored = crate::themes::charcoal();
+        authored.control = Some(Color::from_rgb8(0x32, 0x34, 0x37));
+        let json = serde_json::to_string(&authored).unwrap();
+
+        let palette: ThemePalette = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(hex::to_hex(&palette.control()), "#323437");
     }
 
     fn default_track_colours() -> Vec<Color> {
