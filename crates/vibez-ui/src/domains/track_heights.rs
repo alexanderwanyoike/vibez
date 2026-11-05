@@ -4,12 +4,7 @@
 use std::collections::HashMap;
 
 use vibez_core::id::TrackId;
-
-pub const DEFAULT_TRACK_HEIGHT: f32 = 70.0;
-/// The header column reserves its spacing and padding before laying out
-/// rows, so any shorter squeezes mute and solo under the name row.
-pub const MIN_TRACK_HEIGHT: f32 = 62.0;
-pub const MAX_TRACK_HEIGHT: f32 = 420.0;
+use vibez_project::TrackHeight;
 
 /// Messages the track height domain handles.
 #[derive(Debug, Clone)]
@@ -40,10 +35,10 @@ pub struct TrackHeightAction {
 }
 
 /// Lane height per Arrange track. Tracks never resized are absent and
-/// draw at [`DEFAULT_TRACK_HEIGHT`].
+/// draw at [`TrackHeight::DEFAULT`].
 #[derive(Debug, Clone, Default)]
 pub struct TrackHeights {
-    heights: HashMap<TrackId, f32>,
+    heights: HashMap<TrackId, TrackHeight>,
     resize: Option<TrackResize>,
 }
 
@@ -51,29 +46,25 @@ pub struct TrackHeights {
 struct TrackResize {
     track_id: TrackId,
     anchor_y: f32,
-    start_height: f32,
+    start_height: TrackHeight,
     targets: Vec<TrackId>,
     changed: bool,
 }
 
-fn clamp_height(height: f32) -> f32 {
-    height.clamp(MIN_TRACK_HEIGHT, MAX_TRACK_HEIGHT)
-}
-
 impl TrackHeights {
     /// Heights read back from a project file.
-    pub fn from_saved(saved: &[(TrackId, f32)]) -> Self {
+    pub fn from_saved(saved: &[(TrackId, TrackHeight)]) -> Self {
         Self {
-            heights: saved
-                .iter()
-                .map(|&(track_id, height)| (track_id, clamp_height(height)))
-                .collect(),
+            heights: saved.iter().copied().collect(),
             resize: None,
         }
     }
 
     /// The heights a project file keeps for these tracks.
-    pub fn saved(&self, track_ids: impl IntoIterator<Item = TrackId>) -> Vec<(TrackId, f32)> {
+    pub fn saved(
+        &self,
+        track_ids: impl IntoIterator<Item = TrackId>,
+    ) -> Vec<(TrackId, TrackHeight)> {
         track_ids
             .into_iter()
             .filter_map(|track_id| {
@@ -84,11 +75,8 @@ impl TrackHeights {
             .collect()
     }
 
-    pub fn height(&self, track_id: TrackId) -> f32 {
-        self.heights
-            .get(&track_id)
-            .copied()
-            .unwrap_or(DEFAULT_TRACK_HEIGHT)
+    pub fn height(&self, track_id: TrackId) -> TrackHeight {
+        self.heights.get(&track_id).copied().unwrap_or_default()
     }
 
     /// The track whose header edge is being dragged.
@@ -114,10 +102,12 @@ impl TrackHeights {
             }
             TrackHeightMsg::PointerMoved => {
                 if let Some(resize) = &mut self.resize {
-                    let height = clamp_height(resize.start_height + ctx.cursor_y - resize.anchor_y);
+                    let height = TrackHeight::new(
+                        resize.start_height.pixels() + ctx.cursor_y - resize.anchor_y,
+                    );
                     for &track_id in &resize.targets {
                         let previous = self.heights.get(&track_id).copied();
-                        if previous.unwrap_or(DEFAULT_TRACK_HEIGHT) != height {
+                        if previous.unwrap_or_default() != height {
                             self.heights.insert(track_id, height);
                             resize.changed = true;
                         }
@@ -172,8 +162,8 @@ mod tests {
         assert_eq!(heights.resizing(), Some(ids[0]));
         heights.update(TrackHeightMsg::PointerMoved, ctx(440.0, false, &ids));
 
-        assert_eq!(heights.height(ids[0]), DEFAULT_TRACK_HEIGHT + 140.0);
-        assert_eq!(heights.height(ids[1]), DEFAULT_TRACK_HEIGHT);
+        assert_eq!(heights.height(ids[0]), TrackHeight::new(210.0));
+        assert_eq!(heights.height(ids[1]), TrackHeight::DEFAULT);
     }
 
     #[test]
@@ -182,10 +172,10 @@ mod tests {
         let mut heights = TrackHeights::default();
 
         drag(&mut heights, ids[0], (300.0, -2000.0), false, &ids);
-        assert_eq!(heights.height(ids[0]), MIN_TRACK_HEIGHT);
+        assert_eq!(heights.height(ids[0]), TrackHeight::MIN);
 
         drag(&mut heights, ids[0], (300.0, 5000.0), false, &ids);
-        assert_eq!(heights.height(ids[0]), MAX_TRACK_HEIGHT);
+        assert_eq!(heights.height(ids[0]), TrackHeight::MAX);
     }
 
     #[test]
@@ -198,7 +188,7 @@ mod tests {
 
         assert!(ids
             .iter()
-            .all(|&id| heights.height(id) == DEFAULT_TRACK_HEIGHT + 30.0));
+            .all(|&id| heights.height(id) == TrackHeight::new(100.0)));
     }
 
     #[test]
@@ -224,7 +214,7 @@ mod tests {
 
         heights.update(TrackHeightMsg::PointerMoved, ctx(500.0, false, &ids));
 
-        assert_eq!(heights.height(ids[0]), DEFAULT_TRACK_HEIGHT);
+        assert_eq!(heights.height(ids[0]), TrackHeight::DEFAULT);
     }
 
     #[test]
@@ -235,20 +225,10 @@ mod tests {
         drag(&mut heights, ids[2], (100.0, 80.0), false, &ids);
 
         let saved = heights.saved([ids[0], ids[1]]);
-        assert_eq!(saved, vec![(ids[0], DEFAULT_TRACK_HEIGHT + 140.0)]);
+        assert_eq!(saved, vec![(ids[0], TrackHeight::new(210.0))]);
 
         let reopened = TrackHeights::from_saved(&saved);
-        assert_eq!(reopened.height(ids[0]), DEFAULT_TRACK_HEIGHT + 140.0);
-        assert_eq!(reopened.height(ids[2]), DEFAULT_TRACK_HEIGHT);
-    }
-
-    #[test]
-    fn a_saved_height_out_of_range_loads_clamped() {
-        let ids = tracks();
-
-        let reopened = TrackHeights::from_saved(&[(ids[0], 4.0), (ids[1], 9000.0)]);
-
-        assert_eq!(reopened.height(ids[0]), MIN_TRACK_HEIGHT);
-        assert_eq!(reopened.height(ids[1]), MAX_TRACK_HEIGHT);
+        assert_eq!(reopened.height(ids[0]), TrackHeight::new(210.0));
+        assert_eq!(reopened.height(ids[2]), TrackHeight::DEFAULT);
     }
 }

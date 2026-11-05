@@ -2,12 +2,12 @@
 //! project file.
 
 use super::*;
-use crate::domains::track_heights::{TrackHeightMsg, DEFAULT_TRACK_HEIGHT};
+use crate::domains::track_heights::TrackHeightMsg;
 use crate::domains::view::ViewMsg;
 use crate::state::ProjectTrack;
 use vibez_core::id::TrackId;
 use vibez_core::track::TrackInfo;
-use vibez_project::Project;
+use vibez_project::{Project, TrackHeight};
 
 fn app_with_tracks(count: usize) -> (App, Vec<TrackId>) {
     let mut app = super::test_support::app();
@@ -35,9 +35,9 @@ fn dragging_a_header_edge_resizes_that_track_and_dirties_the_project() {
 
     assert_eq!(
         app.state.track_heights.height(ids[0]),
-        DEFAULT_TRACK_HEIGHT + 140.0
+        TrackHeight::new(210.0)
     );
-    assert_eq!(app.state.track_heights.height(ids[1]), DEFAULT_TRACK_HEIGHT);
+    assert_eq!(app.state.track_heights.height(ids[1]), TrackHeight::DEFAULT);
     assert_eq!(app.state.track_heights.resizing(), None);
     assert!(app.state.project.dirty);
 }
@@ -51,7 +51,7 @@ fn holding_alt_when_the_drag_starts_resizes_every_track() {
 
     assert!(ids
         .iter()
-        .all(|&id| app.state.track_heights.height(id) == DEFAULT_TRACK_HEIGHT + 40.0));
+        .all(|&id| app.state.track_heights.height(id) == TrackHeight::new(110.0)));
 }
 
 async fn reopen(path: PathBuf, project: Project) -> App {
@@ -73,11 +73,11 @@ async fn track_heights_survive_save_and_reload() {
 
     assert_eq!(
         reopened.state.track_heights.height(ids[0]),
-        DEFAULT_TRACK_HEIGHT + 140.0
+        TrackHeight::new(210.0)
     );
     assert_eq!(
         reopened.state.track_heights.height(ids[1]),
-        DEFAULT_TRACK_HEIGHT
+        TrackHeight::DEFAULT
     );
 }
 
@@ -95,5 +95,5 @@ async fn opening_another_project_forgets_the_last_ones_heights() {
 
     app.rebuild_from_loaded_project(load_project_async(path, None).await.unwrap());
 
-    assert_eq!(app.state.track_heights.height(ids[0]), DEFAULT_TRACK_HEIGHT);
+    assert_eq!(app.state.track_heights.height(ids[0]), TrackHeight::DEFAULT);
 }

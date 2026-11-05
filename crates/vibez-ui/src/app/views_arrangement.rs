@@ -232,7 +232,7 @@ impl App {
             };
             (
                 track.id,
-                self.state.track_heights.height(track.id),
+                self.state.track_heights.height(track.id).pixels(),
                 extra_height,
             )
         }));
