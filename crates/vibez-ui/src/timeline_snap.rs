@@ -342,17 +342,8 @@ mod tests {
 
     fn note_clip(start: f64, end: f64) -> UiNoteClip {
         UiNoteClip {
-            id: ClipId::new(),
-            name: "MIDI".into(),
-            position_beats: start,
-            duration_beats: end - start,
-            notes: Vec::new(),
-            selected_notes: Default::default(),
-            start_marker_beats: 0.0,
-            loop_enabled: false,
-            loop_start_beats: 0.0,
             loop_end_beats: 0.0,
-            groove_grid: Default::default(),
+            ..UiNoteClip::test_clip(start, end - start)
         }
     }
 

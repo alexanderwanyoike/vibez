@@ -40,10 +40,7 @@ fn audio(position: u64, duration: u64) -> UiClip {
 /// An unlooped note Clip with one note on every beat of its length.
 fn notes(position_beats: f64, duration_beats: f64) -> UiNoteClip {
     UiNoteClip {
-        id: ClipId::new(),
         name: "Hats".to_string(),
-        position_beats,
-        duration_beats,
         notes: (0..duration_beats as usize)
             .map(|beat| MidiNote {
                 pitch: 42,
@@ -52,12 +49,8 @@ fn notes(position_beats: f64, duration_beats: f64) -> UiNoteClip {
                 duration_beats: 0.25,
             })
             .collect(),
-        selected_notes: HashSet::new(),
-        start_marker_beats: 0.0,
-        loop_enabled: false,
-        loop_start_beats: 0.0,
         loop_end_beats: 0.0,
-        groove_grid: vibez_core::perform::GrooveGrid::Off,
+        ..UiNoteClip::test_clip(position_beats, duration_beats)
     }
 }
 

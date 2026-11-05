@@ -20,15 +20,8 @@ fn add_note_clip(a: &mut ArrangementFixture, position_beats: f64, duration_beats
     a.tracks.last_mut().unwrap().note_clips.push(UiNoteClip {
         id: clip_id,
         name: "Hats".to_string(),
-        position_beats,
-        duration_beats,
-        notes: Vec::new(),
-        selected_notes: HashSet::new(),
-        start_marker_beats: 0.0,
-        loop_enabled: false,
-        loop_start_beats: 0.0,
         loop_end_beats: 0.0,
-        groove_grid: vibez_core::perform::GrooveGrid::Off,
+        ..UiNoteClip::test_clip(position_beats, duration_beats)
     });
     clip_id
 }

@@ -5,7 +5,6 @@ use super::*;
 use crate::domains::arrangement::ArrangementMsg;
 use crate::state::{ArrangementSelection, ProjectTrack, UiNoteClip, UndoGestureId};
 use vibez_core::id::{ClipId, TrackId};
-use vibez_core::perform::GrooveGrid;
 
 /// One selected note Clip at beat 1.1 on a MIDI track.
 fn off_grid_clip() -> (App, TrackId, ClipId) {
@@ -23,15 +22,7 @@ fn off_grid_clip() -> (App, TrackId, ClipId) {
         .push(UiNoteClip {
             id: clip_id,
             name: "Capture".into(),
-            position_beats: 1.1,
-            duration_beats: 4.0,
-            notes: Vec::new(),
-            selected_notes: Default::default(),
-            start_marker_beats: 0.0,
-            loop_enabled: false,
-            loop_start_beats: 0.0,
-            loop_end_beats: 4.0,
-            groove_grid: GrooveGrid::Off,
+            ..UiNoteClip::test_clip(1.1, 4.0)
         });
     app.state
         .arrangement

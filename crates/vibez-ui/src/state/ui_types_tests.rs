@@ -75,17 +75,11 @@ fn the_snap_list_shows_the_step_the_grid_snaps_to() {
 
 fn trimmed_note_clip(loop_enabled: bool) -> UiNoteClip {
     UiNoteClip {
-        id: ClipId::new(),
         name: "Trimmed".into(),
-        position_beats: 6.0,
-        duration_beats: 2.0,
-        notes: Vec::new(),
-        selected_notes: HashSet::new(),
         start_marker_beats: 6.0,
         loop_enabled,
-        loop_start_beats: 0.0,
         loop_end_beats: 8.0,
-        groove_grid: vibez_core::perform::GrooveGrid::Off,
+        ..UiNoteClip::test_clip(6.0, 2.0)
     }
 }
 

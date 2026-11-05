@@ -823,7 +823,7 @@ mod tests {
 mod clip_editor_zoom_tests {
     use std::sync::Arc;
 
-    use vibez_core::id::{ClipId, TrackId};
+    use vibez_core::id::TrackId;
 
     use crate::state::{ProjectTrack, SnapGrid, UiNoteClip};
 
@@ -840,17 +840,10 @@ mod clip_editor_zoom_tests {
         // The piano roll shows its content from beat 0 to beat 32, where
         // this Clip stops playing.
         let clip = UiNoteClip {
-            id: ClipId::new(),
             name: "Trimmed".into(),
-            position_beats: 0.0,
-            duration_beats: 4.0,
-            notes: Vec::new(),
-            selected_notes: Default::default(),
             start_marker_beats: 28.0,
-            loop_enabled: false,
-            loop_start_beats: 0.0,
             loop_end_beats: 32.0,
-            groove_grid: Default::default(),
+            ..UiNoteClip::test_clip(0.0, 4.0)
         };
         let clip_id = clip.id;
         app.state

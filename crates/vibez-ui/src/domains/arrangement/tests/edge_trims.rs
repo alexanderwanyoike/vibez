@@ -359,8 +359,6 @@ fn note_clip(a: &mut ArrangementFixture, position_beats: f64) -> ArrangementSele
     a.tracks[0].note_clips.push(UiNoteClip {
         id: clip_id,
         name: "Notes".into(),
-        position_beats,
-        duration_beats: 8.0,
         notes: [0.5, 2.0, 5.0]
             .into_iter()
             .map(|start_beat| MidiNote {
@@ -370,12 +368,7 @@ fn note_clip(a: &mut ArrangementFixture, position_beats: f64) -> ArrangementSele
                 duration_beats: 0.5,
             })
             .collect(),
-        selected_notes: Default::default(),
-        start_marker_beats: 0.0,
-        loop_enabled: false,
-        loop_start_beats: 0.0,
-        loop_end_beats: 8.0,
-        groove_grid: vibez_core::perform::GrooveGrid::Off,
+        ..UiNoteClip::test_clip(position_beats, 8.0)
     });
     ArrangementSelection::NoteClip { track_id, clip_id }
 }

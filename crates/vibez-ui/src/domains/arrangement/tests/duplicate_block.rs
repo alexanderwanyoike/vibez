@@ -26,20 +26,14 @@ fn add_midi_track_with_clip(
     track.note_clips.push(UiNoteClip {
         id: clip_id,
         name: "Pattern".to_string(),
-        position_beats,
-        duration_beats,
         notes: vec![MidiNote {
             pitch: 60,
             velocity: 100,
             start_beat: 0.0,
             duration_beats: 0.5,
         }],
-        selected_notes: HashSet::new(),
-        start_marker_beats: 0.0,
-        loop_enabled: false,
-        loop_start_beats: 0.0,
         loop_end_beats: 0.0,
-        groove_grid: vibez_core::perform::GrooveGrid::Off,
+        ..UiNoteClip::test_clip(position_beats, duration_beats)
     });
     (track.id, clip_id)
 }

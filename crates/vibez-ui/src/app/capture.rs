@@ -717,22 +717,16 @@ mod tests {
             .ensure(track_id)
             .note_clips
             .push(UiNoteClip {
-                id: ClipId::new(),
                 name: "Loop".into(),
-                position_beats: 0.0,
-                duration_beats: 16.0,
                 notes: vec![MidiNote {
                     pitch: 36,
                     velocity: 100,
                     start_beat: 1.0,
                     duration_beats: 0.5,
                 }],
-                selected_notes: Default::default(),
-                start_marker_beats: 0.0,
                 loop_enabled: true,
-                loop_start_beats: 0.0,
                 loop_end_beats: 4.0,
-                groove_grid: GrooveGrid::Off,
+                ..UiNoteClip::test_clip(0.0, 16.0)
             });
         let captured = MaterializedCapture {
             arrange_start_samples: 6,

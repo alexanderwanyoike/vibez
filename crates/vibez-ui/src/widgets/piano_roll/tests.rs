@@ -647,22 +647,14 @@ fn shift_with_up_or_down_moves_selected_notes_an_octave() {
 #[test]
 fn resizing_an_off_grid_note_ends_it_on_the_grid_line_under_the_pointer() {
     let clip = UiNoteClip {
-        id: ClipId::new(),
         name: "Off grid".into(),
-        position_beats: 0.0,
-        duration_beats: 8.0,
         notes: vec![MidiNote {
             pitch: 60,
             start_beat: 0.3,
             duration_beats: 1.0,
             velocity: 100,
         }],
-        selected_notes: HashSet::new(),
-        start_marker_beats: 0.0,
-        loop_enabled: false,
-        loop_start_beats: 0.0,
-        loop_end_beats: 8.0,
-        groove_grid: vibez_core::perform::GrooveGrid::Off,
+        ..UiNoteClip::test_clip(0.0, 8.0)
     };
     let bounds = Rectangle::new(Point::ORIGIN, iced::Size::new(852.0, 400.0));
     let widget = PianoRollWidget::from_clip(
@@ -715,17 +707,10 @@ fn a_group_note_resize_stops_every_note_at_the_shortest_length() {
         velocity: 100,
     };
     let clip = UiNoteClip {
-        id: ClipId::new(),
         name: "Group".into(),
-        position_beats: 0.0,
-        duration_beats: 8.0,
         notes: vec![note(0.0, 2.0), note(4.0, 0.5)],
         selected_notes: HashSet::from([0, 1]),
-        start_marker_beats: 0.0,
-        loop_enabled: false,
-        loop_start_beats: 0.0,
-        loop_end_beats: 8.0,
-        groove_grid: vibez_core::perform::GrooveGrid::Off,
+        ..UiNoteClip::test_clip(0.0, 8.0)
     };
     let bounds = Rectangle::new(Point::ORIGIN, iced::Size::new(852.0, 400.0));
     let widget = PianoRollWidget::from_clip(

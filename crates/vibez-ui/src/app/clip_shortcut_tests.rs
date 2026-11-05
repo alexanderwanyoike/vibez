@@ -4,22 +4,12 @@ use super::*;
 use crate::domains::project::ProjectMsg;
 use crate::state::{ArrangementSelection, ProjectTrack, UiNoteClip};
 use iced::keyboard::{Key, Modifiers};
-use vibez_core::id::{ClipId, TrackId};
-use vibez_core::perform::GrooveGrid;
+use vibez_core::id::TrackId;
 
 fn note_clip(position_beats: f64) -> UiNoteClip {
     UiNoteClip {
-        id: ClipId::new(),
         name: "Pattern".into(),
-        position_beats,
-        duration_beats: 8.0,
-        notes: Vec::new(),
-        selected_notes: Default::default(),
-        start_marker_beats: 0.0,
-        loop_enabled: false,
-        loop_start_beats: 0.0,
-        loop_end_beats: 8.0,
-        groove_grid: GrooveGrid::Off,
+        ..UiNoteClip::test_clip(position_beats, 8.0)
     }
 }
 
