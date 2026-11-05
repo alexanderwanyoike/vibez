@@ -105,6 +105,36 @@ fn single_selected_audio_clip_for_track(
     }
 }
 
+/// A tab across the top of the detail panel, raised while `active`.
+fn detail_tab<'a>(
+    label: &'a str,
+    active: bool,
+    tab: DetailPanelTab,
+) -> iced::widget::Button<'a, Message> {
+    let (bg, text_color, border_color) = if active {
+        (th::bg_elevated(), th::accent(), th::accent_dim())
+    } else {
+        (
+            iced::Color::TRANSPARENT,
+            th::text_dim(),
+            iced::Color::TRANSPARENT,
+        )
+    };
+    button(text(label).size(12).color(text_color))
+        .on_press(Message::View(ViewMsg::SwitchDetailTab(tab)))
+        .padding([4, 12])
+        .style(move |_theme: &Theme, _status| button::Style {
+            background: Some(bg.into()),
+            text_color,
+            border: iced::Border {
+                color: border_color,
+                width: if active { 1.0 } else { 0.0 },
+                radius: 4.0.into(),
+            },
+            ..Default::default()
+        })
+}
+
 impl App {
     // ── Detail panel (Ableton-style device chain) ──
 
@@ -270,61 +300,13 @@ impl App {
             let track_id = track.id;
             let track_color = th::track_color(track.color_index);
 
-            // Tab bar
-            let clip_tab = {
-                let active = self.state.view.detail_panel_tab == DetailPanelTab::Clip;
-                let (bg, text_color, border_color) = if active {
-                    (th::bg_elevated(), th::accent(), th::accent_dim())
-                } else {
-                    (
-                        iced::Color::TRANSPARENT,
-                        th::text_dim(),
-                        iced::Color::TRANSPARENT,
-                    )
-                };
-                button(text("Clip").size(12).color(text_color))
-                    .on_press(Message::View(ViewMsg::SwitchDetailTab(
-                        DetailPanelTab::Clip,
-                    )))
-                    .padding([4, 12])
-                    .style(move |_theme: &Theme, _status| button::Style {
-                        background: Some(bg.into()),
-                        text_color,
-                        border: iced::Border {
-                            color: border_color,
-                            width: if active { 1.0 } else { 0.0 },
-                            radius: 4.0.into(),
-                        },
-                        ..Default::default()
-                    })
-            };
-            let devices_tab = {
-                let active = self.state.view.detail_panel_tab == DetailPanelTab::Devices;
-                let (bg, text_color, border_color) = if active {
-                    (th::bg_elevated(), th::accent(), th::accent_dim())
-                } else {
-                    (
-                        iced::Color::TRANSPARENT,
-                        th::text_dim(),
-                        iced::Color::TRANSPARENT,
-                    )
-                };
-                button(text("Devices").size(12).color(text_color))
-                    .on_press(Message::View(ViewMsg::SwitchDetailTab(
-                        DetailPanelTab::Devices,
-                    )))
-                    .padding([4, 12])
-                    .style(move |_theme: &Theme, _status| button::Style {
-                        background: Some(bg.into()),
-                        text_color,
-                        border: iced::Border {
-                            color: border_color,
-                            width: if active { 1.0 } else { 0.0 },
-                            radius: 4.0.into(),
-                        },
-                        ..Default::default()
-                    })
-            };
+            let tab = self.state.view.detail_panel_tab;
+            let clip_tab = detail_tab("Clip", tab == DetailPanelTab::Clip, DetailPanelTab::Clip);
+            let devices_tab = detail_tab(
+                "Devices",
+                tab == DetailPanelTab::Devices,
+                DetailPanelTab::Devices,
+            );
             let tab_bar = row![clip_tab, devices_tab].spacing(4).padding([4, 8]);
 
             // Tab content
