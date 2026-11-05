@@ -222,22 +222,22 @@ pub struct GridLineStrengths {
 impl LaneStyle {
     pub const DARK: Self = Self {
         recess: 0.0,
-        band: 0.025,
+        band: 0.015,
         lines: GridLineStrengths {
             label: 0.085,
-            bar: 0.05,
-            fine: 0.028,
+            bar: 0.04,
+            fine: 0.025,
         },
         loop_tint: 0.05,
     };
 
     pub const LIGHT: Self = Self {
         recess: 0.0,
-        band: 0.05,
+        band: 0.015,
         lines: GridLineStrengths {
-            label: 0.13,
-            bar: 0.075,
-            fine: 0.045,
+            label: 0.14,
+            bar: 0.065,
+            fine: 0.04,
         },
         loop_tint: 0.07,
     };
