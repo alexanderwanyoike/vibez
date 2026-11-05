@@ -1,7 +1,7 @@
 //! Sample-browser places tree rendering.
 //! Split from views_browser.rs; inherent methods on [`super::App`].
 
-use iced::widget::{button, column, container, row, scrollable, text, Space};
+use iced::widget::{button, column, container, row, text, Space};
 use iced::{Element, Length, Theme};
 
 use crate::domains::browser::BrowserMsg;
@@ -297,18 +297,15 @@ impl App {
             }),
         );
 
-        container(
-            scrollable(
-                container(places.padding(iced::Padding {
-                    top: 0.0,
-                    right: 8.0,
-                    bottom: 8.0,
-                    left: 0.0,
-                }))
-                .width(Length::Fill),
-            )
-            .direction(scrollable::Direction::Vertical(browser_vertical_scrollbar())),
-        )
+        container(crate::widgets::quiet_scroll::vertical(
+            container(places.padding(iced::Padding {
+                top: 0.0,
+                right: 8.0,
+                bottom: 8.0,
+                left: 0.0,
+            }))
+            .width(Length::Fill),
+        ))
         .width(Length::Fill)
         .height(Length::Fill)
         .into()

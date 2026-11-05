@@ -5,7 +5,7 @@
 use std::collections::HashSet;
 
 use iced::widget::{
-    button, canvas, center, column, container, horizontal_space, mouse_area, row, scrollable, text,
+    button, canvas, center, column, container, horizontal_space, mouse_area, row, text,
 };
 use iced::{Element, Length, Theme};
 
@@ -21,6 +21,7 @@ use crate::theme as th;
 use crate::timeline_geometry::TimelineGeometry;
 use crate::timeline_snap::SnapTargets;
 use crate::widgets::arrange_corner::{arrange_corner, arrangement_size_labels, song_length_label};
+use crate::widgets::quiet_scroll;
 use crate::widgets::timeline::{
     build_row_spans, ArrangementMinimap, MinimapTrack, RulerWidget, TimeRulerWidget, TimelineClip,
     TrackClipCanvas, ARRANGE_RULER_HEIGHT, OVERVIEW_HEIGHT, TIME_RULER_HEIGHT,
@@ -600,15 +601,9 @@ impl App {
             }
         }
 
-        let track_body = scrollable(track_rows)
-            .direction(scrollable::Direction::Vertical(
-                scrollable::Scrollbar::default(),
-            ))
-            .height(Length::Fill);
-        let channel_footer = container(scrollable(channel_rows).direction(
-            scrollable::Direction::Vertical(scrollable::Scrollbar::default()),
-        ))
-        .max_height(CHANNEL_FOOTER_MAX_HEIGHT);
+        let track_body = quiet_scroll::vertical(track_rows).height(Length::Fill);
+        let channel_footer =
+            container(quiet_scroll::vertical(channel_rows)).max_height(CHANNEL_FOOTER_MAX_HEIGHT);
 
         let time_ruler: Element<'_, Message> = canvas(TimeRulerWidget {
             bpm,

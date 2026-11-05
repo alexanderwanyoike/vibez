@@ -23,10 +23,9 @@ const PAD_SURFACE_MIN_WIDTH: f32 = 320.0;
 const SECTION_CONSTRUCTION_MIN_WIDTH: f32 = 460.0;
 const SECTION_TOOLBAR_INLINE_MIN_WIDTH: f32 = 640.0;
 pub(super) const SECTION_TRACK_GUTTER_WIDTH: f32 = 112.0;
-pub(super) const SECTION_SCROLLBAR_WIDTH: u16 = 5;
-pub(super) const SECTION_SCROLLBAR_SPACING: u16 = 1;
+pub(super) const SECTION_SCROLLBAR_SPACING: f32 = 1.0;
 pub(super) const SECTION_SCROLLBAR_RESERVATION: f32 =
-    (SECTION_SCROLLBAR_WIDTH + SECTION_SCROLLBAR_SPACING) as f32;
+    crate::widgets::quiet_scroll::THICKNESS + SECTION_SCROLLBAR_SPACING;
 
 pub(super) fn perform_tool_button(
     icon: char,

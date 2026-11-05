@@ -1,16 +1,38 @@
 //! A slim scrollbar that stays out of sight until the pointer is over the
 //! area it scrolls.
 
-use iced::widget::scrollable::{Rail, Scrollbar, Scroller, Status, Style};
-use iced::{Border, Color, Theme};
+use iced::widget::scrollable::{Direction, Rail, Scrollable, Scrollbar, Scroller, Status, Style};
+use iced::{Border, Color, Element, Theme};
 
+use crate::message::Message;
 use crate::theme as th;
 
-const THICKNESS: f32 = 4.0;
+pub const THICKNESS: f32 = 4.0;
 
 /// The bar itself, floating over the content so showing it moves nothing.
 pub fn scrollbar() -> Scrollbar {
     Scrollbar::new().width(THICKNESS).scroller_width(THICKNESS)
+}
+
+/// `content` scrolling up and down behind the quiet bar.
+pub fn vertical<'a>(content: impl Into<Element<'a, Message>>) -> Scrollable<'a, Message> {
+    scroll(content, Direction::Vertical(scrollbar()))
+}
+
+/// `content` scrolling sideways behind the quiet bar.
+pub fn horizontal<'a>(content: impl Into<Element<'a, Message>>) -> Scrollable<'a, Message> {
+    scroll(content, Direction::Horizontal(scrollbar()))
+}
+
+/// `content` scrolling in `direction`, for bars that keep room of their own
+/// or scroll both ways. Built with its direction because the default
+/// vertical check rejects full-height content before a later `.direction`
+/// could apply.
+pub fn scroll<'a>(
+    content: impl Into<Element<'a, Message>>,
+    direction: Direction,
+) -> Scrollable<'a, Message> {
+    Scrollable::with_direction(content, direction).style(style)
 }
 
 pub fn style(_theme: &Theme, status: Status) -> Style {

@@ -1,7 +1,7 @@
 //! The Settings sheet: a section sidebar beside the chosen section, plus
 //! the Plugins and Warping sections.
 
-use iced::widget::{button, center, column, container, mouse_area, row, scrollable, text};
+use iced::widget::{button, center, column, container, mouse_area, row, text};
 use iced::{Color, Element, Length, Theme};
 
 use crate::icons;
@@ -173,15 +173,12 @@ impl App {
             SettingsTab::Appearance => self.view_settings_appearance_tab(),
             SettingsTab::Updates => self.view_settings_updates_tab(),
         };
-        let body = scrollable(container(tab_body).padding(iced::Padding {
-            right: 12.0,
-            ..Default::default()
-        }))
-        .direction(scrollable::Direction::Vertical(
-            crate::widgets::quiet_scroll::scrollbar(),
-        ))
-        .style(crate::widgets::quiet_scroll::style)
-        .height(Length::Fill);
+        let body =
+            crate::widgets::quiet_scroll::vertical(container(tab_body).padding(iced::Padding {
+                right: 12.0,
+                ..Default::default()
+            }))
+            .height(Length::Fill);
         let content = column![header, body]
             .spacing(16)
             .padding(iced::Padding {

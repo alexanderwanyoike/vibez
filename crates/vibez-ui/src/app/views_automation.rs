@@ -254,7 +254,7 @@ impl App {
                     row![search, close]
                         .spacing(6)
                         .align_y(iced::Alignment::Center),
-                    iced::widget::scrollable(list).height(Length::Fixed(150.0)),
+                    crate::widgets::quiet_scroll::vertical(list).height(Length::Fixed(150.0)),
                 ]
                 .spacing(6),
             )

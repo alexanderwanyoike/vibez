@@ -4,8 +4,8 @@
 //! Split out of app.rs; inherent methods on [`super::App`].
 
 use iced::widget::{
-    button, center, column, container, horizontal_space, mouse_area, row, scrollable, text,
-    text_input, vertical_space,
+    button, center, column, container, horizontal_space, mouse_area, row, text, text_input,
+    vertical_space,
 };
 use iced::{Element, Length, Theme};
 
@@ -20,6 +20,7 @@ use crate::icons;
 use crate::message::{MenuOverlay, Message};
 use crate::state::ContextMenuTarget;
 use crate::theme as th;
+use crate::widgets::quiet_scroll;
 
 use super::*;
 
@@ -319,7 +320,7 @@ impl App {
                 text("This Project Track is shared. Its channel, devices, and authored content will be removed from:")
                     .size(11)
                     .color(th::text_dim()),
-                scrollable(location_list).height(Length::Fixed(location_list_height)),
+                quiet_scroll::vertical(location_list).height(Length::Fixed(location_list_height)),
                 text("One Undo restores the Track and every listed location.")
                     .size(10)
                     .color(th::text_dim()),
@@ -706,12 +707,8 @@ impl App {
             (220.0, 29.0)
         };
         let est_list_h = (est_rows.max(1) as f32 * row_h).min(MENU_LIST_MAX_H);
-        let items_scroll = container(scrollable(items_col).width(Length::Fill).direction(
-            scrollable::Direction::Vertical(
-                scrollable::Scrollbar::new().width(6).scroller_width(6),
-            ),
-        ))
-        .max_height(MENU_LIST_MAX_H);
+        let items_scroll = container(quiet_scroll::vertical(items_col).width(Length::Fill))
+            .max_height(MENU_LIST_MAX_H);
 
         let menu_content = column![tabs_row, search_input, items_scroll]
             .spacing(6)

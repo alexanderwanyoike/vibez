@@ -1,9 +1,7 @@
 //! Remote sample-browser view rendering.
 //! Split from views_browser.rs; inherent methods on [`super::App`].
 
-use iced::widget::{
-    button, column, container, horizontal_space, mouse_area, row, scrollable, text,
-};
+use iced::widget::{button, column, container, horizontal_space, mouse_area, row, text};
 use iced::{Element, Length};
 
 use crate::domains::browser::BrowserMsg;
@@ -423,7 +421,7 @@ impl App {
                 .spacing(5)
                 .align_y(iced::Alignment::Center),
                 table_header,
-                scrollable(
+                crate::widgets::quiet_scroll::vertical(
                     container(entries_col)
                         .width(Length::Fill)
                         .padding(iced::Padding {
@@ -435,7 +433,6 @@ impl App {
                     SampleBrowserMode::Remote,
                 ))
                 .height(Length::Fill)
-                .direction(scrollable::Direction::Vertical(browser_vertical_scrollbar()))
             ]
             .spacing(0)
             .padding(iced::Padding {

@@ -1,8 +1,8 @@
 //! Clip Project creation and grid authoring use the shared Vibez shell.
 
 use iced::widget::{
-    button, canvas, center, column, container, horizontal_space, mouse_area, pick_list, row,
-    scrollable, stack, text, text_input, tooltip,
+    button, canvas, center, column, container, horizontal_space, mouse_area, pick_list, row, stack,
+    text, text_input, tooltip,
 };
 use iced::{Color, Element, Length, Theme};
 use vibez_project::PerformLayout;
@@ -223,7 +223,7 @@ impl App {
             );
             let pad_width = self.clip_pad_surface_width(pad_width);
             let grid_width = dock_width - pad_width - crate::shell_layout::PANE_GAP;
-            scrollable::Scrollable::with_direction(
+            crate::widgets::quiet_scroll::horizontal(
                 row![
                     self.view_pad_surface(pad_width),
                     self.view_perform_surface_splitter(),
@@ -231,7 +231,6 @@ impl App {
                 ]
                 .width(dock_width)
                 .height(Length::Fill),
-                scrollable::Direction::Horizontal(scrollable::Scrollbar::default()),
             )
             .width(Length::Fill)
             .height(Length::Fill)
@@ -789,7 +788,7 @@ impl App {
                 grid = grid.push(lane);
             }
             workspace = workspace.push(
-                scrollable(
+                crate::widgets::quiet_scroll::vertical(
                     container(container(grid).padding(2).width(Length::Fill).style(|_| {
                         container::Style {
                             background: Some(

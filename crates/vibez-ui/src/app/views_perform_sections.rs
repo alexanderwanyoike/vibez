@@ -24,9 +24,7 @@ use crate::widgets::track_header::{color_bar, header_shade, quiet_action_style};
 use vibez_core::time::BEATS_PER_BAR;
 
 use super::views_automation::AutomationLaneLayout;
-use super::views_perform::{
-    SECTION_SCROLLBAR_SPACING, SECTION_SCROLLBAR_WIDTH, SECTION_TRACK_GUTTER_WIDTH,
-};
+use super::views_perform::{SECTION_SCROLLBAR_SPACING, SECTION_TRACK_GUTTER_WIDTH};
 use super::*;
 
 const SECTION_RULER_HEIGHT: f32 = 28.0;
@@ -472,7 +470,7 @@ impl App {
                 }
             }
 
-            let body = scrollable::Scrollable::with_direction(
+            let body = crate::widgets::quiet_scroll::scroll(
                 container(track_rows)
                     .width(Length::Fill)
                     .style(|_theme: &Theme| container::Style {
@@ -480,10 +478,7 @@ impl App {
                         ..Default::default()
                     }),
                 scrollable::Direction::Vertical(
-                    scrollable::Scrollbar::new()
-                        .width(SECTION_SCROLLBAR_WIDTH)
-                        .scroller_width(SECTION_SCROLLBAR_WIDTH)
-                        .spacing(SECTION_SCROLLBAR_SPACING),
+                    crate::widgets::quiet_scroll::scrollbar().spacing(SECTION_SCROLLBAR_SPACING),
                 ),
             )
             .width(Length::Fill)

@@ -271,26 +271,17 @@ impl App {
             .spacing(CHAIN_SPACING)
             .height(Length::Fill);
 
-        // Built with its direction: the default vertical check rejects the
-        // full-height cards before a later `.direction` could apply.
-        use crate::widgets::device_chrome::{
-            chain_bar_room, CHAIN_BAR_GAP, CHAIN_BAR_W, CHAIN_PAD_BELOW,
-        };
+        use crate::widgets::device_chrome::{chain_bar_room, CHAIN_BAR_GAP, CHAIN_PAD_BELOW};
+        use crate::widgets::quiet_scroll;
         let overflows = chain_bar_room(chain_width, available_width) > 0.0;
-        let bar = scrollable::Scrollbar::new()
-            .width(CHAIN_BAR_W)
-            .scroller_width(CHAIN_BAR_W);
         let bar = if overflows {
-            bar.spacing(CHAIN_BAR_GAP)
+            quiet_scroll::scrollbar().spacing(CHAIN_BAR_GAP)
         } else {
-            bar
+            quiet_scroll::scrollbar()
         };
-        let chain = scrollable::Scrollable::with_direction(
-            devices_row,
-            scrollable::Direction::Horizontal(bar),
-        )
-        .width(Length::Fill)
-        .height(Length::Fill);
+        let chain = quiet_scroll::scroll(devices_row, scrollable::Direction::Horizontal(bar))
+            .width(Length::Fill)
+            .height(Length::Fill);
         if overflows {
             chain.into()
         } else {
