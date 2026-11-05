@@ -238,6 +238,7 @@ mod clips_draw;
 mod clips_tests;
 mod fade_drag;
 mod lane_grid;
+mod loop_tint;
 pub mod marquee;
 mod minimap;
 mod note_marks;
