@@ -10,7 +10,7 @@ use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::clip_timeline::{BeatClipTimeline, FrameClipTimeline};
 use vibez_core::effect::{EffectType, ParamDescriptor};
 use vibez_core::id::{ClipId, EffectId, TrackId};
-use vibez_core::midi::{InstrumentKind, MidiNote, TrackKind};
+use vibez_core::midi::{InstrumentKind, MidiNote, TrackKind, NOTE_CONTENT_END_BEATS};
 use vibez_core::track::{
     AudioInputRoute, ClipFades, ClipGainDb, ClipPlaybackDirection, ClipTranspose, DrumPadState,
     InputMonitoring, MediaSourceRef,
@@ -567,6 +567,7 @@ impl UiNoteClip {
             && end.is_finite()
             && start >= 0.0
             && start < end
+            && end <= NOTE_CONTENT_END_BEATS
             && self.start_marker_beats < end
     }
 

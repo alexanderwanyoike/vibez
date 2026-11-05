@@ -2,6 +2,7 @@
 
 use iced::{Point, Rectangle};
 use vibez_core::clip_timeline::BeatClipTimeline;
+use vibez_core::midi::NOTE_CONTENT_END_BEATS;
 
 use crate::domains::piano_roll::PianoRollMsg;
 use crate::message::Message;
@@ -98,7 +99,7 @@ impl PianoRollWidget {
                 let (loop_start_beats, loop_end_beats) = drag.resolve(
                     pointer_at(position.x.max(KEY_WIDTH)),
                     min_length.min(self.total_beats),
-                    f64::INFINITY,
+                    NOTE_CONTENT_END_BEATS,
                 );
                 ((loop_start_beats, loop_end_beats) != (clip.loop_start_beats, clip.loop_end_beats))
                     .then(|| {

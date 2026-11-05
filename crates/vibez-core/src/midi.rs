@@ -34,6 +34,10 @@ impl MidiNote {
     }
 }
 
+/// The furthest beat a note Clip's content reaches, 4096 bars, so a loop
+/// dragged or loaded past the clip's end stays finite.
+pub const NOTE_CONTENT_END_BEATS: f64 = 16_384.0;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NoteClipInfo {
     pub id: ClipId,
