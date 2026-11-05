@@ -66,6 +66,11 @@ impl App {
         bank_bar + DESK_PADDING + strip_height(buses)
     }
 
+    /// Every strip's height on the desk.
+    pub(super) fn mix_strip_height(&self) -> f32 {
+        strip_height(self.state.project_tracks.buses.len())
+    }
+
     /// The work column under the chrome row, down to the gap above the
     /// status bar, which the Mix card, its divider and the detail card share.
     fn mix_column_height(&self) -> f32 {
@@ -184,7 +189,7 @@ impl App {
     /// the master pinned on the right.
     fn view_desk(&self) -> Element<'_, Message> {
         let buses = &self.state.project_tracks.buses;
-        let height = strip_height(buses.len());
+        let height = self.mix_strip_height();
         let strip = |track, role, number| self.view_desk_strip(track, role, number, height);
         let mut channels = row![].spacing(STRIP_GAP);
         for (index, track) in self.state.project_tracks.tracks.iter().enumerate() {
