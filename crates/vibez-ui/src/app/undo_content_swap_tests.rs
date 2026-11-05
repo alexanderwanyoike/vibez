@@ -257,3 +257,39 @@ fn undo_that_keeps_the_tempo_and_swing_sends_neither() {
         "Play must not wait behind a tempo that did not change"
     );
 }
+
+#[test]
+fn undoing_a_drum_pad_value_sends_it_as_a_control() {
+    let (mut app, mut commands, _, _) = two_track_project();
+    let drums = app.state.project_tracks.tracks[1].id;
+    Arc::make_mut(&mut app.state.project_tracks).tracks[1].instrument_kind =
+        Some(vibez_core::midi::InstrumentKind::DrumRack);
+    let original = app.state.project_tracks.tracks[1].drum_rack_pads[2].params[0];
+    app.push_undo_snapshot(None);
+    Arc::make_mut(&mut app.state.project_tracks).tracks[1].drum_rack_pads[2].params[0] =
+        original + 0.25;
+    drain(&mut commands);
+
+    let _ = app.update_and_refresh_clips(Message::Project(ProjectMsg::Undo));
+
+    let sent = drain(&mut commands);
+    assert!(
+        !sent.iter().any(|command| matches!(
+            command,
+            EngineCommand::RemoveTrack(_)
+                | EngineCommand::AddTrack(_)
+                | EngineCommand::SetInstrument { .. }
+                | EngineCommand::SetDrumRackPadState { .. }
+        )),
+        "a pad value change leaves the drum rack in the engine"
+    );
+    assert!(sent.iter().any(|command| matches!(
+        command,
+        EngineCommand::SetDrumRackPadParam { track_id, pad_index: 2, param_index: 0, value }
+            if *track_id == drums && *value == original
+    )));
+    assert_eq!(
+        app.state.project_tracks.tracks[1].drum_rack_pads[2].params[0],
+        original
+    );
+}
