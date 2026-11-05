@@ -199,30 +199,17 @@ pub(super) fn browser_utility_action_style(
     }
 }
 
+/// A filled button in the browser, such as the audition transport.
 pub(super) fn browser_transport_button_style(
     _theme: &Theme,
     status: button::Status,
 ) -> button::Style {
     button::Style {
-        background: Some(
-            if matches!(status, button::Status::Hovered | button::Status::Pressed) {
-                th::bg_hover()
-            } else {
-                th::bg_elevated()
-            }
-            .into(),
-        ),
-        text_color: th::text_dim(),
         border: iced::Border {
-            color: if matches!(status, button::Status::Pressed) {
-                th::accent()
-            } else {
-                th::border()
-            },
-            width: 1.0,
-            radius: 0.0.into(),
+            radius: 6.0.into(),
+            ..Default::default()
         },
-        ..Default::default()
+        ..crate::widgets::control_style::styled(None, status)
     }
 }
 
@@ -282,13 +269,13 @@ pub(super) fn browser_result_cell_color(selected: bool) -> iced::Color {
     }
 }
 
+/// The audition footer: a rounded well sunk into the browser card.
 pub(super) fn browser_footer_style(_theme: &Theme) -> container::Style {
     container::Style {
-        background: Some(th::bg_surface().into()),
+        background: Some(th::field().into()),
         border: iced::Border {
-            color: th::divider(),
-            width: 1.0,
-            radius: 0.0.into(),
+            radius: BROWSER_FIELD_RADIUS.into(),
+            ..Default::default()
         },
         ..Default::default()
     }
