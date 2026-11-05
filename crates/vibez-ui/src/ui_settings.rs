@@ -486,6 +486,22 @@ mod tests {
     }
 
     #[test]
+    fn an_out_of_range_grid_bias_loads_clamped_to_the_adaptive_steps() {
+        use crate::state::{GridConfig, SnapGrid};
+
+        let settings = UiSettings {
+            arrange_grid: GridConfig::new(SnapGrid::EIGHTH, true, true, 100),
+            clip_grid: GridConfig::new(SnapGrid::EIGHTH, true, true, -100),
+            ..UiSettings::default()
+        };
+        let loaded: UiSettings =
+            serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+
+        assert_eq!(loaded.arrange_grid.adaptive_bias, 7);
+        assert_eq!(loaded.clip_grid.adaptive_bias, -7);
+    }
+
+    #[test]
     fn detail_panel_height_defaults_and_roundtrips() {
         let old: UiSettings = serde_json::from_str("{}").unwrap();
         assert_eq!(
