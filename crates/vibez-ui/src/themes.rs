@@ -9,7 +9,7 @@ use std::path::PathBuf;
 
 use iced::Color;
 
-use crate::theme::{ClipStyle, LaneStyle, ThemePalette};
+use crate::theme::{contrast_ratio, ClipStyle, LaneStyle, ThemePalette};
 
 const fn rgb8(r: u8, g: u8, b: u8) -> Color {
     Color {
@@ -148,9 +148,7 @@ const TRACKS_MUTED: [Color; 8] = [
 /// drawn on. Dim text carries 8 to 10 px captions and values, so it keeps
 /// WCAG AA's 4.5:1. Muted text only carries hints, placeholders and
 /// disabled states, so it keeps the 3:1 AA allows for large text.
-#[cfg(test)]
 const TEXT_DIM_CONTRAST: f32 = 4.5;
-#[cfg(test)]
 const TEXT_MUTED_CONTRAST: f32 = 3.0;
 
 struct Seed {
@@ -162,19 +160,47 @@ struct Seed {
     eq: [Color; 4],
 }
 
+/// Fill the dim and muted text tiers by stepping `mix` away from the text
+/// as far as each nominal step, or less where the tier would fall under its
+/// contrast floor on a surface it is drawn on.
+fn with_text_tiers(
+    mut palette: ThemePalette,
+    [dim_step, muted_step]: [f32; 2],
+    mix: impl Fn(f32) -> Color,
+) -> ThemePalette {
+    let surfaces = palette.text_surfaces();
+    let holding = |floor: f32, nominal: f32| {
+        let mut step = nominal;
+        while step > 0.0 {
+            let tier = mix(step);
+            if surfaces
+                .iter()
+                .all(|&(_, surface)| contrast_ratio(tier, surface) >= floor)
+            {
+                return tier;
+            }
+            step -= 0.01;
+        }
+        mix(0.0)
+    };
+    palette.text_dim = holding(TEXT_DIM_CONTRAST, dim_step);
+    palette.text_muted = holding(TEXT_MUTED_CONTRAST, muted_step);
+    palette
+}
+
 /// Fill a complete palette from a dark seed: surfaces step up from
 /// the background, text tiers step down, grids sit between.
 fn dark(seed: Seed) -> ThemePalette {
     let bg = seed.bg;
-    ThemePalette {
+    let palette = ThemePalette {
         name: seed.name.to_string(),
         bg_dark: bg,
         bg_surface: lighten(bg, 0.045),
         bg_elevated: lighten(bg, 0.085),
         bg_hover: lighten(bg, 0.125),
         text: seed.text,
-        text_dim: darken(seed.text, 0.43),
-        text_muted: darken(seed.text, 0.64),
+        text_dim: seed.text,
+        text_muted: seed.text,
         accent: seed.accent,
         accent_dim: darken(seed.accent, 0.4),
         border: lighten(bg, 0.14),
@@ -213,22 +239,23 @@ fn dark(seed: Seed) -> ThemePalette {
         piano_key_label: lighten(bg, 0.32),
         clip_style: ClipStyle::DARK,
         lane_style: LaneStyle::DARK,
-    }
+    };
+    with_text_tiers(palette, [0.43, 0.64], |step| darken(seed.text, step))
 }
 
 /// Fill a complete palette from a light seed: surfaces step down
 /// from the background, text is ink, grids darker than paper.
 fn light(seed: Seed) -> ThemePalette {
     let bg = seed.bg;
-    ThemePalette {
+    let palette = ThemePalette {
         name: seed.name.to_string(),
         bg_dark: bg,
         bg_surface: darken(bg, 0.035),
         bg_elevated: darken(bg, 0.065),
         bg_hover: darken(bg, 0.10),
         text: seed.text,
-        text_dim: lighten(seed.text, 0.38),
-        text_muted: lighten(seed.text, 0.58),
+        text_dim: seed.text,
+        text_muted: seed.text,
         accent: seed.accent,
         accent_dim: lighten(seed.accent, 0.3),
         border: darken(bg, 0.14),
@@ -267,7 +294,8 @@ fn light(seed: Seed) -> ThemePalette {
         piano_key_label: darken(bg, 0.45),
         clip_style: ClipStyle::LIGHT,
         lane_style: LaneStyle::LIGHT,
-    }
+    };
+    with_text_tiers(palette, [0.38, 0.58], |step| lighten(seed.text, step))
 }
 
 /// All built-in themes, default first.
@@ -616,7 +644,6 @@ pub fn save_user_theme(palette: &ThemePalette) -> Result<PathBuf, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::theme::contrast_ratio;
 
     #[test]
     fn twenty_builtins_with_unique_names() {

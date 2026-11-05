@@ -377,7 +377,6 @@ impl ThemePalette {
     }
 
     /// Every background the text tiers are drawn on.
-    #[cfg(test)]
     pub(crate) fn text_surfaces(&self) -> [(&'static str, Color); 5] {
         [
             ("bg_dark", self.bg_dark),
@@ -534,7 +533,6 @@ impl Hsl {
 }
 
 /// WCAG 2 relative luminance of an sRGB colour, ignoring alpha.
-#[cfg(test)]
 pub(crate) fn relative_luminance(c: Color) -> f32 {
     let linear = |v: f32| {
         if v <= 0.04045 {
@@ -547,7 +545,6 @@ pub(crate) fn relative_luminance(c: Color) -> f32 {
 }
 
 /// WCAG 2 contrast ratio between two opaque colours, from 1 to 21.
-#[cfg(test)]
 pub(crate) fn contrast_ratio(a: Color, b: Color) -> f32 {
     let (a, b) = (relative_luminance(a), relative_luminance(b));
     (a.max(b) + 0.05) / (a.min(b) + 0.05)
