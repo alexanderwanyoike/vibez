@@ -23,10 +23,13 @@ const DETAIL_PANEL_MIN_HEIGHT: f32 = 180.0;
 const DETAIL_CARD_PADDING: f32 = 10.0;
 const AUDIO_DETAIL_PANEL_PREFERRED_HEIGHT: f32 = 260.0;
 const MIDI_DETAIL_PANEL_PREFERRED_HEIGHT: f32 = 360.0;
-// The transport, workspace tabs and status chrome consume roughly 140 px at
-// the default density. Reserve another 440 px for the actual workspace so a
-// dragged detail panel can never crush Perform or Arrange into a letterbox.
-const APP_CHROME_AND_WORKSPACE_MIN_HEIGHT: f32 = 580.0;
+// Reserve 440 px for the workspace card below the chrome row, above the
+// status bar and between the frame gaps, so a dragged detail panel can never
+// crush Perform or Arrange into a letterbox.
+const APP_CHROME_AND_WORKSPACE_MIN_HEIGHT: f32 = super::views_control_bar_style::BAR_HEIGHT
+    + crate::shell_layout::STATUS_HEIGHT
+    + 2.0 * crate::shell_layout::PANE_GAP
+    + 440.0;
 // The dogfood reference at a 1,920 x 1,040 work area leaves about 364 px for
 // the detail panel. Preserve that 35% composition when a saved drag height is
 // larger than the current window can comfortably show.
