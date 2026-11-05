@@ -720,6 +720,10 @@ impl AudioEngine {
                 self.apply_arrangement_end();
             }
             EngineCommand::EndContentRebuild => {
+                debug_assert!(
+                    self.content_rebuilds > 0,
+                    "EndContentRebuild without a BeginContentRebuild"
+                );
                 self.content_rebuilds = self.content_rebuilds.saturating_sub(1);
                 self.apply_arrangement_end();
             }

@@ -714,7 +714,14 @@ fn cases() -> Vec<Case> {
             f.note_clip
         )),
         case!("BeginContentRebuild", false, |_| C::BeginContentRebuild),
-        case!("EndContentRebuild", false, |_| C::EndContentRebuild),
+        case!(
+            "EndContentRebuild",
+            false,
+            |commands, _| {
+                assert!(commands.push(C::BeginContentRebuild).is_ok());
+            },
+            |_| C::EndContentRebuild
+        ),
         case!("MoveNoteClip", false, |f| C::MoveNoteClip {
             track_id: f.synth,
             clip_id: f.note_clip,
