@@ -21,6 +21,9 @@ pub const OVERVIEW_HEIGHT: f32 = 34.0;
 const ROW_INSET: f32 = 3.0;
 /// Pixels either side of a view box edge that still grab it.
 const EDGE_GRAB_PX: f32 = 4.0;
+/// The mockup never draws the view box narrower than this, and its middle
+/// this wide always pans, so a far zoom can still be dragged.
+const MIN_BOX_PX: f32 = 6.0;
 
 /// Per-track data for the minimap overview.
 pub struct MinimapTrack {
@@ -50,16 +53,20 @@ impl ArrangementMinimap {
 
     /// Where the view box's edges sit in an overview `width` wide.
     fn view_box_x(&self, overview: TimelineGeometry, width: f32) -> (f32, f32) {
-        (
-            overview.beat_to_x(self.scroll_offset_beats),
-            overview.beat_to_x(self.scroll_offset_beats + self.visible_beats(width)),
-        )
+        let start = overview.beat_to_x(self.scroll_offset_beats);
+        let end = overview.beat_to_x(self.scroll_offset_beats + self.visible_beats(width));
+        let widen = ((MIN_BOX_PX - (end - start)) / 2.0).max(0.0);
+        (start - widen, end + widen)
     }
 
     /// The view box edge a press at `x` grabs: whether it is the start, and
     /// the beat the other edge keeps.
     fn edge_at(&self, overview: TimelineGeometry, width: f32, x: f32) -> Option<(bool, f64)> {
         let (start_x, end_x) = self.view_box_x(overview, width);
+        let inner_grab = ((end_x - start_x - MIN_BOX_PX) / 2.0).clamp(0.0, EDGE_GRAB_PX);
+        if x > start_x + inner_grab && x < end_x - inner_grab {
+            return None;
+        }
         nearest_end(start_x, end_x, x, EDGE_GRAB_PX).map(|edge| {
             let start = edge == LoopMarker::Start;
             let fixed = if start {
