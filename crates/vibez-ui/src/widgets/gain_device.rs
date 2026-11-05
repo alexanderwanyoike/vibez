@@ -14,6 +14,7 @@ use crate::domains::param_entry::ValueEntry;
 use crate::message::Message;
 use crate::state::UiEffect;
 use crate::theme as th;
+use crate::widgets::control_style;
 use crate::widgets::device_controls::{heading, rule, vertical_rule, Param};
 use crate::widgets::effect_knob::KnobTarget;
 use crate::widgets::level_meter::{self, LevelMeter};
@@ -483,22 +484,7 @@ fn small_button<'a>(
     button(text(label).size(9))
         .on_press(message)
         .padding([2, 8])
-        .style(move |_theme: &Theme, status| button::Style {
-            background: Some(
-                if matches!(status, button::Status::Hovered | button::Status::Pressed) {
-                    th::bg_hover().into()
-                } else {
-                    th::bg_dark().into()
-                },
-            ),
-            text_color: if active { accent } else { th::text() },
-            border: iced::Border {
-                color: if active { accent } else { th::border() },
-                width: 1.0,
-                radius: 3.0.into(),
-            },
-            ..Default::default()
-        })
+        .style(control_style::style(active.then_some(accent)))
         .into()
 }
 

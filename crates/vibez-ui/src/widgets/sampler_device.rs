@@ -6,7 +6,7 @@
 use std::sync::Arc;
 
 use iced::widget::{button, column, container, row, text, Space};
-use iced::{Alignment, Color, Element, Length, Size, Theme};
+use iced::{Alignment, Color, Element, Length, Size};
 use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::id::TrackId;
 use vibez_instruments::sampler::{filter_type, param};
@@ -21,6 +21,7 @@ use crate::domains::sampler::{
 use crate::domains::synth::{LFO_SHAPE_NAMES, LFO_TARGET_NAMES};
 use crate::message::Message;
 use crate::theme as th;
+use crate::widgets::control_style;
 use crate::widgets::device_controls::{
     heading, plot_band, rule, segmented, tabs, vertical_rule, Param, LABEL_SIZE,
 };
@@ -321,23 +322,7 @@ impl<'a> SamplerView<'a> {
             button(text("Load").size(LABEL_SIZE))
                 .on_press(self.load.clone())
                 .padding([2, 10])
-                .style(|_theme: &Theme, status| button::Style {
-                    background: Some(
-                        if matches!(status, button::Status::Hovered | button::Status::Pressed) {
-                            th::bg_hover()
-                        } else {
-                            th::bg_surface()
-                        }
-                        .into(),
-                    ),
-                    text_color: th::text(),
-                    border: iced::Border {
-                        color: th::border(),
-                        width: 1.0,
-                        radius: 3.0.into(),
-                    },
-                    ..Default::default()
-                }),
+                .style(control_style::style(None)),
         );
         let mut left = column![container(header)
             .height(SAMPLE_HEADER_H)

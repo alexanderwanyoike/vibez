@@ -7,6 +7,7 @@ use crate::icons;
 use crate::message::Message;
 use crate::state::UiEffect;
 use crate::theme as th;
+use crate::widgets::control_style;
 use crate::widgets::effect_knob::{param_column, EffectKnobWidget};
 use vibez_core::id::TrackId;
 use vibez_plugin_host::gui::PluginGuiKey;
@@ -104,35 +105,11 @@ pub fn view_effect_slot<'a>(
     );
 
     let bypass_label = if is_bypassed { "Off" } else { "On" };
-    let bypass_color = if is_bypassed {
-        th::text_muted()
-    } else {
-        th::success()
-    };
     let make_bypass = move || {
-        button(text(bypass_label).size(9).color(bypass_color))
+        button(text(bypass_label).size(9))
             .on_press(Message::toggle_effect_bypass(track_id, effect.id))
             .padding([2, 5])
-            .style(move |_theme: &Theme, status| {
-                let bg = match status {
-                    button::Status::Hovered => Some(th::bg_hover().into()),
-                    _ => None,
-                };
-                button::Style {
-                    background: bg,
-                    text_color: bypass_color,
-                    border: iced::Border {
-                        color: if is_bypassed {
-                            th::border()
-                        } else {
-                            th::darken(th::success(), 0.5)
-                        },
-                        width: 1.0,
-                        radius: 3.0.into(),
-                    },
-                    ..Default::default()
-                }
-            })
+            .style(control_style::style((!is_bypassed).then(th::success)))
     };
 
     let make_move_up = || -> Element<'a, Message> {
