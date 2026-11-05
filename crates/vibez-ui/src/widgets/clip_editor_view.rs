@@ -158,3 +158,23 @@ impl RulerZoom {
         scrolled
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_clip_editor_ruler_drag_zooms_and_pans_as_the_arrange_ruler_does() {
+        let view = ClipEditorView::new(None, 0.0, 16.0, 64.0);
+        let width = 600.0;
+        let start = view.viewport(width);
+        let pressed = Point::new(300.0, 10.0);
+        let grabbed_beat = start.geometry().x_to_beat(pressed.x);
+
+        let mut zoom = RulerZoom::begin(view, pressed, width);
+        zoom.drag_to(Point::new(320.0, 40.0), width);
+        let reached = zoom.drag_to(Point::new(340.0, 70.0), width);
+
+        assert_eq!(reached, start.ruler_dragged(grabbed_beat, 340.0, 60.0));
+    }
+}
