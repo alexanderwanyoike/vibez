@@ -394,7 +394,7 @@ pub fn builtins() -> Vec<ThemePalette> {
             name: "Solarized Dark",
             bg: rgb8(0, 43, 54),
             accent: rgb8(38, 139, 210),
-            text: rgb8(147, 161, 161),
+            text: rgb8(196, 203, 203),
             tracks: [
                 rgb8(220, 50, 47),
                 rgb8(203, 75, 22),
@@ -453,7 +453,7 @@ pub fn builtins() -> Vec<ThemePalette> {
             name: "One Dark",
             bg: rgb8(40, 44, 52),
             accent: rgb8(97, 175, 239),
-            text: rgb8(171, 178, 191),
+            text: rgb8(209, 213, 220),
             tracks: [
                 rgb8(224, 108, 117),
                 rgb8(209, 154, 102),
@@ -528,7 +528,7 @@ pub fn builtins() -> Vec<ThemePalette> {
             name: "Solarized Light",
             bg: rgb8(253, 246, 227),
             accent: rgb8(38, 139, 210),
-            text: rgb8(88, 110, 117),
+            text: rgb8(40, 62, 70),
             tracks: [
                 rgb8(220, 50, 47),
                 rgb8(203, 75, 22),
