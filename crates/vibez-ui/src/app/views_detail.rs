@@ -13,6 +13,8 @@ use crate::icons;
 use crate::message::Message;
 use crate::state::{ArrangementSelection, DetailPanelTab, GridCommand, TimelineEditorState};
 use crate::theme as th;
+use crate::widgets::audio_clip_detail::audio_clip_editor_view;
+use crate::widgets::clip_editor_view::ClipEditorView;
 use crate::widgets::piano_roll::{PianoRollWidget, VelocityLaneWidget};
 
 use super::*;
@@ -138,6 +140,20 @@ impl App {
         Some((track_id, clip_id))
     }
 
+    /// The clip whose open editor owns the editor shortcuts: an opened
+    /// note clip, or the one audio clip the audio editor shows.
+    pub(super) fn focused_clip_editor(&self) -> Option<ClipId> {
+        self.focused_piano_roll_clip()
+            .map(|(_, clip_id)| clip_id)
+            .or_else(|| {
+                if self.state.view.detail_panel_tab != DetailPanelTab::Clip {
+                    return None;
+                }
+                let editor = self.state.active_timeline_editor();
+                single_selected_audio_clip_for_track(editor, editor.selected_track?)
+            })
+    }
+
     /// Whether the open piano roll has notes selected: the arrow keys then
     /// move them, ahead of anything else that wants the arrows.
     pub(super) fn piano_roll_has_selected_notes(&self) -> bool {
@@ -162,36 +178,48 @@ impl App {
             .effective_grid(self.clip_editor_pixels_per_beat())
     }
 
-    /// Approximate zoom of the clip editor. Both clip editors fit the whole
-    /// clip into the panel; with no clip open the timeline's zoom stands in.
+    /// The open clip editor's zoom, measured against the window's width
+    /// until the producer zooms it; with no clip open the timeline's zoom
+    /// stands in.
     pub(super) fn clip_editor_pixels_per_beat(&self) -> f32 {
-        self.clip_editor_clip_beats()
-            .map(|beats| {
-                crate::widgets::piano_roll::fitted_geometry(beats, self.state.view.window_width)
+        self.open_clip_editor_view()
+            .map(|view| {
+                crate::widgets::piano_roll::view_geometry(view, self.state.view.window_width)
                     .pixels_per_beat()
             })
             .unwrap_or_else(|| self.timeline_pixels_per_beat())
     }
 
-    fn clip_editor_clip_beats(&self) -> Option<f64> {
+    fn open_clip_editor_view(&self) -> Option<ClipEditorView> {
         let editor = self.state.active_timeline_editor();
         if let Some((track_id, clip_id)) = editor.selected_note_clip {
-            return self
+            let clip = self
                 .state
                 .active_timeline_content(track_id)?
                 .note_clips
                 .iter()
-                .find(|clip| clip.id == clip_id)
-                .map(|clip| clip.editor_beats());
+                .find(|clip| clip.id == clip_id)?;
+            return Some(crate::widgets::piano_roll::framed_view(
+                self.state.view.clip_editor_view(clip.id),
+                clip.loop_enabled
+                    .then_some((clip.loop_start_beats, clip.loop_end_beats)),
+                clip.editor_beats(),
+            ));
         }
         let track_id = editor.selected_track?;
         let clip_id = single_selected_audio_clip_for_track(editor, track_id)?;
-        self.state
+        let clip = self
+            .state
             .active_timeline_content(track_id)?
             .clips
             .iter()
-            .find(|clip| clip.id == clip_id)
-            .map(|clip| clip.duration as f64 / self.state.transport.samples_per_beat())
+            .find(|clip| clip.id == clip_id)?;
+        Some(audio_clip_editor_view(
+            self.state.view.clip_editor_view(clip.id),
+            self.state.transport.samples_per_beat(),
+            clip.editor_frames(),
+            clip.timeline(),
+        ))
     }
 
     /// The Snap list for the clip editor grid, shown in each clip editor.
@@ -429,7 +457,7 @@ impl App {
                 content.note_clips.iter().find(|clip| clip.id == clip_id)
             });
 
-        let (mut piano_widget, velocity_widget) = match visible_clip {
+        let (mut piano_widget, mut velocity_widget) = match visible_clip {
             Some(clip) => {
                 let content_playhead = clip.content_beat_at(playhead_beats).unwrap_or(-1.0);
                 (
@@ -458,6 +486,9 @@ impl App {
             ),
         };
 
+        let clip_view = visible_clip.and_then(|clip| self.state.view.clip_editor_view(clip.id));
+        piano_widget.view = clip_view;
+        velocity_widget.view = clip_view;
         piano_widget.reserve_arrow_keys = self.state.view.workspace
             == crate::state::Workspace::Perform
             && self.state.perform.layout == vibez_project::PerformLayout::Clips

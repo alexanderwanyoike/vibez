@@ -13,6 +13,7 @@ mod ui_types;
 pub use transport_state::{PlaybackPhase, TransportState};
 
 use crate::remote_provider::RemoteCatalogSnapshot;
+use crate::widgets::clip_editor_view::StoredClipView;
 pub use browser_results::LocalResults;
 pub use browser_state::*;
 pub use snapshot::*;
@@ -113,6 +114,11 @@ pub struct ViewState {
     pub viewport: crate::timeline_geometry::TimelineViewport,
     /// The Arrange view a zoom to selection replaced, for zoom back.
     pub zoom_before_selection: Option<crate::timeline_geometry::TimelineViewport>,
+    /// What the producer asked the clip editor to show of the clip it last
+    /// showed. Opening another clip shows that clip afresh.
+    pub stored_clip_editor_view: Option<(ClipId, StoredClipView)>,
+    /// The clip editor view a frame of the loop replaced, for zoom back.
+    pub clip_view_before_loop: Option<(ClipId, Option<StoredClipView>)>,
     /// Arrange and Section timelines. The transport bar always edits it; the
     /// grid shortcuts edit it unless a clip editor has focus.
     pub arrange_grid: GridConfig,
@@ -152,6 +158,8 @@ impl Default for ViewState {
             perform_surface_resize_active: false,
             viewport: crate::timeline_geometry::TimelineViewport::new(1.0, 0.0),
             zoom_before_selection: None,
+            stored_clip_editor_view: None,
+            clip_view_before_loop: None,
             arrange_grid: GridConfig::default(),
             clip_grid: GridConfig::default(),
             context_menu: None,
@@ -174,6 +182,12 @@ impl Default for ViewState {
 }
 
 impl ViewState {
+    pub(crate) fn clip_editor_view(&self, clip_id: ClipId) -> Option<StoredClipView> {
+        self.stored_clip_editor_view
+            .filter(|(shown, _)| *shown == clip_id)
+            .map(|(_, viewport)| viewport)
+    }
+
     const DRUM_PAD_FLASH_HOLD: std::time::Duration = std::time::Duration::from_millis(140);
 
     pub fn trigger_drum_pad_flash(

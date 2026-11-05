@@ -482,6 +482,12 @@ pub fn solo_active() -> Color {
     meter_yellow()
 }
 
+/// Washes out clip content the clip never reaches, so a loop that runs
+/// past the clip's end reads as outside it.
+pub fn past_clip_end_shade() -> Color {
+    with_alpha(bg_dark(), 0.6)
+}
+
 pub fn knob_bg() -> Color {
     bg_elevated()
 }

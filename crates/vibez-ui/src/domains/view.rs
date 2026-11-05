@@ -9,6 +9,7 @@ use crate::state::{
     ContextMenuTarget, DetailPanelTab, GridCommand, TimelineEditorState, ViewState, Workspace,
 };
 use crate::timeline_geometry::TimelineViewport;
+use crate::widgets::clip_editor_view::StoredClipView;
 
 /// Messages the view domain handles.
 #[derive(Debug, Clone)]
@@ -26,14 +27,25 @@ pub enum ViewMsg {
     },
     ZoomToFit,
     /// Frame the time selection, or the selected clips, in the lanes
-    /// (Ableton's Z).
+    /// (Ableton's Z). The router sends an open clip editor
+    /// [`ViewMsg::FrameClipEditorLoop`] instead.
     ZoomToSelection,
     /// Return to the view from before the last zoom to selection
-    /// (Ableton's X).
+    /// (Ableton's X), or [`ViewMsg::ClipEditorZoomBack`] for an open clip
+    /// editor.
     ZoomBack,
     ScrollArrangement(f64),
     /// Jump straight to a zoom and scroll, as a ruler drag does.
     SetViewport(TimelineViewport),
+    /// The producer zoomed or scrolled the clip editor showing this clip.
+    SetClipEditorView {
+        clip_id: ClipId,
+        viewport: TimelineViewport,
+    },
+    /// Frame the loop in the clip editor showing this clip.
+    FrameClipEditorLoop(ClipId),
+    /// Return that clip editor to its view from before it framed the loop.
+    ClipEditorZoomBack(ClipId),
     Grid(GridTarget, GridCommand),
     BeginDetailPanelResize,
     ResizeDetailPanel(f32),
@@ -204,6 +216,21 @@ impl ViewState {
                     self.viewport.clamp(ctx.total_beats, ctx.lane_width);
                 }
             }
+            ViewMsg::SetClipEditorView { clip_id, viewport } => {
+                self.stored_clip_editor_view = Some((clip_id, StoredClipView::Viewport(viewport)));
+            }
+            ViewMsg::FrameClipEditorLoop(clip_id) => {
+                self.clip_view_before_loop = Some((clip_id, self.clip_editor_view(clip_id)));
+                self.stored_clip_editor_view = Some((clip_id, StoredClipView::Loop));
+            }
+            ViewMsg::ClipEditorZoomBack(clip_id) => {
+                if let Some((_, before)) = self
+                    .clip_view_before_loop
+                    .take_if(|(framed, _)| *framed == clip_id)
+                {
+                    self.stored_clip_editor_view = before.map(|view| (clip_id, view));
+                }
+            }
             ViewMsg::Grid(target, command) => {
                 match target {
                     GridTarget::Arrange => &mut self.arrange_grid,
@@ -334,6 +361,28 @@ mod tests {
     use crate::timeline_geometry::TimelineGeometry;
 
     #[test]
+    fn a_clip_editor_view_belongs_to_the_clip_it_was_set_for() {
+        let mut view = ViewState::default();
+        let zoomed = ClipId::new();
+        let viewport = TimelineViewport::new(4.0, 12.0);
+
+        view.update(
+            ViewMsg::SetClipEditorView {
+                clip_id: zoomed,
+                viewport,
+            },
+            &TimelineEditorState::default(),
+            ViewCtx::default(),
+        );
+
+        assert_eq!(
+            view.clip_editor_view(zoomed),
+            Some(StoredClipView::Viewport(viewport))
+        );
+        assert_eq!(view.clip_editor_view(ClipId::new()), None);
+    }
+
+    #[test]
     fn zoom_clamps_both_directions() {
         let mut v = ViewState::default();
         v.update(
@@ -446,35 +495,6 @@ mod tests {
         );
     }
 
-    fn audio_clip(position: u64, duration: u64) -> crate::state::UiClip {
-        crate::state::UiClip {
-            id: ClipId::new(),
-            name: "Audio".into(),
-            audio: std::sync::Arc::new(vibez_core::audio_buffer::DecodedAudio {
-                channels: vec![vec![0.0; 8]],
-                sample_rate: 48_000,
-            }),
-            source: None,
-            position,
-            source_offset: 0,
-            start_marker: 0,
-            duration,
-            loop_enabled: false,
-            loop_start: 0,
-            loop_end: 0,
-            gain_db: Default::default(),
-            fades: Default::default(),
-            playback_direction: Default::default(),
-            transient_markers: Default::default(),
-            warp_markers: Default::default(),
-            transpose: Default::default(),
-            original_bpm: None,
-            warped: false,
-            warped_to_bpm: None,
-            original_audio: None,
-        }
-    }
-
     fn note_clip(position_beats: f64, duration_beats: f64) -> crate::state::UiNoteClip {
         crate::state::UiNoteClip {
             id: ClipId::new(),
@@ -513,7 +533,7 @@ mod tests {
     fn zoom_to_selection_frames_every_selected_clip_without_a_time_range() {
         let mut view = zoomed_out_view();
         let (audio_track, midi_track) = (TrackId::new(), TrackId::new());
-        let audio = audio_clip(3_200, 800);
+        let audio = crate::state::UiClip::test_clip(3_200, 800);
         let notes = note_clip(44.0, 4.0);
         let unselected = note_clip(200.0, 4.0);
         let mut content = crate::state::TimelineContent::default();

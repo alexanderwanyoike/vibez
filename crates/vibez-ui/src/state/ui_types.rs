@@ -234,6 +234,19 @@ impl UiClip {
         )
     }
 
+    /// The frames the audio editor spans: from where the loop may begin to
+    /// the furthest it may reach, or to the clip's end where an unlooped
+    /// clip runs on into silence.
+    pub(crate) fn editor_frames(&self) -> (u64, u64) {
+        let reach = self.loop_content_end();
+        let end = if self.loop_enabled {
+            reach
+        } else {
+            reach.max(self.source_offset.saturating_add(self.duration))
+        };
+        (self.loop_content_start(), end)
+    }
+
     /// Resizing a warped clip resizes its Warp Marker map, which can cut the
     /// loop.
     pub(crate) fn clamp_loop_to_warp_map(&mut self) {
@@ -671,6 +684,40 @@ impl UiNoteClip {
     /// Timeline-local occurrences of one source note onset, including repeats.
     pub(crate) fn note_occurrences(&self, source_beat: f64) -> Vec<f64> {
         self.timeline().occurrences_of(source_beat).collect()
+    }
+}
+
+#[cfg(test)]
+impl UiClip {
+    /// A silent, unlooped audio Clip `duration` frames long at `position`,
+    /// for tests to fill in the fields they care about.
+    pub(crate) fn test_clip(position: u64, duration: u64) -> Self {
+        Self {
+            id: ClipId::new(),
+            name: "Audio".into(),
+            audio: Arc::new(DecodedAudio {
+                channels: vec![vec![0.0; duration as usize]],
+                sample_rate: 48_000,
+            }),
+            source: None,
+            position,
+            source_offset: 0,
+            start_marker: 0,
+            duration,
+            loop_enabled: false,
+            loop_start: 0,
+            loop_end: 0,
+            gain_db: Default::default(),
+            fades: Default::default(),
+            playback_direction: Default::default(),
+            transient_markers: Default::default(),
+            warp_markers: Default::default(),
+            transpose: Default::default(),
+            original_bpm: None,
+            warped: false,
+            warped_to_bpm: None,
+            original_audio: None,
+        }
     }
 }
 

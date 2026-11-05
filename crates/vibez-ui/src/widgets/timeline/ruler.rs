@@ -7,13 +7,14 @@ use iced::mouse;
 use iced::widget::canvas;
 use iced::{Point, Rectangle, Renderer, Theme};
 
-use super::ruler_drag::{brace_grab, BraceDrag, BraceGrab};
+use super::ruler_drag::{brace_grab, BraceDrag};
 use crate::domains::transport::TransportMsg;
 use crate::domains::view::ViewMsg;
 use crate::message::Message;
 use crate::state::{ContextMenuTarget, GridConfig, UndoGestureId};
 use crate::timeline_geometry::{TimelineGeometry, TimelineViewport};
 use crate::timeline_snap::{SnapContext, SnapTargets};
+use crate::widgets::clip_loop_markers::LoopMarker;
 use crate::widgets::double_click::DoubleClick;
 use crate::widgets::drag_phase::{DragPhase, CLICK_SLOP_PX};
 
@@ -93,7 +94,7 @@ impl RulerWidget {
         }
     }
 
-    fn brace_grab_at(&self, x: f32) -> BraceGrab {
+    fn brace_grab_at(&self, x: f32) -> Option<LoopMarker> {
         let geometry = self.geometry();
         brace_grab(
             x,
@@ -341,13 +342,10 @@ fn zoom_drag(view: TimelineViewport, grabbed_beat: f64, start: Point, at: Point)
     )))
 }
 
-fn brace_interaction(grab: BraceGrab, dragging: bool) -> mouse::Interaction {
-    match grab {
-        BraceGrab::Start | BraceGrab::End => mouse::Interaction::ResizingHorizontally,
-        BraceGrab::Whole if dragging => mouse::Interaction::Grabbing,
-        BraceGrab::Whole => mouse::Interaction::Grab,
-        BraceGrab::New => mouse::Interaction::Crosshair,
-    }
+fn brace_interaction(grab: Option<LoopMarker>, dragging: bool) -> mouse::Interaction {
+    grab.map_or(mouse::Interaction::Crosshair, |marker| {
+        marker.interaction(dragging)
+    })
 }
 
 #[cfg(test)]

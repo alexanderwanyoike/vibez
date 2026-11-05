@@ -188,6 +188,11 @@ impl TimelineGeometry {
         }
     }
 
+    /// The same mapping drawn to the right of a fixed header.
+    pub fn with_origin(self, origin_x: f32) -> Self {
+        Self { origin_x, ..self }
+    }
+
     pub fn pixels_per_beat(self) -> f32 {
         self.pixels_per_beat
     }
@@ -211,6 +216,14 @@ impl TimelineGeometry {
     pub fn beats_for_width(self, pixels: f32) -> f64 {
         pixels as f64 / self.pixels_per_beat as f64
     }
+
+    /// The beats of a `step` grid from the last one at or before `from_x`
+    /// to the first one at or after `to_x`, none before beat zero.
+    pub fn grid_beats(self, step: f64, from_x: f32, to_x: f32) -> impl Iterator<Item = f64> {
+        let first = (self.x_to_beat(from_x) / step).floor().max(0.0) as u64;
+        let last = (self.x_to_beat(to_x) / step).ceil().max(0.0) as u64;
+        (first..=last).map(move |index| index as f64 * step)
+    }
 }
 
 #[cfg(test)]
@@ -233,6 +246,18 @@ mod tests {
         assert_eq!(geometry.beat_to_x(4.0), 252.0);
         assert_eq!(geometry.x_to_beat(252.0), 4.0);
         assert_eq!(geometry.width_for_beats(2.0), 100.0);
+    }
+
+    #[test]
+    fn grid_beats_cover_the_span_from_the_step_before_to_the_step_after() {
+        let geometry = TimelineGeometry::new(20.0, 1.5);
+
+        let beats: Vec<f64> = geometry.grid_beats(1.0, 0.0, 50.0).collect();
+        assert_eq!(beats, vec![1.0, 2.0, 3.0, 4.0]);
+        let from_zero: Vec<f64> = TimelineGeometry::new(20.0, 0.0)
+            .grid_beats(2.0, -100.0, 30.0)
+            .collect();
+        assert_eq!(from_zero, vec![0.0, 2.0]);
     }
 
     #[test]

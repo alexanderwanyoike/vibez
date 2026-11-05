@@ -32,12 +32,9 @@ pub(super) fn ruler_marks(geometry: TimelineGeometry, width: f32) -> Vec<RulerMa
         .into_iter()
         .find(|step| geometry.width_for_beats(*step) >= MIN_TICK_GAP_PX);
     let step = tick_beats.unwrap_or(label_beats);
-    let first = (geometry.x_to_beat(0.0).max(0.0) / step).floor() as i64;
-    let last = (geometry.x_to_beat(width) / step).ceil() as i64;
 
     let mut marks = Vec::new();
-    for index in first..=last {
-        let beat = index as f64 * step;
+    for beat in geometry.grid_beats(step, 0.0, width) {
         let x = geometry.beat_to_x(beat).round();
         if !(0.0..=width).contains(&x) {
             continue;
