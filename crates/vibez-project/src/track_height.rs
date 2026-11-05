@@ -53,6 +53,11 @@ mod tests {
     }
 
     #[test]
+    fn a_height_that_is_not_a_number_is_the_default() {
+        assert_eq!(TrackHeight::new(f32::NAN), TrackHeight::DEFAULT);
+    }
+
+    #[test]
     fn a_saved_height_out_of_range_loads_inside_it() {
         let loaded: Vec<TrackHeight> = serde_json::from_str("[5.0, 140.0, 5000.0]").unwrap();
 
