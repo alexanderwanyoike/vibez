@@ -134,17 +134,24 @@ where
         .into()
 }
 
+/// How a channel name is set when it is not being edited.
+#[derive(Debug, Clone, Copy)]
+pub struct ChannelNameStyle {
+    pub size: u16,
+    pub font: iced::Font,
+    pub color: iced::Color,
+}
+
 /// Inline-editable channel name shared by arrangement headers and
 /// mixer strips. The caller decides which channel roles expose it.
+/// `editing` holds the text typed so far while the name is being edited.
 pub fn view_editable_channel_name<'a>(
     track: &'a ProjectTrack,
-    editing_name: bool,
-    edit_text: &'a str,
-    size: u16,
-    font: iced::Font,
-    color: iced::Color,
+    editing: Option<&'a str>,
+    style: ChannelNameStyle,
 ) -> Element<'a, Message> {
-    if editing_name {
+    let ChannelNameStyle { size, font, color } = style;
+    if let Some(edit_text) = editing {
         text_input("Name", edit_text)
             .on_input(|value| Message::View(ViewMsg::EditNameText(value)))
             .on_submit(Message::View(ViewMsg::FinishEditing))
@@ -197,11 +204,12 @@ pub fn view_track_header<'a>(
     };
     let name_widget = view_editable_channel_name(
         track,
-        editing_name,
-        edit_text,
-        13,
-        crate::typography::TRACK_TITLE,
-        name_color,
+        editing_name.then_some(edit_text),
+        ChannelNameStyle {
+            size: 13,
+            font: crate::typography::TRACK_TITLE,
+            color: name_color,
+        },
     );
 
     // Hidden actions stay laid out, so nothing shifts when the pointer

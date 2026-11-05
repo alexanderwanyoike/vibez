@@ -25,7 +25,8 @@ use crate::widgets::timeline::{
     OVERVIEW_HEIGHT, TRACK_ROW_HEIGHT,
 };
 use crate::widgets::track_header::{
-    view_editable_channel_name, view_track_header, TrackHeaderFlags, TrackHeaderRecordingView,
+    view_editable_channel_name, view_track_header, ChannelNameStyle, TrackHeaderFlags,
+    TrackHeaderRecordingView,
 };
 
 use super::*;
@@ -495,11 +496,13 @@ impl App {
             } else {
                 view_editable_channel_name(
                     channel,
-                    self.state.view.editing_track_name == Some(channel.id),
-                    &self.state.view.edit_name_text,
-                    11,
-                    iced::Font::DEFAULT,
-                    name_color,
+                    (self.state.view.editing_track_name == Some(channel.id))
+                        .then_some(self.state.view.edit_name_text.as_str()),
+                    ChannelNameStyle {
+                        size: 11,
+                        font: iced::Font::DEFAULT,
+                        color: name_color,
+                    },
                 )
             };
 
