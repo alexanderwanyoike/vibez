@@ -453,7 +453,7 @@ impl TimelineEditorState {
                             }
                         }
                     }
-                    // Select the new copies
+                    action.mark_dirty = !new_selections.is_empty();
                     self.selected_clips = new_selections;
                     let count = selections.len();
                     action.status = Some(if count == 1 {
@@ -671,28 +671,26 @@ impl TimelineEditorState {
                 for selection in clips {
                     match selection {
                         ArrangementSelection::AudioClip { track_id, clip_id } => {
-                            let _ = self.update(
-                                project_tracks,
-                                ArrangementMsg::SplitAudioClip {
+                            action.mark_dirty |= self
+                                .op_split_audio_clip(
+                                    engine,
+                                    ctx,
                                     track_id,
                                     clip_id,
-                                    split_position: ctx.playhead_samples,
-                                },
-                                engine,
-                                ctx,
-                            );
+                                    ctx.playhead_samples,
+                                )
+                                .mark_dirty;
                         }
                         ArrangementSelection::NoteClip { track_id, clip_id } => {
-                            let _ = self.update(
-                                project_tracks,
-                                ArrangementMsg::SplitNoteClip {
+                            action.mark_dirty |= self
+                                .op_split_note_clip(
+                                    engine,
+                                    ctx,
                                     track_id,
                                     clip_id,
-                                    split_beat: ctx.playhead_beats,
-                                },
-                                engine,
-                                ctx,
-                            );
+                                    ctx.playhead_beats,
+                                )
+                                .mark_dirty;
                         }
                     }
                 }

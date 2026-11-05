@@ -226,6 +226,7 @@ impl TimelineEditorState {
 
         if split_count > 0 {
             action.status = Some(format!("Split {split_count} clips at region boundaries"));
+            action.mark_dirty = true;
         }
         action
     }
@@ -338,8 +339,10 @@ impl TimelineEditorState {
 
         if all_audio {
             action.status = self.join_audio_clips(first_track, &clips, engine);
+            action.mark_dirty = action.status.is_some();
         } else if all_note {
             action.status = self.join_note_clips(first_track, &clips, engine);
+            action.mark_dirty = action.status.is_some();
         } else {
             action.status = Some("Join requires same type and track".to_string());
         }

@@ -879,3 +879,48 @@ fn clicking_a_selected_clip_without_dragging_narrows_the_selection_to_it() {
         })) if id == clip_id
     ));
 }
+
+#[test]
+fn one_clip_edit_key_press_emits_one_message_whatever_the_lane_count() {
+    let lanes: Vec<_> = (0..3)
+        .map(|_| canvas_with_selected_audio_clip().0)
+        .collect();
+    let bounds = Rectangle::new(Point::ORIGIN, Size::new(800.0, 80.0));
+    let command = if crate::app::ON_MACOS {
+        Modifiers::LOGO
+    } else {
+        Modifiers::CTRL
+    };
+
+    for (letter, code) in [("d", Code::KeyD), ("e", Code::KeyE), ("j", Code::KeyJ)] {
+        let event = canvas::Event::Keyboard(Event::KeyPressed {
+            key: Key::Character(letter.into()),
+            modified_key: Key::Character(letter.into()),
+            physical_key: Physical::Code(code),
+            location: Location::Standard,
+            modifiers: command,
+            text: None,
+        });
+        let from_lanes = lanes
+            .iter()
+            .filter_map(|lane| {
+                <TrackClipCanvas as canvas::Program<Message>>::update(
+                    lane,
+                    &mut ClipInteractionState::default(),
+                    event.clone(),
+                    bounds,
+                    mouse::Cursor::Unavailable,
+                )
+                .1
+            })
+            .count();
+        let from_global =
+            crate::app::global_key_handler(Key::Character(letter.into()), command).is_some();
+
+        assert_eq!(
+            from_lanes + usize::from(from_global),
+            1,
+            "Command+{letter} must reach the timeline exactly once"
+        );
+    }
+}
