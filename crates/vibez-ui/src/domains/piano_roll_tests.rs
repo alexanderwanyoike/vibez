@@ -301,13 +301,13 @@ fn doubling_a_clip_sends_it_to_the_engine_as_one_insertion() {
 }
 
 #[test]
-fn enabling_loop_replaces_stale_bounds_with_the_current_clip_length() {
+fn enabling_loop_without_a_loop_region_loops_the_current_clip_length() {
     let (mut tracks, tid, cid) = midi_track_with_clip();
     let clip = &mut tracks.get_mut(tid).unwrap().note_clips[0];
     clip.duration_beats = 8.0;
     clip.loop_enabled = false;
     clip.loop_start_beats = 0.0;
-    clip.loop_end_beats = 4.0;
+    clip.loop_end_beats = 0.0;
     clip.notes.push(MidiNote {
         pitch: 67,
         velocity: 100,

@@ -152,7 +152,7 @@ fn loop_toggle_and_resize_apply_to_the_whole_clip_selection() {
 }
 
 #[test]
-fn selected_midi_loop_activation_replaces_stale_bounds_with_the_clip_length() {
+fn selected_midi_loop_activation_without_a_loop_region_loops_the_clip_length() {
     let mut arrangement = arrangement_with_tracks(1);
     let mut engine = RecordingEngine::default();
     arrangement.update(
@@ -177,7 +177,7 @@ fn selected_midi_loop_activation_replaces_stale_bounds_with_the_clip_length() {
         start_marker_beats: 0.0,
         loop_enabled: false,
         loop_start_beats: 0.0,
-        loop_end_beats: 4.0,
+        loop_end_beats: 0.0,
         groove_grid: vibez_core::perform::GrooveGrid::Off,
     });
     arrangement
