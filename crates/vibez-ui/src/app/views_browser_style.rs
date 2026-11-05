@@ -274,6 +274,17 @@ mod browser_table_tests {
     use vibez_core::track::MediaSourceRef;
 
     #[test]
+    fn a_selected_place_is_a_rounded_tinted_pill_without_an_outline() {
+        let selected = browser_place_button_style(true, button::Status::Active);
+        assert_eq!(selected.border.width, 0.0);
+        assert!(selected.border.radius.top_left > 0.0);
+        assert_ne!(selected.background, Some(th::accent().into()));
+        let idle = browser_place_button_style(false, button::Status::Active);
+        assert_ne!(selected.background, idle.background);
+        assert_eq!(idle.border.radius, selected.border.radius);
+    }
+
+    #[test]
     fn selected_result_metadata_uses_the_selected_foreground() {
         assert_eq!(browser_result_cell_color(true), th::text());
         assert_eq!(browser_result_cell_color(false), th::text_dim());
