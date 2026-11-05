@@ -829,7 +829,7 @@ impl canvas::Program<Message> for PianoRollWidget {
                 if let Some(local) = LocalDrag::unclamped().position(cursor, bounds) {
                     state.last_cursor = Some(local);
 
-                    if let Some(DragAction::Ruler { clip_id, zoom }) = state.drag.as_mut() {
+                    if let Some(DragAction::Ruler { clip_id, zoom }) = state.drag {
                         let viewport = zoom.drag_to(
                             Point::new(local.x - KEY_WIDTH, local.y),
                             note_area_width(&bounds),
@@ -837,7 +837,7 @@ impl canvas::Program<Message> for PianoRollWidget {
                         return (
                             canvas::event::Status::Captured,
                             Some(Message::View(ViewMsg::SetClipEditorView {
-                                clip_id: *clip_id,
+                                clip_id,
                                 viewport,
                             })),
                         );

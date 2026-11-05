@@ -9,10 +9,6 @@ use crate::timeline_geometry::{
     FRAME_MARGIN_PIXELS,
 };
 
-/// A ruler drag covers the zoom range in a short throw, as Ableton's does;
-/// the wheel's rate would need the drag to cross the whole screen.
-const RULER_ZOOM_GAIN: f32 = 3.0;
-
 /// One clip editor's horizontal view, resolved against the editor's width.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct ClipEditorView {
@@ -86,13 +82,6 @@ impl ClipEditorView {
         })
     }
 
-    fn showing(self, viewport: TimelineViewport) -> Self {
-        Self {
-            stored: Some(viewport),
-            ..self
-        }
-    }
-
     /// The framing to store when a marker drag begins: the frame follows
     /// the loop, so dragging the loop would otherwise move the editor
     /// under the pointer.
@@ -125,37 +114,34 @@ impl ClipEditorView {
     }
 }
 
-/// A drag along a clip editor's ruler: down zooms in around the press,
-/// sideways scrolls with the content following the pointer.
+/// A drag along a clip editor's ruler, zooming and panning as the Arrange
+/// ruler does, held inside the editor's content.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct RulerZoom {
     view: ClipEditorView,
-    anchor_x: f32,
-    last: Point,
+    start: TimelineViewport,
+    grabbed_beat: f64,
+    pressed_y: f32,
 }
 
 impl RulerZoom {
     /// `at` is measured from the start of the time area.
     pub(crate) fn begin(view: ClipEditorView, at: Point, width: f32) -> Self {
+        let start = view.viewport(width);
         Self {
-            view: view.showing(view.viewport(width)),
-            anchor_x: at.x,
-            last: at,
+            view,
+            start,
+            grabbed_beat: start.geometry().x_to_beat(at.x),
+            pressed_y: at.y,
         }
     }
 
-    /// Each step builds on the last view this drag produced, not on the
-    /// widget's, which can lag a frame behind the pointer.
-    pub(crate) fn drag_to(&mut self, to: Point, width: f32) -> TimelineViewport {
-        let factor = zoom_factor_from_pixels((to.y - self.last.y) * RULER_ZOOM_GAIN);
-        let zoomed = self.view.zoomed(factor, self.anchor_x, width);
-        let scrolled = self
-            .view
-            .showing(zoomed)
-            .scrolled(self.last.x - to.x, width);
-        self.view = self.view.showing(scrolled);
-        self.last = to;
-        scrolled
+    pub(crate) fn drag_to(self, to: Point, width: f32) -> TimelineViewport {
+        let mut viewport = self
+            .start
+            .ruler_dragged(self.grabbed_beat, to.x, to.y - self.pressed_y);
+        viewport.clamp(self.view.scroll_extent(viewport), width);
+        viewport
     }
 }
 
@@ -171,7 +157,7 @@ mod tests {
         let pressed = Point::new(300.0, 10.0);
         let grabbed_beat = start.geometry().x_to_beat(pressed.x);
 
-        let mut zoom = RulerZoom::begin(view, pressed, width);
+        let zoom = RulerZoom::begin(view, pressed, width);
         zoom.drag_to(Point::new(320.0, 40.0), width);
         let reached = zoom.drag_to(Point::new(340.0, 70.0), width);
 

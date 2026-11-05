@@ -858,9 +858,8 @@ impl canvas::Program<Message> for AudioClipDetailWidget {
                     return (canvas::event::Status::Captured, None);
                 };
                 let message = match drag {
-                    AudioMarkerDrag::Ruler(mut zoom) => {
+                    AudioMarkerDrag::Ruler(zoom) => {
                         let viewport = zoom.drag_to(position, bounds.width.max(1.0));
-                        state.drag = Some(AudioMarkerDrag::Ruler(zoom));
                         Some(Message::View(ViewMsg::SetClipEditorView {
                             clip_id: self.clip_id,
                             viewport,
