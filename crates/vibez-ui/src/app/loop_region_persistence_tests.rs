@@ -143,7 +143,35 @@ fn undo_and_redo_of_a_shrink_keep_the_loop() {
     Arc::make_mut(&mut app.state.project_tracks)
         .tracks
         .push(track);
-    let selection = ArrangementSelection::NoteClip { track_id, clip_id };
+    let clip = |app: &App| {
+        let clip = &app.state.arrange_content(track_id).unwrap().note_clips[0];
+        (
+            clip.duration_beats,
+            clip.loop_start_beats,
+            clip.loop_end_beats,
+        )
+    };
+
+    let [shrunk, undone, redone] = shrink_undo_and_redo(
+        &mut app,
+        ArrangementSelection::NoteClip { track_id, clip_id },
+        12.0,
+        clip,
+    );
+
+    assert_eq!(shrunk, (12.0, 0.0, 16.0));
+    assert_eq!(undone, (16.0, 0.0, 16.0));
+    assert_eq!(redone, (12.0, 0.0, 16.0));
+}
+
+/// Shrink the selected clip to `beats` as one gesture, then undo and redo
+/// it, reading the clip with `read` after each step.
+fn shrink_undo_and_redo<T>(
+    app: &mut App,
+    selection: ArrangementSelection,
+    beats: f64,
+    read: impl Fn(&App) -> T,
+) -> [T; 3] {
     let _ = app.update_and_refresh_clips(Message::Arrangement(
         ArrangementMsg::SelectArrangementClip {
             selection,
@@ -154,22 +182,12 @@ fn undo_and_redo_of_a_shrink_keep_the_loop() {
         id: UndoGestureId::new(),
         edit: Box::new(Message::Arrangement(ArrangementMsg::ResizeSelectedClips {
             anchor: selection,
-            new_duration_beats: 12.0,
+            new_duration_beats: beats,
         })),
     });
-    let clip = |app: &App| {
-        let clip = &app.state.arrange_content(track_id).unwrap().note_clips[0];
-        (
-            clip.duration_beats,
-            clip.loop_start_beats,
-            clip.loop_end_beats,
-        )
-    };
-    assert_eq!(clip(&app), (12.0, 0.0, 16.0));
-
+    let shrunk = read(app);
     let _ = app.update_and_refresh_clips(Message::Project(ProjectMsg::Undo));
-    assert_eq!(clip(&app), (16.0, 0.0, 16.0));
-
+    let undone = read(app);
     let _ = app.update_and_refresh_clips(Message::Project(ProjectMsg::Redo));
-    assert_eq!(clip(&app), (12.0, 0.0, 16.0));
+    [shrunk, undone, read(app)]
 }
