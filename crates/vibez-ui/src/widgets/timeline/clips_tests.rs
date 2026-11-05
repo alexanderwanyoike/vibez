@@ -1028,7 +1028,10 @@ fn a_clip_resized_at_fit_zoom_can_shrink_below_the_coarse_adaptive_grid() {
 
     let length = resize_length_after_drag(&canvas, 10.0).expect("a resize");
 
-    assert!((length - 0.25).abs() < 1e-9, "shrank to {length} beats");
+    assert!(
+        (length - crate::state::SHORTEST_LENGTH_BEATS).abs() < 1e-9,
+        "shrank to {length} beats"
+    );
 }
 
 #[test]

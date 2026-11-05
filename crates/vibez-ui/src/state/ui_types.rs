@@ -1042,6 +1042,11 @@ impl std::fmt::Display for SnapGrid {
     }
 }
 
+/// The shortest an edge drag may leave a Clip or a note is the finest grid
+/// step, whatever grid is showing, because a coarse adaptive grid at fit
+/// zoom would otherwise forbid anything under 8 bars.
+pub const SHORTEST_LENGTH_BEATS: f64 = 0.125;
+
 /// Shared grid modes passed into arrangement and MIDI editor widgets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GridConfig {
@@ -1089,15 +1094,9 @@ impl GridConfig {
     /// Length of a span starting at `start` whose end is dragged to `end`.
     ///
     /// The end snaps in absolute time, so it lands on a grid line even when
-    /// the start sits off the grid. The shortest length is a 1/16, or one
-    /// grid unit when the grid is finer, because a coarse adaptive grid at
-    /// fit zoom would otherwise forbid anything under 8 bars.
+    /// the start sits off the grid.
     pub fn length_to_dragged_end(self, start: f64, end: f64, pixels_per_beat: f32) -> f64 {
-        let min_length = self
-            .effective_grid(pixels_per_beat)
-            .beat_size()
-            .min(SnapGrid::SIXTEENTH.beat_size());
-        (self.snap_beat(end, pixels_per_beat) - start).max(min_length)
+        (self.snap_beat(end, pixels_per_beat) - start).max(SHORTEST_LENGTH_BEATS)
     }
 
     /// Cell-containing snap for creation gestures. See
