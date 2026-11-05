@@ -44,6 +44,14 @@ fn context_menu_width(target: &ContextMenuTarget) -> f32 {
     }
 }
 
+fn track_header_menu(track_id: vibez_core::id::TrackId) -> [(char, &'static str, Message); 1] {
+    [(
+        icons::TRASH_2,
+        "Delete Track",
+        Message::remove_track(track_id),
+    )]
+}
+
 fn context_menu_x(requested_x: f32, menu_width: f32, window_width: f32) -> f32 {
     let maximum_x = (window_width - menu_width - CONTEXT_MENU_EDGE_INSET).max(0.0);
     requested_x.clamp(0.0, maximum_x)
@@ -1054,11 +1062,10 @@ impl App {
                 ));
                 col.into()
             }
-            ContextMenuTarget::TrackHeader { track_id } => column![menu_btn(
-                icons::TRASH_2,
-                "Delete Track".into(),
-                Message::remove_track(*track_id),
-            )]
+            ContextMenuTarget::TrackHeader { track_id } => iced::widget::Column::with_children(
+                track_header_menu(*track_id)
+                    .map(|(icon, label, msg)| menu_btn(icon, label.into(), msg)),
+            )
             .spacing(0)
             .width(Length::Fixed(200.0))
             .into(),
