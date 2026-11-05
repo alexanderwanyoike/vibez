@@ -9,7 +9,8 @@ use vibez_engine::test_support::DelayProbeInstrument;
 fn midi_connection_selection_and_monitoring_changes_keep_running_audio_continuous() {
     let mut app = super::test_support::app();
     let (mut engine, commands, _events) = vibez_engine::engine::AudioEngine::new();
-    app.cmd_tx = crate::domains::EngineCommandQueue::new(commands);
+    app.cmd_tx =
+        crate::domains::EngineCommandQueue::new(commands, engine.take_transport_sender().unwrap());
     let first = TrackId::new();
     let second = TrackId::new();
     for (id, latency) in [(first, 0), (second, 521)] {

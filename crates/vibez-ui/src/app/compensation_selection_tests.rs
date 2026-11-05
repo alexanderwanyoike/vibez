@@ -23,7 +23,10 @@ fn unmonitored_selection_does_not_publish_another_timing_plan() {
     let mut app = super::test_support::app();
     let ids = tracks(&mut app);
     let (commands, mut received) = rtrb::RingBuffer::new(16);
-    app.cmd_tx = crate::domains::EngineCommandQueue::new(commands);
+    app.cmd_tx = crate::domains::EngineCommandQueue::new(
+        commands,
+        vibez_engine::transport_ring::transport_ring().0,
+    );
     app.sync_sidechain_routing();
     while received.pop().is_ok() {}
     let generation = app.state.devices.compensation_generation;

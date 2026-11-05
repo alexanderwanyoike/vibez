@@ -362,26 +362,7 @@ impl App {
         }
 
         for clip in &content.note_clips {
-            self.send_command(EngineCommand::AddNoteClip {
-                track_id: track.id,
-                insertion: vibez_engine::clip_insertion::PreparedNoteClipInsertion::new(
-                    clip.id,
-                    clip.position_beats,
-                    clip.duration_beats,
-                    clip.start_marker_beats,
-                    clip.loop_enabled,
-                    clip.loop_start_beats,
-                    clip.loop_end_beats,
-                    clip.groove_grid,
-                ),
-            });
-            for note in &clip.notes {
-                self.send_command(EngineCommand::AddNote {
-                    track_id: track.id,
-                    clip_id: clip.id,
-                    insertion: vibez_engine::clip_insertion::PreparedNoteInsertion::new(*note),
-                });
-            }
+            self.send_command(clip.add_command(track.id));
         }
     }
 

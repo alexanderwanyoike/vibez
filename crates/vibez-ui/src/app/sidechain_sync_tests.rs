@@ -20,7 +20,10 @@ fn dormant_send_keeps_its_graph_connection_without_republishing_for_level_edits(
     project.tracks.push(track);
     project.buses.push(bus);
     let (commands, mut received) = rtrb::RingBuffer::new(16);
-    app.cmd_tx = crate::domains::EngineCommandQueue::new(commands);
+    app.cmd_tx = crate::domains::EngineCommandQueue::new(
+        commands,
+        vibez_engine::transport_ring::transport_ring().0,
+    );
     app.sync_sidechain_routing();
     assert!(matches!(
         received.pop().unwrap(),
@@ -323,7 +326,10 @@ fn timing_reactivation_refreshes_choices_and_persists_restored_feedback_silence(
         .sidechain_choices
         .contains_key(&(effect_id, ExternalInputId(0))));
     let (producer, mut consumer) = rtrb::RingBuffer::new(8);
-    app.cmd_tx = crate::domains::EngineCommandQueue::new(producer);
+    app.cmd_tx = crate::domains::EngineCommandQueue::new(
+        producer,
+        vibez_engine::transport_ring::transport_ring().0,
+    );
     app.send_command(EngineCommand::InsertEffect {
         track_id,
         effect_id,

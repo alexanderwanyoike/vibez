@@ -502,28 +502,7 @@ impl TimelineEditorState {
                     }
                     if let Some(clip) = sync {
                         engine.send(EngineCommand::RemoveNoteClip(track_id, clip_id));
-                        engine.send(EngineCommand::AddNoteClip {
-                            track_id,
-                            insertion: vibez_engine::clip_insertion::PreparedNoteClipInsertion::new(
-                                clip_id,
-                                clip.position_beats,
-                                clip.duration_beats,
-                                clip.start_marker_beats,
-                                clip.loop_enabled,
-                                clip.loop_start_beats,
-                                clip.loop_end_beats,
-                                clip.groove_grid,
-                            ),
-                        });
-                        for note in clip.notes {
-                            engine.send(EngineCommand::AddNote {
-                                track_id,
-                                clip_id,
-                                insertion: vibez_engine::clip_insertion::PreparedNoteInsertion::new(
-                                    note,
-                                ),
-                            });
-                        }
+                        engine.send(clip.add_command(track_id));
                     }
                 }
             }

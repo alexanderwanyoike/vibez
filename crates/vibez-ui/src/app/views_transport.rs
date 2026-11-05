@@ -140,7 +140,7 @@ impl App {
             });
 
         // Play/Pause button
-        let play_pause_btn = if self.state.transport.playing {
+        let play_pause_btn = if self.state.transport.is_playing() {
             button(icons::icon(icons::PAUSE).size(16).color(th::accent()))
                 .on_press(Message::Transport(TransportMsg::Stop))
                 .padding([8, 14])

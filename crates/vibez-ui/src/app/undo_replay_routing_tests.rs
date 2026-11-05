@@ -94,7 +94,8 @@ fn playing_project(app: &mut App, engine: &mut AudioEngine) -> (TrackId, EffectI
 fn undo_while_playing_keeps_a_project_with_built_in_devices_audible() {
     let mut app = super::test_support::app();
     let (mut engine, commands, _events) = AudioEngine::new();
-    app.cmd_tx = crate::domains::EngineCommandQueue::new(commands);
+    app.cmd_tx =
+        crate::domains::EngineCommandQueue::new(commands, engine.take_transport_sender().unwrap());
     playing_project(&mut app, &mut engine);
 
     app.push_undo_snapshot(None);
@@ -111,7 +112,8 @@ fn undo_while_playing_keeps_a_project_with_built_in_devices_audible() {
 fn a_plugin_reloading_into_its_retained_slot_keeps_the_project_audible() {
     let mut app = super::test_support::app();
     let (mut engine, commands, _events) = AudioEngine::new();
-    app.cmd_tx = crate::domains::EngineCommandQueue::new(commands);
+    app.cmd_tx =
+        crate::domains::EngineCommandQueue::new(commands, engine.take_transport_sender().unwrap());
     let (track_id, effect_id) = playing_project(&mut app, &mut engine);
 
     // Undo and project open retain the slot, so the routing model is already
@@ -134,7 +136,8 @@ fn a_plugin_reloading_into_its_retained_slot_keeps_the_project_audible() {
 fn unchanged_routing_undo_redo_266_keeps_exact_mixer_level_and_playback() {
     let mut app = super::test_support::app();
     let (mut engine, commands, _events) = AudioEngine::new();
-    app.cmd_tx = crate::domains::EngineCommandQueue::new(commands);
+    app.cmd_tx =
+        crate::domains::EngineCommandQueue::new(commands, engine.take_transport_sender().unwrap());
     playing_project(&mut app, &mut engine);
     let routing = app.state.devices.last_routing.clone();
     let original_gain = app.state.project_tracks.tracks[0].gain;

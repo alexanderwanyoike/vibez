@@ -84,5 +84,54 @@ fn public_missing_track_returns_complete_prepared_note_clip_without_callback_hea
     }
 }
 
+#[test]
+fn a_note_clip_arrives_with_all_its_notes_in_one_insertion() {
+    let (mut engine, mut commands, mut events) = AudioEngine::new();
+    let track = TrackId::new();
+    commands.push(EngineCommand::add_track(track)).unwrap();
+    let notes: Vec<MidiNote> = (0..3)
+        .map(|index| MidiNote {
+            pitch: 60,
+            velocity: 100,
+            start_beat: f64::from(index),
+            duration_beats: 2.0,
+        })
+        .collect();
+    let insertion = PreparedNoteClipInsertion::new(
+        ClipId::new(),
+        0.0,
+        4.0,
+        0.0,
+        false,
+        0.0,
+        4.0,
+        GrooveGrid::Off,
+    )
+    .with_notes(notes.clone());
+    commands
+        .push(EngineCommand::AddNoteClip {
+            track_id: track,
+            insertion,
+        })
+        .unwrap();
+    engine.process_block(AudioProcessBlock::new(&mut [], 2));
+
+    let resident = &engine.tracks()[0].playback_source.note_clips;
+    assert_eq!(resident.len(), 1);
+    assert_eq!(resident[0].notes, notes);
+    assert_eq!(resident[0].next_same_pitch_start_beat(0), Some(1.0));
+    let mut outcomes = Vec::new();
+    while let Ok(event) = events.pop() {
+        match event {
+            EngineEvent::ClipInsertionCompleted(completed) => outcomes.push(completed.outcome),
+            EngineEvent::ClipInsertionStorageRequested(_) => {
+                panic!("the notes travel inside the prepared clip")
+            }
+            _ => {}
+        }
+    }
+    assert_eq!(outcomes, [ClipInsertionOutcome::Applied]);
+}
+
 #[path = "note_clip_insertion_pressure_tests.rs"]
 mod pressure_tests;

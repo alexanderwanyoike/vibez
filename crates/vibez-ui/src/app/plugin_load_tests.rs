@@ -91,7 +91,10 @@ fn setup() -> (
         .tracks
         .push(track);
     let (producer, commands) = rtrb::RingBuffer::new(16);
-    app.cmd_tx = crate::domains::EngineCommandQueue::new(producer);
+    app.cmd_tx = crate::domains::EngineCommandQueue::new(
+        producer,
+        vibez_engine::transport_ring::transport_ring().0,
+    );
     (app, track_id, effect_id, device, commands)
 }
 

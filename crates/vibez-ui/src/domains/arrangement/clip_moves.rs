@@ -74,26 +74,7 @@ impl TimelineEditorState {
                 // Remove from engine source track
                 engine.send(EngineCommand::RemoveNoteClip(source_track, clip_id));
                 // Add to engine target track
-                engine.send(EngineCommand::AddNoteClip {
-                    track_id: target_track,
-                    insertion: vibez_engine::clip_insertion::PreparedNoteClipInsertion::new(
-                        clip_id,
-                        clip.position_beats,
-                        clip.duration_beats,
-                        clip.start_marker_beats,
-                        clip.loop_enabled,
-                        clip.loop_start_beats,
-                        clip.loop_end_beats,
-                        clip.groove_grid,
-                    ),
-                });
-                for note in &clip.notes {
-                    engine.send(EngineCommand::AddNote {
-                        track_id: target_track,
-                        clip_id,
-                        insertion: vibez_engine::clip_insertion::PreparedNoteInsertion::new(*note),
-                    });
-                }
+                engine.send(clip.add_command(target_track));
                 // Add to UI target track
                 if let Some(track) = self.find_content_mut(target_track) {
                     track.note_clips.push(clip);

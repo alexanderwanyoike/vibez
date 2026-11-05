@@ -336,6 +336,12 @@ impl EngineNoteClip {
         true
     }
 
+    /// Off callback only: the note indices grow to fit.
+    pub(crate) fn replace_notes(&mut self, notes: Vec<MidiNote>) {
+        self.notes = notes;
+        self.rebuild_note_end_clamps();
+    }
+
     fn rebuild_note_end_clamps(&mut self) {
         rebuild_next_same_pitch_start_beats(
             &self.notes,

@@ -285,7 +285,6 @@ fn apply_capture_to_arrangement(
         pre_capture_mutes,
         samples_per_beat,
     } = captured;
-    let mut commands = Vec::new();
     let mut clip_count = 0;
     let timeline = Arc::make_mut(arrange);
     for track_id in by_track.keys().copied() {
@@ -306,10 +305,10 @@ fn apply_capture_to_arrangement(
 
         let destination = timeline.ensure(track_id);
         for clip in &destination.clips {
-            commands.push(EngineCommand::RemoveClip(track_id, clip.id));
+            engine.send(EngineCommand::RemoveClip(track_id, clip.id));
         }
         for clip in &destination.note_clips {
-            commands.push(EngineCommand::RemoveNoteClip(track_id, clip.id));
+            engine.send(EngineCommand::RemoveNoteClip(track_id, clip.id));
         }
 
         destination.clips = destination
@@ -338,13 +337,13 @@ fn apply_capture_to_arrangement(
             .sort_by(|left, right| left.position_beats.total_cmp(&right.position_beats));
 
         for clip in &destination.clips {
-            commands.push(add_audio_clip_command(track_id, clip));
+            engine.send(add_audio_clip_command(track_id, clip));
         }
         for clip in &destination.note_clips {
-            commands.extend(add_note_clip_commands(track_id, clip));
+            engine.send(clip.add_command(track_id));
         }
         for lane in &destination.automation {
-            commands.push(EngineCommand::SetAutomationLane {
+            engine.send(EngineCommand::SetAutomationLane {
                 track_id,
                 insertion: vibez_engine::clip_insertion::PreparedAutomationLaneInsertion::new(
                     lane.clone(),
@@ -353,17 +352,14 @@ fn apply_capture_to_arrangement(
         }
         if let Some(muted) = pre_capture_mutes.get(&track_id) {
             if captured_mute {
-                commands.push(EngineCommand::SetTrackMute(track_id, *muted));
-                commands.push(EngineCommand::SetAutomationOverride {
+                engine.send(EngineCommand::SetTrackMute(track_id, *muted));
+                engine.send(EngineCommand::SetAutomationOverride {
                     track_id,
                     target: vibez_core::automation::AutomationTarget::TrackMute,
                     overridden: false,
                 });
             }
         }
-    }
-    for command in commands {
-        engine.send(command);
     }
     clip_count
 }
@@ -511,31 +507,6 @@ fn add_audio_clip_command(
         playback_direction: clip.playback_direction,
         warp_markers: clip.warp_markers.clone(),
     }
-}
-
-fn add_note_clip_commands(
-    track_id: vibez_core::id::TrackId,
-    clip: &crate::state::UiNoteClip,
-) -> Vec<EngineCommand> {
-    let mut commands = vec![EngineCommand::AddNoteClip {
-        track_id,
-        insertion: vibez_engine::clip_insertion::PreparedNoteClipInsertion::new(
-            clip.id,
-            clip.position_beats,
-            clip.duration_beats,
-            clip.start_marker_beats,
-            clip.loop_enabled,
-            clip.loop_start_beats,
-            clip.loop_end_beats,
-            clip.groove_grid,
-        ),
-    }];
-    commands.extend(clip.notes.iter().map(|note| EngineCommand::AddNote {
-        track_id,
-        clip_id: clip.id,
-        insertion: vibez_engine::clip_insertion::PreparedNoteInsertion::new(*note),
-    }));
-    commands
 }
 
 #[cfg(test)]
@@ -778,6 +749,46 @@ mod tests {
     }
 
     #[test]
+    fn a_song_sized_capture_sends_commands_per_clip_not_per_note() {
+        let track_id = TrackId::new();
+        let pattern = |position_beats: f64| UiNoteClip {
+            name: "Pattern".into(),
+            notes: (0..8)
+                .map(|step| MidiNote {
+                    pitch: 36,
+                    velocity: 100,
+                    start_beat: f64::from(step) * 0.5,
+                    duration_beats: 0.25,
+                })
+                .collect(),
+            ..UiNoteClip::test_clip(position_beats, 4.0)
+        };
+        let mut arrange = Arc::new(ArrangementTimeline::default());
+        let song = Arc::make_mut(&mut arrange).ensure(track_id);
+        song.note_clips = (0..40).map(|bar| pattern(f64::from(bar) * 4.0)).collect();
+        let mut incoming = crate::state::TrackTimelineContent::default();
+        incoming.note_clips.push(pattern(160.0));
+        let captured = MaterializedCapture {
+            arrange_start_samples: 640,
+            arrange_end_samples: 656,
+            by_track: HashMap::from([(track_id, incoming)]),
+            controlled_track_ids: vec![track_id],
+            pre_capture_mutes: HashMap::new(),
+            samples_per_beat: 4.0,
+        };
+        let mut engine = crate::domains::test_support::RecordingEngine::default();
+        apply_capture_to_arrangement(&mut arrange, captured, &mut engine);
+
+        let clips = arrange.get(track_id).unwrap().note_clips.len();
+        assert_eq!(clips, 41);
+        assert!(
+            engine.0.len() <= 2 * clips,
+            "{} commands for {clips} clips",
+            engine.0.len()
+        );
+    }
+
+    #[test]
     fn one_capture_transaction_round_trips_through_undo_and_redo() {
         let mut state = AppState::default();
         let track_id = TrackId::new();
@@ -892,11 +903,12 @@ mod tests {
             loop_end_beats: 0.0,
             groove_grid: GrooveGrid::Off,
         };
-        let mut filler = crate::state::TrackTimelineContent::default();
-        filler.note_clips.push(note_clip(
-            36,
-            vibez_core::constants::RING_BUFFER_CAPACITY - 1,
-        ));
+        let filler = crate::state::TrackTimelineContent {
+            note_clips: (0..vibez_core::constants::RING_BUFFER_CAPACITY)
+                .map(|_| note_clip(36, 1))
+                .collect(),
+            ..Default::default()
+        };
         let mut audible = crate::state::TrackTimelineContent::default();
         audible.note_clips.push(note_clip(72, 1));
 
@@ -909,40 +921,20 @@ mod tests {
             samples_per_beat: 22_050.0,
         };
         let mut timeline = Arc::new(ArrangementTimeline::default());
-        let mut commands = EngineCommandQueue::new(producer);
+        let mut commands =
+            EngineCommandQueue::new(producer, audio_engine.take_transport_sender().unwrap());
         apply_capture_to_arrangement(&mut timeline, captured, &mut commands);
-        assert_eq!(commands.pending_len(), 2);
+        assert_eq!(commands.pending_len(), 1);
 
-        let filler_clip = &timeline.get(filler_track).unwrap().note_clips[0];
-        let audible_clip = &timeline.get(audible_track).unwrap().note_clips[0];
-        let expected_targets = [
-            (filler_track, filler_clip.id, filler_clip.notes.len() + 1),
-            (audible_track, audible_clip.id, audible_clip.notes.len() + 1),
-        ];
-        let expected_notes = filler_clip.notes.len() + audible_clip.notes.len();
-        assert_eq!(expected_notes, vibez_core::constants::RING_BUFFER_CAPACITY);
-        let operations = expected_notes + expected_targets.len();
-        assert_eq!(operations, 1026);
+        let operations = vibez_core::constants::RING_BUFFER_CAPACITY + 1;
         audio_engine.process_block(AudioProcessBlock::new(&mut [], 2));
         commands.flush();
         assert_eq!(commands.pending_len(), 0);
-        let mut requested = Vec::new();
         let mut completed = Vec::new();
-        // The second note can wait before later Tracks or Play reach the engine.
-        // Serve off callback without advancing the original musical start.
         for _ in 0..=operations {
             while let Ok(event) = events.pop() {
                 match event {
                     vibez_engine::events::EngineEvent::ClipInsertionStorageRequested(request) => {
-                        assert!(expected_targets.iter().any(|&(track, clip, _)| {
-                            (request.track_id, request.target)
-                                == (
-                                    track,
-                                    vibez_engine::clip_insertion::ClipInsertionTarget::Clip(clip),
-                                )
-                        }));
-                        assert!(!requested.contains(&request.id));
-                        requested.push(request.id.clone());
                         request.fulfill();
                     }
                     vibez_engine::events::EngineEvent::ClipInsertionCompleted(owner) => {
@@ -950,22 +942,7 @@ mod tests {
                             owner.outcome,
                             vibez_engine::clip_insertion::ClipInsertionOutcome::Applied
                         );
-                        let target = if completed.len() < expected_targets[0].2 {
-                            expected_targets[0]
-                        } else {
-                            expected_targets[1]
-                        };
-                        assert_eq!(
-                            (owner.track_id, owner.target),
-                            (
-                                target.0,
-                                vibez_engine::clip_insertion::ClipInsertionTarget::Clip(target.1)
-                            )
-                        );
-                        let id = owner.id();
-                        assert!(!completed.contains(&id));
-                        completed.push(id);
-                        drop(owner);
+                        completed.push(owner.track_id);
                     }
                     _ => {}
                 }
@@ -978,24 +955,21 @@ mod tests {
         }
         assert_eq!(commands.pending_len(), 0);
         assert_eq!(completed.len(), operations);
-        assert!(!requested.is_empty());
-        for id in &requested {
-            assert!(completed.contains(id));
-        }
-        for (track_id, clip_id, count) in expected_targets {
-            let actual = audio_engine
+        assert_eq!(completed.last(), Some(&audible_track));
+        for track_id in [filler_track, audible_track] {
+            let actual = &audio_engine
                 .tracks()
                 .iter()
                 .find(|track| track.id == track_id)
-                .unwrap();
-            let clips = &actual.playback_source.note_clips;
-            assert_eq!(clips.len(), 1);
-            assert_eq!(clips[0].id, clip_id);
-            assert_eq!(clips[0].notes.len(), count - 1);
-            assert_eq!(
-                clips[0].notes,
-                timeline.get(track_id).unwrap().note_clips[0].notes
-            );
+                .unwrap()
+                .playback_source
+                .note_clips;
+            let expected = &timeline.get(track_id).unwrap().note_clips;
+            assert_eq!(actual.len(), expected.len());
+            for (actual, expected) in actual.iter().zip(expected) {
+                assert_eq!(actual.id, expected.id);
+                assert_eq!(actual.notes, expected.notes);
+            }
         }
         assert_eq!(audio_engine.transport().position(), 0);
         assert!(!audio_engine.transport().is_playing());

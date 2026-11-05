@@ -1,0 +1,199 @@
+//! Transport commands reach the callback on their own ring and overtake only edits the transport never reads.
+
+use rtrb::{Consumer, Producer, RingBuffer};
+
+use crate::commands::EngineCommand;
+
+const TRANSPORT_RING_CAPACITY: usize = 64;
+
+impl EngineCommand {
+    /// Commands the transport owns. They travel on the transport ring so a
+    /// paused content edit never delays Play or Stop.
+    pub fn is_transport(&self) -> bool {
+        matches!(
+            self,
+            Self::Play
+                | Self::Stop
+                | Self::Seek(_)
+                | Self::SetArrangementLoop(_)
+                | Self::SetArrangementLoopRegion { .. }
+        )
+    }
+
+    /// Content edits, and edits to channels, devices and the track list.
+    /// Play, Stop and Seek read none of that state, so a rebuild that queues
+    /// thousands of them never delays the transport. Anything else (tempo,
+    /// Sections, Capture, recording, live notes) keeps its order relative to
+    /// the transport.
+    pub fn transport_may_overtake(&self) -> bool {
+        self.is_content_edit() || self.is_channel_edit()
+    }
+
+    /// Arrangement content edits.
+    pub fn is_content_edit(&self) -> bool {
+        matches!(
+            self,
+            Self::AddClip { .. }
+                | Self::RemoveClip(..)
+                | Self::ReplaceClipAudio { .. }
+                | Self::ReplaceClipBuffer { .. }
+                | Self::MoveClip { .. }
+                | Self::SetClipGain { .. }
+                | Self::SetClipFades { .. }
+                | Self::SetClipPlaybackDirection { .. }
+                | Self::SetClipWarpMarkers { .. }
+                | Self::SetClipBounds { .. }
+                | Self::SetClipLoop { .. }
+                | Self::SetClipStartMarker { .. }
+                | Self::SetAutomationLane { .. }
+                | Self::RemoveAutomationLane { .. }
+                | Self::AddNoteClip { .. }
+                | Self::RemoveNoteClip(..)
+                | Self::MoveNoteClip { .. }
+                | Self::SetNoteClipDuration { .. }
+                | Self::SetNoteClipGrooveGrid { .. }
+                | Self::SetNoteClipLoop { .. }
+                | Self::SetNoteClipStartMarker { .. }
+                | Self::AddNote { .. }
+                | Self::RemoveNote { .. }
+                | Self::EditNote { .. }
+        )
+    }
+
+    fn is_channel_edit(&self) -> bool {
+        matches!(
+            self,
+            Self::AddTrack(_)
+                | Self::RemoveTrack(_)
+                | Self::ReorderTracks(_)
+                | Self::AddBus(_)
+                | Self::RemoveBus(_)
+                | Self::SetTrackGain(..)
+                | Self::SetTrackPan(..)
+                | Self::SetTrackMute(..)
+                | Self::SetTrackSolo(..)
+                | Self::SetTrackSwingOffset(..)
+                | Self::SetAutomationOverride { .. }
+                | Self::SetSend { .. }
+                | Self::SetRouting(_)
+                | Self::UpdateAutomationRouting(_)
+                | Self::RejectRoutingUpdate { .. }
+                | Self::ResumeDeviceReconfiguration { .. }
+                | Self::RejectDeviceReconfiguration { .. }
+                | Self::InsertEffect { .. }
+                | Self::RemoveEffect(..)
+                | Self::MoveEffect { .. }
+                | Self::SetEffectParam { .. }
+                | Self::SetEffectBypass { .. }
+                | Self::SetEffectMeterChannel { .. }
+                | Self::SetInstrument { .. }
+                | Self::RemoveTrackInstrument(_)
+                | Self::SetInstrumentParam { .. }
+                | Self::LoadSamplerSample { .. }
+                | Self::LoadDrumRackPadSample { .. }
+                | Self::ClearDrumRackPad { .. }
+                | Self::SetDrumRackPadState { .. }
+                | Self::SetDrumRackPadParam { .. }
+        )
+    }
+}
+
+/// Sender and receiver must count the same commands, or a transport command
+/// waits forever or overtakes a control it should follow.
+fn controls_in(command: &EngineCommand) -> u64 {
+    u64::from(!command.transport_may_overtake())
+}
+
+/// A transport command stamped with how many commands it may not overtake
+/// were sent on the main command ring before it.
+pub struct TransportCommand {
+    controls_before: u64,
+    command: EngineCommand,
+}
+
+impl TransportCommand {
+    pub fn command(&self) -> &EngineCommand {
+        &self.command
+    }
+}
+
+/// The UI end of the transport ring.
+pub struct TransportSender {
+    producer: Producer<TransportCommand>,
+    controls_sent: u64,
+}
+
+impl TransportSender {
+    /// Call for every command sent on the main command ring, in send order,
+    /// including commands the sender holds back while that ring is full.
+    pub fn record_main_command(&mut self, command: &EngineCommand) {
+        self.controls_sent += controls_in(command);
+    }
+
+    /// Stamp at send time, not push time: a command held back while this
+    /// ring is full must not wait for controls sent after it.
+    pub fn stamp(&self, command: EngineCommand) -> TransportCommand {
+        debug_assert!(command.is_transport());
+        TransportCommand {
+            controls_before: self.controls_sent,
+            command,
+        }
+    }
+
+    #[allow(
+        clippy::result_large_err,
+        reason = "a full ring hands the stamped command back to wait in order"
+    )]
+    pub fn push(&mut self, command: TransportCommand) -> Result<(), TransportCommand> {
+        self.producer
+            .push(command)
+            .map_err(|rtrb::PushError::Full(command)| command)
+    }
+}
+
+/// The callback end of the transport ring.
+pub(crate) struct TransportReceiver {
+    consumer: Consumer<TransportCommand>,
+    controls_applied: u64,
+}
+
+impl TransportReceiver {
+    pub(crate) fn new(consumer: Consumer<TransportCommand>) -> Self {
+        Self {
+            consumer,
+            controls_applied: 0,
+        }
+    }
+
+    pub(crate) fn record_main_command(&mut self, command: &EngineCommand) {
+        self.controls_applied += controls_in(command);
+    }
+
+    /// The next transport command, once every command it may not overtake
+    /// has been applied.
+    pub(crate) fn ready(&self) -> Option<&EngineCommand> {
+        self.consumer
+            .peek()
+            .ok()
+            .filter(|next| next.controls_before <= self.controls_applied)
+            .map(|next| &next.command)
+    }
+
+    pub(crate) fn pop_ready(&mut self) -> Option<EngineCommand> {
+        self.ready()?;
+        self.consumer.pop().ok().map(|next| next.command)
+    }
+}
+
+/// A transport ring whose callback end is a plain consumer, for callers that
+/// observe transport commands without an engine.
+pub fn transport_ring() -> (TransportSender, Consumer<TransportCommand>) {
+    let (producer, consumer) = RingBuffer::new(TRANSPORT_RING_CAPACITY);
+    (
+        TransportSender {
+            producer,
+            controls_sent: 0,
+        },
+        consumer,
+    )
+}

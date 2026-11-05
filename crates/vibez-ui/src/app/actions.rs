@@ -138,7 +138,7 @@ impl App {
             self.state.status_text = "Perform settings saved".into();
         }
         if let Some(request) = action.track_mute_request {
-            let queued = self.state.transport.playing
+            let queued = self.state.transport.is_playing()
                 && request.quantization != vibez_core::perform::TrackMuteQuantization::Immediate;
             let pre_edit_snapshot = self.take_snapshot();
             let changed = {
@@ -148,7 +148,7 @@ impl App {
                     &mut self.state.project.history,
                     pre_edit_snapshot,
                     request,
-                    self.state.transport.playing,
+                    self.state.transport.is_playing(),
                     &mut engine,
                 )
             };

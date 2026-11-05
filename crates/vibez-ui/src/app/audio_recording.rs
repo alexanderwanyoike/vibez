@@ -243,7 +243,7 @@ impl App {
                 format!("Resampling {source_name} into {track_name}")
             }
         };
-        if self.state.transport.playing {
+        if self.state.transport.will_play() {
             Task::none()
         } else {
             self.update(Message::Transport(TransportMsg::Play))
@@ -256,7 +256,7 @@ impl App {
         }
         self.input_bridge.end_recording();
         self.state.status_text = "Finishing the recorded take…".into();
-        if self.state.transport.playing {
+        if self.state.transport.will_play() {
             let _ = self.update(Message::Transport(TransportMsg::Stop));
         }
         Task::none()
@@ -689,7 +689,7 @@ impl App {
         self.discard_project_transaction();
         self.sync_audio_input_target();
         self.state.status_text = status.into();
-        if self.state.transport.playing {
+        if self.state.transport.will_play() {
             self.update(Message::Transport(TransportMsg::Stop))
         } else {
             Task::none()

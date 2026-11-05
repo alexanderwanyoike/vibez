@@ -114,7 +114,7 @@ impl App {
                 sample_rate: self.state.transport.sample_rate,
                 bpm: self.state.transport.bpm,
             },
-            self.state.transport.playing,
+            self.state.transport.is_playing(),
         );
         let count_in_bars = record.notes.count_in.bars();
         let mode = if audio {
@@ -308,7 +308,7 @@ impl App {
             return;
         };
         if let Some(clip) = self.state.perform.clips.by_id(session.working.id).cloned() {
-            self.publish_recorded_clip(clip, self.state.transport.playing);
+            self.publish_recorded_clip(clip, self.state.transport.is_playing());
         }
         self.push_undo_snapshot(None);
         self.mark_project_dirty();
@@ -362,7 +362,7 @@ impl App {
             timeline: Arc::new(timeline),
             launch: session.working.launch,
         };
-        self.publish_recorded_clip(recorded, self.state.transport.playing);
+        self.publish_recorded_clip(recorded, self.state.transport.is_playing());
         self.state.perform.select_launcher_clip(id);
         self.finish_clip_audio_input();
         self.commit_clip_record();

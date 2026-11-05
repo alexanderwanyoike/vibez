@@ -97,6 +97,9 @@ pub struct AudioEngine {
     audition: AuditionBus,
     sample_rate: u32,
     cmd_rx: Consumer<EngineCommand>,
+    transport_rx: crate::transport_ring::TransportReceiver,
+    /// UI end of the transport ring, parked here until the UI takes it.
+    transport_tx: Option<crate::transport_ring::TransportSender>,
     pub(super) event_tx: Producer<EngineEvent>,
     clip_event_drops: u64,
     reported_clip_event_drops: u64,
@@ -238,6 +241,7 @@ impl AudioEngine {
     /// consumer on the UI thread.
     pub fn new() -> (Self, Producer<EngineCommand>, Consumer<EngineEvent>) {
         let (cmd_tx, cmd_rx) = RingBuffer::<EngineCommand>::new(RING_BUFFER_CAPACITY);
+        let (transport_tx, transport_rx) = crate::transport_ring::transport_ring();
         let (event_tx, event_rx) = RingBuffer::<EngineEvent>::new(RING_BUFFER_CAPACITY);
         let (spectrum_tx, spectrum_rx) = RingBuffer::<f32>::new(SPECTRUM_RING_CAPACITY);
         let (effect_spectrum, effect_spectrum_rx) =
@@ -292,6 +296,8 @@ impl AudioEngine {
             audition: AuditionBus::new(),
             sample_rate: DEFAULT_SAMPLE_RATE,
             cmd_rx,
+            transport_rx: crate::transport_ring::TransportReceiver::new(transport_rx),
+            transport_tx: Some(transport_tx),
             event_tx,
             clip_event_drops: 0,
             reported_clip_event_drops: 0,
@@ -318,6 +324,12 @@ impl AudioEngine {
         };
 
         (engine, cmd_tx, event_rx)
+    }
+
+    /// Take the sender for Play, Stop, Seek and loop changes before the
+    /// engine moves to the audio thread; returns `None` if already taken.
+    pub fn take_transport_sender(&mut self) -> Option<crate::transport_ring::TransportSender> {
+        self.transport_tx.take()
     }
 
     /// Take the consumer side of the spectrum-analyser ring. Must be
@@ -800,6 +812,10 @@ mod tests;
 #[cfg(test)]
 #[path = "engine_stuck_note_tests.rs"]
 mod stuck_note_tests;
+
+#[cfg(test)]
+#[path = "engine_transport_ring_tests.rs"]
+mod transport_ring_tests;
 
 #[cfg(test)]
 #[path = "engine_note_edit_allocation_tests.rs"]

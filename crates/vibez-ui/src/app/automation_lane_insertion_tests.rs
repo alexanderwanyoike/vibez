@@ -24,7 +24,8 @@ fn edit(app: &mut App, message: AutomationMsg) {
 fn pending_lane() -> LanePending {
     let mut app = super::super::test_support::app();
     let (mut engine, commands, events) = AudioEngine::new();
-    app.cmd_tx = crate::domains::EngineCommandQueue::new(commands);
+    app.cmd_tx =
+        crate::domains::EngineCommandQueue::new(commands, engine.take_transport_sender().unwrap());
     app.event_rx = Some(events);
     let track = TrackId::new();
     let mut model = ProjectTrack::new(track, "App lane target".into(), 0);
@@ -272,7 +273,8 @@ fn actual_lane_edits_preserve_cloned_fifo_intent_before_stale_undo_and_clear_ser
 fn loaded_lane_payloads_reach_engine_after_real_app_request_servicing() {
     let mut app = super::super::test_support::app();
     let (mut engine, commands, events) = AudioEngine::new();
-    app.cmd_tx = crate::domains::EngineCommandQueue::new(commands);
+    app.cmd_tx =
+        crate::domains::EngineCommandQueue::new(commands, engine.take_transport_sender().unwrap());
     app.event_rx = Some(events);
     let mut track = vibez_core::track::TrackInfo::new("Loaded lanes");
     for (target, value) in [

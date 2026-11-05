@@ -533,6 +533,17 @@ The engine lives on the cpal audio callback. Its rules:
 - **No allocation, no locks, no I/O** in the callback, ever.
 - All mutations arrive as `EngineCommand` values through the ring buffer and
   are drained at the start of each callback.
+- Transport commands (Play, Stop, Seek, loop changes) travel on their own
+  transport ring. A content edit waiting for storage pauses the main ring, but
+  a transport command overtakes it and the content and channel edits queued
+  behind it (`EngineCommand::transport_may_overtake`). Each one is stamped
+  with the number of other commands sent before it, such as tempo, Section or
+  Capture commands, and waits for those.
+- A note clip is sent as one prepared insertion that carries all its notes;
+  `AddNote` is for single edits.
+- The UI's `PlaybackPhase` follows the engine's `PlaybackStarted` and
+  `PlaybackStopped` events; an unconfirmed Play or Stop is `Starting` or
+  `Stopping`.
 - Everything the engine needs (decoded audio, plugin instances, note data) is
   handed to it fully constructed; `Arc<DecodedAudio>` shares immutable sample
   data with the UI without copying.

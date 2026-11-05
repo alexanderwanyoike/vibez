@@ -438,26 +438,7 @@ impl TimelineEditorState {
                                         )
                                     });
                                 if let Some(duplicate) = duplicate {
-                                    engine.send(EngineCommand::AddNoteClip {
-                                        track_id: *track_id,
-                                        insertion: vibez_engine::clip_insertion::PreparedNoteClipInsertion::new(
-                                            duplicate.id,
-                                            duplicate.position_beats,
-                                            duplicate.duration_beats,
-                                            duplicate.start_marker_beats,
-                                            duplicate.loop_enabled,
-                                            duplicate.loop_start_beats,
-                                            duplicate.loop_end_beats,
-                                            duplicate.groove_grid,
-                                        ),
-                                    });
-                                    for note in &duplicate.notes {
-                                        engine.send(EngineCommand::AddNote {
-                                            track_id: *track_id,
-                                            clip_id: duplicate.id,
-                                            insertion: vibez_engine::clip_insertion::PreparedNoteInsertion::new(*note),
-                                        });
-                                    }
+                                    engine.send(duplicate.add_command(*track_id));
                                     let new_id = duplicate.id;
                                     if let Some(track) = self.find_content_mut(*track_id) {
                                         track.note_clips.push(duplicate);
@@ -600,68 +581,26 @@ impl TimelineEditorState {
                 if let Some(track) = self.find_content(track_id) {
                     if let Some(clip) = track.note_clips.iter().find(|c| c.id == clip_id) {
                         let new_pos = clip.position_beats + clip.duration_beats;
-                        new_clip_data = Some((
-                            UiNoteClip {
-                                id: new_clip_id,
-                                name: clip.name.clone(),
-                                position_beats: new_pos,
-                                duration_beats: clip.duration_beats,
-                                notes: clip.notes.clone(),
-                                selected_notes: HashSet::new(),
-                                start_marker_beats: clip.start_marker_beats,
-                                loop_enabled: clip.loop_enabled,
-                                loop_start_beats: clip.loop_start_beats,
-                                loop_end_beats: clip.loop_end_beats,
-                                groove_grid: clip.groove_grid,
-                            },
-                            new_pos,
-                            clip.duration_beats,
-                            clip.notes.clone(),
-                            clip.start_marker_beats,
-                            clip.loop_enabled,
-                            clip.loop_start_beats,
-                            clip.loop_end_beats,
-                            clip.groove_grid,
-                        ));
+                        new_clip_data = Some(UiNoteClip {
+                            id: new_clip_id,
+                            name: clip.name.clone(),
+                            position_beats: new_pos,
+                            duration_beats: clip.duration_beats,
+                            notes: clip.notes.clone(),
+                            selected_notes: HashSet::new(),
+                            start_marker_beats: clip.start_marker_beats,
+                            loop_enabled: clip.loop_enabled,
+                            loop_start_beats: clip.loop_start_beats,
+                            loop_end_beats: clip.loop_end_beats,
+                            groove_grid: clip.groove_grid,
+                        });
                     }
                 }
 
-                if let Some((
-                    new_clip,
-                    pos,
-                    dur,
-                    notes,
-                    start_marker_beats,
-                    loop_enabled,
-                    loop_start,
-                    loop_end,
-                    groove_grid,
-                )) = new_clip_data
-                {
+                if let Some(new_clip) = new_clip_data {
+                    engine.send(new_clip.add_command(track_id));
                     if let Some(track) = self.find_content_mut(track_id) {
                         track.note_clips.push(new_clip);
-                    }
-                    engine.send(EngineCommand::AddNoteClip {
-                        track_id,
-                        insertion: vibez_engine::clip_insertion::PreparedNoteClipInsertion::new(
-                            new_clip_id,
-                            pos,
-                            dur,
-                            start_marker_beats,
-                            loop_enabled,
-                            loop_start,
-                            loop_end,
-                            groove_grid,
-                        ),
-                    });
-                    for note in &notes {
-                        engine.send(EngineCommand::AddNote {
-                            track_id,
-                            clip_id: new_clip_id,
-                            insertion: vibez_engine::clip_insertion::PreparedNoteInsertion::new(
-                                *note,
-                            ),
-                        });
                     }
                     self.selected_note_clip = Some((track_id, new_clip_id));
                     action.status = Some("Duplicated clip".to_string());

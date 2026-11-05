@@ -26,7 +26,10 @@ fn play_resumes_the_clips_that_were_playing_when_the_transport_stopped() {
     for play in [TransportMsg::TogglePlayback, TransportMsg::Play] {
         let mut app = super::test_support::app();
         let (commands, mut sent) = rtrb::RingBuffer::new(64);
-        app.cmd_tx = crate::domains::EngineCommandQueue::new(commands);
+        app.cmd_tx = crate::domains::EngineCommandQueue::new(
+            commands,
+            vibez_engine::transport_ring::transport_ring().0,
+        );
         let (mut events, received) = rtrb::RingBuffer::new(16);
         app.event_rx = Some(received);
         app.state.view.workspace = Workspace::Perform;
@@ -48,7 +51,7 @@ fn play_resumes_the_clips_that_were_playing_when_the_transport_stopped() {
             .clip_editor
             .playing
             .insert(track, clip.clone());
-        app.state.transport.playing = true;
+        app.state.transport.playback = crate::state::PlaybackPhase::Playing;
 
         events.push(EngineEvent::PlaybackStopped).unwrap();
         app.poll_engine_events();

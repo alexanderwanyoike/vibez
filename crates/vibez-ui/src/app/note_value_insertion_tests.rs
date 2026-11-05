@@ -157,9 +157,21 @@ fn piano_roll_note_growth_is_served_before_current_stale_batch_reuse_undo_stop_a
             InnerChange::Clear => outer.app.clear_project_runtime(),
         }
         outer.app.send_command(EngineCommand::SetBpm(137.0));
-        assert_signal(&render(&mut outer.engine, true), 0.25);
-        assert_eq!(outer.engine.transport().position(), 16, "{change:?}");
-        assert!(outer.engine.transport().is_playing(), "{change:?}");
+        let stopped = matches!(change, InnerChange::Stop);
+        assert_signal(
+            &render(&mut outer.engine, true),
+            if stopped { 0.0 } else { 0.25 },
+        );
+        assert_eq!(
+            outer.engine.transport().position(),
+            if stopped { 0 } else { 16 },
+            "{change:?}"
+        );
+        assert_eq!(
+            outer.engine.transport().is_playing(),
+            !stopped,
+            "{change:?}"
+        );
         assert_eq!(outer.engine.transport().bpm(), 120.0);
         let resident = &outer.engine.tracks()[0].playback_source.note_clips[0];
         assert_eq!(resident.id, outer.resident);
@@ -279,7 +291,7 @@ fn piano_roll_note_growth_is_served_before_current_stale_batch_reuse_undo_stop_a
                     if matches!(change, InnerChange::Stop) {
                         assert!(!outer.engine.transport().is_playing());
                         assert_eq!(outer.engine.transport().position(), 0);
-                        assert!(!outer.app.state.transport.playing);
+                        assert!(!outer.app.state.transport.is_playing());
                         0.0
                     } else {
                         0.25
@@ -293,7 +305,7 @@ fn piano_roll_note_growth_is_served_before_current_stale_batch_reuse_undo_stop_a
         }
         assert_signal(&render(&mut outer.engine, true), expected_signal);
         if matches!(change, InnerChange::Clear) {
-            assert!(!outer.app.state.transport.playing);
+            assert!(!outer.app.state.transport.is_playing());
         }
         drop(canonical_tracks);
         drop(canonical_timeline);

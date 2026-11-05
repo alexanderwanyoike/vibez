@@ -15,6 +15,7 @@ pub mod note_repeat;
 pub mod playback_source;
 pub mod render;
 pub mod transport;
+pub mod transport_ring;
 
 pub mod bounce_timing;
 pub mod routing;

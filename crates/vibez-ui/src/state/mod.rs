@@ -9,7 +9,7 @@ mod snapshot;
 pub use project_tracks::ProjectTracksState;
 mod transport_state;
 mod ui_types;
-pub use transport_state::TransportState;
+pub use transport_state::{PlaybackPhase, TransportState};
 
 use crate::remote_provider::RemoteCatalogSnapshot;
 pub use browser_results::LocalResults;
