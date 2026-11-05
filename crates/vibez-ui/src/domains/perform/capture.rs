@@ -12,6 +12,7 @@ use std::sync::Arc;
 use vibez_core::automation::{AutomationLane, AutomationPoint, AutomationTarget};
 use vibez_core::id::{ClipId, TrackId};
 use vibez_core::midi::MidiNote;
+use vibez_core::time::TICKS_PER_BEAT;
 
 use crate::state::{ArrangementTimeline, TrackTimelineContent, UiClip, UiNoteClip, UndoGestureId};
 
@@ -712,9 +713,7 @@ fn samples_per_beat(sample_rate: u32, bpm: f64) -> f64 {
 }
 
 /// Engine boundaries land on whole samples, which rarely fall exactly on a
-/// beat, so captured MIDI clip edges snap to this musical resolution.
-const TICKS_PER_BEAT: f64 = 960.0;
-
+/// beat, so captured MIDI clip edges snap to whole ticks.
 fn on_tick(beats: f64) -> f64 {
     (beats * TICKS_PER_BEAT).round() / TICKS_PER_BEAT
 }

@@ -4,6 +4,7 @@ use vibez_core::id::{ClipId, SectionId, TrackId};
 #[cfg(test)]
 use vibez_core::perform::SwingAmount;
 use vibez_core::perform::{GrooveGrid, NoteRepeatRate};
+use vibez_core::time::TICKS_PER_BEAT;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum LoopRecordCountIn {
@@ -625,7 +626,7 @@ fn push_free_note<T>(session: &mut RecordingSession<T>, note: OpenNote, off_samp
         session.bpm,
         session.sample_rate,
     )
-    .max(1.0 / 960.0);
+    .max(1.0 / TICKS_PER_BEAT);
     session.notes.push(RecordedLoopNote {
         pitch: note.pitch,
         velocity: note.velocity,
@@ -654,7 +655,7 @@ fn preview_open_note<T>(session: &RecordingSession<T>, note: OpenNote) -> Record
         velocity: note.velocity,
         start_beat: quantize_start(raw_start, session.quantization, session.length_beats),
         duration_beats: samples_to_beats(elapsed_samples, session.bpm, session.sample_rate)
-            .max(1.0 / 960.0),
+            .max(1.0 / TICKS_PER_BEAT),
         groove_grid: session.quantization.groove_grid(),
     }
 }
@@ -752,7 +753,7 @@ mod tests {
         assert_eq!(pressed.notes.len(), 1);
         assert_eq!(pressed.notes[0].pitch, 42);
         assert_eq!(pressed.notes[0].start_beat, 0.25);
-        assert_eq!(pressed.notes[0].duration_beats, 1.0 / 960.0);
+        assert_eq!(pressed.notes[0].duration_beats, 1.0 / TICKS_PER_BEAT);
         assert_eq!(pressed.position_beats, 0.0);
         assert_eq!(pressed.length_beats, 0.25);
 
