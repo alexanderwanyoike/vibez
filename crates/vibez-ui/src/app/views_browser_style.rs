@@ -330,6 +330,18 @@ mod browser_table_tests {
     }
 
     #[test]
+    fn the_audition_footer_is_a_rounded_well_of_filled_controls() {
+        let footer = browser_footer_style(&Theme::Dark);
+        assert_eq!(footer.border.width, 0.0);
+        assert!(footer.border.radius.top_left >= 6.0);
+        assert_ne!(footer.background, Some(th::bg_surface().into()));
+        let play = browser_transport_button_style(&Theme::Dark, button::Status::Active);
+        let filled = crate::widgets::control_style::styled(None, button::Status::Active);
+        assert_eq!(play.background, filled.background);
+        assert_eq!(play.border.width, 0.0);
+    }
+
+    #[test]
     fn selected_result_metadata_uses_the_selected_foreground() {
         assert_eq!(browser_result_cell_color(true), th::text());
         assert_eq!(browser_result_cell_color(false), th::text_dim());
