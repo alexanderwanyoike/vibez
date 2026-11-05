@@ -4,9 +4,16 @@ use iced::keyboard::{Event, Modifiers};
 use iced::widget::canvas::Program;
 
 /// At 120 BPM and 1 kHz a beat is 500 frames, so zoom 25 draws one frame
-/// per pixel from the clip's source offset.
+/// per pixel, from the clip's source offset 0.2 beats into the sample.
 fn one_frame_per_pixel() -> Option<TimelineViewport> {
-    Some(TimelineViewport::new(25.0, 0.0))
+    Some(TimelineViewport::new(25.0, 0.2))
+}
+
+/// A warped clip's editor starts at its window, which its Warp Markers
+/// map, still one frame per pixel.
+fn starts_at_its_window(widget: &mut AudioClipDetailWidget) {
+    widget.editor_frames = (widget.source_offset, widget.loop_content_end);
+    widget.view = Some(TimelineViewport::new(25.0, 0.0));
 }
 
 fn widget() -> AudioClipDetailWidget {
@@ -30,6 +37,7 @@ fn widget() -> AudioClipDetailWidget {
         loop_start: 100,
         loop_end: 500,
         loop_content_end: 1_000,
+        editor_frames: (0, 1_000),
         playback_direction: ClipPlaybackDirection::Forward,
         transient_markers: Default::default(),
         selected_transient_marker: None,
@@ -486,6 +494,7 @@ fn double_clicking_empty_waveform_adds_a_transient_marker() {
 fn warp_marker_drag_selects_its_source_anchor_and_snaps_timeline_position() {
     let mut widget = widget();
     assert!(widget.warp_markers.add(300, 200, 100, 900, 800));
+    starts_at_its_window(&mut widget);
     let bounds = Rectangle::new(Point::ORIGIN, iced::Size::new(800.0, 200.0));
     let marker = Point::new(widget.timeline_to_x(300, &bounds), 25.0);
     let target = Point::new(400.0, 25.0);
@@ -529,6 +538,7 @@ fn warp_marker_drag_selects_its_source_anchor_and_snaps_timeline_position() {
 fn source_markers_follow_the_piecewise_timeline_map() {
     let mut widget = widget();
     assert!(widget.warp_markers.add(300, 400, 100, 900, 800));
+    starts_at_its_window(&mut widget);
     let bounds = Rectangle::new(Point::ORIGIN, iced::Size::new(800.0, 200.0));
 
     assert_eq!(widget.source_to_x(300, &bounds), 400.0);

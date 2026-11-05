@@ -234,6 +234,19 @@ impl UiClip {
         )
     }
 
+    /// The frames the audio editor spans: from where the loop may begin to
+    /// the furthest it may reach, or to the clip's end where an unlooped
+    /// clip runs on into silence.
+    pub(crate) fn editor_frames(&self) -> (u64, u64) {
+        let reach = self.loop_content_end();
+        let end = if self.loop_enabled {
+            reach
+        } else {
+            reach.max(self.source_offset.saturating_add(self.duration))
+        };
+        (self.loop_content_start(), end)
+    }
+
     /// Resizing a warped clip resizes its Warp Marker map, which can cut the
     /// loop.
     pub(crate) fn clamp_loop_to_warp_map(&mut self) {

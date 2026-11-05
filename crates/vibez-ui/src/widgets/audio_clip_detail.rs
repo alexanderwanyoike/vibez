@@ -25,9 +25,9 @@ use crate::widgets::local_drag::LocalDrag;
 
 /// Canvas widget for showing a detailed waveform of an audio clip in the detail panel.
 ///
-/// It shows the clip's content, the source from the clip's offset onward,
-/// not the clip as it plays in the Arrangement, so a loop can be placed
-/// anywhere the source reaches.
+/// It shows the clip's content, the whole source its loop may reach, not
+/// the clip as it plays in the Arrangement, so a loop can be placed
+/// anywhere in it.
 pub struct AudioClipDetailWidget {
     pub location: vibez_project::TimelineLocation,
     pub track_id: TrackId,
@@ -47,12 +47,15 @@ pub struct AudioClipDetailWidget {
     pub loop_end: u64,
     /// See `FrameClipTimeline::loop_content_end`.
     pub loop_content_end: u64,
+    /// See `UiClip::editor_frames`.
+    pub editor_frames: (u64, u64),
     pub playback_direction: ClipPlaybackDirection,
     pub transient_markers: TransientMarkers,
     pub selected_transient_marker: Option<u64>,
     pub warp_markers: WarpMarkers,
     pub selected_warp_marker: Option<u64>,
-    /// The producer's zoom and scroll for this clip; `None` frames its loop.
+    /// The producer's zoom and scroll for this clip; `None` frames the whole
+    /// source.
     pub view: Option<TimelineViewport>,
 }
 
@@ -94,28 +97,15 @@ const WARP_MARKER_TOP: f32 = 20.0;
 const WARP_HIT_RADIUS: f32 = 7.0;
 const DOUBLE_CLICK_WINDOW: Duration = Duration::from_millis(300);
 
-/// The audio editor's view, measured in beats from the clip's source
-/// offset.
+/// The audio editor's view of `editor_frames`, measured in beats from its
+/// first frame.
 pub(crate) fn audio_clip_editor_view(
     stored: Option<TimelineViewport>,
     samples_per_beat: f64,
-    source_offset: u64,
-    loop_span: Option<(u64, u64)>,
-    duration: u64,
-    content_frames: u64,
+    (first, end): (u64, u64),
 ) -> ClipEditorView {
-    let beats = |frames: u64| frames as f64 / samples_per_beat;
-    ClipEditorView::framing(
-        stored,
-        loop_span.map(|(start, end)| {
-            (
-                beats(start.saturating_sub(source_offset)),
-                beats(end.saturating_sub(source_offset)),
-            )
-        }),
-        beats(duration.max(1)),
-        beats(content_frames),
-    )
+    let beats = end.saturating_sub(first).max(1) as f64 / samples_per_beat;
+    ClipEditorView::new(stored, 0.0, beats, beats)
 }
 
 impl AudioClipDetailWidget {
@@ -133,27 +123,13 @@ impl AudioClipDetailWidget {
         }
     }
 
-    /// The source from the clip's offset to the furthest a loop may reach,
-    /// or to the clip's end when an unlooped clip runs on into silence.
-    fn content_frames(&self) -> u64 {
-        let source = self.loop_content_end.saturating_sub(self.source_offset);
-        if self.loop_enabled {
-            source
-        } else {
-            source.max(self.duration_samples)
-        }
+    /// The frame at the editor's beat zero.
+    fn first_frame(&self) -> u64 {
+        self.editor_frames.0
     }
 
     fn clip_view(&self) -> ClipEditorView {
-        audio_clip_editor_view(
-            self.view,
-            self.samples_per_beat(),
-            self.source_offset,
-            self.loop_enabled
-                .then_some((self.loop_start, self.loop_end)),
-            self.duration_samples,
-            self.content_frames(),
-        )
+        audio_clip_editor_view(self.view, self.samples_per_beat(), self.editor_frames)
     }
 
     fn geometry(&self, bounds: &Rectangle) -> TimelineGeometry {
@@ -178,14 +154,13 @@ impl AudioClipDetailWidget {
     }
 
     fn timeline_to_x(&self, timeline_frame: u64, bounds: &Rectangle) -> f32 {
-        let local = timeline_frame as f64 - self.source_offset as f64;
-        self.geometry(bounds)
-            .beat_to_x(local / self.samples_per_beat())
+        let beats = (timeline_frame as f64 - self.first_frame() as f64) / self.samples_per_beat();
+        self.geometry(bounds).beat_to_x(beats)
     }
 
     #[cfg(test)]
     fn x_to_timeline_frame(&self, x: f32, bounds: &Rectangle) -> f64 {
-        self.source_offset as f64 + self.geometry(bounds).x_to_beat(x) * self.samples_per_beat()
+        self.first_frame() as f64 + self.geometry(bounds).x_to_beat(x) * self.samples_per_beat()
     }
 
     fn timeline(&self) -> FrameClipTimeline {
@@ -248,11 +223,9 @@ impl AudioClipDetailWidget {
         )
     }
 
-    fn x_to_local_frame(&self, x: f32, bounds: &Rectangle) -> u64 {
-        self.x_to_local_frame_up_to(x, bounds, self.loop_range_frames(), false)
-    }
-
-    fn x_to_local_frame_up_to(&self, x: f32, bounds: &Rectangle, limit: u64, free: bool) -> u64 {
+    /// The frame under `x`, snapped unless `free`, never before the
+    /// editor's first frame.
+    fn x_to_frame(&self, x: f32, bounds: &Rectangle, free: bool) -> u64 {
         let geometry = self.geometry(bounds);
         let beat = geometry.x_to_beat(x).max(0.0);
         let beat = if self.grid.snap_enabled && !free {
@@ -260,12 +233,15 @@ impl AudioClipDetailWidget {
         } else {
             beat
         };
-        ((beat * self.samples_per_beat()).round() as u64).min(limit)
+        self.first_frame() + (beat * self.samples_per_beat()).round() as u64
     }
 
-    fn x_to_unsnapped_local_frame(&self, x: f32, bounds: &Rectangle) -> u64 {
-        let beat = self.geometry(bounds).x_to_beat(x).max(0.0);
-        ((beat * self.samples_per_beat()).round() as u64).min(self.loop_range_frames())
+    /// The frame under `x` counted from the clip's window, where Warp
+    /// Markers count from.
+    fn x_to_window_frame(&self, x: f32, bounds: &Rectangle, free: bool) -> u64 {
+        self.x_to_frame(x, bounds, free)
+            .saturating_sub(self.source_offset)
+            .min(self.loop_range_frames())
     }
 
     fn hit_test_loop_marker(&self, position: Point, bounds: &Rectangle) -> Option<LoopMarker> {
@@ -285,9 +261,7 @@ impl AudioClipDetailWidget {
     }
 
     fn start_marker_from_x(&self, x: f32, bounds: &Rectangle, free: bool) -> u64 {
-        let candidate = self
-            .source_offset
-            .saturating_add(self.x_to_local_frame_up_to(x, bounds, self.content_frames(), free));
+        let candidate = self.x_to_frame(x, bounds, free).min(self.editor_frames.1);
         let source_end = self.source_offset.saturating_add(self.loop_range_frames());
         self.timeline()
             .clamp_start(candidate, self.source_offset, source_end)
@@ -296,7 +270,7 @@ impl AudioClipDetailWidget {
     fn transient_source_from_x(&self, x: f32, bounds: &Rectangle) -> u64 {
         self.warp_markers
             .source_at_timeline(
-                self.x_to_unsnapped_local_frame(x, bounds) as f64,
+                self.x_to_window_frame(x, bounds, true) as f64,
                 self.source_offset,
                 self.warp_timeline_end(),
             )
@@ -428,7 +402,7 @@ impl canvas::Program<Message> for AudioClipDetailWidget {
         );
 
         let looping = self.loop_enabled && self.loop_end > self.loop_start;
-        let content_frames = self.content_frames() as f64;
+        let (first_frame, end_frame) = (self.first_frame() as f64, self.editor_frames.1 as f64);
         let half_h = (waveform_height / 2.0 - 2.0).max(1.0);
         let channels = self.audio.num_channels();
         let waveform_color = theme::with_alpha(self.track_color, 0.7);
@@ -443,18 +417,15 @@ impl canvas::Program<Message> for AudioClipDetailWidget {
             (mn, mx)
         };
         for px in 0..w.max(0.0) as usize {
-            let local_start = (geometry.x_to_beat(px as f32) * samples_per_beat).max(0.0);
-            let local_end =
-                (geometry.x_to_beat(px as f32 + 1.0) * samples_per_beat).min(content_frames);
-            if local_end <= local_start {
+            let frame_start =
+                (first_frame + geometry.x_to_beat(px as f32) * samples_per_beat).max(first_frame);
+            let frame_end = (first_frame + geometry.x_to_beat(px as f32 + 1.0) * samples_per_beat)
+                .min(end_frame);
+            if frame_end <= frame_start {
                 continue;
             }
-            let src_start = self
-                .mapped_source_frame(self.source_offset + local_start.floor() as u64)
-                .floor() as usize;
-            let src_end = self
-                .mapped_source_frame(self.source_offset + local_end.ceil() as u64)
-                .ceil() as usize;
+            let src_start = self.mapped_source_frame(frame_start.floor() as u64).floor() as usize;
+            let src_end = self.mapped_source_frame(frame_end.ceil() as u64).ceil() as usize;
             let (min_val, max_val) = peak_for_range(src_start, src_end.max(src_start + 1));
             let y_top = center_y - (max_val * half_h);
             let y_bottom = center_y - (min_val * half_h);
@@ -472,6 +443,19 @@ impl canvas::Program<Message> for AudioClipDetailWidget {
             iced::Size::new(w, AUDIO_RULER_HEIGHT),
             theme::with_alpha(theme::bg_surface(), 0.96),
         );
+        let played_start = if looping {
+            self.start_marker.min(self.loop_start)
+        } else {
+            self.start_marker
+        };
+        let played_start_x = self.timeline_to_x(played_start, &bounds).min(w);
+        if played_start_x > 0.0 {
+            frame.fill_rectangle(
+                Point::ORIGIN,
+                iced::Size::new(played_start_x, h),
+                theme::past_clip_end_shade(),
+            );
+        }
         let clip_end_x = self.timeline_to_x(self.played_end(), &bounds).max(0.0);
         if clip_end_x < w {
             frame.fill_rectangle(
@@ -823,9 +807,9 @@ impl canvas::Program<Message> for AudioClipDetailWidget {
                 } else if let Some(marker) = self.hit_test_loop_marker(position, &bounds) {
                     Some(AudioMarkerDrag::Loop(LoopDrag::begin(
                         marker,
-                        self.loop_start.saturating_sub(self.source_offset) as f64,
-                        self.loop_end.saturating_sub(self.source_offset) as f64,
-                        self.x_to_local_frame_up_to(position.x, &bounds, u64::MAX, state.alt_held)
+                        self.loop_start.saturating_sub(self.first_frame()) as f64,
+                        self.loop_end.saturating_sub(self.first_frame()) as f64,
+                        (self.x_to_frame(position.x, &bounds, state.alt_held) - self.first_frame())
                             as f64,
                     )))
                 } else {
@@ -866,15 +850,15 @@ impl canvas::Program<Message> for AudioClipDetailWidget {
                         })
                     }
                     AudioMarkerDrag::Loop(drag) => {
-                        let max = self.loop_content_end.saturating_sub(self.source_offset);
-                        let pointer =
-                            self.x_to_local_frame_up_to(position.x, &bounds, max, state.alt_held);
+                        let max = self.loop_content_end.saturating_sub(self.first_frame());
+                        let pointer = (self.x_to_frame(position.x, &bounds, state.alt_held)
+                            - self.first_frame())
+                        .min(max);
                         let min_length = self.minimum_loop_frames(&bounds, state.alt_held).min(max);
                         let (loop_start, loop_end) =
                             drag.resolve(pointer as f64, min_length as f64, max as f64);
-                        let loop_start =
-                            self.source_offset.saturating_add(loop_start.round() as u64);
-                        let loop_end = self.source_offset.saturating_add(loop_end.round() as u64);
+                        let loop_start = self.first_frame() + loop_start.round() as u64;
+                        let loop_end = self.first_frame() + loop_end.round() as u64;
                         ((loop_start, loop_end) != (self.loop_start, self.loop_end)).then(|| {
                             Message::Arrangement(ArrangementMsg::SetClipLoopRegion {
                                 track_id: self.track_id,
@@ -915,7 +899,7 @@ impl canvas::Program<Message> for AudioClipDetailWidget {
                         undo_gesture,
                     } => {
                         state.double_click.clear();
-                        let timeline_frame = self.x_to_local_frame(position.x, &bounds);
+                        let timeline_frame = self.x_to_window_frame(position.x, &bounds, false);
                         if timeline_frame == current_timeline_frame {
                             None
                         } else {
@@ -940,7 +924,7 @@ impl canvas::Program<Message> for AudioClipDetailWidget {
                         current_timeline_frame,
                         undo_gesture,
                     } => {
-                        let timeline_frame = self.x_to_local_frame(position.x, &bounds);
+                        let timeline_frame = self.x_to_window_frame(position.x, &bounds, false);
                         if timeline_frame == current_timeline_frame {
                             None
                         } else {

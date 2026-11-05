@@ -203,11 +203,7 @@ impl App {
         Some(audio_clip_editor_view(
             self.state.view.clip_editor_view(clip.id),
             self.state.transport.samples_per_beat(),
-            clip.source_offset,
-            clip.loop_enabled
-                .then_some((clip.loop_start, clip.loop_end)),
-            clip.duration,
-            clip.duration,
+            clip.editor_frames(),
         ))
     }
 
