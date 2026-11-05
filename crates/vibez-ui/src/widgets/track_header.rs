@@ -567,6 +567,23 @@ mod tests {
     }
 
     #[test]
+    fn the_rows_down_to_the_fader_and_the_resize_strip_below_fit_the_shortest_lane() {
+        const {
+            assert!(HEADER_PADDING.bottom >= RESIZE_HANDLE_HEIGHT);
+            assert!(
+                HEADER_PADDING.top
+                    + NAME_ROW_HEIGHT
+                    + ROW_SPACING
+                    + CONTROLS_ROW_HEIGHT
+                    + ROW_SPACING
+                    + FADER_HEIGHT
+                    + HEADER_PADDING.bottom
+                    <= vibez_project::TrackHeight::MIN.pixels()
+            );
+        }
+    }
+
+    #[test]
     fn an_audio_header_shows_its_input_without_hover() {
         assert!(shows_audio_input(&audio_track()));
     }
