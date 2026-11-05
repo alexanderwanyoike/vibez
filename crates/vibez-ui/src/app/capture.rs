@@ -262,15 +262,11 @@ fn capture_replaces_existing_content(
                     captured.arrange_start_samples,
                     captured.arrange_end_samples,
                 )
-            }) || existing.note_clips.iter().any(|clip| {
-                let start = (clip.position_beats * captured.samples_per_beat)
-                    .round()
-                    .max(0.0) as u64;
-                let end = ((clip.position_beats + clip.duration_beats) * captured.samples_per_beat)
-                    .round()
-                    .max(0.0) as u64;
-                start < captured.arrange_end_samples && end > captured.arrange_start_samples
-            }) || !existing.automation.is_empty()
+            }) || existing
+                .note_clips
+                .iter()
+                .any(|clip| notes_overlap(clip, captured.start_beat(), captured.end_beat()))
+                || !existing.automation.is_empty()
         })
     })
 }
