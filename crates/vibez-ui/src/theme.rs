@@ -168,7 +168,7 @@ impl ClipStyle {
 
     pub const LIGHT: Self = Self {
         body_opacity: 0.55,
-        body_toward_lane: 0.34,
+        body_toward_lane: 0.18,
         ink: Color {
             r: 16.0 / 255.0,
             g: 16.0 / 255.0,
