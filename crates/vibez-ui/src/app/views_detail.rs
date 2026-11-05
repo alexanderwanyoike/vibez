@@ -105,8 +105,8 @@ fn single_selected_audio_clip_for_track(
     }
 }
 
-/// A tab across the top of the detail panel, raised onto the control shade
-/// while `active`.
+/// A tab in the detail panel's switch, raised onto the control shade while
+/// `active`, like the workspace switch.
 fn detail_tab<'a>(
     label: &'a str,
     active: bool,
@@ -116,7 +116,7 @@ fn detail_tab<'a>(
         .on_press(Message::View(ViewMsg::SwitchDetailTab(tab)))
         .padding([4, 12])
         .style(super::views_control_bar_style::segment(
-            active.then(th::accent),
+            active.then(th::text),
         ))
 }
 
@@ -292,7 +292,17 @@ impl App {
                 tab == DetailPanelTab::Devices,
                 DetailPanelTab::Devices,
             );
-            let tab_bar = row![clip_tab, devices_tab].spacing(4);
+            let tab_bar = row![
+                container(row![clip_tab, devices_tab].spacing(2))
+                    .padding(super::views_control_bar_style::GROUP_INSET)
+                    .style(super::views_control_bar_style::group),
+                text(&track.name)
+                    .size(12)
+                    .font(crate::typography::TRACK_TITLE)
+                    .color(th::text()),
+            ]
+            .spacing(10)
+            .align_y(iced::Alignment::Center);
 
             // Tab content
             let tab_content: Element<'_, Message> = match self.state.view.detail_panel_tab {
