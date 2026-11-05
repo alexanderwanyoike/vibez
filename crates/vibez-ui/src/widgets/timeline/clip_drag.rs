@@ -33,8 +33,7 @@ pub enum ClipDragAction {
     },
     ResizeClip {
         undo_gesture: UndoGestureId,
-        clip_id: ClipId,
-        is_note_clip: bool,
+        anchor: ArrangementSelection,
         edge: ClipEdge,
         /// The Clip's other edge, which stays put.
         fixed_beat: f64,

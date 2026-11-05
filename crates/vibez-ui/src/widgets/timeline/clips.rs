@@ -502,8 +502,7 @@ impl canvas::Program<Message> for TrackClipCanvas {
                         if let Some(edge) = edge {
                             state.drag = Some(ClipDragAction::ResizeClip {
                                 undo_gesture: UndoGestureId::new(),
-                                clip_id,
-                                is_note_clip,
+                                anchor: selection,
                                 edge,
                                 fixed_beat: match edge {
                                     ClipEdge::Start => pos_beats + dur_beats,
@@ -740,8 +739,7 @@ impl canvas::Program<Message> for TrackClipCanvas {
                             }
                             ClipDragAction::ResizeClip {
                                 undo_gesture,
-                                clip_id,
-                                is_note_clip,
+                                anchor,
                                 edge,
                                 fixed_beat,
                                 start_local_x,
@@ -752,12 +750,7 @@ impl canvas::Program<Message> for TrackClipCanvas {
                                 }
                                 let pointer = self.x_to_beat(local_x);
                                 let context = self.snap_context(state.alt_held);
-                                let clip_id = *clip_id;
-                                let anchor = if *is_note_clip {
-                                    ArrangementSelection::NoteClip { track_id, clip_id }
-                                } else {
-                                    ArrangementSelection::AudioClip { track_id, clip_id }
-                                };
+                                let anchor = *anchor;
                                 let edit = match edge {
                                     ClipEdge::Start => ArrangementMsg::TrimSelectedClipsStart {
                                         anchor,
