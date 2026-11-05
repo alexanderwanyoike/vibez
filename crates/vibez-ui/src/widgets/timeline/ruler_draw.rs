@@ -161,19 +161,7 @@ fn draw_marks(
                     iced::Size::new(1.0, bottom - top),
                     tick,
                 );
-                let (font, size, color) = if bar {
-                    (typography::PERFORM_LABEL, 11.0, theme::text())
-                } else {
-                    (typography::PERFORM_DISPLAY, 10.5, theme::text_dim())
-                };
-                frame.fill_text(canvas::Text {
-                    content: text,
-                    position: iced::Point::new(x + 4.0, top + 4.0),
-                    color,
-                    size: iced::Pixels(size),
-                    font,
-                    ..Default::default()
-                });
+                draw_label(frame, x, top, text, bar);
             }
             RulerMark::Mid { x } => frame.fill_rectangle(
                 iced::Point::new(x, bottom - MID_TICK_HEIGHT),
@@ -192,4 +180,21 @@ fn draw_marks(
         iced::Size::new(width, 1.0),
         theme::border(),
     );
+}
+
+/// A ruler label just right of the tick at `x`, below `top`.
+pub(super) fn draw_label(frame: &mut canvas::Frame, x: f32, top: f32, text: String, bar: bool) {
+    let (font, size, color) = if bar {
+        (typography::PERFORM_LABEL, 11.0, theme::text())
+    } else {
+        (typography::PERFORM_DISPLAY, 10.5, theme::text_dim())
+    };
+    frame.fill_text(canvas::Text {
+        content: text,
+        position: Point::new(x + 4.0, top + 4.0),
+        color,
+        size: iced::Pixels(size),
+        font,
+        ..Default::default()
+    });
 }

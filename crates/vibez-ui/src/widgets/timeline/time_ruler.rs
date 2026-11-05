@@ -3,11 +3,11 @@
 use iced::widget::canvas;
 use iced::{mouse, Point, Rectangle, Renderer, Size, Theme};
 
+use super::ruler_draw::draw_label;
 use crate::message::Message;
 use crate::theme;
 use crate::time_format::minutes_seconds;
 use crate::timeline_geometry::TimelineGeometry;
-use crate::typography;
 
 pub const TIME_RULER_HEIGHT: f32 = 20.0;
 
@@ -45,14 +45,7 @@ impl canvas::Program<Message> for TimeRulerWidget {
                 Size::new(1.0, TICK_HEIGHT),
                 theme::ruler_tick(),
             );
-            frame.fill_text(canvas::Text {
-                content: label,
-                position: Point::new(x + 4.0, 4.0),
-                color: theme::text_dim(),
-                size: iced::Pixels(10.5),
-                font: typography::PERFORM_DISPLAY,
-                ..Default::default()
-            });
+            draw_label(&mut frame, x, 0.0, label, false);
         }
         vec![frame.into_geometry()]
     }
