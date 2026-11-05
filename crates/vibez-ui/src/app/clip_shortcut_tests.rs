@@ -96,3 +96,41 @@ fn clip_edit_shortcuts_that_change_nothing_leave_no_undo_step() {
     assert!(!app.state.project.history.can_undo());
     assert!(!app.state.project.dirty);
 }
+
+#[test]
+fn split_over_three_lanes_cuts_each_clip_once_in_one_undo_step() {
+    let (mut app, tracks) = selected_clips_on(3);
+    let transport = &mut app.state.transport;
+    let samples_per_beat = 60.0 * transport.sample_rate as f64 / transport.bpm;
+    transport.position_samples = (4.0 * samples_per_beat).round() as u64;
+
+    command_key(&mut app, "e");
+
+    assert_eq!(clip_counts(&app, &tracks), vec![2, 2, 2]);
+    assert_eq!(app.state.project.history.undo.len(), 1);
+    let _ = app.update(Message::Project(ProjectMsg::Undo));
+    assert_eq!(clip_counts(&app, &tracks), vec![1, 1, 1]);
+}
+
+#[test]
+fn join_makes_one_clip_in_one_undo_step() {
+    let (mut app, tracks) = selected_clips_on(1);
+    let track_id = tracks[0];
+    let clip = note_clip(8.0);
+    let clip_id = clip.id;
+    app.state
+        .arrange_content_mut(track_id)
+        .note_clips
+        .push(clip);
+    app.state
+        .arrangement
+        .selected_clips
+        .insert(ArrangementSelection::NoteClip { track_id, clip_id });
+
+    command_key(&mut app, "j");
+
+    assert_eq!(clip_counts(&app, &tracks), vec![1]);
+    assert_eq!(app.state.project.history.undo.len(), 1);
+    let _ = app.update(Message::Project(ProjectMsg::Undo));
+    assert_eq!(clip_counts(&app, &tracks), vec![2]);
+}
