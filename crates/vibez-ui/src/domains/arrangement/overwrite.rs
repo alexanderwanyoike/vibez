@@ -19,15 +19,15 @@ const BEAT_EPSILON: f64 = 1e-9;
 /// What is left of each lane Clip that an incoming range touched. A Clip
 /// listed with no pieces is fully covered.
 #[derive(Debug, Default)]
-pub(super) struct LaneOverwrite {
-    pub(super) audio: Vec<(ClipId, Vec<UiClip>)>,
-    pub(super) notes: Vec<(ClipId, Vec<UiNoteClip>)>,
+pub(crate) struct LaneOverwrite {
+    pub(crate) audio: Vec<(ClipId, Vec<UiClip>)>,
+    pub(crate) notes: Vec<(ClipId, Vec<UiNoteClip>)>,
 }
 
 /// The edits that placing `placed` over `start_beats..end_beats` makes to
 /// the other Clips on `lane`. A piece shorter than the shortest Clip is
 /// dropped, since it could be neither seen nor grabbed.
-pub(super) fn lane_overwrite(
+pub(crate) fn lane_overwrite(
     lane: &TrackTimelineContent,
     (start_beats, end_beats): (f64, f64),
     placed: &HashSet<ClipId>,

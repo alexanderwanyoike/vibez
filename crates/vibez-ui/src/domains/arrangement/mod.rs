@@ -39,6 +39,7 @@ mod duplicate;
 mod fade_edits;
 mod slice_to_drum_rack;
 mod slicing;
+pub(crate) use overwrite::lane_overwrite;
 pub(crate) use slicing::slice_region_count;
 
 pub const PROJECT_TRACKS_FULL: &str = "This project has no room for another track";
