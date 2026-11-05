@@ -145,4 +145,11 @@ mod tests {
         let st = tm.musical_to_sample(MusicalTime(1.0));
         assert_eq!(st.0, 22_050);
     }
+
+    #[test]
+    fn a_beat_lands_on_its_nearest_sample() {
+        // 20_353.85 samples per beat.
+        let tm = TempoMap::new(130.0, 44_100);
+        assert_eq!(tm.musical_to_sample(MusicalTime(1.0)).0, 20_354);
+    }
 }

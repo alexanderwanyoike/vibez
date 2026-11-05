@@ -380,6 +380,30 @@ mod tests {
     }
 
     #[test]
+    fn the_loop_region_lands_on_the_nearest_sample() {
+        let mut t = transport();
+        t.bpm = 130.0;
+        let mut engine = RecordingEngine::default();
+
+        t.update(
+            TransportMsg::SetArrangementLoopRegion {
+                start_beats: 1.0,
+                end_beats: 2.0,
+            },
+            &mut engine,
+            TransportCtx::default(),
+        );
+
+        assert!(matches!(
+            engine.0[0],
+            EngineCommand::SetArrangementLoopRegion {
+                start: 20_354,
+                end: 40_708
+            }
+        ));
+    }
+
+    #[test]
     fn a_tempo_change_while_stopped_keeps_the_playhead_on_its_beat() {
         let mut t = transport();
         let mut engine = RecordingEngine::default();
