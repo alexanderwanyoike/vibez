@@ -14,12 +14,11 @@ use crate::message::Message;
 use crate::state::{ContextMenuTarget, GridConfig, UndoGestureId};
 use crate::timeline_geometry::{TimelineGeometry, TimelineViewport};
 use crate::widgets::double_click::DoubleClick;
+use crate::widgets::drag_phase::{past_click_slop, CLICK_SLOP_PX};
 
 /// Height of the Arrange ruler: the loop strip over the number strip.
 pub const ARRANGE_RULER_HEIGHT: f32 = 36.0;
 pub(super) const LOOP_STRIP_HEIGHT: f32 = 13.0;
-/// Pointer travel that still counts as a click rather than a drag.
-const CLICK_THRESHOLD_PX: f32 = 3.0;
 const DOUBLE_CLICK_WINDOW: Duration = Duration::from_millis(300);
 
 /// Canvas widget that draws a beat-based ruler with bar.beat labels.
@@ -150,7 +149,7 @@ impl canvas::Program<Message> for RulerWidget {
                         Instant::now(),
                         pos,
                         DOUBLE_CLICK_WINDOW,
-                        Some(CLICK_THRESHOLD_PX),
+                        Some(CLICK_SLOP_PX),
                     ) {
                         state.double_click.clear();
                         state.drag = None;
@@ -177,9 +176,7 @@ impl canvas::Program<Message> for RulerWidget {
                         self.brace_edit(drag, gesture, self.geometry().x_to_beat(local.x))
                     }
                     RulerDragAction::PendingSeek { beat, start, view } => {
-                        if (local.x - start.x).abs() <= CLICK_THRESHOLD_PX
-                            && (local.y - start.y).abs() <= CLICK_THRESHOLD_PX
-                        {
+                        if !past_click_slop(start, local) {
                             return (canvas::event::Status::Captured, None);
                         }
                         state.double_click.clear();
