@@ -1,5 +1,4 @@
-//! The mix desk's console parts: LED ladder meters and the dark channel
-//! name display.
+//! The mix desk's LED ladder meters.
 
 use iced::mouse;
 use iced::widget::canvas;
@@ -9,11 +8,9 @@ use vibez_core::level::amplitude_to_db;
 use crate::message::Message;
 use crate::theme as th;
 
-pub const DISPLAY: Color = Color::from_rgb(0.047, 0.051, 0.059);
-pub const DISPLAY_TEXT: Color = Color::from_rgb(0.886, 0.910, 0.937);
-pub const LED_RED: Color = Color::from_rgb(1.0, 0.290, 0.239);
-pub const LED_YELLOW: Color = Color::from_rgb(1.0, 0.824, 0.239);
-pub const LED_GREEN: Color = Color::from_rgb(0.298, 1.0, 0.416);
+const LED_RED: Color = Color::from_rgb(1.0, 0.290, 0.239);
+const LED_YELLOW: Color = Color::from_rgb(1.0, 0.824, 0.239);
+const LED_GREEN: Color = Color::from_rgb(0.298, 1.0, 0.416);
 
 /// The level each LED lights at, bottom to top, in dBFS. Like a desk it
 /// packs the segments near 0 dB, where gain staging happens.

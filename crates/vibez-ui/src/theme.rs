@@ -741,6 +741,38 @@ pub fn hairline(surface: Color) -> Color {
     blend(surface, text(), 0.065)
 }
 
+/// Whether the palette is a light one: its panels brighter than its text.
+pub fn is_light() -> bool {
+    relative_luminance(bg_surface()) > relative_luminance(text())
+}
+
+/// The pale cap of a console's outer EQ knobs.
+pub fn knob_cap_light() -> Color {
+    if is_light() {
+        bg_elevated()
+    } else {
+        fader_handle()
+    }
+}
+
+/// The dark cap of a console's mid EQ knobs.
+pub fn knob_cap_dark() -> Color {
+    if is_light() {
+        border_light()
+    } else {
+        display_bg()
+    }
+}
+
+/// Ink drawn on a pale or a coloured cap.
+pub fn cap_ink() -> Color {
+    if is_light() {
+        text()
+    } else {
+        display_bg()
+    }
+}
+
 /// The line parting lanes and regions: a groove sunk to the well shade.
 pub fn groove() -> Color {
     display_bg()
