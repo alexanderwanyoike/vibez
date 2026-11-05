@@ -446,4 +446,22 @@ mod divider_tests {
             "the detail card's minimum outranks the mixer's"
         );
     }
+
+    #[test]
+    fn a_mix_card_taller_than_its_desk_stretches_every_strip_to_fill_it() {
+        let mut app = dragging_in_mix();
+        let natural = app.mix_strip_height();
+        drag_to(&mut app, 800.0);
+        assert_eq!(
+            app.mix_strip_height(),
+            natural + app.mix_workspace_height() - app.mix_desk_height()
+        );
+
+        drag_to(&mut app, 200.0);
+        assert_eq!(
+            app.mix_strip_height(),
+            natural,
+            "a shorter card scrolls the desk instead"
+        );
+    }
 }
