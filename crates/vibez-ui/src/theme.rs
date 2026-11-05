@@ -415,14 +415,109 @@ pub enum ColourStrength {
 }
 
 impl ColourStrength {
-    /// A theme's track colour at this strength.
+    /// A theme's track colour at this strength. Scaling HSL saturation
+    /// keeps each track's hue and lightness, so tracks stay tellable apart
+    /// and the ink drawn over them keeps its contrast.
     pub fn track(self, authored: Color) -> Color {
-        authored
+        let keep = match self {
+            Self::Vivid => return authored,
+            Self::Medium => MEDIUM_SATURATION,
+            Self::Soft => SOFT_SATURATION,
+        };
+        let hsl = Hsl::of(authored);
+        Hsl {
+            saturation: hsl.saturation * keep,
+            ..hsl
+        }
+        .color(authored.a)
     }
 
-    /// A theme's clip style at this strength.
+    /// A theme's clip style at this strength. Themes author the calm Medium
+    /// body, so Vivid and Soft are measured from it.
     pub fn clip_style(self, authored: ClipStyle) -> ClipStyle {
-        authored
+        match self {
+            Self::Vivid => ClipStyle {
+                body_opacity: authored.body_opacity
+                    + (1.0 - authored.body_opacity) * VIVID_BODY_TOWARD_SOLID,
+                body_toward_lane: authored.body_toward_lane * VIVID_BODY_LANE_MIX_KEPT,
+                ..authored
+            },
+            Self::Medium => authored,
+            Self::Soft => ClipStyle {
+                body_opacity: authored.body_opacity * SOFT_BODY_OPACITY_KEPT,
+                body_toward_lane: authored.body_toward_lane
+                    + (1.0 - authored.body_toward_lane) * SOFT_BODY_TOWARD_LANE,
+                ..authored
+            },
+        }
+    }
+}
+
+// Tuned by eye in Charcoal and Porcelain. Medium's saturation lands near
+// card 28b's muted palette. Soft's body stays close to Medium's because a
+// darker body on a dark lane loses the dark notes drawn over it.
+const MEDIUM_SATURATION: f32 = 0.8;
+const SOFT_SATURATION: f32 = 0.55;
+const VIVID_BODY_TOWARD_SOLID: f32 = 0.7;
+const VIVID_BODY_LANE_MIX_KEPT: f32 = 0.25;
+const SOFT_BODY_OPACITY_KEPT: f32 = 0.92;
+const SOFT_BODY_TOWARD_LANE: f32 = 0.06;
+
+/// A colour as hue, saturation and lightness, all in 0..=1.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Hsl {
+    hue: f32,
+    saturation: f32,
+    lightness: f32,
+}
+
+impl Hsl {
+    fn of(c: Color) -> Self {
+        let max = c.r.max(c.g).max(c.b);
+        let min = c.r.min(c.g).min(c.b);
+        let lightness = (max + min) / 2.0;
+        let chroma = max - min;
+        if chroma == 0.0 {
+            return Self {
+                hue: 0.0,
+                saturation: 0.0,
+                lightness,
+            };
+        }
+        let saturation = chroma / (1.0 - (2.0 * lightness - 1.0).abs());
+        let sector = if max == c.r {
+            ((c.g - c.b) / chroma).rem_euclid(6.0)
+        } else if max == c.g {
+            (c.b - c.r) / chroma + 2.0
+        } else {
+            (c.r - c.g) / chroma + 4.0
+        };
+        Self {
+            hue: sector / 6.0,
+            saturation,
+            lightness,
+        }
+    }
+
+    fn color(self, alpha: f32) -> Color {
+        let chroma = (1.0 - (2.0 * self.lightness - 1.0).abs()) * self.saturation;
+        let sector = self.hue * 6.0;
+        let second = chroma * (1.0 - (sector.rem_euclid(2.0) - 1.0).abs());
+        let (r, g, b) = match sector as u32 {
+            0 => (chroma, second, 0.0),
+            1 => (second, chroma, 0.0),
+            2 => (0.0, chroma, second),
+            3 => (0.0, second, chroma),
+            4 => (second, 0.0, chroma),
+            _ => (chroma, 0.0, second),
+        };
+        let base = self.lightness - chroma / 2.0;
+        Color {
+            r: r + base,
+            g: g + base,
+            b: b + base,
+            a: alpha,
+        }
     }
 }
 
