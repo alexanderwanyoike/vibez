@@ -104,8 +104,8 @@ impl App {
         if let Some(snapshot) = self.state.project.history.revert_gesture(gesture) {
             self.apply_snapshot(snapshot);
         }
-        self.state.arrangement.drag_resize_active = false;
-        self.state.perform.timeline_editor_mut().drag_resize_active = false;
+        self.state.arrangement.end_drag_resize();
+        self.state.perform.timeline_editor_mut().end_drag_resize();
         self.state.status_text = "Drag cancelled".into();
         true
     }
