@@ -43,13 +43,9 @@ impl App {
             .push_maybe(self.view_send_bank_bar())
             .push(self.view_desk());
         mouse_area(
-            iced::widget::Scrollable::with_direction(
-                desk,
-                iced::widget::scrollable::Direction::Vertical(quiet_scroll::scrollbar()),
-            )
-            .style(quiet_scroll::style)
-            .width(Length::Fill)
-            .height(Length::Fill),
+            quiet_scroll::vertical(desk)
+                .width(Length::Fill)
+                .height(Length::Fill),
         )
         .on_right_press(Message::View(ViewMsg::ShowContextMenu {
             x: self.state.view.cursor_x,
@@ -190,14 +186,10 @@ impl App {
         // The plain wheel scrolls the desk up and down; Shift turns it
         // sideways over the channels.
         let channels = crate::widgets::wheel_gate::shift_wheel(
-            iced::widget::Scrollable::with_direction(
-                container(channels).padding(iced::Padding {
-                    bottom: DESK_PADDING - DESK_TOP,
-                    ..iced::Padding::ZERO
-                }),
-                iced::widget::scrollable::Direction::Horizontal(quiet_scroll::scrollbar()),
-            )
-            .style(quiet_scroll::style)
+            quiet_scroll::horizontal(container(channels).padding(iced::Padding {
+                bottom: DESK_PADDING - DESK_TOP,
+                ..iced::Padding::ZERO
+            }))
             .width(Length::Fill),
         );
         let master = container(strip(
