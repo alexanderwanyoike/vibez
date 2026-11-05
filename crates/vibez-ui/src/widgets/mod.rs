@@ -13,6 +13,7 @@ pub mod clip_slot;
 pub mod compressor_device;
 pub mod compressor_display;
 pub mod console;
+pub mod control_style;
 pub mod delay_device;
 pub mod delay_display;
 pub mod device_chrome;
