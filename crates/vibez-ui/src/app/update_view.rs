@@ -22,7 +22,7 @@ impl App {
         if !self.editor_shortcuts_have_focus() {
             return Task::none();
         }
-        let target = if self.focused_piano_roll_clip().is_some() {
+        let target = if self.focused_clip_editor().is_some() {
             GridTarget::Clip
         } else {
             GridTarget::Arrange

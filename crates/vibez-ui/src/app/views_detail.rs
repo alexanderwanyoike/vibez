@@ -140,6 +140,20 @@ impl App {
         Some((track_id, clip_id))
     }
 
+    /// The clip whose open editor owns the editor shortcuts: an opened
+    /// note clip, or the one audio clip the audio editor shows.
+    pub(super) fn focused_clip_editor(&self) -> Option<ClipId> {
+        self.focused_piano_roll_clip()
+            .map(|(_, clip_id)| clip_id)
+            .or_else(|| {
+                if self.state.view.detail_panel_tab != DetailPanelTab::Clip {
+                    return None;
+                }
+                let editor = self.state.active_timeline_editor();
+                single_selected_audio_clip_for_track(editor, editor.selected_track?)
+            })
+    }
+
     /// Whether the open piano roll has notes selected: the arrow keys then
     /// move them, ahead of anything else that wants the arrows.
     pub(super) fn piano_roll_has_selected_notes(&self) -> bool {
