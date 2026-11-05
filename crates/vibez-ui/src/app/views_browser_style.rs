@@ -338,6 +338,15 @@ mod browser_table_tests {
     }
 
     #[test]
+    fn a_selected_result_is_the_same_tinted_pill_as_a_selected_place() {
+        let result = browser_result_style(true);
+        let place = browser_place_button_style(true, button::Status::Active);
+        assert_eq!(result.background, place.background);
+        assert_eq!(result.border.radius, place.border.radius);
+        assert_eq!(browser_result_style(false).background, None);
+    }
+
+    #[test]
     fn selected_result_metadata_uses_the_selected_foreground() {
         assert_eq!(browser_result_cell_color(true), th::text());
         assert_eq!(browser_result_cell_color(false), th::text_dim());
