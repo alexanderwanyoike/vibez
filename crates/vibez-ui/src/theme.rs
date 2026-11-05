@@ -530,6 +530,11 @@ impl Oklch {
         }
     }
 
+    /// The same lightness and hue with chroma reduced as far as sRGB needs.
+    pub fn fitted(self) -> Self {
+        todo!()
+    }
+
     /// The sRGB colour, each channel clipped into gamut.
     pub fn color(self) -> Color {
         let (sin, cos) = self.hue.to_radians().sin_cos();
@@ -953,6 +958,26 @@ mod tests {
         assert!((read.lightness - 0.72).abs() < 0.005, "{read:?}");
         assert!((read.chroma - 0.11).abs() < 0.005, "{read:?}");
         assert!((read.hue - 165.0).abs() < 1.0, "{read:?}");
+    }
+
+    #[test]
+    fn fitting_oklch_into_srgb_lowers_only_the_chroma() {
+        let wanted = Oklch::new(0.78, 0.25, 246.0);
+
+        let fitted = Oklch::of(wanted.fitted().color());
+
+        assert!(fitted.chroma < wanted.chroma, "{fitted:?}");
+        assert!(
+            fitted.chroma > 0.08,
+            "keeps as much colour as fits: {fitted:?}"
+        );
+        assert!(
+            (fitted.lightness - wanted.lightness).abs() < 0.005,
+            "{fitted:?}"
+        );
+        assert!((fitted.hue - wanted.hue).abs() < 2.0, "{fitted:?}");
+        let inside = Oklch::new(0.6, 0.1, 30.0);
+        assert_eq!(inside.fitted(), inside);
     }
 
     #[test]
