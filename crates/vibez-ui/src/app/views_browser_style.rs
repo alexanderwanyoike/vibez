@@ -13,6 +13,7 @@ use crate::theme as th;
 pub(super) const REMOTE_CONNECTION_INDENT: f32 = 14.0;
 pub(super) const BROWSER_TREE_INDENT_STEP: f32 = 8.0;
 pub(super) const BROWSER_ROW_RADIUS: f32 = 7.0;
+pub(super) const BROWSER_FIELD_RADIUS: f32 = 8.0;
 pub(super) const BROWSER_TREE_MAX_DEPTH: f32 = 5.0;
 pub(super) const BROWSER_SCROLLBAR_TRACK_WIDTH: f32 = 5.0;
 pub(super) const BROWSER_SCROLLBAR_HANDLE_WIDTH: f32 = 3.0;
@@ -92,24 +93,14 @@ pub(super) fn format_browser_file_size(bytes: u64) -> String {
     }
 }
 
+/// A small filled icon button, such as the browser's close button.
 pub(super) fn browser_icon_button_style(_theme: &Theme, status: button::Status) -> button::Style {
-    let background = match status {
-        button::Status::Hovered | button::Status::Pressed => Some(th::bg_hover().into()),
-        _ => None,
-    };
     button::Style {
-        background,
-        text_color: th::text_dim(),
         border: iced::Border {
-            color: if matches!(status, button::Status::Pressed) {
-                th::accent()
-            } else {
-                th::border()
-            },
-            width: 1.0,
-            radius: 0.0.into(),
+            radius: 6.0.into(),
+            ..Default::default()
         },
-        ..Default::default()
+        ..crate::widgets::control_style::styled(None, status)
     }
 }
 
@@ -132,21 +123,26 @@ pub(super) fn audition_gain_label(gain: f32) -> String {
     }
 }
 
+/// The search field: a rounded fill edged by a hairline, lit while typing.
 pub(super) fn browser_search_style(
     _theme: &Theme,
-    _status: text_input::Status,
+    status: text_input::Status,
 ) -> text_input::Style {
     text_input::Style {
-        background: th::bg_dark().into(),
+        background: th::field().into(),
         border: iced::Border {
-            color: th::border(),
+            color: if matches!(status, text_input::Status::Focused) {
+                th::accent()
+            } else {
+                th::hairline(th::bg_surface())
+            },
             width: 1.0,
-            radius: 0.0.into(),
+            radius: BROWSER_FIELD_RADIUS.into(),
         },
-        icon: th::text_dim(),
-        placeholder: th::text_dim(),
+        icon: th::text_muted(),
+        placeholder: th::text_muted(),
         value: th::text(),
-        selection: th::accent(),
+        selection: th::with_alpha(th::accent(), 0.35),
     }
 }
 
@@ -234,18 +230,6 @@ pub(super) fn browser_transport_button_style(
             } else {
                 th::border()
             },
-            width: 1.0,
-            radius: 0.0.into(),
-        },
-        ..Default::default()
-    }
-}
-
-pub(super) fn browser_header_style(_theme: &Theme) -> container::Style {
-    container::Style {
-        background: Some(th::bg_surface().into()),
-        border: iced::Border {
-            color: th::divider(),
             width: 1.0,
             radius: 0.0.into(),
         },
