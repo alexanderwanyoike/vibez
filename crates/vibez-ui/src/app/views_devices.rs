@@ -810,6 +810,19 @@ mod width_tests {
     }
 
     #[test]
+    fn every_device_header_fits_its_narrowest_card() {
+        use crate::widgets::device_chrome::{header_min_w, MOST_ACTIONS};
+        for (name, _, widths) in every_device() {
+            assert!(
+                widths.compact >= header_min_w(MOST_ACTIONS),
+                "{name}: {} under {}",
+                widths.compact,
+                header_min_w(MOST_ACTIONS)
+            );
+        }
+    }
+
+    #[test]
     fn a_crowded_chain_keeps_every_device_expanded_and_scrolls() {
         for (name, width, widths) in every_device() {
             assert!(
