@@ -1,10 +1,12 @@
 //! The joined group of segments the shell's switches and grouped controls
 //! sit in, on a small panel-shaded card on the frame.
 
-use iced::widget::{button, container};
-use iced::{Border, Color, Theme};
+use iced::widget::{button, container, row, text};
+use iced::{Border, Color, Element, Font, Theme};
 
+use crate::message::Message;
 use crate::theme as th;
+use crate::typography::PERFORM_LABEL;
 
 pub const GROUP_INSET: f32 = 2.0;
 const GROUP_RADIUS: f32 = 8.0;
@@ -43,4 +45,31 @@ pub fn segment(lit: Option<Color>) -> impl Fn(&Theme, button::Status) -> button:
             ..Default::default()
         }
     }
+}
+
+/// One choice in a [`switch`].
+pub struct Choice<'a> {
+    pub label: &'a str,
+    pub selected: bool,
+    pub on_press: Message,
+}
+
+/// Joined choices in a group, the selected one raised onto the control
+/// shade in the strong label face.
+pub fn switch<'a>(choices: impl IntoIterator<Item = Choice<'a>>) -> Element<'a, Message> {
+    let buttons = choices.into_iter().map(|choice| {
+        button(text(choice.label).size(12).font(if choice.selected {
+            PERFORM_LABEL
+        } else {
+            Font::DEFAULT
+        }))
+        .on_press(choice.on_press)
+        .padding([4, 10])
+        .style(segment(choice.selected.then(th::text)))
+        .into()
+    });
+    container(row(buttons).spacing(2))
+        .padding(GROUP_INSET)
+        .style(group)
+        .into()
 }
