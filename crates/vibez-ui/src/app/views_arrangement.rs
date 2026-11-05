@@ -86,7 +86,7 @@ impl App {
             return area.into();
         }
 
-        let playhead_beats = self.state.position_beats();
+        let playhead_beats = self.state.transport.position_beats();
         let sample_rate = self.state.transport.sample_rate;
         let bpm = self.state.transport.bpm;
         let zoom_level = self.state.view.zoom_level;

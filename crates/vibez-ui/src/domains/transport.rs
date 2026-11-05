@@ -7,6 +7,7 @@
 //! route. That boundary is what isolates bugs and makes this file
 //! unit-testable without iced.
 
+use vibez_core::time::{MusicalTime, SampleTime, TempoMap};
 use vibez_engine::commands::EngineCommand;
 
 use super::EngineHandle;
@@ -108,20 +109,24 @@ impl TransportState {
         };
     }
 
+    fn tempo_map(&self) -> TempoMap {
+        TempoMap::new(self.bpm, self.sample_rate)
+    }
+
     pub fn position_beats(&self) -> f64 {
-        self.position_samples as f64 / self.sample_rate as f64 * self.bpm / 60.0
+        self.tempo_map()
+            .sample_to_musical(SampleTime(self.position_samples))
+            .0
     }
 
     pub fn samples_per_beat(&self) -> f64 {
-        vibez_core::time::TempoMap::new(self.bpm, self.sample_rate).samples_per_beat()
+        self.tempo_map().samples_per_beat()
     }
 
     /// Beat position -> absolute sample position at the current tempo.
-    pub fn beats_to_samples_at(&self, beats: f64) -> u64 {
+    pub fn beats_to_samples(&self, beats: f64) -> u64 {
         if self.bpm > 0.0 {
-            vibez_core::time::TempoMap::new(self.bpm, self.sample_rate)
-                .musical_to_sample(vibez_core::time::MusicalTime(beats))
-                .0
+            self.tempo_map().musical_to_sample(MusicalTime(beats)).0
         } else {
             0
         }
@@ -167,7 +172,7 @@ impl TransportState {
             }
             TransportMsg::ContinuePlayback => {
                 if !self.will_play() {
-                    self.position_samples = self.nearest_sample(self.continue_beats);
+                    self.position_samples = self.beats_to_samples(self.continue_beats);
                     engine.send(EngineCommand::Seek(self.position_samples));
                 }
                 self.update(TransportMsg::TogglePlayback, engine, ctx)
@@ -248,10 +253,6 @@ impl TransportState {
         }
     }
 
-    fn nearest_sample(&self, beats: f64) -> u64 {
-        (beats * self.samples_per_beat()).round() as u64
-    }
-
     fn place_play_start(&mut self, beats: f64, engine: &mut impl EngineHandle) {
         self.play_start_beats = beats;
         self.continue_beats = beats;
@@ -259,7 +260,7 @@ impl TransportState {
     }
 
     fn return_to_play_start(&mut self, engine: &mut impl EngineHandle) {
-        self.position_samples = self.nearest_sample(self.play_start_beats);
+        self.position_samples = self.beats_to_samples(self.play_start_beats);
         engine.send(EngineCommand::Seek(self.position_samples));
     }
 
@@ -271,7 +272,7 @@ impl TransportState {
         self.bpm_text = format!("{bpm:.0}");
         engine.send(EngineCommand::SetBpm(bpm));
         if !self.will_play() {
-            self.position_samples = self.nearest_sample(beat);
+            self.position_samples = self.beats_to_samples(beat);
             engine.send(EngineCommand::Seek(self.position_samples));
         }
     }
@@ -296,8 +297,8 @@ impl TransportState {
     }
 
     fn send_loop_region(&self, engine: &mut impl EngineHandle) {
-        let start = self.beats_to_samples_at(self.loop_start_beats);
-        let end = self.beats_to_samples_at(self.loop_end_beats);
+        let start = self.beats_to_samples(self.loop_start_beats);
+        let end = self.beats_to_samples(self.loop_end_beats);
         engine.send(EngineCommand::SetArrangementLoopRegion { start, end });
     }
 }
@@ -355,7 +356,7 @@ mod tests {
     #[test]
     fn stop_returns_to_where_play_started() {
         let (mut t, mut engine) = playing_from(128.0);
-        let start = t.beats_to_samples_at(128.0);
+        let start = t.beats_to_samples(128.0);
 
         t.update(TransportMsg::Stop, &mut engine, TransportCtx::default());
 
@@ -378,11 +379,11 @@ mod tests {
         t.update(TransportMsg::Stop, &mut engine, TransportCtx::default());
 
         assert_eq!(t.bpm, 60.0);
-        assert_eq!(t.position_samples, t.beats_to_samples_at(32.0));
+        assert_eq!(t.position_samples, t.beats_to_samples(32.0));
     }
 
     #[test]
-    fn the_loop_region_lands_on_the_nearest_sample() {
+    fn the_loop_region_lands_on_the_beats_to_samples() {
         let mut t = transport();
         t.bpm = 130.0;
         let mut engine = RecordingEngine::default();
@@ -422,7 +423,7 @@ mod tests {
             TransportCtx::default(),
         );
 
-        let on_the_beat = t.beats_to_samples_at(32.0);
+        let on_the_beat = t.beats_to_samples(32.0);
         assert_eq!(t.position_samples, on_the_beat);
         assert!(
             matches!(engine.0.last(), Some(EngineCommand::Seek(pos)) if *pos == on_the_beat),
@@ -446,13 +447,13 @@ mod tests {
 
         t.update(TransportMsg::Stop, &mut engine, TransportCtx::default());
 
-        assert_eq!(t.position_samples, t.beats_to_samples_at(64.0));
+        assert_eq!(t.position_samples, t.beats_to_samples(64.0));
     }
 
     #[test]
     fn stopping_on_its_own_returns_to_where_play_started() {
         let (mut t, mut engine) = playing_from(128.0);
-        let start = t.beats_to_samples_at(128.0);
+        let start = t.beats_to_samples(128.0);
 
         t.update(
             TransportMsg::EngineStopped,
@@ -522,7 +523,7 @@ mod tests {
         let (mut t, mut engine) = playing_from(128.0);
         t.update(TransportMsg::Stop, &mut engine, TransportCtx::default());
         t.follow_engine(false);
-        assert_eq!(t.position_samples, t.beats_to_samples_at(128.0));
+        assert_eq!(t.position_samples, t.beats_to_samples(128.0));
 
         engine.0.clear();
         t.update(TransportMsg::Stop, &mut engine, TransportCtx::default());
@@ -569,7 +570,7 @@ mod tests {
             TransportCtx::default(),
         );
         t.update(TransportMsg::Stop, &mut engine, TransportCtx::default());
-        assert_eq!(t.position_samples, t.beats_to_samples_at(128.0));
+        assert_eq!(t.position_samples, t.beats_to_samples(128.0));
     }
 
     #[test]
@@ -589,7 +590,7 @@ mod tests {
             TransportCtx::default(),
         );
 
-        assert_eq!(t.position_samples, t.beats_to_samples_at(64.0));
+        assert_eq!(t.position_samples, t.beats_to_samples(64.0));
     }
 
     #[test]
@@ -622,7 +623,7 @@ mod tests {
         );
 
         assert!(!t.will_play());
-        assert_eq!(t.position_samples, t.beats_to_samples_at(128.0));
+        assert_eq!(t.position_samples, t.beats_to_samples(128.0));
     }
 
     #[test]

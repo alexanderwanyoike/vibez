@@ -786,10 +786,6 @@ impl AppState {
         self.transport.position_samples as f64 / self.transport.sample_rate as f64
     }
 
-    pub fn position_beats(&self) -> f64 {
-        self.transport.position_beats()
-    }
-
     pub fn duration_seconds(&self) -> f64 {
         let samples = self.total_duration_samples();
         if samples > 0 {
@@ -867,11 +863,6 @@ impl AppState {
             // Minimum 64 beats for empty projects
             64.0
         }
-    }
-
-    /// Convert a beat value to a sample position.
-    pub fn beats_to_samples(&self, beats: f64) -> u64 {
-        self.transport.beats_to_samples_at(beats)
     }
 
     /// Check if a clip is in the multi-selection set.

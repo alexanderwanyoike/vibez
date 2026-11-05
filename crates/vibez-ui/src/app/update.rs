@@ -847,9 +847,11 @@ impl App {
                 }
                 let start = self
                     .state
+                    .transport
                     .beats_to_samples(self.state.arrangement.selection_start_beats);
                 let end = self
                     .state
+                    .transport
                     .beats_to_samples(self.state.arrangement.selection_end_beats);
                 return self.dispatch_bounce(
                     vibez_engine::render::BounceMode::Master,

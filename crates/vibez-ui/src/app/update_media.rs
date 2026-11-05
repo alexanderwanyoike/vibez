@@ -505,10 +505,10 @@ impl App {
         };
         let beat = match self.state.browser.drag_target.take() {
             Some(crate::state::BrowserDropTarget::EmptyArrangement { beat }) => beat,
-            _ => self.state.position_beats(),
+            _ => self.state.transport.position_beats(),
         };
         self.state.browser.cancel_media_drag();
-        let position_samples = self.state.beats_to_samples(beat);
+        let position_samples = self.state.transport.beats_to_samples(beat);
         self.dispatch_drop_for_target(
             source,
             BrowserImportTarget::ArrangementNewTrackAt { position_samples },

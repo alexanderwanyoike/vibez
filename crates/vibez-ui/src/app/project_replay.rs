@@ -292,9 +292,11 @@ impl App {
         if self.state.transport.loop_enabled {
             let start = self
                 .state
+                .transport
                 .beats_to_samples(self.state.transport.loop_start_beats);
             let end = self
                 .state
+                .transport
                 .beats_to_samples(self.state.transport.loop_end_beats);
             self.send_command(EngineCommand::SetArrangementLoopRegion { start, end });
         }
