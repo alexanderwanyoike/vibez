@@ -59,6 +59,23 @@ impl App {
         .into()
     }
 
+    /// The whole desk's height: the bank switch when shown, then the strips.
+    pub(super) fn mix_desk_height(&self) -> f32 {
+        let buses = self.state.project_tracks.buses.len();
+        let bank_bar = if crate::widgets::mixer_strip::send_banks(buses) > 1 {
+            BANK_BAR_H
+        } else {
+            0.0
+        };
+        bank_bar + DESK_PADDING + min_strip_height(buses)
+    }
+
+    /// The Mix workspace is as tall as its desk, leaving the detail panel
+    /// the rest, but never squeezes the detail panel below its minimum.
+    pub(super) fn mix_workspace_height(&self) -> f32 {
+        self.mix_desk_height()
+    }
+
     /// The switch between banks of buses on the send rows; none while every
     /// bus fits one bank.
     fn view_send_bank_bar(&self) -> Option<Element<'_, Message>> {
@@ -300,6 +317,22 @@ mod channel_selection_tests {
 mod desk_fit_tests {
     use super::{min_strip_height, DESK_PADDING};
     use crate::shell_layout::{PANE_GAP, STATUS_HEIGHT};
+
+    #[test]
+    fn the_mix_workspace_is_as_tall_as_its_desk_until_the_detail_panel_needs_the_room() {
+        let mut app = super::super::test_support::app();
+        app.state.view.window_width = 1440.0;
+        app.state.view.window_height = 900.0;
+        assert_eq!(app.mix_workspace_height(), app.mix_desk_height());
+
+        app.state.view.window_height = 600.0;
+        let room = 600.0
+            - super::super::views_control_bar_style::BAR_HEIGHT
+            - STATUS_HEIGHT
+            - 3.0 * PANE_GAP
+            - super::super::views_detail::DETAIL_PANEL_MIN_HEIGHT;
+        assert_eq!(app.mix_workspace_height(), room);
+    }
 
     #[test]
     fn a_whole_desk_fits_the_smallest_window_above_the_detail_panel() {
