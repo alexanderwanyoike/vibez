@@ -519,19 +519,8 @@ mod tests {
     }
 
     #[test]
-    fn an_audio_header_shows_its_input_while_hovered_or_in_use() {
-        let resting = TrackHeaderFlags::default();
-        let hovered = TrackHeaderFlags {
-            hovered: true,
-            ..resting
-        };
-        let mut monitoring = audio_track();
-        monitoring.input_monitoring = InputMonitoring::On;
-
-        assert!(!resting.shows_audio_input(&audio_track(), false));
-        assert!(hovered.shows_audio_input(&audio_track(), false));
-        assert!(resting.shows_audio_input(&audio_track(), true));
-        assert!(resting.shows_audio_input(&monitoring, false));
+    fn an_audio_header_shows_its_input_without_hover() {
+        assert!(TrackHeaderFlags::default().shows_audio_input(&audio_track(), false));
     }
 
     #[test]
