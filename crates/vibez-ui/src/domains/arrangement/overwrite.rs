@@ -137,7 +137,7 @@ impl TimelineEditorState {
 
     /// Clears each `(lane, range)` of every Clip but the ones it keeps.
     /// Returns whether any Clip was overwritten.
-    fn overwrite_ranges(
+    pub(super) fn overwrite_ranges(
         &mut self,
         engine: &mut impl EngineHandle,
         ranges: Vec<(TrackId, (f64, f64), HashSet<ClipId>)>,
