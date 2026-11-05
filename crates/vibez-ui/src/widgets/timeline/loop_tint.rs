@@ -1,4 +1,4 @@
-//! Which parts of a lane's backdrop lie under the Arrange loop.
+//! Which whole pixels of a timeline backdrop lie under the Arrange loop.
 
 use crate::timeline_geometry::TimelineGeometry;
 

@@ -10,6 +10,8 @@ use crate::theme;
 use crate::timeline_geometry::{TimelineGeometry, TimelineViewport};
 use crate::widgets::clip_loop_markers::{loop_with_end, loop_with_start, nearest_end, LoopMarker};
 
+use super::loop_tint::LoopSpan;
+
 /// The mockup's overview height, kept below the ruler's so the overview
 /// never outweighs it.
 pub const OVERVIEW_HEIGHT: f32 = 34.0;
@@ -113,6 +115,17 @@ impl canvas::Program<Message> for ArrangementMinimap {
         }
 
         let overview = TimelineGeometry::fitted(self.total_beats, w, 0.0);
+        let loop_span = self
+            .loop_enabled
+            .then(|| LoopSpan::across(overview, w, (self.loop_start_beats, self.loop_end_beats)))
+            .flatten();
+        if let Some(span) = loop_span {
+            frame.fill_rectangle(
+                iced::Point::new(span.start, 0.0),
+                iced::Size::new(span.end - span.start, h),
+                theme::blend(background, theme::accent(), theme::lane_style().loop_tint),
+            );
+        }
         let num_tracks = self.tracks.len();
         let rows_h = h - 2.0 * ROW_INSET;
         let track_h = (rows_h / num_tracks as f32).max(1.0);
@@ -135,21 +148,6 @@ impl canvas::Program<Message> for ArrangementMinimap {
                     iced::Point::new(cx, y),
                     iced::Size::new(cw, clip_h),
                     clip_color,
-                );
-            }
-        }
-
-        // Loop region overlay
-        if self.loop_enabled && self.loop_end_beats > self.loop_start_beats {
-            let lx1 = overview.beat_to_x(self.loop_start_beats);
-            let lx2 = overview.beat_to_x(self.loop_end_beats);
-            let fill_x = lx1.max(0.0);
-            let fill_w = lx2.min(w) - fill_x;
-            if fill_w > 0.0 {
-                frame.fill_rectangle(
-                    iced::Point::new(fill_x, 0.0),
-                    iced::Size::new(fill_w, h),
-                    theme::with_alpha(theme::accent(), 0.15),
                 );
             }
         }
