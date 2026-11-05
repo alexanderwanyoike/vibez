@@ -341,13 +341,14 @@ impl ThemePalette {
     }
 
     /// Every background the text tiers are drawn on.
-    pub(crate) fn text_surfaces(&self) -> [(&'static str, Color); 5] {
+    pub(crate) fn text_surfaces(&self) -> [(&'static str, Color); 6] {
         [
             ("bg_dark", self.bg_dark),
             ("bg_surface", self.bg_surface),
             ("bg_elevated", self.bg_elevated),
             ("display_bg", self.display_bg),
             ("lane", self.lane()),
+            ("control", self.control()),
         ]
     }
 }
