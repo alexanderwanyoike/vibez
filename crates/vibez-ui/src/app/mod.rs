@@ -772,6 +772,9 @@ mod clip_drag_undo_tests;
 mod clip_shortcut_tests;
 
 #[cfg(test)]
+mod grid_shortcut_tests;
+
+#[cfg(test)]
 mod note_clip_insertion_tests;
 
 #[cfg(test)]
