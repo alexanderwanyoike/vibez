@@ -13,6 +13,7 @@ use crate::state::{ProjectTrack, UiEffect};
 use crate::theme as th;
 use crate::typography::{PERFORM_LABEL, PERFORM_TECH};
 use crate::widgets::console;
+use crate::widgets::control_style;
 use crate::widgets::effect_knob::EffectKnobWidget;
 use crate::widgets::fader::FaderWidget;
 use crate::widgets::knob::KnobWidget;
@@ -28,6 +29,10 @@ pub enum StripRole {
 }
 
 pub const STRIP_W: f32 = 116.0;
+const CARD_RADIUS: f32 = 6.0;
+const SELECTION_LINE_H: f32 = 2.0;
+/// How far a selected strip's card leans toward the text colour.
+const SELECTED_LIFT: f32 = 0.035;
 const PAN_H: f32 = 56.0;
 const BUTTONS_H: f32 = 22.0;
 
@@ -237,19 +242,32 @@ pub fn view_mixer_strip<'a>(
 
     let selected = view.selected;
     let body = container(
-        strip
-            .spacing(5)
-            .padding([4, 6])
-            .width(Length::Fixed(STRIP_W))
-            .height(Length::Fill),
+        column![
+            selection_line(selected.then_some(track_color)),
+            strip
+                .spacing(5)
+                .padding(iced::Padding {
+                    top: 4.0 - SELECTION_LINE_H,
+                    ..iced::Padding::from([4, 6])
+                })
+                .height(Length::Fill),
+        ]
+        .width(Length::Fixed(STRIP_W))
+        .height(Length::Fill),
     )
     .height(Length::Fixed(view.height))
     .style(move |_: &Theme| container::Style {
-        background: Some(th::bg_surface().into()),
+        background: Some(
+            if selected {
+                th::blend(th::bg_elevated(), th::text(), SELECTED_LIFT)
+            } else {
+                th::bg_elevated()
+            }
+            .into(),
+        ),
         border: iced::Border {
-            color: if selected { th::accent() } else { th::border() },
-            width: if selected { 2.0 } else { 1.0 },
-            radius: 2.0.into(),
+            radius: CARD_RADIUS.into(),
+            ..Default::default()
         },
         ..Default::default()
     });
@@ -259,6 +277,21 @@ pub fn view_mixer_strip<'a>(
     // arrangement headers. Knobs, faders, and buttons still win
     // their own clicks.
     iced::widget::mouse_area(body).on_press(view.click).into()
+}
+
+/// The line across a selected strip's top, in its track colour; inset
+/// clear of the card's rounded corners, and empty room on the others.
+fn selection_line<'a>(colour: Option<Color>) -> Element<'a, Message> {
+    container(
+        container(Space::new(Length::Fill, SELECTION_LINE_H)).style(move |_: &Theme| {
+            container::Style {
+                background: colour.map(Into::into),
+                ..Default::default()
+            }
+        }),
+    )
+    .padding([0.0, CARD_RADIUS])
+    .into()
 }
 
 /// The silkscreen rule between a strip's sections.
@@ -306,21 +339,8 @@ fn led_button<'a>(label: &'a str, lit: Option<Color>, on_press: Message) -> Elem
     .on_press(on_press)
     .padding([3, 4])
     .style(|_: &Theme, status| button::Style {
-        background: Some(
-            if matches!(status, button::Status::Hovered | button::Status::Pressed) {
-                th::bg_hover()
-            } else {
-                th::bg_elevated()
-            }
-            .into(),
-        ),
         text_color: th::text(),
-        border: iced::Border {
-            color: th::border(),
-            width: 1.0,
-            radius: 2.0.into(),
-        },
-        ..Default::default()
+        ..control_style::styled(None, status)
     })
     .into()
 }
@@ -404,9 +424,8 @@ fn name_display<'a>(
     .style(|_: &Theme| container::Style {
         background: Some(console::DISPLAY.into()),
         border: iced::Border {
-            color: Color::BLACK,
-            width: 1.0,
             radius: 2.0.into(),
+            ..Default::default()
         },
         ..Default::default()
     })
