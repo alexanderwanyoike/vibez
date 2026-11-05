@@ -223,11 +223,13 @@ impl CompletedCapture {
                     .arrange_start_samples
                     .saturating_add((kept_start - i128::from(self.engine_start_samples)) as u64);
                 let looped_launch = span.source.looping.then_some(LoopedLaunch {
-                    phase_samples: source_cursor,
+                    played: CaptureWindow {
+                        source_start_samples: source_cursor,
+                        source_end_samples: source_cursor + remaining,
+                        destination_start_samples: destination_cursor,
+                        samples_per_beat,
+                    },
                     pass_samples: section_length,
-                    played_samples: remaining,
-                    destination_start_samples: destination_cursor,
-                    samples_per_beat,
                 });
                 let looped_notes = looped_launch
                     .and_then(|launch| looped_note_clip(content, &span.source, launch));
@@ -717,7 +719,8 @@ fn on_tick(beats: f64) -> f64 {
     (beats * TICKS_PER_BEAT).round() / TICKS_PER_BEAT
 }
 
-/// One pass of a source, copied from source-local samples to Arrange samples.
+/// A stretch of a source, copied from source-local samples to Arrange
+/// samples.
 #[derive(Debug, Clone, Copy)]
 struct CaptureWindow {
     source_start_samples: u64,
@@ -737,6 +740,14 @@ impl CaptureWindow {
 
     fn destination_start_beats(self) -> f64 {
         self.destination_start_samples as f64 / self.samples_per_beat
+    }
+
+    fn length_samples(self) -> u64 {
+        self.source_end_samples - self.source_start_samples
+    }
+
+    fn destination_end_beats(self) -> f64 {
+        (self.destination_start_samples + self.length_samples()) as f64 / self.samples_per_beat
     }
 }
 

@@ -5,17 +5,17 @@ use vibez_core::track::{ClipFades, ClipPlaybackDirection};
 
 use crate::state::{TrackTimelineContent, UiClip, UiNoteClip};
 
-use super::{captured_clip_name, captured_visible_notes, on_tick, CapturedTimelineSource};
+use super::{
+    captured_clip_name, captured_visible_notes, on_tick, CaptureWindow, CapturedTimelineSource,
+};
 
 /// What one launch of a looping source played on the Arrange timeline.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct LoopedLaunch {
-    /// Where in the source pass the kept part of the launch began.
-    pub phase_samples: u64,
+    /// From where in the source pass the kept part of the launch began, for
+    /// as long as it played, so its source end may lie past the pass.
+    pub played: CaptureWindow,
     pub pass_samples: u64,
-    pub played_samples: u64,
-    pub destination_start_samples: u64,
-    pub samples_per_beat: f64,
 }
 
 /// The track's whole pass as one MIDI clip whose loop is the pass, so the
@@ -63,10 +63,9 @@ pub(super) fn looped_note_clip(
         [only] => captured_clip_name(source, &only.name),
         _ => captured_clip_name(source, &source.name),
     };
-    let beats = |samples: u64| on_tick(samples as f64 / launch.samples_per_beat);
-    let phase = beats(launch.phase_samples);
-    let position_beats = beats(launch.destination_start_samples);
-    let end_beats = beats(launch.destination_start_samples + launch.played_samples);
+    let phase = on_tick(launch.played.source_start_beats());
+    let position_beats = on_tick(launch.played.destination_start_beats());
+    let end_beats = on_tick(launch.played.destination_end_beats());
     Some(UiNoteClip {
         id: ClipId::new(),
         name,
@@ -127,9 +126,9 @@ pub(super) fn looped_audio_clip(
     Some(UiClip {
         id: ClipId::new(),
         name: captured_clip_name(source, &clip.name),
-        position: launch.destination_start_samples,
-        start_marker: timeline.source_at(launch.phase_samples),
-        duration: launch.played_samples,
+        position: launch.played.destination_start_samples,
+        start_marker: timeline.source_at(launch.played.source_start_samples),
+        duration: launch.played.length_samples(),
         loop_enabled: true,
         loop_start,
         loop_end,
