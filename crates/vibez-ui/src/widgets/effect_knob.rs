@@ -235,6 +235,14 @@ impl EffectKnobWidget {
         }
     }
 
+    /// The span of the ring lit by the value, as start and end angles, or
+    /// none when the value lights no visible part of it.
+    fn lit_arc(&self) -> Option<(f32, f32)> {
+        let norm = self.normalized();
+        let value = ARC_START + norm * (ARC_END - ARC_START);
+        (norm > 0.005).then_some((ARC_START, value))
+    }
+
     /// Denormalize from 0.0..1.0 to actual value range.
     fn denormalize(&self, n: f32) -> f32 {
         if matches!(self.target, KnobTarget::GainDb(_)) {
@@ -333,8 +341,8 @@ impl canvas::Program<Message> for EffectKnobWidget {
         });
         frame.stroke(&bg_arc, round.with_color(ring).with_width(2.5));
 
-        if norm > 0.005 {
-            let value_arc = build_arc(center, arc_radius, ARC_START, value_angle);
+        if let Some((from, to)) = self.lit_arc() {
+            let value_arc = build_arc(center, arc_radius, from, to);
             let arc_color = if engaged {
                 Color {
                     r: (self.arc_color.r * 1.2).min(1.0),
