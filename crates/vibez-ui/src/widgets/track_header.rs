@@ -27,18 +27,21 @@ const COLOR_BAR_WIDTH: f32 = 4.0;
 
 /// Total width including the color bar on the left edge.
 pub const TRACK_HEADER_TOTAL_WIDTH: f32 = TRACK_HEADER_WIDTH + COLOR_BAR_WIDTH;
-/// The rows down to the volume fader fit `TrackHeight::MIN` exactly, so
-/// the shortest lane keeps its header usable; the meter below them shows
-/// from the default height up. The header keeps no bottom padding, as the
-/// lane edge below already parts it from the next header.
+/// The rows down to the volume fader, and the resize strip in the bottom
+/// padding below them, fit `TrackHeight::MIN`, so the shortest lane keeps
+/// every control usable and clear of the strip; the meter below the fader
+/// shows from a few pixels taller up. The rows hold fixed heights, so a
+/// rename's text field never pushes the fader down.
 const HEADER_PADDING: iced::Padding = iced::Padding {
-    top: 5.0,
+    top: 4.0,
     right: 6.0,
-    bottom: 0.0,
+    bottom: RESIZE_HANDLE_HEIGHT,
     left: 6.0,
 };
+const NAME_ROW_HEIGHT: f32 = 17.0;
+const CONTROLS_ROW_HEIGHT: f32 = 21.0;
 const FADER_HEIGHT: f32 = 12.0;
-const ROW_SPACING: f32 = 3.0;
+const ROW_SPACING: f32 = 2.0;
 
 /// How an Arrange track header is shown.
 #[derive(Debug, Clone, Copy, Default)]
@@ -68,9 +71,9 @@ impl TrackHeaderFlags {
     }
 }
 
-/// Grab strip along the header's bottom edge, drawn over its padding so
-/// the controls above keep their full height.
-const RESIZE_HANDLE_HEIGHT: f32 = 5.0;
+/// Grab strip along the header's bottom edge, drawn over its bottom
+/// padding.
+const RESIZE_HANDLE_HEIGHT: f32 = 4.0;
 
 #[derive(Debug, Clone, Copy)]
 pub struct TrackHeaderRecordingView<'a> {
@@ -174,6 +177,7 @@ pub fn view_editable_channel_name<'a>(
             .on_input(|value| Message::View(ViewMsg::EditNameText(value)))
             .on_submit(Message::View(ViewMsg::FinishEditing))
             .size(size)
+            .padding([0, 4])
             .width(Length::Fill)
             .into()
     } else {
@@ -246,7 +250,7 @@ pub fn view_track_header<'a>(
     };
     let add_btn = button(icons::icon(icons::PLUS).size(11).color(action_color))
         .on_press_maybe(flags.shows_actions().then_some(add_message))
-        .padding([2, 4])
+        .padding([1, 4])
         .style(quiet_action_style);
 
     let auto_btn = {
@@ -263,7 +267,7 @@ pub fn view_track_header<'a>(
                         track.id,
                     ))),
             )
-            .padding([2, 4])
+            .padding([1, 4])
             .style(quiet_action_style)
     };
 
@@ -276,6 +280,7 @@ pub fn view_track_header<'a>(
         add_btn
     ]
     .spacing(4)
+    .height(Length::Fixed(NAME_ROW_HEIGHT))
     .align_y(iced::Alignment::Center);
 
     // Row 2: Mute/Solo buttons with filled backgrounds when active
@@ -353,7 +358,7 @@ pub fn view_track_header<'a>(
         let arm_btn = button(icons::icon(arm_icon).size(11).color(arm_color))
             .on_press(Message::ToggleAudioTrackArm(track.id))
             .width(Length::Fixed(25.0))
-            .padding([4, 6])
+            .padding([3, 6])
             .style(move |_theme: &Theme, status| {
                 let engaged = matches!(status, button::Status::Hovered | button::Status::Pressed);
                 button::Style {
@@ -469,6 +474,10 @@ pub fn view_track_header<'a>(
         .width(Length::Fill)
         .height(Length::Fixed(6.0))
         .into();
+
+    let track_controls = container(track_controls)
+        .height(Length::Fixed(CONTROLS_ROW_HEIGHT))
+        .align_y(iced::alignment::Vertical::Center);
 
     let header = column![name_row, track_controls, fader_canvas, meter_canvas]
         .spacing(ROW_SPACING)

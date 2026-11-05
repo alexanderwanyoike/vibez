@@ -10,7 +10,8 @@ pub struct TrackHeight(f32);
 
 impl TrackHeight {
     pub const DEFAULT: Self = Self(70.0);
-    /// The header lays its name, mute, solo and volume rows out in this.
+    /// The shortest lane the Arrange track header fits; the header's
+    /// layout says how.
     pub const MIN: Self = Self(62.0);
     pub const MAX: Self = Self(420.0);
 
