@@ -532,7 +532,28 @@ impl Oklch {
 
     /// The same lightness and hue with chroma reduced as far as sRGB needs.
     pub fn fitted(self) -> Self {
-        todo!()
+        let fits = |chroma: f32| {
+            Self { chroma, ..self }
+                .linear_rgb()
+                .iter()
+                .all(|v| (-1e-4..=1.0 + 1e-4).contains(v))
+        };
+        if fits(self.chroma) {
+            return self;
+        }
+        let (mut inside, mut outside) = (0.0, self.chroma);
+        for _ in 0..24 {
+            let mid = (inside + outside) / 2.0;
+            if fits(mid) {
+                inside = mid;
+            } else {
+                outside = mid;
+            }
+        }
+        Self {
+            chroma: inside,
+            ..self
+        }
     }
 
     /// The sRGB colour, each channel clipped into gamut.
