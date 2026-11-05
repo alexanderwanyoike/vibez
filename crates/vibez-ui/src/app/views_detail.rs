@@ -280,6 +280,7 @@ impl App {
             ]
             .map(|(label, choice)| crate::widgets::segment_group::Choice {
                 label,
+                shortcut: None,
                 selected: tab == choice,
                 on_press: Message::View(ViewMsg::SwitchDetailTab(choice)),
             });

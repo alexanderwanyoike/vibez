@@ -50,6 +50,7 @@ pub fn segment(lit: Option<Color>) -> impl Fn(&Theme, button::Status) -> button:
 /// One choice in a [`switch`].
 pub struct Choice<'a> {
     pub label: &'a str,
+    pub shortcut: Option<&'a str>,
     pub selected: bool,
     pub on_press: Message,
 }
@@ -58,11 +59,22 @@ pub struct Choice<'a> {
 /// shade in the strong label face.
 pub fn switch<'a>(choices: impl IntoIterator<Item = Choice<'a>>) -> Element<'a, Message> {
     let buttons = choices.into_iter().map(|choice| {
-        button(text(choice.label).size(12).font(if choice.selected {
+        let ink = if choice.selected {
+            th::text()
+        } else {
+            th::text_dim()
+        };
+        let label = text(choice.label).size(12).font(if choice.selected {
             PERFORM_LABEL
         } else {
             Font::DEFAULT
-        }))
+        });
+        button(
+            row![label]
+                .push_maybe(choice.shortcut.map(|key| shortcut(key, ink)))
+                .spacing(7)
+                .align_y(iced::Alignment::Center),
+        )
         .on_press(choice.on_press)
         .padding([4, 10])
         .style(segment(choice.selected.then(th::text)))

@@ -131,6 +131,7 @@ impl App {
         segment_group::switch(
             workspace_segments(self.state.view.workspace).map(|segment| segment_group::Choice {
                 label: segment.label,
+                shortcut: None,
                 selected: segment.selected,
                 on_press: Message::View(ViewMsg::SwitchWorkspace(segment.workspace)),
             }),
