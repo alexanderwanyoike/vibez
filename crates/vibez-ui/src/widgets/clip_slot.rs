@@ -461,6 +461,7 @@ impl canvas::Program<Message> for ClipSlot<'_> {
                     },
                     title_width - 12.0,
                     if tight { 10.0 } else { 12.0 },
+                    PERFORM_LABEL,
                 ),
                 film.x + 6.0,
                 film.y + if tight { 4.0 } else { 3.0 },
@@ -646,7 +647,7 @@ impl canvas::Program<Message> for LauncherTrackName<'_> {
         let mut frame = canvas::Frame::new(renderer, bounds.size());
         label(
             &mut frame,
-            &crate::typography::fit(self.name, bounds.width, 13.0),
+            &crate::typography::fit(self.name, bounds.width, 13.0, PERFORM_LABEL),
             0.0,
             0.0,
             13.0,

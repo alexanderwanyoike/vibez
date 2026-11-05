@@ -37,7 +37,7 @@ pub const PERFORM_TECH_STRONG: Font = Font {
 
 /// `text` shortened with ".." to fit `width` at font `size`, by an average
 /// condensed glyph width; empty when not even a few letters fit.
-pub(crate) fn fit(text: &str, width: f32, size: f32) -> String {
+pub(crate) fn fit(text: &str, width: f32, size: f32, _font: Font) -> String {
     let limit = (width / (size * 0.61)).max(0.0) as usize;
     if text.chars().count() <= limit {
         text.into()

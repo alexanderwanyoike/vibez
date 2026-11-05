@@ -569,6 +569,7 @@ impl App {
                 &title,
                 pad_size - if small { 4.0 } else { 16.0 },
                 title_size,
+                PERFORM_DISPLAY,
             )
         } else {
             title
