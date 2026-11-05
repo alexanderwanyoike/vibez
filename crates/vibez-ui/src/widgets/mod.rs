@@ -39,6 +39,7 @@ pub mod fm_display;
 pub mod gain_device;
 pub mod gate_device;
 pub mod gate_display;
+pub(crate) mod hint;
 pub mod instrument_bands;
 pub mod knob;
 pub mod level_meter;

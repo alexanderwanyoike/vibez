@@ -11,6 +11,7 @@ use crate::message::Message;
 use crate::state::{AudioStreamHealth, GridCommand};
 use crate::theme as th;
 use crate::typography;
+use crate::widgets::hint::with_hint;
 use crate::widgets::vu_meter::HorizontalVuMeterWidget;
 
 use super::views_control_bar_style as style;
@@ -36,7 +37,7 @@ fn audio_stream_indicator(health: &AudioStreamHealth) -> Element<'_, Message> {
     ]
     .spacing(4)
     .align_y(Alignment::Center);
-    style::with_hint(control, description)
+    with_hint(control, description)
 }
 
 fn audio_cpu_value(displayed: u32, color: Color) -> Element<'static, Message> {
@@ -70,7 +71,7 @@ fn audio_cpu_indicator(load_percent: f32) -> Element<'static, Message> {
     )
     .width(Length::Fixed(AUDIO_CPU_INDICATOR_WIDTH))
     .align_x(iced::alignment::Horizontal::Right);
-    style::with_hint(
+    with_hint(
         control,
         "Audio processing time used per buffer. Red means the audio deadline is at risk.",
     )

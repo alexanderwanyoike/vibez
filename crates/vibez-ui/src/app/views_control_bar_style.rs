@@ -1,6 +1,6 @@
 //! Shared look of the control bar's groups, segments and recessed display.
 
-use iced::widget::{button, container, pick_list, text, text_input, tooltip, Space};
+use iced::widget::{button, container, pick_list, text, text_input, Space};
 use iced::{Border, Color, Element, Length, Theme};
 
 use crate::message::Message;
@@ -152,28 +152,6 @@ pub(super) fn display_label<'a>(label: &'a str, color: Color) -> iced::widget::T
         .size(DISPLAY_LABEL_SIZE)
         .color(color)
         .wrapping(text::Wrapping::None)
-}
-
-/// A control with a short explanation shown below it on hover.
-pub(super) fn with_hint<'a>(
-    control: impl Into<Element<'a, Message>>,
-    hint: impl text::IntoFragment<'a>,
-) -> Element<'a, Message> {
-    let hint = container(text(hint).size(10).color(th::text()))
-        .padding([5, 7])
-        .style(|_theme: &Theme| container::Style {
-            background: Some(th::bg_elevated().into()),
-            border: Border {
-                color: th::border_light(),
-                width: 1.0,
-                radius: 3.0.into(),
-            },
-            ..Default::default()
-        });
-    tooltip(control, hint, tooltip::Position::Bottom)
-        .gap(6)
-        .padding(0)
-        .into()
 }
 
 fn rule<'a>(width: Length, height: Length) -> Element<'a, Message> {
