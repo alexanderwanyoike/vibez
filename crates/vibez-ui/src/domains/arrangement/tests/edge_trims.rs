@@ -245,7 +245,7 @@ fn a_new_trim_drag_starts_from_the_clip_the_last_one_left() {
     let mut a = arrangement_with_tracks(1);
     let anchor = sample_clip(&mut a, 1_000, 300, 200, 500);
     trim_audio(&mut a, anchor, 4.0);
-    a.drag_resize_active = false;
+    a.end_drag_resize();
 
     let after = trim_audio(&mut a, anchor, 5.0);
 

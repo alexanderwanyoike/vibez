@@ -498,7 +498,7 @@ impl TimelineEditorState {
         if !changed {
             return ArrangementAction::default();
         }
-        self.drag_resize_active = true;
+        self.edit_drag.mark_active();
         ArrangementAction {
             scroll_to_beat: max_end,
             mark_dirty: true,

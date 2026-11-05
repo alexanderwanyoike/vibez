@@ -26,7 +26,7 @@ impl TimelineEditorState {
             clip_id,
             new_position,
         });
-        self.drag_resize_active = true;
+        self.edit_drag.mark_active();
     }
 
     pub(super) fn move_note_clip(
@@ -46,7 +46,7 @@ impl TimelineEditorState {
             clip_id,
             new_position_beats,
         });
-        self.drag_resize_active = true;
+        self.edit_drag.mark_active();
     }
 
     pub(super) fn move_clip_to_track(

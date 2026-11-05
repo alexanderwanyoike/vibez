@@ -399,6 +399,30 @@ pub fn new_master_track() -> ProjectTrack {
 /// One musical timeline's content, associated with shared Project Tracks by
 /// stable identity. Hash-map storage prevents track reordering from moving or
 /// cloning timeline content.
+/// Whether an editor drag is in flight, and what a trim drag began from.
+#[derive(Debug, Clone, Default)]
+pub enum EditDrag {
+    #[default]
+    Idle,
+    Active,
+    /// Each trim step trims from the content the drag began from, so markers
+    /// the edge passes over come back when it returns.
+    Trimming(Arc<TimelineContent>),
+}
+
+impl EditDrag {
+    pub fn is_active(&self) -> bool {
+        !matches!(self, Self::Idle)
+    }
+
+    /// A trim already in flight keeps its origin.
+    pub fn mark_active(&mut self) {
+        if matches!(self, Self::Idle) {
+            *self = Self::Active;
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct TimelineContent {
     pub by_track: HashMap<TrackId, TrackTimelineContent>,
@@ -454,12 +478,9 @@ pub struct TimelineEditorState {
     /// Live rubber-band, present only while a box drag is in flight.
     /// Every lane draws its own slice of it.
     pub marquee: Option<ArrangementMarquee>,
-    /// An arrangement drag (move/resize) is active; drives edge
+    /// The move, resize or trim drag in flight, which drives edge
     /// auto-scroll on ticks.
-    pub drag_resize_active: bool,
-    /// The content a trim drag in flight began from. Each step trims from
-    /// it, so markers the edge passes over come back when it returns.
-    pub trim_origin: Option<Arc<TimelineContent>>,
+    pub edit_drag: EditDrag,
     /// In-flight numeric Inspector edits. A missing entry means the control
     /// shows its committed Audio Clip value.
     pub audio_clip_inspector_edits: HashMap<(ClipId, AudioClipInspectorField), String>,
@@ -537,8 +558,7 @@ impl Default for TimelineEditorState {
             selection_end_beats: 0.0,
             time_selection_track: None,
             marquee: None,
-            drag_resize_active: false,
-            trim_origin: None,
+            edit_drag: EditDrag::Idle,
             audio_clip_inspector_edits: HashMap::new(),
             audio_clip_transpose_debounce: HashMap::new(),
         }

@@ -6,7 +6,7 @@ use vibez_core::track::ClipPlaybackDirection;
 use super::fragment_geometry::audio_fragment;
 use super::{ArrangementAction, ArrangementCtx, EngineHandle};
 use crate::state::{
-    ArrangementSelection, TimelineEditorState, UiClip, UiNoteClip, SHORTEST_LENGTH_BEATS,
+    ArrangementSelection, EditDrag, TimelineEditorState, UiClip, UiNoteClip, SHORTEST_LENGTH_BEATS,
 };
 
 impl TimelineEditorState {
@@ -21,9 +21,9 @@ impl TimelineEditorState {
         if spb <= 0.0 {
             return ArrangementAction::default();
         }
-        let origin = match &self.trim_origin {
-            Some(origin) if self.drag_resize_active => origin.clone(),
-            _ => self.trim_origin.insert(self.timeline.clone()).clone(),
+        let origin = match &self.edit_drag {
+            EditDrag::Trimming(origin) => origin.clone(),
+            _ => self.timeline.clone(),
         };
         let Some(anchor_start) = origin.clip_span(anchor, spb).map(|span| span.start_beats) else {
             return ArrangementAction::default();
@@ -74,7 +74,7 @@ impl TimelineEditorState {
         if !changed {
             return ArrangementAction::default();
         }
-        self.drag_resize_active = true;
+        self.edit_drag = EditDrag::Trimming(origin);
         ArrangementAction {
             mark_dirty: true,
             ..Default::default()

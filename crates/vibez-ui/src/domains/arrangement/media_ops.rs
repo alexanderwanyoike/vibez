@@ -236,7 +236,7 @@ impl TimelineEditorState {
             }
         }
         action.scroll_to_beat = clip_end_beat;
-        self.drag_resize_active = true;
+        self.edit_drag.mark_active();
         action
     }
 
