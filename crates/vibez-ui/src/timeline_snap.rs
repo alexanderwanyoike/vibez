@@ -42,11 +42,18 @@ pub struct SnapContext {
     pub free: bool,
 }
 
+/// What a drag moves, whose own edges must not pull it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Moves {
+    Nothing,
+    SelectedClips,
+}
+
 #[derive(Debug, Clone, Copy)]
 struct Magnet {
     target: SnapTarget,
-    /// An edge of a selected Clip, which moves with any drag.
-    dragged: bool,
+    /// The drag that carries this magnet along.
+    moved_by: Moves,
 }
 
 /// The clip edges and markers of one timeline that drags and clicks lock
@@ -80,14 +87,18 @@ impl SnapTargets {
                 )
             });
             for (selection, span) in audio.chain(notes) {
-                let dragged = editor.selected_clips.contains(&selection);
+                let moved_by = if editor.selected_clips.contains(&selection) {
+                    Moves::SelectedClips
+                } else {
+                    Moves::Nothing
+                };
                 for beat in [span.start_beats, span.end_beats()] {
                     targets.magnets.push(Magnet {
                         target: SnapTarget {
                             beat,
                             kind: SnapTargetKind::ClipEdge,
                         },
-                        dragged,
+                        moved_by,
                     });
                 }
             }
@@ -128,7 +139,7 @@ impl SnapTargets {
     pub fn with_marker(mut self, beat: f64, kind: SnapTargetKind) -> Self {
         self.magnets.push(Magnet {
             target: SnapTarget { beat, kind },
-            dragged: false,
+            moved_by: Moves::Nothing,
         });
         self
     }
@@ -136,12 +147,22 @@ impl SnapTargets {
     /// Where a click at `beat` puts the insert point. Selected Clips stay
     /// put on a click, so their edges pull too.
     pub fn click(&self, beat: f64, context: SnapContext) -> Snapped {
-        self.land(&[beat], Self::grid_shift(beat, context), context, true)
+        self.land(
+            &[beat],
+            Self::grid_shift(beat, context),
+            context,
+            Moves::Nothing,
+        )
     }
 
     /// Where a dragged Clip end at `end` lands.
     pub fn dragged_end(&self, end: f64, context: SnapContext) -> Snapped {
-        self.land(&[end], Self::grid_shift(end, context), context, false)
+        self.land(
+            &[end],
+            Self::grid_shift(end, context),
+            context,
+            Moves::SelectedClips,
+        )
     }
 
     /// Where the start of a span at `start`, `length` long, lands after
@@ -160,7 +181,7 @@ impl SnapTargets {
             &[moved, moved + length],
             Self::grid_shift(travel, context),
             context,
-            false,
+            Moves::SelectedClips,
         )
     }
 
@@ -170,13 +191,7 @@ impl SnapTargets {
 
     /// Shifts `edges` onto the nearest magnet within reach of one of them,
     /// or by `grid_shift` when none is, and says where the first one lands.
-    fn land(
-        &self,
-        edges: &[f64],
-        grid_shift: f64,
-        context: SnapContext,
-        with_dragged: bool,
-    ) -> Snapped {
+    fn land(&self, edges: &[f64], grid_shift: f64, context: SnapContext, moves: Moves) -> Snapped {
         let first = edges[0];
         if context.free || !context.grid.snap_enabled {
             return Snapped {
@@ -188,7 +203,7 @@ impl SnapTargets {
         let (shift, target) = self
             .magnets
             .iter()
-            .filter(|magnet| with_dragged || !magnet.dragged)
+            .filter(|magnet| moves == Moves::Nothing || magnet.moved_by != moves)
             .flat_map(|magnet| {
                 edges
                     .iter()
