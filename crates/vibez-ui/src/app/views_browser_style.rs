@@ -237,6 +237,31 @@ pub(super) fn browser_transport_button_style(
     }
 }
 
+/// A results row around `content`, marked while `selected`.
+pub(super) fn browser_result_row<'a>(
+    content: impl Into<Element<'a, Message>>,
+    selected: bool,
+) -> Element<'a, Message> {
+    let selection_marker = container(text(""))
+        .width(Length::Fixed(2.0))
+        .height(Length::Fixed(43.0))
+        .style(move |_theme: &Theme| container::Style {
+            background: selected.then(|| th::accent().into()),
+            ..Default::default()
+        });
+    container(iced::widget::row![selection_marker, content.into()].align_y(iced::Alignment::Center))
+        .width(Length::Fill)
+        .style(move |_theme: &Theme| browser_result_style(selected))
+        .into()
+}
+
+pub(super) fn browser_result_style(selected: bool) -> container::Style {
+    container::Style {
+        background: selected.then(|| th::accent_dim().into()),
+        ..Default::default()
+    }
+}
+
 /// The hairline between the places and results columns.
 pub(super) fn browser_column_rule<'a>() -> Element<'a, Message> {
     container(Space::new(1.0, Length::Fill))

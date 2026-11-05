@@ -4,7 +4,7 @@
 use iced::widget::{
     button, column, container, horizontal_space, mouse_area, row, scrollable, text,
 };
-use iced::{Element, Length, Theme};
+use iced::{Element, Length};
 
 use crate::domains::browser::BrowserMsg;
 use crate::message::Message;
@@ -289,22 +289,8 @@ impl App {
                     .on_release(message)
                     .into()
             };
-            let selection_marker = container(text(""))
-                .width(Length::Fixed(2.0))
-                .height(Length::Fixed(43.0))
-                .style(move |_theme: &Theme| container::Style {
-                    background: selected.then(|| th::accent().into()),
-                    ..Default::default()
-                });
             entries_col = entries_col
-                .push(
-                    container(row![selection_marker, interactive])
-                        .width(Length::Fill)
-                        .style(move |_theme: &Theme| container::Style {
-                            background: selected.then(|| th::accent_dim().into()),
-                            ..Default::default()
-                        }),
-                )
+                .push(browser_result_row(interactive, selected))
                 .push(browser_row_divider());
         }
         for entry in local_everywhere {
@@ -373,22 +359,8 @@ impl App {
                 ))
                 .on_release(Message::ClickLocalBrowserEntry(entry.source.clone()))
                 .into();
-            let selection_marker = container(text(""))
-                .width(Length::Fixed(2.0))
-                .height(Length::Fixed(43.0))
-                .style(move |_theme: &Theme| container::Style {
-                    background: selected.then(|| th::accent().into()),
-                    ..Default::default()
-                });
             entries_col = entries_col
-                .push(
-                    container(row![selection_marker, interactive])
-                        .width(Length::Fill)
-                        .style(move |_theme: &Theme| container::Style {
-                            background: selected.then(|| th::accent_dim().into()),
-                            ..Default::default()
-                        }),
-                )
+                .push(browser_result_row(interactive, selected))
                 .push(browser_row_divider());
         }
         if total_results == 0 {

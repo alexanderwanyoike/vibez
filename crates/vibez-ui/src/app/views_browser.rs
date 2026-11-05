@@ -4,7 +4,7 @@ use iced::widget::text_input;
 use iced::widget::{
     button, column, container, horizontal_space, mouse_area, row, scrollable, text,
 };
-use iced::{Element, Length, Theme};
+use iced::{Element, Length};
 
 use crate::domains::browser::BrowserMsg;
 use crate::icons;
@@ -428,24 +428,9 @@ impl App {
                 ))
                 .on_release(Message::ClickLocalBrowserEntry(entry.source.clone()))
                 .into();
-            let selection_marker = container(text(""))
-                .width(Length::Fixed(2.0))
-                .height(Length::Fixed(43.0))
-                .style(move |_theme: &Theme| container::Style {
-                    background: selected.then(|| th::accent().into()),
-                    ..Default::default()
-                });
-            let flat_row = container(
-                row![selection_marker, entry_dragger]
-                    .spacing(0)
-                    .align_y(iced::Alignment::Center),
-            )
-            .width(Length::Fill)
-            .style(move |_theme: &Theme| container::Style {
-                background: selected.then(|| th::accent_dim().into()),
-                ..Default::default()
-            });
-            entries_col = entries_col.push(flat_row).push(browser_row_divider());
+            entries_col = entries_col
+                .push(browser_result_row(entry_dragger, selected))
+                .push(browser_row_divider());
         }
 
         if total_results == 0 && notice.is_none() {
