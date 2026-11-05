@@ -293,3 +293,19 @@ fn undoing_a_drum_pad_value_sends_it_as_a_control() {
         original
     );
 }
+
+#[test]
+fn undoing_a_tempo_change_while_stopped_keeps_the_playhead_on_its_beat() {
+    use crate::domains::transport::TransportMsg;
+    let (mut app, _commands, _, _) = two_track_project();
+    let _ = app.update_and_refresh_clips(Message::Transport(TransportMsg::SeekToBeat(32.0)));
+    let on_the_beat = app.state.transport.position_samples;
+    let _ = app.update_and_refresh_clips(Message::Transport(TransportMsg::BpmChanged("60".into())));
+    let _ = app.update_and_refresh_clips(Message::Transport(TransportMsg::BpmSubmit));
+    assert_eq!(app.state.transport.position_samples, 2 * on_the_beat);
+
+    let _ = app.update_and_refresh_clips(Message::Project(ProjectMsg::Undo));
+
+    assert_eq!(app.state.transport.bpm, 120.0);
+    assert_eq!(app.state.transport.position_samples, on_the_beat);
+}

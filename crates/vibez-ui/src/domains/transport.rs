@@ -369,6 +369,31 @@ mod tests {
     }
 
     #[test]
+    fn a_tempo_change_while_stopped_keeps_the_playhead_on_its_beat() {
+        let mut t = transport();
+        let mut engine = RecordingEngine::default();
+        t.update(
+            TransportMsg::SeekToBeat(32.0),
+            &mut engine,
+            TransportCtx::default(),
+        );
+        engine.0.clear();
+
+        t.update(
+            TransportMsg::NudgeBpm(-60.0),
+            &mut engine,
+            TransportCtx::default(),
+        );
+
+        let on_the_beat = t.beats_to_samples_at(32.0);
+        assert_eq!(t.position_samples, on_the_beat);
+        assert!(
+            matches!(engine.0.last(), Some(EngineCommand::Seek(pos)) if *pos == on_the_beat),
+            "Play starts where the engine's playhead is"
+        );
+    }
+
+    #[test]
     fn a_click_while_playing_moves_where_stop_returns() {
         let (mut t, mut engine) = playing_from(128.0);
         t.update(
