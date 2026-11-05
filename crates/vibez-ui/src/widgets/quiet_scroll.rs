@@ -2,7 +2,7 @@
 //! area it scrolls.
 
 use iced::widget::scrollable::{Rail, Scrollbar, Scroller, Status, Style};
-use iced::{Border, Theme};
+use iced::{Border, Color, Theme};
 
 use crate::theme as th;
 
@@ -13,12 +13,17 @@ pub fn scrollbar() -> Scrollbar {
     Scrollbar::new().width(THICKNESS).scroller_width(THICKNESS)
 }
 
-pub fn style(_theme: &Theme, _status: Status) -> Style {
+pub fn style(_theme: &Theme, status: Status) -> Style {
+    let shown = !matches!(status, Status::Active);
     let rail = Rail {
         background: None,
         border: Border::default(),
         scroller: Scroller {
-            color: th::with_alpha(th::text_muted(), 0.5),
+            color: if shown {
+                th::with_alpha(th::text_muted(), 0.5)
+            } else {
+                Color::TRANSPARENT
+            },
             border: Border {
                 radius: (THICKNESS / 2.0).into(),
                 ..Default::default()
@@ -36,7 +41,6 @@ pub fn style(_theme: &Theme, _status: Status) -> Style {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use iced::Color;
 
     #[test]
     fn the_scroller_shows_only_while_the_pointer_is_over_the_area_or_dragging() {
