@@ -186,6 +186,27 @@ fn undo_and_redo_of_an_audio_shrink_keep_the_loop() {
     assert_eq!(redone, shrunk);
 }
 
+/// Unlooped, a clip ends with its sample, so turning the loop off cuts a
+/// long clip; undo must give the length back with the loop.
+#[test]
+fn undo_of_turning_an_audio_loop_off_restores_its_length() {
+    let mut app = super::test_support::app();
+    let (track_id, clip_id) = add_looped_percs(&mut app, 400_000, 380_000, 200_000);
+    let clip = |app: &App| {
+        let clip = &app.state.arrange_content(track_id).unwrap().clips[0];
+        (clip.loop_enabled, clip.duration, clip.start_marker)
+    };
+
+    let _ = app.update_and_refresh_clips(Message::Arrangement(ArrangementMsg::ToggleClipLoop(
+        track_id, clip_id,
+    )));
+    let cut = clip(&app);
+    let _ = app.update_and_refresh_clips(Message::Project(ProjectMsg::Undo));
+
+    assert_eq!(cut, (false, 200_000, 200_000));
+    assert_eq!(clip(&app), (true, 380_000, 200_000));
+}
+
 /// Add a "Percs" track holding one Audio Clip `duration` frames long over a
 /// `sample_frames` sample, looping its first 300 000 frames from
 /// `start_marker`.
