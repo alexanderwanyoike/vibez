@@ -6,7 +6,6 @@ use std::sync::Arc;
 
 use vibez_core::id::{ClipId, TrackId};
 use vibez_core::midi::MidiNote;
-use vibez_engine::commands::EngineCommand;
 
 use super::EngineHandle;
 use crate::state::{ArrangementSelection, ClipboardClip, ProjectTracksState, TimelineEditorState};
@@ -211,23 +210,7 @@ impl TimelineEditorState {
                     clip.fades = clip.fades.unlinked();
                     clip.id = ClipId::new();
                     clip.position = (position_beats * spb).round().max(0.0) as u64;
-                    engine.send(EngineCommand::AddClip {
-                        insertion: vibez_engine::clip_insertion::PreparedClipInsertion::new(),
-                        track_id,
-                        clip_id: clip.id,
-                        audio: Arc::clone(&clip.audio),
-                        position: clip.position,
-                        source_offset: clip.source_offset,
-                        start_marker: clip.start_marker,
-                        duration: clip.duration,
-                        loop_enabled: clip.loop_enabled,
-                        loop_start: clip.loop_start,
-                        loop_end: clip.loop_end,
-                        linear_gain: clip.gain_db.linear(),
-                        fades: clip.fades,
-                        playback_direction: clip.playback_direction,
-                        warp_markers: clip.warp_markers.clone(),
-                    });
+                    engine.send(clip.add_command(track_id));
                     selected.insert(ArrangementSelection::AudioClip {
                         track_id,
                         clip_id: clip.id,
