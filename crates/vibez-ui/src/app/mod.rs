@@ -246,6 +246,7 @@ mod views_file_menu;
 mod views_mixer;
 mod views_overlays;
 mod views_perform;
+mod views_perform_header;
 mod views_perform_instrument;
 mod views_perform_pads;
 mod views_perform_playhead;

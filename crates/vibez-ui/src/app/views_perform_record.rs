@@ -13,30 +13,12 @@ use crate::theme as th;
 use crate::typography::{PERFORM_LABEL, PERFORM_TECH, PERFORM_TECH_STRONG};
 use crate::widgets::{control_style, segment_group};
 
+use super::views_perform_header::{header_rows, HeaderRows};
 use super::*;
 
 /// Room around a record control's label, so buttons and lists stand the
 /// same height.
 pub(super) const RECORD_CONTROL_PADDING: [f32; 2] = [6.0, 9.0];
-const SECTION_RECORD_INLINE_MIN_WIDTH: f32 = 1_120.0;
-const SECTION_RECORD_STATUS_BELOW_MIN_WIDTH: f32 = 680.0;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SectionRecordBarLayout {
-    Inline,
-    StatusBelow,
-    StackedControls,
-}
-
-fn section_record_bar_layout(workspace_width: f32) -> SectionRecordBarLayout {
-    if workspace_width >= SECTION_RECORD_INLINE_MIN_WIDTH {
-        SectionRecordBarLayout::Inline
-    } else if workspace_width >= SECTION_RECORD_STATUS_BELOW_MIN_WIDTH {
-        SectionRecordBarLayout::StatusBelow
-    } else {
-        SectionRecordBarLayout::StackedControls
-    }
-}
 
 impl App {
     pub(super) fn view_section_record_bar(&self) -> Element<'_, Message> {
@@ -151,13 +133,13 @@ impl App {
                     .into()
             }
         };
-        let layout = section_record_bar_layout(self.browser_workspace_width());
+        let layout = header_rows(self.browser_workspace_width());
         let content: Element<'_, Message> = match layout {
-            SectionRecordBarLayout::Inline | SectionRecordBarLayout::StatusBelow => {
+            HeaderRows::One | HeaderRows::Two => {
                 let controls = row![record_button, count_in, mode, quantization, capture_button]
                     .spacing(7)
                     .align_y(iced::Alignment::Center);
-                if layout == SectionRecordBarLayout::Inline {
+                if layout == HeaderRows::One {
                     row![
                         controls,
                         container(horizontal_space()).width(Length::Fill),
@@ -169,7 +151,7 @@ impl App {
                     column![controls, status(false)].spacing(6).into()
                 }
             }
-            SectionRecordBarLayout::StackedControls => column![
+            HeaderRows::Three => column![
                 row![record_button, count_in, mode]
                     .spacing(7)
                     .align_y(iced::Alignment::Center),
@@ -335,11 +317,7 @@ fn record_pick_list<'a, T: Copy + Eq + std::fmt::Display + 'static>(
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        capture_destination_label, count_in_beats_remaining, section_record_bar_layout,
-        SectionRecordBarLayout, SECTION_RECORD_INLINE_MIN_WIDTH,
-        SECTION_RECORD_STATUS_BELOW_MIN_WIDTH,
-    };
+    use super::{capture_destination_label, count_in_beats_remaining};
     use crate::domains::perform::CapturePhase;
 
     #[test]
@@ -368,26 +346,6 @@ mod tests {
         assert_eq!(
             capture_destination_label(240_000, 48_000, CapturePhase::Recording),
             "ARRANGE @ 00:05.00 · CAPTURING"
-        );
-    }
-
-    #[test]
-    fn record_bar_adapts_before_controls_or_status_can_be_squashed() {
-        assert_eq!(
-            section_record_bar_layout(SECTION_RECORD_INLINE_MIN_WIDTH),
-            SectionRecordBarLayout::Inline
-        );
-        assert_eq!(
-            section_record_bar_layout(SECTION_RECORD_INLINE_MIN_WIDTH - 1.0),
-            SectionRecordBarLayout::StatusBelow
-        );
-        assert_eq!(
-            section_record_bar_layout(SECTION_RECORD_STATUS_BELOW_MIN_WIDTH),
-            SectionRecordBarLayout::StatusBelow
-        );
-        assert_eq!(
-            section_record_bar_layout(SECTION_RECORD_STATUS_BELOW_MIN_WIDTH - 1.0),
-            SectionRecordBarLayout::StackedControls
         );
     }
 }
