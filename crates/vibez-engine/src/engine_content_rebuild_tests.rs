@@ -152,3 +152,13 @@ fn a_nested_content_rebuild_holds_the_song_end_until_the_outer_one_ends() {
         "the outer rebuild is still re-adding the song"
     );
 }
+
+#[test]
+#[cfg(debug_assertions)]
+#[should_panic(expected = "EndContentRebuild without a BeginContentRebuild")]
+fn an_unbalanced_content_rebuild_end_is_a_bug() {
+    let mut rebuild = Rebuild::new();
+
+    rebuild.send(EngineCommand::EndContentRebuild);
+    rebuild.callback();
+}
