@@ -762,6 +762,23 @@ mod tests {
     }
 
     #[test]
+    fn the_progress_line_stays_inside_the_tiles_rounded_corners() {
+        let film = film(Size::new(160.0, 64.0));
+        let bottom = |line: Rectangle| line.y + line.height;
+        for progress in [0.0, 1.0] {
+            let line = progress_line(film, progress);
+            assert!(line.y > film.y + 2.0, "{progress}: clear of the top corner");
+            assert!(
+                bottom(line) < bottom(film) - 2.0,
+                "{progress}: clear of the bottom corner"
+            );
+        }
+        let middle = progress_line(film, 0.5);
+        assert_eq!(middle.y, film.y + 1.0, "full height away from the corners");
+        assert_eq!(bottom(middle), bottom(film) - 1.0);
+    }
+
+    #[test]
     fn dense_loop_preview_spans_the_whole_clip_with_bounded_work() {
         let onsets = preview_onsets(BeatClipTimeline::new(0.0, 0.0, 0.001, 16.0, true), 0.0, 64);
         assert_eq!(onsets.len(), 64);
