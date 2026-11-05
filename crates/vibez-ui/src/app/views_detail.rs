@@ -379,7 +379,7 @@ impl App {
                         clip_relative_playhead,
                         clip.duration_beats,
                         track_color,
-                        self.state.view.grid_config(),
+                        self.state.view.arrange_grid,
                         self.state.piano_roll.scroll_y,
                         self.state.piano_roll.edit_mode,
                     ),
@@ -388,7 +388,7 @@ impl App {
                         clip,
                         clip.duration_beats,
                         track_color,
-                        self.state.view.grid_config(),
+                        self.state.view.arrange_grid,
                     ),
                 )
             }
@@ -592,8 +592,8 @@ impl App {
 
         let mode_row = row![select_btn, draw_btn].spacing(1);
 
-        let grid = self.state.view.grid_config();
-        let pixels_per_beat = self.active_editor_pixels_per_beat();
+        let grid = self.state.view.arrange_grid;
+        let pixels_per_beat = self.timeline_pixels_per_beat();
         let snap_picker = pick_list(
             grid.choices(pixels_per_beat),
             Some(grid.choice(pixels_per_beat)),

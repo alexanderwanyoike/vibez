@@ -69,7 +69,7 @@ impl App {
             start_marker: clip.start_marker,
             sample_rate: clip.audio.sample_rate,
             bpm: self.state.transport.bpm,
-            grid: self.state.view.grid_config(),
+            grid: self.state.view.arrange_grid,
             track_color,
             playhead_normalized,
             loop_enabled: clip.loop_enabled,

@@ -113,7 +113,7 @@ pub struct ViewState {
     pub viewport: crate::timeline_geometry::TimelineViewport,
     /// The Arrange view a zoom to selection replaced, for zoom back.
     pub zoom_before_selection: Option<crate::timeline_geometry::TimelineViewport>,
-    pub grid: GridConfig,
+    pub arrange_grid: GridConfig,
     pub context_menu: Option<ContextMenu>,
     pub drum_rack_slice_dialog: Option<DrumRackSliceDialog>,
     pub transient_analysis_dialog: Option<TransientAnalysisDialog>,
@@ -148,7 +148,7 @@ impl Default for ViewState {
             perform_surface_resize_active: false,
             viewport: crate::timeline_geometry::TimelineViewport::new(1.0, 0.0),
             zoom_before_selection: None,
-            grid: GridConfig::default(),
+            arrange_grid: GridConfig::default(),
             context_menu: None,
             drum_rack_slice_dialog: None,
             transient_analysis_dialog: None,
@@ -211,10 +211,6 @@ impl ViewState {
     pub fn prune_drum_pad_flashes(&mut self, now: std::time::Instant) {
         self.drum_pad_flash_until
             .retain(|_, expires_at| *expires_at > now);
-    }
-
-    pub fn grid_config(&self) -> GridConfig {
-        self.grid
     }
 
     pub fn dismiss_clip_dialogs_for(

@@ -334,8 +334,8 @@ impl App {
             ..Default::default()
         });
 
-        let grid = self.state.view.grid_config();
-        let pixels_per_beat = self.active_editor_pixels_per_beat();
+        let grid = self.state.view.arrange_grid;
+        let pixels_per_beat = self.timeline_pixels_per_beat();
         let grid_picker = pick_list(
             grid.choices(pixels_per_beat),
             Some(grid.choice(pixels_per_beat)),
@@ -411,17 +411,17 @@ impl App {
             grid_picker,
             grid_toggle(
                 "SNAP",
-                self.state.view.grid.snap_enabled,
+                self.state.view.arrange_grid.snap_enabled,
                 ViewMsg::ToggleSnapToGrid,
             ),
             grid_toggle(
                 "T",
-                self.state.view.grid.selected.is_triplet(),
+                self.state.view.arrange_grid.selected.is_triplet(),
                 ViewMsg::ToggleTripletGrid,
             ),
             grid_toggle(
                 "AUTO",
-                self.state.view.grid.adaptive,
+                self.state.view.arrange_grid.adaptive,
                 ViewMsg::ToggleAdaptiveGrid,
             ),
         ]

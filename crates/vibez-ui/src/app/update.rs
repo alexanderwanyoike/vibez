@@ -625,8 +625,8 @@ impl App {
                     snap_grid: self
                         .state
                         .view
-                        .grid_config()
-                        .effective_grid(self.active_editor_pixels_per_beat()),
+                        .arrange_grid
+                        .effective_grid(self.timeline_pixels_per_beat()),
                 };
                 let action = self.route_piano_roll_editor_message(msg, ctx);
                 self.apply_piano_roll_action(action);

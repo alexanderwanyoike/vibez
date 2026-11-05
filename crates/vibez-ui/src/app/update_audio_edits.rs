@@ -12,8 +12,8 @@ impl App {
                 let grid = self
                     .state
                     .view
-                    .grid_config()
-                    .effective_grid(self.active_editor_pixels_per_beat());
+                    .arrange_grid
+                    .effective_grid(self.timeline_pixels_per_beat());
                 return self.dispatch_audio_quantize(
                     self.active_timeline_location(),
                     track_id,

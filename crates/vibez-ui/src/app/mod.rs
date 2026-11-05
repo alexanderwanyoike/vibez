@@ -658,7 +658,7 @@ impl App {
         );
     }
 
-    pub(super) fn active_editor_pixels_per_beat(&self) -> f32 {
+    pub(super) fn timeline_pixels_per_beat(&self) -> f32 {
         let editor = self.state.active_timeline_editor();
         if let Some((track_id, clip_id)) = editor.selected_note_clip {
             if let Some(duration) =

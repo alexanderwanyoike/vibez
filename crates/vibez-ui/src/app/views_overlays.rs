@@ -900,13 +900,19 @@ impl App {
                 if is_note_clip {
                     col = col.push(menu_btn(
                         icons::CIRCLE_DOT,
-                        format!("Quantize ({})", self.state.view.grid.selected.label()),
+                        format!(
+                            "Quantize ({})",
+                            self.state.view.arrange_grid.selected.label()
+                        ),
                         Message::PianoRoll(PianoRollMsg::QuantizeNoteClip { track_id, clip_id }),
                     ));
                 } else {
                     col = col.push(menu_btn(
                         icons::CIRCLE_DOT,
-                        format!("Quantize ({})", self.state.view.grid.selected.label()),
+                        format!(
+                            "Quantize ({})",
+                            self.state.view.arrange_grid.selected.label()
+                        ),
                         Message::QuantizeAudioClip { track_id, clip_id },
                     ));
                 }

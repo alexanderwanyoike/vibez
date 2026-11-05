@@ -200,12 +200,12 @@ impl ViewState {
                     self.viewport.clamp(ctx.total_beats, ctx.lane_width);
                 }
             }
-            ViewMsg::ChooseGrid(choice) => self.grid.choose(choice),
-            ViewMsg::NarrowGrid => self.grid.narrow(),
-            ViewMsg::WidenGrid => self.grid.widen(),
-            ViewMsg::ToggleTripletGrid => self.grid.toggle_triplet(),
-            ViewMsg::ToggleSnapToGrid => self.grid.toggle_snap(),
-            ViewMsg::ToggleAdaptiveGrid => self.grid.toggle_adaptive(),
+            ViewMsg::ChooseGrid(choice) => self.arrange_grid.choose(choice),
+            ViewMsg::NarrowGrid => self.arrange_grid.narrow(),
+            ViewMsg::WidenGrid => self.arrange_grid.widen(),
+            ViewMsg::ToggleTripletGrid => self.arrange_grid.toggle_triplet(),
+            ViewMsg::ToggleSnapToGrid => self.arrange_grid.toggle_snap(),
+            ViewMsg::ToggleAdaptiveGrid => self.arrange_grid.toggle_adaptive(),
             ViewMsg::BeginDetailPanelResize => {
                 self.detail_panel_resize_active = true;
             }
@@ -824,7 +824,7 @@ mod tests {
 
     #[test]
     fn the_default_grid_follows_zoom_so_a_fit_zoom_drag_lands_on_a_bar() {
-        let grid = ViewState::default().grid_config();
+        let grid = ViewState::default().arrange_grid;
         let fit_zoom_pixels_per_beat = 1.375;
 
         assert_eq!(grid.snap_beat(116.5, fit_zoom_pixels_per_beat), 112.0);
@@ -865,41 +865,41 @@ mod tests {
             &TimelineEditorState::default(),
             ViewCtx::default(),
         );
-        assert!(v.grid.snap_enabled);
-        assert!(!v.grid.adaptive);
+        assert!(v.arrange_grid.snap_enabled);
+        assert!(!v.arrange_grid.adaptive);
 
         v.update(
             ViewMsg::NarrowGrid,
             &TimelineEditorState::default(),
             ViewCtx::default(),
         );
-        assert_eq!(v.grid.selected, SnapGrid::SIXTEENTH);
+        assert_eq!(v.arrange_grid.selected, SnapGrid::SIXTEENTH);
         v.update(
             ViewMsg::WidenGrid,
             &TimelineEditorState::default(),
             ViewCtx::default(),
         );
-        assert_eq!(v.grid.selected, SnapGrid::EIGHTH);
+        assert_eq!(v.arrange_grid.selected, SnapGrid::EIGHTH);
         v.update(
             ViewMsg::ToggleTripletGrid,
             &TimelineEditorState::default(),
             ViewCtx::default(),
         );
-        assert_eq!(v.grid.selected, SnapGrid::EIGHTH.triplet());
+        assert_eq!(v.arrange_grid.selected, SnapGrid::EIGHTH.triplet());
         v.update(
             ViewMsg::ToggleSnapToGrid,
             &TimelineEditorState::default(),
             ViewCtx::default(),
         );
-        assert!(!v.grid.snap_enabled);
+        assert!(!v.arrange_grid.snap_enabled);
         v.update(
             ViewMsg::ToggleAdaptiveGrid,
             &TimelineEditorState::default(),
             ViewCtx::default(),
         );
-        assert!(v.grid.adaptive);
+        assert!(v.arrange_grid.adaptive);
         assert_eq!(
-            v.grid_config().effective_grid(20.0),
+            v.arrange_grid.effective_grid(20.0),
             SnapGrid::QUARTER.triplet()
         );
         v.update(
@@ -908,7 +908,7 @@ mod tests {
             ViewCtx::default(),
         );
         assert_eq!(
-            v.grid_config().effective_grid(20.0),
+            v.arrange_grid.effective_grid(20.0),
             SnapGrid::EIGHTH.triplet()
         );
         v.update(
@@ -917,7 +917,7 @@ mod tests {
             ViewCtx::default(),
         );
         assert_eq!(
-            v.grid_config().effective_grid(20.0),
+            v.arrange_grid.effective_grid(20.0),
             SnapGrid::QUARTER.triplet()
         );
     }
