@@ -235,3 +235,25 @@ fn undoing_mixer_and_device_value_changes_sends_them_as_controls() {
     assert!(!app.state.project_tracks.tracks[0].mute);
     assert_eq!(app.state.project_tracks.tracks[1].gain, 1.0);
 }
+
+#[test]
+fn undo_that_keeps_the_tempo_and_swing_sends_neither() {
+    let (mut app, mut commands, track_id, _) = two_track_project();
+    app.push_undo_snapshot(None);
+    Arc::make_mut(&mut app.state.project_tracks).tracks[0].gain = 0.5;
+    drain(&mut commands);
+
+    let _ = app.update_and_refresh_clips(Message::Project(ProjectMsg::Undo));
+
+    let sent = drain(&mut commands);
+    assert!(sent
+        .iter()
+        .any(|command| matches!(command, EngineCommand::SetTrackGain(id, _) if *id == track_id)));
+    assert!(
+        !sent.iter().any(|command| matches!(
+            command,
+            EngineCommand::SetBpm(_) | EngineCommand::SetProjectSwing(_)
+        )),
+        "Play must not wait behind a tempo that did not change"
+    );
+}
