@@ -1,9 +1,7 @@
 //! The Settings sheet: a section sidebar beside the chosen section, plus
 //! the Plugins and Warping sections.
 
-use iced::widget::{
-    button, center, column, container, horizontal_space, mouse_area, row, scrollable, slider, text,
-};
+use iced::widget::{button, center, column, container, mouse_area, row, scrollable, text};
 use iced::{Color, Element, Length, Theme};
 
 use crate::icons;
@@ -11,6 +9,7 @@ use crate::message::Message;
 use crate::state::SettingsTab;
 use crate::theme as th;
 
+use super::views_settings_rows::{action, group, hint, setting_row, slider_control, switch};
 use super::*;
 
 const SHEET_W: f32 = 900.0;
@@ -156,7 +155,7 @@ impl App {
         let header = row![
             column![
                 text(section.label).size(18).font(bold()).color(th::text()),
-                text(section.hint).size(11.5).color(th::text_muted()),
+                hint(section.hint),
             ]
             .spacing(4)
             .width(Length::Fill),
@@ -233,245 +232,100 @@ impl App {
     }
 
     pub(super) fn view_settings_plugins_tab(&self) -> Element<'_, Message> {
-        // Plugin section header
-        let plugin_title = text("Plugin Library").size(14).color(th::text());
-
-        // Default paths checkbox
-        let default_paths_label = if self.state.plugin_settings.scan_default_paths {
-            icons::icon(icons::CIRCLE_DOT).size(12).color(th::accent())
-        } else {
-            icons::icon(icons::CIRCLE).size(12).color(th::text_dim())
-        };
-        let default_paths_btn = button(
-            row![
-                default_paths_label,
-                text("Scan default system paths").size(12).color(th::text())
-            ]
-            .spacing(6)
-            .align_y(iced::Alignment::Center),
-        )
-        .on_press(Message::ToggleScanDefaultPaths)
-        .padding([4, 8])
-        .style(|_theme: &Theme, _status| button::Style {
-            background: None,
-            text_color: th::text(),
-            border: iced::Border::default(),
-            ..Default::default()
-        });
-
-        // Scan paths list
-        let mut paths_col = column![].spacing(4);
-        for (i, path) in self
-            .state
-            .plugin_settings
-            .extra_scan_paths
-            .iter()
-            .enumerate()
-        {
-            let path_text = text(path.display().to_string())
-                .size(11)
-                .color(th::text_dim());
-            let remove_btn = button(icons::icon(icons::X).size(10).color(th::danger()))
-                .on_press(Message::RemovePluginScanPath(i))
-                .padding([2, 6])
-                .style(|_theme: &Theme, status| {
-                    let bg = match status {
-                        button::Status::Hovered | button::Status::Pressed => {
-                            Some(th::bg_hover().into())
-                        }
-                        _ => None,
-                    };
-                    button::Style {
-                        background: bg,
-                        text_color: th::danger(),
-                        border: iced::Border::default(),
-                        ..Default::default()
-                    }
-                });
-            paths_col = paths_col.push(
-                row![path_text, horizontal_space(), remove_btn]
-                    .align_y(iced::Alignment::Center)
-                    .spacing(4),
+        let settings = &self.state.plugin_settings;
+        let mut folders: Vec<Element<'_, Message>> = vec![
+            setting_row(
+                "Scan default system paths",
+                Some(hint("The standard VST3 and CLAP folders for this system.").into()),
+                switch(settings.scan_default_paths, Message::ToggleScanDefaultPaths),
+            ),
+            setting_row(
+                "Extra folders",
+                Some(
+                    hint(if settings.extra_scan_paths.is_empty() {
+                        "None yet. Add a folder to scan it as well."
+                    } else {
+                        "Scanned as well as the default paths."
+                    })
+                    .into(),
+                ),
+                action("Add folder", Some(Message::AddPluginScanPath), false),
+            ),
+        ];
+        for (index, path) in settings.extra_scan_paths.iter().enumerate() {
+            folders.push(
+                row![
+                    icons::icon(icons::FOLDER).size(13).color(th::text_dim()),
+                    text(path.display().to_string())
+                        .size(11.5)
+                        .color(th::text_dim())
+                        .width(Length::Fill),
+                    action("Remove", Some(Message::RemovePluginScanPath(index)), false),
+                ]
+                .spacing(8)
+                .align_y(iced::Alignment::Center)
+                .into(),
             );
         }
-
-        let add_path_btn = button(
-            row![
-                icons::icon(icons::PLUS).size(12).color(th::accent()),
-                text("Add Path").size(12).color(th::accent())
-            ]
-            .spacing(4)
-            .align_y(iced::Alignment::Center),
-        )
-        .on_press(Message::AddPluginScanPath)
-        .padding([6, 12])
-        .style(|_theme: &Theme, status| {
-            let bg = match status {
-                button::Status::Hovered | button::Status::Pressed => Some(th::bg_hover().into()),
-                _ => None,
-            };
-            button::Style {
-                background: bg,
-                text_color: th::accent(),
-                border: iced::Border {
-                    color: th::accent_dim(),
-                    width: 1.0,
-                    radius: 4.0.into(),
-                },
-                ..Default::default()
-            }
-        });
-
-        // Scan button
+        let status = if self.state.plugin_scan_status.is_empty() {
+            format!("{} plugins cached", settings.cache.len())
+        } else {
+            self.state.plugin_scan_status.clone()
+        };
         let scan_label = if self.state.plugin_scan_in_progress {
-            "Scanning..."
+            "Scanning…"
         } else {
-            "Scan Plugins"
+            "Scan plugins"
         };
-        let scan_btn = button(text(scan_label).size(12).color(th::text()))
-            .on_press(Message::ScanPlugins)
-            .padding([8, 16])
-            .style(|_theme: &Theme, status| {
-                let bg = match status {
-                    button::Status::Hovered | button::Status::Pressed => {
-                        Some(th::accent_dim().into())
-                    }
-                    _ => Some(th::bg_elevated().into()),
-                };
-                button::Style {
-                    background: bg,
-                    text_color: th::text(),
-                    border: iced::Border {
-                        color: th::border(),
-                        width: 1.0,
-                        radius: 4.0.into(),
-                    },
-                    ..Default::default()
-                }
-            });
-
-        // Status
-        let cache_count = self.state.plugin_settings.cache.len();
-        let status = if !self.state.plugin_scan_status.is_empty() {
-            text(&self.state.plugin_scan_status)
-                .size(11)
-                .color(th::text_dim())
-        } else {
-            text(format!("{cache_count} plugins cached"))
-                .size(11)
-                .color(th::text_dim())
-        };
-
         column![
-            plugin_title,
-            default_paths_btn,
-            paths_col,
-            row![add_path_btn, horizontal_space(), scan_btn]
-                .spacing(8)
-                .align_y(iced::Alignment::Center),
-            status,
+            group(folders),
+            group([setting_row(
+                "Plugin library",
+                Some(hint(status).into()),
+                action(scan_label, Some(Message::ScanPlugins), true),
+            )]),
         ]
-        .spacing(8)
+        .spacing(16)
         .into()
     }
 
     pub(super) fn view_settings_warping_tab(&self) -> Element<'_, Message> {
-        let title = text("Sample Warping").size(14).color(th::text());
-        let hint = text(
-            "Auto-warp detects BPM of each dropped sample and time-stretches it to \
-             the project tempo, preserving pitch. Turn this off to keep samples at their \
-             original speed.",
-        )
-        .size(11)
-        .color(th::text_dim());
-
-        let toggle_icon = if self.state.auto_warp_on_import {
-            icons::icon(icons::CIRCLE_DOT).size(12).color(th::accent())
-        } else {
-            icons::icon(icons::CIRCLE).size(12).color(th::text_dim())
-        };
-        let toggle_btn = button(
-            row![
-                toggle_icon,
-                text("Auto-warp samples on import")
-                    .size(12)
-                    .color(th::text())
-            ]
-            .spacing(6)
-            .align_y(iced::Alignment::Center),
-        )
-        .on_press(Message::ToggleAutoWarpOnImport)
-        .padding([4, 8])
-        .style(|_theme: &Theme, _status| button::Style {
-            background: None,
-            text_color: th::text(),
-            border: iced::Border::default(),
-            ..Default::default()
-        });
-
-        let conf = self.state.warp_confidence_threshold;
-        let conf_label = text("Detection confidence threshold")
-            .size(12)
-            .color(th::text());
-        let conf_value = text(format!("{:.2}", conf)).size(12).color(th::text_dim());
-        let conf_hint = text(
-            "Higher = only warp when the detector is very sure. \
-             Lower = warp even ambiguous clips.",
-        )
-        .size(11)
-        .color(th::text_dim());
-        let conf_slider =
-            slider(0.0..=1.0, conf, Message::SetWarpConfidenceThreshold).step(0.05_f32);
-
-        let rewarp_btn = button(
-            text("Re-warp all clips to project tempo")
-                .size(12)
-                .color(th::text()),
-        )
-        .on_press(Message::RewarpAllClips)
-        .padding([6, 12])
-        .style(|_theme: &Theme, status| {
-            let bg = match status {
-                button::Status::Hovered | button::Status::Pressed => Some(th::bg_hover().into()),
-                _ => None,
-            };
-            button::Style {
-                background: bg,
-                text_color: th::text(),
-                border: iced::Border {
-                    color: th::accent_dim(),
-                    width: 1.0,
-                    radius: 4.0.into(),
-                },
-                ..Default::default()
-            }
-        });
-
-        column![
-            title,
-            hint,
-            toggle_btn,
-            container(column![].height(Length::Fixed(1.0)).width(Length::Fill)).style(
-                |_theme: &Theme| container::Style {
-                    background: Some(th::border().into()),
-                    ..Default::default()
-                }
+        let confidence = self.state.warp_confidence_threshold;
+        group([
+            setting_row(
+                "Auto-warp samples on import",
+                Some(
+                    hint(
+                        "Detects each dropped sample's tempo and stretches it to the \
+                         project's, keeping its pitch.",
+                    )
+                    .into(),
+                ),
+                switch(
+                    self.state.auto_warp_on_import,
+                    Message::ToggleAutoWarpOnImport,
+                ),
             ),
-            conf_label,
-            conf_hint,
-            row![conf_slider, conf_value]
-                .spacing(8)
-                .align_y(iced::Alignment::Center),
-            container(column![].height(Length::Fixed(1.0)).width(Length::Fill)).style(
-                |_theme: &Theme| container::Style {
-                    background: Some(th::border().into()),
-                    ..Default::default()
-                }
+            setting_row(
+                "Detection confidence",
+                Some(
+                    hint("Higher warps only when the detector is sure; lower warps ambiguous clips too.")
+                        .into(),
+                ),
+                slider_control(
+                    0.0..=1.0,
+                    confidence,
+                    0.05,
+                    Message::SetWarpConfidenceThreshold,
+                    format!("{confidence:.2}"),
+                ),
             ),
-            rewarp_btn,
-        ]
-        .spacing(10)
-        .into()
+            setting_row(
+                "Re-warp all clips",
+                Some(hint("Stretches every warped clip to the current project tempo.").into()),
+                action("Re-warp", Some(Message::RewarpAllClips), false),
+            ),
+        ])
     }
 }
 
