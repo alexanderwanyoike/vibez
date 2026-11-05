@@ -120,6 +120,8 @@ pub struct AudioEngine {
     /// these frames advance the newly active Section's local playhead.
     section_advance_override: Option<u64>,
     arrangement_audio_length: Option<u64>,
+    /// Open [`EngineCommand::BeginContentRebuild`]s.
+    content_rebuilds: u32,
     /// Audio Track Recording may extend Arrange beyond existing content.
     arrangement_recording: bool,
     /// Project Swing is engine state because generated-event consumers share
@@ -313,6 +315,7 @@ impl AudioEngine {
             pending_section_record_stop: None,
             section_advance_override: None,
             arrangement_audio_length: None,
+            content_rebuilds: 0,
             arrangement_recording: false,
             project_swing: SwingAmount::default(),
             performance_position: 0,
@@ -544,8 +547,7 @@ impl AudioEngine {
             self.rendered_callback_frames = rendered;
             self.active_section = None;
             self.clock_domain = ClockDomain::Arrange;
-            self.transport
-                .set_audio_length(self.arrangement_audio_length);
+            self.transport.set_audio_length(self.arrangement_end());
         }
 
         // Discontinuous jump NOT already handled by the loop-boundary
@@ -816,6 +818,10 @@ mod stuck_note_tests;
 #[cfg(test)]
 #[path = "engine_transport_ring_tests.rs"]
 mod transport_ring_tests;
+
+#[cfg(test)]
+#[path = "engine_content_rebuild_tests.rs"]
+mod content_rebuild_tests;
 
 #[cfg(test)]
 #[path = "engine_note_edit_allocation_tests.rs"]

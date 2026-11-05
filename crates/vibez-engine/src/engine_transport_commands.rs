@@ -18,8 +18,7 @@ impl AudioEngine {
         self.cancel_section_queue();
         self.cancel_queued_track_mutes();
         self.active_section = None;
-        self.transport
-            .set_audio_length(self.arrangement_audio_length);
+        self.transport.set_audio_length(self.arrangement_end());
         for track in &mut self.tracks {
             track.flush_notes();
         }
@@ -58,8 +57,7 @@ impl AudioEngine {
         self.clear_clip_performance(allowance);
         self.clock_domain = ClockDomain::Arrange;
         if !self.arrangement_recording {
-            self.transport
-                .set_audio_length(self.arrangement_audio_length);
+            self.transport.set_audio_length(self.arrangement_end());
         }
         self.transport.play();
         let audition_queued = self.audition.resync_on_transport_start(

@@ -59,6 +59,7 @@ mod audio_inspector;
 mod audio_markers;
 mod channel_selection;
 mod clipboard_loops;
+mod content_swap;
 mod crossfades;
 mod group_move;
 mod note_clips;

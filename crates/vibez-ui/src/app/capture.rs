@@ -295,6 +295,7 @@ fn apply_capture_to_arrangement(
     let start_beat = arrange_start_samples as f64 / samples_per_beat;
     let end_beat = arrange_end_samples as f64 / samples_per_beat;
 
+    engine.send(EngineCommand::BeginContentRebuild);
     for track_id in controlled_track_ids {
         let mut incoming = by_track.remove(&track_id).unwrap_or_default();
         let captured_mute = incoming
@@ -337,7 +338,7 @@ fn apply_capture_to_arrangement(
             .sort_by(|left, right| left.position_beats.total_cmp(&right.position_beats));
 
         for clip in &destination.clips {
-            engine.send(add_audio_clip_command(track_id, clip));
+            engine.send(clip.add_command(track_id));
         }
         for clip in &destination.note_clips {
             engine.send(clip.add_command(track_id));
@@ -361,6 +362,7 @@ fn apply_capture_to_arrangement(
             }
         }
     }
+    engine.send(EngineCommand::EndContentRebuild);
     clip_count
 }
 
@@ -486,29 +488,6 @@ fn replace_automation_interval(
     }
 }
 
-fn add_audio_clip_command(
-    track_id: vibez_core::id::TrackId,
-    clip: &crate::state::UiClip,
-) -> EngineCommand {
-    EngineCommand::AddClip {
-        insertion: vibez_engine::clip_insertion::PreparedClipInsertion::new(),
-        track_id,
-        clip_id: clip.id,
-        audio: Arc::clone(&clip.audio),
-        position: clip.position,
-        source_offset: clip.source_offset,
-        start_marker: clip.start_marker,
-        duration: clip.duration,
-        loop_enabled: clip.loop_enabled,
-        loop_start: clip.loop_start,
-        loop_end: clip.loop_end,
-        linear_gain: clip.gain_db.linear(),
-        fades: clip.fades,
-        playback_direction: clip.playback_direction,
-        warp_markers: clip.warp_markers.clone(),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -624,6 +603,41 @@ mod tests {
             untouched_before
         );
         assert!(arrange.get(captured_track).is_some());
+    }
+
+    #[test]
+    fn a_capture_holds_the_song_end_while_it_re_adds_its_tracks() {
+        let track_id = TrackId::new();
+        let mut arrange = Arc::new(ArrangementTimeline::default());
+        Arc::make_mut(&mut arrange)
+            .ensure(track_id)
+            .clips
+            .push(audio_clip(0, 8));
+        let captured = MaterializedCapture {
+            arrange_start_samples: 16,
+            arrange_end_samples: 24,
+            controlled_track_ids: vec![track_id],
+            samples_per_beat: 4.0,
+            ..MaterializedCapture::default()
+        };
+
+        let mut engine = crate::domains::test_support::RecordingEngine::default();
+        apply_capture_to_arrangement(&mut arrange, captured, &mut engine);
+
+        let edits: Vec<_> = engine
+            .0
+            .iter()
+            .filter(|command| command.is_content_edit())
+            .collect();
+        assert!(edits.len() > 2, "the Capture re-adds the track's clip");
+        assert!(matches!(
+            edits.first(),
+            Some(EngineCommand::BeginContentRebuild)
+        ));
+        assert!(matches!(
+            edits.last(),
+            Some(EngineCommand::EndContentRebuild)
+        ));
     }
 
     #[test]
@@ -781,8 +795,9 @@ mod tests {
 
         let clips = arrange.get(track_id).unwrap().note_clips.len();
         assert_eq!(clips, 41);
+        let rebuild_bracket = 2;
         assert!(
-            engine.0.len() <= 2 * clips,
+            engine.0.len() <= 2 * clips + rebuild_bracket,
             "{} commands for {clips} clips",
             engine.0.len()
         );
@@ -924,7 +939,11 @@ mod tests {
         let mut commands =
             EngineCommandQueue::new(producer, audio_engine.take_transport_sender().unwrap());
         apply_capture_to_arrangement(&mut timeline, captured, &mut commands);
-        assert_eq!(commands.pending_len(), 1);
+        assert_eq!(
+            commands.pending_len(),
+            3,
+            "the last clip and the rebuild bracket"
+        );
 
         let operations = vibez_core::constants::RING_BUFFER_CAPACITY + 1;
         audio_engine.process_block(AudioProcessBlock::new(&mut [], 2));

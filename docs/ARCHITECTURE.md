@@ -541,6 +541,11 @@ The engine lives on the cpal audio callback. Its rules:
   Capture commands, and waits for those.
 - A note clip is sent as one prepared insertion that carries all its notes;
   `AddNote` is for single edits.
+- Arrange playback stops on its own only when the playhead reaches the song
+  end; a playhead already past it keeps going. Undo and Capture wrap the
+  content they re-add in `BeginContentRebuild`/`EndContentRebuild`, and the
+  song end does not stop playback in between, so a song that is briefly
+  shorter while it is rebuilt never stops or moves the playhead.
 - The UI's `PlaybackPhase` follows the engine's `PlaybackStarted` and
   `PlaybackStopped` events; an unconfirmed Play or Stop is `Starting` or
   `Stopping`.
@@ -757,9 +762,16 @@ initialization, while loading the declared executable.
   in the `.vzp` container. Only Arrange content is replayed to the engine until
   Section launch/playback is implemented.
 - Undo/redo keeps independently shared snapshots of Project Tracks, Arrange
-  Timeline Content, and Sections (audio is also shared via `Arc`). Restoring a
-  snapshot tears down the engine side and replays the currently playable
-  Arrange store.
+  Timeline Content, and Sections (audio is also shared via `Arc`). When the
+  snapshot's Project Tracks hold the same channels and devices as the current
+  ones (`same_channel_layout`), restoring it sends the mixer values, send
+  levels and built-in device and drum pad values that differ as control
+  commands and swaps only the clips and automation lanes that differ, so
+  tracks, devices and plugins keep running. Adding, removing or reordering a
+  track, bus or device, changing an instrument, sample, a drum pad's sample
+  or choke group, a plugin, plugin parameter, sidechain or input route still
+  tears down the engine side and replays the
+  currently playable Arrange store.
   Live plugin state is captured before teardown so undo does not reset
   plugin parameters.
 - Long-lived recording edits use one explicit Project Transaction from start

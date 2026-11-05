@@ -116,8 +116,8 @@ fn pending() -> Pending {
     content.clips.push(audio_clip);
     content.note_clips.push(resident);
     app.replay_track_to_engine(&model);
-    // The probe makes the real scheduled note audible numerically. Undo must
-    // restore the canonical instrument-free model, rather than retain this fixture.
+    // The probe makes the real scheduled note audible numerically. Undo of a
+    // content edit leaves the channel, and so this probe, running.
     app.send_command(EngineCommand::SetInstrument {
         track_id: track,
         instrument: Box::new(vibez_engine::test_support::DelayProbeInstrument::new(
@@ -289,8 +289,10 @@ fn note_request_polling_serves_current_stale_delete_undo_stop_and_clear_state() 
                 assert_eq!(notes.len(), 1);
                 assert_eq!(notes[0].id, fixture.resident);
                 assert_eq!(notes[0].notes, content.note_clips[0].notes);
-                assert!(fixture.engine.tracks()[0].instrument.is_none());
-                0.125
+                assert!(fixture.engine.tracks()[0].instrument.is_some());
+                // Removing the incoming clip flushes the held voice, as
+                // deleting it would.
+                0.0
             }
             Change::Current | Change::CanonicalOnlyStale | Change::Stop => {
                 let notes = &fixture.engine.tracks()[0].playback_source.note_clips;

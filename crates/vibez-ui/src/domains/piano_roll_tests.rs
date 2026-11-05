@@ -261,7 +261,7 @@ fn quantize_snaps_notes_and_reports_count() {
 }
 
 #[test]
-fn double_clip_clones_notes_and_grows_engine_clip() {
+fn double_clip_clones_notes_and_doubles_its_length() {
     let (mut tracks, tid, cid) = midi_track_with_clip();
     let mut pr = PianoRollState::default();
     let mut engine = RecordingEngine::default();
@@ -275,10 +275,29 @@ fn double_clip_clones_notes_and_grows_engine_clip() {
     assert_eq!(clip.duration_beats, 8.0);
     assert_eq!(clip.notes.len(), 4);
     assert_eq!(clip.notes[2].start_beat, 4.1);
-    assert!(engine
-        .0
-        .iter()
-        .any(|c| matches!(c, EngineCommand::SetNoteClipDuration { .. })));
+}
+
+#[test]
+fn doubling_a_clip_sends_it_to_the_engine_as_one_insertion() {
+    let (mut tracks, tid, cid) = midi_track_with_clip();
+    let mut pr = PianoRollState::default();
+    let mut engine = RecordingEngine::default();
+    pr.update(
+        PianoRollMsg::DoubleNoteClip(tid, cid),
+        &mut engine,
+        &mut tracks,
+        PianoRollCtx::default(),
+    );
+    assert!(
+        matches!(
+            engine.0.as_slice(),
+            [
+                EngineCommand::RemoveNoteClip(removed_track, removed_clip),
+                EngineCommand::AddNoteClip { track_id, .. },
+            ] if (*removed_track, *removed_clip, *track_id) == (tid, cid, tid)
+        ),
+        "one swap of the whole doubled clip, never a command per note"
+    );
 }
 
 #[test]

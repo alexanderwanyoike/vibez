@@ -535,6 +535,7 @@ impl PianoRollState {
                 }
             }
             PianoRollMsg::DoubleNoteClip(track_id, clip_id) => {
+                let mut sync_data = None;
                 if let Some(track) = find_track_mut(tracks, track_id) {
                     if let Some(clip) = track.note_clips.iter_mut().find(|c| c.id == clip_id) {
                         let orig_dur = clip.duration_beats;
@@ -554,39 +555,12 @@ impl PianoRollState {
                         if was_full_clip_loop {
                             clip.loop_end_beats = clip.duration_beats;
                         }
-                        let new_duration = clip.duration_beats;
-                        let loop_sync = (
-                            clip.loop_enabled,
-                            clip.loop_start_beats,
-                            clip.loop_end_beats,
-                        );
-
-                        // Send new notes to engine
-                        for note in &cloned_notes {
-                            engine.send(EngineCommand::AddNote {
-                                track_id,
-                                clip_id,
-                                insertion: vibez_engine::clip_insertion::PreparedNoteInsertion::new(
-                                    *note,
-                                ),
-                            });
-                        }
-                        // The engine clip must grow too, or playback
-                        // still ends at the old boundary and the
-                        // duplicated notes never sound.
-                        engine.send(EngineCommand::SetNoteClipDuration {
-                            track_id,
-                            clip_id,
-                            duration_beats: new_duration,
-                        });
-                        engine.send(EngineCommand::SetNoteClipLoop {
-                            track_id,
-                            clip_id,
-                            enabled: loop_sync.0,
-                            loop_start_beats: loop_sync.1,
-                            loop_end_beats: loop_sync.2,
-                        });
+                        sync_data = Some(clip.clone());
                     }
+                }
+                if let Some(clip) = sync_data {
+                    engine.send(EngineCommand::RemoveNoteClip(track_id, clip_id));
+                    engine.send(clip.add_command(track_id));
                 }
                 action.status = Some("Doubled clip length".to_string());
             }

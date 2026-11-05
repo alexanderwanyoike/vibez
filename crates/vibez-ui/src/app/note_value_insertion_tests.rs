@@ -250,10 +250,13 @@ fn piano_roll_note_growth_is_served_before_current_stale_batch_reuse_undo_stop_a
                 assert!(canonical.note_clips[1].notes.is_empty());
                 let actual = &outer.engine.tracks()[0].playback_source.note_clips;
                 assert_eq!(actual.len(), 2);
-                assert_eq!(actual[0].notes, [old]);
-                assert!(actual[1].notes.is_empty());
-                assert!(outer.engine.tracks()[0].instrument.is_none());
-                0.125
+                let resident = actual.iter().find(|clip| clip.id == outer.resident);
+                assert_eq!(resident.unwrap().notes, [old]);
+                let incoming = actual.iter().find(|clip| clip.id == outer.incoming.id);
+                assert!(incoming.unwrap().notes.is_empty());
+                assert!(outer.engine.tracks()[0].instrument.is_some());
+                // Swapping the resident clip flushes the held voice.
+                0.0
             }
             InnerChange::Current
             | InnerChange::CanonicalStale
@@ -261,9 +264,10 @@ fn piano_roll_note_growth_is_served_before_current_stale_batch_reuse_undo_stop_a
             | InnerChange::DoubleBatch => {
                 let actual = &outer.engine.tracks()[0].playback_source.note_clips;
                 assert_eq!(actual.len(), 2);
-                assert_eq!(actual[0].id, outer.resident);
-                assert_eq!(actual[1].id, outer.incoming.id);
-                assert!(actual[1].notes.is_empty());
+                let resident = actual.iter().find(|clip| clip.id == outer.resident);
+                let resident = resident.unwrap();
+                let incoming = actual.iter().find(|clip| clip.id == outer.incoming.id);
+                assert!(incoming.unwrap().notes.is_empty());
                 if matches!(change, InnerChange::DoubleBatch) {
                     let later_old = MidiNote {
                         start_beat: old.start_beat + 8.0,
@@ -273,15 +277,15 @@ fn piano_roll_note_growth_is_served_before_current_stale_batch_reuse_undo_stop_a
                         start_beat: note.start_beat + 8.0,
                         ..note
                     };
-                    assert_eq!(actual[0].notes, [old, note, later_old, later_new]);
-                    assert_eq!(actual[0].duration_beats, 16.0);
+                    assert_eq!(resident.notes, [old, note, later_old, later_new]);
+                    assert_eq!(resident.duration_beats, 16.0);
                     let canonical = outer.app.state.arrange_content(outer.track).unwrap();
-                    assert_eq!(canonical.note_clips[0].notes, actual[0].notes);
-                    // Double's existing duration update flushes the held voice.
+                    assert_eq!(canonical.note_clips[0].notes, resident.notes);
+                    // Double swaps the clip, which flushes the held voice.
                     0.0
                 } else {
-                    assert_eq!(actual[0].notes, [old, note]);
-                    assert_eq!(actual[0].duration_beats, 8.0);
+                    assert_eq!(resident.notes, [old, note]);
+                    assert_eq!(resident.duration_beats, 8.0);
                     if matches!(change, InnerChange::CanonicalStale) {
                         assert!(outer.app.state.arrange_content(outer.track).is_none());
                     } else {

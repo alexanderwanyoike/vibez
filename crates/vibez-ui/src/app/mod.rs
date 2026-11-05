@@ -821,6 +821,9 @@ mod compensation_selection_tests;
 #[cfg(test)]
 mod undo_replay_routing_tests;
 
+#[cfg(test)]
+mod undo_content_swap_tests;
+
 mod midi_input;
 
 #[cfg(test)]

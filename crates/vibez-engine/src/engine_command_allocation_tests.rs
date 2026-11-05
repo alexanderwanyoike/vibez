@@ -99,6 +99,8 @@ fn coverage(command: &EngineCommand) -> Coverage {
         | C::SetNoteClipGrooveGrid { .. }
         | C::AddNoteClip { .. }
         | C::RemoveNoteClip(..)
+        | C::BeginContentRebuild
+        | C::EndContentRebuild
         | C::MoveNoteClip { .. }
         | C::AddNote { .. }
         | C::RemoveNote { .. }
@@ -711,6 +713,15 @@ fn cases() -> Vec<Case> {
             f.synth,
             f.note_clip
         )),
+        case!("BeginContentRebuild", false, |_| C::BeginContentRebuild),
+        case!(
+            "EndContentRebuild",
+            false,
+            |commands, _| {
+                assert!(commands.push(C::BeginContentRebuild).is_ok());
+            },
+            |_| C::EndContentRebuild
+        ),
         case!("MoveNoteClip", false, |f| C::MoveNoteClip {
             track_id: f.synth,
             clip_id: f.note_clip,
