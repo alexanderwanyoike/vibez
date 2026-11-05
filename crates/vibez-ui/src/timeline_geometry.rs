@@ -6,6 +6,9 @@ const WHEEL_LINE_PIXELS: f32 = 40.0;
 const ZOOM_SENSITIVITY: f32 = 0.003;
 pub const EDGE_SCROLL_ZONE_PIXELS: f32 = 64.0;
 pub const MAX_EDGE_SCROLL_BEATS_PER_SECOND: f64 = 8.0;
+/// Space kept either side of a framed span so its first and last bar lines
+/// stay clear of the lane edges.
+pub const FRAME_MARGIN_PIXELS: f32 = 12.0;
 
 /// Normalise line- and pixel-based wheel input to physical-ish pixels.
 pub fn wheel_delta_pixels(delta: iced::mouse::ScrollDelta) -> (f32, f32) {
@@ -59,6 +62,16 @@ pub struct TimelineViewport {
 }
 
 impl TimelineViewport {
+    const MIN_ZOOM: f32 = 0.01;
+    const MAX_ZOOM: f32 = 16.0;
+    /// One zoom in or out by keyboard or button.
+    pub const ZOOM_STEP: f32 = 1.25;
+
+    /// `zoom_level` held inside the zoom range every timeline shares.
+    pub fn clamp_zoom(zoom_level: f32) -> f32 {
+        zoom_level.clamp(Self::MIN_ZOOM, Self::MAX_ZOOM)
+    }
+
     pub const fn new(zoom_level: f32, scroll_offset_beats: f64) -> Self {
         Self {
             zoom_level,
@@ -87,9 +100,19 @@ impl TimelineViewport {
         }
         let anchor_x = anchor_x.clamp(0.0, viewport_width.max(0.0));
         let anchor_beat = self.geometry().x_to_beat(anchor_x);
-        self.zoom_level = (self.zoom_level * factor).clamp(0.01, 16.0);
+        self.zoom_level = Self::clamp_zoom(self.zoom_level * factor);
         self.scroll_offset_beats = anchor_beat - self.geometry().beats_for_width(anchor_x);
         self.clamp(total_beats, viewport_width);
+    }
+
+    /// Zoom and scroll so `start..end` fills the viewport inside the margin.
+    pub fn frame(&mut self, start_beats: f64, end_beats: f64, viewport_width: f32) {
+        let span = (end_beats - start_beats).max(f64::EPSILON);
+        let usable = (viewport_width - 2.0 * FRAME_MARGIN_PIXELS).max(1.0);
+        let pixels_per_beat = (f64::from(usable) / span) as f32;
+        self.zoom_level = Self::clamp_zoom(pixels_per_beat / BASE_PIXELS_PER_BEAT);
+        self.scroll_offset_beats =
+            (start_beats - self.geometry().beats_for_width(FRAME_MARGIN_PIXELS)).max(0.0);
     }
 
     pub fn clamp(&mut self, total_beats: f64, viewport_width: f32) {
@@ -231,5 +254,26 @@ mod tests {
         assert_eq!(viewport.scroll_offset_beats, 44.0);
         viewport.scroll_by(-1_000.0, 64.0, 800.0);
         assert_eq!(viewport.scroll_offset_beats, 0.0);
+    }
+
+    #[test]
+    fn framing_a_span_fills_the_viewport_inside_a_margin() {
+        let mut viewport = TimelineViewport::new(1.0, 0.0);
+
+        viewport.frame(32.0, 48.0, 800.0);
+
+        let geometry = viewport.geometry();
+        assert!((geometry.beat_to_x(32.0) - FRAME_MARGIN_PIXELS).abs() < 1.0e-3);
+        assert!((geometry.beat_to_x(48.0) - (800.0 - FRAME_MARGIN_PIXELS)).abs() < 1.0e-3);
+    }
+
+    #[test]
+    fn framing_from_the_song_start_never_scrolls_before_it() {
+        let mut viewport = TimelineViewport::new(1.0, 12.0);
+
+        viewport.frame(0.0, 64.0, 800.0);
+
+        assert_eq!(viewport.scroll_offset_beats, 0.0);
+        assert!(viewport.geometry().beat_to_x(64.0) < 800.0 - FRAME_MARGIN_PIXELS);
     }
 }

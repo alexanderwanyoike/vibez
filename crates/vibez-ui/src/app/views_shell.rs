@@ -61,6 +61,19 @@ pub(super) fn vertical_pane_splitter(active: bool, on_press: Message) -> Element
 }
 
 impl App {
+    /// Width left for the Arrange or Perform workspace beside the Browser.
+    pub(super) fn browser_workspace_width(&self) -> f32 {
+        let browser_width = if self.state.browser.open {
+            self.state
+                .browser
+                .effective_dock_width(self.state.view.window_width)
+                + HORIZONTAL_PANE_SPLITTER_WIDTH
+        } else {
+            0.0
+        };
+        (self.state.view.window_width - browser_width).max(0.0)
+    }
+
     // ── View ──
 
     pub(super) fn view(&self) -> Element<'_, Message> {

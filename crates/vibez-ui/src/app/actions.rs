@@ -606,16 +606,7 @@ impl App {
                 );
             }
         } else if self.state.arrangement.drag_resize_active {
-            let browser_width = if self.state.browser.open {
-                self.state
-                    .browser
-                    .effective_dock_width(self.state.view.window_width)
-                    + super::views_shell::HORIZONTAL_PANE_SPLITTER_WIDTH
-            } else {
-                0.0
-            };
-            let left_boundary =
-                browser_width + crate::widgets::track_header::TRACK_HEADER_TOTAL_WIDTH;
+            let left_boundary = self.state.view.window_width - self.arrange_lane_width();
             let viewport_width = (right_boundary - left_boundary).max(1.0);
             let velocity = crate::timeline_geometry::edge_scroll_velocity(
                 cursor_x,
@@ -623,12 +614,11 @@ impl App {
                 right_boundary,
             );
             if velocity != 0.0 {
-                let mut viewport = crate::timeline_geometry::TimelineViewport::new(
-                    self.state.view.zoom_level,
-                    self.state.view.scroll_offset_beats,
-                );
-                viewport.scroll_by(velocity / 60.0, self.state.total_beats(), viewport_width);
-                self.state.view.scroll_offset_beats = viewport.scroll_offset_beats;
+                let total_beats = self.state.total_beats();
+                self.state
+                    .view
+                    .viewport
+                    .scroll_by(velocity / 60.0, total_beats, viewport_width);
             }
         }
         let auto_save_task = if self.save_runtime.auto_save_due(std::time::Instant::now()) {

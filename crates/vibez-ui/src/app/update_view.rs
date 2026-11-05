@@ -3,13 +3,21 @@
 use crate::domains::browser::BrowserMsg;
 use crate::domains::perform::PerformEditorFocus;
 use crate::domains::timeline_editor::TimelineEditorAdapter;
-use crate::domains::view::ViewMsg;
+use crate::domains::view::{ViewCtx, ViewMsg};
 use crate::state::Workspace;
-use crate::timeline_geometry::{TimelineGeometry, BASE_PIXELS_PER_BEAT};
 
 use super::*;
 
 impl App {
+    fn view_ctx(&self) -> ViewCtx {
+        ViewCtx {
+            total_beats: self.state.total_beats(),
+            song_beats: self.state.song_beats(),
+            lane_width: self.arrange_lane_width(),
+            samples_per_beat: self.state.transport.samples_per_beat(),
+        }
+    }
+
     fn route_section_timeline_navigation(&mut self, msg: &ViewMsg) -> bool {
         if self.state.view.workspace != Workspace::Perform
             || self.state.perform.editor_focus != PerformEditorFocus::TimelineEditor
@@ -27,36 +35,11 @@ impl App {
         };
         let viewport_width = self.section_timeline_viewport_width();
         let viewport = self.state.perform.section_editor.viewport_mut();
-        match msg {
-            ViewMsg::ZoomIn => {
-                viewport.zoom_around(1.25, viewport_width / 2.0, total_beats, viewport_width)
-            }
-            ViewMsg::ZoomOut => viewport.zoom_around(
-                1.0 / 1.25,
-                viewport_width / 2.0,
-                total_beats,
-                viewport_width,
-            ),
-            ViewMsg::SetZoom(level) => {
-                let factor = level.clamp(0.01, 16.0) / viewport.zoom_level;
-                viewport.zoom_around(factor, viewport_width / 2.0, total_beats, viewport_width);
-            }
-            ViewMsg::ZoomAround { factor, anchor_x } => {
-                viewport.zoom_around(*factor, *anchor_x, total_beats, viewport_width);
-            }
-            ViewMsg::ZoomToFit => {
-                let target_ppb =
-                    TimelineGeometry::fitted(total_beats, viewport_width, 0.0).pixels_per_beat();
-                viewport.zoom_level = (target_ppb / BASE_PIXELS_PER_BEAT).clamp(0.01, 16.0);
-                viewport.scroll_offset_beats = 0.0;
-                viewport.clamp(total_beats, viewport_width);
-            }
-            ViewMsg::ScrollArrangement(delta) => {
-                viewport.scroll_by(*delta, total_beats, viewport_width);
-            }
-            _ => return false,
+        if let ViewMsg::ZoomToFit = msg {
+            viewport.frame(0.0, total_beats, viewport_width);
+            return true;
         }
-        true
+        msg.navigate(viewport, total_beats, viewport_width)
     }
 
     pub(super) fn route_view_message(&mut self, msg: ViewMsg) -> Task<Message> {
@@ -92,9 +75,7 @@ impl App {
             _ => None,
         };
         if let Some(resize_msg) = detail_panel_resize {
-            let ctx = crate::domains::view::ViewCtx {
-                total_beats: self.state.total_beats(),
-            };
+            let ctx = self.view_ctx();
             let action = self.state.view.update(
                 resize_msg,
                 self.state.arrangement.resolve_timeline().editor,
@@ -114,9 +95,7 @@ impl App {
             _ => None,
         };
         if let Some(resize_msg) = perform_surface_resize {
-            let ctx = crate::domains::view::ViewCtx {
-                total_beats: self.state.total_beats(),
-            };
+            let ctx = self.view_ctx();
             let action = self.state.view.update(
                 resize_msg,
                 self.state.arrangement.resolve_timeline().editor,
@@ -147,9 +126,13 @@ impl App {
         if self.route_section_timeline_navigation(&msg) {
             return Task::none();
         }
-        let ctx = crate::domains::view::ViewCtx {
-            total_beats: self.state.total_beats(),
-        };
+        // Zoom to selection frames the Arrange view, which Perform hides.
+        if self.state.view.workspace == Workspace::Perform
+            && matches!(msg, ViewMsg::ZoomToSelection | ViewMsg::ZoomBack)
+        {
+            return Task::none();
+        }
+        let ctx = self.view_ctx();
         let editor = if self.state.view.workspace == Workspace::Perform
             && (self.state.perform.has_selected_timeline()
                 || self.state.perform.layout == vibez_project::PerformLayout::Clips)
@@ -178,5 +161,67 @@ impl App {
         } else {
             task
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domains::perform::Section;
+    use crate::timeline_geometry::FRAME_MARGIN_PIXELS;
+
+    /// An app showing one Section's timeline in Perform, with the timeline
+    /// focused.
+    fn app_in_a_section() -> App {
+        let mut app = super::super::test_support::app();
+        app.state.view.workspace = Workspace::Perform;
+        let section = Section::new(0);
+        app.state.perform.selected_section = Some(section.id);
+        std::sync::Arc::make_mut(&mut app.state.perform.sections).insert(section);
+        app.state.perform.editor_focus = PerformEditorFocus::TimelineEditor;
+        app
+    }
+
+    #[test]
+    fn section_fit_frames_the_section_inside_the_lane_margin() {
+        let mut app = app_in_a_section();
+        let section_beats = app
+            .state
+            .perform
+            .selected_section
+            .and_then(|id| app.state.perform.sections.by_id(id))
+            .map(|section| section.length_beats)
+            .unwrap();
+
+        let _ = app.update(Message::View(ViewMsg::ZoomToFit));
+
+        let width = app.section_timeline_viewport_width();
+        let end_x = app
+            .state
+            .perform
+            .section_editor
+            .viewport()
+            .geometry()
+            .beat_to_x(section_beats);
+        assert!(
+            end_x <= width - 2.0 * FRAME_MARGIN_PIXELS + 0.01,
+            "the section ends at {end_x} of {width}"
+        );
+        assert!(end_x > width - 4.0 * FRAME_MARGIN_PIXELS, "ends at {end_x}");
+    }
+
+    #[test]
+    fn z_and_x_in_a_section_leave_the_hidden_arrange_view_alone() {
+        let mut app = app_in_a_section();
+        let editor = app.state.perform.section_editor.editor_mut();
+        editor.time_selection_active = true;
+        editor.selection_start_beats = 4.0;
+        editor.selection_end_beats = 8.0;
+        let arrange = app.state.view.viewport;
+
+        let _ = app.update(Message::View(ViewMsg::ZoomToSelection));
+        assert_eq!(app.state.view.viewport, arrange);
+        let _ = app.update(Message::View(ViewMsg::ZoomBack));
+        assert_eq!(app.state.view.viewport, arrange);
     }
 }

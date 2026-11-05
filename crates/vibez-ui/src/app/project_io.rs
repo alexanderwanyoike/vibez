@@ -112,7 +112,8 @@ impl App {
         self.state.arrangement.time_selection_active = false;
         self.state.arrangement.selection_start_beats = 0.0;
         self.state.arrangement.selection_end_beats = 0.0;
-        self.state.view.scroll_offset_beats = 0.0;
+        self.state.view.viewport.scroll_offset_beats = 0.0;
+        self.state.view.zoom_before_selection = None;
         self.state.view.context_menu = None;
         self.state.devices.context_menu = None;
         self.state.project.file_menu_open = false;
@@ -961,3 +962,16 @@ pub(super) fn drum_rack_pads_for_save(pads: &[UiDrumPad]) -> Vec<vibez_core::tra
 #[cfg(test)]
 #[path = "project_io_tests.rs"]
 mod instrument_invariant_tests;
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn a_new_or_opened_project_forgets_the_view_before_zoom_to_selection() {
+        let mut app = super::super::test_support::app();
+        app.state.view.zoom_before_selection = Some(Default::default());
+
+        app.clear_project_runtime();
+
+        assert!(app.state.view.zoom_before_selection.is_none());
+    }
+}

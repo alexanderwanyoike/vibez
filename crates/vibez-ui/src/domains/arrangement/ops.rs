@@ -439,17 +439,10 @@ impl TimelineEditorState {
         if ctx.samples_per_beat <= 0.0 {
             return ArrangementAction::default();
         }
-        let anchor_duration = match anchor {
-            ArrangementSelection::AudioClip { track_id, clip_id } => self
-                .find_content(track_id)
-                .and_then(|t| t.clips.iter().find(|c| c.id == clip_id))
-                .map(|c| c.duration as f64 / ctx.samples_per_beat),
-            ArrangementSelection::NoteClip { track_id, clip_id } => self
-                .find_content(track_id)
-                .and_then(|t| t.note_clips.iter().find(|c| c.id == clip_id))
-                .map(|c| c.duration_beats),
-        };
-        let Some(anchor_duration) = anchor_duration else {
+        let Some(anchor_duration) = self
+            .clip_span(anchor, ctx.samples_per_beat)
+            .map(|span| span.length_beats)
+        else {
             return ArrangementAction::default();
         };
         let delta = new_duration_beats - anchor_duration;
@@ -462,11 +455,10 @@ impl TimelineEditorState {
         for target in targets {
             match target {
                 ArrangementSelection::AudioClip { track_id, clip_id } => {
-                    let old = self
-                        .find_content(track_id)
-                        .and_then(|t| t.clips.iter().find(|c| c.id == clip_id))
-                        .map(|c| c.duration as f64 / ctx.samples_per_beat);
-                    if let Some(old) = old {
+                    if let Some(old) = self
+                        .clip_span(target, ctx.samples_per_beat)
+                        .map(|span| span.length_beats)
+                    {
                         let duration =
                             ((old + delta).max(0.25) * ctx.samples_per_beat).round() as u64;
                         let action = self.op_resize_audio_clip(

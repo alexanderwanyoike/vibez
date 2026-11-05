@@ -27,6 +27,7 @@ pub use messages::{
     ClipTransposeRenderRequest,
 };
 mod clip_moves;
+mod clip_spans;
 mod clipboard;
 mod content_swap;
 mod control_swap;
