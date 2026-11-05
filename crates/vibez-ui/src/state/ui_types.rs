@@ -608,6 +608,15 @@ impl UiNoteClip {
                 .clamp_start(self.start_marker_beats, 0.0, NOTE_CONTENT_END_BEATS);
     }
 
+    /// The content beat this Clip plays at Arrangement `beat`; off the
+    /// Clip it plays nothing.
+    pub(crate) fn content_beat_at(&self, beat: f64) -> Option<f64> {
+        let into_clip = beat - self.position_beats;
+        (0.0..self.duration_beats)
+            .contains(&into_clip)
+            .then(|| self.timeline().source_at(into_clip))
+    }
+
     /// Content beats a clip editor shows, from beat 0 to where the Clip
     /// stops playing.
     pub(crate) fn editor_beats(&self) -> f64 {

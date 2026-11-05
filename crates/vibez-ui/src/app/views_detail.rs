@@ -431,13 +431,7 @@ impl App {
 
         let (mut piano_widget, velocity_widget) = match visible_clip {
             Some(clip) => {
-                // Off the Clip, its content plays nothing to point at.
-                let clip_playhead = playhead_beats - clip.position_beats;
-                let content_playhead = if (0.0..clip.duration_beats).contains(&clip_playhead) {
-                    clip.timeline().source_at(clip_playhead)
-                } else {
-                    -1.0
-                };
+                let content_playhead = clip.content_beat_at(playhead_beats).unwrap_or(-1.0);
                 (
                     PianoRollWidget::from_clip(
                         track_id,
