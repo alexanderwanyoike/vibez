@@ -532,6 +532,36 @@ impl Hsl {
     }
 }
 
+/// A colour as OKLCH: perceptual lightness in 0..=1, chroma, and hue in
+/// degrees. Palettes are authored in it because equal steps of its
+/// lightness look equal, which HSL's do not.
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Oklch {
+    pub lightness: f32,
+    pub chroma: f32,
+    pub hue: f32,
+}
+
+#[allow(dead_code)]
+impl Oklch {
+    pub const fn new(lightness: f32, chroma: f32, hue: f32) -> Self {
+        Self {
+            lightness,
+            chroma,
+            hue,
+        }
+    }
+
+    pub fn of(_c: Color) -> Self {
+        todo!()
+    }
+
+    pub fn color(self) -> Color {
+        todo!()
+    }
+}
+
 /// WCAG 2 relative luminance of an sRGB colour, ignoring alpha.
 pub(crate) fn relative_luminance(c: Color) -> f32 {
     let linear = |v: f32| {
@@ -875,6 +905,27 @@ mod tests {
             assert!(medium.body_toward_lane < soft.body_toward_lane);
             assert_eq!((soft.ink, vivid.ink), (authored.ink, authored.ink));
         }
+    }
+
+    #[test]
+    fn oklch_converts_to_srgb_as_the_mockup_generator_does() {
+        for (oklch, expected) in [
+            (Oklch::new(0.215, 0.006, 260.0), "#181a1c"),
+            (Oklch::new(0.74, 0.175, 55.0), "#fc871e"),
+            (Oklch::new(0.60, 0.19, 29.0), "#da4336"),
+            (Oklch::new(0.965, 0.004, 85.0), "#f5f3f0"),
+        ] {
+            assert_eq!(hex::to_hex(&oklch.color()), expected, "{oklch:?}");
+        }
+    }
+
+    #[test]
+    fn oklch_reads_back_the_lightness_chroma_and_hue_it_was_built_from() {
+        let authored = Oklch::new(0.72, 0.11, 165.0);
+        let read = Oklch::of(authored.color());
+        assert!((read.lightness - 0.72).abs() < 0.005, "{read:?}");
+        assert!((read.chroma - 0.11).abs() < 0.005, "{read:?}");
+        assert!((read.hue - 165.0).abs() < 1.0, "{read:?}");
     }
 
     #[test]
