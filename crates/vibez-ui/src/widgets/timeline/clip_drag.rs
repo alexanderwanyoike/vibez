@@ -1,27 +1,10 @@
 //! Pointer gestures that can own the per-track Clip canvas.
 
-use crate::state::{ArrangementSelection, ClipSpan, UndoGestureId};
+use crate::state::{ArrangementSelection, ClipEdge, ClipSpan, UndoGestureId};
 use crate::widgets::drag_phase::DragPhase;
 use vibez_core::id::ClipId;
 
 use super::fade_drag::{CrossfadeCurveDrag, FadeClipDrag, FadeCurveDrag};
-
-/// The edge of a Clip a resize drag holds.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ClipEdge {
-    Start,
-    End,
-}
-
-impl ClipEdge {
-    /// The beat of `span` that stays put while this edge is dragged.
-    pub fn fixed_beat(self, span: ClipSpan) -> f64 {
-        match self {
-            Self::Start => span.end_beats(),
-            Self::End => span.start_beats,
-        }
-    }
-}
 
 #[derive(Debug, Clone)]
 pub enum ClipDragAction {

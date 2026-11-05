@@ -1,7 +1,7 @@
 use iced::Point;
 
 use super::*;
-use crate::state::{ClipDragKind, ClipDragStep, ClipSpan, UndoGestureId};
+use crate::state::{ClipDragKind, ClipDragStep, ClipEdge, ClipSpan, UndoGestureId};
 use crate::timeline_snap::{SnapTarget, SnapTargetKind};
 
 const CTX: ArrangementCtx = ArrangementCtx {
@@ -100,7 +100,12 @@ fn edge_steps_read_the_new_start_or_the_new_length() {
 
     drag(
         &mut a,
-        step(UndoGestureId::new(), ClipDragKind::Start, clip, t0),
+        step(
+            UndoGestureId::new(),
+            ClipDragKind::Resize(ClipEdge::Start),
+            clip,
+            t0,
+        ),
         ArrangementMsg::TrimSelectedClipsStart {
             anchor,
             new_start_beats: 1.25,
@@ -110,7 +115,12 @@ fn edge_steps_read_the_new_start_or_the_new_length() {
 
     drag(
         &mut a,
-        step(UndoGestureId::new(), ClipDragKind::End, clip, t0),
+        step(
+            UndoGestureId::new(),
+            ClipDragKind::Resize(ClipEdge::End),
+            clip,
+            t0,
+        ),
         ArrangementMsg::ResizeSelectedClips {
             anchor,
             new_duration_beats: 6.5,

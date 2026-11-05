@@ -4,8 +4,8 @@
 use vibez_core::time::MusicalTime;
 
 use crate::state::{
-    ClipDrag, ClipDragKind, ClipDragPreview, ClipDragStep, EditorSelection, ProjectTracksState,
-    TimelineEditorState, UndoGestureId,
+    ClipDrag, ClipDragKind, ClipDragPreview, ClipDragStep, ClipEdge, EditorSelection,
+    ProjectTracksState, TimelineEditorState, UndoGestureId,
 };
 
 use super::{ArrangementAction, ArrangementCtx, ArrangementMsg, EngineHandle};
@@ -69,8 +69,8 @@ impl TimelineEditorState {
                     .map_or("", |track| track.name.as_str());
                 format!("{start} to {lane}")
             }
-            ClipDragKind::Start => format!("Start {start}"),
-            ClipDragKind::End => format!(
+            ClipDragKind::Resize(ClipEdge::Start) => format!("Start {start}"),
+            ClipDragKind::Resize(ClipEdge::End) => format!(
                 "Length {}",
                 MusicalTime(span.length_beats).bars_beats_sixteenths()
             ),

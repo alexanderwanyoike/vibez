@@ -1401,7 +1401,10 @@ fn a_clip_end_step_reports_the_grid_line_it_locked_onto() {
 
     let step = drag_step(end_drag_message(&canvas, 7.05, Modifiers::empty())).expect("a step");
 
-    assert_eq!(step.kind, crate::state::ClipDragKind::End);
+    assert_eq!(
+        step.kind,
+        crate::state::ClipDragKind::Resize(crate::state::ClipEdge::End)
+    );
     assert_eq!(
         step.guide,
         Some(crate::timeline_snap::SnapTarget {
@@ -1719,10 +1722,7 @@ fn a_clips_end_zone_stops_at_its_drawn_right_edge() {
 
     assert_eq!(
         (inside.clip_id, inside.edge),
-        (
-            clip_id,
-            Some(crate::widgets::timeline::clip_drag::ClipEdge::End)
-        )
+        (clip_id, Some(crate::state::ClipEdge::End))
     );
     assert!(
         canvas.hit_test(end_x - 0.5).is_none(),

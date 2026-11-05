@@ -3,8 +3,7 @@
 use iced::Point;
 
 use super::*;
-use crate::state::{ClipDragKind, ClipDragStep};
-use crate::widgets::timeline::clip_drag::ClipEdge;
+use crate::state::{ClipDragKind, ClipDragStep, ClipEdge};
 
 impl TrackClipCanvas {
     /// The edit for a Clip held by its title and dragged to `local`, or
@@ -115,10 +114,7 @@ impl TrackClipCanvas {
         };
         let step = ClipDragStep {
             gesture: *undo_gesture,
-            kind: match edge {
-                ClipEdge::Start => ClipDragKind::Start,
-                ClipEdge::End => ClipDragKind::End,
-            },
+            kind: ClipDragKind::Resize(*edge),
             anchor: anchor.clip_id(),
             origin_track: track_id,
             origin: *origin,

@@ -12,8 +12,24 @@ use crate::timeline_snap::SnapTarget;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ClipDragKind {
     Move,
+    Resize(ClipEdge),
+}
+
+/// The edge of a Clip a resize drag holds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClipEdge {
     Start,
     End,
+}
+
+impl ClipEdge {
+    /// The beat of `span` that stays put while this edge is dragged.
+    pub fn fixed_beat(self, span: ClipSpan) -> f64 {
+        match self {
+            Self::Start => span.end_beats(),
+            Self::End => span.start_beats,
+        }
+    }
 }
 
 /// One pointer step of a Clip drag, as the lane it began on saw it.
