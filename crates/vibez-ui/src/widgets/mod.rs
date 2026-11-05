@@ -63,6 +63,7 @@ pub mod saturator_device;
 pub mod saturator_display;
 pub mod shell_card;
 mod span_edges;
+pub mod strip_eq;
 pub mod swing_knob;
 pub mod synth_device;
 pub mod synth_display;

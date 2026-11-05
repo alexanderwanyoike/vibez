@@ -11,16 +11,19 @@ use crate::message::Message;
 use crate::state::ContextMenuTarget;
 use crate::theme as th;
 use crate::widgets::control_style;
-use crate::widgets::mixer_strip::{view_mixer_strip, MixerStripView, StripRole};
+use crate::widgets::mixer_strip::{min_strip_height, view_mixer_strip, MixerStripView, StripRole};
+use crate::widgets::quiet_scroll;
 
 use super::*;
 
-/// The desk's own padding round the strips, above and below.
-const DESK_PADDING: f32 = 32.0;
-/// Returns shown side by side before their area scrolls.
-const PINNED_RETURNS: usize = 4;
+/// The desk's padding round the strips, above and below.
+const DESK_PADDING: f32 = 16.0;
+const DESK_TOP: f32 = 10.0;
+const DESK_SIDE: f32 = 10.0;
+/// Space between neighbouring strips.
+const STRIP_GAP: f32 = 8.0;
 /// The send bank switch above the strips, when there is more than one bank.
-const BANK_BAR_H: f32 = 30.0;
+const BANK_BAR_H: f32 = 34.0;
 
 impl App {
     pub(super) fn view_mixer(&self) -> Element<'_, Message> {
@@ -28,47 +31,25 @@ impl App {
             let prompt = text("Add a track to get started")
                 .size(16)
                 .color(th::text_dim());
-
-            let centered = center(prompt).width(Length::Fill).height(Length::Fill);
-
-            return container(centered)
+            return center(prompt)
                 .width(Length::Fill)
-                .height(Length::FillPortion(5))
-                .style(|_theme: &Theme| container::Style {
-                    background: Some(th::bg_dark().into()),
-                    ..Default::default()
-                })
+                .height(Length::Fill)
                 .into();
         }
 
-        // Strips fill the room they get, but never shrink below a usable
-        // fader; on a short window the desk scrolls up and down instead.
-        let desk = iced::widget::responsive(move |size| {
-            let minimum = crate::widgets::mixer_strip::min_strip_height(
-                self.state.project_tracks.buses.len(),
-            );
-            let bank_bar = self.view_send_bank_bar();
-            let bar_h = if bank_bar.is_some() { BANK_BAR_H } else { 0.0 };
-            let desk = self.view_desk((size.height - DESK_PADDING - bar_h).max(minimum));
-            iced::widget::Scrollable::with_direction(
-                column![].push_maybe(bank_bar).push(desk),
-                iced::widget::scrollable::Direction::Vertical(
-                    iced::widget::scrollable::Scrollbar::new(),
-                ),
-            )
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into()
-        });
-
+        // On a window too short for the whole desk it scrolls up and down,
+        // so no strip is ever squashed.
+        let desk = column![]
+            .push_maybe(self.view_send_bank_bar())
+            .push(self.view_desk());
         mouse_area(
-            container(desk)
-                .width(Length::Fill)
-                .height(Length::FillPortion(5))
-                .style(|_theme: &Theme| container::Style {
-                    background: Some(th::bg_surface().into()),
-                    ..Default::default()
-                }),
+            iced::widget::Scrollable::with_direction(
+                desk,
+                iced::widget::scrollable::Direction::Vertical(quiet_scroll::scrollbar()),
+            )
+            .style(quiet_scroll::style)
+            .width(Length::Fill)
+            .height(Length::Fill),
         )
         .on_right_press(Message::View(ViewMsg::ShowContextMenu {
             x: self.state.view.cursor_x,
@@ -87,97 +68,88 @@ impl App {
             return None;
         }
         let current = self.state.view.mixer_send_bank.min(banks - 1);
-        let mut bar = row![text("SENDS").size(10).color(th::text_dim())]
-            .spacing(6)
-            .align_y(iced::Alignment::Center);
-        for bank in 0..banks {
+        let segments = row((0..banks).map(|bank| {
             let first = bank * SENDS_PER_BANK + 1;
-            let active = bank == current;
-            bar = bar.push(
-                button(text(format!("{first}–{}", first + SENDS_PER_BANK - 1)).size(10))
-                    .on_press(Message::View(ViewMsg::SetMixerSendBank(bank)))
-                    .padding([3, 10])
-                    .style(control_style::style(active.then(th::accent))),
-            );
-        }
+            button(text(format!("{first}–{}", first + SENDS_PER_BANK - 1)).size(10.5))
+                .on_press(Message::View(ViewMsg::SetMixerSendBank(bank)))
+                .padding([3, 8])
+                .style(control_style::style((bank == current).then(th::accent)))
+                .into()
+        }))
+        .spacing(2);
         Some(
-            container(bar)
-                .height(BANK_BAR_H)
-                .padding([4, 12])
-                .center_y(BANK_BAR_H)
-                .into(),
+            container(
+                row![
+                    text("SENDS")
+                        .font(crate::typography::PERFORM_LABEL)
+                        .size(8)
+                        .color(th::text_muted()),
+                    segments
+                ]
+                .spacing(8)
+                .align_y(iced::Alignment::Center),
+            )
+            .padding(iced::Padding {
+                top: DESK_TOP,
+                left: DESK_SIDE + 4.0,
+                ..iced::Padding::ZERO
+            })
+            .height(BANK_BAR_H)
+            .into(),
         )
     }
 
-    /// The strips, returns and master at `height`.
-    fn view_desk(&self, height: f32) -> Element<'_, Message> {
-        let playhead_beat = self.state.transport.position_beats();
+    fn view_desk_strip<'a>(
+        &'a self,
+        track: &'a crate::state::ProjectTrack,
+        role: StripRole,
+        number: String,
+        height: f32,
+    ) -> Element<'a, Message> {
+        let id = track.id;
+        view_mixer_strip(
+            track,
+            role,
+            &self.state.project_tracks.buses,
+            MixerStripView {
+                peaks: self.track_meter_peaks.get(&id).copied().unwrap_or_default(),
+                selected: if role == StripRole::Master {
+                    self.state.arrangement.selected_track == Some(id)
+                } else {
+                    self.channel_selected(id)
+                },
+                click: self.channel_click(id),
+                number,
+                editing_name: role != StripRole::Master
+                    && self.state.view.editing_track_name == Some(id),
+                height,
+                send_bank: self.state.view.mixer_send_bank,
+                edit_text: &self.state.view.edit_name_text,
+                playhead_beat: self.state.transport.position_beats(),
+                automation: self
+                    .state
+                    .arrange_content(id)
+                    .map(|content| content.automation.as_slice())
+                    .unwrap_or(&[]),
+            },
+        )
+    }
+
+    /// The tracks then the returns in one row that scrolls sideways, with
+    /// the master pinned on the right.
+    fn view_desk(&self) -> Element<'_, Message> {
         let buses = &self.state.project_tracks.buses;
-        let mut strips = row![].spacing(4).padding(8);
-
+        let height = min_strip_height(buses.len());
+        let strip = |track, role, number| self.view_desk_strip(track, role, number, height);
+        let mut channels = row![].spacing(STRIP_GAP);
         for (index, track) in self.state.project_tracks.tracks.iter().enumerate() {
-            let selected = self.channel_selected(track.id);
-            let strip = view_mixer_strip(
-                track,
-                StripRole::Track,
-                buses,
-                MixerStripView {
-                    peaks: self
-                        .track_meter_peaks
-                        .get(&track.id)
-                        .copied()
-                        .unwrap_or_default(),
-                    selected,
-                    click: self.channel_click(track.id),
-                    number: format!("{:02}", index + 1),
-                    editing_name: self.state.view.editing_track_name == Some(track.id),
-                    height,
-                    send_bank: self.state.view.mixer_send_bank,
-                    edit_text: &self.state.view.edit_name_text,
-                    playhead_beat,
-                    automation: self
-                        .state
-                        .arrange_content(track.id)
-                        .map(|content| content.automation.as_slice())
-                        .unwrap_or(&[]),
-                },
-            );
-            strips = strips.push(strip);
+            channels = channels.push(strip(track, StripRole::Track, format!("{:02}", index + 1)));
         }
-
-        // Returns live on the right, next to the master: new buses
-        // appear where the "+ Bus" pillar sits, growing toward it.
-        let mut returns = row![].spacing(4).padding(8);
+        // Returns follow the tracks, and new buses appear where the "+ Bus"
+        // pillar sits, growing toward the master.
         for (index, bus) in buses.iter().enumerate() {
-            let selected = self.channel_selected(bus.id);
-            returns = returns.push(view_mixer_strip(
-                bus,
-                StripRole::Bus,
-                buses,
-                MixerStripView {
-                    peaks: self
-                        .track_meter_peaks
-                        .get(&bus.id)
-                        .copied()
-                        .unwrap_or_default(),
-                    selected,
-                    click: self.channel_click(bus.id),
-                    number: format!("R{}", index + 1),
-                    editing_name: self.state.view.editing_track_name == Some(bus.id),
-                    height,
-                    send_bank: self.state.view.mixer_send_bank,
-                    edit_text: &self.state.view.edit_name_text,
-                    playhead_beat,
-                    automation: self
-                        .state
-                        .arrange_content(bus.id)
-                        .map(|content| content.automation.as_slice())
-                        .unwrap_or(&[]),
-                },
-            ));
+            channels = channels.push(strip(bus, StripRole::Bus, format!("R{}", index + 1)));
         }
-
-        // "+ Bus" pillar: between the last return and the master.
         let add_bus_btn = button(
             column![icons::icon(icons::PLUS).size(12), text("Bus").size(9)]
                 .spacing(2)
@@ -186,77 +158,49 @@ impl App {
         .on_press(Message::add_bus())
         .padding([12, 6])
         .style(control_style::style(None));
-        let add_bus = container(add_bus_btn)
-            .height(Length::Fixed(height))
-            .align_y(iced::Alignment::Center);
+        channels = channels.push(container(add_bus_btn).center_y(Length::Fixed(height)));
 
-        // Master strip — a real channel, pinned to far right
-        let master_selected =
-            self.state.arrangement.selected_track == Some(vibez_core::id::TrackId::MASTER);
-        let master_strip = container(view_mixer_strip(
-            &self.state.project_tracks.master,
-            StripRole::Master,
-            buses,
-            MixerStripView {
-                peaks: self
-                    .track_meter_peaks
-                    .get(&vibez_core::id::TrackId::MASTER)
-                    .copied()
-                    .unwrap_or_default(),
-                selected: master_selected,
-                click: self.channel_click(vibez_core::id::TrackId::MASTER),
-                number: "M".into(),
-                editing_name: false,
-                height,
-                send_bank: self.state.view.mixer_send_bank,
-                edit_text: &self.state.view.edit_name_text,
-                playhead_beat,
-                automation: self
-                    .state
-                    .arrange_content(vibez_core::id::TrackId::MASTER)
-                    .map(|content| content.automation.as_slice())
-                    .unwrap_or(&[]),
-            },
-        ))
-        .padding(8);
-
-        // Tracks scroll sideways once they outgrow the window; the returns
-        // and the master stay pinned on the right like a desk's.
         // The plain wheel scrolls the desk up and down; Shift turns it
-        // sideways over the tracks or the returns.
+        // sideways over the channels.
         let channels = crate::widgets::wheel_gate::shift_wheel(
             iced::widget::Scrollable::with_direction(
-                strips,
-                iced::widget::scrollable::Direction::Horizontal(
-                    iced::widget::scrollable::Scrollbar::new(),
-                ),
+                container(channels).padding(iced::Padding {
+                    bottom: DESK_PADDING - DESK_TOP,
+                    ..iced::Padding::ZERO
+                }),
+                iced::widget::scrollable::Direction::Horizontal(quiet_scroll::scrollbar()),
             )
+            .style(quiet_scroll::style)
             .width(Length::Fill),
         );
-        // Past a few returns their area scrolls on its own, so they never
-        // squeeze the tracks off the desk or push the master out of view.
-        let returns: Element<'_, Message> = if buses.len() > PINNED_RETURNS {
-            let strips = PINNED_RETURNS as f32;
-            crate::widgets::wheel_gate::shift_wheel(
-                iced::widget::Scrollable::with_direction(
-                    returns,
-                    iced::widget::scrollable::Direction::Horizontal(
-                        iced::widget::scrollable::Scrollbar::new(),
-                    ),
-                )
-                .width(Length::Fixed(
-                    strips * crate::widgets::mixer_strip::STRIP_W + (strips - 1.0) * 4.0 + 16.0,
-                )),
-            )
-            .into()
-        } else {
-            returns.into()
-        };
-        let mixer_row = row![channels, returns, add_bus, master_strip]
-            .spacing(4)
-            .padding([8, 4]);
+        let master = container(strip(
+            &self.state.project_tracks.master,
+            StripRole::Master,
+            "M".into(),
+        ))
+        .style(|_theme: &Theme| container::Style {
+            background: Some(th::bg_elevated().into()),
+            shadow: iced::Shadow {
+                color: th::with_alpha(iced::Color::BLACK, if th::is_light() { 0.15 } else { 0.45 }),
+                offset: iced::Vector::new(-6.0, 0.0),
+                blur_radius: 14.0,
+            },
+            border: iced::Border {
+                radius: 8.0.into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        });
 
-        mixer_row.into()
+        row![channels, master]
+            .spacing(STRIP_GAP)
+            .padding(iced::Padding {
+                top: DESK_TOP,
+                right: DESK_SIDE,
+                bottom: 0.0,
+                left: DESK_SIDE,
+            })
+            .into()
     }
 }
 
@@ -354,9 +298,8 @@ mod channel_selection_tests {
 
 #[cfg(test)]
 mod desk_fit_tests {
-    use super::DESK_PADDING;
+    use super::{min_strip_height, DESK_PADDING};
     use crate::shell_layout::{PANE_GAP, STATUS_HEIGHT};
-    use crate::widgets::mixer_strip::min_strip_height;
 
     #[test]
     fn a_whole_desk_fits_the_smallest_window_above_the_detail_panel() {
