@@ -218,3 +218,21 @@ fn turning_selected_clip_loops_off_and_on_keeps_their_loops() {
     assert!(clip.loop_enabled);
     assert_eq!((clip.loop_start_beats, clip.loop_end_beats), (4.0, 8.0));
 }
+
+#[test]
+fn resetting_a_loop_region_with_the_start_marker_past_the_clip_end_stays_ordered() {
+    let mut a = arrangement_with_tracks(1);
+    add_audio_clip(&mut a, 0, 0, 88_200);
+    let audio = &mut a.tracks[0].clips[0];
+    audio.duration = 44_100;
+    audio.start_marker = 60_000;
+    audio.reset_loop_region_to_clip();
+    assert!(audio.loop_start < audio.loop_end);
+    assert!(audio.start_marker < audio.loop_end);
+
+    let mut midi = UiNoteClip::test_clip(0.0, 4.0);
+    midi.start_marker_beats = 6.0;
+    midi.reset_loop_region_to_clip();
+    assert!(midi.loop_start_beats < midi.loop_end_beats);
+    assert!(midi.start_marker_beats < midi.loop_end_beats);
+}
