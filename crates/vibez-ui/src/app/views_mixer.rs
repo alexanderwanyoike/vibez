@@ -73,7 +73,17 @@ impl App {
     /// The Mix workspace is as tall as its desk, leaving the detail panel
     /// the rest, but never squeezes the detail panel below its minimum.
     pub(super) fn mix_workspace_height(&self) -> f32 {
-        self.mix_desk_height()
+        let chrome = match super::views_control_bar::control_bar_rows(self.state.view.window_width)
+        {
+            super::views_control_bar::ControlBarRows::One => 1.0,
+            super::views_control_bar::ControlBarRows::Two => 2.0,
+        } * super::views_control_bar_style::BAR_HEIGHT;
+        let room = self.state.view.window_height
+            - chrome
+            - crate::shell_layout::STATUS_HEIGHT
+            - 3.0 * crate::shell_layout::PANE_GAP
+            - super::views_detail::DETAIL_PANEL_MIN_HEIGHT;
+        self.mix_desk_height().min(room).max(0.0)
     }
 
     /// The switch between banks of buses on the send rows; none while every

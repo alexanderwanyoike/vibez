@@ -360,11 +360,15 @@ impl App {
                 .into()
         };
 
-        let panel_height = self.effective_detail_height();
+        let height = if self.state.view.workspace == crate::state::Workspace::Mix {
+            Length::Fill
+        } else {
+            Length::Fixed(self.effective_detail_height())
+        };
         crate::widgets::shell_card::shell_card(
             container(detail_content).padding(DETAIL_CARD_PADDING),
         )
-        .height(Length::Fixed(panel_height))
+        .height(height)
         .into()
     }
 
