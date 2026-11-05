@@ -64,6 +64,7 @@ mod crossfades;
 mod duplicate_block;
 mod edge_trims;
 mod group_move;
+mod loop_off;
 mod loop_region;
 mod note_clips;
 mod overwrite;

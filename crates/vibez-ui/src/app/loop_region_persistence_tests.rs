@@ -167,6 +167,55 @@ fn undo_and_redo_of_a_shrink_keep_the_loop() {
 #[test]
 fn undo_and_redo_of_an_audio_shrink_keep_the_loop() {
     let mut app = super::test_support::app();
+    let (track_id, clip_id) = add_looped_percs(&mut app, 400_000, 200_000, 0);
+    let clip = |app: &App| {
+        let clip = &app.state.arrange_content(track_id).unwrap().clips[0];
+        (clip.duration, clip.loop_start, clip.loop_end)
+    };
+
+    let [shrunk, undone, redone] = shrink_undo_and_redo(
+        &mut app,
+        ArrangementSelection::AudioClip { track_id, clip_id },
+        1.0,
+        clip,
+    );
+
+    assert!(shrunk.0 < 200_000);
+    assert_eq!((shrunk.1, shrunk.2), (0, 300_000));
+    assert_eq!(undone, (200_000, 0, 300_000));
+    assert_eq!(redone, shrunk);
+}
+
+/// Unlooped, a clip ends with its sample, so turning the loop off cuts a
+/// long clip; undo must give the length back with the loop.
+#[test]
+fn undo_of_turning_an_audio_loop_off_restores_its_length() {
+    let mut app = super::test_support::app();
+    let (track_id, clip_id) = add_looped_percs(&mut app, 400_000, 380_000, 200_000);
+    let clip = |app: &App| {
+        let clip = &app.state.arrange_content(track_id).unwrap().clips[0];
+        (clip.loop_enabled, clip.duration, clip.start_marker)
+    };
+
+    let _ = app.update_and_refresh_clips(Message::Arrangement(ArrangementMsg::ToggleClipLoop(
+        track_id, clip_id,
+    )));
+    let cut = clip(&app);
+    let _ = app.update_and_refresh_clips(Message::Project(ProjectMsg::Undo));
+
+    assert_eq!(cut, (false, 200_000, 200_000));
+    assert_eq!(clip(&app), (true, 380_000, 200_000));
+}
+
+/// Add a "Percs" track holding one Audio Clip `duration` frames long over a
+/// `sample_frames` sample, looping its first 300 000 frames from
+/// `start_marker`.
+fn add_looped_percs(
+    app: &mut App,
+    sample_frames: usize,
+    duration: u64,
+    start_marker: u64,
+) -> (TrackId, ClipId) {
     let track = ProjectTrack::new(TrackId::new(), "Percs".into(), 0);
     let track_id = track.id;
     let clip_id = ClipId::new();
@@ -177,14 +226,14 @@ fn undo_and_redo_of_an_audio_shrink_keep_the_loop() {
             id: clip_id,
             name: "Percs".into(),
             audio: Arc::new(vibez_core::audio_buffer::DecodedAudio {
-                channels: vec![vec![0.0; 400_000]],
+                channels: vec![vec![0.0; sample_frames]],
                 sample_rate: 44_100,
             }),
             source: None,
             position: 0,
             source_offset: 0,
-            start_marker: 0,
-            duration: 200_000,
+            start_marker,
+            duration,
             loop_enabled: true,
             loop_start: 0,
             loop_end: 300_000,
@@ -202,22 +251,7 @@ fn undo_and_redo_of_an_audio_shrink_keep_the_loop() {
     Arc::make_mut(&mut app.state.project_tracks)
         .tracks
         .push(track);
-    let clip = |app: &App| {
-        let clip = &app.state.arrange_content(track_id).unwrap().clips[0];
-        (clip.duration, clip.loop_start, clip.loop_end)
-    };
-
-    let [shrunk, undone, redone] = shrink_undo_and_redo(
-        &mut app,
-        ArrangementSelection::AudioClip { track_id, clip_id },
-        1.0,
-        clip,
-    );
-
-    assert!(shrunk.0 < 200_000);
-    assert_eq!((shrunk.1, shrunk.2), (0, 300_000));
-    assert_eq!(undone, (200_000, 0, 300_000));
-    assert_eq!(redone, shrunk);
+    (track_id, clip_id)
 }
 
 /// Shrink the selected clip to `beats` as one gesture, then undo and redo

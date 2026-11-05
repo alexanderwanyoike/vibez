@@ -204,9 +204,25 @@ impl TimelineEditorState {
             }
             ArrangementMsg::ToggleClipLoop(track_id, clip_id) => {
                 let mut cmd_data = None;
+                let mut from_start = None;
                 if let Some(track) = self.find_content_mut(track_id) {
                     if let Some(clip) = track.clips.iter_mut().find(|c| c.id == clip_id) {
                         clip.set_loop_enabled(!clip.loop_enabled);
+                        if !clip.loop_enabled {
+                            // Unlooped, a Clip plays only inside its window,
+                            // which may end before its start marker.
+                            let duration = clip.playable_duration(clip.duration);
+                            let mut fragment = fragment_geometry::audio_fragment(
+                                clip,
+                                clip.name.clone(),
+                                0,
+                                duration,
+                            );
+                            fragment.id = clip.id;
+                            let moved = (fragment.source_offset, fragment.duration)
+                                != (clip.source_offset, clip.duration);
+                            from_start = moved.then_some(fragment);
+                        }
                         cmd_data = Some((clip.loop_enabled, clip.loop_start, clip.loop_end));
                     }
                 }
@@ -218,6 +234,9 @@ impl TimelineEditorState {
                         loop_start,
                         loop_end,
                     });
+                }
+                if let Some(from_start) = from_start {
+                    self.replace_audio_clip(engine, track_id, clip_id, vec![from_start]);
                 }
             }
             ArrangementMsg::ToggleClipReverse(track_id, clip_id) => {

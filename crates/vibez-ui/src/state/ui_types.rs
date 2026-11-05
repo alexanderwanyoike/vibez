@@ -222,6 +222,10 @@ impl UiClip {
         }
     }
 
+    pub(crate) fn loop_content_start(&self) -> u64 {
+        FrameClipTimeline::loop_content_start(self.source_offset, &self.warp_markers)
+    }
+
     pub(crate) fn loop_content_end(&self) -> u64 {
         FrameClipTimeline::loop_content_end(
             self.source_offset,
@@ -268,7 +272,7 @@ impl UiClip {
     }
 
     fn accepts_loop_region(&self, start: u64, end: u64) -> bool {
-        start >= self.source_offset
+        start >= self.loop_content_start()
             && start < end
             && end <= self.loop_content_end()
             && self.start_marker < end

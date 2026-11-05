@@ -35,6 +35,17 @@ impl FrameClipTimeline {
         self.has_loop_region() && self.start < self.loop_end
     }
 
+    /// Where a clip's loop may begin: anywhere in its source, unless Warp
+    /// Markers bound it to the window they map (see
+    /// [`Self::loop_content_end`]).
+    pub fn loop_content_start(source_offset: u64, warp_markers: &WarpMarkers) -> u64 {
+        if warp_markers.is_empty() {
+            0
+        } else {
+            source_offset
+        }
+    }
+
     /// The furthest a clip's loop may reach. A loop is the clip's content,
     /// not part of its Arrangement window, so the source bounds it rather
     /// than the clip's length; Warp Markers map only the clip's own window,
@@ -81,6 +92,18 @@ impl FrameClipTimeline {
         } else {
             raw
         }
+    }
+
+    /// The start that keeps every repeat in place when playback begins
+    /// `earlier` frames sooner, or `None` unless the start sits in a loop:
+    /// an intro before the loop plays once, so nothing repeats ahead of it.
+    pub fn start_before(self, earlier: u64) -> Option<u64> {
+        if !self.is_looping() || self.start < self.loop_start {
+            return None;
+        }
+        let length = self.loop_end - self.loop_start;
+        let phase = self.start - self.loop_start;
+        Some(self.loop_start + (phase + length - earlier % length) % length)
     }
 
     pub fn first_wrap(self) -> Option<u64> {
@@ -234,6 +257,18 @@ impl BeatClipTimeline {
         } else {
             raw
         }
+    }
+
+    /// See [`FrameClipTimeline::start_before`].
+    pub fn start_before(self, earlier: f64) -> Option<f64> {
+        if !self.is_looping() || self.start < self.loop_start {
+            return None;
+        }
+        let length = self.loop_end - self.loop_start;
+        let phase = (self.start - self.loop_start - earlier).rem_euclid(length);
+        // `rem_euclid` rounds a tiny negative phase up to `length`, which
+        // would put the start on the loop end.
+        Some(self.loop_start + if phase < length { phase } else { 0.0 })
     }
 
     pub fn first_wrap(self) -> Option<f64> {

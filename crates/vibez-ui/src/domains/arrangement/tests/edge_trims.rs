@@ -484,40 +484,168 @@ fn trimming_a_mixed_selection_moves_audio_and_note_clip_starts_together() {
     assert_eq!(a.tracks[0].note_clips[0].position_beats, 5.0);
 }
 
-#[test]
-fn a_looped_note_clips_start_comes_back_earlier_as_far_as_its_loop_start() {
-    let mut a = arrangement_with_tracks(1);
-    let anchor = note_clip(&mut a, 4.0);
+/// The note Clip from [`note_clip`] looping content beats 1 to 3 from its
+/// loop start, so it plays the note at content beat 2 every 2 beats.
+fn looped_note_clip(a: &mut ArrangementFixture) -> ArrangementSelection {
+    let anchor = note_clip(a, 4.0);
     let clip = &mut a.tracks[0].note_clips[0];
     clip.loop_enabled = true;
     clip.start_marker_beats = 1.0;
     clip.loop_start_beats = 1.0;
     clip.loop_end_beats = 3.0;
-    let before = note_onsets(&a.tracks[0].note_clips[0]);
-    assert_eq!(trim_notes(&mut a, anchor, 5.5).position_beats, 5.5);
-
-    let after = trim_notes(&mut a, anchor, 2.0);
-
-    assert_eq!((after.position_beats, after.start_marker_beats), (4.0, 1.0));
-    assert_eq!(note_onsets(&after), before);
+    anchor
 }
 
 #[test]
-fn a_looped_audio_clips_start_comes_back_earlier_as_far_as_its_loop_start() {
+fn a_looped_note_clip_extended_earlier_by_whole_loops_repeats_its_loop_in_phase() {
     let mut a = arrangement_with_tracks(1);
-    let anchor = sample_clip(&mut a, 1_000, 300, 0, 600);
+    let anchor = looped_note_clip(&mut a);
+    assert_eq!(
+        note_onsets(&a.tracks[0].note_clips[0]),
+        vec![5.0, 7.0, 9.0, 11.0]
+    );
+
+    let after = trim_notes(&mut a, anchor, 0.0);
+
+    assert_eq!((after.position_beats, after.duration_beats), (0.0, 12.0));
+    assert_eq!(after.start_marker_beats, 1.0);
+    assert_eq!(note_onsets(&after), vec![1.0, 3.0, 5.0, 7.0, 9.0, 11.0]);
+}
+
+#[test]
+fn a_looped_note_clip_extended_earlier_by_part_of_a_loop_starts_inside_its_loop() {
+    let mut a = arrangement_with_tracks(1);
+    let anchor = looped_note_clip(&mut a);
+    let mut engine = RecordingEngine::default();
+
+    trim(&mut a, anchor, 2.5, &mut engine);
+
+    let after = &a.tracks[0].note_clips[0];
+    assert_eq!((after.position_beats, after.duration_beats), (2.5, 9.5));
+    assert_eq!(after.start_marker_beats, 1.5);
+    assert_eq!(note_onsets(after), vec![3.0, 5.0, 7.0, 9.0, 11.0]);
+    assert!(engine.0.iter().any(|command| matches!(
+        command,
+        EngineCommand::SetNoteClipBounds {
+            start_marker_beats,
+            ..
+        } if *start_marker_beats == 1.5
+    )));
+    assert!(!engine.0.iter().any(|command| matches!(
+        command,
+        EngineCommand::RemoveNoteClip(..) | EngineCommand::AddNoteClip { .. }
+    )));
+}
+
+/// A looped Audio Clip at frame 600, 400 frames long, looping source
+/// frames 100 to 300 from `start_marker`.
+fn looped_sample_clip(a: &mut ArrangementFixture, start_marker: u64) -> ArrangementSelection {
+    let anchor = sample_clip(a, 1_000, 600, 0, 400);
     let clip = &mut a.tracks[0].clips[0];
     clip.loop_enabled = true;
-    clip.start_marker = 100;
+    clip.start_marker = start_marker;
     clip.loop_start = 100;
     clip.loop_end = 300;
+    anchor
+}
+
+/// Every frame of `clip` plays its loop, one loop length after the frame
+/// before it repeated.
+fn assert_loops_throughout(clip: &UiClip) {
+    let length = clip.loop_end - clip.loop_start;
+    for frame in 0..clip.duration {
+        let source = clip.source_frame_at(frame);
+        assert!(
+            (clip.loop_start..clip.loop_end).contains(&source),
+            "clip frame {frame} plays source {source}, outside the loop"
+        );
+        if frame + length < clip.duration {
+            assert_eq!(source, clip.source_frame_at(frame + length));
+        }
+    }
+}
+
+#[test]
+fn a_looped_audio_clip_extended_earlier_by_whole_loops_repeats_its_loop_in_phase() {
+    let mut a = arrangement_with_tracks(1);
+    let anchor = looped_sample_clip(&mut a, 100);
     let before = a.tracks[0].clips[0].clone();
-    assert_eq!(trim_audio(&mut a, anchor, 4.5).position, 450);
+
+    let after = trim_audio(&mut a, anchor, 2.0);
+
+    assert_eq!((after.position, after.duration), (200, 800));
+    assert_eq!(after.start_marker, 100);
+    assert_audio_in_place(&before, &after, 0);
+    assert_loops_throughout(&after);
+}
+
+#[test]
+fn a_looped_audio_clip_extended_earlier_by_part_of_a_loop_starts_inside_its_loop() {
+    let mut a = arrangement_with_tracks(1);
+    let anchor = looped_sample_clip(&mut a, 200);
+    let before = a.tracks[0].clips[0].clone();
+    let mut engine = RecordingEngine::default();
+
+    trim(&mut a, anchor, 3.5, &mut engine);
+
+    let after = a.tracks[0].clips[0].clone();
+    assert_eq!((after.position, after.duration), (350, 650));
+    assert_eq!(after.start_marker, 150);
+    assert_audio_in_place(&before, &after, 0);
+    assert_loops_throughout(&after);
+    assert!(engine.0.iter().any(|command| matches!(
+        command,
+        EngineCommand::SetClipBounds {
+            start_marker: 150,
+            duration: 650,
+            ..
+        }
+    )));
+    assert!(!engine.0.iter().any(|command| matches!(
+        command,
+        EngineCommand::RemoveClip(..) | EngineCommand::AddClip { .. }
+    )));
+}
+
+#[test]
+fn a_reversed_looped_audio_clip_extended_earlier_repeats_its_loop_in_phase() {
+    let mut a = arrangement_with_tracks(1);
+    let anchor = looped_sample_clip(&mut a, 200);
+    a.tracks[0].clips[0].playback_direction = ClipPlaybackDirection::Reverse;
+    let before = a.tracks[0].clips[0].clone();
+
+    let after = trim_audio(&mut a, anchor, 3.5);
+
+    assert_eq!((after.position, after.duration), (350, 650));
+    assert_audio_in_place(&before, &after, 0);
+    for frame in 0..after.duration {
+        assert!((100..300).contains(&after.source_frame_at(frame)));
+    }
+}
+
+#[test]
+fn a_warped_looped_audio_clip_extended_earlier_keeps_its_warp_in_place() {
+    let mut a = arrangement_with_tracks(1);
+    let anchor = looped_sample_clip(&mut a, 200);
+    assert!(a.tracks[0].clips[0].warp_markers.add(250, 200, 0, 400, 400));
+    let before = a.tracks[0].clips[0].clone();
 
     let after = trim_audio(&mut a, anchor, 1.0);
 
-    assert_eq!((after.position, after.start_marker), (300, 100));
+    assert_eq!((after.position, after.duration), (100, 900));
+    assert_eq!(after.warp_markers, before.warp_markers);
     assert_audio_in_place(&before, &after, 0);
+}
+
+#[test]
+fn a_looped_audio_clip_extended_earlier_stops_at_the_song_start() {
+    let mut a = arrangement_with_tracks(1);
+    let anchor = looped_sample_clip(&mut a, 100);
+
+    let after = trim_audio(&mut a, anchor, -3.0);
+
+    assert_eq!((after.position, after.duration), (0, 1_000));
+    assert_eq!(after.start_marker, 100);
 }
 
 #[test]

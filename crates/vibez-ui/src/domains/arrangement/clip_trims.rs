@@ -90,14 +90,9 @@ pub(super) fn audio_start_trimmed(clip: &UiClip, delta: i64, shortest: u64) -> O
         trimmed.id = clip.id;
         return Some(trimmed);
     }
-    let mut wanted = delta.unsigned_abs().min(clip.position);
+    let wanted = delta.unsigned_abs().min(clip.position);
     if clip.loop_enabled {
-        // Before its loop start a looped Clip repeats its loop rather than
-        // revealing the source there, which is a different edit.
-        if clip.playback_direction == ClipPlaybackDirection::Reverse {
-            return None;
-        }
-        wanted = wanted.min(clip.start_marker.saturating_sub(clip.loop_start));
+        return audio_loop_extended(clip, wanted);
     }
     let mut trimmed = clip.clone();
     match clip.playback_direction {
@@ -126,25 +121,56 @@ pub(super) fn audio_start_trimmed(clip: &UiClip, delta: i64, shortest: u64) -> O
     Some(trimmed)
 }
 
+/// `clip` reaching `wanted` frames earlier by repeating its loop there, or
+/// `None` when nothing repeats before its start.
+fn audio_loop_extended(clip: &UiClip, wanted: u64) -> Option<UiClip> {
+    let start_marker = match clip.playback_direction {
+        ClipPlaybackDirection::Forward => clip.timeline().start_before(wanted)?,
+        // Reversed, the left edge plays the far end of the Clip's run
+        // through its loop, which a longer run simply continues.
+        ClipPlaybackDirection::Reverse => {
+            clip.timeline().is_looping().then_some(clip.start_marker)?
+        }
+    };
+    if wanted == 0 {
+        return None;
+    }
+    let mut extended = clip.clone();
+    extended.start_marker = start_marker;
+    extended.position -= wanted;
+    extended.duration += wanted;
+    Some(extended)
+}
+
 /// `clip` with its start `delta` beats later (earlier when negative), or
 /// `None` when it cannot move that way. Its notes stay where they are in
 /// the content; the start marker moves over them.
 pub(super) fn note_start_trimmed(clip: &UiNoteClip, delta: f64) -> Option<UiNoteClip> {
-    // See `audio_start_trimmed` for why a looped Clip stops at its loop start.
-    let earliest = if clip.loop_enabled {
-        clip.loop_start_beats.min(clip.start_marker_beats)
-    } else {
-        0.0
-    };
+    let timeline = clip.timeline();
     let delta = delta
-        .max(earliest - clip.start_marker_beats)
         .max(-clip.position_beats)
         .min((clip.duration_beats - SHORTEST_LENGTH_BEATS).max(0.0));
+    let repeated_start = (delta < 0.0)
+        .then(|| timeline.start_before(-delta))
+        .flatten();
+    let (delta, start_marker) = match repeated_start {
+        Some(start_marker) => (delta, start_marker),
+        None => {
+            // A looped Clip opening on an intro repeats nothing before it.
+            let earliest = if clip.loop_enabled {
+                clip.loop_start_beats.min(clip.start_marker_beats)
+            } else {
+                0.0
+            };
+            let delta = delta.max(earliest - clip.start_marker_beats);
+            (delta, timeline.source_at(delta))
+        }
+    };
     if delta == 0.0 {
         return None;
     }
     let mut trimmed = clip.clone();
-    trimmed.start_marker_beats = clip.timeline().source_at(delta);
+    trimmed.start_marker_beats = start_marker;
     trimmed.position_beats += delta;
     trimmed.duration_beats -= delta;
     Some(trimmed)
