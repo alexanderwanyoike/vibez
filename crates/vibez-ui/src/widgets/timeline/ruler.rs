@@ -14,7 +14,7 @@ use crate::message::Message;
 use crate::state::{ContextMenuTarget, GridConfig, UndoGestureId};
 use crate::timeline_geometry::{TimelineGeometry, TimelineViewport};
 use crate::widgets::double_click::DoubleClick;
-use crate::widgets::drag_phase::{past_click_slop, CLICK_SLOP_PX};
+use crate::widgets::drag_phase::{DragPhase, CLICK_SLOP_PX};
 
 /// Height of the Arrange ruler: the loop strip over the number strip.
 pub const ARRANGE_RULER_HEIGHT: f32 = 36.0;
@@ -43,17 +43,13 @@ pub struct RulerWidget {
 /// Active drag action on the ruler.
 #[derive(Debug, Clone)]
 enum RulerDragAction {
-    /// A press on the numbers: released in place it sets the play start.
-    PendingSeek {
+    /// A press on the numbers sets the play start when released as a click
+    /// and zooms and pans once dragged.
+    Numbers {
         beat: f64,
         start: Point,
         view: TimelineViewport,
-    },
-    /// The numbers dragged past the click threshold: zoom and pan.
-    Zoom {
-        grabbed_beat: f64,
-        start: Point,
-        view: TimelineViewport,
+        phase: DragPhase,
     },
     Brace {
         drag: BraceDrag,
@@ -158,10 +154,11 @@ impl canvas::Program<Message> for RulerWidget {
                             Some(Message::View(ViewMsg::ZoomToFit)),
                         );
                     }
-                    state.drag = Some(RulerDragAction::PendingSeek {
+                    state.drag = Some(RulerDragAction::Numbers {
                         beat,
                         start: pos,
                         view: TimelineViewport::new(self.zoom_level, self.scroll_offset_beats),
+                        phase: DragPhase::Pending,
                     });
                     return (canvas::event::Status::Captured, None);
                 }
@@ -175,33 +172,36 @@ impl canvas::Program<Message> for RulerWidget {
                     RulerDragAction::Brace { drag, gesture } => {
                         self.brace_edit(drag, gesture, self.geometry().x_to_beat(local.x))
                     }
-                    RulerDragAction::PendingSeek { beat, start, view } => {
-                        if !past_click_slop(start, local) {
+                    RulerDragAction::Numbers {
+                        beat,
+                        start,
+                        view,
+                        mut phase,
+                    } => {
+                        if !phase.follow(start, local) {
                             return (canvas::event::Status::Captured, None);
                         }
                         state.double_click.clear();
-                        state.drag = Some(RulerDragAction::Zoom {
-                            grabbed_beat: beat,
+                        state.drag = Some(RulerDragAction::Numbers {
+                            beat,
                             start,
                             view,
+                            phase,
                         });
                         Some(zoom_drag(view, beat, start, local))
                     }
-                    RulerDragAction::Zoom {
-                        grabbed_beat,
-                        start,
-                        view,
-                    } => Some(zoom_drag(view, grabbed_beat, start, local)),
                 };
                 return (canvas::event::Status::Captured, message);
             }
             canvas::Event::Mouse(iced::mouse::Event::ButtonReleased(iced::mouse::Button::Left)) => {
                 if let Some(drag) = state.drag.take() {
                     let msg = match drag {
-                        RulerDragAction::PendingSeek { beat, .. } => {
-                            Some(Message::Transport(TransportMsg::SeekToBeat(beat)))
-                        }
-                        RulerDragAction::Zoom { .. } | RulerDragAction::Brace { .. } => None,
+                        RulerDragAction::Numbers {
+                            beat,
+                            phase: DragPhase::Pending,
+                            ..
+                        } => Some(Message::Transport(TransportMsg::SeekToBeat(beat))),
+                        RulerDragAction::Numbers { .. } | RulerDragAction::Brace { .. } => None,
                     };
                     return (canvas::event::Status::Captured, msg);
                 }
@@ -293,9 +293,7 @@ impl canvas::Program<Message> for RulerWidget {
     ) -> mouse::Interaction {
         if let Some(ref drag) = state.drag {
             return match drag {
-                RulerDragAction::PendingSeek { .. } | RulerDragAction::Zoom { .. } => {
-                    mouse::Interaction::ZoomIn
-                }
+                RulerDragAction::Numbers { .. } => mouse::Interaction::ZoomIn,
                 RulerDragAction::Brace { drag, .. } => brace_interaction(drag.grab, true),
             };
         }
