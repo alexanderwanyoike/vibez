@@ -3,7 +3,7 @@
 //! a step lower on the right, with Z-shaped rules between the bands.
 
 use iced::mouse;
-use iced::widget::{button, canvas, column, container, stack, text};
+use iced::widget::{button, canvas, column, container, text};
 use iced::{Color, Element, Length, Point, Rectangle, Renderer, Theme};
 use vibez_core::effect::EffectType;
 use vibez_core::id::TrackId;
@@ -14,6 +14,7 @@ use crate::theme as th;
 use crate::typography::PERFORM_LABEL;
 use crate::widgets::control_style;
 use crate::widgets::effect_knob::{EffectKnobWidget, KnobCap};
+use crate::widgets::flat_stack::flat_stack;
 
 pub const EQ_W: f32 = 96.0;
 pub const EQ_H: f32 = 240.0;
@@ -133,7 +134,7 @@ pub fn view_strip_eq(track: &ProjectTrack) -> Element<'_, Message> {
             Message::toggle_effect_bypass(track.id, eq.id),
         ),
     ));
-    stack(layers)
+    flat_stack(layers)
         .width(Length::Fixed(EQ_W))
         .height(Length::Fixed(EQ_H))
         .into()
