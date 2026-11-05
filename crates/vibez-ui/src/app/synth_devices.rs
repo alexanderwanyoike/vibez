@@ -11,8 +11,7 @@ use crate::state::UiTrack;
 use super::*;
 
 impl App {
-    /// The synth card at `width`, with its title and the latency line
-    /// beneath it.
+    /// The synth card at `width`.
     pub(super) fn synth_card<'a>(
         &'a self,
         track_id: TrackId,
@@ -36,25 +35,16 @@ impl App {
                 panel: panel.clone(),
                 entry: self.param_entry.as_ref(),
             }
-            .view(
-                self.view_device_preset_bar(
-                    track_id,
-                    device,
-                    accent,
-                    crate::widgets::synth_device::preset_bar_width(size),
-                ),
-                size,
-            )
+            .view(size)
         });
         self.native_instrument_frame(
             "Subtractive Synth",
-            track_id,
             track,
             accent,
             width,
+            device,
             body.into(),
         )
-        .into()
     }
 }
 

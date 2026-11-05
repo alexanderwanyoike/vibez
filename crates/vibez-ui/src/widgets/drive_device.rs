@@ -14,14 +14,13 @@ use crate::message::Message;
 use crate::state::UiEffect;
 use crate::theme as th;
 use crate::widgets::device_controls::{
-    disclosure, dropdown, heading, level_column, plot_band, rule, segmented, vertical_rule, Param,
-    LABEL_SIZE, METER_W,
+    dropdown, heading, level_column, plot_band, rule, segmented, vertical_rule, Param, LABEL_SIZE,
+    METER_W,
 };
 use crate::widgets::device_layout::{stack, KNOB_ROW_H};
 use crate::widgets::drive_display::{TransferCurve, Waveform};
 
 const PAD: f32 = 10.0;
-const PRESET_ROW_H: f32 = 28.0;
 const KNOB: f32 = 32.0;
 const KNOB_COL_W: f32 = 68.0;
 const PLOT_MIN_H: f32 = 72.0;
@@ -55,10 +54,6 @@ pub const WIDTHS: crate::widgets::device_chrome::CardWidths =
         max: MAX_W,
     };
 
-pub fn preset_bar_width(size: Size) -> f32 {
-    size.width - PAD * 2.0 - 90.0
-}
-
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Arrangement {
     pub waveform: bool,
@@ -69,7 +64,7 @@ pub struct Arrangement {
 }
 
 pub fn arrange(size: Size, advanced: bool) -> Arrangement {
-    let below = (size.height - PRESET_ROW_H - 1.0).max(0.0);
+    let below = size.height.max(0.0);
     let stack = stack(below, advanced.then_some(KNOB_ROW_H), PLOT_MIN_H);
     Arrangement {
         waveform: size.width >= WAVEFORM_W,
@@ -125,26 +120,18 @@ impl<'a> DriveView<'a> {
         self.panel.input.peak_l.max(self.panel.input.peak_r)
     }
 
-    pub fn view(self, preset_bar: Element<'a, Message>, size: Size) -> Element<'a, Message> {
+    /// The card header's Advanced switch.
+    pub fn advanced_switch(&self) -> crate::widgets::device_chrome::Action {
+        crate::widgets::device_chrome::advanced(
+            self.panel.advanced,
+            Message::Card(CardMsg::ToggleAdvanced(self.effect.id)),
+            self.accent(),
+        )
+    }
+
+    pub fn view(self, size: Size) -> Element<'a, Message> {
         let layout = arrange(size, self.panel.advanced);
-        let top = row![
-            preset_bar,
-            Space::with_width(Length::Fill),
-            disclosure(
-                self.panel.advanced,
-                Message::Card(CardMsg::ToggleAdvanced(self.effect.id)),
-                self.accent(),
-            )
-        ]
-        .spacing(6)
-        .align_y(Alignment::Center);
-        let mut body = column![
-            container(top)
-                .padding([0.0, PAD])
-                .height(PRESET_ROW_H)
-                .align_y(Alignment::Center),
-            rule(),
-        ];
+        let mut body = column![];
         if layout.advanced_only {
             let height = layout.advanced.unwrap_or(0.0);
             body = body.push(self.advanced(height));

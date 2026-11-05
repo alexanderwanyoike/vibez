@@ -18,14 +18,12 @@ use crate::message::Message;
 use crate::state::UiEffect;
 use crate::theme as th;
 use crate::widgets::device_controls::{
-    disclosure, dropdown, heading, level_column, plot_band, rule, segmented, vertical_rule, Param,
-    LABEL_SIZE,
+    dropdown, heading, level_column, plot_band, rule, segmented, vertical_rule, Param, LABEL_SIZE,
 };
 use crate::widgets::device_layout::{stack, Stack, KNOB_ROW_H, LINE_H};
 use crate::widgets::echo_display::{MotionPlot, TapsPlot};
 
 const PAD: f32 = 10.0;
-const PRESET_ROW_H: f32 = 28.0;
 const KNOB: f32 = 32.0;
 const KNOB_COL_W: f32 = 64.0;
 /// Below 60 px the plot drops its axis labels, still worth its room.
@@ -58,10 +56,6 @@ pub const WIDTHS: crate::widgets::device_chrome::CardWidths =
         max: MAX_W,
     };
 
-pub fn preset_bar_width(size: Size) -> f32 {
-    size.width - PAD * 2.0 - 90.0
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tier {
     Compact,
@@ -85,7 +79,7 @@ pub fn arrange(size: Size, advanced: bool) -> Arrangement {
     } else {
         Tier::Compact
     };
-    let mut below = (size.height - PRESET_ROW_H - 1.0).max(0.0);
+    let mut below = size.height.max(0.0);
     let switches = if tier == Tier::Compact && below >= LINE_H * 2.0 + 1.0 {
         LINE_H
     } else {
@@ -172,27 +166,19 @@ impl<'a> EchoView<'a> {
         self.param(index).label("Time")
     }
 
-    pub fn view(self, preset_bar: Element<'a, Message>, size: Size) -> Element<'a, Message> {
+    /// The card header's Advanced switch.
+    pub fn advanced_switch(&self) -> crate::widgets::device_chrome::Action {
+        crate::widgets::device_chrome::advanced(
+            self.panel.advanced,
+            Message::Card(CardMsg::ToggleAdvanced(self.effect.id)),
+            self.accent(),
+        )
+    }
+
+    pub fn view(self, size: Size) -> Element<'a, Message> {
         let layout = arrange(size, self.panel.advanced);
         let stack = layout.stack;
-        let top = row![
-            preset_bar,
-            Space::with_width(Length::Fill),
-            disclosure(
-                self.panel.advanced,
-                Message::Card(CardMsg::ToggleAdvanced(self.effect.id)),
-                self.accent(),
-            )
-        ]
-        .spacing(6)
-        .align_y(Alignment::Center);
-        let mut body = column![
-            container(top)
-                .padding([0.0, PAD])
-                .height(PRESET_ROW_H)
-                .align_y(Alignment::Center),
-            rule(),
-        ];
+        let mut body = column![];
         if stack.advanced_only {
             body = body.push(self.advanced(layout.tier, stack.advanced.unwrap_or(0.0), size.width));
             return body.width(Length::Fill).height(Length::Fill).into();

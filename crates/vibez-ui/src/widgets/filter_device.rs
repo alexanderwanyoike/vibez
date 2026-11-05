@@ -16,13 +16,12 @@ use crate::message::Message;
 use crate::state::UiEffect;
 use crate::theme as th;
 use crate::widgets::device_controls::{
-    disclosure, dropdown, heading, level_column, plot_band, rule, segmented, toggle, vertical_rule,
-    Param, LABEL_SIZE, METER_W,
+    dropdown, heading, level_column, plot_band, rule, segmented, toggle, vertical_rule, Param,
+    LABEL_SIZE, METER_W,
 };
 use crate::widgets::filter_display::{ModulationPreview, ResponsePlot};
 
 const PAD: f32 = 10.0;
-const PRESET_ROW_H: f32 = 28.0;
 const KNOB: f32 = 32.0;
 const KNOB_COL_W: f32 = 68.0;
 const KNOB_ROW_H: f32 = 74.0;
@@ -60,10 +59,6 @@ pub const WIDTHS: crate::widgets::device_chrome::CardWidths =
         max: MAX_W,
     };
 
-pub fn preset_bar_width(size: Size) -> f32 {
-    size.width - PAD * 2.0 - 90.0
-}
-
 /// Where the Type and Slope controls sit.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum TypePlace {
@@ -100,7 +95,7 @@ impl Arrangement {
 
 pub fn arrange(size: Size, advanced: bool) -> Arrangement {
     let full = size.width >= FULL_W;
-    let below = (size.height - PRESET_ROW_H - 1.0).max(0.0);
+    let below = size.height.max(0.0);
     let tabs = if full { 0.0 } else { TABS_ROW_H };
     let stacked = 1.0 + KNOB_ROW_H;
     let advanced_only = advanced && below < tabs + TYPE_LINE_H + 1.0 + KNOB_ROW_H + stacked;
@@ -203,26 +198,18 @@ impl<'a> FilterView<'a> {
         move |choice| Message::set_effect_param(track_id, effect_id, index, choice as f32)
     }
 
-    pub fn view(self, preset_bar: Element<'a, Message>, size: Size) -> Element<'a, Message> {
+    /// The card header's Advanced switch.
+    pub fn advanced_switch(&self) -> crate::widgets::device_chrome::Action {
+        crate::widgets::device_chrome::advanced(
+            self.panel.advanced,
+            Message::Filter(FilterMsg::ToggleAdvanced(self.effect.id)),
+            self.accent(),
+        )
+    }
+
+    pub fn view(self, size: Size) -> Element<'a, Message> {
         let layout = arrange(size, self.panel.advanced);
-        let top = row![
-            preset_bar,
-            Space::with_width(Length::Fill),
-            disclosure(
-                self.panel.advanced,
-                Message::Filter(FilterMsg::ToggleAdvanced(self.effect.id)),
-                self.accent(),
-            )
-        ]
-        .spacing(6)
-        .align_y(Alignment::Center);
-        let mut body = column![
-            container(top)
-                .padding([0.0, PAD])
-                .height(PRESET_ROW_H)
-                .align_y(Alignment::Center),
-            rule(),
-        ];
+        let mut body = column![];
         if layout.advanced_only {
             let height = layout.advanced.unwrap_or(0.0);
             body = body.push(self.advanced(height));

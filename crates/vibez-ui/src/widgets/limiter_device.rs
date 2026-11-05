@@ -17,13 +17,12 @@ use crate::message::Message;
 use crate::state::UiEffect;
 use crate::theme as th;
 use crate::widgets::device_controls::{
-    disclosure, heading, plot_band, rule, switch_width, vertical_rule, Param, LABEL_SIZE, METER_W,
+    heading, plot_band, rule, switch_width, vertical_rule, Param, LABEL_SIZE, METER_W,
 };
 use crate::widgets::device_layout::{pack, KNOB_ROW_H, LINE_H};
 use crate::widgets::limiter_display::{HistoryPlot, ReductionMeter};
 
 const PAD: f32 = 10.0;
-const PRESET_ROW_H: f32 = 28.0;
 const KNOB: f32 = 32.0;
 const HEADING_H: f32 = 14.0;
 /// The plots under their headings, the axis labels dropped below 50 px.
@@ -46,10 +45,6 @@ pub const WIDTHS: crate::widgets::device_chrome::CardWidths =
         expanded: FULL_W,
         max: MAX_W,
     };
-
-pub fn preset_bar_width(size: Size) -> f32 {
-    size.width - PAD * 2.0 - 90.0
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tier {
@@ -105,7 +100,7 @@ pub fn arrange(size: Size, advanced: bool, lines: Lines) -> Arrangement {
     } else {
         Tier::Compact
     };
-    let below = (size.height - PRESET_ROW_H - 1.0).max(0.0);
+    let below = size.height.max(0.0);
     let rows = |main: f32, extra: f32, beside: bool| {
         let used = main + if extra > 0.0 { extra + 1.0 } else { 0.0 };
         let rest = below - used - 1.0;
@@ -252,27 +247,19 @@ impl<'a> LimiterView<'a> {
         }
     }
 
-    pub fn view(self, preset_bar: Element<'a, Message>, size: Size) -> Element<'a, Message> {
+    /// The card header's Advanced switch.
+    pub fn advanced_switch(&self) -> crate::widgets::device_chrome::Action {
+        crate::widgets::device_chrome::advanced(
+            self.panel.advanced,
+            Message::Card(CardMsg::ToggleAdvanced(self.effect.id)),
+            self.accent(),
+        )
+    }
+
+    pub fn view(self, size: Size) -> Element<'a, Message> {
         let inner = size.width - PAD * 2.0;
         let layout = arrange(size, self.panel.advanced, self.lines(inner));
-        let top = row![
-            preset_bar,
-            Space::with_width(Length::Fill),
-            disclosure(
-                self.panel.advanced,
-                Message::Card(CardMsg::ToggleAdvanced(self.effect.id)),
-                self.accent(),
-            )
-        ]
-        .spacing(6)
-        .align_y(Alignment::Center);
-        let mut body = column![
-            container(top)
-                .padding([0.0, PAD])
-                .height(PRESET_ROW_H)
-                .align_y(Alignment::Center),
-            rule(),
-        ];
+        let mut body = column![];
         if layout.advanced_only {
             // What the closed card's line could not hold leads Advanced.
             let shown = pack(&self.widths(&self.main_controls(false)), inner, LINE_GAP)

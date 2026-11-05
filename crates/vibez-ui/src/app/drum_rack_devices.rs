@@ -12,8 +12,7 @@ use crate::state::{BrowserDropTarget, UiTrack};
 use super::*;
 
 impl App {
-    /// The drum rack card at `width`, with its title and the latency line
-    /// beneath it.
+    /// The drum rack card at `width`.
     pub(super) fn drum_rack_card<'a>(
         &'a self,
         track_id: TrackId,
@@ -50,7 +49,6 @@ impl App {
             _ => None,
         };
         let body = iced::widget::responsive(move |size| {
-            let layout = crate::widgets::drum_rack_device::arrange(size);
             crate::widgets::drum_rack_device::DrumRackView {
                 track_id,
                 pads: &track.drum_rack_pads,
@@ -63,17 +61,8 @@ impl App {
                 panel: panel.clone(),
                 entry: self.param_entry.as_ref(),
             }
-            .view(
-                self.view_device_preset_bar(
-                    track_id,
-                    device,
-                    accent,
-                    crate::widgets::drum_rack_device::preset_bar_width(layout),
-                ),
-                size,
-            )
+            .view(size)
         });
-        self.native_instrument_frame("Drum Rack", track_id, track, accent, width, body.into())
-            .into()
+        self.native_instrument_frame("Drum Rack", track, accent, width, device, body.into())
     }
 }

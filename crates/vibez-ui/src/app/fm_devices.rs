@@ -10,8 +10,7 @@ use crate::widgets::fm_device::FmView;
 use super::*;
 
 impl App {
-    /// The FM Synth card at `width`, with its title and the latency line
-    /// beneath it.
+    /// The FM Synth card at `width`.
     pub(super) fn fm_card<'a>(
         &'a self,
         track_id: TrackId,
@@ -25,7 +24,7 @@ impl App {
             track,
             accent,
             width,
-            move |device, panel, entry, preset_bar, size| {
+            move |device, panel, entry, size| {
                 FmView {
                     track_id,
                     device,
@@ -33,7 +32,7 @@ impl App {
                     panel,
                     entry,
                 }
-                .view(preset_bar, size)
+                .view(size)
             },
         )
     }

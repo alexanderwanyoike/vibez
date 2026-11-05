@@ -15,13 +15,12 @@ use crate::spectrum::SpectrumState;
 use crate::state::UiEffect;
 use crate::theme as th;
 use crate::widgets::device_controls::{
-    disclosure, heading, rule, segmented, toggle, vertical_rule, Param, LABEL_SIZE,
+    heading, rule, segmented, toggle, vertical_rule, Param, LABEL_SIZE,
 };
 use crate::widgets::eq_display::EqDisplayWidget;
 use crate::widgets::level_meter::{self, LevelMeter};
 
 const PAD: f32 = 10.0;
-const PRESET_ROW_H: f32 = 28.0;
 const SIDE_W: f32 = 200.0;
 /// Band name and three parameter lines.
 const SIDE_H: f32 = 112.0;
@@ -112,7 +111,7 @@ fn upper_for(width: f32, height: f32) -> Upper {
 }
 
 pub fn arrange(size: Size, advanced: bool) -> Arrangement {
-    let below = (size.height - PRESET_ROW_H - 1.0).max(0.0);
+    let below = size.height.max(0.0);
     let stacked = if advanced { 1.0 + ADVANCED_H } else { 0.0 };
     let kind = upper_for(size.width, below - stacked);
     let advanced_only = advanced && (kind != Upper::Side || below - stacked < SIDE_H);
@@ -138,11 +137,6 @@ pub fn arrange(size: Size, advanced: bool) -> Arrangement {
         advanced_only,
         advanced_spectrum: size.width >= ADVANCED_SPECTRUM_W,
     }
-}
-
-/// Width left for the preset bar beside the Advanced toggle.
-pub fn preset_bar_width(size: Size) -> f32 {
-    size.width - PAD * 2.0 - 90.0
 }
 
 pub struct EqView<'a> {
@@ -181,22 +175,9 @@ impl<'a> EqView<'a> {
         Message::set_effect_param(self.track_id, self.effect.id, index, value)
     }
 
-    pub fn view(self, preset_bar: Element<'a, Message>, size: Size) -> Element<'a, Message> {
+    pub fn view(self, size: Size) -> Element<'a, Message> {
         let layout = arrange(size, self.panel.advanced);
-        let top = row![
-            preset_bar,
-            Space::with_width(Length::Fill),
-            self.disclosure()
-        ]
-        .spacing(6)
-        .align_y(Alignment::Center);
-        let mut body = column![
-            container(top)
-                .padding([0.0, PAD])
-                .height(PRESET_ROW_H)
-                .align_y(Alignment::Center),
-            rule(),
-        ];
+        let mut body = column![];
         if layout.advanced_only {
             body = body.push(self.advanced(
                 layout.advanced.unwrap_or(0.0),
@@ -634,8 +615,9 @@ impl<'a> EqView<'a> {
         line.into()
     }
 
-    fn disclosure(&self) -> Element<'a, Message> {
-        disclosure(
+    /// The card header's Advanced switch.
+    pub fn advanced_switch(&self) -> crate::widgets::device_chrome::Action {
+        crate::widgets::device_chrome::advanced(
             self.panel.advanced,
             Message::Eq(EqMsg::ToggleAdvanced(self.effect.id)),
             self.accent(),

@@ -17,12 +17,10 @@ use crate::theme as th;
 use crate::widgets::device_controls::{segmented, Param, LABEL_SIZE, VALUE_SIZE};
 use crate::widgets::device_layout::KNOB_ROW_H;
 use crate::widgets::fm_display::{AlgorithmPlot, ScopePlot};
-pub use crate::widgets::instrument_bands::{
-    preset_bar_width, Form, COMPACT_W, FULL_W, MAX_W, MEDIUM_W,
-};
 use crate::widgets::instrument_bands::{
     BandCard, Group, PlotKind, Tier, BAND_PAD, HEADER_H, STRIP_H,
 };
+pub use crate::widgets::instrument_bands::{Form, COMPACT_W, FULL_W, MAX_W, MEDIUM_W};
 use crate::widgets::synth_display::{EnvelopePlot, LfoPlot};
 
 /// The overview needs two rows of knobs beside the operator's envelope.
@@ -217,7 +215,7 @@ impl<'a> FmView<'a> {
         }
     }
 
-    pub fn view(self, preset_bar: Element<'a, Message>, size: Size) -> Element<'a, Message> {
+    pub fn view(self, size: Size) -> Element<'a, Message> {
         let form = arrange(size, self.page());
         let tier = Tier::for_width(size.width);
         let shown = self.shown();
@@ -236,7 +234,7 @@ impl<'a> FmView<'a> {
             Form::Line => Vec::new(),
         };
         let pages = FmPage::ALL.map(FmPage::name);
-        self.frame(preset_bar, size, form, &pages, self.page().index(), bands)
+        self.frame(size, form, &pages, self.page().index(), bands)
     }
 
     /// Each operator's ratio, fine tune and level, the shown one marked;

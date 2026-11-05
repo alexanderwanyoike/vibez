@@ -15,12 +15,11 @@ use crate::state::UiEffect;
 use crate::theme as th;
 use crate::widgets::bitcrush_display::Scope;
 use crate::widgets::device_controls::{
-    disclosure, heading, level_column, plot_band, rule, segmented, vertical_rule, Param, LABEL_SIZE,
+    heading, level_column, plot_band, rule, segmented, vertical_rule, Param, LABEL_SIZE,
 };
 use crate::widgets::device_layout::{stack, KNOB_ROW_H};
 
 const PAD: f32 = 10.0;
-const PRESET_ROW_H: f32 = 28.0;
 const KNOB: f32 = 32.0;
 const KNOB_COL_W: f32 = 68.0;
 const PLOT_MIN_H: f32 = 72.0;
@@ -42,12 +41,8 @@ pub const WIDTHS: crate::widgets::device_chrome::CardWidths =
         max: MAX_W,
     };
 
-pub fn preset_bar_width(size: Size) -> f32 {
-    size.width - PAD * 2.0 - 90.0
-}
-
 pub fn arrange(size: Size, advanced: bool) -> crate::widgets::device_layout::Stack {
-    let below = (size.height - PRESET_ROW_H - 1.0).max(0.0);
+    let below = size.height.max(0.0);
     stack(below, advanced.then_some(KNOB_ROW_H), PLOT_MIN_H)
 }
 
@@ -74,26 +69,18 @@ impl<'a> BitcrushView<'a> {
             .host_rate(self.host_rate)
     }
 
-    pub fn view(self, preset_bar: Element<'a, Message>, size: Size) -> Element<'a, Message> {
+    /// The card header's Advanced switch.
+    pub fn advanced_switch(&self) -> crate::widgets::device_chrome::Action {
+        crate::widgets::device_chrome::advanced(
+            self.panel.advanced,
+            Message::Card(CardMsg::ToggleAdvanced(self.effect.id)),
+            self.accent(),
+        )
+    }
+
+    pub fn view(self, size: Size) -> Element<'a, Message> {
         let layout = arrange(size, self.panel.advanced);
-        let top = row![
-            preset_bar,
-            Space::with_width(Length::Fill),
-            disclosure(
-                self.panel.advanced,
-                Message::Card(CardMsg::ToggleAdvanced(self.effect.id)),
-                self.accent(),
-            )
-        ]
-        .spacing(6)
-        .align_y(Alignment::Center);
-        let mut body = column![
-            container(top)
-                .padding([0.0, PAD])
-                .height(PRESET_ROW_H)
-                .align_y(Alignment::Center),
-            rule(),
-        ];
+        let mut body = column![];
         if layout.advanced_only {
             let height = layout.advanced.unwrap_or(0.0);
             body = body.push(self.advanced(height));

@@ -30,7 +30,6 @@ use crate::widgets::sampler_display::{Markers, SampleView};
 use crate::widgets::synth_display::{EnvelopePlot, FilterPlot, LfoPlot};
 
 const PAD: f32 = 10.0;
-const PRESET_ROW_H: f32 = 28.0;
 const TABS_H: f32 = 24.0;
 /// The sample's name, length and pitch values above its waveform.
 const SAMPLE_HEADER_H: f32 = 24.0;
@@ -67,10 +66,6 @@ pub const WIDTHS: crate::widgets::device_chrome::CardWidths =
         max: MAX_W,
     };
 
-pub fn preset_bar_width(size: Size) -> f32 {
-    size.width - PAD * 2.0
-}
-
 /// How a body's height divides: the sample band, the tabs and the section
 /// beneath (its header, plot and knobs).
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -93,7 +88,7 @@ pub struct Layout {
 
 pub fn arrange(size: Size) -> Layout {
     let compact = size.width < MEDIUM_W;
-    let below = (size.height - PRESET_ROW_H - 1.0).max(0.0);
+    let below = size.height.max(0.0);
     let header = BAND_PAD * 2.0 + SAMPLE_HEADER_H + if compact { MODE_LINE_H } else { 0.0 };
     let sample_min = header + WAVE_MIN_H;
     let tabs = TABS_H + 1.0;
@@ -236,16 +231,9 @@ impl<'a> SamplerView<'a> {
         self.device.value(index).round().max(0.0) as usize
     }
 
-    pub fn view(self, preset_bar: Element<'a, Message>, size: Size) -> Element<'a, Message> {
+    pub fn view(self, size: Size) -> Element<'a, Message> {
         let layout = arrange(size);
-        let mut body = column![
-            container(preset_bar)
-                .padding([0.0, PAD])
-                .height(PRESET_ROW_H)
-                .align_y(Alignment::Center),
-            rule(),
-            self.sample(layout),
-        ];
+        let mut body = column![self.sample(layout),];
         if layout.section > 0.0 {
             let track_id = self.track_id;
             let pages: Vec<(SamplerPage, &str)> = pages(self.on_pad())
