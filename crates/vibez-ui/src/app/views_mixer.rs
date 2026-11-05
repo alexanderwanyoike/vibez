@@ -77,7 +77,7 @@ impl App {
         let room = self.state.view.window_height
             - chrome
             - crate::shell_layout::STATUS_HEIGHT
-            - 3.0 * crate::shell_layout::PANE_GAP
+            - 2.0 * crate::shell_layout::PANE_GAP
             - crate::shell_layout::DETAIL_PANEL_MIN_HEIGHT;
         self.mix_desk_height().min(room).max(0.0)
     }
