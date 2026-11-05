@@ -66,20 +66,25 @@ impl App {
         bank_bar + DESK_PADDING + strip_height(buses)
     }
 
-    /// The Mix workspace is as tall as its desk, leaving the detail panel
-    /// the rest, but never squeezes the detail panel below its minimum.
-    pub(super) fn mix_workspace_height(&self) -> f32 {
+    /// The work column under the chrome row, down to the gap above the
+    /// status bar, which the Mix card, its divider and the detail card share.
+    fn mix_column_height(&self) -> f32 {
         let chrome = match super::views_control_bar::control_bar_rows(self.state.view.window_width)
         {
             super::views_control_bar::ControlBarRows::One => 1.0,
             super::views_control_bar::ControlBarRows::Two => 2.0,
         } * super::views_control_bar_style::BAR_HEIGHT;
-        let room = self.state.view.window_height
+        self.state.view.window_height
             - chrome
             - crate::shell_layout::STATUS_HEIGHT
-            - 2.0 * crate::shell_layout::PANE_GAP
-            - crate::shell_layout::DETAIL_PANEL_MIN_HEIGHT;
-        self.mix_desk_height().min(room).max(0.0)
+            - crate::shell_layout::PANE_GAP
+    }
+
+    /// The Mix card's height above the divider.
+    pub(super) fn mix_workspace_height(&self) -> f32 {
+        let column = self.mix_column_height();
+        let detail = crate::shell_layout::mix_detail_height(column, self.mix_desk_height());
+        (column - crate::shell_layout::PANE_GAP - detail).max(0.0)
     }
 
     /// The switch between banks of buses on the send rows; none while every

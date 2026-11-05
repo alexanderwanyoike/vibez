@@ -41,6 +41,12 @@ pub fn detail_height_at(cursor_y: f32, window_height: f32) -> f32 {
     detail_bottom - (cursor_y + PANE_GAP / 2.0)
 }
 
+/// The detail card's height in Mix, in a work column `column` tall over a
+/// desk `desk` tall: whatever the whole desk leaves below the divider.
+pub fn mix_detail_height(column: f32, desk: f32) -> f32 {
+    (column - PANE_GAP - desk).max(DETAIL_PANEL_MIN_HEIGHT)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -68,5 +74,11 @@ mod tests {
         assert_eq!(browser_width_at(442.0), 430.0);
         // A detail card from 566 down to the gap above the 26 px status bar.
         assert_eq!(detail_height_at(562.0, 900.0), 300.0);
+    }
+
+    #[test]
+    fn mix_shows_its_whole_desk_until_the_detail_card_is_at_its_minimum() {
+        assert_eq!(mix_detail_height(900.0, 480.0), 412.0);
+        assert_eq!(mix_detail_height(600.0, 480.0), DETAIL_PANEL_MIN_HEIGHT);
     }
 }
