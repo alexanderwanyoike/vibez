@@ -143,13 +143,19 @@ impl FadeClipDrag {
         (point.x - self.handle.x).powi(2) + (point.y - self.handle.y).powi(2)
     }
 
+    /// The fade that meets the overlapping neighbour, while the pointer at
+    /// `x` is within reach of its edge.
+    pub(super) fn crossfade_frames(&self, x: f32) -> Option<u64> {
+        self.snap
+            .filter(|snap| (x - snap.x).abs() <= FADE_HANDLE_HIT_RADIUS)
+            .map(|snap| snap.frames)
+    }
+
     /// Use the exact inverse of [`fade_handle_xs`] so a handle drawn at one
     /// frame cannot jitter to an adjacent frame when the pointer has not moved.
     pub(super) fn frames_at_x(&self, x: f32) -> u64 {
-        if let Some(snap) = self.snap {
-            if (x - snap.x).abs() <= FADE_HANDLE_HIT_RADIUS {
-                return snap.frames;
-            }
+        if let Some(frames) = self.crossfade_frames(x) {
+            return frames;
         }
         if self.clip_width <= 0.0 || self.duration_frames == 0 {
             return 0;
