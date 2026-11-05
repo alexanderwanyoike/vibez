@@ -13,6 +13,7 @@ use crate::state::{GridConfig, PianoRollEditMode, SnapGrid, UiNoteClip, UndoGest
 use crate::timeline_geometry::TimelineGeometry;
 use crate::widgets::clip_loop_markers::{self, LoopDrag};
 use crate::widgets::double_click::DoubleClick;
+use crate::widgets::drag_phase::CLICK_SLOP_PX;
 use crate::widgets::local_drag::LocalDrag;
 use vibez_core::id::{ClipId, TrackId};
 use vibez_core::midi::MidiNote;
@@ -375,11 +376,6 @@ enum DragAction {
         undo_gesture: UndoGestureId,
     },
 }
-
-/// Pointer travel before a press counts as a drag rather than a click: a
-/// rubber-band rather than a deselect, or a note move or resize rather than
-/// a shaky click that would snap an off-grid note.
-const DRAG_MIN_PX: f32 = 4.0;
 
 /// Max time between clicks to count as double-click (ms).
 const DOUBLE_CLICK_MS: u64 = 400;
@@ -757,8 +753,8 @@ impl canvas::Program<Message> for PianoRollWidget {
                             started,
                             ..
                         }) if !*started => {
-                            if (local.x - *start_x).abs() < DRAG_MIN_PX
-                                && (local.y - *start_y).abs() < DRAG_MIN_PX
+                            if (local.x - *start_x).abs() < CLICK_SLOP_PX
+                                && (local.y - *start_y).abs() < CLICK_SLOP_PX
                             {
                                 return (canvas::event::Status::Captured, None);
                             }
@@ -767,7 +763,7 @@ impl canvas::Program<Message> for PianoRollWidget {
                         Some(DragAction::ResizeNote {
                             start_x, started, ..
                         }) if !*started => {
-                            if (local.x - *start_x).abs() < DRAG_MIN_PX {
+                            if (local.x - *start_x).abs() < CLICK_SLOP_PX {
                                 return (canvas::event::Status::Captured, None);
                             }
                             *started = true;
@@ -938,8 +934,8 @@ impl canvas::Program<Message> for PianoRollWidget {
                         additive,
                     } = drag
                     {
-                        let travelled = (current.x - anchor.x).abs() >= DRAG_MIN_PX
-                            || (current.y - anchor.y).abs() >= DRAG_MIN_PX;
+                        let travelled = (current.x - anchor.x).abs() >= CLICK_SLOP_PX
+                            || (current.y - anchor.y).abs() >= CLICK_SLOP_PX;
                         if let (true, Some(clip_data)) = (travelled, self.clip.as_ref()) {
                             if let Some(region) = self.marquee_region(anchor, current, &bounds) {
                                 return (
