@@ -62,6 +62,15 @@ pub struct EffectKnobWidget {
     pub ring_tint: Option<Color>,
     /// Lights the ring from its top centre, for values that cut and boost.
     pub bipolar: bool,
+    /// Paints the body like a console knob's coloured cap.
+    pub cap: Option<KnobCap>,
+}
+
+/// A knob body's own colour and the pointer drawn on it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct KnobCap {
+    pub body: Color,
+    pub pointer: Color,
 }
 
 impl EffectKnobWidget {
@@ -87,6 +96,7 @@ impl EffectKnobWidget {
             arc_color,
             ring_tint: None,
             bipolar: false,
+            cap: None,
         }
     }
 
@@ -112,6 +122,7 @@ impl EffectKnobWidget {
             arc_color,
             ring_tint: None,
             bipolar: false,
+            cap: None,
         }
     }
 
@@ -129,6 +140,7 @@ impl EffectKnobWidget {
             arc_color,
             ring_tint: Some(arc_color),
             bipolar: false,
+            cap: None,
         }
     }
 
@@ -155,6 +167,7 @@ impl EffectKnobWidget {
             arc_color,
             ring_tint: None,
             bipolar: false,
+            cap: None,
         }
     }
 
@@ -244,6 +257,12 @@ impl EffectKnobWidget {
     /// This knob lit from its centre.
     pub fn bipolar(mut self) -> Self {
         self.bipolar = true;
+        self
+    }
+
+    /// This knob wearing `cap`.
+    pub fn with_cap(mut self, cap: KnobCap) -> Self {
+        self.cap = Some(cap);
         self
     }
 
@@ -375,14 +394,13 @@ impl canvas::Program<Message> for EffectKnobWidget {
 
         // Knob body: filled disc, subtly lighter while engaged.
         let body = canvas::Path::circle(center, body_radius);
-        frame.fill(
-            &body,
-            if engaged {
-                theme::knob_body_engaged()
-            } else {
-                theme::knob_body()
-            },
-        );
+        let body_colour = match (self.cap, engaged) {
+            (Some(cap), false) => cap.body,
+            (Some(cap), true) => theme::blend(cap.body, theme::text(), 0.12),
+            (None, false) => theme::knob_body(),
+            (None, true) => theme::knob_body_engaged(),
+        };
+        frame.fill(&body, body_colour);
 
         // Pointer: from inside the body to its edge, rounded, never
         // touching the arc.
@@ -398,16 +416,12 @@ impl canvas::Program<Message> for EffectKnobWidget {
                 center.y + pointer_outer * value_angle.sin(),
             ),
         );
-        frame.stroke(
-            &pointer,
-            round
-                .with_color(if engaged {
-                    theme::text()
-                } else {
-                    theme::text_dim()
-                })
-                .with_width(2.0),
-        );
+        let pointer_colour = match (self.cap, engaged) {
+            (Some(cap), _) => cap.pointer,
+            (None, true) => theme::text(),
+            (None, false) => theme::text_dim(),
+        };
+        frame.stroke(&pointer, round.with_color(pointer_colour).with_width(2.0));
 
         vec![frame.into_geometry()]
     }
