@@ -126,6 +126,9 @@ pub struct ViewState {
     pub editing_track_name: Option<TrackId>,
     pub editing_clip_name: Option<(TrackId, ClipId)>,
     pub edit_name_text: String,
+    /// The Arrange track header under the pointer, which shows its quieter
+    /// actions only while hovered.
+    pub hovered_track_header: Option<TrackId>,
     /// Short-lived, engine-authored note flashes for device feedback.
     /// This is view state only and is never persisted with the project.
     pub(crate) drum_pad_flash_until: HashMap<(TrackId, u8), std::time::Instant>,
@@ -161,6 +164,7 @@ impl Default for ViewState {
             editing_track_name: None,
             editing_clip_name: None,
             edit_name_text: String::new(),
+            hovered_track_header: None,
             drum_pad_flash_until: HashMap::new(),
             held_modifiers: iced::keyboard::Modifiers::empty(),
             mixer_send_bank: 0,
@@ -329,6 +333,9 @@ pub enum ContextMenuTarget {
         transient_marker: Option<u64>,
         warp_marker: Option<u64>,
     },
+    TrackHeader {
+        track_id: TrackId,
+    },
     ArrangementEmpty,
 }
 
@@ -420,6 +427,16 @@ impl TimelineContent {
 
     pub fn remove(&mut self, track_id: TrackId) -> Option<TrackTimelineContent> {
         self.by_track.remove(&track_id)
+    }
+
+    /// Audio and note clips on `tracks`, leaving out content kept for a
+    /// track no longer in the list.
+    pub fn clip_count(&self, tracks: impl IntoIterator<Item = TrackId>) -> usize {
+        tracks
+            .into_iter()
+            .filter_map(|track_id| self.get(track_id))
+            .map(|content| content.clips.len() + content.note_clips.len())
+            .sum()
     }
 }
 

@@ -6,11 +6,16 @@ use iced::{Rectangle, Renderer};
 
 use crate::theme;
 
-use super::clip_colors::clip_colors;
+use super::clip_colors::{clip_colors, ClipColors};
 use super::clip_frame::{clip_box, draw_clip_back, draw_clip_front, LoopPasses};
 use super::fade_drag::{fade_curve_handle, fade_handle_xs};
+use super::lane_grid::{lane_grid, GridLine};
 use super::note_marks::note_marks;
 use super::*;
+
+/// How far a selected track's lane moves toward the text colour: enough
+/// to find the track, quiet enough that the clips stay the loudest thing.
+const SELECTED_LANE_LIFT: f32 = 0.035;
 
 /// How far to shift the lane so whole-pixel coordinates inside it land on
 /// whole screen pixels.
@@ -61,6 +66,20 @@ fn waveform_peak_for_pixel(
 }
 
 impl TrackClipCanvas {
+    fn clip_colors(&self, selected: bool, recording_preview: bool) -> ClipColors {
+        let track = if recording_preview {
+            theme::danger()
+        } else {
+            self.track_color
+        };
+        let colors = clip_colors(track, selected);
+        if self.muted && !recording_preview {
+            colors.muted(theme::track_bg())
+        } else {
+            colors
+        }
+    }
+
     pub(super) fn draw_impl(
         &self,
         renderer: &Renderer,
@@ -87,7 +106,7 @@ impl TrackClipCanvas {
         } else if drop_hover {
             theme::with_alpha(theme::danger(), 0.16)
         } else if self.selected {
-            theme::track_bg_selected()
+            theme::blend(theme::track_bg(), theme::text(), SELECTED_LANE_LIFT)
         } else {
             theme::track_bg()
         };
@@ -100,33 +119,37 @@ impl TrackClipCanvas {
 
         // Grid lines use the same effective division as interaction.
         if self.bpm > 0.0 {
-            let visible = geometry.visible_beats(w);
-            let grid = self.grid.effective_grid(ppb);
-            let step = grid.beat_size();
-            let start = (self.scroll_offset_beats / step).floor().max(0.0) as i64;
-            let end = ((self.scroll_offset_beats + visible) / step).ceil() as i64 + 1;
-
-            for grid_i in start..end {
-                let beat = grid_i as f64 * step;
-                let x = self.beat_to_x(beat);
-                if x < -1.0 || x > w + 1.0 {
-                    continue;
-                }
-                let on_bar = (beat / 4.0 - (beat / 4.0).round()).abs() < 1e-6;
-                let on_beat = (beat - beat.round()).abs() < 1e-6;
-                let (color, width) = if on_bar {
-                    (theme::grid_bar(), 1.0)
-                } else if on_beat {
-                    (theme::grid_beat(), 0.75)
-                } else {
-                    (theme::grid_sub(), 0.5)
+            let step = self.grid.effective_grid(ppb).beat_size();
+            let grid = lane_grid(geometry, w, step);
+            let style = theme::lane_style();
+            let ink = theme::text();
+            let band = theme::blend(bg_color, ink, style.band);
+            for &(start, end) in &grid.bands {
+                frame.fill_rectangle(
+                    iced::Point::new(start, 0.0),
+                    iced::Size::new(end - start, h),
+                    band,
+                );
+            }
+            for (x, line) in grid.lines {
+                let strength = match line {
+                    GridLine::Label => style.lines.label,
+                    GridLine::Bar => style.lines.bar,
+                    GridLine::Fine => style.lines.fine,
                 };
-                let line = canvas::Path::line(iced::Point::new(x, 0.0), iced::Point::new(x, h));
-                frame.stroke(
-                    &line,
-                    canvas::Stroke::default()
-                        .with_color(color)
-                        .with_width(width),
+                let under = if grid
+                    .bands
+                    .iter()
+                    .any(|&(start, end)| (start..end).contains(&x))
+                {
+                    band
+                } else {
+                    bg_color
+                };
+                frame.fill_rectangle(
+                    iced::Point::new(x, 0.0),
+                    iced::Size::new(1.0, h),
+                    theme::blend(under, ink, strength),
                 );
             }
         }
@@ -142,14 +165,7 @@ impl TrackClipCanvas {
             {
                 let is_selected =
                     !is_recording_preview && self.selected_clips.contains(&clip.clip_id);
-                let colors = clip_colors(
-                    if is_recording_preview {
-                        theme::danger()
-                    } else {
-                        self.track_color
-                    },
-                    is_selected,
-                );
+                let colors = self.clip_colors(is_selected, is_recording_preview);
                 let clip_start_beat = clip.position as f64 / spb;
                 let clip_dur_beats = clip.duration as f64 / spb;
 
@@ -342,14 +358,7 @@ impl TrackClipCanvas {
             {
                 let is_selected =
                     !is_recording_preview && self.selected_clips.contains(&note_clip.clip_id);
-                let colors = clip_colors(
-                    if is_recording_preview {
-                        theme::danger()
-                    } else {
-                        self.track_color
-                    },
-                    is_selected,
-                );
+                let colors = self.clip_colors(is_selected, is_recording_preview);
                 let clip_x = self.beat_to_x(note_clip.position_beats);
                 let clip_w = geometry.width_for_beats(note_clip.duration_beats);
 

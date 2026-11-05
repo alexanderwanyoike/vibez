@@ -133,6 +133,10 @@ pub struct ThemePalette {
     /// Older `.vzt` files predate it and load with the dark style.
     #[serde(default)]
     pub clip_style: ClipStyle,
+
+    /// Older `.vzt` files predate it and load with the dark style.
+    #[serde(default)]
+    pub lane_style: LaneStyle,
 }
 
 /// How a timeline clip is shaded from its track colour.
@@ -152,7 +156,8 @@ pub struct ClipStyle {
 impl ClipStyle {
     pub const DARK: Self = Self {
         body_opacity: 0.55,
-        body_toward_lane: 0.1,
+        // Tuned by eye against the mockup's dark body shade.
+        body_toward_lane: 0.28,
         ink: Color {
             r: 10.0 / 255.0,
             g: 10.0 / 255.0,
@@ -174,6 +179,60 @@ impl ClipStyle {
 }
 
 impl Default for ClipStyle {
+    fn default() -> Self {
+        Self::DARK
+    }
+}
+
+/// How the timeline lanes behind clips are shaded from the palette. Every
+/// part is a mix toward the text colour, so the dark style still reads on
+/// a light theme file that predates it.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct LaneStyle {
+    /// How far the lane is mixed from the background toward the text
+    /// colour. Light themes sink their lanes below the headers.
+    pub recess: f32,
+    /// How far every other bar band is mixed toward the text colour.
+    pub band: f32,
+    /// How far grid lines are mixed toward the text colour. Kept faint
+    /// because clip bodies are see-through and the grid must read as
+    /// texture behind them.
+    pub lines: GridLineStrengths,
+}
+
+/// How strongly each rank of lane grid line is mixed toward the text colour.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct GridLineStrengths {
+    /// Lines on the ruler's label step.
+    pub label: f32,
+    pub bar: f32,
+    /// Lines on steps finer than a bar.
+    pub fine: f32,
+}
+
+impl LaneStyle {
+    pub const DARK: Self = Self {
+        recess: 0.0,
+        band: 0.025,
+        lines: GridLineStrengths {
+            label: 0.085,
+            bar: 0.05,
+            fine: 0.028,
+        },
+    };
+
+    pub const LIGHT: Self = Self {
+        recess: 0.15,
+        band: 0.05,
+        lines: GridLineStrengths {
+            label: 0.13,
+            bar: 0.075,
+            fine: 0.045,
+        },
+    };
+}
+
+impl Default for LaneStyle {
     fn default() -> Self {
         Self::DARK
     }
@@ -280,16 +339,7 @@ impl ThemePalette {
             knob_body_engaged: rgb(0.16, 0.16, 0.16),
             knob_track: rgb(0.22, 0.22, 0.22),
             fader_handle: rgb(0.533, 0.533, 0.533),
-            track_colors: [
-                rgb(0.878, 0.376, 0.376), // red
-                rgb(0.878, 0.565, 0.251), // orange
-                rgb(0.816, 0.753, 0.251), // yellow
-                rgb(0.314, 0.690, 0.376), // green
-                rgb(0.251, 0.627, 0.690), // cyan
-                rgb(0.376, 0.502, 0.816), // blue
-                rgb(0.565, 0.376, 0.753), // purple
-                rgb(0.753, 0.376, 0.627), // pink
-            ],
+            track_colors: crate::themes::TRACKS_CLASSIC,
             eq_lf: rgb(0.65, 0.46, 0.28),
             eq_lmf: rgb(0.36, 0.48, 0.72),
             eq_hmf: rgb(0.33, 0.62, 0.38),
@@ -309,7 +359,15 @@ impl ThemePalette {
             piano_black_key: rgb(0.102, 0.102, 0.102),
             piano_key_label: rgb(0.35, 0.35, 0.35),
             clip_style: ClipStyle::DARK,
+            lane_style: LaneStyle::DARK,
         }
+    }
+}
+
+impl ThemePalette {
+    /// Background of the timeline lanes behind clips.
+    pub fn lane(&self) -> Color {
+        blend(self.bg_dark, self.text, self.lane_style.recess)
     }
 }
 
@@ -404,6 +462,10 @@ pub fn clip_style() -> ClipStyle {
     CURRENT.read().unwrap().clip_style
 }
 
+pub fn lane_style() -> LaneStyle {
+    CURRENT.read().unwrap().lane_style
+}
+
 // ── Derived roles (aliases of palette fields) ──
 
 pub fn mute_active() -> Color {
@@ -423,11 +485,16 @@ pub fn fader_track() -> Color {
 }
 
 pub fn track_bg() -> Color {
-    bg_dark()
+    CURRENT.read().unwrap().lane()
 }
 
 pub fn track_bg_selected() -> Color {
     bg_elevated()
+}
+
+/// A hovered track header, halfway to its selected shade.
+pub fn track_header_hovered() -> Color {
+    blend(bg_surface(), track_bg_selected(), 0.5)
 }
 
 pub fn ruler_bg() -> Color {
@@ -441,6 +508,11 @@ pub fn ruler_text() -> Color {
 /// Mix two theme colors without escaping the active palette. Perform uses
 /// this for instrument-like depth that still follows light, dark, and custom
 /// `.vzt` themes.
+///
+/// Faint tints and fades are mixed with this rather than painted
+/// translucent: the renderer blends alpha in linear light, which makes a
+/// faint tint several times stronger than its token and fades dark ink on a
+/// light background far more than on a dark one.
 pub fn blend(from: Color, to: Color, amount: f32) -> Color {
     let amount = amount.clamp(0.0, 1.0);
     let keep = 1.0 - amount;
@@ -557,6 +629,16 @@ mod tests {
         let palette: ThemePalette = serde_json::from_value(json).unwrap();
 
         assert_eq!(palette.clip_style, ClipStyle::DARK);
+    }
+
+    #[test]
+    fn a_theme_file_without_lane_style_loads_with_the_dark_style() {
+        let mut json = serde_json::to_value(ThemePalette::charcoal()).unwrap();
+        json.as_object_mut().unwrap().remove("lane_style");
+
+        let palette: ThemePalette = serde_json::from_value(json).unwrap();
+
+        assert_eq!(palette.lane_style, LaneStyle::DARK);
     }
 
     #[test]

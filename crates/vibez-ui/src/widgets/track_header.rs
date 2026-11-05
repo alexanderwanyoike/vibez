@@ -19,10 +19,40 @@ use vibez_core::midi::TrackKind;
 use vibez_core::track::{AudioInputRoute, InputMonitoring};
 
 /// Width of the track header panel in the arrangement view.
-pub const TRACK_HEADER_WIDTH: f32 = 220.0;
+pub const TRACK_HEADER_WIDTH: f32 = 219.0;
 
-/// Total width including the 3px color bar on the left edge.
-pub const TRACK_HEADER_TOTAL_WIDTH: f32 = TRACK_HEADER_WIDTH + 3.0;
+const COLOR_BAR_WIDTH: f32 = 4.0;
+
+/// Total width including the color bar on the left edge.
+pub const TRACK_HEADER_TOTAL_WIDTH: f32 = TRACK_HEADER_WIDTH + COLOR_BAR_WIDTH;
+
+/// How an Arrange track header is shown.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct TrackHeaderFlags {
+    pub selected: bool,
+    pub editing_name: bool,
+    pub automation_open: bool,
+    pub hovered: bool,
+}
+
+/// An open pick list menu hides the pointer from the header beneath it, so
+/// input controls shown only on hover would vanish, menu and all, before a
+/// choice could be made.
+fn shows_audio_input(track: &ProjectTrack) -> bool {
+    track.kind == TrackKind::Audio
+}
+
+impl TrackHeaderFlags {
+    /// Whether the quiet add action is shown and clickable.
+    fn shows_actions(self) -> bool {
+        self.hovered
+    }
+
+    /// Whether the automation toggle is shown and clickable.
+    fn shows_automation_toggle(self) -> bool {
+        self.hovered || self.automation_open
+    }
+}
 
 #[derive(Debug, Clone, Copy)]
 pub struct TrackHeaderRecordingView<'a> {
@@ -67,8 +97,10 @@ where
             pick_list::Style {
                 text_color: if highlighted {
                     th::accent()
-                } else {
+                } else if engaged {
                     th::text()
+                } else {
+                    th::text_dim()
                 },
                 placeholder_color: th::text_muted(),
                 handle_color: if engaged || highlighted {
@@ -102,16 +134,24 @@ where
         .into()
 }
 
+/// How a channel name is set when it is not being edited.
+#[derive(Debug, Clone, Copy)]
+pub struct ChannelNameStyle {
+    pub size: u16,
+    pub font: iced::Font,
+    pub color: iced::Color,
+}
+
 /// Inline-editable channel name shared by arrangement headers and
 /// mixer strips. The caller decides which channel roles expose it.
+/// `editing` holds the text typed so far while the name is being edited.
 pub fn view_editable_channel_name<'a>(
     track: &'a ProjectTrack,
-    editing_name: bool,
-    edit_text: &'a str,
-    size: u16,
-    color: iced::Color,
+    editing: Option<&'a str>,
+    style: ChannelNameStyle,
 ) -> Element<'a, Message> {
-    if editing_name {
+    let ChannelNameStyle { size, font, color } = style;
+    if let Some(edit_text) = editing {
         text_input("Name", edit_text)
             .on_input(|value| Message::View(ViewMsg::EditNameText(value)))
             .on_submit(Message::View(ViewMsg::FinishEditing))
@@ -119,7 +159,7 @@ pub fn view_editable_channel_name<'a>(
             .width(Length::Fill)
             .into()
     } else {
-        button(text(&track.name).size(size).color(color))
+        button(text(&track.name).size(size).font(font).color(color))
             .on_press(Message::View(ViewMsg::StartEditingTrackName {
                 track_id: track.id,
                 name: track.name.clone(),
@@ -138,12 +178,16 @@ pub fn view_editable_channel_name<'a>(
 /// Render the track header for the arrangement view.
 pub fn view_track_header<'a>(
     track: &'a ProjectTrack,
-    selected: bool,
-    editing_name: bool,
+    flags: TrackHeaderFlags,
     edit_text: &'a str,
-    automation_open: bool,
     recording: TrackHeaderRecordingView<'a>,
 ) -> Element<'a, Message> {
+    let TrackHeaderFlags {
+        selected,
+        editing_name,
+        automation_open,
+        ..
+    } = flags;
     let TrackHeaderRecordingView {
         input_channels: audio_input_channels,
         armed,
@@ -153,86 +197,65 @@ pub fn view_track_header<'a>(
     } = recording;
     let track_color = th::track_color(track.color_index);
 
-    // Row 1: Track type icon + name + "+" add clip button + delete button
-    let type_icon = match track.kind {
-        TrackKind::Audio => icons::icon(icons::AUDIO_WAVEFORM)
-            .size(12)
-            .color(track_color),
-        TrackKind::Instrument(_) | TrackKind::Midi => {
-            icons::icon(icons::MUSIC).size(12).color(track_color)
-        }
-    };
-
     let name_color = if track.mute {
         th::text_dim()
     } else {
         th::text()
     };
-    let name_widget = view_editable_channel_name(track, editing_name, edit_text, 13, name_color);
+    let name_widget = view_editable_channel_name(
+        track,
+        editing_name.then_some(edit_text),
+        ChannelNameStyle {
+            size: 13,
+            font: crate::typography::TRACK_TITLE,
+            color: name_color,
+        },
+    );
 
-    let add_btn = match track.kind {
-        TrackKind::Audio => button(icons::icon(icons::PLUS).size(11).color(th::text_dim()))
-            .on_press(Message::AddClipToTrack(track.id))
-            .padding([2, 6]),
-        TrackKind::Instrument(_) | TrackKind::Midi => {
-            button(icons::icon(icons::PLUS).size(11).color(th::text_dim()))
-                .on_press(Message::PianoRoll(PianoRollMsg::AddNoteClipToTrack(
-                    track.id,
-                )))
-                .padding([2, 6])
-        }
+    // Hidden actions stay laid out, so nothing shifts when the pointer
+    // arrives; they can only be clicked while the header is hovered.
+    let action_color = if flags.shows_actions() {
+        th::text_dim()
+    } else {
+        iced::Color::TRANSPARENT
     };
 
-    let delete_btn = button(icons::icon(icons::TRASH_2).size(10).color(th::text_dim()))
-        .on_press(Message::remove_track(track.id))
+    let add_message = match track.kind {
+        TrackKind::Audio => Message::AddClipToTrack(track.id),
+        TrackKind::Instrument(_) | TrackKind::Midi => {
+            Message::PianoRoll(PianoRollMsg::AddNoteClipToTrack(track.id))
+        }
+    };
+    let add_btn = button(icons::icon(icons::PLUS).size(11).color(action_color))
+        .on_press_maybe(flags.shows_actions().then_some(add_message))
         .padding([2, 4])
-        .style(|_theme: &Theme, status| {
-            let bg = match status {
-                button::Status::Hovered | button::Status::Pressed => Some(th::bg_hover().into()),
-                _ => None,
-            };
-            button::Style {
-                background: bg,
-                text_color: th::text_dim(),
-                border: iced::Border::default(),
-                ..Default::default()
-            }
-        });
+        .style(quiet_action_style);
 
     let auto_btn = {
         let color = if automation_open {
             th::accent()
         } else {
-            th::text_dim()
+            action_color
         };
         button(icons::icon(icons::SLIDERS_VERTICAL).size(10).color(color))
-            .on_press(Message::Automation(AutomationMsg::ToggleTrackLanes(
-                track.id,
-            )))
+            .on_press_maybe(
+                flags
+                    .shows_automation_toggle()
+                    .then_some(Message::Automation(AutomationMsg::ToggleTrackLanes(
+                        track.id,
+                    ))),
+            )
             .padding([2, 4])
-            .style(|_theme: &Theme, status| {
-                let bg = match status {
-                    button::Status::Hovered | button::Status::Pressed => {
-                        Some(th::bg_hover().into())
-                    }
-                    _ => None,
-                };
-                button::Style {
-                    background: bg,
-                    text_color: th::text_dim(),
-                    border: iced::Border::default(),
-                    ..Default::default()
-                }
-            })
+            .style(quiet_action_style)
     };
 
+    let kind_label = text(track.kind.label()).size(10).color(th::text_dim());
     let name_row = row![
-        type_icon,
         name_widget,
+        kind_label,
         horizontal_space(),
         auto_btn,
-        add_btn,
-        delete_btn
+        add_btn
     ]
     .spacing(4)
     .align_y(iced::Alignment::Center);
@@ -302,7 +325,7 @@ pub fn view_track_header<'a>(
         }
     };
 
-    let track_controls: Element<'_, Message> = if track.kind == TrackKind::Audio {
+    let track_controls: Element<'_, Message> = if shows_audio_input(track) {
         let arm_color = if armed { th::danger() } else { th::text_dim() };
         let arm_icon = if armed {
             icons::CIRCLE_DOT
@@ -436,7 +459,7 @@ pub fn view_track_header<'a>(
 
     // Color bar on the left edge
     let color_bar = container(text(""))
-        .width(Length::Fixed(3.0))
+        .width(Length::Fixed(COLOR_BAR_WIDTH))
         .height(Length::Fill)
         .style(move |_theme: &Theme| container::Style {
             background: Some(track_color.into()),
@@ -449,27 +472,88 @@ pub fn view_track_header<'a>(
         background: Some(
             if selected {
                 th::track_bg_selected()
+            } else if flags.hovered {
+                th::track_header_hovered()
             } else {
                 th::bg_surface()
             }
             .into(),
         ),
-        border: iced::Border {
-            color: if selected {
-                th::accent_dim()
-            } else {
-                th::border()
-            },
-            width: if selected { 1.0 } else { 0.0 },
-            radius: 0.0.into(),
-        },
         ..Default::default()
     });
 
     // The whole header column selects the track. Child widgets
-    // (name, M/S, add, delete, fader) capture their own clicks first,
+    // (name, M/S, add, fader) capture their own clicks first,
     // so this only fires on otherwise-dead header space.
+    let track_id = track.id;
     mouse_area(card)
-        .on_press(Message::select_track(track.id))
+        .on_press(Message::select_track(track_id))
+        .on_enter(Message::View(ViewMsg::TrackHeaderHovered {
+            track_id,
+            hovered: true,
+        }))
+        .on_exit(Message::View(ViewMsg::TrackHeaderHovered {
+            track_id,
+            hovered: false,
+        }))
         .into()
+}
+
+fn quiet_action_style(_theme: &Theme, status: button::Status) -> button::Style {
+    let background = match status {
+        button::Status::Hovered | button::Status::Pressed => Some(th::bg_hover().into()),
+        _ => None,
+    };
+    button::Style {
+        background,
+        text_color: th::text_dim(),
+        border: iced::Border {
+            radius: 3.0.into(),
+            ..Default::default()
+        },
+        ..Default::default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use vibez_core::id::TrackId;
+
+    fn audio_track() -> ProjectTrack {
+        ProjectTrack::new(TrackId::new(), "Vox".into(), 0)
+    }
+
+    #[test]
+    fn an_audio_header_shows_its_input_without_hover() {
+        assert!(shows_audio_input(&audio_track()));
+    }
+
+    #[test]
+    fn hidden_header_actions_take_no_clicks() {
+        let resting = TrackHeaderFlags::default();
+        let hovered = TrackHeaderFlags {
+            hovered: true,
+            ..resting
+        };
+        let automation_open = TrackHeaderFlags {
+            automation_open: true,
+            ..resting
+        };
+
+        assert!(!resting.shows_actions());
+        assert!(!resting.shows_automation_toggle());
+        assert!(hovered.shows_actions());
+        assert!(hovered.shows_automation_toggle());
+        assert!(!automation_open.shows_actions());
+        assert!(automation_open.shows_automation_toggle());
+    }
+
+    #[test]
+    fn a_midi_header_never_shows_audio_input() {
+        let mut midi = audio_track();
+        midi.kind = TrackKind::Midi;
+
+        assert!(!shows_audio_input(&midi));
+    }
 }

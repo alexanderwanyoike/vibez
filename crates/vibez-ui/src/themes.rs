@@ -9,7 +9,7 @@ use std::path::PathBuf;
 
 use iced::Color;
 
-use crate::theme::{ClipStyle, ThemePalette};
+use crate::theme::{ClipStyle, LaneStyle, ThemePalette};
 
 const fn rgb8(r: u8, g: u8, b: u8) -> Color {
     Color {
@@ -73,16 +73,31 @@ const EQ_CONSOLE: [Color; 4] = [
     },
 ];
 
-/// The default track rainbow (charcoal's).
-const TRACKS_CLASSIC: [Color; 8] = [
-    rgb8(224, 96, 96),
-    rgb8(224, 144, 64),
-    rgb8(208, 192, 64),
-    rgb8(80, 176, 96),
-    rgb8(64, 160, 176),
-    rgb8(96, 128, 208),
-    rgb8(144, 96, 192),
-    rgb8(192, 96, 160),
+/// The default track palette (Charcoal's): eight hues at low saturation
+/// and mid lightness, so clips stay tellable apart without the colour
+/// shouting over the music they hold.
+pub(crate) const TRACKS_CLASSIC: [Color; 8] = [
+    rgb8(189, 136, 132),
+    rgb8(189, 159, 132),
+    rgb8(180, 165, 116),
+    rgb8(132, 189, 146),
+    rgb8(132, 181, 189),
+    rgb8(132, 155, 189),
+    rgb8(157, 132, 189),
+    rgb8(189, 132, 164),
+];
+
+/// The default palette's hues, a little more saturated and darker so
+/// they hold up against light lanes.
+const TRACKS_CLASSIC_LIGHT: [Color; 8] = [
+    rgb8(194, 118, 112),
+    rgb8(194, 150, 112),
+    rgb8(186, 165, 94),
+    rgb8(112, 194, 133),
+    rgb8(112, 183, 194),
+    rgb8(112, 145, 194),
+    rgb8(148, 112, 194),
+    rgb8(194, 112, 158),
 ];
 
 const TRACKS_NEON: [Color; 8] = [
@@ -190,6 +205,7 @@ fn dark(seed: Seed) -> ThemePalette {
         piano_black_key: darken(bg, 0.15),
         piano_key_label: lighten(bg, 0.32),
         clip_style: ClipStyle::DARK,
+        lane_style: LaneStyle::DARK,
     }
 }
 
@@ -243,6 +259,7 @@ fn light(seed: Seed) -> ThemePalette {
         piano_black_key: rgb8(40, 40, 40),
         piano_key_label: darken(bg, 0.45),
         clip_style: ClipStyle::LIGHT,
+        lane_style: LaneStyle::LIGHT,
     }
 }
 
@@ -494,7 +511,7 @@ pub fn builtins() -> Vec<ThemePalette> {
             bg: rgb8(242, 242, 240),
             accent: rgb8(235, 120, 15),
             text: rgb8(40, 42, 46),
-            tracks: TRACKS_CLASSIC,
+            tracks: TRACKS_CLASSIC_LIGHT,
             eq: EQ_CONSOLE,
         }),
     ]);
@@ -615,6 +632,45 @@ mod tests {
             let d = (luma(t.text) - luma(t.bg_dark)).abs();
             assert!(d > 0.45, "theme {} text/bg contrast too low: {d}", t.name);
         }
+    }
+
+    fn saturation_and_lightness(c: Color) -> (f32, f32) {
+        let max = c.r.max(c.g).max(c.b);
+        let min = c.r.min(c.g).min(c.b);
+        let lightness = (max + min) / 2.0;
+        let chroma = max - min;
+        let saturation = if chroma == 0.0 {
+            0.0
+        } else {
+            chroma / (1.0 - (2.0 * lightness - 1.0).abs())
+        };
+        (saturation, lightness)
+    }
+
+    #[test]
+    fn the_default_dark_and_light_themes_use_a_muted_track_palette() {
+        for name in ["Charcoal", "Porcelain"] {
+            let theme = builtin_by_name(name).unwrap();
+            for color in theme.track_colors {
+                let (saturation, lightness) = saturation_and_lightness(color);
+                assert!(
+                    saturation <= 0.42 && (0.5..=0.68).contains(&lightness),
+                    "{name} track colour {color:?} is s={saturation} l={lightness}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn porcelain_lanes_sit_below_its_headers_and_charcoal_lanes_on_its_background() {
+        fn luma(c: Color) -> f32 {
+            0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b
+        }
+        let porcelain = builtin_by_name("Porcelain").unwrap();
+        let charcoal = builtin_by_name("Charcoal").unwrap();
+
+        assert!(luma(porcelain.lane()) < luma(porcelain.bg_surface) - 0.05);
+        assert_eq!(charcoal.lane(), charcoal.bg_dark);
     }
 
     #[test]

@@ -26,6 +26,8 @@ pub const PERFORM_LABEL: Font = Font {
 /// Clip names in timeline title strips: semibold and condensed, so more of
 /// a name fits a short clip.
 pub const CLIP_TITLE: Font = PERFORM_LABEL;
+/// Track names and the corner titles in the Arrange header column.
+pub const TRACK_TITLE: Font = PERFORM_LABEL;
 pub const PERFORM_TECH: Font = Font {
     weight: Weight::Medium,
     ..Font::with_name("IBM Plex Mono")

@@ -19,12 +19,14 @@ use crate::message::Message;
 use crate::state::{ArrangementSelection, ContextMenuTarget, TrackTimelineContent};
 use crate::theme as th;
 use crate::timeline_geometry::TimelineGeometry;
+use crate::widgets::arrange_corner::{arrange_corner, arrangement_size_labels, song_length_label};
 use crate::widgets::timeline::{
     build_row_spans, ArrangementMinimap, MinimapTrack, RulerWidget, TimelineClip, TrackClipCanvas,
-    TRACK_ROW_HEIGHT,
+    OVERVIEW_HEIGHT, TRACK_ROW_HEIGHT,
 };
 use crate::widgets::track_header::{
-    view_editable_channel_name, view_track_header, TrackHeaderRecordingView,
+    view_editable_channel_name, view_track_header, ChannelNameStyle, TrackHeaderFlags,
+    TrackHeaderRecordingView,
 };
 
 use super::*;
@@ -115,16 +117,17 @@ impl App {
             .height(Length::Fixed(28.0))
             .into();
 
-        // Spacer matching header width (including color bar) for the ruler row
-        let ruler_spacer = container(text(""))
-            .width(Length::Fixed(
-                crate::widgets::track_header::TRACK_HEADER_TOTAL_WIDTH,
-            ))
-            .height(Length::Fixed(28.0))
-            .style(|_theme: &Theme| iced::widget::container::Style {
-                background: Some(crate::theme::bg_surface().into()),
-                ..Default::default()
-            });
+        let (tracks_label, clips_label) = arrangement_size_labels(
+            self.state.project_tracks.tracks.len(),
+            timeline.timeline.clip_count(
+                self.state
+                    .project_tracks
+                    .tracks
+                    .iter()
+                    .map(|track| track.id),
+            ),
+        );
+        let ruler_spacer = arrange_corner(tracks_label, clips_label, 28.0);
 
         let ruler_row = row![ruler_spacer, ruler_canvas];
 
@@ -170,18 +173,14 @@ impl App {
                 })
                 .collect(),
         };
-        let minimap_spacer = container(text(""))
-            .width(Length::Fixed(
-                crate::widgets::track_header::TRACK_HEADER_TOTAL_WIDTH,
-            ))
-            .height(Length::Fixed(40.0))
-            .style(|_theme: &Theme| iced::widget::container::Style {
-                background: Some(th::bg_surface().into()),
-                ..Default::default()
-            });
+        let minimap_spacer = arrange_corner(
+            "Overview".into(),
+            song_length_label(self.state.duration_seconds(), bpm),
+            OVERVIEW_HEIGHT,
+        );
         let minimap_canvas: Element<'_, Message> = canvas(minimap)
             .width(Length::Fill)
-            .height(Length::Fixed(40.0))
+            .height(Length::Fixed(OVERVIEW_HEIGHT))
             .into();
         let minimap_row = row![minimap_spacer, minimap_canvas];
 
@@ -260,10 +259,13 @@ impl App {
                 || self.state.audio_recording.monitor_track == Some(track.id);
             let header = view_track_header(
                 track,
-                selected,
-                editing,
+                TrackHeaderFlags {
+                    selected,
+                    editing_name: editing,
+                    automation_open,
+                    hovered: self.state.view.hovered_track_header == Some(track.id),
+                },
                 &self.state.view.edit_name_text,
-                automation_open,
                 TrackHeaderRecordingView {
                     output_peaks: self
                         .track_meter_peaks
@@ -375,6 +377,12 @@ impl App {
             }
             let clip_canvas: Element<'_, Message> = clip_canvas_area.into();
 
+            let header =
+                mouse_area(header).on_right_press(Message::View(ViewMsg::ShowContextMenu {
+                    x: self.state.view.cursor_x,
+                    y: self.state.view.cursor_y,
+                    target: ContextMenuTarget::TrackHeader { track_id: track.id },
+                }));
             let track_row = row![header, clip_canvas].height(Length::Fixed(TRACK_ROW_HEIGHT));
 
             track_rows = track_rows.push(track_row);
@@ -488,10 +496,13 @@ impl App {
             } else {
                 view_editable_channel_name(
                     channel,
-                    self.state.view.editing_track_name == Some(channel.id),
-                    &self.state.view.edit_name_text,
-                    11,
-                    name_color,
+                    (self.state.view.editing_track_name == Some(channel.id))
+                        .then_some(self.state.view.edit_name_text.as_str()),
+                    ChannelNameStyle {
+                        size: 11,
+                        font: iced::Font::DEFAULT,
+                        color: name_color,
+                    },
                 )
             };
 

@@ -115,12 +115,31 @@ impl TrackKind {
     pub fn is_midi(&self) -> bool {
         matches!(self, TrackKind::Instrument(_) | TrackKind::Midi)
     }
+
+    /// The upper-case kind shown beside a track's name.
+    pub fn label(&self) -> &'static str {
+        if self.is_midi() {
+            "MIDI"
+        } else {
+            "AUDIO"
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::perform::GrooveGrid;
+
+    #[test]
+    fn instrument_and_midi_tracks_both_read_as_midi() {
+        assert_eq!(TrackKind::Audio.label(), "AUDIO");
+        assert_eq!(TrackKind::Midi.label(), "MIDI");
+        assert_eq!(
+            TrackKind::Instrument(InstrumentKind::DrumRack).label(),
+            "MIDI"
+        );
+    }
 
     #[test]
     fn midi_note_frequency() {

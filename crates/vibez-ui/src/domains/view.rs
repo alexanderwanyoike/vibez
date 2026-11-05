@@ -55,6 +55,10 @@ pub enum ViewMsg {
     EditNameText(String),
     FinishEditing,
     CancelEditing,
+    TrackHeaderHovered {
+        track_id: TrackId,
+        hovered: bool,
+    },
 }
 
 /// A committed inline rename, for the router to replay through the
@@ -262,6 +266,13 @@ impl ViewState {
                 self.edit_name_text.clear();
                 action.close_device_menu = true;
             }
+            ViewMsg::TrackHeaderHovered { track_id, hovered } => {
+                if hovered {
+                    self.hovered_track_header = Some(track_id);
+                } else if self.hovered_track_header == Some(track_id) {
+                    self.hovered_track_header = None;
+                }
+            }
         }
         action
     }
@@ -433,6 +444,28 @@ mod tests {
             view.update(message, &timeline, ViewCtx::default());
             assert!(view.context_menu.is_some());
         }
+    }
+
+    #[test]
+    fn a_track_header_stays_hovered_whichever_order_enter_and_leave_arrive() {
+        let mut view = ViewState::default();
+        let timeline = TimelineEditorState::default();
+        let (upper, lower) = (TrackId::new(), TrackId::new());
+        let hover = |view: &mut ViewState, track_id, hovered| {
+            view.update(
+                ViewMsg::TrackHeaderHovered { track_id, hovered },
+                &timeline,
+                ViewCtx::default(),
+            );
+        };
+
+        hover(&mut view, lower, true);
+        hover(&mut view, upper, true);
+        hover(&mut view, lower, false);
+        assert_eq!(view.hovered_track_header, Some(upper));
+
+        hover(&mut view, upper, false);
+        assert_eq!(view.hovered_track_header, None);
     }
 
     #[test]

@@ -18,6 +18,28 @@ pub(super) struct ClipColors {
 /// How far a selected clip's title moves toward white.
 const SELECTED_TITLE_LIFT: f32 = 0.33;
 
+/// How far a clip on a muted track is mixed toward its lane.
+const MUTED_FADE: f32 = 0.55;
+
+impl ClipColors {
+    /// The same clip on a muted track: it stays in place and readable but
+    /// steps back, while a selection outline keeps its full strength.
+    pub fn muted(self, lane: Color) -> Self {
+        let fade = |color: Color| Color {
+            a: color.a,
+            ..theme::blend(color, lane, MUTED_FADE)
+        };
+        Self {
+            title: fade(self.title),
+            body: fade(self.body),
+            ink: fade(self.ink),
+            text: fade(self.text),
+            loop_tick: fade(self.loop_tick),
+            selection: self.selection,
+        }
+    }
+}
+
 /// The colours of a clip on `track`'s lane in the active theme.
 pub(super) fn clip_colors(track: Color, selected: bool) -> ClipColors {
     shade(
@@ -98,6 +120,29 @@ mod tests {
             }
         );
         assert!(colors.loop_tick.a > 0.0 && colors.loop_tick.a < colors.ink.a);
+    }
+
+    #[test]
+    fn a_clip_on_a_muted_track_fades_toward_its_lane_but_keeps_its_selection_outline() {
+        for lane in [DARK_LANE, LIGHT_LANE] {
+            let live = shade(RED, true, ClipStyle::DARK, lane, TEXT);
+
+            let muted = live.muted(lane);
+
+            for (part, before, after) in [
+                ("title", live.title, muted.title),
+                ("body", live.body, muted.body),
+                ("ink", live.ink, muted.ink),
+                ("text", live.text, muted.text),
+                ("loop tick", live.loop_tick, muted.loop_tick),
+            ] {
+                let gap =
+                    |c: Color| (c.r - lane.r).abs() + (c.g - lane.g).abs() + (c.b - lane.b).abs();
+                assert!(gap(after) < gap(before) * 0.6, "{part}: {after:?}");
+                assert_eq!(after.a, before.a, "{part} keeps its opacity");
+            }
+            assert_eq!(muted.selection, live.selection);
+        }
     }
 
     #[test]
