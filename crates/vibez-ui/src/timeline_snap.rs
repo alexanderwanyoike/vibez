@@ -1,7 +1,9 @@
 //! Magnetic snap: the grid line, clip edge or marker a timeline drag or
 //! click locks onto.
 
-use crate::state::{ArrangementSelection, GridConfig, TimelineEditorState, TransportState};
+use crate::state::{
+    ArrangementSelection, GridConfig, TimelineEditorState, TransportState, SHORTEST_LENGTH_BEATS,
+};
 
 /// How close, in screen pixels, a clip edge or marker must be to pull an
 /// edge onto it. Fixed on screen so the pull feels the same at every zoom.
@@ -179,6 +181,21 @@ impl SnapTargets {
             context,
             Moves::Nothing,
         )
+    }
+
+    /// Where the end of a span from `start` lands when dragged to `end`:
+    /// where a dragged Clip end does, but never nearer `start` than
+    /// [`SHORTEST_LENGTH_BEATS`].
+    pub fn span_end(&self, start: f64, end: f64, context: SnapContext) -> Snapped {
+        let landed = self.dragged_end(end, context);
+        let shortest = start + SHORTEST_LENGTH_BEATS;
+        if landed.beat >= shortest {
+            return landed;
+        }
+        Snapped {
+            beat: shortest,
+            target: None,
+        }
     }
 
     /// Where a dragged end of the loop at `edge` lands.

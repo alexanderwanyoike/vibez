@@ -747,15 +747,15 @@ impl canvas::Program<Message> for TrackClipCanvas {
                                 ) {
                                     return (canvas::event::Status::Captured, None);
                                 }
-                                let end = self
+                                let snapped = self
                                     .snap_targets
-                                    .dragged_end(
+                                    .span_end(
+                                        *clip_start_beat,
                                         self.x_to_beat(local_x),
                                         self.snap_context(state.alt_held),
                                     )
-                                    .beat;
-                                let snapped = (end - clip_start_beat)
-                                    .max(crate::state::SHORTEST_LENGTH_BEATS);
+                                    .beat
+                                    - clip_start_beat;
                                 let clip_id = *clip_id;
                                 let anchor = if *is_note_clip {
                                     ArrangementSelection::NoteClip { track_id, clip_id }
