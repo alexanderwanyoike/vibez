@@ -344,11 +344,7 @@ impl TrackClipCanvas {
     }
 
     fn snap_context(&self, free: bool) -> SnapContext {
-        SnapContext {
-            grid: self.grid,
-            pixels_per_beat: self.pixels_per_beat(),
-            free,
-        }
+        self.grid.snap_context(self.pixels_per_beat(), free)
     }
 
     /// Offset of this lane's row from the top of the column, converting

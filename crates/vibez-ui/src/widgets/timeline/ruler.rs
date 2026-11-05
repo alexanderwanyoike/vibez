@@ -81,11 +81,7 @@ impl RulerWidget {
 
     /// `free` bypasses all snapping, as holding Alt does.
     fn snap_context(&self, free: bool) -> SnapContext {
-        SnapContext {
-            grid: self.grid,
-            pixels_per_beat: self.pixels_per_beat(),
-            free,
-        }
+        self.grid.snap_context(self.pixels_per_beat(), free)
     }
 
     /// Where the number strip starts, below the loop strip if there is one.

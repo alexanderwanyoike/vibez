@@ -44,6 +44,18 @@ pub struct SnapContext {
     pub free: bool,
 }
 
+impl GridConfig {
+    /// This grid at `pixels_per_beat`, the one way a gesture builds its
+    /// [`SnapContext`].
+    pub fn snap_context(self, pixels_per_beat: f32, free: bool) -> SnapContext {
+        SnapContext {
+            grid: self,
+            pixels_per_beat,
+            free,
+        }
+    }
+}
+
 /// What a drag moves, whose own edges must not pull it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Moves {
