@@ -298,13 +298,7 @@ impl TimelineEditorState {
                     .retain_source_range(new_start, new_end);
                 clip.clamp_fades_to_clip();
                 clip.clamp_start_to_source();
-                clip.loop_start = clip.loop_start.clamp(new_start, new_end);
-                clip.loop_end = clip.loop_end.clamp(clip.loop_start, new_end);
-                if clip.loop_enabled
-                    && (clip.loop_end <= clip.loop_start || clip.start_marker >= clip.loop_end)
-                {
-                    clip.reset_loop_region_to_clip();
-                }
+                clip.fit_loop_region_to_source();
                 engine.send(clip.bounds_command(track_id));
                 engine.send(EngineCommand::SetClipFades {
                     track_id,

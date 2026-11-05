@@ -243,6 +243,18 @@ impl UiClip {
         true
     }
 
+    /// A loop region may reach past the clip end, so new source bounds only
+    /// pull its start up to the source start; a region that still does not
+    /// fit becomes the clip's.
+    pub(crate) fn fit_loop_region_to_source(&mut self) {
+        let start = self.loop_start.max(self.source_offset);
+        if self.accepts_loop_region(start, self.loop_end) {
+            self.loop_start = start;
+        } else {
+            self.reset_loop_region_to_clip();
+        }
+    }
+
     pub(crate) fn clamp_fades_to_clip(&mut self) {
         self.fades = self.fades.clamped_to(self.duration);
     }
