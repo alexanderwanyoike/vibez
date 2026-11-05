@@ -92,6 +92,26 @@ fn a_duplicated_block_overwrites_on_every_lane_it_spans() {
 }
 
 #[test]
+fn a_duplicated_time_selection_replaces_its_whole_range_gaps_included() {
+    let mut a = arrangement_with_tracks(1);
+    let (track_id, _) = add_audio_clip(&mut a, 0, 0, 400);
+    add_audio_clip(&mut a, 0, 1300, 200);
+    add_audio_clip(&mut a, 0, 1500, 300);
+    a.time_selection_active = true;
+    a.time_selection_track = Some(track_id);
+    a.selection_start_beats = 0.0;
+    a.selection_end_beats = 8.0;
+
+    a.update(
+        ArrangementMsg::DuplicateSelectedClip,
+        &mut RecordingEngine::default(),
+        CTX,
+    );
+
+    assert_eq!(audio_spans(&a, 0), vec![(0, 400), (800, 400), (1600, 200)]);
+}
+
+#[test]
 fn a_paste_into_a_longer_clip_splits_it_in_the_engine_too() {
     let mut a = arrangement_with_tracks(1);
     let (track_id, long) = add_audio_clip(&mut a, 0, 0, 1200);
