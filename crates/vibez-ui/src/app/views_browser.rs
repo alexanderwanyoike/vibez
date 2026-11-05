@@ -160,7 +160,7 @@ impl App {
                 .style(browser_transport_button_style);
             return container(
                 column![
-                    text("RESULTS").size(9).color(th::text_muted()),
+                    browser_caption("RESULTS"),
                     text("Your Local Place is empty").size(13).color(th::text()),
                     text("Choose a folder to begin indexing supported audio.")
                         .size(11)
@@ -172,7 +172,6 @@ impl App {
             )
             .width(Length::Fill)
             .height(Length::Fill)
-            .style(browser_results_style)
             .into();
         }
 
@@ -239,7 +238,6 @@ impl App {
                 left: 10.0,
             })
             .width(Length::Fill)
-            .style(browser_table_header_style)
             .into()
         } else {
             container(
@@ -263,14 +261,13 @@ impl App {
                 left: 10.0,
             })
             .width(Length::Fill)
-            .style(browser_table_header_style)
             .into()
         };
         let total_results =
             root_results.len() + local_results.folders.len() + local_results.entries.len();
         let visible_results = self.state.browser.visible_result_count(total_results);
         let mut remaining = visible_results;
-        let mut entries_col = column![].spacing(1);
+        let mut entries_col = column![].spacing(2);
 
         let notice = self
             .state
@@ -312,33 +309,24 @@ impl App {
         }
 
         for root in root_results.into_iter().take(remaining) {
-            entries_col = entries_col
-                .push(self.view_local_folder_result(
-                    browser_root_name(root),
-                    format!("LOCAL ROOT · {}", root.display()),
-                    self.state.browser.root_catalog_label(root).to_string(),
-                    root.clone(),
-                    wide_columns,
-                ))
-                .push(browser_row_divider());
+            entries_col = entries_col.push(self.view_local_folder_result(
+                browser_root_name(root),
+                format!("LOCAL ROOT · {}", root.display()),
+                self.state.browser.root_catalog_label(root).to_string(),
+                root.clone(),
+                wide_columns,
+            ));
             remaining = remaining.saturating_sub(1);
         }
         for &index in local_results.folders.iter().take(remaining) {
             let folder = &self.state.browser.folders[index];
-            entries_col = entries_col
-                .push(self.view_local_folder_result(
-                    folder.name.clone(),
-                    browser_folder_context(
-                        &folder.root_path,
-                        &folder.relative_path,
-                        "FOLDER",
-                        None,
-                    ),
-                    "FOLDER".into(),
-                    folder.path.clone(),
-                    wide_columns,
-                ))
-                .push(browser_row_divider());
+            entries_col = entries_col.push(self.view_local_folder_result(
+                folder.name.clone(),
+                browser_folder_context(&folder.root_path, &folder.relative_path, "FOLDER", None),
+                "FOLDER".into(),
+                folder.path.clone(),
+                wide_columns,
+            ));
             remaining = remaining.saturating_sub(1);
         }
         for &index in local_results.entries.iter().take(remaining) {
@@ -420,7 +408,13 @@ impl App {
                 .align_y(iced::Alignment::Center)
                 .into()
             };
-            let entry_body = container(table_cells).padding([6, 8]).width(Length::Fill);
+            let entry_body = container(
+                row![browser_result_icon(false, selected), table_cells]
+                    .spacing(9)
+                    .align_y(iced::Alignment::Center),
+            )
+            .padding([6, 8])
+            .width(Length::Fill);
             let entry_dragger: Element<'_, Message> = mouse_area(entry_body)
                 .on_press(Message::BeginPendingBrowserDrag(
                     entry.source.clone(),
@@ -428,9 +422,7 @@ impl App {
                 ))
                 .on_release(Message::ClickLocalBrowserEntry(entry.source.clone()))
                 .into();
-            entries_col = entries_col
-                .push(browser_result_row(entry_dragger, selected))
-                .push(browser_row_divider());
+            entries_col = entries_col.push(browser_result_row(entry_dragger, selected));
         }
 
         if total_results == 0 && notice.is_none() {
@@ -450,7 +442,7 @@ impl App {
 
         if self.state.browser.has_more_results(total_results) {
             let hidden = total_results.saturating_sub(visible_results);
-            entries_col = entries_col.push(browser_row_divider()).push(
+            entries_col = entries_col.push(
                 button(
                     text(format!(
                         "SHOW {} MORE",
@@ -482,7 +474,7 @@ impl App {
         container(
             column![
                 row![
-                    text("RESULTS").size(9).color(th::text_muted()),
+                    browser_caption("RESULTS"),
                     horizontal_space(),
                     text(count).size(9).color(th::text_dim())
                 ]
@@ -492,7 +484,7 @@ impl App {
                     container(entries_col)
                         .width(Length::Fill)
                         .padding(iced::Padding {
-                            right: 12.0,
+                            right: 8.0,
                             ..Default::default()
                         })
                 )
@@ -503,12 +495,16 @@ impl App {
                 .direction(scrollable::Direction::Vertical(browser_vertical_scrollbar()))
             ]
             .spacing(0)
-            .padding(8)
+            .padding(iced::Padding {
+                top: 0.0,
+                right: 8.0,
+                bottom: 8.0,
+                left: 8.0,
+            })
             .height(Length::Fill),
         )
         .width(Length::Fill)
         .height(Length::Fill)
-        .style(browser_results_style)
         .into()
     }
 
@@ -521,7 +517,7 @@ impl App {
         wide_columns: bool,
     ) -> Element<'_, Message> {
         let name_cell = column![
-            text(format!("› {name}"))
+            text(name)
                 .size(12)
                 .color(th::text())
                 .width(Length::Fill)
@@ -567,13 +563,21 @@ impl App {
             .into()
         };
 
-        button(container(cells).padding([6, 8]).width(Length::Fill))
-            .on_press(Message::Browser(BrowserMsg::SelectLocalFolder(Some(
-                destination,
-            ))))
-            .padding(0)
-            .width(Length::Fill)
-            .style(browser_utility_action_style)
-            .into()
+        button(
+            container(
+                row![browser_result_icon(true, false), cells]
+                    .spacing(9)
+                    .align_y(iced::Alignment::Center),
+            )
+            .padding([6, 8])
+            .width(Length::Fill),
+        )
+        .on_press(Message::Browser(BrowserMsg::SelectLocalFolder(Some(
+            destination,
+        ))))
+        .padding(0)
+        .width(Length::Fill)
+        .style(|_theme: &iced::Theme, status| browser_place_button_style(false, status))
+        .into()
     }
 }

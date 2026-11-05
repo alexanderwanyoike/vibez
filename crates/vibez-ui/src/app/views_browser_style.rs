@@ -104,17 +104,6 @@ pub(super) fn browser_icon_button_style(_theme: &Theme, status: button::Status) 
     }
 }
 
-pub(super) fn browser_row_divider<'a>() -> Element<'a, Message> {
-    container(text(""))
-        .width(Length::Fill)
-        .height(Length::Fixed(1.0))
-        .style(|_theme: &Theme| container::Style {
-            background: Some(th::divider().into()),
-            ..Default::default()
-        })
-        .into()
-}
-
 pub(super) fn audition_gain_label(gain: f32) -> String {
     if gain <= 0.0001 {
         "−∞ dB".into()
@@ -204,7 +193,7 @@ pub(super) fn browser_utility_action_style(
         border: iced::Border {
             color: iced::Color::TRANSPARENT,
             width: 0.0,
-            radius: 0.0.into(),
+            radius: 4.0.into(),
         },
         ..Default::default()
     }
@@ -237,19 +226,12 @@ pub(super) fn browser_transport_button_style(
     }
 }
 
-/// A results row around `content`, marked while `selected`.
+/// A results row around `content`, a tinted pill while `selected`.
 pub(super) fn browser_result_row<'a>(
     content: impl Into<Element<'a, Message>>,
     selected: bool,
 ) -> Element<'a, Message> {
-    let selection_marker = container(text(""))
-        .width(Length::Fixed(2.0))
-        .height(Length::Fixed(43.0))
-        .style(move |_theme: &Theme| container::Style {
-            background: selected.then(|| th::accent().into()),
-            ..Default::default()
-        });
-    container(iced::widget::row![selection_marker, content.into()].align_y(iced::Alignment::Center))
+    container(content)
         .width(Length::Fill)
         .style(move |_theme: &Theme| browser_result_style(selected))
         .into()
@@ -257,9 +239,29 @@ pub(super) fn browser_result_row<'a>(
 
 pub(super) fn browser_result_style(selected: bool) -> container::Style {
     container::Style {
-        background: selected.then(|| th::accent_dim().into()),
+        background: selected.then(|| th::selected_place().into()),
+        border: iced::Border {
+            radius: BROWSER_ROW_RADIUS.into(),
+            ..Default::default()
+        },
         ..Default::default()
     }
+}
+
+/// The icon leading a results row: a folder, or audio lit while selected.
+pub(super) fn browser_result_icon<'a>(folder: bool, selected: bool) -> Element<'a, Message> {
+    crate::icons::icon(if folder {
+        crate::icons::FOLDER
+    } else {
+        crate::icons::AUDIO_WAVEFORM
+    })
+    .size(13)
+    .color(if selected {
+        th::accent()
+    } else {
+        th::text_dim()
+    })
+    .into()
 }
 
 /// The hairline between the places and results columns.
@@ -270,25 +272,6 @@ pub(super) fn browser_column_rule<'a>() -> Element<'a, Message> {
             ..Default::default()
         })
         .into()
-}
-
-pub(super) fn browser_results_style(_theme: &Theme) -> container::Style {
-    container::Style {
-        background: Some(th::bg_surface().into()),
-        border: iced::Border {
-            color: th::divider(),
-            width: 1.0,
-            radius: 0.0.into(),
-        },
-        ..Default::default()
-    }
-}
-
-pub(super) fn browser_table_header_style(_theme: &Theme) -> container::Style {
-    container::Style {
-        background: Some(th::bg_dark().into()),
-        ..Default::default()
-    }
 }
 
 pub(super) fn browser_result_cell_color(selected: bool) -> iced::Color {
