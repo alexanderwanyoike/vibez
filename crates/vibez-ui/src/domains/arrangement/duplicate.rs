@@ -1,7 +1,7 @@
 //! Duplicate places a copy of the selection right after itself, as one block.
 
 use super::{ArrangementAction, ArrangementCtx, EngineHandle};
-use crate::state::{ClipboardClip, ProjectTracksState, TimelineEditorState};
+use crate::state::{ProjectTracksState, TimelineEditorState};
 
 impl TimelineEditorState {
     pub(super) fn op_duplicate_selection(
@@ -29,19 +29,7 @@ impl TimelineEditorState {
         });
         let ranged =
             self.time_selection_active && self.selection_end_beats > self.selection_start_beats;
-        let span = if ranged {
-            Some((self.selection_start_beats, self.selection_end_beats))
-        } else {
-            let start = entries
-                .iter()
-                .map(ClipboardClip::position_beats)
-                .min_by(f64::total_cmp);
-            let end = entries
-                .iter()
-                .map(|entry| entry.end_beats(spb))
-                .max_by(f64::total_cmp);
-            start.zip(end)
-        };
+        let span = self.selection_span_beats(spb);
         let Some((start, end)) = span.filter(|_| !entries.is_empty()) else {
             return ArrangementAction::default();
         };
