@@ -6,7 +6,7 @@ use iced::{Border, Color, Element, Font, Theme};
 
 use crate::message::Message;
 use crate::theme as th;
-use crate::typography::PERFORM_LABEL;
+use crate::typography::{PERFORM_LABEL, PERFORM_TECH};
 
 pub const GROUP_INSET: f32 = 2.0;
 const GROUP_RADIUS: f32 = 8.0;
@@ -71,5 +71,15 @@ pub fn switch<'a>(choices: impl IntoIterator<Item = Choice<'a>>) -> Element<'a, 
     container(row(buttons).spacing(2))
         .padding(GROUP_INSET)
         .style(group)
+        .into()
+}
+
+/// A control's keyboard shortcut, shown quietly beside its label in
+/// `colour`.
+pub fn shortcut<'a>(key: &'a str, colour: Color) -> Element<'a, Message> {
+    text(key)
+        .font(PERFORM_TECH)
+        .size(9)
+        .color(th::with_alpha(colour, 0.6))
         .into()
 }

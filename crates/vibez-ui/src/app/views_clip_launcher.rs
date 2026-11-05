@@ -282,15 +282,17 @@ impl App {
             pick_list(RecordLength::ALL, Some(record.length), move |v| msg(
                 ClipRecordMsg::SetLength(v)
             ))
-            .text_size(10)
-            .padding([4, 6]),
+            .text_size(9)
+            .padding(super::views_perform_record::RECORD_CONTROL_PADDING)
+            .style(control_style::list(th::accent())),
             pick_list(
                 LoopRecordCountIn::ALL,
                 Some(record.notes.count_in),
                 move |v| msg(ClipRecordMsg::SetCountIn(v))
             )
-            .text_size(10)
-            .padding([4, 6]),
+            .text_size(9)
+            .padding(super::views_perform_record::RECORD_CONTROL_PADDING)
+            .style(control_style::list(th::accent())),
             text("MIDI")
                 .font(PERFORM_TECH)
                 .size(9)
@@ -298,15 +300,17 @@ impl App {
             pick_list(LoopRecordMode::ALL, Some(record.notes.mode), move |v| msg(
                 ClipRecordMsg::SetMode(v)
             ))
-            .text_size(10)
-            .padding([4, 6]),
+            .text_size(9)
+            .padding(super::views_perform_record::RECORD_CONTROL_PADDING)
+            .style(control_style::list(th::accent())),
             pick_list(
                 LoopRecordQuantization::ALL,
                 Some(record.notes.quantization),
                 move |v| msg(ClipRecordMsg::SetQuantization(v))
             )
-            .text_size(10)
-            .padding([4, 6]),
+            .text_size(9)
+            .padding(super::views_perform_record::RECORD_CONTROL_PADDING)
+            .style(control_style::list(th::accent())),
             text(status)
                 .font(PERFORM_TECH)
                 .size(9)
