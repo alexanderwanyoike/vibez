@@ -116,7 +116,7 @@ impl PianoRollWidget {
     }
 
     fn geometry(&self, bounds: &Rectangle) -> TimelineGeometry {
-        TimelineGeometry::fitted(self.total_beats, bounds.width, KEY_WIDTH)
+        fitted_geometry(self.total_beats, bounds.width)
     }
 
     fn beat_to_x(&self, beat: f64, bounds: &Rectangle) -> f32 {
@@ -270,6 +270,12 @@ fn grabbed_notes(notes: &[MidiNote], selection: &HashSet<usize>) -> Vec<MovedNot
             })
         })
         .collect()
+}
+
+/// The piano roll's zoom: `total_beats` fitted into `width` beside its
+/// key column.
+pub(crate) fn fitted_geometry(total_beats: f64, width: f32) -> TimelineGeometry {
+    TimelineGeometry::fitted(total_beats, width, KEY_WIDTH)
 }
 
 /// Every resized note's new length: the grabbed note takes `duration` and

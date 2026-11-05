@@ -65,7 +65,7 @@ impl VelocityLaneWidget {
     }
 
     fn geometry(&self, bounds: &Rectangle) -> TimelineGeometry {
-        TimelineGeometry::fitted(self.total_beats.max(1.0), bounds.width, KEY_WIDTH)
+        fitted_geometry(self.total_beats.max(1.0), bounds.width)
     }
 
     fn baseline(bounds: &Rectangle) -> f32 {

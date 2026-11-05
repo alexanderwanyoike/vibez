@@ -167,12 +167,8 @@ impl App {
     pub(super) fn clip_editor_pixels_per_beat(&self) -> f32 {
         self.clip_editor_clip_beats()
             .map(|beats| {
-                crate::timeline_geometry::TimelineGeometry::fitted(
-                    beats,
-                    self.state.view.window_width,
-                    52.0,
-                )
-                .pixels_per_beat()
+                crate::widgets::piano_roll::fitted_geometry(beats, self.state.view.window_width)
+                    .pixels_per_beat()
             })
             .unwrap_or_else(|| self.timeline_pixels_per_beat())
     }
