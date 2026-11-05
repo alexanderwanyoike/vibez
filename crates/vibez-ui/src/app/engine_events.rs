@@ -423,9 +423,14 @@ impl App {
                         drop(retired);
                     }
                     EngineEvent::PlaybackStopped => {
-                        let _ = self.update(Message::Transport(
+                        // The engine's report, not a request, so none of the
+                        // checks a user's Stop goes through apply.
+                        let ctx = self.transport_ctx();
+                        self.state.transport.update(
                             crate::domains::transport::TransportMsg::EngineStopped,
-                        ));
+                            &mut crate::domains::EngineTx(&mut self.cmd_tx),
+                            ctx,
+                        );
                         let editor = &mut self.state.perform.clip_editor;
                         editor.resume = editor
                             .playing
