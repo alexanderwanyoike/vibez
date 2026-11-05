@@ -896,28 +896,28 @@ impl canvas::Program<Message> for TrackClipCanvas {
             // bound here raced the piano roll's and deleted the clip while a
             // note was selected.
 
-            // Escape cancels a drag: the lane lets go of the pointer, and a
-            // fade drag, which only this lane knows of, hands its gesture
-            // back to be taken back. The app cancels a clip drag itself.
+            // Escape cancels the drag this lane holds, and the lane captures
+            // it so it does nothing else (docs/PATTERNS.md, Undo).
             canvas::Event::Keyboard(iced::keyboard::Event::KeyPressed {
                 key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape),
                 ..
             }) => {
-                let cancelled = match state.drag.take() {
-                    Some(ClipDragAction::FadeClip(drag)) => Some(drag.undo_gesture),
-                    Some(ClipDragAction::FadeCurve(drag)) => Some(drag.undo_gesture),
-                    Some(ClipDragAction::CrossfadeCurve(drag)) => Some(drag.undo_gesture),
-                    Some(ClipDragAction::MoveClip { .. } | ClipDragAction::ResizeClip { .. }) => {
-                        None
-                    }
+                let gesture = match state.drag.take() {
+                    Some(
+                        ClipDragAction::MoveClip { undo_gesture, .. }
+                        | ClipDragAction::ResizeClip { undo_gesture, .. },
+                    ) => undo_gesture,
+                    Some(ClipDragAction::FadeClip(drag)) => drag.undo_gesture,
+                    Some(ClipDragAction::FadeCurve(drag)) => drag.undo_gesture,
+                    Some(ClipDragAction::CrossfadeCurve(drag)) => drag.undo_gesture,
                     other => {
                         state.drag = other;
-                        None
+                        return (canvas::event::Status::Ignored, None);
                     }
                 };
                 return (
-                    canvas::event::Status::Ignored,
-                    cancelled.map(Message::CancelUndoGesture),
+                    canvas::event::Status::Captured,
+                    Some(Message::CancelUndoGesture(gesture)),
                 );
             }
 

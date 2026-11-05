@@ -89,30 +89,18 @@ impl App {
         true
     }
 
-    /// Escape during a Clip drag: the Clips, the engine and the selection go
-    /// back to how the drag found them, and no undo step is left.
-    pub(super) fn cancel_clip_drag(&mut self) -> bool {
-        let Some(gesture) = self
-            .state
-            .arrangement
-            .editor
-            .cancel_clip_drag()
-            .or_else(|| self.state.perform.timeline_editor_mut().cancel_clip_drag())
-        else {
-            return false;
-        };
-        self.revert_gesture(gesture);
-        self.state.arrangement.end_drag_resize();
-        self.state.perform.timeline_editor_mut().end_drag_resize();
-        self.state.status_text = "Drag cancelled".into();
-        true
-    }
-
-    /// Takes back every edit of `gesture`, which is still in flight.
-    pub(super) fn revert_gesture(&mut self, gesture: UndoGestureId) {
+    /// Escape during a lane drag: what the drag `gesture` edited, the
+    /// engine and a clip drag's selection go back to how the drag found
+    /// them, and no undo step is left.
+    pub(super) fn cancel_drag(&mut self, gesture: UndoGestureId) {
+        self.state.arrangement.editor.cancel_clip_drag();
+        self.state.perform.timeline_editor_mut().cancel_clip_drag();
         if let Some(snapshot) = self.state.project.history.revert_gesture(gesture) {
             self.apply_snapshot(snapshot);
         }
+        self.state.arrangement.end_drag_resize();
+        self.state.perform.timeline_editor_mut().end_drag_resize();
+        self.state.status_text = "Drag cancelled".into();
     }
 
     pub(super) fn apply_snapshot(&mut self, snapshot: crate::state::ProjectSnapshot) {
