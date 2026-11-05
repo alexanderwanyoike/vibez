@@ -133,7 +133,7 @@ impl App {
 
     /// The strips, returns and master at `height`.
     fn view_desk(&self, height: f32) -> Element<'_, Message> {
-        let playhead_beat = self.state.position_beats();
+        let playhead_beat = self.state.transport.position_beats();
         let buses = &self.state.project_tracks.buses;
         let mut strips = row![].spacing(4).padding(8);
 

@@ -445,6 +445,9 @@ impl AudioEngine {
         } else {
             self.transport.advance(frames as u64)
         };
+        if was_playing && !performing && !self.transport.is_playing() {
+            self.present_natural_playback_stop_after(self.mix_latency());
+        }
         self.performance_position = if was_playing {
             if performing {
                 self.performance_position.saturating_add(frames as u64)

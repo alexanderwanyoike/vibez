@@ -23,7 +23,11 @@ fn queued_clips(commands: &mut rtrb::Consumer<EngineCommand>) -> Vec<(TrackId, O
 
 #[test]
 fn play_resumes_the_clips_that_were_playing_when_the_transport_stopped() {
-    for play in [TransportMsg::TogglePlayback, TransportMsg::Play] {
+    for play in [
+        TransportMsg::TogglePlayback,
+        TransportMsg::Play,
+        TransportMsg::ContinuePlayback,
+    ] {
         let mut app = super::test_support::app();
         let (commands, mut sent) = rtrb::RingBuffer::new(64);
         app.cmd_tx = crate::domains::EngineCommandQueue::new(

@@ -423,6 +423,14 @@ impl App {
                         drop(retired);
                     }
                     EngineEvent::PlaybackStopped => {
+                        // The engine's report, not a request, so none of the
+                        // checks a user's Stop goes through apply.
+                        let ctx = self.transport_ctx();
+                        self.state.transport.update(
+                            crate::domains::transport::TransportMsg::EngineStopped,
+                            &mut crate::domains::EngineTx(&mut self.cmd_tx),
+                            ctx,
+                        );
                         let editor = &mut self.state.perform.clip_editor;
                         editor.resume = editor
                             .playing
@@ -434,7 +442,6 @@ impl App {
                         self.state.perform.clip_editor.started_at.clear();
                         self.state.perform.clip_editor.clear_queue();
                         self.state.perform.clip_editor.pending.clear();
-                        self.state.transport.follow_engine(false);
                         self.state.perform.playing_section = None;
                         self.state.perform.queued_section = None;
                         self.state.perform.pending_section_boundary_samples = None;
@@ -1052,6 +1059,22 @@ mod tests {
         assert_eq!(notes.len(), 1);
         assert_eq!(notes[0].pitch, 42);
         assert_eq!(captured.by_track[&track].note_clips[0].position_beats, 2.0);
+    }
+
+    #[test]
+    fn arrange_stopping_on_its_own_shows_stopped_back_where_play_started() {
+        let mut app = crate::app::test_support::app();
+        let (mut events, received) = rtrb::RingBuffer::new(4);
+        app.event_rx = Some(received);
+        app.state.transport.playback = crate::state::PlaybackPhase::Playing;
+        app.state.transport.play_start_beats = 1.0;
+        app.state.transport.position_samples = 90_000;
+
+        events.push(EngineEvent::PlaybackStopped).unwrap();
+        app.poll_engine_events();
+
+        assert!(!app.state.transport.is_playing());
+        assert_eq!(app.state.transport.position_samples, 22_050);
     }
 
     #[test]

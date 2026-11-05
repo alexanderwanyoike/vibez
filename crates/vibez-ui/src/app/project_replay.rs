@@ -258,10 +258,17 @@ impl App {
         self.state.arrangement.timeline = snapshot.arrange_timeline;
         self.state.perform.sections = snapshot.sections;
         self.state.perform.clips = snapshot.launcher_clips;
-        let tempo_changed = self.state.transport.bpm != snapshot.bpm;
-        let swing_changed = self.state.perform.project_swing() != snapshot.project_swing;
-        self.state.transport.bpm = snapshot.bpm;
-        self.state.transport.bpm_text = format!("{:.0}", snapshot.bpm);
+        // Neither may be overtaken, so an unchanged one would hold the next
+        // Play behind every content edit still waiting.
+        if self.state.transport.bpm != snapshot.bpm {
+            self.state.transport.retempo(
+                snapshot.bpm,
+                &mut crate::domains::EngineTx(&mut self.cmd_tx),
+            );
+        }
+        if self.state.perform.project_swing() != snapshot.project_swing {
+            self.send_command(EngineCommand::SetProjectSwing(snapshot.project_swing));
+        }
         self.state.perform.set_project_swing(snapshot.project_swing);
         self.state.transport.loop_enabled = snapshot.loop_enabled;
         self.state.transport.loop_start_beats = snapshot.loop_start_beats;
@@ -279,23 +286,17 @@ impl App {
         self.state.perform.editing_section_name = None;
         self.state.perform.duplicate_source = None;
 
-        // Neither may be overtaken, so an unchanged one would hold the next
-        // Play behind every content edit still waiting.
-        if tempo_changed {
-            self.send_command(EngineCommand::SetBpm(self.state.transport.bpm));
-        }
-        if swing_changed {
-            self.send_command(EngineCommand::SetProjectSwing(snapshot.project_swing));
-        }
         self.send_command(EngineCommand::SetArrangementLoop(
             self.state.transport.loop_enabled,
         ));
         if self.state.transport.loop_enabled {
             let start = self
                 .state
+                .transport
                 .beats_to_samples(self.state.transport.loop_start_beats);
             let end = self
                 .state
+                .transport
                 .beats_to_samples(self.state.transport.loop_end_beats);
             self.send_command(EngineCommand::SetArrangementLoopRegion { start, end });
         }

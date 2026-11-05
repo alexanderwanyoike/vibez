@@ -400,12 +400,19 @@ pub(crate) fn global_key_handler(
 ) -> Option<Message> {
     use iced::keyboard::key::Named;
 
-    // Space: toggle playback (no modifiers required)
     if matches!(key, iced::keyboard::Key::Named(Named::Space)) {
-        return Some(Message::Transport(TransportMsg::TogglePlayback));
+        let toggle = if modifiers.shift() {
+            TransportMsg::ContinuePlayback
+        } else {
+            TransportMsg::TogglePlayback
+        };
+        return Some(Message::Transport(toggle));
     }
 
     if modifiers.is_empty() {
+        if matches!(key, iced::keyboard::Key::Named(Named::Home)) {
+            return Some(Message::Transport(TransportMsg::SeekToBeat(0.0)));
+        }
         let mode = match key {
             iced::keyboard::Key::Named(Named::F1) => Some(PerformMode::Sections),
             iced::keyboard::Key::Named(Named::F2) => Some(PerformMode::TrackMutes),
@@ -834,6 +841,14 @@ mod tests {
         assert!(matches!(
             global_key_handler(Key::Named(Named::Space), Modifiers::empty()),
             Some(Message::Transport(TransportMsg::TogglePlayback))
+        ));
+        assert!(matches!(
+            global_key_handler(Key::Named(Named::Space), Modifiers::SHIFT),
+            Some(Message::Transport(TransportMsg::ContinuePlayback))
+        ));
+        assert!(matches!(
+            global_key_handler(Key::Named(Named::Home), Modifiers::empty()),
+            Some(Message::Transport(TransportMsg::SeekToBeat(beat))) if beat == 0.0
         ));
         assert!(matches!(
             global_key_handler(Key::Named(Named::Escape), Modifiers::empty()),

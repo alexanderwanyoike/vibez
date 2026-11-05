@@ -69,10 +69,10 @@ impl TempoMap {
         self.seconds_per_beat() * self.sample_rate as f64
     }
 
-    /// Convert musical time (beats) to sample time.
+    /// Convert musical time (beats) to its nearest sample.
     pub fn musical_to_sample(&self, musical: MusicalTime) -> SampleTime {
         let samples = musical.0 * self.samples_per_beat();
-        SampleTime(samples as u64)
+        SampleTime(samples.round() as u64)
     }
 
     /// Convert sample time to musical time (beats).
@@ -133,8 +133,7 @@ mod tests {
         let musical = MusicalTime(4.0);
         let sample = tm.musical_to_sample(musical);
         let back = tm.sample_to_musical(sample);
-        // Tolerance accounts for u64 truncation in musical_to_sample
-        let tolerance = 1.0 / tm.samples_per_beat();
+        let tolerance = 0.5 / tm.samples_per_beat();
         assert!((back.0 - musical.0).abs() < tolerance);
     }
 
@@ -144,5 +143,12 @@ mod tests {
         // 1 beat at 120 BPM = 0.5 seconds = 22050 samples
         let st = tm.musical_to_sample(MusicalTime(1.0));
         assert_eq!(st.0, 22_050);
+    }
+
+    #[test]
+    fn a_beat_lands_on_its_nearest_sample() {
+        // 20_353.85 samples per beat.
+        let tm = TempoMap::new(130.0, 44_100);
+        assert_eq!(tm.musical_to_sample(MusicalTime(1.0)).0, 20_354);
     }
 }

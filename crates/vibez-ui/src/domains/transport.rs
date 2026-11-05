@@ -7,6 +7,7 @@
 //! route. That boundary is what isolates bugs and makes this file
 //! unit-testable without iced.
 
+use vibez_core::time::{MusicalTime, SampleTime, TempoMap};
 use vibez_engine::commands::EngineCommand;
 
 use super::EngineHandle;
@@ -18,6 +19,9 @@ pub enum TransportMsg {
     Play,
     Stop,
     TogglePlayback,
+    /// Shift+Space: TogglePlayback that starts from where playback last
+    /// stopped instead of the play start.
+    ContinuePlayback,
     /// Seek to a normalized [0, 1] position on the timeline.
     Seek(f64),
     /// Seek to an absolute musical position on the arrangement ruler.
@@ -33,6 +37,7 @@ pub enum TransportMsg {
     },
     /// Engine events routed to this domain.
     EnginePosition(u64),
+    /// The engine stopped, whether asked to or at the song end.
     EngineStopped,
 }
 
@@ -68,6 +73,14 @@ pub enum TransportAction {
 }
 
 impl TransportState {
+    /// A freshly loaded project: stopped, with every cursor at the song start.
+    pub fn reset_to_song_start(&mut self) {
+        self.playback = PlaybackPhase::Stopped;
+        self.position_samples = 0;
+        self.play_start_beats = 0.0;
+        self.continue_beats = 0.0;
+    }
+
     /// What the screen shows, so it never runs ahead of the engine.
     pub fn is_playing(&self) -> bool {
         matches!(
@@ -96,14 +109,24 @@ impl TransportState {
         };
     }
 
+    fn tempo_map(&self) -> TempoMap {
+        TempoMap::new(self.bpm, self.sample_rate)
+    }
+
+    pub fn position_beats(&self) -> f64 {
+        self.tempo_map()
+            .sample_to_musical(SampleTime(self.position_samples))
+            .0
+    }
+
     pub fn samples_per_beat(&self) -> f64 {
-        vibez_core::time::TempoMap::new(self.bpm, self.sample_rate).samples_per_beat()
+        self.tempo_map().samples_per_beat()
     }
 
     /// Beat position -> absolute sample position at the current tempo.
-    pub fn beats_to_samples_at(&self, beats: f64) -> u64 {
+    pub fn beats_to_samples(&self, beats: f64) -> u64 {
         if self.bpm > 0.0 {
-            (beats * self.sample_rate as f64 * 60.0 / self.bpm) as u64
+            self.tempo_map().musical_to_sample(MusicalTime(beats)).0
         } else {
             0
         }
@@ -124,13 +147,18 @@ impl TransportState {
                 TransportAction::None
             }
             TransportMsg::Stop => {
+                let already_stopped = !self.will_play();
                 if self.playback != PlaybackPhase::Stopped {
                     self.playback = PlaybackPhase::Stopping;
                 }
                 engine.send(EngineCommand::Stop);
                 if !ctx.perform_playback_active {
-                    self.position_samples = 0;
-                    engine.send(EngineCommand::Seek(0));
+                    if already_stopped {
+                        self.place_play_start(0.0, engine);
+                    } else {
+                        self.continue_beats = self.position_beats();
+                        self.return_to_play_start(engine);
+                    }
                 }
                 TransportAction::None
             }
@@ -142,24 +170,22 @@ impl TransportState {
                 };
                 self.update(next, engine, ctx)
             }
+            TransportMsg::ContinuePlayback => {
+                if !self.will_play() {
+                    self.position_samples = self.beats_to_samples(self.continue_beats);
+                    engine.send(EngineCommand::Seek(self.position_samples));
+                }
+                self.update(TransportMsg::TogglePlayback, engine, ctx)
+            }
             TransportMsg::Seek(normalized) => {
                 if ctx.total_duration_samples > 0 {
-                    let sample_pos =
-                        (normalized.clamp(0.0, 1.0) * ctx.total_duration_samples as f64) as u64;
-                    self.position_samples = sample_pos;
-                    engine.send(EngineCommand::Seek(sample_pos));
+                    let sample_pos = normalized.clamp(0.0, 1.0) * ctx.total_duration_samples as f64;
+                    self.place_play_start(sample_pos / self.samples_per_beat(), engine);
                 }
                 TransportAction::ClearTimeSelection
             }
             TransportMsg::SeekToBeat(beat) => {
-                let samples_per_beat = if self.bpm > 0.0 {
-                    self.sample_rate as f64 * 60.0 / self.bpm
-                } else {
-                    0.0
-                };
-                let sample_pos = (beat.max(0.0) * samples_per_beat).round() as u64;
-                self.position_samples = sample_pos;
-                engine.send(EngineCommand::Seek(sample_pos));
+                self.place_play_start(beat.max(0.0), engine);
                 TransportAction::ClearTimeSelection
             }
             TransportMsg::BpmChanged(text) => {
@@ -214,9 +240,40 @@ impl TransportState {
                 TransportAction::None
             }
             TransportMsg::EngineStopped => {
+                // The confirmation of a Stop that a Play has already followed
+                // is not a stop on its own and must not move the new playback.
+                let stopped_on_its_own = self.playback == PlaybackPhase::Playing;
                 self.follow_engine(false);
+                if stopped_on_its_own && !ctx.perform_playback_active {
+                    self.continue_beats = self.position_beats();
+                    self.return_to_play_start(engine);
+                }
                 TransportAction::None
             }
+        }
+    }
+
+    fn place_play_start(&mut self, beats: f64, engine: &mut impl EngineHandle) {
+        self.play_start_beats = beats;
+        self.continue_beats = beats;
+        self.return_to_play_start(engine);
+    }
+
+    fn return_to_play_start(&mut self, engine: &mut impl EngineHandle) {
+        self.position_samples = self.beats_to_samples(self.play_start_beats);
+        engine.send(EngineCommand::Seek(self.position_samples));
+    }
+
+    /// The engine's playhead is a sample position, so while stopped it is
+    /// moved to keep its beat and Play starts from the same place in the song.
+    pub fn retempo(&mut self, bpm: f64, engine: &mut impl EngineHandle) {
+        let beat = self.position_beats();
+        self.bpm = bpm;
+        self.bpm_text = format!("{bpm:.0}");
+        engine.send(EngineCommand::SetBpm(bpm));
+        if !self.will_play() {
+            self.position_samples = self.beats_to_samples(beat);
+            engine.send(EngineCommand::Seek(self.position_samples));
         }
     }
 
@@ -225,9 +282,7 @@ impl TransportState {
     fn set_bpm(&mut self, bpm: f64, engine: &mut impl EngineHandle) -> TransportAction {
         let bpm = bpm.clamp(20.0, 999.0);
         let old_bpm = self.bpm;
-        self.bpm = bpm;
-        self.bpm_text = format!("{bpm:.0}");
-        engine.send(EngineCommand::SetBpm(bpm));
+        self.retempo(bpm, engine);
         if self.loop_enabled {
             self.send_loop_region(engine);
         }
@@ -242,8 +297,8 @@ impl TransportState {
     }
 
     fn send_loop_region(&self, engine: &mut impl EngineHandle) {
-        let start = self.beats_to_samples_at(self.loop_start_beats);
-        let end = self.beats_to_samples_at(self.loop_end_beats);
+        let start = self.beats_to_samples(self.loop_start_beats);
+        let end = self.beats_to_samples(self.loop_end_beats);
         engine.send(EngineCommand::SetArrangementLoopRegion { start, end });
     }
 }
@@ -266,7 +321,7 @@ mod tests {
     }
 
     #[test]
-    fn stop_resets_position_and_seeks_zero() {
+    fn stop_before_any_click_returns_to_the_song_start() {
         let mut t = transport();
         t.playback = PlaybackPhase::Playing;
         t.position_samples = 12345;
@@ -275,6 +330,300 @@ mod tests {
         assert!(!t.will_play());
         assert_eq!(t.position_samples, 0);
         assert!(matches!(engine.0[1], EngineCommand::Seek(0)));
+    }
+
+    /// Clicks `beat`, plays, and lets the playhead run on past it.
+    fn playing_from(beat: f64) -> (TransportState, RecordingEngine) {
+        let mut t = transport();
+        let mut engine = RecordingEngine::default();
+        t.update(
+            TransportMsg::SeekToBeat(beat),
+            &mut engine,
+            TransportCtx::default(),
+        );
+        t.update(TransportMsg::Play, &mut engine, TransportCtx::default());
+        t.follow_engine(true);
+        let ran_on = t.position_samples + 100_000;
+        t.update(
+            TransportMsg::EnginePosition(ran_on),
+            &mut engine,
+            TransportCtx::default(),
+        );
+        engine.0.clear();
+        (t, engine)
+    }
+
+    #[test]
+    fn stop_returns_to_where_play_started() {
+        let (mut t, mut engine) = playing_from(128.0);
+        let start = t.beats_to_samples(128.0);
+
+        t.update(TransportMsg::Stop, &mut engine, TransportCtx::default());
+
+        assert_eq!(t.position_samples, start);
+        assert!(matches!(
+            engine.0.as_slice(),
+            [EngineCommand::Stop, EngineCommand::Seek(s)] if *s == start
+        ));
+    }
+
+    #[test]
+    fn stop_returns_to_the_same_beat_after_a_tempo_change() {
+        let (mut t, mut engine) = playing_from(32.0);
+        t.update(
+            TransportMsg::NudgeBpm(-60.0),
+            &mut engine,
+            TransportCtx::default(),
+        );
+
+        t.update(TransportMsg::Stop, &mut engine, TransportCtx::default());
+
+        assert_eq!(t.bpm, 60.0);
+        assert_eq!(t.position_samples, t.beats_to_samples(32.0));
+    }
+
+    #[test]
+    fn the_loop_region_lands_on_the_beats_to_samples() {
+        let mut t = transport();
+        t.bpm = 130.0;
+        let mut engine = RecordingEngine::default();
+
+        t.update(
+            TransportMsg::SetArrangementLoopRegion {
+                start_beats: 1.0,
+                end_beats: 2.0,
+            },
+            &mut engine,
+            TransportCtx::default(),
+        );
+
+        assert!(matches!(
+            engine.0[0],
+            EngineCommand::SetArrangementLoopRegion {
+                start: 20_354,
+                end: 40_708
+            }
+        ));
+    }
+
+    #[test]
+    fn a_tempo_change_while_stopped_keeps_the_playhead_on_its_beat() {
+        let mut t = transport();
+        let mut engine = RecordingEngine::default();
+        t.update(
+            TransportMsg::SeekToBeat(32.0),
+            &mut engine,
+            TransportCtx::default(),
+        );
+        engine.0.clear();
+
+        t.update(
+            TransportMsg::NudgeBpm(-60.0),
+            &mut engine,
+            TransportCtx::default(),
+        );
+
+        let on_the_beat = t.beats_to_samples(32.0);
+        assert_eq!(t.position_samples, on_the_beat);
+        assert!(
+            matches!(engine.0.last(), Some(EngineCommand::Seek(pos)) if *pos == on_the_beat),
+            "Play starts where the engine's playhead is"
+        );
+    }
+
+    #[test]
+    fn a_click_while_playing_moves_where_stop_returns() {
+        let (mut t, mut engine) = playing_from(128.0);
+        t.update(
+            TransportMsg::SeekToBeat(64.0),
+            &mut engine,
+            TransportCtx::default(),
+        );
+        t.update(
+            TransportMsg::EnginePosition(t.position_samples + 100_000),
+            &mut engine,
+            TransportCtx::default(),
+        );
+
+        t.update(TransportMsg::Stop, &mut engine, TransportCtx::default());
+
+        assert_eq!(t.position_samples, t.beats_to_samples(64.0));
+    }
+
+    #[test]
+    fn stopping_on_its_own_returns_to_where_play_started() {
+        let (mut t, mut engine) = playing_from(128.0);
+        let start = t.beats_to_samples(128.0);
+
+        t.update(
+            TransportMsg::EngineStopped,
+            &mut engine,
+            TransportCtx::default(),
+        );
+
+        assert!(!t.is_playing());
+        assert_eq!(t.position_samples, start);
+        assert!(matches!(engine.0.as_slice(), [EngineCommand::Seek(s)] if *s == start));
+    }
+
+    #[test]
+    fn the_confirmation_of_a_requested_stop_does_not_seek_again() {
+        let (mut t, mut engine) = playing_from(128.0);
+        t.update(TransportMsg::Stop, &mut engine, TransportCtx::default());
+        engine.0.clear();
+
+        t.update(
+            TransportMsg::EngineStopped,
+            &mut engine,
+            TransportCtx::default(),
+        );
+
+        assert!(!t.is_playing());
+        assert!(engine.0.is_empty());
+    }
+
+    #[test]
+    fn play_right_after_stop_does_not_seek_when_the_stop_is_confirmed() {
+        let (mut t, mut engine) = playing_from(128.0);
+        t.update(TransportMsg::Stop, &mut engine, TransportCtx::default());
+        t.update(TransportMsg::Play, &mut engine, TransportCtx::default());
+        engine.0.clear();
+
+        t.update(
+            TransportMsg::EngineStopped,
+            &mut engine,
+            TransportCtx::default(),
+        );
+
+        assert!(engine.0.is_empty(), "the new playback must not jump back");
+        assert!(t.will_play());
+    }
+
+    #[test]
+    fn perform_stopping_on_its_own_keeps_the_arrange_cursor() {
+        let (mut t, mut engine) = playing_from(128.0);
+        let cursor = t.position_samples;
+
+        t.update(
+            TransportMsg::EngineStopped,
+            &mut engine,
+            TransportCtx {
+                perform_playback_active: true,
+                ..TransportCtx::default()
+            },
+        );
+
+        assert!(!t.is_playing());
+        assert_eq!(t.position_samples, cursor);
+        assert!(engine.0.is_empty());
+    }
+
+    #[test]
+    fn a_second_stop_goes_to_the_song_start_and_play_starts_there() {
+        let (mut t, mut engine) = playing_from(128.0);
+        t.update(TransportMsg::Stop, &mut engine, TransportCtx::default());
+        t.follow_engine(false);
+        assert_eq!(t.position_samples, t.beats_to_samples(128.0));
+
+        engine.0.clear();
+        t.update(TransportMsg::Stop, &mut engine, TransportCtx::default());
+        assert_eq!(t.position_samples, 0);
+        assert!(matches!(
+            engine.0.as_slice(),
+            [EngineCommand::Stop, EngineCommand::Seek(0)]
+        ));
+
+        t.update(TransportMsg::Play, &mut engine, TransportCtx::default());
+        t.follow_engine(true);
+        t.update(
+            TransportMsg::EnginePosition(50_000),
+            &mut engine,
+            TransportCtx::default(),
+        );
+        t.update(TransportMsg::Stop, &mut engine, TransportCtx::default());
+        assert_eq!(t.position_samples, 0);
+    }
+
+    #[test]
+    fn continue_plays_from_where_playback_stopped_and_stop_still_returns() {
+        let (mut t, mut engine) = playing_from(128.0);
+        let stopped_at = t.position_samples;
+        t.update(TransportMsg::Stop, &mut engine, TransportCtx::default());
+        t.follow_engine(false);
+        engine.0.clear();
+
+        t.update(
+            TransportMsg::ContinuePlayback,
+            &mut engine,
+            TransportCtx::default(),
+        );
+        assert_eq!(t.position_samples, stopped_at);
+        assert!(matches!(
+            engine.0.as_slice(),
+            [EngineCommand::Seek(s), EngineCommand::Play] if *s == stopped_at
+        ));
+
+        t.follow_engine(true);
+        t.update(
+            TransportMsg::EnginePosition(stopped_at + 1_000),
+            &mut engine,
+            TransportCtx::default(),
+        );
+        t.update(TransportMsg::Stop, &mut engine, TransportCtx::default());
+        assert_eq!(t.position_samples, t.beats_to_samples(128.0));
+    }
+
+    #[test]
+    fn continue_after_a_click_plays_from_the_click() {
+        let (mut t, mut engine) = playing_from(128.0);
+        t.update(TransportMsg::Stop, &mut engine, TransportCtx::default());
+        t.follow_engine(false);
+        t.update(
+            TransportMsg::SeekToBeat(64.0),
+            &mut engine,
+            TransportCtx::default(),
+        );
+
+        t.update(
+            TransportMsg::ContinuePlayback,
+            &mut engine,
+            TransportCtx::default(),
+        );
+
+        assert_eq!(t.position_samples, t.beats_to_samples(64.0));
+    }
+
+    #[test]
+    fn continue_after_stopping_on_its_own_plays_from_where_it_stopped() {
+        let (mut t, mut engine) = playing_from(128.0);
+        let stopped_at = t.position_samples;
+        t.update(
+            TransportMsg::EngineStopped,
+            &mut engine,
+            TransportCtx::default(),
+        );
+
+        t.update(
+            TransportMsg::ContinuePlayback,
+            &mut engine,
+            TransportCtx::default(),
+        );
+
+        assert_eq!(t.position_samples, stopped_at);
+    }
+
+    #[test]
+    fn continue_while_playing_stops_like_space() {
+        let (mut t, mut engine) = playing_from(128.0);
+
+        t.update(
+            TransportMsg::ContinuePlayback,
+            &mut engine,
+            TransportCtx::default(),
+        );
+
+        assert!(!t.will_play());
+        assert_eq!(t.position_samples, t.beats_to_samples(128.0));
     }
 
     #[test]

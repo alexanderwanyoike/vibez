@@ -59,7 +59,7 @@ impl App {
                     .iter()
                     .find(|lane| lane.target == AutomationTarget::TrackSwingOffset)
             })
-            .and_then(|lane| lane.value_at(self.state.position_beats()))
+            .and_then(|lane| lane.value_at(self.state.transport.position_beats()))
             .map(SwingOffset::from_normalized);
         let automated = automation_offset.is_some();
         let controlling_offset = automation_offset.or(manual_offset);

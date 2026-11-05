@@ -25,7 +25,7 @@ fn audio_recording_transport_guard(
     message: &TransportMsg,
 ) -> AudioRecordingTransportGuard {
     match message {
-        TransportMsg::Stop | TransportMsg::TogglePlayback
+        TransportMsg::Stop | TransportMsg::TogglePlayback | TransportMsg::ContinuePlayback
             if phase == crate::domains::audio_recording::AudioRecordingPhase::Recording =>
         {
             AudioRecordingTransportGuard::StopRecording
@@ -49,6 +49,26 @@ fn audio_recording_transport_guard(
 }
 
 impl App {
+    pub(super) fn transport_ctx(&self) -> crate::domains::transport::TransportCtx {
+        let perform_playback_active = self.state.perform.clip_editor.running
+            || self.state.perform.playing_section.is_some()
+            || self.state.perform.queued_section.is_some()
+            || self.state.perform.section_record.is_active();
+        crate::domains::transport::TransportCtx {
+            total_duration_samples: self.state.total_duration_samples(),
+            time_selection: if self.state.arrangement.time_selection_active {
+                Some((
+                    self.state.arrangement.selection_start_beats,
+                    self.state.arrangement.selection_end_beats,
+                ))
+            } else {
+                None
+            },
+            perform_tempo_locked: perform_playback_active,
+            perform_playback_active,
+        }
+    }
+
     pub(super) fn update_and_refresh_clips(&mut self, message: Message) -> Task<Message> {
         let before = Arc::clone(&self.state.perform.clips);
         let recording = self
@@ -143,7 +163,11 @@ impl App {
         if self.state.perform.clip_record.is_active()
             && matches!(
                 &message,
-                Message::Transport(TransportMsg::Stop | TransportMsg::TogglePlayback)
+                Message::Transport(
+                    TransportMsg::Stop
+                        | TransportMsg::TogglePlayback
+                        | TransportMsg::ContinuePlayback
+                )
             )
         {
             if self.state.perform.clip_record.pending_audio_arm.is_some() {
@@ -285,6 +309,7 @@ impl App {
                     && matches!(
                         msg,
                         crate::domains::transport::TransportMsg::TogglePlayback
+                            | crate::domains::transport::TransportMsg::ContinuePlayback
                             | crate::domains::transport::TransportMsg::Play
                     )
                 {
@@ -308,29 +333,14 @@ impl App {
                     || matches!(
                         &msg,
                         crate::domains::transport::TransportMsg::TogglePlayback
+                            | crate::domains::transport::TransportMsg::ContinuePlayback
                             if self.state.transport.will_play()
                     );
                 if stops_perform {
                     self.end_capture_automation_gesture();
                     self.section_residency_request.cancel();
                 }
-                let perform_playback_active = self.state.perform.clip_editor.running
-                    || self.state.perform.playing_section.is_some()
-                    || self.state.perform.queued_section.is_some()
-                    || self.state.perform.section_record.is_active();
-                let ctx = crate::domains::transport::TransportCtx {
-                    total_duration_samples: self.state.total_duration_samples(),
-                    time_selection: if self.state.arrangement.time_selection_active {
-                        Some((
-                            self.state.arrangement.selection_start_beats,
-                            self.state.arrangement.selection_end_beats,
-                        ))
-                    } else {
-                        None
-                    },
-                    perform_tempo_locked: perform_playback_active,
-                    perform_playback_active,
-                };
+                let ctx = self.transport_ctx();
                 let action = {
                     let mut engine = crate::domains::EngineTx(&mut self.cmd_tx);
                     self.state.transport.update(msg, &mut engine, ctx)
@@ -841,9 +851,11 @@ impl App {
                 }
                 let start = self
                     .state
+                    .transport
                     .beats_to_samples(self.state.arrangement.selection_start_beats);
                 let end = self
                     .state
+                    .transport
                     .beats_to_samples(self.state.arrangement.selection_end_beats);
                 return self.dispatch_bounce(
                     vibez_engine::render::BounceMode::Master,

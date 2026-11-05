@@ -786,10 +786,6 @@ impl AppState {
         self.transport.position_samples as f64 / self.transport.sample_rate as f64
     }
 
-    pub fn position_beats(&self) -> f64 {
-        self.position_seconds() * self.transport.bpm / 60.0
-    }
-
     pub fn duration_seconds(&self) -> f64 {
         let samples = self.total_duration_samples();
         if samples > 0 {
@@ -866,15 +862,6 @@ impl AppState {
         } else {
             // Minimum 64 beats for empty projects
             64.0
-        }
-    }
-
-    /// Convert a beat value to a sample position.
-    pub fn beats_to_samples(&self, beats: f64) -> u64 {
-        if self.transport.bpm > 0.0 {
-            (beats * self.transport.sample_rate as f64 * 60.0 / self.transport.bpm) as u64
-        } else {
-            0
         }
     }
 
