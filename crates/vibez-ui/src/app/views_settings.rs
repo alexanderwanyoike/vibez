@@ -1,7 +1,8 @@
-//! Split out of app.rs; inherent methods on [`super::App`].
+//! The Settings sheet: a section sidebar beside the chosen section, plus
+//! the Plugins and Warping sections.
 
 use iced::widget::{
-    button, center, column, container, horizontal_space, mouse_area, row, slider, text,
+    button, center, column, container, horizontal_space, mouse_area, row, scrollable, slider, text,
 };
 use iced::{Color, Element, Length, Theme};
 
@@ -12,97 +13,158 @@ use crate::theme as th;
 
 use super::*;
 
+const SHEET_W: f32 = 900.0;
+const SHEET_H: f32 = 640.0;
+const SHEET_MARGIN: f32 = 24.0;
+const SHEET_RADIUS: f32 = 12.0;
+const NAV_W: f32 = 200.0;
+const NAV_ROW_H: f32 = 30.0;
+
+/// A Settings section as the sidebar lists it.
+struct Section {
+    tab: SettingsTab,
+    label: &'static str,
+    icon: char,
+    hint: &'static str,
+}
+
+const SECTIONS: [Section; 8] = [
+    Section {
+        tab: SettingsTab::Audio,
+        label: "Audio",
+        icon: icons::VOLUME_2,
+        hint: "Audio and MIDI hardware for this computer, never saved with a project.",
+    },
+    Section {
+        tab: SettingsTab::Project,
+        label: "Project",
+        icon: icons::FILE,
+        hint: "How projects save and how monitored tracks are timed.",
+    },
+    Section {
+        tab: SettingsTab::Plugins,
+        label: "Plugins",
+        icon: icons::PLUG,
+        hint: "Where Vibez looks for VST3 and CLAP plugins.",
+    },
+    Section {
+        tab: SettingsTab::Dropbox,
+        label: "Dropbox",
+        icon: icons::CLOUD,
+        hint: "Browse and audition your Dropbox, and how much of it stays on disk.",
+    },
+    Section {
+        tab: SettingsTab::Warping,
+        label: "Warping",
+        icon: icons::AUDIO_LINES,
+        hint: "How dropped samples follow the project tempo.",
+    },
+    Section {
+        tab: SettingsTab::Perform,
+        label: "Perform",
+        icon: icons::LAYOUT_GRID,
+        hint: "The computer keys that play Perform pads, and how hard they play.",
+    },
+    Section {
+        tab: SettingsTab::Appearance,
+        label: "Appearance",
+        icon: icons::PALETTE,
+        hint: "How Vibez looks. Changes apply at once and are saved for you, not in the project.",
+    },
+    Section {
+        tab: SettingsTab::Updates,
+        label: "Updates",
+        icon: icons::ROTATE_CW,
+        hint: "Whether Vibez looks for a newer release, and what it found.",
+    },
+];
+
 impl App {
     pub(super) fn view_settings_modal(&self) -> Element<'_, Message> {
         let sheet = settings_sheet_size(iced::Size::new(
             self.state.view.window_width,
             self.state.view.window_height,
         ));
-        let title = text("Settings").size(18).color(th::accent());
-        let close_btn = button(icons::icon(icons::X).size(14).color(th::text_dim()))
-            .on_press(Message::CloseSettings)
-            .padding([4, 8])
-            .style(|_theme: &Theme, status| {
-                let bg = match status {
-                    button::Status::Hovered | button::Status::Pressed => {
-                        Some(th::bg_hover().into())
-                    }
-                    _ => None,
-                };
-                button::Style {
-                    background: bg,
-                    text_color: th::text_dim(),
-                    border: iced::Border::default(),
-                    ..Default::default()
+        let active = self.state.settings_tab;
+
+        let mut nav = column![
+            container(text("Settings").size(13).font(bold()).color(th::text())).padding(
+                iced::Padding {
+                    top: 0.0,
+                    right: 8.0,
+                    bottom: 12.0,
+                    left: 8.0,
                 }
+            )
+        ]
+        .spacing(2);
+        for section in &SECTIONS {
+            let selected = section.tab == active;
+            nav = nav.push(
+                button(
+                    container(
+                        row![
+                            icons::icon(section.icon).size(14).color(if selected {
+                                th::accent()
+                            } else {
+                                th::text_dim()
+                            }),
+                            text(section.label)
+                                .size(12)
+                                .font(if selected { semibold() } else { medium() })
+                                .color(th::text())
+                                .wrapping(iced::widget::text::Wrapping::None),
+                        ]
+                        .spacing(10)
+                        .align_y(iced::Alignment::Center),
+                    )
+                    .center_y(NAV_ROW_H),
+                )
+                .on_press(Message::SelectSettingsTab(section.tab))
+                .padding([0, 10])
+                .width(Length::Fill)
+                .style(move |_theme: &Theme, status| settings_tab_style(selected, status)),
+            );
+        }
+        let nav = container(nav)
+            .padding([18, 10])
+            .width(NAV_W)
+            .height(Length::Fill)
+            .style(|_theme: &Theme| container::Style {
+                background: Some(nav_background().into()),
+                ..Default::default()
             });
 
-        let header = row![title, horizontal_space(), close_btn].align_y(iced::Alignment::Center);
-
-        // -- Tab bar --
-        let make_tab_btn = |label: &'static str, tab: SettingsTab, is_active: bool| {
-            let color = if is_active {
-                th::accent()
-            } else {
-                th::text_dim()
-            };
-            // A tab label must never wrap: when the bar runs out of room,
-            // wrapping turns the last tab into a one-letter-per-line
-            // column. Clipping is the survivable failure.
-            button(
-                text(label)
-                    .size(13)
-                    .color(color)
-                    .wrapping(iced::widget::text::Wrapping::None),
-            )
-            .on_press(Message::SelectSettingsTab(tab))
-            .padding([6, 8])
-            .style(move |_theme: &Theme, status| settings_tab_style(is_active, status))
-        };
-
-        let active = self.state.settings_tab;
-        let tab_bar = row![
-            make_tab_btn("Audio", SettingsTab::Audio, active == SettingsTab::Audio),
-            make_tab_btn(
-                "Project",
-                SettingsTab::Project,
-                active == SettingsTab::Project
-            ),
-            make_tab_btn(
-                "Plugins",
-                SettingsTab::Plugins,
-                active == SettingsTab::Plugins
-            ),
-            make_tab_btn(
-                "Dropbox",
-                SettingsTab::Dropbox,
-                active == SettingsTab::Dropbox
-            ),
-            make_tab_btn(
-                "Warping",
-                SettingsTab::Warping,
-                active == SettingsTab::Warping
-            ),
-            make_tab_btn(
-                "Perform",
-                SettingsTab::Perform,
-                active == SettingsTab::Perform
-            ),
-            make_tab_btn(
-                "Appearance",
-                SettingsTab::Appearance,
-                active == SettingsTab::Appearance
-            ),
-            make_tab_btn(
-                "Updates",
-                SettingsTab::Updates,
-                active == SettingsTab::Updates
-            ),
+        let section = SECTIONS
+            .iter()
+            .find(|section| section.tab == active)
+            .unwrap_or(&SECTIONS[0]);
+        let close = button(
+            container(icons::icon(icons::X).size(14))
+                .center_x(28.0)
+                .center_y(28.0),
+        )
+        .on_press(Message::CloseSettings)
+        .padding(0)
+        .style(|_theme: &Theme, status| button::Style {
+            border: iced::Border {
+                radius: 7.0.into(),
+                ..Default::default()
+            },
+            ..crate::widgets::control_style::styled(None, status)
+        });
+        let header = row![
+            column![
+                text(section.label).size(18).font(bold()).color(th::text()),
+                text(section.hint).size(11.5).color(th::text_muted()),
+            ]
+            .spacing(4)
+            .width(Length::Fill),
+            close
         ]
-        .spacing(0);
+        .align_y(iced::Alignment::Start);
 
-        // -- Tab body --
-        let tab_body: Element<'_, Message> = match self.state.settings_tab {
+        let tab_body: Element<'_, Message> = match active {
             SettingsTab::Audio => self.view_settings_audio_tab(),
             SettingsTab::Project => self.view_settings_project_tab(),
             SettingsTab::Plugins => self.view_settings_plugins_tab(),
@@ -112,47 +174,57 @@ impl App {
             SettingsTab::Appearance => self.view_settings_appearance_tab(),
             SettingsTab::Updates => self.view_settings_updates_tab(),
         };
+        let body = scrollable(container(tab_body).padding(iced::Padding {
+            right: 12.0,
+            ..Default::default()
+        }))
+        .direction(scrollable::Direction::Vertical(
+            crate::widgets::quiet_scroll::scrollbar(),
+        ))
+        .style(crate::widgets::quiet_scroll::style)
+        .height(Length::Fill);
+        let content = column![header, body]
+            .spacing(16)
+            .padding(iced::Padding {
+                top: 22.0,
+                right: 14.0,
+                bottom: 22.0,
+                left: 26.0,
+            })
+            .width(Length::Fill)
+            .height(Length::Fill);
 
-        let content = column![
-            header,
-            container(column![].height(Length::Fixed(1.0)).width(Length::Fill)).style(
-                |_theme: &Theme| container::Style {
-                    background: Some(th::border().into()),
-                    ..Default::default()
-                }
-            ),
-            tab_bar,
-            container(column![].height(Length::Fixed(1.0)).width(Length::Fill)).style(
-                |_theme: &Theme| container::Style {
-                    background: Some(th::border().into()),
-                    ..Default::default()
-                }
-            ),
-            tab_body,
-        ]
-        .spacing(8)
-        .padding(20)
-        .width(Length::Fixed(sheet.width));
-
-        let dialog = container(content)
-            .max_height(sheet.height)
+        let sheet = container(row![nav, content])
+            .width(sheet.width)
+            .height(sheet.height)
+            .clip(true)
             .style(|_theme: &Theme| container::Style {
                 background: Some(th::bg_surface().into()),
                 border: iced::Border {
-                    color: th::border(),
+                    color: th::hairline(th::bg_surface()),
                     width: 1.0,
-                    radius: 8.0.into(),
+                    radius: SHEET_RADIUS.into(),
+                },
+                shadow: iced::Shadow {
+                    color: Color::from_rgba(0.0, 0.0, 0.0, if th::is_light() { 0.3 } else { 0.6 }),
+                    offset: iced::Vector::new(0.0, 24.0),
+                    blur_radius: 60.0,
                 },
                 ..Default::default()
             });
+        // Presses on the sheet itself land here, so only the dimmed
+        // backdrop around it closes Settings.
+        let sheet = mouse_area(sheet).on_press(Message::SelectSettingsTab(active));
 
-        // Centered overlay with dimmed background
         mouse_area(
-            container(center(dialog).width(Length::Fill).height(Length::Fill))
+            container(center(sheet).width(Length::Fill).height(Length::Fill))
                 .width(Length::Fill)
                 .height(Length::Fill)
                 .style(|_theme: &Theme| container::Style {
-                    background: Some(iced::Color::from_rgba(0.0, 0.0, 0.0, 0.5).into()),
+                    background: Some(
+                        Color::from_rgba(0.0, 0.0, 0.0, if th::is_light() { 0.28 } else { 0.5 })
+                            .into(),
+                    ),
                     ..Default::default()
                 }),
         )
@@ -403,38 +475,59 @@ impl App {
     }
 }
 
-/// The Settings dialog's size in a window `window` big.
-fn settings_sheet_size(window: iced::Size) -> iced::Size {
-    // Wide enough for all eight tab labels on one line with room to
-    // spare; still comfortably inside the 900px minimum window. Grow
-    // this before adding a ninth tab.
-    iced::Size::new(600.0, window.height)
+fn bold() -> iced::Font {
+    iced::Font {
+        weight: iced::font::Weight::Bold,
+        ..iced::Font::DEFAULT
+    }
 }
 
-fn settings_tab_style(is_active: bool, status: button::Status) -> button::Style {
-    let bg = if is_active {
-        None
+fn semibold() -> iced::Font {
+    iced::Font {
+        weight: iced::font::Weight::Semibold,
+        ..iced::Font::DEFAULT
+    }
+}
+
+fn medium() -> iced::Font {
+    iced::Font {
+        weight: iced::font::Weight::Medium,
+        ..iced::Font::DEFAULT
+    }
+}
+
+/// The sidebar's shade: the frame's in dark themes, the lane's in light.
+fn nav_background() -> Color {
+    if th::is_light() {
+        th::track_bg()
     } else {
-        match status {
-            button::Status::Hovered | button::Status::Pressed => Some(th::bg_hover().into()),
-            _ => None,
-        }
-    };
+        th::display_bg()
+    }
+}
+
+/// The Settings sheet's size in a window `window` big: its designed size,
+/// or what fits inside a margin when the window is smaller.
+fn settings_sheet_size(window: iced::Size) -> iced::Size {
+    iced::Size::new(
+        SHEET_W.min(window.width - SHEET_MARGIN * 2.0).max(0.0),
+        SHEET_H.min(window.height - SHEET_MARGIN * 2.0).max(0.0),
+    )
+}
+
+/// A sidebar section: a tinted pill while it is the one shown.
+fn settings_tab_style(is_active: bool, status: button::Status) -> button::Style {
     button::Style {
-        background: bg,
-        text_color: if is_active {
-            th::accent()
+        background: if is_active {
+            Some(th::blend(nav_background(), th::accent(), 0.16).into())
+        } else if matches!(status, button::Status::Hovered | button::Status::Pressed) {
+            Some(th::bg_hover().into())
         } else {
-            th::text_dim()
+            None
         },
+        text_color: th::text(),
         border: iced::Border {
-            color: if is_active {
-                th::accent()
-            } else {
-                Color::TRANSPARENT
-            },
-            width: if is_active { 2.0 } else { 0.0 },
-            radius: 0.0.into(),
+            radius: 7.0.into(),
+            ..Default::default()
         },
         ..Default::default()
     }
