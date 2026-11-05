@@ -445,6 +445,7 @@ impl App {
             eprintln!("vibez: theme scan: {warning}");
         }
         state.user_themes = user_themes;
+        th::set_colour_strength(ui_settings.colour_strength);
         if let Some(name) = &ui_settings.theme {
             let palette = crate::themes::builtin_by_name(name).or_else(|| {
                 state

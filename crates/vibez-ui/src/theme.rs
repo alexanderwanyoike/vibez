@@ -402,6 +402,30 @@ pub fn epoch() -> u64 {
     EPOCH.load(std::sync::atomic::Ordering::Relaxed)
 }
 
+/// How strongly track colours show. A viewer preference saved in
+/// `ui.json` and applied over whichever theme is active, so a `.vzt` file
+/// never carries it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ColourStrength {
+    #[default]
+    Vivid,
+    Medium,
+    Soft,
+}
+
+static STRENGTH: RwLock<ColourStrength> = RwLock::new(ColourStrength::Vivid);
+
+/// Swap the colour strength; the next frame repaints everything.
+pub fn set_colour_strength(strength: ColourStrength) {
+    *STRENGTH.write().unwrap() = strength;
+    EPOCH.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn colour_strength() -> ColourStrength {
+    *STRENGTH.read().unwrap()
+}
+
 /// Snapshot of the whole current palette (theme save, swatches).
 #[allow(dead_code)] // wired up by the Appearance settings
 pub fn current() -> ThemePalette {
