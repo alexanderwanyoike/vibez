@@ -38,4 +38,24 @@ mod tests {
             HeaderRows::Stacked
         );
     }
+
+    #[test]
+    fn the_header_takes_one_row_only_where_switch_status_and_record_group_all_fit() {
+        assert_eq!(header_rows(1424.0), HeaderRows::One, "1440 window");
+        assert_eq!(
+            header_rows(1300.0),
+            HeaderRows::StatusBelow,
+            "no room for the status between the switch and the record group"
+        );
+        assert_eq!(
+            header_rows(1006.0),
+            HeaderRows::StatusBelow,
+            "1440 beside the Browser"
+        );
+        assert_eq!(
+            header_rows(846.0),
+            HeaderRows::Stacked,
+            "1280 beside the Browser: the record group gets a row of its own"
+        );
+    }
 }
