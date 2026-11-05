@@ -7,7 +7,7 @@ use iced::{Border, Color, Element, Theme};
 use crate::message::Message;
 use crate::theme as th;
 
-const THICKNESS: f32 = 4.0;
+pub const THICKNESS: f32 = 4.0;
 
 /// The bar itself, floating over the content so showing it moves nothing.
 pub fn scrollbar() -> Scrollbar {

@@ -415,7 +415,7 @@ pub const CHAIN_PAD_BELOW: f32 = 8.0;
 
 /// The device chain's scrollbar, and the gap it keeps from the cards: the
 /// two fill the room a chain that fits leaves under its cards.
-pub const CHAIN_BAR_W: f32 = 7.0;
+pub const CHAIN_BAR_W: f32 = super::quiet_scroll::THICKNESS;
 pub const CHAIN_BAR_GAP: f32 = CHAIN_PAD_BELOW - CHAIN_BAR_W;
 
 /// The room a chain `chain_width` wide keeps beneath its cards for the
