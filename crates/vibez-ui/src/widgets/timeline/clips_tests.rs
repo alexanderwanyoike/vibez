@@ -970,6 +970,103 @@ fn dragging_an_off_grid_clip_moves_it_by_whole_grid_steps_keeping_its_offset() {
     }
 }
 
+/// Presses `canvas`'s first Clip on its right edge and drags the pointer to
+/// `to_beat`, returning the length the last pointer move asked for.
+fn resize_length_after_drag(canvas: &TrackClipCanvas, to_beat: f64) -> Option<f64> {
+    let clip = &canvas.clips[0];
+    let end_beat = (clip.position + clip.duration) as f64 / canvas.spb();
+    let start = Point::new(canvas.beat_to_x(end_beat) - 2.0, CLIP_Y + 4.0);
+    let target = Point::new(canvas.beat_to_x(to_beat), start.y);
+    let mut state = ClipInteractionState::default();
+
+    left_event(
+        canvas,
+        &mut state,
+        iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left),
+        start,
+    );
+    match left_event(
+        canvas,
+        &mut state,
+        iced::mouse::Event::CursorMoved { position: target },
+        target,
+    ) {
+        Some(Message::UndoGesture { edit, .. }) => match *edit {
+            Message::Arrangement(ArrangementMsg::ResizeSelectedClips {
+                new_duration_beats,
+                ..
+            }) => Some(new_duration_beats),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+#[test]
+fn resizing_an_off_grid_clip_ends_it_on_the_grid_line_under_the_pointer() {
+    let (canvas, _) = canvas_with_off_grid_audio_clip();
+
+    let length = resize_length_after_drag(&canvas, 6.0).expect("a resize");
+
+    assert!(
+        (1.1 + length - 6.0).abs() < 1e-4,
+        "ended at beat {}",
+        1.1 + length
+    );
+}
+
+#[test]
+fn a_clip_resized_at_fit_zoom_can_shrink_below_the_coarse_adaptive_grid() {
+    let (mut canvas, _) = canvas_with_off_grid_audio_clip();
+    canvas.clips[0].duration = (64.0 * canvas.spb()) as u64;
+    canvas.zoom_level = 0.02;
+    canvas.grid = GridConfig::new(crate::state::SnapGrid::EIGHTH, true, true, 0);
+    assert_eq!(
+        canvas.grid.effective_grid(canvas.pixels_per_beat()),
+        crate::state::SnapGrid::EIGHT_BARS
+    );
+
+    let length = resize_length_after_drag(&canvas, 10.0).expect("a resize");
+
+    assert!(
+        (length - crate::state::SHORTEST_LENGTH_BEATS).abs() < 1e-9,
+        "shrank to {length} beats"
+    );
+}
+
+#[test]
+fn a_shaky_click_on_an_off_grid_clip_end_never_resizes_it() {
+    let (canvas, _) = canvas_with_off_grid_audio_clip();
+    let start = Point::new(canvas.beat_to_x(5.1) - 2.0, CLIP_Y + 4.0);
+    let jitter = Point::new(start.x + 3.0, start.y + 1.0);
+    let mut state = ClipInteractionState::default();
+
+    left_event(
+        &canvas,
+        &mut state,
+        iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left),
+        start,
+    );
+    let moved = left_event(
+        &canvas,
+        &mut state,
+        iced::mouse::Event::CursorMoved { position: jitter },
+        jitter,
+    );
+    let released = left_event(
+        &canvas,
+        &mut state,
+        iced::mouse::Event::ButtonReleased(iced::mouse::Button::Left),
+        jitter,
+    );
+
+    assert!(
+        !moved.as_ref().is_some_and(is_clip_edit),
+        "3 px of travel is a click: {moved:?}"
+    );
+    assert!(!released.as_ref().is_some_and(is_clip_edit), "{released:?}");
+}
+
 #[test]
 fn one_clip_edit_key_press_emits_one_message_whatever_the_lane_count() {
     let lanes: Vec<_> = (0..3)

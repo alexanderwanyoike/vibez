@@ -481,6 +481,8 @@ impl canvas::Program<Message> for TrackClipCanvas {
                                 clip_id,
                                 is_note_clip,
                                 clip_start_beat: pos_beats,
+                                start_local_x: pos.x,
+                                phase: DragPhase::Pending,
                             });
                         } else if in_title_bar {
                             // Title bar → move clip
@@ -707,39 +709,40 @@ impl canvas::Program<Message> for TrackClipCanvas {
                                 clip_id,
                                 is_note_clip,
                                 clip_start_beat,
+                                start_local_x,
+                                phase,
                             } => {
-                                let current_beat = self.x_to_beat(local_x);
-                                let min_duration = if self.grid.snap_enabled {
-                                    self.grid.effective_grid(self.pixels_per_beat()).beat_size()
-                                } else {
-                                    0.01
-                                };
-                                let new_dur = (current_beat - clip_start_beat).max(min_duration);
-                                let snapped = self.snapped_beat(new_dur).max(min_duration);
-
-                                if *is_note_clip {
-                                    let edit =
-                                        Message::Arrangement(ArrangementMsg::ResizeSelectedClips {
-                                            anchor: ArrangementSelection::NoteClip {
-                                                track_id,
-                                                clip_id: *clip_id,
-                                            },
-                                            new_duration_beats: snapped,
-                                        })
-                                        .in_undo_gesture(*undo_gesture);
-                                    return (canvas::event::Status::Captured, Some(edit));
-                                } else {
-                                    let edit =
-                                        Message::Arrangement(ArrangementMsg::ResizeSelectedClips {
-                                            anchor: ArrangementSelection::AudioClip {
-                                                track_id,
-                                                clip_id: *clip_id,
-                                            },
-                                            new_duration_beats: snapped,
-                                        })
-                                        .in_undo_gesture(*undo_gesture);
-                                    return (canvas::event::Status::Captured, Some(edit));
+                                // A resize follows the pointer's x alone.
+                                let mut phase = *phase;
+                                if !phase.follow(
+                                    Point::new(*start_local_x, 0.0),
+                                    Point::new(local_x, 0.0),
+                                ) {
+                                    return (canvas::event::Status::Captured, None);
                                 }
+                                let snapped = self.grid.length_to_dragged_end(
+                                    *clip_start_beat,
+                                    self.x_to_beat(local_x),
+                                    self.pixels_per_beat(),
+                                );
+                                let clip_id = *clip_id;
+                                let anchor = if *is_note_clip {
+                                    ArrangementSelection::NoteClip { track_id, clip_id }
+                                } else {
+                                    ArrangementSelection::AudioClip { track_id, clip_id }
+                                };
+                                let edit =
+                                    Message::Arrangement(ArrangementMsg::ResizeSelectedClips {
+                                        anchor,
+                                        new_duration_beats: snapped,
+                                    })
+                                    .in_undo_gesture(*undo_gesture);
+                                if let Some(ClipDragAction::ResizeClip { phase: held, .. }) =
+                                    &mut state.drag
+                                {
+                                    *held = phase;
+                                }
+                                return (canvas::event::Status::Captured, Some(edit));
                             }
                             ClipDragAction::FadeClip(drag) => {
                                 let edit = Message::Arrangement(ArrangementMsg::SetAudioClipFade {

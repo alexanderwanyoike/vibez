@@ -28,6 +28,10 @@ pub enum ClipDragAction {
         clip_id: ClipId,
         is_note_clip: bool,
         clip_start_beat: f64,
+        start_local_x: f32,
+        /// Pending until the pointer travels past the click slop, so a
+        /// shaky click never changes the Clip's length.
+        phase: DragPhase,
     },
     FadeClip(FadeClipDrag),
     FadeCurve(FadeCurveDrag),

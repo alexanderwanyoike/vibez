@@ -9,7 +9,9 @@ use iced::{Color, Point, Rectangle, Renderer, Theme};
 
 use crate::domains::piano_roll::PianoRollMsg;
 use crate::message::Message;
-use crate::state::{GridConfig, PianoRollEditMode, SnapGrid, UiNoteClip, UndoGestureId};
+use crate::state::{
+    GridConfig, PianoRollEditMode, SnapGrid, UiNoteClip, UndoGestureId, SHORTEST_LENGTH_BEATS,
+};
 use crate::timeline_geometry::TimelineGeometry;
 use crate::widgets::clip_loop_markers::{self, LoopDrag};
 use crate::widgets::double_click::DoubleClick;
@@ -271,13 +273,9 @@ fn grabbed_notes(notes: &[MidiNote], selection: &HashSet<usize>) -> Vec<MovedNot
 }
 
 /// Every resized note's new length: the grabbed note takes `duration` and
-/// the rest change by the same amount, none shorter than `min_duration`.
-fn resized_notes(
-    notes: &[MovedNote],
-    grabbed: usize,
-    duration: f64,
-    min_duration: f64,
-) -> Vec<(usize, f64)> {
+/// the rest change by the same amount, none shorter than
+/// [`SHORTEST_LENGTH_BEATS`].
+fn resized_notes(notes: &[MovedNote], grabbed: usize, duration: f64) -> Vec<(usize, f64)> {
     let delta = notes
         .iter()
         .find(|note| note.index == grabbed)
@@ -288,7 +286,7 @@ fn resized_notes(
             let resized = if note.index == grabbed {
                 duration
             } else {
-                (note.duration_beats + delta).max(min_duration)
+                (note.duration_beats + delta).max(SHORTEST_LENGTH_BEATS)
             };
             (note.index, resized)
         })
@@ -819,20 +817,16 @@ impl canvas::Program<Message> for PianoRollWidget {
                                     sent_duration,
                                     ..
                                 } => {
-                                    let dx = local.x - *start_x;
-                                    let beat_delta = geometry.beats_for_width(dx);
-                                    let min_duration = if self.grid.snap_enabled {
-                                        self.effective_grid(&bounds).beat_size()
-                                    } else {
-                                        0.01
-                                    };
-                                    let new_duration = self
-                                        .snapped_beat(
-                                            (*original_duration + beat_delta).max(min_duration),
-                                            &bounds,
-                                        )
-                                        .max(min_duration);
-
+                                    let beat_delta = geometry.beats_for_width(local.x - *start_x);
+                                    let start_beat = original_notes
+                                        .iter()
+                                        .find(|note| note.index == *note_index)
+                                        .map_or(0.0, |note| note.start_beat);
+                                    let new_duration = self.grid.length_to_dragged_end(
+                                        start_beat,
+                                        start_beat + *original_duration + beat_delta,
+                                        geometry.pixels_per_beat(),
+                                    );
                                     if new_duration == *sent_duration {
                                         return (canvas::event::Status::Captured, None);
                                     }
@@ -847,7 +841,6 @@ impl canvas::Program<Message> for PianoRollWidget {
                                                     original_notes,
                                                     *note_index,
                                                     new_duration,
-                                                    min_duration,
                                                 ),
                                             })
                                             .in_undo_gesture(*undo_gesture),

@@ -9,7 +9,7 @@ use vibez_engine::commands::EngineCommand;
 use super::{ArrangementAction, ArrangementCtx, EngineHandle};
 use crate::state::{
     ArrangementMarquee, ArrangementMarqueeRect, ArrangementSelection, ProjectTracksState,
-    TimelineEditorState, UiNoteClip,
+    TimelineEditorState, UiNoteClip, SHORTEST_LENGTH_BEATS,
 };
 
 impl TimelineEditorState {
@@ -455,7 +455,8 @@ impl TimelineEditorState {
                         .map(|c| c.duration);
                     if let Some(old) = old {
                         let old_beats = old as f64 / ctx.samples_per_beat;
-                        let duration = (((old_beats + delta).max(0.25) * ctx.samples_per_beat)
+                        let duration = (((old_beats + delta).max(SHORTEST_LENGTH_BEATS)
+                            * ctx.samples_per_beat)
                             .round() as u64)
                             .max(1);
                         if duration == old {
@@ -475,7 +476,7 @@ impl TimelineEditorState {
                         .find_content_mut(track_id)
                         .and_then(|t| t.note_clips.iter_mut().find(|c| c.id == clip_id))
                     {
-                        let duration = (clip.duration_beats + delta).max(0.25);
+                        let duration = (clip.duration_beats + delta).max(SHORTEST_LENGTH_BEATS);
                         if duration == clip.duration_beats {
                             continue;
                         }

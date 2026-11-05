@@ -66,5 +66,6 @@ mod loop_region;
 mod note_clips;
 mod project_tracks;
 mod selection;
+mod shortest_length;
 mod trim_join;
 mod unchanged_drags;

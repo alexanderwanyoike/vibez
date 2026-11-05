@@ -275,7 +275,7 @@ fn resizing_one_selected_note_resizes_the_whole_selection_in_one_undo_step() {
 }
 
 #[test]
-fn shrinking_a_selection_keeps_every_note_at_least_one_grid_cell_long() {
+fn shrinking_a_selection_keeps_every_note_at_least_the_shortest_length() {
     let original = vec![note(60, 0.0, 1.0), note(64, 2.0, 0.5)];
     let mut editor = Editor::new(original, HashSet::from([0, 1]));
     let grab = Point::new(editor.at(1.0, 60).x - 2.0, editor.at(1.0, 60).y);
@@ -283,7 +283,7 @@ fn shrinking_a_selection_keeps_every_note_at_least_one_grid_cell_long() {
 
     editor.drag(grab, &steps(grab, release));
 
-    assert_eq!(durations(&editor), vec![0.5, 0.25]);
+    assert_eq!(durations(&editor), vec![0.5, SHORTEST_LENGTH_BEATS]);
 }
 
 #[test]
