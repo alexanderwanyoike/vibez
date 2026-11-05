@@ -341,7 +341,7 @@ mod tests {
     use crate::widgets::device_layout::LINE_H;
 
     fn used(layout: Arrangement) -> f32 {
-        let mut used = PRESET_ROW_H + 1.0;
+        let mut used = 0.0;
         if layout.advanced_only {
             return used + layout.advanced.unwrap();
         }

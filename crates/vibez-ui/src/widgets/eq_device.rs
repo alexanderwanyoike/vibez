@@ -648,7 +648,7 @@ mod tests {
     use super::*;
 
     fn used(layout: Arrangement) -> f32 {
-        let mut used = PRESET_ROW_H + 1.0;
+        let mut used = 0.0;
         if layout.advanced_only {
             return used + layout.advanced.unwrap();
         }
@@ -701,11 +701,11 @@ mod tests {
     #[test]
     fn short_cards_keep_the_graph_beside_the_tabs_when_wide_enough() {
         assert_eq!(
-            arrange(Size::new(FULL_W, 100.0), false).kind,
+            arrange(Size::new(FULL_W, 71.0), false).kind,
             Upper::TabsBeside
         );
         assert_eq!(
-            arrange(Size::new(COMPACT_W, 100.0), false).kind,
+            arrange(Size::new(COMPACT_W, 71.0), false).kind,
             Upper::TabsOnly
         );
         assert_eq!(
@@ -713,7 +713,7 @@ mod tests {
             Upper::TabsBelow
         );
         assert_eq!(arrange(Size::new(MEDIUM_W, 200.0), false).kind, Upper::Side);
-        assert_eq!(arrange(Size::new(FULL_W, 70.0), false).kind, Upper::Line);
+        assert_eq!(arrange(Size::new(FULL_W, 41.0), false).kind, Upper::Line);
     }
 
     #[test]

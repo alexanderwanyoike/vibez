@@ -498,7 +498,7 @@ mod tests {
     use crate::widgets::device_layout::LINE_H;
 
     fn used(layout: Arrangement) -> f32 {
-        let mut used = PRESET_ROW_H + 1.0;
+        let mut used = 0.0;
         if layout.advanced_only {
             return used + layout.advanced.unwrap();
         }
@@ -553,12 +553,12 @@ mod tests {
 
     #[test]
     fn short_cards_drop_the_plots_before_the_knobs() {
-        let short = arrange(Size::new(FULL_W, 120.0), false);
+        let short = arrange(Size::new(FULL_W, 91.0), false);
         assert_eq!(short.plots, 0.0);
         assert_eq!(short.knob_row, KNOB_ROW_H);
-        let shortest = arrange(Size::new(FULL_W, 70.0), false);
+        let shortest = arrange(Size::new(FULL_W, 41.0), false);
         assert_eq!(shortest.knob_row, LINE_H);
-        assert!(arrange(Size::new(COMPACT_W, 150.0), true).advanced_only);
+        assert!(arrange(Size::new(COMPACT_W, 121.0), true).advanced_only);
     }
 
     #[test]

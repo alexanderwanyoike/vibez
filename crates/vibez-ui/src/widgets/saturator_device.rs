@@ -857,11 +857,11 @@ mod tests {
     const MINIMUM_BELOW: f32 = 35.0;
 
     fn size(width: f32, below: f32) -> Size {
-        Size::new(width, below + PRESET_ROW_H + 1.0)
+        Size::new(width, below)
     }
 
     fn used(layout: Arrangement) -> f32 {
-        let mut used = PRESET_ROW_H + 1.0;
+        let mut used = 0.0;
         if layout.advanced_only {
             return used + layout.advanced.unwrap();
         }
@@ -888,7 +888,7 @@ mod tests {
     #[test]
     fn every_supported_size_fits_without_scrolling() {
         for width in [COMPACT_W, MEDIUM_W, FULL_W, MAX_W] {
-            let lowest = (MINIMUM_BELOW + PRESET_ROW_H + 1.0) as usize;
+            let lowest = (MINIMUM_BELOW) as usize;
             for height in (lowest..=460).step_by(2).map(|height| height as f32) {
                 for advanced in [false, true] {
                     let layout = arrange(Size::new(width, height), advanced);
@@ -942,7 +942,7 @@ mod tests {
     #[test]
     fn every_control_has_a_place_at_every_size() {
         for width in [COMPACT_W, 460.0, MEDIUM_W, FULL_W, MAX_W] {
-            let lowest = (MINIMUM_BELOW + PRESET_ROW_H + 1.0) as usize;
+            let lowest = (MINIMUM_BELOW) as usize;
             for height in (lowest..=460).step_by(2).map(|height| height as f32) {
                 let closed = arrange(Size::new(width, height), false);
                 let open = arrange(Size::new(width, height), true);

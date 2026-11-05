@@ -524,7 +524,7 @@ mod tests {
             for height in (56..=480).step_by(2).map(|height| height as f32) {
                 let layout = arrange(Size::new(width, height));
                 let context = format!("{width}x{height}: {layout:?}");
-                let mut used = PRESET_ROW_H + 1.0 + layout.shared;
+                let mut used = layout.shared;
                 if layout.tabs {
                     used += TABS_H + 1.0;
                 }

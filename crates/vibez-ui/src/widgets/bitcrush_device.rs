@@ -262,7 +262,7 @@ mod tests {
                 for advanced in [false, true] {
                     let layout = arrange(Size::new(width, height), advanced);
                     let context = format!("{width}x{height} {advanced}: {layout:?}");
-                    let mut used = PRESET_ROW_H + 1.0;
+                    let mut used = 0.0;
                     if layout.advanced_only {
                         used += layout.advanced.unwrap();
                         assert!(layout.advanced.unwrap() >= LINE_H - 0.01, "{context}");

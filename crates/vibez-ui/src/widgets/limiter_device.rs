@@ -511,11 +511,11 @@ mod tests {
     }
 
     fn at(width: f32, below: f32, advanced: bool) -> Arrangement {
-        layout(width, below + PRESET_ROW_H + 1.0, advanced)
+        layout(width, below, advanced)
     }
 
     fn used(layout: Arrangement) -> f32 {
-        let mut used = PRESET_ROW_H + 1.0;
+        let mut used = 0.0;
         if layout.advanced_only {
             return used + layout.extra;
         }
@@ -532,7 +532,7 @@ mod tests {
     #[test]
     fn every_supported_size_fits_without_scrolling() {
         for width in [COMPACT_W, 460.0, MEDIUM_W, FULL_W, MAX_W] {
-            let lowest = (MINIMUM_BELOW + PRESET_ROW_H + 1.0) as usize;
+            let lowest = (MINIMUM_BELOW) as usize;
             for height in (lowest..=460).step_by(2).map(|height| height as f32) {
                 for advanced in [false, true] {
                     let layout = layout(width, height, advanced);

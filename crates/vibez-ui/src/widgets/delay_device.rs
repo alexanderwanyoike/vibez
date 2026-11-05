@@ -474,7 +474,7 @@ mod tests {
                 for advanced in [false, true] {
                     let stack = arrange(Size::new(width, height), advanced).stack;
                     let context = format!("{width}x{height} {advanced}: {stack:?}");
-                    let mut used = PRESET_ROW_H + 1.0;
+                    let mut used = 0.0;
                     if stack.advanced_only {
                         used += stack.advanced.unwrap();
                         assert!(stack.advanced.unwrap() >= LINE_H - 0.01, "{context}");

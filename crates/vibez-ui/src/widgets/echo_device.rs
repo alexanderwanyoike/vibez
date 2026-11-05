@@ -510,7 +510,7 @@ mod tests {
                     let layout = arrange(Size::new(width, height), advanced);
                     let stack = layout.stack;
                     let context = format!("{width}x{height} {advanced}: {layout:?}");
-                    let mut used = PRESET_ROW_H + 1.0;
+                    let mut used = 0.0;
                     if layout.switches > 0.0 {
                         used += layout.switches + 1.0;
                     }

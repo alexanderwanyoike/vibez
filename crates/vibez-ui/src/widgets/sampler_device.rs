@@ -601,7 +601,7 @@ mod tests {
             for height in (56..=520).step_by(2).map(|height| height as f32) {
                 let layout = arrange(Size::new(width, height));
                 let context = format!("{width}x{height}: {layout:?}");
-                let mut used = PRESET_ROW_H + 1.0 + layout.sample;
+                let mut used = layout.sample;
                 if layout.section > 0.0 {
                     used += 1.0 + TABS_H + 1.0 + layout.section;
                     assert!(layout.plot == 0.0 || layout.plot >= PLOT_MIN_H, "{context}");

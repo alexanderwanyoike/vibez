@@ -1007,8 +1007,8 @@ mod tests {
     const MINIMUM_BODY_H: f32 = 68.0;
     /// A pad still showing a name.
     const USABLE_PAD_H: f32 = 14.0;
-    /// The Sampler's preset row over its sample line.
-    const USABLE_SAMPLER_H: f32 = 28.0 + 1.0 + 24.0;
+    /// The Sampler's sample line.
+    const USABLE_SAMPLER_H: f32 = 24.0;
 
     #[test]
     fn every_panel_height_keeps_usable_pads_and_sampler() {

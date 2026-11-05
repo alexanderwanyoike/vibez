@@ -617,20 +617,13 @@ mod tests {
     fn every_supported_size_fits_its_controls_without_scrolling() {
         for width in [COMPACT_W, MEDIUM_W] {
             for height in (60..=400).step_by(4).map(|height| height as f32) {
-                let footer = if footer_fits(height) {
-                    1.0 + FOOTER_H
-                } else {
-                    0.0
-                };
                 for advanced in [false, true] {
                     let used = match arrange(Size::new(width, height), advanced) {
-                        Arrangement::Short { main } => PRESET_ROW_H + 1.0 + main,
-                        Arrangement::Normal { main }
+                        Arrangement::Short { main }
+                        | Arrangement::Normal { main }
                         | Arrangement::AdvancedBeside { main }
-                        | Arrangement::AdvancedOnly { main } => PRESET_ROW_H + 1.0 + main + footer,
-                        Arrangement::WithAdvanced { main } => {
-                            PRESET_ROW_H + 1.0 + main + 1.0 + ADVANCED_H + footer
-                        }
+                        | Arrangement::AdvancedOnly { main } => main,
+                        Arrangement::WithAdvanced { main } => main + 1.0 + ADVANCED_H,
                     };
                     assert!(used <= height + 0.01, "{width}x{height} {advanced}: {used}");
                 }
@@ -647,22 +640,22 @@ mod tests {
             Arrangement::WithAdvanced { main } if main == MAIN_MAX_H
         ));
         assert!(matches!(
-            arrange(medium(200.0), true),
+            arrange(medium(150.0), true),
             Arrangement::AdvancedBeside { .. }
         ));
         assert!(
             matches!(
-                arrange(medium(100.0), true),
+                arrange(medium(80.0), true),
                 Arrangement::AdvancedOnly { .. }
             ),
             "short trims are too wide to sit beside the meters of a medium card"
         );
         assert!(matches!(
-            arrange(Size::new(SHORT_BESIDE_W, 100.0), true),
+            arrange(Size::new(SHORT_BESIDE_W, 80.0), true),
             Arrangement::AdvancedBeside { .. }
         ));
         assert!(matches!(
-            arrange(compact(200.0), true),
+            arrange(compact(150.0), true),
             Arrangement::AdvancedOnly { .. }
         ));
         assert!(matches!(
@@ -670,7 +663,7 @@ mod tests {
             Arrangement::Normal { .. }
         ));
         assert!(matches!(
-            arrange(compact(100.0), false),
+            arrange(compact(80.0), false),
             Arrangement::Short { .. }
         ));
     }

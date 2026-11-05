@@ -573,7 +573,7 @@ mod tests {
     }
 
     fn used(layout: Arrangement) -> f32 {
-        let mut used = PRESET_ROW_H + 1.0;
+        let mut used = 0.0;
         if layout.advanced_only {
             return used + layout.advanced.unwrap();
         }
@@ -629,13 +629,13 @@ mod tests {
 
     #[test]
     fn short_cards_keep_the_type_and_tabs_reachable() {
-        let short = arrange(Size::new(COMPACT_W, 56.0), false);
+        let short = arrange(Size::new(COMPACT_W, 27.0), false);
         assert_eq!(short.knob_row, LINE_H);
         assert_eq!(short.type_place, TypePlace::InKnobs);
         assert!(short.tabs_inline());
-        let line = arrange(Size::new(COMPACT_W, 110.0), false);
+        let line = arrange(Size::new(COMPACT_W, 81.0), false);
         assert!(line.tabs_row > 0.0 && line.type_place == TypePlace::Line);
-        assert!(arrange(Size::new(COMPACT_W, 150.0), true).advanced_only);
+        assert!(arrange(Size::new(COMPACT_W, 121.0), true).advanced_only);
     }
 
     #[test]
