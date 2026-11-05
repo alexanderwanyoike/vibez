@@ -1,8 +1,8 @@
 //! The control bar's right side: grid snap, the output meter, audio health
 //! and CPU load.
 
-use iced::widget::{button, canvas, column, container, pick_list, row, text};
-use iced::{Alignment, Color, Element, Length};
+use iced::widget::{canvas, column, container, pick_list, row, text};
+use iced::{Alignment, Color, Element, Length, Size};
 
 use crate::domains::view::{GridTarget, ViewMsg};
 
@@ -82,17 +82,12 @@ fn snap_button<'a>(
     on: bool,
     command: GridCommand,
 ) -> Element<'a, Message> {
-    button(
-        container(content)
-            .center_x(Length::Fill)
-            .center_y(Length::Fill),
+    style::segment_button(
+        content,
+        Size::new(SNAP_BUTTON_WIDTH, SNAP_BUTTON_HEIGHT),
+        on.then(th::accent),
+        Message::View(ViewMsg::Grid(GridTarget::Arrange, command)),
     )
-    .on_press(Message::View(ViewMsg::Grid(GridTarget::Arrange, command)))
-    .width(Length::Fixed(SNAP_BUTTON_WIDTH))
-    .height(Length::Fixed(SNAP_BUTTON_HEIGHT))
-    .padding(0)
-    .style(style::segment(on.then(th::accent)))
-    .into()
 }
 
 impl App {

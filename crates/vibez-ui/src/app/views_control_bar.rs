@@ -2,7 +2,7 @@
 //! is wide enough and two when it is not.
 
 use iced::widget::{button, column, container, horizontal_space, row, text};
-use iced::{Alignment, Element, Length};
+use iced::{Alignment, Element, Length, Size};
 
 use crate::domains::browser::BrowserMsg;
 use crate::domains::project::ProjectMsg;
@@ -106,18 +106,12 @@ impl App {
                 .padding([5, 8])
                 .style(style::segment(None))
         };
-        let browser = container(
-            button(
-                container(icons::icon(icons::PANEL_LEFT).size(14))
-                    .center_x(Length::Fill)
-                    .center_y(Length::Fill),
-            )
-            .on_press(Message::Browser(BrowserMsg::ToggleSampleBrowser))
-            .width(Length::Fixed(28.0))
-            .height(Length::Fixed(24.0))
-            .padding(0)
-            .style(style::segment(self.state.browser.open.then(th::accent))),
-        )
+        let browser = container(style::segment_button(
+            icons::icon(icons::PANEL_LEFT).size(14),
+            Size::new(28.0, 24.0),
+            self.state.browser.open.then(th::accent),
+            Message::Browser(BrowserMsg::ToggleSampleBrowser),
+        ))
         .padding(style::GROUP_INSET)
         .style(style::group);
 

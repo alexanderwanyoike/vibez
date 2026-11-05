@@ -1,7 +1,7 @@
 //! The control bar's transport buttons and recessed position display.
 
 use iced::widget::{button, canvas, column, container, row, text, text_input};
-use iced::{Alignment, Element, Length};
+use iced::{Alignment, Element, Length, Size};
 use vibez_core::time::MusicalTime;
 
 use crate::domains::perform::PerformMsg;
@@ -62,17 +62,12 @@ fn transport_button<'a>(
     lit: Option<iced::Color>,
     message: Message,
 ) -> Element<'a, Message> {
-    button(
-        container(icons::icon(icon).size(14))
-            .center_x(Length::Fill)
-            .center_y(Length::Fill),
+    style::segment_button(
+        icons::icon(icon).size(14),
+        Size::new(width, TRANSPORT_BUTTON_HEIGHT),
+        lit,
+        message,
     )
-    .on_press(message)
-    .width(Length::Fixed(width))
-    .height(Length::Fixed(TRANSPORT_BUTTON_HEIGHT))
-    .padding(0)
-    .style(style::segment(lit))
-    .into()
 }
 
 /// One field of the display: a value over its label.

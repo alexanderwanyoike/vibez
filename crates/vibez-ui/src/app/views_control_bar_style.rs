@@ -1,7 +1,7 @@
 //! Shared look of the control bar's groups, segments and recessed display.
 
 use iced::widget::{button, container, pick_list, text, text_input, Space};
-use iced::{Border, Color, Element, Length, Theme};
+use iced::{Border, Color, Element, Length, Size, Theme};
 
 use crate::message::Message;
 use crate::theme as th;
@@ -60,6 +60,26 @@ pub(super) fn segment(lit: Option<Color>) -> impl Fn(&Theme, button::Status) -> 
             ..Default::default()
         }
     }
+}
+
+/// A fixed size segment holding centred `content`; `lit` as in [`segment`].
+pub(super) fn segment_button<'a>(
+    content: impl Into<Element<'a, Message>>,
+    size: Size,
+    lit: Option<Color>,
+    message: Message,
+) -> Element<'a, Message> {
+    button(
+        container(content)
+            .center_x(Length::Fill)
+            .center_y(Length::Fill),
+    )
+    .on_press(message)
+    .width(Length::Fixed(size.width))
+    .height(Length::Fixed(size.height))
+    .padding(0)
+    .style(segment(lit))
+    .into()
 }
 
 /// A pick list that sits flush inside a group.
