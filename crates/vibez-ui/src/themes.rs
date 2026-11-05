@@ -85,17 +85,17 @@ pub(crate) const TRACKS_CLASSIC: [Color; 8] = [
     rgb8(192, 96, 160),
 ];
 
-/// The default rainbow, darker and more saturated so it holds up
-/// against light lanes.
+/// The default rainbow, more saturated so it holds up against light
+/// lanes, with each hue just light enough for dark clip titles.
 const TRACKS_CLASSIC_LIGHT: [Color; 8] = [
-    rgb8(216, 55, 49),
+    rgb8(224, 70, 64),
     rgb8(230, 121, 25),
     rgb8(204, 167, 20),
     rgb8(45, 159, 79),
     rgb8(29, 156, 175),
-    rgb8(54, 106, 211),
-    rgb8(128, 69, 196),
-    rgb8(199, 56, 147),
+    rgb8(73, 123, 223),
+    rgb8(154, 98, 218),
+    rgb8(211, 69, 159),
 ];
 
 const TRACKS_NEON: [Color; 8] = [
