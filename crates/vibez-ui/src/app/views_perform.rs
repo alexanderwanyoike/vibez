@@ -1,7 +1,7 @@
 //! Perform workspace shell, Pad Surface, and shared Section Timeline Editor.
 
 use iced::widget::{
-    button, center, column, container, horizontal_space, pick_list, row, text, text_input, tooltip,
+    button, center, column, container, horizontal_space, pick_list, row, text, text_input,
 };
 use iced::{Element, Length, Theme};
 
@@ -10,6 +10,7 @@ use crate::icons;
 use crate::message::Message;
 use crate::theme as th;
 use crate::typography::{PERFORM_DISPLAY, PERFORM_LABEL, PERFORM_TECH, PERFORM_TECH_STRONG};
+use crate::widgets::hint::with_hint;
 
 use super::*;
 
@@ -77,21 +78,7 @@ pub(super) fn perform_tool_button(
             ..Default::default()
         }
     });
-    let hint = container(text(tooltip_label).size(10).color(th::text()))
-        .padding([5, 7])
-        .style(|_theme: &Theme| container::Style {
-            background: Some(th::bg_elevated().into()),
-            border: iced::Border {
-                color: th::border_light(),
-                width: 1.0,
-                radius: 3.0.into(),
-            },
-            ..Default::default()
-        });
-    tooltip(control, hint, tooltip::Position::Bottom)
-        .gap(6)
-        .padding(0)
-        .into()
+    with_hint(control, tooltip_label)
 }
 
 fn perform_mode_tab_width(surface_width: f32) -> f32 {
