@@ -351,3 +351,21 @@ mod channel_selection_tests {
         ));
     }
 }
+
+#[cfg(test)]
+mod desk_fit_tests {
+    use super::DESK_PADDING;
+    use crate::shell_layout::{PANE_GAP, STATUS_HEIGHT};
+    use crate::widgets::mixer_strip::min_strip_height;
+
+    #[test]
+    fn a_whole_desk_fits_the_smallest_window_above_the_detail_panel() {
+        let window = 760.0;
+        let room = window
+            - super::super::views_control_bar_style::BAR_HEIGHT
+            - STATUS_HEIGHT
+            - 3.0 * PANE_GAP
+            - super::super::views_detail::DETAIL_PANEL_MIN_HEIGHT;
+        assert!(DESK_PADDING + min_strip_height(2) <= room);
+    }
+}

@@ -19,7 +19,7 @@ use crate::widgets::piano_roll::{PianoRollWidget, VelocityLaneWidget};
 
 use super::*;
 
-const DETAIL_PANEL_MIN_HEIGHT: f32 = 180.0;
+pub(super) const DETAIL_PANEL_MIN_HEIGHT: f32 = 180.0;
 const DETAIL_CARD_PADDING: f32 = 10.0;
 const AUDIO_DETAIL_PANEL_PREFERRED_HEIGHT: f32 = 260.0;
 const MIDI_DETAIL_PANEL_PREFERRED_HEIGHT: f32 = 360.0;
