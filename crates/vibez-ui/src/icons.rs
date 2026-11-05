@@ -45,6 +45,10 @@ pub const MOUSE_POINTER: char = '\u{E0F3}';
 pub const FLIP_HORIZONTAL_2: char = '\u{E35D}';
 pub const MAGNET: char = '\u{E2B5}';
 pub const PANEL_LEFT: char = '\u{E12A}';
+pub const HARD_DRIVE: char = '\u{E0ED}';
+pub const FOLDER: char = '\u{E0D7}';
+pub const CLOUD: char = '\u{E088}';
+pub const LAYERS: char = '\u{E529}';
 
 /// Create an icon text element with the Lucide font.
 pub fn icon(codepoint: char) -> iced::widget::Text<'static> {

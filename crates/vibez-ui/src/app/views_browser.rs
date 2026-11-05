@@ -141,8 +141,8 @@ impl App {
         let content: Element<'_, Message> = row![
             container(self.view_browser_places())
                 .width(Length::Fixed(places_width))
-                .height(Length::Fill)
-                .style(browser_places_style),
+                .height(Length::Fill),
+            browser_column_rule(),
             body
         ]
         .height(Length::Fill)

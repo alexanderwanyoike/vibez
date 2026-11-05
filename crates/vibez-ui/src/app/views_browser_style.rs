@@ -3,7 +3,7 @@
 
 use std::path::Path;
 
-use iced::widget::{button, container, scrollable, text};
+use iced::widget::{button, container, scrollable, text, Space};
 use iced::{Element, Length, Theme};
 
 use crate::message::Message;
@@ -12,6 +12,7 @@ use crate::theme as th;
 
 pub(super) const REMOTE_CONNECTION_INDENT: f32 = 14.0;
 pub(super) const BROWSER_TREE_INDENT_STEP: f32 = 8.0;
+pub(super) const BROWSER_ROW_RADIUS: f32 = 7.0;
 pub(super) const BROWSER_TREE_MAX_DEPTH: f32 = 5.0;
 pub(super) const BROWSER_SCROLLBAR_TRACK_WIDTH: f32 = 5.0;
 pub(super) const BROWSER_SCROLLBAR_HANDLE_WIDTH: f32 = 3.0;
@@ -131,11 +132,13 @@ pub(super) fn audition_gain_label(gain: f32) -> String {
     }
 }
 
+/// A sidebar row: a tinted pill while it is the selected place, the hover
+/// shade under the pointer.
 pub(super) fn browser_place_button_style(active: bool, status: button::Status) -> button::Style {
     button::Style {
         background: Some(
             if active {
-                th::accent_dim()
+                th::selected_place()
             } else if matches!(status, button::Status::Hovered | button::Status::Pressed) {
                 th::bg_hover()
             } else {
@@ -145,16 +148,31 @@ pub(super) fn browser_place_button_style(active: bool, status: button::Status) -
         ),
         text_color: if active { th::text() } else { th::text_dim() },
         border: iced::Border {
-            color: if active {
-                th::accent()
-            } else {
-                iced::Color::TRANSPARENT
-            },
-            width: if active { 1.0 } else { 0.0 },
-            radius: 0.0.into(),
+            radius: BROWSER_ROW_RADIUS.into(),
+            ..Default::default()
         },
         ..Default::default()
     }
+}
+
+/// A small-caps caption over a group of browser rows.
+pub(super) fn browser_caption<'a>(label: &'a str) -> Element<'a, Message> {
+    container(
+        text(label)
+            .size(9.5)
+            .font(iced::Font {
+                weight: iced::font::Weight::Bold,
+                ..iced::Font::DEFAULT
+            })
+            .color(th::text_muted()),
+    )
+    .padding(iced::Padding {
+        top: 8.0,
+        right: 8.0,
+        bottom: 2.0,
+        left: 8.0,
+    })
+    .into()
 }
 
 pub(super) fn browser_utility_action_style(
@@ -217,16 +235,14 @@ pub(super) fn browser_header_style(_theme: &Theme) -> container::Style {
     }
 }
 
-pub(super) fn browser_places_style(_theme: &Theme) -> container::Style {
-    container::Style {
-        background: Some(th::bg_dark().into()),
-        border: iced::Border {
-            color: th::divider(),
-            width: 1.0,
-            radius: 0.0.into(),
-        },
-        ..Default::default()
-    }
+/// The hairline between the places and results columns.
+pub(super) fn browser_column_rule<'a>() -> Element<'a, Message> {
+    container(Space::new(1.0, Length::Fill))
+        .style(|_theme: &Theme| container::Style {
+            background: Some(th::hairline(th::bg_surface()).into()),
+            ..Default::default()
+        })
+        .into()
 }
 
 pub(super) fn browser_results_style(_theme: &Theme) -> container::Style {
