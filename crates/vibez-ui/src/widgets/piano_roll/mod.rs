@@ -8,7 +8,6 @@ use iced::widget::canvas;
 use iced::{Color, Point, Rectangle, Renderer, Theme};
 
 use crate::domains::piano_roll::PianoRollMsg;
-use crate::domains::view::ViewMsg;
 use crate::message::Message;
 use crate::state::{
     GridConfig, PianoRollEditMode, SnapGrid, UiNoteClip, UndoGestureId, SHORTEST_LENGTH_BEATS,
@@ -540,9 +539,7 @@ impl canvas::Program<Message> for PianoRollWidget {
                     if let Some(viewport) = viewport {
                         return (
                             canvas::event::Status::Captured,
-                            clip_id.map(|clip_id| {
-                                Message::View(ViewMsg::SetClipEditorView { clip_id, viewport })
-                            }),
+                            clip_id.map(|clip_id| Message::set_clip_editor_view(clip_id, viewport)),
                         );
                     }
                     let dy = match delta {
@@ -579,10 +576,7 @@ impl canvas::Program<Message> for PianoRollWidget {
                         state.last_cursor = Some(pos);
                         let pin = self.clip.as_ref().and_then(|clip| {
                             let viewport = self.clip_view().pin(note_area_width(&bounds))?;
-                            Some(Message::View(ViewMsg::SetClipEditorView {
-                                clip_id: clip.clip_id,
-                                viewport,
-                            }))
+                            Some(Message::set_clip_editor_view(clip.clip_id, viewport))
                         });
                         return (canvas::event::Status::Captured, pin);
                     }
@@ -834,10 +828,7 @@ impl canvas::Program<Message> for PianoRollWidget {
                         );
                         return (
                             canvas::event::Status::Captured,
-                            Some(Message::View(ViewMsg::SetClipEditorView {
-                                clip_id,
-                                viewport,
-                            })),
+                            Some(Message::set_clip_editor_view(clip_id, viewport)),
                         );
                     }
 

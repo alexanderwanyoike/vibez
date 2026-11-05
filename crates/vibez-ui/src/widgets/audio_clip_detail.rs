@@ -695,10 +695,7 @@ impl canvas::Program<Message> for AudioClipDetailWidget {
                 };
                 (
                     canvas::event::Status::Captured,
-                    Some(Message::View(ViewMsg::SetClipEditorView {
-                        clip_id: self.clip_id,
-                        viewport,
-                    })),
+                    Some(Message::set_clip_editor_view(self.clip_id, viewport)),
                 )
             }
             canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Right)) => {
@@ -842,12 +839,10 @@ impl canvas::Program<Message> for AudioClipDetailWidget {
                         bounds.width.max(1.0),
                     )))
                 };
-                let pin = self.clip_view().pin(bounds.width.max(1.0)).map(|viewport| {
-                    Message::View(ViewMsg::SetClipEditorView {
-                        clip_id: self.clip_id,
-                        viewport,
-                    })
-                });
+                let pin = self
+                    .clip_view()
+                    .pin(bounds.width.max(1.0))
+                    .map(|viewport| Message::set_clip_editor_view(self.clip_id, viewport));
                 (canvas::event::Status::Captured, pin)
             }
             canvas::Event::Mouse(mouse::Event::CursorMoved { .. }) => {
@@ -860,10 +855,7 @@ impl canvas::Program<Message> for AudioClipDetailWidget {
                 let message = match drag {
                     AudioMarkerDrag::Ruler(zoom) => {
                         let viewport = zoom.drag_to(position, bounds.width.max(1.0));
-                        Some(Message::View(ViewMsg::SetClipEditorView {
-                            clip_id: self.clip_id,
-                            viewport,
-                        }))
+                        Some(Message::set_clip_editor_view(self.clip_id, viewport))
                     }
                     AudioMarkerDrag::Start(undo_gesture) => {
                         let start_marker =
