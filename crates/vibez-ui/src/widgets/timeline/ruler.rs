@@ -296,8 +296,9 @@ impl canvas::Program<Message> for RulerWidget {
     ) -> mouse::Interaction {
         if let Some(ref drag) = state.drag {
             return match drag {
-                RulerDragAction::PendingSeek { .. } => mouse::Interaction::Pointer,
-                RulerDragAction::Zoom { .. } => mouse::Interaction::ZoomIn,
+                RulerDragAction::PendingSeek { .. } | RulerDragAction::Zoom { .. } => {
+                    mouse::Interaction::ZoomIn
+                }
                 RulerDragAction::Brace { drag, .. } => brace_interaction(drag.grab, true),
             };
         }
@@ -305,7 +306,7 @@ impl canvas::Program<Message> for RulerWidget {
             Some(pos) if pos.y < self.numbers_top() => {
                 brace_interaction(self.brace_grab_at(pos.x), false)
             }
-            Some(_) => mouse::Interaction::Pointer,
+            Some(_) => mouse::Interaction::ZoomIn,
             None => mouse::Interaction::default(),
         }
     }
