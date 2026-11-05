@@ -833,3 +833,14 @@ fn alt_drags_the_audio_start_marker_off_the_grid() {
         "{message:?}"
     );
 }
+
+#[test]
+fn a_zoomed_audio_editor_holds_its_frames_when_a_first_warp_marker_moves_its_start() {
+    let mut widget = widget();
+    let bounds = Rectangle::new(Point::ORIGIN, iced::Size::new(800.0, 200.0));
+    let shown = widget.x_to_timeline_frame(0.0, &bounds);
+
+    widget.editor_frames = (widget.source_offset, widget.loop_content_end);
+
+    assert!((widget.x_to_timeline_frame(0.0, &bounds) - shown).abs() < 1e-3);
+}
