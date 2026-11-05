@@ -13,7 +13,6 @@ fn one_frame_per_pixel() -> Option<TimelineViewport> {
 /// map, still one frame per pixel.
 fn starts_at_its_window(widget: &mut AudioClipDetailWidget) {
     widget.editor_frames = (widget.source_offset, widget.loop_content_end);
-    widget.view = Some(TimelineViewport::new(25.0, 0.0));
 }
 
 fn widget() -> AudioClipDetailWidget {

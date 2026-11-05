@@ -98,13 +98,22 @@ const WARP_HIT_RADIUS: f32 = 7.0;
 const DOUBLE_CLICK_WINDOW: Duration = Duration::from_millis(300);
 
 /// The audio editor's view of `editor_frames`, measured in beats from its
-/// first frame.
+/// first frame. The first frame moves when a clip gains or loses Warp
+/// Markers, so `stored` scrolls from source frame zero to stay on the
+/// frames it showed.
 pub(crate) fn audio_clip_editor_view(
     stored: Option<TimelineViewport>,
     samples_per_beat: f64,
     (first, end): (u64, u64),
 ) -> ClipEditorView {
     let beats = end.saturating_sub(first).max(1) as f64 / samples_per_beat;
+    let first_beat = first as f64 / samples_per_beat;
+    let stored = stored.map(|viewport| {
+        TimelineViewport::new(
+            viewport.zoom_level,
+            (viewport.scroll_offset_beats - first_beat).max(0.0),
+        )
+    });
     ClipEditorView::new(stored, 0.0, beats, beats)
 }
 
@@ -130,6 +139,19 @@ impl AudioClipDetailWidget {
 
     fn clip_view(&self) -> ClipEditorView {
         audio_clip_editor_view(self.view, self.samples_per_beat(), self.editor_frames)
+    }
+
+    /// Stores `viewport`, measured from the editor's first frame, the way
+    /// [`audio_clip_editor_view`] reads it back.
+    fn store_view(&self, viewport: TimelineViewport) -> Message {
+        let first_beat = self.first_frame() as f64 / self.samples_per_beat();
+        Message::set_clip_editor_view(
+            self.clip_id,
+            TimelineViewport::new(
+                viewport.zoom_level,
+                viewport.scroll_offset_beats + first_beat,
+            ),
+        )
     }
 
     fn geometry(&self, bounds: &Rectangle) -> TimelineGeometry {
@@ -675,7 +697,7 @@ impl canvas::Program<Message> for AudioClipDetailWidget {
                 };
                 (
                     canvas::event::Status::Captured,
-                    Some(Message::set_clip_editor_view(self.clip_id, viewport)),
+                    Some(self.store_view(viewport)),
                 )
             }
             canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Right)) => {
@@ -822,7 +844,7 @@ impl canvas::Program<Message> for AudioClipDetailWidget {
                 let pin = self
                     .clip_view()
                     .pin(bounds.width.max(1.0))
-                    .map(|viewport| Message::set_clip_editor_view(self.clip_id, viewport));
+                    .map(|viewport| self.store_view(viewport));
                 (canvas::event::Status::Captured, pin)
             }
             canvas::Event::Mouse(mouse::Event::CursorMoved { .. }) => {
@@ -835,7 +857,7 @@ impl canvas::Program<Message> for AudioClipDetailWidget {
                 let message = match drag {
                     AudioMarkerDrag::Ruler(zoom) => {
                         let viewport = zoom.drag_to(position, bounds.width.max(1.0));
-                        Some(Message::set_clip_editor_view(self.clip_id, viewport))
+                        Some(self.store_view(viewport))
                     }
                     AudioMarkerDrag::Start(undo_gesture) => {
                         let start_marker =
