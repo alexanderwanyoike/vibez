@@ -632,19 +632,6 @@ mod tests {
         }
     }
 
-    fn saturation_and_lightness(c: Color) -> (f32, f32) {
-        let max = c.r.max(c.g).max(c.b);
-        let min = c.r.min(c.g).min(c.b);
-        let lightness = (max + min) / 2.0;
-        let chroma = max - min;
-        let saturation = if chroma == 0.0 {
-            0.0
-        } else {
-            chroma / (1.0 - (2.0 * lightness - 1.0).abs())
-        };
-        (saturation, lightness)
-    }
-
     #[test]
     fn the_default_dark_and_light_themes_have_vivid_track_palettes() {
         // Dev's classic rainbow averages 0.53. The muted 0.42 palette took
@@ -655,7 +642,7 @@ mod tests {
             let mean = theme
                 .track_colors
                 .iter()
-                .map(|&color| saturation_and_lightness(color).0)
+                .map(|&color| crate::theme::Hsl::of(color).saturation)
                 .sum::<f32>()
                 / theme.track_colors.len() as f32;
             assert!(mean >= 0.5, "{name} mean track saturation is {mean}");

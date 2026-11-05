@@ -465,14 +465,14 @@ const SOFT_BODY_TOWARD_LANE: f32 = 0.06;
 
 /// A colour as hue, saturation and lightness, all in 0..=1.
 #[derive(Debug, Clone, Copy, PartialEq)]
-struct Hsl {
-    hue: f32,
-    saturation: f32,
-    lightness: f32,
+pub(crate) struct Hsl {
+    pub hue: f32,
+    pub saturation: f32,
+    pub lightness: f32,
 }
 
 impl Hsl {
-    fn of(c: Color) -> Self {
+    pub fn of(c: Color) -> Self {
         let max = c.r.max(c.g).max(c.b);
         let min = c.r.min(c.g).min(c.b);
         let lightness = (max + min) / 2.0;
@@ -794,19 +794,6 @@ mod tests {
         assert_eq!(palette.lane_style, LaneStyle::DARK);
     }
 
-    fn saturation_and_lightness(c: Color) -> (f32, f32) {
-        let max = c.r.max(c.g).max(c.b);
-        let min = c.r.min(c.g).min(c.b);
-        let lightness = (max + min) / 2.0;
-        let chroma = max - min;
-        let saturation = if chroma == 0.0 {
-            0.0
-        } else {
-            chroma / (1.0 - (2.0 * lightness - 1.0).abs())
-        };
-        (saturation, lightness)
-    }
-
     fn default_track_colours() -> Vec<Color> {
         ["Charcoal", "Porcelain"]
             .into_iter()
@@ -829,15 +816,15 @@ mod tests {
                 ColourStrength::Medium,
                 ColourStrength::Vivid,
             ]
-            .map(|strength| saturation_and_lightness(strength.track(color)));
+            .map(|strength| Hsl::of(strength.track(color)));
 
             assert!(
-                soft.0 < medium.0 && medium.0 < vivid.0,
+                soft.saturation < medium.saturation && medium.saturation < vivid.saturation,
                 "{color:?}: soft {soft:?} medium {medium:?} vivid {vivid:?}"
             );
-            for (saturation, lightness) in [soft, medium] {
-                assert!(saturation > 0.0, "{color:?} keeps some colour");
-                assert!((lightness - vivid.1).abs() < 0.01, "{color:?}");
+            for hsl in [soft, medium] {
+                assert!(hsl.saturation > 0.0, "{color:?} keeps some colour");
+                assert!((hsl.lightness - vivid.lightness).abs() < 0.01, "{color:?}");
             }
         }
     }
