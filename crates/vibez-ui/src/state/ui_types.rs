@@ -1128,6 +1128,8 @@ impl GridConfig {
 
     pub fn choose(&mut self, choice: GridChoice) {
         match choice {
+            // The step Auto shows is the one this grid's bias resolves to
+            // now, so keeping the bias is choosing that step.
             GridChoice::Auto(_) => self.adaptive = true,
             GridChoice::Fixed(grid) => {
                 self.selected = grid;
