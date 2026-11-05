@@ -479,7 +479,10 @@ impl App {
                             .size(10)
                             .color(th::text_dim()),
                     )
-                    .padding([if compact { 3 } else { 8 }, 0])
+                    .padding(iced::Padding {
+                        top: crate::widgets::clip_slot::BUTTON_INSET,
+                        ..Default::default()
+                    })
                     .height(slot_height),
                 );
             }
@@ -554,9 +557,11 @@ impl App {
                     ]
                     .spacing(3)
                 };
-                let mut lane = column![container(header).padding([3, 8]).height(header_height)]
-                    .spacing(0)
-                    .width(Length::Fixed(lane_width));
+                let mut lane = column![container(header)
+                    .padding([3.0, crate::widgets::clip_slot::TILE_GAP / 2.0])
+                    .height(header_height)]
+                .spacing(0)
+                .width(Length::Fixed(lane_width));
                 for offset in 0..6u32 {
                     let slot_row = first_row + offset;
                     let recording =
@@ -789,24 +794,7 @@ impl App {
             }
             workspace = workspace.push(
                 crate::widgets::quiet_scroll::vertical(
-                    container(container(grid).padding(2).width(Length::Fill).style(|_| {
-                        container::Style {
-                            background: Some(
-                                iced::gradient::Linear::new(std::f32::consts::PI)
-                                    .add_stop(0.0, th::blend(th::bg_dark(), th::text(), 0.012))
-                                    .add_stop(1.0, th::darken(th::bg_dark(), 0.82))
-                                    .into(),
-                            ),
-                            border: iced::Border {
-                                color: th::with_alpha(th::text(), 0.05),
-                                width: 1.0,
-                                radius: 4.0.into(),
-                            },
-                            ..Default::default()
-                        }
-                    }))
-                    .padding([0, 12])
-                    .width(Length::Fill),
+                    container(grid).padding([0, 12]).width(Length::Fill),
                 )
                 .width(Length::Fill)
                 .height(Length::Fill),
