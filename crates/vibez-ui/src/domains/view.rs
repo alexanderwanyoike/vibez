@@ -473,35 +473,6 @@ mod tests {
         );
     }
 
-    fn audio_clip(position: u64, duration: u64) -> crate::state::UiClip {
-        crate::state::UiClip {
-            id: ClipId::new(),
-            name: "Audio".into(),
-            audio: std::sync::Arc::new(vibez_core::audio_buffer::DecodedAudio {
-                channels: vec![vec![0.0; 8]],
-                sample_rate: 48_000,
-            }),
-            source: None,
-            position,
-            source_offset: 0,
-            start_marker: 0,
-            duration,
-            loop_enabled: false,
-            loop_start: 0,
-            loop_end: 0,
-            gain_db: Default::default(),
-            fades: Default::default(),
-            playback_direction: Default::default(),
-            transient_markers: Default::default(),
-            warp_markers: Default::default(),
-            transpose: Default::default(),
-            original_bpm: None,
-            warped: false,
-            warped_to_bpm: None,
-            original_audio: None,
-        }
-    }
-
     fn note_clip(position_beats: f64, duration_beats: f64) -> crate::state::UiNoteClip {
         crate::state::UiNoteClip {
             id: ClipId::new(),
@@ -540,7 +511,7 @@ mod tests {
     fn zoom_to_selection_frames_every_selected_clip_without_a_time_range() {
         let mut view = zoomed_out_view();
         let (audio_track, midi_track) = (TrackId::new(), TrackId::new());
-        let audio = audio_clip(3_200, 800);
+        let audio = crate::state::UiClip::test_clip(3_200, 800);
         let notes = note_clip(44.0, 4.0);
         let unselected = note_clip(200.0, 4.0);
         let mut content = crate::state::TimelineContent::default();

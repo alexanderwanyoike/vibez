@@ -688,6 +688,40 @@ impl UiNoteClip {
 }
 
 #[cfg(test)]
+impl UiClip {
+    /// A silent, unlooped audio Clip `duration` frames long at `position`,
+    /// for tests to fill in the fields they care about.
+    pub(crate) fn test_clip(position: u64, duration: u64) -> Self {
+        Self {
+            id: ClipId::new(),
+            name: "Audio".into(),
+            audio: Arc::new(DecodedAudio {
+                channels: vec![vec![0.0; duration as usize]],
+                sample_rate: 48_000,
+            }),
+            source: None,
+            position,
+            source_offset: 0,
+            start_marker: 0,
+            duration,
+            loop_enabled: false,
+            loop_start: 0,
+            loop_end: 0,
+            gain_db: Default::default(),
+            fades: Default::default(),
+            playback_direction: Default::default(),
+            transient_markers: Default::default(),
+            warp_markers: Default::default(),
+            transpose: Default::default(),
+            original_bpm: None,
+            warped: false,
+            warped_to_bpm: None,
+            original_audio: None,
+        }
+    }
+}
+
+#[cfg(test)]
 impl UiNoteClip {
     /// An empty, unlooped note Clip `duration_beats` long at
     /// `position_beats`, for tests to fill in the fields they care about.
