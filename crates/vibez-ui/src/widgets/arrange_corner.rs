@@ -56,7 +56,8 @@ pub fn arrangement_size_labels(track_count: usize, clip_count: usize) -> (String
     (counted(track_count, "track"), counted(clip_count, "clip"))
 }
 
-fn counted(count: usize, unit: &str) -> String {
+/// `count` of `unit`, plural unless there is one.
+pub fn counted(count: usize, unit: &str) -> String {
     format!("{count} {unit}{}", if count == 1 { "" } else { "s" })
 }
 

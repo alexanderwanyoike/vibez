@@ -806,10 +806,6 @@ pub fn perform_shadow() -> Color {
     with_alpha(darken(bg_dark(), 0.42), 0.72)
 }
 
-pub fn perform_grid_line() -> Color {
-    with_alpha(grid_beat(), 0.52)
-}
-
 /// Get a track color by index (wraps around).
 pub fn track_color(index: u8) -> Color {
     let palette = CURRENT.read().unwrap();
