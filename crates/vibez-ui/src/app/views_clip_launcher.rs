@@ -13,6 +13,7 @@ use crate::icons;
 use crate::message::Message;
 use crate::theme as th;
 use crate::typography::{PERFORM_DISPLAY, PERFORM_LABEL, PERFORM_TECH};
+use crate::widgets::control_style;
 
 use super::App;
 
@@ -88,6 +89,7 @@ where
     })
     .text_size(10)
     .padding([3, 6])
+    .style(control_style::list(th::accent()))
     .into()
 }
 
@@ -103,6 +105,7 @@ where
     pick_list(all, Some(selected), on_select)
         .text_size(9)
         .padding([1, 4])
+        .style(control_style::list(th::accent()))
         .into()
 }
 
@@ -388,7 +391,7 @@ impl App {
                     rows,
                 })))
                 .padding([6, 10])
-                .style(|_theme, status| choice_style(false, status))
+                .style(control_style::style(None))
         };
         let heading = row![
             text(if width < 780.0 { "" } else { "CLIPS" })
@@ -412,15 +415,15 @@ impl App {
         let actions = row![
             button(text("+ Audio").size(11))
                 .padding([6, 10])
-                .style(|_theme, status| choice_style(false, status))
+                .style(control_style::style(None))
                 .on_press(Message::Arrangement(ArrangementMsg::AddTrack)),
             button(text("+ MIDI").size(11))
                 .padding([6, 10])
-                .style(|_theme, status| choice_style(false, status))
+                .style(control_style::style(None))
                 .on_press(Message::Arrangement(ArrangementMsg::AddMidiTrack)),
             button(text(if width < 780.0 { "■" } else { "Stop clips" }).size(11))
                 .padding([6, 10])
-                .style(|_theme, status| choice_style(false, status))
+                .style(control_style::style(None))
                 .on_press(Message::Perform(PerformMsg::Clips(ClipMsg::StopAll))),
             move_window("←", -4, 0),
             move_window("→", 4, 0),
@@ -885,7 +888,7 @@ impl App {
             .align_y(iced::Alignment::Center),
         )
         .padding([6, 10])
-        .style(move |_, status| choice_style(active, status))
+        .style(control_style::style(active.then(th::accent)))
         .on_press(Message::Perform(PerformMsg::Capture(
             crate::domains::perform::CaptureMsg::Toggle,
         )))
