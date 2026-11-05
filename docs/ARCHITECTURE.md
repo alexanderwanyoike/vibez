@@ -557,9 +557,7 @@ The engine lives on the cpal audio callback. Its rules:
   clip is overwritten instead of queued, so only the latest position waits.
   `MoveNoteClip` and `SetNoteClipBounds` release only the notes that clip
   started and no longer holds under the playhead; the track remembers which
-  clip started each sounding pitch. The whole drag is one undo gesture, and
-  Escape reverts it (`UndoHistory::revert_gesture`): its snapshot is swapped
-  back in, nothing goes on the redo stack, and its later edits are refused.
+  clip started each sounding pitch.
 - Arrange playback stops on its own only when the playhead reaches the song
   end; a playhead already past it keeps going. Undo and Capture wrap the
   content they re-add in `BeginContentRebuild`/`EndContentRebuild`, and the

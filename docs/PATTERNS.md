@@ -465,6 +465,9 @@ Undo is whole-project snapshots. The conventions:
 - One user gesture is one undo step: continuous inputs carry an
   `UndoGestureId` minted at press and reused across moves; the history
   coalesces snapshots by gesture id.
+- A cancelled gesture leaves no step: Escape during a drag calls
+  `UndoHistory::revert_gesture`, which swaps the gesture's snapshot back in,
+  puts nothing on the redo stack and refuses the gesture's later edits.
 - Messages whose outcome decides whether anything changed are listed in
   `defers_project_edit()`: the snapshot is taken before routing but pushed
   only if the domain reports `mark_dirty`.
