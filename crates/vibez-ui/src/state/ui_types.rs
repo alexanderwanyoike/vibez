@@ -172,9 +172,13 @@ impl UiClip {
         self.loop_end = self.source_offset.saturating_add(self.duration);
     }
 
-    pub(crate) fn enable_loop_over_clip(&mut self) {
-        self.loop_enabled = true;
-        self.reset_loop_region_to_clip();
+    /// The loop region outlives its loop being off, as Ableton keeps a clip's
+    /// loop brace, so turning it back on loops the same region.
+    pub(crate) fn set_loop_enabled(&mut self, enabled: bool) {
+        self.loop_enabled = enabled;
+        if enabled && !self.accepts_loop_region(self.loop_start, self.loop_end) {
+            self.reset_loop_region_to_clip();
+        }
     }
 
     pub(crate) fn loop_content_end(&self) -> u64 {
@@ -222,10 +226,16 @@ impl UiClip {
         true
     }
 
+    fn accepts_loop_region(&self, start: u64, end: u64) -> bool {
+        start >= self.source_offset
+            && start < end
+            && end <= self.loop_content_end()
+            && self.start_marker < end
+    }
+
     pub(crate) fn set_loop_region(&mut self, start: u64, end: u64) -> bool {
-        let valid = start >= self.source_offset && start < end && end <= self.loop_content_end();
-        let valid = valid && self.start_marker < end;
-        if !valid || (start, end) == (self.loop_start, self.loop_end) {
+        if !self.accepts_loop_region(start, end) || (start, end) == (self.loop_start, self.loop_end)
+        {
             return false;
         }
         self.loop_start = start;
@@ -527,9 +537,12 @@ impl UiNoteClip {
         self.loop_end_beats = self.duration_beats;
     }
 
-    pub(crate) fn enable_loop_over_clip(&mut self) {
-        self.loop_enabled = true;
-        self.reset_loop_region_to_clip();
+    /// See `UiClip::set_loop_enabled`.
+    pub(crate) fn set_loop_enabled(&mut self, enabled: bool) {
+        self.loop_enabled = enabled;
+        if enabled && !self.accepts_loop_region(self.loop_start_beats, self.loop_end_beats) {
+            self.reset_loop_region_to_clip();
+        }
     }
 
     pub(crate) fn clamp_start_to_duration(&mut self) {
@@ -549,13 +562,18 @@ impl UiNoteClip {
         true
     }
 
-    pub(crate) fn set_loop_region(&mut self, start: f64, end: f64) -> bool {
-        let valid = start.is_finite()
+    fn accepts_loop_region(&self, start: f64, end: f64) -> bool {
+        start.is_finite()
             && end.is_finite()
             && start >= 0.0
             && start < end
-            && self.start_marker_beats < end;
-        if !valid || (start, end) == (self.loop_start_beats, self.loop_end_beats) {
+            && self.start_marker_beats < end
+    }
+
+    pub(crate) fn set_loop_region(&mut self, start: f64, end: f64) -> bool {
+        if !self.accepts_loop_region(start, end)
+            || (start, end) == (self.loop_start_beats, self.loop_end_beats)
+        {
             return false;
         }
         self.loop_start_beats = start;
