@@ -454,3 +454,38 @@ pub(super) fn format_settings_bytes(bytes: u64) -> String {
         format!("{:.1} KiB", bytes as f64 / KIB)
     }
 }
+
+#[cfg(test)]
+mod sheet_tests {
+    use super::*;
+    use iced::Size;
+
+    #[test]
+    fn the_settings_sheet_is_900_by_640_in_every_supported_window() {
+        for window in [Size::new(1440.0, 900.0), Size::new(1280.0, 760.0)] {
+            assert_eq!(settings_sheet_size(window), Size::new(900.0, 640.0));
+        }
+    }
+
+    #[test]
+    fn a_window_too_small_for_the_sheet_shrinks_it_inside_a_margin() {
+        let sheet = settings_sheet_size(Size::new(800.0, 500.0));
+        assert!(
+            sheet.width > 0.0 && sheet.width <= 800.0 - 48.0,
+            "{sheet:?}"
+        );
+        assert!(
+            sheet.height > 0.0 && sheet.height <= 500.0 - 48.0,
+            "{sheet:?}"
+        );
+    }
+
+    #[test]
+    fn the_selected_section_is_a_rounded_tinted_pill_without_an_outline() {
+        let selected = settings_tab_style(true, button::Status::Active);
+        assert_eq!(selected.border.width, 0.0);
+        assert!(selected.border.radius.top_left > 0.0);
+        assert!(selected.background.is_some());
+        assert_eq!(selected.text_color, th::text());
+    }
+}
