@@ -300,7 +300,13 @@ impl App {
                     .size(12)
                     .font(crate::typography::TRACK_TITLE)
                     .color(th::text()),
+                horizontal_space(),
             ]
+            .push_maybe((tab == DetailPanelTab::Devices).then(|| {
+                text("Right-click to add a device")
+                    .size(11)
+                    .color(th::text_muted())
+            }))
             .spacing(10)
             .align_y(iced::Alignment::Center);
 

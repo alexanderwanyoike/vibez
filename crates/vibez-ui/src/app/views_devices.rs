@@ -108,32 +108,10 @@ impl App {
         track: &'a UiTrack,
         track_color: Color,
     ) -> Element<'a, Message> {
-        // Header: track name + right-click hint
-        let track_label = text(format!("{} - Devices", track.name))
-            .size(13)
-            .color(th::text());
-
-        let hint_label = text("Right-click to add").size(10).color(th::text_muted());
-
-        let header = row![track_label, horizontal_space(), hint_label]
-            .spacing(8)
-            .align_y(iced::Alignment::Center);
-
-        let chain = iced::widget::responsive(move |size| {
+        // The chain keeps the room under its cards itself, for its scrollbar.
+        let content = iced::widget::responsive(move |size| {
             self.device_chain_row(track_id, track, track_color, size.width)
         });
-
-        // The chain keeps the room under its cards itself, for its scrollbar.
-        let content = column![header, chain]
-            .spacing(6)
-            .padding(iced::Padding {
-                top: 8.0,
-                right: 8.0,
-                bottom: 0.0,
-                left: 8.0,
-            })
-            .width(Length::Fill)
-            .height(Length::Fill);
 
         // Wrap in mouse_area for right-click context menu
         mouse_area(content)
