@@ -64,6 +64,8 @@ pub struct TimelineViewport {
 impl TimelineViewport {
     const MIN_ZOOM: f32 = 0.01;
     const MAX_ZOOM: f32 = 16.0;
+    /// One zoom in or out by keyboard or button.
+    pub const ZOOM_STEP: f32 = 1.25;
 
     /// `zoom_level` held inside the zoom range every timeline shares.
     pub fn clamp_zoom(zoom_level: f32) -> f32 {

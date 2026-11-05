@@ -8,7 +8,7 @@ use vibez_core::id::{ClipId, TrackId};
 use crate::state::{
     ContextMenuTarget, DetailPanelTab, SnapGrid, TimelineEditorState, ViewState, Workspace,
 };
-use crate::timeline_geometry::{TimelineGeometry, TimelineViewport};
+use crate::timeline_geometry::TimelineViewport;
 
 /// Messages the view domain handles.
 #[derive(Debug, Clone)]
@@ -67,6 +67,46 @@ pub enum ViewMsg {
     },
 }
 
+impl ViewMsg {
+    /// Zooms or scrolls `viewport`, a timeline `viewport_width` wide over
+    /// `total_beats`, the one way Arrange and the Section editor navigate.
+    /// False, leaving it alone, for any other message.
+    pub fn navigate(
+        &self,
+        viewport: &mut TimelineViewport,
+        total_beats: f64,
+        viewport_width: f32,
+    ) -> bool {
+        let centre = viewport_width / 2.0;
+        match *self {
+            ViewMsg::ZoomIn => viewport.zoom_around(
+                TimelineViewport::ZOOM_STEP,
+                centre,
+                total_beats,
+                viewport_width,
+            ),
+            ViewMsg::ZoomOut => viewport.zoom_around(
+                1.0 / TimelineViewport::ZOOM_STEP,
+                centre,
+                total_beats,
+                viewport_width,
+            ),
+            ViewMsg::SetZoom(level) => {
+                let factor = TimelineViewport::clamp_zoom(level) / viewport.zoom_level;
+                viewport.zoom_around(factor, centre, total_beats, viewport_width);
+            }
+            ViewMsg::ZoomAround { factor, anchor_x } => {
+                viewport.zoom_around(factor, anchor_x, total_beats, viewport_width);
+            }
+            ViewMsg::ScrollArrangement(delta) => {
+                viewport.scroll_by(delta, total_beats, viewport_width);
+            }
+            _ => return false,
+        }
+        true
+    }
+}
+
 /// A committed inline rename, for the router to replay through the
 /// arrangement domain.
 #[derive(Debug, Clone, PartialEq)]
@@ -121,18 +161,12 @@ impl ViewState {
                 self.detail_panel_tab = tab;
             }
             ViewMsg::SetMixerSendBank(bank) => self.mixer_send_bank = bank,
-            ViewMsg::ZoomIn => {
-                self.zoom_around(1.25, self.window_width / 2.0, ctx.total_beats);
-            }
-            ViewMsg::ZoomOut => {
-                self.zoom_around(1.0 / 1.25, self.window_width / 2.0, ctx.total_beats);
-            }
-            ViewMsg::SetZoom(level) => {
-                let factor = TimelineViewport::clamp_zoom(level) / self.viewport.zoom_level;
-                self.zoom_around(factor, self.window_width / 2.0, ctx.total_beats);
-            }
-            ViewMsg::ZoomAround { factor, anchor_x } => {
-                self.zoom_around(factor, anchor_x, ctx.total_beats);
+            ViewMsg::ZoomIn
+            | ViewMsg::ZoomOut
+            | ViewMsg::SetZoom(_)
+            | ViewMsg::ZoomAround { .. }
+            | ViewMsg::ScrollArrangement(_) => {
+                msg.navigate(&mut self.viewport, ctx.total_beats, ctx.lane_width);
             }
             ViewMsg::ZoomToFit => {
                 let song_end = if ctx.song_beats > 0.0 {
@@ -154,11 +188,6 @@ impl ViewState {
                 if let Some(previous) = self.zoom_before_selection.take() {
                     self.viewport = previous;
                 }
-            }
-            ViewMsg::ScrollArrangement(delta) => {
-                let total = ctx.total_beats;
-                self.viewport.scroll_offset_beats =
-                    (self.viewport.scroll_offset_beats + delta).clamp(0.0, total);
             }
             ViewMsg::SetSnapGrid(grid) => {
                 self.snap_grid = grid;
@@ -301,26 +330,12 @@ impl ViewState {
         }
         action
     }
-
-    fn zoom_around(&mut self, factor: f32, anchor_x: f32, total_beats: f64) {
-        if !factor.is_finite() || factor <= 0.0 {
-            return;
-        }
-        let old_geometry = TimelineGeometry::from_zoom(self.viewport.zoom_level, 0.0);
-        let anchor_x = anchor_x.max(0.0);
-        let anchor_beat =
-            self.viewport.scroll_offset_beats + old_geometry.beats_for_width(anchor_x);
-        let next_zoom = TimelineViewport::clamp_zoom(self.viewport.zoom_level * factor);
-        let next_geometry = TimelineGeometry::from_zoom(next_zoom, 0.0);
-        self.viewport.zoom_level = next_zoom;
-        self.viewport.scroll_offset_beats = (anchor_beat - next_geometry.beats_for_width(anchor_x))
-            .clamp(0.0, total_beats.max(0.0));
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::timeline_geometry::TimelineGeometry;
 
     #[test]
     fn zoom_clamps_both_directions() {

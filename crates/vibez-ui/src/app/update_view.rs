@@ -5,7 +5,6 @@ use crate::domains::perform::PerformEditorFocus;
 use crate::domains::timeline_editor::TimelineEditorAdapter;
 use crate::domains::view::{ViewCtx, ViewMsg};
 use crate::state::Workspace;
-use crate::timeline_geometry::TimelineViewport;
 
 use super::*;
 
@@ -36,30 +35,11 @@ impl App {
         };
         let viewport_width = self.section_timeline_viewport_width();
         let viewport = self.state.perform.section_editor.viewport_mut();
-        match msg {
-            ViewMsg::ZoomIn => {
-                viewport.zoom_around(1.25, viewport_width / 2.0, total_beats, viewport_width)
-            }
-            ViewMsg::ZoomOut => viewport.zoom_around(
-                1.0 / 1.25,
-                viewport_width / 2.0,
-                total_beats,
-                viewport_width,
-            ),
-            ViewMsg::SetZoom(level) => {
-                let factor = TimelineViewport::clamp_zoom(*level) / viewport.zoom_level;
-                viewport.zoom_around(factor, viewport_width / 2.0, total_beats, viewport_width);
-            }
-            ViewMsg::ZoomAround { factor, anchor_x } => {
-                viewport.zoom_around(*factor, *anchor_x, total_beats, viewport_width);
-            }
-            ViewMsg::ZoomToFit => viewport.frame(0.0, total_beats, viewport_width),
-            ViewMsg::ScrollArrangement(delta) => {
-                viewport.scroll_by(*delta, total_beats, viewport_width);
-            }
-            _ => return false,
+        if let ViewMsg::ZoomToFit = msg {
+            viewport.frame(0.0, total_beats, viewport_width);
+            return true;
         }
-        true
+        msg.navigate(viewport, total_beats, viewport_width)
     }
 
     pub(super) fn route_view_message(&mut self, msg: ViewMsg) -> Task<Message> {
