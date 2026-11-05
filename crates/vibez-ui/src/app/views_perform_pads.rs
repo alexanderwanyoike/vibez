@@ -339,7 +339,7 @@ impl App {
                     rail_width
                 }));
             let rail: Element<'_, Message> = if clip_layout {
-                iced::widget::scrollable(controls)
+                crate::widgets::quiet_scroll::vertical(controls)
                     .height(Length::Fixed(pad_grid_height))
                     .width(Length::Fixed(rail_width))
                     .into()
