@@ -1,15 +1,15 @@
 //! Where a timeline's Clips and selection sit, in beats.
 
-use crate::state::{ArrangementSelection, ClipSpan, TimelineEditorState};
+use crate::state::{ArrangementSelection, ClipSpan, TimelineContent, TimelineEditorState};
 
-impl TimelineEditorState {
+impl TimelineContent {
     /// Where the Clip `selection` names sits, in beats.
     pub fn clip_span(
         &self,
         selection: ArrangementSelection,
         samples_per_beat: f64,
     ) -> Option<ClipSpan> {
-        let lane = self.timeline.get(selection.track_id())?;
+        let lane = self.get(selection.track_id())?;
         match selection {
             ArrangementSelection::AudioClip { clip_id, .. } if samples_per_beat > 0.0 => lane
                 .clips
@@ -24,7 +24,9 @@ impl TimelineEditorState {
                 .map(|clip| clip.span()),
         }
     }
+}
 
+impl TimelineEditorState {
     /// The time selection when there is one, otherwise the span from the
     /// earliest selected Clip start to the latest selected Clip end.
     pub fn selection_span_beats(&self, samples_per_beat: f64) -> Option<(f64, f64)> {
