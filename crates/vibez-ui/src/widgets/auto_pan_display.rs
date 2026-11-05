@@ -112,7 +112,7 @@ impl canvas::Program<Message> for GainPlot<'_> {
                     text,
                     Point::new(LABEL_W - 4.0, at),
                     iced::alignment::Horizontal::Right,
-                    th::text_muted(),
+                    th::text_dim(),
                 );
             }
         }
@@ -133,7 +133,7 @@ impl canvas::Program<Message> for GainPlot<'_> {
                     time_label(seconds * position, position == 1.0),
                     Point::new(x, plot.y + plot.height + LABEL_H / 2.0 + 1.0),
                     horizontal,
-                    th::text_muted(),
+                    th::text_dim(),
                 );
             }
         }
@@ -206,7 +206,7 @@ impl canvas::Program<Message> for GainPlot<'_> {
                     name.into(),
                     Point::new(at.x + 20.0, at.y),
                     iced::alignment::Horizontal::Left,
-                    th::text_muted(),
+                    th::text_dim(),
                 );
             }
         }

@@ -153,7 +153,7 @@ impl VelocityLaneWidget {
             frame.fill_text(canvas::Text {
                 content: label.into(),
                 position: Point::new(34.0, (y + 3.0).min(bounds.height - 2.0)),
-                color: theme::text_muted(),
+                color: theme::text_dim(),
                 size: iced::Pixels(8.0),
                 ..Default::default()
             });
