@@ -210,7 +210,7 @@ impl ViewState {
                 }
             }
             ViewMsg::SetClipEditorView { clip_id, viewport } => {
-                self.clip_editor_view = Some((clip_id, viewport));
+                self.stored_clip_editor_view = Some((clip_id, viewport));
             }
             ViewMsg::Grid(target, command) => {
                 match target {

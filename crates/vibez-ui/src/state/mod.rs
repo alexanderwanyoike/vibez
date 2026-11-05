@@ -115,7 +115,7 @@ pub struct ViewState {
     pub zoom_before_selection: Option<crate::timeline_geometry::TimelineViewport>,
     /// The clip editor's view of the clip it last showed. Opening another
     /// clip frames that clip's loop afresh.
-    pub clip_editor_view: Option<(ClipId, crate::timeline_geometry::TimelineViewport)>,
+    pub stored_clip_editor_view: Option<(ClipId, crate::timeline_geometry::TimelineViewport)>,
     /// Arrange and Section timelines. The transport bar always edits it; the
     /// grid shortcuts edit it unless a clip editor has focus.
     pub arrange_grid: GridConfig,
@@ -155,7 +155,7 @@ impl Default for ViewState {
             perform_surface_resize_active: false,
             viewport: crate::timeline_geometry::TimelineViewport::new(1.0, 0.0),
             zoom_before_selection: None,
-            clip_editor_view: None,
+            stored_clip_editor_view: None,
             arrange_grid: GridConfig::default(),
             clip_grid: GridConfig::default(),
             context_menu: None,
@@ -182,7 +182,7 @@ impl ViewState {
         &self,
         clip_id: ClipId,
     ) -> Option<crate::timeline_geometry::TimelineViewport> {
-        self.clip_editor_view
+        self.stored_clip_editor_view
             .filter(|(shown, _)| *shown == clip_id)
             .map(|(_, viewport)| viewport)
     }
