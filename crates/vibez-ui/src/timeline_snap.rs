@@ -143,8 +143,8 @@ impl SnapTargets {
         context.grid.snap_beat(beat, context.pixels_per_beat) - beat
     }
 
-    /// Shifts `edges` by `grid_shift`, or by less when that locks one of
-    /// them onto a magnet within reach, and says where the first one lands.
+    /// Shifts `edges` onto the nearest magnet within reach of one of them,
+    /// or by `grid_shift` when none is, and says where the first one lands.
     fn land(
         &self,
         edges: &[f64],
@@ -159,13 +159,6 @@ impl SnapTargets {
                 target: None,
             };
         }
-        let grid = (
-            grid_shift,
-            SnapTarget {
-                beat: first + grid_shift,
-                kind: SnapTargetKind::Grid,
-            },
-        );
         let reach = f64::from(MAGNET_RADIUS_PX / context.pixels_per_beat);
         let (shift, target) = self
             .magnets
@@ -177,13 +170,14 @@ impl SnapTargets {
                     .map(move |edge| (magnet.target.beat - edge, magnet.target))
             })
             .filter(|(shift, _)| shift.abs() <= reach)
-            .fold(grid, |nearest, pull| {
-                if pull.0.abs() <= nearest.0.abs() {
-                    pull
-                } else {
-                    nearest
-                }
-            });
+            .min_by(|a, b| a.0.abs().total_cmp(&b.0.abs()))
+            .unwrap_or((
+                grid_shift,
+                SnapTarget {
+                    beat: first + grid_shift,
+                    kind: SnapTargetKind::Grid,
+                },
+            ));
         Snapped {
             beat: first + shift,
             target: Some(target),
