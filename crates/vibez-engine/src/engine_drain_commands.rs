@@ -5,6 +5,11 @@ use super::*;
 use crate::events::SectionSourceRefreshedEvent;
 use vibez_core::id::ClipId;
 
+enum CommandSource {
+    Transport,
+    Main,
+}
+
 impl AudioEngine {
     /// Drain all pending commands from the ring buffer without blocking.
     pub(super) fn drain_commands(&mut self) {
@@ -119,26 +124,32 @@ impl AudioEngine {
 
     /// A ready transport command first; otherwise the main ring, unless a
     /// content edit is waiting for storage.
+    fn next_source(&self) -> Option<CommandSource> {
+        if self.transport_rx.ready().is_some() {
+            Some(CommandSource::Transport)
+        } else if self.pending_clip_insertion.is_some() || self.cmd_rx.is_empty() {
+            None
+        } else {
+            Some(CommandSource::Main)
+        }
+    }
+
     fn next_command(&self) -> Option<&EngineCommand> {
-        if let Some(transport) = self.transport_rx.ready() {
-            return Some(transport);
+        match self.next_source()? {
+            CommandSource::Transport => self.transport_rx.ready(),
+            CommandSource::Main => self.cmd_rx.peek().ok(),
         }
-        if self.pending_clip_insertion.is_some() {
-            return None;
-        }
-        self.cmd_rx.peek().ok()
     }
 
     fn pop_next_command(&mut self) -> Option<EngineCommand> {
-        if let Some(transport) = self.transport_rx.pop_ready() {
-            return Some(transport);
+        match self.next_source()? {
+            CommandSource::Transport => self.transport_rx.pop_ready(),
+            CommandSource::Main => {
+                let cmd = self.cmd_rx.pop().ok()?;
+                self.transport_rx.record_main_command(&cmd);
+                Some(cmd)
+            }
         }
-        if self.pending_clip_insertion.is_some() {
-            return None;
-        }
-        let cmd = self.cmd_rx.pop().ok()?;
-        self.transport_rx.record_main_command(&cmd);
-        Some(cmd)
     }
 
     fn arrangement_clip_mut(
