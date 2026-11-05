@@ -635,7 +635,7 @@ impl canvas::Program<Message> for TrackClipCanvas {
 
             // -- Drag: move, resize, or region select --
             canvas::Event::Mouse(iced::mouse::Event::CursorMoved { .. }) => {
-                if let Some(ref drag) = state.drag {
+                if let Some(drag) = &mut state.drag {
                     if let Some(local) = LocalDrag::unclamped().position(cursor, bounds) {
                         let local_x = local.x;
                         let geometry = self.geometry();
@@ -698,18 +698,17 @@ impl canvas::Program<Message> for TrackClipCanvas {
                                 phase,
                                 ..
                             } => {
-                                let mut phase = *phase;
                                 if !phase.follow(Point::new(*start_local_x, *start_y), local) {
                                     return (canvas::event::Status::Captured, None);
                                 }
-                                let delta_px = local_x - start_local_x;
+                                let delta_px = local_x - *start_local_x;
                                 let travel = crate::timeline_geometry::compensated_drag_beat(
                                     *original_position_beats,
                                     delta_px,
                                     geometry.pixels_per_beat(),
                                     *start_scroll_beats,
                                     self.scroll_offset_beats,
-                                ) - original_position_beats;
+                                ) - *original_position_beats;
                                 let new_pos = self
                                     .snap_targets
                                     .moved_span(
@@ -727,7 +726,7 @@ impl canvas::Program<Message> for TrackClipCanvas {
                                 // above has its automation lanes expanded.
                                 let target_track = self
                                     .resolve_lane_at(self.row_top() + local.y)
-                                    .filter(|_| (local.y - start_y).abs() > CROSS_TRACK_MIN_PX)
+                                    .filter(|_| (local.y - *start_y).abs() > CROSS_TRACK_MIN_PX)
                                     .and_then(|lane| self.track_ids.get(lane).copied())
                                     .unwrap_or(track_id);
                                 let edit =
@@ -737,11 +736,6 @@ impl canvas::Program<Message> for TrackClipCanvas {
                                         target_track,
                                     })
                                     .in_undo_gesture(*undo_gesture);
-                                if let Some(ClipDragAction::MoveClip { phase: held, .. }) =
-                                    &mut state.drag
-                                {
-                                    *held = phase;
-                                }
                                 return (canvas::event::Status::Captured, Some(edit));
                             }
                             ClipDragAction::ResizeClip {
@@ -753,12 +747,7 @@ impl canvas::Program<Message> for TrackClipCanvas {
                                 start_local_x,
                                 phase,
                             } => {
-                                // A resize follows the pointer's x alone.
-                                let mut phase = *phase;
-                                if !phase.follow(
-                                    Point::new(*start_local_x, 0.0),
-                                    Point::new(local_x, 0.0),
-                                ) {
+                                if !phase.follow_x(*start_local_x, local_x) {
                                     return (canvas::event::Status::Captured, None);
                                 }
                                 let pointer = self.x_to_beat(local_x);
@@ -783,16 +772,11 @@ impl canvas::Program<Message> for TrackClipCanvas {
                                             .snap_targets
                                             .span_end(*fixed_beat, pointer, context)
                                             .beat
-                                            - fixed_beat,
+                                            - *fixed_beat,
                                     },
                                 };
                                 let edit =
                                     Message::Arrangement(edit).in_undo_gesture(*undo_gesture);
-                                if let Some(ClipDragAction::ResizeClip { phase: held, .. }) =
-                                    &mut state.drag
-                                {
-                                    *held = phase;
-                                }
                                 return (canvas::event::Status::Captured, Some(edit));
                             }
                             ClipDragAction::FadeClip(drag) => {
@@ -841,8 +825,8 @@ impl canvas::Program<Message> for TrackClipCanvas {
                                 start_local_x,
                                 start_scroll_beats,
                             } => {
-                                let target_scroll = (start_scroll_beats
-                                    - geometry.beats_for_width(local_x - start_local_x))
+                                let target_scroll = (*start_scroll_beats
+                                    - geometry.beats_for_width(local_x - *start_local_x))
                                 .max(0.0);
                                 let delta = target_scroll - self.scroll_offset_beats;
                                 return (
