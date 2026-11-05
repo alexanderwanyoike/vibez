@@ -705,3 +705,67 @@ fn resizing_an_off_grid_note_ends_it_on_the_grid_line_under_the_pointer() {
     let end = 0.3 + duration;
     assert!((end - 2.0).abs() < 1e-4, "ended at beat {end}");
 }
+
+#[test]
+fn a_group_note_resize_stops_every_note_at_the_shortest_length() {
+    let note = |start_beat, duration_beats| MidiNote {
+        pitch: 60,
+        start_beat,
+        duration_beats,
+        velocity: 100,
+    };
+    let clip = UiNoteClip {
+        id: ClipId::new(),
+        name: "Group".into(),
+        position_beats: 0.0,
+        duration_beats: 8.0,
+        notes: vec![note(0.0, 2.0), note(4.0, 0.5)],
+        selected_notes: HashSet::from([0, 1]),
+        start_marker_beats: 0.0,
+        loop_enabled: false,
+        loop_start_beats: 0.0,
+        loop_end_beats: 8.0,
+        groove_grid: vibez_core::perform::GrooveGrid::Off,
+    };
+    let bounds = Rectangle::new(Point::ORIGIN, iced::Size::new(852.0, 400.0));
+    let widget = PianoRollWidget::from_clip(
+        TrackId::new(),
+        &clip,
+        0.0,
+        8.0,
+        Color::WHITE,
+        GridConfig::new(SnapGrid::SIXTEENTH, false, false, 0),
+        default_scroll_y(bounds.height),
+        PianoRollEditMode::Select,
+    );
+    let y = widget.pitch_to_y(60) + KEY_HEIGHT / 2.0;
+    let edge = Point::new(widget.beat_to_x(2.0, &bounds) - 2.0, y);
+    let target = Point::new(widget.beat_to_x(0.05, &bounds), y);
+    let mut state = PianoRollState::default();
+    widget.update(
+        &mut state,
+        canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)),
+        bounds,
+        mouse::Cursor::Available(edge),
+    );
+
+    let moved = widget
+        .update(
+            &mut state,
+            canvas::Event::Mouse(mouse::Event::CursorMoved { position: target }),
+            bounds,
+            mouse::Cursor::Available(target),
+        )
+        .1;
+
+    let Some(PianoRollMsg::SetNoteDurations { durations, .. }) = piano_roll_message(moved.clone())
+    else {
+        panic!("dragging the edge resizes the notes: {moved:?}");
+    };
+    for (index, duration) in durations {
+        assert!(
+            (duration - 0.125).abs() < 1e-9,
+            "note {index} shrank to {duration} beats"
+        );
+    }
+}
