@@ -7,32 +7,29 @@ use crate::message::Message;
 use crate::theme as th;
 use crate::typography;
 
-pub(super) const BAR_HEIGHT: f32 = 56.0;
+pub(super) const BAR_HEIGHT: f32 = 52.0;
 pub(super) const GROUP_INSET: f32 = 2.0;
-const GROUP_RADIUS: f32 = 7.0;
-const SEGMENT_RADIUS: f32 = 5.0;
-pub(super) const DISPLAY_HEIGHT: f32 = 42.0;
+const GROUP_RADIUS: f32 = 8.0;
+const SEGMENT_RADIUS: f32 = 6.0;
+pub(super) const DISPLAY_HEIGHT: f32 = 38.0;
 const DISPLAY_LABEL_SIZE: f32 = 8.0;
 
+/// The bar sits straight on the frame, like the gaps between the cards.
 pub(super) fn bar(_theme: &Theme) -> container::Style {
     container::Style {
-        background: Some(th::bg_surface().into()),
+        background: Some(th::display_bg().into()),
         ..Default::default()
     }
 }
 
-/// The groove under the bar.
-pub(super) fn bar_rule<'a>() -> Element<'a, Message> {
-    rule(Length::Fill, Length::Fixed(1.0), th::display_bg())
-}
-
-/// A joined group of segments sunk into one recessed well.
+/// A joined group of segments on a small panel-shaded card.
 pub(super) fn group(_theme: &Theme) -> container::Style {
     container::Style {
-        background: Some(th::display_bg().into()),
+        background: Some(th::bg_surface().into()),
         border: Border {
+            color: th::hairline(th::display_bg()),
+            width: 1.0,
             radius: GROUP_RADIUS.into(),
-            ..Default::default()
         },
         ..Default::default()
     }
@@ -120,20 +117,19 @@ pub(super) fn group_pick_list_menu(_theme: &Theme) -> iced::widget::overlay::men
     }
 }
 
-/// The recessed position display.
-pub(super) fn display(_theme: &Theme) -> container::Style {
-    container::Style {
-        background: Some(th::display_bg().into()),
-        border: Border {
-            radius: GROUP_RADIUS.into(),
-            ..Default::default()
-        },
-        ..Default::default()
-    }
+/// The position display, carded like the groups beside it.
+pub(super) fn display(theme: &Theme) -> container::Style {
+    group(theme)
 }
 
 pub(super) fn display_divider<'a>() -> Element<'a, Message> {
-    rule(Length::Fixed(1.0), Length::Fill, th::bg_dark())
+    container(rule(
+        Length::Fixed(1.0),
+        Length::Fill,
+        th::hairline(th::bg_surface()),
+    ))
+    .padding([8, 0])
+    .into()
 }
 
 /// An editable value in the display, drawn as plain readout text until it
