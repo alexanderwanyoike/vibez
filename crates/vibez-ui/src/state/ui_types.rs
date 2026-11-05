@@ -121,7 +121,27 @@ pub(super) fn same_audio(
     }
 }
 
+/// Where a Clip sits on its lane, in beats.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ClipSpan {
+    pub start_beats: f64,
+    pub length_beats: f64,
+}
+
+impl ClipSpan {
+    pub fn end_beats(self) -> f64 {
+        self.start_beats + self.length_beats
+    }
+}
+
 impl UiClip {
+    pub fn span(&self, samples_per_beat: f64) -> ClipSpan {
+        ClipSpan {
+            start_beats: self.position as f64 / samples_per_beat,
+            length_beats: self.duration as f64 / samples_per_beat,
+        }
+    }
+
     pub(crate) fn source_end(&self) -> u64 {
         self.warp_markers.source_end(
             self.source_offset
@@ -478,6 +498,13 @@ pub struct UiNoteClip {
 }
 
 impl UiNoteClip {
+    pub fn span(&self) -> ClipSpan {
+        ClipSpan {
+            start_beats: self.position_beats,
+            length_beats: self.duration_beats,
+        }
+    }
+
     pub(crate) fn timeline(&self) -> BeatClipTimeline {
         BeatClipTimeline::new(
             self.start_marker_beats,

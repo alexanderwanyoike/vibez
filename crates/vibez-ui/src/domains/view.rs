@@ -6,8 +6,7 @@
 use vibez_core::id::{ClipId, TrackId};
 
 use crate::state::{
-    ArrangementSelection, ContextMenuTarget, DetailPanelTab, SnapGrid, TimelineEditorState,
-    ViewState, Workspace,
+    ContextMenuTarget, DetailPanelTab, SnapGrid, TimelineEditorState, ViewState, Workspace,
 };
 use crate::timeline_geometry::{TimelineGeometry, TimelineViewport};
 
@@ -146,7 +145,7 @@ impl ViewState {
                 }
             }
             ViewMsg::ZoomToSelection => {
-                if let Some((start, end)) = selection_span_beats(timeline, ctx.samples_per_beat) {
+                if let Some((start, end)) = timeline.selection_span_beats(ctx.samples_per_beat) {
                     self.zoom_before_selection = Some(self.viewport);
                     self.viewport.frame(start, end, ctx.lane_width);
                 }
@@ -317,51 +316,6 @@ impl ViewState {
         self.viewport.scroll_offset_beats = (anchor_beat - next_geometry.beats_for_width(anchor_x))
             .clamp(0.0, total_beats.max(0.0));
     }
-}
-
-/// The time selection when there is one, otherwise the span from the
-/// earliest selected clip start to the latest selected clip end.
-fn selection_span_beats(
-    timeline: &TimelineEditorState,
-    samples_per_beat: f64,
-) -> Option<(f64, f64)> {
-    if timeline.time_selection_active
-        && timeline.selection_end_beats > timeline.selection_start_beats
-    {
-        return Some((timeline.selection_start_beats, timeline.selection_end_beats));
-    }
-    timeline
-        .selected_clips
-        .iter()
-        .filter_map(|selection| {
-            let content = timeline.get(selection.track_id())?;
-            match selection {
-                ArrangementSelection::AudioClip { clip_id, .. } if samples_per_beat > 0.0 => {
-                    content
-                        .clips
-                        .iter()
-                        .find(|clip| clip.id == *clip_id)
-                        .map(|clip| {
-                            (
-                                clip.position as f64 / samples_per_beat,
-                                (clip.position + clip.duration) as f64 / samples_per_beat,
-                            )
-                        })
-                }
-                ArrangementSelection::AudioClip { .. } => None,
-                ArrangementSelection::NoteClip { clip_id, .. } => content
-                    .note_clips
-                    .iter()
-                    .find(|clip| clip.id == *clip_id)
-                    .map(|clip| {
-                        (
-                            clip.position_beats,
-                            clip.position_beats + clip.duration_beats,
-                        )
-                    }),
-            }
-        })
-        .reduce(|(start, end), (clip_start, clip_end)| (start.min(clip_start), end.max(clip_end)))
 }
 
 #[cfg(test)]

@@ -147,15 +147,9 @@ impl TimelineEditorState {
         } else {
             vec![anchor]
         };
-        let beats_of = |this: &Self, selection: ArrangementSelection| match selection {
-            ArrangementSelection::AudioClip { track_id, clip_id } => this
-                .find_content(track_id)
-                .and_then(|content| content.clips.iter().find(|clip| clip.id == clip_id))
-                .map(|clip| clip.position as f64 / ctx.samples_per_beat),
-            ArrangementSelection::NoteClip { track_id, clip_id } => this
-                .find_content(track_id)
-                .and_then(|content| content.note_clips.iter().find(|clip| clip.id == clip_id))
-                .map(|clip| clip.position_beats),
+        let beats_of = |this: &Self, selection: ArrangementSelection| {
+            this.clip_span(selection, ctx.samples_per_beat)
+                .map(|span| span.start_beats)
         };
         let Some(anchor_beats) = beats_of(self, anchor) else {
             return;
