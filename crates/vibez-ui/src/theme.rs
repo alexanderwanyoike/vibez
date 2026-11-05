@@ -343,7 +343,7 @@ impl ThemePalette {
             knob_arc: rgb(0.533, 0.533, 0.533),
             knob_body: rgb(0.12, 0.12, 0.12),
             knob_body_engaged: rgb(0.16, 0.16, 0.16),
-            knob_track: rgb(0.22, 0.22, 0.22),
+            knob_track: rgb(0.30, 0.30, 0.30),
             fader_handle: rgb(0.533, 0.533, 0.533),
             track_colors: crate::themes::TRACKS_CLASSIC,
             eq_lf: rgb(0.65, 0.46, 0.28),
