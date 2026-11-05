@@ -1642,7 +1642,7 @@ fn the_pointer_shows_a_resize_cursor_on_either_clip_edge() {
 }
 
 #[test]
-fn the_pointer_is_an_i_beam_over_a_clip_body_and_an_arrow_on_an_empty_lane() {
+fn the_pointer_is_an_i_beam_wherever_a_click_seeks_and_a_drag_selects_time() {
     let (canvas, _) = canvas_with_off_grid_audio_clip();
     let bounds = Rectangle::new(Point::ORIGIN, Size::new(800.0, 80.0));
     let cursor_at = |beat: f64, y: f32| {
@@ -1656,7 +1656,7 @@ fn the_pointer_is_an_i_beam_over_a_clip_body_and_an_arrow_on_an_empty_lane() {
 
     assert_eq!(cursor_at(3.0, CLIP_BODY_Y), mouse::Interaction::Text);
     assert_eq!(cursor_at(3.0, CLIP_Y + 4.0), mouse::Interaction::Grab);
-    assert_eq!(cursor_at(8.0, CLIP_BODY_Y), mouse::Interaction::Idle);
+    assert_eq!(cursor_at(8.0, CLIP_BODY_Y), mouse::Interaction::Text);
 }
 
 /// A three bar Clip at beat 4, unselected, at the zoom where it is 16 px
