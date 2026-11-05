@@ -7,10 +7,9 @@ use crate::message::Message;
 use crate::theme as th;
 use crate::typography;
 
+pub(super) use crate::widgets::segment_group::{group, segment, GROUP_INSET, SEGMENT_RADIUS};
+
 pub(super) const BAR_HEIGHT: f32 = 52.0;
-pub(super) const GROUP_INSET: f32 = 2.0;
-const GROUP_RADIUS: f32 = 8.0;
-const SEGMENT_RADIUS: f32 = 6.0;
 pub(super) const DISPLAY_HEIGHT: f32 = 38.0;
 const DISPLAY_LABEL_SIZE: f32 = 8.0;
 
@@ -19,41 +18,6 @@ pub(super) fn bar(_theme: &Theme) -> container::Style {
     container::Style {
         background: Some(th::display_bg().into()),
         ..Default::default()
-    }
-}
-
-/// A joined group of segments on a small panel-shaded card.
-pub(super) fn group(_theme: &Theme) -> container::Style {
-    container::Style {
-        background: Some(th::bg_surface().into()),
-        border: Border {
-            color: th::hairline(th::display_bg()),
-            width: 1.0,
-            radius: GROUP_RADIUS.into(),
-        },
-        ..Default::default()
-    }
-}
-
-/// A segment inside a group, raised onto the control shade while on and
-/// showing `lit`, its colour then.
-pub(super) fn segment(lit: Option<Color>) -> impl Fn(&Theme, button::Status) -> button::Style {
-    move |_theme, status| {
-        let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
-        let background = match lit {
-            Some(_) => Some(th::control().into()),
-            None if hovered => Some(th::bg_hover().into()),
-            None => None,
-        };
-        button::Style {
-            background,
-            text_color: lit.unwrap_or(if hovered { th::text() } else { th::text_dim() }),
-            border: Border {
-                radius: SEGMENT_RADIUS.into(),
-                ..Default::default()
-            },
-            ..Default::default()
-        }
     }
 }
 
