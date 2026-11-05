@@ -62,7 +62,7 @@ pub struct MixerStripView<'a> {
     pub edit_text: &'a str,
     pub playhead_beat: f64,
     pub automation: &'a [vibez_core::automation::AutomationLane],
-    /// The strip's height, from [`min_strip_height`].
+    /// The strip's height, from [`strip_height`].
     pub height: f32,
     /// Which bank of buses the send rows show.
     pub send_bank: usize,
@@ -77,7 +77,7 @@ const SENDS_H: f32 = TITLE_H + SENDS_PER_BANK as f32 * SEND_ROW_H;
 
 /// A strip's height with `buses` send knobs on each track strip. The fader
 /// runs beside everything else, so this is the left column's height.
-pub fn min_strip_height(buses: usize) -> f32 {
+pub fn strip_height(buses: usize) -> f32 {
     let sends = if buses == 0 { 0.0 } else { SENDS_H + GAP };
     PADDING.top
         + HEADER_H

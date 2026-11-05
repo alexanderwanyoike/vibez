@@ -11,7 +11,7 @@ use crate::message::Message;
 use crate::state::ContextMenuTarget;
 use crate::theme as th;
 use crate::widgets::control_style;
-use crate::widgets::mixer_strip::{min_strip_height, view_mixer_strip, MixerStripView, StripRole};
+use crate::widgets::mixer_strip::{strip_height, view_mixer_strip, MixerStripView, StripRole};
 use crate::widgets::quiet_scroll;
 
 use super::*;
@@ -67,7 +67,7 @@ impl App {
         } else {
             0.0
         };
-        bank_bar + DESK_PADDING + min_strip_height(buses)
+        bank_bar + DESK_PADDING + strip_height(buses)
     }
 
     /// The Mix workspace is as tall as its desk, leaving the detail panel
@@ -166,7 +166,7 @@ impl App {
     /// the master pinned on the right.
     fn view_desk(&self) -> Element<'_, Message> {
         let buses = &self.state.project_tracks.buses;
-        let height = min_strip_height(buses.len());
+        let height = strip_height(buses.len());
         let strip = |track, role, number| self.view_desk_strip(track, role, number, height);
         let mut channels = row![].spacing(STRIP_GAP);
         for (index, track) in self.state.project_tracks.tracks.iter().enumerate() {
@@ -325,7 +325,7 @@ mod channel_selection_tests {
 
 #[cfg(test)]
 mod desk_fit_tests {
-    use super::{min_strip_height, DESK_PADDING};
+    use super::{strip_height, DESK_PADDING};
     use crate::shell_layout::{PANE_GAP, STATUS_HEIGHT};
 
     #[test]
@@ -352,6 +352,6 @@ mod desk_fit_tests {
             - STATUS_HEIGHT
             - 3.0 * PANE_GAP
             - super::super::views_detail::DETAIL_PANEL_MIN_HEIGHT;
-        assert!(DESK_PADDING + min_strip_height(2) <= room);
+        assert!(DESK_PADDING + strip_height(2) <= room);
     }
 }
