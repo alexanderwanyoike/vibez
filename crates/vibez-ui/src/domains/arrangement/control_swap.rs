@@ -2,7 +2,7 @@
 
 use vibez_engine::commands::EngineCommand;
 
-use crate::state::{ProjectTrack, UiEffect};
+use crate::state::{ProjectTrack, UiDrumPad, UiEffect};
 
 use super::EngineHandle;
 
@@ -26,6 +26,7 @@ pub fn swap_changed_controls(
         sends,
         effects,
         instrument_params,
+        drum_rack_pads,
         name: _,
         audio_input_route: _,
         input_monitoring: _,
@@ -38,7 +39,6 @@ pub fn swap_changed_controls(
         sample_name: _,
         sample_source: _,
         sample_audio: _,
-        drum_rack_pads: _,
         selected_drum_pad: _,
         plugin_instrument_name: _,
         plugin_instrument_ref: _,
@@ -118,6 +118,31 @@ pub fn swap_changed_controls(
                 param_index,
                 value,
             });
+        }
+    }
+    for (pad_index, (pad, current_pad)) in drum_rack_pads
+        .iter()
+        .zip(&current.drum_rack_pads)
+        .enumerate()
+    {
+        let UiDrumPad {
+            params,
+            name: _,
+            source: _,
+            audio: _,
+            choke_group: _,
+        } = pad;
+        for (param_index, (&value, &current_value)) in
+            params.iter().zip(&current_pad.params).enumerate()
+        {
+            if value != current_value {
+                engine.send(EngineCommand::SetDrumRackPadParam {
+                    track_id,
+                    pad_index,
+                    param_index,
+                    value,
+                });
+            }
         }
     }
 }

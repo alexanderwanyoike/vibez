@@ -119,5 +119,5 @@ fn same_pad(pad: &UiDrumPad, other: &UiDrumPad) -> bool {
         && *source == other.source
         && same_audio(audio, &other.audio)
         && *choke_group == other.choke_group
-        && *params == other.params
+        && params.len() == other.params.len()
 }
