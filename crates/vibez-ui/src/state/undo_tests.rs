@@ -743,10 +743,10 @@ fn cut_and_each_paste_are_separate_undo_steps_while_clipboard_survives_undo() {
     assert_eq!(state.project.history.undo.len(), 3);
     assert_eq!(state.clip_clipboard.clips.len(), 1);
     let pasted = &state.arrangement.timeline.get(track_id).unwrap().clips;
-    assert_eq!(pasted.len(), 2);
-    assert!(pasted.iter().all(|clip| clip.position == 700));
-    assert_ne!(pasted[0].id, pasted[1].id);
-    assert!(pasted.iter().all(|clip| clip.id != source_id));
+    // The second paste lands on the first and overwrites it.
+    assert_eq!(pasted.len(), 1);
+    assert_eq!(pasted[0].position, 700);
+    assert_ne!(pasted[0].id, source_id);
 
     undo_once(&mut state);
     assert_eq!(

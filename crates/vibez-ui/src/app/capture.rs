@@ -1,6 +1,7 @@
 //! Application boundary for Capture timing, project transaction, and engine sync.
 
 use iced::Task;
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use vibez_core::automation::AutomationTarget;
@@ -8,7 +9,7 @@ use vibez_core::id::TrackId;
 use vibez_core::perform::SwingOffset;
 use vibez_engine::commands::EngineCommand;
 
-use crate::domains::arrangement::ArrangementMsg;
+use crate::domains::arrangement::{lane_overwrite, ArrangementMsg};
 use crate::domains::devices::DevicesMsg;
 use crate::domains::perform::capture::CompletedCapture;
 use crate::domains::perform::{CaptureAction, MaterializedCapture, PerformMsg};
@@ -256,16 +257,14 @@ fn capture_replaces_existing_content(
 ) -> bool {
     captured.controlled_track_ids.iter().any(|track_id| {
         arrange.get(*track_id).is_some_and(|existing| {
-            existing.clips.iter().any(|clip| {
-                audio_overlaps(
-                    clip,
-                    captured.arrange_start_samples,
-                    captured.arrange_end_samples,
-                )
-            }) || existing
-                .note_clips
-                .iter()
-                .any(|clip| notes_overlap(clip, captured.start_beat(), captured.end_beat()))
+            let overwrite = lane_overwrite(
+                existing,
+                (captured.start_beat(), captured.end_beat()),
+                &HashSet::new(),
+                captured.samples_per_beat,
+            );
+            !overwrite.audio.is_empty()
+                || !overwrite.notes.is_empty()
                 || !existing.automation.is_empty()
         })
     })
@@ -279,12 +278,11 @@ fn apply_capture_to_arrangement(
     let start_beat = captured.start_beat();
     let end_beat = captured.end_beat();
     let MaterializedCapture {
-        arrange_start_samples,
-        arrange_end_samples,
         mut by_track,
         mut controlled_track_ids,
         pre_capture_mutes,
-        samples_per_beat: _,
+        samples_per_beat,
+        ..
     } = captured;
     let mut clip_count = 0;
     let timeline = Arc::make_mut(arrange);
@@ -304,29 +302,38 @@ fn apply_capture_to_arrangement(
         clip_count += incoming.clips.len() + incoming.note_clips.len();
 
         let destination = timeline.ensure(track_id);
-        let (replaced_audio, kept_audio): (Vec<_>, Vec<_>) = std::mem::take(&mut destination.clips)
+        let overwrite = lane_overwrite(
+            destination,
+            (start_beat, end_beat),
+            &HashSet::new(),
+            samples_per_beat,
+        );
+        let replaced_audio: HashSet<_> = overwrite.audio.iter().map(|(id, _)| *id).collect();
+        let replaced_notes: HashSet<_> = overwrite.notes.iter().map(|(id, _)| *id).collect();
+        destination
+            .clips
+            .retain(|clip| !replaced_audio.contains(&clip.id));
+        destination
+            .note_clips
+            .retain(|clip| !replaced_notes.contains(&clip.id));
+        let kept_audio = std::mem::take(&mut destination.clips);
+        let kept_notes = std::mem::take(&mut destination.note_clips);
+        for &clip_id in &replaced_audio {
+            engine.send(EngineCommand::RemoveClip(track_id, clip_id));
+        }
+        for &clip_id in &replaced_notes {
+            engine.send(EngineCommand::RemoveNoteClip(track_id, clip_id));
+        }
+        let mut added_audio: Vec<_> = overwrite
+            .audio
             .into_iter()
-            .partition(|clip| audio_overlaps(clip, arrange_start_samples, arrange_end_samples));
-        let (replaced_notes, kept_notes): (Vec<_>, Vec<_>) =
-            std::mem::take(&mut destination.note_clips)
-                .into_iter()
-                .partition(|clip| notes_overlap(clip, start_beat, end_beat));
-        for clip in &replaced_audio {
-            engine.send(EngineCommand::RemoveClip(track_id, clip.id));
-        }
-        for clip in &replaced_notes {
-            engine.send(EngineCommand::RemoveNoteClip(track_id, clip.id));
-        }
-        let mut added_audio: Vec<_> = replaced_audio
-            .iter()
-            .flat_map(|clip| {
-                preserve_audio_outside_interval(clip, arrange_start_samples, arrange_end_samples)
-            })
+            .flat_map(|(_, pieces)| pieces)
             .collect();
         added_audio.append(&mut incoming.clips);
-        let mut added_notes: Vec<_> = replaced_notes
-            .iter()
-            .flat_map(|clip| preserve_notes_outside_interval(clip, start_beat, end_beat))
+        let mut added_notes: Vec<_> = overwrite
+            .notes
+            .into_iter()
+            .flat_map(|(_, pieces)| pieces)
             .collect();
         added_notes.append(&mut incoming.note_clips);
         replace_automation_interval(
@@ -373,95 +380,6 @@ fn apply_capture_to_arrangement(
     }
     engine.send(EngineCommand::EndContentRebuild);
     clip_count
-}
-
-fn audio_overlaps(clip: &crate::state::UiClip, start: u64, end: u64) -> bool {
-    clip.position < end && clip.position.saturating_add(clip.duration) > start
-}
-
-fn notes_overlap(clip: &crate::state::UiNoteClip, start: f64, end: f64) -> bool {
-    clip.position_beats < end && clip.position_beats + clip.duration_beats > start
-}
-
-fn preserve_audio_outside_interval(
-    clip: &crate::state::UiClip,
-    start: u64,
-    end: u64,
-) -> Vec<crate::state::UiClip> {
-    let clip_end = clip.position.saturating_add(clip.duration);
-    if !audio_overlaps(clip, start, end) {
-        return vec![clip.clone()];
-    }
-    let mut fragments = Vec::with_capacity(2);
-    if clip.position < start {
-        let mut before = clip.clone();
-        before.duration = start - clip.position;
-        fragments.push(before);
-    }
-    if clip_end > end {
-        let mut after = clip.clone();
-        if !fragments.is_empty() {
-            after.id = vibez_core::id::ClipId::new();
-        }
-        let delta = end.saturating_sub(clip.position);
-        after.position = end;
-        after.source_offset = crate::domains::perform::capture::captured_audio_offset(clip, delta);
-        after.start_marker = after.source_offset;
-        after.duration = clip_end - end;
-        fragments.push(after);
-    }
-    fragments
-}
-
-fn preserve_notes_outside_interval(
-    clip: &crate::state::UiNoteClip,
-    start: f64,
-    end: f64,
-) -> Vec<crate::state::UiNoteClip> {
-    let clip_end = clip.position_beats + clip.duration_beats;
-    if !notes_overlap(clip, start, end) {
-        return vec![clip.clone()];
-    }
-    let mut fragments = Vec::with_capacity(2);
-    if clip.position_beats < start {
-        fragments.push(note_clip_window(clip, clip.position_beats, start, clip.id));
-    }
-    if clip_end > end {
-        let id = if fragments.is_empty() {
-            clip.id
-        } else {
-            vibez_core::id::ClipId::new()
-        };
-        fragments.push(note_clip_window(clip, end, clip_end, id));
-    }
-    fragments
-}
-
-fn note_clip_window(
-    clip: &crate::state::UiNoteClip,
-    window_start: f64,
-    window_end: f64,
-    id: vibez_core::id::ClipId,
-) -> crate::state::UiNoteClip {
-    let local_start = window_start - clip.position_beats;
-    let local_end = window_end - clip.position_beats;
-    crate::state::UiNoteClip {
-        id,
-        name: clip.name.clone(),
-        position_beats: window_start,
-        duration_beats: window_end - window_start,
-        notes: crate::domains::perform::capture::captured_visible_notes(
-            clip,
-            local_start,
-            local_end,
-        ),
-        selected_notes: Default::default(),
-        start_marker_beats: 0.0,
-        loop_enabled: false,
-        loop_start_beats: 0.0,
-        loop_end_beats: 0.0,
-        groove_grid: clip.groove_grid,
-    }
 }
 
 fn replace_automation_interval(
@@ -764,8 +682,10 @@ mod tests {
                 .collect::<Vec<_>>(),
             [(2.0, 2.0), (6.0, 4.0)]
         );
-        assert_eq!(content.note_clips[0].notes[0].duration_beats, 1.0);
-        assert_eq!(content.note_clips[1].notes[0].start_beat, 1.0);
+        // Each piece keeps the notes and stops where it ends, and the tail
+        // picks its content up where the capture stopped, as a drop leaves it.
+        assert_eq!(content.note_clips[0].notes.len(), 2);
+        assert_eq!(content.note_clips[1].start_marker_beats, 4.0);
 
         let lane = &content.automation[0];
         assert_eq!(
@@ -777,6 +697,48 @@ mod tests {
         );
         assert!((lane.value_at(2.0).unwrap() - 0.4).abs() < 1e-6);
         assert!((lane.value_at(8.0).unwrap() - 0.4).abs() < 1e-6);
+    }
+
+    #[test]
+    fn a_looped_clip_a_capture_cuts_through_keeps_looping_either_side() {
+        let track_id = TrackId::new();
+        let mut arrange = Arc::new(ArrangementTimeline::default());
+        Arc::make_mut(&mut arrange)
+            .ensure(track_id)
+            .note_clips
+            .push(UiNoteClip {
+                name: "Loop".into(),
+                notes: vec![MidiNote {
+                    pitch: 36,
+                    velocity: 100,
+                    start_beat: 1.0,
+                    duration_beats: 0.5,
+                }],
+                loop_enabled: true,
+                loop_end_beats: 4.0,
+                ..UiNoteClip::test_clip(0.0, 16.0)
+            });
+        let captured = MaterializedCapture {
+            arrange_start_samples: 6,
+            arrange_end_samples: 9,
+            by_track: HashMap::new(),
+            controlled_track_ids: vec![track_id],
+            pre_capture_mutes: HashMap::new(),
+            samples_per_beat: 1.0,
+        };
+
+        apply_capture_to_arrangement(&mut arrange, captured, &mut DiscardingEngine);
+
+        let pieces = &arrange.get(track_id).unwrap().note_clips;
+        assert_eq!(
+            pieces
+                .iter()
+                .map(|clip| (clip.position_beats, clip.duration_beats, clip.loop_enabled))
+                .collect::<Vec<_>>(),
+            [(0.0, 6.0, true), (9.0, 7.0, true)]
+        );
+        // Nine beats into a four beat loop, the tail picks up one beat in.
+        assert_eq!(pieces[1].start_marker_beats, 1.0);
     }
 
     #[test]

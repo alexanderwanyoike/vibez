@@ -854,10 +854,6 @@ fn append_note_window(
     }
 }
 
-pub(crate) fn captured_audio_offset(clip: &UiClip, timeline_delta: u64) -> u64 {
-    clip.source_frame_at(timeline_delta)
-}
-
 pub(crate) fn captured_visible_notes(
     clip: &UiNoteClip,
     local_start: f64,

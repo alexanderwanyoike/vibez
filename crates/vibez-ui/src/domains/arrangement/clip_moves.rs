@@ -142,11 +142,7 @@ impl TimelineEditorState {
         let Some(anchor) = self.locate_clip(anchor) else {
             return ArrangementAction::default();
         };
-        let targets: Vec<ArrangementSelection> = if self.selected_clips.contains(&anchor) {
-            self.selected_clips.iter().copied().collect()
-        } else {
-            vec![anchor]
-        };
+        let targets = self.gesture_targets(anchor);
         let beats_of = |this: &Self, selection: ArrangementSelection| {
             this.clip_span(selection, ctx.samples_per_beat)
                 .map(|span| span.start_beats)
@@ -238,7 +234,7 @@ impl TimelineEditorState {
         }
     }
 
-    fn locate_clip(&self, clip_id: ClipId) -> Option<ArrangementSelection> {
+    pub(super) fn locate_clip(&self, clip_id: ClipId) -> Option<ArrangementSelection> {
         self.timeline
             .by_track
             .iter()

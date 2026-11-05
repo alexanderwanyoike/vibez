@@ -26,20 +26,14 @@ fn add_midi_track_with_clip(
     track.note_clips.push(UiNoteClip {
         id: clip_id,
         name: "Pattern".to_string(),
-        position_beats,
-        duration_beats,
         notes: vec![MidiNote {
             pitch: 60,
             velocity: 100,
             start_beat: 0.0,
             duration_beats: 0.5,
         }],
-        selected_notes: HashSet::new(),
-        start_marker_beats: 0.0,
-        loop_enabled: false,
-        loop_start_beats: 0.0,
         loop_end_beats: 0.0,
-        groove_grid: vibez_core::perform::GrooveGrid::Off,
+        ..UiNoteClip::test_clip(position_beats, duration_beats)
     });
     (track.id, clip_id)
 }
@@ -162,7 +156,7 @@ fn a_time_selection_duplicates_its_range_right_after_itself() {
     let action = duplicate(&mut a);
 
     assert!(action.mark_dirty);
-    assert_eq!(audio_spans(&a, 0), vec![(0, 800), (600, 400)]);
+    assert_eq!(audio_spans(&a, 0), vec![(0, 600), (600, 400)]);
     assert_eq!(note_spans(&a, 1), vec![(3.0, 2.0), (7.0, 2.0)]);
     assert!(a.time_selection_active);
     assert_eq!(

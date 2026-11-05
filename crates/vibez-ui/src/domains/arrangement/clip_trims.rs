@@ -29,11 +29,7 @@ impl TimelineEditorState {
             return ArrangementAction::default();
         };
         let delta = new_start_beats - anchor_start;
-        let targets: Vec<_> = if self.selected_clips.contains(&anchor) {
-            self.selected_clips.iter().copied().collect()
-        } else {
-            vec![anchor]
-        };
+        let targets = self.gesture_targets(anchor);
         let shortest_frames = (SHORTEST_LENGTH_BEATS * spb).round() as u64;
         let mut changed = false;
         for target in targets {
@@ -84,7 +80,7 @@ impl TimelineEditorState {
 
 /// `clip` with its start `delta` frames later (earlier when negative), or
 /// `None` when it cannot move that way.
-fn audio_start_trimmed(clip: &UiClip, delta: i64, shortest: u64) -> Option<UiClip> {
+pub(super) fn audio_start_trimmed(clip: &UiClip, delta: i64, shortest: u64) -> Option<UiClip> {
     if delta > 0 {
         let cut = (delta as u64).min(clip.duration.saturating_sub(shortest));
         if cut == 0 {
@@ -133,7 +129,7 @@ fn audio_start_trimmed(clip: &UiClip, delta: i64, shortest: u64) -> Option<UiCli
 /// `clip` with its start `delta` beats later (earlier when negative), or
 /// `None` when it cannot move that way. Its notes stay where they are in
 /// the content; the start marker moves over them.
-fn note_start_trimmed(clip: &UiNoteClip, delta: f64) -> Option<UiNoteClip> {
+pub(super) fn note_start_trimmed(clip: &UiNoteClip, delta: f64) -> Option<UiNoteClip> {
     // See `audio_start_trimmed` for why a looped Clip stops at its loop start.
     let earliest = if clip.loop_enabled {
         clip.loop_start_beats.min(clip.start_marker_beats)

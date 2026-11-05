@@ -3,8 +3,7 @@
 use super::*;
 use crate::state::{GridConfig, ProjectTrack, UiNoteClip};
 use iced::keyboard::{Key, Modifiers};
-use vibez_core::id::{ClipId, TrackId};
-use vibez_core::perform::GrooveGrid;
+use vibez_core::id::TrackId;
 
 /// An app with one MIDI track holding one note clip, and whether that
 /// clip is open in the piano roll.
@@ -18,17 +17,8 @@ fn app_with_note_clip(open: bool) -> App {
         .tracks
         .push(track);
     let clip = UiNoteClip {
-        id: ClipId::new(),
         name: "Pattern".into(),
-        position_beats: 0.0,
-        duration_beats: 8.0,
-        notes: Vec::new(),
-        selected_notes: Default::default(),
-        start_marker_beats: 0.0,
-        loop_enabled: false,
-        loop_start_beats: 0.0,
-        loop_end_beats: 8.0,
-        groove_grid: GrooveGrid::Off,
+        ..UiNoteClip::test_clip(0.0, 8.0)
     };
     let clip_id = clip.id;
     app.state

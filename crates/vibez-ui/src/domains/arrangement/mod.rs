@@ -26,6 +26,7 @@ pub use messages::{
     ArrangementAction, ArrangementCtx, ArrangementMsg, AudioSliceMarkers, ClipRenderedGeometry,
     ClipTransposeRenderRequest,
 };
+mod clip_copies;
 mod clip_moves;
 mod clip_spans;
 mod clipboard;
@@ -38,6 +39,7 @@ mod duplicate;
 mod fade_edits;
 mod slice_to_drum_rack;
 mod slicing;
+pub(crate) use overwrite::lane_overwrite;
 pub(crate) use slicing::slice_region_count;
 
 pub const PROJECT_TRACKS_FULL: &str = "This project has no room for another track";
@@ -145,6 +147,16 @@ impl TimelineEditorState {
 
     fn find_content_mut(&mut self, track_id: TrackId) -> Option<&mut TrackTimelineContent> {
         Arc::make_mut(&mut self.timeline).get_mut(track_id)
+    }
+
+    /// The Clips a gesture on `anchor` edits: the whole selection when it
+    /// holds `anchor`, otherwise `anchor` alone.
+    fn gesture_targets(&self, anchor: ArrangementSelection) -> Vec<ArrangementSelection> {
+        if self.selected_clips.contains(&anchor) {
+            self.selected_clips.iter().copied().collect()
+        } else {
+            vec![anchor]
+        }
     }
 }
 
@@ -413,6 +425,9 @@ impl TimelineEditorState {
                 new_start_beats,
             } => {
                 return self.op_trim_selected_clips_start(engine, ctx, anchor, new_start_beats);
+            }
+            ArrangementMsg::DropClips { anchor } => {
+                return self.op_drop_clips(engine, ctx, anchor);
             }
             ArrangementMsg::MoveSelectedClips {
                 anchor,
@@ -732,6 +747,7 @@ mod clip_trims;
 mod fragment_geometry;
 mod media_ops;
 mod ops;
+mod overwrite;
 mod transient_markers;
 mod warp_markers;
 mod warp_ops;
