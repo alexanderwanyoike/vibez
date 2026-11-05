@@ -27,11 +27,9 @@ pub struct RulerWidget {
     pub playhead_beats: f64,
     /// Arrange's play-start marker; Section rulers have none.
     pub play_start_beats: Option<f64>,
-    pub bpm: f64,
     pub zoom_level: f32,
     pub grid: GridConfig,
     pub scroll_offset_beats: f64,
-    pub total_beats: f64,
     /// Arrange edits its loop with a brace in a strip above the numbers;
     /// a Section loops over its whole length and has no strip.
     pub loop_brace: bool,

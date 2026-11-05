@@ -152,11 +152,9 @@ impl App {
             let ruler = RulerWidget {
                 playhead_beats: playback_playhead_beats.unwrap_or(-1.0),
                 play_start_beats: None,
-                bpm: self.state.transport.bpm,
                 zoom_level: viewport.zoom_level,
                 grid: self.state.view.grid_config(),
                 scroll_offset_beats: viewport.scroll_offset_beats,
-                total_beats,
                 loop_brace: false,
                 loop_enabled: selected_section.looping,
                 loop_start_beats: 0.0,

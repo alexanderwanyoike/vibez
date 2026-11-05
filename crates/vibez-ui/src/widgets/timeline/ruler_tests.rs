@@ -17,11 +17,9 @@ fn ruler() -> RulerWidget {
     RulerWidget {
         playhead_beats: 0.0,
         play_start_beats: Some(0.0),
-        bpm: 120.0,
         zoom_level: 1.0,
         grid: GridConfig::new(SnapGrid::QUARTER, true, false, 0),
         scroll_offset_beats: 0.0,
-        total_beats: 256.0,
         loop_brace: true,
         loop_enabled: true,
         loop_start_beats: 16.0,

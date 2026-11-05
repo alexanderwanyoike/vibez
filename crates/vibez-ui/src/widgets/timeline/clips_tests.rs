@@ -176,11 +176,9 @@ fn independently_constructed_ruler_and_lane_align_from_the_same_viewport() {
     let ruler = RulerWidget {
         playhead_beats: -1.0,
         play_start_beats: None,
-        bpm: 120.0,
         zoom_level: 3.0,
         grid: GridConfig::new(crate::state::SnapGrid::EIGHTH, true, false, 0),
         scroll_offset_beats: 9.5,
-        total_beats: 64.0,
         loop_brace: false,
         loop_enabled: false,
         loop_start_beats: 0.0,
