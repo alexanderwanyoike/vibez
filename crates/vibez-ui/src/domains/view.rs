@@ -340,13 +340,13 @@ mod tests {
     }
 
     #[test]
-    fn zoom_in_keeps_the_viewport_centre_on_the_same_beat() {
+    fn zoom_in_keeps_the_lane_centre_on_the_same_beat() {
         let mut view = ViewState {
             viewport: TimelineViewport::new(1.0, 100.0),
-            window_width: 800.0,
+            window_width: 1_000.0,
             ..ViewState::default()
         };
-        let centre_x = view.window_width / 2.0;
+        let centre_x: f32 = 400.0;
         let before = view.viewport.scroll_offset_beats
             + centre_x as f64
                 / TimelineGeometry::from_zoom(view.viewport.zoom_level, 0.0).pixels_per_beat()
@@ -357,6 +357,7 @@ mod tests {
             &TimelineEditorState::default(),
             ViewCtx {
                 total_beats: 1_000.0,
+                lane_width: 800.0,
                 ..ViewCtx::default()
             },
         );
@@ -605,6 +606,25 @@ mod tests {
             ctx,
         );
         assert_eq!(v.viewport.scroll_offset_beats, 0.0);
+    }
+
+    #[test]
+    fn scroll_stops_at_the_last_full_view_of_the_lanes() {
+        let mut v = ViewState::default();
+        let ctx = ViewCtx {
+            total_beats: 320.0,
+            lane_width: 800.0,
+            ..ViewCtx::default()
+        };
+        let visible = v.viewport.geometry().visible_beats(800.0);
+
+        v.update(
+            ViewMsg::ScrollArrangement(1_000.0),
+            &TimelineEditorState::default(),
+            ctx,
+        );
+
+        assert_eq!(v.viewport.scroll_offset_beats, 320.0 - visible);
     }
 
     #[test]
