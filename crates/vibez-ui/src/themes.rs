@@ -756,7 +756,8 @@ mod tests {
             .iter()
             .flat_map(|theme| {
                 let behind = [
-                    ("fader_track", theme.bg_elevated),
+                    ("fader_track", theme.display_bg),
+                    ("bg_elevated", theme.bg_elevated),
                     ("bg_surface", theme.bg_surface),
                 ];
                 shortfalls(

@@ -395,6 +395,8 @@ impl FaderWidget {
     }
 }
 
+/// How dark the shadow under the fader cap is.
+const CAP_SHADOW: f32 = 0.35;
 /// The handle's height; its centre travels the rest.
 pub const CAP_H: f32 = 14.0;
 /// Room left of the slot for the dB scale.
@@ -447,11 +449,11 @@ impl canvas::Program<Message> for FaderWidget {
                 theme::text_dim(),
             );
         }
-        // Glow rail: a slim dark rail, lit in the track colour from the
+        // Glow rail: a slim recessed rail, lit in the track colour from the
         // handle down, with a soft column of light round the lit part. The
         // glow is mixed opaque against the strip: the renderer blends alpha
         // in linear light, which would make a faint alpha glow glare.
-        let glow = |amount: f32| theme::blend(theme::bg_surface(), self.fill_color, amount);
+        let glow = |amount: f32| theme::blend(theme::bg_elevated(), self.fill_color, amount);
         let handle_y = y_of(self.value);
         let rail_bottom = CAP_H / 2.0 + travel;
         let lit = (rail_bottom - handle_y).max(0.0);
@@ -466,7 +468,7 @@ impl canvas::Program<Message> for FaderWidget {
                 iced::Size::new(4.0, travel + 4.0),
                 2.0.into(),
             ),
-            theme::darken(theme::bg_surface(), 0.55),
+            theme::display_bg(),
         );
         frame.fill_rectangle(
             iced::Point::new(slot_x - 2.0, handle_y),
@@ -479,35 +481,31 @@ impl canvas::Program<Message> for FaderWidget {
             .add_stop(1.0, self.fill_color),
         );
 
+        // A light neutral cap that reads on any strip, with a shadow under
+        // it and the track colour only in its notch.
         let handle_w = (w - SCALE_W - 8.0).clamp(14.0, 26.0);
-        frame.fill_rectangle(
-            iced::Point::new(slot_x - handle_w / 2.0 - 3.0, handle_y - CAP_H / 2.0 - 3.0),
-            iced::Size::new(handle_w + 6.0, CAP_H + 6.0),
-            glow(0.22),
-        );
         let handle = iced::Rectangle::new(
             iced::Point::new(slot_x - handle_w / 2.0, handle_y - CAP_H / 2.0),
             iced::Size::new(handle_w, CAP_H),
         );
-        let body = canvas::Path::rounded_rectangle(handle.position(), handle.size(), 2.0.into());
         frame.fill(
-            &body,
-            canvas::gradient::Linear::new(
-                handle.position(),
-                iced::Point::new(handle.x, handle.y + handle.height),
-            )
-            .add_stop(0.0, theme::bg_hover())
-            .add_stop(1.0, theme::bg_dark()),
+            &canvas::Path::rounded_rectangle(
+                iced::Point::new(handle.x, handle.y + 1.5),
+                handle.size(),
+                3.0.into(),
+            ),
+            theme::with_alpha(Color::BLACK, CAP_SHADOW),
         );
-        frame.stroke(
-            &body,
-            canvas::Stroke::default()
-                .with_color(self.fill_color)
-                .with_width(1.5),
+        frame.fill(
+            &canvas::Path::rounded_rectangle(handle.position(), handle.size(), 3.0.into()),
+            theme::fader_handle(),
         );
-        frame.fill_rectangle(
-            iced::Point::new(slot_x - handle_w / 2.0 + 6.0, handle_y - 1.0),
-            iced::Size::new(handle_w - 12.0, 2.0),
+        frame.fill(
+            &canvas::Path::rounded_rectangle(
+                iced::Point::new(slot_x - handle_w / 2.0 + 4.0, handle_y - 1.0),
+                iced::Size::new(handle_w - 8.0, 2.0),
+                1.0.into(),
+            ),
             self.fill_color,
         );
 

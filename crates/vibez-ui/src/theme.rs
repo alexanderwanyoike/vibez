@@ -341,13 +341,14 @@ impl ThemePalette {
     }
 
     /// Every background the text tiers are drawn on.
-    pub(crate) fn text_surfaces(&self) -> [(&'static str, Color); 5] {
+    pub(crate) fn text_surfaces(&self) -> [(&'static str, Color); 6] {
         [
             ("bg_dark", self.bg_dark),
             ("bg_surface", self.bg_surface),
             ("bg_elevated", self.bg_elevated),
             ("display_bg", self.display_bg),
             ("lane", self.lane()),
+            ("control", self.control()),
         ]
     }
 }
@@ -713,7 +714,7 @@ pub fn knob_bg() -> Color {
 }
 
 pub fn fader_track() -> Color {
-    bg_elevated()
+    display_bg()
 }
 
 pub fn track_bg() -> Color {
@@ -727,6 +728,16 @@ pub fn track_bg_selected() -> Color {
 /// A hovered track header, halfway to its selected shade.
 pub fn track_header_hovered() -> Color {
     blend(bg_surface(), track_bg_selected(), 0.5)
+}
+
+/// A group of controls sunk slightly into a raised card.
+pub fn card_inset() -> Color {
+    blend(bg_elevated(), display_bg(), 0.35)
+}
+
+/// The line parting lanes and regions: a groove sunk to the well shade.
+pub fn groove() -> Color {
+    display_bg()
 }
 
 pub fn ruler_bg() -> Color {

@@ -10,6 +10,7 @@ use crate::domains::device_params::{DeviceParams, DeviceSlot};
 use crate::domains::param_entry::{param_format, EntryMsg, ValueEntry};
 use crate::message::Message;
 use crate::theme as th;
+use crate::widgets::control_style;
 use crate::widgets::effect_knob::{EffectKnobWidget, KnobTarget};
 use crate::widgets::on_blur::on_blur;
 
@@ -386,23 +387,7 @@ pub fn toggle<'a>(
     button(label)
         .on_press(message)
         .padding([2, 6])
-        .style(move |_theme: &Theme, status| {
-            let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
-            button::Style {
-                background: Some(if hovered {
-                    th::bg_hover().into()
-                } else {
-                    th::bg_dark().into()
-                }),
-                text_color: if on { accent } else { th::text_dim() },
-                border: iced::Border {
-                    color: if on { accent } else { th::border() },
-                    width: 1.0,
-                    radius: 3.0.into(),
-                },
-                ..Default::default()
-            }
-        })
+        .style(control_style::style(on.then_some(accent)))
         .into()
 }
 
@@ -428,25 +413,12 @@ pub fn segmented<'a, T: Copy + PartialEq + 'a>(
             button(text(label).size(LABEL_SIZE).wrapping(text::Wrapping::None))
                 .on_press(on_select(value))
                 .padding([3, 10])
-                .style(move |_theme: &Theme, status| {
-                    let hovered =
-                        matches!(status, button::Status::Hovered | button::Status::Pressed);
-                    button::Style {
-                        background: Some(if chosen {
-                            accent.into()
-                        } else if hovered {
-                            th::bg_hover().into()
-                        } else {
-                            th::bg_dark().into()
-                        }),
-                        text_color: if chosen { th::bg_dark() } else { th::text() },
-                        border: iced::Border {
-                            color: if chosen { accent } else { th::border() },
-                            width: 1.0,
-                            radius,
-                        },
+                .style(move |_theme: &Theme, status| button::Style {
+                    border: iced::Border {
+                        radius,
                         ..Default::default()
-                    }
+                    },
+                    ..control_style::styled(chosen.then_some(accent), status)
                 }),
         );
     }
@@ -494,24 +466,7 @@ pub fn dropdown<'a, T: Clone + ToString + PartialEq + 'a>(
         .width(Length::Fill)
         .padding([3, 5])
         .text_size(9)
-        .style(|_theme: &Theme, status| pick_list::Style {
-            text_color: th::text(),
-            placeholder_color: th::text_muted(),
-            handle_color: th::text_dim(),
-            background: th::bg_dark().into(),
-            border: iced::Border {
-                color: if matches!(
-                    status,
-                    pick_list::Status::Opened | pick_list::Status::Hovered
-                ) {
-                    th::accent_dim()
-                } else {
-                    th::border()
-                },
-                width: 1.0,
-                radius: 3.0.into(),
-            },
-        })
+        .style(control_style::list(th::accent()))
         .menu_style(|_theme: &Theme| iced::widget::overlay::menu::Style {
             background: th::bg_surface().into(),
             border: iced::Border {
@@ -530,10 +485,8 @@ pub fn dropdown<'a, T: Clone + ToString + PartialEq + 'a>(
 pub fn disclosure<'a>(open: bool, message: Message, accent: Color) -> Element<'a, Message> {
     toggle(
         row![
-            text(if open { "\u{25BE}" } else { "\u{25B8}" })
-                .size(9)
-                .color(th::text_dim()),
-            text("Advanced").size(LABEL_SIZE).color(th::text()),
+            text(if open { "\u{25BE}" } else { "\u{25B8}" }).size(9),
+            text("Advanced").size(LABEL_SIZE),
         ]
         .spacing(4)
         .align_y(Alignment::Center)

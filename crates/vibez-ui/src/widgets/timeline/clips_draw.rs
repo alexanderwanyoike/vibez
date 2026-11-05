@@ -348,7 +348,7 @@ impl TrackClipCanvas {
         frame.stroke(
             &sep,
             canvas::Stroke::default()
-                .with_color(theme::divider())
+                .with_color(theme::groove())
                 .with_width(1.0),
         );
 

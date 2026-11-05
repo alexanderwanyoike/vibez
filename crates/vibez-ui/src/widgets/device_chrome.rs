@@ -7,6 +7,7 @@ use vibez_plugin_host::gui::PluginGuiKey;
 use crate::icons;
 use crate::message::Message;
 use crate::theme as th;
+use crate::widgets::control_style;
 
 /// Card width for hosted CLAP and VST3 devices, instrument or effect.
 pub const PLUGIN_CARD_W: f32 = 196.0;
@@ -69,34 +70,30 @@ pub fn section_label<'a>(label: impl ToString) -> Element<'a, Message> {
         .into()
 }
 
-/// Dark strip across the top of every device card.
+/// The row across the top of every device card.
 pub fn title_bar<'a>(
     content: impl Into<Element<'a, Message>>,
 ) -> container::Container<'a, Message> {
-    container(content)
-        .padding([4, 6])
-        .width(Length::Fill)
-        .style(|_theme: &Theme| container::Style {
-            background: Some(th::bg_surface().into()),
-            ..Default::default()
-        })
+    container(content).padding([4, 6]).width(Length::Fill)
 }
 
-/// Raised, bordered container wrapping a whole device card.
+/// The raised container wrapping a whole device card, told from the panel
+/// by its shade alone.
 pub fn card<'a>(content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
     container(content)
         .height(Length::Fill)
         .style(|_theme: &Theme| container::Style {
             background: Some(th::bg_elevated().into()),
             border: iced::Border {
-                color: th::border(),
-                width: 1.0,
-                radius: 4.0.into(),
+                radius: CARD_RADIUS.into(),
+                ..Default::default()
             },
             ..Default::default()
         })
         .into()
 }
+
+const CARD_RADIUS: f32 = 6.0;
 
 /// Small icon-only action in a device title bar.
 pub fn icon_button(
@@ -186,30 +183,7 @@ fn editor_button<'a>(gui_key: Option<PluginGuiKey>) -> Element<'a, Message> {
     .on_press_maybe(gui_key.map(Message::OpenPluginGui))
     .width(Length::Fill)
     .padding([6, 8])
-    .style(move |_theme: &Theme, status| {
-        let hovered =
-            has_editor && matches!(status, button::Status::Hovered | button::Status::Pressed);
-        button::Style {
-            background: Some(th::bg_dark().into()),
-            text_color: if !has_editor {
-                th::text_muted()
-            } else if hovered {
-                th::accent()
-            } else {
-                th::text()
-            },
-            border: iced::Border {
-                color: if hovered {
-                    th::accent_dim()
-                } else {
-                    th::border()
-                },
-                width: 1.0,
-                radius: 3.0.into(),
-            },
-            ..Default::default()
-        }
-    })
+    .style(control_style::style(None))
     .into()
 }
 

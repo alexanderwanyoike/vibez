@@ -33,6 +33,7 @@ const TABS_H: f32 = 56.0;
 const TABS_W: f32 = 320.0;
 const STRIP_H: f32 = 86.0;
 const ADVANCED_H: f32 = 56.0;
+const BAND_GROUP_RADIUS: f32 = 5.0;
 const BAND_GROUP_W: f32 = 172.0;
 const OUTPUT_W: f32 = 340.0;
 const STRIP_KNOB: f32 = 28.0;
@@ -430,11 +431,8 @@ impl<'a> EqView<'a> {
     }
 
     fn strip(&self, with_output: bool) -> Element<'a, Message> {
-        let mut bands = row![].spacing(0).height(STRIP_H);
+        let mut bands = row![].spacing(1).height(STRIP_H);
         for band in 0..BAND_NAMES.len() {
-            if band > 0 {
-                bands = bands.push(vertical_rule());
-            }
             let third: Element<'a, Message> = if has_q(band) {
                 self.param(param::SHAPE[band]).label("Q").column(STRIP_KNOB)
             } else {
@@ -465,7 +463,18 @@ impl<'a> EqView<'a> {
             .padding([4.0, 6.0])
             .width(BAND_GROUP_W)
             .style(move |_| container::Style {
-                background: selected.then(|| th::bg_hover().into()),
+                background: Some(
+                    if selected {
+                        th::bg_hover()
+                    } else {
+                        th::card_inset()
+                    }
+                    .into(),
+                ),
+                border: iced::Border {
+                    radius: BAND_GROUP_RADIUS.into(),
+                    ..Default::default()
+                },
                 ..Default::default()
             });
             bands = bands
