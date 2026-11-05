@@ -113,10 +113,11 @@ pub struct ViewState {
     pub viewport: crate::timeline_geometry::TimelineViewport,
     /// The Arrange view a zoom to selection replaced, for zoom back.
     pub zoom_before_selection: Option<crate::timeline_geometry::TimelineViewport>,
-    pub snap_grid: SnapGrid,
-    pub snap_enabled: bool,
-    pub adaptive_grid: bool,
-    pub adaptive_grid_bias: i8,
+    /// Arrange and Section timelines. The transport bar always edits it; the
+    /// grid shortcuts edit it unless a clip editor has focus.
+    pub arrange_grid: GridConfig,
+    /// Piano roll and audio clip editor, following their own zoom.
+    pub clip_grid: GridConfig,
     pub context_menu: Option<ContextMenu>,
     pub drum_rack_slice_dialog: Option<DrumRackSliceDialog>,
     pub transient_analysis_dialog: Option<TransientAnalysisDialog>,
@@ -151,10 +152,8 @@ impl Default for ViewState {
             perform_surface_resize_active: false,
             viewport: crate::timeline_geometry::TimelineViewport::new(1.0, 0.0),
             zoom_before_selection: None,
-            snap_grid: SnapGrid::EIGHTH,
-            snap_enabled: true,
-            adaptive_grid: false,
-            adaptive_grid_bias: 0,
+            arrange_grid: GridConfig::default(),
+            clip_grid: GridConfig::default(),
             context_menu: None,
             drum_rack_slice_dialog: None,
             transient_analysis_dialog: None,
@@ -217,15 +216,6 @@ impl ViewState {
     pub fn prune_drum_pad_flashes(&mut self, now: std::time::Instant) {
         self.drum_pad_flash_until
             .retain(|_, expires_at| *expires_at > now);
-    }
-
-    pub fn grid_config(&self) -> GridConfig {
-        GridConfig::new(
-            self.snap_grid,
-            self.snap_enabled,
-            self.adaptive_grid,
-            self.adaptive_grid_bias,
-        )
     }
 
     pub fn dismiss_clip_dialogs_for(

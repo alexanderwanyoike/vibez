@@ -622,11 +622,7 @@ impl App {
             },
             Message::PianoRoll(msg) => {
                 let ctx = crate::domains::piano_roll::PianoRollCtx {
-                    snap_grid: self
-                        .state
-                        .view
-                        .grid_config()
-                        .effective_grid(self.active_editor_pixels_per_beat()),
+                    snap_grid: self.clip_editor_grid(),
                 };
                 let action = self.route_piano_roll_editor_message(msg, ctx);
                 self.apply_piano_roll_action(action);
@@ -944,6 +940,7 @@ impl App {
             // -- Multi-track messages --
             Message::DeleteKeyPressed => return self.on_delete_key_pressed(),
             Message::SelectAllPressed => return self.on_select_all_pressed(),
+            Message::GridShortcutPressed(command) => return self.on_grid_shortcut_pressed(command),
             Message::AddClipToTrack(track_id) => {
                 return self.handle_add_clip_to_track(track_id);
             }

@@ -153,7 +153,7 @@ impl App {
                 playhead_beats: playback_playhead_beats.unwrap_or(-1.0),
                 play_start_beats: None,
                 zoom_level: viewport.zoom_level,
-                grid: self.state.view.grid_config(),
+                grid: self.state.view.arrange_grid,
                 scroll_offset_beats: viewport.scroll_offset_beats,
                 loop_brace: false,
                 loop_enabled: selected_section.looping,
@@ -458,7 +458,7 @@ impl App {
                     content,
                     self.state.perform.section_editor.edit_cursor_beats(),
                     viewport.zoom_level,
-                    self.state.view.grid_config(),
+                    self.state.view.arrange_grid,
                     viewport.scroll_offset_beats,
                     viewport_width,
                     total_beats,
@@ -514,7 +514,7 @@ impl App {
                 }
                 clip_canvas = clip_canvas.with_playback_playhead(playback_playhead_beats);
                 let geometry = viewport.geometry();
-                let grid = self.state.view.grid_config();
+                let grid = self.state.view.arrange_grid;
                 let compatible = !track.kind.is_midi();
                 let focused_clip_canvas: Element<'_, Message> = Element::from(
                     canvas(clip_canvas)

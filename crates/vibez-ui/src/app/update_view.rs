@@ -3,8 +3,8 @@
 use crate::domains::browser::BrowserMsg;
 use crate::domains::perform::PerformEditorFocus;
 use crate::domains::timeline_editor::TimelineEditorAdapter;
-use crate::domains::view::{ViewCtx, ViewMsg};
-use crate::state::Workspace;
+use crate::domains::view::{GridTarget, ViewCtx, ViewMsg};
+use crate::state::{GridCommand, Workspace};
 
 use super::*;
 
@@ -16,6 +16,18 @@ impl App {
             lane_width: self.arrange_lane_width(),
             samples_per_beat: self.state.transport.samples_per_beat(),
         }
+    }
+
+    pub(super) fn on_grid_shortcut_pressed(&mut self, command: GridCommand) -> Task<Message> {
+        if !self.editor_shortcuts_have_focus() {
+            return Task::none();
+        }
+        let target = if self.focused_piano_roll_clip().is_some() {
+            GridTarget::Clip
+        } else {
+            GridTarget::Arrange
+        };
+        self.update(Message::View(ViewMsg::Grid(target, command)))
     }
 
     fn route_section_timeline_navigation(&mut self, msg: &ViewMsg) -> bool {

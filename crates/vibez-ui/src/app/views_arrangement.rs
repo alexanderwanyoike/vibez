@@ -80,7 +80,7 @@ impl App {
                 target: ContextMenuTarget::ArrangementEmpty,
             }));
             if browser_drag_active {
-                let grid = self.state.view.grid_config();
+                let grid = self.state.view.arrange_grid;
                 let geometry = self.state.view.viewport.geometry();
                 area = area
                     .on_move(move |point| {
@@ -108,7 +108,7 @@ impl App {
             playhead_beats,
             play_start_beats: Some(self.state.transport.play_start_beats),
             zoom_level,
-            grid: self.state.view.grid_config(),
+            grid: self.state.view.arrange_grid,
             scroll_offset_beats: scroll_offset,
             loop_brace: true,
             loop_enabled: self.state.transport.loop_enabled,
@@ -294,7 +294,7 @@ impl App {
                 content,
                 playhead_beats,
                 zoom_level,
-                self.state.view.grid_config(),
+                self.state.view.arrange_grid,
                 scroll_offset,
                 (self.state.view.window_width
                     - crate::widgets::track_header::TRACK_HEADER_TOTAL_WIDTH)
@@ -359,7 +359,7 @@ impl App {
             }
             let track_id = track.id;
             let compatible = !track.kind.is_midi();
-            let grid = self.state.view.grid_config();
+            let grid = self.state.view.arrange_grid;
             let track_geometry = geometry;
             let mut clip_canvas_area = mouse_area(
                 canvas(clip_canvas_widget)
@@ -399,7 +399,7 @@ impl App {
         }
 
         if self.state.browser.drag_source.is_some() {
-            let grid = self.state.view.grid_config();
+            let grid = self.state.view.arrange_grid;
             let empty_geometry = geometry;
             let empty_beat = match self.state.browser.drag_target {
                 Some(crate::state::BrowserDropTarget::EmptyArrangement { beat }) => Some(beat),

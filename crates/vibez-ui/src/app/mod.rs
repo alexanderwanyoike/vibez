@@ -404,6 +404,8 @@ impl App {
             view: crate::state::ViewState {
                 perform_surface_width: ui_settings.perform_surface_width,
                 detail_panel_height: ui_settings.detail_panel_height,
+                arrange_grid: ui_settings.arrange_grid,
+                clip_grid: ui_settings.clip_grid,
                 ..Default::default()
             },
             browser: crate::state::BrowserState {
@@ -658,28 +660,8 @@ impl App {
         );
     }
 
-    pub(super) fn active_editor_pixels_per_beat(&self) -> f32 {
-        let editor = self.state.active_timeline_editor();
-        if let Some((track_id, clip_id)) = editor.selected_note_clip {
-            if let Some(duration) =
-                self.state
-                    .active_timeline_content(track_id)
-                    .and_then(|content| {
-                        content
-                            .note_clips
-                            .iter()
-                            .find(|clip| clip.id == clip_id)
-                            .map(|clip| clip.duration_beats)
-                    })
-            {
-                return crate::timeline_geometry::TimelineGeometry::fitted(
-                    duration,
-                    self.state.view.window_width,
-                    52.0,
-                )
-                .pixels_per_beat();
-            }
-        }
+    /// Zoom of the Arrange or Section timeline on screen.
+    pub(super) fn timeline_pixels_per_beat(&self) -> f32 {
         if self.state.view.workspace == crate::state::Workspace::Perform
             && self.state.perform.selected_section.is_some()
         {
@@ -788,6 +770,9 @@ mod clip_drag_undo_tests;
 
 #[cfg(test)]
 mod clip_shortcut_tests;
+
+#[cfg(test)]
+mod grid_shortcut_tests;
 
 #[cfg(test)]
 mod note_clip_insertion_tests;

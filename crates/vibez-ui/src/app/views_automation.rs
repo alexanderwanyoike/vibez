@@ -109,7 +109,7 @@ impl App {
                 color: track_color,
                 zoom_level: layout.zoom_level,
                 scroll_offset_beats: layout.scroll_offset_beats,
-                grid: self.state.view.grid_config(),
+                grid: self.state.view.arrange_grid,
                 selected,
                 reference,
                 min_label,

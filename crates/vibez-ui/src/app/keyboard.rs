@@ -11,6 +11,7 @@ use crate::domains::transport::TransportMsg;
 use crate::domains::view::ViewMsg;
 
 use crate::message::Message;
+use crate::state::GridCommand;
 
 #[derive(Default)]
 pub(crate) struct EdgeShortcutState {
@@ -511,16 +512,16 @@ pub(crate) fn global_key_handler(
 
     if command_held(modifiers, ON_MACOS) {
         if let iced::keyboard::Key::Character(ref c) = key {
-            let grid_message = match c.as_str() {
-                "1" => Some(ViewMsg::NarrowGrid),
-                "2" => Some(ViewMsg::WidenGrid),
-                "3" => Some(ViewMsg::ToggleTripletGrid),
-                "4" => Some(ViewMsg::ToggleSnapToGrid),
-                "5" => Some(ViewMsg::ToggleAdaptiveGrid),
+            let grid_command = match c.as_str() {
+                "1" => Some(GridCommand::Narrow),
+                "2" => Some(GridCommand::Widen),
+                "3" => Some(GridCommand::ToggleTriplet),
+                "4" => Some(GridCommand::ToggleSnap),
+                "5" => Some(GridCommand::ToggleAdaptive),
                 _ => None,
             };
-            if let Some(message) = grid_message {
-                return Some(Message::View(message));
+            if let Some(command) = grid_command {
+                return Some(Message::GridShortcutPressed(command));
             }
         }
     }
@@ -661,7 +662,7 @@ mod tests {
 
         assert!(matches!(
             global_key_handler(Key::Character("1".into()), command),
-            Some(Message::View(ViewMsg::NarrowGrid))
+            Some(Message::GridShortcutPressed(GridCommand::Narrow))
         ));
         assert!(matches!(
             global_key_handler(Key::Character("v".into()), command),
@@ -717,39 +718,24 @@ mod tests {
     }
 
     #[test]
-    fn command_number_shortcuts_control_the_shared_grid() {
+    fn command_number_shortcuts_control_the_focused_grid() {
         use iced::keyboard::Key;
 
         let command = command_modifier();
 
         let expected = [
-            ViewMsg::NarrowGrid,
-            ViewMsg::WidenGrid,
-            ViewMsg::ToggleTripletGrid,
-            ViewMsg::ToggleSnapToGrid,
-            ViewMsg::ToggleAdaptiveGrid,
+            GridCommand::Narrow,
+            GridCommand::Widen,
+            GridCommand::ToggleTriplet,
+            GridCommand::ToggleSnap,
+            GridCommand::ToggleAdaptive,
         ];
         for (number, expected) in ["1", "2", "3", "4", "5"].into_iter().zip(expected) {
             let message = global_key_handler(Key::Character(number.into()), command);
-            assert!(matches!(
-                (message, expected),
-                (
-                    Some(Message::View(ViewMsg::NarrowGrid)),
-                    ViewMsg::NarrowGrid
-                ) | (Some(Message::View(ViewMsg::WidenGrid)), ViewMsg::WidenGrid)
-                    | (
-                        Some(Message::View(ViewMsg::ToggleTripletGrid)),
-                        ViewMsg::ToggleTripletGrid
-                    )
-                    | (
-                        Some(Message::View(ViewMsg::ToggleSnapToGrid)),
-                        ViewMsg::ToggleSnapToGrid
-                    )
-                    | (
-                        Some(Message::View(ViewMsg::ToggleAdaptiveGrid)),
-                        ViewMsg::ToggleAdaptiveGrid
-                    )
-            ));
+            assert!(
+                matches!(message, Some(Message::GridShortcutPressed(sent)) if sent == expected),
+                "Command+{number} should send {expected:?}"
+            );
         }
     }
 

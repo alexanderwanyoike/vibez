@@ -41,7 +41,7 @@ impl std::fmt::Debug for ResidentSection {
 }
 
 use crate::domains::audio_settings::{AudioDeviceChoice, AudioSampleRate};
-use crate::state::{AuditionImportInput, AuditionMode, SettingsTab, UndoGestureId};
+use crate::state::{AuditionImportInput, AuditionMode, GridCommand, SettingsTab, UndoGestureId};
 
 /// Menus and dialogs whose lifecycle is owned by their overlay rather than
 /// inferred from unrelated application messages.
@@ -220,6 +220,8 @@ pub enum Message {
     /// Command+A. Context-resolved in `update`, like [`Self::DeleteKeyPressed`]:
     /// the open piano roll's notes first, then the active timeline's clips.
     SelectAllPressed,
+    /// Command+1 to 5, for the grid of the editor with focus.
+    GridShortcutPressed(GridCommand),
 
     // File menu
     NewProject,

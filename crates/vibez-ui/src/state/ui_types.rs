@@ -853,7 +853,7 @@ pub enum DetailPanelTab {
     Devices,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 enum GridDivision {
     EightBars,
     FourBars,
@@ -866,7 +866,7 @@ enum GridDivision {
 }
 
 /// A musical grid division, optionally interpreted as a triplet.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SnapGrid {
     division: GridDivision,
     triplet: bool,
@@ -995,23 +995,30 @@ impl SnapGrid {
         }
     }
 
+    /// The steps a zoom-adaptive grid picks from, coarsest first.
+    const ADAPTIVE_STEPS: [Self; 8] = [
+        Self::EIGHT_BARS,
+        Self::FOUR_BARS,
+        Self::TWO_BARS,
+        Self::BAR,
+        Self::QUARTER,
+        Self::EIGHTH,
+        Self::SIXTEENTH,
+        Self::THIRTY_SECOND,
+    ];
+
+    /// The furthest a bias can push the adaptive grid. Any further and every
+    /// zoom lands on the same end step.
+    pub const ADAPTIVE_BIAS_LIMIT: i8 = Self::ADAPTIVE_STEPS.len() as i8 - 1;
+
     pub fn adaptive(pixels_per_beat: f32, bias: i8, triplet: bool) -> Self {
-        let divisions = [
-            Self::EIGHT_BARS,
-            Self::FOUR_BARS,
-            Self::TWO_BARS,
-            Self::BAR,
-            Self::QUARTER,
-            Self::EIGHTH,
-            Self::SIXTEENTH,
-            Self::THIRTY_SECOND,
-        ];
-        let base = divisions
+        let steps = Self::ADAPTIVE_STEPS;
+        let base = steps
             .iter()
             .rposition(|grid| grid.beat_size() * pixels_per_beat as f64 >= 12.0)
             .unwrap_or(0);
-        let index = (base as i8 + bias).clamp(0, divisions.len() as i8 - 1) as usize;
-        let grid = divisions[index];
+        let index = (base as i8 + bias).clamp(0, Self::ADAPTIVE_BIAS_LIMIT) as usize;
+        let grid = steps[index];
         if triplet {
             grid.triplet()
         } else {
@@ -1047,13 +1054,44 @@ impl std::fmt::Display for SnapGrid {
 /// zoom would otherwise forbid anything under 8 bars.
 pub const SHORTEST_LENGTH_BEATS: f64 = 0.125;
 
-/// Shared grid modes passed into arrangement and MIDI editor widgets.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Grid modes passed into arrangement and clip editor widgets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct GridConfig {
     pub selected: SnapGrid,
     pub snap_enabled: bool,
     pub adaptive: bool,
+    #[serde(deserialize_with = "deserialize_adaptive_bias")]
     pub adaptive_bias: i8,
+}
+
+fn deserialize_adaptive_bias<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<i8, D::Error> {
+    let bias = <i8 as serde::Deserialize>::deserialize(deserializer)?;
+    Ok(bias.clamp(
+        -SnapGrid::ADAPTIVE_BIAS_LIMIT,
+        SnapGrid::ADAPTIVE_BIAS_LIMIT,
+    ))
+}
+
+/// Zoom-adaptive like Ableton, because a fixed default is under a pixel
+/// per step at song zoom and over-coarse when zoomed in. `selected` is the
+/// value a switch to a fixed grid starts from.
+impl Default for GridConfig {
+    fn default() -> Self {
+        Self::new(SnapGrid::EIGHTH, true, true, 0)
+    }
+}
+
+/// One edit to a [`GridConfig`], from a snap list, toggle or shortcut.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GridCommand {
+    Choose(GridChoice),
+    Narrow,
+    Widen,
+    ToggleTriplet,
+    ToggleSnap,
+    ToggleAdaptive,
 }
 
 impl GridConfig {
@@ -1071,15 +1109,85 @@ impl GridConfig {
         }
     }
 
-    pub fn effective_grid(self, pixels_per_beat: f32) -> SnapGrid {
+    pub fn apply(&mut self, command: GridCommand) {
+        match command {
+            GridCommand::Choose(choice) => self.choose(choice),
+            GridCommand::Narrow => self.narrow(),
+            GridCommand::Widen => self.widen(),
+            GridCommand::ToggleTriplet => self.toggle_triplet(),
+            GridCommand::ToggleSnap => self.toggle_snap(),
+            GridCommand::ToggleAdaptive => self.toggle_adaptive(),
+        }
+    }
+
+    pub fn narrow(&mut self) {
         if self.adaptive {
-            SnapGrid::adaptive(
-                pixels_per_beat,
-                self.adaptive_bias,
-                self.selected.is_triplet(),
-            )
+            self.adaptive_bias = (self.adaptive_bias + 1).min(SnapGrid::ADAPTIVE_BIAS_LIMIT);
         } else {
-            self.selected
+            self.selected = self.selected.narrower();
+        }
+    }
+
+    pub fn widen(&mut self) {
+        if self.adaptive {
+            self.adaptive_bias = (self.adaptive_bias - 1).max(-SnapGrid::ADAPTIVE_BIAS_LIMIT);
+        } else {
+            self.selected = self.selected.wider();
+        }
+    }
+
+    pub fn toggle_triplet(&mut self) {
+        self.selected = self.selected.toggle_triplet();
+    }
+
+    pub fn toggle_snap(&mut self) {
+        self.snap_enabled = !self.snap_enabled;
+    }
+
+    pub fn toggle_adaptive(&mut self) {
+        self.adaptive = !self.adaptive;
+    }
+
+    pub fn choose(&mut self, choice: GridChoice) {
+        match choice {
+            // The step Auto shows is the one this grid's bias resolves to
+            // now, so keeping the bias is choosing that step.
+            GridChoice::Auto(_) => self.adaptive = true,
+            GridChoice::Fixed(grid) => {
+                self.selected = grid;
+                self.adaptive = false;
+                self.adaptive_bias = 0;
+            }
+        }
+    }
+
+    /// The snap list entry for this grid at this zoom.
+    pub fn choice(self, pixels_per_beat: f32) -> GridChoice {
+        if self.adaptive {
+            self.auto_choice(pixels_per_beat)
+        } else {
+            GridChoice::Fixed(self.selected)
+        }
+    }
+
+    /// Every snap list entry, Auto first.
+    pub fn choices(self, pixels_per_beat: f32) -> Vec<GridChoice> {
+        std::iter::once(self.auto_choice(pixels_per_beat))
+            .chain(SnapGrid::all().iter().copied().map(GridChoice::Fixed))
+            .collect()
+    }
+
+    fn auto_choice(self, pixels_per_beat: f32) -> GridChoice {
+        GridChoice::Auto(SnapGrid::adaptive(
+            pixels_per_beat,
+            self.adaptive_bias,
+            self.selected.is_triplet(),
+        ))
+    }
+
+    pub fn effective_grid(self, pixels_per_beat: f32) -> SnapGrid {
+        match self.choice(pixels_per_beat) {
+            GridChoice::Auto(grid) | GridChoice::Fixed(grid) => grid,
         }
     }
 
@@ -1106,6 +1214,24 @@ impl GridConfig {
             self.effective_grid(pixels_per_beat).snap_beat_floor(beat)
         } else {
             beat
+        }
+    }
+}
+
+/// An entry in an editor's snap list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GridChoice {
+    /// Follows the editor's zoom; carries the step it resolves to now so
+    /// the list reads what a drag will snap to.
+    Auto(SnapGrid),
+    Fixed(SnapGrid),
+}
+
+impl std::fmt::Display for GridChoice {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Auto(grid) => write!(f, "Auto {}", grid.label()),
+            Self::Fixed(grid) => f.write_str(grid.label()),
         }
     }
 }

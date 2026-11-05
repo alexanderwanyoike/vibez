@@ -26,6 +26,10 @@ pub struct UiSettings {
     pub perform_surface_width: f32,
     #[serde(default = "default_detail_panel_height")]
     pub detail_panel_height: f32,
+    #[serde(default)]
+    pub arrange_grid: crate::state::GridConfig,
+    #[serde(default)]
+    pub clip_grid: crate::state::GridConfig,
     #[serde(default = "default_audition_enabled")]
     pub audition_enabled: bool,
     #[serde(default = "default_audition_gain")]
@@ -138,6 +142,8 @@ impl Default for UiSettings {
             sample_browser_width: default_sample_browser_width(),
             perform_surface_width: default_perform_surface_width(),
             detail_panel_height: default_detail_panel_height(),
+            arrange_grid: crate::state::GridConfig::default(),
+            clip_grid: crate::state::GridConfig::default(),
             audition_enabled: default_audition_enabled(),
             audition_gain: default_audition_gain(),
             auto_warp_on_import: false,
@@ -458,6 +464,41 @@ mod tests {
         let loaded: UiSettings =
             serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
         assert_eq!(loaded.perform_surface_width, 704.0);
+    }
+
+    #[test]
+    fn editor_grids_default_to_zoom_adaptive_and_roundtrip() {
+        use crate::state::{GridConfig, SnapGrid};
+
+        let old: UiSettings = serde_json::from_str("{}").unwrap();
+        assert_eq!(old.arrange_grid, GridConfig::default());
+        assert_eq!(old.clip_grid, GridConfig::default());
+
+        let settings = UiSettings {
+            arrange_grid: GridConfig::new(SnapGrid::BAR, false, false, 0),
+            clip_grid: GridConfig::new(SnapGrid::SIXTEENTH.triplet(), true, true, -2),
+            ..UiSettings::default()
+        };
+        let loaded: UiSettings =
+            serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+        assert_eq!(loaded.arrange_grid, settings.arrange_grid);
+        assert_eq!(loaded.clip_grid, settings.clip_grid);
+    }
+
+    #[test]
+    fn an_out_of_range_grid_bias_loads_clamped_to_the_adaptive_steps() {
+        use crate::state::{GridConfig, SnapGrid};
+
+        let settings = UiSettings {
+            arrange_grid: GridConfig::new(SnapGrid::EIGHTH, true, true, 100),
+            clip_grid: GridConfig::new(SnapGrid::EIGHTH, true, true, -100),
+            ..UiSettings::default()
+        };
+        let loaded: UiSettings =
+            serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+
+        assert_eq!(loaded.arrange_grid.adaptive_bias, 7);
+        assert_eq!(loaded.clip_grid.adaptive_bias, -7);
     }
 
     #[test]

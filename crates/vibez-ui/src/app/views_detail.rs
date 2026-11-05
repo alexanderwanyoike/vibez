@@ -6,12 +6,12 @@ use iced::widget::{
 use iced::{Color, Element, Length, Theme};
 
 use crate::domains::piano_roll::PianoRollMsg;
-use crate::domains::view::ViewMsg;
+use crate::domains::view::{GridTarget, ViewMsg};
 use vibez_core::id::{ClipId, SectionId, TrackId};
 
 use crate::icons;
 use crate::message::Message;
-use crate::state::{ArrangementSelection, DetailPanelTab, TimelineEditorState};
+use crate::state::{ArrangementSelection, DetailPanelTab, GridCommand, TimelineEditorState};
 use crate::theme as th;
 use crate::widgets::piano_roll::{PianoRollWidget, VelocityLaneWidget};
 
@@ -151,6 +151,66 @@ impl App {
                     .map(|clip| !clip.selected_notes.is_empty())
             })
             .unwrap_or(false)
+    }
+
+    /// The open clip editor's step on the clip editor grid; quantize uses
+    /// it so it matches the lines the editor draws.
+    pub(super) fn clip_editor_grid(&self) -> crate::state::SnapGrid {
+        self.state
+            .view
+            .clip_grid
+            .effective_grid(self.clip_editor_pixels_per_beat())
+    }
+
+    /// Approximate zoom of the clip editor. Both clip editors fit the whole
+    /// clip into the panel; with no clip open the timeline's zoom stands in.
+    pub(super) fn clip_editor_pixels_per_beat(&self) -> f32 {
+        self.clip_editor_clip_beats()
+            .map(|beats| {
+                crate::widgets::piano_roll::fitted_geometry(beats, self.state.view.window_width)
+                    .pixels_per_beat()
+            })
+            .unwrap_or_else(|| self.timeline_pixels_per_beat())
+    }
+
+    fn clip_editor_clip_beats(&self) -> Option<f64> {
+        let editor = self.state.active_timeline_editor();
+        if let Some((track_id, clip_id)) = editor.selected_note_clip {
+            return self
+                .state
+                .active_timeline_content(track_id)?
+                .note_clips
+                .iter()
+                .find(|clip| clip.id == clip_id)
+                .map(|clip| clip.duration_beats);
+        }
+        let track_id = editor.selected_track?;
+        let clip_id = single_selected_audio_clip_for_track(editor, track_id)?;
+        self.state
+            .active_timeline_content(track_id)?
+            .clips
+            .iter()
+            .find(|clip| clip.id == clip_id)
+            .map(|clip| clip.duration as f64 / self.state.transport.samples_per_beat())
+    }
+
+    /// The Snap list for the clip editor grid, shown in each clip editor.
+    pub(super) fn clip_grid_snap_list(&self) -> Element<'_, Message> {
+        let grid = self.state.view.clip_grid;
+        let pixels_per_beat = self.clip_editor_pixels_per_beat();
+        let snap_picker = pick_list(
+            grid.choices(pixels_per_beat),
+            Some(grid.choice(pixels_per_beat)),
+            |choice| Message::View(ViewMsg::Grid(GridTarget::Clip, GridCommand::Choose(choice))),
+        )
+        .width(Length::Fixed(90.0))
+        .padding([3, 8])
+        .text_size(11);
+        let snap_label = text("Snap:").size(10).color(th::text_dim());
+        row![snap_label, snap_picker]
+            .spacing(4)
+            .align_y(iced::Alignment::Center)
+            .into()
     }
 
     fn midi_clip_editor_visible(&self) -> bool {
@@ -379,7 +439,7 @@ impl App {
                         clip_relative_playhead,
                         clip.duration_beats,
                         track_color,
-                        self.state.view.grid_config(),
+                        self.state.view.clip_grid,
                         self.state.piano_roll.scroll_y,
                         self.state.piano_roll.edit_mode,
                     ),
@@ -388,7 +448,7 @@ impl App {
                         clip,
                         clip.duration_beats,
                         track_color,
-                        self.state.view.grid_config(),
+                        self.state.view.clip_grid,
                     ),
                 )
             }
@@ -592,21 +652,14 @@ impl App {
 
         let mode_row = row![select_btn, draw_btn].spacing(1);
 
-        let snap_picker = pick_list(
-            crate::state::SnapGrid::all(),
-            Some(
-                self.state
-                    .view
-                    .grid_config()
-                    .effective_grid(self.active_editor_pixels_per_beat()),
-            ),
-            |grid| Message::View(ViewMsg::SetSnapGrid(grid)),
-        )
-        .width(Length::Fixed(90.0));
-        let snap_label = text("Snap:").size(10).color(th::text_dim());
-        let header_row = row![label, mode_row, horizontal_space(), snap_label, snap_picker]
-            .spacing(4)
-            .align_y(iced::Alignment::Center);
+        let header_row = row![
+            label,
+            mode_row,
+            horizontal_space(),
+            self.clip_grid_snap_list()
+        ]
+        .spacing(4)
+        .align_y(iced::Alignment::Center);
 
         content_col = content_col
             .push(header_row)
