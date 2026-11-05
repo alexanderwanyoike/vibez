@@ -3,7 +3,7 @@
 
 use std::path::Path;
 
-use iced::widget::{button, container, scrollable, text, Space};
+use iced::widget::{button, container, scrollable, text, text_input, Space};
 use iced::{Element, Length, Theme};
 
 use crate::message::Message;
@@ -129,6 +129,24 @@ pub(super) fn audition_gain_label(gain: f32) -> String {
         "−∞ dB".into()
     } else {
         format!("{:+.1} dB", 20.0 * gain.log10())
+    }
+}
+
+pub(super) fn browser_search_style(
+    _theme: &Theme,
+    _status: text_input::Status,
+) -> text_input::Style {
+    text_input::Style {
+        background: th::bg_dark().into(),
+        border: iced::Border {
+            color: th::border(),
+            width: 1.0,
+            radius: 0.0.into(),
+        },
+        icon: th::text_dim(),
+        placeholder: th::text_dim(),
+        value: th::text(),
+        selection: th::accent(),
     }
 }
 

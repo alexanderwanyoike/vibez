@@ -43,18 +43,7 @@ impl App {
             .size(12)
             .padding([7, 9])
             .width(Length::Fill)
-            .style(|_theme: &Theme, _status| iced::widget::text_input::Style {
-                background: th::bg_dark().into(),
-                border: iced::Border {
-                    color: th::border(),
-                    width: 1.0,
-                    radius: 0.0.into(),
-                },
-                icon: th::text_dim(),
-                placeholder: th::text_dim(),
-                value: th::text(),
-                selection: th::accent(),
-            });
+            .style(browser_search_style);
 
         let search_context: Element<'_, Message> = match self.state.browser.mode {
             SampleBrowserMode::Local => {
