@@ -27,6 +27,18 @@ const COLOR_BAR_WIDTH: f32 = 4.0;
 
 /// Total width including the color bar on the left edge.
 pub const TRACK_HEADER_TOTAL_WIDTH: f32 = TRACK_HEADER_WIDTH + COLOR_BAR_WIDTH;
+/// The rows down to the volume fader fit `TrackHeight::MIN` exactly, so
+/// the shortest lane keeps its header usable; the meter below them shows
+/// from the default height up. The header keeps no bottom padding, as the
+/// lane edge below already parts it from the next header.
+const HEADER_PADDING: iced::Padding = iced::Padding {
+    top: 5.0,
+    right: 6.0,
+    bottom: 0.0,
+    left: 6.0,
+};
+const FADER_HEIGHT: f32 = 12.0;
+const ROW_SPACING: f32 = 3.0;
 
 /// How an Arrange track header is shown.
 #[derive(Debug, Clone, Copy, Default)]
@@ -440,7 +452,7 @@ pub fn view_track_header<'a>(
     let fader = HorizontalFaderWidget::new(track.id, track.gain, track_color);
     let fader_canvas: Element<'_, Message> = canvas(fader)
         .width(Length::Fill)
-        .height(Length::Fixed(18.0))
+        .height(Length::Fixed(FADER_HEIGHT))
         .into();
 
     // Row 4: Horizontal VU meter (spans width)
@@ -459,8 +471,8 @@ pub fn view_track_header<'a>(
         .into();
 
     let header = column![name_row, track_controls, fader_canvas, meter_canvas]
-        .spacing(4)
-        .padding([6, 6])
+        .spacing(ROW_SPACING)
+        .padding(HEADER_PADDING)
         .width(Length::Fixed(TRACK_HEADER_WIDTH));
 
     // Color bar on the left edge
