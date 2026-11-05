@@ -13,7 +13,7 @@ use crate::state::{GridConfig, PianoRollEditMode, SnapGrid, UiNoteClip, UndoGest
 use crate::timeline_geometry::TimelineGeometry;
 use crate::widgets::clip_loop_markers::{self, LoopDrag};
 use crate::widgets::double_click::DoubleClick;
-use crate::widgets::drag_phase::CLICK_SLOP_PX;
+use crate::widgets::drag_phase::past_click_slop;
 use crate::widgets::local_drag::LocalDrag;
 use vibez_core::id::{ClipId, TrackId};
 use vibez_core::midi::MidiNote;
@@ -753,9 +753,7 @@ impl canvas::Program<Message> for PianoRollWidget {
                             started,
                             ..
                         }) if !*started => {
-                            if (local.x - *start_x).abs() < CLICK_SLOP_PX
-                                && (local.y - *start_y).abs() < CLICK_SLOP_PX
-                            {
+                            if !past_click_slop(Point::new(*start_x, *start_y), local) {
                                 return (canvas::event::Status::Captured, None);
                             }
                             *started = true;
@@ -763,7 +761,8 @@ impl canvas::Program<Message> for PianoRollWidget {
                         Some(DragAction::ResizeNote {
                             start_x, started, ..
                         }) if !*started => {
-                            if (local.x - *start_x).abs() < CLICK_SLOP_PX {
+                            if !past_click_slop(Point::new(*start_x, 0.0), Point::new(local.x, 0.0))
+                            {
                                 return (canvas::event::Status::Captured, None);
                             }
                             *started = true;
@@ -934,8 +933,7 @@ impl canvas::Program<Message> for PianoRollWidget {
                         additive,
                     } = drag
                     {
-                        let travelled = (current.x - anchor.x).abs() >= CLICK_SLOP_PX
-                            || (current.y - anchor.y).abs() >= CLICK_SLOP_PX;
+                        let travelled = past_click_slop(anchor, current);
                         if let (true, Some(clip_data)) = (travelled, self.clip.as_ref()) {
                             if let Some(region) = self.marquee_region(anchor, current, &bounds) {
                                 return (
