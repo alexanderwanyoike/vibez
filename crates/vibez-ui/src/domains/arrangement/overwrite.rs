@@ -3,7 +3,7 @@
 
 use std::collections::HashSet;
 
-use vibez_core::id::ClipId;
+use vibez_core::id::{ClipId, TrackId};
 use vibez_engine::commands::EngineCommand;
 
 use super::clip_trims::{audio_start_trimmed, note_start_trimmed};
@@ -119,25 +119,39 @@ impl TimelineEditorState {
         placed: &[ArrangementSelection],
         samples_per_beat: f64,
     ) -> bool {
+        let ranges: Vec<_> = placed
+            .iter()
+            .filter_map(|selection| {
+                let track_id = selection.track_id();
+                let span = self.clip_span(*selection, samples_per_beat)?;
+                let on_lane: HashSet<ClipId> = placed
+                    .iter()
+                    .filter(|other| other.track_id() == track_id)
+                    .map(|other| other.clip_id())
+                    .collect();
+                Some((track_id, (span.start_beats, span.end_beats()), on_lane))
+            })
+            .collect();
+        self.overwrite_ranges(engine, ranges, samples_per_beat)
+    }
+
+    /// Clears each `(lane, range)` of every Clip but the ones it keeps.
+    /// Returns whether any Clip was overwritten.
+    fn overwrite_ranges(
+        &mut self,
+        engine: &mut impl EngineHandle,
+        ranges: Vec<(TrackId, (f64, f64), HashSet<ClipId>)>,
+        samples_per_beat: f64,
+    ) -> bool {
         if samples_per_beat <= 0.0 {
             return false;
         }
         let mut changed = false;
-        for selection in placed {
-            let track_id = selection.track_id();
-            let (Some(lane), Some(span)) = (
-                self.find_content(track_id),
-                self.clip_span(*selection, samples_per_beat),
-            ) else {
+        for (track_id, range, kept) in ranges {
+            let Some(lane) = self.find_content(track_id) else {
                 continue;
             };
-            let range = (span.start_beats, span.end_beats());
-            let on_lane: HashSet<ClipId> = placed
-                .iter()
-                .filter(|other| other.track_id() == track_id)
-                .map(|other| other.clip_id())
-                .collect();
-            let edits = lane_overwrite(lane, range, &on_lane, samples_per_beat);
+            let edits = lane_overwrite(lane, range, &kept, samples_per_beat);
             let edits_lane = !edits.audio.is_empty() || !edits.notes.is_empty();
             if edits_lane && !changed {
                 engine.send(EngineCommand::BeginContentRebuild);
