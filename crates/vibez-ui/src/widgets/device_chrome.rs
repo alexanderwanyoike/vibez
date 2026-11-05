@@ -70,6 +70,65 @@ pub fn section_label<'a>(label: impl ToString) -> Element<'a, Message> {
         .into()
 }
 
+const HEADER_PAD_LEFT: f32 = 12.0;
+const HEADER_PAD_RIGHT: f32 = 8.0;
+const HEADER_GAP: f32 = 8.0;
+const GROUP_GAP: f32 = 2.0;
+const POWER_W: f32 = 14.0;
+/// The small filled buttons in a header, for actions and preset steps.
+pub const TINY_W: f32 = 24.0;
+/// The narrowest a name gets before the preset selector gives way.
+pub const NAME_MIN_W: f32 = 32.0;
+pub const PRESET_MIN_W: f32 = 72.0;
+const PRESET_MAX_W: f32 = 200.0;
+/// Previous, next, load and save beside the preset selector.
+pub const PRESET_BUTTONS: usize = 4;
+/// Advanced, move up, move down and remove: the most a header carries.
+pub const MOST_ACTIONS: usize = 4;
+
+/// What a header's widths come to: its name and its preset selector.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct HeaderFit {
+    pub name: f32,
+    pub preset: f32,
+}
+
+const fn group_w(buttons: usize) -> f32 {
+    buttons as f32 * TINY_W + buttons.saturating_sub(1) as f32 * GROUP_GAP
+}
+
+/// Everything in a header but its name and preset selector.
+const fn header_fixed_w(preset: bool, actions: usize) -> f32 {
+    let preset = if preset {
+        HEADER_GAP + PRESET_BUTTONS as f32 * (GROUP_GAP + TINY_W)
+    } else {
+        0.0
+    };
+    HEADER_PAD_LEFT
+        + POWER_W
+        + HEADER_GAP
+        + preset
+        + HEADER_GAP
+        + group_w(actions)
+        + HEADER_PAD_RIGHT
+}
+
+/// The narrowest card a header with a preset and `actions` fits.
+pub const fn header_min_w(actions: usize) -> f32 {
+    header_fixed_w(true, actions) + NAME_MIN_W + PRESET_MIN_W
+}
+
+/// Splits a `card_w` wide header between a name that wants `name_w` and
+/// the preset selector: the name keeps its width while the selector keeps
+/// its minimum, and the selector takes what is left up to its maximum.
+pub fn fit_header(card_w: f32, name_w: f32, preset: bool, actions: usize) -> HeaderFit {
+    let _ = (card_w, preset, actions);
+    HeaderFit {
+        name: name_w,
+        preset: PRESET_MAX_W,
+    }
+}
+
 /// The row across the top of every device card.
 pub fn title_bar<'a>(
     content: impl Into<Element<'a, Message>>,
@@ -253,6 +312,32 @@ mod tests {
         expanded: 760.0,
         max: 1000.0,
     };
+
+    #[test]
+    fn at_its_narrowest_a_header_keeps_the_name_and_preset_minimums() {
+        let fit = fit_header(header_min_w(MOST_ACTIONS), 500.0, true, MOST_ACTIONS);
+        assert_eq!((fit.name, fit.preset), (NAME_MIN_W, PRESET_MIN_W));
+    }
+
+    #[test]
+    fn a_long_name_gives_way_until_the_preset_selector_is_at_its_minimum() {
+        let fit = fit_header(header_min_w(MOST_ACTIONS) + 40.0, 500.0, true, MOST_ACTIONS);
+        assert_eq!((fit.name, fit.preset), (NAME_MIN_W + 40.0, PRESET_MIN_W));
+    }
+
+    #[test]
+    fn a_short_name_leaves_the_preset_selector_room_up_to_its_maximum() {
+        let fit = fit_header(1000.0, 40.0, true, MOST_ACTIONS);
+        assert_eq!((fit.name, fit.preset), (40.0, PRESET_MAX_W));
+    }
+
+    #[test]
+    fn a_header_without_presets_gives_its_name_the_rest() {
+        let narrow = fit_header(PLUGIN_CARD_W, 500.0, false, 3);
+        let wider = fit_header(PLUGIN_CARD_W + 30.0, 500.0, false, 3);
+        assert_eq!(wider.name - narrow.name, 30.0);
+        assert_eq!(fit_header(PLUGIN_CARD_W, 40.0, false, 3).name, 40.0);
+    }
 
     #[test]
     fn a_scrolling_chain_keeps_its_cards_as_tall_as_one_that_fits() {
