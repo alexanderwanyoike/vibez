@@ -15,7 +15,11 @@ impl TrackHeight {
     pub const MAX: Self = Self(420.0);
 
     pub fn new(pixels: f32) -> Self {
-        Self(pixels.clamp(Self::MIN.0, Self::MAX.0))
+        if pixels.is_nan() {
+            Self::DEFAULT
+        } else {
+            Self(pixels.clamp(Self::MIN.0, Self::MAX.0))
+        }
     }
 
     pub const fn pixels(self) -> f32 {
