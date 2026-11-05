@@ -117,6 +117,16 @@ impl TimelineViewport {
             (start_beats - self.geometry().beats_for_width(FRAME_MARGIN_PIXELS)).max(0.0);
     }
 
+    /// The view that shows exactly `start..end` across `viewport_width`.
+    pub fn showing(start_beats: f64, end_beats: f64, viewport_width: f32) -> Self {
+        let span = (end_beats - start_beats).max(f64::EPSILON);
+        let pixels_per_beat = (f64::from(viewport_width) / span) as f32;
+        Self::new(
+            Self::clamp_zoom(pixels_per_beat / BASE_PIXELS_PER_BEAT),
+            start_beats,
+        )
+    }
+
     /// The view a ruler drag that started on this view reaches. Dragging
     /// `drag_down` pixels down zooms in, and the grabbed beat stays under
     /// the pointer, so sideways movement pans.

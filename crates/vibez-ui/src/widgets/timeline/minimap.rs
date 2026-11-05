@@ -7,7 +7,8 @@ use iced::{Color, Rectangle, Renderer, Theme};
 use crate::domains::view::ViewMsg;
 use crate::message::Message;
 use crate::theme;
-use crate::timeline_geometry::TimelineGeometry;
+use crate::timeline_geometry::{TimelineGeometry, TimelineViewport};
+use crate::widgets::clip_loop_markers::{loop_with_end, loop_with_start, nearest_end, LoopMarker};
 
 /// The mockup's overview height, kept below the ruler's so the overview
 /// never outweighs it.
@@ -16,6 +17,8 @@ pub const OVERVIEW_HEIGHT: f32 = 34.0;
 /// Space above and below the clip rows, so the viewport outline does not
 /// sit on top of the first and last track.
 const ROW_INSET: f32 = 3.0;
+/// Pixels either side of a view box edge that still grab it.
+const EDGE_GRAB_PX: f32 = 4.0;
 
 /// Per-track data for the minimap overview.
 pub struct MinimapTrack {
@@ -42,6 +45,29 @@ impl ArrangementMinimap {
         TimelineGeometry::from_zoom(self.zoom_level, self.scroll_offset_beats)
             .visible_beats(canvas_width)
     }
+
+    /// Where the view box's edges sit in an overview `width` wide.
+    fn view_box_x(&self, overview: TimelineGeometry, width: f32) -> (f32, f32) {
+        (
+            overview.beat_to_x(self.scroll_offset_beats),
+            overview.beat_to_x(self.scroll_offset_beats + self.visible_beats(width)),
+        )
+    }
+
+    /// The view box edge a press at `x` grabs: whether it is the start, and
+    /// the beat the other edge keeps.
+    fn edge_at(&self, overview: TimelineGeometry, width: f32, x: f32) -> Option<(bool, f64)> {
+        let (start_x, end_x) = self.view_box_x(overview, width);
+        nearest_end(start_x, end_x, x, EDGE_GRAB_PX).map(|edge| {
+            let start = edge == LoopMarker::Start;
+            let fixed = if start {
+                self.scroll_offset_beats + self.visible_beats(width)
+            } else {
+                self.scroll_offset_beats
+            };
+            (start, fixed)
+        })
+    }
 }
 
 /// Interaction state for the minimap.
@@ -54,6 +80,12 @@ pub struct MinimapInteractionState {
 enum MinimapDragAction {
     /// Dragging the viewport rectangle (panning).
     PanViewport { start_x: f32, start_scroll: f64 },
+    /// Dragging one edge of the viewport rectangle: zooming with the other
+    /// edge held at `fixed_beat`.
+    ResizeViewport {
+        dragging_start: bool,
+        fixed_beat: f64,
+    },
     /// Clicked outside viewport — continuously scroll to cursor.
     Seeking,
 }
@@ -192,10 +224,18 @@ impl canvas::Program<Message> for ArrangementMinimap {
             canvas::Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left)) => {
                 if let Some(pos) = cursor.position_in(bounds) {
                     let click_beat = overview.x_to_beat(pos.x);
+                    if let Some((dragging_start, fixed_beat)) =
+                        self.edge_at(overview, bounds.width, pos.x)
+                    {
+                        state.drag = Some(MinimapDragAction::ResizeViewport {
+                            dragging_start,
+                            fixed_beat,
+                        });
+                        return (canvas::event::Status::Captured, None);
+                    }
 
                     // Check if click is inside the viewport rectangle
-                    let vx_start = overview.beat_to_x(self.scroll_offset_beats);
-                    let vx_end = overview.beat_to_x(self.scroll_offset_beats + visible);
+                    let (vx_start, vx_end) = self.view_box_x(overview, bounds.width);
 
                     if pos.x >= vx_start && pos.x <= vx_end {
                         // Start panning the viewport
@@ -232,6 +272,24 @@ impl canvas::Program<Message> for ArrangementMinimap {
                                 return (
                                     canvas::event::Status::Captured,
                                     Some(Message::View(ViewMsg::ScrollArrangement(delta))),
+                                );
+                            }
+                            MinimapDragAction::ResizeViewport {
+                                dragging_start,
+                                fixed_beat,
+                            } => {
+                                let pointer = overview.x_to_beat(local_x);
+                                let min_span = overview.beats_for_width(2.0 * EDGE_GRAB_PX);
+                                let (start, end) = if *dragging_start {
+                                    loop_with_start(pointer, *fixed_beat, min_span)
+                                } else {
+                                    loop_with_end(pointer, *fixed_beat, min_span, self.total_beats)
+                                };
+                                return (
+                                    canvas::event::Status::Captured,
+                                    Some(Message::View(ViewMsg::SetViewport(
+                                        TimelineViewport::showing(start, end, bounds.width),
+                                    ))),
                                 );
                             }
                             MinimapDragAction::Seeking => {
@@ -272,15 +330,19 @@ impl canvas::Program<Message> for ArrangementMinimap {
         if let Some(ref drag) = state.drag {
             return match drag {
                 MinimapDragAction::PanViewport { .. } => mouse::Interaction::Grabbing,
+                MinimapDragAction::ResizeViewport { .. } => {
+                    mouse::Interaction::ResizingHorizontally
+                }
                 MinimapDragAction::Seeking => mouse::Interaction::Pointer,
             };
         }
 
         if let Some(pos) = cursor.position_in(bounds) {
             let overview = TimelineGeometry::fitted(self.total_beats, bounds.width, 0.0);
-            let visible = self.visible_beats(bounds.width);
-            let vx_start = overview.beat_to_x(self.scroll_offset_beats);
-            let vx_end = overview.beat_to_x(self.scroll_offset_beats + visible);
+            if self.edge_at(overview, bounds.width, pos.x).is_some() {
+                return mouse::Interaction::ResizingHorizontally;
+            }
+            let (vx_start, vx_end) = self.view_box_x(overview, bounds.width);
 
             if pos.x >= vx_start && pos.x <= vx_end {
                 return mouse::Interaction::Grab;
