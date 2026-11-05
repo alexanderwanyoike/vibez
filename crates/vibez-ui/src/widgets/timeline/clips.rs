@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 
 use iced::mouse;
 use iced::widget::canvas;
-use iced::{Color, Rectangle, Renderer, Theme};
+use iced::{Color, Point, Rectangle, Renderer, Theme};
 
 use crate::domains::arrangement::ArrangementMsg;
 use crate::domains::browser::BrowserMsg;
@@ -17,6 +17,7 @@ use crate::state::{
     TrackTimelineContent, UndoGestureId,
 };
 use crate::timeline_geometry::TimelineGeometry;
+use crate::widgets::drag_phase::past_click_slop;
 use crate::widgets::local_drag::LocalDrag;
 use crate::widgets::timeline::marquee;
 use vibez_core::id::{ClipId, TrackId};
@@ -25,11 +26,6 @@ use super::clip_drag::ClipDragAction;
 use super::*;
 
 mod hit_test;
-
-/// Pointer travel before a press counts as a drag rather than a click: a
-/// rubber-band rather than a seek, or a group move rather than narrowing the
-/// selection to the pressed Clip.
-const DRAG_MIN_PX: f32 = 4.0;
 
 /// Vertical travel before a clip drag may change lane. Without it a
 /// horizontal drag near a row boundary would flicker between tracks.
@@ -614,11 +610,12 @@ impl canvas::Program<Message> for TrackClipCanvas {
                                 anchor_column_y,
                             } => {
                                 let column_y = self.row_top() + local.y;
-                                let dx = (local_x - start_x).abs();
-                                let dy = (column_y - *anchor_column_y).abs();
                                 // Vertical travel promotes too: a drag
                                 // straight down the lanes is a valid box.
-                                if dx > DRAG_MIN_PX || dy > DRAG_MIN_PX {
+                                if past_click_slop(
+                                    Point::new(*start_x, *anchor_column_y),
+                                    Point::new(local_x, column_y),
+                                ) {
                                     let anchor_snapped = self.snapped_beat(*anchor);
                                     let anchor_y = *anchor_column_y;
                                     state.drag = Some(ClipDragAction::RegionSelect {
@@ -841,10 +838,7 @@ impl canvas::Program<Message> for TrackClipCanvas {
                             start_y,
                             ..
                         } if LocalDrag::unclamped().position(cursor, bounds).is_some_and(
-                            |local| {
-                                (local.x - start_local_x).abs() <= DRAG_MIN_PX
-                                    && (local.y - start_y).abs() <= DRAG_MIN_PX
-                            },
+                            |local| !past_click_slop(Point::new(*start_local_x, *start_y), local),
                         ) =>
                         {
                             Some(Message::Arrangement(
