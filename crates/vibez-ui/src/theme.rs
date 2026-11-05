@@ -730,6 +730,20 @@ pub fn track_header_hovered() -> Color {
     blend(bg_surface(), track_bg_selected(), 0.5)
 }
 
+/// A field or footer sunk into a panel card, such as a search field.
+pub fn field() -> Color {
+    if is_light() {
+        bg_elevated()
+    } else {
+        track_bg()
+    }
+}
+
+/// The tinted pill behind the selected place in a sidebar list.
+pub fn selected_place() -> Color {
+    blend(bg_surface(), accent(), if is_light() { 0.13 } else { 0.16 })
+}
+
 /// A group of controls sunk slightly into a raised card.
 pub fn card_inset() -> Color {
     blend(bg_elevated(), display_bg(), 0.35)

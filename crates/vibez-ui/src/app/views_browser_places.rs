@@ -1,7 +1,7 @@
 //! Sample-browser places tree rendering.
 //! Split from views_browser.rs; inherent methods on [`super::App`].
 
-use iced::widget::{button, column, container, horizontal_space, row, scrollable, text};
+use iced::widget::{button, column, container, row, scrollable, text, Space};
 use iced::{Element, Length, Theme};
 
 use crate::domains::browser::BrowserMsg;
@@ -14,20 +14,11 @@ use super::views_browser_style::*;
 use super::*;
 
 const TREE_ICON_SIZE: f32 = 12.0;
-
-fn place_mode_marker(active: bool) -> iced::widget::Text<'static> {
-    icons::icon(if active {
-        icons::CIRCLE_DOT
-    } else {
-        icons::CIRCLE
-    })
-    .size(TREE_ICON_SIZE)
-    .color(if active {
-        th::accent()
-    } else {
-        th::text_muted()
-    })
-}
+const PLACE_ICON_SIZE: f32 = 13.0;
+const PLACE_ROW_H: f32 = 26.0;
+const PLACE_LABEL_SIZE: f32 = 11.5;
+/// A disclosure chevron's width, kept by leaves too so icons line up.
+const TOGGLE_W: f32 = 14.0;
 
 fn tree_toggle(expanded: bool, message: Message) -> Element<'static, Message> {
     button(
@@ -40,71 +31,152 @@ fn tree_toggle(expanded: bool, message: Message) -> Element<'static, Message> {
         .color(th::text_muted()),
     )
     .on_press(message)
-    .padding([4, 2])
+    .padding(0)
+    .width(Length::Fixed(TOGGLE_W))
     .style(browser_utility_action_style)
     .into()
 }
 
-fn tree_leaf_marker() -> Element<'static, Message> {
-    container(
-        icons::icon(icons::DOT)
-            .size(TREE_ICON_SIZE)
-            .color(th::text_muted()),
-    )
-    .padding([4, 3])
-    .into()
-}
-
-fn catalog_state_marker(state: &str) -> Element<'static, Message> {
+fn catalog_state_marker(state: &str) -> Option<Element<'static, Message>> {
     let (icon, color) = match state {
         "INDEXING" | "UPDATING" => (icons::REFRESH_CW, th::text_muted()),
         "STALE" | "WATCH ERR" | "WARN" => (icons::TRIANGLE_ALERT, th::danger()),
-        _ => (icons::DOT, th::text_muted()),
+        _ => return None,
     };
-    icons::icon(icon).size(TREE_ICON_SIZE).color(color).into()
+    Some(icons::icon(icon).size(TREE_ICON_SIZE).color(color).into())
+}
+
+/// One row of the places list: `indent` in, a disclosure chevron when it
+/// has children, its icon and name, a pill while `selected`, and anything
+/// trailing at its end. `lit` lights the icon of the place being browsed.
+struct PlaceRow<'a> {
+    indent: f32,
+    toggle: Option<Element<'a, Message>>,
+    icon: char,
+    label: String,
+    selected: bool,
+    lit: bool,
+    on_press: Message,
+    trailing: Vec<Element<'a, Message>>,
+}
+
+impl<'a> PlaceRow<'a> {
+    fn new(icon: char, label: impl Into<String>, on_press: Message) -> Self {
+        Self {
+            indent: 0.0,
+            toggle: None,
+            icon,
+            label: label.into(),
+            selected: false,
+            lit: false,
+            on_press,
+            trailing: Vec::new(),
+        }
+    }
+
+    fn view(self) -> Element<'a, Message> {
+        let selected = self.selected;
+        let icon_color = if selected || self.lit {
+            th::accent()
+        } else {
+            th::text_dim()
+        };
+        let mut content = row![
+            icons::icon(self.icon)
+                .size(PLACE_ICON_SIZE)
+                .color(icon_color),
+            text(self.label)
+                .size(PLACE_LABEL_SIZE)
+                .font(iced::Font {
+                    weight: if selected {
+                        iced::font::Weight::Semibold
+                    } else {
+                        iced::font::Weight::Medium
+                    },
+                    ..iced::Font::DEFAULT
+                })
+                .color(th::text())
+                .width(Length::Fill)
+                .wrapping(iced::widget::text::Wrapping::None),
+        ]
+        .spacing(7)
+        .align_y(iced::Alignment::Center);
+        for trailing in self.trailing {
+            content = content.push(trailing);
+        }
+        let pill = button(container(content).center_y(PLACE_ROW_H))
+            .on_press(self.on_press)
+            .padding([0, 7])
+            .width(Length::Fill)
+            .style(move |_theme: &Theme, status| browser_place_button_style(selected, status));
+        row![
+            Space::with_width(self.indent),
+            self.toggle
+                .unwrap_or_else(|| Space::with_width(TOGGLE_W).into()),
+            pill
+        ]
+        .spacing(2)
+        .align_y(iced::Alignment::Center)
+        .into()
+    }
+}
+
+/// A quiet row at the foot of the places list, such as Add root.
+fn place_action<'a>(
+    icon: char,
+    label: &'static str,
+    message: Option<Message>,
+) -> Element<'a, Message> {
+    button(
+        row![
+            icons::icon(icon)
+                .size(PLACE_ICON_SIZE)
+                .color(th::text_muted()),
+            text(label).size(PLACE_LABEL_SIZE).color(th::text_dim())
+        ]
+        .spacing(7)
+        .align_y(iced::Alignment::Center),
+    )
+    .on_press_maybe(message)
+    .padding(iced::Padding {
+        top: 5.0,
+        right: 7.0,
+        bottom: 5.0,
+        left: 7.0 + TOGGLE_W + 2.0,
+    })
+    .width(Length::Fill)
+    .style(|_theme: &Theme, status| browser_place_button_style(false, status))
+    .into()
 }
 
 impl App {
     pub(super) fn view_browser_places(&self) -> Element<'_, Message> {
         let local_active = self.state.browser.mode == SampleBrowserMode::Local;
         let remote_active = self.state.browser.mode == SampleBrowserMode::Remote;
-        let place_button = |label: &'static str, active: bool, mode| {
-            button(
-                row![
-                    place_mode_marker(active),
-                    text(label)
-                        .size(11)
-                        .color(if active { th::text() } else { th::text_dim() })
-                ]
-                .spacing(7)
-                .align_y(iced::Alignment::Center),
-            )
-            .on_press(Message::Browser(BrowserMsg::SetSampleBrowserMode(mode)))
-            .padding([6, 7])
-            .width(Length::Fill)
-            .style(move |_theme: &Theme, status| browser_place_button_style(active, status))
-        };
 
         let mut places = column![
-            text("PLACES").size(9).color(th::text_muted()),
-            place_button("Local", local_active, SampleBrowserMode::Local),
+            browser_caption("PLACES"),
+            PlaceRow {
+                lit: local_active,
+                ..PlaceRow::new(
+                    icons::HARD_DRIVE,
+                    "Local",
+                    Message::Browser(BrowserMsg::SetSampleBrowserMode(SampleBrowserMode::Local)),
+                )
+            }
+            .view(),
+            PlaceRow {
+                indent: BROWSER_TREE_INDENT_STEP,
+                selected: local_active && self.state.browser.current_folder.is_none(),
+                ..PlaceRow::new(
+                    icons::LAYERS,
+                    "All Roots",
+                    Message::Browser(BrowserMsg::SelectLocalFolder(None)),
+                )
+            }
+            .view(),
         ]
-        .spacing(3);
-
-        let all_active = local_active && self.state.browser.current_folder.is_none();
-        let all_roots = button(text("All Roots").size(10).color(if all_active {
-            th::accent()
-        } else {
-            th::text_dim()
-        }))
-        .on_press(Message::Browser(BrowserMsg::SelectLocalFolder(None)))
-        .padding([4, 8])
-        .width(Length::Fill)
-        .style(move |_theme: &Theme, status| browser_place_button_style(all_active, status));
-        places = places.push(row![
-            horizontal_space().width(Length::Fixed(14.0)),
-            all_roots
-        ]);
+        .spacing(1);
 
         let mut local_tree_rows = Vec::new();
         for root in &self.state.browser.roots {
@@ -126,42 +198,39 @@ impl App {
                 .file_name()
                 .map(|name| name.to_string_lossy().into_owned())
                 .unwrap_or_else(|| root.display().to_string());
-            let toggle: Element<'_, Message> = if has_children {
-                tree_toggle(
-                    expanded,
-                    Message::Browser(BrowserMsg::ToggleLocalFolder(root.clone())),
-                )
-            } else {
-                tree_leaf_marker()
-            };
-            let root_button = button(
-                text(label)
-                    .size(10)
-                    .color(if active { th::accent() } else { th::text_dim() })
-                    .wrapping(iced::widget::text::Wrapping::None),
-            )
-            .on_press(Message::Browser(BrowserMsg::SelectLocalFolder(Some(
-                root.clone(),
-            ))))
-            .padding([4, 2])
-            .width(Length::Fill)
-            .style(move |_theme: &Theme, status| browser_place_button_style(active, status));
-            let remove = button(icons::icon(icons::X).size(8).color(th::text_muted()))
+            let remove = button(icons::icon(icons::X).size(9).color(th::text_muted()))
                 .on_press(Message::Browser(BrowserMsg::RemoveSampleLibraryRoot(
                     root.clone(),
                 )))
-                .padding([4, 2])
+                .padding([2, 2])
                 .style(browser_utility_action_style);
-            let root_state = self.state.browser.root_catalog_label(root);
-            let state_marker = catalog_state_marker(root_state);
+            let mut trailing: Vec<Element<'_, Message>> = Vec::new();
+            if let Some(marker) = catalog_state_marker(self.state.browser.root_catalog_label(root))
+            {
+                trailing.push(marker);
+            }
+            trailing.push(remove.into());
             local_tree_rows.push(
-                row![toggle, root_button, state_marker, remove]
-                    .spacing(1)
-                    .align_y(iced::Alignment::Center)
-                    .into(),
+                PlaceRow {
+                    indent: BROWSER_TREE_INDENT_STEP,
+                    toggle: has_children.then(|| {
+                        tree_toggle(
+                            expanded,
+                            Message::Browser(BrowserMsg::ToggleLocalFolder(root.clone())),
+                        )
+                    }),
+                    selected: active,
+                    trailing,
+                    ..PlaceRow::new(
+                        icons::FOLDER,
+                        label,
+                        Message::Browser(BrowserMsg::SelectLocalFolder(Some(root.clone()))),
+                    )
+                }
+                .view(),
             );
             if expanded {
-                self.render_local_places_tree(root, root, 1, &mut local_tree_rows);
+                self.render_local_places_tree(root, root, 2, &mut local_tree_rows);
             }
         }
         for local_row in local_tree_rows {
@@ -169,71 +238,41 @@ impl App {
         }
 
         let remote = &self.state.browser.remote;
-        let remote_toggle = tree_toggle(
-            remote.place_expanded,
-            Message::Browser(BrowserMsg::ToggleRemotePlace),
-        );
-        let remote_select = button(
-            row![
-                container(text("")).width(Length::Fixed(1.0)),
-                text("Remote")
-                    .size(10)
-                    .color(if remote_active {
-                        th::accent()
-                    } else {
-                        th::text_dim()
-                    })
-                    .wrapping(iced::widget::text::Wrapping::None)
-            ]
-            .spacing(6)
-            .align_y(iced::Alignment::Center),
-        )
-        .on_press(Message::Browser(BrowserMsg::SetSampleBrowserMode(
-            SampleBrowserMode::Remote,
-        )))
-        .padding([4, 2])
-        .width(Length::Fill)
-        .style(move |_theme: &Theme, status| browser_place_button_style(remote_active, status));
         places = places.push(
-            row![remote_toggle, remote_select]
-                .spacing(1)
-                .align_y(iced::Alignment::Center),
+            PlaceRow {
+                toggle: Some(tree_toggle(
+                    remote.place_expanded,
+                    Message::Browser(BrowserMsg::ToggleRemotePlace),
+                )),
+                lit: remote_active,
+                ..PlaceRow::new(
+                    icons::CLOUD,
+                    "Remote",
+                    Message::Browser(BrowserMsg::SetSampleBrowserMode(SampleBrowserMode::Remote)),
+                )
+            }
+            .view(),
         );
         if remote.place_expanded {
-            let connection_active = remote_active && remote.current_path.is_empty();
-            let connection_toggle = tree_toggle(
-                remote.connection_expanded,
-                Message::Browser(BrowserMsg::ToggleRemoteConnection),
-            );
-            let connection = button(
-                text(remote.catalog.connection_name.as_str())
-                    .size(10)
-                    .color(if connection_active {
-                        th::accent()
-                    } else {
-                        th::text_dim()
-                    })
-                    .wrapping(iced::widget::text::Wrapping::None),
-            )
-            .on_press(Message::Browser(BrowserMsg::SelectRemoteFolder(
-                String::new(),
-            )))
-            .padding([4, 2])
-            .width(Length::Fill)
-            .style(move |_theme: &Theme, status| {
-                browser_place_button_style(connection_active, status)
-            });
             places = places.push(
-                row![
-                    horizontal_space().width(Length::Fixed(REMOTE_CONNECTION_INDENT)),
-                    connection_toggle,
-                    connection,
-                    text(remote.catalog_state.label())
+                PlaceRow {
+                    indent: REMOTE_CONNECTION_INDENT,
+                    toggle: Some(tree_toggle(
+                        remote.connection_expanded,
+                        Message::Browser(BrowserMsg::ToggleRemoteConnection),
+                    )),
+                    selected: remote_active && remote.current_path.is_empty(),
+                    trailing: vec![text(remote.catalog_state.label())
                         .size(8)
                         .color(th::text_muted())
-                ]
-                .spacing(2)
-                .align_y(iced::Alignment::Center),
+                        .into()],
+                    ..PlaceRow::new(
+                        icons::CLOUD,
+                        remote.catalog.connection_name.as_str(),
+                        Message::Browser(BrowserMsg::SelectRemoteFolder(String::new())),
+                    )
+                }
+                .view(),
             );
             if remote.connection_expanded {
                 let mut remote_rows = Vec::new();
@@ -244,42 +283,31 @@ impl App {
             }
         }
 
-        let add = button(
-            row![
-                icons::icon(icons::PLUS).size(10).color(th::text_muted()),
-                text("ADD ROOT").size(9).color(th::text_dim())
-            ]
-            .spacing(5)
-            .align_y(iced::Alignment::Center),
-        )
-        .on_press(Message::AddSampleLibraryRoot)
-        .padding([4, 5])
-        .width(Length::Fill)
-        .style(browser_utility_action_style);
-        let mut rescan = button(
-            row![
-                icons::icon(icons::REPEAT).size(10).color(th::text_muted()),
-                text("RESCAN").size(9).color(th::text_dim())
-            ]
-            .spacing(5)
-            .align_y(iced::Alignment::Center),
-        )
-        .padding([4, 5])
-        .width(Length::Fill)
-        .style(browser_utility_action_style);
-        if !self.state.browser.roots.is_empty() && !self.state.browser.scan_in_progress {
-            rescan = rescan.on_press(Message::RescanSampleLibrary);
-        }
+        let rescan = (!self.state.browser.roots.is_empty() && !self.state.browser.scan_in_progress)
+            .then_some(Message::RescanSampleLibrary);
         places = places.push(
-            column![add, rescan]
-                .spacing(4)
-                .padding([8, 0])
-                .align_x(iced::Alignment::Start),
+            column![
+                place_action(icons::PLUS, "Add root", Some(Message::AddSampleLibraryRoot)),
+                place_action(icons::REFRESH_CW, "Rescan", rescan),
+            ]
+            .spacing(1)
+            .padding(iced::Padding {
+                top: 8.0,
+                ..Default::default()
+            }),
         );
 
         container(
-            scrollable(container(places.padding(9)).width(Length::Fill))
-                .direction(scrollable::Direction::Vertical(browser_vertical_scrollbar())),
+            scrollable(
+                container(places.padding(iced::Padding {
+                    top: 0.0,
+                    right: 8.0,
+                    bottom: 8.0,
+                    left: 0.0,
+                }))
+                .width(Length::Fill),
+            )
+            .direction(scrollable::Direction::Vertical(browser_vertical_scrollbar())),
         )
         .width(Length::Fill)
         .height(Length::Fill)
@@ -314,36 +342,23 @@ impl App {
                 self.state.browser.folders.iter().any(|child| {
                     child.root_path == root && child.path.parent() == Some(&folder.path)
                 });
-            let toggle: Element<'a, Message> = if has_children {
-                tree_toggle(
-                    expanded,
-                    Message::Browser(BrowserMsg::ToggleLocalFolder(folder.path.clone())),
-                )
-            } else {
-                tree_leaf_marker()
-            };
-            let select = button(
-                text(folder.name.clone())
-                    .size(9)
-                    .color(if active { th::accent() } else { th::text_dim() })
-                    .height(Length::Fixed(12.0))
-                    .wrapping(iced::widget::text::Wrapping::None),
-            )
-            .on_press(Message::Browser(BrowserMsg::SelectLocalFolder(Some(
-                folder.path.clone(),
-            ))))
-            .padding([3, 1])
-            .width(Length::Fill)
-            .style(move |_theme: &Theme, status| browser_place_button_style(active, status));
             rows.push(
-                row![
-                    horizontal_space().width(Length::Fixed((depth as f32 * 8.0).min(40.0))),
-                    toggle,
-                    select
-                ]
-                .spacing(1)
-                .align_y(iced::Alignment::Center)
-                .into(),
+                PlaceRow {
+                    indent: (depth as f32).min(BROWSER_TREE_MAX_DEPTH) * BROWSER_TREE_INDENT_STEP,
+                    toggle: has_children.then(|| {
+                        tree_toggle(
+                            expanded,
+                            Message::Browser(BrowserMsg::ToggleLocalFolder(folder.path.clone())),
+                        )
+                    }),
+                    selected: active,
+                    ..PlaceRow::new(
+                        icons::FOLDER,
+                        folder.name.clone(),
+                        Message::Browser(BrowserMsg::SelectLocalFolder(Some(folder.path.clone()))),
+                    )
+                }
+                .view(),
             );
             if expanded {
                 self.render_local_places_tree(root, &folder.path, depth + 1, rows);
@@ -375,38 +390,27 @@ impl App {
                 .catalog_child_indices(&folder.provider_item_id)
                 .iter()
                 .any(|&child| remote.catalog.entries[child].is_folder);
-            let toggle: Element<'a, Message> = if has_children {
-                tree_toggle(
-                    expanded,
-                    Message::Browser(BrowserMsg::ToggleRemoteFolder(
-                        folder.provider_item_id.clone(),
-                    )),
-                )
-            } else {
-                tree_leaf_marker()
-            };
-            let select = button(
-                text(folder.name.clone())
-                    .size(9)
-                    .color(if active { th::accent() } else { th::text_dim() })
-                    .height(Length::Fixed(12.0))
-                    .wrapping(iced::widget::text::Wrapping::None),
-            )
-            .on_press(Message::Browser(BrowserMsg::SelectRemoteFolder(
-                folder.provider_item_id.clone(),
-            )))
-            .padding([3, 1])
-            .width(Length::Fill)
-            .style(move |_theme: &Theme, status| browser_place_button_style(active, status));
             rows.push(
-                row![
-                    horizontal_space().width(Length::Fixed(remote_places_indent(depth))),
-                    toggle,
-                    select
-                ]
-                .spacing(1)
-                .align_y(iced::Alignment::Center)
-                .into(),
+                PlaceRow {
+                    indent: remote_places_indent(depth),
+                    toggle: has_children.then(|| {
+                        tree_toggle(
+                            expanded,
+                            Message::Browser(BrowserMsg::ToggleRemoteFolder(
+                                folder.provider_item_id.clone(),
+                            )),
+                        )
+                    }),
+                    selected: active,
+                    ..PlaceRow::new(
+                        icons::FOLDER,
+                        folder.name.clone(),
+                        Message::Browser(BrowserMsg::SelectRemoteFolder(
+                            folder.provider_item_id.clone(),
+                        )),
+                    )
+                }
+                .view(),
             );
             if expanded {
                 self.render_remote_places_tree(&folder.provider_item_id, depth + 1, rows);
