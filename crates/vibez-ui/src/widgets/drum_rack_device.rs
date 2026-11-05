@@ -81,8 +81,8 @@ const FULL_PAD_MIN_H: f32 = 16.0;
 const PAD_MIN_H: f32 = 14.0;
 /// Below this a pad drops its bezel gap and sets its name smaller.
 const TINY_PAD_H: f32 = 18.0;
-/// The Sampler's preset row over its sample line.
-const SAMPLER_MIN_H: f32 = 28.0 + 1.0 + 24.0;
+/// The Sampler's sample line.
+const SAMPLER_MIN_H: f32 = 24.0;
 /// The short card's line of tabs, kit and banks.
 const SHORT_HEADER_H: f32 = 26.0;
 const SHORT_PAD_V: f32 = 4.0;
@@ -185,7 +185,8 @@ pub fn arrange(size: Size) -> Layout {
         rail: false,
         short: true,
         rows,
-        sampler: size,
+        // The tabs row the pads' short header shares sits over the Sampler.
+        sampler: Size::new(size.width, (size.height - SHORT_HEADER_H - 1.0).max(0.0)),
     }
 }
 
@@ -193,17 +194,6 @@ pub fn arrange(size: Size) -> Layout {
 fn pad_tabs_width() -> f32 {
     let measure = |label| text_width(label, LABEL_SIZE + 1.0, iced::Font::DEFAULT);
     measure("Pads") + measure("Sampler") + 14.0
-}
-
-/// The width the selected pad's preset bar gets.
-pub fn preset_bar_width(layout: Layout) -> f32 {
-    let bar = crate::widgets::sampler_device::preset_bar_width(layout.sampler);
-    if layout.short {
-        // The tabs share the short card's preset row.
-        bar - pad_tabs_width() - 10.0
-    } else {
-        bar
-    }
 }
 
 /// One pad: its name, which scrolls while hovered when too long to show,
@@ -513,10 +503,10 @@ impl<'a> DrumRackView<'a> {
         )
     }
 
-    pub fn view(self, preset_bar: Element<'a, Message>, size: Size) -> Element<'a, Message> {
+    pub fn view(self, size: Size) -> Element<'a, Message> {
         let layout = arrange(size);
         if layout.short {
-            return self.short(preset_bar, layout);
+            return self.short(layout);
         }
         if layout.side_by_side {
             return row![
@@ -525,7 +515,7 @@ impl<'a> DrumRackView<'a> {
                     .width(layout.grid_w + PAD * 2.0)
                     .height(Length::Fill),
                 vertical_rule(),
-                self.editor(preset_bar, layout),
+                self.editor(layout),
             ]
             .height(Length::Fill)
             .into();
@@ -535,7 +525,7 @@ impl<'a> DrumRackView<'a> {
             .height(TABS_H)
             .align_y(Alignment::Center);
         let shown = if self.panel.pad_sampler {
-            self.editor(preset_bar, layout)
+            self.editor(layout)
         } else {
             container(self.pads(layout))
                 .padding(PAD)
@@ -548,14 +538,15 @@ impl<'a> DrumRackView<'a> {
     }
 
     /// The short card: the tabs, kit and banks on one line over the pads,
-    /// or the tabs in the selected pad's preset row over its Sampler.
-    fn short(self, preset_bar: Element<'a, Message>, layout: Layout) -> Element<'a, Message> {
+    /// or the tabs over the selected pad's Sampler.
+    fn short(self, layout: Layout) -> Element<'a, Message> {
         if self.panel.pad_sampler {
             let pad = &self.pads[self.selected];
-            let preset_row = row![self.pad_tabs(), preset_bar]
-                .spacing(10)
+            let tabs = container(self.pad_tabs())
+                .padding([0.0, PAD])
+                .height(SHORT_HEADER_H)
                 .align_y(Alignment::Center);
-            return SamplerView {
+            let sampler = SamplerView {
                 track_id: self.track_id,
                 device: self.device,
                 load: Message::LoadDrumRackPadSample(self.track_id, self.selected),
@@ -565,7 +556,8 @@ impl<'a> DrumRackView<'a> {
                 panel: self.panel.clone(),
                 entry: self.entry,
             }
-            .view(preset_row.into(), layout.sampler);
+            .view(layout.sampler);
+            return column![tabs, rule(), sampler].height(Length::Fill).into();
         }
         let banks_w = BANK_W * DRUM_RACK_BANK_COUNT as f32 + GAP * 3.0;
         let kit_w = (layout.grid_w - pad_tabs_width() - banks_w - 20.0).clamp(150.0, 300.0);
@@ -826,7 +818,7 @@ impl<'a> DrumRackView<'a> {
             .into()
     }
 
-    fn editor(self, preset_bar: Element<'a, Message>, layout: Layout) -> Element<'a, Message> {
+    fn editor(self, layout: Layout) -> Element<'a, Message> {
         let pad = &self.pads[self.selected];
         let track_id = self.track_id;
         let pad_index = self.selected;
@@ -933,7 +925,7 @@ impl<'a> DrumRackView<'a> {
             panel: self.panel.clone(),
             entry: self.entry,
         }
-        .view(preset_bar, layout.sampler);
+        .view(layout.sampler);
         column![strip, rule(), sampler]
             .width(layout.sampler.width)
             .height(Length::Fill)
@@ -1007,8 +999,8 @@ mod tests {
     const MINIMUM_BODY_H: f32 = 68.0;
     /// A pad still showing a name.
     const USABLE_PAD_H: f32 = 14.0;
-    /// The Sampler's preset row over its sample line.
-    const USABLE_SAMPLER_H: f32 = 28.0 + 1.0 + 24.0;
+    /// The Sampler's sample line.
+    const USABLE_SAMPLER_H: f32 = 24.0;
 
     #[test]
     fn every_panel_height_keeps_usable_pads_and_sampler() {

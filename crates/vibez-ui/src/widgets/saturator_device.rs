@@ -19,13 +19,12 @@ use crate::message::Message;
 use crate::state::UiEffect;
 use crate::theme as th;
 use crate::widgets::device_controls::{
-    disclosure, heading, plot_band, rule, segmented, tabs, vertical_rule, Param, LABEL_SIZE,
+    heading, plot_band, rule, segmented, tabs, vertical_rule, Param, LABEL_SIZE,
 };
 use crate::widgets::device_layout::{stack, Stack, KNOB_ROW_H, LINE_H};
 use crate::widgets::saturator_display::{SpectrumPlot, TransferPlot};
 
 const PAD: f32 = 10.0;
-const PRESET_ROW_H: f32 = 28.0;
 const KNOB: f32 = 32.0;
 const TABS_H: f32 = 22.0;
 /// A plot under its tabs, the axis labels dropped below 60 px.
@@ -74,10 +73,6 @@ pub const WIDTHS: crate::widgets::device_chrome::CardWidths =
         expanded: FULL_W,
         max: MAX_W,
     };
-
-pub fn preset_bar_width(size: Size) -> f32 {
-    size.width - PAD * 2.0 - 90.0
-}
 
 /// The controls column beside the plots, narrower on a narrow card.
 fn controls_width(width: f32) -> f32 {
@@ -199,7 +194,7 @@ pub fn arrange(size: Size, advanced: bool) -> Arrangement {
     } else {
         Tier::Compact
     };
-    let below = (size.height - PRESET_ROW_H - 1.0).max(0.0);
+    let below = size.height.max(0.0);
     match tier {
         Tier::Full => {
             let open = stack(below, None, PLOT_MIN_H);
@@ -302,26 +297,18 @@ impl<'a> SaturatorView<'a> {
         self.choice(index) >= 1
     }
 
-    pub fn view(self, preset_bar: Element<'a, Message>, size: Size) -> Element<'a, Message> {
+    /// The card header's Advanced switch.
+    pub fn advanced_switch(&self) -> crate::widgets::device_chrome::Action {
+        crate::widgets::device_chrome::advanced(
+            self.panel.advanced,
+            Message::Card(CardMsg::ToggleAdvanced(self.effect.id)),
+            self.accent(),
+        )
+    }
+
+    pub fn view(self, size: Size) -> Element<'a, Message> {
         let layout = arrange(size, self.panel.advanced);
-        let top = row![
-            preset_bar,
-            Space::with_width(Length::Fill),
-            disclosure(
-                self.panel.advanced,
-                Message::Card(CardMsg::ToggleAdvanced(self.effect.id)),
-                self.accent(),
-            )
-        ]
-        .spacing(6)
-        .align_y(Alignment::Center);
-        let mut body = column![
-            container(top)
-                .padding([0.0, PAD])
-                .height(PRESET_ROW_H)
-                .align_y(Alignment::Center),
-            rule(),
-        ];
+        let mut body = column![];
         if layout.advanced_only {
             let height = layout.advanced.unwrap_or(0.0);
             body = body.push(self.advanced_row(layout, height, size.width));
@@ -857,11 +844,11 @@ mod tests {
     const MINIMUM_BELOW: f32 = 35.0;
 
     fn size(width: f32, below: f32) -> Size {
-        Size::new(width, below + PRESET_ROW_H + 1.0)
+        Size::new(width, below)
     }
 
     fn used(layout: Arrangement) -> f32 {
-        let mut used = PRESET_ROW_H + 1.0;
+        let mut used = 0.0;
         if layout.advanced_only {
             return used + layout.advanced.unwrap();
         }
@@ -888,7 +875,7 @@ mod tests {
     #[test]
     fn every_supported_size_fits_without_scrolling() {
         for width in [COMPACT_W, MEDIUM_W, FULL_W, MAX_W] {
-            let lowest = (MINIMUM_BELOW + PRESET_ROW_H + 1.0) as usize;
+            let lowest = (MINIMUM_BELOW) as usize;
             for height in (lowest..=460).step_by(2).map(|height| height as f32) {
                 for advanced in [false, true] {
                     let layout = arrange(Size::new(width, height), advanced);
@@ -942,7 +929,7 @@ mod tests {
     #[test]
     fn every_control_has_a_place_at_every_size() {
         for width in [COMPACT_W, 460.0, MEDIUM_W, FULL_W, MAX_W] {
-            let lowest = (MINIMUM_BELOW + PRESET_ROW_H + 1.0) as usize;
+            let lowest = (MINIMUM_BELOW) as usize;
             for height in (lowest..=460).step_by(2).map(|height| height as f32) {
                 let closed = arrange(Size::new(width, height), false);
                 let open = arrange(Size::new(width, height), true);

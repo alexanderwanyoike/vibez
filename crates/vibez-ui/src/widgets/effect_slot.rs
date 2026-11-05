@@ -1,13 +1,13 @@
 //! Shared native and plugin effect header, latency display and device body.
 
-use iced::widget::{button, column, container, row, text, Space};
-use iced::{Color, Element, Length, Theme};
+use iced::widget::{container, row, Space};
+use iced::{Color, Element, Length};
 
 use crate::icons;
 use crate::message::Message;
 use crate::state::UiEffect;
 use crate::theme as th;
-use crate::widgets::control_style;
+use crate::widgets::device_chrome::{shell, Action, Header};
 use crate::widgets::effect_knob::{param_column, EffectKnobWidget};
 use vibez_core::id::TrackId;
 use vibez_plugin_host::gui::PluginGuiKey;
@@ -20,6 +20,10 @@ pub struct DeviceBody<'a> {
     pub content: Element<'a, Message>,
     pub width: f32,
     pub padding: iced::Padding,
+    /// The device's preset controls, built for the width the header spares.
+    pub preset: Option<Box<dyn FnOnce(f32) -> Element<'a, Message> + 'a>>,
+    /// The device's Advanced switch, carried in the header.
+    pub advanced: Option<Action>,
 }
 
 /// Width of an effect card, including its sidechain column when present.
@@ -54,41 +58,10 @@ pub fn view_effect_slot<'a>(
     let has_gui = effect.has_plugin_gui;
     let is_plugin = effect.plugin_name.is_some();
 
-    let dot_color = if is_bypassed {
-        th::text_muted()
-    } else {
-        track_color
-    };
-
-    // ── Title bar: [●] Name …          [On] [▲] [▼] [×] ──
-    let dot = button(text("\u{25CF}").size(9).color(dot_color))
-        .on_press(Message::toggle_effect_bypass(track_id, effect.id))
-        .padding([2, 3])
-        .style(move |_theme: &Theme, status| {
-            let bg = match status {
-                button::Status::Hovered => Some(th::bg_hover().into()),
-                _ => None,
-            };
-            button::Style {
-                background: bg,
-                text_color: dot_color,
-                border: iced::Border {
-                    radius: 2.0.into(),
-                    ..Default::default()
-                },
-                ..Default::default()
-            }
-        });
-
     let display_name = effect
         .plugin_name
         .as_deref()
         .unwrap_or_else(|| effect.effect_type.name());
-    let name_color = if is_bypassed {
-        th::text_dim()
-    } else {
-        th::text()
-    };
 
     // A fixed width: a Fill title strip inside a shrink column collapses
     // the card chrome in iced.
@@ -98,63 +71,49 @@ pub fn view_effect_slot<'a>(
         custom_body.as_ref().map(|body| body.width),
         sidechain.is_some(),
     );
-    let name_section = crate::widgets::device_chrome::title_name(
-        display_name,
-        name_color,
-        title_w - TITLE_CONTROLS_W,
+    let latency =
+        crate::domains::device_latency::latency_label(effect.latency_samples, sample_rate);
+    let mut header = Header::new(display_name, track_color, latency.clone()).power(
+        !is_bypassed,
+        Message::toggle_effect_bypass(track_id, effect.id),
     );
-
-    let bypass_label = if is_bypassed { "Off" } else { "On" };
-    let make_bypass = move || {
-        button(text(bypass_label).size(9))
-            .on_press(Message::toggle_effect_bypass(track_id, effect.id))
-            .padding([2, 5])
-            .style(control_style::style((!is_bypassed).then(th::success)))
+    let (custom_body, advanced) = match custom_body {
+        Some(DeviceBody {
+            content,
+            padding,
+            preset,
+            advanced,
+            ..
+        }) => {
+            header.preset = preset;
+            (Some((content, padding)), advanced)
+        }
+        None => (None, None),
     };
-
-    let make_move_up = || -> Element<'a, Message> {
-        crate::widgets::device_chrome::icon_button(
+    if let Some(advanced) = advanced {
+        header = header.action(advanced);
+    }
+    let header = header
+        .action(Action::new(
             icons::CHEVRON_UP,
-            th::text_dim(),
-            th::text(),
+            "Move earlier",
             Message::move_effect_up(track_id, effect.id),
-        )
-        .into()
-    };
-    let make_move_down = || -> Element<'a, Message> {
-        crate::widgets::device_chrome::icon_button(
+        ))
+        .action(Action::new(
             icons::CHEVRON_DOWN,
-            th::text_dim(),
-            th::text(),
+            "Move later",
             Message::move_effect_down(track_id, effect.id),
-        )
-        .into()
-    };
-    let remove: Element<'a, Message> = crate::widgets::device_chrome::icon_button(
-        icons::X,
-        th::text_dim(),
-        th::danger(),
-        Message::remove_effect(track_id, effect.id),
-    )
-    .into();
-
-    let title_row = row![
-        dot,
-        name_section,
-        make_bypass(),
-        make_move_up(),
-        make_move_down(),
-        remove
-    ]
-    .spacing(3)
-    .align_y(iced::Alignment::Center);
-
-    let title_bar = crate::widgets::device_chrome::title_bar(title_row);
+        ))
+        .action(Action::new(
+            icons::X,
+            "Remove device",
+            Message::remove_effect(track_id, effect.id),
+        ));
 
     // ── Body ─────────────────────────────────────────────────
-    let body: Element<'a, Message> = if let Some(custom) = custom_body {
-        container(custom.content)
-            .padding(custom.padding)
+    let body: Element<'a, Message> = if let Some((content, padding)) = custom_body {
+        container(content)
+            .padding(padding)
             .height(Length::Fill)
             .clip(true)
             .into()
@@ -197,6 +156,7 @@ pub fn view_effect_slot<'a>(
                 .plugin_ref
                 .as_ref()
                 .map(|device| device.format.as_str()),
+            latency,
             has_gui.then_some(PluginGuiKey::Effect {
                 track_id,
                 effect_id: effect.id,
@@ -208,33 +168,16 @@ pub fn view_effect_slot<'a>(
             .into()
     };
 
-    // ── Card ─────────────────────────────────────────────────
     // Routing reads left to right: what keys the device, then the device.
-    let (body, card_w): (Element<'a, Message>, f32) = match sidechain {
-        Some(sidechain) => (
-            row![
-                sidechain,
-                crate::widgets::device_chrome::divider(),
-                container(body).width(Length::Fixed(card_w))
-            ]
-            .height(Length::Fill)
-            .into(),
-            title_w,
-        ),
-        None => (body, card_w),
+    let body: Element<'a, Message> = match sidechain {
+        Some(sidechain) => row![
+            sidechain,
+            crate::widgets::device_chrome::divider(),
+            container(body).width(Length::Fixed(card_w))
+        ]
+        .height(Length::Fill)
+        .into(),
+        None => body,
     };
-    let latency =
-        crate::domains::device_latency::latency_label(effect.latency_samples, sample_rate);
-    let card = column![
-        title_bar,
-        container(text(latency).size(9).color(th::text_dim())).padding([2, 6]),
-        body
-    ]
-    .width(Length::Fixed(card_w))
-    .height(Length::Fill);
-
-    crate::widgets::device_chrome::card(card)
+    shell(header, body, title_w)
 }
-
-/// Width taken by the bypass dot, On, move and remove controls in a title bar.
-const TITLE_CONTROLS_W: f32 = 128.0;

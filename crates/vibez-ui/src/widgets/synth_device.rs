@@ -23,7 +23,6 @@ use crate::widgets::device_layout::{KNOB_ROW_H, LINE_H};
 use crate::widgets::synth_display::{EnvelopePlot, FilterPlot, LfoPlot, WavePlot};
 
 const PAD: f32 = 10.0;
-const PRESET_ROW_H: f32 = 28.0;
 const TABS_H: f32 = 24.0;
 /// A section's name and its choice, above its plot.
 const HEADER_H: f32 = 26.0;
@@ -49,10 +48,6 @@ pub const WIDTHS: crate::widgets::device_chrome::CardWidths =
         expanded: FULL_W,
         max: MAX_W,
     };
-
-pub fn preset_bar_width(size: Size) -> f32 {
-    size.width - PAD * 2.0
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tier {
@@ -90,7 +85,7 @@ pub struct Layout {
 
 pub fn arrange(size: Size) -> Layout {
     let tier = Tier::for_width(size.width);
-    let below = (size.height - PRESET_ROW_H - 1.0).max(0.0);
+    let below = size.height.max(0.0);
     let tabs_h = if tier == Tier::Full {
         0.0
     } else {
@@ -171,15 +166,9 @@ impl<'a> SynthView<'a> {
         self.device.value(index).round().max(0.0) as usize
     }
 
-    pub fn view(self, preset_bar: Element<'a, Message>, size: Size) -> Element<'a, Message> {
+    pub fn view(self, size: Size) -> Element<'a, Message> {
         let layout = arrange(size);
-        let mut body = column![
-            container(preset_bar)
-                .padding([0.0, PAD])
-                .height(PRESET_ROW_H)
-                .align_y(Alignment::Center),
-            rule(),
-        ];
+        let mut body = column![];
         if layout.tabs {
             let track_id = self.track_id;
             let pages: Vec<(SynthPage, &str)> = SynthPage::ALL
@@ -524,7 +513,7 @@ mod tests {
             for height in (56..=480).step_by(2).map(|height| height as f32) {
                 let layout = arrange(Size::new(width, height));
                 let context = format!("{width}x{height}: {layout:?}");
-                let mut used = PRESET_ROW_H + 1.0 + layout.shared;
+                let mut used = layout.shared;
                 if layout.tabs {
                     used += TABS_H + 1.0;
                 }
