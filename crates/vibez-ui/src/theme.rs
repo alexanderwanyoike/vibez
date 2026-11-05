@@ -562,15 +562,17 @@ impl Oklch {
     }
 }
 
+/// An sRGB channel in linear light.
+fn linear(v: f32) -> f32 {
+    if v <= 0.04045 {
+        v / 12.92
+    } else {
+        ((v + 0.055) / 1.055).powf(2.4)
+    }
+}
+
 /// WCAG 2 relative luminance of an sRGB colour, ignoring alpha.
 pub(crate) fn relative_luminance(c: Color) -> f32 {
-    let linear = |v: f32| {
-        if v <= 0.04045 {
-            v / 12.92
-        } else {
-            ((v + 0.055) / 1.055).powf(2.4)
-        }
-    };
     0.2126 * linear(c.r) + 0.7152 * linear(c.g) + 0.0722 * linear(c.b)
 }
 
