@@ -190,7 +190,6 @@ pub fn view_track_header<'a>(
     } = recording;
     let track_color = th::track_color(track.color_index);
 
-    // Row 1: name and kind, then the quiet actions
     let name_color = if track.mute {
         th::text_dim()
     } else {
