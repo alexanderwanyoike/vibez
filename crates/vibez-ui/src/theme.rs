@@ -414,6 +414,18 @@ pub enum ColourStrength {
     Soft,
 }
 
+impl ColourStrength {
+    /// A theme's track colour at this strength.
+    pub fn track(self, authored: Color) -> Color {
+        authored
+    }
+
+    /// A theme's clip style at this strength.
+    pub fn clip_style(self, authored: ClipStyle) -> ClipStyle {
+        authored
+    }
+}
+
 static STRENGTH: RwLock<ColourStrength> = RwLock::new(ColourStrength::Vivid);
 
 /// Swap the colour strength; the next frame repaints everything.
@@ -489,7 +501,7 @@ accessors! {
 }
 
 pub fn clip_style() -> ClipStyle {
-    CURRENT.read().unwrap().clip_style
+    colour_strength().clip_style(CURRENT.read().unwrap().clip_style)
 }
 
 pub fn lane_style() -> LaneStyle {
@@ -600,7 +612,7 @@ pub fn perform_grid_line() -> Color {
 /// Get a track color by index (wraps around).
 pub fn track_color(index: u8) -> Color {
     let palette = CURRENT.read().unwrap();
-    palette.track_colors[index as usize % palette.track_colors.len()]
+    colour_strength().track(palette.track_colors[index as usize % palette.track_colors.len()])
 }
 
 /// Darken a color by a factor (for borders, etc.)
@@ -685,6 +697,73 @@ mod tests {
         let palette: ThemePalette = serde_json::from_value(json).unwrap();
 
         assert_eq!(palette.lane_style, LaneStyle::DARK);
+    }
+
+    fn saturation_and_lightness(c: Color) -> (f32, f32) {
+        let max = c.r.max(c.g).max(c.b);
+        let min = c.r.min(c.g).min(c.b);
+        let lightness = (max + min) / 2.0;
+        let chroma = max - min;
+        let saturation = if chroma == 0.0 {
+            0.0
+        } else {
+            chroma / (1.0 - (2.0 * lightness - 1.0).abs())
+        };
+        (saturation, lightness)
+    }
+
+    fn default_track_colours() -> Vec<Color> {
+        ["Charcoal", "Porcelain"]
+            .into_iter()
+            .flat_map(|name| crate::themes::builtin_by_name(name).unwrap().track_colors)
+            .collect()
+    }
+
+    #[test]
+    fn vivid_shows_track_colours_as_the_theme_authored_them() {
+        for color in default_track_colours() {
+            assert_eq!(ColourStrength::Vivid.track(color), color);
+        }
+    }
+
+    #[test]
+    fn medium_and_soft_desaturate_track_colours_keeping_their_lightness() {
+        for color in default_track_colours() {
+            let [soft, medium, vivid] = [
+                ColourStrength::Soft,
+                ColourStrength::Medium,
+                ColourStrength::Vivid,
+            ]
+            .map(|strength| saturation_and_lightness(strength.track(color)));
+
+            assert!(
+                soft.0 < medium.0 && medium.0 < vivid.0,
+                "{color:?}: soft {soft:?} medium {medium:?} vivid {vivid:?}"
+            );
+            for (saturation, lightness) in [soft, medium] {
+                assert!(saturation > 0.0, "{color:?} keeps some colour");
+                assert!((lightness - vivid.1).abs() < 0.01, "{color:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn medium_shows_the_authored_clip_style_and_vivid_bodies_are_the_most_solid() {
+        for authored in [ClipStyle::DARK, ClipStyle::LIGHT] {
+            let [soft, medium, vivid] = [
+                ColourStrength::Soft,
+                ColourStrength::Medium,
+                ColourStrength::Vivid,
+            ]
+            .map(|strength| strength.clip_style(authored));
+
+            assert_eq!(medium, authored);
+            assert!(soft.body_opacity < medium.body_opacity);
+            assert!(medium.body_opacity < vivid.body_opacity);
+            assert!(vivid.body_toward_lane < medium.body_toward_lane);
+            assert!(medium.body_toward_lane < soft.body_toward_lane);
+            assert_eq!((soft.ink, vivid.ink), (authored.ink, authored.ink));
+        }
     }
 
     #[test]
