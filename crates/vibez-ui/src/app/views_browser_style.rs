@@ -319,6 +319,16 @@ mod browser_table_tests {
     }
 
     #[test]
+    fn the_search_field_is_a_rounded_fill_edged_by_a_hairline_until_focused() {
+        let idle = browser_search_style(&Theme::Dark, text_input::Status::Active);
+        assert!(idle.border.radius.top_left >= 6.0);
+        assert_eq!(idle.border.color, th::hairline(th::bg_surface()));
+        let focused = browser_search_style(&Theme::Dark, text_input::Status::Focused);
+        assert_eq!(focused.border.color, th::accent());
+        assert_eq!(focused.background, idle.background);
+    }
+
+    #[test]
     fn selected_result_metadata_uses_the_selected_foreground() {
         assert_eq!(browser_result_cell_color(true), th::text());
         assert_eq!(browser_result_cell_color(false), th::text_dim());
