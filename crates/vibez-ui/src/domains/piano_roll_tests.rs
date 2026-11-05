@@ -564,6 +564,29 @@ fn midi_loop_region_must_be_ordered_and_may_reach_past_the_clip() {
 }
 
 #[test]
+fn a_midi_loop_cannot_reach_a_billion_beats() {
+    let (mut tracks, track_id, clip_id) = midi_track_with_clip();
+    let mut piano_roll = PianoRollState::default();
+    let mut engine = RecordingEngine::default();
+
+    piano_roll.update(
+        PianoRollMsg::SetNoteClipLoopRegion {
+            track_id,
+            clip_id,
+            loop_start_beats: 0.0,
+            loop_end_beats: 1.0e9,
+        },
+        &mut engine,
+        &mut tracks,
+        PianoRollCtx::default(),
+    );
+
+    let clip = &tracks.get(track_id).unwrap().note_clips[0];
+    assert!(clip.loop_end_beats < 1.0e9);
+    assert!(engine.0.is_empty());
+}
+
+#[test]
 fn groove_grid_updates_the_clip_and_live_engine_source() {
     let (mut tracks, tid, cid) = midi_track_with_clip();
     let mut piano_roll = PianoRollState::default();
