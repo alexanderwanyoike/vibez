@@ -222,6 +222,21 @@ fn a_shaky_click_on_an_off_grid_note_body_leaves_it_alone() {
 }
 
 #[test]
+fn a_note_click_that_wobbles_by_exactly_the_slop_stays_a_click_as_on_the_lanes() {
+    let original = vec![note(60, 0.1, 0.93)];
+    let mut editor = Editor::new(original.clone(), HashSet::new());
+    let body = editor.at(0.5, 60);
+    let end = Point::new(editor.at(1.03, 60).x - 1.0, body.y);
+    let slop = crate::widgets::drag_phase::CLICK_SLOP_PX;
+
+    editor.drag(body, &[Point::new(body.x + slop, body.y + slop)]);
+    editor.drag(end, &[Point::new(end.x + slop, end.y)]);
+
+    assert_eq!(editor.notes(), original);
+    assert!(editor.history.undo.is_empty());
+}
+
+#[test]
 fn note_drags_that_stay_in_their_grid_cell_leave_no_undo_step() {
     let original = vec![note(60, 1.0, 1.0)];
     let mut editor = Editor::new(original.clone(), HashSet::new());
