@@ -53,6 +53,7 @@ impl EngineCommand {
                 | Self::EndContentRebuild
                 | Self::MoveNoteClip { .. }
                 | Self::SetNoteClipDuration { .. }
+                | Self::SetNoteClipBounds { .. }
                 | Self::SetNoteClipGrooveGrid { .. }
                 | Self::SetNoteClipLoop { .. }
                 | Self::SetNoteClipStartMarker { .. }

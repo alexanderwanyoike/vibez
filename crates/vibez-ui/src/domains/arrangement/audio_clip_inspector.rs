@@ -305,15 +305,7 @@ impl TimelineEditorState {
                 {
                     clip.reset_loop_region_to_clip();
                 }
-                engine.send(EngineCommand::SetClipBounds {
-                    track_id,
-                    clip_id,
-                    source_offset: clip.source_offset,
-                    start_marker: clip.start_marker,
-                    duration: clip.duration,
-                    loop_start: clip.loop_start,
-                    loop_end: clip.loop_end,
-                });
+                engine.send(clip.bounds_command(track_id));
                 engine.send(EngineCommand::SetClipFades {
                     track_id,
                     clip_id,

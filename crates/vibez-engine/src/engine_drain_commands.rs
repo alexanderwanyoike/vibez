@@ -703,6 +703,21 @@ impl AudioEngine {
                 clip_id,
                 duration_beats,
             } => self.command_set_note_clip_duration(track_id, clip_id, duration_beats),
+            EngineCommand::SetNoteClipBounds {
+                track_id,
+                clip_id,
+                duration_beats,
+                start_marker_beats,
+                loop_start_beats,
+                loop_end_beats,
+            } => self.command_set_note_clip_bounds(
+                track_id,
+                clip_id,
+                duration_beats,
+                start_marker_beats,
+                loop_start_beats,
+                loop_end_beats,
+            ),
             EngineCommand::SetNoteClipGrooveGrid {
                 track_id,
                 clip_id,

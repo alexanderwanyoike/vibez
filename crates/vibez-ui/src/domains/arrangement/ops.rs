@@ -483,7 +483,6 @@ impl TimelineEditorState {
                     }
                 }
                 ArrangementSelection::NoteClip { track_id, clip_id } => {
-                    let mut sync = None;
                     if let Some(clip) = self
                         .find_content_mut(track_id)
                         .and_then(|t| t.note_clips.iter_mut().find(|c| c.id == clip_id))
@@ -493,16 +492,12 @@ impl TimelineEditorState {
                         if clip.loop_enabled {
                             clip.clamp_loop_to_duration();
                         }
-                        sync = Some(clip.clone());
+                        engine.send(clip.bounds_command(track_id));
                         max_end = Some(
                             max_end
                                 .unwrap_or(0.0)
                                 .max(clip.position_beats + clip.duration_beats),
                         );
-                    }
-                    if let Some(clip) = sync {
-                        engine.send(EngineCommand::RemoveNoteClip(track_id, clip_id));
-                        engine.send(clip.add_command(track_id));
                     }
                 }
             }

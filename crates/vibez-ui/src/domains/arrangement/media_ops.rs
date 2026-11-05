@@ -217,19 +217,20 @@ impl TimelineEditorState {
     ) -> ArrangementAction {
         let mut action = ArrangementAction::default();
         self.unlink_crossfades_for_clip(engine, track_id, clip_id);
-        let mut sync_data = None;
         let mut clip_end_beat = None;
         if let Some(track) = self.find_content_mut(track_id) {
             if let Some(clip) = track.clips.iter_mut().find(|clip| clip.id == clip_id) {
                 let old_mapping_end = clip.warp_timeline_end();
                 let new_mapping_end = new_duration
                     .min((clip.audio.num_frames() as u64).saturating_sub(clip.source_offset));
-                clip.warp_markers = clip.warp_markers.resized_timeline(
+                let warp_markers = clip.warp_markers.resized_timeline(
                     old_mapping_end,
                     new_mapping_end,
                     clip.source_offset,
                     clip.audio.num_frames() as u64,
                 );
+                let warp_changed = warp_markers != clip.warp_markers;
+                clip.warp_markers = warp_markers;
                 clip.duration = new_duration;
                 clip.clamp_fades_to_clip();
                 clip.clamp_start_to_source();
@@ -239,55 +240,15 @@ impl TimelineEditorState {
                 clip.transient_markers
                     .retain_source_range(clip.source_offset, clip.source_end());
                 clip_end_beat = Some((clip.position + clip.duration) as f64 / ctx.samples_per_beat);
-                sync_data = Some((
-                    Arc::clone(&clip.audio),
-                    clip.position,
-                    clip.source_offset,
-                    clip.start_marker,
-                    clip.duration,
-                    clip.loop_enabled,
-                    clip.loop_start,
-                    clip.loop_end,
-                    clip.gain_db.linear(),
-                    clip.fades,
-                    clip.playback_direction,
-                    clip.warp_markers.clone(),
-                ));
+                engine.send(clip.bounds_command(track_id));
+                if warp_changed {
+                    engine.send(EngineCommand::SetClipWarpMarkers {
+                        track_id,
+                        clip_id,
+                        warp_markers: clip.warp_markers.clone(),
+                    });
+                }
             }
-        }
-        if let Some((
-            audio,
-            position,
-            source_offset,
-            start_marker,
-            duration,
-            loop_enabled,
-            loop_start,
-            loop_end,
-            linear_gain,
-            fades,
-            playback_direction,
-            warp_markers,
-        )) = sync_data
-        {
-            engine.send(EngineCommand::RemoveClip(track_id, clip_id));
-            engine.send(EngineCommand::AddClip {
-                insertion: vibez_engine::clip_insertion::PreparedClipInsertion::new(),
-                track_id,
-                clip_id,
-                audio,
-                position,
-                source_offset,
-                start_marker,
-                duration,
-                loop_enabled,
-                loop_start,
-                loop_end,
-                linear_gain,
-                fades,
-                playback_direction,
-                warp_markers,
-            });
         }
         action.scroll_to_beat = clip_end_beat;
         self.drag_resize_active = true;

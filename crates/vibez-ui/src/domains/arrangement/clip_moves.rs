@@ -1,7 +1,5 @@
 //! Moving Arrangement clips in time and between Project Track lanes.
 
-use std::sync::Arc;
-
 use vibez_core::id::{ClipId, TrackId};
 use vibez_engine::commands::EngineCommand;
 
@@ -74,7 +72,10 @@ impl TimelineEditorState {
                 // Remove from engine source track
                 engine.send(EngineCommand::RemoveNoteClip(source_track, clip_id));
                 // Add to engine target track
-                engine.send(clip.add_command(target_track));
+                let resident = self
+                    .find_content(target_track)
+                    .map_or(0, |track| track.note_clips.len());
+                engine.send(clip.add_command_beside(target_track, resident));
                 // Add to UI target track
                 if let Some(track) = self.find_content_mut(target_track) {
                     track.note_clips.push(clip);
@@ -103,23 +104,10 @@ impl TimelineEditorState {
                 // Remove from engine source track
                 engine.send(EngineCommand::RemoveClip(source_track, clip_id));
                 // Add to engine target track
-                engine.send(EngineCommand::AddClip {
-                    insertion: vibez_engine::clip_insertion::PreparedClipInsertion::new(),
-                    track_id: target_track,
-                    clip_id,
-                    audio: Arc::clone(&clip.audio),
-                    position: clip.position,
-                    source_offset: clip.source_offset,
-                    start_marker: clip.start_marker,
-                    duration: clip.duration,
-                    loop_enabled: clip.loop_enabled,
-                    loop_start: clip.loop_start,
-                    loop_end: clip.loop_end,
-                    linear_gain: clip.gain_db.linear(),
-                    fades: clip.fades,
-                    playback_direction: clip.playback_direction,
-                    warp_markers: clip.warp_markers.clone(),
-                });
+                let resident = self
+                    .find_content(target_track)
+                    .map_or(0, |track| track.clips.len());
+                engine.send(clip.add_command_beside(target_track, resident));
                 // Add to UI target track
                 if let Some(track) = self.find_content_mut(target_track) {
                     track.clips.push(clip);

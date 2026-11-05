@@ -541,6 +541,12 @@ The engine lives on the cpal audio callback. Its rules:
   Capture commands, and waits for those.
 - A note clip is sent as one prepared insertion that carries all its notes;
   `AddNote` is for single edits.
+- A clip drag is heard as it moves, so each drag step is an in-place edit of
+  the resident clip (`MoveClip`, `SetClipBounds`, `MoveNoteClip`,
+  `SetNoteClipBounds`) and never re-adds it. A cross-lane drop re-inserts the
+  clip with storage for the target lane's clips, so it lands in the next
+  callback. While the main ring is full, a waiting edit of the same kind and
+  clip is overwritten instead of queued, so only the latest position waits.
 - Arrange playback stops on its own only when the playhead reaches the song
   end; a playhead already past it keeps going. Undo and Capture wrap the
   content they re-add in `BeginContentRebuild`/`EndContentRebuild`, and the

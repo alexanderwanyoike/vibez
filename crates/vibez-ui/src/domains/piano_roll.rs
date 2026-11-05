@@ -610,7 +610,6 @@ impl PianoRollState {
                 clip_id,
                 new_duration_beats,
             } => {
-                let mut sync_data = None;
                 let mut clip_end_beat = None;
                 if let Some(track) = find_track_mut(tracks, track_id) {
                     if let Some(clip) = track.note_clips.iter_mut().find(|c| c.id == clip_id) {
@@ -627,13 +626,8 @@ impl PianoRollState {
                         }
 
                         clip_end_beat = Some(clip.position_beats + clip.duration_beats);
-                        sync_data = Some(clip.clone());
+                        engine.send(clip.bounds_command(track_id));
                     }
-                }
-                // Sync to engine via Remove+Add+re-add-notes (loop state included atomically)
-                if let Some(clip) = sync_data {
-                    engine.send(EngineCommand::RemoveNoteClip(track_id, clip_id));
-                    engine.send(clip.add_command(track_id));
                 }
                 if let Some(end_beat) = clip_end_beat {
                     action.scroll_to_beat = Some(end_beat);

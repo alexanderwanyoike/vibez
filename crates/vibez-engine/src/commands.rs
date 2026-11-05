@@ -299,6 +299,16 @@ pub enum EngineCommand {
         clip_id: ClipId,
         duration_beats: f64,
     },
+    /// Commit a note clip's length, start and loop bounds without re-adding
+    /// it or its notes.
+    SetNoteClipBounds {
+        track_id: TrackId,
+        clip_id: ClipId,
+        duration_beats: f64,
+        start_marker_beats: f64,
+        loop_start_beats: f64,
+        loop_end_beats: f64,
+    },
     SetNoteClipGrooveGrid {
         track_id: TrackId,
         clip_id: ClipId,
@@ -482,6 +492,31 @@ pub enum EngineCommand {
 }
 
 impl EngineCommand {
+    /// Clip position and bounds edits, keyed by kind and clip. Each kind
+    /// writes fields no other kind writes, so waiting ones may be reordered
+    /// among themselves and a newer edit with the same key makes an older one
+    /// redundant.
+    pub fn clip_geometry_key(&self) -> Option<(std::mem::Discriminant<Self>, TrackId, ClipId)> {
+        match self {
+            Self::MoveClip {
+                track_id, clip_id, ..
+            }
+            | Self::SetClipBounds {
+                track_id, clip_id, ..
+            }
+            | Self::SetClipWarpMarkers {
+                track_id, clip_id, ..
+            }
+            | Self::MoveNoteClip {
+                track_id, clip_id, ..
+            }
+            | Self::SetNoteClipBounds {
+                track_id, clip_id, ..
+            } => Some((std::mem::discriminant(self), *track_id, *clip_id)),
+            _ => None,
+        }
+    }
+
     /// Resolve names and destroy unused media metadata on the sending thread.
     pub fn set_drum_rack_pad_state(
         track_id: TrackId,

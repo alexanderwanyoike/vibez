@@ -681,3 +681,44 @@ fn public_note_edit_boundaries_release_voices_and_preserve_audio_across_callback
         assert!(output.iter().all(|sample| *sample == 0.0));
     }
 }
+
+#[test]
+fn note_clip_bounds_change_in_place_keeping_its_notes_without_callback_allocation() {
+    let (mut engine, mut commands, _events, track, clip) =
+        public_note_fixture(&[held_note(0.5, 1.0), held_note(6.0, 1.0)], 8.0);
+    let resident_notes = engine.tracks()[0].playback_source.note_clips[0]
+        .notes
+        .as_ptr();
+    commands
+        .push(EngineCommand::SetNoteClipBounds {
+            track_id: track,
+            clip_id: clip,
+            duration_beats: 4.0,
+            start_marker_beats: 0.25,
+            loop_start_beats: 0.5,
+            loop_end_beats: 3.5,
+        })
+        .unwrap();
+    let measured = crate::retirement::tests::allocations(|| {
+        engine.process_block(AudioProcessBlock::new(&mut [], 2));
+    });
+    assert_eq!(measured, (0, 0));
+    let resized = &engine.tracks()[0].playback_source.note_clips[0];
+    assert_eq!(resized.notes.as_ptr(), resident_notes);
+    assert_eq!(
+        (
+            resized.duration_beats,
+            resized.start_marker_beats,
+            resized.loop_start_beats,
+            resized.loop_end_beats,
+        ),
+        (4.0, 0.25, 0.5, 3.5)
+    );
+
+    begin_note_replay(&mut engine, &mut commands);
+    let mut replayed = [0.0; 768 * 2];
+    render_note_blocks(&mut engine, &mut replayed, 96);
+    let unit = replayed[24 * 2];
+    assert!(unit > 0.01);
+    assert_note_intervals("shortened clip", &replayed, unit, &[(24, 120)]);
+}
