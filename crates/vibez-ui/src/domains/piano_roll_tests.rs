@@ -443,6 +443,40 @@ fn halving_and_regrowing_a_looped_clip_keeps_its_loop() {
 }
 
 #[test]
+fn turning_a_midi_loop_off_and_on_keeps_a_loop_reaching_past_the_clip() {
+    let (mut tracks, tid, cid) = midi_track_with_clip();
+    let clip = &mut tracks.get_mut(tid).unwrap().note_clips[0];
+    clip.loop_enabled = true;
+    clip.loop_start_beats = 4.0;
+    clip.loop_end_beats = 8.0;
+    clip.start_marker_beats = 6.0;
+    let mut piano_roll = PianoRollState::default();
+    let mut engine = RecordingEngine::default();
+
+    for _ in 0..2 {
+        piano_roll.update(
+            PianoRollMsg::ToggleNoteClipLoop(tid, cid),
+            &mut engine,
+            &mut tracks,
+            PianoRollCtx::default(),
+        );
+    }
+
+    let clip = &tracks.get(tid).unwrap().note_clips[0];
+    assert!(clip.loop_enabled);
+    assert_eq!((clip.loop_start_beats, clip.loop_end_beats), (4.0, 8.0));
+    assert!(matches!(
+        engine.0.last(),
+        Some(EngineCommand::SetNoteClipLoop {
+            enabled: true,
+            loop_start_beats: 4.0,
+            loop_end_beats: 8.0,
+            ..
+        })
+    ));
+}
+
+#[test]
 fn start_marker_moves_without_changing_the_midi_loop_region() {
     let (mut tracks, track_id, clip_id) = midi_track_with_clip();
     let clip = &mut tracks.get_mut(track_id).unwrap().note_clips[0];
