@@ -40,6 +40,14 @@ fn darken(c: Color, f: f32) -> Color {
     }
 }
 
+const fn rgbf(r: f32, g: f32, b: f32) -> Color {
+    Color { r, g, b, a: 1.0 }
+}
+
+const fn rgbaf(r: f32, g: f32, b: f32, a: f32) -> Color {
+    Color { r, g, b, a }
+}
+
 fn alpha(c: Color, a: f32) -> Color {
     Color { a, ..c }
 }
@@ -74,7 +82,7 @@ const EQ_CONSOLE: [Color; 4] = [
 ];
 
 /// The default track rainbow (Charcoal's).
-pub(crate) const TRACKS_CLASSIC: [Color; 8] = [
+const TRACKS_CLASSIC: [Color; 8] = [
     rgb8(224, 96, 96),
     rgb8(224, 144, 64),
     rgb8(208, 192, 64),
@@ -158,6 +166,58 @@ struct Seed {
     text: Color,
     tracks: [Color; 8],
     eq: [Color; 4],
+}
+
+/// The founding vibez look: dark charcoal, orange accent.
+pub(crate) fn charcoal() -> ThemePalette {
+    ThemePalette {
+        name: "Charcoal".to_string(),
+        bg_dark: rgbf(0.102, 0.102, 0.102),
+        bg_surface: rgbf(0.141, 0.141, 0.141),
+        bg_elevated: rgbf(0.176, 0.176, 0.176),
+        bg_hover: rgbf(0.212, 0.212, 0.212),
+        text: rgbf(0.878, 0.878, 0.878),
+        text_dim: rgbf(0.58, 0.58, 0.58),
+        text_muted: rgbf(0.46, 0.46, 0.46),
+        accent: rgbf(1.0, 0.549, 0.0),
+        accent_dim: rgbf(0.600, 0.329, 0.0),
+        border: rgbf(0.227, 0.227, 0.227),
+        border_light: rgbf(0.290, 0.290, 0.290),
+        divider: rgbf(0.165, 0.165, 0.165),
+        success: rgbf(0.290, 0.871, 0.502),
+        danger: rgbf(0.973, 0.443, 0.443),
+        playhead: rgbaf(1.0, 1.0, 1.0, 0.8),
+        meter_green: rgbf(0.290, 0.871, 0.502),
+        meter_yellow: rgbf(1.0, 0.843, 0.0),
+        meter_red: rgbf(0.973, 0.443, 0.443),
+        display_bg: rgbf(0.07, 0.07, 0.07),
+        knob_arc: rgbf(0.533, 0.533, 0.533),
+        knob_body: rgbf(0.12, 0.12, 0.12),
+        knob_body_engaged: rgbf(0.16, 0.16, 0.16),
+        knob_track: rgbf(0.30, 0.30, 0.30),
+        fader_handle: rgbf(0.533, 0.533, 0.533),
+        track_colors: TRACKS_CLASSIC,
+        eq_lf: rgbf(0.65, 0.46, 0.28),
+        eq_lmf: rgbf(0.36, 0.48, 0.72),
+        eq_hmf: rgbf(0.33, 0.62, 0.38),
+        eq_hf: rgbf(0.76, 0.33, 0.30),
+        clip_body: rgbaf(0.300, 0.480, 0.900, 0.6),
+        clip_border: rgbaf(0.380, 0.565, 1.0, 0.9),
+        waveform: rgbaf(0.380, 0.565, 1.0, 0.6),
+        ruler_line: rgbaf(0.227, 0.227, 0.227, 0.5),
+        grid_bar: rgbf(0.376, 0.376, 0.376),
+        grid_beat: rgbf(0.251, 0.251, 0.251),
+        grid_sub: rgbf(0.216, 0.216, 0.216),
+        piano_white_row: rgbf(0.145, 0.145, 0.145),
+        piano_black_row: rgbf(0.110, 0.110, 0.110),
+        piano_octave_line: rgbf(0.227, 0.227, 0.227),
+        piano_grid: rgbf(0.165, 0.165, 0.165),
+        piano_white_key: rgbf(0.784, 0.784, 0.784),
+        piano_black_key: rgbf(0.102, 0.102, 0.102),
+        piano_key_label: rgbf(0.35, 0.35, 0.35),
+        clip_style: ClipStyle::DARK,
+        lane_style: LaneStyle::DARK,
+    }
 }
 
 /// Fill the dim and muted text tiers by stepping `mix` away from the text
@@ -300,7 +360,7 @@ fn light(seed: Seed) -> ThemePalette {
 
 /// All built-in themes, default first.
 pub fn builtins() -> Vec<ThemePalette> {
-    let mut themes = vec![ThemePalette::charcoal()];
+    let mut themes = vec![charcoal()];
     themes.extend([
         dark(Seed {
             name: "Obsidian",
@@ -792,7 +852,7 @@ mod tests {
         // Redirect the service to a temp dir via direct file ops:
         // save_user_theme always writes to the real config dir, so
         // exercise the same serialize/parse path manually here.
-        let mut palette = ThemePalette::charcoal();
+        let mut palette = charcoal();
         palette.name = "Test Custom".to_string();
         let json = serde_json::to_string_pretty(&palette).unwrap();
         let path = dir.path().join("test-custom.vzt");

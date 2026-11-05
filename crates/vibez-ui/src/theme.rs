@@ -308,68 +308,6 @@ mod hex_array {
     }
 }
 
-const fn rgb(r: f32, g: f32, b: f32) -> Color {
-    Color { r, g, b, a: 1.0 }
-}
-
-const fn rgba(r: f32, g: f32, b: f32, a: f32) -> Color {
-    Color { r, g, b, a }
-}
-
-impl ThemePalette {
-    /// The founding vibez look: dark charcoal, orange accent.
-    pub fn charcoal() -> Self {
-        Self {
-            name: "Charcoal".to_string(),
-            bg_dark: rgb(0.102, 0.102, 0.102),
-            bg_surface: rgb(0.141, 0.141, 0.141),
-            bg_elevated: rgb(0.176, 0.176, 0.176),
-            bg_hover: rgb(0.212, 0.212, 0.212),
-            text: rgb(0.878, 0.878, 0.878),
-            text_dim: rgb(0.58, 0.58, 0.58),
-            text_muted: rgb(0.46, 0.46, 0.46),
-            accent: rgb(1.0, 0.549, 0.0),
-            accent_dim: rgb(0.600, 0.329, 0.0),
-            border: rgb(0.227, 0.227, 0.227),
-            border_light: rgb(0.290, 0.290, 0.290),
-            divider: rgb(0.165, 0.165, 0.165),
-            success: rgb(0.290, 0.871, 0.502),
-            danger: rgb(0.973, 0.443, 0.443),
-            playhead: rgba(1.0, 1.0, 1.0, 0.8),
-            meter_green: rgb(0.290, 0.871, 0.502),
-            meter_yellow: rgb(1.0, 0.843, 0.0),
-            meter_red: rgb(0.973, 0.443, 0.443),
-            display_bg: rgb(0.07, 0.07, 0.07),
-            knob_arc: rgb(0.533, 0.533, 0.533),
-            knob_body: rgb(0.12, 0.12, 0.12),
-            knob_body_engaged: rgb(0.16, 0.16, 0.16),
-            knob_track: rgb(0.30, 0.30, 0.30),
-            fader_handle: rgb(0.533, 0.533, 0.533),
-            track_colors: crate::themes::TRACKS_CLASSIC,
-            eq_lf: rgb(0.65, 0.46, 0.28),
-            eq_lmf: rgb(0.36, 0.48, 0.72),
-            eq_hmf: rgb(0.33, 0.62, 0.38),
-            eq_hf: rgb(0.76, 0.33, 0.30),
-            clip_body: rgba(0.300, 0.480, 0.900, 0.6),
-            clip_border: rgba(0.380, 0.565, 1.0, 0.9),
-            waveform: rgba(0.380, 0.565, 1.0, 0.6),
-            ruler_line: rgba(0.227, 0.227, 0.227, 0.5),
-            grid_bar: rgb(0.376, 0.376, 0.376),
-            grid_beat: rgb(0.251, 0.251, 0.251),
-            grid_sub: rgb(0.216, 0.216, 0.216),
-            piano_white_row: rgb(0.145, 0.145, 0.145),
-            piano_black_row: rgb(0.110, 0.110, 0.110),
-            piano_octave_line: rgb(0.227, 0.227, 0.227),
-            piano_grid: rgb(0.165, 0.165, 0.165),
-            piano_white_key: rgb(0.784, 0.784, 0.784),
-            piano_black_key: rgb(0.102, 0.102, 0.102),
-            piano_key_label: rgb(0.35, 0.35, 0.35),
-            clip_style: ClipStyle::DARK,
-            lane_style: LaneStyle::DARK,
-        }
-    }
-}
-
 impl ThemePalette {
     /// Background of the timeline lanes behind clips.
     pub fn lane(&self) -> Color {
@@ -390,12 +328,12 @@ impl ThemePalette {
 
 impl Default for ThemePalette {
     fn default() -> Self {
-        Self::charcoal()
+        crate::themes::charcoal()
     }
 }
 
 static CURRENT: LazyLock<RwLock<ThemePalette>> =
-    LazyLock::new(|| RwLock::new(ThemePalette::charcoal()));
+    LazyLock::new(|| RwLock::new(crate::themes::charcoal()));
 
 static EPOCH: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
@@ -835,6 +773,14 @@ pub fn vibez_theme() -> Theme {
 mod tests {
     use super::*;
 
+    const fn rgb(r: f32, g: f32, b: f32) -> Color {
+        Color { r, g, b, a: 1.0 }
+    }
+
+    const fn rgba(r: f32, g: f32, b: f32, a: f32) -> Color {
+        Color { r, g, b, a }
+    }
+
     #[test]
     fn hex_roundtrip() {
         for c in [
@@ -854,7 +800,7 @@ mod tests {
 
     #[test]
     fn palette_serializes_as_vzt_json_and_loads_back() {
-        let p = ThemePalette::charcoal();
+        let p = crate::themes::charcoal();
         let json = serde_json::to_string_pretty(&p).unwrap();
         assert!(json.contains("\"accent\": \"#ff8c00\""));
         let back: ThemePalette = serde_json::from_str(&json).unwrap();
@@ -865,7 +811,7 @@ mod tests {
 
     #[test]
     fn a_theme_file_without_clip_style_loads_with_the_dark_style() {
-        let mut json = serde_json::to_value(ThemePalette::charcoal()).unwrap();
+        let mut json = serde_json::to_value(crate::themes::charcoal()).unwrap();
         json.as_object_mut().unwrap().remove("clip_style");
 
         let palette: ThemePalette = serde_json::from_value(json).unwrap();
@@ -875,7 +821,7 @@ mod tests {
 
     #[test]
     fn a_theme_file_without_lane_style_loads_with_the_dark_style() {
-        let mut json = serde_json::to_value(ThemePalette::charcoal()).unwrap();
+        let mut json = serde_json::to_value(crate::themes::charcoal()).unwrap();
         json.as_object_mut().unwrap().remove("lane_style");
 
         let palette: ThemePalette = serde_json::from_value(json).unwrap();
