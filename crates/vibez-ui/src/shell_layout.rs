@@ -5,6 +5,9 @@
 /// them.
 pub const PANE_GAP: f32 = 7.0;
 
+/// Height of the status bar along the bottom of the window.
+pub const STATUS_HEIGHT: f32 = 24.0;
+
 /// A region's left edge and width, in window pixels.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Span {
@@ -20,4 +23,16 @@ pub fn workspace_span(window_width: f32, browser_width: Option<f32>) -> Span {
         left,
         width: (window_width - left).max(0.0),
     }
+}
+
+/// The Browser width a drag on its gap asks for with the pointer at
+/// `cursor_x`.
+pub fn browser_width_at(cursor_x: f32) -> f32 {
+    cursor_x
+}
+
+/// The detail panel height a drag on its gap asks for with the pointer at
+/// `cursor_y` in a window `window_height` tall.
+pub fn detail_height_at(cursor_y: f32, window_height: f32) -> f32 {
+    window_height - cursor_y - STATUS_HEIGHT
 }

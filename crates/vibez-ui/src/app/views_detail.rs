@@ -30,7 +30,6 @@ const APP_CHROME_AND_WORKSPACE_MIN_HEIGHT: f32 = 580.0;
 // the detail panel. Preserve that 35% composition when a saved drag height is
 // larger than the current window can comfortably show.
 const DETAIL_PANEL_MAX_WINDOW_FRACTION: f32 = 0.35;
-const STATUS_BAR_HEIGHT: f32 = 24.0;
 
 pub(super) fn resolved_detail_playhead_samples(
     editing_perform: bool,
@@ -384,7 +383,7 @@ impl App {
 
     pub(super) fn detail_panel_drag_height(&self, cursor_y: f32) -> f32 {
         effective_detail_panel_height(
-            self.state.view.window_height - cursor_y - STATUS_BAR_HEIGHT,
+            crate::shell_layout::detail_height_at(cursor_y, self.state.view.window_height),
             self.state.view.window_height,
             self.detail_editor_preferred_height(),
         )

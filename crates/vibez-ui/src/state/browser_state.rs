@@ -631,7 +631,8 @@ impl BrowserState {
     /// applied by [`Self::effective_dock_width`], so the handle keeps
     /// tracking the cursor instead of freezing at the yield point.
     pub fn dock_drag_width(&self, cursor_x: f32, window_width: f32) -> f32 {
-        cursor_x.min(window_width - ARRANGE_MIN_WIDTH_WITH_BROWSER)
+        crate::shell_layout::browser_width_at(cursor_x)
+            .min(window_width - ARRANGE_MIN_WIDTH_WITH_BROWSER)
     }
 
     pub fn effective_dock_width(&self, window_width: f32) -> f32 {
