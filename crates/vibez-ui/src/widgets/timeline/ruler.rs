@@ -79,6 +79,15 @@ impl RulerWidget {
         self.geometry().pixels_per_beat()
     }
 
+    /// `free` bypasses all snapping, as holding Alt does.
+    fn snap_context(&self, free: bool) -> SnapContext {
+        SnapContext {
+            grid: self.grid,
+            pixels_per_beat: self.pixels_per_beat(),
+            free,
+        }
+    }
+
     /// Where the number strip starts, below the loop strip if there is one.
     pub(super) fn numbers_top(&self) -> f32 {
         if self.loop_brace {
@@ -206,11 +215,7 @@ impl canvas::Program<Message> for RulerWidget {
                             phase: DragPhase::Pending,
                             ..
                         } => {
-                            let context = SnapContext {
-                                grid: self.grid,
-                                pixels_per_beat: self.pixels_per_beat(),
-                                free: state.alt_held,
-                            };
+                            let context = self.snap_context(state.alt_held);
                             let beat = self.snap_targets.click(beat, context).beat;
                             Some(Message::Transport(TransportMsg::SeekToBeat(beat)))
                         }
