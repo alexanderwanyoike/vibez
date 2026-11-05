@@ -34,8 +34,8 @@ impl MidiNote {
     }
 }
 
-/// The furthest beat a note Clip's content reaches, 4096 bars, so a loop
-/// dragged or loaded past the clip's end stays finite.
+/// The furthest beat a note Clip's content reaches, 4096 bars, so a loop or
+/// start marker placed past the clip's end stays finite.
 pub const NOTE_CONTENT_END_BEATS: f64 = 16_384.0;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -71,7 +71,7 @@ impl NoteClipInfo {
             self.duration_beats,
             self.loop_enabled,
         )
-        .clamp_start(start, 0.0, self.duration_beats)
+        .clamp_start(start, 0.0, NOTE_CONTENT_END_BEATS)
     }
 }
 
@@ -243,6 +243,24 @@ mod tests {
         assert_eq!(loaded.groove_grid, GrooveGrid::Off);
         assert_eq!(loaded.start_marker_beats, None);
         assert_eq!(loaded.resolved_start_marker_beats(), 0.0);
+    }
+
+    #[test]
+    fn resolved_start_marker_may_sit_past_an_unlooped_clips_length() {
+        let clip = NoteClipInfo {
+            id: ClipId::new(),
+            track_id: TrackId::new(),
+            name: "Trimmed".into(),
+            position_beats: 6.0,
+            duration_beats: 2.0,
+            notes: Vec::new(),
+            start_marker_beats: Some(6.0),
+            loop_enabled: false,
+            loop_start_beats: 0.0,
+            loop_end_beats: 8.0,
+            groove_grid: GrooveGrid::Off,
+        };
+        assert_eq!(clip.resolved_start_marker_beats(), 6.0);
     }
 
     #[test]

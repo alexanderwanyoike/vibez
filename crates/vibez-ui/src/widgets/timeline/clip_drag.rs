@@ -6,6 +6,13 @@ use vibez_core::id::ClipId;
 
 use super::fade_drag::{CrossfadeCurveDrag, FadeClipDrag, FadeCurveDrag};
 
+/// The edge of a Clip a resize drag holds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClipEdge {
+    Start,
+    End,
+}
+
 #[derive(Debug, Clone)]
 pub enum ClipDragAction {
     MoveClip {
@@ -26,9 +33,10 @@ pub enum ClipDragAction {
     },
     ResizeClip {
         undo_gesture: UndoGestureId,
-        clip_id: ClipId,
-        is_note_clip: bool,
-        clip_start_beat: f64,
+        anchor: ArrangementSelection,
+        edge: ClipEdge,
+        /// The Clip's other edge, which stays put.
+        fixed_beat: f64,
         start_local_x: f32,
         /// Pending until the pointer travels past the click slop, so a
         /// shaky click never changes the Clip's length.

@@ -1,0 +1,155 @@
+//! Left-edge trims: a Clip's start moves while its content keeps its
+//! Arrangement time.
+
+use vibez_core::track::ClipPlaybackDirection;
+
+use super::fragment_geometry::audio_fragment;
+use super::{ArrangementAction, ArrangementCtx, EngineHandle};
+use crate::state::{
+    ArrangementSelection, EditDrag, TimelineEditorState, UiClip, UiNoteClip, SHORTEST_LENGTH_BEATS,
+};
+
+impl TimelineEditorState {
+    pub(super) fn op_trim_selected_clips_start(
+        &mut self,
+        engine: &mut impl EngineHandle,
+        ctx: ArrangementCtx,
+        anchor: ArrangementSelection,
+        new_start_beats: f64,
+    ) -> ArrangementAction {
+        let spb = ctx.samples_per_beat;
+        if spb <= 0.0 {
+            return ArrangementAction::default();
+        }
+        let origin = match &self.edit_drag {
+            EditDrag::Trimming(origin) => origin.clone(),
+            _ => self.timeline.clone(),
+        };
+        let Some(anchor_start) = origin.clip_span(anchor, spb).map(|span| span.start_beats) else {
+            return ArrangementAction::default();
+        };
+        let delta = new_start_beats - anchor_start;
+        let targets: Vec<_> = if self.selected_clips.contains(&anchor) {
+            self.selected_clips.iter().copied().collect()
+        } else {
+            vec![anchor]
+        };
+        let shortest_frames = (SHORTEST_LENGTH_BEATS * spb).round() as u64;
+        let mut changed = false;
+        for target in targets {
+            let Some(lane) = origin.get(target.track_id()) else {
+                continue;
+            };
+            match target {
+                ArrangementSelection::AudioClip { track_id, clip_id } => {
+                    let Some(start) = lane.clips.iter().find(|c| c.id == clip_id) else {
+                        continue;
+                    };
+                    let trimmed =
+                        audio_start_trimmed(start, (delta * spb).round() as i64, shortest_frames)
+                            .unwrap_or_else(|| start.clone());
+                    let live = self
+                        .find_content(track_id)
+                        .and_then(|t| t.clips.iter().find(|c| c.id == clip_id));
+                    if live != Some(&trimmed) {
+                        changed = true;
+                        self.replace_audio_clip(engine, track_id, clip_id, vec![trimmed]);
+                    }
+                }
+                ArrangementSelection::NoteClip { track_id, clip_id } => {
+                    let Some(start) = lane.note_clips.iter().find(|c| c.id == clip_id) else {
+                        continue;
+                    };
+                    let trimmed = note_start_trimmed(start, delta).unwrap_or_else(|| start.clone());
+                    let live = self
+                        .find_content(track_id)
+                        .and_then(|t| t.note_clips.iter().find(|c| c.id == clip_id));
+                    if live != Some(&trimmed) {
+                        changed = true;
+                        self.replace_note_clip(engine, track_id, clip_id, vec![trimmed]);
+                    }
+                }
+            }
+        }
+        if !changed {
+            return ArrangementAction::default();
+        }
+        self.edit_drag = EditDrag::Trimming(origin);
+        ArrangementAction {
+            mark_dirty: true,
+            ..Default::default()
+        }
+    }
+}
+
+/// `clip` with its start `delta` frames later (earlier when negative), or
+/// `None` when it cannot move that way.
+fn audio_start_trimmed(clip: &UiClip, delta: i64, shortest: u64) -> Option<UiClip> {
+    if delta > 0 {
+        let cut = (delta as u64).min(clip.duration.saturating_sub(shortest));
+        if cut == 0 {
+            return None;
+        }
+        let mut trimmed = audio_fragment(clip, clip.name.clone(), cut, clip.duration - cut);
+        trimmed.id = clip.id;
+        return Some(trimmed);
+    }
+    let mut wanted = delta.unsigned_abs().min(clip.position);
+    if clip.loop_enabled {
+        // Before its loop start a looped Clip repeats its loop rather than
+        // revealing the source there, which is a different edit.
+        if clip.playback_direction == ClipPlaybackDirection::Reverse {
+            return None;
+        }
+        wanted = wanted.min(clip.start_marker.saturating_sub(clip.loop_start));
+    }
+    let mut trimmed = clip.clone();
+    match clip.playback_direction {
+        ClipPlaybackDirection::Forward => {
+            let within = wanted.min(clip.start_marker.saturating_sub(clip.source_offset));
+            trimmed.start_marker -= within;
+            let (gained, source_offset, warp_markers) = clip
+                .warp_markers
+                .extended_start(wanted - within, clip.source_offset);
+            if gained > 0 {
+                trimmed.source_offset = source_offset;
+                trimmed.start_marker = source_offset;
+                trimmed.warp_markers = warp_markers;
+            }
+            trimmed.duration += within + gained;
+        }
+        // Reversed, the left edge plays the end of the source window, so
+        // reaching earlier in time lengthens the window at its end.
+        ClipPlaybackDirection::Reverse => trimmed.resize(clip.duration + wanted),
+    }
+    let gained = trimmed
+        .duration
+        .checked_sub(clip.duration)
+        .filter(|g| *g > 0)?;
+    trimmed.position -= gained;
+    Some(trimmed)
+}
+
+/// `clip` with its start `delta` beats later (earlier when negative), or
+/// `None` when it cannot move that way. Its notes stay where they are in
+/// the content; the start marker moves over them.
+fn note_start_trimmed(clip: &UiNoteClip, delta: f64) -> Option<UiNoteClip> {
+    // See `audio_start_trimmed` for why a looped Clip stops at its loop start.
+    let earliest = if clip.loop_enabled {
+        clip.loop_start_beats.min(clip.start_marker_beats)
+    } else {
+        0.0
+    };
+    let delta = delta
+        .max(earliest - clip.start_marker_beats)
+        .max(-clip.position_beats)
+        .min((clip.duration_beats - SHORTEST_LENGTH_BEATS).max(0.0));
+    if delta == 0.0 {
+        return None;
+    }
+    let mut trimmed = clip.clone();
+    trimmed.start_marker_beats = clip.timeline().source_at(delta);
+    trimmed.position_beats += delta;
+    trimmed.duration_beats -= delta;
+    Some(trimmed)
+}

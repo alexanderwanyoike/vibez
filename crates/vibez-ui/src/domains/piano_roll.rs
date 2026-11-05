@@ -652,7 +652,7 @@ impl PianoRollState {
                 if let Some(track) = find_track_mut(tracks, track_id) {
                     if let Some(clip) = track.note_clips.iter_mut().find(|c| c.id == clip_id) {
                         clip.duration_beats = new_duration_beats;
-                        clip.clamp_start_to_duration();
+                        clip.clamp_start_to_content();
                         clip_end_beat = Some(clip.position_beats + clip.duration_beats);
                         engine.send(clip.bounds_command(track_id));
                     }
@@ -668,7 +668,7 @@ impl PianoRollState {
                     if let Some(clip) = track.note_clips.iter_mut().find(|c| c.id == clip_id) {
                         let new_dur = (clip.duration_beats / 2.0).max(0.25);
                         clip.duration_beats = new_dur;
-                        clip.clamp_start_to_duration();
+                        clip.clamp_start_to_content();
                         engine.send(EngineCommand::SetNoteClipDuration {
                             track_id,
                             clip_id,

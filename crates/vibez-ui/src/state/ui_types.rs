@@ -150,6 +150,41 @@ impl UiClip {
         )
     }
 
+    /// The length `requested` may actually take, as an unlooped Clip stops
+    /// where its sample runs out.
+    pub(crate) fn playable_duration(&self, requested: u64) -> u64 {
+        if self.loop_enabled {
+            return requested;
+        }
+        let frames = self.audio.num_frames() as u64;
+        let longest = (self.warp_timeline_end() + frames.saturating_sub(self.source_end()))
+            .saturating_sub(self.start_marker.saturating_sub(self.source_offset));
+        requested.min(longest)
+    }
+
+    /// Change the length to `requested`, or as near as the sample allows,
+    /// moving the right edge.
+    pub(crate) fn resize(&mut self, requested: u64) {
+        let new_duration = self.playable_duration(requested);
+        let old_mapping_end = self.warp_timeline_end();
+        let new_mapping_end =
+            new_duration.min((self.audio.num_frames() as u64).saturating_sub(self.source_offset));
+        self.warp_markers = self.warp_markers.resized_timeline(
+            old_mapping_end,
+            new_mapping_end,
+            self.source_offset,
+            self.audio.num_frames() as u64,
+        );
+        self.duration = new_duration;
+        self.clamp_fades_to_clip();
+        self.clamp_start_to_source();
+        if self.loop_enabled {
+            self.clamp_loop_to_warp_map();
+        }
+        self.transient_markers
+            .retain_source_range(self.source_offset, self.source_end());
+    }
+
     pub(crate) fn warp_timeline_end(&self) -> u64 {
         let identity_end = self
             .duration
@@ -567,16 +602,35 @@ impl UiNoteClip {
         }
     }
 
-    pub(crate) fn clamp_start_to_duration(&mut self) {
+    pub(crate) fn clamp_start_to_content(&mut self) {
         self.start_marker_beats =
             self.timeline()
-                .clamp_start(self.start_marker_beats, 0.0, self.duration_beats);
+                .clamp_start(self.start_marker_beats, 0.0, NOTE_CONTENT_END_BEATS);
+    }
+
+    /// The content beat this Clip plays at Arrangement `beat`; off the
+    /// Clip it plays nothing.
+    pub(crate) fn content_beat_at(&self, beat: f64) -> Option<f64> {
+        let into_clip = beat - self.position_beats;
+        (0.0..self.duration_beats)
+            .contains(&into_clip)
+            .then(|| self.timeline().source_at(into_clip))
+    }
+
+    /// Content beats a clip editor shows, from beat 0 to where the Clip
+    /// stops playing.
+    pub(crate) fn editor_beats(&self) -> f64 {
+        if self.timeline().is_looping() {
+            self.duration_beats
+        } else {
+            self.start_marker_beats + self.duration_beats
+        }
     }
 
     pub(crate) fn set_start_marker(&mut self, start_marker_beats: f64) -> bool {
         let valid = self
             .timeline()
-            .accepts_start(start_marker_beats, 0.0, self.duration_beats);
+            .accepts_start(start_marker_beats, 0.0, NOTE_CONTENT_END_BEATS);
         if !valid || start_marker_beats == self.start_marker_beats {
             return false;
         }

@@ -23,10 +23,12 @@ use crate::widgets::local_drag::LocalDrag;
 use crate::widgets::timeline::marquee;
 use vibez_core::id::{ClipId, TrackId};
 
-use super::clip_drag::ClipDragAction;
+use super::clip_drag::{ClipDragAction, ClipEdge};
 use super::*;
 
 mod hit_test;
+
+use hit_test::ClipHit;
 
 /// Vertical travel before a clip drag may change lane. Without it a
 /// horizontal drag near a row boundary would flicker between tracks.
@@ -418,9 +420,9 @@ impl canvas::Program<Message> for TrackClipCanvas {
                     }
                 };
             }
-            if let Some((_, _, near_right, _, _)) = self.hit_test(pos.x) {
+            if let Some(hit) = self.hit_test(pos.x) {
                 let in_title_bar = pos.y < CLIP_Y + CLIP_TITLE_HEIGHT;
-                if near_right && in_title_bar {
+                if hit.edge.is_some() {
                     return mouse::Interaction::ResizingHorizontally;
                 }
                 if in_title_bar {
@@ -460,8 +462,9 @@ impl canvas::Program<Message> for TrackClipCanvas {
 
             // -- Left click: select clip, start drag, or seek --
             // Clip zones (Ableton-style):
-            //   Title bar (top ~18px): move / resize (right edge)
-            //   Body (below title):    seek / region-select
+            //   Either edge, full height: resize from that edge
+            //   Title bar (top ~18px):    move
+            //   Body (below title):       seek / region-select
             canvas::Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left)) => {
                 if let Some(pos) = cursor.position_in(bounds) {
                     if let Some(control) = self.fade_control_hit(pos, bounds.height) {
@@ -478,10 +481,16 @@ impl canvas::Program<Message> for TrackClipCanvas {
                         });
                         return (canvas::event::Status::Captured, None);
                     }
-                    if let Some((clip_id, is_note_clip, near_right, pos_beats, dur_beats)) =
-                        self.hit_test(pos.x)
+                    if let Some(ClipHit {
+                        clip_id,
+                        is_note_clip,
+                        edge,
+                        position_beats: pos_beats,
+                        duration_beats: dur_beats,
+                    }) = self.hit_test(pos.x)
                     {
                         let in_title_bar = pos.y < CLIP_Y + CLIP_TITLE_HEIGHT;
+                        let grabbed = in_title_bar || edge.is_some();
 
                         // Build selection message
                         let selection = if is_note_clip {
@@ -490,13 +499,15 @@ impl canvas::Program<Message> for TrackClipCanvas {
                             ArrangementSelection::AudioClip { track_id, clip_id }
                         };
 
-                        if near_right && in_title_bar {
-                            // Right edge of title bar → resize
+                        if let Some(edge) = edge {
                             state.drag = Some(ClipDragAction::ResizeClip {
                                 undo_gesture: UndoGestureId::new(),
-                                clip_id,
-                                is_note_clip,
-                                clip_start_beat: pos_beats,
+                                anchor: selection,
+                                edge,
+                                fixed_beat: match edge {
+                                    ClipEdge::Start => pos_beats + dur_beats,
+                                    ClipEdge::End => pos_beats,
+                                },
                                 start_local_x: pos.x,
                                 phase: DragPhase::Pending,
                             });
@@ -527,7 +538,7 @@ impl canvas::Program<Message> for TrackClipCanvas {
 
                         return (
                             canvas::event::Status::Captured,
-                            if in_title_bar
+                            if grabbed
                                 && self.selected_clips.contains(&clip_id)
                                 && !state.shift_held
                             {
@@ -568,7 +579,12 @@ impl canvas::Program<Message> for TrackClipCanvas {
                     let screen_y = bounds.y + pos.y;
 
                     // Hit test for clip
-                    if let Some((clip_id, is_note_clip, _, _, _)) = self.hit_test(pos.x) {
+                    if let Some(ClipHit {
+                        clip_id,
+                        is_note_clip,
+                        ..
+                    }) = self.hit_test(pos.x)
+                    {
                         return (
                             canvas::event::Status::Captured,
                             Some(Message::View(ViewMsg::ShowContextMenu {
@@ -618,7 +634,7 @@ impl canvas::Program<Message> for TrackClipCanvas {
 
             // -- Drag: move, resize, or region select --
             canvas::Event::Mouse(iced::mouse::Event::CursorMoved { .. }) => {
-                if let Some(ref drag) = state.drag {
+                if let Some(drag) = &mut state.drag {
                     if let Some(local) = LocalDrag::unclamped().position(cursor, bounds) {
                         let local_x = local.x;
                         let geometry = self.geometry();
@@ -681,18 +697,17 @@ impl canvas::Program<Message> for TrackClipCanvas {
                                 phase,
                                 ..
                             } => {
-                                let mut phase = *phase;
                                 if !phase.follow(Point::new(*start_local_x, *start_y), local) {
                                     return (canvas::event::Status::Captured, None);
                                 }
-                                let delta_px = local_x - start_local_x;
+                                let delta_px = local_x - *start_local_x;
                                 let travel = crate::timeline_geometry::compensated_drag_beat(
                                     *original_position_beats,
                                     delta_px,
                                     geometry.pixels_per_beat(),
                                     *start_scroll_beats,
                                     self.scroll_offset_beats,
-                                ) - original_position_beats;
+                                ) - *original_position_beats;
                                 let new_pos = self
                                     .snap_targets
                                     .moved_span(
@@ -710,7 +725,7 @@ impl canvas::Program<Message> for TrackClipCanvas {
                                 // above has its automation lanes expanded.
                                 let target_track = self
                                     .resolve_lane_at(self.row_top() + local.y)
-                                    .filter(|_| (local.y - start_y).abs() > CROSS_TRACK_MIN_PX)
+                                    .filter(|_| (local.y - *start_y).abs() > CROSS_TRACK_MIN_PX)
                                     .and_then(|lane| self.track_ids.get(lane).copied())
                                     .unwrap_or(track_id);
                                 let edit =
@@ -720,55 +735,41 @@ impl canvas::Program<Message> for TrackClipCanvas {
                                         target_track,
                                     })
                                     .in_undo_gesture(*undo_gesture);
-                                if let Some(ClipDragAction::MoveClip { phase: held, .. }) =
-                                    &mut state.drag
-                                {
-                                    *held = phase;
-                                }
                                 return (canvas::event::Status::Captured, Some(edit));
                             }
                             ClipDragAction::ResizeClip {
                                 undo_gesture,
-                                clip_id,
-                                is_note_clip,
-                                clip_start_beat,
+                                anchor,
+                                edge,
+                                fixed_beat,
                                 start_local_x,
                                 phase,
                             } => {
-                                // A resize follows the pointer's x alone.
-                                let mut phase = *phase;
-                                if !phase.follow(
-                                    Point::new(*start_local_x, 0.0),
-                                    Point::new(local_x, 0.0),
-                                ) {
+                                if !phase.follow_x(*start_local_x, local_x) {
                                     return (canvas::event::Status::Captured, None);
                                 }
-                                let snapped = self
-                                    .snap_targets
-                                    .span_end(
-                                        *clip_start_beat,
-                                        self.x_to_beat(local_x),
-                                        self.snap_context(state.alt_held),
-                                    )
-                                    .beat
-                                    - clip_start_beat;
-                                let clip_id = *clip_id;
-                                let anchor = if *is_note_clip {
-                                    ArrangementSelection::NoteClip { track_id, clip_id }
-                                } else {
-                                    ArrangementSelection::AudioClip { track_id, clip_id }
+                                let pointer = self.x_to_beat(local_x);
+                                let context = self.snap_context(state.alt_held);
+                                let anchor = *anchor;
+                                let edit = match edge {
+                                    ClipEdge::Start => ArrangementMsg::TrimSelectedClipsStart {
+                                        anchor,
+                                        new_start_beats: self
+                                            .snap_targets
+                                            .span_start(pointer, *fixed_beat, context)
+                                            .beat,
+                                    },
+                                    ClipEdge::End => ArrangementMsg::ResizeSelectedClips {
+                                        anchor,
+                                        new_duration_beats: self
+                                            .snap_targets
+                                            .span_end(*fixed_beat, pointer, context)
+                                            .beat
+                                            - *fixed_beat,
+                                    },
                                 };
                                 let edit =
-                                    Message::Arrangement(ArrangementMsg::ResizeSelectedClips {
-                                        anchor,
-                                        new_duration_beats: snapped,
-                                    })
-                                    .in_undo_gesture(*undo_gesture);
-                                if let Some(ClipDragAction::ResizeClip { phase: held, .. }) =
-                                    &mut state.drag
-                                {
-                                    *held = phase;
-                                }
+                                    Message::Arrangement(edit).in_undo_gesture(*undo_gesture);
                                 return (canvas::event::Status::Captured, Some(edit));
                             }
                             ClipDragAction::FadeClip(drag) => {
@@ -817,8 +818,8 @@ impl canvas::Program<Message> for TrackClipCanvas {
                                 start_local_x,
                                 start_scroll_beats,
                             } => {
-                                let target_scroll = (start_scroll_beats
-                                    - geometry.beats_for_width(local_x - start_local_x))
+                                let target_scroll = (*start_scroll_beats
+                                    - geometry.beats_for_width(local_x - *start_local_x))
                                 .max(0.0);
                                 let delta = target_scroll - self.scroll_offset_beats;
                                 return (

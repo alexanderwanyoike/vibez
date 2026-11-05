@@ -182,7 +182,7 @@ impl App {
                 .note_clips
                 .iter()
                 .find(|clip| clip.id == clip_id)
-                .map(|clip| clip.duration_beats);
+                .map(|clip| clip.editor_beats());
         }
         let track_id = editor.selected_track?;
         let clip_id = single_selected_audio_clip_for_track(editor, track_id)?;
@@ -431,13 +431,13 @@ impl App {
 
         let (mut piano_widget, velocity_widget) = match visible_clip {
             Some(clip) => {
-                let clip_relative_playhead = playhead_beats - clip.position_beats;
+                let content_playhead = clip.content_beat_at(playhead_beats).unwrap_or(-1.0);
                 (
                     PianoRollWidget::from_clip(
                         track_id,
                         clip,
-                        clip_relative_playhead,
-                        clip.duration_beats,
+                        content_playhead,
+                        clip.editor_beats(),
                         track_color,
                         self.state.view.clip_grid,
                         self.state.piano_roll.scroll_y,
@@ -446,7 +446,7 @@ impl App {
                     VelocityLaneWidget::from_clip(
                         track_id,
                         clip,
-                        clip.duration_beats,
+                        clip.editor_beats(),
                         track_color,
                         self.state.view.clip_grid,
                     ),
@@ -816,5 +816,50 @@ mod tests {
             focused_note_clip_for_track(&editor, track_id),
             Some(explicitly_open_clip)
         );
+    }
+}
+
+#[cfg(test)]
+mod clip_editor_zoom_tests {
+    use std::sync::Arc;
+
+    use vibez_core::id::{ClipId, TrackId};
+
+    use crate::state::{ProjectTrack, SnapGrid, UiNoteClip};
+
+    #[test]
+    fn a_trimmed_note_clip_snaps_at_the_zoom_its_piano_roll_shows() {
+        let mut app = crate::app::test_support::app();
+        app.state.view.window_width = 1_052.0;
+        let mut track = ProjectTrack::new(TrackId::new(), "MIDI".into(), 0);
+        track.kind = vibez_core::midi::TrackKind::Midi;
+        let track_id = track.id;
+        Arc::make_mut(&mut app.state.project_tracks)
+            .tracks
+            .push(track);
+        // The piano roll shows its content from beat 0 to beat 32, where
+        // this Clip stops playing.
+        let clip = UiNoteClip {
+            id: ClipId::new(),
+            name: "Trimmed".into(),
+            position_beats: 0.0,
+            duration_beats: 4.0,
+            notes: Vec::new(),
+            selected_notes: Default::default(),
+            start_marker_beats: 28.0,
+            loop_enabled: false,
+            loop_start_beats: 0.0,
+            loop_end_beats: 32.0,
+            groove_grid: Default::default(),
+        };
+        let clip_id = clip.id;
+        app.state
+            .arrange_content_mut(track_id)
+            .note_clips
+            .push(clip);
+        app.state.arrangement.selected_track = Some(track_id);
+        app.state.arrangement.selected_note_clip = Some((track_id, clip_id));
+
+        assert_eq!(app.clip_editor_grid(), SnapGrid::EIGHTH);
     }
 }

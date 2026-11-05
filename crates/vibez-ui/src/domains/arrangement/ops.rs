@@ -449,16 +449,18 @@ impl TimelineEditorState {
         for target in targets {
             match target {
                 ArrangementSelection::AudioClip { track_id, clip_id } => {
-                    let old = self
+                    let resized = self
                         .find_content(track_id)
                         .and_then(|t| t.clips.iter().find(|c| c.id == clip_id))
-                        .map(|c| c.duration);
-                    if let Some(old) = old {
-                        let old_beats = old as f64 / ctx.samples_per_beat;
-                        let duration = (((old_beats + delta).max(SHORTEST_LENGTH_BEATS)
-                            * ctx.samples_per_beat)
-                            .round() as u64)
-                            .max(1);
+                        .map(|c| {
+                            let old_beats = c.duration as f64 / ctx.samples_per_beat;
+                            let requested = (((old_beats + delta).max(SHORTEST_LENGTH_BEATS)
+                                * ctx.samples_per_beat)
+                                .round() as u64)
+                                .max(1);
+                            (c.duration, c.playable_duration(requested))
+                        });
+                    if let Some((old, duration)) = resized {
                         if duration == old {
                             continue;
                         }
@@ -482,7 +484,7 @@ impl TimelineEditorState {
                         }
                         changed = true;
                         clip.duration_beats = duration;
-                        clip.clamp_start_to_duration();
+                        clip.clamp_start_to_content();
                         engine.send(clip.bounds_command(track_id));
                         max_end = Some(
                             max_end
@@ -496,7 +498,7 @@ impl TimelineEditorState {
         if !changed {
             return ArrangementAction::default();
         }
-        self.drag_resize_active = true;
+        self.edit_drag.mark_active();
         ArrangementAction {
             scroll_to_beat: max_end,
             mark_dirty: true,

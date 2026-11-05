@@ -1349,3 +1349,183 @@ fn an_alt_resize_ends_a_clip_exactly_under_the_pointer() {
         1.1 + length
     );
 }
+
+/// Low in a Clip's body, clear of its fade handles.
+const CLIP_FOOT_Y: f32 = 60.0;
+
+/// Presses `canvas`'s first Clip on its start edge at `y`, drags the pointer
+/// to `to_beat` and returns the start the last pointer move asked for.
+fn trimmed_start_after_drag(
+    canvas: &TrackClipCanvas,
+    y: f32,
+    to_beat: f64,
+    modifiers: Modifiers,
+) -> Option<f64> {
+    let clip = &canvas.clips[0];
+    let start = Point::new(
+        canvas.beat_to_x(clip.position as f64 / canvas.spb()) + 2.0,
+        y,
+    );
+    let target = Point::new(canvas.beat_to_x(to_beat), start.y);
+    let mut state = ClipInteractionState::default();
+    <TrackClipCanvas as canvas::Program<Message>>::update(
+        canvas,
+        &mut state,
+        canvas::Event::Keyboard(Event::ModifiersChanged(modifiers)),
+        Rectangle::new(Point::ORIGIN, Size::new(800.0, 80.0)),
+        mouse::Cursor::Available(start),
+    );
+    left_event(
+        canvas,
+        &mut state,
+        iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left),
+        start,
+    );
+    match left_event(
+        canvas,
+        &mut state,
+        iced::mouse::Event::CursorMoved { position: target },
+        target,
+    ) {
+        Some(Message::UndoGesture { edit, .. }) => match *edit {
+            Message::Arrangement(ArrangementMsg::TrimSelectedClipsStart {
+                new_start_beats,
+                ..
+            }) => Some(new_start_beats),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+#[test]
+fn trimming_an_off_grid_clip_starts_it_on_the_grid_line_under_the_pointer() {
+    let (canvas, _) = canvas_with_off_grid_audio_clip();
+
+    let start =
+        trimmed_start_after_drag(&canvas, CLIP_Y + 4.0, 2.05, Modifiers::empty()).expect("a trim");
+
+    assert!((start - 2.0).abs() < 1e-9, "started at {start}");
+}
+
+#[test]
+fn a_clip_start_trims_from_anywhere_down_its_edge() {
+    let (canvas, _) = canvas_with_off_grid_audio_clip();
+
+    let start =
+        trimmed_start_after_drag(&canvas, CLIP_FOOT_Y, 0.5, Modifiers::empty()).expect("a trim");
+
+    assert!((start - 0.5).abs() < 1e-9, "started at {start}");
+}
+
+#[test]
+fn a_clip_end_resizes_from_anywhere_down_its_edge() {
+    let (canvas, _) = canvas_with_off_grid_audio_clip();
+    let end = Point::new(canvas.beat_to_x(5.1) - 2.0, CLIP_FOOT_Y);
+    let mut state = ClipInteractionState::default();
+
+    left_event(
+        &canvas,
+        &mut state,
+        iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left),
+        end,
+    );
+    let target = Point::new(canvas.beat_to_x(6.0), end.y);
+    let moved = left_event(
+        &canvas,
+        &mut state,
+        iced::mouse::Event::CursorMoved { position: target },
+        target,
+    );
+
+    assert!(
+        matches!(
+            &moved,
+            Some(Message::UndoGesture { edit, .. }) if matches!(
+                **edit,
+                Message::Arrangement(ArrangementMsg::ResizeSelectedClips { .. })
+            )
+        ),
+        "{moved:?}"
+    );
+}
+
+#[test]
+fn an_alt_trim_starts_a_clip_exactly_under_the_pointer() {
+    let (canvas, _) = canvas_with_off_grid_audio_clip();
+
+    let start =
+        trimmed_start_after_drag(&canvas, CLIP_Y + 4.0, 2.05, Modifiers::ALT).expect("a trim");
+
+    assert!((start - 2.05).abs() < 1e-3, "started at {start}");
+}
+
+#[test]
+fn a_trim_past_a_clips_end_leaves_its_shortest_length() {
+    let (canvas, _) = canvas_with_off_grid_audio_clip();
+    let shortest = crate::state::SHORTEST_LENGTH_BEATS;
+
+    let start =
+        trimmed_start_after_drag(&canvas, CLIP_Y + 4.0, 7.0, Modifiers::empty()).expect("a trim");
+
+    assert!(
+        (start - (5.1 - shortest)).abs() < 1e-6,
+        "started at {start}"
+    );
+}
+
+#[test]
+fn a_shaky_click_on_a_clip_start_never_trims_it() {
+    let (canvas, _) = canvas_with_off_grid_audio_clip();
+    let start = Point::new(canvas.beat_to_x(1.1) + 2.0, CLIP_Y + 4.0);
+    let jitter = Point::new(start.x + 3.0, start.y + 1.0);
+    let mut state = ClipInteractionState::default();
+
+    left_event(
+        &canvas,
+        &mut state,
+        iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left),
+        start,
+    );
+    let moved = left_event(
+        &canvas,
+        &mut state,
+        iced::mouse::Event::CursorMoved { position: jitter },
+        jitter,
+    );
+
+    assert!(
+        !matches!(
+            &moved,
+            Some(Message::UndoGesture { edit, .. }) if matches!(
+                **edit,
+                Message::Arrangement(ArrangementMsg::TrimSelectedClipsStart { .. })
+            )
+        ),
+        "3 px of travel is a click: {moved:?}"
+    );
+}
+
+#[test]
+fn the_pointer_shows_a_resize_cursor_on_either_clip_edge() {
+    let (canvas, _) = canvas_with_off_grid_audio_clip();
+    let bounds = Rectangle::new(Point::ORIGIN, Size::new(800.0, 80.0));
+    let cursor_at = |beat: f64, dx: f32| {
+        <TrackClipCanvas as canvas::Program<Message>>::mouse_interaction(
+            &canvas,
+            &ClipInteractionState::default(),
+            bounds,
+            mouse::Cursor::Available(Point::new(canvas.beat_to_x(beat) + dx, CLIP_FOOT_Y)),
+        )
+    };
+
+    assert_eq!(
+        cursor_at(1.1, 2.0),
+        mouse::Interaction::ResizingHorizontally
+    );
+    assert_eq!(
+        cursor_at(5.1, -2.0),
+        mouse::Interaction::ResizingHorizontally
+    );
+    assert_eq!(cursor_at(3.0, 0.0), mouse::Interaction::Pointer);
+}

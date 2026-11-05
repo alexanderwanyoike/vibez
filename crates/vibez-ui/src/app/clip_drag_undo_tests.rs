@@ -69,3 +69,44 @@ fn a_move_and_resize_that_change_nothing_leave_no_undo_step() {
     assert!(!app.state.project.history.can_undo());
     assert!(!app.state.project.dirty);
 }
+
+#[test]
+fn a_left_edge_trim_is_one_undo_step() {
+    let (mut app, track_id, clip_id) = off_grid_clip();
+    let anchor = ArrangementSelection::NoteClip { track_id, clip_id };
+    let gesture = UndoGestureId::new();
+
+    for new_start_beats in [1.5, 2.0] {
+        drag(
+            &mut app,
+            gesture,
+            ArrangementMsg::TrimSelectedClipsStart {
+                anchor,
+                new_start_beats,
+            },
+        );
+    }
+    assert!(app.state.project.dirty);
+    let _ = app.update(Message::Project(crate::domains::project::ProjectMsg::Undo));
+
+    let clip = &app.state.arrange_content_mut(track_id).note_clips[0];
+    assert_eq!((clip.position_beats, clip.duration_beats), (1.1, 4.0));
+    assert!(!app.state.project.history.can_undo());
+}
+
+#[test]
+fn a_left_edge_trim_that_changes_nothing_leaves_no_undo_step() {
+    let (mut app, track_id, clip_id) = off_grid_clip();
+
+    drag(
+        &mut app,
+        UndoGestureId::new(),
+        ArrangementMsg::TrimSelectedClipsStart {
+            anchor: ArrangementSelection::NoteClip { track_id, clip_id },
+            new_start_beats: 1.1,
+        },
+    );
+
+    assert!(!app.state.project.history.can_undo());
+    assert!(!app.state.project.dirty);
+}

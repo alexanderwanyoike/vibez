@@ -17,8 +17,8 @@ use vibez_engine::commands::EngineCommand;
 use super::timeline_editor::TimelineEditorAdapter;
 use super::EngineHandle;
 use crate::state::{
-    ArrangementSelection, ArrangementState, ProjectTrack, ProjectTracksState, TimelineEditorState,
-    TrackTimelineContent, UiNoteClip,
+    ArrangementSelection, ArrangementState, EditDrag, ProjectTrack, ProjectTracksState,
+    TimelineEditorState, TrackTimelineContent, UiNoteClip,
 };
 
 mod messages;
@@ -131,6 +131,11 @@ impl TimelineEditorState {
         self.time_selection_active = false;
         self.time_selection_track = None;
         self.marquee = None;
+    }
+
+    /// The drag in flight is over.
+    pub fn end_drag_resize(&mut self) {
+        self.edit_drag = EditDrag::Idle;
     }
 
     fn find_content(&self, track_id: TrackId) -> Option<&TrackTimelineContent> {
@@ -484,6 +489,12 @@ impl TimelineEditorState {
                     new_duration_beats,
                 );
             }
+            ArrangementMsg::TrimSelectedClipsStart {
+                anchor,
+                new_start_beats,
+            } => {
+                return self.op_trim_selected_clips_start(engine, ctx, anchor, new_start_beats);
+            }
             ArrangementMsg::MoveSelectedClips {
                 anchor,
                 new_position_beats,
@@ -797,6 +808,8 @@ impl TimelineEditorState {
 }
 
 mod audio_clip_inspector;
+mod clip_edges;
+mod clip_trims;
 mod fragment_geometry;
 mod media_ops;
 mod ops;
