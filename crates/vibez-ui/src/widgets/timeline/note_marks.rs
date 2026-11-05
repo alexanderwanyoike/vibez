@@ -100,6 +100,20 @@ mod tests {
     }
 
     #[test]
+    fn a_three_times_taller_lane_draws_its_notes_taller() {
+        let tall = Rectangle {
+            height: 3.0 * AREA.height,
+            ..AREA
+        };
+        let bassline: Vec<_> = (36..48).map(|pitch| (pitch, 0.0, 1.0)).collect();
+
+        let short = note_marks(&bassline, 0.0, AREA, 20.0)[0].height;
+        let taller = note_marks(&bassline, 0.0, tall, 20.0)[0].height;
+
+        assert!(taller >= 2.5 * short, "{short} px became {taller} px");
+    }
+
+    #[test]
     fn dense_notes_on_one_pitch_merge_into_one_mark_when_zoomed_out() {
         let marks = note_marks(&sixteenths(36, 64), 0.0, AREA, 1.0);
 
