@@ -2,37 +2,20 @@
 
 use iced::mouse;
 use iced::widget::canvas;
-use iced::{Color, Rectangle, Renderer};
+use iced::{Rectangle, Renderer};
 
 use crate::theme;
 
+use super::clip_colors::clip_colors;
+use super::clip_frame::{clip_box, draw_clip_back, draw_clip_front, LoopPasses};
 use super::fade_drag::{fade_curve_handle, fade_handle_xs};
 use super::note_marks::note_marks;
 use super::*;
 
-fn fit_clip_title(name: &str, clip_width: f32, loop_icon_visible: bool) -> Option<String> {
-    if clip_width <= 40.0 {
-        return None;
-    }
-    const HORIZONTAL_PADDING: f32 = 8.0;
-    const LOOP_ICON_WIDTH: f32 = 18.0;
-    const APPROX_GLYPH_WIDTH: f32 = 6.5;
-    let reserved = HORIZONTAL_PADDING
-        + if loop_icon_visible {
-            LOOP_ICON_WIDTH
-        } else {
-            0.0
-        };
-    let max_chars = ((clip_width - reserved).max(0.0) / APPROX_GLYPH_WIDTH).floor() as usize;
-    if max_chars < 4 {
-        return None;
-    }
-    if name.chars().count() <= max_chars {
-        Some(name.to_string())
-    } else {
-        let prefix: String = name.chars().take(max_chars - 2).collect();
-        Some(format!("{prefix}.."))
-    }
+/// How far to shift the lane so whole-pixel coordinates inside it land on
+/// whole screen pixels.
+fn whole_pixel_offset(origin: iced::Point) -> iced::Vector {
+    iced::Vector::new(-origin.x.fract(), -origin.y.fract())
 }
 
 fn visible_pixel_columns(
@@ -50,88 +33,6 @@ fn visible_pixel_columns(
     } else {
         0..0
     }
-}
-
-/// Lane left showing after each clip, so back-to-back clips of one track
-/// still read as separate clips when zoomed out to the whole song.
-const CLIP_GAP: f32 = 1.0;
-
-/// The rectangle a clip's body, contents and border are painted in.
-fn clip_box(clip_x: f32, clip_y: f32, clip_w: f32, clip_h: f32) -> Rectangle {
-    Rectangle {
-        x: clip_x,
-        y: clip_y,
-        width: (clip_w - CLIP_GAP).max(1.0),
-        height: clip_h,
-    }
-}
-
-/// The path rectangle for a border of `stroke_width` around `body`. Strokes
-/// are centred on the path, so it is inset by half the stroke to keep the
-/// border out of the gap.
-fn clip_outline(body: Rectangle, stroke_width: f32) -> Rectangle {
-    let inset = stroke_width / 2.0;
-    Rectangle {
-        x: body.x + inset,
-        y: body.y + inset,
-        width: (body.width - stroke_width).max(0.0),
-        height: (body.height - stroke_width).max(0.0),
-    }
-}
-
-/// Where a clip title is clipped to, and where its text starts.
-#[derive(Debug, PartialEq)]
-struct ClipTitleLayout {
-    region: Rectangle,
-    /// Relative to `region`, because `Frame::with_clip` translates drawing
-    /// to the region's origin.
-    text: iced::Point,
-}
-
-fn clip_title_layout(
-    clip_x: f32,
-    clip_y: f32,
-    title_width: f32,
-    viewport_width: f32,
-) -> Option<ClipTitleLayout> {
-    let left = clip_x.max(0.0);
-    let right = (clip_x + title_width).min(viewport_width);
-    (right > left).then(|| ClipTitleLayout {
-        region: Rectangle {
-            x: left,
-            y: clip_y,
-            width: right - left,
-            height: CLIP_TITLE_HEIGHT,
-        },
-        text: iced::Point::new(4.0, 3.0),
-    })
-}
-
-fn draw_clip_title(
-    frame: &mut canvas::Frame,
-    name: &str,
-    clip_x: f32,
-    clip_y: f32,
-    clip_w: f32,
-    loop_enabled: bool,
-    viewport_width: f32,
-) {
-    let title_width = (clip_w - if loop_enabled { 18.0 } else { 0.0 }).max(0.0);
-    let Some(layout) = clip_title_layout(clip_x, clip_y, title_width, viewport_width) else {
-        return;
-    };
-    let Some(title) = fit_clip_title(name, layout.region.width, loop_enabled) else {
-        return;
-    };
-    frame.with_clip(layout.region, |title_frame| {
-        title_frame.fill_text(canvas::Text {
-            content: title,
-            position: layout.text,
-            color: theme::text(),
-            size: iced::Pixels(11.0),
-            ..Default::default()
-        });
-    });
 }
 
 fn waveform_peak_for_pixel(
@@ -167,6 +68,9 @@ impl TrackClipCanvas {
         cursor: mouse::Cursor,
     ) -> Vec<canvas::Geometry> {
         let mut frame = canvas::Frame::new(renderer, bounds.size());
+        // Layout can place the lane between pixel rows, which would smear
+        // every clip edge and one pixel line across two rows.
+        frame.translate(whole_pixel_offset(bounds.position()));
         let w = bounds.width;
         let h = bounds.height;
         let geometry = self.geometry();
@@ -187,7 +91,12 @@ impl TrackClipCanvas {
         } else {
             theme::track_bg()
         };
-        frame.fill_rectangle(iced::Point::ORIGIN, iced::Size::new(w, h), bg_color);
+        // One pixel larger to cover what the whole-pixel shift uncovers.
+        frame.fill_rectangle(
+            iced::Point::ORIGIN,
+            iced::Size::new(w + 1.0, h + 1.0),
+            bg_color,
+        );
 
         // Grid lines use the same effective division as interaction.
         if self.bpm > 0.0 {
@@ -231,21 +140,16 @@ impl TrackClipCanvas {
                 .map(|clip| (clip, false))
                 .chain(self.audio_recording_preview.iter().map(|clip| (clip, true)))
             {
-                let clip_color = if is_recording_preview {
-                    theme::with_alpha(theme::danger(), 0.28)
-                } else {
-                    theme::with_alpha(self.track_color, 0.5)
-                };
-                let clip_border_color = if is_recording_preview {
-                    theme::danger()
-                } else {
-                    theme::darken(self.track_color, 0.7)
-                };
-                let waveform_color = if is_recording_preview {
-                    theme::with_alpha(theme::danger(), 0.92)
-                } else {
-                    theme::with_alpha(self.track_color, 0.6)
-                };
+                let is_selected =
+                    !is_recording_preview && self.selected_clips.contains(&clip.clip_id);
+                let colors = clip_colors(
+                    if is_recording_preview {
+                        theme::danger()
+                    } else {
+                        self.track_color
+                    },
+                    is_selected,
+                );
                 let clip_start_beat = clip.position as f64 / spb;
                 let clip_dur_beats = clip.duration as f64 / spb;
 
@@ -257,14 +161,21 @@ impl TrackClipCanvas {
                     continue;
                 }
 
-                let clip_y = 4.0;
-                let clip_h = h - 8.0;
+                let clip_y = CLIP_Y;
+                let clip_h = h - 2.0 * CLIP_Y;
                 let body = clip_box(clip_x, clip_y, clip_w, clip_h);
 
-                // Clip body
-                frame.fill_rectangle(body.position(), body.size(), clip_color);
+                let looped = clip.loop_enabled && clip.loop_end > clip.loop_start;
+                let loop_passes = looped.then(|| {
+                    let pass_px =
+                        geometry.width_for_beats((clip.loop_end - clip.loop_start) as f64 / spb);
+                    LoopPasses {
+                        first_wrap_px: pass_px,
+                        pass_px,
+                    }
+                });
+                draw_clip_back(&mut frame, body, &colors, loop_passes, w);
 
-                // Mini waveform using track color (drawn below title bar)
                 if !clip.peaks.is_empty() && clip_w > 4.0 {
                     let body_top = clip_y + CLIP_TITLE_HEIGHT;
                     let body_h = clip_h - CLIP_TITLE_HEIGHT;
@@ -289,48 +200,11 @@ impl TrackClipCanvas {
                         frame.fill_rectangle(
                             iced::Point::new(screen_x, y_top),
                             iced::Size::new(1.0, height),
-                            waveform_color,
+                            colors.ink,
                         );
                     }
                 }
 
-                // Loop markers
-                if clip.loop_enabled && clip.loop_end > clip.loop_start {
-                    let loop_region_samples = (clip.loop_end - clip.loop_start) as f64;
-                    let loop_region_beats = loop_region_samples / spb;
-
-                    // Draw repeated sections with lower opacity
-                    let repeat_color = theme::with_alpha(self.track_color, 0.25);
-                    let first_loop_offset_beats = (clip.loop_end - clip.loop_start) as f64 / spb;
-                    let mut repeat_beat = clip_start_beat + first_loop_offset_beats;
-                    while repeat_beat < clip_start_beat + clip_dur_beats {
-                        let rx = self.beat_to_x(repeat_beat);
-                        let rw = geometry.width_for_beats(loop_region_beats);
-                        if rx < w && rx + rw > 0.0 {
-                            frame.fill_rectangle(
-                                iced::Point::new(rx, clip_y),
-                                iced::Size::new(rw.min(body.x + body.width - rx).max(0.0), clip_h),
-                                repeat_color,
-                            );
-                        }
-                        repeat_beat += loop_region_beats;
-                    }
-
-                    // Small "L" icon
-                    if clip_w > 20.0 {
-                        frame.fill_text(canvas::Text {
-                            content: "L".to_string(),
-                            position: iced::Point::new(clip_x + clip_w - 14.0, clip_y + 3.0),
-                            color: theme::accent(),
-                            size: iced::Pixels(9.0),
-                            ..Default::default()
-                        });
-                    }
-                }
-
-                // Selection highlight
-                let is_selected =
-                    !is_recording_preview && self.selected_clips.contains(&clip.clip_id);
                 if !is_recording_preview
                     && (is_selected || clip.fade_in_frames > 0 || clip.fade_out_frames > 0)
                 {
@@ -384,45 +258,7 @@ impl TrackClipCanvas {
                         }
                     }
                 }
-                let border_color = if is_selected {
-                    theme::accent()
-                } else {
-                    clip_border_color
-                };
-                let border_width = if is_selected { 2.0 } else { 1.0 };
-
-                // Clip border
-                let outline = clip_outline(body, border_width);
-                let border = canvas::Path::rectangle(outline.position(), outline.size());
-                frame.stroke(
-                    &border,
-                    canvas::Stroke::default()
-                        .with_color(border_color)
-                        .with_width(border_width),
-                );
-
-                // Title bar separator
-                let title_sep_y = clip_y + CLIP_TITLE_HEIGHT;
-                let title_line = canvas::Path::line(
-                    iced::Point::new(body.x, title_sep_y),
-                    iced::Point::new(body.x + body.width, title_sep_y),
-                );
-                frame.stroke(
-                    &title_line,
-                    canvas::Stroke::default()
-                        .with_color(theme::with_alpha(Color::BLACK, 0.3))
-                        .with_width(1.0),
-                );
-
-                draw_clip_title(
-                    &mut frame,
-                    &clip.name,
-                    clip_x,
-                    clip_y,
-                    body.width,
-                    clip.loop_enabled,
-                    w,
-                );
+                draw_clip_front(&mut frame, body, &colors, &clip.name, looped, w);
 
                 // Diagonal stripe overlay when the clip's warp is
                 // stale relative to the current project tempo. Low
@@ -504,16 +340,16 @@ impl TrackClipCanvas {
                 .map(|clip| (clip, false))
                 .chain(self.recording_preview.iter().map(|clip| (clip, true)))
             {
-                let note_clip_color = if is_recording_preview {
-                    theme::with_alpha(theme::danger(), 0.32)
-                } else {
-                    theme::with_alpha(self.track_color, 0.4)
-                };
-                let note_block_color = if is_recording_preview {
-                    theme::with_alpha(theme::danger(), 0.88)
-                } else {
-                    theme::with_alpha(self.track_color, 0.8)
-                };
+                let is_selected =
+                    !is_recording_preview && self.selected_clips.contains(&note_clip.clip_id);
+                let colors = clip_colors(
+                    if is_recording_preview {
+                        theme::danger()
+                    } else {
+                        self.track_color
+                    },
+                    is_selected,
+                );
                 let clip_x = self.beat_to_x(note_clip.position_beats);
                 let clip_w = geometry.width_for_beats(note_clip.duration_beats);
 
@@ -522,33 +358,24 @@ impl TrackClipCanvas {
                     continue;
                 }
 
-                let clip_y = 4.0;
-                let clip_h = h - 8.0;
+                let clip_y = CLIP_Y;
+                let clip_h = h - 2.0 * CLIP_Y;
                 let body = clip_box(clip_x, clip_y, clip_w, clip_h);
-
-                // Clip body
-                frame.fill_rectangle(body.position(), body.size(), note_clip_color);
 
                 let looping =
                     note_clip.loop_enabled && note_clip.loop_end_beats > note_clip.loop_start_beats;
-                if looping {
-                    let loop_len = note_clip.loop_end_beats - note_clip.loop_start_beats;
-                    let repeat_color = theme::with_alpha(self.track_color, 0.2);
-                    let mut repeat_beat =
-                        note_clip.position_beats + note_clip.timeline().first_wrap().unwrap_or(0.0);
-                    while repeat_beat < note_clip.position_beats + note_clip.duration_beats {
-                        let rx = self.beat_to_x(repeat_beat);
-                        let rw = geometry.width_for_beats(loop_len);
-                        if rx < w && rx + rw > 0.0 {
-                            frame.fill_rectangle(
-                                iced::Point::new(rx, clip_y),
-                                iced::Size::new(rw.min(body.x + body.width - rx).max(0.0), clip_h),
-                                repeat_color,
-                            );
-                        }
-                        repeat_beat += loop_len;
-                    }
-                }
+                let loop_passes =
+                    note_clip
+                        .timeline()
+                        .first_wrap()
+                        .filter(|_| looping)
+                        .map(|first_wrap| LoopPasses {
+                            first_wrap_px: geometry.width_for_beats(first_wrap),
+                            pass_px: geometry.width_for_beats(
+                                note_clip.loop_end_beats - note_clip.loop_start_beats,
+                            ),
+                        });
+                draw_clip_back(&mut frame, body, &colors, loop_passes, w);
 
                 // Draw note blocks inside the clip (below title bar)
                 let left = clip_x.max(0.0);
@@ -559,72 +386,10 @@ impl TrackClipCanvas {
                     height: clip_h - CLIP_TITLE_HEIGHT,
                 };
                 for mark in note_marks(&note_clip.notes, clip_x, area, geometry.pixels_per_beat()) {
-                    frame.fill_rectangle(
-                        mark.rect.position(),
-                        mark.rect.size(),
-                        if mark.repeated {
-                            theme::with_alpha(self.track_color, 0.5)
-                        } else {
-                            note_block_color
-                        },
-                    );
+                    frame.fill_rectangle(mark.position(), mark.size(), colors.ink);
                 }
 
-                // Loop markers for note clips
-                if looping && clip_w > 20.0 {
-                    frame.fill_text(canvas::Text {
-                        content: "L".to_string(),
-                        position: iced::Point::new(clip_x + clip_w - 14.0, clip_y + 3.0),
-                        color: theme::accent(),
-                        size: iced::Pixels(9.0),
-                        ..Default::default()
-                    });
-                }
-
-                // Selection highlight
-                let is_selected =
-                    !is_recording_preview && self.selected_clips.contains(&note_clip.clip_id);
-                let border_color = if is_recording_preview {
-                    theme::danger()
-                } else if is_selected {
-                    theme::accent()
-                } else {
-                    theme::darken(self.track_color, 0.7)
-                };
-                let border_width = if is_selected { 2.0 } else { 1.0 };
-
-                // Clip border
-                let outline = clip_outline(body, border_width);
-                let border = canvas::Path::rectangle(outline.position(), outline.size());
-                frame.stroke(
-                    &border,
-                    canvas::Stroke::default()
-                        .with_color(border_color)
-                        .with_width(border_width),
-                );
-
-                // Title bar separator
-                let title_sep_y = clip_y + CLIP_TITLE_HEIGHT;
-                let title_line = canvas::Path::line(
-                    iced::Point::new(body.x, title_sep_y),
-                    iced::Point::new(body.x + body.width, title_sep_y),
-                );
-                frame.stroke(
-                    &title_line,
-                    canvas::Stroke::default()
-                        .with_color(theme::with_alpha(Color::BLACK, 0.3))
-                        .with_width(1.0),
-                );
-
-                draw_clip_title(
-                    &mut frame,
-                    &note_clip.name,
-                    clip_x,
-                    clip_y,
-                    body.width,
-                    note_clip.loop_enabled,
-                    w,
-                );
+                draw_clip_front(&mut frame, body, &colors, &note_clip.name, looping, w);
             }
         }
 
@@ -809,10 +574,17 @@ impl TrackClipCanvas {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        clip_box, clip_outline, clip_title_layout, fit_clip_title, visible_pixel_columns,
-        waveform_peak_for_pixel,
-    };
+    use super::{visible_pixel_columns, waveform_peak_for_pixel, whole_pixel_offset};
+
+    #[test]
+    fn a_lane_laid_out_between_pixel_rows_paints_on_whole_pixels() {
+        let origin = iced::Point::new(640.25, 173.5);
+
+        let painted = origin + whole_pixel_offset(origin);
+
+        assert_eq!((painted.x.fract(), painted.y.fract()), (0.0, 0.0));
+        assert!(origin.distance(painted) < 1.0);
+    }
 
     #[test]
     fn a_live_waveform_pixel_keeps_its_source_range_as_the_take_grows() {
@@ -855,27 +627,6 @@ mod tests {
     }
 
     #[test]
-    fn clip_title_is_constrained_to_its_visible_width() {
-        assert_eq!(
-            fit_clip_title("Kick.wav", 100.0, false),
-            Some("Kick.wav".into())
-        );
-        assert_eq!(
-            fit_clip_title("OTH_128_Hub_Full.wav", 80.0, false),
-            Some("OTH_128_H..".into())
-        );
-        assert_eq!(fit_clip_title("Kick.wav", 40.0, false), None);
-    }
-
-    #[test]
-    fn loop_icon_reserves_title_space() {
-        assert_eq!(
-            fit_clip_title("OTH_128_Hub_Full.wav", 80.0, true),
-            Some("OTH_12..".into())
-        );
-    }
-
-    #[test]
     fn waveform_iteration_is_limited_to_visible_clip_columns() {
         assert_eq!(
             visible_pixel_columns(-10_000.0, 20_000.0, 1_000.0),
@@ -883,50 +634,5 @@ mod tests {
         );
         assert_eq!(visible_pixel_columns(200.0, 400.0, 1_000.0), 0..400);
         assert_eq!(visible_pixel_columns(1_200.0, 400.0, 1_000.0), 0..0);
-    }
-
-    #[test]
-    fn clip_title_bounds_never_escape_the_arrangement_viewport() {
-        let region = |clip_x| clip_title_layout(clip_x, 4.0, 400.0, 800.0).map(|l| l.region);
-        assert_eq!(region(-200.0).map(|r| (r.x, r.width)), Some((0.0, 200.0)));
-        assert_eq!(region(600.0).map(|r| (r.x, r.width)), Some((600.0, 200.0)));
-        assert_eq!(region(900.0), None);
-    }
-
-    #[test]
-    fn clip_title_text_starts_at_the_left_of_its_region_at_any_scroll() {
-        for clip_x in [-200.0, 0.0, 100.0, 600.0] {
-            let layout = clip_title_layout(clip_x, 4.0, 400.0, 800.0).unwrap();
-            assert_eq!(
-                layout.text,
-                iced::Point::new(4.0, 3.0),
-                "clip at x {clip_x}"
-            );
-        }
-    }
-
-    #[test]
-    fn back_to_back_clips_leave_a_gap_between_them_at_any_zoom() {
-        for clip_w in [400.0, 12.0, 3.0] {
-            let first = clip_box(100.0, 4.0, clip_w, 70.0);
-            let second = clip_box(100.0 + clip_w, 4.0, clip_w, 70.0);
-            assert!(
-                first.x + first.width + 1.0 <= second.x,
-                "clips {clip_w} px wide"
-            );
-            assert!(first.width >= 1.0, "clips {clip_w} px wide");
-        }
-    }
-
-    #[test]
-    fn a_clip_border_never_paints_outside_its_box() {
-        let body = clip_box(100.0, 4.0, 50.0, 70.0);
-        for stroke in [1.0, 2.0] {
-            let outline = clip_outline(body, stroke);
-            assert!(outline.x - stroke / 2.0 >= body.x);
-            assert!(outline.y - stroke / 2.0 >= body.y);
-            assert!(outline.x + outline.width + stroke / 2.0 <= body.x + body.width);
-            assert!(outline.y + outline.height + stroke / 2.0 <= body.y + body.height);
-        }
     }
 }

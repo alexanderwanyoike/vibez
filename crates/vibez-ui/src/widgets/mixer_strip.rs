@@ -358,10 +358,15 @@ fn name_display<'a>(
             .width(Length::Fill)
             .into()
     } else {
-        let label = text(crate::typography::fit(&track.name, STRIP_W - 34.0, 11.0))
-            .font(PERFORM_LABEL)
-            .size(11)
-            .color(console::DISPLAY_TEXT);
+        let label = text(crate::typography::fit(
+            &track.name,
+            STRIP_W - 34.0,
+            11.0,
+            PERFORM_LABEL,
+        ))
+        .font(PERFORM_LABEL)
+        .size(11)
+        .color(console::DISPLAY_TEXT);
         if is_master {
             label.into()
         } else {
@@ -458,10 +463,15 @@ fn view_sends<'a>(
                 let amount = effective_send_amount(track, automation, bus.id, playhead_beat);
                 row![
                     dot(colour),
-                    text(crate::typography::fit(&bus.name, STRIP_W - 60.0, 10.0))
-                        .size(10)
-                        .color(th::text())
-                        .width(Length::Fill),
+                    text(crate::typography::fit(
+                        &bus.name,
+                        STRIP_W - 60.0,
+                        10.0,
+                        iced::Font::DEFAULT
+                    ))
+                    .size(10)
+                    .color(th::text())
+                    .width(Length::Fill),
                     canvas(EffectKnobWidget::for_send(track.id, bus.id, amount, colour))
                         .width(Length::Fixed(34.0))
                         .height(Length::Fixed(34.0)),

@@ -2,20 +2,12 @@
 
 use iced::Rectangle;
 
-/// One filled mark inside a note clip's body.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(super) struct NoteMark {
-    pub rect: Rectangle,
-    /// Belongs to a loop repeat rather than the clip's first pass.
-    pub repeated: bool,
-}
-
 /// Breathing room between the marks and the top and bottom of the body.
 const PAD: f32 = 2.0;
 const MIN_MARK_HEIGHT: f32 = 2.0;
 const MAX_MARK_HEIGHT: f32 = 6.0;
 
-/// Lay out `notes` (pitch, clip-local start, duration, repeated) for a clip
+/// Lay out `notes` (pitch, clip-local start, duration) for a clip
 /// whose beat 0 is at `origin_x`. `area` is the on-screen part of the clip
 /// body below its title.
 ///
@@ -23,11 +15,11 @@ const MAX_MARK_HEIGHT: f32 = 6.0;
 /// Marks on one row that would touch on screen merge into one, which keeps
 /// the mark count bounded by the visible width rather than the note count.
 pub(super) fn note_marks(
-    notes: &[(u8, f64, f64, bool)],
+    notes: &[(u8, f64, f64)],
     origin_x: f32,
     area: Rectangle,
     pixels_per_beat: f32,
-) -> Vec<NoteMark> {
+) -> Vec<Rectangle> {
     let Some(lowest) = notes.iter().map(|note| note.0).min() else {
         return Vec::new();
     };
@@ -47,36 +39,33 @@ pub(super) fn note_marks(
     let top = area.y + PAD + (inner - (step * (rows - 1.0) + height)) / 2.0;
     let right = area.x + area.width;
 
-    let mut spans: Vec<(bool, u8, f32, f32)> = notes
+    let mut spans: Vec<(u8, f32, f32)> = notes
         .iter()
-        .filter_map(|&(pitch, start_beat, duration_beats, repeated)| {
+        .filter_map(|&(pitch, start_beat, duration_beats)| {
             let start_x = origin_x + start_beat as f32 * pixels_per_beat;
             let end_x = start_x + duration_beats as f32 * pixels_per_beat;
             // Whole pixels, at least one wide, so a note narrower than a
             // pixel paints a solid column instead of a faint antialiased one.
             let x0 = start_x.floor().max(area.x);
             let x1 = end_x.ceil().max(start_x.floor() + 1.0).min(right);
-            (x1 > x0).then_some((repeated, pitch, x0, x1))
+            (x1 > x0).then_some((pitch, x0, x1))
         })
         .collect();
-    spans.sort_unstable_by(|a, b| (a.0, a.1).cmp(&(b.0, b.1)).then(a.2.total_cmp(&b.2)));
+    spans.sort_unstable_by(|a, b| a.0.cmp(&b.0).then(a.1.total_cmp(&b.1)));
     spans.dedup_by(|next, kept| {
-        let merge = next.0 == kept.0 && next.1 == kept.1 && next.2 <= kept.3;
+        let merge = next.0 == kept.0 && next.1 <= kept.2;
         if merge {
-            kept.3 = kept.3.max(next.3);
+            kept.2 = kept.2.max(next.2);
         }
         merge
     });
     spans
         .into_iter()
-        .map(|(repeated, pitch, x0, x1)| NoteMark {
-            rect: Rectangle {
-                x: x0,
-                y: top + f32::from(highest - pitch) * step,
-                width: x1 - x0,
-                height,
-            },
-            repeated,
+        .map(|(pitch, x0, x1)| Rectangle {
+            x: x0,
+            y: top + f32::from(highest - pitch) * step,
+            width: x1 - x0,
+            height,
         })
         .collect()
 }
@@ -93,9 +82,9 @@ mod tests {
         height: 44.0,
     };
 
-    fn sixteenths(pitch: u8, count: usize) -> Vec<(u8, f64, f64, bool)> {
+    fn sixteenths(pitch: u8, count: usize) -> Vec<(u8, f64, f64)> {
         (0..count)
-            .map(|index| (pitch, index as f64 * 0.25, 0.2, false))
+            .map(|index| (pitch, index as f64 * 0.25, 0.2))
             .collect()
     }
 
@@ -103,7 +92,7 @@ mod tests {
     fn a_single_pitch_clip_draws_its_notes_centred_in_the_body() {
         let marks = note_marks(&sixteenths(36, 4), 0.0, AREA, 20.0);
 
-        let centre = marks[0].rect.y + marks[0].rect.height / 2.0;
+        let centre = marks[0].y + marks[0].height / 2.0;
         assert!(
             (centre - (AREA.y + AREA.height / 2.0)).abs() < 0.5,
             "centre {centre}"
@@ -115,8 +104,8 @@ mod tests {
         let marks = note_marks(&sixteenths(36, 64), 0.0, AREA, 1.0);
 
         assert_eq!(marks.len(), 1);
-        assert_eq!(marks[0].rect.x, 0.0);
-        assert_eq!(marks[0].rect.width, 16.0);
+        assert_eq!(marks[0].x, 0.0);
+        assert_eq!(marks[0].width, 16.0);
     }
 
     #[test]
@@ -128,20 +117,20 @@ mod tests {
 
     #[test]
     fn a_note_shorter_than_a_pixel_paints_one_whole_pixel() {
-        let marks = note_marks(&[(60, 0.5, 0.1, false)], 10.0, AREA, 1.0);
+        let marks = note_marks(&[(60, 0.5, 0.1)], 10.0, AREA, 1.0);
 
-        assert_eq!(marks[0].rect.x, 10.0);
-        assert_eq!(marks[0].rect.width, 1.0);
+        assert_eq!(marks[0].x, 10.0);
+        assert_eq!(marks[0].width, 1.0);
     }
 
     #[test]
     fn only_the_visible_part_of_a_scrolled_clip_makes_marks() {
         let notes = [
-            (60, 0.0, 1.0, false),
-            (60, 49.5, 1.0, false),
-            (60, 55.0, 1.0, false),
-            (60, 60.0, 1.0, false),
-            (60, 200.0, 1.0, false),
+            (60, 0.0, 1.0),
+            (60, 49.5, 1.0),
+            (60, 55.0, 1.0),
+            (60, 60.0, 1.0),
+            (60, 200.0, 1.0),
         ];
         let visible = Rectangle {
             width: 200.0,
@@ -150,7 +139,7 @@ mod tests {
 
         let marks = note_marks(&notes, -1000.0, visible, 20.0);
 
-        let spans: Vec<_> = marks.iter().map(|m| (m.rect.x, m.rect.width)).collect();
+        let spans: Vec<_> = marks.iter().map(|m| (m.x, m.width)).collect();
         assert_eq!(spans, [(0.0, 10.0), (100.0, 20.0)]);
     }
 }

@@ -129,6 +129,54 @@ pub struct ThemePalette {
     pub piano_black_key: Color,
     #[serde(with = "hex")]
     pub piano_key_label: Color,
+
+    /// Older `.vzt` files predate it and load with the dark style.
+    #[serde(default)]
+    pub clip_style: ClipStyle,
+}
+
+/// How a timeline clip is shaded from its track colour.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct ClipStyle {
+    /// Opacity of the clip body, so the lane shows through faintly while
+    /// the title strip, notes and waveform stay solid.
+    pub body_opacity: f32,
+    /// How far the body is mixed from the track colour toward the lane
+    /// background before `body_opacity` applies.
+    pub body_toward_lane: f32,
+    /// Notes, waveform and title text, drawn over the track colour.
+    #[serde(with = "hex")]
+    pub ink: Color,
+}
+
+impl ClipStyle {
+    pub const DARK: Self = Self {
+        body_opacity: 0.55,
+        body_toward_lane: 0.1,
+        ink: Color {
+            r: 10.0 / 255.0,
+            g: 10.0 / 255.0,
+            b: 12.0 / 255.0,
+            a: 0.86,
+        },
+    };
+
+    pub const LIGHT: Self = Self {
+        body_opacity: 0.55,
+        body_toward_lane: 0.34,
+        ink: Color {
+            r: 16.0 / 255.0,
+            g: 16.0 / 255.0,
+            b: 18.0 / 255.0,
+            a: 0.86,
+        },
+    };
+}
+
+impl Default for ClipStyle {
+    fn default() -> Self {
+        Self::DARK
+    }
 }
 
 /// Hex color (de)serialization: `#rrggbb` or `#rrggbbaa`.
@@ -260,6 +308,7 @@ impl ThemePalette {
             piano_white_key: rgb(0.784, 0.784, 0.784),
             piano_black_key: rgb(0.102, 0.102, 0.102),
             piano_key_label: rgb(0.35, 0.35, 0.35),
+            clip_style: ClipStyle::DARK,
         }
     }
 }
@@ -349,6 +398,10 @@ accessors! {
     piano_white_key => piano_white_key,
     piano_black_key => piano_black_key,
     piano_key_label => piano_key_label,
+}
+
+pub fn clip_style() -> ClipStyle {
+    CURRENT.read().unwrap().clip_style
 }
 
 // ── Derived roles (aliases of palette fields) ──
@@ -494,6 +547,16 @@ mod tests {
         assert_eq!(back.name, "Charcoal");
         assert_eq!(hex::to_hex(&back.accent), "#ff8c00");
         assert_eq!(back.track_colors.len(), 8);
+    }
+
+    #[test]
+    fn a_theme_file_without_clip_style_loads_with_the_dark_style() {
+        let mut json = serde_json::to_value(ThemePalette::charcoal()).unwrap();
+        json.as_object_mut().unwrap().remove("clip_style");
+
+        let palette: ThemePalette = serde_json::from_value(json).unwrap();
+
+        assert_eq!(palette.clip_style, ClipStyle::DARK);
     }
 
     #[test]

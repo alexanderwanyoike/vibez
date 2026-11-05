@@ -51,7 +51,7 @@ pub struct TimelineNoteClip {
     pub position_beats: f64,
     pub duration_beats: f64,
     pub name: String,
-    pub notes: Vec<(u8, f64, f64, bool)>, // (pitch, start, duration, repeated)
+    pub notes: Vec<(u8, f64, f64)>, // (pitch, start, duration)
     pub start_marker_beats: f64,
     pub loop_enabled: bool,
     pub loop_start_beats: f64,
@@ -222,13 +222,16 @@ pub fn compute_clip_peaks(clip: &crate::state::UiClip) -> Arc<Vec<(f32, f32)>> {
 pub(super) const RESIZE_EDGE_PX: f32 = 8.0;
 
 /// Height of the clip title bar zone (move/resize). Below this is the body zone (seek/region select).
-pub(super) const CLIP_TITLE_HEIGHT: f32 = 18.0;
+pub(super) const CLIP_TITLE_HEIGHT: f32 = 16.0;
 /// Top padding of clips within the track canvas.
-pub(super) const CLIP_Y: f32 = 4.0;
+pub(super) const CLIP_Y: f32 = 2.0;
 pub(super) const FADE_HANDLE_Y: f32 = CLIP_Y + CLIP_TITLE_HEIGHT + 6.0;
 pub(super) const FADE_HANDLE_HIT_RADIUS: f32 = 7.0;
 
+mod clip_colors;
 mod clip_drag;
+mod clip_frame;
+mod clip_title;
 mod clips;
 mod clips_draw;
 #[cfg(test)]
