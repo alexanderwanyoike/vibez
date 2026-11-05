@@ -602,6 +602,54 @@ fn fade_drag_snaps_to_an_overlapping_neighbour_across_pointer_moves() {
     }
 }
 
+/// The fade in length after dragging the fade in handle of a fresh 4 beat
+/// clip to `to_beat` with `modifiers` held.
+fn fade_in_frames_after_drag(to_beat: f64, modifiers: Modifiers) -> Option<u64> {
+    let (canvas, _) = canvas_with_selected_audio_clip();
+    let handle = Point::new(canvas.beat_to_x(0.0), FADE_HANDLE_Y);
+    let target = Point::new(canvas.beat_to_x(to_beat), FADE_HANDLE_Y);
+    let mut state = ClipInteractionState::default();
+    <TrackClipCanvas as canvas::Program<Message>>::update(
+        &canvas,
+        &mut state,
+        canvas::Event::Keyboard(Event::ModifiersChanged(modifiers)),
+        Rectangle::new(Point::ORIGIN, Size::new(800.0, 80.0)),
+        mouse::Cursor::Available(handle),
+    );
+    left_event(
+        &canvas,
+        &mut state,
+        iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left),
+        handle,
+    );
+    match left_event(
+        &canvas,
+        &mut state,
+        iced::mouse::Event::CursorMoved { position: target },
+        target,
+    ) {
+        Some(Message::UndoGesture { edit, .. }) => match *edit {
+            Message::Arrangement(ArrangementMsg::SetAudioClipFade { frames, .. }) => Some(frames),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+#[test]
+fn a_fade_drag_ends_the_fade_on_the_grid_line_under_the_pointer() {
+    let frames = fade_in_frames_after_drag(1.1, Modifiers::empty()).expect("a fade edit");
+
+    assert_eq!(frames, 22_050);
+}
+
+#[test]
+fn an_alt_fade_drag_follows_the_pointer_off_the_grid() {
+    let frames = fade_in_frames_after_drag(1.1, Modifiers::ALT).expect("a fade edit");
+
+    assert!(frames.abs_diff(24_255) <= 1, "the fade is {frames} frames");
+}
+
 #[test]
 fn selected_audio_fade_curve_handle_drag_emits_vertical_curve_edits() {
     let mut canvas = empty_track_canvas();
