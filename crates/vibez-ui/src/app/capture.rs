@@ -257,16 +257,14 @@ fn capture_replaces_existing_content(
 ) -> bool {
     captured.controlled_track_ids.iter().any(|track_id| {
         arrange.get(*track_id).is_some_and(|existing| {
-            existing.clips.iter().any(|clip| {
-                audio_overlaps(
-                    clip,
-                    captured.arrange_start_samples,
-                    captured.arrange_end_samples,
-                )
-            }) || existing
-                .note_clips
-                .iter()
-                .any(|clip| notes_overlap(clip, captured.start_beat(), captured.end_beat()))
+            let overwrite = lane_overwrite(
+                existing,
+                (captured.start_beat(), captured.end_beat()),
+                &HashSet::new(),
+                captured.samples_per_beat,
+            );
+            !overwrite.audio.is_empty()
+                || !overwrite.notes.is_empty()
                 || !existing.automation.is_empty()
         })
     })
@@ -382,14 +380,6 @@ fn apply_capture_to_arrangement(
     }
     engine.send(EngineCommand::EndContentRebuild);
     clip_count
-}
-
-fn audio_overlaps(clip: &crate::state::UiClip, start: u64, end: u64) -> bool {
-    clip.position < end && clip.position.saturating_add(clip.duration) > start
-}
-
-fn notes_overlap(clip: &crate::state::UiNoteClip, start: f64, end: f64) -> bool {
-    clip.position_beats < end && clip.position_beats + clip.duration_beats > start
 }
 
 fn replace_automation_interval(
