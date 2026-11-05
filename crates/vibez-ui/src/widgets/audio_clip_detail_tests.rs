@@ -198,7 +198,7 @@ fn overlapping_start_and_loop_start_have_separate_hit_rows() {
 }
 
 #[test]
-fn an_audio_clip_opens_framed_on_its_loop() {
+fn an_audio_clip_opens_on_its_whole_sample_from_before_its_offset() {
     let mut widget = widget();
     widget.bpm = 1_200.0;
     widget.view = None;
@@ -206,8 +206,10 @@ fn an_audio_clip_opens_framed_on_its_loop() {
     widget.loop_end = 700;
     let bounds = Rectangle::new(Point::ORIGIN, iced::Size::new(800.0, 200.0));
 
-    assert!((widget.timeline_to_x(300, &bounds) - FRAME_MARGIN_PIXELS).abs() < 1e-3);
-    assert!((widget.timeline_to_x(700, &bounds) - (800.0 - FRAME_MARGIN_PIXELS)).abs() < 1e-3);
+    assert_eq!(widget.timeline_to_x(0, &bounds), 0.0);
+    assert!(
+        (widget.timeline_to_x(1_000, &bounds) - (800.0 - 2.0 * FRAME_MARGIN_PIXELS)).abs() < 1e-3
+    );
 }
 
 fn wheel(
