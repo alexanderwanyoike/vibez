@@ -87,10 +87,8 @@ fn perform_mode_tab_width(surface_width: f32) -> f32 {
 }
 
 pub(super) fn effective_perform_surface_width(preferred_width: f32, workspace_width: f32) -> f32 {
-    let maximum = (workspace_width
-        - SECTION_CONSTRUCTION_MIN_WIDTH
-        - super::views_shell::HORIZONTAL_PANE_SPLITTER_WIDTH)
-        .max(0.0);
+    let maximum =
+        (workspace_width - SECTION_CONSTRUCTION_MIN_WIDTH - crate::shell_layout::PANE_GAP).max(0.0);
     let minimum = PAD_SURFACE_MIN_WIDTH.min(maximum);
     preferred_width.clamp(minimum, maximum)
 }
@@ -146,8 +144,7 @@ impl App {
         let workspace_width = self.browser_workspace_width();
         let surface_width =
             effective_perform_surface_width(self.state.view.perform_surface_width, workspace_width);
-        (workspace_width - surface_width - super::views_shell::HORIZONTAL_PANE_SPLITTER_WIDTH)
-            .max(0.0)
+        (workspace_width - surface_width - crate::shell_layout::PANE_GAP).max(0.0)
     }
 
     pub(super) fn section_timeline_viewport_width(&self) -> f32 {
@@ -158,10 +155,10 @@ impl App {
     }
 
     pub(super) fn perform_surface_drag_width(&self, cursor_x: f32) -> f32 {
-        let workspace_width = self.browser_workspace_width();
-        let workspace_left = self.state.view.window_width - workspace_width;
+        let workspace = self.workspace_span();
+        let workspace_width = workspace.width;
         effective_perform_surface_width(
-            cursor_x - workspace_left,
+            cursor_x - workspace.left,
             if self.state.perform.layout == vibez_project::PerformLayout::Clips {
                 workspace_width.max(super::views_clip_launcher::MIN_CLIP_DOCK_WIDTH)
             } else {

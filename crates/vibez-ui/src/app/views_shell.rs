@@ -10,13 +10,11 @@ use crate::domains::view::ViewMsg;
 
 use crate::icons;
 use crate::message::Message;
+use crate::shell_layout::PANE_GAP;
 use crate::state::Workspace;
 use crate::theme as th;
 
 use super::*;
-
-pub(super) const HORIZONTAL_PANE_SPLITTER_WIDTH: f32 = 7.0;
-pub(super) const VERTICAL_PANE_SPLITTER_HEIGHT: f32 = 7.0;
 
 fn pane_splitter_style(active: bool) -> container::Style {
     container::Style {
@@ -38,7 +36,7 @@ pub(super) fn horizontal_pane_splitter(
 ) -> Element<'static, Message> {
     mouse_area(
         container(text(""))
-            .width(Length::Fixed(HORIZONTAL_PANE_SPLITTER_WIDTH))
+            .width(Length::Fixed(PANE_GAP))
             .height(Length::Fill)
             .style(move |_theme: &Theme| pane_splitter_style(active)),
     )
@@ -51,7 +49,7 @@ pub(super) fn vertical_pane_splitter(active: bool, on_press: Message) -> Element
     mouse_area(
         container(text(""))
             .width(Length::Fill)
-            .height(Length::Fixed(VERTICAL_PANE_SPLITTER_HEIGHT))
+            .height(Length::Fixed(PANE_GAP))
             .style(move |_theme: &Theme| pane_splitter_style(active)),
     )
     .on_press(on_press)
@@ -60,17 +58,19 @@ pub(super) fn vertical_pane_splitter(active: bool, on_press: Message) -> Element
 }
 
 impl App {
-    /// Width left for the Arrange or Perform workspace beside the Browser.
-    pub(super) fn browser_workspace_width(&self) -> f32 {
-        let browser_width = if self.state.browser.open {
+    /// Where the Arrange or Perform workspace sits beside the Browser.
+    pub(super) fn workspace_span(&self) -> crate::shell_layout::Span {
+        let browser_width = self.state.browser.open.then(|| {
             self.state
                 .browser
                 .effective_dock_width(self.state.view.window_width)
-                + HORIZONTAL_PANE_SPLITTER_WIDTH
-        } else {
-            0.0
-        };
-        (self.state.view.window_width - browser_width).max(0.0)
+        });
+        crate::shell_layout::workspace_span(self.state.view.window_width, browser_width)
+    }
+
+    /// Width left for the Arrange or Perform workspace beside the Browser.
+    pub(super) fn browser_workspace_width(&self) -> f32 {
+        self.workspace_span().width
     }
 
     // ── View ──

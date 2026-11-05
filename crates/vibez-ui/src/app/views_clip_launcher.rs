@@ -222,8 +222,7 @@ impl App {
                 dock_width,
             );
             let pad_width = self.clip_pad_surface_width(pad_width);
-            let grid_width =
-                dock_width - pad_width - super::views_shell::HORIZONTAL_PANE_SPLITTER_WIDTH;
+            let grid_width = dock_width - pad_width - crate::shell_layout::PANE_GAP;
             scrollable::Scrollable::with_direction(
                 row![
                     self.view_pad_surface(pad_width),
