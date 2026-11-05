@@ -384,10 +384,8 @@ impl TimelineEditorState {
                     }
                     _ => unreachable!(),
                 };
-                if new_start < clip.source_offset
-                    || new_start >= new_end
-                    || new_end > loop_limit
-                    || clip.start_marker >= new_end
+                if (new_start, new_end) != (clip.loop_start, clip.loop_end)
+                    && !clip.set_loop_region(new_start, new_end)
                 {
                     action.status = Some(format!(
                         "Loop bounds must stay ordered inside {:.3} to {:.3} s",
@@ -396,8 +394,6 @@ impl TimelineEditorState {
                     ));
                     return action;
                 }
-                clip.loop_start = new_start;
-                clip.loop_end = new_end;
                 engine.send(EngineCommand::SetClipLoop {
                     track_id,
                     clip_id,
