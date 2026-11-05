@@ -5,6 +5,7 @@ use iced::{mouse, Point, Rectangle, Renderer, Size, Theme};
 
 use crate::message::Message;
 use crate::theme;
+use crate::time_format::minutes_seconds;
 use crate::timeline_geometry::TimelineGeometry;
 use crate::typography;
 
@@ -74,10 +75,9 @@ fn time_marks(geometry: TimelineGeometry, width: f32, bpm: f64) -> Vec<(f32, Str
         .filter_map(|index| {
             let seconds = index as f64 * step;
             let x = geometry.beat_to_x(seconds * beats_per_second).round();
-            let whole = seconds.round() as u64;
             (0.0..=width)
                 .contains(&x)
-                .then(|| (x, format!("{}:{:02}", whole / 60, whole % 60)))
+                .then(|| (x, minutes_seconds(seconds)))
         })
         .collect()
 }

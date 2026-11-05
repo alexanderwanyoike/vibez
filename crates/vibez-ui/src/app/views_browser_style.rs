@@ -73,8 +73,7 @@ pub(super) fn browser_entry_metadata(entry: &SampleBrowserEntry) -> String {
 
 pub(super) fn format_browser_duration(seconds: f64) -> String {
     if seconds >= 60.0 {
-        let total_seconds = seconds.round() as u64;
-        format!("{}:{:02}", total_seconds / 60, total_seconds % 60)
+        crate::time_format::minutes_seconds(seconds)
     } else {
         format!("{seconds:.1}s")
     }
