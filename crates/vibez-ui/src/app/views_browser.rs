@@ -1,9 +1,7 @@
 //! Split out of app.rs; inherent methods on [`super::App`].
 
 use iced::widget::text_input;
-use iced::widget::{
-    button, column, container, horizontal_space, mouse_area, row, scrollable, text,
-};
+use iced::widget::{button, column, container, horizontal_space, mouse_area, row, text};
 use iced::{Element, Length};
 
 use crate::domains::browser::BrowserMsg;
@@ -480,7 +478,7 @@ impl App {
                 ]
                 .align_y(iced::Alignment::Center),
                 table_header,
-                scrollable(
+                crate::widgets::quiet_scroll::vertical(
                     container(entries_col)
                         .width(Length::Fill)
                         .padding(iced::Padding {
@@ -492,7 +490,6 @@ impl App {
                     SampleBrowserMode::Local,
                 ))
                 .height(Length::Fill)
-                .direction(scrollable::Direction::Vertical(browser_vertical_scrollbar()))
             ]
             .spacing(0)
             .padding(iced::Padding {

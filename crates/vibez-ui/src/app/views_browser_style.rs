@@ -3,7 +3,7 @@
 
 use std::path::Path;
 
-use iced::widget::{button, container, scrollable, text, text_input, Space};
+use iced::widget::{button, container, text, text_input, Space};
 use iced::{Element, Length, Theme};
 
 use crate::message::Message;
@@ -15,16 +15,6 @@ pub(super) const BROWSER_TREE_INDENT_STEP: f32 = 8.0;
 pub(super) const BROWSER_ROW_RADIUS: f32 = 7.0;
 pub(super) const BROWSER_FIELD_RADIUS: f32 = 8.0;
 pub(super) const BROWSER_TREE_MAX_DEPTH: f32 = 5.0;
-pub(super) const BROWSER_SCROLLBAR_TRACK_WIDTH: f32 = 5.0;
-pub(super) const BROWSER_SCROLLBAR_HANDLE_WIDTH: f32 = 3.0;
-const _: () = assert!(BROWSER_SCROLLBAR_HANDLE_WIDTH < BROWSER_SCROLLBAR_TRACK_WIDTH);
-
-pub(super) fn browser_vertical_scrollbar() -> scrollable::Scrollbar {
-    scrollable::Scrollbar::new()
-        .width(BROWSER_SCROLLBAR_TRACK_WIDTH)
-        .scroller_width(BROWSER_SCROLLBAR_HANDLE_WIDTH)
-}
-
 pub(super) fn remote_places_indent(depth: usize) -> f32 {
     REMOTE_CONNECTION_INDENT
         + ((depth as f32 + 1.0).min(BROWSER_TREE_MAX_DEPTH) * BROWSER_TREE_INDENT_STEP)
