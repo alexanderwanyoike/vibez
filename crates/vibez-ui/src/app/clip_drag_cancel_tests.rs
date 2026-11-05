@@ -32,6 +32,7 @@ struct Song {
 /// real engine.
 fn song() -> Song {
     let mut app = super::test_support::app();
+    app.state.view.workspace = crate::state::Workspace::Arrange;
     let (engine, commands, events) = AudioEngine::new();
     let mut engine = engine;
     app.cmd_tx =
@@ -147,6 +148,20 @@ impl Song {
         self.pointer(mouse::Event::ButtonReleased(mouse::Button::Left), beat);
     }
 
+    fn escape(&mut self) {
+        let key = super::test_support::escape_key();
+        let (status, message) = self.canvas().update(
+            &mut self.lane,
+            canvas::Event::Keyboard(key.clone()),
+            Rectangle::new(Point::ORIGIN, Size::new(1600.0, 70.0)),
+            mouse::Cursor::Unavailable,
+        );
+        if let Some(message) = message {
+            let _ = self.app.update(message);
+        }
+        super::test_support::deliver_key(&mut self.app, key, status);
+    }
+
     fn project_start(&self) -> f64 {
         self.app
             .state
@@ -193,9 +208,14 @@ fn escape_mid_drag_puts_the_clip_back_and_leaves_no_undo_step() {
     }
     song.render();
     assert_eq!(song.engine_start(), 8.0, "the engine follows the drag");
+    song.app.state.browser.audition_playing = true;
 
-    let _ = song.app.update(Message::EscapePressed);
+    song.escape();
     song.render();
+    assert!(
+        song.app.state.browser.audition_playing,
+        "the Escape that cancels the drag does nothing else"
+    );
 
     assert_eq!(song.project_start(), START_BEAT);
     assert_eq!(song.engine_start(), START_BEAT);

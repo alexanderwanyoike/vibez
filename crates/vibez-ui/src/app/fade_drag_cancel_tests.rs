@@ -1,10 +1,8 @@
-//! Escape during a fade drag on the lane canvas puts the fade back and lets
-//! go of the pointer.
+//! Escape during a fade drag on the lane canvas puts the fade back, in the
+//! engine too, lets go of the pointer and does nothing else.
 
 use std::collections::HashSet;
 
-use iced::keyboard::key::{Code, Named, Physical};
-use iced::keyboard::{Event, Key, Location, Modifiers};
 use iced::widget::canvas::{self, Program};
 use iced::{mouse, Color, Point, Rectangle};
 
@@ -15,6 +13,7 @@ use crate::widgets::timeline::{ClipInteractionState, TrackClipCanvas};
 use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::id::{ClipId, TrackId};
 use vibez_core::track::ClipFades;
+use vibez_engine::engine::{AudioEngine, AudioProcessBlock};
 
 /// The fade in handle's row, below the clip's title strip.
 const FADE_HANDLE_Y: f32 = 24.0;
@@ -27,15 +26,21 @@ const BOUNDS: Rectangle = Rectangle {
 
 struct Lane {
     app: App,
+    engine: AudioEngine,
     track: ProjectTrack,
     clip_id: ClipId,
     state: ClipInteractionState,
 }
 
 /// One audio track holding a selected 2 second clip at the song start
-/// with a fade in of 4 410 frames.
+/// with a fade in of 4 410 frames, resident in a real engine.
 fn lane() -> Lane {
     let mut app = super::test_support::app();
+    app.state.view.workspace = crate::state::Workspace::Arrange;
+    let (mut engine, commands, events) = AudioEngine::new();
+    app.cmd_tx =
+        crate::domains::EngineCommandQueue::new(commands, engine.take_transport_sender().unwrap());
+    app.event_rx = Some(events);
     let track = ProjectTrack::new(TrackId::new(), "Loop".into(), 0);
     let clip_id = ClipId::new();
     let frames = 88_200;
@@ -68,12 +73,16 @@ fn lane() -> Lane {
     Arc::make_mut(&mut app.state.project_tracks)
         .tracks
         .push(track.clone());
-    Lane {
+    app.replay_track_to_engine(&track);
+    let mut lane = Lane {
         app,
+        engine,
         track,
         clip_id,
         state: ClipInteractionState::default(),
-    }
+    };
+    lane.render();
+    lane
 }
 
 impl Lane {
@@ -108,11 +117,17 @@ impl Lane {
         )
     }
 
+    fn render(&mut self) {
+        self.engine
+            .process_block(AudioProcessBlock::new(&mut [], 2));
+        self.app.poll_engine_events();
+    }
+
     /// Sends `event` with the pointer at `x` to the lane, and whatever it
     /// emits to the app.
-    fn send(&mut self, event: canvas::Event, x: f32) {
+    fn send(&mut self, event: canvas::Event, x: f32) -> canvas::event::Status {
         let canvas = self.canvas();
-        let (_, message) = canvas.update(
+        let (status, message) = canvas.update(
             &mut self.state,
             event,
             BOUNDS,
@@ -121,6 +136,7 @@ impl Lane {
         if let Some(message) = message {
             let _ = self.app.update(message);
         }
+        status
     }
 
     fn mouse(&mut self, event: mouse::Event, x: f32) {
@@ -128,18 +144,15 @@ impl Lane {
     }
 
     fn escape(&mut self, x: f32) {
-        self.send(
-            canvas::Event::Keyboard(Event::KeyPressed {
-                key: Key::Named(Named::Escape),
-                modified_key: Key::Named(Named::Escape),
-                physical_key: Physical::Code(Code::Escape),
-                location: Location::Standard,
-                modifiers: Modifiers::empty(),
-                text: None,
-            }),
-            x,
-        );
-        let _ = self.app.update(Message::EscapePressed);
+        let key = super::test_support::escape_key();
+        let status = self.send(canvas::Event::Keyboard(key.clone()), x);
+        super::test_support::deliver_key(&mut self.app, key, status);
+    }
+
+    fn engine_fade_in(&self) -> u64 {
+        self.engine.tracks()[0].playback_source.clips[0]
+            .fades
+            .fade_in_frames()
     }
 
     fn fade_in(&self) -> u64 {
@@ -168,12 +181,21 @@ fn escape_mid_fade_drag_puts_the_fade_back_and_lets_go() {
             x,
         );
     }
+    lane.render();
     assert!(lane.fade_in() > 4_410, "the fade follows the drag");
+    assert_eq!(lane.engine_fade_in(), lane.fade_in(), "so does the engine");
+    lane.app.state.browser.audition_playing = true;
 
     lane.escape(handle + 40.0);
+    lane.render();
 
     assert_eq!(lane.fade_in(), 4_410);
+    assert_eq!(lane.engine_fade_in(), 4_410);
     assert!(!lane.app.state.project.history.can_undo());
+    assert!(
+        lane.app.state.browser.audition_playing,
+        "the Escape that cancels the drag does nothing else"
+    );
     let away = mouse::Cursor::Available(Point::new(BOUNDS.width - 10.0, FADE_HANDLE_Y));
     assert_eq!(
         lane.canvas().mouse_interaction(&lane.state, BOUNDS, away),
