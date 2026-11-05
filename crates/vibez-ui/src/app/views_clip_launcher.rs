@@ -222,8 +222,7 @@ impl App {
                 dock_width,
             );
             let pad_width = self.clip_pad_surface_width(pad_width);
-            let grid_width =
-                dock_width - pad_width - super::views_shell::HORIZONTAL_PANE_SPLITTER_WIDTH;
+            let grid_width = dock_width - pad_width - crate::shell_layout::PANE_GAP;
             scrollable::Scrollable::with_direction(
                 row![
                     self.view_pad_surface(pad_width),
@@ -238,15 +237,13 @@ impl App {
             .height(Length::Fill)
             .into()
         };
-        container(column![
-            self.view_perform_mode_selector(width),
-            self.view_clip_record_controls(),
-            content
-        ])
-        .width(Length::Fill)
-        .height(Length::FillPortion(5))
-        .style(surface)
-        .into()
+        super::views_perform::perform_cards(
+            column![
+                self.view_perform_mode_selector(width),
+                self.view_clip_record_controls()
+            ],
+            content,
+        )
     }
 
     fn view_clip_record_controls(&self) -> Element<'_, Message> {
@@ -830,14 +827,7 @@ impl App {
         .spacing(8)
         .align_y(iced::Alignment::Center);
         workspace = workspace.push(container(footer).padding([if compact { 4 } else { 8 }, 12]));
-        container(workspace)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .style(|_| container::Style {
-                background: Some(Color::BLACK.into()),
-                ..Default::default()
-            })
-            .into()
+        crate::widgets::shell_card::shell_card(workspace).into()
     }
 }
 

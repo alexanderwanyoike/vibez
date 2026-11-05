@@ -19,10 +19,10 @@ use super::*;
 /// The narrowest window, in interface pixels, that holds the whole bar in
 /// one row without its groups touching.
 const ONE_ROW_MIN_WIDTH: f32 = 1270.0;
-const BAR_PADDING: f32 = 12.0;
+const BAR_PADDING: f32 = 16.0;
 
 /// Where the File and Edit menus open, under their buttons.
-pub(super) const MENU_TOP: f32 = 46.0;
+pub(super) const MENU_TOP: f32 = 42.0;
 pub(super) const FILE_MENU_LEFT: f32 = 68.0;
 pub(super) const EDIT_MENU_LEFT: f32 = 110.0;
 
@@ -91,17 +91,13 @@ impl App {
             ]
             .into(),
         };
-        column![
-            container(rows).width(Length::Fill).style(style::bar),
-            style::bar_rule(),
-        ]
-        .into()
+        container(rows).width(Length::Fill).style(style::bar).into()
     }
 
     fn view_control_bar_menus(&self) -> Element<'_, Message> {
-        let logo = text("vibez").size(20).color(th::accent());
+        let logo = text("vibez").size(18).color(th::accent());
         let menu = |label: &'static str, message: Message| {
-            button(text(label).size(13))
+            button(text(label).size(12))
                 .on_press(message)
                 .padding([5, 8])
                 .style(style::segment(None))

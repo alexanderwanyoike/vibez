@@ -1,4 +1,4 @@
-//! Labelled cells in the header column beside the Arrange ruler and minimap.
+//! Labelled cells in the header column beside a timeline's ruler and minimap.
 
 use iced::widget::{container, horizontal_space, row, text};
 use iced::{Element, Length, Theme};
@@ -6,10 +6,14 @@ use vibez_core::time::BEATS_PER_BAR;
 
 use crate::message::Message;
 use crate::theme as th;
-use crate::widgets::track_header::TRACK_HEADER_TOTAL_WIDTH;
 
 /// A header-column cell with a title on the left and a detail on the right.
-pub fn arrange_corner<'a>(title: String, detail: String, height: f32) -> Element<'a, Message> {
+pub fn arrange_corner<'a>(
+    title: String,
+    detail: String,
+    width: f32,
+    height: f32,
+) -> Element<'a, Message> {
     container(
         row![
             text(title)
@@ -22,7 +26,7 @@ pub fn arrange_corner<'a>(title: String, detail: String, height: f32) -> Element
         .align_y(iced::Alignment::Center),
     )
     .padding([0, 12])
-    .width(Length::Fixed(TRACK_HEADER_TOTAL_WIDTH))
+    .width(Length::Fixed(width))
     .height(Length::Fixed(height))
     .align_y(iced::alignment::Vertical::Center)
     .style(|_theme: &Theme| container::Style {
@@ -52,7 +56,8 @@ pub fn arrangement_size_labels(track_count: usize, clip_count: usize) -> (String
     (counted(track_count, "track"), counted(clip_count, "clip"))
 }
 
-fn counted(count: usize, unit: &str) -> String {
+/// `count` of `unit`, plural unless there is one.
+pub fn counted(count: usize, unit: &str) -> String {
     format!("{count} {unit}{}", if count == 1 { "" } else { "s" })
 }
 

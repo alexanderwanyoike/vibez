@@ -20,17 +20,20 @@ use crate::widgets::piano_roll::{PianoRollWidget, VelocityLaneWidget};
 use super::*;
 
 const DETAIL_PANEL_MIN_HEIGHT: f32 = 180.0;
+const DETAIL_CARD_PADDING: f32 = 10.0;
 const AUDIO_DETAIL_PANEL_PREFERRED_HEIGHT: f32 = 260.0;
 const MIDI_DETAIL_PANEL_PREFERRED_HEIGHT: f32 = 360.0;
-// The transport, workspace tabs and status chrome consume roughly 140 px at
-// the default density. Reserve another 440 px for the actual workspace so a
-// dragged detail panel can never crush Perform or Arrange into a letterbox.
-const APP_CHROME_AND_WORKSPACE_MIN_HEIGHT: f32 = 580.0;
+// Reserve 440 px for the workspace card below the chrome row, above the
+// status bar and between the frame gaps, so a dragged detail panel can never
+// crush Perform or Arrange into a letterbox.
+const APP_CHROME_AND_WORKSPACE_MIN_HEIGHT: f32 = super::views_control_bar_style::BAR_HEIGHT
+    + crate::shell_layout::STATUS_HEIGHT
+    + 2.0 * crate::shell_layout::PANE_GAP
+    + 440.0;
 // The dogfood reference at a 1,920 x 1,040 work area leaves about 364 px for
 // the detail panel. Preserve that 35% composition when a saved drag height is
 // larger than the current window can comfortably show.
 const DETAIL_PANEL_MAX_WINDOW_FRACTION: f32 = 0.35;
-const STATUS_BAR_HEIGHT: f32 = 24.0;
 
 pub(super) fn resolved_detail_playhead_samples(
     editing_perform: bool,
@@ -105,8 +108,8 @@ fn single_selected_audio_clip_for_track(
     }
 }
 
-/// A tab across the top of the detail panel, raised onto the control shade
-/// while `active`.
+/// A tab in the detail panel's switch, raised onto the control shade while
+/// `active`, like the workspace switch.
 fn detail_tab<'a>(
     label: &'a str,
     active: bool,
@@ -116,7 +119,7 @@ fn detail_tab<'a>(
         .on_press(Message::View(ViewMsg::SwitchDetailTab(tab)))
         .padding([4, 12])
         .style(super::views_control_bar_style::segment(
-            active.then(th::accent),
+            active.then(th::text),
         ))
 }
 
@@ -292,7 +295,23 @@ impl App {
                 tab == DetailPanelTab::Devices,
                 DetailPanelTab::Devices,
             );
-            let tab_bar = row![clip_tab, devices_tab].spacing(4).padding([4, 8]);
+            let tab_bar = row![
+                container(row![clip_tab, devices_tab].spacing(2))
+                    .padding(super::views_control_bar_style::GROUP_INSET)
+                    .style(super::views_control_bar_style::group),
+                text(&track.name)
+                    .size(12)
+                    .font(crate::typography::TRACK_TITLE)
+                    .color(th::text()),
+                horizontal_space(),
+            ]
+            .push_maybe((tab == DetailPanelTab::Devices).then(|| {
+                text("Right-click to add a device")
+                    .size(11)
+                    .color(th::text_muted())
+            }))
+            .spacing(10)
+            .align_y(iced::Alignment::Center);
 
             // Tab content
             let tab_content: Element<'_, Message> = match self.state.view.detail_panel_tab {
@@ -327,7 +346,10 @@ impl App {
                 DetailPanelTab::Devices => self.view_device_chain(track_id, track, track_color),
             };
 
-            column![tab_bar, tab_content].height(Length::Fill).into()
+            column![tab_bar, tab_content]
+                .spacing(DETAIL_CARD_PADDING)
+                .height(Length::Fill)
+                .into()
         } else {
             let label = text("Select a track to view devices")
                 .size(14)
@@ -339,19 +361,11 @@ impl App {
         };
 
         let panel_height = self.effective_detail_height();
-        container(detail_content)
-            .width(Length::Fill)
-            .height(Length::Fixed(panel_height))
-            .style(|_theme: &Theme| container::Style {
-                background: Some(th::bg_surface().into()),
-                border: iced::Border {
-                    color: th::groove(),
-                    width: 1.0,
-                    radius: 0.0.into(),
-                },
-                ..Default::default()
-            })
-            .into()
+        crate::widgets::shell_card::shell_card(
+            container(detail_content).padding(DETAIL_CARD_PADDING),
+        )
+        .height(Length::Fixed(panel_height))
+        .into()
     }
 
     pub(super) fn detail_playhead_samples(&self) -> Option<u64> {
@@ -384,7 +398,7 @@ impl App {
 
     pub(super) fn detail_panel_drag_height(&self, cursor_y: f32) -> f32 {
         effective_detail_panel_height(
-            self.state.view.window_height - cursor_y - STATUS_BAR_HEIGHT,
+            crate::shell_layout::detail_height_at(cursor_y, self.state.view.window_height),
             self.state.view.window_height,
             self.detail_editor_preferred_height(),
         )
@@ -710,6 +724,13 @@ mod tests {
         assert_eq!(effective_detail_panel_height(280.0, 900.0, 360.0), 315.0);
         assert_eq!(effective_detail_panel_height(420.0, 900.0, 360.0), 315.0);
         assert_eq!(effective_detail_panel_height(280.0, 520.0, 360.0), 180.0);
+    }
+
+    #[test]
+    fn the_slim_shell_gives_a_small_window_s_detail_card_the_room_its_chrome_freed() {
+        // 52 px chrome row, 26 px status bar and two 8 px gaps leave 440 px
+        // for the workspace of a 760 px window above a 226 px detail card.
+        assert_eq!(effective_detail_panel_height(360.0, 760.0, 360.0), 226.0);
     }
 
     #[test]

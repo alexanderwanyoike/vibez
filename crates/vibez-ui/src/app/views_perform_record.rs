@@ -239,15 +239,6 @@ impl App {
             .width(Length::Fill)
             .height(Length::Shrink)
             .padding([5, 12])
-            .style(|_theme: &Theme| container::Style {
-                background: Some(th::bg_surface().into()),
-                border: iced::Border {
-                    color: th::divider(),
-                    width: 1.0,
-                    radius: 0.0.into(),
-                },
-                ..Default::default()
-            })
             .into()
     }
 }

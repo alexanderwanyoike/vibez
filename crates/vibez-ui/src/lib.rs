@@ -9,6 +9,7 @@ mod message;
 pub mod plugin_window;
 mod remote_provider;
 mod services;
+mod shell_layout;
 mod spectrum;
 mod state;
 mod theme;

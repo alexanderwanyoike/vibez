@@ -610,7 +610,8 @@ impl App {
                 );
             }
         } else if self.state.arrangement.edit_drag.is_active() {
-            let left_boundary = self.state.view.window_width - self.arrange_lane_width();
+            let left_boundary =
+                self.workspace_span().left + crate::widgets::track_header::TRACK_HEADER_TOTAL_WIDTH;
             let viewport_width = (right_boundary - left_boundary).max(1.0);
             let velocity = crate::timeline_geometry::edge_scroll_velocity(
                 cursor_x,

@@ -1,7 +1,7 @@
 //! Perform workspace shell, Pad Surface, and shared Section Timeline Editor.
 
 use iced::widget::{
-    button, center, column, container, horizontal_space, pick_list, row, text, text_input,
+    button, center, column, container, horizontal_space, pick_list, row, text, text_input, Space,
 };
 use iced::{Element, Length, Theme};
 
@@ -11,6 +11,7 @@ use crate::message::Message;
 use crate::theme as th;
 use crate::typography::{PERFORM_DISPLAY, PERFORM_LABEL, PERFORM_TECH, PERFORM_TECH_STRONG};
 use crate::widgets::hint::with_hint;
+use crate::widgets::shell_card::shell_card;
 
 use super::*;
 
@@ -87,16 +88,29 @@ fn perform_mode_tab_width(surface_width: f32) -> f32 {
 }
 
 pub(super) fn effective_perform_surface_width(preferred_width: f32, workspace_width: f32) -> f32 {
-    let maximum = (workspace_width
-        - SECTION_CONSTRUCTION_MIN_WIDTH
-        - super::views_shell::HORIZONTAL_PANE_SPLITTER_WIDTH)
-        .max(0.0);
+    let maximum =
+        (workspace_width - SECTION_CONSTRUCTION_MIN_WIDTH - crate::shell_layout::PANE_GAP).max(0.0);
     let minimum = PAD_SURFACE_MIN_WIDTH.min(maximum);
     preferred_width.clamp(minimum, maximum)
 }
 
 fn section_toolbar_stacks(section_width: f32) -> bool {
     section_width < SECTION_TOOLBAR_INLINE_MIN_WIDTH
+}
+
+/// Perform's tool strip in a card across the top, above the cards of the
+/// workspace below it.
+pub(super) fn perform_cards<'a>(
+    tools: impl Into<Element<'a, Message>>,
+    workspace: impl Into<Element<'a, Message>>,
+) -> Element<'a, Message> {
+    column![
+        shell_card(tools).height(Length::Shrink),
+        Space::with_height(crate::shell_layout::PANE_GAP),
+        workspace.into()
+    ]
+    .height(Length::Fill)
+    .into()
 }
 
 pub(super) fn perform_pad_grid_height(window_height: f32) -> f32 {
@@ -125,29 +139,17 @@ impl App {
         .height(Length::Fill)
         .spacing(0);
 
-        container(
-            column![mode_selector, self.view_section_record_bar(), workspace].height(Length::Fill),
+        perform_cards(
+            column![mode_selector, self.view_section_record_bar()],
+            workspace,
         )
-        .width(Length::Fill)
-        .height(Length::FillPortion(5))
-        .style(|_theme: &Theme| container::Style {
-            background: Some(th::bg_dark().into()),
-            border: iced::Border {
-                color: th::border(),
-                width: 1.0,
-                radius: 0.0.into(),
-            },
-            ..Default::default()
-        })
-        .into()
     }
 
     pub(super) fn section_construction_width(&self) -> f32 {
         let workspace_width = self.browser_workspace_width();
         let surface_width =
             effective_perform_surface_width(self.state.view.perform_surface_width, workspace_width);
-        (workspace_width - surface_width - super::views_shell::HORIZONTAL_PANE_SPLITTER_WIDTH)
-            .max(0.0)
+        (workspace_width - surface_width - crate::shell_layout::PANE_GAP).max(0.0)
     }
 
     pub(super) fn section_timeline_viewport_width(&self) -> f32 {
@@ -158,10 +160,10 @@ impl App {
     }
 
     pub(super) fn perform_surface_drag_width(&self, cursor_x: f32) -> f32 {
-        let workspace_width = self.browser_workspace_width();
-        let workspace_left = self.state.view.window_width - workspace_width;
+        let workspace = self.workspace_span();
+        let workspace_width = workspace.width;
         effective_perform_surface_width(
-            cursor_x - workspace_left,
+            cursor_x - workspace.left,
             if self.state.perform.layout == vibez_project::PerformLayout::Clips {
                 workspace_width.max(super::views_clip_launcher::MIN_CLIP_DOCK_WIDTH)
             } else {
@@ -275,15 +277,6 @@ impl App {
                 right: 0.0,
                 bottom: 0.0,
                 left: MODE_SELECTOR_INSET,
-            })
-            .style(|_theme: &Theme| container::Style {
-                background: Some(th::bg_surface().into()),
-                border: iced::Border {
-                    color: th::divider(),
-                    width: 1.0,
-                    radius: 0.0.into(),
-                },
-                ..Default::default()
             })
             .into()
     }
@@ -610,8 +603,8 @@ mod tests {
     fn perform_surface_width_preserves_both_panes_during_drag() {
         assert_eq!(effective_perform_surface_width(200.0, 1400.0), 320.0);
         assert_eq!(effective_perform_surface_width(640.0, 1400.0), 640.0);
-        assert_eq!(effective_perform_surface_width(1200.0, 1400.0), 933.0);
-        assert_eq!(effective_perform_surface_width(500.0, 820.0), 353.0);
+        assert_eq!(effective_perform_surface_width(1200.0, 1400.0), 932.0);
+        assert_eq!(effective_perform_surface_width(500.0, 820.0), 352.0);
     }
 
     #[test]

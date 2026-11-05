@@ -27,7 +27,7 @@ use crate::widgets::timeline::{
 };
 use crate::widgets::track_header::{
     view_editable_channel_name, view_track_header, with_resize_edge, ChannelNameStyle,
-    TrackHeaderFlags, TrackHeaderRecordingView,
+    TrackHeaderFlags, TrackHeaderRecordingView, TRACK_HEADER_TOTAL_WIDTH,
 };
 
 use super::*;
@@ -141,7 +141,12 @@ impl App {
                     .map(|track| track.id),
             ),
         );
-        let ruler_spacer = arrange_corner(tracks_label, clips_label, ARRANGE_RULER_HEIGHT);
+        let ruler_spacer = arrange_corner(
+            tracks_label,
+            clips_label,
+            TRACK_HEADER_TOTAL_WIDTH,
+            ARRANGE_RULER_HEIGHT,
+        );
 
         let ruler_row = row![ruler_spacer, ruler_canvas];
 
@@ -190,6 +195,7 @@ impl App {
         let minimap_spacer = arrange_corner(
             "Overview".into(),
             song_length_label(self.state.duration_seconds(), bpm),
+            TRACK_HEADER_TOTAL_WIDTH,
             OVERVIEW_HEIGHT,
         );
         let minimap_canvas: Element<'_, Message> = canvas(minimap)
@@ -613,7 +619,12 @@ impl App {
         .height(Length::Fixed(TIME_RULER_HEIGHT))
         .into();
         let time_row = row![
-            arrange_corner("Time".into(), String::new(), TIME_RULER_HEIGHT),
+            arrange_corner(
+                "Time".into(),
+                String::new(),
+                TRACK_HEADER_TOTAL_WIDTH,
+                TIME_RULER_HEIGHT
+            ),
             time_ruler
         ];
 

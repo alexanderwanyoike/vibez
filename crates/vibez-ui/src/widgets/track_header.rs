@@ -407,31 +407,14 @@ pub fn view_track_header<'a>(
         .padding(HEADER_PADDING)
         .width(Length::Fixed(TRACK_HEADER_WIDTH));
 
-    // Color bar on the left edge
-    let color_bar = container(text(""))
-        .width(Length::Fixed(COLOR_BAR_WIDTH))
-        .height(Length::Fill)
-        .style(move |_theme: &Theme| container::Style {
-            background: Some(track_color.into()),
-            ..Default::default()
-        });
+    let header_with_bar = row![color_bar(track_color), header].height(Length::Fill);
 
-    let header_with_bar = row![color_bar, header].height(Length::Fill);
-
+    let hovered = flags.hovered;
     let card = container(header_with_bar)
         .height(Length::Fill)
         .clip(true)
         .style(move |_theme: &Theme| container::Style {
-            background: Some(
-                if selected {
-                    th::track_bg_selected()
-                } else if flags.hovered {
-                    th::track_header_hovered()
-                } else {
-                    th::bg_surface()
-                }
-                .into(),
-            ),
+            background: Some(header_shade(selected, hovered).into()),
             ..Default::default()
         });
 
@@ -449,6 +432,30 @@ pub fn view_track_header<'a>(
             track_id,
             hovered: false,
         }))
+        .into()
+}
+
+/// A timeline track header's shade: raised while its track is selected,
+/// halfway there under the pointer.
+pub fn header_shade(selected: bool, hovered: bool) -> iced::Color {
+    if selected {
+        th::track_bg_selected()
+    } else if hovered {
+        th::track_header_hovered()
+    } else {
+        th::bg_surface()
+    }
+}
+
+/// The track colour down a timeline track header's left edge.
+pub fn color_bar<'a>(color: iced::Color) -> Element<'a, Message> {
+    container(text(""))
+        .width(Length::Fixed(COLOR_BAR_WIDTH))
+        .height(Length::Fill)
+        .style(move |_theme: &Theme| container::Style {
+            background: Some(color.into()),
+            ..Default::default()
+        })
         .into()
 }
 
@@ -473,7 +480,9 @@ pub fn with_resize_edge<'a>(
     stack![header, column![vertical_space(), resize_handle]].into()
 }
 
-fn quiet_action_style(_theme: &Theme, status: button::Status) -> button::Style {
+/// An icon action in a track header that shows a fill only under the
+/// pointer.
+pub fn quiet_action_style(_theme: &Theme, status: button::Status) -> button::Style {
     let background = match status {
         button::Status::Hovered | button::Status::Pressed => Some(th::bg_hover().into()),
         _ => None,

@@ -60,6 +60,7 @@ pub mod sampler_device;
 pub mod sampler_display;
 pub mod saturator_device;
 pub mod saturator_display;
+pub mod shell_card;
 mod span_edges;
 pub mod swing_knob;
 pub mod synth_device;
