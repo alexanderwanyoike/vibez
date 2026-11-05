@@ -331,7 +331,7 @@ mod hex_array {
 impl ThemePalette {
     /// The fill of buttons and other controls.
     pub fn control(&self) -> Color {
-        todo!()
+        self.control.unwrap_or(self.bg_elevated)
     }
 
     /// Background of the timeline lanes behind clips.
