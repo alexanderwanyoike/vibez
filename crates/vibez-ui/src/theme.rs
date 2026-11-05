@@ -199,7 +199,8 @@ pub struct LaneStyle {
     /// because clip bodies are see-through and the grid must read as
     /// texture behind them.
     pub lines: GridLineStrengths,
-    /// How far the lanes under the Arrange loop are mixed toward the accent.
+    /// How far the lanes, Section ruler and overview under a loop are mixed
+    /// toward the accent.
     pub loop_tint: f32,
 }
 

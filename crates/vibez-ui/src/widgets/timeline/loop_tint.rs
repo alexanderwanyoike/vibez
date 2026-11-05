@@ -1,8 +1,8 @@
-//! Which whole pixels of a timeline backdrop lie under the Arrange loop.
+//! Which whole pixels of a timeline backdrop lie under a loop.
 
 use crate::timeline_geometry::TimelineGeometry;
 
-/// The whole-pixel stretch of a lane the loop covers.
+/// The whole-pixel stretch of a backdrop the loop covers.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) struct LoopSpan {
     pub start: f32,
