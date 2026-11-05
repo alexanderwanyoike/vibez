@@ -191,13 +191,12 @@ impl canvas::Program<Message> for ArrangementMinimap {
             );
         }
 
-        // Bottom border
-        let border =
+        let groove =
             canvas::Path::line(iced::Point::new(0.0, h - 0.5), iced::Point::new(w, h - 0.5));
         frame.stroke(
-            &border,
+            &groove,
             canvas::Stroke::default()
-                .with_color(theme::border())
+                .with_color(theme::groove())
                 .with_width(1.0),
         );
 

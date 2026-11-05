@@ -181,7 +181,7 @@ fn draw_marks(
     frame.fill_rectangle(
         iced::Point::new(0.0, bottom - 1.0),
         iced::Size::new(width, 1.0),
-        theme::border(),
+        theme::groove(),
     );
 }
 

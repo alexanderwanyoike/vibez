@@ -564,7 +564,7 @@ impl App {
                             th::bg_surface().into()
                         }),
                         border: iced::Border {
-                            color: if selected { chan_color } else { th::border() },
+                            color: th::groove(),
                             width: 1.0,
                             radius: 0.0.into(),
                         },
@@ -580,7 +580,7 @@ impl App {
                 .style(|_theme: &Theme| container::Style {
                     background: Some(th::bg_dark().into()),
                     border: iced::Border {
-                        color: th::divider(),
+                        color: th::groove(),
                         width: 1.0,
                         radius: 0.0.into(),
                     },

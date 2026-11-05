@@ -730,6 +730,11 @@ pub fn track_header_hovered() -> Color {
     blend(bg_surface(), track_bg_selected(), 0.5)
 }
 
+/// The line parting lanes and regions: a groove sunk to the well shade.
+pub fn groove() -> Color {
+    display_bg()
+}
+
 pub fn ruler_bg() -> Color {
     bg_surface()
 }

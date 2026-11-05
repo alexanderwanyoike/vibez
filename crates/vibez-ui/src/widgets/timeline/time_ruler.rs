@@ -37,7 +37,7 @@ impl canvas::Program<Message> for TimeRulerWidget {
     ) -> Vec<canvas::Geometry> {
         let mut frame = canvas::Frame::new(renderer, bounds.size());
         frame.fill_rectangle(Point::ORIGIN, bounds.size(), theme::ruler_bg());
-        frame.fill_rectangle(Point::ORIGIN, Size::new(bounds.width, 1.0), theme::border());
+        frame.fill_rectangle(Point::ORIGIN, Size::new(bounds.width, 1.0), theme::groove());
         let geometry = TimelineGeometry::from_zoom(self.zoom_level, self.scroll_offset_beats);
         for (x, label) in time_marks(geometry, bounds.width, self.bpm) {
             frame.fill_rectangle(
