@@ -135,7 +135,7 @@ impl App {
         };
         let layout = header_rows(self.browser_workspace_width());
         let content: Element<'_, Message> = match layout {
-            HeaderRows::One | HeaderRows::Two => {
+            HeaderRows::One | HeaderRows::StatusBelow => {
                 let controls = row![record_button, count_in, mode, quantization, capture_button]
                     .spacing(7)
                     .align_y(iced::Alignment::Center);
@@ -151,7 +151,7 @@ impl App {
                     column![controls, status(false)].spacing(6).into()
                 }
             }
-            HeaderRows::Three => column![
+            HeaderRows::Stacked => column![
                 row![record_button, count_in, mode]
                     .spacing(7)
                     .align_y(iced::Alignment::Center),
