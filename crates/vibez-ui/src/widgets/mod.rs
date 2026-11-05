@@ -54,6 +54,7 @@ pub mod phaser_device;
 pub mod phaser_display;
 pub mod piano_roll;
 mod playhead;
+pub mod quiet_scroll;
 pub mod reverb_device;
 pub mod reverb_display;
 pub mod sampler_device;
