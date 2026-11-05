@@ -302,8 +302,12 @@ mod tests {
     }
 
     #[test]
-    fn a_grid_line_nearer_than_the_edge_wins() {
-        assert_lands(targets().click(2.02, context()), 2.0, SnapTargetKind::Grid);
+    fn a_clip_edge_inside_the_radius_beats_a_nearer_grid_line() {
+        assert_lands(
+            targets().click(2.02, context()),
+            2.1,
+            SnapTargetKind::ClipEdge,
+        );
     }
 
     #[test]
