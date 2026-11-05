@@ -238,16 +238,22 @@ mod clips_draw;
 mod clips_tests;
 mod fade_drag;
 mod lane_grid;
+mod loop_tint;
 pub mod marquee;
 mod minimap;
 mod note_marks;
 mod ruler;
+mod ruler_drag;
+mod ruler_draw;
+mod ruler_scale;
+mod time_ruler;
 
 pub use clip_drag::ClipDragAction;
 pub use clips::*;
 pub use marquee::{build_row_spans, TrackRowSpan, TRACK_ROW_HEIGHT};
 pub use minimap::*;
 pub use ruler::*;
+pub use time_ruler::{TimeRulerWidget, TIME_RULER_HEIGHT};
 
 #[cfg(test)]
 mod performance_tests {

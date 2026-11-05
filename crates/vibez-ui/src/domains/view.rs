@@ -32,6 +32,8 @@ pub enum ViewMsg {
     /// (Ableton's X).
     ZoomBack,
     ScrollArrangement(f64),
+    /// Jump straight to a zoom and scroll, as a ruler drag does.
+    SetViewport(TimelineViewport),
     SetSnapGrid(SnapGrid),
     NarrowGrid,
     WidenGrid,
@@ -101,6 +103,13 @@ impl ViewMsg {
             ViewMsg::ScrollArrangement(delta) => {
                 viewport.scroll_by(delta, total_beats, viewport_width);
             }
+            ViewMsg::SetViewport(target) => {
+                *viewport = TimelineViewport::new(
+                    TimelineViewport::clamp_zoom(target.zoom_level),
+                    target.scroll_offset_beats,
+                );
+                viewport.clamp(total_beats, viewport_width);
+            }
             _ => return false,
         }
         true
@@ -165,7 +174,8 @@ impl ViewState {
             | ViewMsg::ZoomOut
             | ViewMsg::SetZoom(_)
             | ViewMsg::ZoomAround { .. }
-            | ViewMsg::ScrollArrangement(_) => {
+            | ViewMsg::ScrollArrangement(_)
+            | ViewMsg::SetViewport(_) => {
                 msg.navigate(&mut self.viewport, ctx.total_beats, ctx.lane_width);
             }
             ViewMsg::ZoomToFit => {
@@ -668,6 +678,35 @@ mod tests {
         );
 
         assert_eq!(v.viewport.scroll_offset_beats, 320.0 - visible);
+    }
+
+    #[test]
+    fn setting_the_viewport_keeps_the_scroll_inside_the_song() {
+        let mut v = ViewState::default();
+        let ctx = ViewCtx {
+            total_beats: 32.0,
+            ..ViewCtx::default()
+        };
+
+        v.update(
+            ViewMsg::SetViewport(TimelineViewport::new(3.0, 12.0)),
+            &TimelineEditorState::default(),
+            ctx,
+        );
+        assert_eq!(
+            (v.viewport.zoom_level, v.viewport.scroll_offset_beats),
+            (3.0, 12.0)
+        );
+
+        v.update(
+            ViewMsg::SetViewport(TimelineViewport::new(0.5, -4.0)),
+            &TimelineEditorState::default(),
+            ctx,
+        );
+        assert_eq!(
+            (v.viewport.zoom_level, v.viewport.scroll_offset_beats),
+            (0.5, 0.0)
+        );
     }
 
     #[test]

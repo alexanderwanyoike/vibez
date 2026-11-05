@@ -188,6 +188,7 @@ impl Default for ClipStyle {
 /// part is a mix toward the text colour, so the dark style still reads on
 /// a light theme file that predates it.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct LaneStyle {
     /// How far the lane is mixed from the background toward the text
     /// colour. Light themes sink their lanes below the headers.
@@ -198,6 +199,9 @@ pub struct LaneStyle {
     /// because clip bodies are see-through and the grid must read as
     /// texture behind them.
     pub lines: GridLineStrengths,
+    /// How far the lanes, Section ruler and overview under a loop are mixed
+    /// toward the accent.
+    pub loop_tint: f32,
 }
 
 /// How strongly each rank of lane grid line is mixed toward the text colour.
@@ -219,6 +223,7 @@ impl LaneStyle {
             bar: 0.05,
             fine: 0.028,
         },
+        loop_tint: 0.05,
     };
 
     pub const LIGHT: Self = Self {
@@ -229,6 +234,7 @@ impl LaneStyle {
             bar: 0.075,
             fine: 0.045,
         },
+        loop_tint: 0.07,
     };
 }
 
@@ -501,8 +507,18 @@ pub fn ruler_bg() -> Color {
     bg_surface()
 }
 
-pub fn ruler_text() -> Color {
-    text_dim()
+pub fn ruler_tick() -> Color {
+    blend(ruler_bg(), text(), 0.22)
+}
+
+/// The strip above the ruler numbers that holds the loop brace.
+pub fn ruler_loop_strip() -> Color {
+    blend(ruler_bg(), Color::BLACK, 0.08)
+}
+
+/// The loop brace while the loop is off.
+pub fn ruler_brace_off() -> Color {
+    blend(ruler_bg(), text(), 0.25)
 }
 
 /// Mix two theme colors without escaping the active palette. Perform uses

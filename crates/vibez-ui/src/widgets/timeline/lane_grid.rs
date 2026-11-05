@@ -2,6 +2,7 @@
 
 use vibez_core::time::BEATS_PER_BAR;
 
+use super::ruler_scale::{is_multiple, label_step_beats};
 use crate::timeline_geometry::TimelineGeometry;
 
 /// How strongly a grid line is drawn.
@@ -32,19 +33,19 @@ pub(super) fn lane_grid(geometry: TimelineGeometry, width: f32, step_beats: f64)
     }
     let first_beat = geometry.x_to_beat(0.0);
     let last_beat = geometry.x_to_beat(width);
-    let label_beats =
-        f64::from(super::ruler::bar_label_step(ppb * BEATS_PER_BAR as f32)) * BEATS_PER_BAR;
+    let label_beats = label_step_beats(ppb);
 
+    let band_beats = label_beats.max(BEATS_PER_BAR);
     let mut bands = Vec::new();
-    let first_band = (first_beat / label_beats).floor() as i64;
-    let last_band = (last_beat / label_beats).ceil() as i64;
+    let first_band = (first_beat / band_beats).floor() as i64;
+    let last_band = (last_beat / band_beats).ceil() as i64;
     for band in (first_band..last_band).filter(|band| band.rem_euclid(2) == 1) {
         let start = geometry
-            .beat_to_x(band as f64 * label_beats)
+            .beat_to_x(band as f64 * band_beats)
             .round()
             .max(0.0);
         let end = geometry
-            .beat_to_x((band + 1) as f64 * label_beats)
+            .beat_to_x((band + 1) as f64 * band_beats)
             .round()
             .min(width.floor());
         if end > start {
@@ -84,11 +85,6 @@ pub(super) fn lane_grid(geometry: TimelineGeometry, width: f32, step_beats: f64)
     LaneGrid { bands, lines }
 }
 
-fn is_multiple(beat: f64, of: f64) -> bool {
-    let ratio = beat / of;
-    (ratio - ratio.round()).abs() < 1e-6
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -115,6 +111,18 @@ mod tests {
         let grid = lane_grid(TimelineGeometry::new(100.0, 0.0), 1000.0, 0.25);
 
         assert_eq!(grid.bands, vec![(400.0, 800.0)]);
+    }
+
+    #[test]
+    fn beat_lines_rank_as_label_lines_when_the_ruler_labels_beats() {
+        // 50 px beats are labelled on the ruler.
+        let grid = lane_grid(TimelineGeometry::new(50.0, 0.0), 400.0, 0.5);
+
+        assert_eq!(
+            lines_of(&grid, GridLine::Label),
+            vec![0.0, 50.0, 100.0, 150.0, 200.0, 250.0, 300.0, 350.0]
+        );
+        assert!(lines_of(&grid, GridLine::Bar).is_empty());
     }
 
     #[test]

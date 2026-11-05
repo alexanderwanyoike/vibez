@@ -10,6 +10,7 @@ use super::clip_colors::{clip_colors, ClipColors};
 use super::clip_frame::{clip_box, draw_clip_back, draw_clip_front, LoopPasses};
 use super::fade_drag::{fade_curve_handle, fade_handle_xs};
 use super::lane_grid::{lane_grid, GridLine};
+use super::loop_tint::{parts, LoopSpan};
 use super::note_marks::note_marks;
 use super::*;
 
@@ -110,26 +111,40 @@ impl TrackClipCanvas {
         } else {
             theme::track_bg()
         };
+        let style = theme::lane_style();
+        let loop_span = self
+            .loop_enabled
+            .then(|| LoopSpan::across(geometry, w, (self.loop_start_beats, self.loop_end_beats)))
+            .flatten();
+        let accent = theme::accent();
+        // Mixed into every part of the backdrop, as `theme::blend` says faint
+        // tints must be, which keeps it under the clips too.
+        let fill_backdrop = |frame: &mut canvas::Frame, x0: f32, x1: f32, height: f32, color| {
+            for (start, end, under_loop) in parts(loop_span, x0, x1) {
+                if end > start {
+                    frame.fill_rectangle(
+                        iced::Point::new(start, 0.0),
+                        iced::Size::new(end - start, height),
+                        if under_loop {
+                            theme::blend(color, accent, style.loop_tint)
+                        } else {
+                            color
+                        },
+                    );
+                }
+            }
+        };
         // One pixel larger to cover what the whole-pixel shift uncovers.
-        frame.fill_rectangle(
-            iced::Point::ORIGIN,
-            iced::Size::new(w + 1.0, h + 1.0),
-            bg_color,
-        );
+        fill_backdrop(&mut frame, 0.0, w + 1.0, h + 1.0, bg_color);
 
         // Grid lines use the same effective division as interaction.
         if self.bpm > 0.0 {
             let step = self.grid.effective_grid(ppb).beat_size();
             let grid = lane_grid(geometry, w, step);
-            let style = theme::lane_style();
             let ink = theme::text();
             let band = theme::blend(bg_color, ink, style.band);
             for &(start, end) in &grid.bands {
-                frame.fill_rectangle(
-                    iced::Point::new(start, 0.0),
-                    iced::Size::new(end - start, h),
-                    band,
-                );
+                fill_backdrop(&mut frame, start, end, h, band);
             }
             for (x, line) in grid.lines {
                 let strength = match line {
@@ -146,9 +161,11 @@ impl TrackClipCanvas {
                 } else {
                     bg_color
                 };
-                frame.fill_rectangle(
-                    iced::Point::new(x, 0.0),
-                    iced::Size::new(1.0, h),
+                fill_backdrop(
+                    &mut frame,
+                    x,
+                    x + 1.0,
+                    h,
                     theme::blend(under, ink, strength),
                 );
             }
@@ -399,21 +416,6 @@ impl TrackClipCanvas {
                 }
 
                 draw_clip_front(&mut frame, body, &colors, &note_clip.name, looping, w);
-            }
-        }
-
-        // Loop region tint
-        if self.loop_enabled && self.loop_end_beats > self.loop_start_beats {
-            let loop_x1 = self.beat_to_x(self.loop_start_beats);
-            let loop_x2 = self.beat_to_x(self.loop_end_beats);
-            let fill_x = loop_x1.max(0.0);
-            let fill_w = loop_x2.min(w) - fill_x;
-            if fill_w > 0.0 {
-                frame.fill_rectangle(
-                    iced::Point::new(fill_x, 0.0),
-                    iced::Size::new(fill_w, h),
-                    theme::with_alpha(theme::accent(), 0.06),
-                );
             }
         }
 

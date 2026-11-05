@@ -13,6 +13,7 @@ mod spectrum;
 mod state;
 mod theme;
 mod themes;
+mod time_format;
 mod timeline_geometry;
 mod typography;
 mod ui_settings;

@@ -1,9 +1,10 @@
-//! Shared visual language and hit testing for Clip loop braces.
+//! Shared visual language and hit testing for loop braces.
 
 use iced::widget::canvas;
 use iced::{Color, Point};
 
 use crate::state::UndoGestureId;
+use crate::widgets::span_edges::{nearest_edge, span_with_end, span_with_start, SpanEdge};
 
 const HANDLE_WIDTH: f32 = 8.0;
 const HIT_RADIUS: f32 = 8.0;
@@ -46,14 +47,8 @@ impl LoopDrag {
 
     pub(crate) fn resolve(self, pointer: f64, min_length: f64, max: f64) -> (f64, f64) {
         match self {
-            Self::Start { fixed_end, .. } => (
-                pointer.clamp(0.0, (fixed_end - min_length).max(0.0)),
-                fixed_end,
-            ),
-            Self::End { fixed_start, .. } => (
-                fixed_start,
-                pointer.clamp((fixed_start + min_length).min(max), max),
-            ),
+            Self::Start { fixed_end, .. } => span_with_start(pointer, fixed_end, min_length),
+            Self::End { fixed_start, .. } => span_with_end(pointer, fixed_start, min_length, max),
         }
     }
 
@@ -73,15 +68,16 @@ pub(crate) fn hit_test(
     if position.y < 0.0 || position.y > rail_height {
         return None;
     }
+    nearest_end(start_x, end_x, position.x, HIT_RADIUS)
+}
 
-    let start_distance = (position.x - start_x).abs();
-    let end_distance = (position.x - end_x).abs();
-    let nearest = if start_distance <= end_distance {
-        (LoopMarker::Start, start_distance)
-    } else {
-        (LoopMarker::End, end_distance)
-    };
-    (nearest.1 <= HIT_RADIUS).then_some(nearest.0)
+/// The end of a brace from `start_x` to `end_x` within `radius` of `x`,
+/// the nearer one where both are.
+pub(crate) fn nearest_end(start_x: f32, end_x: f32, x: f32, radius: f32) -> Option<LoopMarker> {
+    nearest_edge(start_x, end_x, x, radius).map(|edge| match edge {
+        SpanEdge::Start => LoopMarker::Start,
+        SpanEdge::End => LoopMarker::End,
+    })
 }
 
 pub(crate) fn draw_brace(frame: &mut canvas::Frame, start_x: f32, end_x: f32, color: Color) {

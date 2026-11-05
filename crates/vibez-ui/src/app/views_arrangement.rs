@@ -21,8 +21,8 @@ use crate::theme as th;
 use crate::timeline_geometry::TimelineGeometry;
 use crate::widgets::arrange_corner::{arrange_corner, arrangement_size_labels, song_length_label};
 use crate::widgets::timeline::{
-    build_row_spans, ArrangementMinimap, MinimapTrack, RulerWidget, TimelineClip, TrackClipCanvas,
-    OVERVIEW_HEIGHT, TRACK_ROW_HEIGHT,
+    build_row_spans, ArrangementMinimap, MinimapTrack, RulerWidget, TimeRulerWidget, TimelineClip,
+    TrackClipCanvas, ARRANGE_RULER_HEIGHT, OVERVIEW_HEIGHT, TIME_RULER_HEIGHT, TRACK_ROW_HEIGHT,
 };
 use crate::widgets::track_header::{
     view_editable_channel_name, view_track_header, ChannelNameStyle, TrackHeaderFlags,
@@ -107,11 +107,10 @@ impl App {
         let ruler = RulerWidget {
             playhead_beats,
             play_start_beats: Some(self.state.transport.play_start_beats),
-            bpm,
             zoom_level,
             grid: self.state.view.grid_config(),
             scroll_offset_beats: scroll_offset,
-            total_beats,
+            loop_brace: true,
             loop_enabled: self.state.transport.loop_enabled,
             loop_start_beats: self.state.transport.loop_start_beats,
             loop_end_beats: self.state.transport.loop_end_beats,
@@ -121,7 +120,7 @@ impl App {
         };
         let ruler_canvas: Element<'_, Message> = canvas(ruler)
             .width(Length::Fill)
-            .height(Length::Fixed(28.0))
+            .height(Length::Fixed(ARRANGE_RULER_HEIGHT))
             .into();
 
         let (tracks_label, clips_label) = arrangement_size_labels(
@@ -134,7 +133,7 @@ impl App {
                     .map(|track| track.id),
             ),
         );
-        let ruler_spacer = arrange_corner(tracks_label, clips_label, 28.0);
+        let ruler_spacer = arrange_corner(tracks_label, clips_label, ARRANGE_RULER_HEIGHT);
 
         let ruler_row = row![ruler_spacer, ruler_canvas];
 
@@ -593,7 +592,20 @@ impl App {
         ))
         .max_height(CHANNEL_FOOTER_MAX_HEIGHT);
 
-        let content = column![minimap_row, ruler_row, track_body, channel_footer];
+        let time_ruler: Element<'_, Message> = canvas(TimeRulerWidget {
+            bpm,
+            zoom_level,
+            scroll_offset_beats: scroll_offset,
+        })
+        .width(Length::Fill)
+        .height(Length::Fixed(TIME_RULER_HEIGHT))
+        .into();
+        let time_row = row![
+            arrange_corner("Time".into(), String::new(), TIME_RULER_HEIGHT),
+            time_ruler
+        ];
+
+        let content = column![minimap_row, ruler_row, track_body, channel_footer, time_row];
 
         // mouse_area only provides on_right_press (no cursor position),
         // so use the globally tracked cursor for the scrollable background.
