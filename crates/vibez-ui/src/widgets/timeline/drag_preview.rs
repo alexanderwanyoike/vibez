@@ -136,6 +136,21 @@ impl TrackClipCanvas {
             .as_ref()
             .is_some_and(|preview| preview.step.anchor == clip_id)
     }
+
+    /// `clips` with the dragged one last, so it paints over its neighbours.
+    pub(super) fn dragged_last<'a, T>(
+        &'a self,
+        clips: &'a [T],
+        clip_id: impl Fn(&T) -> vibez_core::id::ClipId + Copy + 'a,
+    ) -> impl Iterator<Item = &'a T> + 'a {
+        let resting = clips
+            .iter()
+            .filter(move |clip| !self.is_dragged(clip_id(clip)));
+        let dragged = clips
+            .iter()
+            .filter(move |clip| self.is_dragged(clip_id(clip)));
+        resting.chain(dragged)
+    }
 }
 
 /// A soft shadow around the dragged Clip's `body`.

@@ -178,14 +178,7 @@ impl TrackClipCanvas {
         if self.bpm > 0.0 {
             let spb = self.sample_rate as f64 * 60.0 / self.bpm;
             for (clip, is_recording_preview) in self
-                .clips
-                .iter()
-                .filter(|clip| !self.is_dragged(clip.clip_id))
-                .chain(
-                    self.clips
-                        .iter()
-                        .filter(|clip| self.is_dragged(clip.clip_id)),
-                )
+                .dragged_last(&self.clips, |clip| clip.clip_id)
                 .map(|clip| (clip, false))
                 .chain(self.audio_recording_preview.iter().map(|clip| (clip, true)))
             {
@@ -380,14 +373,7 @@ impl TrackClipCanvas {
         // Draw note clips (for instrument tracks)
         if self.is_instrument && self.bpm > 0.0 {
             for (note_clip, is_recording_preview) in self
-                .note_clips
-                .iter()
-                .filter(|clip| !self.is_dragged(clip.clip_id))
-                .chain(
-                    self.note_clips
-                        .iter()
-                        .filter(|clip| self.is_dragged(clip.clip_id)),
-                )
+                .dragged_last(&self.note_clips, |clip| clip.clip_id)
                 .map(|clip| (clip, false))
                 .chain(self.recording_preview.iter().map(|clip| (clip, true)))
             {
