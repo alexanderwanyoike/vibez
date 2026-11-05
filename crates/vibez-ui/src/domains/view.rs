@@ -187,6 +187,7 @@ impl ViewState {
             ViewMsg::ZoomBack => {
                 if let Some(previous) = self.zoom_before_selection.take() {
                     self.viewport = previous;
+                    self.viewport.clamp(ctx.total_beats, ctx.lane_width);
                 }
             }
             ViewMsg::SetSnapGrid(grid) => {
