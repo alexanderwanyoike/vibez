@@ -252,7 +252,12 @@ impl EffectKnobWidget {
     fn lit_arc(&self) -> Option<(f32, f32)> {
         let norm = self.normalized();
         let value = ARC_START + norm * (ARC_END - ARC_START);
-        (norm > 0.005).then_some((ARC_START, value))
+        if self.bipolar {
+            let centre = (ARC_START + ARC_END) / 2.0;
+            ((norm - 0.5).abs() > 0.005).then_some((centre.min(value), centre.max(value)))
+        } else {
+            (norm > 0.005).then_some((ARC_START, value))
+        }
     }
 
     /// Denormalize from 0.0..1.0 to actual value range.
