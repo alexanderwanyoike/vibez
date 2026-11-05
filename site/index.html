@@ -430,12 +430,12 @@ footer .for-mum { flex-basis: 100%; }
         <li><b>Record <kbd>F4</kbd></b><span>Record a take with a count-in, into the selected Section or the selected clip cell.</span></li>
       </ul>
       <figure class="shot">
-        <img src="images/band-perform.webp" alt="The Perform workspace: a 16 pad grid of named Sections, one playing, beside the Section editor, with a channel EQ below" width="1100">
-        <figcaption>Perform &middot; Sections mode &middot; Build 2 playing &middot; the Chords EQ in the rack below</figcaption>
+        <img src="images/band-perform.webp" alt="The Perform workspace: a 16 pad grid of named Sections with Peak playing, the Section editor beside it, the sample Browser on the left and the Deep Chords Sampler and EQ below" width="1100">
+        <figcaption>Perform &middot; Sections mode &middot; Peak playing &middot; the Deep Chords Sampler and EQ below</figcaption>
       </figure>
       <figure class="shot">
-        <img src="images/band-clips.webp" alt="The clip launcher: a column of clips per track, several playing, with a warped audio clip open in the editor" width="1100" loading="lazy">
-        <figcaption>Perform &middot; clip launcher &middot; clips playing across three rows &middot; a warped audio clip in the editor</figcaption>
+        <img src="images/band-clips.webp" alt="The clip launcher: a column of clips per track with eight clips playing, and a warped percussion loop open in the clip editor" width="1100" loading="lazy">
+        <figcaption>Perform &middot; clip launcher &middot; eight clips playing &middot; a warped percussion loop in the editor</figcaption>
       </figure>
     </section>
   </div>
@@ -467,8 +467,8 @@ footer .for-mum { flex-basis: 100%; }
         <li><b>Autosave</b><span>Projects are saved to a versioned, self-contained file, with autosave working in the background.</span></li>
       </ul>
       <figure class="shot">
-        <img src="images/band-arrange.webp" alt="A captured performance written into the Arrangement, with a channel EQ and its live spectrum below" width="1100">
-        <figcaption>Arrange &middot; a captured take &middot; the Chords EQ with its live spectrum</figcaption>
+        <img src="images/band-arrange.webp" alt="A full arrangement playing, with an Echo feedback automation lane under the Pad track and the Pad device rack below" width="1100">
+        <figcaption>Arrange &middot; a 280 bar arrangement playing &middot; Echo feedback automation on Pad &middot; Surge XT, EQ and Echo in its rack</figcaption>
       </figure>
     </div>
   </section>
@@ -487,8 +487,8 @@ footer .for-mum { flex-basis: 100%; }
         rack follows the selected channel and hosts vibez instruments, VST3 plugins and CLAP plugins.
       </p>
       <figure class="shot">
-        <img src="images/band-mix.webp" alt="The Mix workspace: channel strips with EQ curves, the master channel, and the device rack" width="1100">
-        <figcaption>Mix &middot; channel EQ and sends &middot; Reverb and Delay returns &middot; the Reverb return's rack</figcaption>
+        <img src="images/band-mix.webp" alt="The Mix workspace: channel strips with four band EQs, faders and meters, the master channel, and the Vox device rack below" width="1100">
+        <figcaption>Mix &middot; nine channels and the master &middot; the Vox Drum Rack and EQ in the rack</figcaption>
       </figure>
     </section>
 
@@ -774,39 +774,39 @@ cd vibez &amp;&amp; cargo run --release</code>
 
   /* the pad grid: same default mapping as the app */
   /* Every image below is a crop from the running __VERSION__ build on the
-     elise2 project, framed on the control the pad is about. */
+     under-it-all project, framed on the control the pad is about. */
   var PADS = [
-    { k: '1', n: 'Sections',        m: 'Perform \u00b7 F1', s: 'images/sections.webp', c: 'Perform \u00b7 Sections mode \u00b7 bank 1',
+    { k: '1', n: 'Sections',        m: 'Perform \u00b7 F1', s: 'images/sections.webp', c: 'Perform \u00b7 Sections mode \u00b7 Peak playing',
       d: 'Put one musical idea on a pad. The next Section can be a small variation or a different tune altogether.' },
-    { k: '2', n: 'Track Mutes',     m: 'Perform \u00b7 F2', s: 'images/trackmutes.webp', c: 'Perform \u00b7 Track Mutes \u00b7 one pad per project track',
+    { k: '2', n: 'Track Mutes',     m: 'Perform \u00b7 F2', s: 'images/trackmutes.webp', c: 'Perform \u00b7 Track Mutes \u00b7 Vox and Pad muted',
       d: 'The same grid now controls the tracks. Bring drums, bass and chords in and out while the music keeps moving.' },
-    { k: '3', n: 'Instrument',      m: 'Perform \u00b7 F3', s: 'images/instrument.webp', c: 'Perform \u00b7 Instrument mode \u00b7 the kit across 16 pads',
+    { k: '3', n: 'Instrument',      m: 'Perform \u00b7 F3', s: 'images/instrument.webp', c: 'Perform \u00b7 Instrument mode \u00b7 Vox across 16 pads, F#2 held',
       d: 'The 16 pads become a playable instrument for the selected track, so you can play a part in rather than draw it. Hold Shift to see the targets.' },
-    { k: '4', n: 'Capture',         m: 'Perform into Arrange \u00b7 F5', s: 'images/capture.webp', c: 'Perform \u00b7 Capture armed for Arrange',
+    { k: '4', n: 'Capture',         m: 'Perform into Arrange \u00b7 F5', s: 'images/capture.webp', c: 'Arrange \u00b7 a captured take, Peak then Breakdown',
       d: 'Record the jam into Arrange. Section changes, live notes, mutes and automation are saved as clips and automation you can edit.' },
-    { k: 'Q', n: 'Section Record',  m: 'Perform \u00b7 F4', s: 'images/sectionrec.webp', c: 'Perform \u00b7 Section Record \u00b7 count-in and Overdub',
+    { k: 'Q', n: 'Section Record',  m: 'Perform \u00b7 F4', s: 'images/sectionrec.webp', c: 'Perform \u00b7 Section Record \u00b7 one bar count-in and Overdub',
       d: 'Record into a Section with a count-in. Use Overdub to add notes or Replace to record over them.' },
-    { k: 'W', n: 'Swing',           m: 'Perform \u00b7 per project, track or clip', s: 'images/swing.webp', c: 'Perform \u00b7 swing following the project',
+    { k: 'W', n: 'Swing',           m: 'Perform \u00b7 per project, track or clip', s: 'images/swing.webp', c: 'Perform \u00b7 the Hat clip swung at 1/16, 57% from its track',
       d: 'Modelled on the MPC2000XL. Set it per project, per track, or per clip, and automate it.' },
-    { k: 'E', n: 'Note Repeat',     m: 'Perform \u00b7 hold N', s: 'images/noterepeat.webp', c: 'Perform \u00b7 Note Repeat held on N',
+    { k: 'E', n: 'Note Repeat',     m: 'Perform \u00b7 hold N', s: 'images/noterepeat.webp', c: 'Perform \u00b7 Note Repeat held on N at 1/16',
       d: 'Hold N and a held pad repeats at the chosen rate, following the swing setting. N is reserved, so no pad can be rebound to it.' },
     { k: 'R', n: 'Full Level',      m: 'Perform \u00b7 Instrument mode', s: 'images/fulllevel.webp', c: 'Perform \u00b7 Full Level pinned to velocity 127',
       d: 'Pin every pad to maximum velocity while you play a part in.' },
-    { k: 'A', n: '16 Levels',       m: 'Perform \u00b7 Instrument mode', s: 'images/sixteenlevels.webp', c: 'Perform \u00b7 16 Levels spread across pitch',
+    { k: 'A', n: '16 Levels',       m: 'Perform \u00b7 Instrument mode', s: 'images/sixteenlevels.webp', c: 'Perform \u00b7 16 Levels spread across pitch from B2',
       d: 'Spread one sound across all sixteen pads, so the grid becomes a controller for velocity or pitch across a chosen range.' },
-    { k: 'S', n: 'Quantized launch', m: 'Perform \u00b7 per Section', s: 'images/quantize.webp', c: 'Perform \u00b7 launch quantize on the selected Section',
+    { k: 'S', n: 'Quantized launch', m: 'Perform \u00b7 per Section', s: 'images/quantize.webp', c: 'Perform \u00b7 launch quantize on the Deep Chords Section',
       d: 'Choose immediate, one beat, one bar or the end of the Section. The next Section starts on that boundary.' },
     { k: 'D', n: 'Banks',           m: 'Perform \u00b7 [ and ]', s: 'images/banks.webp', c: 'Perform \u00b7 bank 1, ordered top left',
       d: 'Square brackets move between banks of sixteen. A project can have more Sections than the sixteen pads shown on screen.' },
-    { k: 'F', n: 'Piano roll',      m: 'Arrange \u00b7 B', s: 'images/pianoroll.webp', c: 'Arrange \u00b7 piano roll on a captured clip',
+    { k: 'F', n: 'Piano roll',      m: 'Arrange \u00b7 B', s: 'images/pianoroll.webp', c: 'Arrange \u00b7 piano roll on a captured Deep Chords clip',
       d: 'Draw and select modes, multi-note editing, velocity, quantize, and adaptive snap grids. Arrow keys nudge and transpose.' },
-    { k: 'Z', n: 'Automation',      m: 'Arrange', s: 'images/automation.webp', c: 'Arrange \u00b7 picking an automation target, device parameters included',
+    { k: 'Z', n: 'Automation',      m: 'Arrange', s: 'images/automation.webp', c: 'Arrange \u00b7 an Echo feedback lane under the Pad track',
       d: 'Automate track, mixer, device and plugin parameters. Track mutes recorded during a performance appear here as editable lanes.' },
-    { k: 'X', n: 'Warping',         m: 'Browser and Arrange', s: 'images/warping.webp', c: 'Browser \u00b7 warp audition \u00b7 source 132.7 detected against project 128',
+    { k: 'X', n: 'Warping',         m: 'Browser and Arrange', s: 'images/warping.webp', c: 'Clip editor \u00b7 a percussion loop warped to 120 BPM \u00b7 28 transients',
       d: 'Preview a loop against the playing track. Warp detects its tempo, fits it to the project BPM and keeps it there when the tempo changes.' },
     { k: 'C', n: 'Channel EQ',      m: 'Mix', s: 'images/channeleq.webp', c: 'Mix \u00b7 every channel with its own four band EQ',
       d: 'Every channel has a four band EQ and named sends to the returns. Returns and the master use the same channel strip.' },
-    { k: 'V', n: 'Device rack',     m: 'Mix', s: 'images/devicerack.webp', c: 'Mix \u00b7 the Sampler in the rack of the selected channel',
+    { k: 'V', n: 'Device rack',     m: 'Mix', s: 'images/devicerack.webp', c: 'Mix \u00b7 the Drum Rack and EQ on the Vox channel',
       d: 'The rack holds vibez\u2019s own synths, sampler, drum rack and effects. It also loads VST3 and CLAP plugins with their native interfaces. Plugin scanning runs in a separate process, so a broken plugin does not crash vibez.' }
   ];
   var HUES = ['var(--kick)', 'var(--chords)', 'var(--chat)', 'var(--clap)'];
