@@ -1083,6 +1083,17 @@ impl Default for GridConfig {
     }
 }
 
+/// One edit to a [`GridConfig`], from a snap list, toggle or shortcut.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GridCommand {
+    Choose(GridChoice),
+    Narrow,
+    Widen,
+    ToggleTriplet,
+    ToggleSnap,
+    ToggleAdaptive,
+}
+
 impl GridConfig {
     pub const fn new(
         selected: SnapGrid,
@@ -1095,6 +1106,17 @@ impl GridConfig {
             snap_enabled,
             adaptive,
             adaptive_bias,
+        }
+    }
+
+    pub fn apply(&mut self, command: GridCommand) {
+        match command {
+            GridCommand::Choose(choice) => self.choose(choice),
+            GridCommand::Narrow => self.narrow(),
+            GridCommand::Widen => self.widen(),
+            GridCommand::ToggleTriplet => self.toggle_triplet(),
+            GridCommand::ToggleSnap => self.toggle_snap(),
+            GridCommand::ToggleAdaptive => self.toggle_adaptive(),
         }
     }
 

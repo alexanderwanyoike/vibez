@@ -8,11 +8,11 @@ use iced::{Color, Element, Length, Theme};
 
 use crate::domains::perform::PerformMsg;
 use crate::domains::transport::TransportMsg;
-use crate::domains::view::ViewMsg;
+use crate::domains::view::{GridTarget, ViewMsg};
 
 use crate::icons;
 use crate::message::Message;
-use crate::state::{AppState, AudioStreamHealth, Workspace};
+use crate::state::{AppState, AudioStreamHealth, GridCommand, Workspace};
 use crate::theme as th;
 use crate::widgets::swing_knob::{parse_swing_percent, SwingKnobWidget};
 use crate::widgets::vu_meter::VuMeterWidget;
@@ -339,7 +339,12 @@ impl App {
         let grid_picker = pick_list(
             grid.choices(pixels_per_beat),
             Some(grid.choice(pixels_per_beat)),
-            |choice| Message::View(ViewMsg::ChooseArrangeGrid(choice)),
+            |choice| {
+                Message::View(ViewMsg::Grid(
+                    GridTarget::Arrange,
+                    GridCommand::Choose(choice),
+                ))
+            },
         )
         .width(Length::Fixed(86.0))
         .padding([3, 8])
@@ -380,10 +385,10 @@ impl App {
             selected_text_color: th::accent(),
             selected_background: th::bg_hover().into(),
         });
-        let grid_toggle = |label: &'static str, active: bool, message: ViewMsg| {
+        let grid_toggle = |label: &'static str, active: bool, command: GridCommand| {
             let color = if active { th::accent() } else { th::text_dim() };
             button(text(label).size(9).color(color))
-                .on_press(Message::View(message))
+                .on_press(Message::GridShortcutPressed(command))
                 .padding([4, 6])
                 .style(move |_theme: &Theme, _status| button::Style {
                     background: Some(
@@ -412,17 +417,17 @@ impl App {
             grid_toggle(
                 "SNAP",
                 self.state.view.arrange_grid.snap_enabled,
-                ViewMsg::ToggleSnapToGrid,
+                GridCommand::ToggleSnap,
             ),
             grid_toggle(
                 "T",
                 self.state.view.arrange_grid.selected.is_triplet(),
-                ViewMsg::ToggleTripletGrid,
+                GridCommand::ToggleTriplet,
             ),
             grid_toggle(
                 "AUTO",
                 self.state.view.arrange_grid.adaptive,
-                ViewMsg::ToggleAdaptiveGrid,
+                GridCommand::ToggleAdaptive,
             ),
         ]
         .spacing(3)

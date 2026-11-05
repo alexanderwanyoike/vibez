@@ -6,12 +6,12 @@ use iced::widget::{
 use iced::{Color, Element, Length, Theme};
 
 use crate::domains::piano_roll::PianoRollMsg;
-use crate::domains::view::ViewMsg;
+use crate::domains::view::{GridTarget, ViewMsg};
 use vibez_core::id::{ClipId, SectionId, TrackId};
 
 use crate::icons;
 use crate::message::Message;
-use crate::state::{ArrangementSelection, DetailPanelTab, TimelineEditorState};
+use crate::state::{ArrangementSelection, DetailPanelTab, GridCommand, TimelineEditorState};
 use crate::theme as th;
 use crate::widgets::piano_roll::{PianoRollWidget, VelocityLaneWidget};
 
@@ -201,7 +201,7 @@ impl App {
         let snap_picker = pick_list(
             grid.choices(pixels_per_beat),
             Some(grid.choice(pixels_per_beat)),
-            |choice| Message::View(ViewMsg::ChooseClipGrid(choice)),
+            |choice| Message::View(ViewMsg::Grid(GridTarget::Clip, GridCommand::Choose(choice))),
         )
         .width(Length::Fixed(90.0))
         .padding([3, 8])

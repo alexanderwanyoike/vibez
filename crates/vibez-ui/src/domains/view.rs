@@ -6,8 +6,7 @@
 use vibez_core::id::{ClipId, TrackId};
 
 use crate::state::{
-    ContextMenuTarget, DetailPanelTab, GridChoice, GridConfig, TimelineEditorState, ViewState,
-    Workspace,
+    ContextMenuTarget, DetailPanelTab, GridCommand, TimelineEditorState, ViewState, Workspace,
 };
 use crate::timeline_geometry::TimelineViewport;
 
@@ -35,14 +34,7 @@ pub enum ViewMsg {
     ScrollArrangement(f64),
     /// Jump straight to a zoom and scroll, as a ruler drag does.
     SetViewport(TimelineViewport),
-    ChooseArrangeGrid(GridChoice),
-    ChooseClipGrid(GridChoice),
-    /// Grid shortcuts, for the grid of the editor with focus.
-    NarrowGrid,
-    WidenGrid,
-    ToggleTripletGrid,
-    ToggleSnapToGrid,
-    ToggleAdaptiveGrid,
+    Grid(GridTarget, GridCommand),
     BeginDetailPanelResize,
     ResizeDetailPanel(f32),
     EndDetailPanelResize,
@@ -119,6 +111,15 @@ impl ViewMsg {
     }
 }
 
+/// Which editor's grid a [`ViewMsg::Grid`] edits.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GridTarget {
+    /// Arrange and Section timelines.
+    Arrange,
+    /// Piano roll and audio clip editor.
+    Clip,
+}
+
 /// A committed inline rename, for the router to replay through the
 /// arrangement domain.
 #[derive(Debug, Clone, PartialEq)]
@@ -139,9 +140,6 @@ pub struct ViewCtx {
     pub lane_width: f32,
     /// Converts audio clip positions for zoom to selection.
     pub samples_per_beat: f64,
-    /// An open clip editor has keyboard focus, so the grid shortcuts edit
-    /// the clip grid rather than the Arrange grid.
-    pub clip_editor_focused: bool,
 }
 
 /// Cross-domain effects requested by a view update.
@@ -161,14 +159,6 @@ pub struct ViewAction {
 }
 
 impl ViewState {
-    fn focused_grid(&mut self, ctx: ViewCtx) -> &mut GridConfig {
-        if ctx.clip_editor_focused {
-            &mut self.clip_grid
-        } else {
-            &mut self.arrange_grid
-        }
-    }
-
     pub fn update(
         &mut self,
         msg: ViewMsg,
@@ -214,32 +204,12 @@ impl ViewState {
                     self.viewport.clamp(ctx.total_beats, ctx.lane_width);
                 }
             }
-            ViewMsg::ChooseArrangeGrid(choice) => {
-                self.arrange_grid.choose(choice);
-                action.persist_settings = true;
-            }
-            ViewMsg::ChooseClipGrid(choice) => {
-                self.clip_grid.choose(choice);
-                action.persist_settings = true;
-            }
-            ViewMsg::NarrowGrid => {
-                self.focused_grid(ctx).narrow();
-                action.persist_settings = true;
-            }
-            ViewMsg::WidenGrid => {
-                self.focused_grid(ctx).widen();
-                action.persist_settings = true;
-            }
-            ViewMsg::ToggleTripletGrid => {
-                self.focused_grid(ctx).toggle_triplet();
-                action.persist_settings = true;
-            }
-            ViewMsg::ToggleSnapToGrid => {
-                self.focused_grid(ctx).toggle_snap();
-                action.persist_settings = true;
-            }
-            ViewMsg::ToggleAdaptiveGrid => {
-                self.focused_grid(ctx).toggle_adaptive();
+            ViewMsg::Grid(target, command) => {
+                match target {
+                    GridTarget::Arrange => &mut self.arrange_grid,
+                    GridTarget::Clip => &mut self.clip_grid,
+                }
+                .apply(command);
                 action.persist_settings = true;
             }
             ViewMsg::BeginDetailPanelResize => {
@@ -360,7 +330,7 @@ impl ViewState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::SnapGrid;
+    use crate::state::{GridChoice, SnapGrid};
     use crate::timeline_geometry::TimelineGeometry;
 
     #[test]
@@ -452,7 +422,6 @@ mod tests {
             song_beats: 320.0,
             lane_width: LANE_WIDTH,
             samples_per_beat: SAMPLES_PER_BEAT,
-            ..Default::default()
         }
     }
 
@@ -873,13 +842,13 @@ mod tests {
         let timeline = TimelineEditorState::default();
         let auto = GridChoice::Auto(SnapGrid::QUARTER);
         for msg in [
-            ViewMsg::ChooseArrangeGrid(auto),
-            ViewMsg::ChooseClipGrid(auto),
-            ViewMsg::NarrowGrid,
-            ViewMsg::WidenGrid,
-            ViewMsg::ToggleTripletGrid,
-            ViewMsg::ToggleSnapToGrid,
-            ViewMsg::ToggleAdaptiveGrid,
+            ViewMsg::Grid(GridTarget::Arrange, GridCommand::Choose(auto)),
+            ViewMsg::Grid(GridTarget::Clip, GridCommand::Choose(auto)),
+            ViewMsg::Grid(GridTarget::Arrange, GridCommand::Narrow),
+            ViewMsg::Grid(GridTarget::Arrange, GridCommand::Widen),
+            ViewMsg::Grid(GridTarget::Arrange, GridCommand::ToggleTriplet),
+            ViewMsg::Grid(GridTarget::Arrange, GridCommand::ToggleSnap),
+            ViewMsg::Grid(GridTarget::Arrange, GridCommand::ToggleAdaptive),
         ] {
             let action = ViewState::default().update(msg.clone(), &timeline, ViewCtx::default());
             assert!(action.persist_settings, "{msg:?} was not saved");
@@ -892,7 +861,10 @@ mod tests {
         let timeline = TimelineEditorState::default();
 
         v.update(
-            ViewMsg::ChooseClipGrid(GridChoice::Fixed(SnapGrid::THIRTY_SECOND)),
+            ViewMsg::Grid(
+                GridTarget::Clip,
+                GridCommand::Choose(GridChoice::Fixed(SnapGrid::THIRTY_SECOND)),
+            ),
             &timeline,
             ViewCtx::default(),
         );
@@ -900,12 +872,23 @@ mod tests {
         assert_eq!(v.arrange_grid.effective_grid(1.375), SnapGrid::FOUR_BARS);
 
         v.update(
-            ViewMsg::ChooseArrangeGrid(GridChoice::Fixed(SnapGrid::BAR)),
+            ViewMsg::Grid(
+                GridTarget::Arrange,
+                GridCommand::Choose(GridChoice::Fixed(SnapGrid::BAR)),
+            ),
             &timeline,
             ViewCtx::default(),
         );
-        v.update(ViewMsg::NarrowGrid, &timeline, ViewCtx::default());
-        v.update(ViewMsg::ToggleSnapToGrid, &timeline, ViewCtx::default());
+        v.update(
+            ViewMsg::Grid(GridTarget::Arrange, GridCommand::Narrow),
+            &timeline,
+            ViewCtx::default(),
+        );
+        v.update(
+            ViewMsg::Grid(GridTarget::Arrange, GridCommand::ToggleSnap),
+            &timeline,
+            ViewCtx::default(),
+        );
         assert_eq!(v.arrange_grid.selected, SnapGrid::QUARTER);
         assert!(!v.arrange_grid.snap_enabled);
         assert_eq!(v.clip_grid.effective_grid(1.375), SnapGrid::THIRTY_SECOND);
@@ -916,7 +899,10 @@ mod tests {
     fn grid_commands_update_the_arrange_grid() {
         let mut v = ViewState::default();
         v.update(
-            ViewMsg::ChooseArrangeGrid(GridChoice::Fixed(SnapGrid::EIGHTH)),
+            ViewMsg::Grid(
+                GridTarget::Arrange,
+                GridCommand::Choose(GridChoice::Fixed(SnapGrid::EIGHTH)),
+            ),
             &TimelineEditorState::default(),
             ViewCtx::default(),
         );
@@ -924,31 +910,31 @@ mod tests {
         assert!(!v.arrange_grid.adaptive);
 
         v.update(
-            ViewMsg::NarrowGrid,
+            ViewMsg::Grid(GridTarget::Arrange, GridCommand::Narrow),
             &TimelineEditorState::default(),
             ViewCtx::default(),
         );
         assert_eq!(v.arrange_grid.selected, SnapGrid::SIXTEENTH);
         v.update(
-            ViewMsg::WidenGrid,
+            ViewMsg::Grid(GridTarget::Arrange, GridCommand::Widen),
             &TimelineEditorState::default(),
             ViewCtx::default(),
         );
         assert_eq!(v.arrange_grid.selected, SnapGrid::EIGHTH);
         v.update(
-            ViewMsg::ToggleTripletGrid,
+            ViewMsg::Grid(GridTarget::Arrange, GridCommand::ToggleTriplet),
             &TimelineEditorState::default(),
             ViewCtx::default(),
         );
         assert_eq!(v.arrange_grid.selected, SnapGrid::EIGHTH.triplet());
         v.update(
-            ViewMsg::ToggleSnapToGrid,
+            ViewMsg::Grid(GridTarget::Arrange, GridCommand::ToggleSnap),
             &TimelineEditorState::default(),
             ViewCtx::default(),
         );
         assert!(!v.arrange_grid.snap_enabled);
         v.update(
-            ViewMsg::ToggleAdaptiveGrid,
+            ViewMsg::Grid(GridTarget::Arrange, GridCommand::ToggleAdaptive),
             &TimelineEditorState::default(),
             ViewCtx::default(),
         );
@@ -958,7 +944,7 @@ mod tests {
             SnapGrid::QUARTER.triplet()
         );
         v.update(
-            ViewMsg::NarrowGrid,
+            ViewMsg::Grid(GridTarget::Arrange, GridCommand::Narrow),
             &TimelineEditorState::default(),
             ViewCtx::default(),
         );
@@ -967,7 +953,7 @@ mod tests {
             SnapGrid::EIGHTH.triplet()
         );
         v.update(
-            ViewMsg::WidenGrid,
+            ViewMsg::Grid(GridTarget::Arrange, GridCommand::Widen),
             &TimelineEditorState::default(),
             ViewCtx::default(),
         );
