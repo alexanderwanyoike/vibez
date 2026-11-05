@@ -714,7 +714,7 @@ pub fn knob_bg() -> Color {
 }
 
 pub fn fader_track() -> Color {
-    bg_elevated()
+    display_bg()
 }
 
 pub fn track_bg() -> Color {
