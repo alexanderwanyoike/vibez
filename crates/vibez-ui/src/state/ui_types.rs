@@ -995,23 +995,30 @@ impl SnapGrid {
         }
     }
 
+    /// The steps a zoom-adaptive grid picks from, coarsest first.
+    const ADAPTIVE_STEPS: [Self; 8] = [
+        Self::EIGHT_BARS,
+        Self::FOUR_BARS,
+        Self::TWO_BARS,
+        Self::BAR,
+        Self::QUARTER,
+        Self::EIGHTH,
+        Self::SIXTEENTH,
+        Self::THIRTY_SECOND,
+    ];
+
+    /// The furthest a bias can push the adaptive grid. Any further and every
+    /// zoom lands on the same end step.
+    pub const ADAPTIVE_BIAS_LIMIT: i8 = Self::ADAPTIVE_STEPS.len() as i8 - 1;
+
     pub fn adaptive(pixels_per_beat: f32, bias: i8, triplet: bool) -> Self {
-        let divisions = [
-            Self::EIGHT_BARS,
-            Self::FOUR_BARS,
-            Self::TWO_BARS,
-            Self::BAR,
-            Self::QUARTER,
-            Self::EIGHTH,
-            Self::SIXTEENTH,
-            Self::THIRTY_SECOND,
-        ];
-        let base = divisions
+        let steps = Self::ADAPTIVE_STEPS;
+        let base = steps
             .iter()
             .rposition(|grid| grid.beat_size() * pixels_per_beat as f64 >= 12.0)
             .unwrap_or(0);
-        let index = (base as i8 + bias).clamp(0, divisions.len() as i8 - 1) as usize;
-        let grid = divisions[index];
+        let index = (base as i8 + bias).clamp(0, Self::ADAPTIVE_BIAS_LIMIT) as usize;
+        let grid = steps[index];
         if triplet {
             grid.triplet()
         } else {
@@ -1053,7 +1060,18 @@ pub struct GridConfig {
     pub selected: SnapGrid,
     pub snap_enabled: bool,
     pub adaptive: bool,
+    #[serde(deserialize_with = "deserialize_adaptive_bias")]
     pub adaptive_bias: i8,
+}
+
+fn deserialize_adaptive_bias<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<i8, D::Error> {
+    let bias = <i8 as serde::Deserialize>::deserialize(deserializer)?;
+    Ok(bias.clamp(
+        -SnapGrid::ADAPTIVE_BIAS_LIMIT,
+        SnapGrid::ADAPTIVE_BIAS_LIMIT,
+    ))
 }
 
 /// Zoom-adaptive like Ableton, because a fixed default is under a pixel
@@ -1082,7 +1100,7 @@ impl GridConfig {
 
     pub fn narrow(&mut self) {
         if self.adaptive {
-            self.adaptive_bias = (self.adaptive_bias + 1).min(6);
+            self.adaptive_bias = (self.adaptive_bias + 1).min(SnapGrid::ADAPTIVE_BIAS_LIMIT);
         } else {
             self.selected = self.selected.narrower();
         }
@@ -1090,7 +1108,7 @@ impl GridConfig {
 
     pub fn widen(&mut self) {
         if self.adaptive {
-            self.adaptive_bias = (self.adaptive_bias - 1).max(-6);
+            self.adaptive_bias = (self.adaptive_bias - 1).max(-SnapGrid::ADAPTIVE_BIAS_LIMIT);
         } else {
             self.selected = self.selected.wider();
         }
