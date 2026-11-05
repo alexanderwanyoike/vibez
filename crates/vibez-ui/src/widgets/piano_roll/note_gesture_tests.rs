@@ -298,3 +298,18 @@ fn resizing_an_unselected_note_selects_and_resizes_only_it() {
     assert_eq!(durations(&editor), vec![2.0, 0.5]);
     assert_eq!(editor.clip().selected_notes, HashSet::from([0]));
 }
+
+#[test]
+fn a_rubber_band_of_exactly_the_slop_stays_a_click_as_on_the_lanes() {
+    let slop = crate::widgets::drag_phase::CLICK_SLOP_PX;
+    let band = |travel: f32| {
+        let mut editor = Editor::new(vec![note(60, 1.0, 1.0)], HashSet::new());
+        let note_start = editor.at(1.0, 60);
+        let press = Point::new(note_start.x - slop / 2.0, note_start.y);
+        editor.drag(press, &[Point::new(press.x + travel, press.y + slop)]);
+        editor.clip().selected_notes.clone()
+    };
+
+    assert!(band(slop).is_empty());
+    assert_eq!(band(slop + 1.0), HashSet::from([0]));
+}
