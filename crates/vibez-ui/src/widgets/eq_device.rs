@@ -43,7 +43,10 @@ const LINE_KNOB: f32 = 18.0;
 /// A one-line Advanced has room for the output trim after both cuts.
 const LINE_OUTPUT_W: f32 = 480.0;
 
-pub const COMPACT_W: f32 = TABS_W + PAD * 2.0;
+/// The band tabs, or the card's header where that is wider.
+pub const COMPACT_W: f32 = (TABS_W + PAD * 2.0).max(crate::widgets::device_chrome::header_min_w(
+    crate::widgets::device_chrome::MOST_ACTIONS,
+));
 /// The graph with the selected band beside it.
 pub const MEDIUM_W: f32 = GRAPH_MIN_W + 1.0 + SIDE_W + PAD * 2.0;
 /// A short card keeps its graph beside the band tabs.

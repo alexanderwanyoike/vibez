@@ -26,8 +26,11 @@ const METER_COLUMN_W: f32 = 118.0;
 const HISTORY_MIN_W: f32 = 210.0;
 /// Below this the history is too short to read and is left out.
 const HISTORY_MIN_H: f32 = 64.0;
-/// Input, Gain and Output side by side.
-pub const COMPACT_W: f32 = METER_COLUMN_W * 2.0 + COLUMN_W + 2.0 + PAD * 2.0;
+/// Input, Gain and Output side by side, or the card's header where that
+/// is wider.
+pub const COMPACT_W: f32 = (METER_COLUMN_W * 2.0 + COLUMN_W + 2.0 + PAD * 2.0).max(
+    crate::widgets::device_chrome::header_min_w(crate::widgets::device_chrome::MOST_ACTIONS),
+);
 /// Adds the output level history.
 pub const MEDIUM_W: f32 = COMPACT_W + 1.0 + HISTORY_MIN_W;
 pub const MAX_W: f32 = 820.0;
