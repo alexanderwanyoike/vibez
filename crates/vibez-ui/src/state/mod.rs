@@ -871,11 +871,7 @@ impl AppState {
 
     /// Convert a beat value to a sample position.
     pub fn beats_to_samples(&self, beats: f64) -> u64 {
-        if self.transport.bpm > 0.0 {
-            (beats * self.transport.sample_rate as f64 * 60.0 / self.transport.bpm) as u64
-        } else {
-            0
-        }
+        self.transport.beats_to_samples_at(beats)
     }
 
     /// Check if a clip is in the multi-selection set.

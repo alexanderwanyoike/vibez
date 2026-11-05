@@ -69,10 +69,10 @@ impl TempoMap {
         self.seconds_per_beat() * self.sample_rate as f64
     }
 
-    /// Convert musical time (beats) to sample time.
+    /// Convert musical time (beats) to its nearest sample.
     pub fn musical_to_sample(&self, musical: MusicalTime) -> SampleTime {
         let samples = musical.0 * self.samples_per_beat();
-        SampleTime(samples as u64)
+        SampleTime(samples.round() as u64)
     }
 
     /// Convert sample time to musical time (beats).
@@ -133,8 +133,7 @@ mod tests {
         let musical = MusicalTime(4.0);
         let sample = tm.musical_to_sample(musical);
         let back = tm.sample_to_musical(sample);
-        // Tolerance accounts for u64 truncation in musical_to_sample
-        let tolerance = 1.0 / tm.samples_per_beat();
+        let tolerance = 0.5 / tm.samples_per_beat();
         assert!((back.0 - musical.0).abs() < tolerance);
     }
 

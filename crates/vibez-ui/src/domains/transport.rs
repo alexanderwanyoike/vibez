@@ -119,7 +119,9 @@ impl TransportState {
     /// Beat position -> absolute sample position at the current tempo.
     pub fn beats_to_samples_at(&self, beats: f64) -> u64 {
         if self.bpm > 0.0 {
-            (beats * self.sample_rate as f64 * 60.0 / self.bpm) as u64
+            vibez_core::time::TempoMap::new(self.bpm, self.sample_rate)
+                .musical_to_sample(vibez_core::time::MusicalTime(beats))
+                .0
         } else {
             0
         }
