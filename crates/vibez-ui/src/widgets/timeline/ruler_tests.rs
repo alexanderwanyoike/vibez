@@ -150,6 +150,21 @@ fn a_click_on_the_numbers_still_sets_the_play_start() {
 }
 
 #[test]
+fn a_click_on_the_numbers_wobbles_as_far_as_a_lane_click() {
+    let ruler = ruler();
+    let mut state = RulerInteractionState::default();
+    let wobble = Point::new(100.0 + crate::widgets::drag_phase::CLICK_SLOP_PX, NUMBERS_Y);
+
+    press(&ruler, &mut state, Point::new(100.0, NUMBERS_Y));
+
+    assert!(move_to(&ruler, &mut state, wobble).is_none());
+    assert!(matches!(
+        release(&ruler, &mut state, wobble),
+        Some(Message::Transport(TransportMsg::SeekToBeat(beat))) if beat == 5.0
+    ));
+}
+
+#[test]
 fn section_rulers_have_no_loop_strip() {
     let ruler = RulerWidget {
         loop_brace: false,
