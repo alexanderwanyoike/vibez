@@ -1,13 +1,14 @@
 use std::borrow::Borrow;
 
 use iced::widget::{
-    button, canvas, column, container, horizontal_space, mouse_area, pick_list, row, text,
-    text_input,
+    button, canvas, column, container, horizontal_space, mouse_area, pick_list, row, stack, text,
+    text_input, vertical_space,
 };
 use iced::{Element, Length, Theme};
 
 use crate::domains::automation::AutomationMsg;
 use crate::domains::piano_roll::PianoRollMsg;
+use crate::domains::track_heights::TrackHeightMsg;
 use crate::domains::view::ViewMsg;
 use crate::icons;
 use crate::message::Message;
@@ -15,6 +16,7 @@ use crate::state::ProjectTrack;
 use crate::theme as th;
 use crate::widgets::fader::HorizontalFaderWidget;
 use crate::widgets::vu_meter::HorizontalVuMeterWidget;
+use vibez_core::id::TrackId;
 use vibez_core::midi::TrackKind;
 use vibez_core::track::{AudioInputRoute, InputMonitoring};
 
@@ -25,6 +27,21 @@ const COLOR_BAR_WIDTH: f32 = 4.0;
 
 /// Total width including the color bar on the left edge.
 pub const TRACK_HEADER_TOTAL_WIDTH: f32 = TRACK_HEADER_WIDTH + COLOR_BAR_WIDTH;
+/// The rows down to the volume fader, and the resize strip in the bottom
+/// padding below them, fit `TrackHeight::MIN`, so the shortest lane keeps
+/// every control usable and clear of the strip; the meter below the fader
+/// shows from a few pixels taller up. The rows hold fixed heights, so a
+/// rename's text field never pushes the fader down.
+const HEADER_PADDING: iced::Padding = iced::Padding {
+    top: 4.0,
+    right: 6.0,
+    bottom: RESIZE_HANDLE_HEIGHT,
+    left: 6.0,
+};
+const NAME_ROW_HEIGHT: f32 = 17.0;
+const CONTROLS_ROW_HEIGHT: f32 = 21.0;
+const FADER_HEIGHT: f32 = 12.0;
+const ROW_SPACING: f32 = 2.0;
 
 /// How an Arrange track header is shown.
 #[derive(Debug, Clone, Copy, Default)]
@@ -53,6 +70,10 @@ impl TrackHeaderFlags {
         self.hovered || self.automation_open
     }
 }
+
+/// Grab strip along the header's bottom edge, drawn over its bottom
+/// padding.
+const RESIZE_HANDLE_HEIGHT: f32 = 4.0;
 
 #[derive(Debug, Clone, Copy)]
 pub struct TrackHeaderRecordingView<'a> {
@@ -156,6 +177,7 @@ pub fn view_editable_channel_name<'a>(
             .on_input(|value| Message::View(ViewMsg::EditNameText(value)))
             .on_submit(Message::View(ViewMsg::FinishEditing))
             .size(size)
+            .padding([0, 4])
             .width(Length::Fill)
             .into()
     } else {
@@ -228,7 +250,7 @@ pub fn view_track_header<'a>(
     };
     let add_btn = button(icons::icon(icons::PLUS).size(11).color(action_color))
         .on_press_maybe(flags.shows_actions().then_some(add_message))
-        .padding([2, 4])
+        .padding([1, 4])
         .style(quiet_action_style);
 
     let auto_btn = {
@@ -245,7 +267,7 @@ pub fn view_track_header<'a>(
                         track.id,
                     ))),
             )
-            .padding([2, 4])
+            .padding([1, 4])
             .style(quiet_action_style)
     };
 
@@ -258,6 +280,7 @@ pub fn view_track_header<'a>(
         add_btn
     ]
     .spacing(4)
+    .height(Length::Fixed(NAME_ROW_HEIGHT))
     .align_y(iced::Alignment::Center);
 
     // Row 2: Mute/Solo buttons with filled backgrounds when active
@@ -335,7 +358,7 @@ pub fn view_track_header<'a>(
         let arm_btn = button(icons::icon(arm_icon).size(11).color(arm_color))
             .on_press(Message::ToggleAudioTrackArm(track.id))
             .width(Length::Fixed(25.0))
-            .padding([4, 6])
+            .padding([3, 6])
             .style(move |_theme: &Theme, status| {
                 let engaged = matches!(status, button::Status::Hovered | button::Status::Pressed);
                 button::Style {
@@ -434,7 +457,7 @@ pub fn view_track_header<'a>(
     let fader = HorizontalFaderWidget::new(track.id, track.gain, track_color);
     let fader_canvas: Element<'_, Message> = canvas(fader)
         .width(Length::Fill)
-        .height(Length::Fixed(18.0))
+        .height(Length::Fixed(FADER_HEIGHT))
         .into();
 
     // Row 4: Horizontal VU meter (spans width)
@@ -452,9 +475,13 @@ pub fn view_track_header<'a>(
         .height(Length::Fixed(6.0))
         .into();
 
+    let track_controls = container(track_controls)
+        .height(Length::Fixed(CONTROLS_ROW_HEIGHT))
+        .align_y(iced::alignment::Vertical::Center);
+
     let header = column![name_row, track_controls, fader_canvas, meter_canvas]
-        .spacing(4)
-        .padding([6, 6])
+        .spacing(ROW_SPACING)
+        .padding(HEADER_PADDING)
         .width(Length::Fixed(TRACK_HEADER_WIDTH));
 
     // Color bar on the left edge
@@ -468,19 +495,22 @@ pub fn view_track_header<'a>(
 
     let header_with_bar = row![color_bar, header].height(Length::Fill);
 
-    let card = container(header_with_bar).style(move |_theme: &Theme| container::Style {
-        background: Some(
-            if selected {
-                th::track_bg_selected()
-            } else if flags.hovered {
-                th::track_header_hovered()
-            } else {
-                th::bg_surface()
-            }
-            .into(),
-        ),
-        ..Default::default()
-    });
+    let card = container(header_with_bar)
+        .height(Length::Fill)
+        .clip(true)
+        .style(move |_theme: &Theme| container::Style {
+            background: Some(
+                if selected {
+                    th::track_bg_selected()
+                } else if flags.hovered {
+                    th::track_header_hovered()
+                } else {
+                    th::bg_surface()
+                }
+                .into(),
+            ),
+            ..Default::default()
+        });
 
     // The whole header column selects the track. Child widgets
     // (name, M/S, add, fader) capture their own clicks first,
@@ -497,6 +527,27 @@ pub fn view_track_header<'a>(
             hovered: false,
         }))
         .into()
+}
+
+/// A track header with a grab strip on its bottom edge that resizes the
+/// track's lane.
+pub fn with_resize_edge<'a>(
+    header: Element<'a, Message>,
+    track_id: TrackId,
+    resizing: bool,
+) -> Element<'a, Message> {
+    let resize_handle = mouse_area(
+        container(text(""))
+            .width(Length::Fill)
+            .height(Length::Fixed(RESIZE_HANDLE_HEIGHT))
+            .style(move |_theme: &Theme| container::Style {
+                background: resizing.then(|| th::accent_dim().into()),
+                ..Default::default()
+            }),
+    )
+    .on_press(Message::TrackHeight(TrackHeightMsg::BeginResize(track_id)))
+    .interaction(iced::mouse::Interaction::ResizingVertically);
+    stack![header, column![vertical_space(), resize_handle]].into()
 }
 
 fn quiet_action_style(_theme: &Theme, status: button::Status) -> button::Style {
@@ -522,6 +573,23 @@ mod tests {
 
     fn audio_track() -> ProjectTrack {
         ProjectTrack::new(TrackId::new(), "Vox".into(), 0)
+    }
+
+    #[test]
+    fn the_rows_down_to_the_fader_and_the_resize_strip_below_fit_the_shortest_lane() {
+        const {
+            assert!(HEADER_PADDING.bottom >= RESIZE_HANDLE_HEIGHT);
+            assert!(
+                HEADER_PADDING.top
+                    + NAME_ROW_HEIGHT
+                    + ROW_SPACING
+                    + CONTROLS_ROW_HEIGHT
+                    + ROW_SPACING
+                    + FADER_HEIGHT
+                    + HEADER_PADDING.bottom
+                    <= vibez_project::TrackHeight::MIN.pixels()
+            );
+        }
     }
 
     #[test]

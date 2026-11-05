@@ -637,6 +637,9 @@ impl App {
                     self.state.status_text = status;
                 }
             }
+            Message::TrackHeight(msg) => {
+                self.route_track_height_message(msg, self.state.view.cursor_y)
+            }
             Message::Perform(msg) => {
                 if !msg.defers_project_edit() {
                     return self.route_perform_message(msg);

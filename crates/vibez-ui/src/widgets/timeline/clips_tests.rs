@@ -51,8 +51,6 @@ fn track_canvas_at(
         Color::BLACK,
         120.0,
         track_id,
-        0,
-        1,
         vec![track_id],
         HashSet::new(),
         false,
@@ -1688,4 +1686,46 @@ fn pressing_where_clips_overlap_picks_the_one_drawn_on_top() {
         ),
         other => panic!("expected a clip selection, got {other:?}"),
     }
+}
+
+#[test]
+fn a_clip_dragged_down_a_tall_lane_changes_track_only_past_its_bottom_edge() {
+    let (mut canvas, clip_id) = canvas_with_selected_audio_clip();
+    let below = TrackId::new();
+    canvas.track_ids = vec![canvas.track_id, below];
+    canvas.row_spans = crate::widgets::timeline::build_row_spans([
+        (canvas.track_id, 210.0, 0.0),
+        (below, 52.0, 0.0),
+    ]);
+    let x = canvas.beat_to_x(1.0);
+    let mut state = ClipInteractionState::default();
+    left_event(
+        &canvas,
+        &mut state,
+        iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left),
+        Point::new(x, CLIP_Y + 4.0),
+    );
+
+    let target_at = |state: &mut ClipInteractionState, y: f32| {
+        let point = Point::new(x, y);
+        match left_event(
+            &canvas,
+            state,
+            iced::mouse::Event::CursorMoved { position: point },
+            point,
+        ) {
+            Some(Message::UndoGesture { edit, .. }) => match *edit {
+                Message::Arrangement(ArrangementMsg::MoveSelectedClips {
+                    anchor,
+                    target_track,
+                    ..
+                }) if anchor == clip_id => target_track,
+                other => panic!("expected a clip move, got {other:?}"),
+            },
+            other => panic!("expected a clip move, got {other:?}"),
+        }
+    };
+
+    assert_eq!(target_at(&mut state, 209.0), canvas.track_id);
+    assert_eq!(target_at(&mut state, 210.0), below);
 }

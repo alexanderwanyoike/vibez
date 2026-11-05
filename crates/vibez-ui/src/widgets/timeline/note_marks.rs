@@ -5,7 +5,11 @@ use iced::Rectangle;
 /// Breathing room between the marks and the top and bottom of the body.
 const PAD: f32 = 2.0;
 const MIN_MARK_HEIGHT: f32 = 2.0;
+/// The tallest a mark grows in a default height lane.
 const MAX_MARK_HEIGHT: f32 = 6.0;
+/// In a taller lane a mark may fill this share of the body, so notes grow
+/// with the lane while a clip of one pitch still reads as a line of notes.
+const MAX_MARK_SHARE: f32 = 0.1;
 
 /// Lay out `notes` (pitch, clip-local start, duration) for a clip
 /// whose beat 0 is at `origin_x`. `area` is the on-screen part of the clip
@@ -26,9 +30,8 @@ pub(super) fn note_marks(
     let highest = notes.iter().map(|note| note.0).max().unwrap_or(lowest);
     let rows = f32::from(highest - lowest) + 1.0;
     let inner = (area.height - 2.0 * PAD).max(0.0);
-    let height = (inner / rows)
-        .clamp(MIN_MARK_HEIGHT, MAX_MARK_HEIGHT)
-        .min(inner);
+    let max_height = (inner * MAX_MARK_SHARE).max(MAX_MARK_HEIGHT);
+    let height = (inner / rows).clamp(MIN_MARK_HEIGHT, max_height).min(inner);
     // A range too wide for MIN_MARK_HEIGHT rows lets neighbouring rows
     // overlap rather than spill out of the body.
     let step = if rows > 1.0 {
@@ -97,6 +100,20 @@ mod tests {
             (centre - (AREA.y + AREA.height / 2.0)).abs() < 0.5,
             "centre {centre}"
         );
+    }
+
+    #[test]
+    fn a_three_times_taller_lane_draws_its_notes_taller() {
+        let tall = Rectangle {
+            height: 3.0 * AREA.height,
+            ..AREA
+        };
+        let bassline: Vec<_> = (36..48).map(|pitch| (pitch, 0.0, 1.0)).collect();
+
+        let short = note_marks(&bassline, 0.0, AREA, 20.0)[0].height;
+        let taller = note_marks(&bassline, 0.0, tall, 20.0)[0].height;
+
+        assert!(taller >= 2.5 * short, "{short} px became {taller} px");
     }
 
     #[test]

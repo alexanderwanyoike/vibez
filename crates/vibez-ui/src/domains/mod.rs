@@ -46,6 +46,7 @@ pub mod saturator;
 pub mod sidechain;
 pub mod synth;
 pub mod timeline_editor;
+pub mod track_heights;
 pub mod transport;
 pub mod view;
 pub mod wavetable;

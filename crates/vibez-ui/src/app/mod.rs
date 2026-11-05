@@ -275,6 +275,8 @@ mod instrument_media_ui_flow_tests;
 mod loop_region_persistence_tests;
 #[cfg(test)]
 mod project_format_v1_tests;
+#[cfg(test)]
+mod track_height_tests;
 
 impl Drop for App {
     fn drop(&mut self) {

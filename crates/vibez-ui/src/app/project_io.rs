@@ -77,6 +77,7 @@ impl App {
             self.send_command(EngineCommand::RemoveBus(bus_id));
         }
         Arc::make_mut(&mut self.state.project_tracks).buses.clear();
+        self.state.track_heights = Default::default();
         self.state.arrangement.timeline = Arc::new(crate::state::ArrangementTimeline::default());
         self.state
             .arrangement
@@ -354,6 +355,13 @@ impl App {
                     .iter()
                     .map(|track| track.id),
             ),
+            track_heights: self.state.track_heights.saved(
+                self.state
+                    .project_tracks
+                    .tracks
+                    .iter()
+                    .map(|track| track.id),
+            ),
             launcher_clips: self
                 .state
                 .perform
@@ -435,6 +443,8 @@ impl App {
         let remote_provenance = first_remote_provenance_label(&loaded.project);
         self.clear_project_runtime();
         self.state.project.unresolved_clips = loaded.unresolved_clips;
+        self.state.track_heights =
+            crate::domains::track_heights::TrackHeights::from_saved(&loaded.project.track_heights);
         self.state.perform.layout = loaded.project.perform_layout;
         let mut clips = crate::domains::perform::ClipStore::default();
         clips.clips = loaded

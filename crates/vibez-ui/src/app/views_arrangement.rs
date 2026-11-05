@@ -23,11 +23,11 @@ use crate::timeline_snap::SnapTargets;
 use crate::widgets::arrange_corner::{arrange_corner, arrangement_size_labels, song_length_label};
 use crate::widgets::timeline::{
     build_row_spans, ArrangementMinimap, MinimapTrack, RulerWidget, TimeRulerWidget, TimelineClip,
-    TrackClipCanvas, ARRANGE_RULER_HEIGHT, OVERVIEW_HEIGHT, TIME_RULER_HEIGHT, TRACK_ROW_HEIGHT,
+    TrackClipCanvas, ARRANGE_RULER_HEIGHT, OVERVIEW_HEIGHT, TIME_RULER_HEIGHT,
 };
 use crate::widgets::track_header::{
-    view_editable_channel_name, view_track_header, ChannelNameStyle, TrackHeaderFlags,
-    TrackHeaderRecordingView,
+    view_editable_channel_name, view_track_header, with_resize_edge, ChannelNameStyle,
+    TrackHeaderFlags, TrackHeaderRecordingView,
 };
 
 use super::*;
@@ -206,7 +206,6 @@ impl App {
             .iter()
             .map(|t| t.id)
             .collect();
-        let total_track_count = self.state.project_tracks.tracks.len();
         let browser_drag_duration = self
             .state
             .browser
@@ -225,23 +224,24 @@ impl App {
         // Track rows: header widgets + clip canvas
         // Real vertical layout of the column, so a rubber-band drag can map
         // a y offset back to a track even with automation lanes expanded.
-        let row_spans = build_row_spans(
-            TRACK_ROW_HEIGHT,
-            self.state.project_tracks.tracks.iter().map(|track| {
-                let extra_height = if self.state.automation_ui.expanded.contains(&track.id) {
-                    self.automation_rows_height(timeline, track.id)
-                } else {
-                    0.0
-                };
-                (track.id, extra_height)
-            }),
-        );
+        let row_spans = build_row_spans(self.state.project_tracks.tracks.iter().map(|track| {
+            let extra_height = if self.state.automation_ui.expanded.contains(&track.id) {
+                self.automation_rows_height(timeline, track.id)
+            } else {
+                0.0
+            };
+            (
+                track.id,
+                self.state.track_heights.height(track.id).pixels(),
+                extra_height,
+            )
+        }));
 
         let mut track_rows = column![].spacing(0);
         let empty_content = TrackTimelineContent::default();
         let browser_drag_active = self.state.browser.drag_source.is_some();
 
-        for (track_index, track) in self.state.project_tracks.tracks.iter().enumerate() {
+        for (track, span) in self.state.project_tracks.tracks.iter().zip(&row_spans) {
             let content = timeline.timeline.get(track.id).unwrap_or(&empty_content);
             let selected = timeline.selected_track == Some(track.id);
             let track_color = th::track_color(track.color_index);
@@ -271,29 +271,33 @@ impl App {
             let input_channels = self.state.audio_settings.input_channel_count();
             let input_target = self.state.audio_recording.armed_track == Some(track.id)
                 || self.state.audio_recording.monitor_track == Some(track.id);
-            let header = view_track_header(
-                track,
-                TrackHeaderFlags {
-                    selected,
-                    editing_name: editing,
-                    automation_open,
-                    hovered: self.state.view.hovered_track_header == Some(track.id),
-                },
-                &self.state.view.edit_name_text,
-                TrackHeaderRecordingView {
-                    output_peaks: self
-                        .track_meter_peaks
-                        .get(&track.id)
-                        .copied()
-                        .unwrap_or_default(),
-                    input_channels,
-                    armed: self.state.audio_recording.armed_track == Some(track.id),
-                    input_peaks: input_target.then_some((
-                        self.state.audio_recording.input_peak_l,
-                        self.state.audio_recording.input_peak_r,
-                    )),
-                    source_tracks: &self.state.project_tracks.tracks,
-                },
+            let header = with_resize_edge(
+                view_track_header(
+                    track,
+                    TrackHeaderFlags {
+                        selected,
+                        editing_name: editing,
+                        automation_open,
+                        hovered: self.state.view.hovered_track_header == Some(track.id),
+                    },
+                    &self.state.view.edit_name_text,
+                    TrackHeaderRecordingView {
+                        output_peaks: self
+                            .track_meter_peaks
+                            .get(&track.id)
+                            .copied()
+                            .unwrap_or_default(),
+                        input_channels,
+                        armed: self.state.audio_recording.armed_track == Some(track.id),
+                        input_peaks: input_target.then_some((
+                            self.state.audio_recording.input_peak_l,
+                            self.state.audio_recording.input_peak_r,
+                        )),
+                        source_tracks: &self.state.project_tracks.tracks,
+                    },
+                ),
+                track.id,
+                self.state.track_heights.resizing() == Some(track.id),
             );
 
             // Clip canvas for this track
@@ -313,8 +317,6 @@ impl App {
                 track_color,
                 bpm,
                 track.id,
-                track_index,
-                total_track_count,
                 track_ids.clone(),
                 selected_clips,
                 self.state.transport.loop_enabled,
@@ -373,7 +375,7 @@ impl App {
             let mut clip_canvas_area = mouse_area(
                 canvas(clip_canvas_widget)
                     .width(Length::Fill)
-                    .height(Length::Fixed(TRACK_ROW_HEIGHT)),
+                    .height(Length::Fixed(span.lane_height)),
             );
             if browser_drag_active {
                 clip_canvas_area = clip_canvas_area
@@ -398,7 +400,7 @@ impl App {
                     y: self.state.view.cursor_y,
                     target: ContextMenuTarget::TrackHeader { track_id: track.id },
                 }));
-            let track_row = row![header, clip_canvas].height(Length::Fixed(TRACK_ROW_HEIGHT));
+            let track_row = row![header, clip_canvas].height(Length::Fixed(span.lane_height));
 
             track_rows = track_rows.push(track_row);
 

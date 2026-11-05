@@ -1,8 +1,10 @@
-//! Routes View messages and their Browser/Perform resize side effects.
+//! Routes View messages and their Browser, Perform and track height resize
+//! side effects.
 
 use crate::domains::browser::BrowserMsg;
 use crate::domains::perform::PerformEditorFocus;
 use crate::domains::timeline_editor::TimelineEditorAdapter;
+use crate::domains::track_heights::{TrackHeightCtx, TrackHeightMsg};
 use crate::domains::view::{GridTarget, ViewCtx, ViewMsg};
 use crate::state::{GridCommand, Workspace};
 
@@ -73,6 +75,26 @@ impl App {
         msg.navigate(viewport, total_beats, viewport_width)
     }
 
+    /// `cursor_y` is the pointer's window y, which a pointer move reports
+    /// before the view records it.
+    pub(super) fn route_track_height_message(&mut self, msg: TrackHeightMsg, cursor_y: f32) {
+        let track_ids: Vec<_> = self
+            .state
+            .project_tracks
+            .tracks
+            .iter()
+            .map(|track| track.id)
+            .collect();
+        let ctx = TrackHeightCtx {
+            cursor_y,
+            all_tracks: self.state.view.held_modifiers.alt(),
+            track_ids: &track_ids,
+        };
+        if self.state.track_heights.update(msg, ctx).mark_dirty {
+            self.mark_project_dirty();
+        }
+    }
+
     pub(super) fn route_view_message(&mut self, msg: ViewMsg) -> Task<Message> {
         if matches!(&msg, ViewMsg::ToggleEditMenu) {
             self.state.project.file_menu_open = false;
@@ -114,6 +136,20 @@ impl App {
             );
             if action.persist_settings {
                 self.persist_ui_settings();
+            }
+        }
+        if self.state.track_heights.resizing().is_some() {
+            match &msg {
+                ViewMsg::CursorMoved(_, y) => {
+                    self.route_track_height_message(TrackHeightMsg::PointerMoved, *y);
+                }
+                ViewMsg::MouseReleased => {
+                    self.route_track_height_message(
+                        TrackHeightMsg::EndResize,
+                        self.state.view.cursor_y,
+                    );
+                }
+                _ => {}
             }
         }
         let perform_surface_resize = match &msg {

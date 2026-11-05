@@ -256,7 +256,7 @@ mod time_ruler;
 
 pub use clip_drag::ClipDragAction;
 pub use clips::*;
-pub use marquee::{build_row_spans, TrackRowSpan, TRACK_ROW_HEIGHT};
+pub use marquee::{build_row_spans, TrackRowSpan};
 pub use minimap::*;
 pub use ruler::*;
 pub use time_ruler::{TimeRulerWidget, TIME_RULER_HEIGHT};
