@@ -12,6 +12,7 @@ use crate::theme as th;
 use crate::typography::{PERFORM_DISPLAY, PERFORM_LABEL, PERFORM_TECH, PERFORM_TECH_STRONG};
 use crate::widgets::hint::with_hint;
 use crate::widgets::shell_card::shell_card;
+use crate::widgets::timeline::CORNER_RADIUS as TIMELINE_RADIUS;
 
 use super::*;
 
@@ -70,7 +71,7 @@ pub(super) fn perform_tool_button(
                     th::border()
                 },
                 width: 1.0,
-                radius: 3.0.into(),
+                radius: TIMELINE_RADIUS.into(),
             },
             ..Default::default()
         }
@@ -317,15 +318,6 @@ impl App {
             .align_y(iced::Alignment::Center)
             .padding([12, 16])
             .width(Length::Fill)
-            .style(|_theme: &Theme| container::Style {
-                background: Some(th::bg_surface().into()),
-                border: iced::Border {
-                    color: th::border(),
-                    width: 1.0,
-                    radius: 0.0.into(),
-                },
-                ..Default::default()
-            })
             .into();
         };
 
@@ -440,7 +432,7 @@ impl App {
                         th::border_light()
                     },
                     width: 1.0,
-                    radius: 1.0.into(),
+                    radius: TIMELINE_RADIUS.into(),
                 },
             }
         })
@@ -528,7 +520,7 @@ impl App {
             border: iced::Border {
                 color: th::border_light(),
                 width: 1.0,
-                radius: 3.0.into(),
+                radius: TIMELINE_RADIUS.into(),
             },
             ..Default::default()
         });
@@ -554,18 +546,7 @@ impl App {
                 .into()
         };
 
-        container(toolbar)
-            .width(Length::Fill)
-            .style(|_theme: &Theme| container::Style {
-                background: Some(th::bg_surface().into()),
-                border: iced::Border {
-                    color: th::border(),
-                    width: 1.0,
-                    radius: 0.0.into(),
-                },
-                ..Default::default()
-            })
-            .into()
+        container(toolbar).width(Length::Fill).into()
     }
 }
 
