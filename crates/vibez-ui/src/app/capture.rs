@@ -752,10 +752,7 @@ mod tests {
     fn a_song_sized_capture_sends_commands_per_clip_not_per_note() {
         let track_id = TrackId::new();
         let pattern = |position_beats: f64| UiNoteClip {
-            id: ClipId::new(),
             name: "Pattern".into(),
-            position_beats,
-            duration_beats: 4.0,
             notes: (0..8)
                 .map(|step| MidiNote {
                     pitch: 36,
@@ -764,12 +761,7 @@ mod tests {
                     duration_beats: 0.25,
                 })
                 .collect(),
-            selected_notes: Default::default(),
-            start_marker_beats: 0.0,
-            loop_enabled: false,
-            loop_start_beats: 0.0,
-            loop_end_beats: 4.0,
-            groove_grid: GrooveGrid::Off,
+            ..UiNoteClip::test_clip(position_beats, 4.0)
         };
         let mut arrange = Arc::new(ArrangementTimeline::default());
         let song = Arc::make_mut(&mut arrange).ensure(track_id);

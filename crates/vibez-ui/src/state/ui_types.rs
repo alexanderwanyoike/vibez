@@ -485,6 +485,27 @@ impl UiNoteClip {
     }
 }
 
+#[cfg(test)]
+impl UiNoteClip {
+    /// An empty, unlooped note Clip `duration_beats` long at
+    /// `position_beats`, for tests to fill in the fields they care about.
+    pub(crate) fn test_clip(position_beats: f64, duration_beats: f64) -> Self {
+        Self {
+            id: ClipId::new(),
+            name: "MIDI".into(),
+            position_beats,
+            duration_beats,
+            notes: Vec::new(),
+            selected_notes: Default::default(),
+            start_marker_beats: 0.0,
+            loop_enabled: false,
+            loop_start_beats: 0.0,
+            loop_end_beats: duration_beats,
+            groove_grid: Default::default(),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum ClipboardClip {
     Audio {

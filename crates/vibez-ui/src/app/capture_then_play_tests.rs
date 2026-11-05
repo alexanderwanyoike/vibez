@@ -5,19 +5,15 @@ use crate::domains::perform::capture::{CaptureAction, CaptureMsg, CapturedTimeli
 use crate::domains::perform::Section;
 use crate::domains::project::ProjectMsg;
 use crate::state::{ProjectTrack, UiNoteClip};
-use vibez_core::id::{ClipId, TrackId};
+use vibez_core::id::TrackId;
 use vibez_core::midi::MidiNote;
-use vibez_core::perform::GrooveGrid;
 use vibez_engine::engine::{AudioEngine, AudioProcessBlock};
 
 const SAMPLES_PER_BEAT: u64 = 22_050;
 
 fn note_clip(position_beats: f64) -> UiNoteClip {
     UiNoteClip {
-        id: ClipId::new(),
         name: "Groove".into(),
-        position_beats,
-        duration_beats: 4.0,
         notes: (0..8)
             .map(|step| MidiNote {
                 pitch: 36,
@@ -26,12 +22,7 @@ fn note_clip(position_beats: f64) -> UiNoteClip {
                 duration_beats: 0.25,
             })
             .collect(),
-        selected_notes: Default::default(),
-        start_marker_beats: 0.0,
-        loop_enabled: false,
-        loop_start_beats: 0.0,
-        loop_end_beats: 4.0,
-        groove_grid: GrooveGrid::Off,
+        ..UiNoteClip::test_clip(position_beats, 4.0)
     }
 }
 
