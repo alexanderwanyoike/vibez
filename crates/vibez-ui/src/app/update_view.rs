@@ -120,7 +120,11 @@ impl App {
         }
         let detail_panel_resize = match &msg {
             ViewMsg::CursorMoved(_, y) if self.state.view.detail_panel_resize_active => Some(
-                ViewMsg::ResizeDetailPanel(self.detail_panel_drag_height(*y)),
+                ViewMsg::ResizeDetailPanel(if self.state.view.workspace == Workspace::Mix {
+                    self.mix_detail_drag_height(*y)
+                } else {
+                    self.detail_panel_drag_height(*y)
+                }),
             ),
             ViewMsg::MouseReleased if self.state.view.detail_panel_resize_active => {
                 Some(ViewMsg::EndDetailPanelResize)

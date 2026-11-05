@@ -110,6 +110,8 @@ pub struct ViewState {
     pub detail_panel_tab: DetailPanelTab,
     pub detail_panel_height: f32,
     pub detail_panel_resize_active: bool,
+    /// The detail card's height in Mix once its divider has been dragged.
+    pub mix_detail_panel_height: Option<f32>,
     pub perform_surface_width: f32,
     pub perform_surface_resize_active: bool,
     /// How far the Arrange timeline is zoomed and scrolled.
@@ -156,6 +158,7 @@ impl Default for ViewState {
             detail_panel_tab: DetailPanelTab::Clip,
             detail_panel_height: DETAIL_PANEL_DEFAULT_HEIGHT,
             detail_panel_resize_active: false,
+            mix_detail_panel_height: None,
             perform_surface_width: PERFORM_SURFACE_DEFAULT_WIDTH,
             perform_surface_resize_active: false,
             viewport: crate::timeline_geometry::TimelineViewport::new(1.0, 0.0),

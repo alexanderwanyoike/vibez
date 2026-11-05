@@ -95,28 +95,26 @@ impl App {
     // ── View ──
 
     pub(super) fn view(&self) -> Element<'_, Message> {
-        // Mix sizes its card to the desk and hands the detail panel the
-        // rest, so there is no gap to drag there.
-        let work_column = match self.state.view.workspace {
-            Workspace::Mix => column![
-                shell_card(self.view_mixer()).height(Length::Fixed(self.mix_workspace_height())),
-                Space::with_height(PANE_GAP),
-                self.view_detail_panel()
-            ],
-            workspace => column![
-                container(if workspace == Workspace::Arrange {
-                    shell_card(self.view_arrangement()).into()
-                } else {
-                    self.view_perform()
-                })
-                .height(Length::Fill),
-                vertical_pane_splitter(
-                    self.state.view.detail_panel_resize_active,
-                    Message::View(ViewMsg::BeginDetailPanelResize),
-                ),
-                self.view_detail_panel()
-            ],
+        let workspace: Element<'_, Message> = match self.state.view.workspace {
+            Workspace::Mix => shell_card(self.view_mixer())
+                .height(Length::Fixed(self.mix_workspace_height()))
+                .into(),
+            workspace => container(if workspace == Workspace::Arrange {
+                shell_card(self.view_arrangement()).into()
+            } else {
+                self.view_perform()
+            })
+            .height(Length::Fill)
+            .into(),
         };
+        let work_column = column![
+            workspace,
+            vertical_pane_splitter(
+                self.state.view.detail_panel_resize_active,
+                Message::View(ViewMsg::BeginDetailPanelResize),
+            ),
+            self.view_detail_panel()
+        ];
         let browser_workspace = matches!(
             self.state.view.workspace,
             Workspace::Arrange | Workspace::Perform

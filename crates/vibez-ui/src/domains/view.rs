@@ -244,7 +244,11 @@ impl ViewState {
             }
             ViewMsg::ResizeDetailPanel(height) => {
                 if self.detail_panel_resize_active {
-                    self.detail_panel_height = height;
+                    if self.workspace == Workspace::Mix {
+                        self.mix_detail_panel_height = Some(height);
+                    } else {
+                        self.detail_panel_height = height;
+                    }
                 }
             }
             ViewMsg::EndDetailPanelResize => {

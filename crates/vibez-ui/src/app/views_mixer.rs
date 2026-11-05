@@ -83,8 +83,25 @@ impl App {
     /// The Mix card's height above the divider.
     pub(super) fn mix_workspace_height(&self) -> f32 {
         let column = self.mix_column_height();
-        let detail = crate::shell_layout::mix_detail_height(column, self.mix_desk_height());
+        let detail = crate::shell_layout::mix_detail_height(
+            column,
+            self.mix_desk_height(),
+            self.state.view.mix_detail_panel_height,
+        );
         (column - crate::shell_layout::PANE_GAP - detail).max(0.0)
+    }
+
+    /// The Mix detail card height a drag on the divider asks for with the
+    /// pointer at `cursor_y`.
+    pub(super) fn mix_detail_drag_height(&self, cursor_y: f32) -> f32 {
+        crate::shell_layout::mix_detail_height(
+            self.mix_column_height(),
+            self.mix_desk_height(),
+            Some(crate::shell_layout::detail_height_at(
+                cursor_y,
+                self.state.view.window_height,
+            )),
+        )
     }
 
     /// The switch between banks of buses on the send rows; none while every
