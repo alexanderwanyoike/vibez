@@ -1,5 +1,7 @@
 //! Clip-local playback geometry shared by audio, MIDI, engine, and UI.
 
+use crate::warp_marker::WarpMarkers;
+
 /// Playback geometry measured in source frames.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FrameClipTimeline {
@@ -31,6 +33,41 @@ impl FrameClipTimeline {
 
     pub fn is_looping(self) -> bool {
         self.has_loop_region() && self.start < self.loop_end
+    }
+
+    /// The furthest a clip's loop may reach. A loop is the clip's content,
+    /// not part of its Arrangement window, so the source bounds it rather
+    /// than the clip's length; Warp Markers map only the clip's own window,
+    /// so they bound a warped clip's loop.
+    pub fn loop_content_end(
+        source_offset: u64,
+        source_frames: u64,
+        warp_markers: &WarpMarkers,
+    ) -> u64 {
+        warp_markers
+            .as_slice()
+            .last()
+            .map_or(source_frames, |anchor| {
+                source_offset.saturating_add(anchor.timeline_frame())
+            })
+    }
+
+    /// Where the content this clip plays ends before any Warp Marker mapping:
+    /// a playing loop reaches [`Self::loop_content_end`], an unlooped clip
+    /// ends with its window.
+    pub fn content_end(
+        self,
+        source_offset: u64,
+        source_frames: u64,
+        warp_markers: &WarpMarkers,
+    ) -> u64 {
+        if self.is_looping() {
+            Self::loop_content_end(source_offset, source_frames, warp_markers)
+        } else {
+            source_offset
+                .saturating_add(self.duration)
+                .min(source_frames)
+        }
     }
 
     fn has_loop_region(self) -> bool {
@@ -104,8 +141,6 @@ impl FrameClipTimeline {
             && candidate < self.marker_end(source_end)
     }
 
-    /// A looping clip's start marker belongs to its loop, which may run past
-    /// the clip's own length; an unlooped one ends with its source.
     fn marker_end(self, source_end: u64) -> u64 {
         if self.loop_enabled {
             self.loop_end

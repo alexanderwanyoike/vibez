@@ -95,7 +95,6 @@ impl PianoRollWidget {
                 })
             }
             DragAction::Loop { clip_id, drag } => {
-                // A MIDI loop is content, so the clip's length does not bound it.
                 let (loop_start_beats, loop_end_beats) = drag.resolve(
                     pointer_at(position.x.max(KEY_WIDTH)),
                     min_length.min(self.total_beats),

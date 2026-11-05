@@ -39,7 +39,7 @@ pub struct AudioClipDetailWidget {
     pub loop_enabled: bool,
     pub loop_start: u64,
     pub loop_end: u64,
-    /// See `UiClip::loop_content_end`.
+    /// See `FrameClipTimeline::loop_content_end`.
     pub loop_content_end: u64,
     pub playback_direction: ClipPlaybackDirection,
     pub transient_markers: TransientMarkers,

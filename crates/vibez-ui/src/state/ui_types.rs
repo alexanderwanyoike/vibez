@@ -177,18 +177,16 @@ impl UiClip {
         self.reset_loop_region_to_clip();
     }
 
-    /// The furthest a loop may reach: the whole source, except that Warp
-    /// Markers map only the clip's own window.
     pub(crate) fn loop_content_end(&self) -> u64 {
-        if self.warp_markers.is_empty() {
-            self.audio.num_frames() as u64
-        } else {
-            self.source_offset.saturating_add(self.warp_timeline_end())
-        }
+        FrameClipTimeline::loop_content_end(
+            self.source_offset,
+            self.audio.num_frames() as u64,
+            &self.warp_markers,
+        )
     }
 
     /// Resizing a warped clip resizes its Warp Marker map, which can cut the
-    /// loop; any other loop is content and outlives the clip's length.
+    /// loop.
     pub(crate) fn clamp_loop_to_warp_map(&mut self) {
         if self.warp_markers.is_empty() {
             return;
