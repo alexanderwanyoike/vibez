@@ -1117,10 +1117,38 @@ impl App {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::{
         context_menu_x, drum_rack_slice_can_create, project_track_deletion_list_height,
-        CONTEXT_MENU_CLIP_WIDTH,
+        track_header_menu, CONTEXT_MENU_CLIP_WIDTH,
     };
+    use crate::domains::view::ViewMsg;
+    use crate::message::{MenuOverlay, Message};
+    use crate::state::{ContextMenuTarget, ProjectTrack};
+    use vibez_core::id::TrackId;
+
+    #[test]
+    fn the_track_header_menu_deletes_that_track() {
+        let mut app = super::super::test_support::app();
+        let track = ProjectTrack::new(TrackId::new(), "Vox".into(), 0);
+        let track_id = track.id;
+        Arc::make_mut(&mut app.state.project_tracks)
+            .tracks
+            .push(track);
+        let _ = app.update(Message::View(ViewMsg::ShowContextMenu {
+            x: 10.0,
+            y: 10.0,
+            target: ContextMenuTarget::TrackHeader { track_id },
+        }));
+        let [(_, label, delete)] = track_header_menu(track_id);
+        assert_eq!(label, "Delete Track");
+
+        let _ = app.update(Message::menu_item(MenuOverlay::ArrangementContext, delete));
+
+        assert!(app.state.view.context_menu.is_none());
+        assert!(app.state.project_tracks.find(track_id).is_none());
+    }
 
     #[test]
     fn deletion_location_list_grows_with_content_then_caps() {
