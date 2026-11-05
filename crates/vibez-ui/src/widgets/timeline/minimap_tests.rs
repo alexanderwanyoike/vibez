@@ -109,3 +109,31 @@ fn the_pointer_over_a_view_box_edge_shows_it_resizes() {
     assert_eq!(interaction(120.0), Interaction::ResizingHorizontally);
     assert_eq!(interaction(110.0), Interaction::Grab);
 }
+
+#[test]
+fn a_narrow_view_box_pans_from_its_middle() {
+    let minimap = ArrangementMinimap {
+        zoom_level: 10.0,
+        ..minimap()
+    };
+    let mut state = MinimapInteractionState::default();
+    send(
+        &minimap,
+        &mut state,
+        Event::ButtonPressed(Button::Left),
+        101.0,
+    );
+    let message = send(
+        &minimap,
+        &mut state,
+        Event::CursorMoved {
+            position: Point::new(151.0, Y),
+        },
+        151.0,
+    );
+
+    assert!(
+        matches!(message, Some(Message::View(ViewMsg::ScrollArrangement(delta))) if (delta - 50.0).abs() < 1e-3),
+        "expected a 50 beat pan, got {message:?}"
+    );
+}
