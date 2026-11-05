@@ -471,7 +471,7 @@ impl App {
                 container(track_rows)
                     .width(Length::Fill)
                     .style(|_theme: &Theme| container::Style {
-                        background: Some(th::display_bg().into()),
+                        background: Some(th::bg_surface().into()),
                         ..Default::default()
                     }),
             )
@@ -486,8 +486,16 @@ impl App {
                 .into()
         };
 
-        let construction =
-            crate::widgets::shell_card::shell_card(column![toolbar, timeline].height(Length::Fill));
+        // The lanes stop short of the card's bottom edge so its rounded
+        // corners only ever cut the card's own shade.
+        let construction = crate::widgets::shell_card::shell_card(
+            column![toolbar, timeline]
+                .height(Length::Fill)
+                .padding(iced::Padding {
+                    bottom: crate::widgets::shell_card::RADIUS,
+                    ..Default::default()
+                }),
+        );
 
         mouse_area(construction)
             .on_press(Message::Perform(PerformMsg::FocusEditor(
