@@ -776,11 +776,20 @@ impl canvas::Program<Message> for TrackClipCanvas {
                                 return (canvas::event::Status::Captured, Some(edit));
                             }
                             ClipDragAction::FadeClip(drag) => {
+                                let handle = self
+                                    .snap_targets
+                                    .fade_handle(
+                                        self.x_to_beat(local_x),
+                                        self.snap_context(state.alt_held),
+                                    )
+                                    .beat;
                                 let edit = Message::Arrangement(ArrangementMsg::SetAudioClipFade {
                                     track_id,
                                     clip_id: drag.clip_id,
                                     edge: drag.edge,
-                                    frames: drag.frames_at_x(local_x),
+                                    frames: drag.crossfade_frames(local_x).unwrap_or_else(|| {
+                                        drag.frames_at_x(self.beat_to_x(handle))
+                                    }),
                                 })
                                 .in_undo_gesture(drag.undo_gesture);
                                 return (canvas::event::Status::Captured, Some(edit));

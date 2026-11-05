@@ -170,6 +170,17 @@ impl SnapTargets {
         )
     }
 
+    /// Where a dragged fade handle at `beat` lands. A fade moves no Clip
+    /// edge, so every edge pulls, its own Clip's too.
+    pub fn fade_handle(&self, beat: f64, context: SnapContext) -> Snapped {
+        self.land(
+            &[beat],
+            Self::grid_shift(beat, context),
+            context,
+            Moves::Nothing,
+        )
+    }
+
     /// Where a dragged end of the loop at `edge` lands.
     pub fn loop_edge(&self, edge: f64, context: SnapContext) -> Snapped {
         self.land(
