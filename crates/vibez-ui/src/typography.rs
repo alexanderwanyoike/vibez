@@ -35,17 +35,10 @@ pub const PERFORM_TECH_STRONG: Font = Font {
     ..Font::with_name("IBM Plex Mono")
 };
 
-/// `text` shortened with ".." to fit `width` at font `size`, by an average
-/// condensed glyph width; empty when not even a few letters fit.
-pub(crate) fn fit(text: &str, width: f32, size: f32, _font: Font) -> String {
-    let limit = (width / (size * 0.61)).max(0.0) as usize;
-    if text.chars().count() <= limit {
-        text.into()
-    } else if limit < 3 {
-        String::new()
-    } else {
-        format!("{}..", text.chars().take(limit - 2).collect::<String>())
-    }
+/// `text`, or as much of it as fits `width` before an ellipsis; empty when
+/// not even one letter fits.
+pub(crate) fn fit(text: &str, width: f32, size: f32, font: Font) -> String {
+    fit_text(text, width, size, font, 1).unwrap_or_default()
 }
 
 #[cfg(test)]
